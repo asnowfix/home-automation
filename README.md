@@ -70,6 +70,11 @@ More details:
 Reason: required, Message: Login Required.
 ```
 
+## Mochi-MQTT Notes
+
+```shell
+$ go get github.com/mochi-mqtt/server/v2
+```
 
 ## References
 
@@ -88,3 +93,6 @@ Reason: required, Message: Login Required.
 3. Shelly
    1. <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/#step-10-generate-periodic-updates-over-mqtt-using-shelly-script>
    2. <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/#step-10-generate-periodic-updates-over-mqtt-using-shelly-script>
+4. Mochi-MQTT
+   1. [github.com:mochi-mqtt/server](https://github.com/mochi-mqtt/server/tree/main)
+   2. [Server with TLS](https://github.com/mochi-mqtt/server/blob/main/examples/tls/main.go)

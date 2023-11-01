@@ -1,0 +1,17 @@
+[Unit]
+Description=MyHome as a system service
+After=local-fs.target network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env "/home/%i/go/bin/myhome"
+Restart=on-failure
+RestartSec=5
+User=%i
+
+[Install]
+# multi-user.target normally defines a system state where all network services
+# are started up and the system will accept logins, but a local GUI is not
+# started. This is the typical default system state for server systems, which
+# might be rack-mounted headless systems in a remote server room.
+WantedBy=multi-user.target

@@ -1,8 +1,15 @@
 module github.com/asnowfix/home-automation
 
-go 1.19
+go 1.21
 
-require internal/myip v1.0.0
+toolchain go1.21.3
+
+require (
+	github.com/mochi-mqtt/server/v2 v2.4.1
+	github.com/rs/zerolog v1.31.0
+	internal/myip v1.0.0
+	internal/myzone v0.0.0-00010101000000-000000000000
+)
 
 replace internal/myip => ./internal/myip
 
@@ -17,9 +24,10 @@ require (
 	github.com/google/uuid v1.3.1 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.1 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.0 // indirect
+	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
-	github.com/rs/zerolog v1.31.0 // indirect
+	github.com/rs/xid v1.5.0 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/crypto v0.14.0 // indirect
 	golang.org/x/net v0.17.0 // indirect
@@ -31,5 +39,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20231012201019-e917dd12ba7a // indirect
 	google.golang.org/grpc v1.58.3 // indirect
 	google.golang.org/protobuf v1.31.0 // indirect
-	internal/myzone v0.0.0-00010101000000-000000000000 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

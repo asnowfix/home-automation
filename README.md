@@ -7,10 +7,69 @@ Collection of tools to help automating my own House
 ## Table of Contents <!-- omit in toc -->
 
 1. [Abstract](#abstract)
-2. [Notes](#notes)
-3. [References](#references)
+2. [GCP Notes](#gcp-notes)
+3. [Mochi-MQTT Notes](#mochi-mqtt-notes)
+4. [References](#references)
 
-## Notes
+## GCP Notes
+
+```shell
+$ gcloud compute project-info describe --project "homeautomation-402816"
+commonInstanceMetadata:
+  fingerprint: dZXOiHlTSW8=
+  kind: compute#metadata
+creationTimestamp: '2023-11-01T02:10:02.993-07:00'
+defaultNetworkTier: PREMIUM
+defaultServiceAccount: 313423816598-compute@developer.gserviceaccount.com
+id: '4099453077804788485'
+kind: compute#project
+name: homeautomation-402816
+quotas:
+- limit: 1000.0
+  metric: SNAPSHOTS
+  usage: 0.0
+[...]
+```
+
+```shell
+cd myzone
+go run .
+tonnara:myzone fix$ go run .
+panic: googleapi: got HTTP response code 404 with body: <!DOCTYPE html>
+<html lang=en>
+  <meta charset=utf-8>
+  <meta name=viewport content="initial-scale=1, minimum-scale=1, width=device-width">
+  <title>Error 404 (Not Found)!!1</title>
+  <style>
+   [...]
+  </style>
+  <a href=//www.google.com/><span id=logo aria-label=Google></span></a>
+  <p><b>404.</b> <ins>That’s an error.</ins>
+  <p>The requested URL <code>/dns/v2/projects/homeautomation-402816/locations/europe-west9/managedZones</code> was not found on this server.  <ins>That’s all we know.</ins>
+```
+
+See <https://cloud.google.com/sdk/gcloud/reference/dns/managed-zones/list>
+
+```shell
+$ go run .
+panic: googleapi: Error 401: API keys are not supported by this API. Expected OAuth2 access token or other authentication credentials that assert a principal. See https://cloud.google.com/docs/authentication
+Details:
+[
+  {
+    "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+    "domain": "googleapis.com",
+    "metadata": {
+      "method": "cloud.dns.api.v2.ManagedZonesService.List",
+      "service": "dns.googleapis.com"
+    },
+    "reason": "CREDENTIALS_MISSING"
+  }
+]
+
+More details:
+Reason: required, Message: Login Required.
+```
+
 
 ## References
 
@@ -22,6 +81,9 @@ Collection of tools to help automating my own House
    5. <https://dcc.godaddy.com/manage/asnowfix.fr/dns>
    6. <https://console.cloud.google.com/net-services/dns/zones/asnowfix-root/details?project=homeautomation-402816>
    7. <https://console.cloud.google.com/home/dashboard?project=homeautomation-402816>
+   8. <https://cloud.google.com/dns/docs/zones>
+   9. <https://cloud.google.com/dns/docs/set-up-dns-records-domain-name>
+   10. <https://github.com/googleapis/google-cloud-go/blob/main/domains/apiv1beta1/domains_client_example_test.go>
 2. [SeeIP](https://seeip.org/)
 3. Shelly
    1. <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/#step-10-generate-periodic-updates-over-mqtt-using-shelly-script>

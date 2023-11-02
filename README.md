@@ -70,6 +70,35 @@ More details:
 Reason: required, Message: Login Required.
 ```
 
+## Shelly Notes
+
+```shell
+$ curl -s http://ShellyPlus1-4855199C9888.local/rpc/Switch.GetStatus?id=0 | jq
+{
+  "id": 0,
+  "source": "init",
+  "output": true,
+  "temperature": {
+    "tC": 52.4,
+    "tF": 126.3
+  }
+}
+```
+
+```shell
+$ curl -s http://ShellyPlus1-4855199C9888.local/rpc/Switch.GetConfig?id=0 | jq
+{
+  "id": 0,
+  "name": "Development",
+  "in_mode": "follow",
+  "initial_state": "on",
+  "auto_on": false,
+  "auto_on_delay": 60,
+  "auto_off": false,
+  "auto_off_delay": 1
+}
+```
+
 ## Mochi-MQTT Notes
 
 ```shell
@@ -93,6 +122,7 @@ $ go get github.com/mochi-mqtt/server/v2
 3. Shelly
    1. <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/#step-10-generate-periodic-updates-over-mqtt-using-shelly-script>
    2. <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/#step-10-generate-periodic-updates-over-mqtt-using-shelly-script>
+   3. <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/HTTP/>
 4. Mochi-MQTT
    1. [github.com:mochi-mqtt/server](https://github.com/mochi-mqtt/server/tree/main)
    2. [Server with TLS](https://github.com/mochi-mqtt/server/blob/main/examples/tls/main.go)

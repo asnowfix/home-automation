@@ -8,6 +8,7 @@ require (
 	internal/myip v1.0.0
 	internal/myzone v0.0.0-00010101000000-000000000000
 	devices/shelly v0.0.0-00010101000000-000000000000
+	devices/shelly/sswitch v0.0.0-00010101000000-000000000000
 )
 
 replace internal/myip => ./internal/myip
@@ -16,7 +17,10 @@ replace internal/myzone => ./internal/myzone
 
 replace devices/shelly => ./devices/shelly
 
+replace devices/shelly/sswitch => ./devices/shelly/sswitch
+
 require (
+
 	cloud.google.com/go/compute v1.23.0 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect

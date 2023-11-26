@@ -43,32 +43,30 @@ func (e Error) String() string {
 }
 
 type Configuration struct {
-	Id                       int    `json:"id"`                                   // Id of the Switch component instance
-	Name                     string `json:"name,omitempty"`                       // Name of the switch instance
-	InMode                   string `json:"in_mode"`                              // Mode of the associated input. Range of values: momentary, follow, flip, detached, cycle (if applicable)
-	InitialState             string `json:"initial_state"`                        // Output state to set on power_on. Range of values: off, on, restore_last, match_input
-	AutoOn                   bool   `json:"auto_on"`                              // True if the "Automatic ON" function is enabled, false otherwise
-	AutoOnDelay              int    `json:"auto_on_delay"`                        // Seconds to pass until the component is switched back on
-	AutoOff                  bool   `json:"auto_off"`                             // True if the "Automatic OFF" function is enabled, false otherwise
-	AutoOffDelay             int    `json:"auto_off_delay"`                       // Seconds to pass until the component is switched back off
-	AutorecoverVoltageErrors bool   `json:"autorecover_voltage_errors,omitempty"` // True if switch output state should be restored after over/undervoltage error is cleared, false otherwise (shown if applicable)
-	InputId                  int    `json:"input_id,omitempty"`                   //Id of the Input component which controls the Switch. Applicable only to Pro1 and Pro1PM devices. Valid values: 0, 1
-	PowerLimit               int    `json:"power_limit,omitempty"`                // Limit (in Watts) over which overpower condition occurs (shown if applicable)
-	VoltageLimit             int    `json:"voltage_limit,omitempty"`              // Limit (in Volts) over which overvoltage condition occurs (shown if applicable)
-	UnderVoltageLimit        int    `json:"undervoltage_limit,omitempty"`         // Limit (in Volts) under which undervoltage condition occurs (shown if applicable)
-	CurrentLimit             int    `json:"current_limit,omitempty"`              // Number, limit (in Amperes) over which overcurrent condition occurs (shown if applicable)
+	Id                       int     `json:"id"`                                   // Id of the Switch component instance
+	Name                     string  `json:"name,omitempty"`                       // Name of the switch instance
+	InMode                   string  `json:"in_mode"`                              // Mode of the associated input. Range of values: momentary, follow, flip, detached, cycle (if applicable)
+	InitialState             string  `json:"initial_state"`                        // Output state to set on power_on. Range of values: off, on, restore_last, match_input
+	AutoOn                   bool    `json:"auto_on"`                              // True if the "Automatic ON" function is enabled, false otherwise
+	AutoOnDelay              float32 `json:"auto_on_delay"`                        // Seconds to pass until the component is switched back on
+	AutoOff                  bool    `json:"auto_off"`                             // True if the "Automatic OFF" function is enabled, false otherwise
+	AutoOffDelay             float32 `json:"auto_off_delay"`                       // Seconds to pass until the component is switched back off
+	AutorecoverVoltageErrors bool    `json:"autorecover_voltage_errors,omitempty"` // True if switch output state should be restored after over/undervoltage error is cleared, false otherwise (shown if applicable)
+	InputId                  int     `json:"input_id,omitempty"`                   //Id of the Input component which controls the Switch. Applicable only to Pro1 and Pro1PM devices. Valid values: 0, 1
+	PowerLimit               float32 `json:"power_limit,omitempty"`                // Limit (in Watts) over which overpower condition occurs (shown if applicable)
+	VoltageLimit             float32 `json:"voltage_limit,omitempty"`              // Limit (in Volts) over which overvoltage condition occurs (shown if applicable)
+	UnderVoltageLimit        float32 `json:"undervoltage_limit,omitempty"`         // Limit (in Volts) under which undervoltage condition occurs (shown if applicable)
+	CurrentLimit             float32 `json:"current_limit,omitempty"`              // Number, limit (in Amperes) over which overcurrent condition occurs (shown if applicable)
 }
 
-type SetConfig struct {
-	Id     int           `json:"id"`
-	Config Configuration `json:"config"`
-}
+// type SetConfig struct {
+// 	Id     int           `json:"id"`
+// 	Config Configuration `json:"config"`
+// }
 
 type Switch struct {
 	Id int `json:"id"`
 }
-
-type GetConfig Switch
 
 type Status struct {
 	Id             int     `json:"id"`                         //Id of the Switch component instance

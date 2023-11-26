@@ -4,6 +4,7 @@ import (
 	"devices/shelly"
 	"fmt"
 	"os"
+	"reflect"
 )
 
 func main() {
@@ -11,6 +12,11 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v", err)
 	} else {
-		fmt.Printf("Devices: %v", devices)
+		fmt.Printf("Found %v devices\n", devices.Len())
+		for di := devices.Front(); di != nil; di = di.Next() {
+			device := di.Value.(shelly.Device)
+			fmt.Printf("%s: %v\n", reflect.TypeOf(device), device)
+
+		}
 	}
 }

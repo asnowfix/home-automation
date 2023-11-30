@@ -3,7 +3,6 @@ package shelly
 import (
 	"container/list"
 	"encoding/json"
-	"fmt"
 	"net"
 	"regexp"
 	"strconv"
@@ -31,7 +30,7 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func MyShellies() (*list.List, error) {
+func MyShellies() ([]Device, error) {
 	devices := list.New()
 	entriesCh := make(chan *mdns.ServiceEntry, 4)
 	go func() {
@@ -52,6 +51,7 @@ func MyShellies() (*list.List, error) {
 				log.Logger.Debug().Msgf("Discarding %v due to %v", pe, err)
 				return
 			}
+			log.Logger.Debug().Msg(string(out))
 
 			var generation int
 			var application string
@@ -92,10 +92,10 @@ func MyShellies() (*list.List, error) {
 			}
 
 			if device.Host != device.Model {
-				fmt.Printf("Got new shelly device: %v\n", string(out))
+				log.Logger.Debug().Msgf("Got new shelly device: %v\n", string(out))
 				devices.PushBack(device)
 			} else {
-				fmt.Printf("Discarding device: %v\n", string(out))
+				log.Logger.Debug().Msgf("Discarding device: %v\n", string(out))
 			}
 		}
 	}()
@@ -103,5 +103,12 @@ func MyShellies() (*list.List, error) {
 	// Start the lookup
 	mdns.Lookup("_shelly._tcp", entriesCh)
 	close(entriesCh)
-	return devices, nil
+
+	var d []Device
+	for di := devices.Front(); di != nil; di = di.Next() {
+		d = append(d, di.Value.(Device))
+		// fmt.Printf("%s: %v\n", reflect.TypeOf(device), device)
+	}
+
+	return d, nil
 }

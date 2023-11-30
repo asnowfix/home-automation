@@ -13,7 +13,7 @@ func GetConfigE(d shelly.Device) (*Configuration, error) {
 
 	res, err := http.Get(requestURL)
 	if err != nil {
-		log.Default().Printf("error making http request: %s\n", err)
+		log.Default().Printf("error making http requestu: %s\n", err)
 		return nil, err
 	}
 	log.Default().Printf("status code: %d\n", res.StatusCode)

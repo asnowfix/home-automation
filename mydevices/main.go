@@ -2,9 +2,9 @@ package main
 
 import (
 	"devices/shelly"
+	"encoding/json"
 	"fmt"
 	"os"
-	"reflect"
 )
 
 func main() {
@@ -12,11 +12,11 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v", err)
 	} else {
-		fmt.Printf("Found %v devices\n", devices.Len())
-		for di := devices.Front(); di != nil; di = di.Next() {
-			device := di.Value.(shelly.Device)
-			fmt.Printf("%s: %v\n", reflect.TypeOf(device), device)
-
+		out, err := json.Marshal(devices)
+		if err != nil {
+			panic(err)
 		}
+		// fmt.Printf("Found %v devices '%v'\n", len(devices), reflect.TypeOf(device))
+		fmt.Printf(string(out))
 	}
 }

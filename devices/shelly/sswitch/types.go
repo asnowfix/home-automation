@@ -59,15 +59,6 @@ type Configuration struct {
 	CurrentLimit             float32 `json:"current_limit,omitempty"`              // Number, limit (in Amperes) over which overcurrent condition occurs (shown if applicable)
 }
 
-// type SetConfig struct {
-// 	Id     int           `json:"id"`
-// 	Config Configuration `json:"config"`
-// }
-
-type Switch struct {
-	Id int `json:"id"`
-}
-
 type Status struct {
 	Id             int     `json:"id"`                         //Id of the Switch component instance
 	Source         string  `json:"source"`                     // Source of the last command, for example: init, WS_in, http, ...
@@ -91,12 +82,12 @@ type Status struct {
 	Errors []string `json:"errors"` // Error conditions occurred. May contain overtemp, overpower, overvoltage, undervoltage, (shown if at least one error is present)
 }
 
-type GetStatus Switch
+type Toogle struct {
+	Id int `json:"id"`
+}
 
 type Set struct {
 	Id          int  `json:"id"`                     // Id of the Switch component instance. Required
 	On          bool `json:"on"`                     // true for switch on, false otherwise. Required
 	ToggleAfter int  `json:"toggle_after,omitempty"` // Optional flip-back timer in seconds. Optional
 }
-
-type Toggle Switch

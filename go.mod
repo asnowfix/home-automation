@@ -3,12 +3,12 @@ module github.com/asnowfix/home-automation
 go 1.21.3
 
 require (
+	devices/shelly v0.0.0-00010101000000-000000000000
+	devices/shelly/sswitch v0.0.0-00010101000000-000000000000
 	github.com/mochi-mqtt/server/v2 v2.4.1
 	github.com/rs/zerolog v1.31.0
 	internal/myip v1.0.0
 	internal/myzone v0.0.0-00010101000000-000000000000
-	devices/shelly v0.0.0-00010101000000-000000000000
-	devices/shelly/sswitch v0.0.0-00010101000000-000000000000
 )
 
 replace internal/myip => ./internal/myip
@@ -20,9 +20,10 @@ replace devices/shelly => ./devices/shelly
 replace devices/shelly/sswitch => ./devices/shelly/sswitch
 
 require (
-
 	cloud.google.com/go/compute v1.23.0 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
+	github.com/alexflint/go-arg v1.4.3 // indirect
+	github.com/alexflint/go-scalar v1.1.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/s2a-go v0.1.7 // indirect

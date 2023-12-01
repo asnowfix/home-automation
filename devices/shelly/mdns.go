@@ -2,25 +2,24 @@ package shelly
 
 import (
 	"container/list"
-	"encoding/json"
-	"net"
 	"regexp"
-	"strconv"
+	"strings"
+	"time"
 
 	"github.com/hashicorp/mdns"
 	"github.com/rs/zerolog/log"
 )
 
-type MdnsEntry struct {
-	Name       string   `json:"name"`
-	Host       string   `json:"host"`
-	AddrV4     net.IP   `json:"addr_v4,omitempty"`
-	AddrV6     net.IP   `json:"addr_v6,omitempty"`
-	Port       int      `json:"port"`
-	Info       string   `json:"info"`
-	InfoFields []string `json:"info_fields"`
-	Addr       net.IP   `json:"addr"` // @Deprecated
-}
+// type MdnsEntry struct {
+// 	Name       string   `json:"name"`
+// 	Host       string   `json:"host"`
+// 	AddrV4     net.IP   `json:"addr_v4,omitempty"`
+// 	AddrV6     net.IP   `json:"addr_v6,omitempty"`
+// 	Port       int      `json:"port"`
+// 	Info       string   `json:"info"`
+// 	InfoFields []string `json:"info_fields"`
+// 	Addr       net.IP   `json:"addr"` // @Deprecated
+// }
 
 var hostRe = regexp.MustCompile("^(?P<model>[a-zA-Z0-9]+)-(?P<serial>[A-Z0-9]+).local.$")
 
@@ -30,85 +29,49 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func MyShellies() ([]Device, error) {
-	devices := list.New()
+func MyShellies() (*map[string]*Device, error) {
+	var mdnsLookFor string = "_shelly._tcp"
+	shellies := list.New()
 	entriesCh := make(chan *mdns.ServiceEntry, 4)
+
 	go func() {
 		for entry := range entriesCh {
-
-			var pe = MdnsEntry{
-				Name:       entry.Name,
-				Host:       entry.Host,
-				AddrV4:     entry.AddrV4,
-				AddrV6:     entry.AddrV6,
-				Port:       entry.Port,
-				Info:       entry.Info,
-				InfoFields: entry.InfoFields,
-				Addr:       entry.Addr,
-			}
-			out, err := json.Marshal(pe)
-			if err != nil {
-				log.Logger.Debug().Msgf("Discarding %v due to %v", pe, err)
-				return
-			}
-			log.Logger.Debug().Msg(string(out))
-
-			var generation int
-			var application string
-			var version string
-			for i, f := range entry.InfoFields {
-				log.Logger.Debug().Msgf("info_field[%v] '%v'", i, f)
-				if generationRe.Match([]byte(f)) {
-					generation, _ = strconv.Atoi(generationRe.ReplaceAllString(f, "${generation}"))
-				}
-				if applicationRe.Match([]byte(f)) {
-					application = applicationRe.ReplaceAllString(f, "${application}")
-				}
-				if versionRe.Match([]byte(f)) {
-					version = versionRe.ReplaceAllString(f, "${version}")
-				}
-			}
-
-			// gen, err := strconv.Atoi(genRe.ReplaceAllString(entry.Info, "${gen}"))
-			// if err != nil {
-			// 	log.Logger.Debug().Msgf("Discarding %v due to %v", pe, err)
-			// 	return
+			// var pe = MdnsEntry{
+			// 	Name:       entry.Name,
+			// 	Host:       entry.Host,
+			// 	AddrV4:     entry.AddrV4,
+			// 	AddrV6:     entry.AddrV6,
+			// 	Port:       entry.Port,
+			// 	Info:       entry.Info,
+			// 	InfoFields: entry.InfoFields,
+			// 	Addr:       entry.Addr,
 			// }
-
-			var device = Device{
-				Host:        entry.Host,
-				Ip:          entry.AddrV4,
-				Model:       hostRe.ReplaceAllString(entry.Host, "${model}"),
-				Serial:      hostRe.ReplaceAllString(entry.Host, "${serial}"),
-				Generation:  generation,
-				Application: application,
-				Version:     version,
-			}
-
-			out, err = json.Marshal(device)
-			if err != nil {
-				log.Logger.Debug().Msgf("Discarding %v due to %v", pe, err)
-				return
-			}
-
-			if device.Host != device.Model {
-				log.Logger.Debug().Msgf("Got new shelly device: %v\n", string(out))
-				devices.PushBack(device)
-			} else {
-				log.Logger.Debug().Msgf("Discarding device: %v\n", string(out))
+			if strings.Contains(entry.Name, mdnsLookFor) {
+				shellies.PushBack(entry)
 			}
 		}
 	}()
 
 	// Start the lookup
 	mdns.Lookup("_shelly._tcp", entriesCh)
+	time.Sleep(time.Second * 5)
 	close(entriesCh)
 
-	var d []Device
-	for di := devices.Front(); di != nil; di = di.Next() {
-		d = append(d, di.Value.(Device))
-		// fmt.Printf("%s: %v\n", reflect.TypeOf(device), device)
+	devices := map[string]*Device{}
+
+	for si := shellies.Front(); si != nil; si = si.Next() {
+		entry := si.Value.(*mdns.ServiceEntry)
+
+		if _, exists := devices[entry.Name]; !exists {
+			device, err := NewDevice(entry)
+			if err != nil {
+				log.Logger.Debug().Msgf("Discarding %v due to %v", entry, err)
+			} else {
+				log.Logger.Debug().Msgf("Loading %v: %v", entry.Name, entry)
+				devices[entry.Name] = device
+			}
+		}
 	}
 
-	return d, nil
+	return &devices, nil
 }

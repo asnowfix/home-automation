@@ -2,57 +2,63 @@ package sswitch
 
 import (
 	"devices/shelly"
+	"devices/shelly/sswitch"
 	"encoding/json"
-	"fmt"
 	"log"
-	"net/http"
 )
 
-func GetConfigE(d shelly.Device) (*Configuration, error) {
-	requestURL := fmt.Sprintf("http://%s/rpc/%s?id=0", d.Host, "Switch.GetConfig")
+func SwitchGetConfigE(d shelly.Device) (*Configuration, error) {
 
-	res, err := http.Get(requestURL)
+	res, err := shelly.GetE(d, "Switch.GetConfig")
 	if err != nil {
-		log.Default().Printf("error making http requestu: %s\n", err)
 		return nil, err
 	}
-	log.Default().Printf("status code: %d\n", res.StatusCode)
-
-	// defer res.Body.Close()
-	// b, err := io.ReadAll(res.Body)
-	// if err != nil {
-	// 	log.Fatalln(err)
-	// }
-	// log.Default().Printf("res: %s\n", string(b))
 
 	var c Configuration
 	err = json.NewDecoder(res.Body).Decode(&c)
 	if err != nil {
 		return nil, err
 	}
-	log.Default().Printf("GetConfig: %v\n", c)
-
-	// req, err := http.NewRequest("GET", "http://api.themoviedb.org/3/tv/popular", nil)
-	// if err != nil {
-	// 	log.Print(err)
-	// 	os.Exit(1)
-	// }
-	// q := req.URL.Query()
-	// q.Add("api_key", "key_from_environment_or_flag")
-	// q.Add("another_thing", "foo & bar")
-	// req.URL.RawQuery = q.Encode()
-
-	// // req, _ := http.NewRequest("GET", "http://api.themoviedb.org/3/tv/popular", nil)
-	// // req.Header.Add("Accept", "application/json")
-	// resp, err := client.Do(req)
+	log.Default().Printf("Switch.GetConfig: %v\n", c)
 
 	return &c, nil
 }
 
-func GetConfig(d shelly.Device) *Configuration {
-	c, err := GetConfigE(d)
+func SwitchGetConfig(d shelly.Device) *Configuration {
+	c, err := SwitchGetConfigE(d)
 	if err != nil {
 		panic(err)
 	}
 	return c
+}
+
+func SwitchStatusE(d shelly.Device) (*Status, error) {
+	res, err := shelly.GetE(d, "Switch.Status")
+	if err != nil {
+		return nil, err
+	}
+	var s Status
+	err = json.NewDecoder(res.Body).Decode(&s)
+	if err != nil {
+		return nil, err
+	}
+	log.Default().Printf("Status: %v\n", s)
+
+	return &s, nil
+}
+
+func SwitchStatus(d shelly.Device) *Status {
+	s, err := SwitchStatusE(d)
+	if err != nil {
+		panic(err)
+	}
+	return s
+}
+
+func SwitchToggleE(d shelly.Device, s sswitch.Toggle) error {
+	return shelly.GetE(d, "Switch.Toogle")
+}
+
+func SwitchSetE(d shelly.Device, s sswitch.Set) error {
+	return shelly.GetE(d, "Switch.Set")
 }

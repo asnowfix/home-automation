@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/hashicorp/mdns"
 )
@@ -19,11 +20,12 @@ type Product struct {
 
 type Device struct {
 	*Product
-	Host    string      `json:"host"`
-	Ipv4    net.IP      `json:"ipv4"`
-	Port    int         `json:"port"`
-	Info    *DeviceInfo `json:"info"`
-	Methods *[]string   `json:"methods"`
+	Service string                     `json:"service,omitempty"`
+	Host    string                     `json:"host"`
+	Ipv4    net.IP                     `json:"ipv4"`
+	Port    int                        `json:"port"`
+	Info    *DeviceInfo                `json:"info"`
+	Api     map[string]map[string]bool `json:"api"`
 }
 
 type Methods struct {
@@ -76,10 +78,12 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 	// }
 
 	var device = Device{
+		Service: entry.Name,
 		Host:    entry.Host,
 		Ipv4:    entry.AddrV4,
 		Port:    entry.Port,
 		Product: &product,
+		Api:     make(map[string]map[string]bool),
 	}
 
 	return &device, device.init()
@@ -95,13 +99,24 @@ func (device Device) init() error {
 	if err != nil {
 		return err
 	}
-	var m Methods
-	err = json.NewDecoder(res.Body).Decode(&m)
+	var ms Methods
+	err = json.NewDecoder(res.Body).Decode(&ms)
 	if err != nil {
 		return err
 	}
-	device.Methods = &m.Methods
-	log.Default().Printf("Shelly.ListMethods: loaded %v\n", device.Methods)
+	log.Default().Printf("Methods: %v\n", ms)
+	for _, m := range ms.Methods {
+		s := strings.Split(m, ".")[0]
+		for api := Shelly; api < None; api++ {
+			if s == api.String() {
+				if _, exists := device.Api[s]; !exists {
+					device.Api[s] = make(map[string]bool)
+				}
+				device.Api[s][m] = true
+			}
+		}
+	}
+	log.Default().Printf("device.Api: %v\n", device.Api)
 	return nil
 }
 

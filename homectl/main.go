@@ -1,7 +1,10 @@
 package main
 
 import (
+	"devices/shelly"
+	"encoding/json"
 	"fmt"
+	"net"
 
 	arg "github.com/alexflint/go-arg"
 )
@@ -12,7 +15,13 @@ func main() {
 		// Output  []string `arg:"positional"`
 	}
 	arg.MustParse(&args)
-	fmt.Println("IP:", args.IP)
-	// fmt.Println("Output:", args.Output)
-
+	devices, err := shelly.MyShellies(net.ParseIP(args.IP))
+	if err != nil {
+		panic(err)
+	}
+	out, err := json.Marshal((*devices)[args.IP])
+	if err != nil {
+		panic(err)
+	}
+	fmt.Print(string(out))
 }

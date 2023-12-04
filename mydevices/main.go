@@ -4,11 +4,12 @@ import (
 	"devices/shelly"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 )
 
 func main() {
-	devices, err := shelly.MyShellies()
+	devices, err := shelly.MyShellies(net.IPv4zero)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v", err)
 	} else {
@@ -17,6 +18,6 @@ func main() {
 			panic(err)
 		}
 		// fmt.Printf("Found %v devices '%v'\n", len(devices), reflect.TypeOf(device))
-		fmt.Printf(string(out))
+		fmt.Print(string(out))
 	}
 }

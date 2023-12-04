@@ -2,9 +2,9 @@ package shelly
 
 import (
 	"container/list"
+	"net"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/hashicorp/mdns"
 	"github.com/rs/zerolog/log"
@@ -29,32 +29,30 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func MyShellies() (*map[string]*Device, error) {
+func MyShellies(addr net.IP) (*map[string]*Device, error) {
 	var mdnsLookFor string = "_shelly._tcp"
 	shellies := list.New()
 	entriesCh := make(chan *mdns.ServiceEntry, 4)
 
 	go func() {
-		for entry := range entriesCh {
-			// var pe = MdnsEntry{
-			// 	Name:       entry.Name,
-			// 	Host:       entry.Host,
-			// 	AddrV4:     entry.AddrV4,
-			// 	AddrV6:     entry.AddrV6,
-			// 	Port:       entry.Port,
-			// 	Info:       entry.Info,
-			// 	InfoFields: entry.InfoFields,
-			// 	Addr:       entry.Addr,
-			// }
-			if strings.Contains(entry.Name, mdnsLookFor) {
-				shellies.PushBack(entry)
+		if addr.Equal(net.IPv4zero) {
+			for entry := range entriesCh {
+				if strings.Contains(entry.Name, mdnsLookFor) {
+					shellies.PushBack(entry)
+				}
+			}
+		} else {
+			for entry := range entriesCh {
+				if entry.AddrV4.Equal(addr) {
+					shellies.PushBack(entry)
+				}
 			}
 		}
 	}()
 
 	// Start the lookup
 	mdns.Lookup("_shelly._tcp", entriesCh)
-	time.Sleep(time.Second * 5)
+	// time.Sleep(time.Second * 5)
 	close(entriesCh)
 
 	devices := map[string]*Device{}
@@ -62,13 +60,13 @@ func MyShellies() (*map[string]*Device, error) {
 	for si := shellies.Front(); si != nil; si = si.Next() {
 		entry := si.Value.(*mdns.ServiceEntry)
 
-		if _, exists := devices[entry.Name]; !exists {
+		if _, exists := devices[entry.AddrV4.String()]; !exists {
 			device, err := NewDevice(entry)
 			if err != nil {
 				log.Logger.Debug().Msgf("Discarding %v due to %v", entry, err)
 			} else {
 				log.Logger.Debug().Msgf("Loading %v: %v", entry.Name, entry)
-				devices[entry.Name] = device
+				devices[entry.AddrV4.String()] = device
 			}
 		}
 	}

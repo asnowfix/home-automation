@@ -1,5 +1,7 @@
 package shelly
 
+type MethodParams map[string]string
+
 type Api uint
 
 const (

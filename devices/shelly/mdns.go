@@ -3,7 +3,6 @@ package shelly
 import (
 	"container/list"
 	"net"
-	"regexp"
 	"strings"
 
 	"github.com/hashicorp/mdns"
@@ -20,14 +19,6 @@ import (
 // 	InfoFields []string `json:"info_fields"`
 // 	Addr       net.IP   `json:"addr"` // @Deprecated
 // }
-
-var hostRe = regexp.MustCompile("^(?P<model>[a-zA-Z0-9]+)-(?P<serial>[A-Z0-9]+).local.$")
-
-var generationRe = regexp.MustCompile("^gen=(?P<generation>[0-9]+)$")
-
-var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
-
-var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
 func MyShellies(addr net.IP) (*map[string]*Device, error) {
 	var mdnsLookFor string = "_shelly._tcp"

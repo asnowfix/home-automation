@@ -2,14 +2,17 @@ package sswitch
 
 import (
 	"devices/shelly"
-	"devices/shelly/sswitch"
 	"encoding/json"
 	"log"
 )
 
-func SwitchGetConfigE(d shelly.Device) (*Configuration, error) {
+// func init() {
+// 	shelly.RegisterMethod("Switch.GetConfig", GetConfigE, Configuration)
+// }
 
-	res, err := shelly.GetE(d, "Switch.GetConfig")
+func GetConfigE(d shelly.Device) (*Configuration, error) {
+
+	res, err := shelly.GetE(d, "Switch.GetConfig", shelly.MethodParams{})
 	if err != nil {
 		return nil, err
 	}
@@ -24,16 +27,12 @@ func SwitchGetConfigE(d shelly.Device) (*Configuration, error) {
 	return &c, nil
 }
 
-func SwitchGetConfig(d shelly.Device) *Configuration {
-	c, err := SwitchGetConfigE(d)
-	if err != nil {
-		panic(err)
-	}
-	return c
-}
+// func init() {
+// 	shelly.RegisterMethod("Switch.GetStatus", GetStatusE)
+// }
 
-func SwitchStatusE(d shelly.Device) (*Status, error) {
-	res, err := shelly.GetE(d, "Switch.Status")
+func GetStatusE(d shelly.Device) (*Status, error) {
+	res, err := shelly.GetE(d, "Switch.Status", shelly.MethodParams{})
 	if err != nil {
 		return nil, err
 	}
@@ -47,18 +46,6 @@ func SwitchStatusE(d shelly.Device) (*Status, error) {
 	return &s, nil
 }
 
-func SwitchStatus(d shelly.Device) *Status {
-	s, err := SwitchStatusE(d)
-	if err != nil {
-		panic(err)
-	}
-	return s
-}
-
-func SwitchToggleE(d shelly.Device, s sswitch.Toggle) error {
-	return shelly.GetE(d, "Switch.Toogle")
-}
-
-func SwitchSetE(d shelly.Device, s sswitch.Set) error {
-	return shelly.GetE(d, "Switch.Set")
-}
+// func ToggleE(d shelly.Device, s sswitch.Toggle) error {
+// 	return shelly.GetE(d, "Switch.Toogle")
+// }

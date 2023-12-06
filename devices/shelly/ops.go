@@ -6,7 +6,21 @@ import (
 	"net/http"
 )
 
-func GetE(d Device, cmd string, params map[string]string) (*http.Response, error) {
+// type Method interface {
+// 	ReturnedType
+// 	func(Device) (*any, error)
+// }
+
+// var methods *map[string]Method
+
+// func RegisterMethod(name string, method Method, data interface) {
+// 	if methods == nil {
+// 		methods = new(map[string]Method)
+// 	}
+// 	(*methods)[name] = method
+// }
+
+func GetE(d Device, cmd string, params MethodParams) (*http.Response, error) {
 	requestURL := fmt.Sprintf("http://%s/rpc/%s?id=0", d.Host, cmd)
 
 	res, err := http.Get(requestURL)

@@ -1,27 +1,62 @@
 package shelly
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
+	"reflect"
 )
 
-// type Method interface {
-// 	ReturnedType
-// 	func(Device) (*any, error)
-// }
+type MethodConfiguration struct {
+	Allocate func() any
+	Params   map[string]string
+}
 
-// var methods *map[string]Method
+var methods map[string]MethodConfiguration
 
-// func RegisterMethod(name string, method Method, data interface) {
-// 	if methods == nil {
-// 		methods = new(map[string]Method)
-// 	}
-// 	(*methods)[name] = method
-// }
+func ConfigureMethod(m string, c MethodConfiguration) {
+	log.Default().Printf("Configuring method:%v: params:%v\n", m, c.Params)
+	if _, exists := methods[m]; !exists {
+		methods[m] = c
+	}
+}
 
-func GetE(d Device, cmd string, params MethodParams) (*http.Response, error) {
-	requestURL := fmt.Sprintf("http://%s/rpc/%s?id=0", d.Host, cmd)
+func CallMethod(device *Device, m string) (any, error) {
+	var data any
+	var params map[string]string
+	if method, exists := methods[m]; exists {
+		data = method.Allocate()
+		params = method.Params
+		log.Default().Printf("Found configuration for method: %v: parser:%v params:%v\n", m, reflect.TypeOf(data), params)
+	} else {
+		log.Default().Printf("Did not find any configuration for method: %v\n", m)
+		params = make(map[string]string)
+	}
+
+	res, err := GetE(device, m, params)
+	if err != nil {
+		return nil, err
+	}
+	err = json.NewDecoder(res.Body).Decode(&data)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func GetE(d *Device, cmd string, params MethodParams) (*http.Response, error) {
+
+	values := url.Values{}
+	for key, value := range params {
+		values.Add(key, value)
+
+	}
+	query := values.Encode()
+
+	requestURL := fmt.Sprintf("http://%s/rpc/%s?%s", d.Host, cmd, query)
+	log.Default().Printf("Calling : %v\n", requestURL)
 
 	res, err := http.Get(requestURL)
 	if err != nil {

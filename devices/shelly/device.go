@@ -22,12 +22,12 @@ type Product struct {
 
 type Device struct {
 	Product
-	Service string                     `json:"service"`
-	Host    string                     `json:"host"`
-	Ipv4    net.IP                     `json:"ipv4"`
-	Port    int                        `json:"port"`
-	Info    *DeviceInfo                `json:"info"`
-	Api     map[string]map[string]*any `json:"api"`
+	Service string                    `json:"service"`
+	Host    string                    `json:"host"`
+	Ipv4    net.IP                    `json:"ipv4"`
+	Port    int                       `json:"port"`
+	Info    *DeviceInfo               `json:"info"`
+	Api     map[string]map[string]any `json:"api"`
 }
 
 type Methods struct {
@@ -44,7 +44,7 @@ type DeviceInfo struct {
 	Discoverable          bool   `json:"discoverable"`
 	CloudKey              string `json:"key,omitempty"`
 	Batch                 string `json:"batch,omitempty"`
-	FirmwareSBits         int    `json:"fw_sbits,omitempty"`
+	FirmwareSBits         string `json:"fw_sbits,omitempty"`
 }
 
 var hostRe = regexp.MustCompile("^(?P<model>[a-zA-Z0-9]+)-(?P<mac>[A-Z0-9]+).local.$")
@@ -90,7 +90,7 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 			Application: application,
 			Version:     version,
 		},
-		Api: make(map[string]map[string]*any),
+		Api: make(map[string]map[string]any),
 	}
 
 	// gen, err := strconv.Atoi(genRe.ReplaceAllString(entry.Info, "${gen}"))
@@ -100,7 +100,7 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 	// }
 
 	if device.Info == nil {
-		res, err := GetE(device, "Shelly.GetDeviceInfo", map[string]string{
+		res, err := GetE(&device, "Shelly.GetDeviceInfo", map[string]string{
 			"ident": "true",
 		})
 		if err != nil {
@@ -115,7 +115,7 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 		device.Info = &di
 	}
 
-	res, err := GetE(device, "Shelly.ListMethods", map[string]string{})
+	res, err := GetE(&device, "Shelly.ListMethods", map[string]string{})
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 		for api := Shelly; api < None; api++ {
 			if a == api.String() {
 				if _, exists := device.Api[a]; !exists {
-					device.Api[a] = make(map[string]*any)
+					device.Api[a] = make(map[string]any)
 				}
 				device.Api[a][v] = nil
 			}
@@ -144,17 +144,25 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 
 	for apiName, api := range device.Api {
 		if _, exists := api["GetConfig"]; exists {
-			var data any
-			res, err := GetE(device, apiName+".GetConfig", MethodParams{})
+			// log.Default().Printf("%v.GetConfig return %v\n", apiName, methodOutput[apiName+".GetConfig"])
+
+			data, err := CallMethod(&device, apiName+".GetConfig")
 			if err != nil {
 				return nil, err
 			}
-			err = json.NewDecoder(res.Body).Decode(&data)
-			if err != nil {
-				return nil, err
-			}
-			log.Default().Printf("%v.GetConfig: got %v\n", apiName, data)
-			api["GetConfig"] = &data
+
+			// log.Default().Printf("%v.GetConfig return %v\n", apiName, methodOutput[apiName+".GetConfig"])
+
+			// res, err := GetE(device, apiName+".GetConfig", MethodParams{})
+			// if err != nil {
+			// 	return nil, err
+			// }
+			// err = json.NewDecoder(res.Body).Decode(&data)
+			// if err != nil {
+			// 	return nil, err
+			// }
+			// log.Default().Printf("%v.GetConfig: got %v\n", apiName, data)
+			api["GetConfig"] = data
 		}
 	}
 

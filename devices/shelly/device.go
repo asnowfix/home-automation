@@ -1,6 +1,7 @@
 package shelly
 
 import (
+	"devices/shelly/types"
 	"encoding/json"
 	"log"
 	"net"
@@ -131,7 +132,7 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 		mi := strings.Split(m, ".")
 		a := mi[0] // api
 		v := mi[1] // verb
-		for api := Shelly; api < None; api++ {
+		for api := types.Shelly; api < types.None; api++ {
 			if a == api.String() {
 				if _, exists := device.Api[a]; !exists {
 					device.Api[a] = make(map[string]any)

@@ -15,7 +15,13 @@ replace internal/myip => ./internal/myip
 
 replace internal/myzone => ./internal/myzone
 
+replace devices => ./devices
+
+replace internal => ./internal
+
 replace devices/shelly => ./devices/shelly
+
+replace devices/shelly/types => ./devices/shelly/types
 
 replace devices/shelly/sswitch => ./devices/shelly/sswitch
 

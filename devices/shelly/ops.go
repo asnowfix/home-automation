@@ -1,6 +1,8 @@
 package shelly
 
 import (
+	"devices/shelly/sswitch"
+	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,14 +11,14 @@ import (
 	"reflect"
 )
 
-type MethodConfiguration struct {
-	Allocate func() any
-	Params   map[string]string
+var methods map[string]types.MethodConfiguration
+
+func init() {
+	methods = make(map[string]types.MethodConfiguration)
+	sswitch.Initialize(ConfigureMethod)
 }
 
-var methods map[string]MethodConfiguration
-
-func ConfigureMethod(m string, c MethodConfiguration) {
+func ConfigureMethod(m string, c types.MethodConfiguration) {
 	log.Default().Printf("Configuring method:%v: params:%v\n", m, c.Params)
 	if _, exists := methods[m]; !exists {
 		methods[m] = c
@@ -46,7 +48,7 @@ func CallMethod(device *Device, m string) (any, error) {
 	return data, nil
 }
 
-func GetE(d *Device, cmd string, params MethodParams) (*http.Response, error) {
+func GetE(d *Device, cmd string, params types.MethodParams) (*http.Response, error) {
 
 	values := url.Values{}
 	for key, value := range params {

@@ -1,6 +1,13 @@
-package shelly
+package types
 
 type MethodParams map[string]string
+
+type MethodConfiguration struct {
+	Allocate func() any
+	Params   MethodParams
+}
+
+type ConfigurationMethod func(m string, c MethodConfiguration)
 
 type Api uint
 

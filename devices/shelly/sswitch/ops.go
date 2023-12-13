@@ -1,27 +1,21 @@
 package sswitch
 
-import (
-	"devices/shelly"
-)
+import "devices/shelly/types"
 
-func init() {
-	Initialize()
-}
-
-func Initialize() {
-	shelly.ConfigureMethod("Switch.GetConfig", shelly.MethodConfiguration{
+func Initialize(cm types.ConfigurationMethod) {
+	cm("Switch.GetConfig", types.MethodConfiguration{
 		Allocate: func() any { return new(Configuration) },
 		Params: map[string]string{
 			"id": "0",
 		},
 	})
-	shelly.ConfigureMethod("Switch.GetStatus", shelly.MethodConfiguration{
+	cm("Switch.GetStatus", types.MethodConfiguration{
 		Allocate: func() any { return new(Status) },
 		Params: map[string]string{
 			"id": "0",
 		},
 	})
-	shelly.ConfigureMethod("Switch.Toogle", shelly.MethodConfiguration{
+	cm("Switch.Toogle", types.MethodConfiguration{
 		Allocate: func() any { return new(Toogle) },
 		Params: map[string]string{
 			"id": "0",

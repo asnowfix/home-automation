@@ -145,25 +145,21 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 
 	for apiName, api := range device.Api {
 		if _, exists := api["GetConfig"]; exists {
-			// log.Default().Printf("%v.GetConfig return %v\n", apiName, methodOutput[apiName+".GetConfig"])
-
 			data, err := CallMethod(&device, apiName+".GetConfig")
 			if err != nil {
 				return nil, err
 			}
-
-			// log.Default().Printf("%v.GetConfig return %v\n", apiName, methodOutput[apiName+".GetConfig"])
-
-			// res, err := GetE(device, apiName+".GetConfig", MethodParams{})
-			// if err != nil {
-			// 	return nil, err
-			// }
-			// err = json.NewDecoder(res.Body).Decode(&data)
-			// if err != nil {
-			// 	return nil, err
-			// }
-			// log.Default().Printf("%v.GetConfig: got %v\n", apiName, data)
 			api["GetConfig"] = data
+		}
+	}
+
+	for apiName, api := range device.Api {
+		if _, exists := api["GetStatus"]; exists {
+			data, err := CallMethod(&device, apiName+".GetStatus")
+			if err != nil {
+				return nil, err
+			}
+			api["GetStatus"] = data
 		}
 	}
 

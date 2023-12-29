@@ -133,6 +133,16 @@ $ curl -s http://ShellyPlus1-4855199C9888.local/rpc/Switch.GetConfig?id=0 | jq
 }
 ```
 
+## Red-by-SFR Box Notes
+
+```bash
+$ curl -s -G  http://192.168.1.1/api/1.0/?method=auth.getToken
+<?xml version="1.0" encoding="UTF-8"?>
+<rsp stat="ok" version="1.0">
+     <auth token="665ae99c7ff692d186fdca08ba2a8c" method="all" />
+</rsp>
+```
+
 ## Mochi-MQTT Notes
 
 ```shell

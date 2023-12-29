@@ -99,6 +99,40 @@ $ curl -s http://ShellyPlus1-4855199C9888.local/rpc/Switch.GetConfig?id=0 | jq
 }
 ```
 
+## Shelly Devices
+
+### Pro1
+
+```json
+{
+  "model": "ShellyPro1",
+  "mac": "30C6F782D274",
+  "app": "Pro1",
+  "ver": "1.0.8",
+  "gen": 2,  "service": "shellypro1-30c6f782d274._shelly._tcp.local.",
+  "host": "ShellyPro1-30C6F782D274.local.",
+  "ipv4": "192.168.1.60",
+  // ...
+}
+```
+
+### Mini1 Gen2
+
+```json
+{
+  "model": "ShellyPlus1",
+  "mac": "08B61FD141E8",
+  "app": "Plus1",
+  "ver": "1.0.8",
+  "gen": 2,
+  "service": "shellyplus1-08b61fd141e8._shelly._tcp.local.",
+  "host": "ShellyPlus1-08B61FD141E8.local.",
+  "ipv4": "192.168.1.76",
+  "port": 80,
+  // ...
+}
+```
+
 ## Mochi-MQTT Notes
 
 ```shell

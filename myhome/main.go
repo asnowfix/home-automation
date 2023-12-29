@@ -11,6 +11,8 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
+var Commit string
+
 func main() {
 	// Create signals channel to run server until interrupted
 	sigs := make(chan os.Signal, 1)

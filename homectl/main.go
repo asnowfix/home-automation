@@ -1,27 +1,42 @@
 package main
 
 import (
-	"devices/shelly"
-	"encoding/json"
 	"fmt"
-	"net"
+	"os"
 
-	arg "github.com/alexflint/go-arg"
+	"github.com/spf13/cobra"
 )
 
+var Commit string
+
 func main() {
-	var args struct {
-		IP string `arg:"positional"`
-		// Output  []string `arg:"positional"`
+	Execute()
+}
+
+func Execute() {
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
-	arg.MustParse(&args)
-	devices, err := shelly.MyShellies(net.ParseIP(args.IP))
-	if err != nil {
-		panic(err)
-	}
-	out, err := json.Marshal((*devices)[args.IP])
-	if err != nil {
-		panic(err)
-	}
-	fmt.Print(string(out))
+}
+
+var rootCmd = &cobra.Command{
+	Use: "homectl",
+	// Short: "Show integrated devices.",
+	// Run: func(cmd *cobra.Command, args []string) {
+	// Do Stuff Here
+	// },
+}
+
+func init() {
+	rootCmd.AddCommand(versionCmd)
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print the version number",
+	// Long:  `All software has versions. This is Hugo's`,
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println(Commit)
+	},
 }

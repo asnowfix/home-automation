@@ -29,3 +29,6 @@ ifeq ($(shell uname -s),Linux)
 else
 	$(error unsupported $(shell uname -s))
 endif
+
+build: homectl myhome
+	$(MAKE) -C $(@) build

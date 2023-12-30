@@ -1,5 +1,7 @@
 package devices
 
+import "net"
+
 type Output uint
 
 const (
@@ -17,4 +19,11 @@ type Switch interface {
 type Button interface {
 	Action() error
 	Status() (bool, error)
+}
+
+type Host struct {
+	Name   string           `json:"name"`
+	Ip     net.IP           `json:"ip"`
+	Mac    net.HardwareAddr `json:"mac"`
+	Online bool             `json:"online"`
 }

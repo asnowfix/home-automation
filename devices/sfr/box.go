@@ -20,20 +20,44 @@ var username string = os.Getenv("SFR_USERNAME")
 
 var password string = os.Getenv("SFR_PASSWORD")
 
-func ListDevices() ([]byte, error) {
-	token, method, err := getToken()
+var token string = ""
+
+func ListDevices() (any, error) {
+	if len(token) == 0 {
+		renewToken()
+	}
+	params := map[string]string{
+		"token": token,
+	}
+	res, err := queryBox("lan.getHostsList", &params)
 	if err != nil {
 		log.Default().Println(err)
-		return nil, err
+		return "", err
 	}
-	if method == "passwd" || method == "all" {
-		err = checkToken(token)
-		if err != nil {
-			log.Default().Println(err)
-			return nil, err
-		}
+	hosts := res.([]*Host)
+	// devices := make([]devices.Host, len(hosts))
+	for _, host := range hosts {
+		// var device devices.Host
+		// devices = append(devices, devices.Host{
+		// 	Name: host.Name,
+		// 	Ip:   host.Ip,
+		// })
+		log.Default().Println(host)
 	}
+
 	return nil, nil
+}
+
+type Host struct {
+	XMLName   xml.Name         `xml:"host"`
+	Type      string           `xml:"type,attr"`
+	Name      string           `xml:"name,attr"`
+	Ip        net.IP           `xml:"ip,attr"`
+	Mac       net.HardwareAddr `xml:"mac,attr"`
+	Interface string           `xml:"iface,attr"`
+	Probe     uint             `xml:"probe,attr"`
+	Alive     uint             `xml:"alive,attr"`
+	Status    string           `xml:"status,attr"`
 }
 
 type Response struct {
@@ -42,6 +66,7 @@ type Response struct {
 	Version string   `xml:"version,attr"`
 	Error   *Error
 	Auth    *Auth
+	Hosts   []*Host `xml:"host"`
 }
 
 type Error struct {
@@ -54,6 +79,23 @@ type Auth struct {
 	XMLName xml.Name `xml:"auth"`
 	Token   string   `xml:"token,attr"`
 	Method  string   `xml:"method,attr"`
+}
+
+func renewToken() error {
+	t, method, err := getToken()
+	if err != nil {
+		log.Default().Println(err)
+		return err
+	}
+	if method == "passwd" || method == "all" {
+		err = checkToken(t)
+		if err != nil {
+			log.Default().Println(err)
+			return err
+		}
+	}
+	token = t
+	return nil
 }
 
 func getToken() (string, string, error) {
@@ -148,6 +190,8 @@ func queryBox(method string, params *map[string]string) (any, error) {
 		return nil, fmt.Errorf("%v (%v)", res.Error.Message, res.Error.Code)
 	} else if res.Auth != nil {
 		return res.Auth, nil
+	} else if len(res.Hosts) > 0 {
+		return res.Hosts, nil
 	} else {
 		return nil, fmt.Errorf("Unhandled response (%v)", res)
 	}

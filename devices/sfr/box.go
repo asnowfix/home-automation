@@ -27,19 +27,70 @@ func ListDevices() ([]byte, error) {
 		return nil, err
 	}
 	if method == "passwd" || method == "all" {
-		uh, err := doHash(username, []byte(token))
+		err = checkToken(token)
 		if err != nil {
 			log.Default().Println(err)
 			return nil, err
 		}
-		ph, err := doHash(password, []byte(token))
-		if err != nil {
-			log.Default().Println(err)
-			return nil, err
-		}
-		_, _, _ = checkToken(token, uh+ph)
 	}
 	return nil, nil
+}
+
+type Response struct {
+	XMLName xml.Name `xml:"rsp"`
+	Status  string   `xml:"stat,attr"`
+	Version string   `xml:"version,attr"`
+	Error   *Error
+	Auth    *Auth
+}
+
+type Error struct {
+	XMLName xml.Name `xml:"err"`
+	Code    string   `xml:"code,attr"`
+	Message string   `xml:"msg,attr"`
+}
+
+type Auth struct {
+	XMLName xml.Name `xml:"auth"`
+	Token   string   `xml:"token,attr"`
+	Method  string   `xml:"method,attr"`
+}
+
+func getToken() (string, string, error) {
+	params := map[string]string{}
+	res, err := queryBox("auth.getToken", &params)
+	if err != nil {
+		log.Default().Println(err)
+		return "", "", err
+	}
+	auth := res.(*Auth)
+	log.Default().Printf("Token: %v", auth.Token)
+	log.Default().Printf("Method: %v", auth.Method)
+	return auth.Token, auth.Method, nil
+}
+
+func checkToken(token string) error {
+	uh, err := doHash(username, []byte(token))
+	if err != nil {
+		log.Default().Println(err)
+		return err
+	}
+	ph, err := doHash(password, []byte(token))
+	if err != nil {
+		log.Default().Println(err)
+		return err
+	}
+	params := map[string]string{
+		"token": token,
+		"hash":  uh + ph,
+	}
+	_, err = queryBox("auth.checkToken", &params)
+	if err != nil {
+		log.Default().Println(err)
+		return err
+	}
+	log.Default().Printf("Valid token: %v", token)
+	return nil
 }
 
 func doHash(value string, tb []byte) (string, error) {
@@ -66,41 +117,13 @@ func doHash(value string, tb []byte) (string, error) {
 	return hmacHex, nil
 }
 
-type AuthResponse struct {
-	XMLName xml.Name `xml:"rsp"`
-	Status  string   `xml:"stat,attr"`
-	Version string   `xml:"version,attr"`
-	Auth    Auth
-	Error   Error
-}
-
-type Auth struct {
-	XMLName xml.Name `xml:"auth"`
-	Token   string   `xml:"token,attr"`
-	Method  string   `xml:"method,attr"`
-}
-
-type Error struct {
-	XMLName xml.Name `xml:"err"`
-	Code    string   `xml:"code,attr"`
-	Message string   `xml:"msg,attr"`
-}
-
-func getToken() (string, string, error) {
+func queryBox(method string, params *map[string]string) (any, error) {
 	values := url.Values{}
-	values.Add("method", "auth.getToken")
-	return authToken(&values)
-}
+	values.Add("method", method)
+	for k, v := range *params {
+		values.Add(k, v)
+	}
 
-func checkToken(token string, hash string) (string, string, error) {
-	values := url.Values{}
-	values.Add("method", "auth.checkToken")
-	values.Add("token", token)
-	values.Add("hash", hash)
-	return authToken(&values)
-}
-
-func authToken(values *url.Values) (string, string, error) {
 	u := &url.URL{
 		Scheme:   "http",
 		Host:     boxIp.String(),
@@ -109,24 +132,24 @@ func authToken(values *url.Values) (string, string, error) {
 	}
 	log.Default().Printf("Calling url: %v", u)
 
-	if xmlBytes, err := getXML(u.String()); err != nil {
+	xmlBytes, err := getXML(u.String())
+	if err != nil {
 		log.Default().Printf("Failed to get XML: %v", err)
-		return "", "", err
+		return nil, err
+	}
+	log.Default().Printf("Result (Raw): %v", string(xmlBytes))
+	var res Response
+	if err := xml.Unmarshal(xmlBytes, &res); err != nil {
+		return nil, err
+	}
+	if res.Status == "fail" {
+		log.Default().Printf("Err Code: %v", res.Error.Code)
+		log.Default().Printf("Err Msg: %v", res.Error.Message)
+		return nil, fmt.Errorf("%v (%v)", res.Error.Message, res.Error.Code)
+	} else if res.Auth != nil {
+		return res.Auth, nil
 	} else {
-		log.Default().Printf("Result (Raw): %v", string(xmlBytes))
-		var result AuthResponse
-		if err := xml.Unmarshal(xmlBytes, &result); err != nil {
-			return "", "", err
-		}
-		if result.Status == "ok" {
-			log.Default().Printf("Token: %v", result.Auth.Token)
-			log.Default().Printf("Method: %v", result.Auth.Method)
-			return result.Auth.Token, result.Auth.Method, nil
-		} else {
-			log.Default().Printf("Err Code: %v", result.Error.Code)
-			log.Default().Printf("Err Msg: %v", result.Error.Message)
-			return "", "", fmt.Errorf("%v (%v)", result.Error.Message, result.Error.Code)
-		}
+		return nil, fmt.Errorf("Unhandled response (%v)", res)
 	}
 }
 

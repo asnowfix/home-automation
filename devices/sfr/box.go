@@ -21,48 +21,36 @@ var username string = os.Getenv("SFR_USERNAME")
 var password string = os.Getenv("SFR_PASSWORD")
 
 func ListDevices() ([]byte, error) {
-	th, method, err := getToken()
+	token, method, err := getToken()
 	if err != nil {
 		log.Default().Println(err)
 		return nil, err
 	}
-	// tb, err := hex.DecodeString(th)
-	// if err != nil {
-	// 	log.Default().Println(err)
-	// 	return nil, err
-	// }
-	tb := []byte(th)
 	if method == "passwd" || method == "all" {
-		uh, err := doHash(username, tb)
+		uh, err := doHash(username, []byte(token))
 		if err != nil {
 			log.Default().Println(err)
 			return nil, err
 		}
-		ph, err := doHash(password, tb)
+		ph, err := doHash(password, []byte(token))
 		if err != nil {
 			log.Default().Println(err)
 			return nil, err
 		}
-		_, _, _ = checkToken(th, uh+ph)
+		_, _, _ = checkToken(token, uh+ph)
 	}
 	return nil, nil
 }
 
 func doHash(value string, tb []byte) (string, error) {
-	// Fixed size checksum
-	// hb := sha256.Sum256([]byte(value))
-	// hh := hex.EncodeToString(hb[0:32])
-
-	// Streaming checksum
 	h := sha256.New()
-	// h := sha3.New256()
 	h.Write([]byte(value))
 	hh := hex.EncodeToString(h.Sum(nil))
 
 	log.Default().Printf("SHA256(data: %s): %s (len: %v)", value, hh, len(hh))
 
 	// create a new HMAC by defining the hash type and the key
-	hmac := hmac.New( /*sha3.New256*/ sha256.New, tb)
+	hmac := hmac.New(sha256.New, tb)
 
 	// compute the HMAC
 	if _, err := hmac.Write([]byte(hh)); err != nil {
@@ -118,7 +106,6 @@ func authToken(values *url.Values) (string, string, error) {
 		Host:     boxIp.String(),
 		Path:     "/api/1.0/",
 		RawQuery: values.Encode(),
-		// User:     url.UserPassword(username, password),
 	}
 	log.Default().Printf("Calling url: %v", u)
 

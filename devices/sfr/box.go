@@ -12,8 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-
-	"golang.org/x/crypto/sha3"
 )
 
 var boxIp = net.ParseIP("192.168.1.1")
@@ -28,11 +26,12 @@ func ListDevices() ([]byte, error) {
 		log.Default().Println(err)
 		return nil, err
 	}
-	tb, err := hex.DecodeString(th)
-	if err != nil {
-		log.Default().Println(err)
-		return nil, err
-	}
+	// tb, err := hex.DecodeString(th)
+	// if err != nil {
+	// 	log.Default().Println(err)
+	// 	return nil, err
+	// }
+	tb := []byte(th)
 	if method == "passwd" || method == "all" {
 		uh, err := doHash(username, tb)
 		if err != nil {
@@ -51,18 +50,19 @@ func ListDevices() ([]byte, error) {
 
 func doHash(value string, tb []byte) (string, error) {
 	// Fixed size checksum
-	hb := sha256.Sum256([]byte(value))
-	hh := hex.EncodeToString(hb[0:32])
+	// hb := sha256.Sum256([]byte(value))
+	// hh := hex.EncodeToString(hb[0:32])
 
 	// Streaming checksum
-	// h := sha256.New()
-	// h.Write([]byte(value))
-	// hh := hex.EncodeToString(h.Sum(nil))
+	h := sha256.New()
+	// h := sha3.New256()
+	h.Write([]byte(value))
+	hh := hex.EncodeToString(h.Sum(nil))
 
 	log.Default().Printf("SHA256(data: %s): %s (len: %v)", value, hh, len(hh))
 
 	// create a new HMAC by defining the hash type and the key
-	hmac := hmac.New(sha3.New256 /*sha256.New*/, tb)
+	hmac := hmac.New( /*sha3.New256*/ sha256.New, tb)
 
 	// compute the HMAC
 	if _, err := hmac.Write([]byte(hh)); err != nil {

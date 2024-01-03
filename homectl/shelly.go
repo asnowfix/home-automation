@@ -11,10 +11,10 @@ import (
 )
 
 func init() {
-	showCmd.AddCommand(shellyCmd)
+	showCmd.AddCommand(showShellyCmd)
 }
 
-var shellyCmd = &cobra.Command{
+var showShellyCmd = &cobra.Command{
 	Use:   "shelly",
 	Short: "Show Shelly devices",
 	// Long:  `All software has versions. This is Hugo's`,

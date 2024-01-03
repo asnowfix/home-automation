@@ -21,15 +21,21 @@ func NewSwitch(ip net.IP) (*Switch, error) {
 	var s Switch
 
 	s.device = tapo.New(ip.String(), username, password)
+	log.Default().Print("Tapo device: %v", s.device)
+
+	log.Default().Print("Tapo Handshake...")
 	if err := s.device.Handshake(); err != nil {
 		log.Default().Print(err)
 		return nil, err
 	}
+	log.Default().Print("Tapo Handshake... Ok")
 
+	log.Default().Print("Tapo Login...")
 	if err := s.device.Login(); err != nil {
 		log.Default().Print(err)
 		return nil, err
 	}
+	log.Default().Print("Tapo Login... Ok")
 
 	return &s, nil
 }

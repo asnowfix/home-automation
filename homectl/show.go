@@ -11,5 +11,7 @@ func init() {
 var showCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show devices",
-	// Long:  `All software has versions. This is Hugo's`,
+	Run: func(cmd *cobra.Command, args []string) {
+		InitLog()
+	},
 }

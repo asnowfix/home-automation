@@ -1,12 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"internal/myip"
-
-	"github.com/rs/zerolog/log"
 )
 
 func main() {
 	ip := myip.SeeIp()
-	log.Info().Msgf("IPv4: %v", ip)
+	fmt.Printf("IPv4: %v", ip)
 }

@@ -2,11 +2,11 @@ package shelly
 
 import (
 	"container/list"
+	"log"
 	"net"
 	"strings"
 
 	"github.com/hashicorp/mdns"
-	"github.com/rs/zerolog/log"
 )
 
 // type MdnsEntry struct {
@@ -54,9 +54,9 @@ func MyShellies(addr net.IP) (*map[string]*Device, error) {
 		if _, exists := devices[entry.AddrV4.String()]; !exists {
 			device, err := NewDevice(entry)
 			if err != nil {
-				log.Logger.Debug().Msgf("Discarding %v due to %v", entry, err)
+				log.Default().Printf("Discarding %v due to %v", entry, err)
 			} else {
-				log.Logger.Debug().Msgf("Loading %v: %v", entry.Name, entry)
+				log.Default().Printf("Loading %v: %v", entry.Name, entry)
 				devices[entry.AddrV4.String()] = device
 			}
 		}

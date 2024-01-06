@@ -17,8 +17,10 @@ func init() {
 var showShellyCmd = &cobra.Command{
 	Use:   "shelly",
 	Short: "Show Shelly devices",
-	// Long:  `All software has versions. This is Hugo's`,
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		InitLog()
+		shelly.Init()
+
 		var Ip net.IP
 		if len(args) > 0 {
 			Ip = net.ParseIP(args[0])
@@ -28,21 +30,22 @@ var showShellyCmd = &cobra.Command{
 		log.Default().Printf("Looking for Shelly with IP=%v\n", Ip)
 		devices, err := shelly.MyShellies(Ip)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		if len(args) > 0 {
 			out, err := json.Marshal((*devices)[args[0]])
 			if err != nil {
-				panic(err)
+				return err
 			}
 			fmt.Print(string(out))
 		} else {
 			out, err := json.Marshal(devices)
 			if err != nil {
-				panic(err)
+				return err
 			}
 			// fmt.Printf("Found %v devices '%v'\n", len(devices), reflect.TypeOf(device))
 			fmt.Print(string(out))
 		}
+		return nil
 	},
 }

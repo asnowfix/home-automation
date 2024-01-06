@@ -2,9 +2,9 @@ package myzone
 
 import (
 	"context"
+	"log"
 	"os"
 
-	"github.com/rs/zerolog/log"
 	dns "google.golang.org/api/dns/v2"
 	"google.golang.org/api/option"
 )
@@ -33,6 +33,6 @@ func MyGcpZone() error {
 	if err != nil {
 		panic(err)
 	}
-	log.Info().Msgf("Projects.Get: %v", resp.ManagedZones)
+	log.Default().Printf("Projects.Get: %v", resp.ManagedZones)
 	return nil
 }

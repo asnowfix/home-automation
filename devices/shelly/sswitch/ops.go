@@ -2,7 +2,7 @@ package sswitch
 
 import "devices/shelly/types"
 
-func Initialize(cm types.ConfigurationMethod) {
+func Init(cm types.ConfigurationMethod) {
 	cm("Switch.GetConfig", types.MethodConfiguration{
 		Allocate: func() any { return new(Configuration) },
 		Params: map[string]string{

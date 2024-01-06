@@ -13,9 +13,9 @@ import (
 
 var methods map[string]types.MethodConfiguration
 
-func init() {
+func Init() {
 	methods = make(map[string]types.MethodConfiguration)
-	sswitch.Initialize(ConfigureMethod)
+	sswitch.Init(ConfigureMethod)
 }
 
 func ConfigureMethod(m string, c types.MethodConfiguration) {

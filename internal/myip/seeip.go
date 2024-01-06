@@ -2,10 +2,9 @@ package myip
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
-
-	"github.com/rs/zerolog/log"
 )
 
 func SeeIp() string {
@@ -17,6 +16,6 @@ func SeeIp() string {
 	if err := json.Unmarshal([]byte(ipJson), &data); err != nil {
 		panic(err)
 	}
-	log.Info().Msg("My IPv4 is" + data.Ip)
+	fmt.Printf("My IPv4 is" + data.Ip)
 	return data.Ip
 }

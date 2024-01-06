@@ -6,7 +6,6 @@ require (
 	devices/shelly v0.0.0-00010101000000-000000000000
 	devices/shelly/sswitch v0.0.0-00010101000000-000000000000
 	github.com/mochi-mqtt/server/v2 v2.4.1
-	github.com/rs/zerolog v1.31.0
 	internal/myip v1.0.0
 	internal/myzone v0.0.0-00010101000000-000000000000
 )

@@ -2,6 +2,10 @@ package main
 
 import (
 	"devices/sfr"
+	"encoding/json"
+	"fmt"
+	"log"
+	"reflect"
 
 	"github.com/spf13/cobra"
 )
@@ -14,6 +18,8 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List known devices connected on the home gateway",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		InitLog()
+
 		hosts, err := sfr.ListDevices()
 		if err != nil {
 			return err

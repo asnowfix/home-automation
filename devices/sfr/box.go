@@ -3,6 +3,7 @@ package sfr
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"devices"
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
@@ -22,7 +23,7 @@ var password string = os.Getenv("SFR_PASSWORD")
 
 var token string = ""
 
-func ListDevices() (any, error) {
+func ListDevices() ([]devices.Host, error) {
 	if len(token) == 0 {
 		renewToken()
 	}
@@ -32,20 +33,19 @@ func ListDevices() (any, error) {
 	res, err := queryBox("lan.getHostsList", &params)
 	if err != nil {
 		log.Default().Println(err)
-		return "", err
+		return nil, err
 	}
-	hosts := res.([]*Host)
-	// devices := make([]devices.Host, len(hosts))
-	for _, host := range hosts {
-		// var device devices.Host
-		// devices = append(devices, devices.Host{
-		// 	Name: host.Name,
-		// 	Ip:   host.Ip,
-		// })
-		log.Default().Println(host)
+	boxHosts := res.([]*Host)
+	hosts := make([]devices.Host, len(boxHosts))
+	for i, boxHost := range boxHosts {
+		log.Default().Println(boxHost)
+		hosts[i].Ip = boxHost.Ip
+		hosts[i].Mac = boxHost.Mac
+		hosts[i].Name = boxHost.Name
+		hosts[i].Online = (boxHost.Status == "online")
 	}
 
-	return nil, nil
+	return hosts, nil
 }
 
 type Host struct {
@@ -193,7 +193,7 @@ func queryBox(method string, params *map[string]string) (any, error) {
 	} else if len(res.Hosts) > 0 {
 		return res.Hosts, nil
 	} else {
-		return nil, fmt.Errorf("Unhandled response (%v)", res)
+		return nil, fmt.Errorf("unhandled response (%v)", res)
 	}
 }
 

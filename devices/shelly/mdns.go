@@ -3,7 +3,7 @@ package shelly
 import (
 	"container/list"
 	"log"
-	"net"
+	"strconv"
 	"strings"
 
 	"github.com/hashicorp/mdns"
@@ -20,29 +20,21 @@ import (
 // 	Addr       net.IP   `json:"addr"` // @Deprecated
 // }
 
-func MyShellies(addr net.IP) (*map[string]*Device, error) {
+func NewMdnsDevices() (*map[string]*Device, error) {
 	var mdnsLookFor string = "_shelly._tcp"
 	shellies := list.New()
 	entriesCh := make(chan *mdns.ServiceEntry, 4)
 
 	go func() {
-		if addr.Equal(net.IPv4zero) {
-			for entry := range entriesCh {
-				if strings.Contains(entry.Name, mdnsLookFor) {
-					shellies.PushBack(entry)
-				}
-			}
-		} else {
-			for entry := range entriesCh {
-				if entry.AddrV4.Equal(addr) {
-					shellies.PushBack(entry)
-				}
+		for entry := range entriesCh {
+			if strings.Contains(entry.Name, mdnsLookFor) {
+				shellies.PushBack(entry)
 			}
 		}
 	}()
 
 	// Start the lookup
-	mdns.Lookup("_shelly._tcp", entriesCh)
+	mdns.Lookup(mdnsLookFor, entriesCh)
 	// time.Sleep(time.Second * 5)
 	close(entriesCh)
 
@@ -52,7 +44,7 @@ func MyShellies(addr net.IP) (*map[string]*Device, error) {
 		entry := si.Value.(*mdns.ServiceEntry)
 
 		if _, exists := devices[entry.AddrV4.String()]; !exists {
-			device, err := NewDevice(entry)
+			device, err := NewMdnsDevice(entry)
 			if err != nil {
 				log.Default().Printf("Discarding %v due to %v", entry, err)
 			} else {
@@ -63,4 +55,45 @@ func MyShellies(addr net.IP) (*map[string]*Device, error) {
 	}
 
 	return &devices, nil
+}
+
+func NewMdnsDevice(entry *mdns.ServiceEntry) (*Device, error) {
+	log.Default().Printf("Found host:'%v'", entry.Host)
+	log.Default().Printf("Found name:'%v'", entry.Name)
+	log.Default().Printf("Found ipv4:'%v'", entry.AddrV4)
+	log.Default().Printf("Found ipv6:'%v'", entry.AddrV6)
+	log.Default().Printf("Found port:'%v'", entry.Port)
+
+	var generation int
+	var application string
+	var version string
+	for i, f := range entry.InfoFields {
+		log.Default().Printf("Found info_field[%v]:'%v'", i, f)
+		if generationRe.Match([]byte(f)) {
+			generation, _ = strconv.Atoi(generationRe.ReplaceAllString(f, "${generation}"))
+		}
+		if applicationRe.Match([]byte(f)) {
+			application = applicationRe.ReplaceAllString(f, "${application}")
+		}
+		if versionRe.Match([]byte(f)) {
+			version = versionRe.ReplaceAllString(f, "${version}")
+		}
+	}
+
+	var device Device = Device{
+		Service: entry.Name,
+		Host:    entry.Host,
+		Ipv4:    entry.AddrV4,
+		Port:    entry.Port,
+		Product: Product{
+			Model:       hostRe.ReplaceAllString(entry.Host, "${model}"),
+			MacAddress:  hostRe.ReplaceAllString(entry.Host, "${mac}"),
+			Generation:  generation,
+			Application: application,
+			Version:     version,
+		},
+		Api: make(map[string]map[string]any),
+	}
+
+	return getDeviceInfo(&device)
 }

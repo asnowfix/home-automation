@@ -6,10 +6,7 @@ import (
 	"log"
 	"net"
 	"regexp"
-	"strconv"
 	"strings"
-
-	"github.com/hashicorp/mdns"
 )
 
 type Product struct {
@@ -56,52 +53,18 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
-	log.Default().Printf("Found host:'%v'", entry.Host)
-	log.Default().Printf("Found name:'%v'", entry.Name)
-	log.Default().Printf("Found ipv4:'%v'", entry.AddrV4)
-	log.Default().Printf("Found ipv6:'%v'", entry.AddrV6)
-	log.Default().Printf("Found port:'%v'", entry.Port)
+func NewDevice(ip net.IP) (*Device, error) {
 
-	var generation int
-	var application string
-	var version string
-	for i, f := range entry.InfoFields {
-		log.Default().Printf("Found info_field[%v]:'%v'", i, f)
-		if generationRe.Match([]byte(f)) {
-			generation, _ = strconv.Atoi(generationRe.ReplaceAllString(f, "${generation}"))
-		}
-		if applicationRe.Match([]byte(f)) {
-			application = applicationRe.ReplaceAllString(f, "${application}")
-		}
-		if versionRe.Match([]byte(f)) {
-			version = versionRe.ReplaceAllString(f, "${version}")
-		}
+	var device Device = Device{
+		Ipv4: ip,
 	}
+	return getDeviceInfo(&device)
+}
 
-	var device = Device{
-		Service: entry.Name,
-		Host:    entry.Host,
-		Ipv4:    entry.AddrV4,
-		Port:    entry.Port,
-		Product: Product{
-			Model:       hostRe.ReplaceAllString(entry.Host, "${model}"),
-			MacAddress:  hostRe.ReplaceAllString(entry.Host, "${mac}"),
-			Generation:  generation,
-			Application: application,
-			Version:     version,
-		},
-		Api: make(map[string]map[string]any),
-	}
-
-	// gen, err := strconv.Atoi(genRe.ReplaceAllString(entry.Info, "${gen}"))
-	// if err != nil {
-	// 	log.Logger.Debug().Msgf("Discarding %v due to %v", pe, err)
-	// 	return
-	// }
-
+func getDeviceInfo(device *Device) (*Device, error) {
+	device.Api = make(map[string]map[string]any)
 	if device.Info == nil {
-		res, err := GetE(&device, "Shelly.GetDeviceInfo", map[string]string{
+		res, err := GetE(device, "Shelly.GetDeviceInfo", map[string]string{
 			"ident": "true",
 		})
 		if err != nil {
@@ -116,7 +79,7 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 		device.Info = &di
 	}
 
-	res, err := GetE(&device, "Shelly.ListMethods", map[string]string{})
+	res, err := GetE(device, "Shelly.ListMethods", map[string]string{})
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +108,7 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 
 	for apiName, api := range device.Api {
 		if _, exists := api["GetConfig"]; exists {
-			data, err := CallMethod(&device, apiName+".GetConfig")
+			data, err := CallMethod(device, apiName+".GetConfig")
 			if err != nil {
 				return nil, err
 			}
@@ -155,7 +118,7 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 
 	for apiName, api := range device.Api {
 		if _, exists := api["GetStatus"]; exists {
-			data, err := CallMethod(&device, apiName+".GetStatus")
+			data, err := CallMethod(device, apiName+".GetStatus")
 			if err != nil {
 				return nil, err
 			}
@@ -163,5 +126,5 @@ func NewDevice(entry *mdns.ServiceEntry /**MdnsEntry*/) (*Device, error) {
 		}
 	}
 
-	return &device, nil
+	return device, nil
 }

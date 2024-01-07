@@ -1,8 +1,10 @@
 package shelly
 
 import (
+	"devices"
 	"devices/shelly/types"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"regexp"
@@ -10,22 +12,23 @@ import (
 )
 
 type Product struct {
-	Model       string `json:"model"`
-	Serial      string `json:"serial,omitempty"`
-	MacAddress  string `json:"mac"`
-	Application string `json:"app"`
-	Version     string `json:"ver"`
-	Generation  int    `json:"gen"`
+	Model       string           `json:"model"`
+	Serial      string           `json:"serial,omitempty"`
+	MacAddress  net.HardwareAddr `json:"mac"`
+	Application string           `json:"app"`
+	Version     string           `json:"ver"`
+	Generation  int              `json:"gen"`
 }
 
 type Device struct {
 	Product
-	Service string                    `json:"service"`
-	Host    string                    `json:"host"`
-	Ipv4    net.IP                    `json:"ipv4"`
-	Port    int                       `json:"port"`
-	Info    *DeviceInfo               `json:"info"`
-	Api     map[string]map[string]any `json:"api"`
+	Service    string                    `json:"service"`
+	MacAddress net.HardwareAddr          `json:"mac"`
+	Host       string                    `json:"host"`
+	Ipv4       net.IP                    `json:"ipv4"`
+	Port       int                       `json:"port"`
+	Info       *DeviceInfo               `json:"info"`
+	Api        map[string]map[string]any `json:"api"`
 }
 
 type Methods struct {
@@ -53,12 +56,29 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func NewDevice(ip net.IP) (*Device, error) {
-
-	var device Device = Device{
-		Ipv4: ip,
+func NewDevice(d string) (*Device, error) {
+	var device Device
+	if ip := net.ParseIP(d); ip != nil {
+		device = Device{
+			Ipv4: ip,
+		}
+		return getDeviceInfo(&device)
+	} else {
+		hosts, err := devices.List()
+		if err != nil {
+			return nil, err
+		}
+		for _, host := range hosts {
+			if d == host.Mac.String() {
+				device = Device{
+					Ipv4:       host.Ip,
+					MacAddress: host.Mac,
+				}
+				return getDeviceInfo(&device)
+			}
+		}
 	}
-	return getDeviceInfo(&device)
+	return nil, fmt.Errorf("device not found: %v", d)
 }
 
 func getDeviceInfo(device *Device) (*Device, error) {

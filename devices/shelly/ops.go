@@ -57,7 +57,7 @@ func GetE(d *Device, cmd string, params types.MethodParams) (*http.Response, err
 	}
 	query := values.Encode()
 
-	requestURL := fmt.Sprintf("http://%s/rpc/%s?%s", d.Host, cmd, query)
+	requestURL := fmt.Sprintf("http://%s/rpc/%s?%s", d.Ipv4, cmd, query)
 	log.Default().Printf("Calling : %v\n", requestURL)
 
 	res, err := http.Get(requestURL)

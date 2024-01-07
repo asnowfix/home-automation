@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 
 	"github.com/spf13/cobra"
 )
@@ -35,11 +34,9 @@ var showShellyCmd = &cobra.Command{
 		InitLog()
 		shelly.Init()
 
-		var Ip net.IP
 		if len(args) > 0 {
-			Ip = net.ParseIP(args[0])
-			log.Default().Printf("Looking for Shelly with IP=%v", Ip)
-			device, err := shelly.NewDevice(Ip)
+			log.Default().Printf("Looking for Shelly device %v", args[0])
+			device, err := shelly.NewDevice(args[0])
 			if err != nil {
 				return err
 			}

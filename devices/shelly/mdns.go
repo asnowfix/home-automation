@@ -3,6 +3,7 @@ package shelly
 import (
 	"container/list"
 	"log"
+	"net"
 	"strconv"
 	"strings"
 
@@ -80,14 +81,19 @@ func NewMdnsDevice(entry *mdns.ServiceEntry) (*Device, error) {
 		}
 	}
 
+	macStr := hostRe.ReplaceAllString(entry.Host, "${mac}")
+	mac, err := net.ParseMAC(macStr)
+	if err != nil {
+		log.Default().Printf("Unable to parse MAC address '%v'", macStr)
+	}
 	var device Device = Device{
-		Service: entry.Name,
-		Host:    entry.Host,
-		Ipv4:    entry.AddrV4,
-		Port:    entry.Port,
+		Service:    entry.Name,
+		Host:       entry.Host,
+		Ipv4:       entry.AddrV4,
+		MacAddress: mac,
+		Port:       entry.Port,
 		Product: Product{
 			Model:       hostRe.ReplaceAllString(entry.Host, "${model}"),
-			MacAddress:  hostRe.ReplaceAllString(entry.Host, "${mac}"),
 			Generation:  generation,
 			Application: application,
 			Version:     version,

@@ -126,25 +126,27 @@ func getDeviceInfo(device *Device) (*Device, error) {
 	}
 	log.Default().Printf("device.Api: %v\n", device.Api)
 
-	for apiName, api := range device.Api {
-		if _, exists := api["GetConfig"]; exists {
-			data, err := CallMethod(device, apiName+".GetConfig")
-			if err != nil {
-				return nil, err
-			}
-			api["GetConfig"] = data
-		}
-	}
-
-	for apiName, api := range device.Api {
-		if _, exists := api["GetStatus"]; exists {
-			data, err := CallMethod(device, apiName+".GetStatus")
-			if err != nil {
-				return nil, err
-			}
-			api["GetStatus"] = data
-		}
-	}
-
 	return device, nil
 }
+
+// func getConfig() {
+// 	for apiName, api := range device.Api {
+// 		if _, exists := api["GetConfig"]; exists {
+// 			data, err := CallMethod(device, apiName+".GetConfig")
+// 			if err != nil {
+// 				return nil, err
+// 			}
+// 			api["GetConfig"] = data
+// 		}
+// 	}
+
+// 	for apiName, api := range device.Api {
+// 		if _, exists := api["GetStatus"]; exists {
+// 			data, err := CallMethod(device, apiName+".GetStatus")
+// 			if err != nil {
+// 				return nil, err
+// 			}
+// 			api["GetStatus"] = data
+// 		}
+// 	}
+// }

@@ -1,6 +1,7 @@
 package shelly
 
 import (
+	"devices/shelly/mqtt"
 	"devices/shelly/sswitch"
 	"devices/shelly/types"
 	"encoding/json"
@@ -16,6 +17,7 @@ var methods map[string]types.MethodConfiguration
 func Init() {
 	methods = make(map[string]types.MethodConfiguration)
 	sswitch.Init(ConfigureMethod)
+	mqtt.Init(ConfigureMethod)
 }
 
 func ConfigureMethod(m string, c types.MethodConfiguration) {

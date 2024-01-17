@@ -19,12 +19,12 @@ var showStatusFlag bool
 var showWifiFlag bool
 
 func init() {
-	showShellyCmd.LocalFlags().BoolVarP(&showAllFlag, "all", "a", false, "Show everything about (the) device(s).")
-	showShellyCmd.LocalFlags().BoolVarP(&showConfigFlag, "config", "c", false, "Show device configuration(s).")
-	showShellyCmd.LocalFlags().BoolVarP(&showStatusFlag, "status", "s", true, "Show device Status(s).")
-	showShellyCmd.LocalFlags().BoolVarP(&showWifiFlag, "wifi", "W", false, "Show device Wifi configuration(s).")
-	showShellyCmd.LocalFlags().BoolVarP(&showCloudFlag, "cloud", "C", false, "Show device Cloud configuration(s).")
-	showShellyCmd.LocalFlags().BoolVarP(&showMqttFlag, "mqtt", "M", false, "Show device MQTT configuration(s).")
+	showShellyCmd.Flags().BoolVarP(&showAllFlag, "all", "a", false, "Show everything about (the) device(s).")
+	showShellyCmd.Flags().BoolVarP(&showConfigFlag, "config", "c", false, "Show device configuration(s).")
+	showShellyCmd.Flags().BoolVarP(&showStatusFlag, "status", "s", true, "Show device Status(s).")
+	showShellyCmd.Flags().BoolVarP(&showWifiFlag, "wifi", "W", false, "Show device Wifi configuration(s).")
+	showShellyCmd.Flags().BoolVarP(&showCloudFlag, "cloud", "C", false, "Show device Cloud configuration(s).")
+	showShellyCmd.Flags().BoolVarP(&showMqttFlag, "mqtt", "M", false, "Show device MQTT configuration(s).")
 
 	showCmd.AddCommand(showShellyCmd)
 }
@@ -73,37 +73,15 @@ func showOneDevice(device *shelly.Device) error {
 		Mqtt       struct {
 			Config mqtt.Configuration `json:"config"`
 			Status mqtt.Status        `json:"status"`
-		} `json:"mqtt"`
+		} `json:"mqtt,omitempty"`
 	}
 
-	data, err := shelly.CallMethod(device, "Shelly.DeviceInfo")
-	if err != nil {
-		return err
-	}
-	s.DeviceInfo, _ = data.(shelly.DeviceInfo)
+	s.DeviceInfo = shelly.CallMethod(device, "Shelly", "GetDeviceInfo").(shelly.DeviceInfo)
+	// s.Device.Config := shelly.CallMethod(device, "Shelly", "GetConfig").(shelly.Configuration)
 
-	// data, err := shelly.CallMethod(device, "Shelly.GetConfig")
-	// if err != nil {
-	// 	return err
-	// }
-	// s.Device.Config, _ = data.(shelly.Configuration)
-
-	if showMqttFlag == true {
-		if _, exists := device.Api["MQTT"]["GetConfig"]; exists {
-			data, err := shelly.CallMethod(device, "MQTT.GetConfig")
-			if err != nil {
-				return err
-			}
-			s.Mqtt.Config = data.(mqtt.Configuration)
-		}
-
-		if _, exists := device.Api["MQTT"]["GetStatus"]; exists {
-			data, err := shelly.CallMethod(device, "MQTT.GetStatus")
-			if err != nil {
-				return err
-			}
-			device.Api["MQTT"]["GetStatus"] = data.(mqtt.Status)
-		}
+	if showMqttFlag {
+		s.Mqtt.Config = shelly.CallMethod(device, "MQTT", "GetConfig").(mqtt.Configuration)
+		s.Mqtt.Status = shelly.CallMethod(device, "MQTT", "GetStatus").(mqtt.Status)
 	}
 
 	out, err := json.Marshal(s)

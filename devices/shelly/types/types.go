@@ -7,7 +7,7 @@ type MethodConfiguration struct {
 	Params   MethodParams
 }
 
-type ConfigurationMethod func(m string, c MethodConfiguration)
+type ConfigurationMethod func(a string, v string, c MethodConfiguration)
 
 type Api uint
 

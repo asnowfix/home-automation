@@ -3,6 +3,7 @@ package shelly
 import (
 	"devices/shelly/mqtt"
 	"devices/shelly/sswitch"
+	"devices/shelly/system"
 	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
@@ -12,34 +13,73 @@ import (
 	"reflect"
 )
 
-var methods map[string]types.MethodConfiguration
+var methods map[string]map[string]types.MethodConfiguration
 
 func Init() {
-	methods = make(map[string]types.MethodConfiguration)
+	methods = make(map[string]map[string]types.MethodConfiguration)
+
+	// Shelly.ListMethods
+	// Shelly.PutTLSClientKey
+	// Shelly.PutTLSClientCert
+	// Shelly.PutUserCA
+	// Shelly.Reboot
+	// Shelly.SetAuth
+	// Shelly.Update
+	// Shelly.CheckForUpdate
+	// Shelly.DetectLocation
+	// Shelly.ListTimezones
+	// Shelly.GetComponents
+	// Shelly.GetStatus
+	// Shelly.FactoryReset
+	// Shelly.ResetWiFiConfig
+	// Shelly.GetConfig
+	// Shelly.GetDeviceInfo
+	ConfigureMethod("Shelly", "GetDeviceInfo", types.MethodConfiguration{
+		Allocate: func() any { return new(DeviceInfo) },
+		Params:   map[string]string{},
+	})
+
+	system.Init(ConfigureMethod)
 	sswitch.Init(ConfigureMethod)
 	mqtt.Init(ConfigureMethod)
 }
 
-func ConfigureMethod(m string, c types.MethodConfiguration) {
-	log.Default().Printf("Configuring method:%v: params:%v\n", m, c.Params)
-	if _, exists := methods[m]; !exists {
-		methods[m] = c
+func ConfigureMethod(a string, v string, c types.MethodConfiguration) {
+	log.Default().Printf("Configuring method:%v.%v: params:%v\n", a, v, c.Params)
+	if _, exists := methods[a]; !exists {
+		methods[a] = make(map[string]types.MethodConfiguration)
+		if _, exists := methods[a][v]; !exists {
+			methods[a][v] = c
+		}
 	}
 }
 
-func CallMethod(device *Device, m string) (any, error) {
-	var data any
+func CallMethod(device *Device, a string, v string) any {
+	data, err := CallMethodE(device, a, v)
+	if err != nil {
+		log.Default().Print(err)
+		panic(err)
+	}
+	return data
+}
+
+func CallMethodE(device *Device, a string, v string) (any, error) {
+	var data any = nil
 	var params map[string]string
-	if method, exists := methods[m]; exists {
-		data = method.Allocate()
-		params = method.Params
-		log.Default().Printf("Found configuration for method: %v: parser:%v params:%v\n", m, reflect.TypeOf(data), params)
-	} else {
-		log.Default().Printf("Did not find any configuration for method: %v\n", m)
-		params = make(map[string]string)
+
+	if api, exists := methods[a]; exists {
+		if verb, exists := api[v]; exists {
+			data = verb.Allocate()
+			params = verb.Params
+			log.Default().Printf("Found configuration for method: %v.%v: parser:%v params:%v", a, v, reflect.TypeOf(data), params)
+		}
 	}
 
-	res, err := GetE(device, m, params)
+	if data == nil {
+		return nil, fmt.Errorf("did not find any configuration for method: %v.%v", a, v)
+	}
+
+	res, err := GetE(device, fmt.Sprintf("%v.%v", a, v), params)
 	if err != nil {
 		return nil, err
 	}

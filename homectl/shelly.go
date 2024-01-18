@@ -68,20 +68,22 @@ var showShellyCmd = &cobra.Command{
 }
 
 func showOneDevice(device *shelly.Device) error {
+
 	var s struct {
-		DeviceInfo shelly.DeviceInfo `json:"info"`
+		DeviceInfo *shelly.DeviceInfo `json:"info"`
 		Mqtt       struct {
-			Config mqtt.Configuration `json:"config"`
-			Status mqtt.Status        `json:"status"`
+			Config *mqtt.Configuration `json:"config,omitempty"`
+			Status *mqtt.Status        `json:"status,omitempty"`
 		} `json:"mqtt,omitempty"`
 	}
 
-	s.DeviceInfo = shelly.CallMethod(device, "Shelly", "GetDeviceInfo").(shelly.DeviceInfo)
-	// s.Device.Config := shelly.CallMethod(device, "Shelly", "GetConfig").(shelly.Configuration)
+	s.DeviceInfo = shelly.CallMethod(device, "Shelly", "GetDeviceInfo").(*shelly.DeviceInfo)
+	// dc := shelly.CallMethod(device, "Shelly", "GetConfig").(*shelly.DeviceConfiguration)
+	// ds := shelly.CallMethod(device, "Shelly", "GetStatus").(*shelly.DeviceStatus)
 
 	if showMqttFlag {
-		s.Mqtt.Config = shelly.CallMethod(device, "MQTT", "GetConfig").(mqtt.Configuration)
-		s.Mqtt.Status = shelly.CallMethod(device, "MQTT", "GetStatus").(mqtt.Status)
+		s.Mqtt.Config = shelly.CallMethod(device, "MQTT", "GetConfig").(*mqtt.Configuration)
+		s.Mqtt.Status = shelly.CallMethod(device, "MQTT", "GetStatus").(*mqtt.Status)
 	}
 
 	out, err := json.Marshal(s)

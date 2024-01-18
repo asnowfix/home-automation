@@ -1,7 +1,9 @@
 package shelly
 
 import (
+	"devices/shelly/input"
 	"devices/shelly/mqtt"
+	"devices/shelly/script"
 	"devices/shelly/sswitch"
 	"devices/shelly/system"
 	"devices/shelly/types"
@@ -42,6 +44,8 @@ func Init() {
 	system.Init(ConfigureMethod)
 	sswitch.Init(ConfigureMethod)
 	mqtt.Init(ConfigureMethod)
+	script.Init(ConfigureMethod)
+	input.Init(ConfigureMethod)
 }
 
 func ConfigureMethod(a string, v string, c types.MethodConfiguration) {

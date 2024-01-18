@@ -75,7 +75,7 @@ func CallMethodE(device *Device, a string, v string) (any, error) {
 		if verb, exists := api[v]; exists {
 			data = verb.Allocate()
 			params = verb.Params
-			log.Default().Printf("Found configuration for method: %v.%v: parser:%v params:%v", a, v, reflect.TypeOf(data), params)
+			log.Default().Printf("found configuration for method: %v.%v: parser:%v params:%v", a, v, reflect.TypeOf(data), params)
 		}
 	}
 

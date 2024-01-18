@@ -22,7 +22,7 @@ const (
 	Ethernet
 	BluetoothLowEnergy
 	Cloud
-	MQTT
+	Mqtt
 	OutboundWebsocket
 	Script
 	Input
@@ -49,7 +49,7 @@ func (api Api) String() string {
 		"Ethernet",
 		"BluetoothLowEnergy",
 		"Cloud",
-		"MQTT",
+		"Mqtt",
 		"OutboundWebsocket",
 		"Script",
 		"Input",

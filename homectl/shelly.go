@@ -82,8 +82,8 @@ func showOneDevice(device *shelly.Device) error {
 	// ds := shelly.CallMethod(device, "Shelly", "GetStatus").(*shelly.DeviceStatus)
 
 	if showMqttFlag {
-		s.Mqtt.Config = shelly.CallMethod(device, "MQTT", "GetConfig").(*mqtt.Configuration)
-		s.Mqtt.Status = shelly.CallMethod(device, "MQTT", "GetStatus").(*mqtt.Status)
+		s.Mqtt.Config = shelly.CallMethod(device, "Mqtt", "GetConfig").(*mqtt.Configuration)
+		s.Mqtt.Status = shelly.CallMethod(device, "Mqtt", "GetStatus").(*mqtt.Status)
 	}
 
 	out, err := json.Marshal(s)

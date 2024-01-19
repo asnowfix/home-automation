@@ -4,7 +4,7 @@ type MethodParams map[string]string
 
 type MethodConfiguration struct {
 	Allocate func() any
-	Params   MethodParams
+	Params   MethodParams `json:"params"`
 }
 
 type ConfigurationMethod func(a string, v string, c MethodConfiguration)

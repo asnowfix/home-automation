@@ -3,6 +3,7 @@ package main
 import (
 	"devices/shelly"
 	"devices/shelly/mqtt"
+	"devices/shelly/sswitch"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -16,12 +17,14 @@ var showCloudFlag bool
 var showConfigFlag bool
 var showMqttFlag bool
 var showStatusFlag bool
+var showSwitchFlag bool
 var showWifiFlag bool
 
 func init() {
 	showShellyCmd.Flags().BoolVarP(&showAllFlag, "all", "a", false, "Show everything about (the) device(s).")
 	showShellyCmd.Flags().BoolVarP(&showConfigFlag, "config", "c", false, "Show device configuration(s).")
-	showShellyCmd.Flags().BoolVarP(&showStatusFlag, "status", "s", true, "Show device Status(s).")
+	showShellyCmd.Flags().BoolVarP(&showStatusFlag, "status", "s", false, "Show device Status(s).")
+	showShellyCmd.Flags().BoolVarP(&showSwitchFlag, "switch", "S", false, "Show switch Status(s).")
 	showShellyCmd.Flags().BoolVarP(&showWifiFlag, "wifi", "W", false, "Show device Wifi configuration(s).")
 	showShellyCmd.Flags().BoolVarP(&showCloudFlag, "cloud", "C", false, "Show device Cloud configuration(s).")
 	showShellyCmd.Flags().BoolVarP(&showMqttFlag, "mqtt", "M", false, "Show device MQTT configuration(s).")
@@ -34,13 +37,13 @@ var showShellyCmd = &cobra.Command{
 	Short: "Show Shelly devices",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		InitLog()
-		shelly.Init()
 
 		if showAllFlag {
 			showCloudFlag = true
 			showConfigFlag = true
 			showMqttFlag = true
 			showStatusFlag = true
+			showSwitchFlag = true
 			showWifiFlag = true
 		}
 
@@ -75,15 +78,24 @@ func showOneDevice(device *shelly.Device) error {
 			Config *mqtt.Configuration `json:"config,omitempty"`
 			Status *mqtt.Status        `json:"status,omitempty"`
 		} `json:"mqtt,omitempty"`
+		Switch struct {
+			Config *sswitch.Configuration `json:"config,omitempty"`
+			Status *sswitch.Status        `json:"status,omitempty"`
+		} `json:"switch,omitempty"`
 	}
 
-	s.DeviceInfo = shelly.CallMethod(device, "Shelly", "GetDeviceInfo").(*shelly.DeviceInfo)
+	s.DeviceInfo = device.Info
 	// dc := shelly.CallMethod(device, "Shelly", "GetConfig").(*shelly.DeviceConfiguration)
 	// ds := shelly.CallMethod(device, "Shelly", "GetStatus").(*shelly.DeviceStatus)
 
 	if showMqttFlag {
 		s.Mqtt.Config = shelly.CallMethod(device, "Mqtt", "GetConfig").(*mqtt.Configuration)
 		s.Mqtt.Status = shelly.CallMethod(device, "Mqtt", "GetStatus").(*mqtt.Status)
+	}
+
+	if showSwitchFlag {
+		s.Switch.Config = shelly.CallMethod(device, "Switch", "GetConfig").(*sswitch.Configuration)
+		s.Switch.Status = shelly.CallMethod(device, "Switch", "GetStatus").(*sswitch.Status)
 	}
 
 	out, err := json.Marshal(s)

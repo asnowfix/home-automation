@@ -22,13 +22,13 @@ type Product struct {
 
 type Device struct {
 	Product
-	Service    string                    `json:"service"`
-	MacAddress net.HardwareAddr          `json:"mac"`
-	Host       string                    `json:"host"`
-	Ipv4       net.IP                    `json:"ipv4"`
-	Port       int                       `json:"port"`
-	Info       *DeviceInfo               `json:"info"`
-	Api        map[string]map[string]any `json:"api"`
+	Service    string                                          `json:"service"`
+	MacAddress net.HardwareAddr                                `json:"mac"`
+	Host       string                                          `json:"host"`
+	Ipv4       net.IP                                          `json:"ipv4"`
+	Port       int                                             `json:"port"`
+	Info       *DeviceInfo                                     `json:"info"`
+	Api        map[string]map[string]types.MethodConfiguration `json:"api"`
 }
 
 type Methods struct {
@@ -82,23 +82,6 @@ func NewDevice(d string) (*Device, error) {
 }
 
 func getDeviceInfo(device *Device) (*Device, error) {
-	device.Api = make(map[string]map[string]any)
-	if device.Info == nil {
-		res, err := GetE(device, "Shelly.GetDeviceInfo", map[string]string{
-			"ident": "true",
-		})
-		if err != nil {
-			return nil, err
-		}
-		var di DeviceInfo
-		err = json.NewDecoder(res.Body).Decode(&di)
-		if err != nil {
-			return nil, err
-		}
-		log.Default().Printf("Shelly.GetDeviceInfo: loaded %v\n", di)
-		device.Info = &di
-	}
-
 	res, err := GetE(device, "Shelly.ListMethods", map[string]string{})
 	if err != nil {
 		return nil, err
@@ -111,6 +94,7 @@ func getDeviceInfo(device *Device) (*Device, error) {
 	}
 
 	log.Default().Printf("Shelly.ListMethods: %v\n", ms)
+	device.Api = make(map[string]map[string]types.MethodConfiguration)
 	for _, m := range ms.Methods {
 		mi := strings.Split(m, ".")
 		a := mi[0] // api
@@ -118,35 +102,22 @@ func getDeviceInfo(device *Device) (*Device, error) {
 		for api := types.Shelly; api < types.None; api++ {
 			if a == api.String() {
 				if _, exists := device.Api[a]; !exists {
-					device.Api[a] = make(map[string]any)
+					device.Api[a] = make(map[string]types.MethodConfiguration)
 				}
-				device.Api[a][v] = nil
+				if _, exists := methods[a]; exists {
+					if _, exists := methods[a][v]; exists {
+						device.Api[a][v] = methods[a][v]
+					}
+				}
 			}
 		}
 	}
 	log.Default().Printf("device.Api: %v\n", device.Api)
 
+	if device.Info == nil {
+		device.Info = CallMethod(device, "Shelly", "GetDeviceInfo").(*DeviceInfo)
+		log.Default().Printf("Shelly.GetDeviceInfo: loaded %v\n", *device.Info)
+	}
+
 	return device, nil
 }
-
-// func getConfig() {
-// 	for apiName, api := range device.Api {
-// 		if _, exists := api["GetConfig"]; exists {
-// 			data, err := CallMethod(device, apiName+".GetConfig")
-// 			if err != nil {
-// 				return nil, err
-// 			}
-// 			api["GetConfig"] = data
-// 		}
-// 	}
-
-// 	for apiName, api := range device.Api {
-// 		if _, exists := api["GetStatus"]; exists {
-// 			data, err := CallMethod(device, apiName+".GetStatus")
-// 			if err != nil {
-// 				return nil, err
-// 			}
-// 			api["GetStatus"] = data
-// 		}
-// 	}
-// }

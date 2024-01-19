@@ -52,15 +52,15 @@ func init() {
 	log.Default().Printf("configured %v APIs", len(methods))
 }
 
-func ConfigureMethod(a string, v string, c types.MethodConfiguration) {
-	log.Default().Printf("Configuring method:%v.%v...", a, v)
-	if _, exists := methods[a]; !exists {
-		methods[a] = make(map[string]types.MethodConfiguration)
-		log.Default().Printf("... Added API:%v", a)
+func ConfigureMethod(c string, v string, m types.MethodConfiguration) {
+	log.Default().Printf("Configuring method:%v.%v...", c, v)
+	if _, exists := methods[c]; !exists {
+		methods[c] = make(map[string]types.MethodConfiguration)
+		log.Default().Printf("... Added API:%v", c)
 	}
-	if _, exists := methods[a][v]; !exists {
-		methods[a][v] = c
-		log.Default().Printf("... Added verb:%v.%v: params:%v", a, v, c.Params)
+	if _, exists := methods[c][v]; !exists {
+		methods[c][v] = m
+		log.Default().Printf("... Added verb:%v.%v: params:%v", c, v, m.Params)
 	}
 }
 
@@ -73,23 +73,23 @@ func CallMethod(device *Device, a string, v string) any {
 	return data
 }
 
-func CallMethodE(device *Device, a string, v string) (any, error) {
+func CallMethodE(device *Device, c string, v string) (any, error) {
 	var data any = nil
 	var params map[string]string
 
-	if api, exists := device.Api[a]; exists {
-		if verb, exists := api[v]; exists {
-			log.Default().Printf("found configuration for method: %v.%v: parser:%v params:%v", a, v, reflect.TypeOf(data), params)
+	if comp, exists := device.Methods[c]; exists {
+		if verb, exists := comp[v]; exists {
+			log.Default().Printf("found configuration for method: %v.%v: parser:%v params:%v", c, v, reflect.TypeOf(data), params)
 			data = verb.Allocate()
 			params = verb.Params
 		}
 	}
 
 	if data == nil {
-		return nil, fmt.Errorf("did not find any configuration for method: %v.%v", a, v)
+		return nil, fmt.Errorf("did not find any configuration for method: %v.%v", c, v)
 	}
 
-	res, err := GetE(device, fmt.Sprintf("%v.%v", a, v), params)
+	res, err := GetE(device, fmt.Sprintf("%v.%v", c, v), params)
 	if err != nil {
 		return nil, err
 	}

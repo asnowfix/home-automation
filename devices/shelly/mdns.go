@@ -2,6 +2,7 @@ package shelly
 
 import (
 	"container/list"
+	"devices/shelly/types"
 	"log"
 	"net"
 	"strconv"
@@ -98,7 +99,7 @@ func NewMdnsDevice(entry *mdns.ServiceEntry) (*Device, error) {
 			Application: application,
 			Version:     version,
 		},
-		Api: make(map[string]map[string]any),
+		Api: make(map[string]map[string]types.MethodConfiguration),
 	}
 
 	return getDeviceInfo(&device)

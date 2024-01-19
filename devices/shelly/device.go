@@ -28,7 +28,7 @@ type Device struct {
 	Ipv4       net.IP                                          `json:"ipv4"`
 	Port       int                                             `json:"port"`
 	Info       *DeviceInfo                                     `json:"info"`
-	Api        map[string]map[string]types.MethodConfiguration `json:"api"`
+	Methods    map[string]map[string]types.MethodConfiguration `json:"methods"`
 }
 
 type Methods struct {
@@ -94,25 +94,25 @@ func getDeviceInfo(device *Device) (*Device, error) {
 	}
 
 	log.Default().Printf("Shelly.ListMethods: %v\n", ms)
-	device.Api = make(map[string]map[string]types.MethodConfiguration)
+	device.Methods = make(map[string]map[string]types.MethodConfiguration)
 	for _, m := range ms.Methods {
 		mi := strings.Split(m, ".")
-		a := mi[0] // api
+		c := mi[0] // component
 		v := mi[1] // verb
-		for api := types.Shelly; api < types.None; api++ {
-			if a == api.String() {
-				if _, exists := device.Api[a]; !exists {
-					device.Api[a] = make(map[string]types.MethodConfiguration)
+		for component := types.Shelly; component < types.None; component++ {
+			if c == component.String() {
+				if _, exists := device.Methods[c]; !exists {
+					device.Methods[c] = make(map[string]types.MethodConfiguration)
 				}
-				if _, exists := methods[a]; exists {
-					if _, exists := methods[a][v]; exists {
-						device.Api[a][v] = methods[a][v]
+				if _, exists := methods[c]; exists {
+					if _, exists := methods[c][v]; exists {
+						device.Methods[c][v] = methods[c][v]
 					}
 				}
 			}
 		}
 	}
-	log.Default().Printf("device.Api: %v\n", device.Api)
+	log.Default().Printf("device.Api: %v\n", device.Methods)
 
 	if device.Info == nil {
 		device.Info = CallMethod(device, "Shelly", "GetDeviceInfo").(*DeviceInfo)

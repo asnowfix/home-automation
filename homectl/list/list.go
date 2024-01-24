@@ -1,4 +1,4 @@
-package main
+package list
 
 import (
 	"devices/sfr"
@@ -11,15 +11,12 @@ import (
 )
 
 func init() {
-	rootCmd.AddCommand(listCmd)
 }
 
-var listCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use:   "list",
 	Short: "List known devices connected on the home gateway",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		InitLog()
-
 		hosts, err := sfr.ListDevices()
 		if err != nil {
 			return err

@@ -6,6 +6,9 @@ import (
 	"log"
 	"os"
 
+	"homectl/list"
+	"homectl/show"
+
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +22,7 @@ func main() {
 var rootCmd = &cobra.Command{
 	Use: "homectl",
 	Run: func(cmd *cobra.Command, args []string) {
+		InitLog()
 		if !Verbose {
 			log.Default().SetOutput(io.Discard)
 		}
@@ -38,6 +42,8 @@ func InitLog() {
 func init() {
 	rootCmd.PersistentFlags().BoolVarP(&Verbose, "verbose", "v", false, "verbose output")
 	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(show.Cmd)
+	rootCmd.AddCommand(list.Cmd)
 }
 
 var Commit string

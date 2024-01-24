@@ -1,4 +1,4 @@
-package main
+package show
 
 import (
 	"devices/shelly"
@@ -28,16 +28,12 @@ func init() {
 	showShellyCmd.Flags().BoolVarP(&showWifiFlag, "wifi", "W", false, "Show device Wifi configuration(s).")
 	showShellyCmd.Flags().BoolVarP(&showCloudFlag, "cloud", "C", false, "Show device Cloud configuration(s).")
 	showShellyCmd.Flags().BoolVarP(&showMqttFlag, "mqtt", "M", false, "Show device MQTT configuration(s).")
-
-	showCmd.AddCommand(showShellyCmd)
 }
 
 var showShellyCmd = &cobra.Command{
 	Use:   "shelly",
 	Short: "Show Shelly devices",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		InitLog()
-
 		if showAllFlag {
 			showCloudFlag = true
 			showConfigFlag = true

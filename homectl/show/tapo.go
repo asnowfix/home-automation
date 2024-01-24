@@ -1,4 +1,4 @@
-package main
+package show
 
 import (
 	"fmt"
@@ -11,11 +11,6 @@ import (
 var switches []string = []string{
 	"P100",
 	"P110",
-}
-
-func init() {
-	// listCmd.AddCommand(listTapoCmd)
-	showCmd.AddCommand(showTapoCmd)
 }
 
 var showTapoCmd = &cobra.Command{

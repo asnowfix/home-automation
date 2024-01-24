@@ -1,6 +1,6 @@
 module devices/shelly
 
-go 1.21.3
+go 1.21
 
 require (
 	github.com/hashicorp/mdns v1.0.5 // indirect

@@ -5,7 +5,6 @@ go 1.21.4
 toolchain go1.21.6
 
 require (
-	devices/shelly v0.0.0-00010101000000-000000000000
 	github.com/mochi-mqtt/server/v2 v2.4.1
 	github.com/spf13/cobra v1.8.0
 	internal/myip v1.0.0
@@ -29,9 +28,6 @@ replace devices/shelly/sswitch => ./devices/shelly/sswitch
 require (
 	cloud.google.com/go/compute v1.23.0 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
-	devices v0.0.0-00010101000000-000000000000 // indirect
-	devices/shelly/sswitch v0.0.0-00010101000000-000000000000 // indirect
-	devices/shelly/types v0.0.0-00010101000000-000000000000 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/s2a-go v0.1.7 // indirect
@@ -39,9 +35,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.1 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.0 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
-	github.com/hashicorp/mdns v1.0.5 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/miekg/dns v1.1.41 // indirect
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.opencensus.io v0.24.0 // indirect

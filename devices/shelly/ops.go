@@ -1,6 +1,7 @@
 package shelly
 
 import (
+	"bytes"
 	"devices/shelly/input"
 	"devices/shelly/mqtt"
 	"devices/shelly/script"
@@ -9,16 +10,18 @@ import (
 	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"reflect"
 )
 
-var methods map[string]map[string]types.MethodConfiguration
+var methods map[string]map[string]types.MethodHandler
 
-func init() {
-	methods = make(map[string]map[string]types.MethodConfiguration)
+func Init() {
+	methods = make(map[string]map[string]types.MethodHandler)
 
 	// Shelly.ListMethods
 	// Shelly.PutTLSClientKey
@@ -36,36 +39,37 @@ func init() {
 	// Shelly.ResetWiFiConfig
 	// Shelly.GetConfig
 	// Shelly.GetDeviceInfo
-	ConfigureMethod("Shelly", "GetDeviceInfo", types.MethodConfiguration{
+	RegisterMethodHandler("Shelly", "GetDeviceInfo", types.MethodHandler{
 		Allocate: func() any { return new(DeviceInfo) },
 		Params: map[string]string{
 			"ident": "true",
 		},
+		HttpMethod: http.MethodGet,
 	})
 
-	system.Init(ConfigureMethod)
-	sswitch.Init(ConfigureMethod)
-	mqtt.Init(ConfigureMethod)
-	script.Init(ConfigureMethod)
-	input.Init(ConfigureMethod)
+	system.Init(RegisterMethodHandler)
+	sswitch.Init(RegisterMethodHandler)
+	mqtt.Init(RegisterMethodHandler)
+	script.Init(RegisterMethodHandler)
+	input.Init(RegisterMethodHandler)
 
-	log.Default().Printf("configured %v APIs", len(methods))
+	log.Default().Printf("Registered %v APIs", len(methods))
 }
 
-func ConfigureMethod(c string, v string, m types.MethodConfiguration) {
-	log.Default().Printf("Configuring method:%v.%v...", c, v)
+func RegisterMethodHandler(c string, v string, m types.MethodHandler) {
+	log.Default().Printf("Registering handler for method:%v.%v...", c, v)
 	if _, exists := methods[c]; !exists {
-		methods[c] = make(map[string]types.MethodConfiguration)
+		methods[c] = make(map[string]types.MethodHandler)
 		log.Default().Printf("... Added API:%v", c)
 	}
 	if _, exists := methods[c][v]; !exists {
 		methods[c][v] = m
-		log.Default().Printf("... Added verb:%v.%v: params:%v", c, v, m.Params)
+		log.Default().Printf("... Added verb:%v.%v: http(method=%v params=%v)", c, v, m.HttpMethod, m.Params)
 	}
 }
 
-func CallMethod(device *Device, a string, v string) any {
-	data, err := CallMethodE(device, a, v)
+func CallMethod(device *Device, component string, verb string, params any) any {
+	data, err := CallMethodE(device, component, verb, params)
 	if err != nil {
 		log.Default().Print(err)
 		panic(err)
@@ -73,15 +77,15 @@ func CallMethod(device *Device, a string, v string) any {
 	return data
 }
 
-func CallMethodE(device *Device, c string, v string) (any, error) {
+func CallMethodE(device *Device, c string, v string, params any) (any, error) {
 	var data any = nil
-	var params map[string]string
 
-	if comp, exists := device.Methods[c]; exists {
-		if verb, exists := comp[v]; exists {
-			log.Default().Printf("found configuration for method: %v.%v: parser:%v params:%v", c, v, reflect.TypeOf(data), params)
+	var verb types.MethodHandler
+
+	if comp, exists := device.Components[c]; exists {
+		if verb, exists = comp[v]; exists {
 			data = verb.Allocate()
-			params = verb.Params
+			log.Default().Printf("found configuration for method: %v.%v: parser:%v params:%v", c, v, reflect.TypeOf(data), params)
 		}
 	}
 
@@ -89,14 +93,27 @@ func CallMethodE(device *Device, c string, v string) (any, error) {
 		return nil, fmt.Errorf("did not find any configuration for method: %v.%v", c, v)
 	}
 
-	res, err := GetE(device, fmt.Sprintf("%v.%v", c, v), params)
+	var res *http.Response
+	var err error
+
+	switch verb.HttpMethod {
+	case http.MethodGet:
+		res, err = GetE(device, fmt.Sprintf("%v.%v", c, v), verb.Params)
+	case http.MethodPost:
+		res, err = PostE(device, fmt.Sprintf("%v.%v", c, v), params)
+	default:
+		return nil, fmt.Errorf("unhandled HTTP method '%v' for Shelly verb '%v.%v'", verb.HttpMethod, c, v)
+	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	err = json.NewDecoder(res.Body).Decode(&data)
 	if err != nil {
 		return nil, err
 	}
+
 	return data, nil
 }
 
@@ -119,26 +136,54 @@ func GetE(d *Device, cmd string, params types.MethodParams) (*http.Response, err
 	}
 	log.Default().Printf("status code: %d\n", res.StatusCode)
 
-	// req, err := http.NewRequest("GET", "http://api.themoviedb.org/3/tv/popular", nil)
-	// if err != nil {
-	// 	log.Print(err)
-	// 	os.Exit(1)
-	// }
+	return res, err
+}
+
+func PostE(d *Device, cmd string, params any) (*http.Response, error) {
+
+	var payload struct {
+		Method string `json:"method"`
+		Params any    `json:"params"`
+	}
+
+	payload.Method = cmd
+	payload.Params = params
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	requestURL := fmt.Sprintf("http://%s/rpc", d.Ipv4)
+	log.Default().Printf("Calling : %v\n", requestURL)
+
+	json.Marshal(params)
+	req, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Print(err)
+		os.Exit(1)
+	}
+
 	// q := req.URL.Query()
 	// q.Add("api_key", "key_from_environment_or_flag")
 	// q.Add("another_thing", "foo & bar")
 	// req.URL.RawQuery = q.Encode()
 
-	// // req, _ := http.NewRequest("GET", "http://api.themoviedb.org/3/tv/popular", nil)
-	// // req.Header.Add("Accept", "application/json")
-	// resp, err := client.Do(req)
+	// req.Header.Add("Accept", "application/json")
 
-	// defer res.Body.Close()
-	// b, err := io.ReadAll(res.Body)
-	// if err != nil {
-	// 	log.Fatalln(err)
-	// }
-	// log.Default().Printf("res: %s\n", string(b))
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Default().Printf("error making http request: %s\n", err)
+		return nil, err
+	}
+	log.Default().Printf("status code: %d\n", res.StatusCode)
+
+	defer res.Body.Close()
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	log.Default().Printf("res: %s\n", string(b))
 
 	return res, err
 }

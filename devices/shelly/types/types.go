@@ -2,12 +2,13 @@ package types
 
 type MethodParams map[string]string
 
-type MethodConfiguration struct {
-	Allocate func() any
-	Params   MethodParams `json:"params"`
+type MethodHandler struct {
+	Allocate   func() any
+	Params     MethodParams `json:"params"` // Built in parameters
+	HttpMethod string       // The HTTP request method to use (See https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods)
 }
 
-type ConfigurationMethod func(a string, v string, c MethodConfiguration)
+type MethodRegistration func(a string, v string, c MethodHandler)
 
 type Api uint
 

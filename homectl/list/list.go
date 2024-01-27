@@ -10,9 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-}
-
 var Cmd = &cobra.Command{
 	Use:   "list",
 	Short: "List known devices connected on the home gateway",

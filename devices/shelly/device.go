@@ -22,13 +22,13 @@ type Product struct {
 
 type Device struct {
 	Product
-	Service    string                                          `json:"service"`
-	MacAddress net.HardwareAddr                                `json:"mac"`
-	Host       string                                          `json:"host"`
-	Ipv4       net.IP                                          `json:"ipv4"`
-	Port       int                                             `json:"port"`
-	Info       *DeviceInfo                                     `json:"info"`
-	Methods    map[string]map[string]types.MethodConfiguration `json:"methods"`
+	Service    string                                    `json:"service"`
+	MacAddress net.HardwareAddr                          `json:"mac"`
+	Host       string                                    `json:"host"`
+	Ipv4       net.IP                                    `json:"ipv4"`
+	Port       int                                       `json:"port"`
+	Info       *DeviceInfo                               `json:"info"`
+	Components map[string]map[string]types.MethodHandler `json:"methods"`
 }
 
 type Methods struct {
@@ -93,30 +93,30 @@ func getDeviceInfo(device *Device) (*Device, error) {
 		return nil, err
 	}
 
-	log.Default().Printf("Shelly.ListMethods: %v\n", ms)
-	device.Methods = make(map[string]map[string]types.MethodConfiguration)
+	log.Default().Printf("Shelly.ListMethods: %v", ms)
+	device.Components = make(map[string]map[string]types.MethodHandler)
 	for _, m := range ms.Methods {
 		mi := strings.Split(m, ".")
 		c := mi[0] // component
 		v := mi[1] // verb
 		for component := types.Shelly; component < types.None; component++ {
 			if c == component.String() {
-				if _, exists := device.Methods[c]; !exists {
-					device.Methods[c] = make(map[string]types.MethodConfiguration)
+				if _, exists := device.Components[c]; !exists {
+					device.Components[c] = make(map[string]types.MethodHandler)
 				}
 				if _, exists := methods[c]; exists {
 					if _, exists := methods[c][v]; exists {
-						device.Methods[c][v] = methods[c][v]
+						device.Components[c][v] = methods[c][v]
 					}
 				}
 			}
 		}
 	}
-	log.Default().Printf("device.Api: %v\n", device.Methods)
+	log.Default().Printf("device.Api: %v", device.Components)
 
 	if device.Info == nil {
-		device.Info = CallMethod(device, "Shelly", "GetDeviceInfo").(*DeviceInfo)
-		log.Default().Printf("Shelly.GetDeviceInfo: loaded %v\n", *device.Info)
+		device.Info = CallMethod(device, "Shelly", "GetDeviceInfo", nil).(*DeviceInfo)
+		log.Default().Printf("Shelly.GetDeviceInfo: loaded %v", *device.Info)
 	}
 
 	return device, nil

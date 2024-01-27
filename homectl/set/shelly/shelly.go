@@ -1,4 +1,4 @@
-package show
+package shelly
 
 import (
 	"devices/shelly"
@@ -6,7 +6,6 @@ import (
 	"devices/shelly/sswitch"
 	"encoding/json"
 	"fmt"
-	hlog "homectl/log"
 	"log"
 	"reflect"
 
@@ -22,25 +21,26 @@ var showSwitchFlag bool
 var showWifiFlag bool
 
 func init() {
-	showShellyCmd.Flags().BoolVarP(&showAllFlag, "all", "a", false, "Show everything about (the) device(s).")
-	showShellyCmd.Flags().BoolVarP(&showConfigFlag, "config", "c", false, "Show device configuration(s).")
-	showShellyCmd.Flags().BoolVarP(&showStatusFlag, "status", "s", false, "Show device Status(s).")
-	showShellyCmd.Flags().BoolVarP(&showSwitchFlag, "switch", "S", false, "Show switch Status(s).")
-	showShellyCmd.Flags().BoolVarP(&showWifiFlag, "wifi", "W", false, "Show device Wifi configuration(s).")
-	showShellyCmd.Flags().BoolVarP(&showCloudFlag, "cloud", "C", false, "Show device Cloud configuration(s).")
-	showShellyCmd.Flags().BoolVarP(&showMqttFlag, "mqtt", "M", false, "Show device MQTT configuration(s).")
+	Cmd.Flags().BoolVarP(&showAllFlag, "all", "a", false, "Show everything about (the) device(s).")
+	Cmd.Flags().BoolVarP(&showConfigFlag, "config", "c", false, "Show device configuration(s).")
+	Cmd.Flags().BoolVarP(&showStatusFlag, "status", "s", false, "Show device Status(s).")
+	Cmd.Flags().BoolVarP(&showSwitchFlag, "switch", "S", false, "Show switch Status(s).")
+	Cmd.Flags().BoolVarP(&showWifiFlag, "wifi", "W", false, "Show device Wifi configuration(s).")
+	Cmd.Flags().BoolVarP(&showCloudFlag, "cloud", "C", false, "Show device Cloud configuration(s).")
+	Cmd.Flags().BoolVarP(&showMqttFlag, "mqtt", "M", false, "Show device MQTT configuration(s).")
+
+	Cmd.AddCommand(mqttCmd)
 }
 
-var showShellyCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use:   "shelly",
-	Short: "Show Shelly devices",
+	Short: "Set Shelly devices configuration",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		hlog.Init()
-		shelly.Init()
 		if showAllFlag {
 			showCloudFlag = true
 			showConfigFlag = true
 			showMqttFlag = true
+			showStatusFlag = true
 			showSwitchFlag = true
 			showWifiFlag = true
 		}

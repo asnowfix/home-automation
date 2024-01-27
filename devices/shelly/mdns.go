@@ -99,7 +99,7 @@ func NewMdnsDevice(entry *mdns.ServiceEntry) (*Device, error) {
 			Application: application,
 			Version:     version,
 		},
-		Methods: make(map[string]map[string]types.MethodConfiguration),
+		Components: make(map[string]map[string]types.MethodHandler),
 	}
 
 	return getDeviceInfo(&device)

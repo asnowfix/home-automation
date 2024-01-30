@@ -10,7 +10,6 @@ import (
 	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -46,6 +45,11 @@ func Init() {
 		},
 		HttpMethod: http.MethodGet,
 	})
+	RegisterMethodHandler("Shelly", "Reboot", types.MethodHandler{
+		Allocate:   func() any { return new(string) },
+		Params:     map[string]string{},
+		HttpMethod: http.MethodGet,
+	})
 
 	system.Init(RegisterMethodHandler)
 	sswitch.Init(RegisterMethodHandler)
@@ -78,18 +82,21 @@ func CallMethod(device *Device, component string, verb string, params any) any {
 }
 
 func CallMethodE(device *Device, c string, v string, params any) (any, error) {
-	var data any = nil
+	log.Default().Printf("calling %v.%v params=%v", c, v, params)
 
+	var data any = nil
 	var verb types.MethodHandler
+	var found bool = false
 
 	if comp, exists := device.Components[c]; exists {
 		if verb, exists = comp[v]; exists {
+			found = true
 			data = verb.Allocate()
 			log.Default().Printf("found configuration for method: %v.%v: parser:%v params:%v", c, v, reflect.TypeOf(data), params)
 		}
 	}
 
-	if data == nil {
+	if !found {
 		return nil, fmt.Errorf("did not find any configuration for method: %v.%v", c, v)
 	}
 
@@ -142,12 +149,16 @@ func GetE(d *Device, cmd string, params types.MethodParams) (*http.Response, err
 func PostE(d *Device, cmd string, params any) (*http.Response, error) {
 
 	var payload struct {
+		Id     uint   `json:"id"`
 		Method string `json:"method"`
-		Params any    `json:"params"`
+		Params struct {
+			Config any `json:"config"`
+		} `json:"params"`
 	}
 
+	payload.Id = 0
 	payload.Method = cmd
-	payload.Params = params
+	payload.Params.Config = params
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
@@ -155,9 +166,8 @@ func PostE(d *Device, cmd string, params any) (*http.Response, error) {
 	}
 
 	requestURL := fmt.Sprintf("http://%s/rpc", d.Ipv4)
-	log.Default().Printf("Calling : %v\n", requestURL)
+	log.Default().Printf("Preparing: %v %v body:%v", http.MethodPost, requestURL, string(jsonData))
 
-	json.Marshal(params)
 	req, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Print(err)
@@ -169,21 +179,19 @@ func PostE(d *Device, cmd string, params any) (*http.Response, error) {
 	// q.Add("another_thing", "foo & bar")
 	// req.URL.RawQuery = q.Encode()
 
-	// req.Header.Add("Accept", "application/json")
+	req.Header.Add("Content-Type", "application/json")
 
+	log.Default().Printf("Calling: %v %v", http.MethodPost, requestURL)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Default().Printf("error making http request: %s\n", err)
+		log.Default().Printf("error making http request: %s", err)
 		return nil, err
 	}
-	log.Default().Printf("status code: %d\n", res.StatusCode)
+	log.Default().Printf("status code: %d", res.StatusCode)
 
-	defer res.Body.Close()
-	b, err := io.ReadAll(res.Body)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	log.Default().Printf("res: %s\n", string(b))
+	// defer res.Body.Close()
+	// body, err := io.ReadAll(res.Body)
+	// log.Default().Printf("body: %s", string(body))
 
 	return res, err
 }

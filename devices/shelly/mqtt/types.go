@@ -28,3 +28,11 @@ type Configuration struct {
 type Status struct {
 	Connected bool `json:"connected"` // True if the device is MQTT connected, false otherwise
 }
+
+type ConfigResults struct {
+	Id     uint   `json:"id"`
+	Source string `json:"src"`
+	Result struct {
+		RestartRequired bool `json:"restart_required"`
+	}
+}

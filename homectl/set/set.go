@@ -13,6 +13,4 @@ func init() {
 var Cmd = &cobra.Command{
 	Use:   "set",
 	Short: "Set devices configurqtion",
-	Run: func(cmd *cobra.Command, args []string) {
-	},
 }

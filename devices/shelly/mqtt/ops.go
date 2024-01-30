@@ -21,7 +21,7 @@ func Init(cm types.MethodRegistration) {
 		HttpMethod: http.MethodGet,
 	})
 	cm("Mqtt", "SetConfig", types.MethodHandler{
-		Allocate: func() any { return new(Configuration) },
+		Allocate: func() any { return new(ConfigResults) },
 		Params: map[string]string{
 			"id": "0",
 		},

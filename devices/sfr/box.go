@@ -15,7 +15,7 @@ import (
 	"os"
 )
 
-var boxIp = net.ParseIP("192.168.1.1")
+var boxIp net.IP
 
 var username string = os.Getenv("SFR_USERNAME")
 
@@ -35,20 +35,44 @@ func ListDevices() ([]devices.Host, error) {
 		log.Default().Println(err)
 		return nil, err
 	}
-	boxHosts := res.([]*Host)
-	hosts := make([]devices.Host, len(boxHosts))
-	for i, boxHost := range boxHosts {
-		log.Default().Println(boxHost)
-		hosts[i].Ip = boxHost.Ip
-		hosts[i].Mac = boxHost.Mac
-		hosts[i].Name = boxHost.Name
-		hosts[i].Online = (boxHost.Status == "online")
+
+	xmlHosts := res.([]*xmlHost)
+	hosts := make([]devices.Host, len(xmlHosts))
+	for i, xmlHost := range xmlHosts {
+		log.Default().Println(xmlHost)
+		var host Host
+		host.xml = *xmlHost
+		hosts[i] = host
 	}
 
 	return hosts, nil
 }
 
 type Host struct {
+	xml xmlHost
+}
+
+func (h Host) Name() string {
+	return h.xml.Name
+}
+
+func (h Host) Ip() net.IP {
+	return h.xml.Ip
+}
+
+func (h Host) Mac() net.HardwareAddr {
+	return h.xml.Mac
+}
+
+func (h Host) Online() bool {
+	return h.xml.Status == "online"
+}
+
+func (h Host) Topic() devices.Topic {
+	return devices.NoTopic
+}
+
+type xmlHost struct {
 	XMLName   xml.Name         `xml:"host"`
 	Type      string           `xml:"type,attr"`
 	Name      string           `xml:"name,attr"`
@@ -66,7 +90,7 @@ type Response struct {
 	Version string   `xml:"version,attr"`
 	Error   *Error
 	Auth    *Auth
-	Hosts   []*Host `xml:"host"`
+	Hosts   []*xmlHost `xml:"host"`
 }
 
 type Error struct {

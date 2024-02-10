@@ -2,7 +2,7 @@
 
 ## Abstract
 
-Collection of tools to help automating my own House
+Collection of tools to help automating my own House, mostly using (very cool) Shelly devices, from Alterco Robotics.
 
 ## Table of Contents <!-- omit in toc -->
 
@@ -135,13 +135,134 @@ $ curl -s http://ShellyPlus1-4855199C9888.local/rpc/Switch.GetConfig?id=0 | jq
 
 ## Red-by-SFR Box Notes
 
-```bash
+### Main API
+
+```shell
 $ curl -s -G  http://192.168.1.1/api/1.0/?method=auth.getToken
 <?xml version="1.0" encoding="UTF-8"?>
 <rsp stat="ok" version="1.0">
      <auth token="665ae99c7ff692d186fdca08ba2a8c" method="all" />
 </rsp>
 ```
+
+### UPnP
+
+```shell
+$ sudo apt install xmlstarlet gupnp-tools
+$ cat /proc/net/route | awk '{if($2=="00000000"){print $1}else{next}}'
+enp1s0
+$ gssdp-discover -i enp1s0 --timeout=3
+[...]
+resource available
+  USN:      uuid:a6863339-b260-4d65-a9ac-6b73204d56f4::urn:neufboxtv-org:service:Resources:1
+  Location: http://192.168.1.28:49153/uuid:7caa1f0b-ea52-485a-bd1d-5fe9ff0da2df/description.xml
+[...]
+resource available
+  USN:      uuid:a04bed62-57f7-4885-91cc-e44e321a3ca7::urn:schemas-upnp-org:device:WANConnectionDevice:1
+  Location: http://192.168.1.1:49152/rootDesc.xml
+[...]
+$ curl http://192.168.1.1:49152/rootDesc.xml | xmlstarlet fo
+```
+```xml
+<?xml version="1.0"?>
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>0</minor>
+  </specVersion>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+    <friendlyName>neufbox router</friendlyName>
+    <manufacturer>neufbox</manufacturer>
+    <manufacturerURL>http://efixo.com</manufacturerURL>
+    <modelDescription>neufbox router</modelDescription>
+    <modelName>neufbox router</modelName>
+    <modelNumber>1</modelNumber>
+    <modelURL>http://efixo.com</modelURL>
+    <serialNumber>00000000</serialNumber>
+    <UDN>uuid:a04bed62-57f7-4885-91cc-e44e321a3ca5</UDN>
+    <serviceList>
+      <service>
+        <serviceType>urn:schemas-upnp-org:service:Layer3Forwarding:1</serviceType>
+        <serviceId>urn:upnp-org:serviceId:Layer3Forwarding1</serviceId>
+        <controlURL>/ctl/L3F</controlURL>
+        <eventSubURL>/evt/L3F</eventSubURL>
+        <SCPDURL>/L3F.xml</SCPDURL>
+      </service>
+    </serviceList>
+    <deviceList>
+      <device>
+        <deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
+        <friendlyName>WANDevice</friendlyName>
+        <manufacturer>MiniUPnP</manufacturer>
+        <manufacturerURL>http://miniupnp.free.fr/</manufacturerURL>
+        <modelDescription>WAN Device</modelDescription>
+        <modelName>WAN Device</modelName>
+        <modelNumber>20220123</modelNumber>
+        <modelURL>http://miniupnp.free.fr/</modelURL>
+        <serialNumber>00000000</serialNumber>
+        <UDN>uuid:a04bed62-57f7-4885-91cc-e44e321a3ca6</UDN>
+        <UPC>000000000000</UPC>
+        <serviceList>
+          <service>
+            <serviceType>urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1</serviceType>
+            <serviceId>urn:upnp-org:serviceId:WANCommonIFC1</serviceId>
+            <controlURL>/ctl/CmnIfCfg</controlURL>
+            <eventSubURL>/evt/CmnIfCfg</eventSubURL>
+            <SCPDURL>/WANCfg.xml</SCPDURL>
+          </service>
+        </serviceList>
+        <deviceList>
+          <device>
+            <deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
+            <friendlyName>WANConnectionDevice</friendlyName>
+            <manufacturer>MiniUPnP</manufacturer>
+            <manufacturerURL>http://miniupnp.free.fr/</manufacturerURL>
+            <modelDescription>MiniUPnP daemon</modelDescription>
+            <modelName>MiniUPnPd</modelName>
+            <modelNumber>20220123</modelNumber>
+            <modelURL>http://miniupnp.free.fr/</modelURL>
+            <serialNumber>00000000</serialNumber>
+            <UDN>uuid:a04bed62-57f7-4885-91cc-e44e321a3ca7</UDN>
+            <UPC>000000000000</UPC>
+            <serviceList>
+              <service>
+                <serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>
+                <serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId>
+                <controlURL>/ctl/IPConn</controlURL>
+                <eventSubURL>/evt/IPConn</eventSubURL>
+                <SCPDURL>/WANIPCn.xml</SCPDURL>
+              </service>
+            </serviceList>
+          </device>
+        </deviceList>
+      </device>
+      <device>
+        <deviceType>urn:schemas-upnp-org:device:EventDevice:1</deviceType>
+        <friendlyName>NeufboxEventDevice</friendlyName>
+        <manufacturer>efixo</manufacturer>
+        <manufacturerURL>http://www.efixo.com/</manufacturerURL>
+        <modelDescription>software Event Device</modelDescription>
+        <modelName>Neufbox Event Device</modelName>
+        <modelNumber>20220123</modelNumber>
+        <modelURL>http://www.efixo.com/</modelURL>
+        <serialNumber>00000000</serialNumber>
+        <UDN>uuid:a04bed62-57f7-4885-91cc-e44e321a3ca8</UDN>
+        <UPC>000000000000</UPC>
+        <serviceList>
+          <service>
+            <serviceType>urn:neufbox-org:service:NeufBoxEvent:1</serviceType>
+            <serviceId>urn:neufbox-org:serviceId:NeufBoxEvent1</serviceId>
+            <controlURL>/ctl/NBX</controlURL>
+            <eventSubURL>/evt/NBX</eventSubURL>
+            <SCPDURL>/NBX.xml</SCPDURL>
+          </service>
+        </serviceList>
+      </device>
+    </deviceList>
+    <presentationURL>http://192.168.1.1/</presentationURL>
+  </device>
+</root>```
 
 ## Mochi-MQTT Notes
 

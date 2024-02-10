@@ -69,10 +69,10 @@ func NewDevice(d string) (*Device, error) {
 			return nil, err
 		}
 		for _, host := range hosts {
-			if d == host.Mac.String() {
+			if d == host.Mac().String() {
 				device = Device{
-					Ipv4:       host.Ip,
-					MacAddress: host.Mac,
+					Ipv4:       host.Ip(),
+					MacAddress: host.Mac(),
 				}
 				return getDeviceInfo(&device)
 			}

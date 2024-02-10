@@ -7,6 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"devices"
+
 	"github.com/hashicorp/mdns"
 	mqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
@@ -42,15 +44,14 @@ func main() {
 
 	// Publish over mDNS
 	host, _ := os.Hostname()
-	service := "_mqtt._tcp"
 	info := []string{
 		fmt.Sprintf("hostname=%v", host),
 		fmt.Sprintf("program=%v", Program),
 		fmt.Sprintf("version=%v", Version),
 		fmt.Sprintf("commit=%v", Commit),
 	}
-	mdnsService, _ := mdns.NewMDNSService(host, service, "", "", 1883, nil, info)
-	log.Default().Printf("publishing %v as %v over mDNS", info, service)
+	mdnsService, _ := mdns.NewMDNSService(host, devices.MqttService, "", "", 1883, nil, info)
+	log.Default().Printf("publishing %v as %v over mDNS", info, devices.MqttService)
 
 	// Create the mDNS server, defer shutdown
 	mdnsServer, _ := mdns.NewServer(&mdns.Config{Zone: mdnsService})

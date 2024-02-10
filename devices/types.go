@@ -21,9 +21,18 @@ type Button interface {
 	Status() (bool, error)
 }
 
-type Host struct {
-	Name   string           `json:"name"`
-	Ip     net.IP           `json:"ip"`
-	Mac    net.HardwareAddr `json:"mac"`
-	Online bool             `json:"online"`
+type Host interface {
+	Name() string
+	Ip() net.IP
+	Mac() net.HardwareAddr
+	Online() bool
+	Topic() Topic
 }
+
+type Topic interface {
+	IsConnected() bool
+	Publish(msg []byte)
+	Subscribe(handler func(msg []byte))
+}
+
+var NoTopic Topic

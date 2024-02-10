@@ -6,6 +6,7 @@ import (
 
 	"homectl/list"
 	hlog "homectl/log"
+	"homectl/mqtt"
 	"homectl/set"
 	"homectl/show"
 
@@ -33,6 +34,7 @@ func init() {
 	rootCmd.AddCommand(list.Cmd)
 	rootCmd.AddCommand(show.Cmd)
 	rootCmd.AddCommand(set.Cmd)
+	rootCmd.AddCommand(mqtt.Cmd)
 }
 
 var Commit string

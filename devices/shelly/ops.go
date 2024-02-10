@@ -189,9 +189,5 @@ func PostE(d *Device, cmd string, params any) (*http.Response, error) {
 	}
 	log.Default().Printf("status code: %d", res.StatusCode)
 
-	// defer res.Body.Close()
-	// body, err := io.ReadAll(res.Body)
-	// log.Default().Printf("body: %s", string(body))
-
 	return res, err
 }

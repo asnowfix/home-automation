@@ -13,9 +13,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+
+	"github.com/jackpal/gateway"
 )
 
-var boxIp net.IP
+func boxIp() string {
+	ip, _ := gateway.DiscoverGateway()
+	return ip.String()
+}
 
 var username string = os.Getenv("SFR_USERNAME")
 
@@ -192,7 +197,7 @@ func queryBox(method string, params *map[string]string) (any, error) {
 
 	u := &url.URL{
 		Scheme:   "http",
-		Host:     boxIp.String(),
+		Host:     boxIp(),
 		Path:     "/api/1.0/",
 		RawQuery: values.Encode(),
 	}

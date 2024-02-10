@@ -1,28 +1,29 @@
 package sswitch
 
 import (
+	"devices/shelly"
 	"devices/shelly/types"
 	"net/http"
 )
 
-func Init(cm types.MethodRegistration) {
-	cm("Switch", "GetConfig", types.MethodHandler{
+func init() {
+	shelly.RegisterMethodHandler("Switch", "GetConfig", types.MethodHandler{
 		Allocate: func() any { return new(Configuration) },
-		Params: map[string]string{
+		HttpQuery: map[string]string{
 			"id": "0",
 		},
 		HttpMethod: http.MethodGet,
 	})
-	cm("Switch", "GetStatus", types.MethodHandler{
+	shelly.RegisterMethodHandler("Switch", "GetStatus", types.MethodHandler{
 		Allocate: func() any { return new(Status) },
-		Params: map[string]string{
+		HttpQuery: map[string]string{
 			"id": "0",
 		},
 		HttpMethod: http.MethodGet,
 	})
-	cm("Switch", "Toogle", types.MethodHandler{
+	shelly.RegisterMethodHandler("Switch", "Toogle", types.MethodHandler{
 		Allocate: func() any { return new(Toogle) },
-		Params: map[string]string{
+		HttpQuery: map[string]string{
 			"id": "0",
 		},
 		HttpMethod: http.MethodGet,

@@ -11,6 +11,7 @@ type ListDevicesFunc func() ([]Host, error)
 var listDevicesFuncs []ListDevicesFunc
 
 func Register(f ListDevicesFunc) {
+	log.Default().Printf("Registering ")
 	listDevicesFuncs = append(listDevicesFuncs, f)
 }
 

@@ -3,7 +3,6 @@ package shelly
 import (
 	"devices"
 	"devices/shelly/types"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -48,7 +47,7 @@ type DeviceInfo struct {
 	FirmwareSBits         string `json:"fw_sbits,omitempty"`
 }
 
-var hostRe = regexp.MustCompile("^(?P<model>[a-zA-Z0-9]+)-(?P<mac>[A-Z0-9]+).local.$")
+var hostRe = regexp.MustCompile("^(?P<model>[a-zA-Z0-9]+)-(?P<serial>[A-Z0-9]+).local.$")
 
 var generationRe = regexp.MustCompile("^gen=(?P<generation>[0-9]+)$")
 
@@ -82,18 +81,18 @@ func NewDevice(d string) (*Device, error) {
 }
 
 func getDeviceInfo(device *Device) (*Device, error) {
-	res, err := GetE(device, "Shelly.ListMethods", map[string]string{})
-	if err != nil {
-		return nil, err
-	}
-
-	var ms Methods
-	err = json.NewDecoder(res.Body).Decode(&ms)
-	if err != nil {
-		return nil, err
-	}
-
+	ms := Call(device, "Shelly", "ListMethods", nil).(*Methods)
+	// res, err := http.GetE(device, "Shelly.ListMethods", map[string]string{})
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// var ms Methods
+	// err = json.NewDecoder(res.Body).Decode(&ms)
+	// if err != nil {
+	// 	return nil, err
+	// }
 	log.Default().Printf("Shelly.ListMethods: %v", ms)
+
 	device.Components = make(map[string]map[string]types.MethodHandler)
 	for _, m := range ms.Methods {
 		mi := strings.Split(m, ".")
@@ -115,7 +114,7 @@ func getDeviceInfo(device *Device) (*Device, error) {
 	log.Default().Printf("device.Api: %v", device.Components)
 
 	if device.Info == nil {
-		device.Info = CallMethod(device, "Shelly", "GetDeviceInfo", nil).(*DeviceInfo)
+		device.Info = Call(device, "Shelly", "GetDeviceInfo", nil).(*DeviceInfo)
 		log.Default().Printf("Shelly.GetDeviceInfo: loaded %v", *device.Info)
 	}
 

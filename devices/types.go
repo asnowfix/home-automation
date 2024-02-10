@@ -21,6 +21,11 @@ type Button interface {
 	Status() (bool, error)
 }
 
+type Provider interface {
+	Name() string
+	Search(names []string) []Host
+}
+
 type Host interface {
 	Name() string
 	Ip() net.IP

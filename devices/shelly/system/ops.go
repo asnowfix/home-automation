@@ -1,18 +1,19 @@
 package system
 
 import (
+	"devices/shelly"
 	"devices/shelly/types"
 	"net/http"
 )
 
-func Init(cm types.MethodRegistration) {
-	cm("System", "GetConfig", types.MethodHandler{
-		Allocate: func() any { return new(Configuration) },
-		Params:   map[string]string{},
+func init() {
+	shelly.RegisterMethodHandler("System", "GetConfig", types.MethodHandler{
+		Allocate:  func() any { return new(Configuration) },
+		HttpQuery: map[string]string{},
 	})
-	cm("System", "GetStatus", types.MethodHandler{
+	shelly.RegisterMethodHandler("System", "GetStatus", types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
-		Params:     map[string]string{},
+		HttpQuery:  map[string]string{},
 		HttpMethod: http.MethodGet,
 	})
 	// System.SetConfig

@@ -1,14 +1,12 @@
 package types
 
-type MethodParams map[string]string
+type QueryParams map[string]string
 
 type MethodHandler struct {
 	Allocate   func() any
-	Params     MethodParams `json:"params"` // Built in parameters
-	HttpMethod string       // The HTTP request method to use (See https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods)
+	HttpQuery  QueryParams `json:"params"` // Built in parameters
+	HttpMethod string      // The HTTP request method to use (See https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods)
 }
-
-type MethodRegistration func(a string, v string, c MethodHandler)
 
 type Api uint
 

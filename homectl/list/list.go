@@ -16,6 +16,7 @@ var Cmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		hosts, err := sfr.ListDevices()
 		if err != nil {
+			log.Default().Print(err)
 			return err
 		}
 		log.Default().Printf("Found %v devices '%v'\n", len(hosts), reflect.TypeOf(hosts))

@@ -87,13 +87,13 @@ func showOneDevice(device *shelly.Device) error {
 	// ds := shelly.CallMethod(device, "Shelly", "GetStatus").(*shelly.DeviceStatus)
 
 	if showMqttFlag {
-		s.Mqtt.Config = shelly.CallMethod(device, "Mqtt", "GetConfig", nil).(*mqtt.Configuration)
-		s.Mqtt.Status = shelly.CallMethod(device, "Mqtt", "GetStatus", nil).(*mqtt.Status)
+		s.Mqtt.Config = shelly.Call(device, "Mqtt", "GetConfig", nil).(*mqtt.Configuration)
+		s.Mqtt.Status = shelly.Call(device, "Mqtt", "GetStatus", nil).(*mqtt.Status)
 	}
 
 	if showSwitchFlag {
-		s.Switch.Config = shelly.CallMethod(device, "Switch", "GetConfig", nil).(*sswitch.Configuration)
-		s.Switch.Status = shelly.CallMethod(device, "Switch", "GetStatus", nil).(*sswitch.Status)
+		s.Switch.Config = shelly.Call(device, "Switch", "GetConfig", nil).(*sswitch.Configuration)
+		s.Switch.Status = shelly.Call(device, "Switch", "GetStatus", nil).(*sswitch.Status)
 	}
 
 	out, err := json.Marshal(s)

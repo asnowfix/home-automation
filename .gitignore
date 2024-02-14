@@ -25,3 +25,7 @@ go.work
 
 /secrets.sh
 SECRETS.md
+
+/homectl/homectl
+/myhome/myhome
+/myip/myip

@@ -34,6 +34,15 @@ Same as:
 $ curl -X POST 'http://192.168.1.2:8888/?hum=89&temp=9.88&id=shellyht-EE45E9'
 ```
 
+Test output
+
+```
+go install
+sudo systemctl stop myhome@fix.service
+sudo systemctl start myhome@fix.service
+systemctl status myhome@fix.service
+```
+
 ## GCP Notes
 
 ```shell

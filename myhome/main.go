@@ -2,13 +2,17 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"devices"
 
+	"github.com/gorilla/schema"
 	"github.com/hashicorp/mdns"
 	mqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
@@ -27,6 +31,58 @@ func main() {
 	go func() {
 		<-sigs
 		done <- true
+	}()
+
+	// create signal channel to receive temperature inputs
+	// tc := make(chan any, 10)
+	go func() {
+		type HTSensor struct {
+			Hum  uint    `json:"hum"`
+			Temp float32 `json:"temp"`
+			Id   string  `json:"id"`
+		}
+		var hook struct {
+			*HTSensor
+		}
+
+		var decoder = schema.NewDecoder()
+
+		http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
+			defer req.Body.Close()
+
+			b, err := io.ReadAll(req.Body)
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			log.Default().Printf("url: %s", req.URL)
+
+			m, _ := url.ParseQuery(req.URL.RawQuery)
+			log.Default().Printf("query: %v", m)
+
+			err = decoder.Decode(&hook, m)
+			if err != nil {
+				log.Default().Print(err)
+				return
+			}
+			log.Default().Printf("hook.HTSensor: %v", hook.HTSensor)
+
+			for k, v := range req.Header {
+				log.Default().Printf("header: %s: %s", k, v)
+			}
+			log.Default().Printf("body: %s", string(b))
+
+			// var t any
+			// err := json.NewDecoder(r.Body).Decode(&t)
+			// if err != nil {
+			// 	http.Error(w, err.Error(), http.StatusBadRequest)
+			// 	return
+			// }
+			// tc <- req.Body
+			_, _ = w.Write([]byte("")) // 200 OK
+		})
+		log.Default().Print("Now listening on port 8888.")
+		http.ListenAndServe(":8888", nil)
 	}()
 
 	// Create the new MQTT Server.

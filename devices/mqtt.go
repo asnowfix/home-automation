@@ -11,7 +11,7 @@ import (
 )
 
 func connect(clientId string) mqtt.Client {
-	opts := createClientOptions(clientId)
+	opts := CreateClientOptions(clientId)
 	client := mqtt.NewClient(opts)
 	token := client.Connect()
 	for !token.WaitTimeout(3 * time.Second) {
@@ -22,7 +22,7 @@ func connect(clientId string) mqtt.Client {
 	return client
 }
 
-func createClientOptions(clientId string) *mqtt.ClientOptions {
+func CreateClientOptions(clientId string) *mqtt.ClientOptions {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(fmt.Sprintf("tcp://%s", MqttBroker()))
 	opts.SetUsername(MqttUsername)

@@ -1,8 +1,8 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -37,9 +37,9 @@ func main() {
 	// tc := make(chan any, 10)
 	go func() {
 		type HTSensor struct {
-			Hum  uint    `json:"hum"`
-			Temp float32 `json:"temp"`
-			Id   string  `json:"id"`
+			Humidity    uint    `schema:"hum,required"  json:"humidity"`
+			Temperature float32 `schema:"temp,required" json:"temperature"`
+			DeviceId    string  `schema:"id,required"   json:"id"`
 		}
 		var hook struct {
 			*HTSensor
@@ -48,29 +48,24 @@ func main() {
 		var decoder = schema.NewDecoder()
 
 		http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-			defer req.Body.Close()
-
-			b, err := io.ReadAll(req.Body)
-			if err != nil {
-				log.Fatalln(err)
-			}
-
 			log.Default().Printf("url: %s", req.URL)
 
 			m, _ := url.ParseQuery(req.URL.RawQuery)
 			log.Default().Printf("query: %v", m)
 
-			err = decoder.Decode(&hook, m)
+			err := decoder.Decode(&hook, m)
 			if err != nil {
 				log.Default().Print(err)
 				return
 			}
-			log.Default().Printf("hook.HTSensor: %v", hook.HTSensor)
+			log.Default().Printf("hook.HTSensor(struct): %v", hook.HTSensor)
+
+			jd, _ := json.Marshal(hook)
+			log.Default().Printf("hook.HTSensor(JSON): %v", string(jd))
 
 			for k, v := range req.Header {
 				log.Default().Printf("header: %s: %s", k, v)
 			}
-			log.Default().Printf("body: %s", string(b))
 
 			// var t any
 			// err := json.NewDecoder(r.Body).Decode(&t)

@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"myhome/http"
 	"myhome/mqtt"
 )
 
 var Program string
+var Repo string
 var Version string
 var Commit string
 
@@ -28,8 +30,10 @@ func main() {
 	// Publish MQTT server info over mDNS
 	info := []string{
 		fmt.Sprintf("program=%v", Program),
+		fmt.Sprintf("repo=%v", Repo),
 		fmt.Sprintf("version=%v", Version),
 		fmt.Sprintf("commit=%v", Commit),
+		fmt.Sprintf("time=%v", time.Now()),
 	}
 
 	mdnsServer, _ := mqtt.MyHome(info)

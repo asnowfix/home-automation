@@ -11,6 +11,8 @@ import (
 	"github.com/gorilla/schema"
 )
 
+// var uaRe = regexp.MustCompile("^(?P<model>[a-zA-Z0-9]+)-(?P<serial>[A-Z0-9]+).local.$")
+
 func MyHome(tc chan gen1.Device) {
 	var decoder = schema.NewDecoder()
 
@@ -27,12 +29,23 @@ func MyHome(tc chan gen1.Device) {
 			return
 		}
 
+		for k, v := range req.Header {
+			log.Default().Printf("header: %s: %s", k, v)
+		}
+
+		// var t any
+		// err := json.NewDecoder(r.Body).Decode(&t)
+		// if err != nil {
+		// 	http.Error(w, err.Error(), http.StatusBadRequest)
+		// 	return
+		// }
+		// tc <- req.Body
+
 		ip, _, err := net.SplitHostPort(req.RemoteAddr)
 		if err != nil {
 			//return nil, fmt.Errorf("userip: %q is not IP:port", req.RemoteAddr)
 			log.Default().Printf("userip: %q is not IP:port", req.RemoteAddr)
 		}
-
 		h.Ip = net.ParseIP(ip)
 		if h.Ip == nil {
 			//return nil, fmt.Errorf("userip: %q is not IP:port", req.RemoteAddr)

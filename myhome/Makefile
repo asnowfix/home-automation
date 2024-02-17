@@ -1,2 +1,9 @@
-build:
-	go build -ldflags="-X main.Program="myhome" -X main.Version=$(shell git describe --always) -X main.Commit=$(shell git rev-parse HEAD)" .
+GO_LDFLAGS += -X main.Program="myhome"
+GO_LDFLAGS += -X main.Repo=$(shell git config --get remote.$(shell git remote).url)
+GO_LDFLAGS += -X main.Version=$(shell git describe --always)
+GO_LDFLAGS += -X main.Commit=$(shell git rev-parse HEAD)
+
+GOFLAGS = -ldflags="$(GO_LDFLAGS)"
+
+build install run:
+	go $(@) $(GOFLAGS) .

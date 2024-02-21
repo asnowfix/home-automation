@@ -1,6 +1,8 @@
 package gen1
 
-import "net"
+import (
+	"net"
+)
 
 type HTSensor struct {
 	Humidity    uint    `schema:"hum,required"  json:"humidity"`
@@ -9,6 +11,9 @@ type HTSensor struct {
 }
 
 type Device struct {
-	Ip net.IP `json:"-"`
+	Ip           net.IP `json:"ip"`
+	FirmwareDate string `json:"fw_date,omitempty"`
+	FirmwareId   string `json:"fw_id,omitempty"`
+	Model        string `json:"model,omitempty"`
 	*HTSensor
 }

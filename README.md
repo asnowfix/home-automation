@@ -31,7 +31,8 @@ févr. 15 22:04:09 palmbeach env[191666]: 2024/02/15 22:04:09 body:
 Same as:
 
 ```
-$ curl -X POST 'http://192.168.1.2:8888/?hum=89&temp=9.88&id=shellyht-EE45E9'
+$ curl -X POST -H 'User-Agent: [Shelly/20230913-112531/v1.14.0-gcb84623 (SHHT-1)]' 'http://192.168.1.2:8888/?hum=89&temp=9.88&id=shellyht-
+EE45E9'
 ```
 
 Test output

@@ -7,11 +7,13 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 
 	"github.com/gorilla/schema"
 )
 
-// var uaRe = regexp.MustCompile("^(?P<model>[a-zA-Z0-9]+)-(?P<serial>[A-Z0-9]+).local.$")
+// User-Agent: [Shelly/20230913-112531/v1.14.0-gcb84623 (SHHT-1)]
+var uaRe = regexp.MustCompile(`^\[Shelly/(?P<fw_date>[0-9-]+)/(?P<fw_id>[a-z0-9-.]+) \((?P<model>[A-Z0-9-]+)\)\]$`)
 
 func MyHome(tc chan gen1.Device) {
 	var decoder = schema.NewDecoder()
@@ -31,6 +33,13 @@ func MyHome(tc chan gen1.Device) {
 
 		for k, v := range req.Header {
 			log.Default().Printf("header: %s: %s", k, v)
+		}
+
+		ua := req.Header["User-Agent"][0]
+		if uaRe.Match([]byte(ua)) {
+			h.FirmwareDate = uaRe.ReplaceAllString(ua, "${fw_date}")
+			h.FirmwareId = uaRe.ReplaceAllString(ua, "${fw_id}")
+			h.Model = uaRe.ReplaceAllString(ua, "${model}")
 		}
 
 		// var t any

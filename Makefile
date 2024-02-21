@@ -4,7 +4,7 @@ help:
 	@echo make help install start stop
 
 install:
-	cd myhome && go install .
+	$(MAKE) -C myhome install .
 ifeq ($(shell uname -s),Linux)
 	cd linux && sudo install -m 644 -o root -g root myhome@.service /etc/systemd/system/myhome@.service
 	sudo systemctl daemon-reload
@@ -30,5 +30,6 @@ else
 	$(error unsupported $(shell uname -s))
 endif
 
-build: homectl myhome
-	$(MAKE) -C $(@) build
+build:
+	$(MAKE) -C homectl $(@)
+	$(MAKE) -C myhome $(@)

@@ -1,9 +1,11 @@
 package list
 
 import (
+	"devices"
 	"devices/sfr"
 	"encoding/json"
 	"fmt"
+	hlog "homectl/log"
 	"log"
 	"reflect"
 
@@ -14,7 +16,13 @@ var Cmd = &cobra.Command{
 	Use:   "list",
 	Short: "List known devices connected on the home gateway",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		hosts, err := sfr.ListDevices()
+		hlog.Init()
+		// shelly.Init()
+		sfr.Init()
+
+		// hosts, err := sfr.ListDevices()
+
+		hosts, err := devices.List()
 		if err != nil {
 			log.Default().Print(err)
 			return err

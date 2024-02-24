@@ -57,6 +57,12 @@ type Host struct {
 	xml xmlHost
 }
 
+var provider string = "sfrbox"
+
+func (h Host) Provider() string {
+	return provider
+}
+
 func (h Host) Name() string {
 	return h.xml.Name
 }
@@ -74,7 +80,23 @@ func (h Host) Online() bool {
 }
 
 func (h Host) Topic() devices.Topic {
-	return devices.NoTopic
+	return h
+}
+
+func (h Host) IsConnected() bool {
+	return false
+}
+
+func (h Host) Publish(msg []byte) {
+	log.Default().Printf("Fake topic (%v) discarding '%v'.", provider, string(msg))
+}
+
+func (h Host) Subscribe(handler func(msg []byte)) {
+	log.Default().Printf("Fake topic (%v) will not receive anything.", provider)
+}
+
+func (h Host) MarshalJSON() ([]byte, error) {
+	return devices.MarshalJSON(h)
 }
 
 type xmlHost struct {

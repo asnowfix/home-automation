@@ -11,7 +11,7 @@ type ListDevicesFunc func() ([]Host, error)
 var listDevicesFuncs []ListDevicesFunc
 
 func Register(f ListDevicesFunc) {
-	log.Default().Printf("Registering ")
+	log.Default().Print("Registering")
 	listDevicesFuncs = append(listDevicesFuncs, f)
 }
 
@@ -48,6 +48,8 @@ func Topics(dn []string) ([]Topic, error) {
 		return nil, err
 	}
 	topics := make([]Topic, len(hosts))
+	log.Default().Printf("found %v hosts", len(hosts))
+
 	for i, host := range hosts {
 		topics[i] = host.Topic()
 	}

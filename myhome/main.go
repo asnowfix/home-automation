@@ -39,9 +39,9 @@ func main() {
 	mdnsServer, _ := mqtt.MyHome(info)
 	defer mdnsServer.Shutdown()
 
-	tc := make(chan gen1.Device, 1)
-	go http.MyHome(tc)
-	go gen1.Publisher(tc)
+	gen1Ch := make(chan gen1.Device, 1)
+	go http.MyHome(gen1Ch)
+	go gen1.Publisher(gen1Ch)
 
 	// Run server until interrupted
 	<-done

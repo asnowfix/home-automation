@@ -19,13 +19,23 @@ func Publisher(ch chan Device) {
 
 	for {
 		device := <-ch
+		var tC float32
+		var id string
+		if device.HTSensor != nil {
+			tC = device.HTSensor.Temperature
+			id = device.HTSensor.Id
+		}
+		if device.Flood != nil {
+			tC = device.Flood.Temperature
+			id = device.Flood.Id
+		}
 		t := temperature.Status{
 			Id:         0,
-			Celsius:    device.Temperature,
-			Fahrenheit: (device.Temperature * 1.8) + 32.0,
+			Celsius:    tC,
+			Fahrenheit: (tC * 1.8) + 32.0,
 		}
 		// https://shelly-api-docs.shelly.cloud/gen2/General/RPCChannels#mqtt
-		topic := fmt.Sprintf("%v/events/rpc", device.Id)
+		topic := fmt.Sprintf("%v/events/rpc", id)
 		msg, _ := json.Marshal(t)
 		log.Default().Printf("%v <<< %v", topic, string(msg))
 		client.Publish(topic, 0, false, string(msg))

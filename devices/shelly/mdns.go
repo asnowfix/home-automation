@@ -21,7 +21,7 @@ import (
 // 	Addr       net.IP   `json:"addr"` // @Deprecated
 // }
 
-func NewMdnsDevices() (*map[string]*Device, error) {
+func FindDevicesFromMdns() (map[string]*Device, error) {
 	var mdnsLookFor string = "_shelly._tcp"
 	shellies := list.New()
 	entriesCh := make(chan *mdns.ServiceEntry, 4)
@@ -39,13 +39,13 @@ func NewMdnsDevices() (*map[string]*Device, error) {
 	// time.Sleep(time.Second * 5)
 	close(entriesCh)
 
-	devices := map[string]*Device{}
+	devices := make(map[string]*Device, 10)
 
 	for si := shellies.Front(); si != nil; si = si.Next() {
 		entry := si.Value.(*mdns.ServiceEntry)
 
 		if _, exists := devices[entry.AddrV4.String()]; !exists {
-			device, err := NewMdnsDevice(entry)
+			device, err := NewDeviceFromMdns(entry)
 			if err != nil {
 				log.Default().Printf("Discarding %v due to %v", entry, err)
 			} else {
@@ -55,10 +55,10 @@ func NewMdnsDevices() (*map[string]*Device, error) {
 		}
 	}
 
-	return &devices, nil
+	return devices, nil
 }
 
-func NewMdnsDevice(entry *mdns.ServiceEntry) (*Device, error) {
+func NewDeviceFromMdns(entry *mdns.ServiceEntry) (*Device, error) {
 	log.Default().Printf("Found host:'%v'", entry.Host)
 	log.Default().Printf("Found name:'%v'", entry.Name)
 	log.Default().Printf("Found ipv4:'%v'", entry.AddrV4)

@@ -17,7 +17,7 @@ func Register(f ListDevicesFunc) {
 
 func List() ([]Host, error) {
 	var err error
-	var all []Host = make([]Host, 1)
+	var all []Host = make([]Host, 0)
 	for _, ld := range listDevicesFuncs {
 		h, err := ld()
 		if err == nil {

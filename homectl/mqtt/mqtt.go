@@ -2,8 +2,6 @@ package mqtt
 
 import (
 	"devices"
-	"devices/sfr"
-	"devices/shelly"
 	hlog "homectl/log"
 	"log"
 	"strings"
@@ -32,7 +30,8 @@ var pubCmd = &cobra.Command{
 	Short: "Publish to device(s) MQTT topic(s)",
 	Run: func(cmd *cobra.Command, args []string) {
 		hlog.Init()
-		shelly.Init()
+		devices.Init()
+
 		dn := strings.Split(options.devices, ",")
 		log.Default().Printf("looking for devices: %v", dn)
 		topics, err := devices.Topics(dn)
@@ -52,8 +51,7 @@ var subCmd = &cobra.Command{
 	Short: "Subscribe to device(s) MQTT topic(s)",
 	Run: func(cmd *cobra.Command, args []string) {
 		hlog.Init()
-		shelly.Init()
-		sfr.Init()
+		devices.Init()
 
 		topics, err := devices.Topics(strings.Split(options.devices, ","))
 		if err != nil {

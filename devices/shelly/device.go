@@ -1,9 +1,7 @@
 package shelly
 
 import (
-	"devices"
 	"devices/shelly/types"
-	"fmt"
 	"log"
 	"net"
 	"regexp"
@@ -55,29 +53,11 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func NewDevice(d string) (*Device, error) {
-	var device Device
-	if ip := net.ParseIP(d); ip != nil {
-		device = Device{
-			Ipv4: ip,
-		}
-		return getDeviceInfo(&device)
-	} else {
-		hosts, err := devices.List()
-		if err != nil {
-			return nil, err
-		}
-		for _, host := range hosts {
-			if d == host.Mac().String() {
-				device = Device{
-					Ipv4:       host.Ip(),
-					MacAddress: host.Mac(),
-				}
-				return getDeviceInfo(&device)
-			}
-		}
+func GetDevice(ip net.IP) (*Device, error) {
+	device := Device{
+		Ipv4: ip,
 	}
-	return nil, fmt.Errorf("device not found: %v", d)
+	return getDeviceInfo(&device)
 }
 
 func getDeviceInfo(device *Device) (*Device, error) {

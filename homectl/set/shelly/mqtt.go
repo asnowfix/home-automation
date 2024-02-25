@@ -1,6 +1,7 @@
 package shelly
 
 import (
+	"devices"
 	"log"
 	"reflect"
 
@@ -22,23 +23,27 @@ var mqttCmd = &cobra.Command{
 		if len(args) > 0 {
 			for _, name := range args {
 				log.Default().Printf("Looking for Shelly device %v", name)
-				device, err := shelly.NewDevice(name)
+				host, err := devices.Lookup(name)
+				if err != nil {
+					log.Default().Print(err)
+					return err
+				}
+				device, err := shelly.GetDevice(host.Ip())
 				if err != nil {
 					log.Default().Print(err)
 					return err
 				}
 				mqtt.Setup(device)
-
 			}
 		} else {
 			log.Default().Printf("Looking for any Shelly device")
-			devices, err := shelly.NewMdnsDevices()
+			devices, err := shelly.FindDevicesFromMdns()
 			if err != nil {
 				log.Default().Print(err)
 				return err
 			}
-			log.Default().Printf("Found %v devices '%v'\n", len(*devices), reflect.TypeOf(*devices))
-			for _, device := range *devices {
+			log.Default().Printf("Found %v devices '%v'\n", len(devices), reflect.TypeOf(devices))
+			for _, device := range devices {
 				mqtt.Setup(device)
 			}
 		}

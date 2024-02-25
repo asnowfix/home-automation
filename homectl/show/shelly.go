@@ -1,6 +1,7 @@
 package show
 
 import (
+	"devices"
 	"devices/shelly"
 	"devices/shelly/mqtt"
 	"devices/shelly/sswitch"
@@ -47,19 +48,27 @@ var showShellyCmd = &cobra.Command{
 
 		if len(args) > 0 {
 			log.Default().Printf("Looking for Shelly device %v", args[0])
-			device, err := shelly.NewDevice(args[0])
-			if err != nil {
-				return err
+			for _, name := range args {
+				host, err := devices.Lookup(name)
+				if err != nil {
+					log.Default().Print(err)
+					return err
+				}
+				device, err := shelly.GetDevice(host.Ip())
+				if err != nil {
+					log.Default().Print(err)
+					return err
+				}
+				showOneDevice(device)
 			}
-			showOneDevice(device)
 		} else {
 			log.Default().Printf("Looking for any Shelly device")
-			devices, err := shelly.NewMdnsDevices()
+			devices, err := shelly.FindDevicesFromMdns()
 			if err != nil {
 				return err
 			}
-			log.Default().Printf("Found %v devices '%v'\n", len(*devices), reflect.TypeOf(*devices))
-			for _, device := range *devices {
+			log.Default().Printf("Found %v devices '%v'\n", len(devices), reflect.TypeOf(devices))
+			for _, device := range devices {
 				showOneDevice(device)
 			}
 		}

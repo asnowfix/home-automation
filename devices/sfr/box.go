@@ -3,7 +3,6 @@ package sfr
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"devices"
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
@@ -28,78 +27,7 @@ var password string = os.Getenv("SFR_PASSWORD")
 
 var token string = ""
 
-func ListDevices() ([]devices.Host, error) {
-	if len(token) == 0 {
-		renewToken()
-	}
-	params := map[string]string{
-		"token": token,
-	}
-	res, err := queryBox("lan.getHostsList", &params)
-	if err != nil {
-		log.Default().Println(err)
-		return nil, err
-	}
-
-	xmlHosts := res.([]*xmlHost)
-	hosts := make([]devices.Host, len(xmlHosts))
-	for i, xmlHost := range xmlHosts {
-		log.Default().Println(xmlHost)
-		var host Host
-		host.xml = *xmlHost
-		hosts[i] = host
-	}
-
-	return hosts, nil
-}
-
-type Host struct {
-	xml xmlHost
-}
-
-var provider string = "sfrbox"
-
-func (h Host) Provider() string {
-	return provider
-}
-
-func (h Host) Name() string {
-	return h.xml.Name
-}
-
-func (h Host) Ip() net.IP {
-	return h.xml.Ip
-}
-
-func (h Host) Mac() net.HardwareAddr {
-	return h.xml.Mac
-}
-
-func (h Host) Online() bool {
-	return h.xml.Status == "online"
-}
-
-func (h Host) Topic() devices.Topic {
-	return h
-}
-
-func (h Host) IsConnected() bool {
-	return false
-}
-
-func (h Host) Publish(msg []byte) {
-	log.Default().Printf("Fake topic (%v) discarding '%v'.", provider, string(msg))
-}
-
-func (h Host) Subscribe(handler func(msg []byte)) {
-	log.Default().Printf("Fake topic (%v) will not receive anything.", provider)
-}
-
-func (h Host) MarshalJSON() ([]byte, error) {
-	return devices.MarshalJSON(h)
-}
-
-type xmlHost struct {
+type XmlHost struct {
 	XMLName   xml.Name         `xml:"host"`
 	Type      string           `xml:"type,attr"`
 	Name      string           `xml:"name,attr"`
@@ -117,7 +45,7 @@ type Response struct {
 	Version string   `xml:"version,attr"`
 	Error   *Error
 	Auth    *Auth
-	Hosts   []*xmlHost `xml:"host"`
+	Hosts   []*XmlHost `xml:"host"`
 }
 
 type Error struct {

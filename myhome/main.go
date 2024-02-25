@@ -36,7 +36,7 @@ func main() {
 		fmt.Sprintf("time=%v", time.Now()),
 	}
 
-	mdnsServer, _ := mqtt.MyHome(info)
+	mdnsServer, _ := mqtt.MyHome(Program, info)
 	defer mdnsServer.Shutdown()
 
 	gen1Ch := make(chan gen1.Device, 1)

@@ -19,36 +19,17 @@ func MyHome(tc chan gen1.Device) {
 	var decoder = schema.NewDecoder()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
-		log.Default().Printf("url: %s", req.URL)
-
-		m, _ := url.ParseQuery(req.URL.RawQuery)
-		log.Default().Printf("query: %v", m)
-
-		var d gen1.Device
-		err := decoder.Decode(&d, m)
-		if err != nil {
-			log.Default().Print(err)
-			return
-		}
-
 		for k, v := range req.Header {
 			log.Default().Printf("header: %s: %s", k, v)
 		}
 
+		var d gen1.Device
 		ua := req.Header["User-Agent"][0]
 		if uaRe.Match([]byte(ua)) {
 			d.FirmwareDate = uaRe.ReplaceAllString(ua, "${fw_date}")
 			d.FirmwareId = uaRe.ReplaceAllString(ua, "${fw_id}")
 			d.Model = uaRe.ReplaceAllString(ua, "${model}")
 		}
-
-		// var t any
-		// err := json.NewDecoder(r.Body).Decode(&t)
-		// if err != nil {
-		// 	http.Error(w, err.Error(), http.StatusBadRequest)
-		// 	return
-		// }
-		// tc <- req.Body
 
 		ip, _, err := net.SplitHostPort(req.RemoteAddr)
 		if err != nil {
@@ -61,6 +42,30 @@ func MyHome(tc chan gen1.Device) {
 			log.Default().Printf("userip: %q is not IP:port", req.RemoteAddr)
 			return
 		}
+
+		log.Default().Printf("url: %s", req.URL)
+		m, _ := url.ParseQuery(req.URL.RawQuery)
+		log.Default().Printf("query: %v", m)
+
+		var ht gen1.HTSensor
+		err = decoder.Decode(&ht, m)
+		if err == nil {
+			d.HTSensor = &ht
+		}
+
+		var fl gen1.Flood
+		err = decoder.Decode(&fl, m)
+		if err == nil {
+			d.Flood = &fl
+		}
+
+		// var t any
+		// err := json.NewDecoder(r.Body).Decode(&t)
+		// if err != nil {
+		// 	http.Error(w, err.Error(), http.StatusBadRequest)
+		// 	return
+		// }
+		// tc <- req.Body
 
 		log.Default().Printf("Gen1 Device(struct): %v", d)
 		tc <- d

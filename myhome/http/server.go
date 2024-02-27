@@ -15,7 +15,7 @@ import (
 // User-Agent: [Shelly/20230913-112531/v1.14.0-gcb84623 (SHHT-1)]
 var uaRe = regexp.MustCompile(`^\[Shelly/(?P<fw_date>[0-9-]+)/(?P<fw_id>[a-z0-9-.]+) \((?P<model>[A-Z0-9-]+)\)\]$`)
 
-func MyHome(tc chan gen1.Device) {
+func MyHome(g1c chan gen1.Device) {
 	var decoder = schema.NewDecoder()
 
 	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
@@ -68,7 +68,7 @@ func MyHome(tc chan gen1.Device) {
 		// tc <- req.Body
 
 		log.Default().Printf("Gen1 Device(struct): %v", d)
-		tc <- d
+		g1c <- d
 
 		jd, _ := json.Marshal(d)
 		log.Default().Printf("Gen1 Device(JSON): %v", string(jd))

@@ -13,7 +13,7 @@ import (
 
 type Empty struct{}
 
-func Publisher(ch chan Device) {
+func Publisher(ch chan Device, tc chan string) {
 	opts := devices.CreateClientOptions(reflect.TypeOf(Empty{}).PkgPath())
 	client := mqtt.NewClient(opts)
 
@@ -36,9 +36,11 @@ func Publisher(ch chan Device) {
 		}
 		// https://shelly-api-docs.shelly.cloud/gen2/General/RPCChannels#mqtt
 		topic := fmt.Sprintf("%v/events/rpc", id)
+		tc <- topic
 		msg, _ := json.Marshal(t)
-		log.Default().Printf("%v <<< %v", topic, string(msg))
-		client.Publish(topic, 0, false, string(msg))
+		log.Default().Printf("gen1.Publisher: %v <<< %v", topic, string(msg))
+		token := client.Publish(topic, 0 /*qos*/, true /*retain*/, string(msg))
+		log.Default().Printf("gen1.Publisher: token: %v", token)
 	}
 
 }

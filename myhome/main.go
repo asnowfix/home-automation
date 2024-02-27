@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"myhome/http"
+	"myhome/logs"
 	"myhome/mqtt"
 )
 
@@ -39,9 +40,13 @@ func main() {
 	mdnsServer, _ := mqtt.MyHome(Program, info)
 	defer mdnsServer.Shutdown()
 
+	topicsCh := make(chan string, 1)
+	defer close(topicsCh)
+	go logs.Waiter(topicsCh)
+
 	gen1Ch := make(chan gen1.Device, 1)
 	go http.MyHome(gen1Ch)
-	go gen1.Publisher(gen1Ch)
+	go gen1.Publisher(gen1Ch, topicsCh)
 
 	// Run server until interrupted
 	<-done

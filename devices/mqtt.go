@@ -66,8 +66,8 @@ type MqttMessage struct {
 	Payload []byte `json:"payload"`
 }
 
-func MqttSubscribe(clientId string, topic string, qlen uint) (chan<- MqttMessage, error) {
-	mch := make(chan<- MqttMessage, qlen)
+func MqttSubscribe(clientId string, topic string, qlen uint) (chan MqttMessage, error) {
+	mch := make(chan MqttMessage, qlen)
 
 	go func() {
 		client := connect(clientId)

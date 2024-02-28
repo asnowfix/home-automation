@@ -29,3 +29,4 @@ SECRETS.md
 /homectl/homectl
 /myhome/myhome
 /myip/myip
+/mqtt-cli-*.deb

@@ -28,11 +28,7 @@ var mqttCmd = &cobra.Command{
 					log.Default().Print(err)
 					return err
 				}
-				device, err := shelly.GetDevice(host.Ip())
-				if err != nil {
-					log.Default().Print(err)
-					return err
-				}
+				device := shelly.NewDeviceFromIp(host.Ip()).Init()
 				mqtt.Setup(device)
 			}
 		} else {

@@ -2,6 +2,7 @@ package shelly
 
 import (
 	"devices/shelly/types"
+	"fmt"
 	"log"
 	"net"
 	"regexp"
@@ -19,6 +20,7 @@ type Product struct {
 
 type Device struct {
 	Product
+	Id         string                                    `json:"id"`
 	Service    string                                    `json:"service"`
 	MacAddress net.HardwareAddr                          `json:"mac"`
 	Host       string                                    `json:"host"`
@@ -45,6 +47,8 @@ type DeviceInfo struct {
 	FirmwareSBits         string `json:"fw_sbits,omitempty"`
 }
 
+var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", mdnsShellies))
+
 var hostRe = regexp.MustCompile("^(?P<model>[a-zA-Z0-9]+)-(?P<serial>[A-Z0-9]+).local.$")
 
 var generationRe = regexp.MustCompile("^gen=(?P<generation>[0-9]+)$")
@@ -53,50 +57,67 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func GetDevice(ip net.IP) (*Device, error) {
-	device := Device{
+var devices map[string]*Device
+
+func NewDeviceFromIp(ip net.IP) *Device {
+	s := ip.String()
+	if d, exists := devices[s]; exists {
+		return d
+	}
+	d := &Device{
 		Ipv4: ip,
 	}
-	return getDeviceInfo(&device)
+	devices[s] = d
+	return d
 }
 
-func getDeviceInfo(device *Device) (*Device, error) {
-	ms := Call(device, "Shelly", "ListMethods", nil).(*Methods)
-	// res, err := http.GetE(device, "Shelly.ListMethods", map[string]string{})
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// var ms Methods
-	// err = json.NewDecoder(res.Body).Decode(&ms)
-	// if err != nil {
-	// 	return nil, err
-	// }
+func (d *Device) Init() *Device {
+	m, err := CallE(d, "Shelly", "ListMethods", nil)
+	if err != nil {
+		log.Default().Printf("Shelly.ListMethods: %v", err)
+		return d
+	}
+
+	ms := m.(*Methods)
 	log.Default().Printf("Shelly.ListMethods: %v", ms)
 
-	device.Components = make(map[string]map[string]types.MethodHandler)
+	d.Components = make(map[string]map[string]types.MethodHandler)
 	for _, m := range ms.Methods {
 		mi := strings.Split(m, ".")
 		c := mi[0] // component
 		v := mi[1] // verb
 		for component := types.Shelly; component < types.None; component++ {
 			if c == component.String() {
-				if _, exists := device.Components[c]; !exists {
-					device.Components[c] = make(map[string]types.MethodHandler)
+				if _, exists := d.Components[c]; !exists {
+					d.Components[c] = make(map[string]types.MethodHandler)
 				}
 				if _, exists := methods[c]; exists {
 					if _, exists := methods[c][v]; exists {
-						device.Components[c][v] = methods[c][v]
+						d.Components[c][v] = methods[c][v]
 					}
 				}
 			}
 		}
 	}
-	log.Default().Printf("device.Api: %v", device.Components)
+	log.Default().Printf("device.Api: %v", d.Components)
 
-	if device.Info == nil {
-		device.Info = Call(device, "Shelly", "GetDeviceInfo", nil).(*DeviceInfo)
-		log.Default().Printf("Shelly.GetDeviceInfo: loaded %v", *device.Info)
+	di, err := CallE(d, "Shelly", "GetDeviceInfo", nil)
+	if err != nil {
+		log.Default().Printf("Shelly.GetDeviceInfo: %v", err)
+		return d
 	}
+	d.Info = di.(*DeviceInfo)
+	log.Default().Printf("Shelly.GetDeviceInfo: loaded %v", *d.Info)
 
-	return device, nil
+	d.Id = d.Info.Id
+
+	return d
+}
+
+func (d *Device) Topics() []string {
+	topics := make([]string, 5)
+	topics[0] = fmt.Sprintf("%s/rpc", d.Info.Id)
+	topics[0] = fmt.Sprintf("%s/events/rpc", d.Info.Id)
+	topics[0] = fmt.Sprintf("%s/online", d.Info.Id)
+	return topics
 }

@@ -54,11 +54,7 @@ var showShellyCmd = &cobra.Command{
 					log.Default().Print(err)
 					return err
 				}
-				device, err := shelly.GetDevice(host.Ip())
-				if err != nil {
-					log.Default().Print(err)
-					return err
-				}
+				device := shelly.NewDeviceFromIp(host.Ip()).Init()
 				showOneDevice(device)
 			}
 		} else {

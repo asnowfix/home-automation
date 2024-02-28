@@ -21,22 +21,38 @@ import (
 // 	Addr       net.IP   `json:"addr"` // @Deprecated
 // }
 
+var mdnsShellies string = "_shelly._tcp"
+
+func MdnsShellies(tc chan string) {
+	ec := make(chan *mdns.ServiceEntry, 10)
+
+	go func() {
+		for entry := range ec {
+			if strings.Contains(entry.Name, mdnsShellies) {
+				for _, topic := range NewDeviceFromMdns(entry).Topics() {
+					tc <- topic
+				}
+			}
+		}
+	}()
+
+	mdns.Lookup(mdnsShellies, ec)
+}
+
 func FindDevicesFromMdns() (map[string]*Device, error) {
-	var mdnsLookFor string = "_shelly._tcp"
 	shellies := list.New()
 	entriesCh := make(chan *mdns.ServiceEntry, 4)
 
 	go func() {
 		for entry := range entriesCh {
-			if strings.Contains(entry.Name, mdnsLookFor) {
+			if strings.Contains(entry.Name, mdnsShellies) {
 				shellies.PushBack(entry)
 			}
 		}
 	}()
 
 	// Start the lookup
-	mdns.Lookup(mdnsLookFor, entriesCh)
-	// time.Sleep(time.Second * 5)
+	mdns.Lookup(mdnsShellies, entriesCh)
 	close(entriesCh)
 
 	devices := make(map[string]*Device, 10)
@@ -45,20 +61,16 @@ func FindDevicesFromMdns() (map[string]*Device, error) {
 		entry := si.Value.(*mdns.ServiceEntry)
 
 		if _, exists := devices[entry.AddrV4.String()]; !exists {
-			device, err := NewDeviceFromMdns(entry)
-			if err != nil {
-				log.Default().Printf("Discarding %v due to %v", entry, err)
-			} else {
-				log.Default().Printf("Loading %v: %v", entry.Name, entry)
-				devices[entry.AddrV4.String()] = device
-			}
+			device := NewDeviceFromMdns(entry).Init()
+			log.Default().Printf("Loading %v: %v", entry.Name, entry)
+			devices[entry.AddrV4.String()] = device
 		}
 	}
 
 	return devices, nil
 }
 
-func NewDeviceFromMdns(entry *mdns.ServiceEntry) (*Device, error) {
+func NewDeviceFromMdns(entry *mdns.ServiceEntry) *Device {
 	log.Default().Printf("Found host:'%v'", entry.Host)
 	log.Default().Printf("Found name:'%v'", entry.Name)
 	log.Default().Printf("Found ipv4:'%v'", entry.AddrV4)
@@ -81,6 +93,7 @@ func NewDeviceFromMdns(entry *mdns.ServiceEntry) (*Device, error) {
 		}
 	}
 	var device Device = Device{
+		Id:      nameRe.ReplaceAllString(entry.Name, "${id}"),
 		Service: entry.Name,
 		Host:    entry.Host,
 		Ipv4:    entry.AddrV4,
@@ -95,5 +108,5 @@ func NewDeviceFromMdns(entry *mdns.ServiceEntry) (*Device, error) {
 		Components: make(map[string]map[string]types.MethodHandler),
 	}
 
-	return getDeviceInfo(&device)
+	return &device
 }

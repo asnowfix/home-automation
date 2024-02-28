@@ -72,7 +72,7 @@ func MqttSubscribe(clientId string, topic string, qlen uint) (chan MqttMessage, 
 	go func() {
 		client := connect(clientId)
 		client.Subscribe(topic, 0, func(client mqtt.Client, msg mqtt.Message) {
-			log.Default().Printf("< [%s] %s", msg.Topic(), string(msg.Payload()))
+			log.Default().Printf("MqttSubscribe: MQTT(%s) >>> %s", msg.Topic(), string(msg.Payload()))
 			mch <- MqttMessage{
 				Topic:   msg.Topic(),
 				Payload: msg.Payload(),
@@ -85,6 +85,6 @@ func MqttSubscribe(clientId string, topic string, qlen uint) (chan MqttMessage, 
 
 func MqttPublish(clientId string, topic string, msg []byte) {
 	client := connect(clientId)
-	log.Default().Printf("> [%s] %s", topic, string(msg))
+	log.Default().Printf("MqttPublish: MQTT(%s) <<< %s", topic, string(msg))
 	client.Publish(topic, 0, false, msg)
 }

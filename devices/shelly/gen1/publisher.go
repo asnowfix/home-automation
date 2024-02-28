@@ -16,9 +16,9 @@ type Empty struct{}
 func Publisher(ch chan Device, tc chan string) {
 	opts := devices.CreateClientOptions(reflect.TypeOf(Empty{}).PkgPath())
 	client := mqtt.NewClient(opts)
+	token := client.Connect()
 
-	for {
-		device := <-ch
+	for device := range ch {
 		var tC float32
 		var id string
 		if device.HTSensor != nil {
@@ -38,9 +38,9 @@ func Publisher(ch chan Device, tc chan string) {
 		topic := fmt.Sprintf("%v/events/rpc", id)
 		tc <- topic
 		msg, _ := json.Marshal(t)
-		log.Default().Printf("gen1.Publisher: %v <<< %v", topic, string(msg))
-		token := client.Publish(topic, 0 /*qos*/, true /*retain*/, string(msg))
-		log.Default().Printf("gen1.Publisher: token: %v", token)
+		log.Default().Printf("gen1.Publisher: MQTT(%v) <<< %v", topic, string(msg))
+		client.Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, string(msg)).Wait()
 	}
 
+	token.Wait()
 }

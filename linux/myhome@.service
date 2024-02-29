@@ -4,7 +4,7 @@ After=local-fs.target network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/env "/home/%i/go/bin/myhome"
+ExecStart=/usr/bin/env "/home/%i/go/bin/myhome -v"
 Restart=on-failure
 RestartSec=5
 User=%i

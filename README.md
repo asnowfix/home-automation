@@ -44,6 +44,38 @@ sudo systemctl start myhome@fix.service
 systemctl status myhome@fix.service
 ```
 
+### Shelly MQTT Notes
+
+- [Hive MQTT CLI Installation](https://hivemq.github.io/mqtt-cli/docs/installation/)
+
+Subscribe to Shelly H&T Gen1:
+
+```shell
+$ mqtt sub -d -t shellyht-EE45E9/events/rpc -h 192.168.1.2
+Client 'UNKNOWN@192.168.1.2' sending CONNECT
+    MqttConnect{keepAlive=60, cleanStart=true, sessionExpiryInterval=0}
+Client 'UNKNOWN@192.168.1.2' received CONNACK
+    MqttConnAck{reasonCode=SUCCESS, sessionPresent=false, assignedClientIdentifier=cnfrgl0vpopiu8vsbo1g, restrictions=MqttConnAckRestrictions{receiveMaximum=1024, maximumPacketSize=268435460, topicAliasMaximum=0, maximumQos=EXACTLY_ONCE, retainAvailable=true, wildcardSubscriptionAvailable=true, sharedSubscriptionAvailable=true, subscriptionIdentifiersAvailable=true}}
+Client 'cnfrgl0vpopiu8vsbo1g@192.168.1.2' sending SUBSCRIBE
+    MqttSubscribe{subscriptions=[MqttSubscription{topicFilter=shellyht-EE45E9/events/rpc, qos=EXACTLY_ONCE, noLocal=false, retainHandling=SEND, retainAsPublished=false}]}
+Client 'cnfrgl0vpopiu8vsbo1g@192.168.1.2' received SUBACK
+    MqttSubAck{reasonCodes=[GRANTED_QOS_2], packetIdentifier=65526}
+```
+
+Publish to Shelly H&T Gen1:
+
+```shell
+$ mqtt pub -d -t shellyht-EE45E9/events/rpc -h 192.168.1.2 -m '{"a":"b"}'
+Client 'UNKNOWN@192.168.1.2' sending CONNECT
+    MqttConnect{keepAlive=60, cleanStart=true, sessionExpiryInterval=0}
+Client 'UNKNOWN@192.168.1.2' received CONNACK
+    MqttConnAck{reasonCode=SUCCESS, sessionPresent=false, assignedClientIdentifier=cngepjovpopiu8vsbo20, restrictions=MqttConnAckRestrictions{receiveMaximum=1024, maximumPacketSize=268435460, topicAliasMaximum=0, maximumQos=EXACTLY_ONCE, retainAvailable=true, wildcardSubscriptionAvailable=true, sharedSubscriptionAvailable=true, subscriptionIdentifiersAvailable=true}}
+Client 'cngepjovpopiu8vsbo20@192.168.1.2' sending PUBLISH ('{"a":"b"}')
+    MqttPublish{topic=shellyht-EE45E9/events/rpc, payload=9byte, qos=AT_MOST_ONCE, retain=false}
+Client 'cngepjovpopiu8vsbo20@192.168.1.2' finish PUBLISH
+    MqttPublishResult{publish=MqttPublish{topic=shellyht-EE45E9/events/rpc, payload=9byte, qos=AT_MOST_ONCE, retain=false}}
+```
+
 ## GCP Notes
 
 ```shell
@@ -134,7 +166,7 @@ $ curl -s http://ShellyPlus1-4855199C9888.local/rpc/Switch.GetConfig?id=0 | jq
 
 ## Shelly Devices
 
-### Pro1
+### Pro1 Gen2
 
 ```json
 {
@@ -149,7 +181,7 @@ $ curl -s http://ShellyPlus1-4855199C9888.local/rpc/Switch.GetConfig?id=0 | jq
 }
 ```
 
-### Mini1 Gen2
+### Plus1 Gen2
 
 ```json
 {
@@ -328,3 +360,6 @@ $ go get github.com/mochi-mqtt/server/v2
   1. <https://awesome-go.com/>
   1. <https://github.com/alexflint/go-arg>
   1. <https://github.com/spf13/cobra/blob/main/site/content/user_guide.md>
+6. Internet Engineering Task Force (IETF)
+  1. [RFC6762: Multicast DNS](https://datatracker.ietf.org/doc/html/rfc6762)
+  2. [RFC6763: DNS-Based Service Discovery](https://datatracker.ietf.org/doc/html/rfc6763)

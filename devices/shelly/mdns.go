@@ -2,108 +2,131 @@ package shelly
 
 import (
 	"container/list"
+	"context"
 	"devices/shelly/types"
+	"encoding/json"
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/hashicorp/mdns"
+	"github.com/grandcat/zeroconf"
 )
-
-// type MdnsEntry struct {
-// 	Name       string   `json:"name"`
-// 	Host       string   `json:"host"`
-// 	AddrV4     net.IP   `json:"addr_v4,omitempty"`
-// 	AddrV6     net.IP   `json:"addr_v6,omitempty"`
-// 	Port       int      `json:"port"`
-// 	Info       string   `json:"info"`
-// 	InfoFields []string `json:"info_fields"`
-// 	Addr       net.IP   `json:"addr"` // @Deprecated
-// }
 
 var mdnsShellies string = "_shelly._tcp"
 
 func MdnsShellies(tc chan string) {
-	ec := make(chan *mdns.ServiceEntry, 10)
+	resolver, err := zeroconf.NewResolver(nil)
+	if err != nil {
+		log.Fatalln("Failed to initialize resolver:", err.Error())
+	}
 
-	go func() {
-		for entry := range ec {
-			if strings.Contains(entry.Name, mdnsShellies) {
+	entries := make(chan *zeroconf.ServiceEntry)
+	go func(results <-chan *zeroconf.ServiceEntry) {
+		for entry := range results {
+			log.Println(entry)
+			if strings.Contains(entry.Instance, mdnsShellies) {
 				for _, topic := range NewDeviceFromMdns(entry).Topics() {
 					tc <- topic
 				}
 			}
 		}
-	}()
+		log.Println("No more entries.")
+	}(entries)
 
-	mdns.Lookup(mdnsShellies, ec)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
+	defer cancel()
+	err = resolver.Browse(ctx, mdnsShellies, "local.", entries)
+	if err != nil {
+		log.Fatalln("Failed to browse:", err.Error())
+	}
+
+	<-ctx.Done()
+
 }
 
 func FindDevicesFromMdns() (map[string]*Device, error) {
+	log.Default().Println("FindDevicesFromMdns()")
+
+	resolver, err := zeroconf.NewResolver(nil)
+	if err != nil {
+		log.Default().Fatalln("Failed to initialize resolver:", err.Error())
+		return nil, err
+	}
+
 	shellies := list.New()
-	entriesCh := make(chan *mdns.ServiceEntry, 4)
+	entries := make(chan *zeroconf.ServiceEntry)
 
 	go func() {
-		for entry := range entriesCh {
-			if strings.Contains(entry.Name, mdnsShellies) {
+		for entry := range entries {
+			log.Default().Printf("FindDevicesFromMdns(): %v", entry)
+
+			if strings.Contains(entry.Service, mdnsShellies) {
 				shellies.PushBack(entry)
 			}
 		}
 	}()
 
 	// Start the lookup
-	mdns.Lookup(mdnsShellies, entriesCh)
-	close(entriesCh)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
+	defer cancel()
 
-	devices := make(map[string]*Device, 10)
+	err = resolver.Browse(ctx, mdnsShellies, "local.", entries)
+	if err != nil {
+		log.Default().Fatalln("Failed to browse:", err.Error())
+		return nil, err
+	}
+
+	<-ctx.Done()
+
+	devices := make(map[string]*Device)
 
 	for si := shellies.Front(); si != nil; si = si.Next() {
-		entry := si.Value.(*mdns.ServiceEntry)
+		entry := si.Value.(*zeroconf.ServiceEntry)
 
-		if _, exists := devices[entry.AddrV4.String()]; !exists {
+		if _, exists := devices[string(entry.AddrIPv4[0])]; !exists {
 			device := NewDeviceFromMdns(entry).Init()
-			log.Default().Printf("Loading %v: %v", entry.Name, entry)
-			devices[entry.AddrV4.String()] = device
+			log.Default().Printf("Loading %v: %v", entry.HostName, entry)
+			devices[string(entry.AddrIPv4[0])] = device
+		} else {
+			log.Default().Printf("Dropping already known %v: %v", entry.HostName, entry)
 		}
 	}
 
 	return devices, nil
 }
 
-func NewDeviceFromMdns(entry *mdns.ServiceEntry) *Device {
-	log.Default().Printf("Found host:'%v'", entry.Host)
-	log.Default().Printf("Found name:'%v'", entry.Name)
-	log.Default().Printf("Found ipv4:'%v'", entry.AddrV4)
-	log.Default().Printf("Found ipv6:'%v'", entry.AddrV6)
-	log.Default().Printf("Found port:'%v'", entry.Port)
+func NewDeviceFromMdns(entry *zeroconf.ServiceEntry) *Device {
+	s, _ := json.Marshal(entry)
+	log.Default().Printf("Found %v", s)
 
 	var generation int
 	var application string
 	var version string
-	for i, f := range entry.InfoFields {
-		log.Default().Printf("Found info_field[%v]:'%v'", i, f)
-		if generationRe.Match([]byte(f)) {
-			generation, _ = strconv.Atoi(generationRe.ReplaceAllString(f, "${generation}"))
+	for i, txt := range entry.Text {
+		log.Default().Printf("Found TXT[%v]:'%v'", i, txt)
+		if generationRe.Match([]byte(txt)) {
+			generation, _ = strconv.Atoi(generationRe.ReplaceAllString(txt, "${generation}"))
 		}
-		if applicationRe.Match([]byte(f)) {
-			application = applicationRe.ReplaceAllString(f, "${application}")
+		if applicationRe.Match([]byte(txt)) {
+			application = applicationRe.ReplaceAllString(txt, "${application}")
 		}
-		if versionRe.Match([]byte(f)) {
-			version = versionRe.ReplaceAllString(f, "${version}")
+		if versionRe.Match([]byte(txt)) {
+			version = versionRe.ReplaceAllString(txt, "${version}")
 		}
 	}
 	var device Device = Device{
-		Id:      nameRe.ReplaceAllString(entry.Name, "${id}"),
-		Service: entry.Name,
-		Host:    entry.Host,
-		Ipv4:    entry.AddrV4,
+		Id:      nameRe.ReplaceAllString(entry.HostName, "${id}"),
+		Service: entry.Service,
+		Host:    entry.HostName,
+		Ipv4:    entry.AddrIPv4[0],
 		Port:    entry.Port,
 		Product: Product{
-			Model:       hostRe.ReplaceAllString(entry.Host, "${model}"),
+			Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),
 			Generation:  generation,
 			Application: application,
 			Version:     version,
-			Serial:      hostRe.ReplaceAllString(entry.Host, "${serial}"),
+			Serial:      hostRe.ReplaceAllString(entry.HostName, "${serial}"),
 		},
 		Components: make(map[string]map[string]types.MethodHandler),
 	}

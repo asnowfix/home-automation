@@ -71,7 +71,7 @@ func RegisterMethodHandler(c string, v string, m types.MethodHandler) {
 func Call(device *Device, component string, verb string, body any) any {
 	data, err := CallE(device, component, verb, body)
 	if err != nil {
-		log.Default().Print(err)
+		log.Default().Printf("calling device %v: %v", device.Id, err)
 		panic(err)
 	}
 	return data

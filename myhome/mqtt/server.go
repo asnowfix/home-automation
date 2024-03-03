@@ -3,18 +3,17 @@ package mqtt
 import (
 	"devices"
 	"log"
-	"net"
+	"mynet"
 	"os"
 
-	"github.com/jackpal/gateway"
+	"github.com/grandcat/zeroconf"
 	mqtt "github.com/mochi-mqtt/server/v2"
 
-	"github.com/hashicorp/mdns"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
-func MyHome(program string, info []string) (*mdns.Server, error) {
+func MyHome(program string, info []string) (*zeroconf.Server, error) {
 	// Create the new MQTT Server.
 	mqttServer := mqtt.New(nil)
 
@@ -24,12 +23,6 @@ func MyHome(program string, info []string) (*mdns.Server, error) {
 	// Create a TCP listener on a standard port.
 	tcp := listeners.NewTCP("t1", ":1883", nil)
 	err := mqttServer.AddListener(tcp)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	addrs := make([]net.IP, 1)
-	addrs[0], err = gateway.DiscoverInterface()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -44,18 +37,15 @@ func MyHome(program string, info []string) (*mdns.Server, error) {
 		instance = host
 	}
 
-	log.Default().Printf("publishing %v as %v over mDNS via IP %v", info, devices.MqttService, addrs)
-	mdnsService, _ := mdns.NewMDNSService(instance, devices.MqttService, "" /*domain*/, "" /*host*/, 1883, addrs, info)
+	ifaces, err := mynet.Interfaces()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// Create the mDNS server, defer shutdown
-	mdnsServer, _ := mdns.NewServer(&mdns.Config{Zone: mdnsService})
-
-	go func() {
-		err := mqttServer.Serve()
-		if err != nil {
-			log.Fatal(err)
-		}
-	}()
+	mdnsServer, err := zeroconf.Register(instance, devices.MqttService, "local.", 1883, info, ifaces)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	return mdnsServer, nil
 }

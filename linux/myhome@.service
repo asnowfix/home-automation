@@ -1,3 +1,5 @@
+# https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html
+
 [Unit]
 Description=MyHome as a system service
 After=local-fs.target network.target

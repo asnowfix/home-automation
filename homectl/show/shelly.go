@@ -61,6 +61,7 @@ var showShellyCmd = &cobra.Command{
 			log.Default().Printf("Looking for any Shelly device")
 			devices, err := shelly.FindDevicesFromMdns()
 			if err != nil {
+				log.Default().Println(err)
 				return err
 			}
 			log.Default().Printf("Found %v devices '%v'\n", len(devices), reflect.TypeOf(devices))

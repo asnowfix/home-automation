@@ -1,13 +1,14 @@
 package devices
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/hashicorp/mdns"
+	"github.com/grandcat/zeroconf"
 )
 
 func connect(clientId string) mqtt.Client {
@@ -41,20 +42,29 @@ var mqttBroker string
 
 func MqttBroker() string {
 	if len(mqttBroker) == 0 {
-		ch := make(chan *mdns.ServiceEntry, 4)
+		resolver, err := zeroconf.NewResolver(nil)
+		if err != nil {
+			log.Fatalln("Failed to initialize resolver:", err.Error())
+		}
+
+		entries := make(chan *zeroconf.ServiceEntry)
 
 		go func() {
-			for entry := range ch {
+			for entry := range entries {
 				// Filter-out spurious candidates
-				if strings.Contains(entry.Name, MqttService) {
-					mqttBroker = fmt.Sprintf("%v:%v", entry.Addr, entry.Port)
+				if strings.Contains(entry.Service, MqttService) {
+					mqttBroker = fmt.Sprintf("%v:%v", entry.AddrIPv4, entry.Port)
 				}
 			}
 		}()
 
 		// Start the lookup
-		mdns.Lookup(MqttService, ch)
-		close(ch)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
+		defer cancel()
+		err = resolver.Browse(ctx, MqttService, "local.", entries)
+		if err != nil {
+			log.Fatalln("Failed to browse:", err.Error())
+		}
 
 		log.Default().Printf("Using MQTT broker %v for service %v", mqttBroker, MqttService)
 	}

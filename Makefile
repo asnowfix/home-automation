@@ -1,7 +1,7 @@
 default: help
 
 help:
-	@echo make help install start stop
+	@echo make help build run install start stop
 
 install:
 	$(MAKE) -C myhome install .
@@ -30,6 +30,6 @@ else
 	$(error unsupported $(shell uname -s))
 endif
 
-build:
+build run:
 	$(MAKE) -C homectl $(@)
 	$(MAKE) -C myhome $(@)

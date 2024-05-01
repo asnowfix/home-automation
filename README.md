@@ -6,10 +6,41 @@ Collection of tools to help automating my own House, mostly using (very cool) Sh
 
 ## Table of Contents <!-- omit in toc -->
 
-1. [Abstract](#abstract)
-2. [GCP Notes](#gcp-notes)
-3. [Mochi-MQTT Notes](#mochi-mqtt-notes)
-4. [References](#references)
+- [Home Automation](#home-automation)
+  - [Abstract](#abstract)
+  - [Usage](#usage)
+    - [Is daemon running?](#is-daemon-running)
+    - [Manual start](#manual-start)
+  - [Shelly Notes](#shelly-notes)
+    - [Shelly 1 H\&T](#shelly-1-ht)
+    - [Shelly MQTT Notes](#shelly-mqtt-notes)
+  - [GCP Notes](#gcp-notes)
+  - [Shelly Devices](#shelly-devices)
+    - [Gen 3](#gen-3)
+    - [Gen 2](#gen-2)
+      - [Pro1 - Gen 2](#pro1---gen-2)
+      - [Plus1 - Gen2](#plus1---gen2)
+  - [Red-by-SFR Box Notes](#red-by-sfr-box-notes)
+    - [Main API](#main-api)
+    - [UPnP](#upnp)
+  - [References](#references)
+
+## Usage
+
+### Is daemon running?
+
+```shell
+$ systemctl status myhome@fix.service
+myhome@fix.service - MyHome as a system service
+     Loaded: loaded (/etc/systemd/system/myhome@.service; enabled; vendor preset: enabled)
+     Active: activating (auto-restart) (Result: exit-code) since Wed 2024-05-01 10:23:50 CEST; 1s ago
+    Process: 3150933 ExecStart=/usr/bin/env /home/fix/go/bin/myhome -v (code=exited, status=127)
+   Main PID: 3150933 (code=exited, status=127)
+```
+
+### Manual start
+
+
 
 ## Shelly Notes
 
@@ -135,7 +166,43 @@ More details:
 Reason: required, Message: Login Required.
 ```
 
-## Shelly Notes
+## Shelly Devices
+
+### Gen 3
+
+### Gen 2
+
+#### Pro1 - Gen 2
+
+```json
+{
+  "model": "ShellyPro1",
+  "mac": "30C6F782D274",
+  "app": "Pro1",
+  "ver": "1.0.8",
+  "gen": 2,  "service": "shellypro1-30c6f782d274._shelly._tcp.local.",
+  "host": "ShellyPro1-30C6F782D274.local.",
+  "ipv4": "192.168.1.60",
+  // ...
+}
+```
+
+#### Plus1 - Gen2
+
+```json
+{
+  "model": "ShellyPlus1",
+  "mac": "08B61FD141E8",
+  "app": "Plus1",
+  "ver": "1.0.8",
+  "gen": 2,
+  "service": "shellyplus1-08b61fd141e8._shelly._tcp.local.",
+  "host": "ShellyPlus1-08B61FD141E8.local.",
+  "ipv4": "192.168.1.76",
+  "port": 80,
+  // ...
+}
+```
 
 ```shell
 $ curl -s http://ShellyPlus1-4855199C9888.local/rpc/Switch.GetStatus?id=0 | jq
@@ -161,40 +228,6 @@ $ curl -s http://ShellyPlus1-4855199C9888.local/rpc/Switch.GetConfig?id=0 | jq
   "auto_on_delay": 60,
   "auto_off": false,
   "auto_off_delay": 1
-}
-```
-
-## Shelly Devices
-
-### Pro1 Gen2
-
-```json
-{
-  "model": "ShellyPro1",
-  "mac": "30C6F782D274",
-  "app": "Pro1",
-  "ver": "1.0.8",
-  "gen": 2,  "service": "shellypro1-30c6f782d274._shelly._tcp.local.",
-  "host": "ShellyPro1-30C6F782D274.local.",
-  "ipv4": "192.168.1.60",
-  // ...
-}
-```
-
-### Plus1 Gen2
-
-```json
-{
-  "model": "ShellyPlus1",
-  "mac": "08B61FD141E8",
-  "app": "Plus1",
-  "ver": "1.0.8",
-  "gen": 2,
-  "service": "shellyplus1-08b61fd141e8._shelly._tcp.local.",
-  "host": "ShellyPlus1-08B61FD141E8.local.",
-  "ipv4": "192.168.1.76",
-  "port": 80,
-  // ...
 }
 ```
 

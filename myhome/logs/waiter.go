@@ -11,7 +11,7 @@ func Waiter(tc chan string) {
 		log.Default().Printf("logs.Waiter: topic: %v", topic)
 		if _, exists := topics[topic]; !exists {
 			log.Default().Printf("logs.Waiter: subscribing to %v", topic)
-			tc, err := devices.MqttSubscribe("logs.Waiter", topic, 0 /*qlen*/)
+			tc, err := devices.MqttSubscribe(topic, 0 /*qlen*/)
 			if err == nil {
 				log.Default().Printf("logs.Waiter: subscribed to %v", topic)
 				topics[topic] = tc

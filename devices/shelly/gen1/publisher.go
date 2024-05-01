@@ -6,18 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"reflect"
-
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 type Empty struct{}
 
 func Publisher(ch chan Device, tc chan string) {
-	opts := devices.CreateClientOptions(reflect.TypeOf(Empty{}).PkgPath())
-	client := mqtt.NewClient(opts)
-	token := client.Connect()
-
 	for device := range ch {
 		var tC float32
 		var id string
@@ -39,8 +32,6 @@ func Publisher(ch chan Device, tc chan string) {
 		tc <- topic
 		msg, _ := json.Marshal(t)
 		log.Default().Printf("gen1.Publisher: MQTT(%v) <<< %v", topic, string(msg))
-		client.Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, string(msg)).Wait()
+		devices.MqttClient().Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, string(msg)).Wait()
 	}
-
-	token.Wait()
 }

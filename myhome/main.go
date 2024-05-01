@@ -3,6 +3,7 @@ package main
 import (
 	"devices/shelly/gen1"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,7 +38,14 @@ func main() {
 		fmt.Sprintf("time=%v", time.Now()),
 	}
 
-	mdnsServer, _ := mqtt.MyHome(Program, info)
+	if len(Program) == 0 {
+		Program = os.Args[0]
+	}
+
+	mdnsServer, err := mqtt.MyHome(Program, info)
+	if err != nil {
+		log.Fatalf("error starting MQTT server: %v", err)
+	}
 	defer mdnsServer.Shutdown()
 
 	topicsCh := make(chan string, 1)

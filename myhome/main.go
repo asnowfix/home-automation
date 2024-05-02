@@ -42,7 +42,7 @@ func main() {
 		Program = os.Args[0]
 	}
 
-	mdnsServer, err := mqtt.MyHome(Program, info)
+	mdnsServer, broker, err := mqtt.MyHome(Program, info)
 	if err != nil {
 		log.Fatalf("error starting MQTT server: %v", err)
 	}
@@ -50,14 +50,20 @@ func main() {
 
 	topicsCh := make(chan string, 1)
 	defer close(topicsCh)
-	go logs.Waiter(topicsCh)
+	go logs.Waiter(broker, topicsCh)
 
 	gen1Ch := make(chan gen1.Device, 1)
 	go http.MyHome(gen1Ch)
-	go gen1.Publisher(gen1Ch, topicsCh)
+	go gen1.Publisher(gen1Ch, topicsCh, broker)
+
+	proxyCh := make(chan struct{}, 1)
+	go mqtt.CommandProxy(proxyCh)
 
 	// Run server until interrupted
 	<-done
+
+	// Close command proxy channel
+	close(proxyCh)
 
 	// Cleanup
 }

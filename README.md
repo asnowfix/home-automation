@@ -396,3 +396,11 @@ $ go get github.com/mochi-mqtt/server/v2
 6. Internet Engineering Task Force (IETF)
   1. [RFC6762: Multicast DNS](https://datatracker.ietf.org/doc/html/rfc6762)
   2. [RFC6763: DNS-Based Service Discovery](https://datatracker.ietf.org/doc/html/rfc6763)
+7. HiveMQ
+   1. [MQTT Topics, Wildcards, & Best Practices – MQTT Essentials: Part 5](https://www.hivemq.com/blog/mqtt-essentials-part-5-mqtt-topics-best-practices/)
+8. AWS
+   1. [MQTT design best practices](https://docs.aws.amazon.com/whitepapers/latest/designing-mqtt-topics-aws-iot-core/mqtt-design-best-practices.html)
+9. Cedalo
+   1.  [The MQTT client and its role in the MQTT connection](https://cedalo.com/blog/mqtt-connection-beginners-guide)
+       1.  [Persistent Sessions](https://cedalo.com/blog/mqtt-connection-beginners-guide/#mqtt-persistent-session)
+   2.  [Essential Guide to MQTT Topics and Wildcards](https://cedalo.com/blog/mqtt-topics-and-mqtt-wildcards-explained/)

@@ -5,6 +5,7 @@ import (
 	"devices/shelly"
 	"devices/shelly/types"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 )
@@ -43,9 +44,11 @@ func Setup(device *shelly.Device) (*shelly.Device, error) {
 	log.Default().Printf("initial MQTT status: %v", string(statusStr))
 
 	config.Enable = true
-	config.Server = devices.MqttBroker()[0].Host
 	config.RpcNotifs = true
 	config.StatusNotifs = true
+	broker := devices.MqttBrokers()[0]
+	// Shelly MQTT Server is formatted like host:port
+	config.Server = fmt.Sprintf("%s:%s", broker.Hostname(), broker.Port())
 
 	configStr, _ = json.Marshal(config)
 	log.Default().Printf("new MQTT config: %v", string(configStr))

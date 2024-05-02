@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/url"
 )
 
 type Empty struct{}
 
-func Publisher(ch chan Device, tc chan string) {
+func Publisher(ch chan Device, tc chan string, broker *url.URL) {
 	for device := range ch {
 		var tC float32
 		var id string
@@ -32,6 +33,6 @@ func Publisher(ch chan Device, tc chan string) {
 		tc <- topic
 		msg, _ := json.Marshal(t)
 		log.Default().Printf("gen1.Publisher: MQTT(%v) <<< %v", topic, string(msg))
-		devices.MqttClient().Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, string(msg)).Wait()
+		devices.MqttClient(broker).Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, string(msg)).Wait()
 	}
 }

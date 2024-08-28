@@ -124,7 +124,7 @@ func (d *Device) Topics() []string {
 	return topics
 }
 
-var devicesMap map[string]*Device
+var devicesMap map[string]*Device = make(map[string]*Device)
 
 var devicesMutex sync.Mutex
 
@@ -136,7 +136,6 @@ func Devices() map[string]*Device {
 func DevicesE() (map[string]*Device, error) {
 	devicesMutex.Lock()
 	if len(devicesMap) == 0 {
-		devicesMap = make(map[string]*Device)
 		err := loadDevicesFromMdns()
 		if err != nil {
 			log.Default().Fatal(err)

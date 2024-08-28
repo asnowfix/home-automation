@@ -3,7 +3,6 @@ package shelly
 import (
 	"container/list"
 	"context"
-	"devices/shelly/types"
 	"encoding/json"
 	"log"
 	"strconv"
@@ -13,9 +12,9 @@ import (
 	"github.com/grandcat/zeroconf"
 )
 
-var mdnsShellies string = "_shelly._tcp"
+const MDNS_SHELLIES string = "_shelly._tcp"
 
-func MdnsShellies(tc chan string) {
+func mdnsShellies(tc chan string) {
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
 		log.Fatalln("Failed to initialize resolver:", err.Error())
@@ -25,8 +24,8 @@ func MdnsShellies(tc chan string) {
 	go func(results <-chan *zeroconf.ServiceEntry) {
 		for entry := range results {
 			log.Println(entry)
-			if strings.Contains(entry.Instance, mdnsShellies) {
-				for _, topic := range NewDeviceFromMdns(entry).Topics() {
+			if strings.Contains(entry.Instance, MDNS_SHELLIES) {
+				for _, topic := range newDeviceFromMdns(entry).Topics() {
 					tc <- topic
 				}
 			}
@@ -36,7 +35,7 @@ func MdnsShellies(tc chan string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
 	defer cancel()
-	err = resolver.Browse(ctx, mdnsShellies, "local.", entries)
+	err = resolver.Browse(ctx, MDNS_SHELLIES, "local.", entries)
 	if err != nil {
 		log.Fatalln("Failed to browse:", err.Error())
 	}
@@ -45,13 +44,11 @@ func MdnsShellies(tc chan string) {
 
 }
 
-func FindDevicesFromMdns() (map[string]*Device, error) {
-	log.Default().Println("FindDevicesFromMdns()")
-
+func loadDevicesFromMdns() error {
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
-		log.Default().Fatalln("Failed to initialize resolver:", err.Error())
-		return nil, err
+		log.Default().Fatalln("Failed to initialize zeroconf resolver:", err.Error())
+		return err
 	}
 
 	shellies := list.New()
@@ -59,44 +56,39 @@ func FindDevicesFromMdns() (map[string]*Device, error) {
 
 	go func() {
 		for entry := range entries {
-			log.Default().Printf("FindDevicesFromMdns(): %v", entry)
+			log.Default().Printf("Found %v", entry)
 
-			if strings.Contains(entry.Service, mdnsShellies) {
+			if strings.Contains(entry.Service, MDNS_SHELLIES) {
 				shellies.PushBack(entry)
 			}
 		}
 	}()
 
 	// Start the lookup
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 	defer cancel()
 
-	err = resolver.Browse(ctx, mdnsShellies, "local.", entries)
+	err = resolver.Browse(ctx, MDNS_SHELLIES, "local.", entries)
 	if err != nil {
 		log.Default().Fatalln("Failed to browse:", err.Error())
-		return nil, err
+		return err
 	}
 
 	<-ctx.Done()
 
-	devices := make(map[string]*Device)
-
 	for si := shellies.Front(); si != nil; si = si.Next() {
 		entry := si.Value.(*zeroconf.ServiceEntry)
-
-		if _, exists := devices[string(entry.AddrIPv4[0])]; !exists {
-			device := NewDeviceFromMdns(entry).Init()
-			log.Default().Printf("Loading %v: %v", entry.HostName, entry)
-			devices[string(entry.AddrIPv4[0])] = device
-		} else {
-			log.Default().Printf("Dropping already known %v: %v", entry.HostName, entry)
+		if len(entry.AddrIPv4) == 0 {
+			log.Default().Printf("Skipping mDNS entry without an IPv4: %v", entry)
+			continue
 		}
+		addDevice(entry.AddrIPv4[0].String(), newDeviceFromMdns(entry))
 	}
 
-	return devices, nil
+	return nil
 }
 
-func NewDeviceFromMdns(entry *zeroconf.ServiceEntry) *Device {
+func newDeviceFromMdns(entry *zeroconf.ServiceEntry) *Device {
 	s, _ := json.Marshal(entry)
 	log.Default().Printf("Found %v", s)
 
@@ -115,7 +107,7 @@ func NewDeviceFromMdns(entry *zeroconf.ServiceEntry) *Device {
 			version = versionRe.ReplaceAllString(txt, "${version}")
 		}
 	}
-	var device Device = Device{
+	d := &Device{
 		Id:      nameRe.ReplaceAllString(entry.HostName, "${id}"),
 		Service: entry.Service,
 		Host:    entry.HostName,
@@ -128,8 +120,7 @@ func NewDeviceFromMdns(entry *zeroconf.ServiceEntry) *Device {
 			Version:     version,
 			Serial:      hostRe.ReplaceAllString(entry.HostName, "${serial}"),
 		},
-		Components: make(map[string]map[string]types.MethodHandler),
 	}
-
-	return &device
+	d.Init()
+	return d
 }

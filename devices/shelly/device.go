@@ -2,11 +2,14 @@ package shelly
 
 import (
 	"devices/shelly/types"
+	"errors"
 	"fmt"
 	"log"
 	"net"
+	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 type Product struct {
@@ -47,7 +50,7 @@ type DeviceInfo struct {
 	FirmwareSBits         string `json:"fw_sbits,omitempty"`
 }
 
-var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", mdnsShellies))
+var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", MDNS_SHELLIES))
 
 var hostRe = regexp.MustCompile("^(?P<model>[a-zA-Z0-9]+)-(?P<serial>[A-Z0-9]+).local.$")
 
@@ -57,17 +60,16 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-var devices map[string]*Device
-
 func NewDeviceFromIp(ip net.IP) *Device {
 	s := ip.String()
-	if d, exists := devices[s]; exists {
+	if d, exists := devicesMap[s]; exists {
 		return d
 	}
 	d := &Device{
 		Ipv4: ip,
 	}
-	devices[s] = d
+	d.Init()
+	addDevice(s, d)
 	return d
 }
 
@@ -120,4 +122,98 @@ func (d *Device) Topics() []string {
 	topics[0] = fmt.Sprintf("%s/events/rpc", d.Info.Id)
 	topics[0] = fmt.Sprintf("%s/online", d.Info.Id)
 	return topics
+}
+
+var devicesMap map[string]*Device
+
+var devicesMutex sync.Mutex
+
+func Devices() map[string]*Device {
+	devices, _ := DevicesE()
+	return devices
+}
+
+func DevicesE() (map[string]*Device, error) {
+	devicesMutex.Lock()
+	if len(devicesMap) == 0 {
+		devicesMap = make(map[string]*Device)
+		err := loadDevicesFromMdns()
+		if err != nil {
+			log.Default().Fatal(err)
+			return nil, err
+		}
+		log.Default().Printf("Discovered %v devices", len(devicesMap))
+	}
+	log.Default().Printf("Knows %v devices (%v)", len(devicesMap), devicesMap)
+	devicesMutex.Unlock()
+	return devicesMap, nil
+}
+
+func addDevice(name string, device *Device) {
+	if _, exists := devicesMap[name]; !exists {
+		log.Default().Printf("Loading %v (%v)", name, *device)
+		devicesMap[name] = device
+	} else {
+		log.Default().Printf("Already loaded %v", name)
+	}
+}
+
+func Lookup(name string) (*Device, error) {
+	ip := net.ParseIP(name)
+	if ip != nil {
+		log.Default().Printf("Contacting device IP '%v'", ip)
+		return NewDeviceFromIp(ip), nil
+	} else {
+		devices := Devices()
+		log.Default().Printf("Looking-up '%v' in devices %v", name, devices)
+
+		for key, device := range devices {
+			log.Default().Printf("Matching '%v' against %v", name, device)
+
+			if key == name {
+				return device, nil
+			}
+			if device.Info != nil && device.Info.MacAddress != nil && device.Info.MacAddress.String() == name {
+				return device, nil
+			}
+			if device.Ipv4 != nil && device.Ipv4.String() == name {
+				return device, nil
+			}
+			if device.Host == name {
+				return device, nil
+			}
+			if device.Model == name {
+				return device, nil
+			}
+		}
+		return nil, errors.New("No device matching '" + name + "'")
+	}
+}
+
+type Do func(*Device) (*Device, error)
+
+func Foreach(args []string, do Do) error {
+	log.Default().Printf("Running %v on %v", reflect.TypeOf(do), args)
+
+	if len(args) > 0 {
+		for _, name := range args {
+			log.Default().Printf("Looking for Shelly device %v", name)
+			device, err := Lookup(name)
+			if err != nil {
+				log.Default().Printf("Skipping device %v: %v", name, err)
+				continue
+			}
+			_, err = do(device)
+			if err != nil {
+				log.Default().Printf("Operation on %v failed: %v", name, err)
+				continue
+			}
+		}
+	} else {
+		log.Default().Print("Running on every device")
+		for _, device := range Devices() {
+			do(device)
+		}
+	}
+	return nil
 }

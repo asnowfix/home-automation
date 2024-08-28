@@ -53,7 +53,7 @@ func (d ShellyDevice) MarshalJSON() ([]byte, error) {
 }
 
 func ListShellyDevices() ([]Host, error) {
-	devices, err := shelly.FindDevicesFromMdns()
+	devices, err := shelly.DevicesE()
 	if err != nil {
 		log.Default().Print(err)
 		return nil, err

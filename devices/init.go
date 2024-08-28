@@ -11,4 +11,6 @@ func Init() {
 
 	sfr.Init()
 	Register(ListSfrDevices)
+
+	List()
 }

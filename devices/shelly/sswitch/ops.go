@@ -21,7 +21,7 @@ func init() {
 		},
 		HttpMethod: http.MethodGet,
 	})
-	shelly.RegisterMethodHandler("Switch", "Toogle", types.MethodHandler{
+	shelly.RegisterMethodHandler("Switch", "Toggle", types.MethodHandler{
 		Allocate: func() any { return new(Toogle) },
 		HttpQuery: map[string]string{
 			"id": "0",

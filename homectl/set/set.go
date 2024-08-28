@@ -12,5 +12,5 @@ func init() {
 
 var Cmd = &cobra.Command{
 	Use:   "set",
-	Short: "Set devices configurqtion",
+	Short: "Set devices configuration",
 }

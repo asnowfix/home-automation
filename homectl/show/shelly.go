@@ -1,15 +1,12 @@
 package show
 
 import (
-	"devices"
 	"devices/shelly"
 	"devices/shelly/mqtt"
 	"devices/shelly/sswitch"
 	"encoding/json"
 	"fmt"
 	hlog "homectl/log"
-	"log"
-	"reflect"
 
 	"github.com/spf13/cobra"
 )
@@ -46,35 +43,12 @@ var showShellyCmd = &cobra.Command{
 			showWifiFlag = true
 		}
 
-		if len(args) > 0 {
-			log.Default().Printf("Looking for Shelly device %v", args[0])
-			for _, name := range args {
-				host, err := devices.Lookup(name)
-				if err != nil {
-					log.Default().Print(err)
-					return err
-				}
-				device := shelly.NewDeviceFromIp(host.Ip()).Init()
-				showOneDevice(device)
-			}
-		} else {
-			log.Default().Printf("Looking for any Shelly device")
-			devices, err := shelly.FindDevicesFromMdns()
-			if err != nil {
-				log.Default().Println(err)
-				return err
-			}
-			log.Default().Printf("Found %v devices '%v'\n", len(devices), reflect.TypeOf(devices))
-			for _, device := range devices {
-				showOneDevice(device)
-			}
-		}
-
+		shelly.Foreach(args, showOneDevice)
 		return nil
 	},
 }
 
-func showOneDevice(device *shelly.Device) error {
+func showOneDevice(device *shelly.Device) (*shelly.Device, error) {
 
 	var s struct {
 		DeviceInfo *shelly.DeviceInfo `json:"info"`
@@ -104,9 +78,9 @@ func showOneDevice(device *shelly.Device) error {
 
 	out, err := json.Marshal(s)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fmt.Print(string(out))
 
-	return nil
+	return device, nil
 }

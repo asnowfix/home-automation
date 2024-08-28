@@ -80,3 +80,21 @@ func Hosts(args []string) ([]Host, error) {
 		return ip.Equal(h.Ip())
 	}), nil
 }
+
+type Do func(*Host) (*Host, error)
+
+func Foreach(args []string, do Do) error {
+	if len(args) > 0 {
+		for _, name := range args {
+			log.Default().Printf("Looking for device %v", name)
+			host, err := Lookup(name)
+			if err != nil {
+				log.Default().Print(err)
+				return err
+			}
+			_, err = do(host)
+			return err
+		}
+	}
+	return nil
+}

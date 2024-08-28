@@ -9,6 +9,7 @@ import (
 	"homectl/mqtt"
 	"homectl/set"
 	"homectl/show"
+	"homectl/toggle"
 
 	"github.com/spf13/cobra"
 )
@@ -35,6 +36,7 @@ func init() {
 	rootCmd.AddCommand(show.Cmd)
 	rootCmd.AddCommand(set.Cmd)
 	rootCmd.AddCommand(mqtt.Cmd)
+	rootCmd.AddCommand(toggle.Cmd)
 }
 
 var Commit string

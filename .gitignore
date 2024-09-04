@@ -18,7 +18,7 @@
 /vendor
 
 # Go workspace file
-go.work
+#go.work
 
 # Visual Studio Code
 /.vscode
@@ -26,7 +26,7 @@ go.work
 /secrets.sh
 SECRETS.md
 
-/homectl/homectl
-/myhome/myhome
-/myip/myip
+/homectl/homectl*
+/myhome/myhome*
+/myip/myip*
 /mqtt-cli-*.deb

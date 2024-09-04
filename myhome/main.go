@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"hlog"
+
 	"myhome/http"
 	"myhome/logs"
 	"myhome/mqtt"
@@ -20,6 +22,8 @@ var Version string
 var Commit string
 
 func main() {
+	hlog.Init()
+
 	// Create signals channel to run server until interrupted
 	sigs := make(chan os.Signal, 1)
 	done := make(chan bool, 1)
@@ -44,7 +48,7 @@ func main() {
 
 	mdnsServer, broker, err := mqtt.MyHome(Program, info)
 	if err != nil {
-		log.Fatalf("error starting MQTT server: %v", err)
+		log.Default().Printf("error starting MQTT server: %v", err)
 	}
 	defer mdnsServer.Shutdown()
 

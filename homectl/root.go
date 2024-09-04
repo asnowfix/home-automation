@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"hlog"
 	"homectl/list"
-	hlog "homectl/log"
 	"homectl/mqtt"
 	"homectl/set"
 	"homectl/show"

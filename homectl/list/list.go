@@ -4,7 +4,7 @@ import (
 	"devices"
 	"encoding/json"
 	"fmt"
-	hlog "homectl/log"
+	"hlog"
 	"log"
 	"reflect"
 

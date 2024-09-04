@@ -1,0 +1,29 @@
+go 1.21.4
+
+use (
+	.
+	./devices
+	./devices/sfr
+	./devices/shelly
+	./devices/shelly/gen1
+	./devices/shelly/http
+	./devices/shelly/input
+	./devices/shelly/script
+	./devices/shelly/sswitch
+	./devices/shelly/system
+	./devices/shelly/types
+	./devices/tapo
+	./myhome/http
+	./myhome/logs
+	./myhome/mqtt
+	./homectl/list
+	./hlog
+	./homectl/set
+	./homectl/toggle
+	./homectl/set/shelly
+	./homectl/show
+	./homectl/mqtt
+	./internal/myip
+	./internal/mynet
+	./internal/myzone
+)

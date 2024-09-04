@@ -1,7 +1,7 @@
 package shelly
 
 import (
-	hlog "homectl/log"
+	"hlog"
 
 	"github.com/spf13/cobra"
 

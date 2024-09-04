@@ -2,7 +2,7 @@ package toggle
 
 import (
 	"devices/shelly"
-	hlog "homectl/log"
+	"hlog"
 
 	"github.com/spf13/cobra"
 )

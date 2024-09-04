@@ -6,7 +6,7 @@ import (
 	"devices/shelly/sswitch"
 	"encoding/json"
 	"fmt"
-	hlog "homectl/log"
+	"hlog"
 
 	"github.com/spf13/cobra"
 )

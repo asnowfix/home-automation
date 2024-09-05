@@ -8,9 +8,10 @@ Collection of tools to help automating my own House, mostly using (very cool) Sh
 
 - [Home Automation](#home-automation)
   - [Abstract](#abstract)
-  - [Usage](#usage)
+  - [Usage - Linux](#usage---linux)
     - [Is daemon running?](#is-daemon-running)
     - [Manual start](#manual-start)
+  - [Usage Windows](#usage-windows)
   - [Shelly Notes](#shelly-notes)
     - [Shelly 1 H\&T](#shelly-1-ht)
     - [Shelly MQTT Notes](#shelly-mqtt-notes)
@@ -25,7 +26,7 @@ Collection of tools to help automating my own House, mostly using (very cool) Sh
     - [UPnP](#upnp)
   - [References](#references)
 
-## Usage
+## Usage - Linux
 
 ### Is daemon running?
 
@@ -40,7 +41,17 @@ myhome@fix.service - MyHome as a system service
 
 ### Manual start
 
+```bash
+make start
+```
 
+## Usage Windows
+
+Unless you suceed to set `$env:Path` in pwsh, you need to call GNU Make with its full Path.
+
+```bash
+C:\ProgramData\chocolatey\bin\make build
+```
 
 ## Shelly Notes
 

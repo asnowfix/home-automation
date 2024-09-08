@@ -16,7 +16,7 @@ var Cmd = &cobra.Command{
 	Short: "List known devices connected on the home gateway",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		hlog.Init()
-		devices.Init()
+		// devices.Init()
 
 		hosts, err := devices.List()
 		if err != nil {

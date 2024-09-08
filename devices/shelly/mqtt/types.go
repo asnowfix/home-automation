@@ -1,5 +1,21 @@
 package mqtt
 
+type Qos uint
+
+const (
+	AtMostOnce Qos = iota
+	AtLeastOnce
+	ExactlyOnce
+)
+
+func (qos Qos) String() string {
+	return [...]string{
+		"AtMostOnce",
+		"AtLeastOnce",
+		"ExactlyOnce",
+	}[qos]
+}
+
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/
 
 type SslCa uint

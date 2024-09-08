@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"mqtt"
 	"reflect"
 	"sync"
 	"time"
@@ -12,21 +13,21 @@ import (
 
 func CommandProxy(run chan struct{}) {
 
-	subscriptions := make(map[string]func(devices.MqttMessage))
+	subscriptions := make(map[string]func(mqtt.MqttMessage))
 	subscriptions["devices/status"] = handleDevicesStatus
 
-	subsch := make(map[string]chan devices.MqttMessage)
+	subsch := make(map[string]chan mqtt.MqttMessage)
 	for topic, handler := range subscriptions {
 		// Subscribe to the topic
 		log.Default().Print("Subscribing to topic ", topic)
-		subsch[topic], _ = devices.MqttSubscribe(PrivateBroker(), topic, 0)
-		go func(topic string, handler func(devices.MqttMessage)) {
+		subsch[topic], _ = mqtt.MqttSubscribe(mqtt.Broker(true), topic, 0)
+		go func(topic string, handler func(mqtt.MqttMessage)) {
 			for {
 				select {
 				// In case of channel close, exit the loop
 				case <-subsch[topic]:
 					log.Default().Print("Unsubscribing from topic ", topic)
-					devices.MqttClient(PrivateBroker()).Unsubscribe(topic).Wait()
+					mqtt.MqttClient(mqtt.Broker(true)).Unsubscribe(topic).Wait()
 					return
 				// In case of message, handle it
 				case msg := <-subsch[topic]:
@@ -78,7 +79,7 @@ func refreshHosts() {
 	log.Default().Print(hosts)
 }
 
-func handleDevicesStatus(msg devices.MqttMessage) {
+func handleDevicesStatus(msg mqtt.MqttMessage) {
 	hostsLock.Lock()
 	defer hostsLock.Unlock()
 
@@ -105,7 +106,7 @@ func handleDevicesStatus(msg devices.MqttMessage) {
 		handleError(req.ClientId, req.RequestId, err)
 		return
 	}
-	devices.MqttPublish(PrivateBroker(), fmt.Sprintf("client/%v", req.ClientId), out)
+	mqtt.MqttPublish(mqtt.Broker(true), fmt.Sprintf("client/%v", req.ClientId), out)
 }
 
 func handleError(clientId string, requestId string, err error) {
@@ -120,5 +121,5 @@ func handleError(clientId string, requestId string, err error) {
 		log.Default().Print(err)
 		return
 	}
-	devices.MqttPublish(PrivateBroker(), fmt.Sprintf("client/%v", clientId), out)
+	mqtt.MqttPublish(mqtt.Broker(true), fmt.Sprintf("client/%v", clientId), out)
 }

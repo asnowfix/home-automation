@@ -30,7 +30,7 @@ var pubCmd = &cobra.Command{
 	Short: "Publish to device(s) MQTT topic(s)",
 	Run: func(cmd *cobra.Command, args []string) {
 		hlog.Init()
-		devices.Init()
+		// devices.Init()
 
 		dn := strings.Split(options.devices, ",")
 		log.Default().Printf("looking for devices: %v", dn)
@@ -51,7 +51,7 @@ var subCmd = &cobra.Command{
 	Short: "Subscribe to device(s) MQTT topic(s)",
 	Run: func(cmd *cobra.Command, args []string) {
 		hlog.Init()
-		devices.Init()
+		// devices.Init()
 
 		topics, err := devices.Topics(strings.Split(options.devices, ","))
 		if err != nil {

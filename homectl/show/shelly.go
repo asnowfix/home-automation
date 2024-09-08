@@ -29,6 +29,12 @@ func init() {
 	showShellyCmd.Flags().BoolVarP(&showMqttFlag, "mqtt", "M", false, "Show device MQTT configuration(s).")
 }
 
+var useHttpChannel bool
+
+func init() {
+	showShellyCmd.Flags().BoolVarP(&useHttpChannel, "http", "H", false, "Use HTTP channel to communicate with Shelly devices")
+}
+
 var showShellyCmd = &cobra.Command{
 	Use:   "shelly",
 	Short: "Show Shelly devices",

@@ -19,3 +19,9 @@ var Cmd = &cobra.Command{
 		})
 	},
 }
+
+var useHttpChannel bool
+
+func init() {
+	Cmd.Flags().BoolVarP(&useHttpChannel, "http", "H", false, "Use HTTP channel to communicate with Shelly devices")
+}

@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"devices/shelly"
 	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
@@ -12,17 +13,29 @@ import (
 	"os"
 )
 
-func Call(ip net.IP, hm string, sm string, out any, qp types.QueryParams, body any) (any, error) {
+func init() {
+	// shelly.RegisterMethodHandler("Http", "GetStatus", types.MethodHandler{
+	// 	Allocate: func() any { return new(Status) },
+	// 	HttpQuery: map[string]string{
+	// 		"id": "0",
+	// 	},
+	// 	HttpMethod: http.MethodGet,
+	// })
+
+	shelly.RegisterDeviceCaller(shelly.Http, shelly.DeviceCaller(Call))
+}
+
+func Call(device *shelly.Device, verb types.MethodHandler, method string, out any, body any) (any, error) {
 	var res *http.Response
 	var err error
 
-	switch hm {
+	switch verb.HttpMethod {
 	case http.MethodGet:
-		res, err = getE(ip, sm, qp)
+		res, err = getE(device.Ipv4, method, verb.HttpQuery)
 	case http.MethodPost:
-		res, err = postE(ip, sm, body)
+		res, err = postE(device.Ipv4, method, body)
 	default:
-		return nil, fmt.Errorf("unhandled HTTP method '%v' for Shelly method '%v'", hm, sm)
+		return nil, fmt.Errorf("unhandled HTTP method '%v' for Shelly method '%v'", verb.HttpMethod, method)
 	}
 
 	if err != nil {

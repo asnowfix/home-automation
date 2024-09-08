@@ -1,11 +1,11 @@
 package gen1
 
 import (
-	"devices"
 	"devices/shelly/temperature"
 	"encoding/json"
 	"fmt"
 	"log"
+	"mqtt"
 	"net/url"
 )
 
@@ -33,6 +33,6 @@ func Publisher(ch chan Device, tc chan string, broker *url.URL) {
 		tc <- topic
 		msg, _ := json.Marshal(t)
 		log.Default().Printf("gen1.Publisher: MQTT(%v) <<< %v", topic, string(msg))
-		devices.MqttClient(broker).Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, string(msg)).Wait()
+		mqtt.MqttClient(broker).Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, string(msg)).Wait()
 	}
 }

@@ -23,10 +23,6 @@ func main() {
 
 var rootCmd = &cobra.Command{
 	Use: "homectl",
-	// Run: func(cmd *cobra.Command, args []string) {
-	// 	hlog.Init()
-	// 	shelly.Init()
-	// },
 }
 
 func init() {
@@ -44,7 +40,6 @@ var Commit string
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version number",
-	// Long:  `All software has versions. This is Hugo's`,
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Println(Commit)
 	},

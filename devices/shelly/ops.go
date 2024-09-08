@@ -1,7 +1,6 @@
 package shelly
 
 import (
-	shttp "devices/shelly/http"
 	"devices/shelly/types"
 	"fmt"
 	"log"
@@ -10,6 +9,8 @@ import (
 )
 
 var methods = make(map[string]map[string]types.MethodHandler)
+
+var channel Channel = Http
 
 // methods := map[string]map[string]{
 // 	"Shelly": {
@@ -68,8 +69,8 @@ func RegisterMethodHandler(c string, v string, m types.MethodHandler) {
 	}
 }
 
-func Call(device *Device, component string, verb string, body any) any {
-	data, err := CallE(device, component, verb, body)
+func Call(device *Device, component string, verb string, params any) any {
+	data, err := CallE(device, component, verb, params)
 	if err != nil {
 		log.Default().Printf("calling device %v: %v", device.Id, err)
 		panic(err)
@@ -77,8 +78,9 @@ func Call(device *Device, component string, verb string, body any) any {
 	return data
 }
 
-func CallE(device *Device, c string, v string, body any) (any, error) {
-	log.Default().Printf("calling %v.%v body=%v", c, v, body)
+func CallE(device *Device, c string, v string, params any) (any, error) {
+	method := fmt.Sprintf("%v.%v", c, v)
+	log.Default().Printf("calling %v body=%v", method, params)
 
 	var verb types.MethodHandler
 
@@ -98,7 +100,33 @@ func CallE(device *Device, c string, v string, body any) (any, error) {
 	}
 
 	out := verb.Allocate()
-	log.Default().Printf("found configuration for method: %v.%v: parser:%v params:%v", c, v, reflect.TypeOf(out), body)
+	log.Default().Printf("found configuration for method: %v.%v: parser:%v params:%v", c, v, reflect.TypeOf(out), params)
 
-	return shttp.Call(device.Ipv4, verb.HttpMethod, fmt.Sprintf("%v.%v", c, v), out, verb.HttpQuery, body)
+	return channels[channel](device, verb, method, out, params)
+	// switch channel {
+	// case Http:
+	// return shttp.Call(device, verb, method, out, verb.HttpQuery, params)
+	// // case Mqtt:
+	// // 	return mqtt.Call(device, fmt.Sprintf("%v.%v", c, v), out, params)
+	// default:
+	// 	return nil, fmt.Errorf("unsupported channel %v", channel)
+	// }
 }
+
+var channels = make([]DeviceCaller, 3 /*sizeof(Channel*/)
+
+func RegisterDeviceCaller(channel Channel, dc DeviceCaller) {
+	log.Default().Printf("Registering %v for channel %v", dc, string(channel))
+
+	channels[channel] = dc
+}
+
+type DeviceCaller func(device *Device, verb types.MethodHandler, method string, out any, params any) (any, error)
+
+type Channel uint
+
+const (
+	Http Channel = iota
+	Mqtt
+	Udp
+)

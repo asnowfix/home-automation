@@ -14,18 +14,21 @@ import (
 )
 
 func init() {
-	// shelly.RegisterMethodHandler("Http", "GetStatus", types.MethodHandler{
-	// 	Allocate: func() any { return new(Status) },
-	// 	HttpQuery: map[string]string{
-	// 		"id": "0",
-	// 	},
-	// 	HttpMethod: http.MethodGet,
-	// })
+	shelly.RegisterMethodHandler("HTTP", "GET", types.MethodHandler{
+		Allocate:   func() any { return new(Response) },
+		HttpQuery:  map[string]string{},
+		HttpMethod: http.MethodGet,
+	})
+	shelly.RegisterMethodHandler("HTTP", "POST", types.MethodHandler{
+		Allocate:   func() any { return new(Response) },
+		HttpQuery:  map[string]string{},
+		HttpMethod: http.MethodGet,
+	})
 
-	shelly.RegisterDeviceCaller(shelly.Http, shelly.DeviceCaller(Call))
+	shelly.RegisterDeviceCaller(shelly.Http, shelly.DeviceCaller(callDevice))
 }
 
-func Call(device *shelly.Device, verb types.MethodHandler, method string, out any, body any) (any, error) {
+func callDevice(device *shelly.Device, verb types.MethodHandler, method string, out any, body any) (any, error) {
 	var res *http.Response
 	var err error
 

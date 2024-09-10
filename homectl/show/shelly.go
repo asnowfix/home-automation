@@ -40,7 +40,6 @@ var showShellyCmd = &cobra.Command{
 	Short: "Show Shelly devices",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		hlog.Init()
-		shelly.Init()
 		if showAllFlag {
 			showCloudFlag = true
 			showConfigFlag = true

@@ -22,7 +22,7 @@ var channel Channel = Http
 // 	}
 // }
 
-func Init() {
+func init() {
 	RegisterMethodHandler("Shelly", "ListMethods", types.MethodHandler{
 		Allocate:   func() any { return new(Methods) },
 		HttpQuery:  map[string]string{},
@@ -53,8 +53,6 @@ func Init() {
 		HttpQuery:  map[string]string{},
 		HttpMethod: http.MethodGet,
 	})
-
-	log.Default().Printf("Registered %v APIs", len(methods))
 }
 
 func RegisterMethodHandler(c string, v string, m types.MethodHandler) {
@@ -67,6 +65,7 @@ func RegisterMethodHandler(c string, v string, m types.MethodHandler) {
 		methods[c][v] = m
 		log.Default().Printf("... Added verb:%v.%v HTTP(method=%v params=%v)", c, v, m.HttpMethod, m.HttpQuery)
 	}
+	log.Default().Printf("Registered %v methods handlers", len(methods))
 }
 
 func Call(device *Device, component string, verb string, params any) any {
@@ -80,8 +79,6 @@ func Call(device *Device, component string, verb string, params any) any {
 
 func CallE(device *Device, c string, v string, params any) (any, error) {
 	method := fmt.Sprintf("%v.%v", c, v)
-	log.Default().Printf("calling %v body=%v", method, params)
-
 	var verb types.MethodHandler
 
 	if c == "Shelly" && v == "ListMethods" {
@@ -100,8 +97,8 @@ func CallE(device *Device, c string, v string, params any) (any, error) {
 	}
 
 	out := verb.Allocate()
-	log.Default().Printf("found configuration for method: %v.%v: parser:%v params:%v", c, v, reflect.TypeOf(out), params)
-
+	log.Default().Printf("calling channel:%s method:%v: parser:%v params:%v", channel, method, reflect.TypeOf(out), params)
+	log.Default().Printf("channels:%v", channels)
 	return channels[channel](device, verb, method, out, params)
 	// switch channel {
 	// case Http:
@@ -115,10 +112,10 @@ func CallE(device *Device, c string, v string, params any) (any, error) {
 
 var channels = make([]DeviceCaller, 3 /*sizeof(Channel*/)
 
-func RegisterDeviceCaller(channel Channel, dc DeviceCaller) {
-	log.Default().Printf("Registering %v for channel %v", dc, string(channel))
+func RegisterDeviceCaller(ch Channel, dc DeviceCaller) {
+	log.Default().Printf("Registering %v for channel %s", dc, ch)
 
-	channels[channel] = dc
+	channels[ch] = dc
 }
 
 type DeviceCaller func(device *Device, verb types.MethodHandler, method string, out any, params any) (any, error)
@@ -130,3 +127,7 @@ const (
 	Mqtt
 	Udp
 )
+
+func (ch Channel) String() string {
+	return [...]string{"Http", "Mqtt", "Udp"}[ch]
+}

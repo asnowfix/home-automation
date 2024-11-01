@@ -2,7 +2,6 @@ package http
 
 import (
 	"bytes"
-	"devices/shelly"
 	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
@@ -11,34 +10,54 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
+
+	"github.com/go-logr/logr"
 )
 
-func init() {
-	shelly.RegisterMethodHandler("HTTP", "GET", types.MethodHandler{
+var registrar types.MethodsRegistrar
+
+var logger logr.Logger
+
+type empty struct{}
+
+func Init(r types.MethodsRegistrar, l logr.Logger) {
+	// setup logger
+	logger = l
+	logger.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
+
+	// register methods
+	registrar = r
+	registrar.RegisterMethodHandler("HTTP", "GET", types.MethodHandler{
 		Allocate:   func() any { return new(Response) },
 		HttpQuery:  map[string]string{},
 		HttpMethod: http.MethodGet,
 	})
-	shelly.RegisterMethodHandler("HTTP", "POST", types.MethodHandler{
+	registrar.RegisterMethodHandler("HTTP", "POST", types.MethodHandler{
 		Allocate:   func() any { return new(Response) },
 		HttpQuery:  map[string]string{},
-		HttpMethod: http.MethodGet,
+		HttpMethod: http.MethodPost,
 	})
 
-	shelly.RegisterDeviceCaller(shelly.Http, shelly.DeviceCaller(callDevice))
+	// register channel
+	registrar.RegisterDeviceCaller(types.ChannelHttp, types.DeviceCaller(httpChannel.callE))
 }
 
-func callDevice(device *shelly.Device, verb types.MethodHandler, method string, out any, body any) (any, error) {
+type HttpChannel struct{}
+
+var httpChannel HttpChannel
+
+func (ch *HttpChannel) callE(device types.Device, verb types.MethodHandler, out any, body any) (any, error) {
 	var res *http.Response
 	var err error
 
 	switch verb.HttpMethod {
 	case http.MethodGet:
-		res, err = getE(device.Ipv4, method, verb.HttpQuery)
+		res, err = ch.getE(device.Ipv4(), verb.Method, verb.HttpQuery)
 	case http.MethodPost:
-		res, err = postE(device.Ipv4, method, body)
+		res, err = ch.postE(device.Ipv4(), verb.Method, body)
 	default:
-		return nil, fmt.Errorf("unhandled HTTP method '%v' for Shelly method '%v'", verb.HttpMethod, method)
+		return nil, fmt.Errorf("unhandled HTTP method '%v' for Shelly method '%v'", verb.HttpQuery, verb.Method)
 	}
 
 	if err != nil {
@@ -56,7 +75,7 @@ func callDevice(device *shelly.Device, verb types.MethodHandler, method string, 
 
 }
 
-func getE(ip net.IP, cmd string, qp types.QueryParams) (*http.Response, error) {
+func (ch *HttpChannel) getE(ip net.IP, cmd string, qp types.QueryParams) (*http.Response, error) {
 
 	values := url.Values{}
 	for key, value := range qp {
@@ -65,19 +84,19 @@ func getE(ip net.IP, cmd string, qp types.QueryParams) (*http.Response, error) {
 	query := values.Encode()
 
 	requestURL := fmt.Sprintf("http://%s/rpc/%s?%s", ip, cmd, query)
-	log.Default().Printf("Calling : %v\n", requestURL)
+	logger.Info("calling:", "url", requestURL)
 
 	res, err := http.Get(requestURL)
 	if err != nil {
-		log.Default().Printf("error making http request: %s\n", err)
+		logger.Info("error making http request", "error", err)
 		return nil, err
 	}
-	log.Default().Printf("status code: %d\n", res.StatusCode)
+	logger.Info("status code", "code", res.StatusCode)
 
 	return res, err
 }
 
-func postE(ip net.IP, cmd string, params any) (*http.Response, error) {
+func (ch *HttpChannel) postE(ip net.IP, cmd string, params any) (*http.Response, error) {
 
 	var payload struct {
 		Id     uint   `json:"id"`
@@ -97,7 +116,7 @@ func postE(ip net.IP, cmd string, params any) (*http.Response, error) {
 	}
 
 	requestURL := fmt.Sprintf("http://%s/rpc", ip)
-	log.Default().Printf("Preparing: %v %v body:%v", http.MethodPost, requestURL, string(jsonData))
+	logger.Info("Preparing", "method", http.MethodPost, "url", requestURL, "body", string(jsonData))
 
 	req, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewBuffer(jsonData))
 	if err != nil {
@@ -112,13 +131,13 @@ func postE(ip net.IP, cmd string, params any) (*http.Response, error) {
 
 	req.Header.Add("Content-Type", "application/json")
 
-	log.Default().Printf("Calling: %v %v", http.MethodPost, requestURL)
+	logger.Info("Calling", "method", http.MethodPost, "url", requestURL)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Default().Printf("error making http request: %s", err)
 		return nil, err
 	}
-	log.Default().Printf("status code: %d", res.StatusCode)
+	logger.Info("status code", "code", res.StatusCode)
 
 	return res, err
 }

@@ -1,4 +1,4 @@
-package mqtt
+package mymqtt
 
 import (
 	"context"

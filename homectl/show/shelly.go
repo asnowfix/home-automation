@@ -4,6 +4,7 @@ import (
 	"devices/shelly"
 	"devices/shelly/mqtt"
 	"devices/shelly/sswitch"
+	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
 	"hlog"
@@ -48,12 +49,16 @@ var showShellyCmd = &cobra.Command{
 			showWifiFlag = true
 		}
 
-		shelly.Foreach(args, showOneDevice)
+		ch := types.ChannelHttp
+		if !useHttpChannel {
+			ch = types.ChannelMqtt
+		}
+		shelly.Foreach(args, ch, showOneDevice)
 		return nil
 	},
 }
 
-func showOneDevice(device *shelly.Device) (*shelly.Device, error) {
+func showOneDevice(via types.Channel, device *shelly.Device) (*shelly.Device, error) {
 
 	var s struct {
 		DeviceInfo *shelly.DeviceInfo `json:"info"`
@@ -71,14 +76,19 @@ func showOneDevice(device *shelly.Device) (*shelly.Device, error) {
 	// dc := shelly.CallMethod(device, "Shelly", "GetConfig").(*shelly.DeviceConfiguration)
 	// ds := shelly.CallMethod(device, "Shelly", "GetStatus").(*shelly.DeviceStatus)
 
+	channel := types.ChannelMqtt
+	if useHttpChannel {
+		channel = types.ChannelHttp
+	}
+
 	if showMqttFlag {
-		s.Mqtt.Config = shelly.Call(device, "Mqtt", "GetConfig", nil).(*mqtt.Configuration)
-		s.Mqtt.Status = shelly.Call(device, "Mqtt", "GetStatus", nil).(*mqtt.Status)
+		s.Mqtt.Config = device.Call(channel, "Mqtt", "GetConfig", nil, &mqtt.ConfigResults{}).(*mqtt.Configuration)
+		s.Mqtt.Status = device.Call(channel, "Mqtt", "GetStatus", nil, &mqtt.Status{}).(*mqtt.Status)
 	}
 
 	if showSwitchFlag {
-		s.Switch.Config = shelly.Call(device, "Switch", "GetConfig", nil).(*sswitch.Configuration)
-		s.Switch.Status = shelly.Call(device, "Switch", "GetStatus", nil).(*sswitch.Status)
+		s.Switch.Config = device.Call(channel, "Switch", "GetConfig", nil, &sswitch.Configuration{}).(*sswitch.Configuration)
+		s.Switch.Status = device.Call(channel, "Switch", "GetStatus", nil, &sswitch.Status{}).(*sswitch.Status)
 	}
 
 	out, err := json.Marshal(s)

@@ -3,6 +3,7 @@ package shelly
 import (
 	"container/list"
 	"context"
+	"devices/shelly/types"
 	"encoding/json"
 	"log"
 	"strconv"
@@ -108,10 +109,10 @@ func newDeviceFromMdns(entry *zeroconf.ServiceEntry) *Device {
 		}
 	}
 	d := &Device{
-		Id:      nameRe.ReplaceAllString(entry.HostName, "${id}"),
+		Id_:     nameRe.ReplaceAllString(entry.HostName, "${id}"),
 		Service: entry.Service,
 		Host:    entry.HostName,
-		Ipv4:    entry.AddrIPv4[0],
+		Ipv4_:   entry.AddrIPv4[0],
 		Port:    entry.Port,
 		Product: Product{
 			Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),
@@ -121,6 +122,7 @@ func newDeviceFromMdns(entry *zeroconf.ServiceEntry) *Device {
 			Serial:      hostRe.ReplaceAllString(entry.HostName, "${serial}"),
 		},
 	}
-	d.Init()
+	// Initialize device usign http channel and default channel http type
+	d.Init(types.ChannelHttp)
 	return d
 }

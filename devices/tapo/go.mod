@@ -1,6 +1,6 @@
 module tapo
 
-go 1.21.4
+go 1.22
 
 require github.com/j-iot/tapo-go v0.0.0-20210626000425-49dce7306511
 

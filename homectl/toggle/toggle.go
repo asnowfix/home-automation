@@ -2,7 +2,9 @@ package toggle
 
 import (
 	"devices/shelly"
+	"devices/shelly/types"
 	"hlog"
+	"log"
 
 	"github.com/spf13/cobra"
 )
@@ -12,8 +14,17 @@ var Cmd = &cobra.Command{
 	Short: "Toggle switch devices",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		hlog.Init()
-		return shelly.Foreach(args, func(device *shelly.Device) (*shelly.Device, error) {
-			_, err := shelly.CallE(device, "Switch", "Toggle", nil)
+
+		ch := types.ChannelHttp
+		if !useHttpChannel {
+			ch = types.ChannelMqtt
+		}
+		return shelly.Foreach(args, ch, func(via types.Channel, device *shelly.Device) (*shelly.Device, error) {
+			_, err := device.CallE(ch, "Switch", "Toggle", nil)
+			if err != nil {
+				log.Default().Printf("Failed to toggle device %s: %v", device.Id_, err)
+				return nil, err
+			}
 			return device, err
 		})
 	},

@@ -2,7 +2,7 @@ package mqtt
 
 import (
 	"log"
-	"mqtt"
+	"mymqtt"
 	"mynet"
 	"net"
 	"net/url"
@@ -17,7 +17,7 @@ import (
 
 func MyHome(program string, info []string) (*zeroconf.Server, *url.URL, error) {
 
-	log.Default().Printf("Starting new MQTT server on %v", mqtt.Broker(true))
+	log.Default().Printf("Starting new MQTT server on %v", mymqtt.Broker(true))
 
 	// Create the new MQTT Server.
 	mqttServer := mmqtt.New(nil)
@@ -25,8 +25,12 @@ func MyHome(program string, info []string) (*zeroconf.Server, *url.URL, error) {
 	// Allow all connections.
 	_ = mqttServer.AddHook(new(auth.AllowHook), nil)
 
-	// Create a TCP listener on a standard port.
-	tcp := listeners.NewTCP(program, mqtt.Broker(true).Host, nil)
+	// Create a new MQTT TCP listener on a standard port.
+	tcp := listeners.NewTCP(listeners.Config{
+		ID:      "tcp",
+		Address: mymqtt.Broker(true).Host,
+	})
+
 	err := mqttServer.AddListener(tcp)
 	if err != nil {
 		log.Default().Printf("error adding TCP listener: %v", err)
@@ -53,13 +57,13 @@ func MyHome(program string, info []string) (*zeroconf.Server, *url.URL, error) {
 		return nil, nil, err
 	}
 
-	mdnsServer, err := zeroconf.Register(instance, mqtt.ZEROCONF_SERVICE, "local.", mqtt.PRIVATE_PORT, info, ifaces)
+	mdnsServer, err := zeroconf.Register(instance, mymqtt.ZEROCONF_SERVICE, "local.", mymqtt.PRIVATE_PORT, info, ifaces)
 	if err != nil {
 		log.Default().Printf("Registering new ZeroConf service: %v", err)
 		return nil, nil, err
 	}
 
-	log.Default().Printf("Started new MQTT server %v ZeroConf as service: %v", mdnsServer, mqtt.ZEROCONF_SERVICE)
+	log.Default().Printf("Started new MQTT server %v ZeroConf as service: %v", mdnsServer, mymqtt.ZEROCONF_SERVICE)
 
-	return mdnsServer, mqtt.Broker(true), nil
+	return mdnsServer, mymqtt.Broker(true), nil
 }

@@ -86,6 +86,10 @@ type Toogle struct {
 	Id int `json:"id"`
 }
 
+type ToogleResponse struct {
+	WasOn bool `json:"was_on"`
+}
+
 type Set struct {
 	Id          int  `json:"id"`                     // Id of the Switch component instance. Required
 	On          bool `json:"on"`                     // true for switch on, false otherwise. Required

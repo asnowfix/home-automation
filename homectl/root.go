@@ -11,6 +11,7 @@ import (
 	"homectl/show"
 	"homectl/toggle"
 
+	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
@@ -21,8 +22,13 @@ func main() {
 	}
 }
 
+var logger logr.Logger
+
 var rootCmd = &cobra.Command{
 	Use: "homectl",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger = hlog.Init()
+	},
 }
 
 func init() {

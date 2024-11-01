@@ -1,32 +1,44 @@
 package mqtt
 
 import (
-	"devices/shelly"
 	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
 	"log"
-	"mqtt"
+
+	"mymqtt"
 	"net/http"
 	"os"
+	"reflect"
+
+	"github.com/go-logr/logr"
 )
 
-func init() {
-	shelly.RegisterMethodHandler("Mqtt", "GetStatus", types.MethodHandler{
+var registrar types.MethodsRegistrar
+
+var logger logr.Logger
+
+type empty struct{}
+
+func Init(r types.MethodsRegistrar, l logr.Logger) {
+	logger = l
+	logger.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
+	registrar = r
+	r.RegisterMethodHandler("Mqtt", "GetStatus", types.MethodHandler{
 		Allocate: func() any { return new(Status) },
 		HttpQuery: map[string]string{
 			"id": "0",
 		},
 		HttpMethod: http.MethodGet,
 	})
-	shelly.RegisterMethodHandler("Mqtt", "GetConfig", types.MethodHandler{
+	r.RegisterMethodHandler("Mqtt", "GetConfig", types.MethodHandler{
 		Allocate: func() any { return new(Configuration) },
 		HttpQuery: map[string]string{
 			"id": "0",
 		},
 		HttpMethod: http.MethodGet,
 	})
-	shelly.RegisterMethodHandler("Mqtt", "SetConfig", types.MethodHandler{
+	r.RegisterMethodHandler("Mqtt", "SetConfig", types.MethodHandler{
 		Allocate: func() any { return new(ConfigResults) },
 		HttpQuery: map[string]string{
 			"id": "0",
@@ -34,11 +46,16 @@ func init() {
 		HttpMethod: http.MethodPost,
 	})
 
-	shelly.RegisterDeviceCaller(shelly.Mqtt, shelly.DeviceCaller(callDevice))
+	registrar.RegisterDeviceCaller(types.ChannelMqtt, types.DeviceCaller(mqttChannel.CallDevice))
 }
 
-func callDevice(device *shelly.Device, verb types.MethodHandler, method string, out any, params any) (any, error) {
-	reqTopic := fmt.Sprintf(" %v/rpc", device.Id)
+type MqttChannel struct {
+}
+
+var mqttChannel MqttChannel
+
+func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
+	reqTopic := fmt.Sprintf(" %v/rpc", device.Id())
 	// reqChan, err := mqtt.MqttSubscribe(mqtt.PrivateBroker(), reqTopic, uint(AtLeastOnce))
 	var req struct {
 		Source string `json:"src"`
@@ -54,10 +71,10 @@ func callDevice(device *shelly.Device, verb types.MethodHandler, method string, 
 	}
 	req.Source = fmt.Sprintf("%v_%v", hostname, os.Getpid())
 	req.Id = 0
-	req.Method = method
+	req.Method = verb.Method
 	req.Params = params
 
-	resChan, err := mqtt.MqttSubscribe(mqtt.Broker(false), fmt.Sprintf(" %v/rpc", req.Source), uint(AtLeastOnce))
+	resChan, err := mymqtt.MqttSubscribe(mymqtt.Broker(false), fmt.Sprintf(" %v/rpc", req.Source), uint(AtLeastOnce))
 	if err != nil {
 		log.Default().Printf("Unable to subscribe to topic '%v': %v", reqTopic, err)
 		return nil, err
@@ -69,7 +86,7 @@ func callDevice(device *shelly.Device, verb types.MethodHandler, method string, 
 		return nil, err
 	}
 
-	mqtt.MqttPublish(mqtt.Broker(false), reqTopic, reqPayload)
+	mymqtt.MqttPublish(mymqtt.Broker(false), reqTopic, reqPayload)
 	res := <-resChan
 
 	err = json.Unmarshal(res.Payload, &out)
@@ -79,31 +96,4 @@ func callDevice(device *shelly.Device, verb types.MethodHandler, method string, 
 	}
 
 	return out, nil
-}
-
-func Setup(device *shelly.Device) (*shelly.Device, error) {
-	config := shelly.Call(device, "Mqtt", "GetConfig", nil).(*Configuration)
-	configStr, _ := json.Marshal(config)
-	log.Default().Printf("initial MQTT config: %v", string(configStr))
-
-	status := shelly.Call(device, "Mqtt", "GetStatus", nil).(*Status)
-	statusStr, _ := json.Marshal(status)
-	log.Default().Printf("initial MQTT status: %v", string(statusStr))
-
-	config.Enable = true
-	config.RpcNotifs = true
-	config.StatusNotifs = true
-	broker := mqtt.Broker(false)
-	// Shelly MQTT Server is formatted like host:port
-	config.Server = fmt.Sprintf("%s:%s", broker.Hostname(), broker.Port())
-
-	configStr, _ = json.Marshal(config)
-	log.Default().Printf("new MQTT config: %v", string(configStr))
-
-	res := shelly.Call(device, "Mqtt", "SetConfig", config).(*ConfigResults)
-	if res.Result.RestartRequired {
-		_, err := shelly.CallE(device, "Shelly", "Reboot", config)
-		return device, err
-	}
-	return device, nil
 }

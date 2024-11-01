@@ -1,18 +1,19 @@
 package hlog
 
 import (
-	"io"
-	"log"
+	"github.com/go-logr/logr"
+	"github.com/iand/logfmtr"
 )
 
 var Verbose bool
 
-func Init() {
-	if !Verbose {
-		log.Default().SetOutput(io.Discard)
-	} else {
-		// File name & Line number in logs
-		log.SetFlags(log.LstdFlags | log.Llongfile)
-		log.Default().Print("Turning on logging")
-	}
+func Init() logr.Logger {
+
+	// Set options that all loggers will be based on
+	opts := logfmtr.DefaultOptions()
+	opts.Humanize = true
+	opts.AddCaller = true
+	logfmtr.UseOptions(opts)
+
+	return logfmtr.NewNamed("hlog")
 }

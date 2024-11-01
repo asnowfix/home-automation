@@ -4,8 +4,6 @@ import (
 	"devices/shelly"
 	"log"
 	"net"
-
-	"golang.org/x/exp/maps"
 )
 
 type ShellyDevice struct {
@@ -21,7 +19,7 @@ func (d ShellyDevice) Name() string {
 }
 
 func (d ShellyDevice) Ip() net.IP {
-	return d.shelly.Ipv4
+	return d.shelly.Ipv4()
 }
 
 func (d ShellyDevice) Mac() net.HardwareAddr {
@@ -60,7 +58,15 @@ func ListShellyDevices() ([]Host, error) {
 	}
 	sd := make([]ShellyDevice, len(devices))
 	hosts := make([]Host, len(devices))
-	keys := maps.Keys(devices)
+
+	// Extract keys of a map as a slice (pre go 1.23)
+	keys := make([]string, len(devices))
+	i := 0
+	for k := range devices {
+		keys[i] = k
+		i++
+	}
+
 	for i := range keys {
 		sd[i].shelly = devices[keys[i]]
 		hosts[i] = sd[i]

@@ -1,4 +1,4 @@
-go 1.21.4
+go 1.23.0
 
 use (
 	.
@@ -6,25 +6,25 @@ use (
 	./devices/sfr
 	./devices/shelly
 	./devices/shelly/gen1
-	./devices/shelly/http
 	./devices/shelly/input
 	./devices/shelly/script
+	./devices/shelly/shttp
 	./devices/shelly/sswitch
 	./devices/shelly/system
 	./devices/shelly/types
 	./devices/tapo
-	./myhome/http
-	./myhome/logs
-	./myhome/mqtt
-	./homectl/list
 	./hlog
-	./mqtt
+	./homectl/list
+	./homectl/mqtt
 	./homectl/set
-	./homectl/toggle
 	./homectl/set/shelly
 	./homectl/show
-	./homectl/mqtt
+	./homectl/toggle
 	./internal/myip
 	./internal/mynet
 	./internal/myzone
+	./myhome/http
+	./myhome/logs
+	./myhome/mqtt
+	./mymqtt
 )

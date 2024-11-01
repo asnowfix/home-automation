@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"mqtt"
+	"mymqtt"
 	"reflect"
 	"sync"
 	"time"
@@ -13,21 +13,21 @@ import (
 
 func CommandProxy(run chan struct{}) {
 
-	subscriptions := make(map[string]func(mqtt.MqttMessage))
+	subscriptions := make(map[string]func(mymqtt.MqttMessage))
 	subscriptions["devices/status"] = handleDevicesStatus
 
-	subsch := make(map[string]chan mqtt.MqttMessage)
+	subsch := make(map[string]chan mymqtt.MqttMessage)
 	for topic, handler := range subscriptions {
 		// Subscribe to the topic
 		log.Default().Print("Subscribing to topic ", topic)
-		subsch[topic], _ = mqtt.MqttSubscribe(mqtt.Broker(true), topic, 0)
-		go func(topic string, handler func(mqtt.MqttMessage)) {
+		subsch[topic], _ = mymqtt.MqttSubscribe(mymqtt.Broker(true), topic, 0)
+		go func(topic string, handler func(mymqtt.MqttMessage)) {
 			for {
 				select {
 				// In case of channel close, exit the loop
 				case <-subsch[topic]:
 					log.Default().Print("Unsubscribing from topic ", topic)
-					mqtt.MqttClient(mqtt.Broker(true)).Unsubscribe(topic).Wait()
+					mymqtt.MqttClient(mymqtt.Broker(true)).Unsubscribe(topic).Wait()
 					return
 				// In case of message, handle it
 				case msg := <-subsch[topic]:
@@ -79,7 +79,7 @@ func refreshHosts() {
 	log.Default().Print(hosts)
 }
 
-func handleDevicesStatus(msg mqtt.MqttMessage) {
+func handleDevicesStatus(msg mymqtt.MqttMessage) {
 	hostsLock.Lock()
 	defer hostsLock.Unlock()
 
@@ -106,7 +106,7 @@ func handleDevicesStatus(msg mqtt.MqttMessage) {
 		handleError(req.ClientId, req.RequestId, err)
 		return
 	}
-	mqtt.MqttPublish(mqtt.Broker(true), fmt.Sprintf("client/%v", req.ClientId), out)
+	mymqtt.MqttPublish(mymqtt.Broker(true), fmt.Sprintf("client/%v", req.ClientId), out)
 }
 
 func handleError(clientId string, requestId string, err error) {
@@ -121,5 +121,5 @@ func handleError(clientId string, requestId string, err error) {
 		log.Default().Print(err)
 		return
 	}
-	mqtt.MqttPublish(mqtt.Broker(true), fmt.Sprintf("client/%v", clientId), out)
+	mymqtt.MqttPublish(mymqtt.Broker(true), fmt.Sprintf("client/%v", clientId), out)
 }

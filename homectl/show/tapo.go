@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var switches []string = []string{
+var Switches []string = []string{
 	"P100",
 	"P110",
 }

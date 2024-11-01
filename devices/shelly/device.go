@@ -23,14 +23,22 @@ type Product struct {
 
 type Device struct {
 	Product
-	Id         string                                    `json:"id"`
+	Id_        string                                    `json:"id"`
 	Service    string                                    `json:"service"`
 	MacAddress net.HardwareAddr                          `json:"mac"`
 	Host       string                                    `json:"host"`
-	Ipv4       net.IP                                    `json:"ipv4"`
+	Ipv4_      net.IP                                    `json:"ipv4"`
 	Port       int                                       `json:"port"`
 	Info       *DeviceInfo                               `json:"info"`
 	Components map[string]map[string]types.MethodHandler `json:"methods"`
+}
+
+func (d *Device) Id() string {
+	return d.Id_
+}
+
+func (d *Device) Ipv4() net.IP {
+	return d.Ipv4_
 }
 
 type Methods struct {
@@ -60,21 +68,57 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
+func (d *Device) Call(ch types.Channel, component string, verb string, params any, errv any) any {
+	data, err := d.CallE(ch, component, verb, params)
+	if err != nil {
+		log.Default().Printf("failure calling device %v: %v", d.Id(), err)
+		return errv
+	}
+	return data
+}
+
+func (d *Device) MethodHandlerE(c string, v string) (types.MethodHandler, error) {
+	var mh types.MethodHandler
+
+	if c == "Shelly" && v == "ListMethods" {
+		mh = listMethodsHandler
+	} else {
+		found := false
+		if comp, exists := d.Components[c]; exists {
+			if mh, exists = comp[v]; exists {
+				found = true
+			}
+		}
+		if !found {
+			return types.MethodNotFound, fmt.Errorf("did not find any handler for method: %v.%v", c, v)
+		}
+	}
+	return mh, nil
+}
+
+func (d *Device) CallE(ch types.Channel, comp string, verb string, params any) (any, error) {
+	mh, err := d.MethodHandlerE(comp, verb)
+	if err != nil {
+		return nil, err
+	}
+	return GetRegistrar().CallE(d, ch, mh, params)
+}
+
 func NewDeviceFromIp(ip net.IP) *Device {
 	s := ip.String()
 	if d, exists := devicesMap[s]; exists {
 		return d
 	}
 	d := &Device{
-		Ipv4: ip,
+		Ipv4_: ip,
 	}
-	d.Init()
+	d.Init(types.ChannelHttp)
 	addDevice(s, d)
 	return d
 }
 
-func (d *Device) Init() *Device {
-	m, err := CallE(d, "Shelly", "ListMethods", nil)
+func (d *Device) Init(ch types.Channel) *Device {
+	m, err := GetRegistrar().CallE(d, ch, listMethodsHandler, nil)
 	if err != nil {
 		log.Default().Printf("Shelly.ListMethods: %v", err)
 		return d
@@ -93,9 +137,9 @@ func (d *Device) Init() *Device {
 				if _, exists := d.Components[c]; !exists {
 					d.Components[c] = make(map[string]types.MethodHandler)
 				}
-				if _, exists := methods[c]; exists {
-					if _, exists := methods[c][v]; exists {
-						d.Components[c][v] = methods[c][v]
+				if _, exists := registrar.methods[c]; exists {
+					if _, exists := registrar.methods[c][v]; exists {
+						d.Components[c][v] = registrar.methods[c][v]
 					}
 				}
 			}
@@ -103,7 +147,7 @@ func (d *Device) Init() *Device {
 	}
 	log.Default().Printf("device.Api: %v", d.Components)
 
-	di, err := CallE(d, "Shelly", "GetDeviceInfo", nil)
+	di, err := d.CallE(ch, "Shelly", "GetDeviceInfo", nil)
 	if err != nil {
 		log.Default().Printf("Shelly.GetDeviceInfo: %v", err)
 		return d
@@ -111,7 +155,7 @@ func (d *Device) Init() *Device {
 	d.Info = di.(*DeviceInfo)
 	log.Default().Printf("Shelly.GetDeviceInfo: loaded %v", *d.Info)
 
-	d.Id = d.Info.Id
+	d.Id_ = d.Info.Id
 
 	return d
 }
@@ -175,7 +219,7 @@ func Lookup(name string) (*Device, error) {
 			if device.Info != nil && device.Info.MacAddress != nil && device.Info.MacAddress.String() == name {
 				return device, nil
 			}
-			if device.Ipv4 != nil && device.Ipv4.String() == name {
+			if device.Ipv4() != nil && device.Ipv4().String() == name {
 				return device, nil
 			}
 			if device.Host == name {
@@ -189,9 +233,9 @@ func Lookup(name string) (*Device, error) {
 	}
 }
 
-type Do func(*Device) (*Device, error)
+type Do func(types.Channel, *Device) (*Device, error)
 
-func Foreach(args []string, do Do) error {
+func Foreach(args []string, via types.Channel, do Do) error {
 	log.Default().Printf("Running %v on %v", reflect.TypeOf(do), args)
 
 	if len(args) > 0 {
@@ -202,7 +246,7 @@ func Foreach(args []string, do Do) error {
 				log.Default().Printf("Skipping device %v: %v", name, err)
 				continue
 			}
-			_, err = do(device)
+			_, err = do(via, device)
 			if err != nil {
 				log.Default().Printf("Operation on %v failed: %v", name, err)
 				continue
@@ -211,7 +255,7 @@ func Foreach(args []string, do Do) error {
 	} else {
 		log.Default().Print("Running on every device")
 		for _, device := range Devices() {
-			do(device)
+			do(via, device)
 		}
 	}
 	return nil

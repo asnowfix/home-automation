@@ -83,7 +83,7 @@ func (ch *HttpChannel) getE(ip net.IP, cmd string, qp types.QueryParams) (*http.
 	query := values.Encode()
 
 	requestURL := fmt.Sprintf("http://%s/rpc/%s?%s", ip, cmd, query)
-	log.Info("calling:", "url", requestURL)
+	log.Info("Calling", "method", http.MethodGet, "url", requestURL)
 
 	res, err := http.Get(requestURL)
 	if err != nil {

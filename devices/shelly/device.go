@@ -128,7 +128,7 @@ func (d *Device) Init(ch types.Channel) *Device {
 	}
 
 	ms := m.(*Methods)
-	d.log.Info("Shelly.ListMethods: %v", ms)
+	d.log.Info("Shelly.ListMethods", "methods", ms)
 
 	d.Components = make(map[string]map[string]types.MethodHandler)
 	for _, m := range ms.Methods {
@@ -148,7 +148,7 @@ func (d *Device) Init(ch types.Channel) *Device {
 			}
 		}
 	}
-	d.log.Info("device.Api: %v", d.Components)
+	d.log.Info("device API", "components", d.Components)
 
 	di, err := d.CallE(ch, "Shelly", "GetDeviceInfo", nil)
 	if err != nil {
@@ -207,14 +207,14 @@ func addDevice(log logr.Logger, name string, device *Device) {
 func Lookup(log logr.Logger, name string) (*Device, error) {
 	ip := net.ParseIP(name)
 	if ip != nil {
-		log.Info("Contacting device IP '%v'", ip)
+		log.Info("Contacting device", "ip", ip)
 		return NewDeviceFromIp(log, ip), nil
 	} else {
 		devices := Devices(log)
-		log.Info("Looking-up '%v' in devices %v", name, devices)
+		log.Info("Looking-up in...", "name", name, "devices", devices)
 
 		for key, device := range devices {
-			log.Info("Matching '%v' against %v", name, device)
+			log.Info("Matching", "name", name, "device", device)
 
 			if key == name {
 				return device, nil
@@ -232,7 +232,7 @@ func Lookup(log logr.Logger, name string) (*Device, error) {
 				return device, nil
 			}
 		}
-		return nil, errors.New("No device matching '" + name + "'")
+		return nil, errors.New("No device matching name:'" + name + "'")
 	}
 }
 
@@ -243,7 +243,7 @@ func Foreach(log logr.Logger, args []string, via types.Channel, do Do) error {
 
 	if len(args) > 0 {
 		for _, name := range args {
-			log.Info("Looking for Shelly device %v", name)
+			log.Info("Looking for Shelly device", "name", name)
 			device, err := Lookup(log, name)
 			if err != nil {
 				log.Info("Skipping device %v: %v", name, err)

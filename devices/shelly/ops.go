@@ -9,7 +9,6 @@ import (
 	"reflect"
 
 	"github.com/go-logr/logr"
-	"github.com/pkg/errors"
 )
 
 func Init(log logr.Logger) {
@@ -33,6 +32,7 @@ type Registrar struct {
 }
 
 var listMethodsHandler = types.MethodHandler{
+	Method:     "Shelly.ListMethods",
 	Allocate:   func() any { return new(Methods) },
 	HttpQuery:  map[string]string{},
 	HttpMethod: http.MethodGet,
@@ -79,28 +79,25 @@ func (r *Registrar) RegisterMethodHandler(c string, v string, m types.MethodHand
 		r.log.Info("Added", "component", c)
 	}
 	if _, exists := r.methods[c][v]; !exists {
+		m.Method = fmt.Sprintf("%s.%s", c, v)
 		r.methods[c][v] = m
 		r.log.Info("Registered", "component", c, "verb", v, "http_method", m.HttpMethod, " http_query", m.HttpQuery)
 	}
-	m.Method = fmt.Sprintf("%s.%s", c, v)
 	r.log.Info("Registered methods", "num", len(r.methods))
 }
-
-var ChannelRegistered = errors.Errorf("channel registration")
 
 func (r *Registrar) RegisterDeviceCaller(ch types.Channel, dc types.DeviceCaller) {
 	r.log.Info("Registering", "channel", ch, "caller", dc)
 
-	// err := errors.New(fmt.Sprintf("Registering %v for channel %s", dc, ch))
-	err := errors.Wrap(fmt.Errorf("registering %v for channel %s", dc, ch), "foo")
-	// err := errors.New(ChannelRegistered)
-	r.log.Error(err, "Registering", "channel", ch, "caller", dc)
+	// err := errors.Wrap(fmt.Errorf("stack registering %v for channel %s", dc, ch), "registering")
+	// r.log.Error(err, "Registering", "channel", ch, "caller", dc)
 
 	r.channels[ch] = dc
 }
 
 func (r *Registrar) CallE(d types.Device, ch types.Channel, mh types.MethodHandler, params any) (any, error) {
 	out := mh.Allocate()
-	r.log.Info("calling", "channel", ch, "method", mh.HttpMethod, "params", params, "out_type", reflect.TypeOf(out))
+	// r.log.Info("Calling", "channel", ch, "method", mh.Method, "http_method", mh.HttpMethod, "params", params, "out_type", reflect.TypeOf(out))
+	r.log.Info("Calling", "channel", ch, "method_handler", mh, "params", params, "out_type", reflect.TypeOf(out))
 	return r.channels[ch](d, mh, out, params)
 }

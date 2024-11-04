@@ -31,10 +31,10 @@ func (ch Channel) String() string {
 type QueryParams map[string]string
 
 type MethodHandler struct {
-	Method     string
-	Allocate   func() any
-	HttpQuery  QueryParams `json:"params"` // Built in parameters
-	HttpMethod string      // The HTTP request method to use (See https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods)
+	Method     string      `json:"method"`      // The method name
+	Allocate   func() any  `json:"-"`           // Allocate a new instance of the output type
+	HttpQuery  QueryParams `json:"http_params"` // Built in parameters
+	HttpMethod string      `json:"http_method"` // The HTTP request method to use (See https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods)
 }
 
 var MethodNotFound = MethodHandler{}

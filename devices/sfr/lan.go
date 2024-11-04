@@ -1,7 +1,5 @@
 package sfr
 
-import "log"
-
 func LanGetHostsList() ([]*XmlHost, error) {
 	if len(token) == 0 {
 		renewToken()
@@ -11,7 +9,7 @@ func LanGetHostsList() ([]*XmlHost, error) {
 	}
 	res, err := queryBox("lan.getHostsList", &params)
 	if err != nil {
-		log.Default().Println(err)
+		log.Info("lan.getHostsList", err)
 		return nil, err
 	}
 

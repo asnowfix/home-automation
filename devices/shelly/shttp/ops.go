@@ -5,11 +5,9 @@ import (
 	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"reflect"
 
 	"github.com/go-logr/logr"
@@ -17,14 +15,14 @@ import (
 
 var registrar types.MethodsRegistrar
 
-var logger logr.Logger
+var log logr.Logger
 
 type empty struct{}
 
-func Init(r types.MethodsRegistrar, l logr.Logger) {
+func Init(l logr.Logger, r types.MethodsRegistrar) {
 	// setup logger
-	logger = l
-	logger.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
+	log = l
+	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
 
 	// register methods
 	registrar = r
@@ -43,7 +41,8 @@ func Init(r types.MethodsRegistrar, l logr.Logger) {
 	registrar.RegisterDeviceCaller(types.ChannelHttp, types.DeviceCaller(httpChannel.callE))
 }
 
-type HttpChannel struct{}
+type HttpChannel struct {
+}
 
 var httpChannel HttpChannel
 
@@ -61,13 +60,13 @@ func (ch *HttpChannel) callE(device types.Device, verb types.MethodHandler, out 
 	}
 
 	if err != nil {
-		log.Default().Print(err)
+		log.Info("HTTP error", err)
 		return nil, err
 	}
 
 	err = json.NewDecoder(res.Body).Decode(&out)
 	if err != nil {
-		log.Default().Print(err)
+		log.Error(err, "HTTP error decoding response")
 		return nil, err
 	}
 
@@ -84,14 +83,14 @@ func (ch *HttpChannel) getE(ip net.IP, cmd string, qp types.QueryParams) (*http.
 	query := values.Encode()
 
 	requestURL := fmt.Sprintf("http://%s/rpc/%s?%s", ip, cmd, query)
-	logger.Info("calling:", "url", requestURL)
+	log.Info("calling:", "url", requestURL)
 
 	res, err := http.Get(requestURL)
 	if err != nil {
-		logger.Info("error making http request", "error", err)
+		log.Error(err, "HTTP GET error")
 		return nil, err
 	}
-	logger.Info("status code", "code", res.StatusCode)
+	log.Info("status code", "code", res.StatusCode)
 
 	return res, err
 }
@@ -116,12 +115,12 @@ func (ch *HttpChannel) postE(ip net.IP, cmd string, params any) (*http.Response,
 	}
 
 	requestURL := fmt.Sprintf("http://%s/rpc", ip)
-	logger.Info("Preparing", "method", http.MethodPost, "url", requestURL, "body", string(jsonData))
+	log.Info("Preparing", "method", http.MethodPost, "url", requestURL, "body", string(jsonData))
 
 	req, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		log.Print(err)
-		os.Exit(1)
+		log.Error(err, "error creating HTTP POST request")
+		return nil, err
 	}
 
 	// q := req.URL.Query()
@@ -131,13 +130,12 @@ func (ch *HttpChannel) postE(ip net.IP, cmd string, params any) (*http.Response,
 
 	req.Header.Add("Content-Type", "application/json")
 
-	logger.Info("Calling", "method", http.MethodPost, "url", requestURL)
+	log.Info("Calling", "method", http.MethodPost, "url", requestURL)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Default().Printf("error making http request: %s", err)
-		return nil, err
+		log.Error(err, "HTTP POST error")
 	}
-	logger.Info("status code", "code", res.StatusCode)
+	log.Info("status code", "code", res.StatusCode)
 
 	return res, err
 }

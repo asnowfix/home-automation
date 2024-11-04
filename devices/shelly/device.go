@@ -4,12 +4,13 @@ import (
 	"devices/shelly/types"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"reflect"
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/go-logr/logr"
 )
 
 type Product struct {
@@ -22,6 +23,7 @@ type Product struct {
 }
 
 type Device struct {
+	log logr.Logger
 	Product
 	Id_        string                                    `json:"id"`
 	Service    string                                    `json:"service"`
@@ -71,7 +73,7 @@ var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 func (d *Device) Call(ch types.Channel, component string, verb string, params any, errv any) any {
 	data, err := d.CallE(ch, component, verb, params)
 	if err != nil {
-		log.Default().Printf("failure calling device %v: %v", d.Id(), err)
+		d.log.Info("failure calling device %v: %v", d.Id(), err)
 		return errv
 	}
 	return data
@@ -104,28 +106,29 @@ func (d *Device) CallE(ch types.Channel, comp string, verb string, params any) (
 	return GetRegistrar().CallE(d, ch, mh, params)
 }
 
-func NewDeviceFromIp(ip net.IP) *Device {
+func NewDeviceFromIp(log logr.Logger, ip net.IP) *Device {
 	s := ip.String()
 	if d, exists := devicesMap[s]; exists {
 		return d
 	}
 	d := &Device{
+		log:   log,
 		Ipv4_: ip,
 	}
 	d.Init(types.ChannelHttp)
-	addDevice(s, d)
+	addDevice(log, s, d)
 	return d
 }
 
 func (d *Device) Init(ch types.Channel) *Device {
 	m, err := GetRegistrar().CallE(d, ch, listMethodsHandler, nil)
 	if err != nil {
-		log.Default().Printf("Shelly.ListMethods: %v", err)
+		d.log.Error(err, "Shelly.ListMethods")
 		return d
 	}
 
 	ms := m.(*Methods)
-	log.Default().Printf("Shelly.ListMethods: %v", ms)
+	d.log.Info("Shelly.ListMethods: %v", ms)
 
 	d.Components = make(map[string]map[string]types.MethodHandler)
 	for _, m := range ms.Methods {
@@ -145,15 +148,15 @@ func (d *Device) Init(ch types.Channel) *Device {
 			}
 		}
 	}
-	log.Default().Printf("device.Api: %v", d.Components)
+	d.log.Info("device.Api: %v", d.Components)
 
 	di, err := d.CallE(ch, "Shelly", "GetDeviceInfo", nil)
 	if err != nil {
-		log.Default().Printf("Shelly.GetDeviceInfo: %v", err)
+		d.log.Info("Shelly.GetDeviceInfo: %v", err)
 		return d
 	}
 	d.Info = di.(*DeviceInfo)
-	log.Default().Printf("Shelly.GetDeviceInfo: loaded %v", *d.Info)
+	d.log.Info("Shelly.GetDeviceInfo: loaded %v", *d.Info)
 
 	d.Id_ = d.Info.Id
 
@@ -172,46 +175,46 @@ var devicesMap map[string]*Device = make(map[string]*Device)
 
 var devicesMutex sync.Mutex
 
-func Devices() map[string]*Device {
-	devices, _ := DevicesE()
+func Devices(log logr.Logger) map[string]*Device {
+	devices, _ := DevicesE(log)
 	return devices
 }
 
-func DevicesE() (map[string]*Device, error) {
+func DevicesE(log logr.Logger) (map[string]*Device, error) {
 	devicesMutex.Lock()
 	if len(devicesMap) == 0 {
-		err := loadDevicesFromMdns()
+		err := loadDevicesFromMdns(log)
 		if err != nil {
-			log.Default().Fatal(err)
+			log.Error(err, "Unable to load devices from mDNS")
 			return nil, err
 		}
-		log.Default().Printf("Discovered %v devices", len(devicesMap))
+		log.Info("Discovered %v devices", len(devicesMap))
 	}
-	log.Default().Printf("Knows %v devices (%v)", len(devicesMap), devicesMap)
+	log.Info("Knows %v devices (%v)", len(devicesMap), devicesMap)
 	devicesMutex.Unlock()
 	return devicesMap, nil
 }
 
-func addDevice(name string, device *Device) {
+func addDevice(log logr.Logger, name string, device *Device) {
 	if _, exists := devicesMap[name]; !exists {
-		log.Default().Printf("Loading %v (%v)", name, *device)
+		log.Info("Loading", "name", name, "device", *device)
 		devicesMap[name] = device
 	} else {
-		log.Default().Printf("Already loaded %v", name)
+		log.Info("Already loaded", "name", name)
 	}
 }
 
-func Lookup(name string) (*Device, error) {
+func Lookup(log logr.Logger, name string) (*Device, error) {
 	ip := net.ParseIP(name)
 	if ip != nil {
-		log.Default().Printf("Contacting device IP '%v'", ip)
-		return NewDeviceFromIp(ip), nil
+		log.Info("Contacting device IP '%v'", ip)
+		return NewDeviceFromIp(log, ip), nil
 	} else {
-		devices := Devices()
-		log.Default().Printf("Looking-up '%v' in devices %v", name, devices)
+		devices := Devices(log)
+		log.Info("Looking-up '%v' in devices %v", name, devices)
 
 		for key, device := range devices {
-			log.Default().Printf("Matching '%v' against %v", name, device)
+			log.Info("Matching '%v' against %v", name, device)
 
 			if key == name {
 				return device, nil
@@ -233,29 +236,29 @@ func Lookup(name string) (*Device, error) {
 	}
 }
 
-type Do func(types.Channel, *Device) (*Device, error)
+type Do func(logr.Logger, types.Channel, *Device) (*Device, error)
 
-func Foreach(args []string, via types.Channel, do Do) error {
-	log.Default().Printf("Running %v on %v", reflect.TypeOf(do), args)
+func Foreach(log logr.Logger, args []string, via types.Channel, do Do) error {
+	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
 
 	if len(args) > 0 {
 		for _, name := range args {
-			log.Default().Printf("Looking for Shelly device %v", name)
-			device, err := Lookup(name)
+			log.Info("Looking for Shelly device %v", name)
+			device, err := Lookup(log, name)
 			if err != nil {
-				log.Default().Printf("Skipping device %v: %v", name, err)
+				log.Info("Skipping device %v: %v", name, err)
 				continue
 			}
-			_, err = do(via, device)
+			_, err = do(log, via, device)
 			if err != nil {
-				log.Default().Printf("Operation on %v failed: %v", name, err)
+				log.Info("Operation on %v failed: %v", name, err)
 				continue
 			}
 		}
 	} else {
-		log.Default().Print("Running on every device")
-		for _, device := range Devices() {
-			do(via, device)
+		log.Info("Running on every device")
+		for _, device := range Devices(log) {
+			do(log, via, device)
 		}
 	}
 	return nil

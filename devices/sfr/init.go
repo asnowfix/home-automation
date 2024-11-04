@@ -1,16 +1,18 @@
 package sfr
 
 import (
-	"log"
-
+	"github.com/go-logr/logr"
 	"github.com/jackpal/gateway"
 )
 
-func Init() {
+var log logr.Logger
+
+func Init(l logr.Logger) {
+	log = l
 	boxIp, err := gateway.DiscoverGateway()
 	if err != nil {
-		log.Fatal(err)
+		log.Error(err, "failed to discover gateway")
 	} else {
-		log.Default().Printf("assuming the box IP is %v", boxIp)
+		log.Info("assuming the box IP is %v", boxIp)
 	}
 }

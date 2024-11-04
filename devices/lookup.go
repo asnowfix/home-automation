@@ -2,13 +2,14 @@ package devices
 
 import (
 	"fmt"
-	"log"
+
+	"github.com/go-logr/logr"
 )
 
-func Lookup(name string) (*Host, error) {
-	hosts, err := List()
+func Lookup(log logr.Logger, name string) (*Host, error) {
+	hosts, err := List(log)
 	if err != nil {
-		log.Default().Print(err)
+		log.Info("did not find host named", name, err)
 		return nil, err
 	}
 	for _, host := range hosts {

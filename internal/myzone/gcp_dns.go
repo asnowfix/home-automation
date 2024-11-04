@@ -2,14 +2,14 @@ package myzone
 
 import (
 	"context"
-	"log"
 	"os"
 
+	"github.com/go-logr/logr"
 	dns "google.golang.org/api/dns/v2"
 	"google.golang.org/api/option"
 )
 
-func MyGcpZone() error {
+func MyGcpZone(log logr.Logger) error {
 	ctx := context.Background()
 
 	// config := &oauth2.Config{
@@ -33,6 +33,6 @@ func MyGcpZone() error {
 	if err != nil {
 		panic(err)
 	}
-	log.Default().Printf("Projects.Get: %v", resp.ManagedZones)
+	log.Info("Projects.Get: %v", resp.ManagedZones)
 	return nil
 }

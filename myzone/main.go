@@ -1,9 +1,11 @@
 package main
 
 import (
+	"hlog"
 	"internal/myzone"
 )
 
 func main() {
-	myzone.MyGcpZone()
+	log := hlog.Init()
+	myzone.MyGcpZone(log)
 }

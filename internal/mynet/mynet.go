@@ -2,44 +2,44 @@ package mynet
 
 import (
 	"fmt"
-	"log"
 	"net"
 
+	"github.com/go-logr/logr"
 	"github.com/jackpal/gateway"
 )
 
-func MainInterface() (*net.Interface, *net.IP, error) {
+func MainInterface(log logr.Logger) (*net.Interface, *net.IP, error) {
 
 	gw, err := gateway.DiscoverGateway()
 	if err != nil {
-		log.Default().Printf("finding network gateway: %v", err)
+		log.Info("finding network gateway: %v", err)
 		return nil, nil, err
 	}
-	log.Default().Printf("net gw addr: %v", gw.String())
+	log.Info("net gw addr: %v", gw.String())
 
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		log.Default().Printf("listing interfaces: %v", err)
+		log.Info("listing interfaces: %v", err)
 		return nil, nil, err
 	}
 	for _, iface := range ifaces {
 		addrs, err := iface.Addrs()
 		if err != nil {
-			log.Default().Printf("finding adresses for interface %v: %v", iface, err)
+			log.Info("finding adresses for interface %v: %v", iface, err)
 			continue
 		}
 		for _, addr := range addrs {
-			log.Default().Printf("%v %v", iface.Name, addr)
+			log.Info("%v %v", iface.Name, addr)
 			ip, nw, err := net.ParseCIDR(addr.String())
 			if err != nil {
-				log.Default().Printf("reading CIDR notation for %v: %v", addr.String(), err)
+				log.Info("reading CIDR notation for %v: %v", addr.String(), err)
 			} else {
 				if nw.Contains(gw) {
-					log.Default().Printf("selecting iface %v with ip %v: contains gw ip %v", addr, ip, gw)
+					log.Info("selecting iface %v with ip %v: contains gw ip %v", addr, ip, gw)
 
 					return &iface, &ip, nil
 				} else {
-					log.Default().Printf("skipping iface %v: does not contains gw ip %v", addr, gw)
+					log.Info("skipping iface %v: does not contains gw ip %v", addr, gw)
 				}
 			}
 		}

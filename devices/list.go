@@ -2,32 +2,33 @@ package devices
 
 import (
 	"fmt"
-	"log"
 	"net"
+
+	"github.com/go-logr/logr"
 )
 
 type ListDevicesFunc func() ([]Host, error)
 
 var listDevicesFuncs []ListDevicesFunc
 
-func Register(f ListDevicesFunc) {
-	log.Default().Print("Registering")
+func Register(log logr.Logger, f ListDevicesFunc) {
+	log.Info("Registering")
 	listDevicesFuncs = append(listDevicesFuncs, f)
 }
 
-func List() ([]Host, error) {
+func List(log logr.Logger) ([]Host, error) {
 	var err error
 	var all []Host = make([]Host, 0)
 	for _, ld := range listDevicesFuncs {
 		h, err := ld()
 		if err == nil {
-			// log.Default().Printf("%v found matching hosts:", ld.Name(), h.Name())
+			// log.Info("%v found matching hosts:", ld.Name(), h.Name())
 			all = append(all, h...)
 		} else {
-			log.Default().Print(err)
+			log.Info("did not find matching host", err)
 		}
 	}
-	log.Default().Printf("found %v matching hosts:", len(all))
+	log.Info("found matching hosts", "len", len(all))
 	return all, err
 }
 
@@ -41,14 +42,14 @@ func Filter[T any](s []T, cond func(t T) bool) []T {
 	return res
 }
 
-func Topics(dn []string) ([]Topic, error) {
-	hosts, err := Hosts(dn)
+func Topics(log logr.Logger, dn []string) ([]Topic, error) {
+	hosts, err := Hosts(log, dn)
 	if err != nil {
-		log.Default().Print(err)
+		log.Info("cannot get hosts for", dn)
 		return nil, err
 	}
 	topics := make([]Topic, len(hosts))
-	log.Default().Printf("found %v hosts", len(hosts))
+	log.Info("found %v hosts", len(hosts))
 
 	for i, host := range hosts {
 		topics[i] = host.Topic()
@@ -56,15 +57,15 @@ func Topics(dn []string) ([]Topic, error) {
 	return topics, nil
 }
 
-func Hosts(args []string) ([]Host, error) {
+func Hosts(log logr.Logger, args []string) ([]Host, error) {
 	if len(args) == 0 || len(args[0]) == 0 {
-		log.Default().Print("not host provided: using all of them")
-		return List()
+		log.Info("not host provided: using all of them")
+		return List(log)
 	}
 
-	hosts, err := List()
+	hosts, err := List(log)
 	if err != nil {
-		log.Default().Print(err)
+		log.Info("cannot list hosts", err)
 		return nil, err
 	}
 
@@ -83,13 +84,13 @@ func Hosts(args []string) ([]Host, error) {
 
 type Do func(*Host) (*Host, error)
 
-func Foreach(args []string, do Do) error {
+func Foreach(log logr.Logger, args []string, do Do) error {
 	if len(args) > 0 {
 		for _, name := range args {
-			log.Default().Printf("Looking for device %v", name)
-			host, err := Lookup(name)
+			log.Info("Looking for device %v", name)
+			host, err := Lookup(log, name)
 			if err != nil {
-				log.Default().Print(err)
+				log.Info("lookup failed", host, err)
 				return err
 			}
 			_, err = do(host)

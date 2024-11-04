@@ -4,35 +4,36 @@ import (
 	"devices"
 	"encoding/json"
 	"fmt"
-	"log"
 	"mymqtt"
 	"reflect"
 	"sync"
 	"time"
+
+	"github.com/go-logr/logr"
 )
 
-func CommandProxy(run chan struct{}) {
+func CommandProxy(log logr.Logger, run chan struct{}) {
 
-	subscriptions := make(map[string]func(mymqtt.MqttMessage))
+	subscriptions := make(map[string]func(logr.Logger, mymqtt.MqttMessage))
 	subscriptions["devices/status"] = handleDevicesStatus
 
 	subsch := make(map[string]chan mymqtt.MqttMessage)
 	for topic, handler := range subscriptions {
 		// Subscribe to the topic
-		log.Default().Print("Subscribing to topic ", topic)
-		subsch[topic], _ = mymqtt.MqttSubscribe(mymqtt.Broker(true), topic, 0)
-		go func(topic string, handler func(mymqtt.MqttMessage)) {
+		log.Info("Subscribing to topic ", topic)
+		subsch[topic], _ = mymqtt.MqttSubscribe(log, mymqtt.Broker(log, true), topic, 0)
+		go func(topic string, handler func(logr.Logger, mymqtt.MqttMessage)) {
 			for {
 				select {
 				// In case of channel close, exit the loop
 				case <-subsch[topic]:
-					log.Default().Print("Unsubscribing from topic ", topic)
-					mymqtt.MqttClient(mymqtt.Broker(true)).Unsubscribe(topic).Wait()
+					log.Info("Unsubscribing from topic ", topic)
+					mymqtt.MqttClient(log, mymqtt.Broker(log, true)).Unsubscribe(topic).Wait()
 					return
 				// In case of message, handle it
 				case msg := <-subsch[topic]:
-					log.Default().Print("Received message on topic ", topic)
-					handler(msg)
+					log.Info("Received message on topic ", topic)
+					handler(log, msg)
 				}
 			}
 		}(topic, handler)
@@ -45,7 +46,7 @@ func CommandProxy(run chan struct{}) {
 		case <-refresh:
 			return
 		case <-time.After(60 * time.Second):
-			refreshHosts()
+			refreshHosts(log)
 		}
 	}()
 
@@ -53,11 +54,11 @@ func CommandProxy(run chan struct{}) {
 	<-run
 
 	// Tell the refresh loop to stop
-	log.Default().Print("Closing refresh channel")
+	log.Info("Closing refresh channel")
 	refresh <- struct{}{}
 
 	for topic, subch := range subsch {
-		log.Default().Print("Closing subscription channel for topic", topic)
+		log.Info("Closing subscription channel for topic", topic)
 		close(subch)
 	}
 }
@@ -66,20 +67,20 @@ var hostsLock sync.Mutex
 
 var hosts []devices.Host
 
-func refreshHosts() {
+func refreshHosts(log logr.Logger) {
 	hostsLock.Lock()
 	defer hostsLock.Unlock()
 
 	var err error
-	hosts, err = devices.List()
+	hosts, err = devices.List(log)
 	if err != nil {
-		log.Default().Print(err)
+		log.Error(err, "Unable to list devices")
 		return
 	}
-	log.Default().Print(hosts)
+	log.Info("hosts", hosts)
 }
 
-func handleDevicesStatus(msg mymqtt.MqttMessage) {
+func handleDevicesStatus(log logr.Logger, msg mymqtt.MqttMessage) {
 	hostsLock.Lock()
 	defer hostsLock.Unlock()
 
@@ -89,7 +90,7 @@ func handleDevicesStatus(msg mymqtt.MqttMessage) {
 	}
 	err := json.Unmarshal(msg.Payload, &req)
 	if err != nil {
-		log.Default().Print(err)
+		log.Error(err, "Unable to unmarshal message")
 		return
 	}
 
@@ -100,16 +101,16 @@ func handleDevicesStatus(msg mymqtt.MqttMessage) {
 	}
 	res.RequestId = req.RequestId
 
-	log.Default().Printf("Found %v devices '%v'\n", len(hosts), reflect.TypeOf(hosts))
+	log.Info("Found devices", "len", len(hosts), "type", reflect.TypeOf(hosts))
 	out, err := json.Marshal(hosts)
 	if err != nil {
-		handleError(req.ClientId, req.RequestId, err)
+		handleError(log, req.ClientId, req.RequestId, err)
 		return
 	}
-	mymqtt.MqttPublish(mymqtt.Broker(true), fmt.Sprintf("client/%v", req.ClientId), out)
+	mymqtt.MqttPublish(log, mymqtt.Broker(log, true), fmt.Sprintf("client/%v", req.ClientId), out)
 }
 
-func handleError(clientId string, requestId string, err error) {
+func handleError(log logr.Logger, clientId string, requestId string, err error) {
 	var res struct {
 		RequestId string `json:"request_id"`
 		Error     string `json:"error,omitempty"`
@@ -118,8 +119,8 @@ func handleError(clientId string, requestId string, err error) {
 	res.Error = err.Error()
 	out, err := json.Marshal(res)
 	if err != nil {
-		log.Default().Print(err)
+		log.Error(err, "Unable to marshal error response")
 		return
 	}
-	mymqtt.MqttPublish(mymqtt.Broker(true), fmt.Sprintf("client/%v", clientId), out)
+	mymqtt.MqttPublish(log, mymqtt.Broker(log, true), fmt.Sprintf("client/%v", clientId), out)
 }

@@ -5,7 +5,6 @@ import (
 	shttp "devices/shelly/shttp"
 	"devices/shelly/types"
 	"fmt"
-	"log"
 	"net/http"
 	"reflect"
 
@@ -13,10 +12,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-func Init(l logr.Logger) {
-	registrar.Init()
-	shttp.Init(&registrar, l)
-	mqtt.Init(&registrar, l)
+func Init(log logr.Logger) {
+	registrar.Init(log)
+	shttp.Init(log, &registrar)
+	mqtt.Init(log, &registrar)
 }
 
 var registrar Registrar
@@ -27,6 +26,7 @@ func GetRegistrar() *Registrar {
 }
 
 type Registrar struct {
+	log      logr.Logger
 	methods  map[string]map[string]types.MethodHandler
 	channel  types.Channel
 	channels []types.DeviceCaller
@@ -38,7 +38,8 @@ var listMethodsHandler = types.MethodHandler{
 	HttpMethod: http.MethodGet,
 }
 
-func (r *Registrar) Init() {
+func (r *Registrar) Init(log logr.Logger) {
+	r.log = log
 	r.channel = types.ChannelHttp
 	r.channels = make([]types.DeviceCaller, 3 /*sizeof(Channel)*/)
 
@@ -72,34 +73,34 @@ func (r *Registrar) Init() {
 }
 
 func (r *Registrar) RegisterMethodHandler(c string, v string, m types.MethodHandler) {
-	log.Default().Printf("Registering handler for method:%v.%v...", c, v)
+	r.log.Info("Registering", "component", c, "verb", v)
 	if _, exists := r.methods[c]; !exists {
 		r.methods[c] = make(map[string]types.MethodHandler)
-		log.Default().Printf("... Added API:%v", c)
+		r.log.Info("Added", "component", c)
 	}
 	if _, exists := r.methods[c][v]; !exists {
 		r.methods[c][v] = m
-		log.Default().Printf("... Added verb:%v.%v HTTP(method=%v params=%v)", c, v, m.HttpMethod, m.HttpQuery)
+		r.log.Info("Registered", "component", c, "verb", v, "http_method", m.HttpMethod, " http_query", m.HttpQuery)
 	}
 	m.Method = fmt.Sprintf("%s.%s", c, v)
-	log.Default().Printf("Registered %v methods handlers", len(r.methods))
+	r.log.Info("Registered methods", "num", len(r.methods))
 }
 
 var ChannelRegistered = errors.Errorf("channel registration")
 
 func (r *Registrar) RegisterDeviceCaller(ch types.Channel, dc types.DeviceCaller) {
-	log.Default().Printf("Registering %v for channel %s", dc, ch)
+	r.log.Info("Registering", "channel", ch, "caller", dc)
 
 	// err := errors.New(fmt.Sprintf("Registering %v for channel %s", dc, ch))
 	err := errors.Wrap(fmt.Errorf("registering %v for channel %s", dc, ch), "foo")
 	// err := errors.New(ChannelRegistered)
-	log.Default().Print(err)
+	r.log.Error(err, "Registering", "channel", ch, "caller", dc)
 
 	r.channels[ch] = dc
 }
 
 func (r *Registrar) CallE(d types.Device, ch types.Channel, mh types.MethodHandler, params any) (any, error) {
 	out := mh.Allocate()
-	log.Default().Printf("calling channel:%s method:%v parser:%v params:%v", ch, mh, reflect.TypeOf(out), params)
+	r.log.Info("calling", "channel", ch, "method", mh.HttpMethod, "params", params, "out_type", reflect.TypeOf(out))
 	return r.channels[ch](d, mh, out, params)
 }

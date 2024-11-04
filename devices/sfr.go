@@ -2,23 +2,25 @@ package devices
 
 import (
 	"devices/sfr"
-	"log"
 	"net"
+
+	"github.com/go-logr/logr"
 )
 
-func ListSfrDevices() ([]Host, error) {
+func ListSfrDevices(log logr.Logger) ([]Host, error) {
 	xmlHosts, err := sfr.LanGetHostsList()
 	if err != nil {
-		log.Default().Print(err)
+		log.Info("Failed to get SFR hosts list: %v", err)
 		return nil, err
 	}
 
 	hosts := make([]Host, len(xmlHosts))
 	sh := make([]SfrHost, len(xmlHosts))
 	for i, xmlHost := range xmlHosts {
-		log.Default().Println(xmlHost)
+		log.Info("Found SFR host %v", xmlHost.Name)
 		sh[i] = SfrHost{
 			xml: xmlHost,
+			log: log,
 		}
 		hosts[i] = sh[i]
 	}
@@ -27,6 +29,7 @@ func ListSfrDevices() ([]Host, error) {
 }
 
 type SfrHost struct {
+	log logr.Logger
 	xml *sfr.XmlHost
 }
 
@@ -59,11 +62,11 @@ func (h SfrHost) IsConnected() bool {
 }
 
 func (h SfrHost) Publish(msg []byte) {
-	log.Default().Printf("Fake topic (%v) discarding '%v'.", h.Provider(), string(msg)) // TODO connect to real MQTT
+	h.log.Info("Fake topic (%v) discarding '%v'.", h.Provider(), string(msg)) // TODO connect to real MQTT
 }
 
 func (h SfrHost) Subscribe(handler func(msg []byte)) {
-	log.Default().Printf("Fake topic (%v) will not receive anything.", h.Provider()) // TODO connect to real MQTT
+	h.log.Info("Fake topic (%v) will not receive anything.", h.Provider()) // TODO connect to real MQTT
 }
 
 func (h SfrHost) MarshalJSON() ([]byte, error) {

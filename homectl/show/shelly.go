@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hlog"
 
+	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +41,9 @@ var showShellyCmd = &cobra.Command{
 	Use:   "shelly",
 	Short: "Show Shelly devices",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		hlog.Init()
+		log := hlog.Init()
+		shelly.Init(log)
+
 		if showAllFlag {
 			showCloudFlag = true
 			showConfigFlag = true
@@ -53,12 +56,12 @@ var showShellyCmd = &cobra.Command{
 		if !useHttpChannel {
 			ch = types.ChannelMqtt
 		}
-		shelly.Foreach(args, ch, showOneDevice)
+		shelly.Foreach(log, args, ch, showOneDevice)
 		return nil
 	},
 }
 
-func showOneDevice(via types.Channel, device *shelly.Device) (*shelly.Device, error) {
+func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device) (*shelly.Device, error) {
 
 	var s struct {
 		DeviceInfo *shelly.DeviceInfo `json:"info"`

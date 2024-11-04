@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
-	"log"
 	"reflect"
 
 	"github.com/spf13/cobra"
@@ -15,15 +14,15 @@ var Cmd = &cobra.Command{
 	Use:   "list",
 	Short: "List known devices connected on the home gateway",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		hlog.Init()
+		log := hlog.Init()
 		// devices.Init()
 
-		hosts, err := devices.List()
+		hosts, err := devices.List(log)
 		if err != nil {
-			log.Default().Print(err)
+			log.Error(err, "Failed to list devices")
 			return err
 		}
-		log.Default().Printf("Found %v devices '%v'\n", len(hosts), reflect.TypeOf(hosts))
+		log.Info("Found devices", "length", len(hosts), "type", reflect.TypeOf(hosts))
 		out, err := json.Marshal(hosts)
 		if err != nil {
 			return err

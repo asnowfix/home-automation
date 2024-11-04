@@ -7,7 +7,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -63,13 +62,13 @@ type Auth struct {
 func renewToken() error {
 	t, method, err := getToken()
 	if err != nil {
-		log.Default().Println(err)
+		log.Info("getToken()", err)
 		return err
 	}
 	if method == "passwd" || method == "all" {
 		err = checkToken(t)
 		if err != nil {
-			log.Default().Println(err)
+			log.Info("checkToken()", err)
 			return err
 		}
 	}
@@ -81,24 +80,24 @@ func getToken() (string, string, error) {
 	params := map[string]string{}
 	res, err := queryBox("auth.getToken", &params)
 	if err != nil {
-		log.Default().Println(err)
+		log.Info("auth.getToken", err)
 		return "", "", err
 	}
 	auth := res.(*Auth)
-	log.Default().Printf("Token: %v", auth.Token)
-	log.Default().Printf("Method: %v", auth.Method)
+	log.Info("Token: %v", auth.Token)
+	log.Info("Method: %v", auth.Method)
 	return auth.Token, auth.Method, nil
 }
 
 func checkToken(token string) error {
 	uh, err := doHash(username, []byte(token))
 	if err != nil {
-		log.Default().Println(err)
+		log.Info("doHash()", err)
 		return err
 	}
 	ph, err := doHash(password, []byte(token))
 	if err != nil {
-		log.Default().Println(err)
+		log.Info("doHash()", err)
 		return err
 	}
 	params := map[string]string{
@@ -107,10 +106,10 @@ func checkToken(token string) error {
 	}
 	_, err = queryBox("auth.checkToken", &params)
 	if err != nil {
-		log.Default().Println(err)
+		log.Info("auth.checkToken", err)
 		return err
 	}
-	log.Default().Printf("Valid token: %v", token)
+	log.Info("Valid token: %v", token)
 	return nil
 }
 
@@ -119,14 +118,14 @@ func doHash(value string, tb []byte) (string, error) {
 	h.Write([]byte(value))
 	hh := hex.EncodeToString(h.Sum(nil))
 
-	log.Default().Printf("SHA256(data: %s): %s (len: %v)", value, hh, len(hh))
+	log.Info("SHA256(data: %s): %s (len: %v)", value, hh, len(hh))
 
 	// create a new HMAC by defining the hash type and the key
 	hmac := hmac.New(sha256.New, tb)
 
 	// compute the HMAC
 	if _, err := hmac.Write([]byte(hh)); err != nil {
-		log.Default().Println(err)
+		log.Info("hmac.Write()", err)
 		return "", err
 	}
 	dataHmac := hmac.Sum(nil)
@@ -134,7 +133,7 @@ func doHash(value string, tb []byte) (string, error) {
 	hmacHex := hex.EncodeToString(dataHmac)
 	secretHex := hex.EncodeToString(tb)
 
-	log.Default().Printf("HMAC_SHA256(key: %s, data: %s): %s (len: %v)", secretHex, string(value), hmacHex, len(hmacHex))
+	log.Info("HMAC_SHA256(key: %s, data: %s): %s (len: %v)", secretHex, string(value), hmacHex, len(hmacHex))
 	return hmacHex, nil
 }
 
@@ -151,21 +150,21 @@ func queryBox(method string, params *map[string]string) (any, error) {
 		Path:     "/api/1.0/",
 		RawQuery: values.Encode(),
 	}
-	log.Default().Printf("Calling url: %v", u)
+	log.Info("Calling url: %v", u)
 
 	xmlBytes, err := getXML(u.String())
 	if err != nil {
-		log.Default().Printf("Failed to get XML: %v", err)
+		log.Info("Failed to get XML: %v", err)
 		return nil, err
 	}
-	log.Default().Printf("Result (Raw): %v", string(xmlBytes))
+	log.Info("Result (Raw): %v", string(xmlBytes))
 	var res Response
 	if err := xml.Unmarshal(xmlBytes, &res); err != nil {
 		return nil, err
 	}
 	if res.Status == "fail" {
-		log.Default().Printf("Err Code: %v", res.Error.Code)
-		log.Default().Printf("Err Msg: %v", res.Error.Message)
+		log.Info("Err Code: %v", res.Error.Code)
+		log.Info("Err Msg: %v", res.Error.Message)
 		return nil, fmt.Errorf("%v (%v)", res.Error.Message, res.Error.Code)
 	} else if res.Auth != nil {
 		return res.Auth, nil

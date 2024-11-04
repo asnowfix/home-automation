@@ -3,24 +3,17 @@ package main
 import (
 	"devices/shelly/gen1"
 	"fmt"
+	"hlog"
+	"myhome/http"
+	"myhome/logs"
+	"myhome/mqtt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-
-	"hlog"
-
-	"myhome/http"
-	"myhome/logs"
-	"myhome/mqtt"
 )
 
-var Program string
-var Repo string
-var Version string
-var Commit string
-
-func main() {
+func start() {
 	log := hlog.Init()
 
 	// Create signals channel to run server until interrupted
@@ -59,14 +52,14 @@ func main() {
 	go http.MyHome(log, gen1Ch)
 	go gen1.Publisher(log, gen1Ch, topicsCh, broker)
 
-	proxyCh := make(chan struct{}, 1)
-	go mqtt.CommandProxy(log, proxyCh)
+	// proxyCh := make(chan struct{}, 1)
+	// go mqtt.CommandProxy(proxyCh)
 
 	// Run server until interrupted
 	<-done
 
-	// Close command proxy channel
-	close(proxyCh)
+	// // Close command proxy channel
+	// close(proxyCh)
 
 	// Cleanup
 }

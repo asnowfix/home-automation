@@ -3,7 +3,6 @@ package mqtt
 import (
 	"devices"
 	"hlog"
-	"log"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -29,18 +28,18 @@ var pubCmd = &cobra.Command{
 	Use:   "pub",
 	Short: "Publish to device(s) MQTT topic(s)",
 	Run: func(cmd *cobra.Command, args []string) {
-		hlog.Init()
+		log := hlog.Init()
 		// devices.Init()
 
 		dn := strings.Split(options.devices, ",")
-		log.Default().Printf("looking for devices: %v", dn)
-		topics, err := devices.Topics(dn)
+		log.Info("looking for devices: %v", dn)
+		topics, err := devices.Topics(log, dn)
 		if err != nil {
-			log.Default().Panic(err)
+			log.Error(err, "Failed to list devices")
 		}
 		msg := strings.Join(args, "")
 		for _, topic := range topics {
-			log.Default().Printf("MQTT <<< %v", msg)
+			log.Info("MQTT <<< %v", msg)
 			topic.Publish([]byte(msg))
 		}
 	},
@@ -50,16 +49,16 @@ var subCmd = &cobra.Command{
 	Use:   "sub",
 	Short: "Subscribe to device(s) MQTT topic(s)",
 	Run: func(cmd *cobra.Command, args []string) {
-		hlog.Init()
+		log := hlog.Init()
 		// devices.Init()
 
-		topics, err := devices.Topics(strings.Split(options.devices, ","))
+		topics, err := devices.Topics(log, strings.Split(options.devices, ","))
 		if err != nil {
-			log.Default().Panic(err)
+			log.Error(err, "Failed to list devices")
 		}
 		for _, topic := range topics {
 			topic.Subscribe(func(msg []byte) {
-				log.Default().Printf("MQTT >>> %v", msg)
+				log.Info("MQTT >>> %v", msg)
 			})
 		}
 	},

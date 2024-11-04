@@ -2,6 +2,7 @@ package show
 
 import (
 	"fmt"
+	"hlog"
 	"net"
 	"tapo"
 
@@ -19,7 +20,8 @@ var showTapoCmd = &cobra.Command{
 	// Long:  `All software has versions. This is Hugo's`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		sw, err := tapo.NewSwitch(net.ParseIP(args[0]))
+		log := hlog.Init()
+		sw, err := tapo.NewSwitch(log, net.ParseIP(args[0]))
 		if err != nil {
 			panic(err)
 		}

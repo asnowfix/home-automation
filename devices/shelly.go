@@ -2,11 +2,13 @@ package devices
 
 import (
 	"devices/shelly"
-	"log"
 	"net"
+
+	"github.com/go-logr/logr"
 )
 
 type ShellyDevice struct {
+	log    logr.Logger
 	shelly *shelly.Device
 }
 
@@ -39,21 +41,21 @@ func (d ShellyDevice) IsConnected() bool {
 }
 
 func (d ShellyDevice) Publish(msg []byte) {
-	log.Default().Printf("Fake topic (%v) discarding '%v'.", d.Provider(), string(msg)) // TODO connect to real MQTT
+	d.log.Info("Fake topic (%v) discarding '%v'.", d.Provider(), string(msg)) // TODO connect to real MQTT
 }
 
 func (d ShellyDevice) Subscribe(handler func(msg []byte)) {
-	log.Default().Printf("Fake topic (%v) will not receive anything.", d.Provider()) // TODO connect to real MQTT
+	d.log.Info("Fake topic (%v) will not receive anything.", d.Provider()) // TODO connect to real MQTT
 }
 
 func (d ShellyDevice) MarshalJSON() ([]byte, error) {
 	return MarshalJSON(d)
 }
 
-func ListShellyDevices() ([]Host, error) {
-	devices, err := shelly.DevicesE()
+func ListShellyDevices(log logr.Logger) ([]Host, error) {
+	devices, err := shelly.DevicesE(log)
 	if err != nil {
-		log.Default().Print(err)
+		log.Info("Unable to list Shelly devices: %v", err)
 		return nil, err
 	}
 	sd := make([]ShellyDevice, len(devices))
@@ -69,6 +71,7 @@ func ListShellyDevices() ([]Host, error) {
 
 	for i := range keys {
 		sd[i].shelly = devices[keys[i]]
+		sd[i].log = log
 		hosts[i] = sd[i]
 	}
 	return hosts, nil

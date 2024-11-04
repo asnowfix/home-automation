@@ -4,7 +4,6 @@ import (
 	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"mymqtt"
 	"net/http"
@@ -16,13 +15,13 @@ import (
 
 var registrar types.MethodsRegistrar
 
-var logger logr.Logger
+var log logr.Logger
 
 type empty struct{}
 
-func Init(r types.MethodsRegistrar, l logr.Logger) {
-	logger = l
-	logger.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
+func Init(l logr.Logger, r types.MethodsRegistrar) {
+	log = l
+	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
 	registrar = r
 	r.RegisterMethodHandler("Mqtt", "GetStatus", types.MethodHandler{
 		Allocate: func() any { return new(Status) },
@@ -66,7 +65,7 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 
 	hostname, err := os.Hostname()
 	if err != nil {
-		log.Default().Printf("Unable to get local hostname: %v", err)
+		log.Info("Unable to get local hostname: %v", err)
 		return nil, err
 	}
 	req.Source = fmt.Sprintf("%v_%v", hostname, os.Getpid())
@@ -74,24 +73,24 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 	req.Method = verb.Method
 	req.Params = params
 
-	resChan, err := mymqtt.MqttSubscribe(mymqtt.Broker(false), fmt.Sprintf(" %v/rpc", req.Source), uint(AtLeastOnce))
+	resChan, err := mymqtt.MqttSubscribe(log, mymqtt.Broker(log, false), fmt.Sprintf(" %v/rpc", req.Source), uint(AtLeastOnce))
 	if err != nil {
-		log.Default().Printf("Unable to subscribe to topic '%v': %v", reqTopic, err)
+		log.Info("Unable to subscribe to topic '%v': %v", reqTopic, err)
 		return nil, err
 	}
 
 	reqPayload, err := json.Marshal(req)
 	if err != nil {
-		log.Default().Printf("Unable to marshal request payload '%v': %v", req, err)
+		log.Info("Unable to marshal request payload '%v': %v", req, err)
 		return nil, err
 	}
 
-	mymqtt.MqttPublish(mymqtt.Broker(false), reqTopic, reqPayload)
+	mymqtt.MqttPublish(log, mymqtt.Broker(log, false), reqTopic, reqPayload)
 	res := <-resChan
 
 	err = json.Unmarshal(res.Payload, &out)
 	if err != nil {
-		log.Default().Printf("Unable to unmarshal response payload '%v': %v", res, err)
+		log.Info("Unable to unmarshal response payload '%v': %v", res, err)
 		return nil, err
 	}
 

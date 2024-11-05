@@ -63,7 +63,7 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 		return nil, nil, err
 	}
 
-	log.Info("Started new MQTT server %v ZeroConf as service: %v", mdnsServer, mymqtt.ZEROCONF_SERVICE)
+	log.Info("Started new MQTT broker", "mdns_server", mdnsServer, "mdns_service", mymqtt.ZEROCONF_SERVICE)
 
 	return mdnsServer, mymqtt.Broker(log, true), nil
 }

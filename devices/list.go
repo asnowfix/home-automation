@@ -22,10 +22,9 @@ func List(log logr.Logger) ([]Host, error) {
 	for _, ld := range listDevicesFuncs {
 		h, err := ld()
 		if err == nil {
-			// log.Info("%v found matching hosts:", ld.Name(), h.Name())
 			all = append(all, h...)
 		} else {
-			log.Info("did not find matching host", err)
+			log.Error(err, "did not find matching host")
 		}
 	}
 	log.Info("found matching hosts", "len", len(all))
@@ -45,11 +44,11 @@ func Filter[T any](s []T, cond func(t T) bool) []T {
 func Topics(log logr.Logger, dn []string) ([]Topic, error) {
 	hosts, err := Hosts(log, dn)
 	if err != nil {
-		log.Info("cannot get hosts for", dn)
+		log.Info("cannot get hosts for", "topic", dn)
 		return nil, err
 	}
 	topics := make([]Topic, len(hosts))
-	log.Info("found %v hosts", len(hosts))
+	log.Info("found hosts", "num_hosts", len(hosts))
 
 	for i, host := range hosts {
 		topics[i] = host.Topic()
@@ -71,7 +70,7 @@ func Hosts(log logr.Logger, args []string) ([]Host, error) {
 
 	ip := net.ParseIP(args[0])
 	if ip == nil {
-		return nil, fmt.Errorf("did not find a known Host for '%v'", args[0])
+		return nil, fmt.Errorf("did not find a known Host for", "hostname", args[0])
 	}
 
 	return Filter[Host](hosts, func(h Host) bool {
@@ -87,10 +86,10 @@ type Do func(*Host) (*Host, error)
 func Foreach(log logr.Logger, args []string, do Do) error {
 	if len(args) > 0 {
 		for _, name := range args {
-			log.Info("Looking for device %v", name)
+			log.Info("Looking for device", "name", name)
 			host, err := Lookup(log, name)
 			if err != nil {
-				log.Info("lookup failed", host, err)
+				log.Error(err, "lookup failed", "hostname", host)
 				return err
 			}
 			_, err = do(host)

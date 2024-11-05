@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +17,7 @@ import (
 	"github.com/grandcat/zeroconf"
 )
 
-const BROKER_HOSTNAME = "mqtt"
+const BROKER_SERVICE = "_mqtt._tcp."
 const PRIVATE_PORT = 1883
 const PUBLIC_PORT = 8883
 
@@ -31,17 +32,20 @@ func Broker(log logr.Logger, myself bool) *url.URL {
 	if _broker == nil {
 		var ip *net.IP
 		if myself {
+			log.Info("Using local IP as MQTT broker")
 			_, lip, err := mynet.MainInterface(log)
 			if err != nil {
 				log.Error(err, "Could not get local IP")
+				return nil
 			}
 			ip = lip
 		} else {
-			ips, err := net.LookupIP(BROKER_HOSTNAME)
+			log.Info("Looking up MQTT broker")
+			ips, err := lookupBroker(log)
 			if err == nil {
 				ip = &ips[0]
 			} else {
-				log.Info("Could not find IPs for host %v: %v", BROKER_HOSTNAME, err)
+				log.Error(err, "Zeroconf lookup failed", "service", BROKER_SERVICE)
 				_broker = zeronconfBroker(log)
 			}
 		}
@@ -53,6 +57,38 @@ func Broker(log logr.Logger, myself bool) *url.URL {
 	return _broker
 }
 
+func lookupBroker(log logr.Logger) ([]net.IP, error) {
+	log.Info("Looking up via Zeroconf", "service", BROKER_SERVICE)
+
+	resolver, err := zeroconf.NewResolver(nil)
+	if err != nil {
+		log.Error(err, "Failed to initialize Zeroconf resolver")
+		return nil, err
+	}
+
+	ips := make([]net.IP, 0)
+	entries := make(chan *zeroconf.ServiceEntry)
+
+	go func() {
+		// until the channel is closed
+		for entry := range entries {
+			log.Info("Found from Zeroconf", "entry", entry)
+			ips = append(ips, entry.AddrIPv4...)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
+	defer cancel()
+	err = resolver.Browse(ctx, BROKER_SERVICE, "", entries)
+	if err != nil {
+		log.Error(err, "Failed to browse")
+		return nil, err
+	}
+
+	<-ctx.Done()
+	return ips, nil
+}
+
 var mqttClient mqtt.Client = nil
 
 var mutexClient sync.Mutex
@@ -62,8 +98,8 @@ func MqttClient(log logr.Logger, broker *url.URL) mqtt.Client {
 	defer mutexClient.Unlock()
 
 	if mqttClient == nil {
-		clientId := fmt.Sprintf("%v:%v", os.Args[0], os.Getpid())
-		log.Info("Initializing MQTT client %v", clientId)
+		clientId := fmt.Sprintf("%v:%v", path.Base(os.Args[0]), os.Getpid())
+		log.Info("Initializing MQTT client", "client_id", clientId)
 
 		opts := mqtt.NewClientOptions()
 		opts.SetUsername(MqttUsername)
@@ -76,7 +112,7 @@ func MqttClient(log logr.Logger, broker *url.URL) mqtt.Client {
 			opts.Servers = make([]*url.URL, 1)
 			opts.Servers[0] = broker
 		} else {
-			log.Info("Using MQTT broker '%s'", broker.String())
+			log.Info("Using MQTT", "broker", broker.String())
 			opts.AddBroker(broker.String())
 			opts.Servers = []*url.URL{broker}
 		}
@@ -85,10 +121,10 @@ func MqttClient(log logr.Logger, broker *url.URL) mqtt.Client {
 		mqttClient := mqtt.NewClient(opts)
 		token := mqttClient.Connect()
 		for !token.WaitTimeout(3 * time.Second) {
-			log.Info("Waiting for MQTT client %v to connect", clientId)
+			log.Info("Waiting for MQTT client to connect", "client_id", clientId)
 		}
 		if err := token.Error(); err != nil {
-			log.Error(err, "Failed to connect MQTT client %v (%v)", clientId, mqttClient)
+			log.Error(err, "Failed to connect MQTT client", "client_id", clientId, "mqtt_client", mqttClient)
 		}
 		log.Info("Connected MQTT client %v (%v)", clientId, mqttClient)
 	}
@@ -100,7 +136,7 @@ var MqttUsername string = ""
 
 var MqttPassword string = ""
 
-const ZEROCONF_SERVICE = "_mqtt._tcp"
+const ZEROCONF_SERVICE = "_mqtt._tcp."
 
 var brokers []*url.URL = make([]*url.URL, 0)
 
@@ -152,9 +188,9 @@ func MqttSubscribe(log logr.Logger, broker *url.URL, topic string, qlen uint) (c
 	mch := make(chan MqttMessage, qlen)
 
 	go func() {
-		log.Info("MqttSubscribe: subscribing to %s", topic)
+		log.Info("MqttSubscribe: subscribing:", "topic", topic)
 		MqttClient(log, broker).Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
-			log.Info("MqttSubscribe: MQTT(%s) >>> %s", msg.Topic(), string(msg.Payload()))
+			log.Info("MqttSubscribe received:", "topic", msg.Topic(), "payload", string(msg.Payload()))
 			mch <- MqttMessage{
 				Topic:   msg.Topic(),
 				Payload: msg.Payload(),
@@ -166,6 +202,6 @@ func MqttSubscribe(log logr.Logger, broker *url.URL, topic string, qlen uint) (c
 }
 
 func MqttPublish(log logr.Logger, broker *url.URL, topic string, msg []byte) {
-	log.Info("MqttPublish: MQTT(%s) <<< %s", topic, string(msg))
+	log.Info("MqttPublish: to", "topic", topic, "payload", string(msg))
 	MqttClient(log, broker).Publish(topic, 0, false, msg)
 }

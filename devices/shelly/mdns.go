@@ -13,7 +13,7 @@ import (
 	"github.com/grandcat/zeroconf"
 )
 
-const MDNS_SHELLIES string = "_shelly._tcp"
+const MDNS_SHELLIES string = "_shelly._tcp."
 
 func mdnsShellies(log logr.Logger, tc chan string) {
 	resolver, err := zeroconf.NewResolver(nil)

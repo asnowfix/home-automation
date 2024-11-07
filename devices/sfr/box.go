@@ -84,8 +84,7 @@ func getToken() (string, string, error) {
 		return "", "", err
 	}
 	auth := res.(*Auth)
-	log.Info("Token: %v", auth.Token)
-	log.Info("Method: %v", auth.Method)
+	log.Info("Auth", "token", auth.Token, "method", auth.Method)
 	return auth.Token, auth.Method, nil
 }
 
@@ -109,7 +108,7 @@ func checkToken(token string) error {
 		log.Info("auth.checkToken", err)
 		return err
 	}
-	log.Info("Valid token: %v", token)
+	log.Info("Valid auth", "token", token)
 	return nil
 }
 
@@ -118,14 +117,14 @@ func doHash(value string, tb []byte) (string, error) {
 	h.Write([]byte(value))
 	hh := hex.EncodeToString(h.Sum(nil))
 
-	log.Info("SHA256(data: %s): %s (len: %v)", value, hh, len(hh))
+	log.Info("SHA256", "data", value, "hash", hh, "hash_len", len(hh))
 
 	// create a new HMAC by defining the hash type and the key
 	hmac := hmac.New(sha256.New, tb)
 
 	// compute the HMAC
 	if _, err := hmac.Write([]byte(hh)); err != nil {
-		log.Info("hmac.Write()", err)
+		log.Error(err, "hmac.Write()")
 		return "", err
 	}
 	dataHmac := hmac.Sum(nil)
@@ -133,7 +132,7 @@ func doHash(value string, tb []byte) (string, error) {
 	hmacHex := hex.EncodeToString(dataHmac)
 	secretHex := hex.EncodeToString(tb)
 
-	log.Info("HMAC_SHA256(key: %s, data: %s): %s (len: %v)", secretHex, string(value), hmacHex, len(hmacHex))
+	log.Info("HMAC_SHA256", "key", secretHex, "data", string(value), "hmac_hex", hmacHex, "hmac_hex_len", len(hmacHex))
 	return hmacHex, nil
 }
 
@@ -150,21 +149,20 @@ func queryBox(method string, params *map[string]string) (any, error) {
 		Path:     "/api/1.0/",
 		RawQuery: values.Encode(),
 	}
-	log.Info("Calling url: %v", u)
+	log.Info("Calling", "url", u)
 
 	xmlBytes, err := getXML(u.String())
 	if err != nil {
-		log.Info("Failed to get XML: %v", err)
+		log.Error(err, "Failed to get XML")
 		return nil, err
 	}
-	log.Info("Result (Raw): %v", string(xmlBytes))
+	log.Info("Result", "raw", string(xmlBytes))
 	var res Response
 	if err := xml.Unmarshal(xmlBytes, &res); err != nil {
 		return nil, err
 	}
 	if res.Status == "fail" {
-		log.Info("Err Code: %v", res.Error.Code)
-		log.Info("Err Msg: %v", res.Error.Message)
+		log.Info("Err Code", "code", res.Error.Code, "msg", res.Error.Message)
 		return nil, fmt.Errorf("%v (%v)", res.Error.Message, res.Error.Code)
 	} else if res.Auth != nil {
 		return res.Auth, nil

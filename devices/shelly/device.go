@@ -73,7 +73,7 @@ var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 func (d *Device) Call(ch types.Channel, component string, verb string, params any, errv any) any {
 	data, err := d.CallE(ch, component, verb, params)
 	if err != nil {
-		d.log.Info("failure calling device %v: %v", d.Id(), err)
+		d.log.Error(err, "failure calling device", "id", d.Id())
 		return errv
 	}
 	return data
@@ -152,11 +152,11 @@ func (d *Device) Init(ch types.Channel) *Device {
 
 	di, err := d.CallE(ch, "Shelly", "GetDeviceInfo", nil)
 	if err != nil {
-		d.log.Info("Shelly.GetDeviceInfo: %v", err)
+		d.log.Error(err, "Shelly.GetDeviceInfo")
 		return d
 	}
 	d.Info = di.(*DeviceInfo)
-	d.log.Info("Shelly.GetDeviceInfo: loaded %v", *d.Info)
+	d.log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
 
 	d.Id_ = d.Info.Id
 
@@ -188,9 +188,9 @@ func DevicesE(log logr.Logger) (map[string]*Device, error) {
 			log.Error(err, "Unable to load devices from mDNS")
 			return nil, err
 		}
-		log.Info("Discovered %v devices", len(devicesMap))
+		log.Info("New discovered devices", "num", len(devicesMap))
 	}
-	log.Info("Knows %v devices (%v)", len(devicesMap), devicesMap)
+	log.Info("Now knows devices", "num", len(devicesMap), "devices", devicesMap)
 	devicesMutex.Unlock()
 	return devicesMap, nil
 }
@@ -246,12 +246,12 @@ func Foreach(log logr.Logger, args []string, via types.Channel, do Do) error {
 			log.Info("Looking for Shelly device", "name", name)
 			device, err := Lookup(log, name)
 			if err != nil {
-				log.Info("Skipping device %v: %v", name, err)
+				log.Error(err, "Skipping", "device", name)
 				continue
 			}
 			_, err = do(log, via, device)
 			if err != nil {
-				log.Info("Operation on %v failed: %v", name, err)
+				log.Error(err, "Operation on failed", "device", name)
 				continue
 			}
 		}

@@ -10,14 +10,14 @@ import (
 func ListSfrDevices(log logr.Logger) ([]Host, error) {
 	xmlHosts, err := sfr.LanGetHostsList()
 	if err != nil {
-		log.Info("Failed to get SFR hosts list: %v", err)
+		log.Error(err, "Failed to get SFR hosts list")
 		return nil, err
 	}
 
 	hosts := make([]Host, len(xmlHosts))
 	sh := make([]SfrHost, len(xmlHosts))
 	for i, xmlHost := range xmlHosts {
-		log.Info("Found SFR host %v", xmlHost.Name)
+		log.Info("Found SFR host", "hostname", xmlHost.Name)
 		sh[i] = SfrHost{
 			xml: xmlHost,
 			log: log,
@@ -62,11 +62,11 @@ func (h SfrHost) IsConnected() bool {
 }
 
 func (h SfrHost) Publish(msg []byte) {
-	h.log.Info("Fake topic (%v) discarding '%v'.", h.Provider(), string(msg)) // TODO connect to real MQTT
+	h.log.Info("Fake topic, discarding message.", "topic", h.Provider(), "msg", string(msg)) // TODO connect to real MQTT
 }
 
 func (h SfrHost) Subscribe(handler func(msg []byte)) {
-	h.log.Info("Fake topic (%v) will not receive anything.", h.Provider()) // TODO connect to real MQTT
+	h.log.Info("Fake topic, will not receive anything.", "topic", h.Provider()) // TODO connect to real MQTT
 }
 
 func (h SfrHost) MarshalJSON() ([]byte, error) {

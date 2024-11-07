@@ -1,6 +1,7 @@
 package mqtt
 
 import (
+	"log/slog"
 	"mymqtt"
 	"mynet"
 	"net"
@@ -21,6 +22,7 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 
 	// Create the new MQTT Server.
 	mqttServer := mmqtt.New(nil)
+	mqttServer.Log = slog.New(logr.ToSlogHandler(log))
 
 	// Allow all connections.
 	_ = mqttServer.AddHook(new(auth.AllowHook), nil)
@@ -33,7 +35,7 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 
 	err := mqttServer.AddListener(tcp)
 	if err != nil {
-		log.Info("error adding TCP listener: %v", err)
+		log.Error(err, "error adding TCP listener")
 		return nil, nil, err
 	}
 

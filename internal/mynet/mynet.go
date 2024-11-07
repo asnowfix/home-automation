@@ -15,31 +15,31 @@ func MainInterface(log logr.Logger) (*net.Interface, *net.IP, error) {
 		log.Info("finding network gateway: %v", err)
 		return nil, nil, err
 	}
-	log.Info("net gw addr: %v", gw.String())
+	log.Info("net gw ", "addr", gw.String())
 
 	ifaces, err := net.Interfaces()
 	if err != nil {
-		log.Info("listing interfaces: %v", err)
+		log.Error(err, "listing interfaces")
 		return nil, nil, err
 	}
 	for _, iface := range ifaces {
 		addrs, err := iface.Addrs()
 		if err != nil {
-			log.Info("finding adresses for interface %v: %v", iface, err)
+			log.Error(err, "finding adresses", "interface", iface)
 			continue
 		}
 		for _, addr := range addrs {
-			log.Info("%v %v", iface.Name, addr)
+			log.Info("", "interface", iface.Name, "addr", addr)
 			ip, nw, err := net.ParseCIDR(addr.String())
 			if err != nil {
-				log.Info("reading CIDR notation for %v: %v", addr.String(), err)
+				log.Error(err, "reading CIDR notation", "iface_addr", addr.String())
 			} else {
 				if nw.Contains(gw) {
-					log.Info("selecting iface %v with ip %v: contains gw ip %v", addr, ip, gw)
+					log.Info("selecting iface: contains gw ip", "iface_addr", addr, "iface_ip", ip, "gw_ip", gw)
 
 					return &iface, &ip, nil
 				} else {
-					log.Info("skipping iface %v: does not contains gw ip %v", addr, gw)
+					log.Info("skipping iface: does not contains gw ip", "iface_addr", addr, "gw_ip", gw)
 				}
 			}
 		}

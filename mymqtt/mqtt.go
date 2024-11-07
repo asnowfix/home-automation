@@ -36,17 +36,21 @@ func Broker(log logr.Logger, myself bool) *url.URL {
 			_, lip, err := mynet.MainInterface(log)
 			if err != nil {
 				log.Error(err, "Could not get local IP")
-				return nil
+				panic(err)
 			}
 			ip = lip
 		} else {
 			log.Info("Looking up MQTT broker")
 			ips, err := lookupBroker(log)
-			if err == nil {
+			if err == nil && len(ips) > 0 {
 				ip = &ips[0]
 			} else {
 				log.Error(err, "Zeroconf lookup failed", "service", BROKER_SERVICE)
-				_broker = zeronconfBroker(log)
+				_broker, err = zeroconfBroker(log)
+				if err != nil {
+					log.Error(err, "Zeroconf broker lookup failed")
+					panic(err)
+				}
 			}
 		}
 		_broker = &url.URL{
@@ -121,14 +125,14 @@ func MqttClient(log logr.Logger, broker *url.URL) mqtt.Client {
 		mqttClient := mqtt.NewClient(opts)
 		token := mqttClient.Connect()
 		for !token.WaitTimeout(3 * time.Second) {
-			log.Info("Waiting for MQTT client to connect", "client_id", clientId)
+			log.Info("MQTT client trying to connect as", "client_id", clientId)
 		}
 		if err := token.Error(); err != nil {
-			log.Error(err, "Failed to connect MQTT client", "client_id", clientId, "mqtt_client", mqttClient)
+			log.Error(err, "MQTT client Failed to connect", "client_id", clientId, "mqtt_client", mqttClient)
 		}
-		log.Info("Connected MQTT client %v (%v)", clientId, mqttClient)
+		log.Info("MQTT client connected", "client_id", clientId, "mqtt_client", mqttClient)
 	}
-	log.Info("Using connected MQTT client %v", mqttClient)
+	log.Info("Using connected MQTT", "mqtt_client", mqttClient)
 	return mqttClient
 }
 
@@ -140,7 +144,7 @@ const ZEROCONF_SERVICE = "_mqtt._tcp."
 
 var brokers []*url.URL = make([]*url.URL, 0)
 
-func zeronconfBroker(log logr.Logger) *url.URL {
+func zeroconfBroker(log logr.Logger) (*url.URL, error) {
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
 		log.Error(err, "Failed to initialize zeronconf resolver:")
@@ -170,13 +174,18 @@ func zeronconfBroker(log logr.Logger) *url.URL {
 	err = resolver.Browse(ctx, ZEROCONF_SERVICE, "local.", entries)
 	if err != nil {
 		log.Error(err, "Failed to browse")
+		return nil, err
 	}
 
 	// wait for the lookup to complete
 	<-ctx.Done()
 
-	log.Info("Using MQTT broker %v for service %v", brokers, ZEROCONF_SERVICE)
-	return brokers[0]
+	log.Info("Using MQTT", "broker", brokers, "service", ZEROCONF_SERVICE)
+	if len(brokers) == 0 {
+		return nil, fmt.Errorf("No MQTT broker found")
+	} else {
+		return brokers[0], nil
+	}
 }
 
 type MqttMessage struct {

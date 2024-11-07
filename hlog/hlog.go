@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/go-logr/logr"
+
 	"github.com/go-logr/zerologr"
 	"github.com/rs/zerolog"
 )
@@ -22,6 +23,7 @@ func Init() logr.Logger {
 	zl := zerolog.New(os.Stderr)
 	zl = zl.Output(zerolog.ConsoleWriter{Out: os.Stderr}) // pretty print
 	zl = zl.With().Caller().Timestamp().Logger()
+	zl.Level(zerolog.DebugLevel)
 	var log logr.Logger = zerologr.New(&zl)
 
 	log.Info("Turning on logging")

@@ -41,11 +41,11 @@ func (d ShellyDevice) IsConnected() bool {
 }
 
 func (d ShellyDevice) Publish(msg []byte) {
-	d.log.Info("Fake topic (%v) discarding '%v'.", d.Provider(), string(msg)) // TODO connect to real MQTT
+	d.log.Info("Fake topic discarding message.", "topic", d.Provider(), "msg", string(msg)) // TODO connect to real MQTT
 }
 
 func (d ShellyDevice) Subscribe(handler func(msg []byte)) {
-	d.log.Info("Fake topic (%v) will not receive anything.", d.Provider()) // TODO connect to real MQTT
+	d.log.Info("Fake topic will not receive anything.", "topic", d.Provider()) // TODO connect to real MQTT
 }
 
 func (d ShellyDevice) MarshalJSON() ([]byte, error) {
@@ -55,7 +55,7 @@ func (d ShellyDevice) MarshalJSON() ([]byte, error) {
 func ListShellyDevices(log logr.Logger) ([]Host, error) {
 	devices, err := shelly.DevicesE(log)
 	if err != nil {
-		log.Info("Unable to list Shelly devices: %v", err)
+		log.Error(err, "Unable to list Shelly devices")
 		return nil, err
 	}
 	sd := make([]ShellyDevice, len(devices))

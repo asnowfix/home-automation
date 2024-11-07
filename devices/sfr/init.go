@@ -13,6 +13,6 @@ func Init(l logr.Logger) {
 	if err != nil {
 		log.Error(err, "failed to discover gateway")
 	} else {
-		log.Info("assuming the box IP is %v", boxIp)
+		log.Info("found gateway", "ip", boxIp)
 	}
 }

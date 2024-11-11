@@ -43,7 +43,8 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 	// Create a new MQTT TCP listener on a standard port.
 	tcp := listeners.NewTCP(listeners.Config{
 		ID:      "tcp",
-		Address: mymqtt.Broker(log, true).Host,
+		Address: ":1883",
+		// Address: mymqtt.Broker(log, true).Host,
 	})
 
 	err = mqttServer.AddListener(tcp)

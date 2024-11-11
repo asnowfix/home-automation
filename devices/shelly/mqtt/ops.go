@@ -45,7 +45,7 @@ type MqttChannel struct {
 var mqttChannel MqttChannel
 
 func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
-	reqTopic := fmt.Sprintf(" %v/rpc", device.Id())
+	reqTopic := fmt.Sprintf("%v/rpc", device.Id())
 	// reqChan, err := mqtt.MqttSubscribe(mqtt.PrivateBroker(), reqTopic, uint(AtLeastOnce))
 	var req struct {
 		Source string `json:"src"`
@@ -56,7 +56,7 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 
 	hostname, err := os.Hostname()
 	if err != nil {
-		log.Info("Unable to get local hostname: %v", err)
+		log.Error(err, "Unable to get local hostname")
 		return nil, err
 	}
 	req.Source = fmt.Sprintf("%v_%v", hostname, os.Getpid())
@@ -66,24 +66,33 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 
 	resChan, err := mymqtt.MqttSubscribe(log, mymqtt.Broker(log, false), fmt.Sprintf("%v/rpc", req.Source), uint(AtLeastOnce))
 	if err != nil {
-		log.Info("Unable to subscribe to topic '%v': %v", reqTopic, err)
+		log.Error(err, "Unable to subscribe", "topic", reqTopic)
 		return nil, err
 	}
 
 	reqPayload, err := json.Marshal(req)
 	if err != nil {
-		log.Info("Unable to marshal request payload '%v': %v", req, err)
+		log.Error(err, "Unable to marshal", "request", req)
 		return nil, err
 	}
 
 	mymqtt.MqttPublish(log, mymqtt.Broker(log, false), reqTopic, reqPayload)
-	res := <-resChan
+	resMsg := <-resChan
 
-	err = json.Unmarshal(res.Payload, &out)
+	var res struct {
+		Id     uint   `json:"id"`
+		Src    string `json:"src"`
+		Dst    string `json:"dst"`
+		Result *any   `json:"result"`
+	}
+	res.Result = &out
+
+	err = json.Unmarshal(resMsg.Payload, &res)
 	if err != nil {
-		log.Info("Unable to unmarshal response payload '%v': %v", res, err)
+		log.Error(err, "Unable to unmarshal response", "payload", resMsg.Payload)
 		return nil, err
 	}
 
+	log.Info("Received", "response", res)
 	return out, nil
 }

@@ -150,7 +150,7 @@ func (d *Device) Init(ch types.Channel) *Device {
 	}
 	d.log.Info("device API", "components", d.Components)
 
-	di, err := d.CallE(ch, "Shelly", "GetDeviceInfo", map[string]string{"ident": "true"})
+	di, err := d.CallE(ch, "Shelly", "GetDeviceInfo", map[string]interface{}{"ident": true})
 	if err != nil {
 		d.log.Error(err, "Shelly.GetDeviceInfo")
 		return d

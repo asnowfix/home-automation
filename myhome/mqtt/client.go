@@ -20,19 +20,19 @@ func CommandProxy(log logr.Logger, run chan struct{}) {
 	subsch := make(map[string]chan mymqtt.MqttMessage)
 	for topic, handler := range subscriptions {
 		// Subscribe to the topic
-		log.Info("Subscribing to topic ", topic)
+		log.Info("Subscribing", "topic", topic)
 		subsch[topic], _ = mymqtt.MqttSubscribe(log, mymqtt.Broker(log, true), topic, 0)
 		go func(topic string, handler func(logr.Logger, mymqtt.MqttMessage)) {
 			for {
 				select {
 				// In case of channel close, exit the loop
 				case <-subsch[topic]:
-					log.Info("Unsubscribing from topic ", topic)
+					log.Info("Unsubscribing", "topic", topic)
 					mymqtt.MqttClient(log, mymqtt.Broker(log, true)).Unsubscribe(topic).Wait()
 					return
 				// In case of message, handle it
 				case msg := <-subsch[topic]:
-					log.Info("Received message on topic ", topic)
+					log.Info("Received message", "topic ", topic, "msg", string(msg.Payload))
 					handler(log, msg)
 				}
 			}

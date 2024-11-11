@@ -28,12 +28,10 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	registrar = r
 	registrar.RegisterMethodHandler("HTTP", "GET", types.MethodHandler{
 		Allocate:   func() any { return new(Response) },
-		HttpQuery:  map[string]string{},
 		HttpMethod: http.MethodGet,
 	})
 	registrar.RegisterMethodHandler("HTTP", "POST", types.MethodHandler{
 		Allocate:   func() any { return new(Response) },
-		HttpQuery:  map[string]string{},
 		HttpMethod: http.MethodPost,
 	})
 
@@ -46,17 +44,15 @@ type HttpChannel struct {
 
 var httpChannel HttpChannel
 
-func (ch *HttpChannel) callE(device types.Device, verb types.MethodHandler, out any, body any) (any, error) {
+func (ch *HttpChannel) callE(device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
 	var res *http.Response
 	var err error
 
 	switch verb.HttpMethod {
 	case http.MethodGet:
-		res, err = ch.getE(device.Ipv4(), verb.Method, verb.HttpQuery)
-	case http.MethodPost:
-		res, err = ch.postE(device.Ipv4(), verb.Method, body)
+		res, err = ch.getE(device.Ipv4(), verb.Method, params)
 	default:
-		return nil, fmt.Errorf("unhandled HTTP method '%v' for Shelly method '%v'", verb.HttpQuery, verb.Method)
+		res, err = ch.postE(device.Ipv4(), http.MethodPost, verb.Method, params)
 	}
 
 	if err != nil {
@@ -74,15 +70,29 @@ func (ch *HttpChannel) callE(device types.Device, verb types.MethodHandler, out 
 
 }
 
-func (ch *HttpChannel) getE(ip net.IP, cmd string, qp types.QueryParams) (*http.Response, error) {
+func (ch *HttpChannel) getE(ip net.IP, cmd string, params any) (*http.Response, error) {
 
 	values := url.Values{}
-	for key, value := range qp {
-		values.Add(key, value)
-	}
-	query := values.Encode()
 
-	requestURL := fmt.Sprintf("http://%s/rpc/%s?%s", ip, cmd, query)
+	qs := ""
+	if params != nil {
+		qp, ok := params.(map[string]interface{})
+		if ok {
+			for key, value := range qp {
+				s, err := json.Marshal(value)
+				if err == nil {
+					values.Add(key, string(s))
+				}
+			}
+		} else {
+			err := fmt.Errorf("%s support query parameters only (got %v)", http.MethodGet, reflect.TypeOf(params))
+			log.Error(err, "Params error error")
+			return nil, err
+		}
+		qs = fmt.Sprintf("?%s", values.Encode())
+	}
+
+	requestURL := fmt.Sprintf("http://%s/rpc/%s%s", ip, cmd, qs)
 	log.Info("Calling", "method", http.MethodGet, "url", requestURL)
 
 	res, err := http.Get(requestURL)
@@ -95,7 +105,7 @@ func (ch *HttpChannel) getE(ip net.IP, cmd string, qp types.QueryParams) (*http.
 	return res, err
 }
 
-func (ch *HttpChannel) postE(ip net.IP, cmd string, params any) (*http.Response, error) {
+func (ch *HttpChannel) postE(ip net.IP, hm string, cmd string, params any) (*http.Response, error) {
 
 	var payload struct {
 		Id     uint   `json:"id"`
@@ -115,11 +125,11 @@ func (ch *HttpChannel) postE(ip net.IP, cmd string, params any) (*http.Response,
 	}
 
 	requestURL := fmt.Sprintf("http://%s/rpc", ip)
-	log.Info("Preparing", "method", http.MethodPost, "url", requestURL, "body", string(jsonData))
+	log.Info("Preparing", "method", hm, "url", requestURL, "body", string(jsonData))
 
-	req, err := http.NewRequest(http.MethodPost, requestURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequest(hm, requestURL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		log.Error(err, "error creating HTTP POST request")
+		log.Error(err, "error creating HTTP request")
 		return nil, err
 	}
 
@@ -130,10 +140,10 @@ func (ch *HttpChannel) postE(ip net.IP, cmd string, params any) (*http.Response,
 
 	req.Header.Add("Content-Type", "application/json")
 
-	log.Info("Calling", "method", http.MethodPost, "url", requestURL)
+	log.Info("Calling", "method", hm, "url", requestURL)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		log.Error(err, "HTTP POST error")
+		log.Error(err, "HTTP error")
 	}
 	log.Info("status code", "code", res.StatusCode)
 

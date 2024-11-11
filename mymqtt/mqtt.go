@@ -98,6 +98,15 @@ var mqttClient mqtt.Client = nil
 var mutexClient sync.Mutex
 
 func MqttClient(log logr.Logger, broker *url.URL) mqtt.Client {
+	if mqttClient, err := MqttClientE(log, broker); err != nil {
+		log.Error(err, "Failed to initialize MQTT client")
+		panic(err)
+	} else {
+		return mqttClient
+	}
+}
+
+func MqttClientE(log logr.Logger, broker *url.URL) (mqtt.Client, error) {
 	mutexClient.Lock()
 	defer mutexClient.Unlock()
 
@@ -122,18 +131,19 @@ func MqttClient(log logr.Logger, broker *url.URL) mqtt.Client {
 		}
 
 		// Connect to the MQTT broker
-		mqttClient := mqtt.NewClient(opts)
+		mqttClient = mqtt.NewClient(opts)
 		token := mqttClient.Connect()
 		for !token.WaitTimeout(3 * time.Second) {
 			log.Info("MQTT client trying to connect as", "client_id", clientId)
 		}
 		if err := token.Error(); err != nil {
 			log.Error(err, "MQTT client Failed to connect", "client_id", clientId, "mqtt_client", mqttClient)
+			return nil, err
 		}
 		log.Info("MQTT client connected", "client_id", clientId, "mqtt_client", mqttClient)
 	}
 	log.Info("Using connected MQTT", "mqtt_client", mqttClient)
-	return mqttClient
+	return mqttClient, nil
 }
 
 var MqttUsername string = ""
@@ -213,4 +223,5 @@ func MqttSubscribe(log logr.Logger, broker *url.URL, topic string, qlen uint) (c
 func MqttPublish(log logr.Logger, broker *url.URL, topic string, msg []byte) {
 	log.Info("MqttPublish: to", "topic", topic, "payload", string(msg))
 	MqttClient(log, broker).Publish(topic, 0, false, msg)
+	log.Info("MqttPublish: published", "topic", topic, "payload", string(msg))
 }

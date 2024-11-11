@@ -42,6 +42,10 @@ func (e Error) String() string {
 	return [...]string{"overtemp", "overpower", "overvoltage", "undervoltage"}[e]
 }
 
+type Request struct {
+	Id int `json:"id"`
+}
+
 type Configuration struct {
 	Id                       int     `json:"id"`                                   // Id of the Switch component instance
 	Name                     string  `json:"name,omitempty"`                       // Name of the switch instance
@@ -80,10 +84,6 @@ type Status struct {
 		Fahrenheit float32 `json:"tF,omitempty"` // Temperature in Fahrenheit (null if temperature is out of the measurement range)
 	} `json:"temperature"`
 	Errors []string `json:"errors"` // Error conditions occurred. May contain overtemp, overpower, overvoltage, undervoltage, (shown if at least one error is present)
-}
-
-type Toogle struct {
-	Id int `json:"id"`
 }
 
 type ToogleResponse struct {

@@ -13,16 +13,29 @@ import (
 
 	mmqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
+	"github.com/mochi-mqtt/server/v2/hooks/debug"
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
 func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *url.URL, error) {
 
-	log.Info("Starting new MQTT server on %v", mymqtt.Broker(log, true))
+	log.Info("Starting new MQTT server", "broker", mymqtt.Broker(log, true))
 
 	// Create the new MQTT Server.
 	mqttServer := mmqtt.New(nil)
 	mqttServer.Log = slog.New(logr.ToSlogHandler(log))
+
+	err := mqttServer.AddHook(&debug.Hook{
+		Log: slog.New(logr.ToSlogHandler(log)),
+	}, &debug.Options{
+		ShowPacketData: true,
+		ShowPings:      true,
+		ShowPasswords:  true,
+	})
+	if err != nil {
+		log.Error(err, "error adding debug hook")
+		return nil, nil, err
+	}
 
 	// Allow all connections.
 	_ = mqttServer.AddHook(new(auth.AllowHook), nil)
@@ -33,15 +46,23 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 		Address: mymqtt.Broker(log, true).Host,
 	})
 
-	err := mqttServer.AddListener(tcp)
+	err = mqttServer.AddListener(tcp)
 	if err != nil {
 		log.Error(err, "error adding TCP listener")
 		return nil, nil, err
 	}
 
+	// start the mqtt server
+	go func() {
+		err := mqttServer.Serve()
+		if err != nil {
+			log.Error(err, "error starting MQTT server")
+		}
+	}()
+
 	host, err := os.Hostname()
 	if err != nil {
-		log.Info("error finding hostname: %v", err)
+		log.Error(err, "error finding current hostname")
 		return nil, nil, err
 	}
 
@@ -55,13 +76,13 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 	ifaces := make([]net.Interface, 1)
 	ifaces[0] = *iface
 	if err != nil {
-		log.Info("Unable to get main local IP interface: %v", err)
+		log.Error(err, "Unable to get main local IP interface")
 		return nil, nil, err
 	}
 
 	mdnsServer, err := zeroconf.Register(instance, mymqtt.ZEROCONF_SERVICE, "local.", mymqtt.PRIVATE_PORT, info, ifaces)
 	if err != nil {
-		log.Info("Registering new ZeroConf service: %v", err)
+		log.Error(err, "Unable to register new ZeroConf service")
 		return nil, nil, err
 	}
 

@@ -51,11 +51,12 @@ var showShellyCmd = &cobra.Command{
 			showWifiFlag = true
 		}
 
-		ch := types.ChannelHttp
+		via := types.ChannelHttp
 		if !useHttpChannel {
-			ch = types.ChannelMqtt
+			via = types.ChannelMqtt
 		}
-		shelly.Foreach(log, args, ch, showOneDevice)
+
+		shelly.Foreach(log, args, via, showOneDevice)
 		return nil
 	},
 }
@@ -78,21 +79,16 @@ func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device) (*
 	// dc := shelly.CallMethod(device, "Shelly", "GetConfig").(*shelly.DeviceConfiguration)
 	// ds := shelly.CallMethod(device, "Shelly", "GetStatus").(*shelly.DeviceStatus)
 
-	channel := types.ChannelMqtt
-	if useHttpChannel {
-		channel = types.ChannelHttp
-	}
-
 	if showMqttFlag {
-		s.Mqtt.Config = device.Call(channel, "Mqtt", "GetConfig", nil, &mqtt.ConfigResults{}).(*mqtt.Configuration)
-		s.Mqtt.Status = device.Call(channel, "Mqtt", "GetStatus", nil, &mqtt.Status{}).(*mqtt.Status)
+		s.Mqtt.Config = device.Call(via, "Mqtt", "GetConfig", nil, &mqtt.ConfigResults{}).(*mqtt.Configuration)
+		s.Mqtt.Status = device.Call(via, "Mqtt", "GetStatus", nil, &mqtt.Status{}).(*mqtt.Status)
 	}
 
 	if showSwitchId >= 0 {
 		sr := make(map[string]interface{})
 		sr["id"] = showSwitchId
-		s.Switch.Config = device.Call(channel, "Switch", "GetConfig", sr, &sswitch.Configuration{}).(*sswitch.Configuration)
-		s.Switch.Status = device.Call(channel, "Switch", "GetStatus", sr, &sswitch.Status{}).(*sswitch.Status)
+		s.Switch.Config = device.Call(via, "Switch", "GetConfig", sr, &sswitch.Configuration{}).(*sswitch.Configuration)
+		s.Switch.Status = device.Call(via, "Switch", "GetStatus", sr, &sswitch.Status{}).(*sswitch.Status)
 	}
 
 	out, err := json.Marshal(s)

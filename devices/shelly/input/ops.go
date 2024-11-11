@@ -3,21 +3,23 @@ package input
 import (
 	"devices/shelly/types"
 	"net/http"
+	"reflect"
+
+	"github.com/go-logr/logr"
 )
 
-func Init(r types.MethodsRegistrar) {
+var log logr.Logger
+
+type empty struct{}
+
+func Init(l logr.Logger, r types.MethodsRegistrar) {
+	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
 	r.RegisterMethodHandler("Input", "GetConfig", types.MethodHandler{
-		Allocate: func() any { return new(Configuration) },
-		HttpQuery: map[string]string{
-			"id": "0",
-		},
+		Allocate:   func() any { return new(Configuration) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler("Input", "GetStatus", types.MethodHandler{
-		Allocate: func() any { return new(Status) },
-		HttpQuery: map[string]string{
-			"id": "0",
-		},
+		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
 }

@@ -9,6 +9,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var toggleSwitchId int
+
+func init() {
+	Cmd.Flags().IntVarP(&toggleSwitchId, "switch", "S", -1, "Use this switch ID.")
+}
+
 var Cmd = &cobra.Command{
 	Use:   "toggle",
 	Short: "Toggle switch devices",
@@ -20,7 +26,9 @@ var Cmd = &cobra.Command{
 			ch = types.ChannelMqtt
 		}
 		return shelly.Foreach(log, args, ch, func(log logr.Logger, via types.Channel, device *shelly.Device) (*shelly.Device, error) {
-			_, err := device.CallE(ch, "Switch", "Toggle", nil)
+			sr := make(map[string]interface{})
+			sr["id"] = toggleSwitchId
+			_, err := device.CallE(ch, "Switch", "Toggle", sr)
 			if err != nil {
 				log.Info("Failed to toggle device %s: %v", device.Id_, err)
 				return nil, err

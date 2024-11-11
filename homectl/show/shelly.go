@@ -18,14 +18,14 @@ var showCloudFlag bool
 var showConfigFlag bool
 var showMqttFlag bool
 var showStatusFlag bool
-var showSwitchFlag bool
+var showSwitchId int
 var showWifiFlag bool
 
 func init() {
 	showShellyCmd.Flags().BoolVarP(&showAllFlag, "all", "a", false, "Show everything about (the) device(s).")
 	showShellyCmd.Flags().BoolVarP(&showConfigFlag, "config", "c", false, "Show device configuration(s).")
 	showShellyCmd.Flags().BoolVarP(&showStatusFlag, "status", "s", false, "Show device Status(s).")
-	showShellyCmd.Flags().BoolVarP(&showSwitchFlag, "switch", "S", false, "Show switch Status(s).")
+	showShellyCmd.Flags().IntVarP(&showSwitchId, "switch", "S", -1, "Show status of this switch ID.")
 	showShellyCmd.Flags().BoolVarP(&showWifiFlag, "wifi", "W", false, "Show device Wifi configuration(s).")
 	showShellyCmd.Flags().BoolVarP(&showCloudFlag, "cloud", "C", false, "Show device Cloud configuration(s).")
 	showShellyCmd.Flags().BoolVarP(&showMqttFlag, "mqtt", "M", false, "Show device MQTT configuration(s).")
@@ -48,7 +48,6 @@ var showShellyCmd = &cobra.Command{
 			showCloudFlag = true
 			showConfigFlag = true
 			showMqttFlag = true
-			showSwitchFlag = true
 			showWifiFlag = true
 		}
 
@@ -89,9 +88,11 @@ func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device) (*
 		s.Mqtt.Status = device.Call(channel, "Mqtt", "GetStatus", nil, &mqtt.Status{}).(*mqtt.Status)
 	}
 
-	if showSwitchFlag {
-		s.Switch.Config = device.Call(channel, "Switch", "GetConfig", nil, &sswitch.Configuration{}).(*sswitch.Configuration)
-		s.Switch.Status = device.Call(channel, "Switch", "GetStatus", nil, &sswitch.Status{}).(*sswitch.Status)
+	if showSwitchId >= 0 {
+		sr := make(map[string]interface{})
+		sr["id"] = showSwitchId
+		s.Switch.Config = device.Call(channel, "Switch", "GetConfig", sr, &sswitch.Configuration{}).(*sswitch.Configuration)
+		s.Switch.Status = device.Call(channel, "Switch", "GetStatus", sr, &sswitch.Status{}).(*sswitch.Status)
 	}
 
 	out, err := json.Marshal(s)

@@ -92,7 +92,7 @@ systemctl status myhome@fix.service
 
 Subscribe to Shelly H&T Gen1:
 
-```shell
+```log
 $ mqtt sub -d -t shellyht-EE45E9/events/rpc -h 192.168.1.2
 Client 'UNKNOWN@192.168.1.2' sending CONNECT
     MqttConnect{keepAlive=60, cleanStart=true, sessionExpiryInterval=0}
@@ -102,6 +102,18 @@ Client 'cnfrgl0vpopiu8vsbo1g@192.168.1.2' sending SUBSCRIBE
     MqttSubscribe{subscriptions=[MqttSubscription{topicFilter=shellyht-EE45E9/events/rpc, qos=EXACTLY_ONCE, noLocal=false, retainHandling=SEND, retainAsPublished=false}]}
 Client 'cnfrgl0vpopiu8vsbo1g@192.168.1.2' received SUBACK
     MqttSubAck{reasonCodes=[GRANTED_QOS_2], packetIdentifier=65526}
+```
+
+```log
+$ mqtt pub --topic=foo -m="bar" --host=192.168.1.2 --debug
+Client 'UNKNOWN@192.168.1.2' sending CONNECT
+    MqttConnect{keepAlive=60, cleanStart=true, sessionExpiryInterval=0}
+Client 'UNKNOWN@192.168.1.2' received CONNACK
+    MqttConnAck{reasonCode=SUCCESS, sessionPresent=false, assignedClientIdentifier=csoekd0vpoph78legnfg, restrictions=MqttConnAckRestrictions{receiveMaximum=1024, maximumPacketSize=268435460, topicAliasMaximum=0, maximumQos=EXACTLY_ONCE, retainAvailable=true, wildcardSubscriptionAvailable=true, sharedSubscriptionAvailable=true, subscriptionIdentifiersAvailable=true}}
+Client 'csoekd0vpoph78legnfg@192.168.1.2' sending PUBLISH ('bar')
+    MqttPublish{topic=foo, payload=3byte, qos=AT_MOST_ONCE, retain=false}
+Client 'csoekd0vpoph78legnfg@192.168.1.2' finish PUBLISH
+    MqttPublishResult{publish=MqttPublish{topic=foo, payload=3byte, qos=AT_MOST_ONCE, retain=false}}
 ```
 
 Publish to Shelly H&T Gen1:

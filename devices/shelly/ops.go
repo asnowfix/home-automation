@@ -1,8 +1,11 @@
 package shelly
 
 import (
+	"devices/shelly/input"
 	"devices/shelly/mqtt"
+	"devices/shelly/script"
 	shttp "devices/shelly/shttp"
+	"devices/shelly/sswitch"
 	"devices/shelly/types"
 	"fmt"
 	"net/http"
@@ -13,8 +16,11 @@ import (
 
 func Init(log logr.Logger) {
 	registrar.Init(log)
-	shttp.Init(log, &registrar)
+	input.Init(log, &registrar)
 	mqtt.Init(log, &registrar)
+	script.Init(log, &registrar)
+	shttp.Init(log, &registrar)
+	sswitch.Init(log, &registrar)
 }
 
 var registrar Registrar
@@ -34,7 +40,6 @@ type Registrar struct {
 var listMethodsHandler = types.MethodHandler{
 	Method:     "Shelly.ListMethods",
 	Allocate:   func() any { return new(Methods) },
-	HttpQuery:  map[string]string{},
 	HttpMethod: http.MethodGet,
 }
 
@@ -59,15 +64,11 @@ func (r *Registrar) Init(log logr.Logger) {
 	// Shelly.ResetWiFiConfig
 	// Shelly.GetConfig
 	r.RegisterMethodHandler("Shelly", "GetDeviceInfo", types.MethodHandler{
-		Allocate: func() any { return new(DeviceInfo) },
-		HttpQuery: map[string]string{
-			"ident": "true",
-		},
+		Allocate:   func() any { return new(DeviceInfo) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler("Shelly", "Reboot", types.MethodHandler{
 		Allocate:   func() any { return new(string) },
-		HttpQuery:  map[string]string{},
 		HttpMethod: http.MethodGet,
 	})
 }
@@ -81,7 +82,7 @@ func (r *Registrar) RegisterMethodHandler(c string, v string, m types.MethodHand
 	if _, exists := r.methods[c][v]; !exists {
 		m.Method = fmt.Sprintf("%s.%s", c, v)
 		r.methods[c][v] = m
-		r.log.Info("Registered", "component", c, "verb", v, "http_method", m.HttpMethod, " http_query", m.HttpQuery)
+		r.log.Info("Registered", "component", c, "verb", v, "http_method", m.HttpMethod)
 	}
 	r.log.Info("Registered methods", "num", len(r.methods))
 }

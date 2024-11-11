@@ -33,19 +33,17 @@ func MyHome(log logr.Logger, g1c chan gen1.Device) {
 
 		ip, _, err := net.SplitHostPort(req.RemoteAddr)
 		if err != nil {
-			//return nil, fmt.Errorf("userip: %q is not IP:port", req.RemoteAddr)
-			log.Info("userip: %q is not IP:port", req.RemoteAddr)
+			log.Info("http.HandleFunc: not <ip>:<port>", "userip", req.RemoteAddr)
 		}
 		d.Ip = net.ParseIP(ip)
 		if d.Ip == nil {
-			//return nil, fmt.Errorf("userip: %q is not IP:port", req.RemoteAddr)
-			log.Info("userip: %q is not IP:port", req.RemoteAddr)
+			log.Info("http.HandleFunc: not <ip>:<port>", "userip", req.RemoteAddr)
 			return
 		}
 
-		log.Info("url: %s", req.URL)
+		log.Info("http.HandleFunc", "url", req.URL)
 		m, _ := url.ParseQuery(req.URL.RawQuery)
-		log.Info("query: %v", m)
+		log.Info("http.HandleFunc", "query", m)
 
 		var ht gen1.HTSensor
 		err = decoder.Decode(&ht, m)
@@ -67,11 +65,11 @@ func MyHome(log logr.Logger, g1c chan gen1.Device) {
 		// }
 		// tc <- req.Body
 
-		log.Info("Gen1 Device(struct): %v", d)
+		log.Info("http.HandleFunc", "gen1_device", d)
 		g1c <- d
 
 		jd, _ := json.Marshal(d)
-		log.Info("Gen1 Device(JSON): %v", string(jd))
+		log.Info("http.HandleFunc", "gen1_json", string(jd))
 
 		_, _ = w.Write([]byte("")) // 200 OK
 	})

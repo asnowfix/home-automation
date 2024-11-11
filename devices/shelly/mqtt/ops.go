@@ -24,24 +24,15 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
 	registrar = r
 	r.RegisterMethodHandler("Mqtt", "GetStatus", types.MethodHandler{
-		Allocate: func() any { return new(Status) },
-		HttpQuery: map[string]string{
-			"id": "0",
-		},
+		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler("Mqtt", "GetConfig", types.MethodHandler{
-		Allocate: func() any { return new(Configuration) },
-		HttpQuery: map[string]string{
-			"id": "0",
-		},
+		Allocate:   func() any { return new(Configuration) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler("Mqtt", "SetConfig", types.MethodHandler{
-		Allocate: func() any { return new(ConfigResults) },
-		HttpQuery: map[string]string{
-			"id": "0",
-		},
+		Allocate:   func() any { return new(ConfigResults) },
 		HttpMethod: http.MethodPost,
 	})
 
@@ -73,7 +64,7 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 	req.Method = verb.Method
 	req.Params = params
 
-	resChan, err := mymqtt.MqttSubscribe(log, mymqtt.Broker(log, false), fmt.Sprintf(" %v/rpc", req.Source), uint(AtLeastOnce))
+	resChan, err := mymqtt.MqttSubscribe(log, mymqtt.Broker(log, false), fmt.Sprintf("%v/rpc", req.Source), uint(AtLeastOnce))
 	if err != nil {
 		log.Info("Unable to subscribe to topic '%v': %v", reqTopic, err)
 		return nil, err

@@ -3,28 +3,31 @@ package sswitch
 import (
 	"devices/shelly/types"
 	"net/http"
+	"reflect"
+
+	"github.com/go-logr/logr"
 )
 
-func Init(r types.MethodsRegistrar) {
+var log logr.Logger
+
+type empty struct{}
+
+func Init(l logr.Logger, r types.MethodsRegistrar) {
+	// setup logger
+	log = l
+	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
+
+	// register methods
 	r.RegisterMethodHandler("Switch", "GetConfig", types.MethodHandler{
-		Allocate: func() any { return new(Configuration) },
-		HttpQuery: map[string]string{
-			"id": "0",
-		},
+		Allocate:   func() any { return new(Configuration) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler("Switch", "GetStatus", types.MethodHandler{
-		Allocate: func() any { return new(Status) },
-		HttpQuery: map[string]string{
-			"id": "0",
-		},
+		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler("Switch", "Toggle", types.MethodHandler{
-		Allocate: func() any { return new(Toogle) },
-		HttpQuery: map[string]string{
-			"id": "0",
-		},
+		Allocate:   func() any { return new(Request) },
 		HttpMethod: http.MethodGet,
 	})
 }

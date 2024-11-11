@@ -137,12 +137,11 @@ func MqttClientE(log logr.Logger, broker *url.URL) (mqtt.Client, error) {
 			log.Info("MQTT client trying to connect as", "client_id", clientId)
 		}
 		if err := token.Error(); err != nil {
-			log.Error(err, "MQTT client Failed to connect", "client_id", clientId, "mqtt_client", mqttClient)
+			log.Error(err, "MQTT client failed to connect", "client_id", clientId)
 			return nil, err
 		}
-		log.Info("MQTT client connected", "client_id", clientId, "mqtt_client", mqttClient)
+		log.Info("MQTT client connected", "client_id", clientId)
 	}
-	log.Info("Using connected MQTT", "mqtt_client", mqttClient)
 	return mqttClient, nil
 }
 

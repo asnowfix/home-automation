@@ -20,7 +20,6 @@ endif
 start:
 ifeq ($(OS),Linux)
 	sudo systemctl start myhome@$(ME).service
-	systemctl status myhome@$(ME).service
 else
 	$(error unsupported $(@) for OS:$(OS))
 endif
@@ -28,7 +27,6 @@ endif
 stop:
 ifeq ($(OS),Linux)
 	sudo systemctl stop myhome@$(ME).service
-	-systemctl status myhome@$(ME).service
 else
 	$(error unsupported $(@) for OS:$(OS))
 endif

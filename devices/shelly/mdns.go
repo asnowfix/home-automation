@@ -1,13 +1,10 @@
 package shelly
 
 import (
-	"container/list"
-	"context"
 	"devices/shelly/types"
 	"encoding/json"
+	"net"
 	"strconv"
-	"strings"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
@@ -15,81 +12,7 @@ import (
 
 const MDNS_SHELLIES string = "_shelly._tcp."
 
-func mdnsShellies(log logr.Logger, tc chan string) {
-	resolver, err := zeroconf.NewResolver(nil)
-	if err != nil {
-		log.Error(err, "Failed to initialize resolver")
-	}
-
-	entries := make(chan *zeroconf.ServiceEntry)
-	go func(results <-chan *zeroconf.ServiceEntry) {
-		for entry := range results {
-			log.Info("entry: %v", entry)
-			if strings.Contains(entry.Instance, MDNS_SHELLIES) {
-				for _, topic := range newDeviceFromMdns(log, entry).Topics() {
-					tc <- topic
-				}
-			}
-		}
-		log.Info("No more entries.")
-	}(entries)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
-	defer cancel()
-	err = resolver.Browse(ctx, MDNS_SHELLIES, "local.", entries)
-	if err != nil {
-		log.Error(err, "Failed to browse")
-	}
-
-	<-ctx.Done()
-
-}
-
-func loadDevicesFromMdns(log logr.Logger) error {
-	resolver, err := zeroconf.NewResolver(nil)
-	if err != nil {
-		log.Error(err, "Failed to initialize zeroconf resolver")
-		return err
-	}
-
-	shellies := list.New()
-	entries := make(chan *zeroconf.ServiceEntry)
-
-	go func() {
-		for entry := range entries {
-			log.Info("Found", " entry", entry)
-
-			if strings.Contains(entry.Service, MDNS_SHELLIES) {
-				shellies.PushBack(entry)
-			}
-		}
-	}()
-
-	// Start the lookup
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
-	defer cancel()
-
-	err = resolver.Browse(ctx, MDNS_SHELLIES, "local.", entries)
-	if err != nil {
-		log.Error(err, "Failed to browse")
-		return err
-	}
-
-	<-ctx.Done()
-
-	for si := shellies.Front(); si != nil; si = si.Next() {
-		entry := si.Value.(*zeroconf.ServiceEntry)
-		if len(entry.AddrIPv4) == 0 {
-			log.Info("Skipping mDNS entry without an IPv4: %v", entry)
-			continue
-		}
-		addDevice(log, entry.AddrIPv4[0].String(), newDeviceFromMdns(log, entry))
-	}
-
-	return nil
-}
-
-func newDeviceFromMdns(log logr.Logger, entry *zeroconf.ServiceEntry) *Device {
+func NewDeviceFromZeroConfEntry(log logr.Logger, entry *zeroconf.ServiceEntry) (*Device, error) {
 	s, _ := json.Marshal(entry)
 	log.Info("Found", "entry", s)
 
@@ -108,11 +31,26 @@ func newDeviceFromMdns(log logr.Logger, entry *zeroconf.ServiceEntry) *Device {
 			version = versionRe.ReplaceAllString(txt, "${version}")
 		}
 	}
+
+	ips, err := net.LookupIP(entry.HostName)
+	if err != nil {
+		log.Error(err, "Failed to resolve IP address", "hostname", entry.HostName)
+		return nil, err
+	}
+
+	var ip net.IP
+	if len(ips) > 0 {
+		ip = ips[0]
+	} else {
+		log.Error(nil, "No IP addresses found for hostname", "hostname", entry.HostName)
+		return nil, err
+	}
+
 	d := &Device{
 		Id_:     nameRe.ReplaceAllString(entry.HostName, "${id}"),
 		Service: entry.Service,
 		Host:    entry.HostName,
-		Ipv4_:   entry.AddrIPv4[0],
+		Ipv4_:   ip,
 		Port:    entry.Port,
 		Product: Product{
 			Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),
@@ -122,7 +60,9 @@ func newDeviceFromMdns(log logr.Logger, entry *zeroconf.ServiceEntry) *Device {
 			Serial:      hostRe.ReplaceAllString(entry.HostName, "${serial}"),
 		},
 	}
-	// Initialize device usign http channel and default channel http type
-	d.Init(types.ChannelHttp)
-	return d
+	log.Info("Discovered", "device", d)
+
+	d.Init(log, types.ChannelHttp)
+	log.Info("Initialized", "device", d)
+	return d, nil
 }

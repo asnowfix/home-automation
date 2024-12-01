@@ -1,6 +1,7 @@
 package main
 
 import (
+	"devices/shelly"
 	"devices/shelly/gen1"
 	"fmt"
 	"os"
@@ -13,6 +14,10 @@ import (
 	"myhome/http"
 	"myhome/logs"
 	"myhome/mqtt"
+
+	"github.com/asnowfix/home-automation/myhome/devices"
+	"github.com/go-logr/logr"
+	"github.com/grandcat/zeroconf"
 )
 
 var Program string
@@ -47,8 +52,10 @@ func main() {
 
 	mdnsServer, broker, err := mqtt.MyHome(log, Program, info)
 	if err != nil {
-		log.Info("error starting MQTT server: %v", err)
+		log.Error(err, "error starting MQTT server")
+		return
 	}
+	log.Info("Started MQTT server & published it over mDNS/Zeroconf", "server", mdnsServer)
 	defer mdnsServer.Shutdown()
 
 	topicsCh := make(chan string, 1)
@@ -61,12 +68,45 @@ func main() {
 
 	proxyCh := make(chan struct{}, 1)
 	go mqtt.CommandProxy(log, proxyCh)
+	defer close(proxyCh)
+
+	ds, err := devices.NewDeviceStorage(log, "myhome.db")
+	// fails startup if storage fails to start
+	if err != nil {
+		log.Error(err, "error starting device storage")
+		return
+	}
+	log.Info("Started device storage", "storage", ds)
+	defer ds.Close()
+
+	dm := devices.NewDeviceManager(log, ds)
+	log.Info("Started device manager", "manager", dm)
+
+	shelly.Init(log)
+	dm.DiscoverDevices(shelly.MDNS_SHELLIES, 5*time.Second, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.DeviceIdentifier, error) {
+		log.Info("Identifying", "entry", entry)
+		return &devices.DeviceIdentifier{
+			Manufacturer: "Shelly",
+			ID:           entry.Instance,
+		}, nil
+	}, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.Device, error) {
+		sd, err := shelly.NewDeviceFromZeroConfEntry(log, entry)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("Got", "shelly_device", sd)
+		return &devices.Device{
+			DeviceIdentifier: devices.DeviceIdentifier{
+				Manufacturer: "Shelly",
+				ID:           sd.Id_,
+			},
+			MAC:  sd.MacAddress,
+			Host: sd.Ipv4_.String(),
+		}, nil
+	})
+	defer dm.StopDiscovery()
 
 	// Run server until interrupted
 	<-done
-
-	// Close command proxy channel
-	close(proxyCh)
-
-	// Cleanup
+	log.Info("Shutting down")
 }

@@ -70,7 +70,7 @@ func Hosts(log logr.Logger, args []string) ([]Host, error) {
 
 	ip := net.ParseIP(args[0])
 	if ip == nil {
-		return nil, fmt.Errorf("did not find a known Host for", "hostname", args[0])
+		return nil, fmt.Errorf("did not find a known Host for hostname %v", args[0])
 	}
 
 	return Filter[Host](hosts, func(h Host) bool {

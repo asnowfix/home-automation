@@ -23,7 +23,6 @@ type Product struct {
 }
 
 type Device struct {
-	log logr.Logger
 	Product
 	Id_        string                                    `json:"id"`
 	Service    string                                    `json:"service"`
@@ -73,7 +72,6 @@ var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 func (d *Device) Call(ch types.Channel, component string, verb string, params any, errv any) any {
 	data, err := d.CallE(ch, component, verb, params)
 	if err != nil {
-		d.log.Error(err, "failure calling device", "id", d.Id())
 		return errv
 	}
 	return data
@@ -112,23 +110,22 @@ func NewDeviceFromIp(log logr.Logger, ip net.IP) *Device {
 		return d
 	}
 	d := &Device{
-		log:   log,
 		Ipv4_: ip,
+		Host:  ip.String(),
 	}
-	d.Init(types.ChannelHttp)
+	d.Init(log, types.ChannelHttp)
 	addDevice(log, s, d)
 	return d
 }
 
-func (d *Device) Init(ch types.Channel) *Device {
+func (d *Device) Init(log logr.Logger, ch types.Channel) error {
 	m, err := GetRegistrar().CallE(d, ch, listMethodsHandler, nil)
 	if err != nil {
-		d.log.Error(err, "Shelly.ListMethods")
-		return d
+		return err
 	}
 
 	ms := m.(*Methods)
-	d.log.Info("Shelly.ListMethods", "methods", ms)
+	log.Info("Shelly.ListMethods", "methods", ms)
 
 	d.Components = make(map[string]map[string]types.MethodHandler)
 	for _, m := range ms.Methods {
@@ -148,19 +145,18 @@ func (d *Device) Init(ch types.Channel) *Device {
 			}
 		}
 	}
-	d.log.Info("device API", "components", d.Components)
+	log.Info("device API", "components", d.Components)
 
 	di, err := d.CallE(ch, "Shelly", "GetDeviceInfo", map[string]interface{}{"ident": true})
 	if err != nil {
-		d.log.Error(err, "Shelly.GetDeviceInfo")
-		return d
+		return err
 	}
 	d.Info = di.(*DeviceInfo)
-	d.log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
-
+	log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
 	d.Id_ = d.Info.Id
+	d.MacAddress = d.Info.MacAddress
 
-	return d
+	return nil
 }
 
 func (d *Device) Topics() []string {
@@ -183,11 +179,11 @@ func Devices(log logr.Logger) map[string]*Device {
 func DevicesE(log logr.Logger) (map[string]*Device, error) {
 	devicesMutex.Lock()
 	if len(devicesMap) == 0 {
-		err := loadDevicesFromMdns(log)
-		if err != nil {
-			log.Error(err, "Unable to load devices from mDNS")
-			return nil, err
-		}
+		// err := loadDevicesFromMdns(log)
+		// if err != nil {
+		// 	log.Error(err, "Unable to load devices from mDNS")
+		// 	return nil, err
+		// }
 		log.Info("New discovered devices", "num", len(devicesMap))
 	}
 	log.Info("Now knows devices", "num", len(devicesMap), "devices", devicesMap)

@@ -23,8 +23,9 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 
 	// Create the new MQTT Server.
 	mqttServer := mmqtt.New(nil)
-	mqttServer.Log = slog.New(logr.ToSlogHandler(log))
 
+	// Configure the MQTT server so that every message is logged.
+	mqttServer.Log = slog.New(logr.ToSlogHandler(log))
 	err := mqttServer.AddHook(&debug.Hook{
 		Log: slog.New(logr.ToSlogHandler(log)),
 	}, &debug.Options{

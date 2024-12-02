@@ -31,7 +31,8 @@ type Device struct {
 	Ipv4_      net.IP                                    `json:"ipv4"`
 	Port       int                                       `json:"port"`
 	Info       *DeviceInfo                               `json:"info"`
-	Components map[string]map[string]types.MethodHandler `json:"methods"`
+	Methods    []string                                  `json:"methods"`
+	Components map[string]map[string]types.MethodHandler `json:"methods_handlers"`
 }
 
 func (d *Device) Id() string {
@@ -42,7 +43,7 @@ func (d *Device) Ipv4() net.IP {
 	return d.Ipv4_
 }
 
-type Methods struct {
+type MethodsResponse struct {
 	Methods []string `json:"methods"`
 }
 
@@ -124,11 +125,11 @@ func (d *Device) Init(log logr.Logger, ch types.Channel) error {
 		return err
 	}
 
-	ms := m.(*Methods)
-	log.Info("Shelly.ListMethods", "methods", ms)
+	d.Methods = m.(*MethodsResponse).Methods
+	log.Info("Shelly.ListMethods", "methods", d.Methods)
 
 	d.Components = make(map[string]map[string]types.MethodHandler)
-	for _, m := range ms.Methods {
+	for _, m := range d.Methods {
 		mi := strings.Split(m, ".")
 		c := mi[0] // component
 		v := mi[1] // verb

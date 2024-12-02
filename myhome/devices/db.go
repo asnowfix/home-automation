@@ -39,6 +39,9 @@ func (s *DeviceStorage) createTable() error {
         name TEXT,
         host TEXT,
         manufacturer TEXT,
+        info TEXT,
+        config TEXT,
+        status TEXT,
         UNIQUE (manufacturer, id)
     );`
 	_, err := s.db.Exec(schema)
@@ -56,15 +59,34 @@ func (s *DeviceStorage) Close() {
 
 func (s *DeviceStorage) UpsertDevice(device *Device) error {
 	query := `
-    INSERT INTO devices (mac, id, name, host, manufacturer) VALUES (:mac, :id, :name, :host, :manufacturer)
-    ON CONFLICT(mac) DO UPDATE SET id = excluded.id, name = excluded.name, host = excluded.host, manufacturer = excluded.manufacturer
-    ON CONFLICT(manufacturer, id) DO UPDATE SET mac = excluded.mac, name = excluded.name, host = excluded.host`
+    INSERT INTO devices (mac, id, name, host, manufacturer, info, config, status) VALUES (:mac, :id, :name, :host, :manufacturer, :info, :config, :status)
+    ON CONFLICT(mac) DO UPDATE SET id = excluded.id, name = excluded.name, host = excluded.host, manufacturer = excluded.manufacturer, info = excluded.info, config = excluded.config, status = excluded.status
+    ON CONFLICT(manufacturer, id) DO UPDATE SET mac = excluded.mac, name = excluded.name, host = excluded.host, info = excluded.info, config = excluded.config, status = excluded.status`
 	_, err := s.db.NamedExec(query, device)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device", "device", device)
 		return err
 	}
 	s.log.Info("Upserted device", "device", device)
+	return nil
+}
+
+func (s *DeviceStorage) AddDeviceIfUnknown(device *Device) error {
+	var existingDevice Device
+	query := `SELECT * FROM devices WHERE mac = $1`
+	err := s.db.Get(&existingDevice, query, device.MAC)
+	if err == nil {
+		s.log.Info("Device already exists", "device", existingDevice)
+		return nil
+	}
+
+	query = `INSERT INTO devices (mac, id, name, host, manufacturer, info, config, status) VALUES (:mac, :id, :name, :host, :manufacturer, :info, :config, :status)`
+	_, err = s.db.NamedExec(query, device)
+	if err != nil {
+		s.log.Error(err, "Failed to add device", "device", device)
+		return err
+	}
+	s.log.Info("Added new device", "device", device)
 	return nil
 }
 
@@ -103,6 +125,17 @@ func (s *DeviceStorage) GetDeviceByMAC(mac string) (*Device, error) {
 	return &device, nil
 }
 
+func (s *DeviceStorage) GetDeviceByID(id string) (*Device, error) {
+	var device Device
+	query := `SELECT * FROM devices WHERE id = $1`
+	err := s.db.Get(&device, query, id)
+	if err != nil {
+		s.log.Error(err, "Failed to get device by ID", "id", id)
+		return nil, err
+	}
+	return &device, nil
+}
+
 func (s *DeviceStorage) GetDeviceByName(name string) (*Device, error) {
 	var device Device
 	query := `SELECT * FROM devices WHERE name = $1`
@@ -126,7 +159,7 @@ func (s *DeviceStorage) GetAllDevices() ([]Device, error) {
 }
 
 func (s *DeviceStorage) UpdateDevice(device Device) error {
-	query := `UPDATE devices SET id = :id, name = :name, host = :host, manufacturer = :manufacturer WHERE mac = :mac`
+	query := `UPDATE devices SET id = :id, name = :name, host = :host, manufacturer = :manufacturer, info = :info, config = :config, status = :status WHERE mac = :mac`
 	_, err := s.db.NamedExec(query, device)
 	if err != nil {
 		s.log.Error(err, "Failed to update device", "device", device)

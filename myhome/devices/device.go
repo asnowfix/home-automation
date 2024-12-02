@@ -18,7 +18,10 @@ type Device struct {
 	// The host address of the device (Host address or resolvable hostname), assigned on this network
 	Host string `db:"host" json:"host"`
 	// The local unique name of the device, defined by the user
-	Name string `db:"name" json:"name"`
+	Name   string `db:"name" json:"name"`
+	Info   string `db:"info"`
+	Config string `db:"config"`
+	Status string `db:"status"`
 }
 
 func NewDevice(manufacturer, id, name, host string, mac net.HardwareAddr) *Device {
@@ -27,8 +30,11 @@ func NewDevice(manufacturer, id, name, host string, mac net.HardwareAddr) *Devic
 			Manufacturer: manufacturer,
 			ID:           id,
 		},
-		MAC:  mac,
-		Host: host,
-		Name: name,
+		MAC:    mac,
+		Host:   host,
+		Name:   name,
+		Info:   "",
+		Config: "",
+		Status: "",
 	}
 }

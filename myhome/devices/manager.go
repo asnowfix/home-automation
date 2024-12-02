@@ -76,17 +76,15 @@ func (dm *DeviceManager) updateDevices(service string, timeout time.Duration, id
 
 	dm.mu.Lock()
 	for _, entry := range entries {
-		dm.log.Info("Identifying", "entry", entry)
 		identity, err := identify(dm.log, entry)
 		if err != nil {
-			dm.log.Info("Skipping", "entry", entry, "error", err)
+			dm.log.Error(err, "Skipping unidentifiable", "entry", entry)
 			continue
 		}
 
-		dm.log.Info("Identified", "identity", identity)
 		_, err = dm.storage.GetDeviceByManufacturerAndID(identity.Manufacturer, identity.ID)
 		if err == nil {
-			dm.log.Info("Skipping known", "entry", entry)
+			// Device already known
 			continue
 		}
 

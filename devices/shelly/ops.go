@@ -39,7 +39,7 @@ type Registrar struct {
 
 var listMethodsHandler = types.MethodHandler{
 	Method:     "Shelly.ListMethods",
-	Allocate:   func() any { return new(Methods) },
+	Allocate:   func() any { return new(MethodsResponse) },
 	HttpMethod: http.MethodGet,
 }
 

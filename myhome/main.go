@@ -26,6 +26,9 @@ var Version string
 var Commit string
 
 func main() {
+	var disableMQTT bool
+	var disableDeviceManager bool
+
 	log := hlog.Init()
 
 	// Initialize viper
@@ -35,11 +38,13 @@ func main() {
 	err := viper.ReadInConfig()   // Find and read the config file
 	if err != nil {
 		log.Error(err, "Error reading config file")
-		os.Exit(1)
+		disableMQTT = false
+		disableDeviceManager = true
+	} else {
+		// Read the configuration option to disable MQTT server startup
+		disableMQTT = viper.GetBool("disable_mqtt")
+		disableDeviceManager = viper.GetBool("disable_device_manager")
 	}
-
-	// Read the configuration option to disable MQTT server startup
-	disableMQTT := viper.GetBool("disable_mqtt")
 
 	// Create signals channel to run server until interrupted
 	sigs := make(chan os.Signal, 1)
@@ -49,15 +54,6 @@ func main() {
 		<-sigs
 		done <- true
 	}()
-
-	// Initialize DeviceManager
-	storage, err := devices.NewDeviceStorage(log, "myhome.db")
-	if err != nil {
-		log.Error(err, "Failed to initialize device storage")
-		os.Exit(1)
-	}
-	dm := devices.NewDeviceManager(log, storage)
-	log.Info("Started device manager", "manager", dm)
 
 	// Conditionally start the MQTT server
 	if !disableMQTT {
@@ -82,30 +78,41 @@ func main() {
 		defer close(proxyCh)
 	}
 
-	// Initialize Shelly devices
-	shelly.Init(log)
-	dm.DiscoverDevices(shelly.MDNS_SHELLIES, 5*time.Second, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.DeviceIdentifier, error) {
-		log.Info("Identifying", "entry", entry)
-		return &devices.DeviceIdentifier{
-			Manufacturer: "Shelly",
-			ID:           entry.Instance,
-		}, nil
-	}, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.Device, error) {
-		sd, err := shelly.NewDeviceFromZeroConfEntry(log, entry)
+	if !disableDeviceManager {
+		// Initialize DeviceManager
+		storage, err := devices.NewDeviceStorage(log, "myhome.db")
 		if err != nil {
-			return nil, err
+			log.Error(err, "Failed to initialize device storage")
+			os.Exit(1)
 		}
-		log.Info("Got", "shelly_device", sd)
-		return &devices.Device{
-			DeviceIdentifier: devices.DeviceIdentifier{
+		dm := devices.NewDeviceManager(log, storage)
+		log.Info("Started device manager", "manager", dm)
+		defer dm.StopDiscovery()
+
+		// Initialize Shelly devices
+		shelly.Init(log)
+		dm.DiscoverDevices(shelly.MDNS_SHELLIES, 5*time.Second, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.DeviceIdentifier, error) {
+			log.Info("Identifying", "entry", entry)
+			return &devices.DeviceIdentifier{
 				Manufacturer: "Shelly",
-				ID:           sd.Id_,
-			},
-			MAC:  sd.MacAddress,
-			Host: sd.Ipv4_.String(),
-		}, nil
-	})
-	defer dm.StopDiscovery()
+				ID:           entry.Instance,
+			}, nil
+		}, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.Device, error) {
+			sd, err := shelly.NewDeviceFromZeroConfEntry(log, entry)
+			if err != nil {
+				return nil, err
+			}
+			log.Info("Got", "shelly_device", sd)
+			return &devices.Device{
+				DeviceIdentifier: devices.DeviceIdentifier{
+					Manufacturer: "Shelly",
+					ID:           sd.Id_,
+				},
+				MAC:  sd.MacAddress,
+				Host: sd.Ipv4_.String(),
+			}, nil
+		})
+	}
 
 	// Run server until interrupted
 	<-done

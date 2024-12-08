@@ -19,6 +19,7 @@ endif
 
 start:
 ifeq ($(OS),Linux)
+	mkdir -p $(HOME)/.local/state/myhome
 	sudo systemctl start myhome@$(ME).service
 else
 	$(error unsupported $(@) for OS:$(OS))

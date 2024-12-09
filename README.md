@@ -14,6 +14,7 @@ Collection of tools to help automating my own House, mostly using (very cool) Sh
   - [Usage Windows](#usage-windows)
   - [Shelly Notes](#shelly-notes)
     - [Shelly 1 H\&T](#shelly-1-ht)
+    - [Web-Sockets Logs](#web-sockets-logs)
     - [Shelly MQTT Notes](#shelly-mqtt-notes)
   - [GCP Notes](#gcp-notes)
   - [Shelly Devices](#shelly-devices)
@@ -84,6 +85,63 @@ go install
 sudo systemctl stop myhome@fix.service
 sudo systemctl start myhome@fix.service
 systemctl status myhome@fix.service
+```
+
+### Web-Sockets Logs
+
+From <https://shelly-api-docs.shelly.cloud/gen2/Scripts/Tutorial>:
+
+
+```bash
+export SHELLY=192.168.1.39
+curl -X POST -d '{"id":1, "method":"Sys.SetConfig","params":{"config":{"debug":{"websocket":{"enable":true}}}}}' http://${SHELLY}/rpc
+wscat --connect ws://${SHELLY}/debug/log
+```
+```log
+< {"ts":1733774548.629, "level":2, "data":"shelly_debug.cpp:236    Streaming logs to 192.168.1.2:40234", "fd":1}
+< {"ts":1733774573.492, "level":2, "data":"    \"component\": \"input:0\", ", "fd":102}
+< {"ts":1733774573.494, "level":2, "data":"    \"id\": 0, ", "fd":102}
+< {"ts":1733774573.497, "level":2, "data":"    \"event\": \"toggle\", ", "fd":102}
+< {"ts":1733774573.499, "level":2, "data":"    \"state\": true, \"ts\": 1733774573.41000008583 }", "fd":102}
+< {"ts":1733774573.501, "level":2, "data":" }", "fd":102}
+< {"ts":1733774573.503, "level":2, "data":"Toggle lustre light", "fd":102}
+< {"ts":1733774573.505, "level":2, "data":"shelly_ejs_rpc.cpp:41   Shelly.call HTTP.POST {\"url\":\"http://shelly1minig3-84fce63bf464.local/rpc/Switch.Toggle\",\"body\":\"{\\\"id\\\":0}\"}", "fd":1}
+< {"ts":1733774573.508, "level":2, "data":"shelly_notification:162 Status change of input:0: {\"id\":0,\"state\":true}", "fd":1}
+< {"ts":1733774573.543, "level":2, "data":"shos_rpc_inst.c:243     HTTP.POST via loopback ", "fd":1}
+< {"ts":1733774573.547, "level":2, "data":"shelly_http_client.:308 0x3ffe4998: HTTP POST http://shelly1minig3-84fce63bf464.local/rpc/Switch.Toggle", "fd":1}
+< {"ts":1733774573.670, "level":2, "data":"  \"id\": 0, \"now\": 1733774573.60793089866, ", "fd":102}
+< {"ts":1733774573.672, "level":2, "data":"  \"info\": { ", "fd":102}
+< {"ts":1733774573.674, "level":2, "data":"    \"component\": \"input:0\", ", "fd":102}
+< {"ts":1733774573.676, "level":2, "data":"    \"id\": 0, ", "fd":102}
+< {"ts":1733774573.678, "level":2, "data":"    \"event\": \"toggle\", ", "fd":102}
+< {"ts":1733774573.680, "level":2, "data":"    \"state\": false, \"ts\": 1733774573.60999989509 }", "fd":102}
+< {"ts":1733774573.682, "level":2, "data":" }", "fd":102}
+< {"ts":1733774573.684, "level":2, "data":"shelly_notification:162 Status change of input:0: {\"id\":0,\"state\":false}", "fd":1}
+< {"ts":1733774573.751, "level":2, "data":"shelly_http_client.:611 0x3ffe4998: Finished; bytes 132, code 200, redir 0/3, auth 0, status OK", "fd":1}
+< {"ts":1733774574.909, "level":2, "data":"    \"component\": \"input:0\", ", "fd":102}
+< {"ts":1733774574.912, "level":2, "data":"    \"id\": 0, ", "fd":102}
+< {"ts":1733774574.913, "level":2, "data":"    \"event\": \"toggle\", ", "fd":102}
+< {"ts":1733774574.915, "level":2, "data":"    \"state\": true, \"ts\": 1733774574.82999992370 }", "fd":102}
+< {"ts":1733774574.917, "level":2, "data":" }", "fd":102}
+< {"ts":1733774574.919, "level":2, "data":"Toggle lustre light", "fd":102}
+< {"ts":1733774574.921, "level":2, "data":"shelly_ejs_rpc.cpp:41   Shelly.call HTTP.POST {\"url\":\"http://shelly1minig3-84fce63bf464.local/rpc/Switch.Toggle\",\"body\":\"{\\\"id\\\":0}\"}", "fd":1}
+< {"ts":1733774574.925, "level":2, "data":"shelly_notification:162 Status change of input:0: {\"id\":0,\"state\":true}", "fd":1}
+< {"ts":1733774574.973, "level":2, "data":"shos_rpc_inst.c:243     HTTP.POST via loopback ", "fd":1}
+< {"ts":1733774574.977, "level":2, "data":"shelly_http_client.:308 0x3ffe4a0c: HTTP POST http://shelly1minig3-84fce63bf464.local/rpc/Switch.Toggle", "fd":1}
+< {"ts":1733774574.980, "level":2, "data":"shos_init.c:94          New min heap free: 107092", "fd":1}
+< {"ts":1733774574.982, "level":2, "data":"shos_init.c:94          New min heap free: 106164", "fd":1}
+< {"ts":1733774574.996, "level":2, "data":"shos_init.c:94          New min heap free: 105400", "fd":1}
+< {"ts":1733774575.020, "level":2, "data":"shelly_http_client.:611 0x3ffe4a0c: Finished; bytes 131, code 200, redir 0/3, auth 0, status OK", "fd":1}
+< {"ts":1733774575.109, "level":2, "data":"  \"id\": 0, \"now\": 1733774575.04737496376, ", "fd":102}
+< {"ts":1733774575.112, "level":2, "data":"  \"info\": { ", "fd":102}
+< {"ts":1733774575.114, "level":2, "data":"    \"component\": \"input:0\", ", "fd":102}
+< {"ts":1733774575.116, "level":2, "data":"    \"id\": 0, ", "fd":102}
+< {"ts":1733774575.117, "level":2, "data":"    \"event\": \"toggle\", ", "fd":102}
+< {"ts":1733774575.119, "level":2, "data":"    \"state\": false, \"ts\": 1733774575.04999995231 }", "fd":102}
+< {"ts":1733774575.121, "level":2, "data":" }", "fd":102}
+< {"ts":1733774575.123, "level":2, "data":"shelly_notification:162 Status change of input:0: {\"id\":0,\"state\":false}", "fd":1}
+< {"ts":1733774575.144, "level":2, "data":"shos_init.c:94          New min heap free: 104656", "fd":1}
+< {"ts":1733774584.700, "level":2, "data":"shelly_debug.cpp:149    Stopped streaming logs to 192.168.1.57:53127", "fd":1}
 ```
 
 ### Shelly MQTT Notes

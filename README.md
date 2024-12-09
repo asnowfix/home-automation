@@ -16,6 +16,10 @@ Collection of tools to help automating my own House, mostly using (very cool) Sh
     - [Shelly 1 H\&T](#shelly-1-ht)
     - [Web-Sockets Logs](#web-sockets-logs)
     - [Shelly MQTT Notes](#shelly-mqtt-notes)
+      - [Any topic](#any-topic)
+      - [Shelly H\&T Gen1 (FIXME)](#shelly-ht-gen1-fixme)
+      - [Test MQTT CLI](#test-mqtt-cli)
+      - [Shelly H\&T Gen1](#shelly-ht-gen1)
   - [GCP Notes](#gcp-notes)
   - [Shelly Devices](#shelly-devices)
     - [Gen 3](#gen-3)
@@ -147,6 +151,142 @@ wscat --connect ws://${SHELLY}/debug/log
 ### Shelly MQTT Notes
 
 - [Hive MQTT CLI Installation](https://hivemq.github.io/mqtt-cli/docs/installation/)
+
+#### Any topic
+
+```bash
+mqtt sub -d -t '#' -h 192.168.1.2
+```
+```log
+Client 'UNKNOWN@192.168.1.2' sending CONNECT
+    MqttConnect{keepAlive=60, cleanStart=true, sessionExpiryInterval=0}
+Client 'UNKNOWN@192.168.1.2' received CONNACK
+    MqttConnAck{reasonCode=SUCCESS, sessionPresent=false, assignedClientIdentifier=ctblbp0vpopou2bqq0t0, restrictions=MqttConnAckRestrictions{receiveMaximum=1024, maximumPacketSize=268435460, topicAliasMaximum=0, maximumQos=EXACTLY_ONCE, retainAvailable=true, wildcardSubscriptionAvailable=true, sharedSubscriptionAvailable=true, subscriptionIdentifiersAvailable=true}}
+Client 'ctblbp0vpopou2bqq0t0@192.168.1.2' sending SUBSCRIBE
+    MqttSubscribe{subscriptions=[MqttSubscription{topicFilter=#, qos=EXACTLY_ONCE, noLocal=false, retainHandling=SEND, retainAsPublished=false}]}
+Client 'ctblbp0vpopou2bqq0t0@192.168.1.2' received SUBACK
+    MqttSubAck{reasonCodes=[GRANTED_QOS_2], packetIdentifier=65526}
+Client 'ctblbp0vpopou2bqq0t0@192.168.1.2' received PUBLISH ('true')
+    MqttPublish{topic=shelly1minig3-54320464f17c/online, payload=4byte, qos=AT_LEAST_ONCE, retain=true}
+true
+[...]
+Client 'ctblbp0vpopou2bqq0t0@192.168.1.2' received PUBLISH ('{"src":"shellyplusi4-c4d8d554ad6c","dst":"shellyplusi4-c4d8d554ad6c/events","method":"NotifyStatus","params":{"ts":1733776884.28,"input:3":{"id":3,"state":true}}}')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/events/rpc, payload=162byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+{"src":"shellyplusi4-c4d8d554ad6c","dst":"shellyplusi4-c4d8d554ad6c/events","method":"NotifyStatus","params":{"ts":1733776884.28,"input:3":{"id":3,"state":true}}}
+[...]
+Client 'ctblbp0vpopou2bqq0t0@192.168.1.2' received PUBLISH ('{"id":3,"state":false}')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/status/input:3, payload=22byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+{"id":3,"state":false}
+[...]
+Client 'ctblbp0vpopou2bqq0t0@192.168.1.2' received PUBLISH ('{"src":"shellyplusi4-c4d8d554ad6c","dst":"shellyplusi4-c4d8d554ad6c/events","method":"NotifyStatus","params":{"ts":1733776888.34,"input:3":{"id":3,"state":true}}}')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/events/rpc, payload=162byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+{"src":"shellyplusi4-c4d8d554ad6c","dst":"shellyplusi4-c4d8d554ad6c/events","method":"NotifyStatus","params":{"ts":1733776888.34,"input:3":{"id":3,"state":true}}}
+[...]
+Client 'ctblbp0vpopou2bqq0t0@192.168.1.2' received PUBLISH ('{"src":"shelly1minig3-54320464f17c","dst":"shelly1minig3-54320464f17c/events","method":"NotifyStatus","params":{"ts":1733776888.48,"switch:0":{"id":0,"output":false,"source":"HTTP_in"}}}')
+    MqttPublish{topic=shelly1minig3-54320464f17c/events/rpc, payload=186byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+{"src":"shelly1minig3-54320464f17c","dst":"shelly1minig3-54320464f17c/events","method":"NotifyStatus","params":{"ts":1733776888.48,"switch:0":{"id":0,"output":false,"source":"HTTP_in"}}}
+[...]
+Client 'ctblbp0vpopou2bqq0t0@192.168.1.2' received PUBLISH ('{"id":3,"state":false}')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/status/input:3, payload=22byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+{"id":3,"state":false}
+[...]
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' received PUBLISH ('shellyplusi4-c4d8d554ad6c 427 1733777582.752 1|shos_dns_sd_respond:236 ws(0x3ffde77c): Announced ShellyPlusI4-C4D8D554AD6C any@any (192.168.1.39)')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/debug/log, payload=145byte, qos=AT_MOST_ONCE, retain=false, messageExpiryInterval=86400}
+[...]
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' received PUBLISH ('{"id":0,"state":false}')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/status/input:0, payload=22byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+{"id":0,"state":false}
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' sending PUBACK
+    MqttPubAck{reasonCode=SUCCESS, packetIdentifier=57}
+```
+
+Click & Release Button 2
+
+```log
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' received PUBLISH ('{"src":"shellyplusi4-c4d8d554ad6c","dst":"shellyplusi4-c4d8d554ad6c/events","method":"NotifyStatus","params":{"ts":1733777785.79,"input:2":{"id":2,"state":true}}}')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/events/rpc, payload=162byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+{"src":"shellyplusi4-c4d8d554ad6c","dst":"shellyplusi4-c4d8d554ad6c/events","method":"NotifyStatus","params":{"ts":1733777785.79,"input:2":{"id":2,"state":true}}}
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' sending PUBACK
+    MqttPubAck{reasonCode=SUCCESS, packetIdentifier=58}
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' received PUBLISH ('{"id":2,"state":true}')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/status/input:2, payload=21byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+{"id":2,"state":true}
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' sending PUBACK
+    MqttPubAck{reasonCode=SUCCESS, packetIdentifier=59}
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' received PUBLISH ('{"src":"shellyplusi4-c4d8d554ad6c","dst":"shellyplusi4-c4d8d554ad6c/events","method":"NotifyStatus","params":{"ts":1733777785.98,"input:2":{"id":2,"state":false}}}')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/events/rpc, payload=163byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+{"src":"shellyplusi4-c4d8d554ad6c","dst":"shellyplusi4-c4d8d554ad6c/events","method":"NotifyStatus","params":{"ts":1733777785.98,"input:2":{"id":2,"state":false}}}
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' sending PUBACK
+    MqttPubAck{reasonCode=SUCCESS, packetIdentifier=60}
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' received PUBLISH ('{"id":2,"state":false}')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/status/input:2, payload=22byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+{"id":2,"state":false}
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' sending PUBACK
+    MqttPubAck{reasonCode=SUCCESS, packetIdentifier=61}
+```
+
+#### Shelly H&T Gen1 (FIXME)
+
+Debug log:
+
+```log
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/http/server.go:23 > header: %s: %s Content-Length=["0"] v=0
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/http/server.go:23 > header: %s: %s User-Agent=["Shelly/20230913-112531/v1.14.0-gcb84623 (SHHT-1)"] v=0
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/http/server.go:44 > http.HandleFunc url=/?hum=69&temp=17.62&id=shellyht-208500 v=0
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/http/server.go:46 > http.HandleFunc query={"hum":["69"],"id":["shellyht-208500"],"temp":["17.62"]} v=0
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/http/server.go:68 > http.HandleFunc gen1_device={"humidity":69,"ip":"192.168.1.37"} v=0
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/http/server.go:72 > http.HandleFunc gen1_json="{\"ip\":\"192.168.1.37\",\"humidity\":69}" v=0
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/devices/shelly/gen1/publisher.go:36 > gen1.Publisher: MQTT(%v) <<< %v shellyht-208500/events/rpc="{\"id\":0,\"tC\":17.62,\"tF\":63.716003}" v=0
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/logs/waiter.go:13 > logs.Waiter: topic=shellyht-208500/events/rpc v=0
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/logs/waiter.go:29 > logs.Waiter: already known topic=shellyht-208500/events/rpc v=0
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/mymqtt/mqtt.go:211 > MqttSubscribe received: payload="{\"id\":0,\"tC\":17.62,\"tF\":63.716003}" topic=shellyht-208500/events/rpc v=0
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/logs/waiter.go:25 > logs.Waiter payload="{\"id\":0,\"tC\":17.62,\"tF\":63.716003}" topic=shellyht-208500/events/rpc v=0
+```
+
+MQTT log:
+
+```log
+Client 'ctblgrgvpopou2bqq0tg@192.168.1.2' received PUBLISH ('{"id":0, "source":"HTTP_in", "output":false,"temperature":{"tC":40.5, "tF":104.9}}')
+    MqttPublish{topic=shelly1minig3-54320464f17c/status/switch:0, payload=82byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+{"id":0, "source":"HTTP_in", "output":false,"temperature":{"tC":40.5, "tF":104.9}}
+```
+
+#### Test MQTT CLI
+
+```bash
+mqtt sub -d -t shellyplusi4-c4d8d554ad6c/status/3 -h 192.168.1.2
+```
+```log
+Client 'UNKNOWN@192.168.1.2' sending CONNECT
+    MqttConnect{keepAlive=60, cleanStart=true, sessionExpiryInterval=0}
+Client 'UNKNOWN@192.168.1.2' received CONNACK
+    MqttConnAck{reasonCode=SUCCESS, sessionPresent=false, assignedClientIdentifier=ctbl8t0vpopou2bqq0r0, restrictions=MqttConnAckRestrictions{receiveMaximum=1024, maximumPacketSize=268435460, topicAliasMaximum=0, maximumQos=EXACTLY_ONCE, retainAvailable=true, wildcardSubscriptionAvailable=true, sharedSubscriptionAvailable=true, subscriptionIdentifiersAvailable=true}}
+Client 'ctbl8t0vpopou2bqq0r0@192.168.1.2' sending SUBSCRIBE
+    MqttSubscribe{subscriptions=[MqttSubscription{topicFilter=shellyplusi4-c4d8d554ad6c/status/3, qos=EXACTLY_ONCE, noLocal=false, retainHandling=SEND, retainAsPublished=false}]}
+Client 'ctbl8t0vpopou2bqq0r0@192.168.1.2' received SUBACK
+    MqttSubAck{reasonCodes=[GRANTED_QOS_2], packetIdentifier=65526}
+[...]
+Client 'ctbl8t0vpopou2bqq0r0@192.168.1.2' received PUBLISH ('bar')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/status/3, payload=3byte, qos=AT_MOST_ONCE, retain=false, messageExpiryInterval=86400}
+bar
+```
+
+```bash
+mqtt pub --topic=shellyplusi4-c4d8d554ad6c/status/3 -m="bar" --host=192.168.1.2 --debug
+```
+```log
+Client 'UNKNOWN@192.168.1.2' sending CONNECT
+    MqttConnect{keepAlive=60, cleanStart=true, sessionExpiryInterval=0}
+Client 'UNKNOWN@192.168.1.2' received CONNACK
+    MqttConnAck{reasonCode=SUCCESS, sessionPresent=false, assignedClientIdentifier=ctbla00vpopou2bqq0sg, restrictions=MqttConnAckRestrictions{receiveMaximum=1024, maximumPacketSize=268435460, topicAliasMaximum=0, maximumQos=EXACTLY_ONCE, retainAvailable=true, wildcardSubscriptionAvailable=true, sharedSubscriptionAvailable=true, subscriptionIdentifiersAvailable=true}}
+Client 'ctbla00vpopou2bqq0sg@192.168.1.2' sending PUBLISH ('bar')
+    MqttPublish{topic=shellyplusi4-c4d8d554ad6c/status/3, payload=3byte, qos=AT_MOST_ONCE, retain=false}
+Client 'ctbla00vpopou2bqq0sg@192.168.1.2' finish PUBLISH
+    MqttPublishResult{publish=MqttPublish{topic=shellyplusi4-c4d8d554ad6c/status/3, payload=3byte, qos=AT_MOST_ONCE, retain=false}}
+```
+
+
+#### Shelly H&T Gen1
 
 Subscribe to Shelly H&T Gen1:
 

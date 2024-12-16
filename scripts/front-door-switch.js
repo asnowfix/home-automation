@@ -3,6 +3,12 @@ Shelly.addEventHandler(function (event) {
     try {
         // top-left switch - front door light
         if (event.id === 1 && event.info.state === true) {
+            console.log("Toogling right door light");
+            // MQTT.publish("shellyplus1-b8d61a85ed58/rpc", JSON.stringify(true), 0, false);
+            Shelly.call("HTTP.POST", {
+                url: "http://shellyplus1-b8d61a85ed58.local/rpc/Switch.Toggle",
+                body: JSON.stringify({ "id": 0 })
+            });
             console.log("Toogling front door light");
             // MQTT.publish("shelly1minig3-543204522cb4/rpc", JSON.stringify(true), 0, false);
             Shelly.call("HTTP.POST", {

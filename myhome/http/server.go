@@ -66,7 +66,7 @@ func MyHome(log logr.Logger, g1c chan gen1.Device) {
 		// tc <- req.Body
 
 		log.Info("http.HandleFunc", "gen1_device", d)
-		g1c <- d
+		// g1c <- d FIXME: reenable
 
 		jd, _ := json.Marshal(d)
 		log.Info("http.HandleFunc", "gen1_json", string(jd))

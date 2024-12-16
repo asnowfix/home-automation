@@ -7,6 +7,9 @@ let CONFIG = {
     // Active scan means the scanner will ping back the Bluetooth device to receive all its data, but it will drain the battery faster
     active: false,
 
+    // The amount of second before turning off the switch, when triggered by a bluetooth event
+    autoOffTimeout: 300,
+
     // When `allowedMacAddresses` is set to null, evets from every bluetooth device are accepted.
     // allowedMacAddresses: null,
     allowedMacAddresses: [
@@ -63,14 +66,34 @@ let CONFIG = {
         try {
             // Turn on the light if the motion is detected & illuminance is below 100.
             if (eventData.motion === 1 && eventData.illuminance < 100) {
-                Shelly.call("Switch.Set", { id: 0, on: true });
+
+                Shelly.call("switch.getstatus", { id: 0 }, CONFIG.turnOnIfOff, "Switch.GetStatus");
             }
         } catch (error) {
             console.error("onStatusUpdate error", error);
         }
         MQTT.publish(eventData.address, JSON.stringify(eventData))
+    },
+    turnOnIfOff: function(result, error_code, error_message, user_data) {
+        //console.log("turnOnIfOff result:", result, "error_code:", error_code, "error_message:", error_message, "user_data:", user_data);
+        if (result.output === false) {
+          console.log("switch off: turn it on, with auto-off after", CONFIG.autoOffTimeout, "seconds")
+          Shelly.call("Switch.Set", { id: 0, on: true });
+          function timerCode() {
+            console.log("auto-off: turning off the switch")
+            Shelly.call("Switch.Set", { id: 0, on: false });
+        };
+          Timer.set(
+            /* number of miliseconds */ 1000 * CONFIG.autoOffTimeout,
+            /* repeat? */ false,
+            /* callback */ timerCode
+          );
+        } else {
+          console.log("switch already on ")
+        }
     }
 };
+
 /******************* STOP CHANGE HERE *******************/
 
 let ALLTERCO_MFD_ID_STR = "0ba9";

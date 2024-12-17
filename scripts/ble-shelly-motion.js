@@ -74,22 +74,22 @@ let CONFIG = {
         }
         MQTT.publish(eventData.address, JSON.stringify(eventData))
     },
-    turnOnIfOff: function(result, error_code, error_message, user_data) {
-        //console.log("turnOnIfOff result:", result, "error_code:", error_code, "error_message:", error_message, "user_data:", user_data);
+    turnOnIfOff: function (result, error_code, error_message, user_data) {
+        console.log("turnOnIfOff result:", result, "error_code:", error_code, "error_message:", error_message, "user_data:", user_data);
         if (result.output === false) {
-          console.log("switch off: turn it on, with auto-off after", CONFIG.autoOffTimeout, "seconds")
-          Shelly.call("Switch.Set", { id: 0, on: true });
-          function timerCode() {
-            console.log("auto-off: turning off the switch")
-            Shelly.call("Switch.Set", { id: 0, on: false });
-        };
-          Timer.set(
-            /* number of miliseconds */ 1000 * CONFIG.autoOffTimeout,
-            /* repeat? */ false,
-            /* callback */ timerCode
-          );
+            console.log("switch off: turn it on, with auto-off after", CONFIG.autoOffTimeout, "seconds")
+            Shelly.call("Switch.Set", { id: 0, on: true });
+            function timerCode() {
+                console.log("auto-off: turning off the switch")
+                Shelly.call("Switch.Set", { id: 0, on: false });
+            };
+            Timer.set(
+                1000 * CONFIG.autoOffTimeout, /* number of miliseconds */
+                false, /* repeat? */
+                timerCode /* callback */
+            );
         } else {
-          console.log("switch already on ")
+            console.log("switch already on ")
         }
     }
 };

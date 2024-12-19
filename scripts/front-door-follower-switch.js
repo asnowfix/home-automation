@@ -1,5 +1,5 @@
 let CONFIG = {
-    // front-door switch
+    // front-door light
     device: "shelly1minig3-543204522cb4",
 };
 MQTT.subscribe(
@@ -22,7 +22,7 @@ MQTT.subscribe(
             // }
             msg = JSON.parse(message)
             if (msg.method === "NotifyStatus") {
-                console.log("Following event", msg.params["switch:0"].output)
+                console.log("Calling Switch.Set", msg.params["switch:0"].output)
                 Shelly.call("Switch.Set", { id: 0, on: msg.params["switch:0"].output });
             } else {
               console.log("ignoring msg:", msg)
@@ -31,6 +31,6 @@ MQTT.subscribe(
             console.log("Error handling event: ", e);
         }
     },
-    "foo"
+    "none"
 );
-console.log("Now handling status events from", CONFIG.device);
+console.log("Now handling MQTT RPC events from", CONFIG.device);

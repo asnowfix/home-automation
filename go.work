@@ -1,4 +1,4 @@
-go 1.23.0
+go 1.23.4
 
 use (
 	.
@@ -7,6 +7,7 @@ use (
 	./devices/shelly
 	./devices/shelly/gen1
 	./devices/shelly/input
+	./devices/shelly/schedule
 	./devices/shelly/script
 	./devices/shelly/shttp
 	./devices/shelly/sswitch
@@ -16,8 +17,11 @@ use (
 	./hlog
 	./homectl/list
 	./homectl/mqtt
-	./homectl/set
-	./homectl/set/shelly
+	./homectl/options
+	./homectl/shelly
+	./homectl/shelly/jobs
+	./homectl/shelly/mqtt
+	./homectl/shelly/options
 	./homectl/show
 	./homectl/toggle
 	./internal/myip

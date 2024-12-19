@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
+	"homectl/shelly/options"
+	"schedule"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -20,6 +22,7 @@ var showMqttFlag bool
 var showStatusFlag bool
 var showSwitchId int
 var showWifiFlag bool
+var showJobsFlag bool
 
 func init() {
 	showShellyCmd.Flags().BoolVarP(&showAllFlag, "all", "a", false, "Show everything about (the) device(s).")
@@ -29,12 +32,7 @@ func init() {
 	showShellyCmd.Flags().BoolVarP(&showWifiFlag, "wifi", "W", false, "Show device Wifi configuration(s).")
 	showShellyCmd.Flags().BoolVarP(&showCloudFlag, "cloud", "C", false, "Show device Cloud configuration(s).")
 	showShellyCmd.Flags().BoolVarP(&showMqttFlag, "mqtt", "M", false, "Show device MQTT configuration(s).")
-}
-
-var useHttpChannel bool
-
-func init() {
-	showShellyCmd.Flags().BoolVarP(&useHttpChannel, "http", "H", false, "Use HTTP channel to communicate with Shelly devices")
+	showShellyCmd.Flags().BoolVarP(&showJobsFlag, "jobs", "J", false, "Show device Scheduled Jobs configuration(s).")
 }
 
 var showShellyCmd = &cobra.Command{
@@ -49,10 +47,11 @@ var showShellyCmd = &cobra.Command{
 			showConfigFlag = true
 			showMqttFlag = true
 			showWifiFlag = true
+			showJobsFlag = true
 		}
 
 		via := types.ChannelHttp
-		if !useHttpChannel {
+		if !options.UseHttpChannel {
 			via = types.ChannelMqtt
 		}
 
@@ -73,6 +72,7 @@ func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device) (*
 			Config *sswitch.Configuration `json:"config,omitempty"`
 			Status *sswitch.Status        `json:"status,omitempty"`
 		} `json:"switch,omitempty"`
+		Scheduled *schedule.Scheduled `json:"scheduled,omitempty"`
 	}
 
 	s.DeviceInfo = device.Info
@@ -89,6 +89,10 @@ func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device) (*
 		sr["id"] = showSwitchId
 		s.Switch.Config = device.Call(via, "Switch", "GetConfig", sr, &sswitch.Configuration{}).(*sswitch.Configuration)
 		s.Switch.Status = device.Call(via, "Switch", "GetStatus", sr, &sswitch.Status{}).(*sswitch.Status)
+	}
+
+	if showJobsFlag {
+		s.Scheduled = device.Call(via, "Schedule", "List", nil, &schedule.Scheduled{}).(*schedule.Scheduled)
 	}
 
 	out, err := json.Marshal(s)

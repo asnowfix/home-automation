@@ -1,4 +1,4 @@
-package shelly
+package mqtt
 
 import (
 	"encoding/json"
@@ -12,9 +12,11 @@ import (
 	"devices/shelly"
 	"devices/shelly/mqtt"
 	"devices/shelly/types"
+
+	"homectl/shelly/options"
 )
 
-var mqttCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use:   "mqtt",
 	Short: "Set Shelly devices MQTT configuration",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -22,7 +24,7 @@ var mqttCmd = &cobra.Command{
 		shelly.Init(log)
 
 		via := types.ChannelMqtt
-		if useHttpChannel {
+		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
 		return shelly.Foreach(log, args, via, setupOneDevice)
@@ -41,11 +43,11 @@ func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device) (
 		log.Info("Unable to marshal MQTT config: %v", err)
 		return nil, err
 	}
-	log.Info("initial MQTT config: %v", string(configStr))
+	log.Info("initial MQTT", "config", configStr)
 
 	out, err = device.CallE(via, "Mqtt", "GetStatus", nil)
 	if err != nil {
-		log.Info("Unable to get MQTT status: %v", err)
+		log.Error(err, "Unable to get MQTT status")
 		return nil, err
 	}
 	status := out.(*mqtt.Status)
@@ -60,7 +62,7 @@ func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device) (
 	config.Server = fmt.Sprintf("%s:%s", broker.Hostname(), broker.Port())
 
 	configStr, _ = json.Marshal(config)
-	log.Info("new MQTT config: %v", string(configStr))
+	log.Info("new MQTT config", "config", string(configStr))
 
 	out, err = device.CallE(via, "Mqtt", "SetConfig", config)
 	if err != nil {

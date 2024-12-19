@@ -6,6 +6,12 @@ default: help
 help:
 	@echo make help build run install start stop
 
+ifneq ($(MODULE),)
+# make module MODULE=homectl/shelly/options
+module:
+	(mkdir -p $(MODULE) && cd $(MODULE) && go mod init $(MODULE)) && go work use $(MODULE)
+endif
+
 install:
 	$(MAKE) -C myhome install .
 ifeq ($(OS),Linux)

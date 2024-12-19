@@ -13,12 +13,14 @@ var log logr.Logger
 type empty struct{}
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
-	// setup logger
 	log = l
 	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
 
-	// register methods
 	r.RegisterMethodHandler("Switch", "GetConfig", types.MethodHandler{
+		Allocate:   func() any { return new(Configuration) },
+		HttpMethod: http.MethodGet,
+	})
+	r.RegisterMethodHandler("Switch", "SetConfig", types.MethodHandler{
 		Allocate:   func() any { return new(Configuration) },
 		HttpMethod: http.MethodGet,
 	})
@@ -27,7 +29,11 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler("Switch", "Toggle", types.MethodHandler{
-		Allocate:   func() any { return new(Request) },
+		Allocate:   func() any { return new(ToogleSetResponse) },
+		HttpMethod: http.MethodGet,
+	})
+	r.RegisterMethodHandler("Switch", "Set", types.MethodHandler{
+		Allocate:   func() any { return new(ToogleSetResponse) },
 		HttpMethod: http.MethodGet,
 	})
 }

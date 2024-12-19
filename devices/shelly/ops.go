@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"schedule"
 
 	"github.com/go-logr/logr"
 )
@@ -18,6 +19,7 @@ func Init(log logr.Logger) {
 	registrar.Init(log)
 	input.Init(log, &registrar)
 	mqtt.Init(log, &registrar)
+	schedule.Init(log, &registrar)
 	script.Init(log, &registrar)
 	shttp.Init(log, &registrar)
 	sswitch.Init(log, &registrar)

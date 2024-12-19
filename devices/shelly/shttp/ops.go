@@ -56,7 +56,7 @@ func (ch *HttpChannel) callE(device types.Device, verb types.MethodHandler, out 
 	}
 
 	if err != nil {
-		log.Info("HTTP error", err)
+		log.Error(err, "HTTP error")
 		return nil, err
 	}
 

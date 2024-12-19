@@ -2,21 +2,21 @@ package main
 
 import (
 	"fmt"
+	"homectl/list"
+	"homectl/mqtt"
+	shellyCtl "homectl/shelly"
+	"homectl/show"
+	"homectl/toggle"
 	"os"
 
 	"hlog"
-	"homectl/list"
-	"homectl/mqtt"
-	"homectl/set"
-	"homectl/show"
-	"homectl/toggle"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
 func main() {
-	if err := rootCmd.Execute(); err != nil {
+	if err := Cmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -24,7 +24,7 @@ func main() {
 
 var logger logr.Logger
 
-var rootCmd = &cobra.Command{
+var Cmd = &cobra.Command{
 	Use: "homectl",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger = hlog.Init()
@@ -32,13 +32,13 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.PersistentFlags().BoolVarP(&hlog.Verbose, "verbose", "v", false, "verbose output")
-	rootCmd.AddCommand(versionCmd)
-	rootCmd.AddCommand(list.Cmd)
-	rootCmd.AddCommand(show.Cmd)
-	rootCmd.AddCommand(set.Cmd)
-	rootCmd.AddCommand(mqtt.Cmd)
-	rootCmd.AddCommand(toggle.Cmd)
+	Cmd.PersistentFlags().BoolVarP(&hlog.Verbose, "verbose", "v", false, "verbose output")
+	Cmd.AddCommand(versionCmd)
+	Cmd.AddCommand(list.Cmd)
+	Cmd.AddCommand(show.Cmd)
+	Cmd.AddCommand(mqtt.Cmd)
+	Cmd.AddCommand(toggle.Cmd)
+	Cmd.AddCommand(shellyCtl.Cmd)
 }
 
 var Commit string

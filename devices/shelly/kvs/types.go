@@ -1,8 +1,12 @@
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Input/
 package kvs
 
-type KeyValue struct {
+type Key struct {
 	Key string `json:"key"` // The key to be looked-up / added / updated. (Required)
+}
+
+type KeyValue struct {
+	Key
 	Value
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -30,12 +31,20 @@ var listCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, args, via, listKeys)
+		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, listKeys, args)
 	},
 }
 
-func listKeys(log logr.Logger, via types.Channel, device *shelly.Device) (*shelly.Device, error) {
-	out, err := device.CallE(via, "KVS", "List", nil)
+func listKeys(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+	var match string
+	if len(args) > 0 {
+		match = args[0]
+	} else {
+		match = "*" // default
+	}
+	out, err := device.CallE(via, "KVS", "List", &kvs.KeyValuesMatching{
+		Match: match,
+	})
 	if err != nil {
 		log.Error(err, "Unable to List keys")
 		return nil, err

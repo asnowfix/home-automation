@@ -18,6 +18,8 @@ var Cmd = &cobra.Command{
 
 func init() {
 	Cmd.PersistentFlags().BoolVarP(&options.UseHttpChannel, "http", "H", false, "Use HTTP channel to communicate with Shelly devices")
+	Cmd.PersistentFlags().StringVarP(&options.DeviceNames, "devices", "d", "", "Shelly Device names to apply the command to")
+
 	Cmd.AddCommand(jobsCtl.Cmd)
 	Cmd.AddCommand(mqttCtl.Cmd)
 	Cmd.AddCommand(kvsCtl.Cmd)

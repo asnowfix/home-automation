@@ -4,6 +4,8 @@ import (
 	"devices/shelly"
 	"devices/shelly/types"
 	"hlog"
+	"homectl/shelly/options"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -25,7 +27,7 @@ var Cmd = &cobra.Command{
 		if !useHttpChannel {
 			ch = types.ChannelMqtt
 		}
-		return shelly.Foreach(log, args, ch, func(log logr.Logger, via types.Channel, device *shelly.Device) (*shelly.Device, error) {
+		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), ch, func(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
 			sr := make(map[string]interface{})
 			sr["id"] = toggleSwitchId
 			_, err := device.CallE(ch, "Switch", "Toggle", sr)
@@ -34,7 +36,7 @@ var Cmd = &cobra.Command{
 				return nil, err
 			}
 			return device, err
-		})
+		}, args)
 	},
 }
 

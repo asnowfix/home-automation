@@ -6,6 +6,7 @@ import (
 	"hlog"
 	"homectl/shelly/options"
 	"schedule"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -25,11 +26,11 @@ var showCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, args, via, showOneDeviceJobs)
+		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, showOneDeviceJobs, args)
 	},
 }
 
-func showOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.Device) (*shelly.Device, error) {
+func showOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
 	out, err := schedule.ShowJobs(via, device)
 	if err != nil {
 		log.Error(err, "Unable to set Scheduled JobSpec: %v", err)

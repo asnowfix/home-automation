@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hlog"
 	"mymqtt"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -27,11 +28,11 @@ var Cmd = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, args, via, setupOneDevice)
+		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, setupOneDevice, args)
 	},
 }
 
-func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device) (*shelly.Device, error) {
+func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
 	out, err := device.CallE(via, "Mqtt", "GetConfig", nil)
 	if err != nil {
 		log.Info("Unable to get MQTT config: %v", err)

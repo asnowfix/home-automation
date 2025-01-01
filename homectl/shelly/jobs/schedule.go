@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"homectl/shelly/options"
+	"strings"
 
 	"encoding/json"
 	"fmt"
@@ -26,11 +27,11 @@ var scheduleCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, args, via, scheduleOneDeviceJobs)
+		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, scheduleOneDeviceJobs, args)
 	},
 }
 
-func scheduleOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.Device) (*shelly.Device, error) {
+func scheduleOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
 	jobs := make([]schedule.Job, 0)
 
 	out, err := schedule.ScheduleJob(via, device, schedule.JobSpec{

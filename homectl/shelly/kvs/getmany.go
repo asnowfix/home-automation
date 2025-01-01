@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -30,11 +31,11 @@ var getManyCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, args, via, getMany)
+		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, getMany, args)
 	},
 }
 
-func getMany(log logr.Logger, via types.Channel, device *shelly.Device) (*shelly.Device, error) {
+func getMany(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
 	out, err := device.CallE(via, "KVS", "GetMany", nil)
 	if err != nil {
 		log.Error(err, "Unable to get many key-values")

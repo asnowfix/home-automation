@@ -233,20 +233,20 @@ func Lookup(log logr.Logger, name string) (*Device, error) {
 	}
 }
 
-type Do func(logr.Logger, types.Channel, *Device) (*Device, error)
+type Do func(logr.Logger, types.Channel, *Device, []string) (*Device, error)
 
-func Foreach(log logr.Logger, args []string, via types.Channel, do Do) error {
+func Foreach(log logr.Logger, names []string, via types.Channel, do Do, args []string) error {
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
 
-	if len(args) > 0 {
-		for _, name := range args {
+	if len(names) > 0 {
+		for _, name := range names {
 			log.Info("Looking for Shelly device", "name", name)
 			device, err := Lookup(log, name)
 			if err != nil {
 				log.Error(err, "Skipping", "device", name)
 				continue
 			}
-			_, err = do(log, via, device)
+			_, err = do(log, via, device, args)
 			if err != nil {
 				log.Error(err, "Operation on failed", "device", name)
 				continue
@@ -255,7 +255,7 @@ func Foreach(log logr.Logger, args []string, via types.Channel, do Do) error {
 	} else {
 		log.Info("Running on every device")
 		for _, device := range Devices(log) {
-			do(log, via, device)
+			do(log, via, device, args)
 		}
 	}
 	return nil

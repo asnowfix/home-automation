@@ -7,6 +7,7 @@ import (
 	"hlog"
 	"homectl/shelly/options"
 	"schedule"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -34,12 +35,12 @@ var cancelCtl = &cobra.Command{
 			via = types.ChannelMqtt
 		}
 
-		shelly.Foreach(log, args, via, cancelOneDeviceJob)
+		shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, cancelOneDeviceJob, args)
 		return nil
 	},
 }
 
-func cancelOneDeviceJob(log logr.Logger, via types.Channel, device *shelly.Device) (*shelly.Device, error) {
+func cancelOneDeviceJob(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
 	if cancelFlag.all {
 		_, err := schedule.CancelAllJobs(via, device)
 		if err != nil {

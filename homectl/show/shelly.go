@@ -10,6 +10,7 @@ import (
 	"hlog"
 	"homectl/shelly/options"
 	"schedule"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -55,12 +56,12 @@ var showShellyCmd = &cobra.Command{
 			via = types.ChannelMqtt
 		}
 
-		shelly.Foreach(log, args, via, showOneDevice)
+		shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, showOneDevice, args)
 		return nil
 	},
 }
 
-func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device) (*shelly.Device, error) {
+func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
 
 	var s struct {
 		DeviceInfo *shelly.DeviceInfo `json:"info"`

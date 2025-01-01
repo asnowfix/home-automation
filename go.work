@@ -6,6 +6,7 @@ use (
 	./devices/sfr
 	./devices/shelly
 	./devices/shelly/gen1
+	./devices/shelly/kvs
 	./devices/shelly/input
 	./devices/shelly/schedule
 	./devices/shelly/script
@@ -20,6 +21,7 @@ use (
 	./homectl/options
 	./homectl/shelly
 	./homectl/shelly/jobs
+	./homectl/shelly/kvs
 	./homectl/shelly/mqtt
 	./homectl/shelly/options
 	./homectl/show

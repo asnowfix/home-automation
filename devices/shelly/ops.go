@@ -2,6 +2,7 @@ package shelly
 
 import (
 	"devices/shelly/input"
+	"devices/shelly/kvs"
 	"devices/shelly/mqtt"
 	"devices/shelly/script"
 	shttp "devices/shelly/shttp"
@@ -23,6 +24,7 @@ func Init(log logr.Logger) {
 	script.Init(log, &registrar)
 	shttp.Init(log, &registrar)
 	sswitch.Init(log, &registrar)
+	kvs.Init(log, &registrar)
 }
 
 var registrar Registrar

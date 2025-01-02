@@ -22,7 +22,7 @@ func init() {
 
 var deleteCtl = &cobra.Command{
 	Use:   "delete",
-	Short: "Delete existing key-values from given shelly devices",
+	Short: "Delete existing key-value from given shelly devices",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Init()
 		shelly.Init(log)
@@ -36,11 +36,12 @@ var deleteCtl = &cobra.Command{
 }
 
 func deleteKeys(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+	key := args[0]
 	out, err := device.CallE(via, "KVS", "Delete", &kvs.Key{
-		Key: args[0],
+		Key: key,
 	})
 	if err != nil {
-		log.Error(err, "Unable to delete key:"+args[0])
+		log.Error(err, "Unable to delete", "key", key)
 		return nil, err
 	}
 	status := out.(*kvs.Status)

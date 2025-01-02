@@ -84,6 +84,10 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 		Src    string `json:"src"`
 		Dst    string `json:"dst"`
 		Result *any   `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 	res.Result = &out
 
@@ -94,5 +98,9 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 	}
 
 	log.Info("Received", "response", res)
+	if res.Error != nil {
+		return nil, fmt.Errorf("%v (code:%v)", res.Error.Message, res.Error.Code)
+	}
+
 	return out, nil
 }

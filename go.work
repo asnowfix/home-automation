@@ -23,6 +23,7 @@ use (
 	./homectl/shelly/jobs
 	./homectl/shelly/kvs
 	./homectl/shelly/mqtt
+	./homectl/shelly/script
 	./homectl/shelly/options
 	./homectl/show
 	./homectl/toggle

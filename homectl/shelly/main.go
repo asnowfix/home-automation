@@ -5,6 +5,7 @@ import (
 	kvsCtl "homectl/shelly/kvs"
 	mqttCtl "homectl/shelly/mqtt"
 	"homectl/shelly/options"
+	scriptCtl "homectl/shelly/script"
 
 	"github.com/spf13/cobra"
 )
@@ -23,4 +24,5 @@ func init() {
 	Cmd.AddCommand(jobsCtl.Cmd)
 	Cmd.AddCommand(mqttCtl.Cmd)
 	Cmd.AddCommand(kvsCtl.Cmd)
+	Cmd.AddCommand(scriptCtl.Cmd)
 }

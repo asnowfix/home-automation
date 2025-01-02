@@ -1,4 +1,4 @@
-// https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Input/
+// https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/KVS/
 package kvs
 
 type Key struct {

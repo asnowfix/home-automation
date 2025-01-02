@@ -41,7 +41,7 @@ func setKeyValue(log logr.Logger, via types.Channel, device *shelly.Device, args
 		Value: kvs.Value{Value: args[1]},
 	})
 	if err != nil {
-		log.Error(err, "Unable to delete key:"+args[0])
+		log.Error(err, "Unable to set", "key", args[0], "value", args[1])
 		return nil, err
 	}
 	status := out.(*kvs.Status)

@@ -248,7 +248,7 @@ func Foreach(log logr.Logger, names []string, via types.Channel, do Do, args []s
 			}
 			_, err = do(log, via, device, args)
 			if err != nil {
-				log.Error(err, "Operation on failed", "device", name)
+				log.Error(err, "Operation failed", "device", name)
 				continue
 			}
 		}

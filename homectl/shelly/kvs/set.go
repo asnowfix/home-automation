@@ -35,7 +35,7 @@ var setCtl = &cobra.Command{
 	},
 }
 
-func setKeyValue(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+func setKeyValue(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	out, err := device.CallE(via, "KVS", "Set", &kvs.KeyValue{
 		Key:   kvs.Key{Key: args[0]},
 		Value: kvs.Value{Value: args[1]},
@@ -51,5 +51,5 @@ func setKeyValue(log logr.Logger, via types.Channel, device *shelly.Device, args
 	}
 	fmt.Print(string(s))
 
-	return device, nil
+	return status, nil
 }

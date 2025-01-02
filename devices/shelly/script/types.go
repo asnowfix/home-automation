@@ -13,7 +13,7 @@ type ConfigurationRequest struct {
 
 type Configuration struct {
 	Id
-	Name   string `json:"name"`             // Name of the script
+	Name   string `json:"name,omitempty"`   // Name of the script
 	Enable bool   `json:"enable,omitempty"` // true if the script runs by default on boot, false otherwise
 }
 
@@ -24,6 +24,7 @@ type Status struct {
 	MemUsed uint32 `json:"mem_used,omitempty"` // Memory used by the script in bytes
 	MemPeak uint32 `json:"mem_peak,omitempty"` // Peak memory used by the script in bytes
 	MemFree uint32 `json:"mem_free,omitempty"` // Free memory available to the script in bytes
+	Loaded  bool   `json:"loaded,omitempty"`   // Is loaded on the device
 }
 
 type FormerStatus struct {

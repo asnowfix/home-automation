@@ -2,6 +2,7 @@ package shelly
 
 import (
 	"devices/shelly/types"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -233,7 +234,17 @@ func Lookup(log logr.Logger, name string) (*Device, error) {
 	}
 }
 
-type Do func(logr.Logger, types.Channel, *Device, []string) (*Device, error)
+type Do func(logr.Logger, types.Channel, *Device, []string) (any, error)
+
+func Print(log logr.Logger, d any) error {
+	buf, err := json.Marshal(d)
+	if err != nil {
+		log.Error(err, "Unable to JSON-ify", "out", d)
+		return err
+	}
+	fmt.Print(string(buf))
+	return nil
+}
 
 func Foreach(log logr.Logger, names []string, via types.Channel, do Do, args []string) error {
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
@@ -246,17 +257,33 @@ func Foreach(log logr.Logger, names []string, via types.Channel, do Do, args []s
 				log.Error(err, "Skipping", "device", name)
 				continue
 			}
-			_, err = do(log, via, device, args)
+			out, err := do(log, via, device, args)
 			if err != nil {
 				log.Error(err, "Operation failed", "device", name)
 				continue
 			}
+			s, err := json.Marshal(out)
+			if err != nil {
+				return err
+			}
+			fmt.Print(string(s))
 		}
 	} else {
 		log.Info("Running on every device")
+		out := make([]any, 0)
 		for _, device := range Devices(log) {
-			do(log, via, device, args)
+			item, err := do(log, via, device, args)
+			if err != nil {
+				log.Error(err, "Operation failed", "device", device.Host)
+				continue
+			}
+			out = append(out, item)
 		}
+		s, err := json.Marshal(out)
+		if err != nil {
+			return err
+		}
+		fmt.Print(string(s))
 	}
 	return nil
 }

@@ -11,7 +11,6 @@ bluMotionSensorEventData = {
 }
 
 switch4IEventData = [{
-    "id": 1, "now": 1732463413.75878000259,
     "info": {
         "component": "input:1",
         "id": 1,

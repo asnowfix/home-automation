@@ -32,10 +32,10 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	out, err := device.CallE(via, "Mqtt", "GetConfig", nil)
 	if err != nil {
-		log.Info("Unable to get MQTT config: %v", err)
+		log.Error(err, "Unable to get MQTT config")
 		return nil, err
 	}
 	config := out.(*mqtt.Configuration)
@@ -53,7 +53,7 @@ func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, a
 	}
 	status := out.(*mqtt.Status)
 	statusStr, _ := json.Marshal(status)
-	log.Info("initial MQTT status: %v", string(statusStr))
+	log.Info("initial MQTT status", "status", statusStr)
 
 	config.Enable = true
 	config.RpcNotifs = true
@@ -67,12 +67,12 @@ func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, a
 
 	out, err = device.CallE(via, "Mqtt", "SetConfig", config)
 	if err != nil {
-		log.Info("Unable to set MQTT config: %v", err)
+		log.Error(err, "Unable to set MQTT config")
 		return nil, err
 	}
 	res := out.(*mqtt.ConfigResults)
 	if res.Result.RestartRequired {
 		device.CallE(via, "Shelly", "Reboot", nil)
 	}
-	return device, nil
+	return out, nil
 }

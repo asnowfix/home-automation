@@ -35,7 +35,7 @@ var deleteCtl = &cobra.Command{
 	},
 }
 
-func deleteKeys(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+func deleteKeys(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	key := args[0]
 	out, err := device.CallE(via, "KVS", "Delete", &kvs.Key{
 		Key: key,
@@ -51,5 +51,5 @@ func deleteKeys(log logr.Logger, via types.Channel, device *shelly.Device, args 
 	}
 	fmt.Print(string(s))
 
-	return device, nil
+	return status, nil
 }

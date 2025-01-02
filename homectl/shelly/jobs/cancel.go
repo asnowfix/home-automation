@@ -40,22 +40,22 @@ var cancelCtl = &cobra.Command{
 	},
 }
 
-func cancelOneDeviceJob(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+func cancelOneDeviceJob(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	if cancelFlag.all {
-		_, err := schedule.CancelAllJobs(via, device)
+		out, err := schedule.CancelAllJobs(via, device)
 		if err != nil {
 			log.Error(err, "Unable to cancel all Scheduled Jobs: %v", err)
 			return nil, err
 		}
-		return device, nil
+		return out, nil
 	} else if cancelFlag.id < 0 {
 		return nil, fmt.Errorf("No job ID provided to cancel")
 	} else {
-		_, err := schedule.CancelJob(via, device, uint32(cancelFlag.id))
+		out, err := schedule.CancelJob(via, device, uint32(cancelFlag.id))
 		if err != nil {
 			log.Error(err, "Unable to cancel all Scheduled Jobs: %v", err)
 			return nil, err
 		}
-		return device, nil
+		return out, nil
 	}
 }

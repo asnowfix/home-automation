@@ -4,8 +4,6 @@ import (
 	"devices/shelly"
 	"devices/shelly/script"
 	"devices/shelly/types"
-	"encoding/json"
-	"fmt"
 	"hlog"
 	"homectl/shelly/options"
 	"strings"
@@ -41,7 +39,7 @@ func init() {
 }
 
 var stopCtl = &cobra.Command{
-	Use:   "start",
+	Use:   "stop",
 	Short: "Stop a script loaded on the given Shelly device(s)",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -56,21 +54,28 @@ var stopCtl = &cobra.Command{
 	},
 }
 
-func doStartStop(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
-	operation := args[0]
-	out, err := device.CallE(via, "Script", operation, &script.Id{
-		Id: uint32(flags.Id),
-	})
-	if err != nil {
-		log.Error(err, "Unable to run operation on script", "id", flags.Id, "operation", args[0])
-		return nil, err
-	}
-	response := out.(*script.FormerStatus)
-	s, err := json.Marshal(response)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(s))
+func init() {
+	Cmd.AddCommand(deleteCtl)
+	deleteCtl.MarkFlagRequired("id")
+}
 
-	return device, nil
+var deleteCtl = &cobra.Command{
+	Use:   "delete",
+	Short: "Delete a script loaded on the given Shelly device(s)",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		log := hlog.Init()
+		shelly.Init(log)
+
+		via := types.ChannelMqtt
+		if options.UseHttpChannel {
+			via = types.ChannelHttp
+		}
+		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, doStartStop, []string{"Delete"})
+	},
+}
+
+func doStartStop(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+	operation := args[0]
+	return script.StartStopDelete(via, device, flags.Name, flags.Id, operation)
 }

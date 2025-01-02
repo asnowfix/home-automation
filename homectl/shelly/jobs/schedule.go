@@ -4,7 +4,6 @@ import (
 	"homectl/shelly/options"
 	"strings"
 
-	"encoding/json"
 	"fmt"
 	"hlog"
 	"schedule"
@@ -31,7 +30,7 @@ var scheduleCtl = &cobra.Command{
 	},
 }
 
-func scheduleOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+func scheduleOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	jobs := make([]schedule.Job, 0)
 
 	out, err := schedule.ScheduleJob(via, device, schedule.JobSpec{
@@ -66,16 +65,10 @@ func scheduleOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.De
 		jobs = append(jobs, *out.(*schedule.Job))
 	}
 
-	s, err := json.Marshal(jobs)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(s))
-
 	// If the list of scheduled jobs is empty, return an error
 	if len(jobs) == 0 {
 		return nil, fmt.Errorf("No jobs scheduled")
 	} else {
-		return device, nil
+		return jobs, nil
 	}
 }

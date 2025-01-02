@@ -13,9 +13,12 @@ var Cmd = &cobra.Command{
 }
 
 var flags struct {
-	Id int
+	Id   uint32
+	Name string
 }
 
 func init() {
-	Cmd.PersistentFlags().IntVarP(&flags.Id, "id", "i", 0, "Script ID")
+	Cmd.PersistentFlags().Uint32VarP(&flags.Id, "id", "i", 0, "Script Id")
+	Cmd.PersistentFlags().StringVarP(&flags.Name, "name", "n", "undefined", "Script Name")
+	Cmd.MarkFlagsMutuallyExclusive("id", "name")
 }

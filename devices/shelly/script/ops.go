@@ -17,7 +17,7 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	r.RegisterMethodHandler("Script", "SetConfig", types.MethodHandler{
 		// InputType:  reflect.TypeOf(ConfigurationRequest{}),
 		Allocate:   func() any { return new(Configuration) },
-		HttpMethod: http.MethodGet,
+		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler("Script", "GetConfig", types.MethodHandler{
 		// InputType:  reflect.TypeOf(Configuration{}),
@@ -32,12 +32,17 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	r.RegisterMethodHandler("Script", "Create", types.MethodHandler{
 		// InputType:  reflect.TypeOf(Configuration{}),
 		Allocate:   func() any { return new(Status) },
-		HttpMethod: http.MethodGet,
+		HttpMethod: http.MethodPost,
+	})
+	r.RegisterMethodHandler("Script", "Delete", types.MethodHandler{
+		// InputType:  reflect.TypeOf(Id{}),
+		Allocate:   func() any { return nil },
+		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler("Script", "PutCode", types.MethodHandler{
 		// InputType:  reflect.TypeOf(PutCodeRequest{}),
 		Allocate:   func() any { return new(PutCodeResponse) },
-		HttpMethod: http.MethodGet,
+		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler("Script", "GetCode", types.MethodHandler{
 		// InputType:  reflect.TypeOf(GetCodeRequest{}),

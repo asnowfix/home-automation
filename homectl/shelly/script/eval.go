@@ -35,10 +35,10 @@ var evalCtl = &cobra.Command{
 	},
 }
 
-func doEval(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+func doEval(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	out, err := device.CallE(via, "Script", "Eval", &script.EvalRequest{
-		Id:   script.Id{Id: uint32(flags.Id)},
-		Code: args[1],
+		Id:   script.Id{Id: flags.Id},
+		Code: args[0],
 	})
 	if err != nil {
 		log.Error(err, "Unable to eval script", "id", flags.Id)
@@ -51,5 +51,5 @@ func doEval(log logr.Logger, via types.Channel, device *shelly.Device, args []st
 	}
 	fmt.Print(string(s))
 
-	return device, nil
+	return response, nil
 }

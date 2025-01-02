@@ -14,7 +14,7 @@ import (
 var toggleSwitchId int
 
 func init() {
-	Cmd.Flags().IntVarP(&toggleSwitchId, "switch", "S", -1, "Use this switch ID.")
+	Cmd.Flags().IntVarP(&toggleSwitchId, "switch", "S", 0, "Use this switch ID.")
 }
 
 var Cmd = &cobra.Command{
@@ -27,15 +27,15 @@ var Cmd = &cobra.Command{
 		if !useHttpChannel {
 			ch = types.ChannelMqtt
 		}
-		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), ch, func(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), ch, func(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 			sr := make(map[string]interface{})
 			sr["id"] = toggleSwitchId
-			_, err := device.CallE(ch, "Switch", "Toggle", sr)
+			out, err := device.CallE(ch, "Switch", "Toggle", sr)
 			if err != nil {
 				log.Info("Failed to toggle device %s: %v", device.Id_, err)
 				return nil, err
 			}
-			return device, err
+			return out, err
 		}, args)
 	},
 }

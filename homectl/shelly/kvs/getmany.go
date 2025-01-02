@@ -35,7 +35,7 @@ var getManyCtl = &cobra.Command{
 	},
 }
 
-func getMany(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+func getMany(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	out, err := device.CallE(via, "KVS", "GetMany", nil)
 	if err != nil {
 		log.Error(err, "Unable to get many key-values")
@@ -48,5 +48,5 @@ func getMany(log logr.Logger, via types.Channel, device *shelly.Device, args []s
 	}
 	fmt.Print(string(s))
 
-	return device, nil
+	return kvs, nil
 }

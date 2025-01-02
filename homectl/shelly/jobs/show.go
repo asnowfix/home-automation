@@ -1,8 +1,6 @@
 package jobs
 
 import (
-	"encoding/json"
-	"fmt"
 	"hlog"
 	"homectl/shelly/options"
 	"schedule"
@@ -30,7 +28,7 @@ var showCtl = &cobra.Command{
 	},
 }
 
-func showOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+func showOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	out, err := schedule.ShowJobs(via, device)
 	if err != nil {
 		log.Error(err, "Unable to set Scheduled JobSpec: %v", err)
@@ -38,13 +36,7 @@ func showOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.Device
 	}
 
 	jobs := out.(*schedule.Scheduled)
-	// log.Info("Scheduled", "jobs", jobs)
+	log.Info("Scheduled", "jobs", jobs)
 
-	s, err := json.Marshal(jobs)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(s))
-
-	return device, nil
+	return jobs, nil
 }

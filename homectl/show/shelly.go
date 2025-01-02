@@ -5,8 +5,6 @@ import (
 	"devices/shelly/mqtt"
 	"devices/shelly/sswitch"
 	"devices/shelly/types"
-	"encoding/json"
-	"fmt"
 	"hlog"
 	"homectl/shelly/options"
 	"schedule"
@@ -61,7 +59,7 @@ var showShellyCmd = &cobra.Command{
 	},
 }
 
-func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 
 	var s struct {
 		DeviceInfo *shelly.DeviceInfo `json:"info"`
@@ -96,11 +94,5 @@ func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, ar
 		s.Scheduled = device.Call(via, "Schedule", "List", nil, &schedule.Scheduled{}).(*schedule.Scheduled)
 	}
 
-	out, err := json.Marshal(s)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(out))
-
-	return device, nil
+	return s, nil
 }

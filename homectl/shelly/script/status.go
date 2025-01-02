@@ -4,8 +4,6 @@ import (
 	"devices/shelly"
 	"devices/shelly/script"
 	"devices/shelly/types"
-	"encoding/json"
-	"fmt"
 	"hlog"
 	"homectl/shelly/options"
 	"strings"
@@ -35,7 +33,7 @@ var statusCtl = &cobra.Command{
 	},
 }
 
-func doStatus(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+func doStatus(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	out, err := device.CallE(via, "Script", "GetStatus", &script.Id{
 		Id: uint32(flags.Id),
 	})
@@ -44,11 +42,5 @@ func doStatus(log logr.Logger, via types.Channel, device *shelly.Device, args []
 		return nil, err
 	}
 	response := out.(*script.Status)
-	s, err := json.Marshal(response)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(s))
-
-	return device, nil
+	return response, nil
 }

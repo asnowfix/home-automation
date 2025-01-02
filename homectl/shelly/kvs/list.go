@@ -1,8 +1,6 @@
 package kvs
 
 import (
-	"encoding/json"
-	"fmt"
 	"hlog"
 	"strings"
 
@@ -35,7 +33,7 @@ var listCtl = &cobra.Command{
 	},
 }
 
-func listKeys(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*shelly.Device, error) {
+func listKeys(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	var match string
 	if len(args) > 0 {
 		match = args[0]
@@ -50,11 +48,5 @@ func listKeys(log logr.Logger, via types.Channel, device *shelly.Device, args []
 		return nil, err
 	}
 	keys := out.(*kvs.KeyItems)
-	s, err := json.Marshal(keys)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(s))
-
-	return device, nil
+	return keys, nil
 }

@@ -25,7 +25,8 @@ func main() {
 var logger logr.Logger
 
 var Cmd = &cobra.Command{
-	Use: "homectl",
+	Use:  "homectl",
+	Args: cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger = hlog.Init()
 	},

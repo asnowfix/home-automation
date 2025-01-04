@@ -19,6 +19,7 @@ var flags struct {
 
 func init() {
 	Cmd.PersistentFlags().Uint32VarP(&flags.Id, "id", "i", 0, "Script Id")
-	Cmd.PersistentFlags().StringVarP(&flags.Name, "name", "n", "undefined", "Script Name")
+	Cmd.PersistentFlags().StringVarP(&flags.Name, "name", "n", "", "Script Name")
 	Cmd.MarkFlagsMutuallyExclusive("id", "name")
+	// Cmd.MarkFlagsOneRequired("id", "name", "all")
 }

@@ -1,0 +1,158 @@
+[
+    {
+        "enable": true,
+        "timespec": "@sunrise-1h",
+        "calls": [
+            {
+                "method": "Shelly.Reboot"
+            }
+        ]
+    },
+    {
+        "enable": true,
+        "timespec": "@sunrise-2h * * SUN",
+        "calls": [
+            {
+                "method": "Shelly.Update",
+                "params": {
+                    "stage": "stable"
+                }
+            }
+        ]
+    },
+    {
+        "enable": false,
+        "timespec": "@sunrise",
+        "calls": [
+            {
+                "method": "Shelly.emitEvent",
+                "params": {
+                    "name": "schedule_sunrise",
+                    "data": {
+                        "description": "Sunrise"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "enable": false,
+        "timespec": "@sunset",
+        "calls": [
+            {
+                "method": "Shelly.emitEvent",
+                "params": {
+                    "name": "schedule_sunset",
+                    "data": {
+                        "description": "Sunset"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "enable": false,
+        "timespec": "0 15 7 * * *",
+        "calls": [
+            {
+                "method": "Shelly.emitEvent",
+                "params": {
+                    "name": "schedule_peak_time",
+                    "data": {
+                        "description": "Heures Pleine EDF every day at 7:15"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "enable": true,
+        "timespec": "0 15 23 * * *",
+        "calls": [
+            {
+                "method": "Shelly.emitEvent",
+                "params": {
+                    "name": "schedule_off_peak_time",
+                    "data": {
+                        "description": "Heures Creuses EDF every day at 23:15"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "enable": true,
+        "timespec": "0 0 6 * * MON-FRI",
+        "calls": [
+            {
+                "method": "Shelly.emitEvent",
+                "params": {
+                    "name": "schedule_wakeup_1h",
+                    "data": {
+                        "description": "Run every week day one hour before wake-up at 6:00"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "enable": true,
+        "timespec": "0 0 11 * * MON,WED,FRI,SAT-SUN",
+        "calls": [
+            {
+                "method": "Shelly.emitEvent",
+                "params": {
+                    "name": "schedule_begin_lunch_1h",
+                    "data": {
+                        "description": "Run at 11:00 every day having lunch at home"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "enable": true,
+        "timespec": "0 0 13 * * MON,WED,FRI,SAT-SUN",
+        "calls": [
+            {
+                "method": "Shelly.emitEvent",
+                "params": {
+                    "name": "schedule_end_lunch_1h",
+                    "data": {
+                        "description": "Run at 13:00 every day having lunch at home"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "enable": true,
+        "timespec": "0 0 8 * * MON,WED,FRI",
+        "calls": [
+            {
+                "method": "Shelly.emitEvent",
+                "params": {
+                    "name": "schedule_begin_workday",
+                    "data": {
+                        "description": "Run at 8:00 every working day at home"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "enable": true,
+        "timespec": "0 0 18 * * MON,WED,FRI",
+        "calls": [
+            {
+                "method": "Shelly.emitEvent",
+                "params": {
+                    "name": "schedule_end_workday",
+                    "data": {
+                        "description": "Run at 18:00 every working day at home"
+                    }
+                }
+            }
+        ]
+    }
+]

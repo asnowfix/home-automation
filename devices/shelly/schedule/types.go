@@ -2,6 +2,10 @@ package schedule
 
 // https://shelly-api-docs.shelly.cloud/gen2/0.14/ComponentsAndServices/Schedule
 
+type JobsRevision struct {
+	Revision uint `json:"rev"`
+}
+
 type JobId struct {
 	// Id assigned to the job when it is created. This is used in subsequent Update / Delete calls
 	Id uint32 `json:"id,omitempty"`

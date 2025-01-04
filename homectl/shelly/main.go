@@ -13,6 +13,7 @@ import (
 var Cmd = &cobra.Command{
 	Use:   "shelly",
 	Short: "Shelly devices features",
+	Args:  cobra.NoArgs,
 	Run: func(cmd *cobra.Command, args []string) {
 	},
 }

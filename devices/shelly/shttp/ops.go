@@ -107,26 +107,35 @@ func (ch *HttpChannel) getE(ip net.IP, cmd string, params any) (*http.Response, 
 
 func (ch *HttpChannel) postE(ip net.IP, hm string, cmd string, params any) (*http.Response, error) {
 
-	var payload struct {
-		Id     uint   `json:"id"`
-		Method string `json:"method"`
-		Params struct {
-			Config any `json:"config"`
-		} `json:"params"`
+	var requestURL string
+	var jsonData []byte
+	var err error
+
+	if false {
+		var payload struct {
+			// Id     uint   `json:"id"`
+			Method string `json:"method"`
+			Params any    `json:"params"`
+		}
+		// payload.Id = 0
+		payload.Method = cmd
+		payload.Params = params
+		jsonData, err = json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		requestURL = fmt.Sprintf("http://%s/rpc", ip)
+	} else {
+		requestURL = fmt.Sprintf("http://%s/rpc/%s", ip, cmd)
+		if params != nil {
+			jsonData, err = json.Marshal(params)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 
-	payload.Id = 0
-	payload.Method = cmd
-	payload.Params.Config = params
-
-	jsonData, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	requestURL := fmt.Sprintf("http://%s/rpc", ip)
 	log.Info("Preparing", "method", hm, "url", requestURL, "body", string(jsonData))
-
 	req, err := http.NewRequest(hm, requestURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Error(err, "error creating HTTP request")

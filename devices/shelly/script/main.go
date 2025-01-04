@@ -45,6 +45,9 @@ func isLoaded(via types.Channel, device types.Device, name string, id uint32) (*
 		if l.Name == name {
 			return &l.Id, nil
 		}
+		if l.Id.Id == id {
+			return &l.Id, nil
+		}
 	}
 
 	return nil, fmt.Errorf("script not found: name=%v", name)

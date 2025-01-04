@@ -4,6 +4,7 @@ import (
 	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"mymqtt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"reflect"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/exp/rand"
 )
 
 var registrar types.MethodsRegistrar
@@ -39,10 +41,20 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	registrar.RegisterDeviceCaller(types.ChannelMqtt, types.DeviceCaller(mqttChannel.CallDevice))
 }
 
-type MqttChannel struct {
+func init() {
+	rand.Seed(uint64(time.Now().UnixNano()))
+}
+
+func requestId() string {
+	b := make([]byte, 8)
+	rand.Read(b)
+	return fmt.Sprintf("%x", b)
 }
 
 var mqttChannel MqttChannel
+
+type MqttChannel struct {
+}
 
 func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
 	reqTopic := fmt.Sprintf("%v/rpc", device.Id())
@@ -51,7 +63,7 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 		Source string `json:"src"`
 		Id     uint   `json:"id"`
 		Method string `json:"method"`
-		Params any    `json:"params"`
+		Params any    `json:"params,omitempty"`
 	}
 
 	hostname, err := os.Hostname()
@@ -59,25 +71,31 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 		log.Error(err, "Unable to get local hostname")
 		return nil, err
 	}
-	req.Source = fmt.Sprintf("%v_%v", hostname, os.Getpid())
+	req.Source = fmt.Sprintf("%v_%v", hostname, requestId())
 	req.Id = 0
 	req.Method = verb.Method
 	req.Params = params
 
-	resChan, err := mymqtt.MqttSubscribe(log, mymqtt.Broker(log, false), fmt.Sprintf("%v/rpc", req.Source), uint(AtLeastOnce))
+	resTopic := fmt.Sprintf("%v/rpc", req.Source)
+
+	resChan, err := mymqtt.MqttSubscribe(log, mymqtt.Broker(log, false), resTopic, uint(AtLeastOnce))
 	if err != nil {
 		log.Error(err, "Unable to subscribe", "topic", reqTopic)
 		return nil, err
 	}
+	log.Info("Subscribing...", "topic", resTopic)
+	<-resChan // subscribed
+	log.Info("Subscribed", "topic", resTopic)
 
 	reqPayload, err := json.Marshal(req)
 	if err != nil {
 		log.Error(err, "Unable to marshal", "request", req)
 		return nil, err
 	}
-
 	mymqtt.MqttPublish(log, mymqtt.Broker(log, false), reqTopic, reqPayload)
 	resMsg := <-resChan
+
+	mymqtt.MqttUnsubscribe(log, mymqtt.Broker(log, false), resTopic)
 
 	var res struct {
 		Id     uint   `json:"id"`

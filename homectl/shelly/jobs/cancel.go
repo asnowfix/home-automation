@@ -21,6 +21,7 @@ var cancelFlag struct {
 func init() {
 	cancelCtl.Flags().IntVarP(&cancelFlag.id, "id", "i", -1, "Scheduled job ID to cancel.")
 	cancelCtl.Flags().BoolVarP(&cancelFlag.all, "all", "a", false, "Cancel every scheduled job Id on given device(s).")
+	cancelCtl.MarkFlagsMutuallyExclusive("id", "all")
 }
 
 var cancelCtl = &cobra.Command{

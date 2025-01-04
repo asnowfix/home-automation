@@ -214,9 +214,18 @@ func MqttSubscribe(log logr.Logger, broker *url.URL, topic string, qlen uint) (c
 				Payload: msg.Payload(),
 			}
 		})
+		mch <- MqttMessage{
+			Topic:   topic,
+			Payload: []byte("subscribed"),
+		}
 	}()
 
 	return mch, nil
+}
+
+func MqttUnsubscribe(log logr.Logger, broker *url.URL, topic string) {
+	log.Info("MqttUnsubscribe: unsubscribing:", "topic", topic)
+	MqttClient(log, broker).Unsubscribe(topic)
 }
 
 func MqttPublish(log logr.Logger, broker *url.URL, topic string, msg []byte) {

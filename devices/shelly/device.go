@@ -25,16 +25,16 @@ type Product struct {
 
 type Device struct {
 	Product
-	Id_            string           `json:"id"`
-	Service        string           `json:"service"`
-	MacAddress     net.HardwareAddr `json:"mac"`
-	Host           string           `json:"host"`
-	Ipv4_          net.IP           `json:"ipv4"`
-	Port           int              `json:"port"`
-	Info           *DeviceInfo      `json:"info"`
-	Methods        []string         `json:"methods"`
-	MethodHandlers map[string]map[string]types.MethodHandler
-	Components     []Component `json:"components:omitempty"`
+	Id_            string                                    `json:"id"`
+	Service        string                                    `json:"service"`
+	MacAddress     net.HardwareAddr                          `json:"mac"`
+	Host           string                                    `json:"host"`
+	Ipv4_          net.IP                                    `json:"ipv4"`
+	Port           int                                       `json:"port"`
+	Info           *DeviceInfo                               `json:"info"`
+	Methods        []string                                  `json:"methods"`
+	MethodHandlers map[string]map[string]types.MethodHandler `json:"-"`
+	Components     []Component                               `json:"components:omitempty"`
 }
 
 func (d *Device) Id() string {

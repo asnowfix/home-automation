@@ -14,6 +14,7 @@ use (
 	./devices/shelly/sswitch
 	./devices/shelly/system
 	./devices/shelly/types
+	./devices/shelly/wifi
 	./devices/tapo
 	./hlog
 	./homectl/list

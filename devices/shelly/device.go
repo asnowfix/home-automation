@@ -25,15 +25,16 @@ type Product struct {
 
 type Device struct {
 	Product
-	Id_        string                                    `json:"id"`
-	Service    string                                    `json:"service"`
-	MacAddress net.HardwareAddr                          `json:"mac"`
-	Host       string                                    `json:"host"`
-	Ipv4_      net.IP                                    `json:"ipv4"`
-	Port       int                                       `json:"port"`
-	Info       *DeviceInfo                               `json:"info"`
-	Methods    []string                                  `json:"methods"`
-	Components map[string]map[string]types.MethodHandler `json:"methods_handlers"`
+	Id_            string           `json:"id"`
+	Service        string           `json:"service"`
+	MacAddress     net.HardwareAddr `json:"mac"`
+	Host           string           `json:"host"`
+	Ipv4_          net.IP           `json:"ipv4"`
+	Port           int              `json:"port"`
+	Info           *DeviceInfo      `json:"info"`
+	Methods        []string         `json:"methods"`
+	MethodHandlers map[string]map[string]types.MethodHandler
+	Components     []Component `json:"components:omitempty"`
 }
 
 func (d *Device) Id() string {
@@ -46,6 +47,22 @@ func (d *Device) Ipv4() net.IP {
 
 type MethodsResponse struct {
 	Methods []string `json:"methods"`
+}
+
+type Component struct {
+	Key    string      `json:"key"`              // Component's key (in format <type>:<cid>, for example boolean:200)
+	Status interface{} `json:"status,omitempty"` // Component's status, will be omitted if "status" is not specified in the include property.
+	Config interface{} `json:"config,omitempty"` // Component's config, will be omitted if "config" is not specified in the include property.
+}
+
+type GetComponentsRequest struct {
+	Offset      uint32   `json:"offset,omitempty"`       // Index of the component from which to start generating the result Optional
+	Include     []string `json:"include,omitempty"`      // "status" will include the component's status, "config" - the config. The keys are always included. Combination of both (["config", "status"]) to get the full config and status of each component. Optional
+	DynamicOnly bool     `json:"dynamic_only,omitempty"` // true to include only dynamic components, default false. Optional
+}
+
+type GetComponentsResponse struct {
+	Components []Component `json:"components"`
 }
 
 type DeviceInfo struct {
@@ -86,7 +103,7 @@ func (d *Device) MethodHandlerE(c string, v string) (types.MethodHandler, error)
 		mh = listMethodsHandler
 	} else {
 		found := false
-		if comp, exists := d.Components[c]; exists {
+		if comp, exists := d.MethodHandlers[c]; exists {
 			if mh, exists = comp[v]; exists {
 				found = true
 			}
@@ -129,25 +146,25 @@ func (d *Device) Init(log logr.Logger, ch types.Channel) error {
 	d.Methods = m.(*MethodsResponse).Methods
 	log.Info("Shelly.ListMethods", "methods", d.Methods)
 
-	d.Components = make(map[string]map[string]types.MethodHandler)
+	d.MethodHandlers = make(map[string]map[string]types.MethodHandler)
 	for _, m := range d.Methods {
 		mi := strings.Split(m, ".")
 		c := mi[0] // component
 		v := mi[1] // verb
 		for component := types.Shelly; component < types.None; component++ {
 			if c == component.String() {
-				if _, exists := d.Components[c]; !exists {
-					d.Components[c] = make(map[string]types.MethodHandler)
+				if _, exists := d.MethodHandlers[c]; !exists {
+					d.MethodHandlers[c] = make(map[string]types.MethodHandler)
 				}
 				if _, exists := registrar.methods[c]; exists {
 					if _, exists := registrar.methods[c][v]; exists {
-						d.Components[c][v] = registrar.methods[c][v]
+						d.MethodHandlers[c][v] = registrar.methods[c][v]
 					}
 				}
 			}
 		}
 	}
-	log.Info("device API", "components", d.Components)
+	log.Info("device API", "components", d.MethodHandlers)
 
 	di, err := d.CallE(ch, "Shelly", "GetDeviceInfo", map[string]interface{}{"ident": true})
 	if err != nil {
@@ -157,6 +174,16 @@ func (d *Device) Init(log logr.Logger, ch types.Channel) error {
 	log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
 	d.Id_ = d.Info.Id
 	d.MacAddress = d.Info.MacAddress
+
+	out, err := d.CallE(ch, "Shelly", "GetComponents", &GetComponentsRequest{
+		Include: []string{"config", "status"},
+	})
+	if err != nil {
+		return err
+	}
+	cr := out.(*GetComponentsResponse)
+	d.Components = cr.Components
+	log.Info("Shelly.GetComponents", "components", d.Components)
 
 	return nil
 }

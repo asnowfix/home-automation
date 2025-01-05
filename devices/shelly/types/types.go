@@ -29,9 +29,9 @@ func (ch Channel) String() string {
 }
 
 type MethodHandler struct {
-	Method     string     `json:"method"`      // The method name
-	Allocate   func() any `json:"-"`           // Allocate a new instance of the output type
-	HttpMethod string     `json:"http_method"` // The HTTP request method to use (See https://developer.mozilla.org/en-US/docs/Web/HTTP/Methods)
+	Method     string
+	Allocate   func() any
+	HttpMethod string
 }
 
 var MethodNotFound = MethodHandler{}

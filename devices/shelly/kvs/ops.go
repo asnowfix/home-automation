@@ -16,7 +16,7 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
 	r.RegisterMethodHandler("KVS", "Set", types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
-		HttpMethod: http.MethodGet,
+		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler("KVS", "Get", types.MethodHandler{
 		Allocate:   func() any { return new(Value) },
@@ -32,6 +32,6 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	})
 	r.RegisterMethodHandler("KVS", "Delete", types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
-		HttpMethod: http.MethodGet,
+		HttpMethod: http.MethodPost,
 	})
 }

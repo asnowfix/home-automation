@@ -33,5 +33,6 @@ use (
 	./myhome/http
 	./myhome/logs
 	./myhome/mqtt
+	./myhome/daemon
 	./mymqtt
 )

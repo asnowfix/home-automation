@@ -40,13 +40,5 @@ func listKeys(log logr.Logger, via types.Channel, device *shelly.Device, args []
 	} else {
 		match = "*" // default
 	}
-	out, err := device.CallE(via, "KVS", "List", &kvs.KeyValuesMatching{
-		Match: match,
-	})
-	if err != nil {
-		log.Error(err, "Unable to List keys")
-		return nil, err
-	}
-	keys := out.(*kvs.KeyItems)
-	return keys, nil
+	return kvs.ListKeys(via, device, match)
 }

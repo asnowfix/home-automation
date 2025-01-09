@@ -1,8 +1,6 @@
 package kvs
 
 import (
-	"encoding/json"
-	"fmt"
 	"hlog"
 	"strings"
 
@@ -36,20 +34,7 @@ var setCtl = &cobra.Command{
 }
 
 func setKeyValue(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(via, "KVS", "Set", &kvs.KeyValue{
-		Key:   kvs.Key{Key: args[0]},
-		Value: kvs.Value{Value: args[1]},
-	})
-	if err != nil {
-		log.Error(err, "Unable to set", "key", args[0], "value", args[1])
-		return nil, err
-	}
-	status := out.(*kvs.Status)
-	s, err := json.Marshal(status)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(s))
-
-	return status, nil
+	key := args[0]
+	value := args[1]
+	return kvs.SetKeyValue(via, device, key, value)
 }

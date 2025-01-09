@@ -1,8 +1,6 @@
 package kvs
 
 import (
-	"encoding/json"
-	"fmt"
 	"hlog"
 	"strings"
 
@@ -37,19 +35,5 @@ var deleteCtl = &cobra.Command{
 
 func deleteKeys(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	key := args[0]
-	out, err := device.CallE(via, "KVS", "Delete", &kvs.Key{
-		Key: key,
-	})
-	if err != nil {
-		log.Error(err, "Unable to delete", "key", key)
-		return nil, err
-	}
-	status := out.(*kvs.Status)
-	s, err := json.Marshal(status)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(s))
-
-	return status, nil
+	return kvs.Delete(via, device, key)
 }

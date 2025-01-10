@@ -34,5 +34,6 @@ use (
 	./myhome/logs
 	./myhome/mqtt
 	./myhome/daemon
+	./myhome/devices
 	./mymqtt
 )

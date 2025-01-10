@@ -12,7 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/asnowfix/home-automation/myhome/devices"
+	"myhome/devices"
+
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
 	"github.com/spf13/cobra"

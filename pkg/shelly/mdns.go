@@ -5,6 +5,7 @@ import (
 	"net"
 	"pkg/shelly/types"
 	"strconv"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
@@ -40,7 +41,12 @@ func NewDeviceFromZeroConfEntry(log logr.Logger, entry *zeroconf.ServiceEntry) (
 
 	var ip net.IP
 	if len(ips) > 0 {
-		ip = ips[0]
+		log.Info("Resolved", "hostname", entry.HostName, "ip[]", ips)
+		for _, ip = range ips {
+			if ip.To4() != nil {
+				break
+			}
+		}
 	} else {
 		log.Error(nil, "No IP addresses found for hostname", "hostname", entry.HostName)
 		return nil, err
@@ -49,7 +55,7 @@ func NewDeviceFromZeroConfEntry(log logr.Logger, entry *zeroconf.ServiceEntry) (
 	d := &Device{
 		Id_:     nameRe.ReplaceAllString(entry.HostName, "${id}"),
 		Service: entry.Service,
-		Host:    entry.HostName,
+		Host:    strings.ToLower(entry.HostName),
 		Ipv4_:   ip,
 		Port:    entry.Port,
 		Product: Product{

@@ -78,7 +78,7 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 
 	resTopic := fmt.Sprintf("%v/rpc", req.Source)
 
-	resChan, err := mymqtt.MqttSubscribe(log, mymqtt.Broker(log, false), resTopic, uint(AtLeastOnce))
+	resChan, err := mymqtt.MqttSubscribe(log, mymqtt.Broker(log, false), resTopic, 0 /*qlen*/)
 	if err != nil {
 		log.Error(err, "Unable to subscribe", "topic", reqTopic)
 		return nil, err

@@ -21,7 +21,7 @@ func CommandProxy(log logr.Logger, run chan struct{}) {
 	for topic, handler := range subscriptions {
 		// Subscribe to the topic
 		log.Info("Subscribing", "topic", topic)
-		subsch[topic], _ = mymqtt.MqttSubscribe(log, mymqtt.Broker(log, true), topic, 0)
+		subsch[topic], _ = mymqtt.MqttSubscribe(log, mymqtt.Broker(log, true), topic, 0 /*qlen*/)
 		go func(topic string, handler func(logr.Logger, mymqtt.MqttMessage)) {
 			for {
 				select {

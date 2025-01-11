@@ -182,7 +182,7 @@ func zeroconfBroker(log logr.Logger) (*url.URL, error) {
 	defer cancel()
 	err = resolver.Browse(ctx, ZEROCONF_SERVICE, "local.", entries)
 	if err != nil {
-		log.Error(err, "Failed to browse")
+		log.Error(err, "failed to browse")
 		return nil, err
 	}
 
@@ -191,7 +191,7 @@ func zeroconfBroker(log logr.Logger) (*url.URL, error) {
 
 	log.Info("Using MQTT", "broker", brokers, "service", ZEROCONF_SERVICE)
 	if len(brokers) == 0 {
-		return nil, fmt.Errorf("No MQTT broker found")
+		return nil, fmt.Errorf("no MQTT broker found")
 	} else {
 		return brokers[0], nil
 	}
@@ -205,31 +205,28 @@ type MqttMessage struct {
 func MqttSubscribe(log logr.Logger, broker *url.URL, topic string, qlen uint) (chan MqttMessage, error) {
 	mch := make(chan MqttMessage, qlen)
 
-	go func() {
-		log.Info("MqttSubscribe: subscribing:", "topic", topic)
-		MqttClient(log, broker).Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
-			log.Info("MqttSubscribe received:", "topic", msg.Topic(), "payload", string(msg.Payload()))
+	log.Info("Subscribing to:", "topic", topic)
+	MqttClient(log, broker).Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
+		go func() {
+			log.Info("Received from MQTT:", "topic", msg.Topic(), "payload", string(msg.Payload()))
 			mch <- MqttMessage{
 				Topic:   msg.Topic(),
 				Payload: msg.Payload(),
 			}
-		})
-		mch <- MqttMessage{
-			Topic:   topic,
-			Payload: []byte("subscribed"),
-		}
-	}()
+		}()
+	})
+	log.Info("Subscribed to:", "topic", topic)
 
 	return mch, nil
 }
 
 func MqttUnsubscribe(log logr.Logger, broker *url.URL, topic string) {
-	log.Info("MqttUnsubscribe: unsubscribing:", "topic", topic)
+	log.Info("Unsubscribing:", "topic", topic)
 	MqttClient(log, broker).Unsubscribe(topic)
 }
 
 func MqttPublish(log logr.Logger, broker *url.URL, topic string, msg []byte) {
-	log.Info("MqttPublish: to", "topic", topic, "payload", string(msg))
+	log.Info("Publishing:", "topic", topic, "payload", string(msg))
 	MqttClient(log, broker).Publish(topic, 0, false, msg)
-	log.Info("MqttPublish: published", "topic", topic, "payload", string(msg))
+	log.Info("Published:", "topic", topic, "payload", string(msg))
 }

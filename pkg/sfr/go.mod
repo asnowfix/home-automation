@@ -1,8 +1,11 @@
-module devices/sfr
+module pkg/sfr
 
 go 1.22
 
-require github.com/jackpal/gateway v1.0.15
+require (
+	github.com/go-logr/logr v1.4.2
+	github.com/jackpal/gateway v1.0.15
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect

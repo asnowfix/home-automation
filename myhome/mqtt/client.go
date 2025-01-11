@@ -15,7 +15,7 @@ import (
 func CommandProxy(log logr.Logger, run chan struct{}) {
 
 	subscriptions := make(map[string]func(logr.Logger, mymqtt.MqttMessage))
-	subscriptions["devices/status"] = handleDevicesStatus
+	subscriptions["pkg/status"] = handleDevicesStatus
 
 	subsch := make(map[string]chan mymqtt.MqttMessage)
 	for topic, handler := range subscriptions {

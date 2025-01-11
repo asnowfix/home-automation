@@ -1,4 +1,4 @@
-module pkg/shelly/gen1
+module devices
 
 go 1.22
 

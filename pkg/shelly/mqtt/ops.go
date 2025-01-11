@@ -1,9 +1,9 @@
 package mqtt
 
 import (
-	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
+	"pkg/shelly/types"
 	"time"
 
 	"mymqtt"

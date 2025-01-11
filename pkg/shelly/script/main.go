@@ -1,9 +1,9 @@
 package script
 
 import (
-	"devices/shelly/types"
 	"embed"
 	"fmt"
+	"pkg/shelly/types"
 )
 
 //go:embed *.js

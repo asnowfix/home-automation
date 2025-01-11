@@ -1,11 +1,11 @@
 package jobs
 
 import (
-	"devices/shelly"
-	"devices/shelly/types"
 	"fmt"
 	"hlog"
 	"homectl/shelly/options"
+	"pkg/shelly"
+	"pkg/shelly/types"
 	"schedule"
 	"strings"
 

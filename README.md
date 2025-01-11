@@ -236,7 +236,7 @@ déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home
 déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/http/server.go:46 > http.HandleFunc query={"hum":["69"],"id":["shellyht-208500"],"temp":["17.62"]} v=0
 déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/http/server.go:68 > http.HandleFunc gen1_device={"humidity":69,"ip":"192.168.1.37"} v=0
 déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/http/server.go:72 > http.HandleFunc gen1_json="{\"ip\":\"192.168.1.37\",\"humidity\":69}" v=0
-déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/devices/shelly/gen1/publisher.go:36 > gen1.Publisher: MQTT(%v) <<< %v shellyht-208500/events/rpc="{\"id\":0,\"tC\":17.62,\"tF\":63.716003}" v=0
+déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/pkg/shelly/gen1/publisher.go:36 > gen1.Publisher: MQTT(%v) <<< %v shellyht-208500/events/rpc="{\"id\":0,\"tC\":17.62,\"tF\":63.716003}" v=0
 déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/logs/waiter.go:13 > logs.Waiter: topic=shellyht-208500/events/rpc v=0
 déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/myhome/logs/waiter.go:29 > logs.Waiter: already known topic=shellyht-208500/events/rpc v=0
 déc. 09 21:51:13 palmbeach myhome[609413]: 9:51PM INF ../../../Desktop/GIT/home-automation/mymqtt/mqtt.go:211 > MqttSubscribe received: payload="{\"id\":0,\"tC\":17.62,\"tF\":63.716003}" topic=shellyht-208500/events/rpc v=0

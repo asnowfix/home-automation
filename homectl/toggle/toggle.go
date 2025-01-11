@@ -1,10 +1,10 @@
 package toggle
 
 import (
-	"devices/shelly"
-	"devices/shelly/types"
 	"hlog"
 	"homectl/shelly/options"
+	"pkg/shelly"
+	"pkg/shelly/types"
 	"strings"
 
 	"github.com/go-logr/logr"

@@ -1,13 +1,13 @@
 package script
 
 import (
-	"devices/shelly"
-	"devices/shelly/script"
-	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
 	"hlog"
 	"homectl/shelly/options"
+	"pkg/shelly"
+	"pkg/shelly/script"
+	"pkg/shelly/types"
 	"strings"
 
 	"github.com/go-logr/logr"

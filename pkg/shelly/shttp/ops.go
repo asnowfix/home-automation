@@ -2,12 +2,12 @@ package http
 
 import (
 	"bytes"
-	"devices/shelly/types"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"pkg/shelly/types"
 	"reflect"
 
 	"github.com/go-logr/logr"

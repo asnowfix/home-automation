@@ -1,11 +1,11 @@
 package script
 
 import (
-	"devices/shelly"
-	"devices/shelly/script"
-	"devices/shelly/types"
 	"hlog"
 	"homectl/shelly/options"
+	"pkg/shelly"
+	"pkg/shelly/script"
+	"pkg/shelly/types"
 	"strconv"
 	"strings"
 

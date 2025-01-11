@@ -1,12 +1,12 @@
 package show
 
 import (
-	"devices/shelly"
-	"devices/shelly/mqtt"
-	"devices/shelly/sswitch"
-	"devices/shelly/types"
 	"hlog"
 	"homectl/shelly/options"
+	"pkg/shelly"
+	"pkg/shelly/mqtt"
+	"pkg/shelly/sswitch"
+	"pkg/shelly/types"
 	"schedule"
 	"strings"
 

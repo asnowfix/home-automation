@@ -1,6 +1,5 @@
-module devices/shelly/kvs
+module pkg/shelly/kvs
 
 go 1.22
 
-require (
-)
+require github.com/go-logr/logr v1.4.2

@@ -1,11 +1,11 @@
 package shelly
 
 import (
-	"devices/shelly/types"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
+	"pkg/shelly/types"
 	"reflect"
 	"regexp"
 	"strings"

@@ -29,7 +29,7 @@ var getManyCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, getMany, args)
+		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, getMany, args)
 	},
 }
 

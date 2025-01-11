@@ -36,7 +36,7 @@ var cancelCtl = &cobra.Command{
 			via = types.ChannelMqtt
 		}
 
-		shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, cancelOneDeviceJob, args)
+		shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, cancelOneDeviceJob, args)
 		return nil
 	},
 }

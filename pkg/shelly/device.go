@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mymqtt"
 	"net"
 	"pkg/shelly/types"
 	"reflect"
@@ -25,15 +26,16 @@ type Product struct {
 
 type Device struct {
 	Product
-	Id_        string                                    `json:"id"`
-	Service    string                                    `json:"service"`
-	MacAddress net.HardwareAddr                          `json:"mac"`
-	Host       string                                    `json:"host"`
-	Ipv4_      net.IP                                    `json:"ipv4"`
-	Port       int                                       `json:"port"`
-	Info       *DeviceInfo                               `json:"info"`
-	Methods    []string                                  `json:"methods"`
-	Components map[string]map[string]types.MethodHandler `json:"methods_handlers"`
+	Id_         string                                    `json:"id"`
+	Service     string                                    `json:"service"`
+	MacAddress  net.HardwareAddr                          `json:"mac"`
+	Host        string                                    `json:"host"`
+	Ipv4_       net.IP                                    `json:"ipv4"`
+	Port        int                                       `json:"port"`
+	Info        *DeviceInfo                               `json:"info"`
+	Methods     []string                                  `json:"methods"`
+	Components  map[string]map[string]types.MethodHandler `json:"-"`
+	mqttChannel chan []byte                               `json:"-"`
 }
 
 func (d *Device) Id() string {
@@ -106,7 +108,15 @@ func (d *Device) CallE(ch types.Channel, comp string, verb string, params any) (
 	return GetRegistrar().CallE(d, ch, mh, params)
 }
 
-func NewDeviceFromIp(log logr.Logger, ip net.IP) *Device {
+func (d *Device) String() string {
+	return fmt.Sprintf("%s_%s", d.Model, d.Id_)
+}
+
+func (d *Device) MqttChannel() chan []byte {
+	return d.mqttChannel
+}
+
+func NewDeviceFromIp(log logr.Logger, mc *mymqtt.Client, ip net.IP) *Device {
 	s := ip.String()
 	if d, exists := devicesMap[s]; exists {
 		return d
@@ -115,12 +125,12 @@ func NewDeviceFromIp(log logr.Logger, ip net.IP) *Device {
 		Ipv4_: ip,
 		Host:  ip.String(),
 	}
-	d.Init(log, types.ChannelHttp)
+	d.Init(log, mc, types.ChannelHttp)
 	addDevice(log, s, d)
 	return d
 }
 
-func (d *Device) Init(log logr.Logger, ch types.Channel) error {
+func (d *Device) Init(log logr.Logger, mc *mymqtt.Client, ch types.Channel) error {
 	m, err := GetRegistrar().CallE(d, ch, listMethodsHandler, nil)
 	if err != nil {
 		return err
@@ -158,15 +168,12 @@ func (d *Device) Init(log logr.Logger, ch types.Channel) error {
 	d.Id_ = d.Info.Id
 	d.MacAddress = d.Info.MacAddress
 
+	d.mqttChannel, err = mc.Subscribe(fmt.Sprintf("%s/%s", d.Info.Id, "rpc"), 0 /*qlen*/)
+	if err != nil {
+		log.Error(err, "Unable to subscribe to RPC topic", "device_id", d.Id)
+		return err
+	}
 	return nil
-}
-
-func (d *Device) Topics() []string {
-	topics := make([]string, 5)
-	topics[0] = fmt.Sprintf("%s/rpc", d.Info.Id)
-	topics[0] = fmt.Sprintf("%s/events/rpc", d.Info.Id)
-	topics[0] = fmt.Sprintf("%s/online", d.Info.Id)
-	return topics
 }
 
 var devicesMap map[string]*Device = make(map[string]*Device)
@@ -202,11 +209,11 @@ func addDevice(log logr.Logger, name string, device *Device) {
 	}
 }
 
-func Lookup(log logr.Logger, name string) (*Device, error) {
+func Lookup(log logr.Logger, mc *mymqtt.Client, name string) (*Device, error) {
 	ip := net.ParseIP(name)
 	if ip != nil {
 		log.Info("Contacting device", "ip", ip)
-		return NewDeviceFromIp(log, ip), nil
+		return NewDeviceFromIp(log, mc, ip), nil
 	} else {
 		devices := Devices(log)
 		log.Info("Looking-up in...", "name", name, "devices", devices)
@@ -246,13 +253,13 @@ func Print(log logr.Logger, d any) error {
 	return nil
 }
 
-func Foreach(log logr.Logger, names []string, via types.Channel, do Do, args []string) error {
+func Foreach(log logr.Logger, mc *mymqtt.Client, names []string, via types.Channel, do Do, args []string) error {
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
 
 	if len(names) > 0 {
 		for _, name := range names {
 			log.Info("Looking for Shelly device", "name", name)
-			device, err := Lookup(log, name)
+			device, err := Lookup(log, mc, name)
 			if err != nil {
 				log.Error(err, "Skipping", "device", name)
 				continue

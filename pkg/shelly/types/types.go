@@ -1,6 +1,8 @@
 package types
 
-import "net"
+import (
+	"net"
+)
 
 type MethodsRegistrar interface {
 	RegisterMethodHandler(comp string, verb string, mh MethodHandler)
@@ -9,9 +11,11 @@ type MethodsRegistrar interface {
 }
 
 type Device interface {
+	String() string
 	Ipv4() net.IP
 	Id() string
 	CallE(via Channel, comp string, verb string, params any) (any, error)
+	MqttChannel() chan []byte
 }
 
 type DeviceCaller func(device Device, mh MethodHandler, out any, params any) (any, error)

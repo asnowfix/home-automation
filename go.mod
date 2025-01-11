@@ -7,6 +7,7 @@ require (
 	github.com/spf13/cobra v1.8.0
 	internal/myip v0.0.0-00010101000000-000000000000
 	internal/myzone v0.0.0-00010101000000-000000000000
+	mymqtt v0.0.0-00010101000000-000000000000
 	pkg/shelly/gen1 v0.0.0-00010101000000-000000000000
 )
 
@@ -14,9 +15,9 @@ replace internal/myip => ./internal/myip
 
 replace internal/myzone => ./internal/myzone
 
-replace mymqtt => ./mymqtt
-
 replace devices => ./devices
+
+replace mymqtt => ./mymqtt
 
 replace internal => ./internal
 
@@ -67,6 +68,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240314234333-6e1732d8331c // indirect
 	google.golang.org/grpc v1.62.1 // indirect
 	google.golang.org/protobuf v1.33.0 // indirect
-	mymqtt v0.0.0-00010101000000-000000000000 // indirect
 	pkg/shelly v0.0.0-00010101000000-000000000000 // indirect
 )

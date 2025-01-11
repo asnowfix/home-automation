@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"mymqtt"
-	"net/url"
 	"pkg/shelly/temperature"
 
 	"github.com/go-logr/logr"
@@ -12,7 +11,7 @@ import (
 
 type Empty struct{}
 
-func Publisher(log logr.Logger, ch chan Device, tc chan string, broker *url.URL) {
+func Publisher(log logr.Logger, ch chan Device, mc *mymqtt.Client) {
 	for device := range ch {
 		var tC float32
 		var id string
@@ -31,9 +30,8 @@ func Publisher(log logr.Logger, ch chan Device, tc chan string, broker *url.URL)
 		}
 		// https://shelly-api-docs.shelly.cloud/gen2/General/RPCChannels#mqtt
 		topic := fmt.Sprintf("%v/events/rpc", id)
-		tc <- topic
 		msg, _ := json.Marshal(t)
 		log.Info("gen1.Publisher: MQTT(%v) <<< %v", topic, string(msg))
-		mymqtt.MqttClient(log, broker).Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, string(msg)).Wait()
+		mc.Publish(topic, msg)
 	}
 }

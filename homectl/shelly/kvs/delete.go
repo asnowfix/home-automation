@@ -29,7 +29,7 @@ var deleteCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, deleteKeys, args)
+		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, deleteKeys, args)
 	},
 }
 

@@ -27,7 +27,7 @@ var Cmd = &cobra.Command{
 		if !useHttpChannel {
 			ch = types.ChannelMqtt
 		}
-		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), ch, func(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), ch, func(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 			sr := make(map[string]interface{})
 			sr["id"] = toggleSwitchId
 			out, err := device.CallE(ch, "Switch", "Toggle", sr)

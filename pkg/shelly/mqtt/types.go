@@ -16,6 +16,29 @@ func (qos Qos) String() string {
 	}[qos]
 }
 
+// ChannelMqtt
+
+type Event struct {
+	Id  uint   `json:"id"`
+	Src string `json:"src"`
+}
+
+type Request struct {
+	Event
+	Method string `json:"method"`
+	Params any    `json:"params,omitempty"`
+}
+
+type Response struct {
+	Event
+	Dst    string `json:"dst"`
+	Result *any   `json:"result"`
+	Error  *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/
 
 type SslCa uint

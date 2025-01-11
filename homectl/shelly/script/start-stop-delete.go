@@ -29,7 +29,7 @@ var startCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, doStartStop, []string{"Start"})
+		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, doStartStop, []string{"Start"})
 	},
 }
 
@@ -50,7 +50,7 @@ var stopCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, doStartStop, []string{"Stop"})
+		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, doStartStop, []string{"Stop"})
 	},
 }
 
@@ -71,7 +71,7 @@ var deleteCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, doStartStop, []string{"Delete"})
+		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, doStartStop, []string{"Delete"})
 	},
 }
 

@@ -3,21 +3,17 @@ package daemon
 import (
 	"hlog"
 	"myhome/http"
-	"myhome/logs"
 	"myhome/mqtt"
+	"mymqtt"
 	"os"
 	"os/signal"
 	"pkg/shelly"
 	"pkg/shelly/gen1"
 	"syscall"
-	"time"
 
 	"myhome/devices"
 
-	"github.com/go-logr/logr"
-	"github.com/grandcat/zeroconf"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 // cobra command for the daemon
@@ -39,25 +35,26 @@ func init() {
 }
 
 func Run() {
-	var disableEmbeddedMqttBroker bool
-	var disableDeviceManager bool
+	var disableEmbeddedMqttBroker bool = len(mqttBroker) != 0
+	var disableDeviceManager bool = false
+	var err error
 
 	log := hlog.Init()
 
-	// Initialize viper
-	viper.SetConfigName("myhome") // name of config file (without extension)
-	viper.SetConfigType("yaml")   // or viper.SetConfigType("toml")
-	viper.AddConfigPath(".")      // optionally look for config in the working directory
-	err := viper.ReadInConfig()   // Find and read the config file
-	if err != nil {
-		log.Error(err, "Error reading config file")
-		disableEmbeddedMqttBroker = false
-		disableDeviceManager = true
-	} else {
-		// Read the configuration option to disable MQTT broker startup
-		disableEmbeddedMqttBroker = viper.GetBool("disable_embedded_mqtt")
-		disableDeviceManager = viper.GetBool("disable_device_manager")
-	}
+	// // Initialize viper
+	// viper.SetConfigName("myhome") // name of config file (without extension)
+	// viper.SetConfigType("yaml")   // or viper.SetConfigType("toml")
+	// viper.AddConfigPath(".")      // optionally look for config in the working directory
+	// err := viper.ReadInConfig()   // Find and read the config file
+	// if err != nil {
+	// 	log.Error(err, "Error reading config file")
+	// 	disableEmbeddedMqttBroker = false
+	// 	disableDeviceManager = true
+	// } else {
+	// 	// Read the configuration option to disable MQTT broker startup
+	// 	disableEmbeddedMqttBroker = viper.GetBool("disable_embedded_mqtt")
+	// 	disableDeviceManager = viper.GetBool("disable_device_manager")
+	// }
 
 	// Create signals channel to run server until interrupted
 	sigs := make(chan os.Signal, 1)
@@ -68,9 +65,11 @@ func Run() {
 		done <- true
 	}()
 
+	var mc *mymqtt.Client
+
 	// Conditionally start the embedded MQTT broker
 	if !disableEmbeddedMqttBroker {
-		mdnsServer, broker, err := mqtt.MyHome(log, "myhome", nil)
+		mdnsServer, _, err := mqtt.MyHome(log, "myhome", nil)
 		if err != nil {
 			log.Error(err, "Error starting MQTT server")
 			os.Exit(1)
@@ -78,17 +77,23 @@ func Run() {
 		log.Info("Started embedded MQTT broker & published it over mDNS/Zeroconf", "server", mdnsServer)
 		defer mdnsServer.Shutdown()
 
-		topicsCh := make(chan string, 1)
-		defer close(topicsCh)
-		go logs.Waiter(log, broker, topicsCh)
+		// Connect to the embedded MQTT broker
+		mc, err = mymqtt.NewClientE(log, "me")
+		if err != nil {
+			log.Error(err, "Failed to initialize MQTT client")
+			os.Exit(1)
+		}
 
 		gen1Ch := make(chan gen1.Device, 1)
 		go http.MyHome(log, gen1Ch)
-		go gen1.Publisher(log, gen1Ch, topicsCh, broker)
-
-		proxyCh := make(chan struct{}, 1)
-		go mqtt.CommandProxy(log, proxyCh)
-		defer close(proxyCh)
+		go gen1.Publisher(log, gen1Ch, mc)
+	} else {
+		// Connect to the network's MQTT broker
+		mc, err = mymqtt.NewClientE(log, mqttBroker)
+		if err != nil {
+			log.Error(err, "Failed to initialize MQTT client")
+			os.Exit(1)
+		}
 	}
 
 	if !disableDeviceManager {
@@ -102,29 +107,34 @@ func Run() {
 		log.Info("Started device manager", "manager", dm)
 		defer dm.StopDiscovery()
 
-		// Initialize Shelly devices
+		// Initialize Shelly devices handler
 		shelly.Init(log)
-		dm.DiscoverDevices(shelly.MDNS_SHELLIES, 5*time.Second, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.DeviceIdentifier, error) {
-			log.Info("Identifying", "entry", entry)
-			return &devices.DeviceIdentifier{
-				Manufacturer: "Shelly",
-				ID:           entry.Instance,
-			}, nil
-		}, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.Device, error) {
-			sd, err := shelly.NewDeviceFromZeroConfEntry(log, entry)
-			if err != nil {
-				return nil, err
-			}
-			log.Info("Got", "shelly_device", sd)
-			return &devices.Device{
-				DeviceIdentifier: devices.DeviceIdentifier{
-					Manufacturer: "Shelly",
-					ID:           sd.Id_,
-				},
-				MAC:  sd.MacAddress,
-				Host: sd.Ipv4_.String(),
-			}, nil
-		})
+
+		// Loop on MQTT event devices discovery
+		dm.WatchMqtt(mc)
+
+		// Loop on ZeroConf devices discovery
+		// dm.DiscoverDevices(shelly.MDNS_SHELLIES, 300*time.Second, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.DeviceIdentifier, error) {
+		// 	log.Info("Identifying", "entry", entry)
+		// 	return &devices.DeviceIdentifier{
+		// 		Manufacturer: "Shelly",
+		// 		ID:           entry.Instance,
+		// 	}, nil
+		// }, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.Device, error) {
+		// 	sd, err := shelly.NewDeviceFromZeroConfEntry(log, entry)
+		// 	if err != nil {
+		// 		return nil, err
+		// 	}
+		// 	log.Info("Got", "shelly_device", sd)
+		// 	return &devices.Device{
+		// 		DeviceIdentifier: devices.DeviceIdentifier{
+		// 			Manufacturer: "Shelly",
+		// 			ID:           sd.Id_,
+		// 		},
+		// 		MAC:  sd.MacAddress,
+		// 		Host: sd.Ipv4_.String(),
+		// 	}, nil
+		// })
 	}
 
 	// Run server until interrupted

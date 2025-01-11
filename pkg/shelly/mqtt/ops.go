@@ -6,7 +6,6 @@ import (
 	"pkg/shelly/types"
 	"time"
 
-	"mymqtt"
 	"net/http"
 	"os"
 	"reflect"
@@ -57,61 +56,32 @@ type MqttChannel struct {
 }
 
 func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
-	reqTopic := fmt.Sprintf("%v/rpc", device.Id())
-	// reqChan, err := mqtt.MqttSubscribe(mqtt.PrivateBroker(), reqTopic, uint(AtLeastOnce))
-	var req struct {
-		Source string `json:"src"`
-		Id     uint   `json:"id"`
-		Method string `json:"method"`
-		Params any    `json:"params,omitempty"`
-	}
+	var req Request
 
 	hostname, err := os.Hostname()
 	if err != nil {
 		log.Error(err, "Unable to get local hostname")
 		return nil, err
 	}
-	req.Source = fmt.Sprintf("%v_%v", hostname, requestId())
+	req.Src = fmt.Sprintf("%v_%v", hostname, requestId())
 	req.Id = 0
 	req.Method = verb.Method
 	req.Params = params
-
-	resTopic := fmt.Sprintf("%v/rpc", req.Source)
-
-	resChan, err := mymqtt.MqttSubscribe(log, mymqtt.Broker(log, false), resTopic, 0 /*qlen*/)
-	if err != nil {
-		log.Error(err, "Unable to subscribe", "topic", reqTopic)
-		return nil, err
-	}
-	log.Info("Subscribing...", "topic", resTopic)
-	<-resChan // subscribed
-	log.Info("Subscribed", "topic", resTopic)
 
 	reqPayload, err := json.Marshal(req)
 	if err != nil {
 		log.Error(err, "Unable to marshal", "request", req)
 		return nil, err
 	}
-	mymqtt.MqttPublish(log, mymqtt.Broker(log, false), reqTopic, reqPayload)
-	resMsg := <-resChan
+	device.MqttChannel() <- reqPayload
+	resMsg := <-device.MqttChannel()
 
-	mymqtt.MqttUnsubscribe(log, mymqtt.Broker(log, false), resTopic)
-
-	var res struct {
-		Id     uint   `json:"id"`
-		Src    string `json:"src"`
-		Dst    string `json:"dst"`
-		Result *any   `json:"result"`
-		Error  *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
+	var res Response
 	res.Result = &out
 
-	err = json.Unmarshal(resMsg.Payload, &res)
+	err = json.Unmarshal(resMsg, &res)
 	if err != nil {
-		log.Error(err, "Unable to unmarshal response", "payload", resMsg.Payload)
+		log.Error(err, "Unable to unmarshal response", "payload", resMsg)
 		return nil, err
 	}
 

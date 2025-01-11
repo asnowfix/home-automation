@@ -32,7 +32,6 @@ use (
 	./internal/mynet
 	./internal/myzone
 	./myhome/http
-	./myhome/logs
 	./myhome/mqtt
 	./myhome/daemon
 	./myhome/devices

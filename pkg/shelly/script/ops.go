@@ -1,8 +1,8 @@
 package script
 
 import (
-	"devices/shelly/types"
 	"net/http"
+	"pkg/shelly/types"
 	"reflect"
 
 	"github.com/go-logr/logr"

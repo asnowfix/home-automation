@@ -2,19 +2,20 @@ go 1.22
 
 use (
 	.
-	./devices
-	./devices/sfr
-	./devices/shelly
-	./devices/shelly/gen1
-	./devices/shelly/kvs
-	./devices/shelly/input
-	./devices/shelly/schedule
-	./devices/shelly/script
-	./devices/shelly/shttp
-	./devices/shelly/sswitch
-	./devices/shelly/system
-	./devices/shelly/types
-	./devices/tapo
+	./pkg/devices
+	./pkg/sfr
+	./pkg/shelly
+	./pkg/shelly/gen1
+	./pkg/shelly/kvs
+	./pkg/shelly/input
+	./pkg/shelly/schedule
+	./pkg/shelly/mqtt
+	./pkg/shelly/script
+	./pkg/shelly/shttp
+	./pkg/shelly/sswitch
+	./pkg/shelly/system
+	./pkg/shelly/types
+	./pkg/tapo
 	./hlog
 	./homectl/list
 	./homectl/mqtt

@@ -1,6 +1,5 @@
-module devices/shelly/input
+module pkg/shelly/input
 
 go 1.22
 
-require (
-)
+require github.com/go-logr/logr v1.4.2

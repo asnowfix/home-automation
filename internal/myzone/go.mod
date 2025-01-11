@@ -2,7 +2,10 @@ module myzone
 
 go 1.22
 
-require google.golang.org/api v0.148.0
+require (
+	github.com/go-logr/logr v1.4.2
+	google.golang.org/api v0.148.0
+)
 
 require (
 	cloud.google.com/go/compute v1.23.0 // indirect

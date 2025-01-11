@@ -1,6 +1,5 @@
-module devices/shelly/system
+module pkg/shelly/system
 
 go 1.22
 
-require (
-)
+require github.com/go-logr/logr v1.4.2

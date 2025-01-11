@@ -1,15 +1,15 @@
 package shelly
 
 import (
-	"devices/shelly/input"
-	"devices/shelly/kvs"
-	"devices/shelly/mqtt"
-	"devices/shelly/script"
-	shttp "devices/shelly/shttp"
-	"devices/shelly/sswitch"
-	"devices/shelly/types"
 	"fmt"
 	"net/http"
+	"pkg/shelly/input"
+	"pkg/shelly/kvs"
+	"pkg/shelly/mqtt"
+	"pkg/shelly/script"
+	shttp "pkg/shelly/shttp"
+	"pkg/shelly/sswitch"
+	"pkg/shelly/types"
 	"reflect"
 	"schedule"
 

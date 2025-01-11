@@ -1,8 +1,8 @@
 package devices
 
 // import (
-// 	"devices/sfr"
-// 	"devices/shelly"
+// 	"pkg/sfr"
+// 	"pkg/shelly"
 // )
 
 // func Init() {

@@ -1,6 +1,3 @@
-module devices/shelly/types
+module pkg/shelly/types
 
 go 1.22
-
-require (
-)

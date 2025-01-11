@@ -1,7 +1,6 @@
 package main
 
 import (
-	"devices/shelly/gen1"
 	"fmt"
 	"hlog"
 	"myhome/http"
@@ -9,6 +8,7 @@ import (
 	"myhome/mqtt"
 	"os"
 	"os/signal"
+	"pkg/shelly/gen1"
 	"syscall"
 	"time"
 )

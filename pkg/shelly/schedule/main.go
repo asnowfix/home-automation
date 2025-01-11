@@ -1,9 +1,9 @@
 package schedule
 
 import (
-	"devices/shelly/types"
 	_ "embed"
 	"encoding/json"
+	"pkg/shelly/types"
 )
 
 //go:embed jobs.json

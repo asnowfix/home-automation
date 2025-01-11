@@ -1,14 +1,14 @@
 package daemon
 
 import (
-	"devices/shelly"
-	"devices/shelly/gen1"
 	"hlog"
 	"myhome/http"
 	"myhome/logs"
 	"myhome/mqtt"
 	"os"
 	"os/signal"
+	"pkg/shelly"
+	"pkg/shelly/gen1"
 	"syscall"
 	"time"
 

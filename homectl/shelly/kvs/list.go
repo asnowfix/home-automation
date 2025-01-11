@@ -7,9 +7,9 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"devices/shelly"
-	"devices/shelly/kvs"
-	"devices/shelly/types"
+	"pkg/shelly"
+	"pkg/shelly/kvs"
+	"pkg/shelly/types"
 
 	"homectl/shelly/options"
 )

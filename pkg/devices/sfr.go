@@ -1,8 +1,8 @@
 package devices
 
 import (
-	"devices/sfr"
 	"net"
+	"pkg/sfr"
 
 	"github.com/go-logr/logr"
 )

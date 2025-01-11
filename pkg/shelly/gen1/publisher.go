@@ -1,11 +1,11 @@
 package gen1
 
 import (
-	"devices/shelly/temperature"
 	"encoding/json"
 	"fmt"
 	"mymqtt"
 	"net/url"
+	"pkg/shelly/temperature"
 
 	"github.com/go-logr/logr"
 )

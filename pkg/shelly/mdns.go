@@ -1,9 +1,9 @@
 package shelly
 
 import (
-	"devices/shelly/types"
 	"encoding/json"
 	"net"
+	"pkg/shelly/types"
 	"strconv"
 
 	"github.com/go-logr/logr"

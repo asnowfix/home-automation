@@ -1,4 +1,4 @@
-module devices/shelly
+module pkg/shelly
 
 go 1.22
 

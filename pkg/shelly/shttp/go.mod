@@ -1,4 +1,4 @@
-module devices/shelly/shttp
+module pkg/shelly/shttp
 
 go 1.22
 

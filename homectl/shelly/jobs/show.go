@@ -9,8 +9,8 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"devices/shelly"
-	"devices/shelly/types"
+	"pkg/shelly"
+	"pkg/shelly/types"
 )
 
 var showCtl = &cobra.Command{

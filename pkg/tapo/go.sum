@@ -1,3 +1,5 @@
+github.com/go-logr/logr v1.4.2 h1:6pFjapn8bFcIbiKo3XT4j/BhANplGihG6tvd+8rYgrY=
+github.com/go-logr/logr v1.4.2/go.mod h1:9T104GzyrTigFIr8wt5mBrctHMim0Nb2HLGrmQ40KvY=
 github.com/j-iot/tapo-go v0.0.0-20210626000425-49dce7306511 h1:VGSg5l0joCMqYiYo+8WUsaD6QEFWUEZnBHTnzL9qB0A=
 github.com/j-iot/tapo-go v0.0.0-20210626000425-49dce7306511/go.mod h1:ysYyc76QmL9sY0iQ/dFl1j7SgQxMqy05rODgoesRfhU=
 github.com/mergermarket/go-pkcs7 v0.0.0-20170926155232-153b18ea13c9 h1:j6boLfPkcFlRVaKbc0hf5PVh3jJrdHv9n6SIPOdVKaU=

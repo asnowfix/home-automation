@@ -2,15 +2,14 @@ package shelly
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"mymqtt"
 	"net"
+	"os"
 	"pkg/shelly/types"
 	"reflect"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/go-logr/logr"
 )
@@ -26,16 +25,17 @@ type Product struct {
 
 type Device struct {
 	Product
-	Id_         string                                    `json:"id"`
-	Service     string                                    `json:"service"`
-	MacAddress  net.HardwareAddr                          `json:"mac"`
-	Host        string                                    `json:"host"`
-	Ipv4_       net.IP                                    `json:"ipv4"`
-	Port        int                                       `json:"port"`
-	Info        *DeviceInfo                               `json:"info"`
-	Methods     []string                                  `json:"methods"`
-	Components  map[string]map[string]types.MethodHandler `json:"-"`
-	mqttChannel chan []byte                               `json:"-"`
+	Id_        string                                    `json:"id"`
+	Service    string                                    `json:"service"`
+	Host       string                                    `json:"host"`
+	Ipv4_      net.IP                                    `json:"ipv4"`
+	Port       int                                       `json:"port"`
+	Info       *DeviceInfo                               `json:"info"`
+	Methods    []string                                  `json:"methods"`
+	Components map[string]map[string]types.MethodHandler `json:"-"`
+	me         string                                    `json:"-"`
+	to         chan []byte                               `json:"-"`
+	from       chan []byte                               `json:"-"`
 }
 
 func (d *Device) Id() string {
@@ -112,26 +112,61 @@ func (d *Device) String() string {
 	return fmt.Sprintf("%s_%s", d.Model, d.Id_)
 }
 
-func (d *Device) MqttChannel() chan []byte {
-	return d.mqttChannel
+func (d *Device) To() chan<- []byte {
+	return d.to
+}
+
+func (d *Device) From() <-chan []byte {
+	return d.from
+}
+
+func (d *Device) ReplyTo() string {
+	return d.me
 }
 
 func NewDeviceFromIp(log logr.Logger, mc *mymqtt.Client, ip net.IP) *Device {
-	s := ip.String()
-	if d, exists := devicesMap[s]; exists {
-		return d
-	}
 	d := &Device{
 		Ipv4_: ip,
 		Host:  ip.String(),
 	}
 	d.Init(log, mc, types.ChannelHttp)
-	addDevice(log, s, d)
 	return d
 }
 
-func (d *Device) Init(log logr.Logger, mc *mymqtt.Client, ch types.Channel) error {
-	m, err := GetRegistrar().CallE(d, ch, listMethodsHandler, nil)
+func NewDeviceFromId(log logr.Logger, mc *mymqtt.Client, id string) *Device {
+	d := &Device{
+		Id_:  id,
+		Host: fmt.Sprintf("%s.local", id),
+	}
+	d.Init(log, mc, types.ChannelMqtt)
+	return d
+}
+
+func (d *Device) Init(log logr.Logger, mc *mymqtt.Client, via types.Channel) error {
+	var err error
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Error(err, "Unable to get local hostname")
+		return err
+	}
+	d.me = fmt.Sprintf("%s_%s", hostname, d.Id_)
+	d.from, err = mc.Subscribe(fmt.Sprintf("%s/rpc", d.me), 1 /*qlen*/)
+	if err != nil {
+		log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
+		return err
+	}
+
+	d.to = make(chan []byte, 1 /*qlen*/)
+	toDevice := fmt.Sprintf("%s/rpc", d.Id_)
+	go func() {
+		for {
+			msg := <-d.to
+			mc.Publish(toDevice, msg)
+		}
+	}()
+
+	m, err := GetRegistrar().CallE(d, via, listMethodsHandler, nil)
 	if err != nil {
 		return err
 	}
@@ -159,7 +194,7 @@ func (d *Device) Init(log logr.Logger, mc *mymqtt.Client, ch types.Channel) erro
 	}
 	log.Info("device API", "components", d.Components)
 
-	di, err := d.CallE(ch, "Shelly", "GetDeviceInfo", map[string]interface{}{"ident": true})
+	di, err := d.CallE(via, "Shelly", "GetDeviceInfo", map[string]interface{}{"ident": true})
 	if err != nil {
 		return err
 	}
@@ -168,77 +203,7 @@ func (d *Device) Init(log logr.Logger, mc *mymqtt.Client, ch types.Channel) erro
 	d.Id_ = d.Info.Id
 	d.MacAddress = d.Info.MacAddress
 
-	d.mqttChannel, err = mc.Subscribe(fmt.Sprintf("%s/%s", d.Info.Id, "rpc"), 0 /*qlen*/)
-	if err != nil {
-		log.Error(err, "Unable to subscribe to RPC topic", "device_id", d.Id)
-		return err
-	}
 	return nil
-}
-
-var devicesMap map[string]*Device = make(map[string]*Device)
-
-var devicesMutex sync.Mutex
-
-func Devices(log logr.Logger) map[string]*Device {
-	devices, _ := DevicesE(log)
-	return devices
-}
-
-func DevicesE(log logr.Logger) (map[string]*Device, error) {
-	devicesMutex.Lock()
-	if len(devicesMap) == 0 {
-		// err := loadDevicesFromMdns(log)
-		// if err != nil {
-		// 	log.Error(err, "Unable to load devices from mDNS")
-		// 	return nil, err
-		// }
-		log.Info("New discovered devices", "num", len(devicesMap))
-	}
-	log.Info("Now knows devices", "num", len(devicesMap), "devices", devicesMap)
-	devicesMutex.Unlock()
-	return devicesMap, nil
-}
-
-func addDevice(log logr.Logger, name string, device *Device) {
-	if _, exists := devicesMap[name]; !exists {
-		log.Info("Loading", "name", name, "device", *device)
-		devicesMap[name] = device
-	} else {
-		log.Info("Already loaded", "name", name)
-	}
-}
-
-func Lookup(log logr.Logger, mc *mymqtt.Client, name string) (*Device, error) {
-	ip := net.ParseIP(name)
-	if ip != nil {
-		log.Info("Contacting device", "ip", ip)
-		return NewDeviceFromIp(log, mc, ip), nil
-	} else {
-		devices := Devices(log)
-		log.Info("Looking-up in...", "name", name, "devices", devices)
-
-		for key, device := range devices {
-			log.Info("Matching", "name", name, "device", device)
-
-			if key == name {
-				return device, nil
-			}
-			if device.Info != nil && device.Info.MacAddress != nil && device.Info.MacAddress.String() == name {
-				return device, nil
-			}
-			if device.Ipv4() != nil && device.Ipv4().String() == name {
-				return device, nil
-			}
-			if device.Host == name {
-				return device, nil
-			}
-			if device.Model == name {
-				return device, nil
-			}
-		}
-		return nil, errors.New("No device matching name:'" + name + "'")
-	}
 }
 
 type Do func(logr.Logger, types.Channel, *Device, []string) (any, error)
@@ -259,10 +224,12 @@ func Foreach(log logr.Logger, mc *mymqtt.Client, names []string, via types.Chann
 	if len(names) > 0 {
 		for _, name := range names {
 			log.Info("Looking for Shelly device", "name", name)
-			device, err := Lookup(log, mc, name)
-			if err != nil {
-				log.Error(err, "Skipping", "device", name)
-				continue
+			var device *Device
+			var ip net.IP
+			if ip = net.ParseIP(name); ip != nil {
+				device = NewDeviceFromIp(log, mc, ip)
+			} else {
+				device = NewDeviceFromId(log, mc, name)
 			}
 			out, err := do(log, via, device, args)
 			if err != nil {
@@ -278,7 +245,9 @@ func Foreach(log logr.Logger, mc *mymqtt.Client, names []string, via types.Chann
 	} else {
 		log.Info("Running on every device")
 		out := make([]any, 0)
-		for _, device := range Devices(log) {
+		// FIXME: implement lookup with request to myhome
+		devices := make(map[string]*Device, 0)
+		for _, device := range devices {
 			item, err := do(log, via, device, args)
 			if err != nil {
 				log.Error(err, "Operation failed", "device", device.Host)

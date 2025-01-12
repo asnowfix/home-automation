@@ -2,12 +2,13 @@ package script
 
 import (
 	"hlog"
-	"homectl/shelly/options"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
 	"strconv"
-	"strings"
+
+	hopts "homectl/options"
+	"homectl/shelly/options"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -30,7 +31,7 @@ var enableCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, doEnableDisable, []string{"true"})
+		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, doEnableDisable, []string{"true"})
 	},
 }
 
@@ -46,7 +47,7 @@ var disableCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, doEnableDisable, []string{"false"})
+		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, doEnableDisable, []string{"false"})
 	},
 }
 

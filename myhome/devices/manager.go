@@ -2,7 +2,10 @@ package devices
 
 import (
 	"context"
+	"encoding/json"
 	"mymqtt"
+	"pkg/shelly"
+	"pkg/shelly/mqtt"
 	"sync"
 	"time"
 
@@ -14,6 +17,7 @@ type DeviceManager struct {
 	storage *DeviceStorage
 	mu      sync.Mutex
 	cancel  context.CancelFunc
+	watch   chan bool
 	log     logr.Logger
 }
 
@@ -21,7 +25,57 @@ func NewDeviceManager(log logr.Logger, storage *DeviceStorage) *DeviceManager {
 	return &DeviceManager{
 		storage: storage,
 		log:     log.WithName("DeviceManager"),
+		cancel:  nil,
+		watch:   nil,
 	}
+}
+
+func (dm *DeviceManager) Start(mc *mymqtt.Client) error {
+	var err error
+
+	dm.log.Info("Starting device manager")
+
+	// Loop on MQTT event devices discovery
+	dm.watch, err = dm.WatchMqtt(mc)
+	if err != nil {
+		dm.log.Error(err, "Failed to watch MQTT events")
+		return err
+	}
+
+	// Loop on ZeroConf devices discovery
+	// dm.DiscoverDevices(shelly.MDNS_SHELLIES, 300*time.Second, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.DeviceIdentifier, error) {
+	// 	log.Info("Identifying", "entry", entry)
+	// 	return &devices.DeviceIdentifier{
+	// 		Manufacturer: "Shelly",
+	// 		ID:           entry.Instance,
+	// 	}, nil
+	// }, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.Device, error) {
+	// 	sd, err := shelly.NewDeviceFromZeroConfEntry(log, entry)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	log.Info("Got", "shelly_device", sd)
+	// 	return &devices.Device{
+	// 		DeviceIdentifier: devices.DeviceIdentifier{
+	// 			Manufacturer: "Shelly",
+	// 			ID:           sd.Id_,
+	// 		},
+	// 		MAC:  sd.MacAddress,
+	// 		Host: sd.Ipv4_.String(),
+	// 	}, nil
+	// })
+
+	return nil
+}
+
+func (dm *DeviceManager) Stop() {
+	if dm.cancel != nil {
+		dm.cancel() // Stop the context
+	}
+	if dm.watch != nil {
+		close(dm.watch) // Close the watch channel to terminate the watch goroutine
+	}
+	dm.storage.Close() // Close the storage
 }
 
 func (dm *DeviceManager) WatchMqtt(mc *mymqtt.Client) (chan bool, error) {
@@ -40,14 +94,40 @@ func (dm *DeviceManager) WatchMqtt(mc *mymqtt.Client) (chan bool, error) {
 			case <-stop:
 				return
 			case msg := <-ch:
-				// Events like:
-				// - '{"src":"shelly1minig3-54320464a1d0","dst":"shelly1minig3-54320464a1d0/events","method":"NotifyStatus","params":{"ts":1736603810.49,"switch:0":{"id":0,"output":false,"source":"HTTP_in"}}}'
-				// - '{"src":"shellyplus1-08b61fd90730","dst":"shellyplus1-08b61fd90730/events","method":"NotifyStatus","params":{"ts":1736604020.06,"cloud":{"connected":true}}}'
-				// - '{"src":"shellyplus1-08b61fd141e8","dst":"shellyplus1-08b61fd141e8/events","method":"NotifyFullStatus","params":{"ts":1736604018.38,"ble":{},"cloud":{"connected":true},"input:0":{"id":0,"state":false},"mqtt":{"connected":true},"switch:0":{"id":0, "source":"SHC", "output":true,"temperature":{"tC":48.4, "tF":119.2}},"sys":{"mac":"08B61FD141E8","restart_required":false,"time":"15:00","unixtime":1736604018,"uptime":658773,"ram_size":268520,"ram_free":110248,"fs_size":393216,"fs_free":106496,"cfg_rev":13,"kvs_rev":0,"schedule_rev":1,"webhook_rev":0,"available_updates":{"beta":{"version":"1.5.0-beta1"}},"reset_reason":3},"wifi":{"sta_ip":"192.168.1.76","status":"got ip","ssid":"Linksys_7A50","rssi":-58,"ap_client_count":0},"ws":{"connected":false}}}'
-				// - '{"src":"shelly1minig3-54320464a1d0","dst":"shelly1minig3-54320464a1d0/events","method":"NotifyEvent","params":{"ts":1736605194.11,"events":[{"component":"input:0","id":0,"event":"config_changed","restart_required":false,"ts":1736605194.11,"cfg_rev":35}]}}'
-				// - '{"src":"shelly1minig3-54320464a1d0","dst":"shelly1minig3-54320464a1d0/events","method":"NotifyStatus","params":{"ts":1736605194.11,"sys":{"cfg_rev":35}}}'
 				dm.log.Info("Received message", "payload", string(msg))
-
+				event := &mqtt.Event{}
+				err := json.Unmarshal(msg, &event)
+				if err != nil {
+					dm.log.Error(err, "Failed to unmarshal event from payload", "payload", string(msg))
+					continue
+				}
+				if event.Src[:6] != "shelly" {
+					dm.log.Info("Skipping non-shelly event", "event", event)
+					continue
+				}
+				deviceId := event.Src
+				device, err := dm.storage.GetDeviceByManufacturerAndID("Shelly", deviceId)
+				if err != nil {
+					dm.log.Info("Device not found, creating new one", "device_id", deviceId)
+					device = NewDevice("Shelly", deviceId)
+					sd := shelly.NewDeviceFromId(dm.log, mc, deviceId)
+					device.MAC = sd.MacAddress
+					device.Host = sd.Ipv4_.String()
+					out, err := json.Marshal(sd.Info)
+					if err != nil {
+						dm.log.Error(err, "Failed to marshal device info", "device_id", event.Src)
+						continue
+					}
+					device.Info = string(out)
+				}
+				dm.log.Info("Updating device", "device", device)
+				err = device.UpdateFromMqttEvent(event)
+				if err != nil {
+					dm.log.Error(err, "Failed to update device from MQTT event", "device_id", event.Src)
+					continue
+				}
+				dm.log.Info("Storing updated device", "device", device)
+				dm.storage.UpsertDevice(device)
 			}
 		}
 	}()
@@ -133,11 +213,4 @@ func (dm *DeviceManager) updateDevices(service string, timeout time.Duration, id
 		}
 	}
 	dm.mu.Unlock()
-}
-
-func (dm *DeviceManager) StopDiscovery() {
-	dm.log.Info("Stopping device discovery")
-	if dm.cancel != nil {
-		dm.cancel()
-	}
 }

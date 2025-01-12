@@ -2,11 +2,11 @@ package script
 
 import (
 	"hlog"
+	hopts "homectl/options"
 	"homectl/shelly/options"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -29,7 +29,7 @@ var statusCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, doStatus, args)
+		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, doStatus, args)
 	},
 }
 

@@ -19,18 +19,54 @@ func (qos Qos) String() string {
 // ChannelMqtt
 
 type Event struct {
+	Src    string                 `json:"src"`    // Source of the event (Device Id)
+	Dst    string                 `json:"dst"`    // Destination of the event (MQTT topic)
+	Method string                 `json:"method"` // One of NotifyStatus, NotifyEvent, NotifyFullStatus
+	Params map[string]interface{} `json:"params"` // Parameters of the event
+	// Params struct {
+	// 	Timestamp float64              `json:"ts"`
+	// 	BLE       *any                 `json:"ble"`
+	// 	BtHome    *any                 `json:"bthome"`
+	// 	Cloud     *any                 `json:"cloud"`
+	// 	Input0    *sswitch.InputStatus `json:"input:0"`
+	// 	Input1    *sswitch.InputStatus `json:"input:1"`
+	// 	Input2    *sswitch.InputStatus `json:"input:2"`
+	// 	Input3    *sswitch.InputStatus `json:"input:3"`
+	// 	Knx       *any                 `json:"knx"`
+	// 	Mqtt      *Status              `json:"mqtt"`
+	// 	Switch0   *sswitch.Status      `json:"switch:0"`
+	// 	Switch1   *sswitch.Status      `json:"switch:1"`
+	// 	Switch2   *sswitch.Status      `json:"switch:2"`
+	// 	Switch3   *sswitch.Status      `json:"switch:3"`
+	// 	System    *system.Status       `json:"system"`
+	// 	Wifi      *wifi.StatusEvent    `json:"wifi"`
+	// 	WebSocket *any                 `json:"ws"`
+	//  Events    *[]ComponentEvent    `json:"events"`
+	// } `json:"params"` // Parameters of the event
+}
+
+type ComponentEvent struct {
+	Component       string  `json:"component"`
+	Id              int     `json:"id"`
+	Event           string  `json:"event"`
+	RestartRequired bool    `json:"restart_required"`
+	Ts              float64 `json:"ts"`
+	CfgRev          int     `json:"cfg_rev"`
+}
+
+type Dialog struct {
 	Id  uint   `json:"id"`
 	Src string `json:"src"`
 }
 
 type Request struct {
-	Event
+	Dialog
 	Method string `json:"method"`
 	Params any    `json:"params,omitempty"`
 }
 
 type Response struct {
-	Event
+	Dialog
 	Dst    string `json:"dst"`
 	Result *any   `json:"result"`
 	Error  *struct {

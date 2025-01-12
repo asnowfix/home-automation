@@ -113,3 +113,88 @@ scriptReloadEventData = [{
         "cfg_rev": 59
     }
 }]
+
+mqtt_event_bluetooth = {
+    "src": "shelly1minig3-5432046419f8",
+    "dst": "shelly1minig3-5432046419f8/events",
+    "method": "NotifyFullStatus",
+    "params": {
+      "ts": 1736633812.50,
+      "ble": {},
+      "bthome": {
+        "errors": [
+          "observer_disabled"
+        ]
+      },
+      "cloud": {
+        "connected": false
+      },
+      "input:0": {
+        "id": 0,
+        "state": false
+      },
+      "knx": {},
+      "mqtt": {
+        "connected": true
+      },
+      "switch:0": {
+        "id": 0,
+        "source": "SHC",
+        "output": false,
+        "temperature": {
+          "tC": 51.2,
+          "tF": 124.2
+        }
+      },
+      "sys": {
+        "mac": "5432046419F8",
+        "restart_required": false,
+        "time": "23:16",
+        "unixtime": 1736633812,
+        "uptime": 757645,
+        "ram_size": 259400,
+        "ram_free": 82468,
+        "fs_size": 1048576,
+        "fs_free": 589824,
+        "cfg_rev": 22,
+        "kvs_rev": 0,
+        "schedule_rev": 1,
+        "webhook_rev": 0,
+        "available_updates": {
+          "beta": {
+            "version": "1.5.0-beta1"
+          }
+        },
+        "reset_reason": 1
+      },
+      "wifi": {
+        "sta_ip": "192.168.33.29",
+        "status": "got ip",
+        "ssid": "Shelly1MiniG3-54320464A1D0",
+        "rssi": -92
+      },
+      "ws": {
+        "connected": false
+      }
+    }
+  }
+  
+  event_1 = {
+    "src": "shelly1minig3-54320464a1d0",
+    "dst": "shelly1minig3-54320464a1d0/events",
+    "method": "NotifyEvent",
+    "params": {
+      "ts": 1736605194.11,
+      "events": [
+        {
+          "component": "input:0",
+          "id": 0,
+          "event": "config_changed",
+          "restart_required": false,
+          "ts": 1736605194.11,
+          "cfg_rev": 35
+        }
+      ]
+    }
+  }
+  

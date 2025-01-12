@@ -22,13 +22,14 @@ const PRIVATE_PORT = 1883
 const PUBLIC_PORT = 8883
 
 type Client struct {
-	mqtt      mqtt.Client
-	brokerUrl *url.URL
-	log       logr.Logger
+	Id        string      // MQTT client_id (this client)
+	mqtt      mqtt.Client // MQTT stack
+	brokerUrl *url.URL    // MQTT broker to connect to
+	log       logr.Logger // Logger to use
 }
 
 func NewClientE(log logr.Logger, where string) (*Client, error) {
-	clientId := fmt.Sprintf("%v:%v", path.Base(os.Args[0]), os.Getpid())
+	clientId := fmt.Sprintf("%v%v", path.Base(os.Args[0]), os.Getpid())
 	log.Info("Initializing MQTT client", "client_id", clientId)
 
 	opts := mqtt.NewClientOptions()
@@ -41,31 +42,40 @@ func NewClientE(log logr.Logger, where string) (*Client, error) {
 		log.Error(err, "could not find MQTT broker", "where", where)
 		return nil, err
 	}
+	log.Info("Using MQTT broker", "url", brokerUrl)
+
 	opts.AddBroker(brokerUrl.String())
 	opts.Servers = []*url.URL{brokerUrl}
 
-	client := Client{
+	c := Client{
+		Id:        clientId,
 		mqtt:      mqtt.NewClient(opts),
 		log:       log,
 		brokerUrl: brokerUrl,
 	}
-	token := client.mqtt.Connect()
+	c.log.Info("MQTT client initialized", "client_id", clientId)
+	return &c, nil
+}
+
+func (c *Client) connect() error {
+	if c.mqtt.IsConnected() {
+		return nil
+	}
+
+	token := c.mqtt.Connect()
 	for !token.WaitTimeout(3 * time.Second) {
-		log.Info("MQTT client trying to connect as", "client_id", clientId)
+		c.log.Info("MQTT client trying to connect as", "client_id", c.Id)
 	}
 	if err := token.Error(); err != nil {
-		log.Error(err, "MQTT client failed to connect", "client_id", clientId)
-		return nil, err
+		c.log.Error(err, "MQTT client failed to connect", "client_id", c.Id)
+		return err
 	}
-	log.Info("MQTT client connected", "client_id", clientId)
-
-	return &client, nil
+	c.log.Info("MQTT client connected", "client_id", c.Id)
+	return nil
 }
 
 func lookupBroker(log logr.Logger, where string) (*url.URL, error) {
 	log.Info("Looking up MQTT broker", "where", where)
-
-	var ip net.IP
 
 	if where == "me" {
 		log.Info("Finding local IP")
@@ -74,7 +84,6 @@ func lookupBroker(log logr.Logger, where string) (*url.URL, error) {
 			log.Error(err, "Could not get local IP")
 			return nil, err
 		}
-		log.Info("Using", "ip", ip)
 		return &url.URL{
 			Scheme: "tcp",
 			Host:   fmt.Sprintf("%s:%d", ip, PRIVATE_PORT),
@@ -82,18 +91,30 @@ func lookupBroker(log logr.Logger, where string) (*url.URL, error) {
 	}
 
 	p := strings.Split(where, ":")
-	if len(p) == 2 {
-		ip = net.ParseIP(p[0])
-		_, err := strconv.Atoi(p[1])
-		if ip != nil && err == nil {
-			log.Info("Using", "ip", ip)
-			return &url.URL{
-				Scheme: "tcp",
-				Host:   where,
-			}, nil
+	host := p[0]
+	port := PRIVATE_PORT
+	if len(p) > 1 {
+		var err error
+		port, err = strconv.Atoi(p[1])
+		if err != nil {
+			return nil, err
 		}
-		log.Error(fmt.Errorf("invalid IP:port %v", where), "Ignoring")
-		return nil, fmt.Errorf("invalid IP:port %v", where)
+	}
+
+	if ip := net.ParseIP(host); ip != nil {
+		log.Info("Using IP", "where", host, "port", port)
+		return &url.URL{
+			Scheme: "tcp",
+			Host:   fmt.Sprintf("%s:%d", host, port),
+		}, nil
+	}
+
+	if _, err := net.LookupHost(host); err == nil {
+		log.Info("Using host", "where", host, "port", port)
+		return &url.URL{
+			Scheme: "tcp",
+			Host:   fmt.Sprintf("%s:%d", where, PRIVATE_PORT),
+		}, nil
 	}
 
 	url, err := lookupBrokerViaZeroConf(log)
@@ -109,7 +130,9 @@ func (c *Client) BrokerUrl() *url.URL {
 }
 
 func (c *Client) Close() {
-	c.mqtt.Disconnect(250 /* milliseconds */)
+	if c.mqtt.IsConnected() {
+		c.mqtt.Disconnect(250 /* milliseconds */)
+	}
 }
 
 var MqttUsername string = ""
@@ -169,6 +192,8 @@ type MqttMessage struct {
 }
 
 func (c *Client) Subscribe(topic string, qlen uint) (chan []byte, error) {
+	c.connect()
+
 	mch := make(chan []byte, qlen)
 
 	c.log.Info("Subscribing to:", "topic", topic)
@@ -188,8 +213,11 @@ func (c *Client) Unsubscribe(topic string) {
 	c.mqtt.Unsubscribe(topic)
 }
 
-func (c *Client) Publish(topic string, msg []byte) {
+func (c *Client) Publish(topic string, msg []byte) error {
+	c.connect()
 	c.log.Info("Publishing:", "topic", topic, "payload", string(msg))
 	c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, msg)
-	c.log.Info("Published:", "topic", topic, "payload", string(msg))
+	c.log.Info("Published")
+
+	return nil
 }

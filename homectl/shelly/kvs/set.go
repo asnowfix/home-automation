@@ -2,7 +2,6 @@ package kvs
 
 import (
 	"hlog"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -11,6 +10,7 @@ import (
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 
+	hopts "homectl/options"
 	"homectl/shelly/options"
 )
 
@@ -29,7 +29,7 @@ var setCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, setKeyValue, args)
+		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, setKeyValue, args)
 	},
 }
 

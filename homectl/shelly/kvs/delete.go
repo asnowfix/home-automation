@@ -2,7 +2,8 @@ package kvs
 
 import (
 	"hlog"
-	"strings"
+
+	hopts "homectl/options"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -29,7 +30,7 @@ var deleteCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, deleteKeys, args)
+		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, deleteKeys, args)
 	},
 }
 

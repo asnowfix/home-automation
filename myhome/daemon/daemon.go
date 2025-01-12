@@ -31,7 +31,7 @@ var (
 
 func init() {
 	// Define the MQTT broker option
-	Cmd.Flags().StringVarP(&mqttBroker, "mqtt-broker", "M", "", "Specify the MQTT broker to use, using the format <hostname>:<port>")
+	Cmd.Flags().StringVarP(&mqttBroker, "mqtt-broker", "B", "", "Specify the MQTT broker to use, using the format <hostname>:<port>")
 }
 
 func Run() {
@@ -64,6 +64,9 @@ func Run() {
 		<-sigs
 		done <- true
 	}()
+
+	// Initialize Shelly devices handler
+	shelly.Init(log)
 
 	var mc *mymqtt.Client
 
@@ -103,38 +106,16 @@ func Run() {
 			log.Error(err, "Failed to initialize device storage")
 			os.Exit(1)
 		}
+
 		dm := devices.NewDeviceManager(log, storage)
+		err = dm.Start(mc)
+		if err != nil {
+			log.Error(err, "Failed to start device manager")
+			os.Exit(1)
+		}
+
+		defer dm.Stop()
 		log.Info("Started device manager", "manager", dm)
-		defer dm.StopDiscovery()
-
-		// Initialize Shelly devices handler
-		shelly.Init(log)
-
-		// Loop on MQTT event devices discovery
-		dm.WatchMqtt(mc)
-
-		// Loop on ZeroConf devices discovery
-		// dm.DiscoverDevices(shelly.MDNS_SHELLIES, 300*time.Second, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.DeviceIdentifier, error) {
-		// 	log.Info("Identifying", "entry", entry)
-		// 	return &devices.DeviceIdentifier{
-		// 		Manufacturer: "Shelly",
-		// 		ID:           entry.Instance,
-		// 	}, nil
-		// }, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.Device, error) {
-		// 	sd, err := shelly.NewDeviceFromZeroConfEntry(log, entry)
-		// 	if err != nil {
-		// 		return nil, err
-		// 	}
-		// 	log.Info("Got", "shelly_device", sd)
-		// 	return &devices.Device{
-		// 		DeviceIdentifier: devices.DeviceIdentifier{
-		// 			Manufacturer: "Shelly",
-		// 			ID:           sd.Id_,
-		// 		},
-		// 		MAC:  sd.MacAddress,
-		// 		Host: sd.Ipv4_.String(),
-		// 	}, nil
-		// })
 	}
 
 	// Run server until interrupted

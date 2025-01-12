@@ -3,11 +3,11 @@ package jobs
 import (
 	"fmt"
 	"hlog"
+	hopts "homectl/options"
 	"homectl/shelly/options"
 	"pkg/shelly"
 	"pkg/shelly/types"
 	"schedule"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -36,7 +36,7 @@ var cancelCtl = &cobra.Command{
 			via = types.ChannelMqtt
 		}
 
-		shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, cancelOneDeviceJob, args)
+		shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, cancelOneDeviceJob, args)
 		return nil
 	},
 }

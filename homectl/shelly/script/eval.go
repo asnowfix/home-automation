@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
+	hopts "homectl/options"
 	"homectl/shelly/options"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -31,7 +31,7 @@ var evalCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, options.MqttClient, strings.Split(options.DeviceNames, ","), via, doEval, args)
+		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, doEval, args)
 	},
 }
 

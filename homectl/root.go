@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"homectl/list"
 	"homectl/mqtt"
-	shellyCtl "homectl/shelly"
+	"homectl/options"
+	"homectl/shelly"
 	"homectl/show"
 	"homectl/toggle"
 	"os"
+	"strings"
+
+	"mymqtt"
 
 	"hlog"
 
@@ -22,24 +26,37 @@ func main() {
 	}
 }
 
-var logger logr.Logger
+var log logr.Logger
 
 var Cmd = &cobra.Command{
 	Use:  "homectl",
 	Args: cobra.NoArgs,
-	Run: func(cmd *cobra.Command, args []string) {
-		logger = hlog.Init()
+	// run for this command and any sub-command
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		log = hlog.Init()
+		options.Devices = strings.Split(options.Flags.Devices, ",")
+		log.Info("Will use", "devices", options.Devices)
+
+		var err error
+		options.MqttClient, err = mymqtt.NewClientE(log, options.Flags.MqttBroker)
+		if err != nil {
+			log.Error(err, "Failed to create MQTT client")
+			os.Exit(1)
+		}
 	},
 }
 
 func init() {
 	Cmd.PersistentFlags().BoolVarP(&hlog.Verbose, "verbose", "v", false, "verbose output")
+	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")
+	Cmd.PersistentFlags().StringVarP(&options.Flags.Devices, "devices", "D", "", "comma-separated list of devices to use")
+
 	Cmd.AddCommand(versionCmd)
 	Cmd.AddCommand(list.Cmd)
 	Cmd.AddCommand(show.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(toggle.Cmd)
-	Cmd.AddCommand(shellyCtl.Cmd)
+	Cmd.AddCommand(shelly.Cmd)
 }
 
 var Commit string

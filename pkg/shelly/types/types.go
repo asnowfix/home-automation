@@ -15,7 +15,9 @@ type Device interface {
 	Ipv4() net.IP
 	Id() string
 	CallE(via Channel, comp string, verb string, params any) (any, error)
-	MqttChannel() chan []byte
+	ReplyTo() string
+	To() chan<- []byte
+	From() <-chan []byte
 }
 
 type DeviceCaller func(device Device, mh MethodHandler, out any, params any) (any, error)

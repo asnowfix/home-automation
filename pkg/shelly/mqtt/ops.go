@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"net/http"
-	"os"
 	"reflect"
 
 	"github.com/go-logr/logr"
@@ -44,12 +43,6 @@ func init() {
 	rand.Seed(uint64(time.Now().UnixNano()))
 }
 
-func requestId() string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return fmt.Sprintf("%x", b)
-}
-
 var mqttChannel MqttChannel
 
 type MqttChannel struct {
@@ -58,12 +51,7 @@ type MqttChannel struct {
 func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
 	var req Request
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Error(err, "Unable to get local hostname")
-		return nil, err
-	}
-	req.Src = fmt.Sprintf("%v_%v", hostname, requestId())
+	req.Src = device.ReplyTo()
 	req.Id = 0
 	req.Method = verb.Method
 	req.Params = params
@@ -73,8 +61,11 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 		log.Error(err, "Unable to marshal", "request", req)
 		return nil, err
 	}
-	device.MqttChannel() <- reqPayload
-	resMsg := <-device.MqttChannel()
+	log.Info("Sending", "request", req)
+	device.To() <- reqPayload
+
+	log.Info("Waiting for response")
+	resMsg := <-device.From()
 
 	var res Response
 	res.Result = &out

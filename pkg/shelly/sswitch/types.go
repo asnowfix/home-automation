@@ -68,17 +68,23 @@ type ConfigurationRequest struct {
 	Configuration Configuration `json:"config"` // Configuration that the method takes
 }
 
+type InputStatus struct {
+	Id    int  `json:"id"`    // Id of the Switch component instance
+	State bool `json:"state"` // Current state of this input
+}
+
 type Status struct {
-	Id             int     `json:"id"`                         //Id of the Switch component instance
-	Source         string  `json:"source"`                     // Source of the last command, for example: init, WS_in, http, ...
-	Output         bool    `json:"output"`                     // true if the output channel is currently on, false otherwise
-	TimerStartedAt int     `json:"timer_started_at,omitempty"` // Unix timestamp, start time of the timer (in UTC) (shown if the timer is triggered)
-	TimerDuration  int     `json:"timer_duration,omitempty"`   // Duration of the timer in seconds (shown if the timer is triggered)
-	Apower         float32 `json:"apower,omitempty"`           // Last measured instantaneous active power (in Watts) delivered to the attached load (shown if applicable)
-	Voltage        float32 `json:"voltage,omitempty"`          // Last measured voltage in Volts (shown if applicable)
-	Current        float32 `json:"current,omitempty"`          // Last measured current in Amperes (shown if applicable)
-	PowerFactor    float32 `json:"pf"`                         // Last measured power factor (shown if applicable)
-	Freq           int     `json:"freq"`                       // Last measured network frequency in Hz (shown if applicable)
+	Input          InputStatus `json:"input"`
+	Id             int         `json:"id"`                         //Id of the Switch component instance
+	Source         string      `json:"source"`                     // Source of the last command, for example: init, WS_in, http, ...
+	Output         bool        `json:"output"`                     // true if the output channel is currently on, false otherwise
+	TimerStartedAt int         `json:"timer_started_at,omitempty"` // Unix timestamp, start time of the timer (in UTC) (shown if the timer is triggered)
+	TimerDuration  int         `json:"timer_duration,omitempty"`   // Duration of the timer in seconds (shown if the timer is triggered)
+	Apower         float32     `json:"apower,omitempty"`           // Last measured instantaneous active power (in Watts) delivered to the attached load (shown if applicable)
+	Voltage        float32     `json:"voltage,omitempty"`          // Last measured voltage in Volts (shown if applicable)
+	Current        float32     `json:"current,omitempty"`          // Last measured current in Amperes (shown if applicable)
+	PowerFactor    float32     `json:"pf"`                         // Last measured power factor (shown if applicable)
+	Freq           int         `json:"freq"`                       // Last measured network frequency in Hz (shown if applicable)
 	Aenergy        struct {
 		Total    float32   `json:"total"`     // Total energy consumed in Watt-hours
 		ByMinute []float32 `json:"by_minute"` // Energy consumption by minute (in Milliwatt-hours) for the last three minutes (the lower the index of the element in the array, the closer to the current moment the minute)

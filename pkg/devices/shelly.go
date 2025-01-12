@@ -51,28 +51,3 @@ func (d ShellyDevice) Subscribe(handler func(msg []byte)) {
 func (d ShellyDevice) MarshalJSON() ([]byte, error) {
 	return MarshalJSON(d)
 }
-
-func ListShellyDevices(log logr.Logger) ([]Host, error) {
-	devices, err := shelly.DevicesE(log)
-	if err != nil {
-		log.Error(err, "Unable to list Shelly devices")
-		return nil, err
-	}
-	sd := make([]ShellyDevice, len(devices))
-	hosts := make([]Host, len(devices))
-
-	// Extract keys of a map as a slice (pre go 1.23)
-	keys := make([]string, len(devices))
-	i := 0
-	for k := range devices {
-		keys[i] = k
-		i++
-	}
-
-	for i := range keys {
-		sd[i].shelly = devices[keys[i]]
-		sd[i].log = log
-		hosts[i] = sd[i]
-	}
-	return hosts, nil
-}

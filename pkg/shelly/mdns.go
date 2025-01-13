@@ -2,9 +2,7 @@ package shelly
 
 import (
 	"encoding/json"
-	"mymqtt"
 	"net"
-	"pkg/shelly/types"
 	"strconv"
 	"strings"
 
@@ -14,7 +12,7 @@ import (
 
 const MDNS_SHELLIES string = "_shelly._tcp."
 
-func NewDeviceFromZeroConfEntry(log logr.Logger, mc *mymqtt.Client, entry *zeroconf.ServiceEntry) (*Device, error) {
+func NewDeviceFromZeroConfEntry(log logr.Logger, entry *zeroconf.ServiceEntry) (*Device, error) {
 	s, _ := json.Marshal(entry)
 	log.Info("Found", "entry", s)
 
@@ -69,7 +67,5 @@ func NewDeviceFromZeroConfEntry(log logr.Logger, mc *mymqtt.Client, entry *zeroc
 	}
 	log.Info("Discovered", "device", d)
 
-	d.Init(log, mc, types.ChannelHttp)
-	log.Info("Initialized", "device", d)
 	return d, nil
 }

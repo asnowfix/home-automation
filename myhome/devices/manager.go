@@ -6,6 +6,7 @@ import (
 	"mymqtt"
 	"pkg/shelly"
 	"pkg/shelly/mqtt"
+	"pkg/shelly/types"
 	"sync"
 	"time"
 
@@ -16,31 +17,84 @@ import (
 type DeviceManager struct {
 	storage *DeviceStorage
 	mu      sync.Mutex
+	update  chan *Device
 	cancel  context.CancelFunc
-	watch   chan bool
 	log     logr.Logger
+	devices map[string]any
 }
 
 func NewDeviceManager(log logr.Logger, storage *DeviceStorage) *DeviceManager {
 	return &DeviceManager{
 		storage: storage,
 		log:     log.WithName("DeviceManager"),
-		cancel:  nil,
-		watch:   nil,
+		update:  make(chan *Device, 1),
+		devices: make(map[string]any),
 	}
 }
 
-func (dm *DeviceManager) Start(mc *mymqtt.Client) error {
+func (dm *DeviceManager) Start(ctx context.Context, mc *mymqtt.Client) error {
 	var err error
 
 	dm.log.Info("Starting device manager")
 
+	ctx, dm.cancel = context.WithCancel(ctx)
+	go func(ctx context.Context, log logr.Logger, dc <-chan *Device) error {
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+
+			case device := <-dc:
+				sd, ok := device.impl.(*shelly.Device)
+				if ok && device.MAC == nil {
+					// TODO: select HTTP when MQTT is not configured
+					err := sd.Init(mc, types.ChannelMqtt)
+					if err != nil {
+						dm.log.Error(err, "Failed to init shelly device", "device_id", device.ID)
+						continue
+					}
+					device.MAC = sd.MacAddress
+					device.Host = sd.Ipv4_.String()
+					out, err := json.Marshal(sd.Info)
+					if err != nil {
+						dm.log.Error(err, "Failed to marshal device info", "device_id", device.ID)
+						continue
+					}
+					device.Info = string(out)
+				}
+				err = dm.storage.UpsertDevice(device)
+				if err != nil {
+					dm.log.Error(err, "Failed to upsert device", "device", device)
+					continue
+				}
+
+				dm.devices[device.ID] = device
+			}
+		}
+	}(ctx, log.WithName("DeviceManager#NewDevices"), dm.update)
+
+	// Load every devices from storage & init them
+	devices, err := dm.storage.GetAllDevices()
+	if err != nil {
+		return err
+	}
+	for _, device := range devices {
+		dm.update <- device.WithImpl(shelly.NewDeviceFromId(dm.log.WithName(device.ID), device.ID))
+	}
+
 	// Loop on MQTT event devices discovery
-	dm.watch, err = dm.WatchMqtt(mc)
+	err = dm.WatchMqtt(ctx, mc)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch MQTT events")
 		return err
 	}
+
+	// // Loop on ZeroConf devices discovery
+	// err = dm.WatchZeroConf(ctx)
+	// if err != nil {
+	// 	dm.log.Error(err, "Failed to watch ZeroConf devices")
+	// 	return err
+	// }
 
 	// Loop on ZeroConf devices discovery
 	// dm.DiscoverDevices(shelly.MDNS_SHELLIES, 300*time.Second, func(log logr.Logger, entry *zeroconf.ServiceEntry) (*devices.DeviceIdentifier, error) {
@@ -70,35 +124,31 @@ func (dm *DeviceManager) Start(mc *mymqtt.Client) error {
 
 func (dm *DeviceManager) Stop() {
 	if dm.cancel != nil {
-		dm.cancel() // Stop the context
+		dm.cancel()
 	}
-	if dm.watch != nil {
-		close(dm.watch) // Close the watch channel to terminate the watch goroutine
-	}
-	dm.storage.Close() // Close the storage
+	dm.storage.Close()
 }
 
-func (dm *DeviceManager) WatchMqtt(mc *mymqtt.Client) (chan bool, error) {
+func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error {
 	ch, err := mc.Subscribe("+/events/rpc", 0)
 	if err != nil {
 		dm.log.Error(err, "Failed to subscribe to shelly devices events")
-		return nil, err
+		return err
 	}
 
-	stop := make(chan bool, 1)
-
-	go func() {
+	go func(ctx context.Context, log logr.Logger) error {
 		for {
 			select {
-			// return if stop channel is closed
-			case <-stop:
-				return
+			case <-ctx.Done():
+				log.Info("Stopping")
+				return ctx.Err()
+
 			case msg := <-ch:
-				dm.log.Info("Received message", "payload", string(msg))
+				log.Info("Received message", "payload", string(msg))
 				event := &mqtt.Event{}
 				err := json.Unmarshal(msg, &event)
 				if err != nil {
-					dm.log.Error(err, "Failed to unmarshal event from payload", "payload", string(msg))
+					log.Error(err, "Failed to unmarshal event from payload", "payload", string(msg))
 					continue
 				}
 				if event.Src[:6] != "shelly" {
@@ -110,7 +160,8 @@ func (dm *DeviceManager) WatchMqtt(mc *mymqtt.Client) (chan bool, error) {
 				if err != nil {
 					dm.log.Info("Device not found, creating new one", "device_id", deviceId)
 					device = NewDevice("Shelly", deviceId)
-					sd := shelly.NewDeviceFromId(dm.log, mc, deviceId)
+					sd := shelly.NewDeviceFromId(dm.log, deviceId)
+					sd.Init(mc, types.ChannelMqtt)
 					device.MAC = sd.MacAddress
 					device.Host = sd.Ipv4_.String()
 					out, err := json.Marshal(sd.Info)
@@ -130,9 +181,62 @@ func (dm *DeviceManager) WatchMqtt(mc *mymqtt.Client) (chan bool, error) {
 				dm.storage.UpsertDevice(device)
 			}
 		}
-	}()
+	}(ctx, log.WithName("WatchMqtt"))
 
-	return stop, nil
+	return nil
+}
+
+func (dm *DeviceManager) WatchZeroConf(ctx context.Context) error {
+
+	resolver, err := zeroconf.NewResolver(nil)
+	if err != nil {
+		dm.log.Error(err, "Failed to initialize ZeroConf resolver")
+		return err
+	}
+	dm.log.Info("Initialized ZeroConf resolver")
+
+	scan := make(chan *zeroconf.ServiceEntry, 1)
+
+	err = resolver.Browse(ctx, shelly.MDNS_SHELLIES, "local.", scan)
+	if err != nil {
+		dm.log.Error(err, "Failed to browse ZeroConf")
+		return err
+	}
+	dm.log.Info("Started ZeroConf browsing")
+
+	go func(ctx context.Context, log logr.Logger, scan <-chan *zeroconf.ServiceEntry) error {
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("Stopping")
+				return ctx.Err()
+
+			case entry := <-scan:
+				log.Info("Browsed", "entry", entry)
+				deviceId := entry.Instance
+				_, err := dm.storage.GetDeviceByManufacturerAndID("Shelly", deviceId)
+				if err != nil {
+					log.Info("Device not found, creating new one", "device_id", deviceId)
+					host := entry.HostName
+					if len(entry.AddrIPv4) > 0 {
+						host = string(entry.AddrIPv4[0])
+					}
+					device := NewDevice("Shelly", deviceId).WithHost(host)
+
+					sd, err := shelly.NewDeviceFromZeroConfEntry(log, entry)
+					if err != nil {
+						log.Error(err, "Failed to parse device from zeroconf entry", "entry", entry)
+						continue
+					}
+					device.impl = sd
+
+					dm.update <- device
+				}
+			}
+		}
+	}(ctx, dm.log.WithName("WatchZeroConf"), scan)
+
+	return nil
 }
 
 // function type that knows how to mak a zerofon entry into a device

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"hlog"
 	"myhome/http"
 	"myhome/mqtt"
@@ -69,6 +70,7 @@ func Run() {
 	shelly.Init(log)
 
 	var mc *mymqtt.Client
+	ctx := context.Background()
 
 	// Conditionally start the embedded MQTT broker
 	if !disableEmbeddedMqttBroker {
@@ -108,7 +110,7 @@ func Run() {
 		}
 
 		dm := devices.NewDeviceManager(log, storage)
-		err = dm.Start(mc)
+		err = dm.Start(ctx, mc)
 		if err != nil {
 			log.Error(err, "Failed to start device manager")
 			os.Exit(1)
@@ -120,5 +122,6 @@ func Run() {
 
 	// Run server until interrupted
 	<-done
+	mc.Close()
 	log.Info("Shutting down")
 }

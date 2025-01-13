@@ -36,6 +36,7 @@ type Device struct {
 	me         string                                    `json:"-"`
 	to         chan []byte                               `json:"-"`
 	from       chan []byte                               `json:"-"`
+	log        logr.Logger                               `json:"-"`
 }
 
 func (d *Device) Id() string {
@@ -124,36 +125,38 @@ func (d *Device) ReplyTo() string {
 	return d.me
 }
 
-func NewDeviceFromIp(log logr.Logger, mc *mymqtt.Client, ip net.IP) *Device {
+func NewDeviceFromIp(log logr.Logger, ip net.IP) *Device {
 	d := &Device{
 		Ipv4_: ip,
 		Host:  ip.String(),
+		log:   log,
 	}
-	d.Init(log, mc, types.ChannelHttp)
+	// d.Init(log, mc, types.ChannelHttp)
 	return d
 }
 
-func NewDeviceFromId(log logr.Logger, mc *mymqtt.Client, id string) *Device {
+func NewDeviceFromId(log logr.Logger, id string) *Device {
 	d := &Device{
 		Id_:  id,
-		Host: fmt.Sprintf("%s.local", id),
+		Host: fmt.Sprintf("%s.local.", id),
+		log:  log,
 	}
-	d.Init(log, mc, types.ChannelMqtt)
+	// d.Init(log, mc, types.ChannelMqtt)
 	return d
 }
 
-func (d *Device) Init(log logr.Logger, mc *mymqtt.Client, via types.Channel) error {
+func (d *Device) Init(mc *mymqtt.Client, via types.Channel) error {
 	var err error
 
 	hostname, err := os.Hostname()
 	if err != nil {
-		log.Error(err, "Unable to get local hostname")
+		d.log.Error(err, "Unable to get local hostname")
 		return err
 	}
 	d.me = fmt.Sprintf("%s_%s", hostname, d.Id_)
 	d.from, err = mc.Subscribe(fmt.Sprintf("%s/rpc", d.me), 1 /*qlen*/)
 	if err != nil {
-		log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
+		d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
 		return err
 	}
 
@@ -172,7 +175,7 @@ func (d *Device) Init(log logr.Logger, mc *mymqtt.Client, via types.Channel) err
 	}
 
 	d.Methods = m.(*MethodsResponse).Methods
-	log.Info("Shelly.ListMethods", "methods", d.Methods)
+	d.log.Info("Shelly.ListMethods", "methods", d.Methods)
 
 	d.Components = make(map[string]map[string]types.MethodHandler)
 	for _, m := range d.Methods {
@@ -192,14 +195,14 @@ func (d *Device) Init(log logr.Logger, mc *mymqtt.Client, via types.Channel) err
 			}
 		}
 	}
-	log.Info("device API", "components", d.Components)
+	d.log.Info("device API", "components", d.Components)
 
 	di, err := d.CallE(via, "Shelly", "GetDeviceInfo", map[string]interface{}{"ident": true})
 	if err != nil {
 		return err
 	}
 	d.Info = di.(*DeviceInfo)
-	log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
+	d.log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
 	d.Id_ = d.Info.Id
 	d.MacAddress = d.Info.MacAddress
 
@@ -227,10 +230,11 @@ func Foreach(log logr.Logger, mc *mymqtt.Client, names []string, via types.Chann
 			var device *Device
 			var ip net.IP
 			if ip = net.ParseIP(name); ip != nil {
-				device = NewDeviceFromIp(log, mc, ip)
+				device = NewDeviceFromIp(log, ip)
 			} else {
-				device = NewDeviceFromId(log, mc, name)
+				device = NewDeviceFromId(log, name)
 			}
+			device.Init(mc, via)
 			out, err := do(log, via, device, args)
 			if err != nil {
 				log.Error(err, "Operation failed", "device", name)

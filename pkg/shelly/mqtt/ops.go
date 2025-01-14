@@ -61,10 +61,10 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 		log.Error(err, "Unable to marshal", "request", req)
 		return nil, err
 	}
-	log.Info("Sending", "request", req)
+	log.Info("Sending to", "device", device.Id(), "request", req)
 	device.To() <- reqPayload
 
-	log.Info("Waiting for response")
+	log.Info("Waiting for response from", "device", device.Id())
 	resMsg := <-device.From()
 
 	var res Response

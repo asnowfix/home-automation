@@ -19,10 +19,14 @@ func (qos Qos) String() string {
 // ChannelMqtt
 
 type Event struct {
-	Src    string                 `json:"src"`    // Source of the event (Device Id)
-	Dst    string                 `json:"dst"`    // Destination of the event (MQTT topic)
-	Method string                 `json:"method"` // One of NotifyStatus, NotifyEvent, NotifyFullStatus
-	Params map[string]interface{} `json:"params"` // Parameters of the event
+	Src    string `json:"src"`    // Source of the event (Device Id)
+	Dst    string `json:"dst"`    // Destination of the event (MQTT topic)
+	Method string `json:"method"` // One of NotifyStatus, NotifyEvent, NotifyFullStatus
+	Error  *struct {
+		Code    int    `json:"code"`    // Error code
+		Message string `json:"message"` // Error message
+	} `json:"error,omitempty"`
+	Params *map[string]interface{} `json:"params,omitempty"` // Parameters of the event
 	// Params struct {
 	// 	Timestamp float64              `json:"ts"`
 	// 	BLE       *any                 `json:"ble"`

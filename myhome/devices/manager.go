@@ -42,6 +42,7 @@ func (dm *DeviceManager) Start(ctx context.Context, mc *mymqtt.Client) error {
 		for {
 			select {
 			case <-ctx.Done():
+				log.Info("Cancelled")
 				return ctx.Err()
 
 			case device := <-dc:
@@ -50,21 +51,21 @@ func (dm *DeviceManager) Start(ctx context.Context, mc *mymqtt.Client) error {
 					// TODO: select HTTP when MQTT is not configured
 					err := sd.Init(mc, types.ChannelMqtt)
 					if err != nil {
-						dm.log.Error(err, "Failed to init shelly device", "device_id", device.ID)
+						log.Error(err, "Failed to init shelly device", "device_id", device.ID)
 						continue
 					}
 					device.MAC = sd.MacAddress
 					device.Host = sd.Ipv4_.String()
 					out, err := json.Marshal(sd.Info)
 					if err != nil {
-						dm.log.Error(err, "Failed to marshal device info", "device_id", device.ID)
+						log.Error(err, "Failed to marshal device info", "device_id", device.ID)
 						continue
 					}
 					device.Info = string(out)
 				}
 				err = dm.storage.UpsertDevice(device)
 				if err != nil {
-					dm.log.Error(err, "Failed to upsert device", "device", device)
+					log.Error(err, "Failed to upsert device", "device", device)
 					continue
 				}
 
@@ -140,7 +141,7 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 		for {
 			select {
 			case <-ctx.Done():
-				log.Info("Stopping")
+				log.Info("Cancelled")
 				return ctx.Err()
 
 			case msg := <-ch:
@@ -152,13 +153,13 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 					continue
 				}
 				if event.Src[:6] != "shelly" {
-					dm.log.Info("Skipping non-shelly event", "event", event)
+					log.Info("Skipping non-shelly event", "event", event)
 					continue
 				}
 				deviceId := event.Src
 				device, err := dm.storage.GetDeviceByManufacturerAndID("Shelly", deviceId)
 				if err != nil {
-					dm.log.Info("Device not found, creating new one", "device_id", deviceId)
+					log.Info("Device not found, creating new one", "device_id", deviceId)
 					device = NewDevice("Shelly", deviceId)
 					sd := shelly.NewDeviceFromId(dm.log, deviceId)
 					sd.Init(mc, types.ChannelMqtt)
@@ -181,7 +182,7 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 				dm.storage.UpsertDevice(device)
 			}
 		}
-	}(ctx, log.WithName("WatchMqtt"))
+	}(ctx, log.WithName("DeviceManager#WatchMqtt"))
 
 	return nil
 }
@@ -208,7 +209,7 @@ func (dm *DeviceManager) WatchZeroConf(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Info("Stopping")
+				log.Info("Cancelled")
 				return ctx.Err()
 
 			case entry := <-scan:
@@ -234,7 +235,7 @@ func (dm *DeviceManager) WatchZeroConf(ctx context.Context) error {
 				}
 			}
 		}
-	}(ctx, dm.log.WithName("WatchZeroConf"), scan)
+	}(ctx, dm.log.WithName("DeviceManager#WatchZeroConf"), scan)
 
 	return nil
 }
@@ -249,17 +250,18 @@ func (dm *DeviceManager) DiscoverDevices(service string, interval time.Duration,
 	ctx, cancel := context.WithCancel(context.Background())
 	dm.cancel = cancel
 
-	go func() {
+	go func(ctx context.Context, log logr.Logger) {
 		for {
 			select {
 			case <-ctx.Done():
+				log.Info("Cancelled")
 				return
 			default:
 				dm.updateDevices(service, interval, identify, init)
 				time.Sleep(interval)
 			}
 		}
-	}()
+	}(ctx, dm.log.WithName("DeviceManager#DiscoverDevices"))
 }
 
 func (dm *DeviceManager) updateDevices(service string, timeout time.Duration, identify IdentifyDeviceFromZeroConfEntry, init InitializeDeviceFromZeroConfEntry) {

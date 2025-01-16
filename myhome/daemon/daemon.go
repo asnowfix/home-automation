@@ -109,8 +109,8 @@ func Run() {
 			os.Exit(1)
 		}
 
-		dm := devices.NewDeviceManager(log, storage)
-		err = dm.Start(ctx, mc)
+		dm := devices.NewDeviceManager(log, storage, mc)
+		err = dm.Start(ctx)
 		if err != nil {
 			log.Error(err, "Failed to start device manager")
 			os.Exit(1)

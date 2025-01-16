@@ -63,10 +63,16 @@ func (r *Registrar) Init(log logr.Logger) {
 	// Shelly.DetectLocation
 	// Shelly.ListTimezones
 	// Shelly.GetComponents
-	// Shelly.GetStatus
+	r.RegisterMethodHandler("Shelly", "GetStatus", types.MethodHandler{
+		Allocate:   func() any { return make(map[string]interface{}) },
+		HttpMethod: http.MethodGet,
+	})
 	// Shelly.FactoryReset
 	// Shelly.ResetWiFiConfig
-	// Shelly.GetConfig
+	r.RegisterMethodHandler("Shelly", "GetConfig", types.MethodHandler{
+		Allocate:   func() any { return make(map[string]interface{}) },
+		HttpMethod: http.MethodGet,
+	})
 	r.RegisterMethodHandler("Shelly", "GetDeviceInfo", types.MethodHandler{
 		Allocate:   func() any { return new(DeviceInfo) },
 		HttpMethod: http.MethodGet,

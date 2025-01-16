@@ -198,3 +198,57 @@ mqtt_event_bluetooth = {
     }
   }
   
+
+event_2 = {
+  "ble": {},
+  "cloud": {
+    "connected": true
+  },
+  "input:0": {
+    "id": 0,
+    "state": false
+  },
+  "mqtt": {
+    "connected": true
+  },
+  "switch:0": {
+    "id": 0,
+    "output": true,
+    "source": "SHC",
+    "temperature": {
+      "tC": 26.5,
+      "tF": 79.6
+    }
+  },
+  "sys": {
+    "available_updates": {
+      "stable": {
+        "version": "1.3.3"
+      }
+    },
+    "cfg_rev": 20,
+    "fs_free": 151552,
+    "fs_size": 458752,
+    "kvs_rev": 0,
+    "mac": "08B61FCFE6C0",
+    "ram_free": 146432,
+    "ram_size": 246452,
+    "restart_required": false,
+    "schedule_rev": 0,
+    "time": "02:56",
+    "unixtime": 1736819811,
+    "uptime": 944772,
+    "webhook_rev": 0
+  },
+  "ts": 1736819818.04,
+  "wifi": {
+    "rssi": -52,
+    "ssid": "Linksys_7A50",
+    "sta_ip": "192.168.1.66",
+    "status": "got ip"
+  },
+  "ws": {
+    "connected": false
+  }
+}
+  

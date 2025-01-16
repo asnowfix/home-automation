@@ -124,13 +124,17 @@ func (dm *DeviceManager) Start(ctx context.Context, mc *mymqtt.Client) error {
 }
 
 func (dm *DeviceManager) Stop() {
+	dm.log.Info("Stopping device manager")
 	if dm.cancel != nil {
 		dm.cancel()
+		dm.cancel = nil
 	}
 	dm.storage.Close()
 }
 
 func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error {
+	var sd *shelly.Device
+
 	ch, err := mc.Subscribe("+/events/rpc", 0)
 	if err != nil {
 		dm.log.Error(err, "Failed to subscribe to shelly devices events")
@@ -161,7 +165,7 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 				if err != nil {
 					log.Info("Device not found, creating new one", "device_id", deviceId)
 					device = NewDevice("Shelly", deviceId)
-					sd := shelly.NewDeviceFromId(dm.log, deviceId)
+					sd = shelly.NewDeviceFromId(dm.log, deviceId)
 					sd.Init(mc, types.ChannelMqtt)
 					device.MAC = sd.MacAddress
 					device.Host = sd.Ipv4_.String()
@@ -171,7 +175,33 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 						continue
 					}
 					device.Info = string(out)
+					device.impl = sd
 				}
+
+				if device.Config == "" {
+					sd, ok := device.impl.(*shelly.Device)
+					if !ok {
+						dm.log.Info("Device is not a shelly device", "device_id", event.Src)
+					} else {
+						out, err := sd.CallE(types.ChannelMqtt, "Shelly", "GetConfig", nil)
+						if err != nil {
+							dm.log.Error(err, "Failed to get shelly config", "device_id", event.Src)
+						} else {
+							config, ok := out.(map[string]interface{})
+							if ok {
+								c, err := json.Marshal(config)
+								if err != nil {
+									dm.log.Error(err, "Failed to marshal shelly config", "device_id", event.Src)
+								} else {
+									device.Config = string(c)
+								}
+							} else {
+								dm.log.Info("shelly config is not valid JSON", "out", out)
+							}
+						}
+					}
+				}
+
 				dm.log.Info("Updating device", "device", device)
 				err = device.UpdateFromMqttEvent(event)
 				if err != nil {
@@ -319,4 +349,9 @@ func (dm *DeviceManager) updateDevices(service string, timeout time.Duration, id
 		}
 	}
 	dm.mu.Unlock()
+}
+
+func (dm *DeviceManager) GetDeviceByIdentifier(identifier string) (*Device, error) {
+	dm.devices
+	d, err := dm.storage.GetDeviceByIdentifier(identifier)
 }

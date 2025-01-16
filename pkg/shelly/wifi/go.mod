@@ -1,3 +1,6 @@
-module pkg/shelly/wifi
+module devices/shelly/wifi
 
 go 1.22
+
+require (
+)

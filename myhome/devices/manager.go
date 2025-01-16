@@ -15,24 +15,30 @@ import (
 )
 
 type DeviceManager struct {
-	storage *DeviceStorage
-	mu      sync.Mutex
-	update  chan *Device
-	cancel  context.CancelFunc
-	log     logr.Logger
-	devices map[string]any
+	storage       *DeviceStorage
+	mu            sync.Mutex
+	update        chan *Device
+	cancel        context.CancelFunc
+	log           logr.Logger
+	mqttClient    *mymqtt.Client
+	devicesById   map[string]*Device
+	devicesByMAC  map[string]*Device
+	devicesByHost map[string]*Device
 }
 
-func NewDeviceManager(log logr.Logger, storage *DeviceStorage) *DeviceManager {
+func NewDeviceManager(log logr.Logger, storage *DeviceStorage, mqttClient *mymqtt.Client) *DeviceManager {
 	return &DeviceManager{
-		storage: storage,
-		log:     log.WithName("DeviceManager"),
-		update:  make(chan *Device, 1),
-		devices: make(map[string]any),
+		storage:       storage,
+		log:           log.WithName("DeviceManager"),
+		update:        make(chan *Device, 1),
+		devicesById:   make(map[string]*Device),
+		devicesByMAC:  make(map[string]*Device),
+		devicesByHost: make(map[string]*Device),
+		mqttClient:    mqttClient,
 	}
 }
 
-func (dm *DeviceManager) Start(ctx context.Context, mc *mymqtt.Client) error {
+func (dm *DeviceManager) Start(ctx context.Context) error {
 	var err error
 
 	dm.log.Info("Starting device manager")
@@ -49,7 +55,7 @@ func (dm *DeviceManager) Start(ctx context.Context, mc *mymqtt.Client) error {
 				sd, ok := device.impl.(*shelly.Device)
 				if ok && device.MAC == nil {
 					// TODO: select HTTP when MQTT is not configured
-					err := sd.Init(mc, types.ChannelMqtt)
+					err := sd.Init(dm.mqttClient, types.ChannelMqtt)
 					if err != nil {
 						log.Error(err, "Failed to init shelly device", "device_id", device.ID)
 						continue
@@ -69,7 +75,7 @@ func (dm *DeviceManager) Start(ctx context.Context, mc *mymqtt.Client) error {
 					continue
 				}
 
-				dm.devices[device.ID] = device
+				dm.devicesById[device.ID] = device
 			}
 		}
 	}(ctx, log.WithName("DeviceManager#NewDevices"), dm.update)
@@ -84,7 +90,7 @@ func (dm *DeviceManager) Start(ctx context.Context, mc *mymqtt.Client) error {
 	}
 
 	// Loop on MQTT event devices discovery
-	err = dm.WatchMqtt(ctx, mc)
+	err = dm.WatchMqtt(ctx, dm.mqttClient)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch MQTT events")
 		return err
@@ -352,6 +358,32 @@ func (dm *DeviceManager) updateDevices(service string, timeout time.Duration, id
 }
 
 func (dm *DeviceManager) GetDeviceByIdentifier(identifier string) (*Device, error) {
-	dm.devices
+	var d *Device
+	d, exists := dm.devicesById[identifier]
+	if exists {
+		return d, nil
+	}
+	d, exists = dm.devicesByMAC[identifier]
+	if exists {
+		return d, nil
+	}
+	d, exists = dm.devicesByHost[identifier]
+	if exists {
+		return d, nil
+	}
 	d, err := dm.storage.GetDeviceByIdentifier(identifier)
+	if err != nil {
+		return nil, err
+	}
+	return dm.LoadDevice(d)
+}
+
+func (dm *DeviceManager) LoadDevice(d *Device) (*Device, error) {
+	dm.devicesById[d.ID] = d
+	dm.devicesByMAC[d.MAC.String()] = d
+	dm.devicesByHost[d.Host] = d
+	if sd, ok := d.impl.(*shelly.Device); ok {
+		sd.Init(dm.mqttClient, types.ChannelMqtt)
+	}
+	return d, nil
 }

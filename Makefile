@@ -1,6 +1,9 @@
 OS ?= $(shell uname -s)
 ME ?= $(shell id -un)
 
+# go-sqlite3
+export CGO_ENABLED=1
+
 mods = $(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */*/*/go.mod) $(wildcard */*/*/*/go.mod)
 
 default: help

@@ -1,14 +1,14 @@
 package main
 
 import (
-	"devices/shelly/gen1"
 	"fmt"
 	"hlog"
 	"myhome/http"
-	"myhome/logs"
 	"myhome/mqtt"
+	"mymqtt"
 	"os"
 	"os/signal"
+	"pkg/shelly/gen1"
 	"syscall"
 	"time"
 )
@@ -38,28 +38,22 @@ func start() {
 		Program = os.Args[0]
 	}
 
-	mdnsServer, broker, err := mqtt.MyHome(log, Program, info)
+	mdnsServer, _, err := mqtt.MyHome(log, Program, info)
 	if err != nil {
-		log.Info("error starting MQTT server: %v", err)
+		log.Error(err, "error starting MQTT server")
 	}
 	defer mdnsServer.Shutdown()
 
-	topicsCh := make(chan string, 1)
-	defer close(topicsCh)
-	go logs.Waiter(log, broker, topicsCh)
+	client, err := mymqtt.NewClientE(log, "me")
+	if err != nil {
+		log.Error(err, "error starting MQTT client")
+	}
+	defer client.Close()
 
 	gen1Ch := make(chan gen1.Device, 1)
 	go http.MyHome(log, gen1Ch)
-	go gen1.Publisher(log, gen1Ch, topicsCh, broker)
-
-	// proxyCh := make(chan struct{}, 1)
-	// go mqtt.CommandProxy(proxyCh)
+	go gen1.Publisher(log, gen1Ch, client)
 
 	// Run server until interrupted
 	<-done
-
-	// // Close command proxy channel
-	// close(proxyCh)
-
-	// Cleanup
 }

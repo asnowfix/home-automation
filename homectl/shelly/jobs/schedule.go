@@ -1,8 +1,8 @@
 package jobs
 
 import (
+	hopts "homectl/options"
 	"homectl/shelly/options"
-	"strings"
 
 	"hlog"
 	"schedule"
@@ -10,8 +10,8 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"devices/shelly"
-	"devices/shelly/types"
+	"pkg/shelly"
+	"pkg/shelly/types"
 )
 
 var scheduleCtl = &cobra.Command{
@@ -26,7 +26,7 @@ var scheduleCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, scheduleOneDeviceJobs, args)
+		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, scheduleOneDeviceJobs, args)
 	},
 }
 

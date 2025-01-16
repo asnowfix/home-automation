@@ -3,6 +3,7 @@ module myhome/mqtt
 go 1.22
 
 require (
+	github.com/go-logr/logr v1.4.2
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/mochi-mqtt/server/v2 v2.6.6
 )

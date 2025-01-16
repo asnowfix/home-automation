@@ -1,11 +1,11 @@
 package http
 
 import (
-	"devices/shelly/gen1"
 	"encoding/json"
 	"net"
 	"net/http"
 	"net/url"
+	"pkg/shelly/gen1"
 	"regexp"
 
 	"github.com/go-logr/logr"

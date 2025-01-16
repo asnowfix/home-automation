@@ -1,6 +1,8 @@
 package devices
 
 import (
+	"errors"
+
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3" // or any other SQL driver
@@ -34,15 +36,15 @@ func NewDeviceStorage(log logr.Logger, dbName string) (*DeviceStorage, error) {
 func (s *DeviceStorage) createTable() error {
 	schema := `
     CREATE TABLE IF NOT EXISTS devices (
-        mac TEXT PRIMARY KEY,
-        id TEXT,
+        manufacturer TEXT NOT NULL,
+        id TEXT NOT NULL,
+        mac TEXT UNIQUE,  -- mac can be NULL but must be unique if provided
         name TEXT,
         host TEXT,
-        manufacturer TEXT,
         info TEXT,
         config TEXT,
         status TEXT,
-        UNIQUE (manufacturer, id)
+        PRIMARY KEY (manufacturer, id)
     );`
 	_, err := s.db.Exec(schema)
 	if err != nil {
@@ -59,34 +61,20 @@ func (s *DeviceStorage) Close() {
 
 func (s *DeviceStorage) UpsertDevice(device *Device) error {
 	query := `
-    INSERT INTO devices (mac, id, name, host, manufacturer, info, config, status) VALUES (:mac, :id, :name, :host, :manufacturer, :info, :config, :status)
-    ON CONFLICT(mac) DO UPDATE SET id = excluded.id, name = excluded.name, host = excluded.host, manufacturer = excluded.manufacturer, info = excluded.info, config = excluded.config, status = excluded.status
-    ON CONFLICT(manufacturer, id) DO UPDATE SET mac = excluded.mac, name = excluded.name, host = excluded.host, info = excluded.info, config = excluded.config, status = excluded.status`
+    INSERT INTO devices (manufacturer, id, mac, name, host, info, config, status) 
+    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config, :status)
+    ON CONFLICT(manufacturer, id) DO UPDATE SET 
+        mac = excluded.mac, 
+        name = excluded.name, 
+        host = excluded.host, 
+        info = excluded.info, 
+        config = excluded.config, 
+        status = excluded.status`
 	_, err := s.db.NamedExec(query, device)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device", "device", device)
 		return err
 	}
-	s.log.Info("Upserted device", "device", device)
-	return nil
-}
-
-func (s *DeviceStorage) AddDeviceIfUnknown(device *Device) error {
-	var existingDevice Device
-	query := `SELECT * FROM devices WHERE mac = $1`
-	err := s.db.Get(&existingDevice, query, device.MAC)
-	if err == nil {
-		s.log.Info("Device already exists", "device", existingDevice)
-		return nil
-	}
-
-	query = `INSERT INTO devices (mac, id, name, host, manufacturer, info, config, status) VALUES (:mac, :id, :name, :host, :manufacturer, :info, :config, :status)`
-	_, err = s.db.NamedExec(query, device)
-	if err != nil {
-		s.log.Error(err, "Failed to add device", "device", device)
-		return err
-	}
-	s.log.Info("Added new device", "device", device)
 	return nil
 }
 
@@ -115,22 +103,14 @@ func (s *DeviceStorage) GetDeviceByManufacturerAndID(manufacturer, id string) (*
 }
 
 func (s *DeviceStorage) GetDeviceByMAC(mac string) (*Device, error) {
+	if len(mac) == 0 {
+		return nil, errors.New("empty mac")
+	}
 	var device Device
 	query := `SELECT * FROM devices WHERE mac = $1`
 	err := s.db.Get(&device, query, mac)
 	if err != nil {
 		s.log.Error(err, "Failed to get device by MAC", "mac", mac)
-		return nil, err
-	}
-	return &device, nil
-}
-
-func (s *DeviceStorage) GetDeviceByID(id string) (*Device, error) {
-	var device Device
-	query := `SELECT * FROM devices WHERE id = $1`
-	err := s.db.Get(&device, query, id)
-	if err != nil {
-		s.log.Error(err, "Failed to get device by ID", "id", id)
 		return nil, err
 	}
 	return &device, nil
@@ -156,15 +136,6 @@ func (s *DeviceStorage) GetAllDevices() ([]Device, error) {
 		return nil, err
 	}
 	return devices, nil
-}
-
-func (s *DeviceStorage) UpdateDevice(device Device) error {
-	query := `UPDATE devices SET id = :id, name = :name, host = :host, manufacturer = :manufacturer, info = :info, config = :config, status = :status WHERE mac = :mac`
-	_, err := s.db.NamedExec(query, device)
-	if err != nil {
-		s.log.Error(err, "Failed to update device", "device", device)
-	}
-	return err
 }
 
 func (s *DeviceStorage) DeleteDevice(mac string) error {

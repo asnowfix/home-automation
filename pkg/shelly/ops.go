@@ -63,6 +63,11 @@ func (r *Registrar) Init(log logr.Logger) {
 	// Shelly.DetectLocation
 	// Shelly.ListTimezones
 	// Shelly.GetComponents
+	r.RegisterMethodHandler("Shelly", "GetComponents", types.MethodHandler{
+		// InputType:  reflect.TypeOf(ComponentsRequest{}),
+		Allocate:   func() any { return new(ComponentsResponse) },
+		HttpMethod: http.MethodPost,
+	})
 	r.RegisterMethodHandler("Shelly", "GetStatus", types.MethodHandler{
 		Allocate:   func() any { return make(map[string]interface{}) },
 		HttpMethod: http.MethodGet,

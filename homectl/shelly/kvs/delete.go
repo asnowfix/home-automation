@@ -1,17 +1,16 @@
 package kvs
 
 import (
-	"encoding/json"
-	"fmt"
 	"hlog"
-	"strings"
+
+	hopts "homectl/options"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"devices/shelly"
-	"devices/shelly/kvs"
-	"devices/shelly/types"
+	"pkg/shelly"
+	"pkg/shelly/kvs"
+	"pkg/shelly/types"
 
 	"homectl/shelly/options"
 )
@@ -31,25 +30,11 @@ var deleteCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, deleteKeys, args)
+		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, deleteKeys, args)
 	},
 }
 
 func deleteKeys(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	key := args[0]
-	out, err := device.CallE(via, "KVS", "Delete", &kvs.Key{
-		Key: key,
-	})
-	if err != nil {
-		log.Error(err, "Unable to delete", "key", key)
-		return nil, err
-	}
-	status := out.(*kvs.Status)
-	s, err := json.Marshal(status)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(s))
-
-	return status, nil
+	return kvs.Delete(via, device, key)
 }

@@ -1,6 +1,8 @@
 OS ?= $(shell uname -s)
 ME ?= $(shell id -un)
 
+mods = $(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */*/*/go.mod) $(wildcard */*/*/*/go.mod)
+
 default: help
 
 help:
@@ -51,6 +53,10 @@ ifeq ($(OS),Linux)
 else
 	$(error unsupported $(@) for OS:$(OS))
 endif
+
+tidy:
+	@echo $(mods)
+	$(foreach m,$(mods),go work use $(dir $(m)) && (cd $(dir $(m)) && go mod tidy) &&) true
 
 build run:
 	$(MAKE) -C homectl $(@)

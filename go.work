@@ -2,20 +2,6 @@ go 1.22
 
 use (
 	.
-	./devices
-	./devices/sfr
-	./devices/shelly
-	./devices/shelly/gen1
-	./devices/shelly/kvs
-	./devices/shelly/input
-	./devices/shelly/schedule
-	./devices/shelly/script
-	./devices/shelly/shttp
-	./devices/shelly/sswitch
-	./devices/shelly/system
-	./devices/shelly/types
-	./devices/shelly/wifi
-	./devices/tapo
 	./hlog
 	./homectl/list
 	./homectl/mqtt
@@ -24,15 +10,31 @@ use (
 	./homectl/shelly/jobs
 	./homectl/shelly/kvs
 	./homectl/shelly/mqtt
-	./homectl/shelly/script
 	./homectl/shelly/options
+	./homectl/shelly/script
 	./homectl/show
 	./homectl/toggle
 	./internal/myip
 	./internal/mynet
 	./internal/myzone
+	./myhome/daemon
+	./myhome/devices
 	./myhome/http
-	./myhome/logs
 	./myhome/mqtt
 	./mymqtt
+	./pkg/devices
+	./pkg/sfr
+	./pkg/shelly
+	./pkg/shelly/gen1
+	./pkg/shelly/input
+	./pkg/shelly/kvs
+	./pkg/shelly/mqtt
+	./pkg/shelly/schedule
+	./pkg/shelly/script
+	./pkg/shelly/shttp
+	./pkg/shelly/sswitch
+	./pkg/shelly/system
+	./pkg/shelly/types
+	./pkg/shelly/wifi
+	./pkg/tapo
 )

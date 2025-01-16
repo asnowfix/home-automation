@@ -1,14 +1,16 @@
 package show
 
 import (
-	"devices/shelly"
-	"devices/shelly/mqtt"
-	"devices/shelly/sswitch"
-	"devices/shelly/types"
 	"hlog"
+
+	hopts "homectl/options"
 	"homectl/shelly/options"
+
+	"pkg/shelly"
+	"pkg/shelly/mqtt"
+	"pkg/shelly/sswitch"
+	"pkg/shelly/types"
 	"schedule"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -54,7 +56,7 @@ var showShellyCmd = &cobra.Command{
 			via = types.ChannelMqtt
 		}
 
-		shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, showOneDevice, args)
+		shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, showOneDevice, args)
 		return nil
 	},
 }

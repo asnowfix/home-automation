@@ -1,11 +1,11 @@
 package mqtt
 
 import (
+	"fmt"
 	"log/slog"
 	"mymqtt"
 	"mynet"
 	"net"
-	"net/url"
 	"os"
 
 	"github.com/go-logr/logr"
@@ -17,9 +17,8 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
-func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *url.URL, error) {
-
-	log.Info("Starting new MQTT server", "broker", mymqtt.Broker(log, true))
+func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *mmqtt.Server, error) {
+	log.Info("Starting MyHome", "program", program)
 
 	// Create the new MQTT Server.
 	mqttServer := mmqtt.New(nil)
@@ -44,7 +43,7 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 	// Create a new MQTT TCP listener on a standard port.
 	tcp := listeners.NewTCP(listeners.Config{
 		ID:      "tcp",
-		Address: ":1883",
+		Address: fmt.Sprintf(":%d", mymqtt.PRIVATE_PORT),
 		// Address: mymqtt.Broker(log, true).Host,
 	})
 
@@ -90,5 +89,5 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 
 	log.Info("Started new MQTT broker", "mdns_server", mdnsServer, "mdns_service", mymqtt.ZEROCONF_SERVICE)
 
-	return mdnsServer, mymqtt.Broker(log, true), nil
+	return mdnsServer, mqttServer, nil
 }

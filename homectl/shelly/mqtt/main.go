@@ -2,17 +2,16 @@ package mqtt
 
 import (
 	"encoding/json"
-	"fmt"
 	"hlog"
-	"mymqtt"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"devices/shelly"
-	"devices/shelly/mqtt"
-	"devices/shelly/types"
+	"pkg/shelly"
+	"pkg/shelly/mqtt"
+	"pkg/shelly/types"
+
+	hopts "homectl/options"
 
 	"homectl/shelly/options"
 )
@@ -28,7 +27,7 @@ var Cmd = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, setupOneDevice, args)
+		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, setupOneDevice, args)
 	},
 }
 
@@ -58,9 +57,7 @@ func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, a
 	config.Enable = true
 	config.RpcNotifs = true
 	config.StatusNotifs = true
-	broker := mymqtt.Broker(log, false)
-	// Shelly MQTT Server is formatted like host:port
-	config.Server = fmt.Sprintf("%s:%s", broker.Hostname(), broker.Port())
+	config.Server = hopts.MqttClient.BrokerUrl().String()
 
 	configStr, _ = json.Marshal(config)
 	log.Info("new MQTT config", "config", string(configStr))

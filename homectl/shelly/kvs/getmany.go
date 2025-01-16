@@ -1,18 +1,16 @@
 package kvs
 
 import (
-	"encoding/json"
-	"fmt"
 	"hlog"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"devices/shelly"
-	"devices/shelly/kvs"
-	"devices/shelly/types"
+	"pkg/shelly"
+	"pkg/shelly/kvs"
+	"pkg/shelly/types"
 
+	hopts "homectl/options"
 	"homectl/shelly/options"
 )
 
@@ -31,22 +29,10 @@ var getManyCtl = &cobra.Command{
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, strings.Split(options.DeviceNames, ","), via, getMany, args)
+		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, getMany, args)
 	},
 }
 
 func getMany(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(via, "KVS", "GetMany", nil)
-	if err != nil {
-		log.Error(err, "Unable to get many key-values")
-		return nil, err
-	}
-	kvs := out.(*kvs.KeyValueItems)
-	s, err := json.Marshal(kvs)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(s))
-
-	return kvs, nil
+	return kvs.GetMany(via, device)
 }

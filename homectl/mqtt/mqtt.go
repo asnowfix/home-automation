@@ -3,18 +3,13 @@ package mqtt
 import (
 	"devices"
 	"hlog"
+	"homectl/options"
 	"strings"
 
 	"github.com/spf13/cobra"
 )
 
-var options struct {
-	devices string
-}
-
 func init() {
-	Cmd.Flags().StringVarP(&options.devices, "devices", "D", "", "comma-separated list of MQTT devices to send the message to")
-
 	Cmd.AddCommand(pubCmd)
 	Cmd.AddCommand(subCmd)
 }
@@ -31,9 +26,8 @@ var pubCmd = &cobra.Command{
 		log := hlog.Init()
 		// devices.Init()
 
-		dn := strings.Split(options.devices, ",")
-		log.Info("looking for devices: %v", dn)
-		topics, err := devices.Topics(log, dn)
+		log.Info("looking for devices: %v", options.Devices)
+		topics, err := devices.Topics(log, options.Devices)
 		if err != nil {
 			log.Error(err, "Failed to list devices")
 		}
@@ -52,7 +46,7 @@ var subCmd = &cobra.Command{
 		log := hlog.Init()
 		// devices.Init()
 
-		topics, err := devices.Topics(log, strings.Split(options.devices, ","))
+		topics, err := devices.Topics(log, options.Devices)
 		if err != nil {
 			log.Error(err, "Failed to list devices")
 		}

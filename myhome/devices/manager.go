@@ -3,15 +3,22 @@ package devices
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"mymqtt"
 	"pkg/shelly"
+	"pkg/shelly/kvs"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/types"
+	"reflect"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
+)
+
+const (
+	Shelly = "Shelly"
 )
 
 type DeviceManager struct {
@@ -24,6 +31,7 @@ type DeviceManager struct {
 	devicesById   map[string]*Device
 	devicesByMAC  map[string]*Device
 	devicesByHost map[string]*Device
+	method        map[string]MethodHandler
 }
 
 func NewDeviceManager(log logr.Logger, storage *DeviceStorage, mqttClient *mymqtt.Client) *DeviceManager {
@@ -35,6 +43,7 @@ func NewDeviceManager(log logr.Logger, storage *DeviceStorage, mqttClient *mymqt
 		devicesByMAC:  make(map[string]*Device),
 		devicesByHost: make(map[string]*Device),
 		mqttClient:    mqttClient,
+		method:        make(map[string]MethodHandler),
 	}
 }
 
@@ -42,6 +51,21 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	var err error
 
 	dm.log.Info("Starting device manager")
+
+	dm.registerMethod("group.list", MethodHandler{
+		Method: func(in any) (any, error) {
+			return dm.storage.GetAllGroups()
+		},
+		InType:  nil,
+		OutType: reflect.TypeOf([]string{}),
+	})
+	dm.registerMethod("group.getdevices", MethodHandler{
+		Method: func(in any) (any, error) {
+			return dm.storage.GetDevicesByGroupName(in.(string))
+		},
+		InType:  reflect.TypeOf(""),
+		OutType: reflect.TypeOf([]*Device{}),
+	})
 
 	ctx, dm.cancel = context.WithCancel(ctx)
 	go func(ctx context.Context, log logr.Logger, dc <-chan *Device) error {
@@ -129,8 +153,8 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	return nil
 }
 
-func (dm *DeviceManager) Stop() {
-	dm.log.Info("Stopping device manager")
+func (dm *DeviceManager) Shutdown() {
+	dm.log.Info("Shutting down device manager")
 	if dm.cancel != nil {
 		dm.cancel()
 		dm.cancel = nil
@@ -375,15 +399,60 @@ func (dm *DeviceManager) GetDeviceByIdentifier(identifier string) (*Device, erro
 	if err != nil {
 		return nil, err
 	}
-	return dm.LoadDevice(d)
+	return dm.Load(d.ID)
 }
 
-func (dm *DeviceManager) LoadDevice(d *Device) (*Device, error) {
+func (dm *DeviceManager) Load(id string) (*Device, error) {
+	d, err := dm.storage.GetDeviceByManufacturerAndID(Shelly, id) // TODO: support other manufacturers(id)
+	if err != nil {
+		return nil, err
+	}
+	return dm.Save(d)
+}
+
+func (dm *DeviceManager) Save(d *Device) (*Device, error) {
 	dm.devicesById[d.ID] = d
 	dm.devicesByMAC[d.MAC.String()] = d
 	dm.devicesByHost[d.Host] = d
-	if sd, ok := d.impl.(*shelly.Device); ok {
-		sd.Init(dm.mqttClient, types.ChannelMqtt)
+	if d.Manufacturer == Shelly {
+		sd, ok := d.impl.(*shelly.Device)
+		if !ok {
+			sd = shelly.NewDeviceFromId(dm.log, d.ID)
+			sd.Init(dm.mqttClient, types.ChannelMqtt)
+		}
+		for _, group := range d.Groups {
+			_, err := kvs.SetKeyValue(types.ChannelMqtt, sd, fmt.Sprintf("group/%s", group), "true")
+			if err != nil {
+				return nil, err
+			}
+		}
+		d.impl = sd
 	}
-	return d, nil
+
+	return d, dm.storage.UpsertDevice(d)
+}
+
+func (dm *DeviceManager) CallE(method string, in any) (any, error) {
+	mh := dm.method[method]
+	if mh.InType != reflect.TypeOf(in) {
+		return nil, fmt.Errorf("invalid type for method %s: got %v, want %v", method, reflect.TypeOf(in), mh.InType)
+	}
+	out, err := mh.Method(in)
+	if err != nil {
+		return nil, err
+	}
+	if mh.OutType != reflect.TypeOf(out) {
+		return nil, fmt.Errorf("invalid type for method %s: got %v, want %v", method, reflect.TypeOf(out), mh.OutType)
+	}
+	return out, nil
+}
+
+type MethodHandler struct {
+	InType  reflect.Type
+	OutType reflect.Type
+	Method  func(in any) (any, error)
+}
+
+func (dm *DeviceManager) registerMethod(method string, handler MethodHandler) {
+	dm.method[method] = handler
 }

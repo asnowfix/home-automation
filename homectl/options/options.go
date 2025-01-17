@@ -3,6 +3,7 @@ package options
 import "mymqtt"
 
 var Flags struct {
+	Json       bool
 	Devices    string
 	MqttBroker string
 }

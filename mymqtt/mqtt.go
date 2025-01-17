@@ -28,6 +28,14 @@ type Client struct {
 	log       logr.Logger // Logger to use
 }
 
+func NewClient(log logr.Logger, where string) *Client {
+	c, err := NewClientE(log, where) // TODO: fix this
+	if err != nil {
+		panic(fmt.Errorf("could not initialize MQTT client: %w", err))
+	}
+	return c
+}
+
 func NewClientE(log logr.Logger, where string) (*Client, error) {
 	clientId := fmt.Sprintf("%v%v", path.Base(os.Args[0]), os.Getpid())
 	log.Info("Initializing MQTT client", "client_id", clientId)
@@ -220,4 +228,52 @@ func (c *Client) Publish(topic string, msg []byte) error {
 	c.log.Info("Published")
 
 	return nil
+}
+
+func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan<- []byte, error) {
+	err := c.connect()
+	if err != nil {
+		return nil, err
+	}
+	mch := make(chan []byte, qlen)
+
+	go func(log logr.Logger) {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg := <-mch:
+				log.Info("Publishing to MQTT:", "topic", topic, "payload", string(msg))
+				c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, msg)
+			}
+		}
+	}(c.log.WithName("Client#Publisher"))
+
+	c.log.Info("Publisher running:", "topic", topic)
+	return mch, nil
+}
+
+func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (<-chan []byte, error) {
+	err := c.connect()
+	if err != nil {
+		return nil, err
+	}
+	mch := make(chan []byte, qlen)
+
+	c.mqtt.Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
+		go func(log logr.Logger) {
+			for {
+				select {
+				case <-ctx.Done():
+					log.Info("Cancelled")
+					return
+				case mch <- msg.Payload():
+					log.Info("Received from MQTT:", "topic", topic, "payload", string(msg.Payload()))
+				}
+			}
+		}(c.log.WithName("Client#Subscriber"))
+	})
+
+	c.log.Info("Subscriber running:", "topic", topic)
+	return mch, nil
 }

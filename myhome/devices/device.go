@@ -34,8 +34,8 @@ type Device struct {
 	Info   string           `db:"info"`
 	Config string           `db:"config"`
 	Status string           `db:"status"`
-
-	impl any `json:"-"` // Reference to the inner implementation
+	Groups []string         `db:"groups" json:"groups"`
+	impl   any              `json:"-"` // Reference to the inner implementation
 }
 
 func NewDevice(manufacturer, id string) *Device {
@@ -82,12 +82,21 @@ func (d *Device) WithImpl(impl any) *Device {
 	return d
 }
 
-// func (d *Device) String() string {
-// 	if len(d.Name) > 0 {
-// 		return d.Name
-// 	}
-// 	return d.ID
-// }
+func (d *Device) WithGroups(groups []string) *Device {
+	d.Groups = groups
+	return d
+}
+
+func (d *Device) WithGroup(group string) *Device {
+	// is group in d.Groups? if not, append it
+	for _, g := range d.Groups {
+		if g == group {
+			return d
+		}
+	}
+	d.Groups = append(d.Groups, group)
+	return d
+}
 
 func (d *Device) UpdateFromMqttEvent(event *mqtt.Event) error {
 	// Events like:
@@ -139,3 +148,20 @@ func (d *Device) UpdateFromMqttEvent(event *mqtt.Event) error {
 
 	return nil
 }
+
+// func NewDeviceFromShelly(sd *shelly.Device) (*Device, error) {
+// 	d := NewDevice(Shelly, sd.Id())
+// 	d = d.WithMAC(net.HardwareAddr(sd.Info.MacAddress.String()))
+// 	d = d.WithHost(sd.Ipv4().String())
+// 	d = d.WithName(sd.Config.Sys.DeviceName)
+// 	info, err := json.Marshal(sd.Info)
+// 	if err != nil {
+// 		log.Error(err, "failed to marshal shelly info")
+// 		return nil, err
+// 	}
+// 	d = d.WithInfo(string(info))
+// 	d = d.WithConfig(sd.Config)
+// 	d = d.WithStatus(sd.Status)
+// 	d = d.WithGroups(sd.Groups)
+// 	return d
+// }

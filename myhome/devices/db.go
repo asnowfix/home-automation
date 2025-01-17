@@ -44,8 +44,17 @@ func (s *DeviceStorage) createTable() error {
         info TEXT,
         config TEXT,
         status TEXT,
-        PRIMARY KEY (manufacturer, id)
-    );`
+        groups INTEGER[],  -- Change to INTEGER[] to reference group IDs
+        PRIMARY KEY (manufacturer, id),
+        FOREIGN KEY (groups) REFERENCES groups(id) ON DELETE CASCADE  -- Foreign key constraint
+    );
+
+    CREATE TABLE IF NOT EXISTS groups (
+        id SERIAL PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        description TEXT
+    );
+`
 	_, err := s.db.Exec(schema)
 	if err != nil {
 		s.log.Error(err, "Failed to execute create table query")
@@ -61,15 +70,16 @@ func (s *DeviceStorage) Close() {
 
 func (s *DeviceStorage) UpsertDevice(device *Device) error {
 	query := `
-    INSERT INTO devices (manufacturer, id, mac, name, host, info, config, status) 
-    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config, :status)
+    INSERT INTO devices (manufacturer, id, mac, name, host, info, config, status, groups) 
+    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config, :status, :groups)
     ON CONFLICT(manufacturer, id) DO UPDATE SET 
         mac = excluded.mac, 
         name = excluded.name, 
         host = excluded.host, 
         info = excluded.info, 
         config = excluded.config, 
-        status = excluded.status`
+        status = excluded.status,
+        groups = excluded.groups`
 	_, err := s.db.NamedExec(query, device)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device", "device", device)
@@ -145,4 +155,43 @@ func (s *DeviceStorage) DeleteDevice(mac string) error {
 		s.log.Error(err, "Failed to delete device", "mac", mac)
 	}
 	return err
+}
+
+type Group struct {
+	ID          int    `db:"id"`
+	Name        string `db:"name"`
+	Description string `db:"description"`
+}
+
+func (s *DeviceStorage) GetAllGroups() ([]Group, error) {
+	var groups []Group
+	query := "SELECT id, name, description FROM groups"
+	err := s.db.Select(&groups, query)
+	if err != nil {
+		s.log.Error(err, "Failed to retrieve groups")
+		return nil, err
+	}
+	return groups, nil
+}
+
+func (s *DeviceStorage) GetDevicesByGroupName(name string) ([]Device, error) {
+	var devices []Device
+
+	// First, get the group ID for the given group name
+	var groupID int
+	err := s.db.Get(&groupID, "SELECT id FROM groups WHERE name = $1", name)
+	if err != nil {
+		s.log.Error(err, "Did not find a group with", "name", name)
+		return nil, err
+	}
+
+	// Now, query devices that have this group ID
+	query := "SELECT * FROM devices WHERE $1 = ANY(groups)"
+	err = s.db.Select(&devices, query, groupID)
+	if err != nil {
+		s.log.Error(err, "Failed to retrieve devices for group", "name", name)
+		return nil, err
+	}
+
+	return devices, nil
 }

@@ -3,6 +3,7 @@ go 1.22
 use (
 	.
 	./hlog
+	./homectl/group
 	./homectl/list
 	./homectl/mqtt
 	./homectl/options
@@ -17,6 +18,7 @@ use (
 	./internal/myip
 	./internal/mynet
 	./internal/myzone
+	./internal/myhome
 	./myhome/daemon
 	./myhome/devices
 	./myhome/http

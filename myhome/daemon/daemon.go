@@ -116,7 +116,7 @@ func Run() {
 			os.Exit(1)
 		}
 
-		defer dm.Stop()
+		defer dm.Shutdown()
 		log.Info("Started device manager", "manager", dm)
 	}
 

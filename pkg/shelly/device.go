@@ -14,6 +14,8 @@ import (
 	"github.com/go-logr/logr"
 )
 
+const Shelly = "Shelly"
+
 type Product struct {
 	Model       string           `json:"model"`
 	Serial      string           `json:"serial,omitempty"`
@@ -107,7 +109,7 @@ func (d *Device) Call(ch types.Channel, component string, verb string, params an
 func (d *Device) MethodHandlerE(c string, v string) (types.MethodHandler, error) {
 	var mh types.MethodHandler
 
-	if c == "Shelly" && v == "ListMethods" {
+	if c == Shelly && v == "ListMethods" {
 		mh = listMethodsHandler
 	} else {
 		found := false

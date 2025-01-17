@@ -251,4 +251,73 @@ event_2 = {
     "connected": false
   }
 }
-  
+
+get_component_response = {
+  "dst": "GIGARO_shellyplus1-b8d61a85a970",
+  "error": null,
+  "id": 0,
+  "result": {
+    "cfg_revision": 0,
+    "components": [
+      {
+        "config": {
+          "enable": true,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "key": "ble",
+        "status": {}
+      },
+      {
+        "config": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "key": "cloud",
+        "status": {
+          "connected": true
+        }
+      },
+      {
+        "config": {
+          "enable": true,
+          "factory_reset": true,
+          "id": 0,
+          "invert": true,
+          "name": null,
+          "type": "switch"
+        },
+        "key": "input:0",
+        "status": {
+          "id": 0,
+          "state": true
+        }
+      },
+      {
+        "config": {
+          "client_id": "shellyplus1-b8d61a85a970",
+          "enable": true,
+          "enable_control": true,
+          "enable_rpc": true,
+          "rpc_ntf": true,
+          "server": "192.168.1.2:1883",
+          "status_ntf": true,
+          "topic_prefix": "shellyplus1-b8d61a85a970",
+          "use_client_cert": false,
+          "user": null
+        },
+        "key": "mqtt",
+        "status": {
+          "connected": true
+        }
+      }
+    ],
+    "offset": 0,
+    "total": 8
+  },
+  "src": "shellyplus1-b8d61a85a970"
+}

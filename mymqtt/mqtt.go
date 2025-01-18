@@ -22,32 +22,40 @@ const PRIVATE_PORT = 1883
 const PUBLIC_PORT = 8883
 
 type Client struct {
-	Id        string      // MQTT client_id (this client)
+	clientId  string      // MQTT client_id (this client)
 	mqtt      mqtt.Client // MQTT stack
 	brokerUrl *url.URL    // MQTT broker to connect to
 	log       logr.Logger // Logger to use
 }
 
-func NewClient(log logr.Logger, where string) *Client {
-	c, err := NewClientE(log, where) // TODO: fix this
+func NewClient(log logr.Logger, broker string, me string) *Client {
+	c, err := NewClientE(log, broker, me)
 	if err != nil {
 		panic(fmt.Errorf("could not initialize MQTT client: %w", err))
 	}
 	return c
 }
 
-func NewClientE(log logr.Logger, where string) (*Client, error) {
-	clientId := fmt.Sprintf("%v%v", path.Base(os.Args[0]), os.Getpid())
-	log.Info("Initializing MQTT client", "client_id", clientId)
+func NewClientE(log logr.Logger, broker string, me string) (*Client, error) {
+	if me == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			return nil, fmt.Errorf("could not get hostname: %w", err)
+		}
+
+		me = fmt.Sprintf("%v-%v-%v", hostname, path.Base(os.Args[0]), os.Getpid())
+
+	}
+	log.Info("Initializing MQTT client", "client_id", me)
 
 	opts := mqtt.NewClientOptions()
 	opts.SetUsername(MqttUsername)
 	opts.SetPassword(MqttPassword)
-	opts.SetClientID(clientId)
+	opts.SetClientID(me)
 
-	brokerUrl, err := lookupBroker(log, where)
+	brokerUrl, err := lookupBroker(log, broker)
 	if err != nil {
-		log.Error(err, "could not find MQTT broker", "where", where)
+		log.Error(err, "could not find MQTT broker", "where", broker)
 		return nil, err
 	}
 	log.Info("Using MQTT broker", "url", brokerUrl)
@@ -56,13 +64,25 @@ func NewClientE(log logr.Logger, where string) (*Client, error) {
 	opts.Servers = []*url.URL{brokerUrl}
 
 	c := Client{
-		Id:        clientId,
+		clientId:  me,
 		mqtt:      mqtt.NewClient(opts),
 		log:       log,
 		brokerUrl: brokerUrl,
 	}
-	c.log.Info("MQTT client initialized", "client_id", clientId)
+	c.log.Info("MQTT client initialized", "client_id", me)
 	return &c, nil
+}
+
+func (c *Client) Id() string {
+	return c.clientId
+}
+
+func (c *Client) BrokerUrl() *url.URL {
+	return c.brokerUrl
+}
+
+func (c *Client) IsConnected() bool {
+	return c.mqtt.IsConnected()
 }
 
 func (c *Client) connect() error {
@@ -72,13 +92,13 @@ func (c *Client) connect() error {
 
 	token := c.mqtt.Connect()
 	for !token.WaitTimeout(3 * time.Second) {
-		c.log.Info("MQTT client trying to connect as", "client_id", c.Id)
+		c.log.Info("Trying to connect as MQTT client", "client_id", c.Id())
 	}
 	if err := token.Error(); err != nil {
-		c.log.Error(err, "MQTT client failed to connect", "client_id", c.Id)
+		c.log.Error(err, "Failed to connect as MQTT client", "client_id", c.Id())
 		return err
 	}
-	c.log.Info("MQTT client connected", "client_id", c.Id)
+	c.log.Info("Successfully connected as MQTT client", "client_id", c.Id())
 	return nil
 }
 
@@ -131,10 +151,6 @@ func lookupBroker(log logr.Logger, where string) (*url.URL, error) {
 		return nil, err
 	}
 	return url, nil
-}
-
-func (c *Client) BrokerUrl() *url.URL {
-	return c.brokerUrl
 }
 
 func (c *Client) Close() {
@@ -224,8 +240,9 @@ func (c *Client) Unsubscribe(topic string) {
 func (c *Client) Publish(topic string, msg []byte) error {
 	c.connect()
 	c.log.Info("Publishing:", "topic", topic, "payload", string(msg))
-	c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, msg)
-	c.log.Info("Published")
+	token := c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, msg)
+	token.Wait()
+	c.log.Info("Published:", "topic", topic, "payload", string(msg))
 
 	return nil
 }
@@ -244,7 +261,9 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan<-
 				return
 			case msg := <-mch:
 				log.Info("Publishing to MQTT:", "topic", topic, "payload", string(msg))
-				c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, msg)
+				token := c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, msg)
+				token.Wait()
+				log.Info("Published to MQTT:", "topic", topic, "payload", string(msg))
 			}
 		}
 	}(c.log.WithName("Client#Publisher"))
@@ -261,19 +280,25 @@ func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (<-cha
 	mch := make(chan []byte, qlen)
 
 	c.mqtt.Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
-		go func(log logr.Logger) {
-			for {
-				select {
-				case <-ctx.Done():
-					log.Info("Cancelled")
-					return
-				case mch <- msg.Payload():
-					log.Info("Received from MQTT:", "topic", topic, "payload", string(msg.Payload()))
-				}
-			}
-		}(c.log.WithName("Client#Subscriber"))
+		c.log.Info("Received from MQTT:", "topic", topic, "payload", string(msg.Payload()))
+		mch <- msg.Payload()
 	})
 
-	c.log.Info("Subscriber running:", "topic", topic)
+	go func(ctx context.Context, log logr.Logger) {
+		<-ctx.Done()
+		log.Info("Cancelled")
+		c.mqtt.Unsubscribe(topic)
+		// select {
+		// case <-ctx.Done():
+		// 	log.Info("Cancelled")
+		// 	c.mqtt.Unsubscribe(topic)
+		// 	return
+		// case <-mch:
+		// 	log.Info("Closed by subscriber")
+		// 	c.mqtt.Unsubscribe(topic)
+		// }
+	}(ctx, c.log.WithName("Client#Subscriber"))
+
+	c.log.Info("Subscribed to:", "topic", topic)
 	return mch, nil
 }

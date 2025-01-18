@@ -8,18 +8,12 @@ import (
 
 	"myhome/daemon"
 
-	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
-
-var logger logr.Logger
 
 var Cmd = &cobra.Command{
 	Use:  "myhome",
 	Args: cobra.NoArgs,
-	Run: func(cmd *cobra.Command, args []string) {
-		logger = hlog.Init()
-	},
 }
 
 func init() {

@@ -1,34 +1,36 @@
 package list
 
 import (
-	"devices"
 	"encoding/json"
 	"fmt"
-	"hlog"
-	"reflect"
+	"homectl/options"
+
+	"myhome/devices"
 
 	"github.com/spf13/cobra"
 )
 
 var Cmd = &cobra.Command{
 	Use:   "list",
-	Short: "List known devices connected on the home gateway",
+	Short: "List known devices",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Init()
-		// devices.Init()
-
-		hosts, err := devices.List(log)
-		if err != nil {
-			log.Error(err, "Failed to list devices")
-			return err
-		}
-		log.Info("Found devices", "length", len(hosts), "type", reflect.TypeOf(hosts))
-		out, err := json.Marshal(hosts)
+		out, err := options.MyHomeClient.CallE("devices.list", nil, &[]*devices.Device{})
 		if err != nil {
 			return err
 		}
-		fmt.Print(string(out))
-
+		devices := out.(*[]*devices.Device)
+		if options.Flags.Json {
+			s, err := json.Marshal(devices)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Println(string(s))
+		} else {
+			for _, device := range *devices {
+				fmt.Println(device)
+			}
+		}
 		return nil
 	},
 }

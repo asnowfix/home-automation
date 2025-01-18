@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"homectl/group"
 	"homectl/list"
 	"homectl/mqtt"
 	"homectl/options"
 	"homectl/shelly"
 	"homectl/show"
 	"homectl/toggle"
+	"myhome"
 	"os"
 	"strings"
 
@@ -32,17 +35,21 @@ var Cmd = &cobra.Command{
 	Use:  "homectl",
 	Args: cobra.NoArgs,
 	// run for this command and any sub-command
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		log = hlog.Init()
 		options.Devices = strings.Split(options.Flags.Devices, ",")
 		log.Info("Will use", "devices", options.Devices)
 
 		var err error
-		options.MqttClient, err = mymqtt.NewClientE(log, options.Flags.MqttBroker)
+		options.MqttClient, err = mymqtt.NewClientE(log, options.Flags.MqttBroker, "")
 		if err != nil {
-			log.Error(err, "Failed to create MQTT client")
-			os.Exit(1)
+			return err
 		}
+		options.MyHomeClient, err = myhome.NewClientProxyE(context.Background(), log, options.MqttClient)
+		if err != nil {
+			return err
+		}
+		return nil
 	},
 }
 
@@ -58,6 +65,7 @@ func init() {
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(toggle.Cmd)
 	Cmd.AddCommand(shelly.Cmd)
+	Cmd.AddCommand(group.Cmd)
 }
 
 var Commit string

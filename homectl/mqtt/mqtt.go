@@ -22,7 +22,7 @@ var Cmd = &cobra.Command{
 var pubCmd = &cobra.Command{
 	Use:   "pub",
 	Short: "Publish to device(s) MQTT topic(s)",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Init()
 		// devices.Init()
 
@@ -30,30 +30,34 @@ var pubCmd = &cobra.Command{
 		topics, err := devices.Topics(log, options.Devices)
 		if err != nil {
 			log.Error(err, "Failed to list devices")
+			return err
 		}
 		msg := strings.Join(args, "")
 		for _, topic := range topics {
 			log.Info("MQTT <<< %v", msg)
 			topic.Publish([]byte(msg))
 		}
+		return nil
 	},
 }
 
 var subCmd = &cobra.Command{
 	Use:   "sub",
 	Short: "Subscribe to device(s) MQTT topic(s)",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Init()
 		// devices.Init()
 
 		topics, err := devices.Topics(log, options.Devices)
 		if err != nil {
 			log.Error(err, "Failed to list devices")
+			return err
 		}
 		for _, topic := range topics {
 			topic.Subscribe(func(msg []byte) {
 				log.Info("MQTT >>> %v", msg)
 			})
 		}
+		return nil
 	},
 }

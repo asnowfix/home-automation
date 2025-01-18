@@ -1,6 +1,9 @@
 package options
 
-import "mymqtt"
+import (
+	"myhome"
+	"mymqtt"
+)
 
 var Flags struct {
 	Json       bool
@@ -13,3 +16,5 @@ var Devices []string
 var BrokerUrl string
 
 var MqttClient *mymqtt.Client
+
+var MyHomeClient myhome.Proxy

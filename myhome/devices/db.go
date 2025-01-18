@@ -42,17 +42,25 @@ func (s *DeviceStorage) createTable() error {
         name TEXT,
         host TEXT,
         info TEXT,
+        config_revision INTEGER,  -- New column for config revision
         config TEXT,
         status TEXT,
-        groups INTEGER[],  -- Change to INTEGER[] to reference group IDs
-        PRIMARY KEY (manufacturer, id),
-        FOREIGN KEY (groups) REFERENCES groups(id) ON DELETE CASCADE  -- Foreign key constraint
+        PRIMARY KEY (manufacturer, id)
     );
 
     CREATE TABLE IF NOT EXISTS groups (
         id SERIAL PRIMARY KEY,
         name TEXT UNIQUE NOT NULL,
         description TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS groupsMember (
+        manufacturer TEXT NOT NULL,
+        id TEXT NOT NULL,
+        group_id INTEGER NOT NULL,
+        UNIQUE(manufacturer, id, group_id),
+        FOREIGN KEY (manufacturer, id) REFERENCES devices(manufacturer, id) ON DELETE CASCADE,
+        FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
     );
 `
 	_, err := s.db.Exec(schema)
@@ -70,16 +78,16 @@ func (s *DeviceStorage) Close() {
 
 func (s *DeviceStorage) UpsertDevice(device *Device) error {
 	query := `
-    INSERT INTO devices (manufacturer, id, mac, name, host, info, config, status, groups) 
-    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config, :status, :groups)
+    INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config, status) 
+    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config, :status)
     ON CONFLICT(manufacturer, id) DO UPDATE SET 
         mac = excluded.mac, 
         name = excluded.name, 
         host = excluded.host, 
         info = excluded.info, 
+        config_revision = excluded.config_revision, 
         config = excluded.config, 
-        status = excluded.status,
-        groups = excluded.groups`
+        status = excluded.status`
 	_, err := s.db.NamedExec(query, device)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device", "device", device)
@@ -164,7 +172,8 @@ type Group struct {
 }
 
 func (s *DeviceStorage) GetAllGroups() ([]Group, error) {
-	var groups []Group
+	s.log.Info("Retrieving all groups")
+	groups := make([]Group, 0)
 	query := "SELECT id, name, description FROM groups"
 	err := s.db.Select(&groups, query)
 	if err != nil {
@@ -175,23 +184,60 @@ func (s *DeviceStorage) GetAllGroups() ([]Group, error) {
 }
 
 func (s *DeviceStorage) GetDevicesByGroupName(name string) ([]Device, error) {
-	var devices []Device
+	log := s.log.WithValues("group", name)
+	log.Info("Retrieving devices for group")
+	devices := make([]Device, 0)
 
 	// First, get the group ID for the given group name
 	var groupID int
 	err := s.db.Get(&groupID, "SELECT id FROM groups WHERE name = $1", name)
 	if err != nil {
-		s.log.Error(err, "Did not find a group with", "name", name)
+		log.Error(err, "Did not find a group with", "name", name)
 		return nil, err
 	}
 
 	// Now, query devices that have this group ID
-	query := "SELECT * FROM devices WHERE $1 = ANY(groups)"
+	query := "SELECT d.* FROM devices d INNER JOIN groupsMember gm ON d.manufacturer = gm.manufacturer AND d.id = gm.id WHERE gm.group_id = $1"
 	err = s.db.Select(&devices, query, groupID)
 	if err != nil {
-		s.log.Error(err, "Failed to retrieve devices for group", "name", name)
+		log.Error(err, "Failed to retrieve devices for group", "name", name)
 		return nil, err
 	}
 
 	return devices, nil
+}
+
+// AddGroup adds a new group to the database.
+func (s *DeviceStorage) AddGroup(name, description string) error {
+	log := s.log.WithValues("name", name)
+	log.Info("Adding new group")
+	query := `INSERT INTO groups (name, description) VALUES (:name, :description)`
+	_, err := s.db.NamedExec(query, map[string]interface{}{
+		"name":        name,
+		"description": description,
+	})
+	return err
+}
+
+// RemoveGroup removes a group from the database.
+func (s *DeviceStorage) RemoveGroup(groupID int) error {
+	log := s.log.WithValues("groupID", groupID)
+	log.Info("Removing group")
+	query := `DELETE FROM groups WHERE id = $1`
+	_, err := s.db.Exec(query, groupID)
+	return err
+}
+
+// AddDeviceToGroup adds a device to a group.
+func (s *DeviceStorage) AddDeviceToGroup(manufacturer, id string, groupID int) error {
+	query := `INSERT INTO groupsMember (manufacturer, id, group_id) VALUES ($1, $2, $3)`
+	_, err := s.db.Exec(query, manufacturer, id, groupID)
+	return err
+}
+
+// RemoveDeviceFromGroup removes a device from a group.
+func (s *DeviceStorage) RemoveDeviceFromGroup(manufacturer, id string, groupID int) error {
+	query := `DELETE FROM groupsMember WHERE manufacturer = $1 AND id = $2 AND group_id = $3`
+	_, err := s.db.Exec(query, manufacturer, id, groupID)
+	return err
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"homectl/options"
+	"myhome/devices"
 
 	"github.com/spf13/cobra"
 )
@@ -15,12 +16,15 @@ func init() {
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List groups",
-	Run: func(cmd *cobra.Command, args []string) {
-		out, err := myhomeClient.CallE("group.list", nil)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		out, err := options.MyHomeClient.CallE("group.list", nil, &[]devices.Group{})
 		if err != nil {
-			panic(err)
+			return err
 		}
-		groups := out.([]string)
+		groups, ok := out.(*[]devices.Group)
+		if !ok {
+			panic("unexpected format (failed to cast groups)")
+		}
 		if options.Flags.Json {
 			s, err := json.Marshal(groups)
 			if err != nil {
@@ -28,9 +32,11 @@ var listCmd = &cobra.Command{
 			}
 			fmt.Println(string(s))
 		} else {
-			for _, group := range groups {
+			fmt.Println("Groups:")
+			for _, group := range *groups {
 				fmt.Println(group)
 			}
 		}
+		return nil
 	},
 }

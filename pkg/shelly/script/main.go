@@ -70,9 +70,9 @@ func Load(device types.Device, via types.Channel, name string, autostart bool) (
 			return nil, err
 		}
 
-		status := out.(*Status)
-		if err != nil {
-			return nil, err
+		status, ok := out.(*Status)
+		if !ok {
+			return nil, fmt.Errorf("unexpected format (failed to cast status)")
 		}
 
 		id = &status.Id

@@ -28,14 +28,15 @@ type DeviceIdentifier struct {
 
 type Device struct {
 	DeviceIdentifier
-	MAC    net.HardwareAddr `db:"mac" json:"mac,omitempty"` // The Ethernet hardware address of the device, globally unique & assigned by the manufacturer
-	Host   string           `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
-	Name   string           `db:"name" json:"name"`         // The local unique name of the device, defined by the user
-	Info   string           `db:"info"`
-	Config string           `db:"config"`
-	Status string           `db:"status"`
-	Groups []string         `db:"groups" json:"groups"`
-	impl   any              `json:"-"` // Reference to the inner implementation
+	MAC            net.HardwareAddr `db:"mac" json:"mac,omitempty"` // The Ethernet hardware address of the device, globally unique & assigned by the manufacturer
+	Host           string           `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
+	Name           string           `db:"name" json:"name"`         // The local unique name of the device, defined by the user
+	Info           string           `db:"info"`
+	ConfigRevision int              `db:"config_revision" json:"config_revision"`
+	Config         string           `db:"config"`
+	Status         string           `db:"status"`
+	Groups         []string         `db:"groups" json:"groups"`
+	impl           any              `json:"-"` // Reference to the inner implementation
 }
 
 func NewDevice(manufacturer, id string) *Device {

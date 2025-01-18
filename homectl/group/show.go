@@ -17,17 +17,17 @@ var showCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show device groups",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		out, err := myhomeClient.CallE("group.show", name)
+		out, err := options.MyHomeClient.CallE("group.show", name, &[]*devices.Device{})
 		if err != nil {
-			panic(err)
+			return err
 		}
 		devices := out.(*[]*devices.Device)
 		if options.Flags.Json {
 			s, err := json.Marshal(devices)
 			if err != nil {
-				panic(err)
+				return err
 			}
 			fmt.Println(string(s))
 		} else {
@@ -35,5 +35,6 @@ var showCmd = &cobra.Command{
 				fmt.Println(device)
 			}
 		}
+		return nil
 	},
 }

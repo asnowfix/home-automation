@@ -12,6 +12,8 @@ import (
 	"pkg/shelly/gen1"
 	"syscall"
 
+	"myhome"
+
 	"myhome/devices"
 
 	"github.com/spf13/cobra"
@@ -83,7 +85,7 @@ func Run() {
 		defer mdnsServer.Shutdown()
 
 		// Connect to the embedded MQTT broker
-		mc, err = mymqtt.NewClientE(log, "me")
+		mc, err = mymqtt.NewClientE(log, "me", myhome.MYHOME)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			os.Exit(1)
@@ -94,7 +96,7 @@ func Run() {
 		go gen1.Publisher(log, gen1Ch, mc)
 	} else {
 		// Connect to the network's MQTT broker
-		mc, err = mymqtt.NewClientE(log, mqttBroker)
+		mc, err = mymqtt.NewClientE(log, mqttBroker, myhome.MYHOME)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			os.Exit(1)
@@ -118,6 +120,12 @@ func Run() {
 
 		defer dm.Shutdown()
 		log.Info("Started device manager", "manager", dm)
+
+		ds, err := myhome.NewServerProxyE(ctx, log, mc, dm)
+		if err != nil {
+			log.Error(err, "Failed to start device server")
+		}
+		defer ds.Shutdown()
 	}
 
 	// Run server until interrupted

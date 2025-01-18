@@ -52,19 +52,26 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	dm.log.Info("Starting device manager")
 
+	dm.registerMethod("devices.list", MethodHandler{
+		Method: func(in any) (any, error) {
+			return dm.storage.GetAllDevices()
+		},
+		InType:  nil,
+		OutType: reflect.TypeOf([]Device{}),
+	})
 	dm.registerMethod("group.list", MethodHandler{
 		Method: func(in any) (any, error) {
 			return dm.storage.GetAllGroups()
 		},
 		InType:  nil,
-		OutType: reflect.TypeOf([]string{}),
+		OutType: reflect.TypeOf([]Group{}),
 	})
 	dm.registerMethod("group.getdevices", MethodHandler{
 		Method: func(in any) (any, error) {
 			return dm.storage.GetDevicesByGroupName(in.(string))
 		},
 		InType:  reflect.TypeOf(""),
-		OutType: reflect.TypeOf([]*Device{}),
+		OutType: reflect.TypeOf([]Device{}),
 	})
 
 	ctx, dm.cancel = context.WithCancel(ctx)
@@ -432,19 +439,24 @@ func (dm *DeviceManager) Save(d *Device) (*Device, error) {
 	return d, dm.storage.UpsertDevice(d)
 }
 
-func (dm *DeviceManager) CallE(method string, in any) (any, error) {
-	mh := dm.method[method]
-	if mh.InType != reflect.TypeOf(in) {
-		return nil, fmt.Errorf("invalid type for method %s: got %v, want %v", method, reflect.TypeOf(in), mh.InType)
+func (dm *DeviceManager) CallE(method string, params any, result any) (any, error) {
+	dm.log.Info("Calling method", "method", method, "params", params)
+	mh, exists := dm.method[method]
+	if !exists {
+		return nil, fmt.Errorf("unknown method %s", method)
 	}
-	out, err := mh.Method(in)
+	if mh.InType != reflect.TypeOf(params) {
+		return nil, fmt.Errorf("invalid parameters for method %s: got %v, want %v", method, reflect.TypeOf(params), mh.InType)
+	}
+	var err error
+	result, err = mh.Method(params)
 	if err != nil {
 		return nil, err
 	}
-	if mh.OutType != reflect.TypeOf(out) {
-		return nil, fmt.Errorf("invalid type for method %s: got %v, want %v", method, reflect.TypeOf(out), mh.OutType)
+	if mh.OutType != reflect.TypeOf(result) {
+		return nil, fmt.Errorf("invalid type for method %s: got %v, want %v", method, reflect.TypeOf(result), mh.OutType)
 	}
-	return out, nil
+	return result, nil
 }
 
 type MethodHandler struct {

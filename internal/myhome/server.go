@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"mymqtt"
+	"reflect"
 
 	"github.com/go-logr/logr"
 )
@@ -16,7 +17,9 @@ type serverProxy struct {
 }
 
 type Handler interface {
-	CallE(method string, params any, result any) (any, error)
+	CallE(method string, params any) (any, error)
+	InType() reflect.Type
+	OutType() reflect.Type
 }
 
 func NewServerProxyE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler Handler) (Proxy, error) {
@@ -35,6 +38,7 @@ func NewServerProxyE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, ha
 			case inMsg := <-from:
 				log.Info("Received message", "payload", string(inMsg))
 				var req request
+				req.Params = reflect.New(handler.InType()).Elem()
 				err := json.Unmarshal(inMsg, &req)
 				if err != nil {
 					log.Error(err, "Failed to unmarshal request from payload", "payload", string(inMsg))
@@ -52,9 +56,10 @@ func NewServerProxyE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, ha
 						Src: mc.Id(),
 						Dst: req.Src,
 					},
+					Result: reflect.New(handler.OutType()).Elem(),
 				}
 
-				out, err := handler.CallE(req.Method, req.Params, nil)
+				out, err := handler.CallE(req.Method, req.Params)
 				if err != nil {
 					log.Error(err, "Failed to call handler")
 					res.Error = &Error{Code: 1, Message: err.Error()}
@@ -83,8 +88,8 @@ func NewServerProxyE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, ha
 	}, nil
 }
 
-func (sp *serverProxy) CallE(method string, params any, result any) (any, error) {
-	return sp.handler.CallE(method, params, result)
+func (sp *serverProxy) CallE(method string, params any) (any, error) {
+	return sp.handler.CallE(method, params)
 }
 
 func (sp *serverProxy) Shutdown() {

@@ -19,7 +19,7 @@ var showCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		out, err := options.MyHomeClient.CallE("group.show", name, &[]*devices.Device{})
+		out, err := options.MyHomeClient.CallE("group.getdevices", name)
 		if err != nil {
 			return err
 		}

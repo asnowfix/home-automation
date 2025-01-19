@@ -3,7 +3,9 @@ package myhome
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"mymqtt"
+	"reflect"
 
 	"github.com/go-logr/logr"
 )
@@ -43,7 +45,7 @@ func (hc *clientProxy) Shutdown() {
 	}
 }
 
-func (hc *clientProxy) CallE(method string, in any, result any) (any, error) {
+func (hc *clientProxy) CallE(method string, params any) (any, error) {
 	requestId, err := RandStringBytesMaskImprRandReaderUnsafe(16)
 	if err != nil {
 		return nil, err
@@ -55,7 +57,7 @@ func (hc *clientProxy) CallE(method string, in any, result any) (any, error) {
 			Dst: MYHOME,
 		},
 		Method: method,
-		Params: in,
+		Params: params,
 	}
 	reqStr, err := json.Marshal(req)
 	if err != nil {
@@ -69,7 +71,7 @@ func (hc *clientProxy) CallE(method string, in any, result any) (any, error) {
 	hc.to <- reqStr
 	resStr := <-hc.from
 	var res response
-	res.Result = result
+	res.Result = reflect.New(handler.OutType()).Elem()
 	err = json.Unmarshal(resStr, &res)
 	if err != nil {
 		return nil, err
@@ -77,6 +79,10 @@ func (hc *clientProxy) CallE(method string, in any, result any) (any, error) {
 
 	if err := ValidateDialog(res.Dialog); err != nil {
 		return nil, err
+	}
+
+	if res.Error != nil {
+		return nil, fmt.Errorf("%v (code:%v)", res.Error.Message, res.Error.Code)
 	}
 
 	return res.Result, nil

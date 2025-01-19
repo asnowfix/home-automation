@@ -166,9 +166,9 @@ func (s *DeviceStorage) DeleteDevice(mac string) error {
 }
 
 type Group struct {
-	ID          int    `db:"id"`
-	Name        string `db:"name"`
-	Description string `db:"description"`
+	ID          int    `db:"id" json:"-"`
+	Name        string `db:"name" json:"name"`
+	Description string `db:"description" json:"description"`
 }
 
 func (s *DeviceStorage) GetAllGroups() ([]Group, error) {
@@ -208,24 +208,26 @@ func (s *DeviceStorage) GetDevicesByGroupName(name string) ([]Device, error) {
 }
 
 // AddGroup adds a new group to the database.
-func (s *DeviceStorage) AddGroup(name, description string) error {
-	log := s.log.WithValues("name", name)
+func (s *DeviceStorage) AddGroup(group Group) (any, error) {
+	log := s.log.WithValues("name", group.Name)
 	log.Info("Adding new group")
 	query := `INSERT INTO groups (name, description) VALUES (:name, :description)`
 	_, err := s.db.NamedExec(query, map[string]interface{}{
-		"name":        name,
-		"description": description,
+		"name":        group.Name,
+		"description": group.Description,
 	})
-	return err
+	return nil, err
 }
 
-// RemoveGroup removes a group from the database.
-func (s *DeviceStorage) RemoveGroup(groupID int) error {
-	log := s.log.WithValues("groupID", groupID)
+// RemoveGroup removes a group from the database by its name.
+func (s *DeviceStorage) RemoveGroup(name string) (any, error) {
+	log := s.log.WithValues("name", name)
 	log.Info("Removing group")
-	query := `DELETE FROM groups WHERE id = $1`
-	_, err := s.db.Exec(query, groupID)
-	return err
+	query := `DELETE FROM groups WHERE name = :name`
+	_, err := s.db.NamedExec(query, map[string]interface{}{
+		"name": name,
+	})
+	return nil, err
 }
 
 // AddDeviceToGroup adds a device to a group.

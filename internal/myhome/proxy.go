@@ -1,9 +1,11 @@
 package myhome
 
-import "fmt"
+import (
+	"fmt"
+)
 
 type Proxy interface {
-	CallE(method string, params any, result any) (any, error)
+	CallE(method string, params any) (any, error)
 	Shutdown()
 }
 

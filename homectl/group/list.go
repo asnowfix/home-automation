@@ -17,7 +17,7 @@ var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List groups",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		out, err := options.MyHomeClient.CallE("group.list", nil, &[]devices.Group{})
+		out, err := options.MyHomeClient.CallE("group.list", nil)
 		if err != nil {
 			return err
 		}

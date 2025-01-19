@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"myhome"
 	"mymqtt"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
@@ -65,6 +66,20 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		},
 		InType:  nil,
 		OutType: reflect.TypeOf([]Group{}),
+	})
+	dm.registerMethod("group.create", MethodHandler{
+		Method: func(in any) (any, error) {
+			return dm.storage.AddGroup(in.(Group))
+		},
+		InType:  reflect.TypeOf(&Group{}),
+		OutType: reflect.TypeOf(nil),
+	})
+	dm.registerMethod("group.delete", MethodHandler{
+		Method: func(in any) (any, error) {
+			return dm.storage.RemoveGroup(in.(string))
+		},
+		InType:  reflect.TypeOf(""),
+		OutType: reflect.TypeOf(nil),
 	})
 	dm.registerMethod("group.getdevices", MethodHandler{
 		Method: func(in any) (any, error) {
@@ -439,7 +454,7 @@ func (dm *DeviceManager) Save(d *Device) (*Device, error) {
 	return d, dm.storage.UpsertDevice(d)
 }
 
-func (dm *DeviceManager) CallE(method string, params any, result any) (any, error) {
+func (dm *DeviceManager) CallE(method string, params any) (any, error) {
 	dm.log.Info("Calling method", "method", method, "params", params)
 	mh, exists := dm.method[method]
 	if !exists {
@@ -449,7 +464,7 @@ func (dm *DeviceManager) CallE(method string, params any, result any) (any, erro
 		return nil, fmt.Errorf("invalid parameters for method %s: got %v, want %v", method, reflect.TypeOf(params), mh.InType)
 	}
 	var err error
-	result, err = mh.Method(params)
+	result, err := mh.Method(params)
 	if err != nil {
 		return nil, err
 	}
@@ -459,12 +474,6 @@ func (dm *DeviceManager) CallE(method string, params any, result any) (any, erro
 	return result, nil
 }
 
-type MethodHandler struct {
-	InType  reflect.Type
-	OutType reflect.Type
-	Method  func(in any) (any, error)
-}
-
-func (dm *DeviceManager) registerMethod(method string, handler MethodHandler) {
-	dm.method[method] = handler
+func (dm *DeviceManager) registerMethod(sig myhome.MethodSignature, handler myhome.MethodHandler) {
+	dm.method[sig.Method] = handler
 }

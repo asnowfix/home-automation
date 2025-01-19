@@ -15,7 +15,7 @@ var Cmd = &cobra.Command{
 	Short: "List known devices",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		out, err := options.MyHomeClient.CallE("devices.list", nil, &[]*devices.Device{})
+		out, err := options.MyHomeClient.CallE("devices.list", nil)
 		if err != nil {
 			return err
 		}

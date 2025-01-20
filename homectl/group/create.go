@@ -2,7 +2,7 @@ package group
 
 import (
 	"homectl/options"
-	"myhome/devices"
+	"myhome"
 
 	"github.com/spf13/cobra"
 )
@@ -21,7 +21,7 @@ var createCmd = &cobra.Command{
 		if len(args) > 1 {
 			description = args[1]
 		}
-		_, err := options.MyHomeClient.CallE("group.create", &devices.Group{Name: name, Description: description})
+		_, err := options.MyHomeClient.CallE("group.create", &myhome.Group{Name: name, Description: description})
 		return err
 	},
 }

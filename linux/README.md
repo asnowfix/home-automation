@@ -30,6 +30,13 @@
     Linux myhome 6.6.51+rpt-rpi-v8 #1 SMP PREEMPT Debian 1:6.6.51-1+rpt3 (2024-10-08) aarch64
     ```
 
+    ```config
+    Host myhome
+      HostName myhome.local.
+      User admin
+      IdentityFile ~/.ssh/id_rsa
+    End
+
 [ ] Setup passwordless sudo
 [ ] Setup mDNS
 [ ] Setup systemd service

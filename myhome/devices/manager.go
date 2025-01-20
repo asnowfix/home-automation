@@ -32,7 +32,7 @@ type DeviceManager struct {
 	devicesById   map[string]*Device
 	devicesByMAC  map[string]*Device
 	devicesByHost map[string]*Device
-	method        map[string]MethodHandler
+	method        map[string]myhome.Method
 }
 
 func NewDeviceManager(log logr.Logger, storage *DeviceStorage, mqttClient *mymqtt.Client) *DeviceManager {
@@ -44,7 +44,7 @@ func NewDeviceManager(log logr.Logger, storage *DeviceStorage, mqttClient *mymqt
 		devicesByMAC:  make(map[string]*Device),
 		devicesByHost: make(map[string]*Device),
 		mqttClient:    mqttClient,
-		method:        make(map[string]MethodHandler),
+		method:        make(map[string]myhome.Method),
 	}
 }
 
@@ -53,36 +53,36 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	dm.log.Info("Starting device manager")
 
-	dm.registerMethod("devices.list", MethodHandler{
-		Method: func(in any) (any, error) {
+	dm.registerMethod("devices.list", myhome.Method{
+		ActionE: func(in any) (any, error) {
 			return dm.storage.GetAllDevices()
 		},
 		InType:  nil,
 		OutType: reflect.TypeOf([]Device{}),
 	})
-	dm.registerMethod("group.list", MethodHandler{
-		Method: func(in any) (any, error) {
+	dm.registerMethod("group.list", myhome.Method{
+		ActionE: func(in any) (any, error) {
 			return dm.storage.GetAllGroups()
 		},
 		InType:  nil,
 		OutType: reflect.TypeOf([]Group{}),
 	})
-	dm.registerMethod("group.create", MethodHandler{
-		Method: func(in any) (any, error) {
+	dm.registerMethod("group.create", myhome.Method{
+		ActionE: func(in any) (any, error) {
 			return dm.storage.AddGroup(in.(Group))
 		},
 		InType:  reflect.TypeOf(&Group{}),
 		OutType: reflect.TypeOf(nil),
 	})
-	dm.registerMethod("group.delete", MethodHandler{
-		Method: func(in any) (any, error) {
+	dm.registerMethod("group.delete", myhome.Method{
+		ActionE: func(in any) (any, error) {
 			return dm.storage.RemoveGroup(in.(string))
 		},
 		InType:  reflect.TypeOf(""),
 		OutType: reflect.TypeOf(nil),
 	})
-	dm.registerMethod("group.getdevices", MethodHandler{
-		Method: func(in any) (any, error) {
+	dm.registerMethod("group.getdevices", myhome.Method{
+		ActionE: func(in any) (any, error) {
 			return dm.storage.GetDevicesByGroupName(in.(string))
 		},
 		InType:  reflect.TypeOf(""),
@@ -325,7 +325,7 @@ func (dm *DeviceManager) WatchZeroConf(ctx context.Context) error {
 // function type that knows how to mak a zerofon entry into a device
 type InitializeDeviceFromZeroConfEntry func(log logr.Logger, entry *zeroconf.ServiceEntry) (*Device, error)
 
-type IdentifyDeviceFromZeroConfEntry func(log logr.Logger, entry *zeroconf.ServiceEntry) (*DeviceIdentifier, error)
+type IdentifyDeviceFromZeroConfEntry func(log logr.Logger, entry *zeroconf.ServiceEntry) (*myhome.DeviceIdentifier, error)
 
 func (dm *DeviceManager) DiscoverDevices(service string, interval time.Duration, identify IdentifyDeviceFromZeroConfEntry, init InitializeDeviceFromZeroConfEntry) {
 	dm.log.Info("Starting device discovery", "service", service, "interval", interval)
@@ -442,7 +442,11 @@ func (dm *DeviceManager) Save(d *Device) (*Device, error) {
 			sd = shelly.NewDeviceFromId(dm.log, d.ID)
 			sd.Init(dm.mqttClient, types.ChannelMqtt)
 		}
-		for _, group := range d.Groups {
+		groups, err := dm.storage.GetDeviceGroups(d.Manufacturer, d.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, group := range groups {
 			_, err := kvs.SetKeyValue(types.ChannelMqtt, sd, fmt.Sprintf("group/%s", group), "true")
 			if err != nil {
 				return nil, err
@@ -464,7 +468,7 @@ func (dm *DeviceManager) CallE(method string, params any) (any, error) {
 		return nil, fmt.Errorf("invalid parameters for method %s: got %v, want %v", method, reflect.TypeOf(params), mh.InType)
 	}
 	var err error
-	result, err := mh.Method(params)
+	result, err := mh.ActionE(params)
 	if err != nil {
 		return nil, err
 	}
@@ -474,6 +478,14 @@ func (dm *DeviceManager) CallE(method string, params any) (any, error) {
 	return result, nil
 }
 
-func (dm *DeviceManager) registerMethod(sig myhome.MethodSignature, handler myhome.MethodHandler) {
-	dm.method[sig.Method] = handler
+func (dm *DeviceManager) registerMethod(method string, handler myhome.Method) {
+	dm.method[method] = handler
+}
+
+func (dm *DeviceManager) MethodE(method string) (myhome.Method, error) {
+	mh, exists := dm.method[method]
+	if !exists {
+		return myhome.Method{}, fmt.Errorf("unknown method %s", method)
+	}
+	return mh, nil
 }

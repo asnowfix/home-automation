@@ -17,4 +17,4 @@ var BrokerUrl string
 
 var MqttClient *mymqtt.Client
 
-var MyHomeClient myhome.Proxy
+var MyHomeClient myhome.Client

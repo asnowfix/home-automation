@@ -1,5 +1,10 @@
 OS ?= $(shell uname -s)
-ME ?= $(shell id -un)
+ifneq ($(WSL_DISTRO_NAME),)
+ME ?= $(shell /mnt/c/windows/system32/cmd.exe /c whoami 2>/dev/null)
+else ifeq ($(OS),Linux)
+ME ?= $(shell whoami)
+endif
+$(info OS=$(OS) ME=$(ME))
 
 # go-sqlite3
 export CGO_ENABLED=1

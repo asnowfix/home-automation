@@ -165,12 +165,6 @@ func (s *DeviceStorage) DeleteDevice(mac string) error {
 	return err
 }
 
-type Group struct {
-	ID          int    `db:"id" json:"-"`
-	Name        string `db:"name" json:"name"`
-	Description string `db:"description" json:"description"`
-}
-
 func (s *DeviceStorage) GetAllGroups() ([]Group, error) {
 	s.log.Info("Retrieving all groups")
 	groups := make([]Group, 0)
@@ -205,6 +199,17 @@ func (s *DeviceStorage) GetDevicesByGroupName(name string) ([]Device, error) {
 	}
 
 	return devices, nil
+}
+
+func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) ([]Group, error) {
+	groups := make([]Group, 0)
+	query := "SELECT g.* FROM groups g INNER JOIN groupsMember gm ON g.id = gm.group_id WHERE gm.manufacturer = $1 AND gm.id = $2"
+	err := s.db.Select(&groups, query, manufacturer, id)
+	if err != nil {
+		s.log.Error(err, "Failed to retrieve groups for device", "manufacturer", manufacturer, "id", id)
+		return nil, err
+	}
+	return groups, nil
 }
 
 // AddGroup adds a new group to the database.

@@ -1,39 +1,39 @@
 package myhome
 
 import (
-	"myhome/devices"
 	"reflect"
 )
 
-type MethodSignature struct {
+type Method struct {
 	InType  reflect.Type
 	OutType reflect.Type
+	ActionE func(in any) (any, error)
 }
 
-type MethodHandler struct {
-	MethodSignature
-	Method func(in any) (any, error)
-}
-
-var Methods map[string]MethodSignature = map[string]MethodSignature{
-	"devices.list": MethodSignature{
+var Methods map[string]Method = map[string]Method{
+	"devices.list": Method{
 		InType:  reflect.TypeOf(nil),
-		OutType: reflect.TypeOf([]devices.Device{}),
+		OutType: reflect.TypeOf([]Device{}),
+		ActionE: nil,
 	},
-	"group.list": MethodSignature{
+	"group.list": Method{
 		InType:  reflect.TypeOf(nil),
-		OutType: reflect.TypeOf([]devices.Group{}),
+		OutType: reflect.TypeOf([]Group{}),
+		ActionE: nil,
 	},
-	"group.create": MethodSignature{
-		InType:  reflect.TypeOf(&devices.Group{}),
-		OutType: reflect.TypeOf(nil),
-	},
-	"group.delete": MethodSignature{
+	"group.create": Method{
 		InType:  reflect.TypeOf(""),
 		OutType: reflect.TypeOf(nil),
+		ActionE: nil,
 	},
-	"group.getdevices": MethodSignature{
+	"group.delete": Method{
 		InType:  reflect.TypeOf(""),
-		OutType: reflect.TypeOf([]devices.Device{}),
+		OutType: reflect.TypeOf(nil),
+		ActionE: nil,
+	},
+	"group.getdevices": Method{
+		InType:  reflect.TypeOf(""),
+		OutType: reflect.TypeOf([]Device{}),
+		ActionE: nil,
 	},
 }

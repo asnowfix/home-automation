@@ -3,26 +3,26 @@ package myhome
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"mymqtt"
 	"reflect"
 
 	"github.com/go-logr/logr"
 )
 
-type serverProxy struct {
+type server struct {
 	mc      *mymqtt.Client
-	handler Handler
+	handler Server
 	cancel  context.CancelFunc
 	from    <-chan []byte
 }
 
-type Handler interface {
-	CallE(method string, params any) (any, error)
-	InType() reflect.Type
-	OutType() reflect.Type
+type Server interface {
+	MethodE(method string) (Method, error)
+	Shutdown()
 }
 
-func NewServerProxyE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler Handler) (Proxy, error) {
+func NewServerE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler Server) (Server, error) {
 	sctx, cancel := context.WithCancel(ctx)
 	from, err := mc.Subscriber(ctx, ServerTopic(), 1)
 	if err != nil {
@@ -38,41 +38,69 @@ func NewServerProxyE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, ha
 			case inMsg := <-from:
 				log.Info("Received message", "payload", string(inMsg))
 				var req request
-				req.Params = reflect.New(handler.InType()).Elem()
-				err := json.Unmarshal(inMsg, &req)
+				var res response
+				var err error
+
+				err = json.Unmarshal(inMsg, &req)
 				if err != nil {
 					log.Error(err, "Failed to unmarshal request from payload", "payload", string(inMsg))
+					fail(1, err, &req, mc)
 					continue
 				}
 
-				if err := ValidateDialog(req.Dialog); err != nil {
-					log.Error(err, "invalid dialog")
-					panic(err)
-					// continue
-				}
-				res := &response{
-					Dialog: Dialog{
-						Id:  req.Id,
-						Src: mc.Id(),
-						Dst: req.Src,
-					},
-					Result: reflect.New(handler.OutType()).Elem(),
+				err = ValidateDialog(req.Dialog)
+				if err != nil {
+					fail(1, err, &req, mc)
+					continue
 				}
 
-				out, err := handler.CallE(req.Method, req.Params)
+				method, err := handler.MethodE(req.Method)
 				if err != nil {
-					log.Error(err, "Failed to call handler")
-					res.Error = &Error{Code: 1, Message: err.Error()}
-					res.Result = nil
-				} else {
-					res.Result = out
+					log.Error(err, "Failed to get action for method", "method", req.Method)
+					fail(1, err, &req, mc)
+					continue
 				}
+
+				// re-do Unmarshalling with proper types in place, if needed
+				if method.InType != nil {
+					req.Params = reflect.New(method.InType).Elem()
+					err = json.Unmarshal(inMsg, &req)
+					if err != nil {
+						log.Error(err, "Failed to unmarshal request from payload", "payload", string(inMsg))
+						fail(1, err, &req, mc)
+						continue
+					}
+				}
+
+				if method.OutType != nil {
+					res.Result = reflect.New(method.OutType).Elem()
+				}
+
+				res.Dialog = Dialog{
+					Id:  req.Id,
+					Src: mc.Id(),
+					Dst: req.Src,
+				}
+
+				out, err := method.ActionE(req.Params)
+				if err != nil {
+					log.Error(err, "Failed to call action")
+					fail(1, err, &req, mc)
+					continue
+				}
+
+				if reflect.TypeOf(out) != method.OutType {
+					fail(1, fmt.Errorf("unexpected type returned from action: got %v, want %v", reflect.TypeOf(out), method.OutType), &req, mc)
+					continue
+				}
+
+				res.Result = out
+
 				outMsg, err := json.Marshal(res)
 				if err != nil {
 					log.Error(err, "Failed to marshal response")
-					res.Error = &Error{Code: 1, Message: err.Error()}
-					res.Result = nil
-					outMsg, _ = json.Marshal(res)
+					fail(1, err, &req, mc)
+					continue
 				}
 				mc.Publish(ClientTopic(req.Src), outMsg)
 			}
@@ -80,7 +108,7 @@ func NewServerProxyE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, ha
 	}(sctx, log.WithName("Server#Subscriber"))
 
 	log.Info("Server running")
-	return &serverProxy{
+	return &server{
 		mc:      mc,
 		handler: handler,
 		cancel:  cancel,
@@ -88,11 +116,25 @@ func NewServerProxyE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, ha
 	}, nil
 }
 
-func (sp *serverProxy) CallE(method string, params any) (any, error) {
-	return sp.handler.CallE(method, params)
+func fail(code int, err error, req *request, mc *mymqtt.Client) {
+	var res response = response{
+		Dialog: Dialog{
+			Id:  req.Id,
+			Src: mc.Id(),
+			Dst: req.Src,
+		},
+		Error:  &Error{Code: code, Message: err.Error()},
+		Result: nil,
+	}
+	outMsg, _ := json.Marshal(res)
+	mc.Publish(ClientTopic(res.Dst), outMsg)
 }
 
-func (sp *serverProxy) Shutdown() {
+func (sp *server) MethodE(method string) (Method, error) {
+	return sp.handler.MethodE(method)
+}
+
+func (sp *server) Shutdown() {
 	if sp.cancel != nil {
 		sp.cancel()
 		sp.cancel = nil

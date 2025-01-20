@@ -10,14 +10,14 @@ import (
 	"github.com/go-logr/logr"
 )
 
-type clientProxy struct {
+type client struct {
 	to     chan<- []byte
 	from   <-chan []byte
 	cancel context.CancelFunc
 	me     string
 }
 
-func NewClientProxyE(ctx context.Context, log logr.Logger, mc *mymqtt.Client) (Proxy, error) {
+func NewClientE(ctx context.Context, log logr.Logger, mc *mymqtt.Client) (Client, error) {
 	hctx, cancel := context.WithCancel(ctx)
 	from, err := mc.Subscriber(hctx, ClientTopic(mc.Id()), 1)
 	if err != nil {
@@ -31,7 +31,7 @@ func NewClientProxyE(ctx context.Context, log logr.Logger, mc *mymqtt.Client) (P
 		return nil, err
 	}
 
-	return &clientProxy{
+	return &client{
 		from:   from,
 		to:     to,
 		cancel: cancel,
@@ -39,16 +39,25 @@ func NewClientProxyE(ctx context.Context, log logr.Logger, mc *mymqtt.Client) (P
 	}, nil
 }
 
-func (hc *clientProxy) Shutdown() {
-	if hc.cancel != nil {
-		hc.cancel()
+func (c *client) Shutdown() {
+	if c.cancel != nil {
+		c.cancel()
 	}
 }
 
-func (hc *clientProxy) CallE(method string, params any) (any, error) {
+func (hc *client) CallE(method string, params any) (any, error) {
 	requestId, err := RandStringBytesMaskImprRandReaderUnsafe(16)
 	if err != nil {
 		return nil, err
+	}
+
+	m, exists := Methods[method]
+	if !exists {
+		return Method{}, fmt.Errorf("unknown method %s", method)
+	}
+
+	if reflect.TypeOf(params) != m.InType {
+		return nil, fmt.Errorf("invalid parameters for method %s: got %v, want %v", method, reflect.TypeOf(params), m.InType)
 	}
 	req := request{
 		Dialog: Dialog{
@@ -71,7 +80,7 @@ func (hc *clientProxy) CallE(method string, params any) (any, error) {
 	hc.to <- reqStr
 	resStr := <-hc.from
 	var res response
-	res.Result = reflect.New(handler.OutType()).Elem()
+	res.Result = reflect.New(m.OutType).Elem()
 	err = json.Unmarshal(resStr, &res)
 	if err != nil {
 		return nil, err
@@ -87,3 +96,15 @@ func (hc *clientProxy) CallE(method string, params any) (any, error) {
 
 	return res.Result, nil
 }
+
+// func (hc *client) MethodE(method string) (Method, error) {
+// 	m, exists := Methods[method]
+// 	if !exists {
+// 		return Method{}, fmt.Errorf("unknown method %s", method)
+// 	}
+// 	return Method{
+// 		InType:  m.InType,
+// 		OutType: m.OutType,
+// 		ActionE: nil,
+// 	}, nil
+// }

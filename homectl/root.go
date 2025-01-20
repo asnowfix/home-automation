@@ -45,7 +45,7 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		options.MyHomeClient, err = myhome.NewClientProxyE(context.Background(), log, options.MqttClient)
+		options.MyHomeClient, err = myhome.NewClientE(context.Background(), log, options.MqttClient)
 		if err != nil {
 			return err
 		}

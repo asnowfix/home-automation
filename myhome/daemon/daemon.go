@@ -121,7 +121,7 @@ func Run() {
 		defer dm.Shutdown()
 		log.Info("Started device manager", "manager", dm)
 
-		ds, err := myhome.NewServerProxyE(ctx, log, mc, dm)
+		ds, err := myhome.NewServerE(ctx, log, mc, dm)
 		if err != nil {
 			log.Error(err, "Failed to start device server")
 		}

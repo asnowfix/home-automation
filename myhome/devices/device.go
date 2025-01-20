@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"myhome"
 	"net"
 	"pkg/shelly/mqtt"
 	"reflect"
@@ -19,32 +20,24 @@ func init() {
 	log.WithName(reflect.TypeOf(empty{}).PkgPath())
 }
 
-type DeviceIdentifier struct {
-	// The manufacturer of the device
-	Manufacturer string `db:"manufacturer" json:"manufacturer"`
-	// The unique identifier of the device, defined by the manufacturer
-	ID string `db:"id" json:"id"`
+type Device struct {
+	myhome.Device
+	impl any `json:"-"` // Reference to the inner implementation
 }
 
-type Device struct {
-	DeviceIdentifier
-	MAC            net.HardwareAddr `db:"mac" json:"mac,omitempty"` // The Ethernet hardware address of the device, globally unique & assigned by the manufacturer
-	Host           string           `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
-	Name           string           `db:"name" json:"name"`         // The local unique name of the device, defined by the user
-	Info           string           `db:"info"`
-	ConfigRevision int              `db:"config_revision" json:"config_revision"`
-	Config         string           `db:"config"`
-	Status         string           `db:"status"`
-	Groups         []string         `db:"groups" json:"groups"`
-	impl           any              `json:"-"` // Reference to the inner implementation
+type Group struct {
+	myhome.Group
 }
 
 func NewDevice(manufacturer, id string) *Device {
 	return &Device{
-		DeviceIdentifier: DeviceIdentifier{
-			Manufacturer: manufacturer,
-			ID:           id,
+		Device: myhome.Device{
+			DeviceIdentifier: myhome.DeviceIdentifier{
+				Manufacturer: manufacturer,
+				ID:           id,
+			},
 		},
+		impl: nil,
 	}
 }
 
@@ -80,22 +73,6 @@ func (d *Device) WithStatus(status string) *Device {
 
 func (d *Device) WithImpl(impl any) *Device {
 	d.impl = impl
-	return d
-}
-
-func (d *Device) WithGroups(groups []string) *Device {
-	d.Groups = groups
-	return d
-}
-
-func (d *Device) WithGroup(group string) *Device {
-	// is group in d.Groups? if not, append it
-	for _, g := range d.Groups {
-		if g == group {
-			return d
-		}
-	}
-	d.Groups = append(d.Groups, group)
 	return d
 }
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 )
 
-type Proxy interface {
+type Client interface {
 	CallE(method string, params any) (any, error)
 	Shutdown()
 }

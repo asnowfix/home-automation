@@ -27,26 +27,11 @@ type Event struct {
 		Message string `json:"message"` // Error message
 	} `json:"error,omitempty"`
 	Params *map[string]interface{} `json:"params,omitempty"` // Parameters of the event
-	// Params struct {
-	// 	Timestamp float64              `json:"ts"`
-	// 	BLE       *any                 `json:"ble"`
-	// 	BtHome    *any                 `json:"bthome"`
-	// 	Cloud     *any                 `json:"cloud"`
-	// 	Input0    *sswitch.InputStatus `json:"input:0"`
-	// 	Input1    *sswitch.InputStatus `json:"input:1"`
-	// 	Input2    *sswitch.InputStatus `json:"input:2"`
-	// 	Input3    *sswitch.InputStatus `json:"input:3"`
-	// 	Knx       *any                 `json:"knx"`
-	// 	Mqtt      *Status              `json:"mqtt"`
-	// 	Switch0   *sswitch.Status      `json:"switch:0"`
-	// 	Switch1   *sswitch.Status      `json:"switch:1"`
-	// 	Switch2   *sswitch.Status      `json:"switch:2"`
-	// 	Switch3   *sswitch.Status      `json:"switch:3"`
-	// 	System    *system.Status       `json:"system"`
-	// 	Wifi      *wifi.StatusEvent    `json:"wifi"`
-	// 	WebSocket *any                 `json:"ws"`
-	//  Events    *[]ComponentEvent    `json:"events"`
-	// } `json:"params"` // Parameters of the event
+	// Params *struct {
+	// 	Status
+	// 	Timestamp float64           `json:"ts"`
+	// 	Events    *[]ComponentEvent `json:"events,omitempty"`
+	// } `json:"params,omitempty"` // Parameters of the event
 }
 
 type ComponentEvent struct {
@@ -91,7 +76,7 @@ const (
 )
 
 // The configuration of the MQTT component contains information about the credentials and prefix used and the protection and notifications settings of the MQTT connection.
-type Configuration struct {
+type Config struct {
 	Enable         bool   `json:"enable"`                 // True if MQTT connection is enabled, false otherwise
 	Server         string `json:"server,omitempty"`       // Host name of the MQTT server. Can be followed by port number - host:port
 	ClientId       string `json:"client_id,omitempty"`    // Identifies each MQTT client that connects to an MQTT brokers (when null, Device id is used as client_id)

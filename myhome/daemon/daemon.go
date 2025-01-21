@@ -5,6 +5,7 @@ import (
 	"hlog"
 	"myhome/http"
 	"myhome/mqtt"
+	"myhome/storage"
 	"mymqtt"
 	"os"
 	"os/signal"
@@ -105,7 +106,7 @@ func Run() {
 
 	if !disableDeviceManager {
 		// Initialize DeviceManager
-		storage, err := devices.NewDeviceStorage(log, "myhome.db")
+		storage, err := storage.NewDeviceStorage(log, "myhome.db")
 		if err != nil {
 			log.Error(err, "Failed to initialize device storage")
 			os.Exit(1)

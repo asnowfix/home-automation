@@ -13,12 +13,12 @@ type Method struct {
 var Methods map[string]Method = map[string]Method{
 	"devices.list": Method{
 		InType:  reflect.TypeOf(nil),
-		OutType: reflect.TypeOf([]Device{}),
+		OutType: reflect.TypeOf(Devices{}),
 		ActionE: nil,
 	},
 	"group.list": Method{
 		InType:  reflect.TypeOf(nil),
-		OutType: reflect.TypeOf([]Group{}),
+		OutType: reflect.TypeOf(Groups{}),
 		ActionE: nil,
 	},
 	"group.create": Method{
@@ -33,7 +33,7 @@ var Methods map[string]Method = map[string]Method{
 	},
 	"group.getdevices": Method{
 		InType:  reflect.TypeOf(""),
-		OutType: reflect.TypeOf([]Device{}),
+		OutType: reflect.TypeOf(Devices{}),
 		ActionE: nil,
 	},
 }

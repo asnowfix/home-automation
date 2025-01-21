@@ -1,7 +1,9 @@
-package devices
+package storage
 
 import (
+	"encoding/json"
 	"errors"
+	"myhome"
 
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"
@@ -76,7 +78,31 @@ func (s *DeviceStorage) Close() {
 	s.db.Close()
 }
 
-func (s *DeviceStorage) UpsertDevice(device *Device) error {
+func (s *DeviceStorage) UpsertDevice(device *myhome.Device) error {
+	var d Device = Device{
+		Device: *device,
+	}
+	out, err := json.Marshal(d.Info)
+	if err != nil {
+		s.log.Error(err, "Failed to marshal device info", "device_id", device.ID)
+		return err
+	}
+	d.Info_ = string(out)
+
+	out, err = json.Marshal(d.Config)
+	if err != nil {
+		s.log.Error(err, "Failed to marshal device config", "device_id", device.ID)
+		return err
+	}
+	d.Config_ = string(out)
+
+	out, err = json.Marshal(d.Status)
+	if err != nil {
+		s.log.Error(err, "Failed to marshal device status", "device_id", device.ID)
+		return err
+	}
+	d.Status_ = string(out)
+
 	query := `
     INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config, status) 
     VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config, :status)
@@ -88,7 +114,7 @@ func (s *DeviceStorage) UpsertDevice(device *Device) error {
         config_revision = excluded.config_revision, 
         config = excluded.config, 
         status = excluded.status`
-	_, err := s.db.NamedExec(query, device)
+	_, err = s.db.NamedExec(query, d)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device", "device", device)
 		return err
@@ -96,7 +122,7 @@ func (s *DeviceStorage) UpsertDevice(device *Device) error {
 	return nil
 }
 
-func (s *DeviceStorage) GetDeviceByIdentifier(identifier string) (*Device, error) {
+func (s *DeviceStorage) GetDeviceByIdentifier(identifier string) (*myhome.Device, error) {
 	var device Device
 	query := `SELECT * FROM devices WHERE id = $1 OR mac = $1 OR name = $1 OR host = $1`
 	err := s.db.Get(&device, query, identifier)
@@ -105,10 +131,10 @@ func (s *DeviceStorage) GetDeviceByIdentifier(identifier string) (*Device, error
 		return nil, err
 	}
 	s.log.Info("Got device by identifier", "identifier", identifier, "device", device)
-	return &device, nil
+	return unmarshallDevice(&device)
 }
 
-func (s *DeviceStorage) GetDeviceByManufacturerAndID(manufacturer, id string) (*Device, error) {
+func (s *DeviceStorage) GetDeviceByManufacturerAndID(manufacturer, id string) (*myhome.Device, error) {
 	var device Device
 	query := `SELECT * FROM devices WHERE manufacturer = $1 AND id = $2`
 	err := s.db.Get(&device, query, manufacturer, id)
@@ -117,10 +143,10 @@ func (s *DeviceStorage) GetDeviceByManufacturerAndID(manufacturer, id string) (*
 		return nil, err
 	}
 	s.log.Info("Got device by manufacturer and ID", "manufacturer", manufacturer, "id", id, "device", device)
-	return &device, nil
+	return unmarshallDevice(&device)
 }
 
-func (s *DeviceStorage) GetDeviceByMAC(mac string) (*Device, error) {
+func (s *DeviceStorage) GetDeviceByMAC(mac string) (*myhome.Device, error) {
 	if len(mac) == 0 {
 		return nil, errors.New("empty mac")
 	}
@@ -131,10 +157,10 @@ func (s *DeviceStorage) GetDeviceByMAC(mac string) (*Device, error) {
 		s.log.Error(err, "Failed to get device by MAC", "mac", mac)
 		return nil, err
 	}
-	return &device, nil
+	return unmarshallDevice(&device)
 }
 
-func (s *DeviceStorage) GetDeviceByName(name string) (*Device, error) {
+func (s *DeviceStorage) GetDeviceByName(name string) (*myhome.Device, error) {
 	var device Device
 	query := `SELECT * FROM devices WHERE name = $1`
 	err := s.db.Get(&device, query, name)
@@ -142,18 +168,18 @@ func (s *DeviceStorage) GetDeviceByName(name string) (*Device, error) {
 		s.log.Error(err, "Failed to get device by name", "name", name)
 		return nil, err
 	}
-	return &device, nil
+	return unmarshallDevice(&device)
 }
 
-func (s *DeviceStorage) GetAllDevices() ([]Device, error) {
-	var devices []Device
+func (s *DeviceStorage) GetAllDevices() (*myhome.Devices, error) {
+	devices := make([]Device, 0)
 	query := `SELECT * FROM devices`
 	err := s.db.Select(&devices, query)
 	if err != nil {
 		s.log.Error(err, "Failed to get all devices")
 		return nil, err
 	}
-	return devices, nil
+	return unmarshallDevices(devices)
 }
 
 func (s *DeviceStorage) DeleteDevice(mac string) error {
@@ -165,16 +191,16 @@ func (s *DeviceStorage) DeleteDevice(mac string) error {
 	return err
 }
 
-func (s *DeviceStorage) GetAllGroups() ([]Group, error) {
+func (s *DeviceStorage) GetAllGroups() (*myhome.Groups, error) {
 	s.log.Info("Retrieving all groups")
-	groups := make([]Group, 0)
+	var groups myhome.Groups
 	query := "SELECT id, name, description FROM groups"
-	err := s.db.Select(&groups, query)
+	err := s.db.Select(&groups.Groups, query)
 	if err != nil {
 		s.log.Error(err, "Failed to retrieve groups")
 		return nil, err
 	}
-	return groups, nil
+	return &groups, nil
 }
 
 func (s *DeviceStorage) GetDevicesByGroupName(name string) ([]Device, error) {
@@ -201,19 +227,19 @@ func (s *DeviceStorage) GetDevicesByGroupName(name string) ([]Device, error) {
 	return devices, nil
 }
 
-func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) ([]Group, error) {
-	groups := make([]Group, 0)
+func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (*myhome.Groups, error) {
+	var groups myhome.Groups
 	query := "SELECT g.* FROM groups g INNER JOIN groupsMember gm ON g.id = gm.group_id WHERE gm.manufacturer = $1 AND gm.id = $2"
-	err := s.db.Select(&groups, query, manufacturer, id)
+	err := s.db.Select(&groups.Groups, query, manufacturer, id)
 	if err != nil {
 		s.log.Error(err, "Failed to retrieve groups for device", "manufacturer", manufacturer, "id", id)
 		return nil, err
 	}
-	return groups, nil
+	return &groups, nil
 }
 
 // AddGroup adds a new group to the database.
-func (s *DeviceStorage) AddGroup(group Group) (any, error) {
+func (s *DeviceStorage) AddGroup(group myhome.Group) (any, error) {
 	log := s.log.WithValues("name", group.Name)
 	log.Info("Adding new group")
 	query := `INSERT INTO groups (name, description) VALUES (:name, :description)`
@@ -247,4 +273,34 @@ func (s *DeviceStorage) RemoveDeviceFromGroup(manufacturer, id string, groupID i
 	query := `DELETE FROM groupsMember WHERE manufacturer = $1 AND id = $2 AND group_id = $3`
 	_, err := s.db.Exec(query, manufacturer, id, groupID)
 	return err
+}
+
+func unmarshallDevice(device *Device) (*myhome.Device, error) {
+	err := json.Unmarshal([]byte(device.Info_), &device.Info)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal([]byte(device.Config_), &device.Config)
+	if err != nil {
+		return nil, err
+	}
+	err = json.Unmarshal([]byte(device.Status_), &device.Status)
+	if err != nil {
+		return nil, err
+	}
+	return &device.Device, nil
+}
+
+func unmarshallDevices(devices []Device) (*myhome.Devices, error) {
+	ds := myhome.Devices{
+		Devices: make([]myhome.Device, 0),
+	}
+	for _, device := range devices {
+		d, err := unmarshallDevice(&device)
+		if err != nil {
+			return nil, err
+		}
+		ds.Devices = append(ds.Devices, *d)
+	}
+	return &ds, nil
 }

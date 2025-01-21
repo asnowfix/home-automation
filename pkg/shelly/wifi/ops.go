@@ -15,7 +15,7 @@ type empty struct{}
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
 	r.RegisterMethodHandler("WiFi", "GetConfig", types.MethodHandler{
-		Allocate: func() any { return new(Configuration) },
+		Allocate: func() any { return new(Config) },
 	})
 	r.RegisterMethodHandler("WiFi", "SetConfig", types.MethodHandler{
 		Allocate:   func() any { return new(Status) },

@@ -17,11 +17,11 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
 
 	r.RegisterMethodHandler("Switch", "GetConfig", types.MethodHandler{
-		Allocate:   func() any { return new(Configuration) },
+		Allocate:   func() any { return new(Config) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler("Switch", "SetConfig", types.MethodHandler{
-		Allocate:   func() any { return new(Configuration) },
+		Allocate:   func() any { return new(Config) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler("Switch", "GetStatus", types.MethodHandler{

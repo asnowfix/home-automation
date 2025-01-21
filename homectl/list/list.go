@@ -22,7 +22,7 @@ var Cmd = &cobra.Command{
 			return err
 		}
 		log.Info("result", "out", out, "type", reflect.TypeOf(out))
-		devices := out.([]*myhome.Device)
+		devices := out.(*myhome.Devices)
 		if options.Flags.Json {
 			s, err := json.Marshal(devices)
 			if err != nil {
@@ -30,7 +30,7 @@ var Cmd = &cobra.Command{
 			}
 			fmt.Println(string(s))
 		} else {
-			for _, device := range devices {
+			for _, device := range devices.Devices {
 				fmt.Println(device)
 			}
 		}

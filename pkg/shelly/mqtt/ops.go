@@ -28,7 +28,7 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler("Mqtt", "GetConfig", types.MethodHandler{
-		Allocate:   func() any { return new(Configuration) },
+		Allocate:   func() any { return new(Config) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler("Mqtt", "SetConfig", types.MethodHandler{

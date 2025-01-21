@@ -1,11 +1,15 @@
 package shelly
 
 import (
+	"devices/shelly/wifi"
 	"encoding/json"
 	"fmt"
 	"mymqtt"
 	"net"
 	"os"
+	"pkg/shelly/mqtt"
+	"pkg/shelly/sswitch"
+	"pkg/shelly/system"
 	"pkg/shelly/types"
 	"reflect"
 	"regexp"
@@ -65,6 +69,44 @@ type DeviceInfo struct {
 	CloudKey              string `json:"key,omitempty"`
 	Batch                 string `json:"batch,omitempty"`
 	FirmwareSBits         string `json:"fw_sbits,omitempty"`
+}
+
+type Config struct {
+	BLE    *any `json:"ble"`
+	BtHome *any `json:"bthome"`
+	Cloud  *any `json:"cloud"`
+	// Input0    *sswitch.InputConfig        `json:"input:0"`
+	// Input1    *sswitch.InputConfig        `json:"input:1"`
+	// Input2    *sswitch.InputConfig        `json:"input:2"`
+	// Input3    *sswitch.InputConfiguration `json:"input:3"`
+	Knx       *any            `json:"knx"`
+	Mqtt      *mqtt.Config    `json:"mqtt"`
+	Switch0   *sswitch.Config `json:"switch:0"`
+	Switch1   *sswitch.Config `json:"switch:1"`
+	Switch2   *sswitch.Config `json:"switch:2"`
+	Switch3   *sswitch.Config `json:"switch:3"`
+	System    *system.Config  `json:"system"`
+	Wifi      *wifi.Config    `json:"wifi"`
+	WebSocket *any            `json:"ws"`
+}
+
+type Status struct {
+	BLE       *any                 `json:"ble"`
+	BtHome    *any                 `json:"bthome"`
+	Cloud     *any                 `json:"cloud"`
+	Input0    *sswitch.InputStatus `json:"input:0"`
+	Input1    *sswitch.InputStatus `json:"input:1"`
+	Input2    *sswitch.InputStatus `json:"input:2"`
+	Input3    *sswitch.InputStatus `json:"input:3"`
+	Knx       *any                 `json:"knx"`
+	Mqtt      *mqtt.Status         `json:"mqtt"`
+	Switch0   *sswitch.Status      `json:"switch:0"`
+	Switch1   *sswitch.Status      `json:"switch:1"`
+	Switch2   *sswitch.Status      `json:"switch:2"`
+	Switch3   *sswitch.Status      `json:"switch:3"`
+	System    *system.Status       `json:"system"`
+	Wifi      *wifi.Status         `json:"wifi"`
+	WebSocket *any                 `json:"ws"`
 }
 
 // From https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellygetcomponents

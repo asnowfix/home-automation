@@ -29,7 +29,7 @@ type STA struct {
 	Gateway  string `json:"gateway,omitempty"`
 }
 
-type Configuration struct {
+type Config struct {
 	Mode     string `json:"mode"`
 	SSID     string `json:"ssid"`
 	Password string `json:"password"`

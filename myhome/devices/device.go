@@ -56,20 +56,20 @@ func (d *Device) WithName(name string) *Device {
 	return d
 }
 
-func (d *Device) WithInfo(info string) *Device {
-	d.Info = info
-	return d
-}
+// func (d *Device) WithInfo(info string) *Device {
+// 	d.Info = info
+// 	return d
+// }
 
-func (d *Device) WithConfig(config string) *Device {
-	d.Config = config
-	return d
-}
+// func (d *Device) WithConfig(config string) *Device {
+// 	d.Config = config
+// 	return d
+// }
 
-func (d *Device) WithStatus(status string) *Device {
-	d.Status = status
-	return d
-}
+// func (d *Device) WithStatus(status string) *Device {
+// 	d.Status = status
+// 	return d
+// }
 
 func (d *Device) WithImpl(impl any) *Device {
 	d.impl = impl
@@ -82,20 +82,36 @@ func (d *Device) UpdateFromMqttEvent(event *mqtt.Event) error {
 	// - '{"src":"shellyplus1-08b61fd90730","dst":"shellyplus1-08b61fd90730/events","method":"NotifyStatus","params":{"ts":1736604020.06,"cloud":{"connected":true}}}'
 	// - '{"src":"shelly1minig3-54320464a1d0","dst":"shelly1minig3-54320464a1d0/events","method":"NotifyStatus","params":{"ts":1736605194.11,"sys":{"cfg_rev":35}}}'
 	if event.Method == "NotifyStatus" {
-		var status map[string]interface{}
-		err := json.Unmarshal([]byte(d.Status), &status)
-		if err != nil {
-			log.Error(err, "failed to JSON-unmarshal status from storage: restarting with empty one", "old", d.Status)
-			status = make(map[string]interface{})
-		}
 		if event.Params != nil {
-			maps.Copy(status, *event.Params)
-			out, err := json.Marshal(status)
+			// FIXME: Convoluted way to merge status update event in the current status
+			out, err := json.Marshal(d.Status)
 			if err != nil {
-				log.Error(err, "failed to JSON-marshal updated status")
+				log.Error(err, "failed to JSON-marshal current status")
 				return err
 			}
-			d.Status = string(out)
+			status := make(map[string]interface{})
+			err = json.Unmarshal(out, &status)
+			if err != nil {
+				log.Error(err, "failed to unmarshal current status")
+				return err
+			}
+			maps.Copy(status, *event.Params)
+			out, err = json.Marshal(status)
+			if err != nil {
+				log.Error(err, "failed to JSON-(re)marshal updated status")
+				return err
+			}
+			err = json.Unmarshal(out, &d.Status)
+			if err != nil {
+				log.Error(err, "failed to (re)unmarshal updated status")
+				return err
+			}
+			// v := reflect.ValueOf(d.Status)
+			// for i := 0; i < v.NumField(); i++ {
+			// 	typeField := v.Type().Field(i)
+			// 	valueField := v.Field(i)
+			// 	log.Info("Updated status", "field", typeField.Name, "value", valueField.Interface())
+			// }
 		}
 	}
 
@@ -106,7 +122,11 @@ func (d *Device) UpdateFromMqttEvent(event *mqtt.Event) error {
 			log.Error(err, "failed to marshal updated full status")
 			return err
 		}
-		d.Status = string(out)
+		err = json.Unmarshal(out, &d.Status)
+		if err != nil {
+			log.Error(err, "failed to unmarshal updated full status")
+			return err
+		}
 	}
 
 	// - '{"dst":"NCELRND1279_shellyplus1-08b61fd9333c","error":{"code":-109,"message":"shutting down in 952 ms"},"id":0,"result":{"methods":null},"src":"shellyplus1-08b61fd9333c"}'

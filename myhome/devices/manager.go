@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"myhome"
+	"myhome/storage"
 	"mymqtt"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
@@ -23,7 +24,7 @@ const (
 )
 
 type DeviceManager struct {
-	storage       *DeviceStorage
+	storage       *storage.DeviceStorage
 	mu            sync.Mutex
 	update        chan *Device
 	cancel        context.CancelFunc
@@ -35,7 +36,7 @@ type DeviceManager struct {
 	method        map[string]myhome.Method
 }
 
-func NewDeviceManager(log logr.Logger, storage *DeviceStorage, mqttClient *mymqtt.Client) *DeviceManager {
+func NewDeviceManager(log logr.Logger, storage *storage.DeviceStorage, mqttClient *mymqtt.Client) *DeviceManager {
 	return &DeviceManager{
 		storage:       storage,
 		log:           log.WithName("DeviceManager"),
@@ -57,36 +58,36 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		ActionE: func(in any) (any, error) {
 			return dm.storage.GetAllDevices()
 		},
-		InType:  nil,
-		OutType: reflect.TypeOf([]Device{}),
+		InType:  myhome.Methods["devices.list"].InType,
+		OutType: myhome.Methods["devices.list"].OutType,
 	})
 	dm.registerMethod("group.list", myhome.Method{
 		ActionE: func(in any) (any, error) {
 			return dm.storage.GetAllGroups()
 		},
-		InType:  nil,
-		OutType: reflect.TypeOf([]Group{}),
+		InType:  myhome.Methods["group.list"].InType,
+		OutType: myhome.Methods["group.list"].OutType,
 	})
 	dm.registerMethod("group.create", myhome.Method{
 		ActionE: func(in any) (any, error) {
-			return dm.storage.AddGroup(in.(Group))
+			return dm.storage.AddGroup(in.(myhome.Group))
 		},
-		InType:  reflect.TypeOf(&Group{}),
-		OutType: reflect.TypeOf(nil),
+		InType:  myhome.Methods["group.create"].InType,
+		OutType: myhome.Methods["group.create"].OutType,
 	})
 	dm.registerMethod("group.delete", myhome.Method{
 		ActionE: func(in any) (any, error) {
 			return dm.storage.RemoveGroup(in.(string))
 		},
-		InType:  reflect.TypeOf(""),
-		OutType: reflect.TypeOf(nil),
+		InType:  myhome.Methods["group.delete"].InType,
+		OutType: myhome.Methods["group.delete"].OutType,
 	})
 	dm.registerMethod("group.getdevices", myhome.Method{
 		ActionE: func(in any) (any, error) {
 			return dm.storage.GetDevicesByGroupName(in.(string))
 		},
-		InType:  reflect.TypeOf(""),
-		OutType: reflect.TypeOf([]Device{}),
+		InType:  myhome.Methods["group.getdevices"].InType,
+		OutType: myhome.Methods["group.getdevices"].OutType,
 	})
 
 	ctx, dm.cancel = context.WithCancel(ctx)
@@ -108,14 +109,9 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 					}
 					device.MAC = sd.MacAddress
 					device.Host = sd.Ipv4_.String()
-					out, err := json.Marshal(sd.Info)
-					if err != nil {
-						log.Error(err, "Failed to marshal device info", "device_id", device.ID)
-						continue
-					}
-					device.Info = string(out)
+					device.Info = sd.Info
 				}
-				err = dm.storage.UpsertDevice(device)
+				err = dm.storage.UpsertDevice(&device.Device)
 				if err != nil {
 					log.Error(err, "Failed to upsert device", "device", device)
 					continue
@@ -131,8 +127,11 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, device := range devices {
-		dm.update <- device.WithImpl(shelly.NewDeviceFromId(dm.log.WithName(device.ID), device.ID))
+	for _, device := range devices.Devices {
+		var d Device = Device{
+			Device: device,
+		}
+		dm.update <- d.WithImpl(shelly.NewDeviceFromId(dm.log.WithName(device.ID), device.ID))
 	}
 
 	// Loop on MQTT event devices discovery
@@ -213,24 +212,21 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 					continue
 				}
 				deviceId := event.Src
-				device, err := dm.storage.GetDeviceByManufacturerAndID("Shelly", deviceId)
+				mhd, err := dm.storage.GetDeviceByManufacturerAndID("Shelly", deviceId)
+				var device Device = Device{
+					Device: *mhd,
+				}
 				if err != nil {
 					log.Info("Device not found, creating new one", "device_id", deviceId)
-					device = NewDevice("Shelly", deviceId)
+					device = *NewDevice("Shelly", deviceId)
 					sd = shelly.NewDeviceFromId(dm.log, deviceId)
 					sd.Init(mc, types.ChannelMqtt)
 					device.MAC = sd.MacAddress
 					device.Host = sd.Ipv4_.String()
-					out, err := json.Marshal(sd.Info)
-					if err != nil {
-						dm.log.Error(err, "Failed to marshal device info", "device_id", event.Src)
-						continue
-					}
-					device.Info = string(out)
 					device.impl = sd
 				}
 
-				if device.Config == "" {
+				if device.Config == nil {
 					sd, ok := device.impl.(*shelly.Device)
 					if !ok {
 						dm.log.Info("Device is not a shelly device", "device_id", event.Src)
@@ -239,14 +235,9 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 						if err != nil {
 							dm.log.Error(err, "Failed to get shelly config", "device_id", event.Src)
 						} else {
-							config, ok := out.(map[string]interface{})
+							config, ok := out.(*shelly.Config)
 							if ok {
-								c, err := json.Marshal(config)
-								if err != nil {
-									dm.log.Error(err, "Failed to marshal shelly config", "device_id", event.Src)
-								} else {
-									device.Config = string(c)
-								}
+								device.Config = config
 							} else {
 								dm.log.Info("shelly config is not valid JSON", "out", out)
 							}
@@ -261,7 +252,7 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 					continue
 				}
 				dm.log.Info("Storing updated device", "device", device)
-				dm.storage.UpsertDevice(device)
+				dm.storage.UpsertDevice(&device.Device)
 			}
 		}
 	}(ctx, log.WithName("DeviceManager#WatchMqtt"))
@@ -395,7 +386,7 @@ func (dm *DeviceManager) updateDevices(service string, timeout time.Duration, id
 		}
 
 		dm.log.Info("Adding", "device", device)
-		err = dm.storage.UpsertDevice(device)
+		err = dm.storage.UpsertDevice(&device.Device)
 		if err != nil {
 			dm.log.Error(err, "Failed to add device", "device", device)
 		}
@@ -417,19 +408,20 @@ func (dm *DeviceManager) GetDeviceByIdentifier(identifier string) (*Device, erro
 	if exists {
 		return d, nil
 	}
-	d, err := dm.storage.GetDeviceByIdentifier(identifier)
+	device, err := dm.storage.GetDeviceByIdentifier(identifier)
 	if err != nil {
 		return nil, err
 	}
-	return dm.Load(d.ID)
+	return dm.Load(device.ID)
 }
 
 func (dm *DeviceManager) Load(id string) (*Device, error) {
+	var err error
 	d, err := dm.storage.GetDeviceByManufacturerAndID(Shelly, id) // TODO: support other manufacturers(id)
 	if err != nil {
 		return nil, err
 	}
-	return dm.Save(d)
+	return dm.Save(&Device{Device: *d})
 }
 
 func (dm *DeviceManager) Save(d *Device) (*Device, error) {
@@ -446,8 +438,8 @@ func (dm *DeviceManager) Save(d *Device) (*Device, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, group := range groups {
-			_, err := kvs.SetKeyValue(types.ChannelMqtt, sd, fmt.Sprintf("group/%s", group), "true")
+		for _, group := range groups.Groups {
+			_, err := kvs.SetKeyValue(types.ChannelMqtt, sd, fmt.Sprintf("group/%s", group.Name), "true")
 			if err != nil {
 				return nil, err
 			}
@@ -455,7 +447,7 @@ func (dm *DeviceManager) Save(d *Device) (*Device, error) {
 		d.impl = sd
 	}
 
-	return d, dm.storage.UpsertDevice(d)
+	return d, dm.storage.UpsertDevice(&d.Device)
 }
 
 func (dm *DeviceManager) CallE(method string, params any) (any, error) {

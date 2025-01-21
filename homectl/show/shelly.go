@@ -66,12 +66,12 @@ func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, ar
 	var s struct {
 		DeviceInfo *shelly.DeviceInfo `json:"info"`
 		Mqtt       struct {
-			Config *mqtt.Configuration `json:"config,omitempty"`
-			Status *mqtt.Status        `json:"status,omitempty"`
+			Config *mqtt.Config `json:"config,omitempty"`
+			Status *mqtt.Status `json:"status,omitempty"`
 		} `json:"mqtt,omitempty"`
 		Switch struct {
-			Config *sswitch.Configuration `json:"config,omitempty"`
-			Status *sswitch.Status        `json:"status,omitempty"`
+			Config *sswitch.Config `json:"config,omitempty"`
+			Status *sswitch.Status `json:"status,omitempty"`
 		} `json:"switch,omitempty"`
 		Scheduled *schedule.Scheduled `json:"scheduled,omitempty"`
 	}
@@ -81,14 +81,14 @@ func showOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, ar
 	// ds := shelly.CallMethod(device, "Shelly", "GetStatus").(*shelly.DeviceStatus)
 
 	if showMqttFlag {
-		s.Mqtt.Config = device.Call(via, "Mqtt", "GetConfig", nil, &mqtt.ConfigResults{}).(*mqtt.Configuration)
+		s.Mqtt.Config = device.Call(via, "Mqtt", "GetConfig", nil, &mqtt.ConfigResults{}).(*mqtt.Config)
 		s.Mqtt.Status = device.Call(via, "Mqtt", "GetStatus", nil, &mqtt.Status{}).(*mqtt.Status)
 	}
 
 	if showSwitchId >= 0 {
 		sr := make(map[string]interface{})
 		sr["id"] = showSwitchId
-		s.Switch.Config = device.Call(via, "Switch", "GetConfig", sr, &sswitch.Configuration{}).(*sswitch.Configuration)
+		s.Switch.Config = device.Call(via, "Switch", "GetConfig", sr, &sswitch.Config{}).(*sswitch.Config)
 		s.Switch.Status = device.Call(via, "Switch", "GetStatus", sr, &sswitch.Status{}).(*sswitch.Status)
 	}
 

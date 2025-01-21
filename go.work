@@ -20,6 +20,7 @@ use (
 	./internal/myzone
 	./internal/myhome
 	./myhome/daemon
+	./myhome/storage
 	./myhome/devices
 	./myhome/http
 	./myhome/mqtt

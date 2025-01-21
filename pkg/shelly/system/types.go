@@ -4,7 +4,7 @@ import "net"
 
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys/#configuration
 
-type Configuration struct {
+type Config struct {
 	Device struct {
 		Name         string           `json:"name"`
 		EcoMode      bool             `json:"eco_mode"`

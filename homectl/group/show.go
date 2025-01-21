@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"homectl/options"
-	"myhome/devices"
+	"myhome"
 
 	"github.com/spf13/cobra"
 )
@@ -23,7 +23,7 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		devices := out.(*[]*devices.Device)
+		devices := out.(*[]*myhome.Device)
 		if options.Flags.Json {
 			s, err := json.Marshal(devices)
 			if err != nil {

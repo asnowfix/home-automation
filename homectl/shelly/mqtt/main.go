@@ -37,7 +37,7 @@ func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, a
 		log.Error(err, "Unable to get MQTT config")
 		return nil, err
 	}
-	config := out.(*mqtt.Configuration)
+	config := out.(*mqtt.Config)
 	configStr, err := json.Marshal(config)
 	if err != nil {
 		log.Info("Unable to marshal MQTT config: %v", err)

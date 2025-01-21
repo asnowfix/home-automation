@@ -46,7 +46,7 @@ type Request struct {
 	Id int `json:"id"`
 }
 
-type Configuration struct {
+type Config struct {
 	Id                       int     `json:"id"`                                   // Id of the Switch component instance
 	Name                     string  `json:"name,omitempty"`                       // Name of the switch instance
 	InMode                   string  `json:"in_mode"`                              // Mode of the associated input. Range of values: momentary, follow, flip, detached, cycle (if applicable)
@@ -64,8 +64,8 @@ type Configuration struct {
 }
 
 type ConfigurationRequest struct {
-	Id            int           `json:"id"`     // Id of the Switch component instance
-	Configuration Configuration `json:"config"` // Configuration that the method takes
+	Id            int    `json:"id"`     // Id of the Switch component instance
+	Configuration Config `json:"config"` // Configuration that the method takes
 }
 
 type InputStatus struct {

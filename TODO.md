@@ -1,6 +1,5 @@
 TODO
 ====
-
 [ ] Create/Configure scripts in a single operation
 [x] Status for one / multiple scripts in a single operation
 [ ] Run simple JavaScript in a single operation
@@ -11,6 +10,7 @@ TODO
 
     - https://github.com/uvjim/linksys_velop
     - https://github.com/uvjim/linksys_velop/blob/master/README.md
+
 
 [ ] Rework file/folder layout to be more generic using https://github.com/golang-standards/project-layout
 
@@ -49,3 +49,9 @@ TODO
     created by myhome/devices.(*DeviceManager).WatchMqtt in goroutine 1
             /Users/fkowalski/Desktop/Projects/home-automation/myhome/devices/manager.go:139 +0x1c8
     exit status 2
+
+[x] Use pure-Go sqlite implementation (to allow cross-compilation)
+
+        - https://pkg.go.dev/modernc.org/sqlite
+        - https://github.com/ncruces/go-sqlite3
+        - https://github.com/cvilsmeier/go-sqlite-bench

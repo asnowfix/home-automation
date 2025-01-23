@@ -7,7 +7,9 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3" // or any other SQL driver
+
+	_ "github.com/ncruces/go-sqlite3/driver"
+	_ "github.com/ncruces/go-sqlite3/embed"
 )
 
 type DeviceStorage struct {

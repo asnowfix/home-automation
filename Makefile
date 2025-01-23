@@ -6,9 +6,6 @@ ME ?= $(shell whoami)
 endif
 $(info OS=$(OS) ME=$(ME))
 
-# go-sqlite3
-export CGO_ENABLED=1
-
 mods = $(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */*/*/go.mod) $(wildcard */*/*/*/go.mod)
 
 default: help

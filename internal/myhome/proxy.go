@@ -36,7 +36,7 @@ type Error struct {
 
 type response struct {
 	Dialog
-	Result any    `json:"result,omitempty"`
+	Result *any   `json:"result,omitempty"`
 	Error  *Error `json:"error,omitempty"`
 }
 

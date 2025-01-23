@@ -3,9 +3,7 @@ package myhome
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"mymqtt"
-	"reflect"
 
 	"github.com/go-logr/logr"
 )
@@ -62,19 +60,16 @@ func NewServerE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler
 				}
 
 				// re-do Unmarshalling with proper types in place, if needed
-				if method.Signature.NewParams != nil {
-					req.Params = method.Signature.NewParams()
-					err = json.Unmarshal(inMsg, &req)
-					if err != nil {
-						log.Error(err, "Failed to unmarshal request from payload", "payload", string(inMsg))
-						fail(1, err, &req, mc)
-						continue
-					}
+				req.Params = method.Signature.NewParams()
+				err = json.Unmarshal(inMsg, &req)
+				if err != nil {
+					log.Error(err, "Failed to unmarshal request from payload", "payload", string(inMsg))
+					fail(1, err, &req, mc)
+					continue
 				}
 
-				if method.Signature.NewResult != nil {
-					res.Result = method.Signature.NewResult()
-				}
+				tempResult := method.Signature.NewResult()
+				res.Result = &tempResult
 
 				res.Dialog = Dialog{
 					Id:  req.Id,
@@ -89,12 +84,12 @@ func NewServerE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler
 					continue
 				}
 
-				if reflect.TypeOf(out) != reflect.TypeOf(res.Result) {
-					fail(1, fmt.Errorf("unexpected type returned from action: got %v, want %v", reflect.TypeOf(out), reflect.TypeOf(res.Result)), &req, mc)
-					continue
-				}
+				// if reflect.TypeOf(out) != reflect.TypeOf(res.Result) {
+				// 	fail(1, fmt.Errorf("unexpected type returned from action: got %v, want %v", reflect.TypeOf(out), reflect.TypeOf(res.Result)), &req, mc)
+				// 	continue
+				// }
 
-				res.Result = out
+				res.Result = &out
 
 				outMsg, err := json.Marshal(res)
 				if err != nil {

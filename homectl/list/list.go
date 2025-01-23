@@ -22,7 +22,7 @@ var Cmd = &cobra.Command{
 			return err
 		}
 		log.Info("result", "out", out, "type", reflect.TypeOf(out))
-		devices := out.(myhome.Devices)
+		devices := out.(*myhome.Devices)
 		if options.Flags.Json {
 			s, err := json.Marshal(devices)
 			if err != nil {

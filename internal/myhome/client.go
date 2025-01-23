@@ -41,9 +41,9 @@ func NewClientE(ctx context.Context, log logr.Logger, mc *mymqtt.Client) (Client
 	}, nil
 }
 
-func (c *client) Shutdown() {
-	if c.cancel != nil {
-		c.cancel()
+func (hc *client) Shutdown() {
+	if hc.cancel != nil {
+		hc.cancel()
 	}
 }
 
@@ -82,14 +82,27 @@ func (hc *client) CallE(method string, params any) (any, error) {
 	hc.to <- reqStr
 	resStr := <-hc.from
 	var res response
-	res.Result = m.NewResult()
-	// hc.log.Info("Received response. expecting", "type", m.OutType)
 	err = json.Unmarshal(resStr, &res)
 	if err != nil {
+		hc.log.Error(err, "Failed to unmarshal response", "payload", resStr)
 		return nil, err
 	}
 
 	if err := ValidateDialog(res.Dialog); err != nil {
+		hc.log.Error(err, "Invalid response dialog", "dialog", res.Dialog)
+		return nil, err
+	}
+
+	rs, err := json.Marshal(res.Result)
+	if err != nil {
+		hc.log.Error(err, "Failed to re-marshal response.result", "result", res.Result)
+		return nil, err
+	}
+	result := m.NewResult()
+	hc.log.Info("Result", "type", reflect.TypeOf(result))
+	err = json.Unmarshal(rs, &result)
+	if err != nil {
+		hc.log.Error(err, "Failed to re-unmarshal response.result", "payload", rs)
 		return nil, err
 	}
 
@@ -97,17 +110,5 @@ func (hc *client) CallE(method string, params any) (any, error) {
 		return nil, fmt.Errorf("%v (code:%v)", res.Error.Message, res.Error.Code)
 	}
 
-	return res.Result, nil
+	return result, nil
 }
-
-// func (hc *client) MethodE(method string) (Method, error) {
-// 	m, exists := Methods[method]
-// 	if !exists {
-// 		return Method{}, fmt.Errorf("unknown method %s", method)
-// 	}
-// 	return Method{
-// 		InType:  m.InType,
-// 		OutType: m.OutType,
-// 		ActionE: nil,
-// 	}, nil
-// }

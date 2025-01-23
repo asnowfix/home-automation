@@ -41,7 +41,7 @@ var signatures map[string]MethodSignature = map[string]MethodSignature{
 			return nil
 		},
 		NewResult: func() any {
-			return Devices{}
+			return &Devices{}
 		},
 	},
 	"group.list": {
@@ -49,7 +49,7 @@ var signatures map[string]MethodSignature = map[string]MethodSignature{
 			return nil
 		},
 		NewResult: func() any {
-			return Groups{}
+			return &Groups{}
 		},
 	},
 	"group.create": {

@@ -89,17 +89,17 @@ func (r *Registrar) Init(log logr.Logger) {
 }
 
 func (r *Registrar) RegisterMethodHandler(c string, v string, m types.MethodHandler) {
-	r.log.Info("Registering", "component", c, "verb", v)
+	// r.log.Info("Registering", "component", c, "verb", v)
 	if _, exists := r.methods[c]; !exists {
 		r.methods[c] = make(map[string]types.MethodHandler)
-		r.log.Info("Added", "component", c)
+		// r.log.Info("Added", "component", c)
 	}
 	if _, exists := r.methods[c][v]; !exists {
 		m.Method = fmt.Sprintf("%s.%s", c, v)
 		r.methods[c][v] = m
-		r.log.Info("Registered", "component", c, "verb", v, "http_method", m.HttpMethod)
+		// r.log.Info("Registered", "component", c, "verb", v, "http_method", m.HttpMethod)
 	}
-	r.log.Info("Registered methods", "num", len(r.methods))
+	// r.log.Info("Registered methods", "num", len(r.methods))
 }
 
 func (r *Registrar) RegisterDeviceCaller(ch types.Channel, dc types.DeviceCaller) {

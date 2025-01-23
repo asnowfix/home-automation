@@ -36,3 +36,9 @@ type Group struct {
 type Groups struct {
 	Groups []Group `json:"groups"`
 }
+
+type GroupDevice struct {
+	Manufacturer string `db:"manufacturer" json:"manufacturer"`
+	ID           string `db:"id" json:"id"`
+	Group        string `db:"group" json:"group"`
+}

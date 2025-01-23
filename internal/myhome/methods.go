@@ -1,39 +1,95 @@
 package myhome
 
-import (
-	"reflect"
-)
+import "fmt"
 
-type Method struct {
-	InType  reflect.Type
-	OutType reflect.Type
-	ActionE func(in any) (any, error)
+type MethodHandler func(in any) (any, error)
+
+type MethodSignature struct {
+	NewParams func() any
+	NewResult func() any
 }
 
-var Methods map[string]Method = map[string]Method{
-	"devices.list": Method{
-		InType:  reflect.TypeOf(nil),
-		OutType: reflect.TypeOf(Devices{}),
-		ActionE: nil,
+type Method struct {
+	Signature MethodSignature
+	ActionE   MethodHandler
+}
+
+func Methods(name string) (*Method, error) {
+	m, exists := methods[name]
+	if !exists {
+		return nil, fmt.Errorf("unknown or unregistered method %s", name)
+	}
+	return m, nil
+}
+
+func RegisterMethodHandler(name string, mh MethodHandler) {
+	s, exists := signatures[name]
+	if !exists {
+		panic(fmt.Errorf("unknown method %s", name))
+	}
+	methods[name] = &Method{
+		Signature: s,
+		ActionE:   mh,
+	}
+}
+
+var methods map[string]*Method = make(map[string]*Method)
+
+var signatures map[string]MethodSignature = map[string]MethodSignature{
+	"device.list": {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return Devices{}
+		},
 	},
-	"group.list": Method{
-		InType:  reflect.TypeOf(nil),
-		OutType: reflect.TypeOf(Groups{}),
-		ActionE: nil,
+	"group.list": {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return Groups{}
+		},
 	},
-	"group.create": Method{
-		InType:  reflect.TypeOf(""),
-		OutType: reflect.TypeOf(nil),
-		ActionE: nil,
+	"group.create": {
+		NewParams: func() any {
+			return ""
+		},
+		NewResult: func() any {
+			return nil
+		},
 	},
-	"group.delete": Method{
-		InType:  reflect.TypeOf(""),
-		OutType: reflect.TypeOf(nil),
-		ActionE: nil,
+	"group.delete": {
+		NewParams: func() any {
+			return ""
+		},
+		NewResult: func() any {
+			return nil
+		},
 	},
-	"group.getdevices": Method{
-		InType:  reflect.TypeOf(""),
-		OutType: reflect.TypeOf(Devices{}),
-		ActionE: nil,
+	"group.getdevices": {
+		NewParams: func() any {
+			return ""
+		},
+		NewResult: func() any {
+			return Devices{}
+		},
+	},
+	"group.adddevice": {
+		NewParams: func() any {
+			return GroupDevice{}
+		},
+		NewResult: func() any {
+			return nil
+		},
+	},
+	"group.removedevice": {
+		NewParams: func() any {
+			return GroupDevice{}
+		},
+		NewResult: func() any {
+			return nil
+		},
 	},
 }

@@ -23,7 +23,7 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		devices := out.(*[]*myhome.Device)
+		devices := out.(*[]myhome.Device)
 		if options.Flags.Json {
 			s, err := json.Marshal(devices)
 			if err != nil {

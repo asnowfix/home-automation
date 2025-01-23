@@ -17,12 +17,12 @@ var Cmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Init()
-		out, err := options.MyHomeClient.CallE("devices.list", nil)
+		out, err := options.MyHomeClient.CallE("device.list", nil)
 		if err != nil {
 			return err
 		}
 		log.Info("result", "out", out, "type", reflect.TypeOf(out))
-		devices := out.(*myhome.Devices)
+		devices := out.(myhome.Devices)
 		if options.Flags.Json {
 			s, err := json.Marshal(devices)
 			if err != nil {

@@ -18,7 +18,7 @@ type server struct {
 }
 
 type Server interface {
-	MethodE(method string) (Method, error)
+	MethodE(method string) (*Method, error)
 	Shutdown()
 }
 
@@ -62,8 +62,8 @@ func NewServerE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler
 				}
 
 				// re-do Unmarshalling with proper types in place, if needed
-				if method.InType != nil {
-					req.Params = reflect.New(method.InType).Elem()
+				if method.Signature.NewParams != nil {
+					req.Params = method.Signature.NewParams()
 					err = json.Unmarshal(inMsg, &req)
 					if err != nil {
 						log.Error(err, "Failed to unmarshal request from payload", "payload", string(inMsg))
@@ -72,8 +72,8 @@ func NewServerE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler
 					}
 				}
 
-				if method.OutType != nil {
-					res.Result = reflect.New(method.OutType).Elem()
+				if method.Signature.NewResult != nil {
+					res.Result = method.Signature.NewResult()
 				}
 
 				res.Dialog = Dialog{
@@ -89,8 +89,8 @@ func NewServerE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler
 					continue
 				}
 
-				if reflect.TypeOf(out) != method.OutType {
-					fail(1, fmt.Errorf("unexpected type returned from action: got %v, want %v", reflect.TypeOf(out), method.OutType), &req, mc)
+				if reflect.TypeOf(out) != reflect.TypeOf(res.Result) {
+					fail(1, fmt.Errorf("unexpected type returned from action: got %v, want %v", reflect.TypeOf(out), reflect.TypeOf(res.Result)), &req, mc)
 					continue
 				}
 
@@ -130,7 +130,7 @@ func fail(code int, err error, req *request, mc *mymqtt.Client) {
 	mc.Publish(ClientTopic(res.Dst), outMsg)
 }
 
-func (sp *server) MethodE(method string) (Method, error) {
+func (sp *server) MethodE(method string) (*Method, error) {
 	return sp.handler.MethodE(method)
 }
 

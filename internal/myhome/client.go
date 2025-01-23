@@ -11,6 +11,7 @@ import (
 )
 
 type client struct {
+	log    logr.Logger
 	to     chan<- []byte
 	from   <-chan []byte
 	cancel context.CancelFunc
@@ -32,6 +33,7 @@ func NewClientE(ctx context.Context, log logr.Logger, mc *mymqtt.Client) (Client
 	}
 
 	return &client{
+		log:    log,
 		from:   from,
 		to:     to,
 		cancel: cancel,
@@ -51,13 +53,13 @@ func (hc *client) CallE(method string, params any) (any, error) {
 		return nil, err
 	}
 
-	m, exists := Methods[method]
+	m, exists := signatures[method]
 	if !exists {
 		return Method{}, fmt.Errorf("unknown method %s", method)
 	}
 
-	if reflect.TypeOf(params) != m.InType {
-		return nil, fmt.Errorf("invalid parameters for method %s: got %v, want %v", method, reflect.TypeOf(params), m.InType)
+	if reflect.TypeOf(params) != reflect.TypeOf(m.NewParams()) {
+		return nil, fmt.Errorf("invalid parameters for method %s: got %v", method, reflect.TypeOf(params))
 	}
 	req := request{
 		Dialog: Dialog{
@@ -80,7 +82,8 @@ func (hc *client) CallE(method string, params any) (any, error) {
 	hc.to <- reqStr
 	resStr := <-hc.from
 	var res response
-	res.Result = reflect.New(m.OutType).Elem()
+	res.Result = m.NewResult()
+	// hc.log.Info("Received response. expecting", "type", m.OutType)
 	err = json.Unmarshal(resStr, &res)
 	if err != nil {
 		return nil, err

@@ -73,14 +73,16 @@ func (s *DeviceStorage) createTable() error {
 	return err
 }
 
+// Close closes the database connection & syncs it to persistent storage.
 func (s *DeviceStorage) Close() {
 	s.log.Info("Closing database connection")
 	s.db.Close()
 }
 
-func (s *DeviceStorage) UpsertDevice(device *myhome.Device) error {
+// UpsertDevice update a device into the database, creating it on the fly if necessary
+func (s *DeviceStorage) UpsertDevice(device myhome.Device) error {
 	var d Device = Device{
-		Device: *device,
+		Device: device,
 	}
 	out, err := json.Marshal(d.Info)
 	if err != nil {
@@ -122,66 +124,72 @@ func (s *DeviceStorage) UpsertDevice(device *myhome.Device) error {
 	return nil
 }
 
-func (s *DeviceStorage) GetDeviceByIdentifier(identifier string) (*myhome.Device, error) {
+// GetDeviceByIdentifier retrieves a device from the database by one of its identifiers (Id, MAC address, name, host)
+func (s *DeviceStorage) GetDeviceByIdentifier(identifier string) (myhome.Device, error) {
 	var device Device
 	query := `SELECT * FROM devices WHERE id = $1 OR mac = $1 OR name = $1 OR host = $1`
 	err := s.db.Get(&device, query, identifier)
 	if err != nil {
 		s.log.Error(err, "Failed to get device by identifier", "identifier", identifier)
-		return nil, err
+		return myhome.Device{}, err
 	}
 	s.log.Info("Got device by identifier", "identifier", identifier, "device", device)
-	return unmarshallDevice(&device)
+	return unmarshallDevice(device)
 }
 
-func (s *DeviceStorage) GetDeviceByManufacturerAndID(manufacturer, id string) (*myhome.Device, error) {
+// GetDeviceByManufacturerAndID retrieves a device from the database by its manufacturer and ID.
+func (s *DeviceStorage) GetDeviceByManufacturerAndID(manufacturer, id string) (myhome.Device, error) {
 	var device Device
 	query := `SELECT * FROM devices WHERE manufacturer = $1 AND id = $2`
 	err := s.db.Get(&device, query, manufacturer, id)
 	if err != nil {
 		s.log.Error(err, "Failed to get device by manufacturer and ID", "manufacturer", manufacturer, "id", id)
-		return nil, err
+		return myhome.Device{}, err
 	}
 	s.log.Info("Got device by manufacturer and ID", "manufacturer", manufacturer, "id", id, "device", device)
-	return unmarshallDevice(&device)
+	return unmarshallDevice(device)
 }
 
-func (s *DeviceStorage) GetDeviceByMAC(mac string) (*myhome.Device, error) {
+// GetDeviceByMAC retrieves a device from the database by its MAC address.
+func (s *DeviceStorage) GetDeviceByMAC(mac string) (myhome.Device, error) {
 	if len(mac) == 0 {
-		return nil, errors.New("empty mac")
+		return myhome.Device{}, errors.New("empty mac")
 	}
 	var device Device
 	query := `SELECT * FROM devices WHERE mac = $1`
 	err := s.db.Get(&device, query, mac)
 	if err != nil {
 		s.log.Error(err, "Failed to get device by MAC", "mac", mac)
-		return nil, err
+		return myhome.Device{}, err
 	}
-	return unmarshallDevice(&device)
+	return unmarshallDevice(device)
 }
 
-func (s *DeviceStorage) GetDeviceByName(name string) (*myhome.Device, error) {
+// GetDeviceByName retrieves a device from the database by its name.
+func (s *DeviceStorage) GetDeviceByName(name string) (myhome.Device, error) {
 	var device Device
 	query := `SELECT * FROM devices WHERE name = $1`
 	err := s.db.Get(&device, query, name)
 	if err != nil {
 		s.log.Error(err, "Failed to get device by name", "name", name)
-		return nil, err
+		return myhome.Device{}, err
 	}
-	return unmarshallDevice(&device)
+	return unmarshallDevice(device)
 }
 
-func (s *DeviceStorage) GetAllDevices() (*myhome.Devices, error) {
+// GetAllDevices retrieves all devices from the database.
+func (s *DeviceStorage) GetAllDevices() (myhome.Devices, error) {
 	devices := make([]Device, 0)
 	query := `SELECT * FROM devices`
 	err := s.db.Select(&devices, query)
 	if err != nil {
 		s.log.Error(err, "Failed to get all devices")
-		return nil, err
+		return myhome.Devices{}, err
 	}
 	return unmarshallDevices(devices)
 }
 
+// DeleteDevice deletes a device from the database by its MAC address.
 func (s *DeviceStorage) DeleteDevice(mac string) error {
 	query := `DELETE FROM devices WHERE mac = $1`
 	_, err := s.db.Exec(query, mac)
@@ -191,18 +199,20 @@ func (s *DeviceStorage) DeleteDevice(mac string) error {
 	return err
 }
 
-func (s *DeviceStorage) GetAllGroups() (*myhome.Groups, error) {
+// GetAllGroups retrieves all groups from the database.
+func (s *DeviceStorage) GetAllGroups() (myhome.Groups, error) {
 	s.log.Info("Retrieving all groups")
 	var groups myhome.Groups
 	query := "SELECT id, name, description FROM groups"
 	err := s.db.Select(&groups.Groups, query)
 	if err != nil {
 		s.log.Error(err, "Failed to retrieve groups")
-		return nil, err
+		return myhome.Groups{}, err
 	}
-	return &groups, nil
+	return groups, nil
 }
 
+// GetDevicesByGroupName retrieves the devices for a specific group.
 func (s *DeviceStorage) GetDevicesByGroupName(name string) ([]Device, error) {
 	log := s.log.WithValues("group", name)
 	log.Info("Retrieving devices for group")
@@ -227,15 +237,16 @@ func (s *DeviceStorage) GetDevicesByGroupName(name string) ([]Device, error) {
 	return devices, nil
 }
 
-func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (*myhome.Groups, error) {
+// GetDeviceGroups retrieves the groups for a specific device.
+func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (myhome.Groups, error) {
 	var groups myhome.Groups
 	query := "SELECT g.* FROM groups g INNER JOIN groupsMember gm ON g.id = gm.group_id WHERE gm.manufacturer = $1 AND gm.id = $2"
 	err := s.db.Select(&groups.Groups, query, manufacturer, id)
 	if err != nil {
 		s.log.Error(err, "Failed to retrieve groups for device", "manufacturer", manufacturer, "id", id)
-		return nil, err
+		return myhome.Groups{}, err
 	}
-	return &groups, nil
+	return groups, nil
 }
 
 // AddGroup adds a new group to the database.
@@ -262,45 +273,47 @@ func (s *DeviceStorage) RemoveGroup(name string) (any, error) {
 }
 
 // AddDeviceToGroup adds a device to a group.
-func (s *DeviceStorage) AddDeviceToGroup(manufacturer, id string, groupID int) error {
-	query := `INSERT INTO groupsMember (manufacturer, id, group_id) VALUES ($1, $2, $3)`
-	_, err := s.db.Exec(query, manufacturer, id, groupID)
-	return err
+func (s *DeviceStorage) AddDeviceToGroup(groupDevice myhome.GroupDevice) (any, error) {
+	query := `INSERT INTO groupsMember (manufacturer, id, group_id) VALUES (:manufacturer, :id, :group_id)`
+	_, err := s.db.NamedExec(query, groupDevice)
+	return nil, err
 }
 
 // RemoveDeviceFromGroup removes a device from a group.
-func (s *DeviceStorage) RemoveDeviceFromGroup(manufacturer, id string, groupID int) error {
+func (s *DeviceStorage) RemoveDeviceFromGroup(groupDevice myhome.GroupDevice) (any, error) {
 	query := `DELETE FROM groupsMember WHERE manufacturer = $1 AND id = $2 AND group_id = $3`
-	_, err := s.db.Exec(query, manufacturer, id, groupID)
-	return err
+	_, err := s.db.Exec(query, groupDevice.Manufacturer, groupDevice.ID, groupDevice.Group)
+	return nil, err
 }
 
-func unmarshallDevice(device *Device) (*myhome.Device, error) {
+// unmarshallDevice takes a Device struct and unmarshals the Info, Config, and Status fields
+func unmarshallDevice(device Device) (myhome.Device, error) {
 	err := json.Unmarshal([]byte(device.Info_), &device.Info)
 	if err != nil {
-		return nil, err
+		return myhome.Device{}, err
 	}
 	err = json.Unmarshal([]byte(device.Config_), &device.Config)
 	if err != nil {
-		return nil, err
+		return myhome.Device{}, err
 	}
 	err = json.Unmarshal([]byte(device.Status_), &device.Status)
 	if err != nil {
-		return nil, err
+		return myhome.Device{}, err
 	}
-	return &device.Device, nil
+	return device.Device, nil
 }
 
-func unmarshallDevices(devices []Device) (*myhome.Devices, error) {
+// unmarshallDevices takes a slice of Device structs and unmarshals the Info, Config, and Status fields
+func unmarshallDevices(devices []Device) (myhome.Devices, error) {
 	ds := myhome.Devices{
 		Devices: make([]myhome.Device, 0),
 	}
 	for _, device := range devices {
-		d, err := unmarshallDevice(&device)
+		d, err := unmarshallDevice(device)
 		if err != nil {
-			return nil, err
+			return myhome.Devices{}, err
 		}
-		ds.Devices = append(ds.Devices, *d)
+		ds.Devices = append(ds.Devices, d)
 	}
-	return &ds, nil
+	return ds, nil
 }

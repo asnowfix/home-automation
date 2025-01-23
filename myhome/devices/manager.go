@@ -11,7 +11,6 @@ import (
 	"pkg/shelly/kvs"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/types"
-	"reflect"
 	"sync"
 	"time"
 
@@ -33,7 +32,6 @@ type DeviceManager struct {
 	devicesById   map[string]*Device
 	devicesByMAC  map[string]*Device
 	devicesByHost map[string]*Device
-	method        map[string]myhome.Method
 }
 
 func NewDeviceManager(log logr.Logger, storage *storage.DeviceStorage, mqttClient *mymqtt.Client) *DeviceManager {
@@ -45,7 +43,6 @@ func NewDeviceManager(log logr.Logger, storage *storage.DeviceStorage, mqttClien
 		devicesByMAC:  make(map[string]*Device),
 		devicesByHost: make(map[string]*Device),
 		mqttClient:    mqttClient,
-		method:        make(map[string]myhome.Method),
 	}
 }
 
@@ -54,40 +51,26 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	dm.log.Info("Starting device manager")
 
-	dm.registerMethod("devices.list", myhome.Method{
-		ActionE: func(in any) (any, error) {
-			return dm.storage.GetAllDevices()
-		},
-		InType:  myhome.Methods["devices.list"].InType,
-		OutType: myhome.Methods["devices.list"].OutType,
+	myhome.RegisterMethodHandler("device.list", func(in any) (any, error) {
+		return dm.storage.GetAllDevices()
 	})
-	dm.registerMethod("group.list", myhome.Method{
-		ActionE: func(in any) (any, error) {
-			return dm.storage.GetAllGroups()
-		},
-		InType:  myhome.Methods["group.list"].InType,
-		OutType: myhome.Methods["group.list"].OutType,
+	myhome.RegisterMethodHandler("group.list", func(in any) (any, error) {
+		return dm.storage.GetAllGroups()
 	})
-	dm.registerMethod("group.create", myhome.Method{
-		ActionE: func(in any) (any, error) {
-			return dm.storage.AddGroup(in.(myhome.Group))
-		},
-		InType:  myhome.Methods["group.create"].InType,
-		OutType: myhome.Methods["group.create"].OutType,
+	myhome.RegisterMethodHandler("group.create", func(in any) (any, error) {
+		return dm.storage.AddGroup(in.(myhome.Group))
 	})
-	dm.registerMethod("group.delete", myhome.Method{
-		ActionE: func(in any) (any, error) {
-			return dm.storage.RemoveGroup(in.(string))
-		},
-		InType:  myhome.Methods["group.delete"].InType,
-		OutType: myhome.Methods["group.delete"].OutType,
+	myhome.RegisterMethodHandler("group.delete", func(in any) (any, error) {
+		return dm.storage.RemoveGroup(in.(string))
 	})
-	dm.registerMethod("group.getdevices", myhome.Method{
-		ActionE: func(in any) (any, error) {
-			return dm.storage.GetDevicesByGroupName(in.(string))
-		},
-		InType:  myhome.Methods["group.getdevices"].InType,
-		OutType: myhome.Methods["group.getdevices"].OutType,
+	myhome.RegisterMethodHandler("group.getdevices", func(in any) (any, error) {
+		return dm.storage.GetDevicesByGroupName(in.(string))
+	})
+	myhome.RegisterMethodHandler("group.adddevice", func(in any) (any, error) {
+		return dm.storage.AddDeviceToGroup(in.(myhome.GroupDevice))
+	})
+	myhome.RegisterMethodHandler("group.removedevice", func(in any) (any, error) {
+		return dm.storage.RemoveDeviceFromGroup(in.(myhome.GroupDevice))
 	})
 
 	ctx, dm.cancel = context.WithCancel(ctx)
@@ -111,7 +94,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 					device.Host = sd.Ipv4_.String()
 					device.Info = sd.Info
 				}
-				err = dm.storage.UpsertDevice(&device.Device)
+				err = dm.storage.UpsertDevice(device.Device)
 				if err != nil {
 					log.Error(err, "Failed to upsert device", "device", device)
 					continue
@@ -214,7 +197,7 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 				deviceId := event.Src
 				mhd, err := dm.storage.GetDeviceByManufacturerAndID("Shelly", deviceId)
 				var device Device = Device{
-					Device: *mhd,
+					Device: mhd,
 				}
 				if err != nil {
 					log.Info("Device not found, creating new one", "device_id", deviceId)
@@ -252,7 +235,7 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 					continue
 				}
 				dm.log.Info("Storing updated device", "device", device)
-				dm.storage.UpsertDevice(&device.Device)
+				dm.storage.UpsertDevice(device.Device)
 			}
 		}
 	}(ctx, log.WithName("DeviceManager#WatchMqtt"))
@@ -316,7 +299,7 @@ func (dm *DeviceManager) WatchZeroConf(ctx context.Context) error {
 // function type that knows how to mak a zerofon entry into a device
 type InitializeDeviceFromZeroConfEntry func(log logr.Logger, entry *zeroconf.ServiceEntry) (*Device, error)
 
-type IdentifyDeviceFromZeroConfEntry func(log logr.Logger, entry *zeroconf.ServiceEntry) (*myhome.DeviceIdentifier, error)
+type IdentifyDeviceFromZeroConfEntry func(log logr.Logger, entry *zeroconf.ServiceEntry) (myhome.DeviceIdentifier, error)
 
 func (dm *DeviceManager) DiscoverDevices(service string, interval time.Duration, identify IdentifyDeviceFromZeroConfEntry, init InitializeDeviceFromZeroConfEntry) {
 	dm.log.Info("Starting device discovery", "service", service, "interval", interval)
@@ -386,7 +369,7 @@ func (dm *DeviceManager) updateDevices(service string, timeout time.Duration, id
 		}
 
 		dm.log.Info("Adding", "device", device)
-		err = dm.storage.UpsertDevice(&device.Device)
+		err = dm.storage.UpsertDevice(device.Device)
 		if err != nil {
 			dm.log.Error(err, "Failed to add device", "device", device)
 		}
@@ -421,7 +404,7 @@ func (dm *DeviceManager) Load(id string) (*Device, error) {
 	if err != nil {
 		return nil, err
 	}
-	return dm.Save(&Device{Device: *d})
+	return dm.Save(&Device{Device: d})
 }
 
 func (dm *DeviceManager) Save(d *Device) (*Device, error) {
@@ -447,37 +430,33 @@ func (dm *DeviceManager) Save(d *Device) (*Device, error) {
 		d.impl = sd
 	}
 
-	return d, dm.storage.UpsertDevice(&d.Device)
+	return d, dm.storage.UpsertDevice(d.Device)
 }
 
 func (dm *DeviceManager) CallE(method string, params any) (any, error) {
 	dm.log.Info("Calling method", "method", method, "params", params)
-	mh, exists := dm.method[method]
-	if !exists {
-		return nil, fmt.Errorf("unknown method %s", method)
-	}
-	if mh.InType != reflect.TypeOf(params) {
-		return nil, fmt.Errorf("invalid parameters for method %s: got %v, want %v", method, reflect.TypeOf(params), mh.InType)
-	}
 	var err error
+	mh, err := myhome.Methods(method)
+	if err != nil {
+		return nil, err
+	}
+	// if mh.InType != reflect.TypeOf(params) {
+	// 	return nil, fmt.Errorf("invalid parameters for method %s: got %v, want %v", method, reflect.TypeOf(params), mh.InType)
+	// }
 	result, err := mh.ActionE(params)
 	if err != nil {
 		return nil, err
 	}
-	if mh.OutType != reflect.TypeOf(result) {
-		return nil, fmt.Errorf("invalid type for method %s: got %v, want %v", method, reflect.TypeOf(result), mh.OutType)
-	}
+	// if mh.OutType != reflect.TypeOf(result) {
+	// 	return nil, fmt.Errorf("invalid type for method %s: got %v, want %v", method, reflect.TypeOf(result), mh.OutType)
+	// }
 	return result, nil
 }
 
-func (dm *DeviceManager) registerMethod(method string, handler myhome.Method) {
-	dm.method[method] = handler
-}
-
-func (dm *DeviceManager) MethodE(method string) (myhome.Method, error) {
-	mh, exists := dm.method[method]
-	if !exists {
-		return myhome.Method{}, fmt.Errorf("unknown method %s", method)
+func (dm *DeviceManager) MethodE(method string) (*myhome.Method, error) {
+	mh, err := myhome.Methods(method)
+	if err != nil {
+		return nil, err
 	}
 	return mh, nil
 }

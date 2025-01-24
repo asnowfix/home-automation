@@ -68,6 +68,24 @@ type ConfigurationRequest struct {
 	Configuration Config `json:"config"` // Configuration that the method takes
 }
 
+type InputConfig struct {
+	Id                       int     `json:"id"`                                   // Id of the Switch component instance
+	Name                     *string `json:"name"`                                 // Name of the switch instance
+	InMode                   string  `json:"in_mode"`                              // Mode of the associated input
+	InitialState             string  `json:"initial_state"`                        // Output state to set on power_on
+	AutoOn                   bool    `json:"auto_on"`                              // True if "Automatic ON" function is enabled
+	AutoOnDelay              int     `json:"auto_on_delay"`                        // Seconds to pass until switched back on
+	AutoOff                  bool    `json:"auto_off"`                             // True if "Automatic OFF" function is enabled
+	AutoOffDelay             int     `json:"auto_off_delay"`                       // Seconds to pass until switched back off
+	AutorecoverVoltageErrors bool    `json:"autorecover_voltage_errors,omitempty"` // Restore state after voltage error (shown if applicable)
+	InputId                  int     `json:"input_id,omitempty"`                   // Id of the Input component which controls the Switch. Applicable only to Pro1 and Pro1PM devices. Valid values: 0, 1. (shown if applicable)
+	PowerLimit               int     `json:"power_limit,omitempty"`                // Limit (in Watts) for overpower condition (shown if applicable)
+	VoltageLimit             int     `json:"voltage_limit,omitempty"`              // Limit (in Volts) for overvoltage condition (shown if applicable)
+	UndervoltageLimit        int     `json:"undervoltage_limit,omitempty"`         // Limit (in Volts) for undervoltage condition (shown if applicable)
+	CurrentLimit             int     `json:"current_limit,omitempty"`              // Limit (in Amperes) for overcurrent condition (shown if applicable)
+	Reverse                  bool    `json:"reverse,omitempty"`                    // Reverse measurement direction of active power
+}
+
 type InputStatus struct {
 	Id    int  `json:"id"`    // Id of the Switch component instance
 	State bool `json:"state"` // Current state of this input

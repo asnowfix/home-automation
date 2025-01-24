@@ -83,20 +83,23 @@ func (d *Device) UpdateFromMqttEvent(event *mqtt.Event) error {
 	// - '{"src":"shelly1minig3-54320464a1d0","dst":"shelly1minig3-54320464a1d0/events","method":"NotifyStatus","params":{"ts":1736605194.11,"sys":{"cfg_rev":35}}}'
 	if event.Method == "NotifyStatus" {
 		if event.Params != nil {
-			// FIXME: Convoluted way to merge status update event in the current status
-			out, err := json.Marshal(d.Status)
-			if err != nil {
-				log.Error(err, "failed to JSON-marshal current status")
-				return err
-			}
+			var err error
 			status := make(map[string]interface{})
-			err = json.Unmarshal(out, &status)
-			if err != nil {
-				log.Error(err, "failed to unmarshal current status")
-				return err
+			if d.Status != nil {
+				// FIXME: Convoluted way to merge status update map event in the current status
+				out, err := json.Marshal(d.Status)
+				if err != nil {
+					log.Error(err, "failed to JSON-marshal current status")
+					return err
+				}
+				err = json.Unmarshal(out, &status)
+				if err != nil {
+					log.Error(err, "failed to unmarshal current status")
+					return err
+				}
 			}
 			maps.Copy(status, *event.Params)
-			out, err = json.Marshal(status)
+			out, err := json.Marshal(status)
 			if err != nil {
 				log.Error(err, "failed to JSON-(re)marshal updated status")
 				return err

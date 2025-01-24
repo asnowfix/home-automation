@@ -222,7 +222,7 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 							if ok {
 								device.Config = config
 							} else {
-								dm.log.Info("shelly config is not valid JSON", "out", out)
+								dm.log.Info("discarding incomplete or unknown shelly config", "out", out)
 							}
 						}
 					}

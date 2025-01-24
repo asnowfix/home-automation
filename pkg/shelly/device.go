@@ -72,22 +72,22 @@ type DeviceInfo struct {
 }
 
 type Config struct {
-	BLE    *any `json:"ble"`
-	BtHome *any `json:"bthome"`
-	Cloud  *any `json:"cloud"`
-	// Input0    *sswitch.InputConfig        `json:"input:0"`
-	// Input1    *sswitch.InputConfig        `json:"input:1"`
-	// Input2    *sswitch.InputConfig        `json:"input:2"`
-	// Input3    *sswitch.InputConfiguration `json:"input:3"`
-	Knx       *any            `json:"knx"`
-	Mqtt      *mqtt.Config    `json:"mqtt"`
-	Switch0   *sswitch.Config `json:"switch:0"`
-	Switch1   *sswitch.Config `json:"switch:1"`
-	Switch2   *sswitch.Config `json:"switch:2"`
-	Switch3   *sswitch.Config `json:"switch:3"`
-	System    *system.Config  `json:"system"`
-	Wifi      *wifi.Config    `json:"wifi"`
-	WebSocket *any            `json:"ws"`
+	BLE       *any                 `json:"ble,omitempty"`
+	BtHome    *any                 `json:"bthome,omitempty"`
+	Cloud     *any                 `json:"cloud,omitempty"`
+	Input0    *sswitch.InputConfig `json:"input:0,omitempty"`
+	Input1    *sswitch.InputConfig `json:"input:1,omitempty"`
+	Input2    *sswitch.InputConfig `json:"input:2,omitempty"`
+	Input3    *sswitch.InputConfig `json:"input:3,omitempty"`
+	Knx       *any                 `json:"knx,omitempty"`
+	Mqtt      *mqtt.Config         `json:"mqtt,omitempty"`
+	Switch0   *sswitch.Config      `json:"switch:0,omitempty"`
+	Switch1   *sswitch.Config      `json:"switch:1,omitempty"`
+	Switch2   *sswitch.Config      `json:"switch:2,omitempty"`
+	Switch3   *sswitch.Config      `json:"switch:3,omitempty"`
+	System    *system.Config       `json:"system,omitempty"`
+	Wifi      *wifi.Config         `json:"wifi,omitempty"`
+	WebSocket *any                 `json:"ws,omitempty"`
 }
 
 type Status struct {

@@ -52,7 +52,17 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	dm.log.Info("Starting device manager")
 
 	myhome.RegisterMethodHandler("device.list", func(in any) (any, error) {
-		return dm.storage.GetAllDevices()
+		devices := myhome.Devices{
+			Devices: make([]myhome.DeviceSummary, 0),
+		}
+		ds, err := dm.storage.GetAllDevices()
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range ds {
+			devices.Devices = append(devices.Devices, d.DeviceSummary)
+		}
+		return &devices, nil
 	})
 	myhome.RegisterMethodHandler("group.list", func(in any) (any, error) {
 		return dm.storage.GetAllGroups()
@@ -87,7 +97,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 					// TODO: select HTTP when MQTT is not configured
 					err := sd.Init(dm.mqttClient, types.ChannelMqtt)
 					if err != nil {
-						log.Error(err, "Failed to init shelly device", "device_id", device.ID)
+						log.Error(err, "Failed to init shelly device", "device_id", device.Id)
 						continue
 					}
 					device.MAC = sd.MacAddress
@@ -100,7 +110,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 					continue
 				}
 
-				dm.devicesById[device.ID] = device
+				dm.devicesById[device.Id] = device
 			}
 		}
 	}(ctx, log.WithName("DeviceManager#NewDevices"), dm.update)
@@ -110,11 +120,11 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, device := range devices.Devices {
+	for _, device := range devices {
 		var d Device = Device{
 			Device: device,
 		}
-		dm.update <- d.WithImpl(shelly.NewDeviceFromId(dm.log.WithName(device.ID), device.ID))
+		dm.update <- d.WithImpl(shelly.NewDeviceFromId(dm.log.WithName(device.Id), device.Id))
 	}
 
 	// Loop on MQTT event devices discovery
@@ -356,7 +366,7 @@ func (dm *DeviceManager) updateDevices(service string, timeout time.Duration, id
 			continue
 		}
 
-		_, err = dm.storage.GetDeviceByManufacturerAndID(identity.Manufacturer, identity.ID)
+		_, err = dm.storage.GetDeviceByManufacturerAndID(identity.Manufacturer, identity.Id)
 		if err == nil {
 			// Device already known
 			continue
@@ -395,7 +405,7 @@ func (dm *DeviceManager) GetDeviceByIdentifier(identifier string) (*Device, erro
 	if err != nil {
 		return nil, err
 	}
-	return dm.Load(device.ID)
+	return dm.Load(device.Id)
 }
 
 func (dm *DeviceManager) Load(id string) (*Device, error) {
@@ -408,16 +418,16 @@ func (dm *DeviceManager) Load(id string) (*Device, error) {
 }
 
 func (dm *DeviceManager) Save(d *Device) (*Device, error) {
-	dm.devicesById[d.ID] = d
+	dm.devicesById[d.Id] = d
 	dm.devicesByMAC[d.MAC.String()] = d
 	dm.devicesByHost[d.Host] = d
 	if d.Manufacturer == Shelly {
 		sd, ok := d.impl.(*shelly.Device)
 		if !ok {
-			sd = shelly.NewDeviceFromId(dm.log, d.ID)
+			sd = shelly.NewDeviceFromId(dm.log, d.Id)
 			sd.Init(dm.mqttClient, types.ChannelMqtt)
 		}
-		groups, err := dm.storage.GetDeviceGroups(d.Manufacturer, d.ID)
+		groups, err := dm.storage.GetDeviceGroups(d.Manufacturer, d.Id)
 		if err != nil {
 			return nil, err
 		}

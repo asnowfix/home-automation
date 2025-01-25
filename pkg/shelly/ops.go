@@ -62,7 +62,6 @@ func (r *Registrar) Init(log logr.Logger) {
 	// Shelly.CheckForUpdate
 	// Shelly.DetectLocation
 	// Shelly.ListTimezones
-	// Shelly.GetComponents
 	r.RegisterMethodHandler("Shelly", "GetComponents", types.MethodHandler{
 		// InputType:  reflect.TypeOf(ComponentsRequest{}),
 		Allocate:   func() any { return new(ComponentsResponse) },

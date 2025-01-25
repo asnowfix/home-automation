@@ -14,6 +14,10 @@ type empty struct{}
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
+	r.RegisterMethodHandler("System", "SetConfig", types.MethodHandler{
+		// InputType:  reflect.TypeOf(Config{}),
+		Allocate: func() any { return nil },
+	})
 	r.RegisterMethodHandler("System", "GetConfig", types.MethodHandler{
 		Allocate: func() any { return new(Config) },
 	})
@@ -21,5 +25,4 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
-	// System.SetConfig
 }

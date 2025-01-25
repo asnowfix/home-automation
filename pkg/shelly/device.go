@@ -91,22 +91,22 @@ type Config struct {
 }
 
 type Status struct {
-	BLE       *any                 `json:"ble"`
-	BtHome    *any                 `json:"bthome"`
-	Cloud     *any                 `json:"cloud"`
-	Input0    *sswitch.InputStatus `json:"input:0"`
-	Input1    *sswitch.InputStatus `json:"input:1"`
-	Input2    *sswitch.InputStatus `json:"input:2"`
-	Input3    *sswitch.InputStatus `json:"input:3"`
-	Knx       *any                 `json:"knx"`
-	Mqtt      *mqtt.Status         `json:"mqtt"`
-	Switch0   *sswitch.Status      `json:"switch:0"`
-	Switch1   *sswitch.Status      `json:"switch:1"`
-	Switch2   *sswitch.Status      `json:"switch:2"`
-	Switch3   *sswitch.Status      `json:"switch:3"`
-	System    *system.Status       `json:"system"`
-	Wifi      *wifi.Status         `json:"wifi"`
-	WebSocket *any                 `json:"ws"`
+	BLE       *any                 `json:"ble,omitempty"`
+	BtHome    *any                 `json:"bthome,omitempty"`
+	Cloud     *any                 `json:"cloud,omitempty"`
+	Input0    *sswitch.InputStatus `json:"input:0,omitempty"`
+	Input1    *sswitch.InputStatus `json:"input:1,omitempty"`
+	Input2    *sswitch.InputStatus `json:"input:2,omitempty"`
+	Input3    *sswitch.InputStatus `json:"input:3,omitempty"`
+	Knx       *any                 `json:"knx,omitempty"`
+	Mqtt      *mqtt.Status         `json:"mqtt,omitempty"`
+	Switch0   *sswitch.Status      `json:"switch:0,omitempty"`
+	Switch1   *sswitch.Status      `json:"switch:1,omitempty"`
+	Switch2   *sswitch.Status      `json:"switch:2,omitempty"`
+	Switch3   *sswitch.Status      `json:"switch:3,omitempty"`
+	System    *system.Status       `json:"system,omitempty"`
+	Wifi      *wifi.Status         `json:"wifi,omitempty"`
+	WebSocket *any                 `json:"ws,omitempty"`
 }
 
 // From https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellygetcomponents

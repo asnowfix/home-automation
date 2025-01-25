@@ -64,6 +64,9 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		return &devices, nil
 	})
+	myhome.RegisterMethodHandler("device.show", func(in any) (any, error) {
+		return dm.storage.GetDeviceByIdentifier(in.(string))
+	})
 	myhome.RegisterMethodHandler("group.list", func(in any) (any, error) {
 		return dm.storage.GetAllGroups()
 	})

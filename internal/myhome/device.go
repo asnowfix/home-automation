@@ -9,14 +9,18 @@ type DeviceIdentifier struct {
 	// The manufacturer of the device
 	Manufacturer string `db:"manufacturer" json:"manufacturer"`
 	// The unique identifier of the device, defined by the manufacturer
-	ID string `db:"id" json:"id"`
+	Id string `db:"id" json:"id"`
+}
+
+type DeviceSummary struct {
+	DeviceIdentifier
+	MAC  net.HardwareAddr `db:"mac" json:"mac,omitempty"` // The Ethernet hardware address of the device, globally unique & assigned by the manufacturer
+	Host string           `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
+	Name string           `db:"name" json:"name"`         // The local unique name of the device, defined by the user
 }
 
 type Device struct {
-	DeviceIdentifier
-	MAC            net.HardwareAddr   `db:"mac" json:"mac,omitempty"` // The Ethernet hardware address of the device, globally unique & assigned by the manufacturer
-	Host           string             `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
-	Name           string             `db:"name" json:"name"`         // The local unique name of the device, defined by the user
+	DeviceSummary
 	ConfigRevision int                `db:"config_revision" json:"config_revision"`
 	Info           *shelly.DeviceInfo `db:"-" json:"info"`
 	Config         *shelly.Config     `db:"-" json:"config"`
@@ -24,7 +28,7 @@ type Device struct {
 }
 
 type Devices struct {
-	Devices []Device `json:"devices"`
+	Devices []DeviceSummary `json:"devices"`
 }
 
 type Group struct {

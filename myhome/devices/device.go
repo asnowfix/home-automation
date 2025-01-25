@@ -30,15 +30,10 @@ type Group struct {
 }
 
 func NewDevice(manufacturer, id string) *Device {
-	return &Device{
-		Device: myhome.Device{
-			DeviceIdentifier: myhome.DeviceIdentifier{
-				Manufacturer: manufacturer,
-				ID:           id,
-			},
-		},
-		impl: nil,
-	}
+	d := &Device{}
+	d.Manufacturer = manufacturer
+	d.Id = id
+	return d
 }
 
 func (d *Device) WithMAC(mac net.HardwareAddr) *Device {

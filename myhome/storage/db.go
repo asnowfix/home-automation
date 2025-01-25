@@ -88,21 +88,21 @@ func (s *DeviceStorage) UpsertDevice(device myhome.Device) error {
 	}
 	out, err := json.Marshal(d.Info)
 	if err != nil {
-		s.log.Error(err, "Failed to marshal device info", "device_id", device.ID)
+		s.log.Error(err, "Failed to marshal device info", "device_id", device.Id)
 		return err
 	}
 	d.Info_ = string(out)
 
 	out, err = json.Marshal(d.Config)
 	if err != nil {
-		s.log.Error(err, "Failed to marshal device config", "device_id", device.ID)
+		s.log.Error(err, "Failed to marshal device config", "device_id", device.Id)
 		return err
 	}
 	d.Config_ = string(out)
 
 	out, err = json.Marshal(d.Status)
 	if err != nil {
-		s.log.Error(err, "Failed to marshal device status", "device_id", device.ID)
+		s.log.Error(err, "Failed to marshal device status", "device_id", device.Id)
 		return err
 	}
 	d.Status_ = string(out)
@@ -180,13 +180,13 @@ func (s *DeviceStorage) GetDeviceByName(name string) (myhome.Device, error) {
 }
 
 // GetAllDevices retrieves all devices from the database.
-func (s *DeviceStorage) GetAllDevices() (myhome.Devices, error) {
+func (s *DeviceStorage) GetAllDevices() ([]myhome.Device, error) {
 	devices := make([]Device, 0)
 	query := `SELECT * FROM devices`
 	err := s.db.Select(&devices, query)
 	if err != nil {
 		s.log.Error(err, "Failed to get all devices")
-		return myhome.Devices{}, err
+		return nil, err
 	}
 	return unmarshallDevices(devices)
 }
@@ -306,16 +306,14 @@ func unmarshallDevice(device Device) (myhome.Device, error) {
 }
 
 // unmarshallDevices takes a slice of Device structs and unmarshals the Info, Config, and Status fields
-func unmarshallDevices(devices []Device) (myhome.Devices, error) {
-	ds := myhome.Devices{
-		Devices: make([]myhome.Device, 0),
-	}
+func unmarshallDevices(devices []Device) ([]myhome.Device, error) {
+	mhd := make([]myhome.Device, 0)
 	for _, device := range devices {
 		d, err := unmarshallDevice(device)
 		if err != nil {
-			return myhome.Devices{}, err
+			return mhd, err
 		}
-		ds.Devices = append(ds.Devices, d)
+		mhd = append(mhd, d)
 	}
-	return ds, nil
+	return mhd, nil
 }

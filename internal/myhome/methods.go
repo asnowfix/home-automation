@@ -44,6 +44,14 @@ var signatures map[string]MethodSignature = map[string]MethodSignature{
 			return &Devices{}
 		},
 	},
+	"device.show": {
+		NewParams: func() any {
+			return ""
+		},
+		NewResult: func() any {
+			return &Device{}
+		},
+	},
 	"group.list": {
 		NewParams: func() any {
 			return nil

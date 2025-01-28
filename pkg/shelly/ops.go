@@ -41,19 +41,17 @@ type Registrar struct {
 	channels []types.DeviceCaller
 }
 
-var listMethodsHandler = types.MethodHandler{
-	Method:     "Shelly.ListMethods",
-	Allocate:   func() any { return new(MethodsResponse) },
-	HttpMethod: http.MethodGet,
-}
-
 func (r *Registrar) Init(log logr.Logger) {
 	r.log = log
 	r.channel = types.ChannelHttp
 	r.channels = make([]types.DeviceCaller, 3 /*sizeof(Channel)*/)
 
 	r.methods = make(map[string]map[string]types.MethodHandler)
-	r.RegisterMethodHandler("Shelly", "ListMethods", listMethodsHandler)
+	r.RegisterMethodHandler("Shelly", "ListMethods", types.MethodHandler{
+		Method:     "Shelly.ListMethods",
+		Allocate:   func() any { return new(MethodsResponse) },
+		HttpMethod: http.MethodGet,
+	})
 	// Shelly.PutTLSClientKey
 	// Shelly.PutTLSClientCert
 	// Shelly.PutUserCA
@@ -87,6 +85,10 @@ func (r *Registrar) Init(log logr.Logger) {
 	})
 }
 
+func (r *Registrar) MethodHandler(c string, v string) types.MethodHandler {
+	return r.methods[c][v]
+}
+
 func (r *Registrar) RegisterMethodHandler(c string, v string, m types.MethodHandler) {
 	// r.log.Info("Registering", "component", c, "verb", v)
 	if _, exists := r.methods[c]; !exists {
@@ -113,6 +115,6 @@ func (r *Registrar) RegisterDeviceCaller(ch types.Channel, dc types.DeviceCaller
 func (r *Registrar) CallE(d types.Device, ch types.Channel, mh types.MethodHandler, params any) (any, error) {
 	out := mh.Allocate()
 	// r.log.Info("Calling", "channel", ch, "method", mh.Method, "http_method", mh.HttpMethod, "params", params, "out_type", reflect.TypeOf(out))
-	r.log.Info("Calling", "channel", ch, "method_handler", mh, "params", params, "out_type", reflect.TypeOf(out))
+	r.log.Info("Calling", "channel", ch, "params", params, "out_type", reflect.TypeOf(out))
 	return r.channels[ch](d, mh, out, params)
 }

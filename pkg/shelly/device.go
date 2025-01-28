@@ -13,6 +13,7 @@ import (
 	"pkg/shelly/types"
 	"reflect"
 	"regexp"
+	"schedule"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -81,6 +82,7 @@ type Config struct {
 	Input3    *sswitch.InputConfig `json:"input:3,omitempty"`
 	Knx       *any                 `json:"knx,omitempty"`
 	Mqtt      *mqtt.Config         `json:"mqtt,omitempty"`
+	Schedule  *schedule.Scheduled  `json:"schedule,omitempty"`
 	Switch0   *sswitch.Config      `json:"switch:0,omitempty"`
 	Switch1   *sswitch.Config      `json:"switch:1,omitempty"`
 	Switch2   *sswitch.Config      `json:"switch:2,omitempty"`
@@ -118,10 +120,10 @@ type ComponentsRequest struct {
 }
 
 type ComponentsResponse struct {
-	Components     []Component `json:"components"`
-	ConfigRevision int         `json:"cfg_revision"` // The current config revision. See SystemGetConfig#ConfigRevision
-	Offset         int         `json:"offset"`       // The index of the first component in the list.
-	Total          int         `json:"total"`        // Total number of components with all filters applied.
+	Components     *[]Component `json:"components"`
+	ConfigRevision int          `json:"cfg_revision"` // The current config revision. See SystemGetConfig#ConfigRevision
+	Offset         int          `json:"offset"`       // The index of the first component in the list.
+	Total          int          `json:"total"`        // Total number of components with all filters applied.
 }
 
 type Component struct {
@@ -140,19 +142,23 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func (d *Device) Call(ch types.Channel, component string, verb string, params any, errv any) any {
+func (d *Device) Call(ch types.Channel, component string, verb string, params any) any {
 	data, err := d.CallE(ch, component, verb, params)
 	if err != nil {
-		return errv
+		panic(err)
 	}
 	return data
 }
 
 func (d *Device) MethodHandlerE(c string, v string) (types.MethodHandler, error) {
 	var mh types.MethodHandler
+	var exists bool
 
-	if c == Shelly && v == "ListMethods" {
-		mh = listMethodsHandler
+	if c == Shelly {
+		mh, exists = registrar.methods[Shelly][v]
+		if !exists {
+			return types.MethodNotFound, fmt.Errorf("did not find any registrar handler for method: %v.%v", c, v)
+		}
 	} else {
 		found := false
 		if comp, exists := d.ComponentsMethods[c]; exists {
@@ -161,7 +167,7 @@ func (d *Device) MethodHandlerE(c string, v string) (types.MethodHandler, error)
 			}
 		}
 		if !found {
-			return types.MethodNotFound, fmt.Errorf("did not find any handler for method: %v.%v", c, v)
+			return types.MethodNotFound, fmt.Errorf("did not find any device handler for method: %v.%v", c, v)
 		}
 	}
 	return mh, nil
@@ -212,7 +218,18 @@ func NewDeviceFromId(log logr.Logger, id string) *Device {
 }
 
 func (d *Device) Init(mc *mymqtt.Client, via types.Channel) error {
+	d.log.Info("Shelly.Init", "id", d.Id_, "host", d.Host, "via", via)
 	var err error
+	if d.Id_ == "" {
+		di, err := GetRegistrar().CallE(d, types.ChannelHttp, GetRegistrar().MethodHandler(Shelly, "GetDeviceInfo"), map[string]interface{}{"ident": true})
+		if err != nil {
+			return err
+		}
+		d.Info = di.(*DeviceInfo)
+		d.log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
+		d.Id_ = d.Info.Id
+		d.MacAddress = d.Info.MacAddress
+	}
 
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -226,6 +243,24 @@ func (d *Device) Init(mc *mymqtt.Client, via types.Channel) error {
 		return err
 	}
 
+	if d.Info == nil {
+		di, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "GetDeviceInfo"), map[string]interface{}{"ident": true})
+		if err != nil {
+			return err
+		}
+		d.Info = di.(*DeviceInfo)
+		d.log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
+		d.Id_ = d.Info.Id
+		d.MacAddress = d.Info.MacAddress
+	}
+
+	out, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "GetComponents"), &ComponentsRequest{})
+	if err != nil {
+		return err
+	}
+	d.Components = out.(*ComponentsResponse).Components
+	d.log.Info("Shelly.GetComponents", "components", *d.Components)
+
 	d.to = make(chan []byte, 1 /*qlen*/)
 	toDevice := fmt.Sprintf("%s/rpc", d.Id_)
 	go func() {
@@ -235,7 +270,7 @@ func (d *Device) Init(mc *mymqtt.Client, via types.Channel) error {
 		}
 	}()
 
-	m, err := GetRegistrar().CallE(d, via, listMethodsHandler, nil)
+	m, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "ListMethods"), nil)
 	if err != nil {
 		return err
 	}
@@ -262,23 +297,6 @@ func (d *Device) Init(mc *mymqtt.Client, via types.Channel) error {
 		}
 	}
 
-	// Get device components
-	out, err := d.CallE(via, "Shelly", "GetComponents", &ComponentsRequest{})
-	if err != nil {
-		return err
-	}
-	d.Components = &out.(*ComponentsResponse).Components
-	d.log.Info("Shelly.GetComponents", "components", *d.Components)
-
-	di, err := d.CallE(via, "Shelly", "GetDeviceInfo", map[string]interface{}{"ident": true})
-	if err != nil {
-		return err
-	}
-	d.Info = di.(*DeviceInfo)
-	d.log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
-	d.Id_ = d.Info.Id
-	d.MacAddress = d.Info.MacAddress
-
 	return nil
 }
 
@@ -300,15 +318,18 @@ func Foreach(log logr.Logger, mc *mymqtt.Client, names []string, via types.Chann
 	if len(names) > 0 {
 		for _, name := range names {
 			log.Info("Looking for Shelly device", "name", name)
-			var device *Device
-			var ip net.IP
-			if ip = net.ParseIP(name); ip != nil {
-				device = NewDeviceFromIp(log, ip)
+			var via types.Channel
+			var sd *Device
+			ip := net.ParseIP(name)
+			if ip != nil {
+				sd = NewDeviceFromIp(log, ip)
+				via = types.ChannelHttp
 			} else {
-				device = NewDeviceFromId(log, name)
+				sd = NewDeviceFromId(log, name)
+				via = types.ChannelMqtt
 			}
-			device.Init(mc, via)
-			out, err := do(log, via, device, args)
+			sd.Init(mc, via)
+			out, err := do(log, via, sd, args)
 			if err != nil {
 				log.Error(err, "Operation failed", "device", name)
 				continue

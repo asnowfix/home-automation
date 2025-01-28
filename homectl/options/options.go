@@ -6,6 +6,7 @@ import (
 )
 
 var Flags struct {
+	ViaHttp    bool
 	Json       bool
 	Devices    string
 	MqttBroker string

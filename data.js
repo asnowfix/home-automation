@@ -321,3 +321,127 @@ get_component_response = {
   },
   "src": "shellyplus1-b8d61a85a970"
 }
+
+device_1 =     {
+  "manufacturer": "Shelly",
+  "id": "shellyplus1-08b61fd9d708",
+  "mac": "08B61FD9D708",
+  "host": "<nil>",
+  "name": "",
+  "config_revision": 0,
+  "info": {
+    "model": "SNSW-001X16EU",
+    "mac": "08B61FD9D708",
+    "app": "Plus1",
+    "ver": "1.0.8",
+    "gen": 2,
+    "id": "shellyplus1-08b61fd9d708",
+    "fw_id": "20231106-160328/1.0.8-gdba0ee3",
+    "auth_en": false,
+    "discoverable": false,
+    "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2NzExNjE1NjAsIm1hYyI6IjA4QjYxRkQ5RDcwOCIsIm0iOiJTTlNXLTAwMVgxNkVVIiwiYiI6IjIyMzktQnJvYWR3ZWxsIiwiZnAiOiIwNzYzZGRhMiJ9.zWOaAb9aD8_1A4nY6vwiyvNz0NlJzVlURsQxJB2FMLY1aCVFSboqhdqgls_M-PxBfYGY20mRpz2JOP65M7Mo02IHxTbB5Fhk3wSJn0Y3fWTYz_h5GEZabziWcjZUazso",
+    "batch": "2239-Broadwell",
+    "fw_sbits": "04"
+  },
+  "config": {
+    "ble": {
+      "enable": true,
+      "observer": {
+        "enable": false
+      },
+      "rpc": {
+        "enable": true
+      }
+    },
+    "bthome": null,
+    "cloud": {
+      "enable": true,
+      "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+    },
+    "knx": null,
+    "mqtt": {
+      "enable": true,
+      "server": "192.168.1.2:1883",
+      "client_id": "shellyplus1-08b61fd9d708",
+      "topic_prefix": "shellyplus1-08b61fd9d708",
+      "rpc_ntf": true,
+      "status_ntf": true,
+      "use_client_cert": false,
+      "enable_control": true
+    },
+    "switch:0": {
+      "id": 0,
+      "name": "Radiateur Chambre Aline",
+      "in_mode": "follow",
+      "initial_state": "on",
+      "auto_on": false,
+      "auto_on_delay": 60,
+      "auto_off": false,
+      "auto_off_delay": 60
+    },
+    "switch:1": null,
+    "switch:2": null,
+    "switch:3": null,
+    "system": null,
+    "wifi": {
+      "mode": "",
+      "ssid": "",
+      "password": "",
+      "ap": {
+        "ssid": "ShellyPlus1-08B61FD9D708",
+        "password": ""
+      },
+      "sta": {
+        "ssid": "Linksys_7A50",
+        "password": ""
+      },
+      "sta1": {
+        "ssid": "",
+        "password": ""
+      }
+    },
+    "ws": {
+      "enable": false,
+      "server": null,
+      "ssl_ca": "ca.pem"
+    }
+  },
+  "status": {
+    "ble": null,
+    "bthome": null,
+    "cloud": null,
+    "input:0": null,
+    "input:1": null,
+    "input:2": null,
+    "input:3": null,
+    "knx": null,
+    "mqtt": null,
+    "switch:0": {
+      "input": {
+        "id": 0,
+        "state": false
+      },
+      "id": 0,
+      "source": "",
+      "output": false,
+      "pf": 0,
+      "freq": 0,
+      "aenergy": {
+        "total": 0,
+        "by_minute": null,
+        "minute_ts": 0
+      },
+      "temperature": {
+        "tC": 41.67,
+        "tF": 107
+      },
+      "errors": null
+    },
+    "switch:1": null,
+    "switch:2": null,
+    "switch:3": null,
+    "system": null,
+    "wifi": null,
+    "ws": null
+  }
+}

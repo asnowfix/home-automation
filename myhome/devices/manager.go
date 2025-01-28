@@ -95,18 +95,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 				return ctx.Err()
 
 			case device := <-dc:
-				sd, ok := device.impl.(*shelly.Device)
-				if ok && device.MAC == nil {
-					// TODO: select HTTP when MQTT is not configured
-					err := sd.Init(dm.mqttClient, types.ChannelMqtt)
-					if err != nil {
-						log.Error(err, "Failed to init shelly device", "device_id", device.Id)
-						continue
-					}
-					device.MAC = sd.MacAddress
-					device.Host = sd.Ipv4_.String()
-					device.Info = sd.Info
-				}
+				UpdateDeviceFromShelly(device, device.impl.(*shelly.Device), types.ChannelMqtt)
 				err = dm.storage.UpsertDevice(device.Device)
 				if err != nil {
 					log.Error(err, "Failed to upsert device", "device", device)
@@ -118,17 +107,18 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 	}(ctx, log.WithName("DeviceManager#NewDevices"), dm.update)
 
-	// Load every devices from storage & init them
-	devices, err := dm.storage.GetAllDevices()
-	if err != nil {
-		return err
-	}
-	for _, device := range devices {
-		var d Device = Device{
-			Device: device,
-		}
-		dm.update <- d.WithImpl(shelly.NewDeviceFromId(dm.log.WithName(device.Id), device.Id))
-	}
+	// FIXME: load & re-init from storage hangs
+	// // Load every devices from storage & init them
+	// devices, err := dm.storage.GetAllDevices()
+	// if err != nil {
+	// 	return err
+	// }
+	// for _, device := range devices {
+	// 	var d Device = Device{
+	// 		Device: device,
+	// 	}
+	// 	dm.update <- d.WithImpl(shelly.NewDeviceFromId(dm.log.WithName(device.Id), device.Id).Init(dm.mqttClient, types.ChannelMqtt))
+	// }
 
 	// Loop on MQTT event devices discovery
 	err = dm.WatchMqtt(ctx, dm.mqttClient)

@@ -6,7 +6,9 @@ import (
 	"maps"
 	"myhome"
 	"net"
+	"pkg/shelly"
 	"pkg/shelly/mqtt"
+	"pkg/shelly/types"
 	"reflect"
 
 	"github.com/go-logr/logr"
@@ -161,3 +163,7 @@ func (d *Device) UpdateFromMqttEvent(event *mqtt.Event) error {
 // 	d = d.WithGroups(sd.Groups)
 // 	return d
 // }
+
+func UpdateDeviceFromShelly(d *Device, sd *shelly.Device, via types.Channel) {
+	myhome.UpdateDeviceFromShelly(&d.Device, sd, via)
+}

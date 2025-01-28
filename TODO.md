@@ -55,3 +55,21 @@ TODO
         - https://pkg.go.dev/modernc.org/sqlite
         - https://github.com/ncruces/go-sqlite3
         - https://github.com/cvilsmeier/go-sqlite-bench
+
+[ ] Add goreleaser to cross-compile
+
+        - https://goreleaser.com/ci/actions/
+        - https://github.com/marketplace/actions/goreleaser-action
+        - https://github.com/goreleaser/goreleaser-cross
+
+[ ] Add command to auto-update from release channel
+
+[ ] Add Home Assistant integration
+[ ] Add Amazon Alexa integration
+[ ] Add Google Home integration
+[ ] Add interactive shell
+
+        - https://www.dolthub.com/blog/2023-03-29-interactive-shell-golang/
+        - https://github.com/abiosoft/ishell
+
+[ ] Re-init list of live devices at startup... or lazy version?

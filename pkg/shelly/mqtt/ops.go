@@ -56,6 +56,11 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 	req.Method = verb.Method
 	req.Params = params
 
+	if req.Src == "" {
+		panic("empty Src")
+		// return nil, fmt.Errorf("empty Src")
+	}
+
 	reqPayload, err := json.Marshal(req)
 	if err != nil {
 		log.Error(err, "Unable to marshal", "request", req)

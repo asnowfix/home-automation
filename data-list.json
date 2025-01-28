@@ -1,0 +1,1764 @@
+{
+  "devices": [
+    {
+      "manufacturer": "Shelly",
+      "id": "shelly1minig3-54320440d02c",
+      "mac": "54320440D02C",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "S3SW-001X8EU",
+        "mac": "54320440D02C",
+        "app": "Mini1G3",
+        "ver": "1.3.3",
+        "gen": 3,
+        "id": "shelly1minig3-54320440d02c",
+        "fw_id": "20240625-122606/1.3.3-gbdfd9b3",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3MDE3NTk3MjUsIm1hYyI6IjU0MzIwNDQwRDAyQyIsIm0iOiJTM1NXLTAwMVg4RVUiLCJiIjoiMjM0Ny1Ccm9hZHdlbGwiLCJmcCI6IjA3NjNkZGEyIn0.mZramoEvO-Ozr4vHiIdI_mJ9urbeaJZKLFtvBF3pmctoaGTQURbBvi1rYVovmYdNrPqh3UIueZSj7Gc37yq_-9NbeXAE6BmW7R2MSQNcLtGI2vUMnNzk9FjnX0-r2NHi",
+        "batch": "2347-Broadwell",
+        "fw_sbits": "00"
+      },
+      "config": {
+        "ble": {
+          "enable": true,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "bthome": {},
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shelly1minig3-54320440d02c",
+          "topic_prefix": "shelly1minig3-54320440d02c",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "name": "light-pool-house-2",
+          "in_mode": "detached",
+          "initial_state": "off",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "Shelly1MiniG3-54320440D02C",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "ShellyPlus1-B8D61A85ED58",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": {},
+        "bthome": {
+          "errors": [
+            "observer_disabled"
+          ]
+        },
+        "cloud": {
+          "connected": true
+        },
+        "input:0": {
+          "id": 0,
+          "state": false
+        },
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": {
+          "connected": true
+        },
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "loopback",
+          "output": false,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {
+            "tC": 42,
+            "tF": 107.7
+          },
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": {
+          "ssid": "",
+          "ip": "",
+          "strength": 0
+        },
+        "ws": {
+          "connected": false
+        }
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shellyplus1-08b61fd90730",
+      "mac": "08B61FD90730",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "SNSW-001X16EU",
+        "mac": "08B61FD90730",
+        "app": "Plus1",
+        "ver": "1.0.8",
+        "gen": 2,
+        "id": "shellyplus1-08b61fd90730",
+        "fw_id": "20231106-160328/1.0.8-gdba0ee3",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2NzA1NzE1MzYsIm1hYyI6IjA4QjYxRkQ5MDczMCIsIm0iOiJTTlNXLTAwMVgxNkVVIiwiYiI6IjIyMzktQnJvYWR3ZWxsIiwiZnAiOiIwNzYzZGRhMiJ9.FJdp0ut2W4sYE0iYf2Mj1WrXr40rNg0ZtnR4YReaYOp1BT5-gKiqb2jPH5c5ue_d9-yQP5aIlIAIwoH0TxWYOnDJVpcbJbIkLcIVyxlexxHNd4qk647XPI0G0mhysKzW",
+        "batch": "2239-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": false,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shellyplus1-08b61fd90730",
+          "topic_prefix": "shellyplus1-08b61fd90730",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "name": "Radiateur Salle de Bain du Bas",
+          "in_mode": "follow",
+          "initial_state": "on",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "ShellyPlus1-08B61FD90730",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": {},
+        "bthome": null,
+        "cloud": {
+          "connected": true
+        },
+        "input:0": {
+          "id": 0,
+          "state": false
+        },
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": {
+          "connected": true
+        },
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "SHC",
+          "output": true,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {
+            "tC": 30,
+            "tF": 85.9
+          },
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": {
+          "ssid": "Linksys_7A50",
+          "ip": "",
+          "strength": 0
+        },
+        "ws": {
+          "connected": false
+        }
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shellyplus1-08b61fd141e8",
+      "mac": "08B61FD141E8",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "SNSW-001X16EU",
+        "mac": "08B61FD141E8",
+        "app": "Plus1",
+        "ver": "1.4.4",
+        "gen": 2,
+        "id": "shellyplus1-08b61fd141e8",
+        "fw_id": "20241011-114452/1.4.4-g6d2a586",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2NzA0NjY0MDYsIm1hYyI6IjA4QjYxRkQxNDFFOCIsIm0iOiJTTlNXLTAwMVgxNkVVIiwiYiI6IjIyMzktQnJvYWR3ZWxsIiwiZnAiOiIwNzYzZGRhMiJ9.yPZVAvE228J9cx5_Wg1tjeSBUhY67lnM90hqMwKwTaa-qcvJQ8AVmlK68NwkzYa3Yz0dZR1HAtJzuPzSYNbbZT9LNsm0cxcSkwBfcq7nU7XBPqfKMrxfJhU7WzTaeX2e",
+        "batch": "2239-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": true,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shellyplus1-08b61fd141e8",
+          "topic_prefix": "shellyplus1-08b61fd141e8",
+          "rpc_ntf": true,
+          "status_ntf": false,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "in_mode": "follow",
+          "initial_state": "on",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "ShellyPlus1-08B61FD141E8",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "ShellyPlus1-B8D61A85ED58",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": {},
+        "bthome": null,
+        "cloud": {
+          "connected": true
+        },
+        "input:0": {
+          "id": 0,
+          "state": false
+        },
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": {
+          "connected": true
+        },
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "HTTP_in",
+          "output": true,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {
+            "tC": 48.8,
+            "tF": 119.9
+          },
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": {
+          "ssid": "Linksys_7A50",
+          "ip": "",
+          "strength": 0
+        },
+        "ws": {
+          "connected": false
+        }
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shellyplus1-08b61fcfe6c0",
+      "mac": "08B61FCFE6C0",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "SNSW-001X16EU",
+        "mac": "08B61FCFE6C0",
+        "app": "Plus1",
+        "ver": "1.0.8",
+        "gen": 2,
+        "id": "shellyplus1-08b61fcfe6c0",
+        "fw_id": "20231106-160328/1.0.8-gdba0ee3",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2NzAzMjQzODcsIm1hYyI6IjA4QjYxRkNGRTZDMCIsIm0iOiJTTlNXLTAwMVgxNkVVIiwiYiI6IjIyMzktQnJvYWR3ZWxsIiwiZnAiOiIwNzYzZGRhMiJ9.HiJNDyyA-YwuPDnVU5zca9RzH7o19KLrc2rhT0cHQPBFhoQw1OuSpIIJbtaJQWlPzir_7E5842E0wFSK8_KQ3b7uyw1Ph3_zeIsqHD3zdcyBzaZEnwNPU2Ly9ZwfzbcC",
+        "batch": "2239-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": false,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shellyplus1-08b61fcfe6c0",
+          "topic_prefix": "shellyplus1-08b61fcfe6c0",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "name": "Radiateur Chambre du Bas",
+          "in_mode": "follow",
+          "initial_state": "restore_last",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "ShellyPlus1-08B61FCFE6C0",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": {},
+        "bthome": null,
+        "cloud": {
+          "connected": true
+        },
+        "input:0": {
+          "id": 0,
+          "state": false
+        },
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": {
+          "connected": true
+        },
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "SHC",
+          "output": true,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {
+            "tC": 27.3,
+            "tF": 81.1
+          },
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": {
+          "ssid": "Linksys_7A50",
+          "ip": "",
+          "strength": 0
+        },
+        "ws": {
+          "connected": false
+        }
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shellyplus1-08b61fd9333c",
+      "mac": "08B61FD9333C",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "SNSW-001X16EU",
+        "mac": "08B61FD9333C",
+        "app": "Plus1",
+        "ver": "1.4.4",
+        "gen": 2,
+        "id": "shellyplus1-08b61fd9333c",
+        "fw_id": "20241011-114452/1.4.4-g6d2a586",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2NzA1NjY5OTQsIm1hYyI6IjA4QjYxRkQ5MzMzQyIsIm0iOiJTTlNXLTAwMVgxNkVVIiwiYiI6IjIyMzktQnJvYWR3ZWxsIiwiZnAiOiIwNzYzZGRhMiJ9.wu6GZ2kaqVUulIGpXTcuDZPfQ5WZE_NCsXrYup46nHzoWiqVV225PvDJImIO3sjacfe3QeLnaV2Prsvm7_VddRZCfHdJMBNHyT9OWuXg24OxQDbpZWqaelelX_9JApvD",
+        "batch": "2239-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": true,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shellyplus1-08b61fd9333c",
+          "topic_prefix": "shellyplus1-08b61fd9333c",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "name": "Radiateur Salon Old-Front-Door",
+          "in_mode": "follow",
+          "initial_state": "on",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "ShellyPlus1-08B61FD9333C",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": {},
+        "bthome": null,
+        "cloud": {
+          "connected": true
+        },
+        "input:0": {
+          "id": 0,
+          "state": false
+        },
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": {
+          "connected": true
+        },
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "init",
+          "output": true,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {
+            "tC": 50.8,
+            "tF": 123.5
+          },
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": {
+          "ssid": "Linksys_7A50",
+          "ip": "",
+          "strength": 0
+        },
+        "ws": {
+          "connected": false
+        }
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shellyplus1-b8d61a86cac0",
+      "mac": "B8D61A86CAC0",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "SNSW-001X16EU",
+        "mac": "B8D61A86CAC0",
+        "app": "Plus1",
+        "ver": "1.4.4",
+        "gen": 2,
+        "id": "shellyplus1-b8d61a86cac0",
+        "fw_id": "20241011-114452/1.4.4-g6d2a586",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2NjI1MzU4MjMsIm1hYyI6IkI4RDYxQTg2Q0FDMCIsIm0iOiJTTlNXLTAwMVgxNkVVIiwiYiI6IjIxNTEtQnJvYWR3ZWxsIiwiZnAiOiIwNzYzZGRhMiJ9.-W38Cv0KOX4P2JKzI9mEQgMldniG6SPxv8bnSjBFrl4JNFLkveUye3u0y1glu3DPA_vo1peta3NLer0LzRSbha2FtaHBiBS1lydx1HyeC8l5mICu7MqQ9mG6rIe9lRtA",
+        "batch": "2151-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": true,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shellyplus1-b8d61a86cac0",
+          "topic_prefix": "shellyplus1-b8d61a86cac0",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "name": "Radiateur Salle de Bain Parents",
+          "in_mode": "follow",
+          "initial_state": "on",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "ShellyPlus1-B8D61A86CAC0",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "ShellyPlus1-08B61FD141E8",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": {},
+        "bthome": null,
+        "cloud": {
+          "connected": true
+        },
+        "input:0": {
+          "id": 0,
+          "state": true
+        },
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": {
+          "connected": true
+        },
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "SHC",
+          "output": true,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {
+            "tC": 54.1,
+            "tF": 129.4
+          },
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": {
+          "ssid": "Linksys_7A50",
+          "ip": "",
+          "strength": 0
+        },
+        "ws": {
+          "connected": false
+        }
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shelly1minig3-54320440f878",
+      "mac": "54320440F878",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "S3SW-001X8EU",
+        "mac": "54320440F878",
+        "app": "Mini1G3",
+        "ver": "1.4.4",
+        "gen": 3,
+        "id": "shelly1minig3-54320440f878",
+        "fw_id": "20241011-114456/1.4.4-g6d2a586",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3MDE2OTc4MDYsIm1hYyI6IjU0MzIwNDQwRjg3OCIsIm0iOiJTM1NXLTAwMVg4RVUiLCJiIjoiMjM0Ny1Ccm9hZHdlbGwiLCJmcCI6IjA3NjNkZGEyIn0.B_P7U9xSocKDJa3ZVdfP4EemyY2BIryrexFb0PtIDk-YpgEeyvY-cwwNN9bjAhkdpR6ymrJHhr-Ej9IetXGikVZO1GSL5nvQ-WuucjL-w5UTsntg05yUkUmrkfb351XB",
+        "batch": "2347-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": true,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "bthome": {},
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "knx": {
+          "enable": false,
+          "ia": "15.15.255",
+          "routing": {
+            "addr": "224.0.23.12:3671"
+          }
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shelly1minig3-54320440f878",
+          "topic_prefix": "shelly1minig3-54320440f878",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "in_mode": "follow",
+          "initial_state": "on",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "Shelly1MiniG3-54320440F878",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": null,
+        "bthome": null,
+        "cloud": null,
+        "input:0": null,
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": null,
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "SHC",
+          "output": true,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {},
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": null,
+        "ws": null
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shelly1minig3-54320464f17c",
+      "mac": "54320464F17C",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "S3SW-001X8EU",
+        "mac": "54320464F17C",
+        "app": "Mini1G3",
+        "ver": "1.1.99-minig3prod1",
+        "gen": 3,
+        "id": "shelly1minig3-54320464f17c",
+        "fw_id": "20231121-110944/1.1.99-minig3prod1-ga898543",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3MTE5MzA1MTEsIm1hYyI6IjU0MzIwNDY0RjE3QyIsIm0iOiJTM1NXLTAwMVg4RVUiLCJiIjoiMjM0Ny1Ccm9hZHdlbGwiLCJmcCI6IjA3NjNkZGEyIn0.nZcw2D720BBmy4kLhBqmM3T44j9u3f9eO8nn1r2GaHVatYEDTgxng412bGdu6lT_R_eAOGLjOUn0EM2fhBhmi3mu7FCUmY_3jvmZ5Q-D2DnGlYl-S3GnNGOQ88NbP6FZ",
+        "batch": "2347-Broadwell",
+        "fw_sbits": "00"
+      },
+      "config": {
+        "ble": {
+          "enable": true,
+          "observer": {
+            "enable": true
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shelly1minig3-54320464f17c",
+          "topic_prefix": "shelly1minig3-54320464f17c",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "name": "Lumière Escalier Exterieur",
+          "in_mode": "follow",
+          "initial_state": "off",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "Shelly1MiniG3-54320464F17C",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Shelly1MiniG3-54320464A1D0",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "Linksys_7A50-guest",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": null,
+        "bthome": null,
+        "cloud": null,
+        "input:0": null,
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": null,
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "",
+          "output": false,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {
+            "tC": 38.54,
+            "tF": 101.37
+          },
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": null,
+        "ws": null
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shelly1minig3-543204522cb4",
+      "mac": "543204522CB4",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "S3SW-001X8EU",
+        "mac": "543204522CB4",
+        "app": "Mini1G3",
+        "ver": "1.4.4",
+        "gen": 3,
+        "id": "shelly1minig3-543204522cb4",
+        "fw_id": "20241011-114456/1.4.4-g6d2a586",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3MDE3NjAzNjcsIm1hYyI6IjU0MzIwNDUyMkNCNCIsIm0iOiJTM1NXLTAwMVg4RVUiLCJiIjoiMjM0Ny1Ccm9hZHdlbGwiLCJmcCI6IjA3NjNkZGEyIn0.esMrCZyE8to1QXJaEfgxwFj225QKQzk0_llLhY7PBapl1Rp7aePc-Jg0Oo6hjrWkTQ8uXOAp3VmzPVtkfQx4tzUZpYZGaRS1m1YFCWaUPiUeb8YAOcHU15UOZarRJZW4",
+        "batch": "2347-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": true,
+          "observer": {
+            "enable": true
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "bthome": {},
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "knx": {
+          "enable": false,
+          "ia": "15.15.255",
+          "routing": {
+            "addr": "224.0.23.12:3671"
+          }
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shelly1minig3-543204522cb4",
+          "topic_prefix": "shelly1minig3-543204522cb4",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "name": "Lumiere Porte Entree",
+          "in_mode": "detached",
+          "initial_state": "off",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "Shelly1MiniG3-543204522CB4",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": null,
+        "bthome": null,
+        "cloud": null,
+        "input:0": null,
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": null,
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "loopback",
+          "output": false,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {},
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": null,
+        "ws": null
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shelly1minig3-54320464a1d0",
+      "mac": "54320464A1D0",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "S3SW-001X8EU",
+        "mac": "54320464A1D0",
+        "app": "Mini1G3",
+        "ver": "1.4.4",
+        "gen": 3,
+        "id": "shelly1minig3-54320464a1d0",
+        "fw_id": "20241011-114456/1.4.4-g6d2a586",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3MTE5MzI4NzYsIm1hYyI6IjU0MzIwNDY0QTFEMCIsIm0iOiJTM1NXLTAwMVg4RVUiLCJiIjoiMjM0Ny1Ccm9hZHdlbGwiLCJmcCI6IjA3NjNkZGEyIn0.GsTrT-7fEZdncuUCG4l8135WQxXxscrWddUw8fwUYtDPIKG7FCEUaVFqp3uwI2hu-9cLwKMqO-2xps_5JDh_YkwwP_5WvxHEcXBUSJPhHMyZ3XwIyz2b67jK_InWEKSH",
+        "batch": "2347-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": false,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "bthome": {},
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "knx": {
+          "enable": false,
+          "ia": "15.15.255",
+          "routing": {
+            "addr": "224.0.23.12:3671"
+          }
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shelly1minig3-54320464a1d0",
+          "topic_prefix": "shelly1minig3-54320464a1d0",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "name": "Lumiere Old Front Door",
+          "in_mode": "detached",
+          "initial_state": "off",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "Shelly1MiniG3-54320464A1D0",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": null,
+        "bthome": null,
+        "cloud": null,
+        "input:0": null,
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": null,
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "loopback",
+          "output": false,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {},
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": null,
+        "ws": null
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shellyplus1-b8d61a85ed58",
+      "mac": "B8D61A85ED58",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "SNSW-001X16EU",
+        "mac": "B8D61A85ED58",
+        "app": "Plus1",
+        "ver": "1.4.4",
+        "gen": 2,
+        "id": "shellyplus1-b8d61a85ed58",
+        "fw_id": "20241011-114452/1.4.4-g6d2a586",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2NjI0NTE0OTAsIm1hYyI6IkI4RDYxQTg1RUQ1OCIsIm0iOiJTTlNXLTAwMVgxNkVVIiwiYiI6IjIxNTEtQnJvYWR3ZWxsIiwiZnAiOiIwNzYzZGRhMiJ9.RRVUg4sZXSgZRjW75r3EpyJdRlm49m-8KqfYzPYyLaiyBed36iLQSXWTBJObDHCubA2Vleo9SZ2HBvqYoENor86jFlgcJByFusxnij25rN4cn8GJ4sWzEoAMfsWcM9oV",
+        "batch": "2151-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": false,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": false
+          }
+        },
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shellyplus1-b8d61a85ed58",
+          "topic_prefix": "shellyplus1-b8d61a85ed58",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "name": "Lumiere Entree Droite",
+          "in_mode": "detached",
+          "initial_state": "off",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "ShellyPlus1-B8D61A85ED58",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": null,
+        "bthome": null,
+        "cloud": null,
+        "input:0": null,
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": null,
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "loopback",
+          "output": false,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {},
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": null,
+        "ws": null
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shelly1minig3-54320464074c",
+      "mac": "54320464074C",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "S3SW-001X8EU",
+        "mac": "54320464074C",
+        "app": "Mini1G3",
+        "ver": "1.4.4",
+        "gen": 3,
+        "id": "shelly1minig3-54320464074c",
+        "fw_id": "20241011-114456/1.4.4-g6d2a586",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3MTE5Mzk2NjYsIm1hYyI6IjU0MzIwNDY0MDc0QyIsIm0iOiJTM1NXLTAwMVg4RVUiLCJiIjoiMjM0Ny1Ccm9hZHdlbGwiLCJmcCI6IjA3NjNkZGEyIn0.gdl9vzVwMofDprTLJDsYwh7kcYzW139FGCjlHMRrfLUdxkat3AWfJs6vTG1oWYJeXVhNJ3IZK8Ujuyw9t2CfiHIeXOJEWU0CPB227utYH1hpUykJ9efmqckDFRoo8gNT",
+        "batch": "2347-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": true,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "bthome": {},
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "knx": {
+          "enable": false,
+          "ia": "15.15.255",
+          "routing": {
+            "addr": "224.0.23.12:3671"
+          }
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shelly1minig3-54320464074c",
+          "topic_prefix": "shelly1minig3-54320464074c",
+          "rpc_ntf": true,
+          "status_ntf": false,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "name": "light-pool-house-1",
+          "in_mode": "detached",
+          "initial_state": "off",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "Shelly1MiniG3-54320464074C",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "Shelly1MiniG3-54320440D02C",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": {},
+        "bthome": {
+          "errors": [
+            "observer_disabled"
+          ]
+        },
+        "cloud": {
+          "connected": true
+        },
+        "input:0": {
+          "id": 0,
+          "state": false
+        },
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": {},
+        "mqtt": {
+          "connected": true
+        },
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "loopback",
+          "output": false,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {},
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": {
+          "ssid": "Shelly1MiniG3-54320440D02C",
+          "ip": "",
+          "strength": 0
+        },
+        "ws": {
+          "connected": false
+        }
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shelly1minig3-84fce63bf464",
+      "mac": "84FCE63BF464",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "S3SW-001X8EU",
+        "mac": "84FCE63BF464",
+        "app": "Mini1G3",
+        "ver": "1.4.4",
+        "gen": 3,
+        "id": "shelly1minig3-84fce63bf464",
+        "fw_id": "20241011-114456/1.4.4-g6d2a586",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3MDE3NzY4OTYsIm1hYyI6Ijg0RkNFNjNCRjQ2NCIsIm0iOiJTM1NXLTAwMVg4RVUiLCJiIjoiMjM0Ny1Ccm9hZHdlbGwiLCJmcCI6IjA3NjNkZGEyIn0.GVxT7shH1UC03CibgThsNN--L3AJ6l9uVNLzLyVT2cxaOgwmiOvYFsSKEUex_UtKweXzrXyBfwycgBGXImqYGNjzDmaMKBK9ly7TC78czhmd-HEjyXsGLWF1IYRWjVMK",
+        "batch": "2347-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": true,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "bthome": {},
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "knx": {
+          "enable": false,
+          "ia": "15.15.255",
+          "routing": {
+            "addr": "224.0.23.12:3671"
+          }
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shelly1minig3-84fce63bf464",
+          "topic_prefix": "shelly1minig3-84fce63bf464",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "in_mode": "momentary",
+          "initial_state": "off",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "Shelly1MiniG3-84FCE63BF464",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": null,
+        "bthome": null,
+        "cloud": null,
+        "input:0": null,
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": null,
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "",
+          "output": false,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {
+            "tC": 52.79,
+            "tF": 127.02
+          },
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": null,
+        "ws": null
+      }
+    },
+    {
+      "manufacturer": "Shelly",
+      "id": "shellyplus1-08b61fd9d708",
+      "mac": "08B61FD9D708",
+      "host": "<nil>",
+      "name": "",
+      "config_revision": 0,
+      "info": {
+        "model": "SNSW-001X16EU",
+        "mac": "08B61FD9D708",
+        "app": "Plus1",
+        "ver": "1.0.8",
+        "gen": 2,
+        "id": "shellyplus1-08b61fd9d708",
+        "fw_id": "20231106-160328/1.0.8-gdba0ee3",
+        "auth_en": false,
+        "discoverable": false,
+        "key": "eyJhbGciOiJFUzM4NCIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE2NzExNjE1NjAsIm1hYyI6IjA4QjYxRkQ5RDcwOCIsIm0iOiJTTlNXLTAwMVgxNkVVIiwiYiI6IjIyMzktQnJvYWR3ZWxsIiwiZnAiOiIwNzYzZGRhMiJ9.zWOaAb9aD8_1A4nY6vwiyvNz0NlJzVlURsQxJB2FMLY1aCVFSboqhdqgls_M-PxBfYGY20mRpz2JOP65M7Mo02IHxTbB5Fhk3wSJn0Y3fWTYz_h5GEZabziWcjZUazso",
+        "batch": "2239-Broadwell",
+        "fw_sbits": "04"
+      },
+      "config": {
+        "ble": {
+          "enable": true,
+          "observer": {
+            "enable": false
+          },
+          "rpc": {
+            "enable": true
+          }
+        },
+        "cloud": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        },
+        "mqtt": {
+          "enable": true,
+          "server": "192.168.1.2:1883",
+          "client_id": "shellyplus1-08b61fd9d708",
+          "topic_prefix": "shellyplus1-08b61fd9d708",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_control": true
+        },
+        "switch:0": {
+          "id": 0,
+          "name": "Radiateur Chambre Aline",
+          "in_mode": "follow",
+          "initial_state": "on",
+          "auto_on": false,
+          "auto_on_delay": 60,
+          "auto_off": false,
+          "auto_off_delay": 60
+        },
+        "wifi": {
+          "mode": "",
+          "ssid": "",
+          "password": "",
+          "ap": {
+            "ssid": "ShellyPlus1-08B61FD9D708",
+            "password": ""
+          },
+          "sta": {
+            "ssid": "Linksys_7A50",
+            "password": ""
+          },
+          "sta1": {
+            "ssid": "",
+            "password": ""
+          }
+        },
+        "ws": {
+          "enable": false,
+          "server": null,
+          "ssl_ca": "ca.pem"
+        }
+      },
+      "status": {
+        "ble": null,
+        "bthome": null,
+        "cloud": null,
+        "input:0": null,
+        "input:1": null,
+        "input:2": null,
+        "input:3": null,
+        "knx": null,
+        "mqtt": null,
+        "switch:0": {
+          "input": {
+            "id": 0,
+            "state": false
+          },
+          "id": 0,
+          "source": "",
+          "output": false,
+          "pf": 0,
+          "freq": 0,
+          "aenergy": {
+            "total": 0,
+            "by_minute": null,
+            "minute_ts": 0
+          },
+          "temperature": {
+            "tC": 41.67,
+            "tF": 107
+          },
+          "errors": null
+        },
+        "switch:1": null,
+        "switch:2": null,
+        "switch:3": null,
+        "system": null,
+        "wifi": null,
+        "ws": null
+      }
+    }
+  ]
+}

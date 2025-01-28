@@ -3,6 +3,9 @@ package myhome
 import (
 	"net"
 	"pkg/shelly"
+	"pkg/shelly/system"
+	"pkg/shelly/types"
+	"schedule"
 )
 
 type DeviceIdentifier struct {
@@ -21,10 +24,11 @@ type DeviceSummary struct {
 
 type Device struct {
 	DeviceSummary
-	ConfigRevision int                `db:"config_revision" json:"config_revision"`
-	Info           *shelly.DeviceInfo `db:"-" json:"info"`
-	Config         *shelly.Config     `db:"-" json:"config"`
-	Status         *shelly.Status     `db:"-" json:"status"`
+	ConfigRevision int                 `db:"config_revision" json:"config_revision"`
+	Components     *[]shelly.Component `db:"-" json:"components"`
+	Info           *shelly.DeviceInfo  `db:"-" json:"info"`
+	Config         *shelly.Config      `db:"-" json:"config"`
+	Status         *shelly.Status      `db:"-" json:"status"`
 }
 
 type Devices struct {
@@ -45,4 +49,36 @@ type GroupDevice struct {
 	Manufacturer string `db:"manufacturer" json:"manufacturer"`
 	ID           string `db:"id" json:"id"`
 	Group        string `db:"group" json:"group"`
+}
+
+func UpdateDeviceFromShelly(d *Device, sd *shelly.Device, via types.Channel) {
+	if d.Info == nil {
+		d.Info = sd.Call(via, "Shelly", "GetDeviceInfo", &shelly.DeviceInfo{}).(*shelly.DeviceInfo)
+	}
+
+	if d.Components == nil {
+		d.Components = sd.Call(via, "Shelly", "GetComponents", nil).(*shelly.ComponentsResponse).Components
+	}
+
+	if d.Config == nil {
+		d.Config = sd.Call(via, "Shelly", "GetConfig", &shelly.Config{}).(*shelly.Config)
+	}
+	if d.Config.System == nil {
+		d.Config.System = sd.Call(via, "System", "GetConfig", &system.Config{}).(*system.Config)
+	}
+	if d.Config.Schedule == nil {
+		d.Config.Schedule = sd.Call(via, "Schedule", "List", &schedule.Scheduled{}).(*schedule.Scheduled)
+	}
+
+	if d.Status == nil {
+		d.Status = sd.Call(via, "Shelly", "GetStatus", &shelly.Status{}).(*shelly.Status)
+	}
+	if d.Status.System == nil {
+		d.Status.System = sd.Call(via, "System", "GetStatus", &system.Status{}).(*system.Status)
+	}
+
+	d.MAC = net.HardwareAddr(sd.Info.MacAddress.String())
+	d.Host = sd.Ipv4().String()
+	d.Name = d.Config.System.Device.Name
+	d.Manufacturer = "Shelly"
 }

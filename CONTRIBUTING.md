@@ -12,16 +12,41 @@ sqlite3 myhome/myhome.db .dump
 
 ```cmd
 winget install --id Git.Git -e --source winget
-winget install --id GoLang.Go --source winget
 winget install --id GnuWin32.Make --source winget
 winget install --id SQLite.SQLite --source winget
 ```
 
-```cmd
-cd myhome
-go run . -v
+```pwsh
+winget install --id GoLang.Go --source winget
+$env:Path += ";C:\Program Files\Go\bin;C:\Users\$env:Username\Go\bin"
 ```
 
+```pwsh
+winget install --id WiXToolset.WiXCLI --source winget
+$env:Path += ";C:\Program Files\WiX Toolset v5.0\bin"
+```
+
+```pwsh
+go install github.com/mh-cbon/go-msi
+```
+
+```cmd
+netsh advfirewall firewall add rule name="Allow MQTT" dir=in action=allow protocol=TCP localport=1883
+The requested operation requires elevation (Run as administrator).
+```
+
+```cmd
+% go-msi gen-wix-cmd --msi MyHome.msi                         
+CreateFile C:\Users\fixko\Go\bin\templates: The system cannot find the file specified.
+
+% go-msi make --msi MyHome.msi --version 0.0.0                
+CreateFile C:\Users\fixko\Go\bin\templates: The system cannot find the file specified.
+```
+
+```cmd
+cd myhome
+go run . -h
+```
 
 ## macOS TBC
 

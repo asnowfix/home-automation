@@ -1,12 +1,25 @@
 OS ?= $(shell uname -s)
 ifneq ($(WSL_DISTRO_NAME),)
 ME ?= $(shell /mnt/c/windows/system32/cmd.exe /c whoami 2>/dev/null)
-else ifeq ($(OS),Linux)
+else
 ME ?= $(shell whoami)
 endif
 $(info OS=$(OS) ME=$(ME))
 
-mods = $(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */*/*/go.mod) $(wildcard */*/*/*/go.mod)
+ifeq ($(OS),Windows_NT)
+# SHELL := powershell.exe
+# SHELL := cmd.exe
+# GO := "c:\\Program Files\\Go\\bin\\go.exe"
+# folder = $(subst /,\\,$1)
+SHELL := bash.exe
+GO := "/mnt/c/Program Files/Go/bin/go.exe"
+folder = $1
+else
+GO := go
+folder = $1
+endif
+
+mods = $(patsubst %/,%,$(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */*/*/go.mod) $(wildcard */*/*/*/go.mod))
 
 default: help
 
@@ -16,7 +29,7 @@ help:
 ifneq ($(MODULE),)
 # make module MODULE=homectl/shelly/options
 module:
-	(mkdir -p $(MODULE) && cd $(MODULE) && go mod init $(MODULE)) && go work use $(MODULE)
+	(mkdir -p $(MODULE) && cd $(MODULE) && $(GO) mod init $(MODULE)) && $(GO) work use $(MODULE)
 endif
 
 install:
@@ -60,9 +73,12 @@ else
 endif
 
 tidy:
-	@echo $(mods)
-	$(foreach m,$(mods),go work use $(dir $(m)) && (cd $(dir $(m)) && go mod tidy) &&) true
+	$(foreach m,$(mods),$(GO) work use $(dir $(m)) &&) echo
+	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) mod tidy) &&) echo
 
 build run:
 	$(MAKE) -C homectl $(@)
 	$(MAKE) -C myhome $(@)
+
+push:
+	$(GIT) push

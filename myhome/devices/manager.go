@@ -107,18 +107,17 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 	}(ctx, log.WithName("DeviceManager#NewDevices"), dm.update)
 
-	// FIXME: load & re-init from storage hangs
-	// // Load every devices from storage & init them
-	// devices, err := dm.storage.GetAllDevices()
-	// if err != nil {
-	// 	return err
-	// }
-	// for _, device := range devices {
-	// 	var d Device = Device{
-	// 		Device: device,
-	// 	}
-	// 	dm.update <- d.WithImpl(shelly.NewDeviceFromId(dm.log.WithName(device.Id), device.Id).Init(dm.mqttClient, types.ChannelMqtt))
-	// }
+	// Load every devices from storage & init them
+	devices, err := dm.storage.GetAllDevices()
+	if err != nil {
+		return err
+	}
+	for _, device := range devices {
+		var d Device = Device{
+			Device: device,
+		}
+		dm.update <- d.WithImpl(shelly.NewMqttDevice(dm.log.WithName(device.Id), device.Id, dm.mqttClient))
+	}
 
 	// Loop on MQTT event devices discovery
 	err = dm.WatchMqtt(ctx, dm.mqttClient)
@@ -205,8 +204,7 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 				if err != nil {
 					log.Info("Device not found, creating new one", "device_id", deviceId)
 					device = *NewDevice("Shelly", deviceId)
-					sd = shelly.NewDeviceFromId(dm.log, deviceId)
-					sd.Init(mc, types.ChannelMqtt)
+					sd = shelly.NewMqttDevice(dm.log, deviceId, mc)
 					device.MAC = sd.MacAddress
 					device.Host = sd.Ipv4_.String()
 					device.impl = sd
@@ -417,8 +415,7 @@ func (dm *DeviceManager) Save(d *Device) (*Device, error) {
 	if d.Manufacturer == Shelly {
 		sd, ok := d.impl.(*shelly.Device)
 		if !ok {
-			sd = shelly.NewDeviceFromId(dm.log, d.Id)
-			sd.Init(dm.mqttClient, types.ChannelMqtt)
+			sd = shelly.NewMqttDevice(dm.log, d.Id, dm.mqttClient)
 		}
 		groups, err := dm.storage.GetDeviceGroups(d.Manufacturer, d.Id)
 		if err != nil {

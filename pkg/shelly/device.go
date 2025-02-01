@@ -30,6 +30,14 @@ type Product struct {
 	Generation  int              `json:"gen"`
 }
 
+type State uint
+
+const (
+	New State = iota
+	HttpOk
+	MqttOk
+)
+
 type Device struct {
 	Product
 	Id_               string                                    `json:"id"`
@@ -41,6 +49,8 @@ type Device struct {
 	Methods           []string                                  `json:"methods"`
 	ComponentsMethods map[string]map[string]types.MethodHandler `json:"-"`
 	Components        *[]Component                              `json:"-"`
+	state             State                                     `json:"-"`
+	mqttClient        *mymqtt.Client                            `json:"-"`
 	me                string                                    `json:"-"`
 	to                chan []byte                               `json:"-"`
 	from              chan []byte                               `json:"-"`
@@ -174,6 +184,7 @@ func (d *Device) MethodHandlerE(c string, v string) (types.MethodHandler, error)
 }
 
 func (d *Device) CallE(ch types.Channel, comp string, verb string, params any) (any, error) {
+	d.init()
 	mh, err := d.MethodHandlerE(comp, verb)
 	if err != nil {
 		return nil, err
@@ -197,31 +208,40 @@ func (d *Device) ReplyTo() string {
 	return d.me
 }
 
-func NewDeviceFromIp(log logr.Logger, ip net.IP) *Device {
+func NewHttpDevice(log logr.Logger, ip net.IP) *Device {
 	d := &Device{
 		Ipv4_: ip,
 		Host:  ip.String(),
+		state: New,
 		log:   log,
 	}
-	// d.Init(log, mc, types.ChannelHttp)
 	return d
 }
 
-func NewDeviceFromId(log logr.Logger, id string) *Device {
+func NewMqttDevice(log logr.Logger, id string, mc *mymqtt.Client) *Device {
 	d := &Device{
-		Id_:  id,
-		Host: fmt.Sprintf("%s.local.", id),
-		log:  log,
+		Id_:        id,
+		Host:       fmt.Sprintf("%s.local.", id),
+		mqttClient: mc,
+		state:      New,
+		log:        log,
 	}
-	// d.Init(log, mc, types.ChannelMqtt)
 	return d
 }
 
-func (d *Device) Init(mc *mymqtt.Client, via types.Channel) error {
-	d.log.Info("Shelly.Init", "id", d.Id_, "host", d.Host, "via", via)
+func (d *Device) init() error {
+	d.log.Info("Shelly.init", "id", d.Id_, "host", d.Host)
+
+	var via types.Channel
+	if d.mqttClient == nil {
+		via = types.ChannelHttp
+	} else {
+		via = types.ChannelMqtt
+	}
+
 	var err error
 	if d.Id_ == "" {
-		di, err := GetRegistrar().CallE(d, types.ChannelHttp, GetRegistrar().MethodHandler(Shelly, "GetDeviceInfo"), map[string]interface{}{"ident": true})
+		di, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "GetDeviceInfo"), map[string]interface{}{"ident": true})
 		if err != nil {
 			return err
 		}
@@ -237,7 +257,7 @@ func (d *Device) Init(mc *mymqtt.Client, via types.Channel) error {
 		return err
 	}
 	d.me = fmt.Sprintf("%s_%s", hostname, d.Id_)
-	d.from, err = mc.Subscribe(fmt.Sprintf("%s/rpc", d.me), 1 /*qlen*/)
+	d.from, err = d.mqttClient.Subscribe(fmt.Sprintf("%s/rpc", d.me), 1 /*qlen*/)
 	if err != nil {
 		d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
 		return err
@@ -254,43 +274,49 @@ func (d *Device) Init(mc *mymqtt.Client, via types.Channel) error {
 		d.MacAddress = d.Info.MacAddress
 	}
 
-	out, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "GetComponents"), &ComponentsRequest{})
-	if err != nil {
-		return err
-	}
-	d.Components = out.(*ComponentsResponse).Components
-	d.log.Info("Shelly.GetComponents", "components", *d.Components)
-
-	d.to = make(chan []byte, 1 /*qlen*/)
-	toDevice := fmt.Sprintf("%s/rpc", d.Id_)
-	go func() {
-		for {
-			msg := <-d.to
-			mc.Publish(toDevice, msg)
+	if d.Components == nil {
+		out, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "GetComponents"), &ComponentsRequest{})
+		if err != nil {
+			return err
 		}
-	}()
-
-	m, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "ListMethods"), nil)
-	if err != nil {
-		return err
+		d.Components = out.(*ComponentsResponse).Components
+		d.log.Info("Shelly.GetComponents", "components", *d.Components)
 	}
 
-	d.Methods = m.(*MethodsResponse).Methods
-	d.log.Info("Shelly.ListMethods", "methods", d.Methods)
+	if d.to == nil {
+		d.to = make(chan []byte, 1 /*qlen*/)
+		toDevice := fmt.Sprintf("%s/rpc", d.Id_)
+		go func() {
+			for {
+				msg := <-d.to
+				d.mqttClient.Publish(toDevice, msg)
+			}
+		}()
+	}
 
-	d.ComponentsMethods = make(map[string]map[string]types.MethodHandler)
-	for _, m := range d.Methods {
-		mi := strings.Split(m, ".")
-		c := mi[0] // component
-		v := mi[1] // verb
-		for component := types.Shelly; component < types.None; component++ {
-			if c == component.String() {
-				if _, exists := d.ComponentsMethods[c]; !exists {
-					d.ComponentsMethods[c] = make(map[string]types.MethodHandler)
-				}
-				if _, exists := registrar.methods[c]; exists {
-					if _, exists := registrar.methods[c][v]; exists {
-						d.ComponentsMethods[c][v] = registrar.methods[c][v]
+	if d.Methods == nil {
+		m, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "ListMethods"), nil)
+		if err != nil {
+			return err
+		}
+
+		d.Methods = m.(*MethodsResponse).Methods
+		d.log.Info("Shelly.ListMethods", "methods", d.Methods)
+
+		d.ComponentsMethods = make(map[string]map[string]types.MethodHandler)
+		for _, m := range d.Methods {
+			mi := strings.Split(m, ".")
+			c := mi[0] // component
+			v := mi[1] // verb
+			for component := types.Shelly; component < types.None; component++ {
+				if c == component.String() {
+					if _, exists := d.ComponentsMethods[c]; !exists {
+						d.ComponentsMethods[c] = make(map[string]types.MethodHandler)
+					}
+					if _, exists := registrar.methods[c]; exists {
+						if _, exists := registrar.methods[c][v]; exists {
+							d.ComponentsMethods[c][v] = registrar.methods[c][v]
+						}
 					}
 				}
 			}
@@ -322,13 +348,12 @@ func Foreach(log logr.Logger, mc *mymqtt.Client, names []string, via types.Chann
 			var sd *Device
 			ip := net.ParseIP(name)
 			if ip != nil {
-				sd = NewDeviceFromIp(log, ip)
+				sd = NewHttpDevice(log, ip)
 				via = types.ChannelHttp
 			} else {
-				sd = NewDeviceFromId(log, name)
+				sd = NewMqttDevice(log, name, mc)
 				via = types.ChannelMqtt
 			}
-			sd.Init(mc, via)
 			out, err := do(log, via, sd, args)
 			if err != nil {
 				log.Error(err, "Operation failed", "device", name)

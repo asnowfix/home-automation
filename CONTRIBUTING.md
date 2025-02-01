@@ -10,10 +10,14 @@ sqlite3 myhome/myhome.db .dump
 
 ## Windows
 
-```cmd
+```pwsh
 winget install --id Git.Git -e --source winget
+$env:Path += ";C:\Program Files\Git\bin"
+```
+
+```pwsh
 winget install --id GnuWin32.Make --source winget
-winget install --id SQLite.SQLite --source winget
+$env:Path += ";C:\Program Files (x86)\GnuWin32\bin"
 ```
 
 ```pwsh

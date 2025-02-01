@@ -8,6 +8,12 @@ sudo apt install sqlite3
 sqlite3 myhome/myhome.db .dump
 ```
 
+```bashrc
+if ! type go 1>/dev/null 2>&1 && test -d /snap/go/current/bin; then
+    export PATH=${PATH}:/snap/go/current/bin
+fi
+```
+
 ## Windows
 
 ```pwsh
@@ -40,10 +46,10 @@ The requested operation requires elevation (Run as administrator).
 ```
 
 ```cmd
-% go-msi gen-wix-cmd --msi MyHome.msi                         
+% go-msi gen-wix-cmd --msi MyHome.msi
 CreateFile C:\Users\fixko\Go\bin\templates: The system cannot find the file specified.
 
-% go-msi make --msi MyHome.msi --version 0.0.0                
+% go-msi make --msi MyHome.msi --version 0.0.0
 CreateFile C:\Users\fixko\Go\bin\templates: The system cannot find the file specified.
 ```
 

@@ -5,8 +5,6 @@ go 1.22
 require (
 	github.com/go-logr/logr v1.4.2
 	github.com/grandcat/zeroconf v1.0.0
-	github.com/jmoiron/sqlx v1.4.0
-	github.com/mattn/go-sqlite3 v1.14.24
 )
 
 require (

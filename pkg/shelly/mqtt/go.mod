@@ -1,6 +1,8 @@
 module pkg/shelly/mqtt
 
-go 1.22
+go 1.22.0
+
+toolchain go1.23.5
 
 require (
 	github.com/go-logr/logr v1.4.2

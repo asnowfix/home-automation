@@ -15,15 +15,15 @@ use (
 	./homectl/shelly/script
 	./homectl/show
 	./homectl/toggle
+	./internal/myhome
 	./internal/myip
 	./internal/mynet
 	./internal/myzone
-	./internal/myhome
 	./myhome/daemon
-	./myhome/storage
 	./myhome/devices
 	./myhome/http
 	./myhome/mqtt
+	./myhome/storage
 	./mymqtt
 	./pkg/devices
 	./pkg/sfr

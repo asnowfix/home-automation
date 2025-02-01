@@ -1,5 +1,5 @@
 module pkg/shelly/shttp
 
-go 1.22
+go 1.23
 
 require github.com/go-logr/logr v1.4.2

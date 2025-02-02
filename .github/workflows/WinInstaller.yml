@@ -16,6 +16,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
 
+      - name: Change to myhome directory
+        run: cd myhome
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -29,6 +32,8 @@ jobs:
           # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
           # GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
 
+      - name: Change to root directory
+        run: cd ..
       - name: Install go-msi
         run: choco install -y "go-msi"
 

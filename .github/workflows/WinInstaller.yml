@@ -18,9 +18,6 @@ jobs:
         with:
           go-version: 1.23.0
 
-      - name: Change to myhome directory
-        run: cd myhome
-
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -28,15 +25,14 @@ jobs:
           distribution: goreleaser
           # 'latest', 'nightly', or a semver
           version: '~> v2'
-          args: release -f .goreleaser.yml --rm-dist --clean --snapshot
+          #args: release --rm-dist --clean --snapshot
+          args: release -f .goreleaser.yml --clean --snapshot
 
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
           # GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
 
-      - name: Change to root directory
-        run: cd ..
       - name: Install go-msi
         run: choco install -y "go-msi"
 

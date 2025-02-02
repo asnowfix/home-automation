@@ -1,0 +1,17 @@
+# .goreleaser.yml
+project_name: myhome
+builds:
+  - env: [CGO_ENABLED=0]
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # id is the name of the snapshot (and of the release) and will be used
+    # as the name of the binary. It's also the directory name where the binary
+    # will be placed in the archive.
+    id: "snapshot"
+    dir: .
+    main: ./myhome

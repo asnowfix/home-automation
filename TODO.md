@@ -1,11 +1,12 @@
 TODO
 ====
+
 [ ] Create/Configure scripts in a single operation
 [x] Status for one / multiple scripts in a single operation
 [ ] Run simple JavaScript in a single operation
 [ ] Do not scan ZeroConf when devices are explicit
 [x] HTTP POST (spurious "config" layer)
-[ ] Fix MQTT when several CallE() invocations are in the same run
+[x] Fix MQTT when several CallE() invocations are in the same run
 [ ] Add support for linksys velop devices (via JNAP protocol) 
 
     - https://github.com/uvjim/linksys_velop
@@ -22,7 +23,7 @@ TODO
     - <https://dave.cheney.net/2011/10/15/scratching-my-own-itch-or-how-to-publish-multicast-dns-records-in-go> and with supporting repo fork follow-up <https://github.com/ugjka/mdns>
 
 [ ] Add SPDX license identifier everywhere
-
+[ ] Change license from MPL-2.0 to MIT/BSD when ready
 [x] Fix error
 
     7:02AM INF ../mymqtt/mqtt.go:202 > Received from MQTT: payload="{\"src\":\"shellyplus1-08b61fd9333c\",\"dst\":\"shellyplus1-08b61fd9333c/events\",\"method\":\"NotifyEvent\",\"params\":{\"ts\":1736834580.08,\"events\":[{\"component\":\"sys\", \"event\":\"scheduled_restart\", \"time_ms\": 999, \"ts\":1736834580.08}]}}" topic=shellyplus1-08b61fd9333c/events/rpc v=0
@@ -62,8 +63,8 @@ TODO
         - https://github.com/marketplace/actions/goreleaser-action
         - https://github.com/goreleaser/goreleaser-cross
 
+[ ] Build MSI package for Windows & Store as release
 [ ] Add command to auto-update from release channel
-
 [ ] Add Home Assistant integration
 [ ] Add Amazon Alexa integration
 [ ] Add Google Home integration
@@ -73,3 +74,6 @@ TODO
         - https://github.com/abiosoft/ishell
 
 [ ] Re-init list of live devices at startup... or lazy version?
+[ ] Timeout on missing/non-responsive devices
+[ ] Ctrl-C should stop myhome program (whatever the option)
+[ ] Fix inbould IPv6 communication

@@ -1,4 +1,11 @@
-## Ubuntu Linux
+# Contributor's Guide <!-- omit in toc -->
+
+## Table of Contents <!-- omit in toc -->
+
+- [Ubuntu/Debian Linux](#ubuntu-debian-linux)
+- [Windows - WSL](#windows-wsl)
+
+## Ubuntu/Debian Linux
 
 ```bash
 sudo snap install --classic go
@@ -14,7 +21,17 @@ if ! type go 1>/dev/null 2>&1 && test -d /snap/go/current/bin; then
 fi
 ```
 
-## Windows
+## Windows - WSL
+
+In addition to the native Linux instructions above, you need to run the following command on the Windows host.
+
+Route intress MQTT traffic to the WSL guest:
+
+```cmd
+netsh interface portproxy add v4tov4 listenport=1883 listenaddress=0.0.0.0 connectport=1883 connectaddress=<WSL-Addr>
+```
+
+## Windows - Native
 
 ```pwsh
 winget install --id Git.Git -e --source winget
@@ -39,6 +56,8 @@ $env:Path += ";C:\Program Files\WiX Toolset v5.0\bin"
 ```pwsh
 go install github.com/mh-cbon/go-msi
 ```
+
+Allow ingress MQTT:
 
 ```cmd
 netsh advfirewall firewall add rule name="Allow MQTT" dir=in action=allow protocol=TCP localport=1883

@@ -15,6 +15,8 @@ jobs:
 
       - name: Set up Go
         uses: actions/setup-go@v5
+        with:
+          go-version: 2.23.0
 
       - name: Change to myhome directory
         run: cd myhome
@@ -26,7 +28,8 @@ jobs:
           distribution: goreleaser
           # 'latest', 'nightly', or a semver
           version: '~> v2'
-          args: release --clean --snapshot
+          args: release -f .goreleaser.yml --rm-dist --clean --snapshot
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
@@ -51,4 +54,3 @@ jobs:
           title: "Windows Development Build"
           files: |
             myhome.msi
-            

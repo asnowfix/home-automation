@@ -1,0 +1,82 @@
+name: Debian Package Creation and Publication
+
+on: [push]
+# on:
+#   push:
+#     tags:
+#       - 'v*.*.*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+        -
+            name: Checkout
+            uses: actions/checkout@v4
+            with:
+              fetch-depth: 0
+        -
+            name: Set up Go
+            uses: actions/setup-go@v5
+        -
+            name: Setup Go
+            uses: actions/setup-go@v5
+            with:
+                go-version: '1.23.x'
+        -
+            name: Install dependencies
+            run: go get .
+        -
+            name: Run GoReleaser
+            uses: goreleaser/goreleaser-action@v6
+            with:
+                # either 'goreleaser' (default) or 'goreleaser-pro'
+                distribution: goreleaser
+                # 'latest', 'nightly', or a semver
+                version: '~> v2'
+                #args: release --rm-dist --clean --snapshot
+                args: release -f .goreleaser.yml --clean --snapshot
+            env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
+                # GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+        # -
+        #     name: Build
+        #     run: go build -v ./...
+        # -
+        #     name: Test with the Go CLI
+        #     run: go test
+        -
+            uses: actions/checkout@v3
+        -
+            name: Set package content
+            run: |
+                # Main program
+                mkdir -p .debpkg/usr/bin
+                cp myhome .debpkg/usr/bin/myhome
+
+                # create DEBIAN directory if you want to add other pre/post scripts
+                mkdir -p .debpkg/DEBIAN
+                cp linux/debian/postinst.sh .debpkg/DEBIAN/postinst
+                chmod +x .debpkg/DEBIAN/postinst
+        -
+            uses: jiro4989/build-deb-action@v4
+            with:
+                package: myhome
+                package_root: .debpkg
+                maintainer: Francois-Xavier 'FiX' KOWALSKI <fix.kowalski@gmail.com>
+                version: ${{ github.ref }} # refs/tags/v*.*.*
+                arch: 'arm64' # optional
+                depends: 'libc6 (>= 2.2.1), systemd' # optional
+                desc: 'MyHome Automation.' # optional
+                homepage: 'https://github.com/asnowfix/home-automation' # optional
+        -
+            name: Check a path of deb file
+            run: ls ${{ steps.build.outputs.file_name }}
+        -
+            run: |
+                gh release create v1.2.3 release.tar.xz
+            env:
+                GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            shell: bash
+            name: Creates a release in GitHub and uploads attachments

@@ -21,6 +21,7 @@ jobs:
             with:
                 go-version: '1.23.x'
         -
+            id: go-releaser
             name: Run GoReleaser
             uses: goreleaser/goreleaser-action@v6
             with:
@@ -36,9 +37,10 @@ jobs:
                 # GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
         -
             name: Check files
-            run: ls ${{ steps.build.outputs.file_name }}
+            run: ls -lR dist
         -
-            name: Set package content
+            id: prepare-deb
+            name: Prepare package content
             run: |
                 # Main program
                 mkdir -p .debpkg/usr/bin
@@ -49,6 +51,8 @@ jobs:
                 cp linux/debian/postinst.sh .debpkg/DEBIAN/postinst
                 chmod +x .debpkg/DEBIAN/postinst
         -
+            id: build-deb
+            name: Build Debian Package
             uses: jiro4989/build-deb-action@v4
             with:
                 package: myhome
@@ -60,8 +64,8 @@ jobs:
                 desc: 'MyHome Automation.' # optional
                 homepage: 'https://github.com/asnowfix/home-automation' # optional
         -
-            name: Check a path of deb file
-            run: ls ${{ steps.build.outputs.file_name }}
+            name: Check files
+            run: ls -lR ${{ steps.build-deb.outputs.file_name }}
         -
             run: |
                 gh release create v1.2.3 release.tar.xz

@@ -2,12 +2,12 @@
 set -e
 
 # Define the service file name
-SERVICE_FILE="my_service.service"
+SERVICE_FILE="myhome.service"
 
 # Check if the script is being run during package installation
 if [ "$1" = "configure" ]; then
     # Copy the service file to the systemd directory
-    cp /usr/share/my_package/$SERVICE_FILE /etc/systemd/system/
+    cp /usr/share/myhome/$SERVICE_FILE /etc/systemd/system/
 
     # Reload systemd to recognize the new service
     systemctl daemon-reload

@@ -16,16 +16,10 @@ jobs:
             with:
               fetch-depth: 0
         -
-            name: Set up Go
-            uses: actions/setup-go@v5
-        -
             name: Setup Go
             uses: actions/setup-go@v5
             with:
                 go-version: '1.23.x'
-        # -
-        #     name: Install dependencies
-        #     run: go get .
         -
             name: Run GoReleaser
             uses: goreleaser/goreleaser-action@v6
@@ -40,20 +34,15 @@ jobs:
                 GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
                 # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
                 # GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
-        # -
-        #     name: Build
-        #     run: go build -v ./...
-        # -
-        #     name: Test with the Go CLI
-        #     run: go test
         -
-            uses: actions/checkout@v3
+            name: Check files
+            run: ls ${{ steps.build.outputs.file_name }}
         -
             name: Set package content
             run: |
                 # Main program
                 mkdir -p .debpkg/usr/bin
-                cp myhome .debpkg/usr/bin/myhome
+                cp myhome/myhome .debpkg/usr/bin/myhome
 
                 # create DEBIAN directory if you want to add other pre/post scripts
                 mkdir -p .debpkg/DEBIAN

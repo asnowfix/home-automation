@@ -39,8 +39,12 @@ jobs:
             name: Check files
             run: ls -lR dist
         -
+            uses: awalsh128/cache-apt-pkgs-action@latest
+            with:
+              packages: jq
+        -
             name: Check artifacts
-            run: echo ${{ steps.go-releaser.outputs.artifacts }}
+            run: echo ${{ steps.go-releaser.outputs.artifacts }} | jq
         -
             id: prepare-deb
             name: Prepare package content

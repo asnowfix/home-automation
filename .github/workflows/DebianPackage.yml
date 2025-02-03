@@ -68,7 +68,7 @@ jobs:
                 package_root: .debpkg
                 maintainer: Francois-Xavier 'FiX' KOWALSKI <fix.kowalski@gmail.com>
                 #version: ${{ github.ref }} # refs/tags/v*.*.*
-                version: ${{ github.ref_name || 'v0.0.0' }}-${{ github.sha.substr(0, 7) }}
+                version: ${{ github.ref_name || 'v0.0.0' }}-${{ github.sha }}
                 arch: 'arm64' # optional
                 depends: 'libc6 (>= 2.2.1), systemd' # optional
                 desc: 'MyHome Automation.' # optional

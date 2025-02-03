@@ -40,7 +40,7 @@ jobs:
             run: ls -lR dist
         -
             name: Check artifacts
-            run: ls -lR ${{ steps.go-releaser.outputs.artifacts }}
+            run: echo ${{ steps.go-releaser.outputs.artifacts }}
         -
             id: prepare-deb
             name: Prepare package content

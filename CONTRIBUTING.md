@@ -33,6 +33,18 @@ netsh interface portproxy add v4tov4 listenport=1883 listenaddress=0.0.0.0 conne
 
 ## Windows - Native
 
+### Git Bash
+
+In `~/.bashrc`:
+
+```bash
+if ! type make 1>/dev/null 2>&1 && test -d /c/Program\ Files\ \(x86\)/GnuWin32/bin; then
+    export PATH=${PATH}:/c/Program\ Files\ \(x86\)/GnuWin32/bin
+fi
+```
+
+### PowerShell
+
 ```pwsh
 winget install --id Git.Git -e --source winget
 $env:Path += ";C:\Program Files\Git\bin"

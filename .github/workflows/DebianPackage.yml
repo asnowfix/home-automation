@@ -44,7 +44,7 @@ jobs:
               packages: jq
         -
             name: Check artifacts
-            run: echo ${{ steps.go-releaser.outputs.artifacts }} | jq
+            run: echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
         -
             id: prepare-deb
             name: Prepare package content

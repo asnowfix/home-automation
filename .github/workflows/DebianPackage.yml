@@ -49,9 +49,13 @@ jobs:
             id: prepare-deb
             name: Prepare package content
             run: |
-                # Main program
+                # main program
                 mkdir -p .debpkg/usr/bin
-                cp myhome/myhome .debpkg/usr/bin/myhome
+                cp $(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -r '.[] | select(.name == "myhome") | .path') .debpkg/usr/bin/myhome
+
+                # systemd script
+                mkdir -p .debpkg/usr/lib/systemd/system
+                cp linux/debian/myhome.service .debpkg/usr/lib/systemd/system/myhome.service
 
                 # create DEBIAN directory if you want to add other pre/post scripts
                 mkdir -p .debpkg/DEBIAN

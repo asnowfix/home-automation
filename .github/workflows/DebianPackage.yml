@@ -99,6 +99,7 @@ jobs:
             id: tag-release
             uses: ncipollo/release-action@v1
             with:
+                name: Release v${{ steps.semver.outputs.patch }}
                 artifactErrorsFailBuild: true
                 artifacts: "${{ steps.build-deb.outputs.file_name }},README.md"
                 bodyFile: "CHANGELOG.md"

@@ -95,12 +95,15 @@ jobs:
                 desc: 'MyHome Automation.' # optional
                 homepage: 'https://github.com/asnowfix/home-automation' # optional
         -
-            name: Release
-            uses: softprops/action-gh-release@v2
-            if: startsWith(github.ref, 'refs/tags/')
+            name: Tag & Release
+            id: tag-release
+            uses: ncipollo/release-action@v1
             with:
-                files: |
-                    ${{ steps.build-deb.outputs.file_name }}
-                    README.md
-                    CHANGELOG.md
-      
+                artifactErrorsFailBuild: true
+                artifacts: "${{ steps.build-deb.outputs.file_name }},README.md"
+                bodyFile: "CHANGELOG.md"
+                tag: ${{ steps.semver.outputs.patch }}
+                prerelease: true
+                draft: true
+                replacesArtifacts: true
+                generateReleaseNotes: true

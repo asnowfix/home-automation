@@ -60,6 +60,20 @@ jobs:
                 cp linux/debian/postinst.sh .debpkg/DEBIAN/postinst
                 chmod +x .debpkg/DEBIAN/postinst
         -
+            name: Get previous tag
+            id: previoustag
+            uses: 'WyriHaximus/github-action-get-previous-tag@v1'
+            with:
+                fallback: 0.0.0 # Optional fallback tag to use when no tag can be found
+            env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        -
+            name: Get next patchlevel version
+            id: semver
+            uses: 'WyriHaximus/github-action-next-semvers@v1'
+            with:
+                version: ${{ steps.previoustag.outputs.tag }}
+        -
             id: build-deb
             name: Build Debian Package
             uses: jiro4989/build-deb-action@v4
@@ -69,8 +83,12 @@ jobs:
                 maintainer: Francois-Xavier 'FiX' KOWALSKI <fix.kowalski@gmail.com>
                 # https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
                 #debian_revision: ${{ github.run_number }}
-                #version: ${{ github.ref }} # refs/tags/v*.*.*
-                version: 0${{ github.ref_name }}.${{ github.sha }}
+                # # Next major
+                # version: ${{ steps.semver.outputs.major }}
+                # # Next minor
+                # version: ${{ steps.semver.outputs.minor }}
+                # Next patchlevel
+                version: ${{ steps.semver.outputs.patch }}
                 arch: 'arm64' # optional
                 depends: 'libc6 (>= 2.2.1), systemd' # optional
                 desc: 'MyHome Automation.' # optional

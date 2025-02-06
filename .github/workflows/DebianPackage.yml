@@ -109,7 +109,7 @@ jobs:
                 name: Release v${{ steps.semver.outputs.patch }}
                 artifactErrorsFailBuild: true
                 artifacts: "${{ steps.build-deb.outputs.file_name }},README.md"
-                bodyFile: "CHANGELOG.md"
+                bodyFile: CHANGELOG.md
                 tag: ${{ steps.semver.outputs.patch }}
                 prerelease: true
                 draft: true

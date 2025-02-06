@@ -95,8 +95,15 @@ jobs:
                 desc: 'MyHome Automation.' # optional
                 homepage: 'https://github.com/asnowfix/home-automation' # optional
         -
-            name: Tag & Release
-            id: tag-release
+            uses: rickstaa/action-create-tag@v1
+            id: "tag_create"
+            with:
+                tag: v${{ steps.semver.outputs.patch }}
+                tag_exists_error: true
+                message: "Release v${{ steps.semver.outputs.patch }}"
+        -
+            name: Release
+            id: release
             uses: ncipollo/release-action@v1
             with:
                 name: Release v${{ steps.semver.outputs.patch }}

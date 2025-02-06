@@ -79,10 +79,19 @@ jobs:
             name: Check files
             run: ls -l ${{ steps.build-deb.outputs.file_name }}
         -
-            run: |
-                # get the latest tag
-                gh release create v0.0.0 ${{ steps.build-deb.outputs.file_name }}
+            name: version
+            run: echo "::set-output name=version::$(git describe)"
+            id: version
+        -
+            name: Create Release
+            id: create_release
+            uses: actions/create-release@v1
             env:
-                GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            shell: bash
-            name: Creates a release in GitHub and uploads attachments
+              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+            with:
+              tag_name: ${{ github.ref }}
+              release_name: ${{ steps.version.outputs.version }}
+              body_path: CHANGELOG.md
+              draft: false
+              prerelease: true
+    

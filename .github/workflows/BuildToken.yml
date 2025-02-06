@@ -8,7 +8,7 @@ jobs:
   print-token:
     permissions: write-all
     name: print-token
-    environment: dev
+    # environment: github
     # needs: pre-pkr
     runs-on: ubuntu-latest
 

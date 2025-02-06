@@ -83,15 +83,28 @@ jobs:
             run: echo "::set-output name=version::$(git describe)"
             id: version
         -
-            name: Create Release
-            id: create_release
+            name: Get previous tag
+            id: previoustag
+            uses: 'WyriHaximus/github-action-get-previous-tag@v1'
+            env:
+              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        -
+            name: Get next minor version
+            id: semver
+            uses: 'WyriHaximus/github-action-next-semvers@v1'
+            with:
+              version: ${{ steps.previoustag.outputs.tag }}
+        -
+            name: Create release
+            id: create_release_id
             uses: actions/create-release@v1
             env:
-              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by Actions, you do not need to create your own token
+              GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
             with:
-              tag_name: ${{ github.ref }}
-              release_name: ${{ steps.version.outputs.version }}
+              tag_name: ${{ steps.semver.outputs.patch }}
+              release_name: Release ${{ steps.semver.outputs.patch }}
+              #tag_name: ${{ github.ref }}
+              #release_name: ${{ steps.version.outputs.version }}
               body_path: CHANGELOG.md
               draft: false
               prerelease: true
-    

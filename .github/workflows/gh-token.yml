@@ -5,7 +5,7 @@ name: get-token
 
 jobs:
   
-  print-token:
+  gh-token:
     permissions: write-all
     name: print-token
     # environment: github

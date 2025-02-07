@@ -1,0 +1,56 @@
+name: Windows Installer Creation and Publication as Release
+
+on:
+  push:
+      tags:
+      - 'v*.*.*'
+
+jobs:
+  package-msi:
+    runs-on: windows-latest
+
+    steps:
+      - 
+        name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - 
+        name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.23.0
+      - 
+        name: Build Windows Exectutable
+        run: go build -o myhome.exe ./myhome
+      - 
+        name: Install go-msi
+        run: choco install -y "go-msi"
+      -
+        id: build-msi
+        name: Build Windows Installer MSI from exe file
+        uses: AliceOh/CreateWindowsInstaller@1.0.0
+        with:
+          exefile: 'myhome.exe'
+      -
+        name: Get previous tag
+        id: previoustag
+        uses: 'WyriHaximus/github-action-get-previous-tag@v1'
+        with:
+            fallback: 0.0.0 # Optional fallback tag to use when no tag can be found
+        env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      -
+        name: Release
+        id: release
+        uses: ncipollo/release-action@v1
+        with:
+            name: Release v${{ steps.previoustag.outputs.tag }}
+            artifactErrorsFailBuild: true
+            artifacts: "${{ steps.build-msi.outputs.file_name }},README.md"
+            bodyFile: CHANGELOG.md
+            tag: ${{ steps.previoustag.outputs.tag }}
+            prerelease: true
+            draft: true
+            replacesArtifacts: true
+            generateReleaseNotes: true

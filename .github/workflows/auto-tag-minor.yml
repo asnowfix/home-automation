@@ -1,9 +1,11 @@
 name: Auto-tag minor version update
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 on:
   push:
     branches:
-        'v[0-9]+'
+        'v[0-9]+.x'
 
 jobs:
   tag-minor:
@@ -23,22 +25,16 @@ jobs:
             id: go-build
             name: Run go build
             run: go build ./...
-            env:
-                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         -
             id: go-test
             name: Run go test
             run: go test ./...
-            env:
-                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         -
             name: Get previous tag
             id: previoustag
             uses: 'WyriHaximus/github-action-get-previous-tag@v1'
             with:
                 fallback: 0.0.0 # Optional fallback tag to use when no tag can be found
-            env:
-                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         -
             name: Get semantic version
             id: semver

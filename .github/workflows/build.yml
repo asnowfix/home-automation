@@ -1,4 +1,6 @@
 name: Build and Test
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 on:
   push:
@@ -23,11 +25,7 @@ jobs:
             id: go-build
             name: Run go build
             run: go build ./...
-            env:
-                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         -
             id: go-test
             name: Run go test
             run: go test ./...
-            env:
-                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -20,8 +20,8 @@ jobs:
             with:
                 go-version: '1.23.x'
         -
-            id: go-build-test
-            name: Run go build and go test
-            run: go build -o myhome.exe ./myhome && go test ./...
+            id: go-test
+            name: Run go test
+            run: go test ./...
             env:
                 GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

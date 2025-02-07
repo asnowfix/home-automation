@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  tag-patch:
+  build:
     runs-on: ubuntu-latest
     steps:
         -
@@ -23,6 +23,5 @@ jobs:
             id: go-build-test
             name: Run go build and go test
             run: go build -o myhome.exe ./myhome && go test ./...
-            working-directory: myhome
             env:
                 GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

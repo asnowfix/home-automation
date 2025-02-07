@@ -1,0 +1,50 @@
+name: Auto-tag minor version update
+
+on:
+  push:
+    branches:
+      - '*.x'
+
+jobs:
+  tag-minor:
+    runs-on: ubuntu-latest
+    steps:
+        -
+            name: Checkout
+            uses: actions/checkout@v4
+            with:
+              fetch-depth: 0
+        -
+            name: Setup Go
+            uses: actions/setup-go@v5
+            with:
+                go-version: '1.23.x'
+        -
+            id: go-build-test
+            name: Run go build and go test
+            run: go build -o myhome.exe ./myhome && go test ./...
+            working-directory: myhome
+            env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        -
+            name: Get previous tag
+            id: previoustag
+            uses: 'WyriHaximus/github-action-get-previous-tag@v1'
+            with:
+                fallback: 0.0.0 # Optional fallback tag to use when no tag can be found
+            env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        -
+            name: Get semantic version
+            id: semver
+            uses: 'WyriHaximus/github-action-next-semvers@v1'
+            with:
+                version: ${{ steps.previoustag.outputs.tag }}
+        -
+            name: Next minor version
+            uses: rickstaa/action-create-tag@v1
+            id: "tag-minor"
+            with:
+                tag: v${{ steps.semver.outputs.minor }}
+                tag_exists_error: true
+                message: "Release v${{ steps.semver.outputs.minor }}"

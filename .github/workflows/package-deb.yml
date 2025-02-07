@@ -1,14 +1,13 @@
 name: Debian Package Creation and Publication as Release
 
 
-on: [push]
-# on:
-#   push:
-#     tags:
-#       - 'v*.*.*'
+on:
+    push:
+        tags:
+        - 'v*.*.*'
 
 jobs:
-  build:
+  package-deb:
     runs-on: ubuntu-latest
     steps:
         -
@@ -69,12 +68,6 @@ jobs:
             env:
                 GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         -
-            name: Get next patchlevel version
-            id: semver
-            uses: 'WyriHaximus/github-action-next-semvers@v1'
-            with:
-                version: ${{ steps.previoustag.outputs.tag }}
-        -
             id: build-deb
             name: Build Debian Package
             uses: jiro4989/build-deb-action@v4
@@ -84,33 +77,21 @@ jobs:
                 maintainer: Francois-Xavier 'FiX' KOWALSKI <fix.kowalski@gmail.com>
                 # https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
                 #debian_revision: ${{ github.run_number }}
-                # # Next major
-                # version: ${{ steps.semver.outputs.major }}
-                # # Next minor
-                # version: ${{ steps.semver.outputs.minor }}
-                # Next patchlevel
-                version: ${{ steps.semver.outputs.patch }}
+                version: ${{ steps.previoustag.outputs.tag }}
                 arch: 'arm64' # optional
                 depends: 'libc6 (>= 2.2.1), systemd' # optional
                 desc: 'MyHome Automation.' # optional
                 homepage: 'https://github.com/asnowfix/home-automation' # optional
         -
-            uses: rickstaa/action-create-tag@v1
-            id: "tag_create"
-            with:
-                tag: v${{ steps.semver.outputs.patch }}
-                tag_exists_error: true
-                message: "Release v${{ steps.semver.outputs.patch }}"
-        -
             name: Release
             id: release
             uses: ncipollo/release-action@v1
             with:
-                name: Release v${{ steps.semver.outputs.patch }}
+                name: Release v${{ steps.previoustag.outputs.tag }}
                 artifactErrorsFailBuild: true
                 artifacts: "${{ steps.build-deb.outputs.file_name }},README.md"
                 bodyFile: CHANGELOG.md
-                tag: ${{ steps.semver.outputs.patch }}
+                tag: ${{ steps.previoustag.outputs.tag }}
                 prerelease: true
                 draft: true
                 replacesArtifacts: true

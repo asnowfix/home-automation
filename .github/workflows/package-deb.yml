@@ -32,9 +32,9 @@ jobs:
                 version: '~> v2'
                 #args: release --rm-dist --clean --snapshot
                 args: release -f .goreleaser.yml --clean --snapshot
-            env:
-                # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
-                # GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+            # env:
+            #     # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
+            #     GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
         -
             name: Install jq
             uses: awalsh128/cache-apt-pkgs-action@latest

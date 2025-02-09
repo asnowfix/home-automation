@@ -50,3 +50,7 @@ jobs:
                 tag_exists_error: true
                 force_push_tag: true
                 message: "Release v${{ steps.semver.outputs.patch }}"
+        -
+            name: Log End
+            run: echo "Finished the auto-tag-patch workflow."
+        

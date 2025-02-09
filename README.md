@@ -31,6 +31,10 @@ Collection of tools to help automating my own House, mostly using (very cool) Sh
     - [UPnP](#upnp)
   - [References](#references)
 
+## Releases
+
+Published here: <https://github.com/asnowfix/home-automation/releases>.
+
 ## Usage - Linux
 
 ### Is daemon running?

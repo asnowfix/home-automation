@@ -42,7 +42,7 @@ jobs:
             with:
                 version: ${{ steps.previoustag.outputs.tag }}
         -
-            name: Next minor version
+            name: Add annotated tag (new minor)
             uses: rickstaa/action-create-tag@v1
             id: "tag-minor"
             with:

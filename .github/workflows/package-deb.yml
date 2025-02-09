@@ -12,7 +12,9 @@ on:
         branches:
             - 'v[0-9]+.[0-9]+.x'
             - 'v[0-9]+.x'
-            - main
+    push:
+        tags:
+            - 'v[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
     package-deb:
@@ -28,6 +30,10 @@ jobs:
                 uses: actions/setup-go@v5
                 with:
                     go-version: '1.23.x'
+            -
+                id: git-describe
+                name: Get package version from latest (current or prior) tag
+                run: echo "version=$(git describe --tags --abbrev=0)"
             -
                 id: go-releaser
                 name: Run GoReleaser
@@ -76,7 +82,8 @@ jobs:
                     maintainer: Francois-Xavier 'FiX' KOWALSKI <fix.kowalski@gmail.com>
                     # https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
                     #debian_revision: ${{ github.run_number }}
-                    version: ${{ github.ref_name }}
+                    # infer version from the latest tag
+                    version: ${{ steps.git-describe.outputs.version }}
                     arch: 'arm64' # optional
                     depends: 'libc6 (>= 2.2.1), systemd' # optional
                     desc: 'MyHome Automation.' # optional

@@ -1,4 +1,4 @@
-name: Auto-tag patch version update
+name: auto-tag-patch
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

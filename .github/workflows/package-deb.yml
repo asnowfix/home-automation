@@ -3,26 +3,33 @@ env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 on:
-    workflow_run:
-        workflows:
-            - auto-tag-patch
-            - auto-tag-minor
-        types:
-            - completed
-        branches:
-            - 'v[0-9]+.[0-9]+.x'
-            - 'v[0-9]+.x'
-            - main
+    workflow_dispatch:
+        inputs:
+            ref:
+                description: 'Ref to build'
+                required: true
+                default: 'main'
+    push:
+        tags:
+            - 'v[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
     package-deb:
         runs-on: ubuntu-latest
+        outputs:
+            release_version: ${{ steps.version.outputs.release }}
         steps:
+            -
+                name: Install jq
+                uses: awalsh128/cache-apt-pkgs-action@latest
+                with:
+                    packages: jq
             -
                 name: Checkout
                 uses: actions/checkout@v4
                 with:
                     fetch-depth: 0
+                    ref: ${{ github.event.inputs.ref }}
             -
                 name: Setup Go
                 uses: actions/setup-go@v5
@@ -43,13 +50,19 @@ jobs:
                 #     # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
                 #     GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
             -
-                name: Install jq
-                uses: awalsh128/cache-apt-pkgs-action@latest
-                with:
-                    packages: jq
-            -
                 name: Show artifacts
                 run: echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
+            -
+                id: version
+                name: Get package version from latest (current or prior) tag
+                run: |
+                    # https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
+                    # [epoch:]upstream_version[-debian_revision]
+                    #echo "upstream_version=$(git describe | sed -E 's|^v*([0-9]+\.[0-9]+\.[0-9]+)-(.*)$|\1|g')" | tee -a $GITHUB_OUTPUT
+                    #echo "debian_revision=$(git describe | sed -E 's|^v*([0-9]+\.[0-9]+\.[0-9]+)-(.*)$|\2|g')" | tee -a $GITHUB_OUTPUT
+                    #echo "debian_version=$(git describe | sed -E 's|^v*(.*)$|\1|g')" | tee -a $GITHUB_OUTPUT
+                    #echo "::set-output name=release::$(git describe)"
+                    echo "release=$(git describe)" | tee -a "$GITHUB_OUTPUT"
             -
                 id: prepare-deb
                 name: Prepare package content
@@ -74,9 +87,8 @@ jobs:
                     package: myhome
                     package_root: .debpkg
                     maintainer: Francois-Xavier 'FiX' KOWALSKI <fix.kowalski@gmail.com>
-                    # https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
-                    #debian_revision: ${{ github.run_number }}
-                    version: ${{ github.ref_name }}
+                    # `https://hub.docker.com/r/jiro4989/build-deb-action` wants format like version: refs/tags/v*.*.*
+                    version: refs/tags/${{ steps.version.outputs.version }}
                     arch: 'arm64' # optional
                     depends: 'libc6 (>= 2.2.1), systemd' # optional
                     desc: 'MyHome Automation.' # optional
@@ -86,11 +98,11 @@ jobs:
                 id: release
                 uses: ncipollo/release-action@v1
                 with:
-                    name: Release ${{ github.ref_name }}
+                    name: Release ${{ steps.version.outputs.release }}
                     artifactErrorsFailBuild: true
                     artifacts: "${{ steps.build-deb.outputs.file_name }},README.md"
                     #bodyFile: CHANGELOG.md
-                    tag: ${{ github.ref_name }}
+                    tag: ${{ steps.version.outputs.release }}
                     prerelease: true
                     draft: true
                     replacesArtifacts: true

@@ -49,3 +49,6 @@ jobs:
                 tag: v${{ steps.semver.outputs.minor }}
                 tag_exists_error: true
                 message: "Release v${{ steps.semver.outputs.minor }}"
+        -
+            name: Log End
+            run: echo "Finished the auto-tag-minor workflow."

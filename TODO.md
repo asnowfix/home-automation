@@ -32,7 +32,7 @@ Functions
     - Consider using Pion mDNS <https://github.com/pion/mdns> or HashiCorp mDNS <https://github.com/hashicorp/mdns/blob/main/server.go> rather than ZeroConf.
     - <https://dave.cheney.net/2011/10/15/scratching-my-own-itch-or-how-to-publish-multicast-dns-records-in-go> and with supporting repo fork follow-up <https://github.com/ugjka/mdns>
 
-[ ] Rework file/folder layout to be more generic using https://github.com/golang-standards/project-layout
+[ ] Rework file/folder layout to be more generic using <https://github.com/golang-standards/project-layout>
 [x] Fix error
 
     7:02AM INF ../mymqtt/mqtt.go:202 > Received from MQTT: payload="{\"src\":\"shellyplus1-08b61fd9333c\",\"dst\":\"shellyplus1-08b61fd9333c/events\",\"method\":\"NotifyEvent\",\"params\":{\"ts\":1736834580.08,\"events\":[{\"component\":\"sys\", \"event\":\"scheduled_restart\", \"time_ms\": 999, \"ts\":1736834580.08}]}}" topic=shellyplus1-08b61fd9333c/events/rpc v=0

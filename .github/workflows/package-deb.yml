@@ -105,7 +105,7 @@ jobs:
                     artifacts: "${{ steps.build-deb.outputs.file_name }},README.md"
                     #bodyFile: CHANGELOG.md
                     tag: ${{ steps.version.outputs.release }}
-                    prerelease: true
-                    draft: true
+                    prerelease: false   # beta, rc
+                    draft: true         # confirmation in the UI
                     replacesArtifacts: true
                     generateReleaseNotes: true

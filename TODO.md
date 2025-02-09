@@ -65,10 +65,13 @@ Functions
         - https://github.com/ncruces/go-sqlite3
         - https://github.com/cvilsmeier/go-sqlite-bench
 
-[ ] Add goreleaser to cross-compile
+[x] Use goreleaser to cross-compile
 
         - https://goreleaser.com/ci/actions/
         - https://github.com/marketplace/actions/goreleaser-action
+
+[ ] Use goreleaser-cross if needed
+
         - https://github.com/goreleaser/goreleaser-cross
 
 Packaging

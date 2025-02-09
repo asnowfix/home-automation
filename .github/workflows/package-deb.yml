@@ -9,6 +9,10 @@ on:
             - auto-tag-minor
         types:
             - completed
+        branches:
+            - 'v[0-9]+.[0-9]+.x'
+            - 'v[0-9]+.x'
+            - main
 
 jobs:
     package-deb:

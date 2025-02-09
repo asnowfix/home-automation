@@ -27,6 +27,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.ref }}
       - 
+        id: go
         name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -38,11 +39,9 @@ jobs:
           $tag = git describe
           Add-Content -Path $env:GITHUB_OUTPUT -Value "release=$tag"
       - 
+        id: build
         name: Build Windows Exectutable
-        run: go build -o myhome.exe ./myhome
-      - 
-        name: Install go-msi
-        run: choco install -y "go-msi"
+        run: go build .\\myhome
       -
         id: build-msi
         name: Build Windows Installer MSI from exe file

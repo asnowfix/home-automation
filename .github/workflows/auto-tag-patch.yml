@@ -51,6 +51,11 @@ jobs:
                 force_push_tag: true
                 message: "Release v${{ steps.semver.outputs.patch }}"
         -
-            name: Log End
-            run: echo "Finished the auto-tag-patch workflow."
-        
+            name: Trigger Packaging Workflow
+            uses: request-action@v2
+            with:
+                route: POST /repos/:owner/:repo/dispatches
+                owner: ${{ github.repository_owner }}
+                repo: ${{ github.repository }}
+                event-type: trigger-event
+                client-payload: '{"ref": "v${{ steps.semver.outputs.patch }}"}'  

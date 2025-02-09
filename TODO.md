@@ -14,16 +14,14 @@ Functions
 
     - https://github.com/uvjim/linksys_velop
     - https://github.com/uvjim/linksys_velop/blob/master/README.md
-
-
-[ ] Rework file/folder layout to be more generic using https://github.com/golang-standards/project-layout
-
 [ ] Publish mqtt.local. or myhome.local. hostname using mDNS, using
 
     - <https://medium.com/@potto_94870/understand-mdns-with-an-example-1e05ef70013b>
     - <https://andrewdupont.net/2022/01/27/using-mdns-aliases-within-your-home-network/>
     - Consider using Pion mDNS <https://github.com/pion/mdns> or HashiCorp mDNS <https://github.com/hashicorp/mdns/blob/main/server.go> rather than ZeroConf.
     - <https://dave.cheney.net/2011/10/15/scratching-my-own-itch-or-how-to-publish-multicast-dns-records-in-go> and with supporting repo fork follow-up <https://github.com/ugjka/mdns>
+
+[ ] Rework file/folder layout to be more generic using https://github.com/golang-standards/project-layout
 
 [ ] Select anoth FOSS license than MPL-2.0
 [ ] Add SPDX license identifier everywhere

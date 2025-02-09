@@ -4,7 +4,7 @@ TODO
 License
 -------
 
-[ ] Select anoth FOSS license than MPL-2.0
+[ ] Select another FOSS license than MPL-2.0
 [ ] Add SPDX license identifier everywhere
 
 Functions

@@ -35,7 +35,8 @@ jobs:
         id: version
         name: Get package version from latest (current or prior) tag
         run: |
-            echo "release=$(git describe)" | tee -a "$GITHUB_OUTPUT"
+          $tag = git describe
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "release=$tag"
       - 
         name: Build Windows Exectutable
         run: go build -o myhome.exe ./myhome

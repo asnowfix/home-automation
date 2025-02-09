@@ -25,6 +25,7 @@ Functions
     - Consider using Pion mDNS <https://github.com/pion/mdns> or HashiCorp mDNS <https://github.com/hashicorp/mdns/blob/main/server.go> rather than ZeroConf.
     - <https://dave.cheney.net/2011/10/15/scratching-my-own-itch-or-how-to-publish-multicast-dns-records-in-go> and with supporting repo fork follow-up <https://github.com/ugjka/mdns>
 
+[ ] Select anoth FOSS license than MPL-2.0
 [ ] Add SPDX license identifier everywhere
 [ ] Change license from MPL-2.0 to MIT/BSD when ready
 [x] Fix error

@@ -76,7 +76,8 @@ Packaging
 
 [x] Auto-tag patch & minor increases
 [ ] Build Debian package on new tagged version
-[ ] Build MSI package for Windowson new tagged version
+[ ] Build Debian package the official way using <https://github.com/marketplace/actions/build-debian-packages>
+[ ] Build MSI package for Windows on new tagged version
 [ ] Add command to auto-update from release channel
 [ ] Add Home Assistant integration
 [ ] Add Amazon Alexa integration

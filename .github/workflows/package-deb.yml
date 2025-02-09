@@ -3,8 +3,12 @@ env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 on:
-    repository_dispatch:
-        types: [trigger-event]
+    workflow_dispatch:
+        inputs:
+            ref:
+                description: 'Ref to build'
+                required: true
+                default: 'main'
     push:
         tags:
             - 'v[0-9]+.[0-9]+.[0-9]+'
@@ -25,7 +29,7 @@ jobs:
                 uses: actions/checkout@v4
                 with:
                     fetch-depth: 0
-                    ref: ${{ github.event.client_payload.ref }}
+                    ref: ${{ github.event.inputs.ref }}
             -
                 name: Setup Go
                 uses: actions/setup-go@v5

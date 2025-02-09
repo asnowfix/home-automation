@@ -33,7 +33,8 @@ jobs:
             -
                 id: git-describe
                 name: Get package version from latest (current or prior) tag
-                run: echo "version=$(git describe --tags --abbrev=0)"
+                run: |
+                    echo "description=$(git describe --tags --abbrev=0)" >> $GITHUB_ENV
             -
                 id: go-releaser
                 name: Run GoReleaser
@@ -83,7 +84,7 @@ jobs:
                     # https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
                     #debian_revision: ${{ github.run_number }}
                     # infer version from the latest tag
-                    version: ${{ steps.git-describe.outputs.version }}
+                    version: ${{ steps.git-describe.outputs.description }}
                     arch: 'arm64' # optional
                     depends: 'libc6 (>= 2.2.1), systemd' # optional
                     desc: 'MyHome Automation.' # optional

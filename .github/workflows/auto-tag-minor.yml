@@ -50,5 +50,11 @@ jobs:
                 tag_exists_error: true
                 message: "Release v${{ steps.semver.outputs.minor }}"
         -
-            name: Log End
-            run: echo "Finished the auto-tag-minor workflow."
+            name: Trigger Packaging Workflow
+            uses: request-action@v2
+            with:
+                route: POST /repos/:owner/:repo/dispatches
+                owner: ${{ github.repository_owner }}
+                repo: ${{ github.repository }}
+                event-type: trigger-event
+                client-payload: '{"ref": "v${{ steps.semver.outputs.minor }}"}'  

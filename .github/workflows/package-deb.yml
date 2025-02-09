@@ -60,12 +60,6 @@ jobs:
                 cp linux/debian/postinst.sh .debpkg/DEBIAN/postinst
                 chmod +x .debpkg/DEBIAN/postinst
         -
-            name: Get previous tag
-            id: previoustag
-            uses: 'WyriHaximus/github-action-get-previous-tag@v1'
-            with:
-                fallback: 0.0.0 # Optional fallback tag to use when no tag can be found
-        -
             id: build-deb
             name: Build Debian Package
             uses: jiro4989/build-deb-action@v4
@@ -75,7 +69,7 @@ jobs:
                 maintainer: Francois-Xavier 'FiX' KOWALSKI <fix.kowalski@gmail.com>
                 # https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
                 #debian_revision: ${{ github.run_number }}
-                version: ${{ steps.previoustag.outputs.tag }}
+                version: ${{ github.ref_name }}
                 arch: 'arm64' # optional
                 depends: 'libc6 (>= 2.2.1), systemd' # optional
                 desc: 'MyHome Automation.' # optional
@@ -85,11 +79,11 @@ jobs:
             id: release
             uses: ncipollo/release-action@v1
             with:
-                name: Release v${{ steps.previoustag.outputs.tag }}
+                name: Release ${{ github.ref_name }}
                 artifactErrorsFailBuild: true
                 artifacts: "${{ steps.build-deb.outputs.file_name }},README.md"
-                bodyFile: CHANGELOG.md
-                tag: ${{ steps.previoustag.outputs.tag }}
+                #bodyFile: CHANGELOG.md
+                tag: ${{ github.ref_name }}
                 prerelease: true
                 draft: true
                 replacesArtifacts: true

@@ -1,6 +1,9 @@
 TODO
 ====
 
+Functions
+---------
+
 [ ] Create/Configure scripts in a single operation
 [x] Status for one / multiple scripts in a single operation
 [ ] Run simple JavaScript in a single operation
@@ -62,6 +65,9 @@ TODO
         - https://goreleaser.com/ci/actions/
         - https://github.com/marketplace/actions/goreleaser-action
         - https://github.com/goreleaser/goreleaser-cross
+
+Packaging
+---------
 
 [x] Auto-tag patch & minor increases
 [ ] Build Debian package on new tagged version

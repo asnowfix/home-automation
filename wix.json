@@ -14,7 +14,7 @@
     "vars": [
       {
         "name": "PATH",
-        "value": "c:\\Program Files\\Go\\bin;",
+        "value": "c:\\Program Files\\MyHome;",
         "permanent": "no",
         "system": "no",
         "action": "set",

@@ -63,7 +63,9 @@ TODO
         - https://github.com/marketplace/actions/goreleaser-action
         - https://github.com/goreleaser/goreleaser-cross
 
-[ ] Build MSI package for Windows & Store as release
+[x] Auto-tag patch & minor increases
+[ ] Build Debian package on new tagged version
+[ ] Build MSI package for Windowson new tagged version
 [ ] Add command to auto-update from release channel
 [ ] Add Home Assistant integration
 [ ] Add Amazon Alexa integration

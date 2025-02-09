@@ -50,3 +50,11 @@ jobs:
                 tag_exists_error: true
                 force_push_tag: true
                 message: "Release v${{ steps.semver.outputs.patch }}"
+        -
+            name: Trigger Packaging Workflow
+            run: |
+                curl -X POST \
+                    -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                    -H "Accept: application/vnd.github.v3+json" \
+                    https://api.github.com/repos/${{ github.repository }}/actions/workflows/package-deb.yml/dispatches \
+                    -d '{"ref":"v${{ steps.semver.outputs.patch }}"}'

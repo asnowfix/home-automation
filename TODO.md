@@ -1,6 +1,12 @@
 TODO
 ====
 
+License
+-------
+
+[ ] Select anoth FOSS license than MPL-2.0
+[ ] Add SPDX license identifier everywhere
+
 Functions
 ---------
 
@@ -28,9 +34,6 @@ Functions
     - <https://dave.cheney.net/2011/10/15/scratching-my-own-itch-or-how-to-publish-multicast-dns-records-in-go> and with supporting repo fork follow-up <https://github.com/ugjka/mdns>
 
 [ ] Rework file/folder layout to be more generic using https://github.com/golang-standards/project-layout
-
-[ ] Select anoth FOSS license than MPL-2.0
-[ ] Add SPDX license identifier everywhere
 [ ] Change license from MPL-2.0 to MIT/BSD when ready
 [x] Fix error
 
@@ -59,12 +62,30 @@ Functions
             /Users/fkowalski/Desktop/Projects/home-automation/myhome/devices/manager.go:139 +0x1c8
     exit status 2
 
+[ ] Add Home Assistant integration
+[ ] Add Amazon Alexa integration
+[ ] Add Google Home integration
+[ ] Add interactive shell
+
+        - https://www.dolthub.com/blog/2023-03-29-interactive-shell-golang/
+        - https://github.com/abiosoft/ishell
+
 [x] Use pure-Go sqlite implementation (to allow cross-compilation)
 
         - https://pkg.go.dev/modernc.org/sqlite
         - https://github.com/ncruces/go-sqlite3
         - https://github.com/cvilsmeier/go-sqlite-bench
 
+[ ] Re-init list of live devices at startup... or lazy version?
+[ ] Timeout on missing/non-responsive devices
+[ ] Ctrl-C should stop myhome program (whatever the option)
+[ ] Fix inbound IPv6 communication
+
+Packaging
+---------
+
+[x] Auto-tag patch & minor increases
+[ ] Build Debian package on new tagged version
 [x] Use goreleaser to cross-compile
 
         - https://goreleaser.com/ci/actions/
@@ -74,23 +95,6 @@ Functions
 
         - https://github.com/goreleaser/goreleaser-cross
 
-Packaging
----------
-
-[x] Auto-tag patch & minor increases
-[ ] Build Debian package on new tagged version
 [ ] Build Debian package the official way using <https://github.com/marketplace/actions/build-debian-packages>
 [ ] Build MSI package for Windows on new tagged version
-[ ] Add command to auto-update from release channel
-[ ] Add Home Assistant integration
-[ ] Add Amazon Alexa integration
-[ ] Add Google Home integration
-[ ] Add interactive shell
-
-        - https://www.dolthub.com/blog/2023-03-29-interactive-shell-golang/
-        - https://github.com/abiosoft/ishell
-
-[ ] Re-init list of live devices at startup... or lazy version?
-[ ] Timeout on missing/non-responsive devices
-[ ] Ctrl-C should stop myhome program (whatever the option)
-[ ] Fix inbould IPv6 communication
+[ ] Add command to auto-update Debian package installation from latest

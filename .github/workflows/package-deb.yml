@@ -31,11 +31,6 @@ jobs:
                 with:
                     go-version: '1.23.x'
             -
-                id: git-describe
-                name: Get package version from latest (current or prior) tag
-                run: |
-                    echo "description=$(git describe --tags --abbrev=0)" >> $GITHUB_ENV
-            -
                 id: go-releaser
                 name: Run GoReleaser
                 uses: goreleaser/goreleaser-action@v6
@@ -57,6 +52,14 @@ jobs:
             -
                 name: Show artifacts
                 run: echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
+            -
+                id: version
+                name: Get package version from latest (current or prior) tag
+                run: |
+                    #echo "epoch=0" | tee -a $GITHUB_ENV
+                    #echo "upstream_version=$(git describe | sed -E 's|^v*([0-9]+\.[0-9]+\.[0-9]+)-(.*)$|\1|g')" | tee -a $GITHUB_ENV
+                    #echo "debian_revision=$(git describe | sed -E 's|^v*([0-9]+\.[0-9]+\.[0-9]+)-(.*)$|\2|g')" | tee -a $GITHUB_ENV
+                    echo "debian_version=$(git describe | sed -E 's|^v*(.*)$|\1|g')" | tee -a $GITHUB_ENV
             -
                 id: prepare-deb
                 name: Prepare package content
@@ -82,9 +85,8 @@ jobs:
                     package_root: .debpkg
                     maintainer: Francois-Xavier 'FiX' KOWALSKI <fix.kowalski@gmail.com>
                     # https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
-                    #debian_revision: ${{ github.run_number }}
-                    # infer version from the latest tag
-                    version: ${{ steps.git-describe.outputs.description }}
+                    # [epoch:]upstream_version[-debian_revision]
+                    version: ${{ steps.version.outputs.debian_version }}
                     arch: 'arm64' # optional
                     depends: 'libc6 (>= 2.2.1), systemd' # optional
                     desc: 'MyHome Automation.' # optional

@@ -23,10 +23,9 @@ Functions
 
 [ ] Re-enable mDNS for early devices discovery
 [ ] Configure MQTT broker immediatelly after device discovery
-
+[ ] Publish mqtt.local. or myhome.local. hostname using mDNS, using
 [ ] Rework file/folder layout to be more generic using https://github.com/golang-standards/project-layout
 [ ] Find out proper layout
-[ ] Publish mqtt.local. or myhome.local. hostname using mDNS, using
 
     - <https://medium.com/@potto_94870/understand-mdns-with-an-example-1e05ef70013b>
     - <https://andrewdupont.net/2022/01/27/using-mdns-aliases-within-your-home-network/>

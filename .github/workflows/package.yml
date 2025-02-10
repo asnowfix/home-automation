@@ -98,7 +98,7 @@ jobs:
                     homepage: 'https://github.com/asnowfix/home-automation' # optional
             -
                 name: Upload MyHome DEB as artifact
-                uses: actions/upload-artifact@v3
+                uses: actions/upload-artifact@v4
                 with:
                     name: deb_file
                     path: ${{ steps.build-deb.outputs.file_name }}
@@ -144,7 +144,7 @@ jobs:
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=MyHome-${{ steps.version.outputs.release }}.msi"
             -
                 name: Upload MyHome MSI as artifact
-                uses: actions/upload-artifact@v3
+                uses: actions/upload-artifact@v4
                 with:
                     name: msi_file
                     path: ${{ steps.build-msi.outputs.msi_file }}
@@ -157,12 +157,12 @@ jobs:
         steps:
             -
                 name: Download MyHome MSI from package-msi
-                uses: actions/download-artifact@v3
+                uses: actions/download-artifact@v4
                 with:
                     name: msi_file
             -
                 name: Download MyHome DEB from package-deb
-                uses: actions/download-artifact@v3
+                uses: actions/download-artifact@v4
                 with:
                     name: deb_file
             -

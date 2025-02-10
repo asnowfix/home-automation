@@ -20,6 +20,7 @@ jobs:
         runs-on: ubuntu-latest
         outputs:
             release_version: ${{ steps.version.outputs.release }}
+            deb_file: ${{ steps.build-deb.outputs.file_name }}
         steps:
             -
                 name: Install jq
@@ -95,16 +96,54 @@ jobs:
                     depends: 'libc6 (>= 2.2.1), systemd' # optional
                     desc: 'MyHome Automation.' # optional
                     homepage: 'https://github.com/asnowfix/home-automation' # optional
+    package-msi:
+        runs-on: windows-latest
+        steps:
+            - 
+                name: Checkout
+                uses: actions/checkout@v4
+                with:
+                    fetch-depth: 0
+                    ref: ${{ github.event.ref }}
+            - 
+                id: go
+                name: Set up Go
+                uses: actions/setup-go@v5
+                with:
+                    go-version: 1.23.0
+            -
+                id: version
+                name: Get package version from latest (current or prior) tag
+                run: |
+                    $tag = git describe
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "release=$tag"
+            - 
+                id: build
+                name: Build Windows Exectutable
+                run: go build .\\myhome
+            - 
+                id: go-msi
+                name: Install go-msi
+                run: choco install go-msi
+            -
+                id: build-msi
+                name: Build Windows Installer MSI from exe file
+                run: go-msi make --msi MyHome-${{ steps.version.outputs.release }}.msi --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE
+
+    release:
+        runs-on: ubuntu-latest
+        steps:
             -
                 name: Release
                 id: release
                 uses: ncipollo/release-action@v1
                 with:
-                    name: Release ${{ steps.version.outputs.release }}
+                    name: Release ${{ needs.package-deb.outputs.release_version }}
                     artifactErrorsFailBuild: true
-                    artifacts: "${{ steps.build-deb.outputs.file_name }},README.md"
+                    artifacts: "${{ needs.package-deb.outputs.deb_file }},MyHome-${{ needs.package-deb.outputs.release_version }},README.md"
                     #bodyFile: CHANGELOG.md
-                    tag: ${{ steps.version.outputs.release }}
+                    #tag: ${{ needs.package-deb.outputs.release_version }}-rc${{ github.run_number }}
+                    tag: ${{ needs.package-deb.outputs.release_version }}
                     prerelease: false   # beta, rc
                     draft: true         # confirmation in the UI
                     replacesArtifacts: true

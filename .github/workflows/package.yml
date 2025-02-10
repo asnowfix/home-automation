@@ -96,8 +96,17 @@ jobs:
                     depends: 'libc6 (>= 2.2.1), systemd' # optional
                     desc: 'MyHome Automation.' # optional
                     homepage: 'https://github.com/asnowfix/home-automation' # optional
+            -
+                name: Upload MyHome DEB as artifact
+                uses: actions/upload-artifact@v3
+                with:
+                    name: deb_file
+                    path: ${{ steps.build-deb.outputs.file_name }}
     package-msi:
         runs-on: windows-latest
+        outputs:
+            release_version: ${{ steps.version.outputs.release }}
+            msi_file: ${{ steps.build-msi.outputs.file_name }}
         steps:
             - 
                 name: Checkout
@@ -128,11 +137,34 @@ jobs:
             -
                 id: build-msi
                 name: Build Windows Installer MSI from exe file
-                run: go-msi make --msi MyHome-${{ steps.version.outputs.release }}.msi --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE
+                env:
+                    Path: $env:Path + ";C:\Program Files\go-msi"
+                run: |
+                    go-msi make --msi MyHome-${{ steps.version.outputs.release }}.msi --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=MyHome-${{ steps.version.outputs.release }}.msi"
+            -
+                name: Upload MyHome MSI as artifact
+                uses: actions/upload-artifact@v3
+                with:
+                    name: msi_file
+                    path: ${{ steps.build-msi.outputs.msi_file }}
 
     release:
         runs-on: ubuntu-latest
+        needs:
+            - package-deb
+            - package-msi
         steps:
+            -
+                name: Download MyHome MSI from package-msi
+                uses: actions/download-artifact@v3
+                with:
+                    name: msi_file
+            -
+                name: Download MyHome DEB from package-deb
+                uses: actions/download-artifact@v3
+                with:
+                    name: deb_file
             -
                 name: Release
                 id: release

@@ -6,7 +6,7 @@
   "files": {
     "guid": "5b4e432c-e6da-4259-8981-67cd54d07471",
     "items": [
-      "myhome/myhome.exe"
+      "myhome.exe"
     ]
   },
   "env": {
@@ -29,7 +29,7 @@
         "name": "MyHome Home Automation",
         "description": "MSI pakage for MyHome Home Automation",
         "target": "c:\\Program Files\\MyHome\\myhome.exe",
-        "wdir": "c:\\Program Files\\MyHome",
+        "wdir": "MyHome",
         "arguments": "",
         "icon": ""
       }

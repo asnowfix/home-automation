@@ -58,33 +58,66 @@ $env:Path += ";C:\Program Files (x86)\GnuWin32\bin"
 ```pwsh
 winget install --id GoLang.Go --source winget
 $env:Path += ";C:\Program Files\Go\bin;C:\Users\$env:Username\Go\bin"
+Get-Command go
+```
+
+```
+CommandType     Name    Version    Source
+-----------     ----    -------    ------
+Application     go.exe  0.0.0.0    C:\Program Files\Go\bin\go.exe    
+```
+
+As administrator, install the WiX Toolset:
+
+```pwsh
+Enable-WindowsOptionalFeature -Online -FeatureName NetFx3
+winget install --id WiXToolset.WiXToolset --version 3.14.1.8722 --source winget
+$env:Path += ";C:\Program Files (x86)\WiX Toolset v3.14\bin"
+Get-Command candle
+```
+
+```
+CommandType     Name        Version    Source
+-----------     ----        -------    ------
+Application     candle.exe  3.14.87... C:\Program Files (x86)\WiX Toolset v3.14\bin\candle.exe
 ```
 
 ```pwsh
-winget install --id WiXToolset.WiXCLI --source winget
-$env:Path += ";C:\Program Files\WiX Toolset v5.0\bin"
+winget install --id Chocolatey.Chocolatey --source winget
+Get-Command choco
 ```
 
+```
+CommandType     Name        Version    Source
+-----------     ----        -------    ------
+Application     choco.exe   0.12.1.0   C:\ProgramData\chocolatey\bin\choco.exe
+```
+
+Run as administrator:
+
 ```pwsh
-go install github.com/mh-cbon/go-msi
+choco install go-msi
+Get-Command go-msi
+```
+
+```
+CommandType     Name        Version    Source
+-----------     ----        -------    ------
+Application     go-msi.exe  0.0.0.0    C:\Program Files\go-msi\go-msi.exe
 ```
 
 Allow ingress MQTT:
 
-```cmd
+```pwsh
 netsh advfirewall firewall add rule name="Allow MQTT" dir=in action=allow protocol=TCP localport=1883
 The requested operation requires elevation (Run as administrator).
 ```
 
-```cmd
-% go-msi gen-wix-cmd --msi MyHome.msi
-CreateFile C:\Users\fixko\Go\bin\templates: The system cannot find the file specified.
-
-% go-msi make --msi MyHome.msi --version 0.0.0
-CreateFile C:\Users\fixko\Go\bin\templates: The system cannot find the file specified.
+```pwsh
+go-msi make --msi MyHome.msi --version 0.0.0 --path .\wix.json --arch amd64 --license .\LICENSE
 ```
 
-```cmd
+```pwsh
 cd myhome
 go run . -h
 ```

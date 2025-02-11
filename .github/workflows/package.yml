@@ -114,7 +114,7 @@ jobs:
             - 
                 name: Install WiXToolset
                 id: wix
-                run: winget install --id WiXToolset.WiXToolset --version 3.14.1.8722 --source winget --disable-interactivity --accept-source-agreements
+                run: winget install --id WiXToolset.WiXToolset --version 3.14.1.8722 --source winget --disable-interactivity --accept-source-agreements --force
             - 
                 id: go-msi
                 name: Install go-msi

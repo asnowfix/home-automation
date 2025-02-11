@@ -140,6 +140,8 @@ jobs:
                 env:
                     Path: $env:Path + ";C:\Program Files\go-msi"
                 run: |
+                    Get-ChildItem Env:
+                    echo $env:Path
                     go-msi make --msi MyHome-${{ steps.version.outputs.release }}.msi --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=MyHome-${{ steps.version.outputs.release }}.msi"
             -

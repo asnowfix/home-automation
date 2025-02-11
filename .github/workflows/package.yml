@@ -123,7 +123,6 @@ jobs:
             -
                 id: version
                 name: Get package version from latest (current or prior) tag
-                shell: powershell
                 run: |
                     $tag = git describe
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "release=$tag"
@@ -140,12 +139,10 @@ jobs:
                 name: Build Windows Installer MSI from exe file
                 env:
                     Path: "C:\\Program Files\\go-msi"
-                shell: powershell
                 run: |
-                    $PSDefaultParameterValues['*:Verbose'] = $true
-                    echo $env:Path
-                    New-Item -ItemType Directory -Path "$(Get-Location)\\msi"
-                    go-msi make --msi MyHome-${{ steps.version.outputs.release }}.msi --version ${{ steps.version.outputs.release }} --path "$(Get-Location)\\wix.json" --arch amd64 --license "$(Get-Location)\\LICENSE" --out "$(Get-Location)\\msi"
+                    $out = "$(Get-Location)\msi"
+                    New-Item -ItemType Directory -Path $out
+                    go-msi make --msi MyHome-${{ steps.version.outputs.release }}.msi --version ${{ steps.version.outputs.release }} --path \wix.json --arch amd64 --license \LICENSE --out $out
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=MyHome-${{ steps.version.outputs.release }}.msi"
             -
                 name: Upload MyHome MSI as artifact

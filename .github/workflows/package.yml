@@ -108,6 +108,9 @@ jobs:
             release_version: ${{ steps.version.outputs.release }}
             msi_file: ${{ steps.build-msi.outputs.msi_file }}
         steps:
+            -
+                name: Install winget
+                uses: Cyberboss/install-winget@v1
             - 
                 name: Install WiXToolset
                 id: wix

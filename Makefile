@@ -82,3 +82,7 @@ build run:
 
 push:
 	$(GIT) push
+
+msi: build-msi
+	$msi = "$out\MyHome-0.0.18.msi"
+	go-msi make --msi $msi --version 0.0.18 --path .\wix.json --arch amd64 --license .\LICENSE --out $out

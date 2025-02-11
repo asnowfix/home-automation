@@ -141,7 +141,7 @@ jobs:
                     Path: "C:\\Program Files\\go-msi"
                 run: |
                     echo $env:Path
-                    mkdir $(Get-Location)\msi
+                    New-Item -ItemType Directory -Path "$(Get-Location)\msi"
                     go-msi make --msi MyHome-${{ steps.version.outputs.release }}.msi --version ${{ steps.version.outputs.release }} --path $(Get-Location)\wix.json --arch amd64 --license $(Get-Location)\LICENSE --out $(Get-Location)\msi
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=MyHome-${{ steps.version.outputs.release }}.msi"
             -

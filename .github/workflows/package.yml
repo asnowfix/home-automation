@@ -109,6 +109,14 @@ jobs:
             msi_file: ${{ steps.build-msi.outputs.msi_file }}
         steps:
             - 
+                name: Install WiXToolset
+                id: wix
+                run: winget install --id WiXToolset.WiXToolset --version 3.14.1.8722 --source winget --disable-interactivity --accept-source-agreements
+            - 
+                id: go-msi
+                name: Install go-msi
+                run: choco install go-msi
+            - 
                 name: Checkout
                 uses: actions/checkout@v4
                 with:
@@ -130,10 +138,6 @@ jobs:
                 id: build
                 name: Build Windows Exectutable
                 run: go build -o myhome.exe myhome
-            - 
-                id: go-msi
-                name: Install go-msi
-                run: choco install go-msi
             -
                 id: build-msi
                 name: Build Windows Installer MSI from exe file

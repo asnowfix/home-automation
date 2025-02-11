@@ -106,7 +106,7 @@ jobs:
         runs-on: windows-latest
         outputs:
             release_version: ${{ steps.version.outputs.release }}
-            msi_file: ${{ steps.build-msi.outputs.file_name }}
+            msi_file: ${{ steps.build-msi.outputs.msi_file }}
         steps:
             - 
                 name: Checkout
@@ -140,8 +140,8 @@ jobs:
                 env:
                     Path: "C:\\Program Files\\go-msi"
                 run: |
-                    $out = New-Item -Type Directory -Path $env:TEMP -Name "tmp$(Get-Random)"
-                    $msi = echo $out\MyHome-${{ steps.version.outputs.release }}.msi
+                    $out = New-Item -Type Directory -Path . -Name "msi_build"
+                    $msi = "$out\MyHome-${{ steps.version.outputs.release }}.msi"
                     go-msi make --msi $msi --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE --out $out
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=$msi"
             -

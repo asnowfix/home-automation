@@ -138,7 +138,7 @@ jobs:
                 id: build-msi
                 name: Build Windows Installer MSI from exe file
                 env:
-                    Path: "C:\Program Files\go-msi"
+                    Path: "C:\\Program Files\\go-msi"
                 run: |
                     echo $env:Path
                     go-msi make --msi MyHome-${{ steps.version.outputs.release }}.msi --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE

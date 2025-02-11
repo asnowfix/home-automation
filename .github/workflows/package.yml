@@ -129,7 +129,7 @@ jobs:
             - 
                 id: build
                 name: Build Windows Exectutable
-                run: go build .\\myhome
+                run: go build -o myhome.exe myhome
             - 
                 id: go-msi
                 name: Install go-msi
@@ -140,10 +140,10 @@ jobs:
                 env:
                     Path: "C:\\Program Files\\go-msi"
                 run: |
-                    $out = "$(Get-Location)\msi"
-                    New-Item -ItemType Directory -Path $out
-                    go-msi make --msi MyHome-${{ steps.version.outputs.release }}.msi --version ${{ steps.version.outputs.release }} --path $(Get-Location)\wix.json --arch amd64 --license $(Get-Location)\LICENSE --out $out
-                    Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=MyHome-${{ steps.version.outputs.release }}.msi"
+                    $out = New-Item -Type Directory -Path $env:TEMP -Name "tmp$(Get-Random)"
+                    $msi = $out\MyHome-${{ steps.version.outputs.release }}.msi
+                    go-msi make --msi $msi --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE --out $out
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=$msi"
             -
                 name: Upload MyHome MSI as artifact
                 uses: actions/upload-artifact@v4

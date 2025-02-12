@@ -1,13 +1,15 @@
 #!/bin/bash
 set -e
 
-# Define the service file name
-SERVICE_FILE="myhome.service"
+SERVICE="myhome"
+SERVICE_FILE="${SERVICE}.service"
+
+mkdir -p /var/lib/$SERVICE
 
 # Check if the script is being run during package installation
 if [ "$1" = "configure" ]; then
     # Copy the service file to the systemd directory
-    cp /usr/share/myhome/$SERVICE_FILE /etc/systemd/system/
+    cp /usr/share/$SERVICE/$SERVICE_FILE /etc/systemd/system/
 
     # Reload systemd to recognize the new service
     systemctl daemon-reload

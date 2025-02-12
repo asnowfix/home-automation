@@ -149,8 +149,9 @@ jobs:
                 run: |
                     $out = New-Item -Type Directory -Path . -Name "msi_build"
                     $msi = "$out\MyHome-${{ steps.version.outputs.release }}.msi"
-                    go-msi make --msi $msi --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE --out $out
+                    go-msi make --msi $msi --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE --out $out --keep
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=$msi"
+                    Get-Item $msi
             -
                 name: Upload MyHome MSI as artifact
                 uses: actions/upload-artifact@v4

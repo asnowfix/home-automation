@@ -71,7 +71,7 @@ As administrator, install the WiX Toolset:
 
 ```pwsh
 Enable-WindowsOptionalFeature -Online -FeatureName NetFx3
-winget install --id WiXToolset.WiXToolset --version 3.14.1.8722 --source winget
+winget install --id WiXToolset.WiXToolset --version 3.14.1.8722 --source winget --disable-interactivity --accept-source-agreements --force
 $env:Path += ";C:\Program Files (x86)\WiX Toolset v3.14\bin"
 Get-Command candle
 ```

@@ -145,7 +145,7 @@ jobs:
                 id: build-msi
                 name: Build Windows Installer MSI from exe file
                 env:
-                    Path: "C:\\Windows\\System32;$env:Path;C:\\Program Files\\go-msi"
+                    Path: "C:\\Windows\\System32;$env:Path;C:\\Program Files\\go-msi;C:\Program Files (x86)\\WiX Toolset v3.14\\bin"
                 run: |
                     $out = New-Item -Type Directory -Path . -Name "msi_build"
                     $msi = "$out\MyHome-${{ steps.version.outputs.release }}.msi"

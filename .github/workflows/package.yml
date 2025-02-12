@@ -148,10 +148,11 @@ jobs:
                     Path: "C:\\Windows\\System32;$env:Path;C:\\Program Files\\go-msi;C:\\Program Files (x86)\\WiX Toolset v3.14\\bin"
                 run: |
                     $out = New-Item -Type Directory -Path . -Name "msi_build"
-                    $msi = "$out\MyHome-${{ steps.version.outputs.release }}.msi"
-                    go-msi make --msi $msi --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE --out $out --keep
-                    Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=$msi"
+                    $msi = "MyHome-${{ steps.version.outputs.release }}.msi"
+                    go-msi make --msi "$out\$msi" --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE --out $out --keep
+                    Copy-Item "$out\$msi" .
                     Get-Item $msi
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=$msi"
             -
                 name: Upload MyHome MSI as artifact
                 uses: actions/upload-artifact@v4

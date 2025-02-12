@@ -177,13 +177,16 @@ jobs:
                 uses: actions/download-artifact@v4
                 with:
                     name: msi_file
-                    path: ${{ needs.package-msi.outputs.msi_file }}
+                    #path: ${{ needs.package-msi.outputs.msi_file }}
             -
                 name: Download MyHome DEB from package-deb
                 uses: actions/download-artifact@v4
                 with:
                     name: deb_file
-                    path: ${{ needs.package-deb.outputs.deb_file }}
+                    #path: ${{ needs.package-deb.outputs.deb_file }}
+            -
+                name: List files in workspace
+                run: ls -al
             -
                 name: Release
                 id: release

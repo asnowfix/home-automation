@@ -14,7 +14,7 @@
     "vars": [
       {
         "name": "PATH",
-        "value": "c:\\Program Files\\MyHome;",
+        "value": "c:\\Program Files\\MyHome",
         "permanent": "no",
         "system": "no",
         "action": "set",
@@ -26,10 +26,10 @@
     "guid": "0bd5eaaa-55ae-44b1-99d0-20fcbe48e611",
     "items": [
       {
-        "name": "MyHome Home Automation",
+        "name": "MyHome",
         "description": "MSI pakage for MyHome Home Automation",
-        "target": "c:\\Program Files\\MyHome\\myhome.exe",
-        "wdir": "MyHome",
+        "target": "[INSTALLFOLDER]myhome.exe",
+        "wdir": "INSTALLFOLDER",
         "arguments": "",
         "icon": ""
       }

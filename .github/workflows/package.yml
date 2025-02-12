@@ -182,7 +182,7 @@ jobs:
                 with:
                     name: Release ${{ needs.package-deb.outputs.release_version }}
                     artifactErrorsFailBuild: true
-                    artifacts: "${{ needs.package-deb.outputs.deb_file }},MyHome-${{ needs.package-deb.outputs.release_version }},README.md"
+                    artifacts: "${{ needs.package-deb.outputs.deb_file }},${{ needs.package-msi.outputs.msi_file }},README.md"
                     #bodyFile: CHANGELOG.md
                     #tag: ${{ needs.package-deb.outputs.release_version }}-rc${{ github.run_number }}
                     tag: ${{ needs.package-deb.outputs.release_version }}

@@ -52,20 +52,26 @@ Functions
 [ ] Ctrl-C should stop myhome program (whatever the option)
 [ ] Fix inbound IPv6 communication
 
-Packaging
----------
+Integration
+-----------
 
 [x] Auto-tag patch & minor increases
-[ ] Build Debian package on new tagged version
+[x] Build Debian package on new tagged version
 [x] Use goreleaser to cross-compile
 
         - https://goreleaser.com/ci/actions/
         - https://github.com/marketplace/actions/goreleaser-action
 
+[ ] Build Debian package for amd64
+[x] Build Debian package for arm64
+[ ] Ship linux/arm64 binary in the release
+[ ] Ship linux/amd64 binary in the release*
+[ ] Add cron-job to download the binary from the latest release
+[ ] Package systemd scripts in-place (with stop, disable & reload as preuninstall, ans reload enable & start as postinstall)
 [ ] Use goreleaser-cross if needed
 
         - https://github.com/goreleaser/goreleaser-cross
 
 [ ] Build Debian package the official way using <https://github.com/marketplace/actions/build-debian-packages>
-[ ] Build MSI package for Windows on new tagged version
+[x] Build MSI package for Windows on new tagged version
 [ ] Add command to auto-update Debian package installation from latest

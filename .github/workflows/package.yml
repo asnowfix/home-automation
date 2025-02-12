@@ -6,11 +6,8 @@ on:
     workflow_dispatch:
         inputs:
             previous:
-                description: 'Previous tag'
-                required: false
-            base_ref:
-                description: 'Base ref'
-                required: false
+                description: 'Previous ref/tag'
+                required: true
     push:
         tags:
             - 'v[0-9]+.[0-9]+.[0-9]+'
@@ -172,7 +169,7 @@ jobs:
                 uses: gableroux/generate-github-release-notes@v0.1.2
                 with:
                     repository: ${{ github.repository }}
-                    base_tag: ${{ github.event.inputs.base_ref }}
+                    base_tag: ${{ github.event.inputs.previous }}
                     head_tag: ${{ github.sha }}
                     github_token: ${{ secrets.GITHUB_TOKEN }}
             -

@@ -55,6 +55,10 @@ Functions
 Integration
 -----------
 
+[ ] Fix error
+
+        This version of c:\Program Files\MyHome\myhome.exe is not compatible with the version of Windows you're running. Check your computer's system information and then contact the software publisher.
+        
 [x] Auto-tag patch & minor increases
 [x] Build Debian package on new tagged version
 [x] Use goreleaser to cross-compile

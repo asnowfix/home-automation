@@ -144,7 +144,7 @@ jobs:
                 env:
                     Path: "C:\\Windows\\System32;$env:Path;C:\\Program Files\\go-msi;C:\\Program Files (x86)\\WiX Toolset v3.14\\bin"
                 run: |
-                    $out = New-Item -Type Directory -Path . -Name "msi_build"
+                    $out = New-Item -Type Directory -Path $env:TEMP -Name "tmp$(Get-Random)"
                     $msi = "MyHome-${{ steps.version.outputs.release }}.msi"
                     go-msi make --msi "$out\$msi" --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE --out $out --keep
                     Copy-Item "$out\$msi" -Destination "."

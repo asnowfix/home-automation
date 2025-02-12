@@ -65,9 +65,10 @@ Integration
 [ ] Build Debian package for amd64
 [x] Build Debian package for arm64
 [ ] Ship linux/arm64 binary in the release
-[ ] Ship linux/amd64 binary in the release*
+[ ] Ship linux/amd64 binary in the release
 [ ] Add cron-job to download the binary from the latest release
 [ ] Package systemd scripts in-place (with stop, disable & reload as preuninstall, ans reload enable & start as postinstall)
+[ ] Create verified tags
 [ ] Use goreleaser-cross if needed
 
         - https://github.com/goreleaser/goreleaser-cross

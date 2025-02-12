@@ -167,6 +167,15 @@ jobs:
             - package-msi
         steps:
             -
+                name: Generate Release Notes
+                id: release_notes
+                uses: gableroux/generate-github-release-notes@v0.1.2
+                with:
+                    repository: ${{ github.repository }}
+                    base_tag: ${{ github.event.inputs.base_ref }}
+                    head_tag: ${{ github.sha }}
+                    github_token: ${{ secrets.GITHUB_TOKEN }}
+            -
                 name: Download MyHome MSI from package-msi
                 uses: actions/download-artifact@v4
                 with:
@@ -185,11 +194,11 @@ jobs:
                 with:
                     name: Release ${{ needs.package-deb.outputs.release_version }}
                     artifactErrorsFailBuild: true
-                    artifacts: "${{ needs.package-deb.outputs.deb_file }},${{ needs.package-msi.outputs.msi_file }},README.md"
-                    #bodyFile: CHANGELOG.md
+                    artifacts: "${{ needs.package-deb.outputs.deb_file }},${{ needs.package-msi.outputs.msi_file }}"
+                    body: ${{ steps.release_notes.outputs.notes }}
                     #tag: ${{ needs.package-deb.outputs.release_version }}-rc${{ github.run_number }}
                     tag: ${{ needs.package-deb.outputs.release_version }}
                     prerelease: false   # beta, rc
                     draft: true         # confirmation in the UI
                     replacesArtifacts: true
-                    generateReleaseNotes: true
+                    #generateReleaseNotes: true

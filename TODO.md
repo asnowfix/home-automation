@@ -55,6 +55,7 @@ Functions
 Integration
 -----------
 
+[ ] Build every target using matrix+go-releaser (to cache & build faster)
 [ ] Add GitHub actions attestation <https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds>
 [x] GPG signed commits on Windows/WSL/Linux
 [ ] Fix error

@@ -137,7 +137,7 @@ jobs:
             - 
                 id: build
                 name: Build Windows Exectutable
-                run: go build -o myhome.exe myhome
+                run: go build -o "myhome.exe" ".\\myhome"
             -
                 id: build-msi
                 name: Build Windows Installer MSI from exe file

@@ -56,6 +56,7 @@ Integration
 -----------
 
 [ ] Add GitHub actions attestation <https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds>
+[x] GPG signed commits on Windows/WSL/Linux
 [ ] Fix error
 
         This version of c:\Program Files\MyHome\myhome.exe is not compatible with the version of Windows you're running. Check your computer's system information and then contact the software publisher.

@@ -2,7 +2,7 @@
 
 ## Abstract
 
-Collection of tools to help automating my own House, mostly using (very cool) Shelly devices, from Alterco Robotics.
+Collection of tools (including myhome) to help automating my own House, mostly using (very cool) Shelly devices, from Alterco Robotics.
 
 ## Table of Contents <!-- omit in toc -->
 

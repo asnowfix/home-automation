@@ -48,7 +48,7 @@ Functions
         - https://github.com/cvilsmeier/go-sqlite-bench
 
 [ ] Re-init list of live devices at startup... or lazy version?
-[ ] Timeout on missing/non-responsive devices
+[x] Timeout on missing/non-responsive devices/server
 [ ] Ctrl-C should stop myhome program (whatever the option)
 [ ] Fix inbound IPv6 communication
 

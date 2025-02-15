@@ -6,19 +6,21 @@ import (
 	"fmt"
 	"mymqtt"
 	"reflect"
+	"time"
 
 	"github.com/go-logr/logr"
 )
 
 type client struct {
-	log    logr.Logger
-	to     chan<- []byte
-	from   <-chan []byte
-	cancel context.CancelFunc
-	me     string
+	log     logr.Logger
+	to      chan<- []byte
+	from    <-chan []byte
+	cancel  context.CancelFunc
+	me      string
+	timeout time.Duration
 }
 
-func NewClientE(ctx context.Context, log logr.Logger, mc *mymqtt.Client) (Client, error) {
+func NewClientE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, timeout time.Duration) (Client, error) {
 	hctx, cancel := context.WithCancel(ctx)
 	from, err := mc.Subscriber(hctx, ClientTopic(mc.Id()), 1)
 	if err != nil {
@@ -33,11 +35,12 @@ func NewClientE(ctx context.Context, log logr.Logger, mc *mymqtt.Client) (Client
 	}
 
 	return &client{
-		log:    log,
-		from:   from,
-		to:     to,
-		cancel: cancel,
-		me:     mc.Id(),
+		log:     log,
+		from:    from,
+		to:      to,
+		cancel:  cancel,
+		me:      mc.Id(),
+		timeout: timeout,
 	}, nil
 }
 
@@ -79,8 +82,17 @@ func (hc *client) CallE(method string, params any) (any, error) {
 		return nil, err
 	}
 
+	hc.log.Info("Calling method", "method", req.Method, "params", req.Params)
 	hc.to <- reqStr
-	resStr := <-hc.from
+
+	var resStr []byte
+	select {
+	case resStr = <-hc.from:
+		hc.log.Info("Response", "payload", resStr)
+	case <-time.After(hc.timeout):
+		return nil, fmt.Errorf("timed out waiting for response to method %s (%v)", method, hc.timeout)
+	}
+
 	var res response
 	err = json.Unmarshal(resStr, &res)
 	if err != nil {

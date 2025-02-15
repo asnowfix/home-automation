@@ -26,6 +26,8 @@
 # Visual Studio Code
 /.vscode
 
+*__debug_*
+
 /secrets.sh
 SECRETS.md
 

@@ -13,6 +13,7 @@ import (
 	"myhome"
 	"os"
 	"strings"
+	"time"
 
 	"mymqtt"
 
@@ -43,7 +44,7 @@ var Cmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		options.MyHomeClient, err = myhome.NewClientE(context.Background(), log, options.MqttClient)
+		options.MyHomeClient, err = myhome.NewClientE(context.Background(), log, options.MqttClient, options.Flags.MqttTimeout)
 		if err != nil {
 			return err
 		}
@@ -54,6 +55,7 @@ var Cmd = &cobra.Command{
 func init() {
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", 5*time.Second, "Timeout for MQTT operations")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.Devices, "devices", "D", "", "comma-separated list of devices to use")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Json, "json", "j", false, "output in json format")
 

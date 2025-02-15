@@ -10,6 +10,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -26,7 +27,10 @@ type Client struct {
 	mqtt      mqtt.Client // MQTT stack
 	brokerUrl *url.URL    // MQTT broker to connect to
 	log       logr.Logger // Logger to use
+	lock      sync.Mutex  // Lock to serialize access to the client
 }
+
+var client Client
 
 func NewClient(log logr.Logger, broker string, me string) *Client {
 	c, err := NewClientE(log, broker, me)
@@ -37,6 +41,9 @@ func NewClient(log logr.Logger, broker string, me string) *Client {
 }
 
 func NewClientE(log logr.Logger, broker string, me string) (*Client, error) {
+	defer client.lock.Unlock()
+	client.lock.Lock()
+
 	if me == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
@@ -63,14 +70,13 @@ func NewClientE(log logr.Logger, broker string, me string) (*Client, error) {
 	opts.AddBroker(brokerUrl.String())
 	opts.Servers = []*url.URL{brokerUrl}
 
-	c := Client{
-		clientId:  me,
-		mqtt:      mqtt.NewClient(opts),
-		log:       log,
-		brokerUrl: brokerUrl,
-	}
-	c.log.Info("MQTT client initialized", "client_id", me)
-	return &c, nil
+	client.clientId = me
+	client.mqtt = mqtt.NewClient(opts)
+	client.log = log
+	client.brokerUrl = brokerUrl
+
+	client.log.Info("MQTT client initialized", "client_id", me)
+	return &client, nil
 }
 
 func (c *Client) Id() string {
@@ -86,6 +92,8 @@ func (c *Client) IsConnected() bool {
 }
 
 func (c *Client) connect() error {
+	defer c.lock.Unlock()
+	c.lock.Lock()
 	if c.mqtt.IsConnected() {
 		return nil
 	}
@@ -216,7 +224,11 @@ type MqttMessage struct {
 }
 
 func (c *Client) Subscribe(topic string, qlen uint) (chan []byte, error) {
-	c.connect()
+	err := c.connect()
+	if err != nil {
+		c.log.Error(err, "Unable to connect to subscribe to", "topic", topic)
+		return nil, err
+	}
 
 	mch := make(chan []byte, qlen)
 
@@ -238,7 +250,11 @@ func (c *Client) Unsubscribe(topic string) {
 }
 
 func (c *Client) Publish(topic string, msg []byte) error {
-	c.connect()
+	err := c.connect()
+	if err != nil {
+		c.log.Error(err, "Unable to connect to publish to", "topic", topic)
+		return err
+	}
 	c.log.Info("Publishing:", "topic", topic, "payload", string(msg))
 	token := c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, true /*retain*/, msg)
 	token.Wait()
@@ -250,6 +266,7 @@ func (c *Client) Publish(topic string, msg []byte) error {
 func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan<- []byte, error) {
 	err := c.connect()
 	if err != nil {
+		c.log.Error(err, "Unable to connect to create publisher channel", "topic", topic)
 		return nil, err
 	}
 	mch := make(chan []byte, qlen)
@@ -275,6 +292,7 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan<-
 func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (<-chan []byte, error) {
 	err := c.connect()
 	if err != nil {
+		c.log.Error(err, "Unable to connect to create subscriber channel", "topic", topic)
 		return nil, err
 	}
 	mch := make(chan []byte, qlen)

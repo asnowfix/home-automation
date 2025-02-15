@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"hlog"
+	"homectl/options"
 	"myhome/http"
 	"myhome/mqtt"
 	"myhome/storage"
@@ -71,7 +72,7 @@ func Run() error {
 	}()
 
 	// Initialize Shelly devices handler
-	shelly.Init(log)
+	shelly.Init(log, options.Flags.MqttTimeout)
 
 	var mc *mymqtt.Client
 	ctx := context.Background()
@@ -125,12 +126,13 @@ func Run() error {
 
 		ds, err := myhome.NewServerE(ctx, log, mc, dm)
 		if err != nil {
-			log.Error(err, "Failed to start device manager service")
+			log.Error(err, "Failed to start MyHome service")
 			return err
 		}
 		defer ds.Shutdown()
 	}
 
+	log.Info("Running")
 	// Run server until interrupted
 	<-done
 	mc.Close()

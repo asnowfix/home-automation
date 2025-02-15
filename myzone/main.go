@@ -6,6 +6,6 @@ import (
 )
 
 func main() {
-	log := hlog.Init()
+	log := hlog.Logger
 	myzone.MyGcpZone(log)
 }

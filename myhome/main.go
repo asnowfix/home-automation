@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"homectl/options"
 	"os"
 
 	"hlog"
@@ -14,10 +15,14 @@ import (
 var Cmd = &cobra.Command{
 	Use:  "myhome",
 	Args: cobra.NoArgs,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		hlog.Init(options.Flags.Verbose)
+		return nil
+	},
 }
 
 func init() {
-	Cmd.PersistentFlags().BoolVarP(&hlog.Verbose, "verbose", "v", false, "verbose output")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
 	Cmd.AddCommand(daemon.Cmd)
 }
 

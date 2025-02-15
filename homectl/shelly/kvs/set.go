@@ -22,7 +22,7 @@ var setCtl = &cobra.Command{
 	Use:   "set",
 	Short: "Set or update a key-value on the given shelly device(s)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Init()
+		log := hlog.Logger
 		shelly.Init(log)
 
 		via := types.ChannelMqtt

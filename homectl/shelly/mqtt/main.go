@@ -20,7 +20,7 @@ var Cmd = &cobra.Command{
 	Use:   "mqtt",
 	Short: "Set Shelly devices MQTT configuration",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Init()
+		log := hlog.Logger
 		shelly.Init(log)
 
 		via := types.ChannelMqtt

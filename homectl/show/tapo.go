@@ -20,7 +20,7 @@ var showTapoCmd = &cobra.Command{
 	// Long:  `All software has versions. This is Hugo's`,
 	Args: cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
-		log := hlog.Init()
+		log := hlog.Logger
 		sw, err := tapo.NewSwitch(log, net.ParseIP(args[0]))
 		if err != nil {
 			panic(err)

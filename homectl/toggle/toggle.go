@@ -20,7 +20,7 @@ var Cmd = &cobra.Command{
 	Use:   "toggle",
 	Short: "Toggle switch devices",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Init()
+		log := hlog.Logger
 
 		ch := types.ChannelHttp
 		if !useHttpChannel {

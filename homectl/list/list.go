@@ -16,7 +16,7 @@ var Cmd = &cobra.Command{
 	Short: "List known devices",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Init()
+		log := hlog.Logger
 		out, err := options.MyHomeClient.CallE("device.list", nil)
 		if err != nil {
 			return err

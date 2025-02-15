@@ -28,7 +28,7 @@ var cancelCtl = &cobra.Command{
 	Use:   "cancel",
 	Short: "Cancel scheduled jobs on Shelly devices",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Init()
+		log := hlog.Logger
 		shelly.Init(log)
 
 		via := types.ChannelHttp

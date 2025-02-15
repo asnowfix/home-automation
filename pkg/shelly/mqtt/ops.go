@@ -15,12 +15,9 @@ import (
 
 var registrar types.MethodsRegistrar
 
-var log logr.Logger
-
 type empty struct{}
 
-func Init(l logr.Logger, r types.MethodsRegistrar) {
-	log = l
+func Init(log logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
 	registrar = r
 	r.RegisterMethodHandler("Mqtt", "GetStatus", types.MethodHandler{
@@ -36,6 +33,7 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 		HttpMethod: http.MethodPost,
 	})
 
+	mqttChannel.Init(log)
 	registrar.RegisterDeviceCaller(types.ChannelMqtt, types.DeviceCaller(mqttChannel.CallDevice))
 }
 
@@ -46,6 +44,13 @@ func init() {
 var mqttChannel MqttChannel
 
 type MqttChannel struct {
+	log *logr.Logger
+}
+
+func (ch *MqttChannel) Init(log logr.Logger) {
+	log = log.WithName("mqtt")
+	ch.log = &log
+	ch.log.Info("Init MQTT channel")
 }
 
 func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
@@ -63,13 +68,13 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 
 	reqPayload, err := json.Marshal(req)
 	if err != nil {
-		log.Error(err, "Unable to marshal", "request", req)
+		ch.log.Error(err, "Unable to marshal", "request", req)
 		return nil, err
 	}
-	log.Info("Sending to", "device", device.Id(), "request", req)
+	ch.log.Info("Sending to", "device", device.Id(), "request", req)
 	device.To() <- reqPayload
 
-	log.Info("Waiting for response from", "device", device.Id())
+	ch.log.Info("Waiting for response from", "device", device.Id())
 	resMsg := <-device.From()
 
 	var res Response
@@ -77,11 +82,11 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 
 	err = json.Unmarshal(resMsg, &res)
 	if err != nil {
-		log.Error(err, "Unable to unmarshal response", "payload", resMsg)
+		ch.log.Error(err, "Unable to unmarshal response", "payload", resMsg)
 		return nil, err
 	}
 
-	log.Info("Received", "response", res)
+	ch.log.Info("Received", "response", res)
 	if res.Error != nil {
 		return nil, fmt.Errorf("%v (code:%v)", res.Error.Message, res.Error.Code)
 	}

@@ -23,7 +23,7 @@ var pubCmd = &cobra.Command{
 	Use:   "pub",
 	Short: "Publish to device(s) MQTT topic(s)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Init()
+		log := hlog.Logger
 		// devices.Init()
 
 		log.Info("looking for devices: %v", options.Devices)
@@ -45,7 +45,7 @@ var subCmd = &cobra.Command{
 	Use:   "sub",
 	Short: "Subscribe to device(s) MQTT topic(s)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Init()
+		log := hlog.Logger
 		// devices.Init()
 
 		topics, err := devices.Topics(log, options.Devices)

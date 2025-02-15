@@ -6,6 +6,7 @@ import (
 )
 
 var Flags struct {
+	Verbose    bool
 	ViaHttp    bool
 	Json       bool
 	Devices    string

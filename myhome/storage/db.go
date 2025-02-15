@@ -264,11 +264,26 @@ func (s *DeviceStorage) AddGroup(group *myhome.Group) (any, error) {
 }
 
 // RemoveGroup removes a group from the database by its name.
+// RemoveGroup removes a group from the database by its name.
 func (s *DeviceStorage) RemoveGroup(name string) (any, error) {
 	log := s.log.WithValues("name", name)
 	log.Info("Removing group")
+
+	// Check if the group exists
+	var exists bool
+	err := s.db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM groups WHERE name = $1)", name)
+	if err != nil {
+		log.Error(err, "Failed to check if group exists")
+		return nil, err
+	}
+	if !exists {
+		log.Info("Group does not exist", "name", name)
+		return nil, errors.New("group does not exist")
+	}
+
+	// Proceed to delete the group
 	query := `DELETE FROM groups WHERE name = :name`
-	_, err := s.db.NamedExec(query, map[string]interface{}{
+	_, err = s.db.NamedExec(query, map[string]interface{}{
 		"name": name,
 	})
 	return nil, err

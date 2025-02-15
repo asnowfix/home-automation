@@ -24,7 +24,8 @@ Functions
 [ ] Re-enable mDNS for early devices discovery
 [ ] Configure MQTT broker immediatelly after device discovery
 [ ] Publish mqtt.local. or myhome.local. hostname using mDNS, using
-[ ] Rework file/folder layout to be more generic using https://github.com/golang-standards/project-layout
+[ ] Rework file/folder layout to be more generic using <https://github.com/golang-standards/project-layout>
+[ ] Move homectl as ctl subcommand of myhome
 [ ] Find out proper layout
 
     - <https://medium.com/@potto_94870/understand-mdns-with-an-example-1e05ef70013b>
@@ -32,7 +33,6 @@ Functions
     - Consider using Pion mDNS <https://github.com/pion/mdns> or HashiCorp mDNS <https://github.com/hashicorp/mdns/blob/main/server.go> rather than ZeroConf.
     - <https://dave.cheney.net/2011/10/15/scratching-my-own-itch-or-how-to-publish-multicast-dns-records-in-go> and with supporting repo fork follow-up <https://github.com/ugjka/mdns>
 
-[ ] Rework file/folder layout to be more generic using <https://github.com/golang-standards/project-layout>
 [ ] Add Home Assistant integration
 [ ] Add Amazon Alexa integration
 [ ] Add Google Home integration
@@ -55,7 +55,8 @@ Functions
 Integration
 -----------
 
-[ ] Build every target using matrix+go-releaser (to cache & build faster)
+[ ] Build every target using matrix+go-releaser (to cache & build faster)slr268
+
 [ ] Add GitHub actions attestation <https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds>
 [x] GPG signed commits on Windows/WSL/Linux
 [ ] Fix error
@@ -82,4 +83,5 @@ Integration
 
 [ ] Build Debian package the official way using <https://github.com/marketplace/actions/build-debian-packages>
 [x] Build MSI package for Windows on new tagged version
-[ ] Add command to auto-update Debian package installation from latest
+[ ] Add command to auto-update Debian package installation from latest release
+[ ] Run myhome as a windows service <https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/create-user-defined-service>

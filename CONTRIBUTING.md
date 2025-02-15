@@ -9,7 +9,7 @@
 
 See
 - <https://wiki.gnupg.org/AgentForwarding>
-- 
+- <https://stackoverflow.com/questions/63440623/no-gpg-passphrase-prompt-in-visual-studio-code-on-windows-10-for-signed-git-comm>
 
 ## Ubuntu/Debian Linux
 

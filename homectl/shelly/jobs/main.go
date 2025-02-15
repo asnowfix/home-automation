@@ -8,8 +8,6 @@ var Cmd = &cobra.Command{
 	Use:   "jobs",
 	Short: "Shelly jobs features",
 	Args:  cobra.NoArgs,
-	Run: func(cmd *cobra.Command, args []string) {
-	},
 }
 
 func init() {

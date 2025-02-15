@@ -7,7 +7,9 @@
 
 ## Code signin
 
-TBC
+See
+- <https://wiki.gnupg.org/AgentForwarding>
+- 
 
 ## Ubuntu/Debian Linux
 

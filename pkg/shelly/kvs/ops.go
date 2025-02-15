@@ -13,7 +13,7 @@ var log logr.Logger
 type empty struct{}
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
-	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
+	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	r.RegisterMethodHandler("KVS", "Set", types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodPost,

@@ -22,7 +22,7 @@ type empty struct{}
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	// setup logger
 	log = l
-	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
+	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 
 	// register methods
 	registrar = r

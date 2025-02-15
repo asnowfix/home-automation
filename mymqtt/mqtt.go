@@ -178,7 +178,7 @@ func lookupBrokerViaZeroConf(log logr.Logger) (*url.URL, error) {
 		for entry := range entries {
 			// Filter-out spurious candidates
 			if strings.Contains(entry.Service, ZEROCONF_SERVICE) {
-				log.Info("Found MQTT broker %v:%v", entry.AddrIPv4, entry.Port)
+				log.Info("Discovered MQTT broker using mDNS", " ip", entry.AddrIPv4, "port", entry.Port)
 				for _, addrIpV4 := range entry.AddrIPv4 {
 					// Append the MQTT broker URL format host:port to known brokers
 					brokers = append(brokers, &url.URL{

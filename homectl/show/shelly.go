@@ -31,7 +31,7 @@ var showShellyCmd = &cobra.Command{
 		var device *myhome.Device
 
 		identifier := args[0]
-		log := hlog.Init()
+		log := hlog.Logger
 
 		if direct {
 			var via types.Channel

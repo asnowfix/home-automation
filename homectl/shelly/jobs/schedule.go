@@ -19,7 +19,7 @@ var scheduleCtl = &cobra.Command{
 	Short: "Configure Shelly devices scheduled jobs",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Init()
+		log := hlog.Logger
 		shelly.Init(log)
 
 		via := types.ChannelMqtt

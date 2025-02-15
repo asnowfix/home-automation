@@ -18,7 +18,6 @@ import (
 
 	"hlog"
 
-	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
@@ -29,14 +28,13 @@ func main() {
 	}
 }
 
-var log logr.Logger
-
 var Cmd = &cobra.Command{
 	Use:  "homectl",
 	Args: cobra.NoArgs,
 	// run for this command and any sub-command
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		log = hlog.Init()
+		hlog.Init(options.Flags.Verbose)
+		log := hlog.Logger
 		options.Devices = strings.Split(options.Flags.Devices, ",")
 		log.Info("Will use", "devices", options.Devices)
 
@@ -54,7 +52,7 @@ var Cmd = &cobra.Command{
 }
 
 func init() {
-	Cmd.PersistentFlags().BoolVarP(&hlog.Verbose, "verbose", "v", false, "verbose output")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.Devices, "devices", "D", "", "comma-separated list of devices to use")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Json, "json", "j", false, "output in json format")

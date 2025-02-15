@@ -44,7 +44,7 @@ func Run() error {
 	var disableEmbeddedMqttBroker bool = len(mqttBroker) != 0
 	var err error
 
-	log := hlog.Init()
+	log := hlog.Logger
 
 	// // Initialize viper
 	// viper.SetConfigName("myhome") // name of config file (without extension)

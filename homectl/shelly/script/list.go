@@ -21,7 +21,7 @@ var listCtl = &cobra.Command{
 	Short: "Report status of every scripts loaded on the given Shelly device(s)",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Init()
+		log := hlog.Logger
 		shelly.Init(log)
 
 		via := types.ChannelMqtt

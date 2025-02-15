@@ -9,32 +9,33 @@ import (
 	"github.com/rs/zerolog"
 )
 
-var Verbose bool
+var Logger logr.Logger
 
-// var Log logr.Logger
-
-func Init() logr.Logger {
+func Init(verbose bool) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
 
 	zerologr.NameFieldName = "logger"
 	zerologr.NameSeparator = "/"
-	zerologr.SetMaxV(1)
+	zerologr.SetMaxV(int(zerolog.InfoLevel))
 
 	zl := zerolog.New(os.Stderr)
-	zl = zl.Output(zerolog.ConsoleWriter{Out: os.Stderr}) // pretty print
+
+	nocolor := false
+	term, defined := os.LookupEnv("TERM")
+	if term == "dumb" || !defined {
+		nocolor = true
+	}
+
+	zl = zl.Output(zerolog.ConsoleWriter{
+		Out:     os.Stderr,
+		NoColor: nocolor,
+	}) // pretty print
 	zl = zl.With().Caller().Timestamp().Logger()
-	zl.Level(zerolog.DebugLevel)
-	var log logr.Logger = zerologr.New(&zl)
-
-	log.Info("Turning on logging")
-
-	// if !Verbose {
-	// 	log.Default().SetOutput(io.Discard)
-	// } else {
-	// 	// File name & Line number in logs
-	// 	log.SetFlags(log.LstdFlags | log.Llongfile)
-	// 	log.Info("Turning on logging")
-	// }
-
-	return log
+	if verbose {
+		zl.Level(zerolog.DebugLevel)
+	} else {
+		zl.Level(zerolog.InfoLevel)
+	}
+	Logger = zerologr.New(&zl)
+	Logger.Info("Initialized", "verbose", verbose, "TERM", os.Getenv("TERM"))
 }

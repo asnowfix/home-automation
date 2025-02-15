@@ -22,7 +22,7 @@ var getManyCtl = &cobra.Command{
 	Use:   "get-many",
 	Short: "List Shelly devices Key-Value Store",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Init()
+		log := hlog.Logger
 		shelly.Init(log)
 
 		via := types.ChannelMqtt

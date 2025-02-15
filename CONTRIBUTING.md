@@ -11,6 +11,7 @@ See
 - <https://wiki.gnupg.org/AgentForwarding>
 - <https://stackoverflow.com/questions/63440623/no-gpg-passphrase-prompt-in-visual-studio-code-on-windows-10-for-signed-git-comm>
 - <https://stackoverflow.com/questions/49630601/signing-commits-with-git-doesnt-ask-for-my-passphrase>
+- <https://r-pufky.github.io/docs/apps/gpg/usage/windows-forward-gpg.html>
 
 ## Ubuntu/Debian Linux
 

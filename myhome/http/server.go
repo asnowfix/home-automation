@@ -20,7 +20,7 @@ func MyHome(log logr.Logger, g1c chan gen1.Device) {
 
 	http.HandleFunc("/", func(w http.ResponseWriter, req *http.Request) {
 		for k, v := range req.Header {
-			log.Info("header: %s: %s", k, v)
+			log.Info("Inbound", k, v)
 		}
 
 		var d gen1.Device

@@ -72,7 +72,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return dm.storage.GetAllGroups()
 	})
 	myhome.RegisterMethodHandler("group.create", func(in any) (any, error) {
-		return dm.storage.AddGroup(in.(myhome.Group))
+		return dm.storage.AddGroup(in.(*myhome.Group))
 	})
 	myhome.RegisterMethodHandler("group.delete", func(in any) (any, error) {
 		return dm.storage.RemoveGroup(in.(string))

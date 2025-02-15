@@ -62,7 +62,7 @@ var signatures map[string]MethodSignature = map[string]MethodSignature{
 	},
 	"group.create": {
 		NewParams: func() any {
-			return ""
+			return &Group{}
 		},
 		NewResult: func() any {
 			return nil

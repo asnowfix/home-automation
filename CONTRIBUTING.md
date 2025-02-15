@@ -20,7 +20,13 @@ sudo snap install --classic go
 sudo apt install make build-essential
 sudo apt-get install libsqlite3-dev
 sudo apt install sqlite3
+```
+
+Some useful SQLite 3 commands:
+
+```bash
 sqlite3 myhome/myhome.db .dump
+sqlite3 myhome.db "DROP TABLE IF EXISTS groups;"
 ```
 
 ```bashrc

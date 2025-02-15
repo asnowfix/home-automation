@@ -12,14 +12,15 @@ import (
 	"pkg/shelly/types"
 	"reflect"
 	"schedule"
+	"time"
 
 	"github.com/go-logr/logr"
 )
 
-func Init(log logr.Logger) {
+func Init(log logr.Logger, timeout time.Duration) {
 	registrar.Init(log)
 	input.Init(log, &registrar)
-	mqtt.Init(log, &registrar)
+	mqtt.Init(log, &registrar, timeout)
 	schedule.Init(log, &registrar)
 	script.Init(log, &registrar)
 	shttp.Init(log, &registrar)

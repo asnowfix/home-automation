@@ -18,7 +18,7 @@ var showCtl = &cobra.Command{
 	Short: "Show Shelly devices scheduled jobs",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log)
+		shelly.Init(log, hopts.Flags.MqttTimeout)
 
 		via := types.ChannelMqtt
 		if options.UseHttpChannel {

@@ -23,7 +23,7 @@ var statusCtl = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log)
+		shelly.Init(log, hopts.Flags.MqttTimeout)
 
 		via := types.ChannelMqtt
 		if options.UseHttpChannel {

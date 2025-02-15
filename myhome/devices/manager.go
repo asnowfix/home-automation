@@ -57,6 +57,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		ds, err := dm.storage.GetAllDevices()
 		if err != nil {
+			log.Error(err, "Failed to get all devices")
 			return nil, err
 		}
 		for _, d := range ds {
@@ -110,13 +111,17 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	// Load every devices from storage & init them
 	devices, err := dm.storage.GetAllDevices()
 	if err != nil {
+		log.Error(err, "Failed to get all devices")
 		return err
 	}
 	for _, device := range devices {
-		var d Device = Device{
-			Device: device,
-		}
-		dm.update <- d.WithImpl(shelly.NewMqttDevice(dm.log.WithName(device.Id), device.Id, dm.mqttClient))
+		go func(log logr.Logger, device myhome.Device) {
+			var d Device = Device{
+				Device: device,
+			}
+			log.Info("Updating local view of device", "id", device.Id)
+			dm.update <- d.WithImpl(shelly.NewMqttDevice(dm.log.WithName(device.Id), device.Id, dm.mqttClient))
+		}(log.WithName(device.Id), device)
 	}
 
 	// Loop on MQTT event devices discovery

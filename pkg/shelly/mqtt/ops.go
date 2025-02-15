@@ -17,8 +17,8 @@ var registrar types.MethodsRegistrar
 
 type empty struct{}
 
-func Init(log logr.Logger, r types.MethodsRegistrar) {
-	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
+func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
+	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	registrar = r
 	r.RegisterMethodHandler("Mqtt", "GetStatus", types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
@@ -33,7 +33,7 @@ func Init(log logr.Logger, r types.MethodsRegistrar) {
 		HttpMethod: http.MethodPost,
 	})
 
-	mqttChannel.Init(log)
+	mqttChannel.Init(log, timeout)
 	registrar.RegisterDeviceCaller(types.ChannelMqtt, types.DeviceCaller(mqttChannel.CallDevice))
 }
 
@@ -44,13 +44,15 @@ func init() {
 var mqttChannel MqttChannel
 
 type MqttChannel struct {
-	log *logr.Logger
+	log     *logr.Logger
+	timeout time.Duration
 }
 
-func (ch *MqttChannel) Init(log logr.Logger) {
+func (ch *MqttChannel) Init(log logr.Logger, timeout time.Duration) {
 	log = log.WithName("mqtt")
 	ch.log = &log
-	ch.log.Info("Init MQTT channel")
+	ch.timeout = timeout
+	ch.log.Info("Init MQTT channel", "timeout", ch.timeout)
 }
 
 func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
@@ -74,8 +76,14 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 	ch.log.Info("Sending to", "device", device.Id(), "request", req)
 	device.To() <- reqPayload
 
-	ch.log.Info("Waiting for response from", "device", device.Id())
-	resMsg := <-device.From()
+	ch.log.Info("Waiting for response from", "device", device.Id(), "timeout", ch.timeout)
+	var resMsg []byte
+	select {
+	case resMsg = <-device.From():
+	case <-time.After(ch.timeout):
+		ch.log.Error(nil, "Timeout waiting for response from", "device", device.Id(), "timeout", ch.timeout)
+		return nil, fmt.Errorf("timeout waiting for response from %v", device.Id())
+	}
 
 	var res Response
 	res.Result = &out

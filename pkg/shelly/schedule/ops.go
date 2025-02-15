@@ -14,7 +14,7 @@ type empty struct{}
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log = l
-	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
+	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	r.RegisterMethodHandler("Schedule", "Create", types.MethodHandler{
 		Allocate:   func() any { return new(Job) },
 		HttpMethod: http.MethodPost,

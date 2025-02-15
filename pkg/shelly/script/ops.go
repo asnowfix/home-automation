@@ -13,7 +13,7 @@ var log logr.Logger
 type empty struct{}
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
-	log.Info("Init package", reflect.TypeOf(empty{}).PkgPath())
+	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	r.RegisterMethodHandler("Script", "SetConfig", types.MethodHandler{
 		// InputType:  reflect.TypeOf(ConfigurationRequest{}),
 		Allocate:   func() any { return new(Configuration) },

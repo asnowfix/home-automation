@@ -136,7 +136,7 @@ func (s *DeviceStorage) GetDeviceByIdentifier(identifier string) (myhome.Device,
 		return myhome.Device{}, err
 	}
 	s.log.Info("Got device by identifier", "identifier", identifier, "device", device)
-	return unmarshallDevice(device)
+	return unmarshallDevice(s.log, device)
 }
 
 // GetDeviceByManufacturerAndID retrieves a device from the database by its manufacturer and ID.
@@ -149,7 +149,7 @@ func (s *DeviceStorage) GetDeviceByManufacturerAndID(manufacturer, id string) (m
 		return myhome.Device{}, err
 	}
 	s.log.Info("Got device by manufacturer and ID", "manufacturer", manufacturer, "id", id, "device", device)
-	return unmarshallDevice(device)
+	return unmarshallDevice(s.log, device)
 }
 
 // GetDeviceByMAC retrieves a device from the database by its MAC address.
@@ -164,7 +164,7 @@ func (s *DeviceStorage) GetDeviceByMAC(mac string) (myhome.Device, error) {
 		s.log.Error(err, "Failed to get device by MAC", "mac", mac)
 		return myhome.Device{}, err
 	}
-	return unmarshallDevice(device)
+	return unmarshallDevice(s.log, device)
 }
 
 // GetDeviceByName retrieves a device from the database by its name.
@@ -176,7 +176,7 @@ func (s *DeviceStorage) GetDeviceByName(name string) (myhome.Device, error) {
 		s.log.Error(err, "Failed to get device by name", "name", name)
 		return myhome.Device{}, err
 	}
-	return unmarshallDevice(device)
+	return unmarshallDevice(s.log, device)
 }
 
 // GetAllDevices retrieves all devices from the database.
@@ -188,7 +188,7 @@ func (s *DeviceStorage) GetAllDevices() ([]myhome.Device, error) {
 		s.log.Error(err, "Failed to get all devices")
 		return nil, err
 	}
-	return unmarshallDevices(devices)
+	return unmarshallDevices(s.log, devices)
 }
 
 // DeleteDevice deletes a device from the database by its MAC address.
@@ -289,28 +289,32 @@ func (s *DeviceStorage) RemoveDeviceFromGroup(groupDevice myhome.GroupDevice) (a
 }
 
 // unmarshallDevice takes a Device struct and unmarshals the Info, Config, and Status fields
-func unmarshallDevice(device Device) (myhome.Device, error) {
+func unmarshallDevice(log logr.Logger, device Device) (myhome.Device, error) {
 	err := json.Unmarshal([]byte(device.Info_), &device.Info)
 	if err != nil {
-		return myhome.Device{}, err
+		log.Error(err, "Failed to unmarshal storage info", "device_id", device.Id, "info", device.Info_)
+		// return myhome.Device{}, err
 	}
 	err = json.Unmarshal([]byte(device.Config_), &device.Config)
 	if err != nil {
-		return myhome.Device{}, err
+		log.Error(err, "Failed to unmarshal storage config", "device_id", device.Id, "config", device.Config_)
+		// return myhome.Device{}, err
 	}
 	err = json.Unmarshal([]byte(device.Status_), &device.Status)
 	if err != nil {
-		return myhome.Device{}, err
+		log.Error(err, "Failed to unmarshal storage status", "device_id", device.Id, "status", device.Status_)
+		// return myhome.Device{}, err
 	}
 	return device.Device, nil
 }
 
 // unmarshallDevices takes a slice of Device structs and unmarshals the Info, Config, and Status fields
-func unmarshallDevices(devices []Device) ([]myhome.Device, error) {
+func unmarshallDevices(log logr.Logger, devices []Device) ([]myhome.Device, error) {
 	mhd := make([]myhome.Device, 0)
 	for _, device := range devices {
-		d, err := unmarshallDevice(device)
+		d, err := unmarshallDevice(log, device)
 		if err != nil {
+			log.Error(err, "Failed to unmarshall storage", "device_id", device.Id)
 			return mhd, err
 		}
 		mhd = append(mhd, d)

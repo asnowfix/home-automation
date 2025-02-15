@@ -53,7 +53,7 @@ func (s *DeviceStorage) createTable() error {
     );
 
     CREATE TABLE IF NOT EXISTS groups (
-        id SERIAL PRIMARY KEY,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL,
         description TEXT
     );
@@ -252,7 +252,7 @@ func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (myhome.Groups,
 }
 
 // AddGroup adds a new group to the database.
-func (s *DeviceStorage) AddGroup(group myhome.Group) (any, error) {
+func (s *DeviceStorage) AddGroup(group *myhome.Group) (any, error) {
 	log := s.log.WithValues("name", group.Name)
 	log.Info("Adding new group")
 	query := `INSERT INTO groups (name, description) VALUES (:name, :description)`

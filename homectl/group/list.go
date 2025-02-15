@@ -25,7 +25,7 @@ var listCmd = &cobra.Command{
 			return err
 		}
 		log.Info("result", "out", out, "type", reflect.TypeOf(out))
-		groups, ok := out.([]myhome.Group)
+		groups, ok := out.(*myhome.Groups)
 		if !ok {
 			panic("unexpected format (failed to cast groups)")
 		}
@@ -37,7 +37,7 @@ var listCmd = &cobra.Command{
 			fmt.Println(string(s))
 		} else {
 			fmt.Println("Groups:")
-			for _, group := range groups {
+			for _, group := range groups.Groups {
 				fmt.Println(group)
 			}
 		}

@@ -11,6 +11,7 @@ import (
 	"pkg/shelly/kvs"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/types"
+	"reflect"
 	"sync"
 	"time"
 
@@ -60,6 +61,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			log.Error(err, "Failed to get all devices")
 			return nil, err
 		}
+		log.Info("Found devices", "num_devices", len(ds))
 		for _, d := range ds {
 			devices.Devices = append(devices.Devices, d.DeviceSummary)
 		}
@@ -96,33 +98,45 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 				return ctx.Err()
 
 			case device := <-dc:
-				UpdateDeviceFromShelly(device, device.impl.(*shelly.Device), types.ChannelMqtt)
+				sd, ok := device.impl.(*shelly.Device)
+				if ok {
+					UpdateDeviceFromShelly(ctx, log, device, sd, types.ChannelMqtt)
+				} else {
+					log.Error(nil, "Unhandled device type", "device", device, "type", reflect.TypeOf(device.impl))
+					continue
+				}
 				err = dm.storage.UpsertDevice(device.Device)
 				if err != nil {
 					log.Error(err, "Failed to upsert device", "device", device)
 					continue
+				} else {
+					log.Info("Updated device", "device", device)
 				}
 
 				dm.devicesById[device.Id] = device
+				dm.devicesByHost[device.Host] = device
+				dm.devicesByMAC[device.MAC.String()] = device
 			}
 		}
-	}(ctx, log.WithName("DeviceManager#NewDevices"), dm.update)
+	}(ctx, log.WithName("DeviceManager#DeviceChannel"), dm.update)
 
-	// Load every devices from storage & init them
-	devices, err := dm.storage.GetAllDevices()
-	if err != nil {
-		log.Error(err, "Failed to get all devices")
-		return err
-	}
-	for _, device := range devices {
-		go func(log logr.Logger, device myhome.Device) {
-			var d Device = Device{
-				Device: device,
-			}
-			log.Info("Updating local view of device", "id", device.Id)
-			dm.update <- d.WithImpl(shelly.NewMqttDevice(dm.log.WithName(device.Id), device.Id, dm.mqttClient))
-		}(log.WithName(device.Id), device)
-	}
+	// // Load every devices from storage & init them
+	// devices, err := dm.storage.GetAllDevices()
+	// if err != nil {
+	// 	log.Error(err, "Failed to get all devices")
+	// 	return err
+	// }
+	// log.Info("Loaded", "devices", len(devices))
+	// for _, device := range devices {
+	// 	log.Info("Background update of device", "id", device.Id)
+	// 	go func(log logr.Logger, device myhome.Device) {
+	// 		var d Device = Device{
+	// 			Device: device,
+	// 		}
+	// 		log.Info("Scheduling update of device", "id", device.Id)
+	// 		dm.update <- d.WithImpl(shelly.NewMqttDevice(dm.log.WithName(device.Id), device.Id, dm.mqttClient))
+	// 	}(log.WithName(device.Id), device)
+	// }
 
 	// Loop on MQTT event devices discovery
 	err = dm.WatchMqtt(ctx, dm.mqttClient)
@@ -176,7 +190,7 @@ func (dm *DeviceManager) Shutdown() {
 func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error {
 	var sd *shelly.Device
 
-	ch, err := mc.Subscribe("+/events/rpc", 0)
+	ch, err := mc.Subscriber(ctx, "+/events/rpc", 16)
 	if err != nil {
 		dm.log.Error(err, "Failed to subscribe to shelly devices events")
 		return err
@@ -220,7 +234,7 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 					if !ok {
 						dm.log.Info("Device is not a shelly device", "device_id", event.Src)
 					} else {
-						out, err := sd.CallE(types.ChannelMqtt, "Shelly", "GetConfig", nil)
+						out, err := sd.CallE(ctx, types.ChannelMqtt, "Shelly", "GetConfig", nil)
 						if err != nil {
 							dm.log.Error(err, "Failed to get shelly config", "device_id", event.Src)
 						} else {
@@ -383,7 +397,7 @@ func (dm *DeviceManager) updateDevices(service string, timeout time.Duration, id
 	dm.mu.Unlock()
 }
 
-func (dm *DeviceManager) GetDeviceByIdentifier(identifier string) (*Device, error) {
+func (dm *DeviceManager) GetDeviceByIdentifier(ctx context.Context, identifier string) (*Device, error) {
 	var d *Device
 	d, exists := dm.devicesById[identifier]
 	if exists {
@@ -401,19 +415,19 @@ func (dm *DeviceManager) GetDeviceByIdentifier(identifier string) (*Device, erro
 	if err != nil {
 		return nil, err
 	}
-	return dm.Load(device.Id)
+	return dm.Load(ctx, device.Id)
 }
 
-func (dm *DeviceManager) Load(id string) (*Device, error) {
+func (dm *DeviceManager) Load(ctx context.Context, id string) (*Device, error) {
 	var err error
 	d, err := dm.storage.GetDeviceByManufacturerAndID(Shelly, id) // TODO: support other manufacturers(id)
 	if err != nil {
 		return nil, err
 	}
-	return dm.Save(&Device{Device: d})
+	return dm.Save(ctx, &Device{Device: d})
 }
 
-func (dm *DeviceManager) Save(d *Device) (*Device, error) {
+func (dm *DeviceManager) Save(ctx context.Context, d *Device) (*Device, error) {
 	dm.devicesById[d.Id] = d
 	dm.devicesByMAC[d.MAC.String()] = d
 	dm.devicesByHost[d.Host] = d
@@ -427,7 +441,7 @@ func (dm *DeviceManager) Save(d *Device) (*Device, error) {
 			return nil, err
 		}
 		for _, group := range groups.Groups {
-			_, err := kvs.SetKeyValue(types.ChannelMqtt, sd, fmt.Sprintf("group/%s", group.Name), "true")
+			_, err := kvs.SetKeyValue(ctx, log, types.ChannelMqtt, sd, fmt.Sprintf("group/%s", group.Name), "true")
 			if err != nil {
 				return nil, err
 			}

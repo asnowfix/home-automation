@@ -1,6 +1,7 @@
 package script
 
 import (
+	"context"
 	"hlog"
 	"pkg/shelly"
 	"pkg/shelly/script"
@@ -51,11 +52,11 @@ var disableCtl = &cobra.Command{
 	},
 }
 
-func doEnableDisable(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func doEnableDisable(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	enable, err := strconv.ParseBool(args[0])
 	if err != nil {
 		log.Error(err, "Invalid enable/disable argument", "arg", args[0])
 		return nil, err
 	}
-	return script.EnableDisable(via, device, flags.Name, flags.Id, enable)
+	return script.EnableDisable(ctx, via, device, flags.Name, flags.Id, enable)
 }

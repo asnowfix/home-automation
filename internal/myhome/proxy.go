@@ -1,11 +1,12 @@
 package myhome
 
 import (
+	"context"
 	"fmt"
 )
 
 type Client interface {
-	CallE(method string, params any) (any, error)
+	CallE(ctx context.Context, method string, params any) (any, error)
 	Shutdown()
 }
 

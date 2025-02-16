@@ -13,6 +13,7 @@ import (
 	"pkg/shelly"
 	"pkg/shelly/gen1"
 	"syscall"
+	"time"
 
 	"myhome"
 
@@ -24,7 +25,6 @@ import (
 // cobra command for the daemon
 var (
 	disableDeviceManager bool
-	mqttBroker           string
 	Cmd                  = &cobra.Command{
 		Use:   "daemon",
 		Short: "MyHome Daemon",
@@ -38,11 +38,13 @@ var (
 
 func init() {
 	Cmd.Flags().BoolVarP(&disableDeviceManager, "disable-device-manager", "D", false, "Disable the device manager")
-	Cmd.Flags().StringVarP(&mqttBroker, "mqtt-broker", "B", "", "Specify the MQTT broker to connect to (do not start built-in one), using the format <hostname>:<port>")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
+	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", 5*time.Second, "Timeout for MQTT operations")
 }
 
 func Run() error {
-	var disableEmbeddedMqttBroker bool = len(mqttBroker) != 0
+	var disableEmbeddedMqttBroker bool = len(options.Flags.MqttBroker) != 0
 	var err error
 
 	log := hlog.Logger
@@ -75,7 +77,8 @@ func Run() error {
 	shelly.Init(log, options.Flags.MqttTimeout)
 
 	var mc *mymqtt.Client
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Conditionally start the embedded MQTT broker
 	if !disableEmbeddedMqttBroker {
@@ -96,10 +99,10 @@ func Run() error {
 
 		gen1Ch := make(chan gen1.Device, 1)
 		go http.MyHome(log, gen1Ch)
-		go gen1.Publisher(log, gen1Ch, mc)
+		go gen1.Publisher(ctx, log, gen1Ch, mc)
 	} else {
 		// Connect to the network's MQTT broker
-		mc, err = mymqtt.NewClientE(log, mqttBroker, myhome.MYHOME, options.Flags.MqttTimeout)
+		mc, err = mymqtt.NewClientE(log, options.Flags.MqttBroker, myhome.MYHOME, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err

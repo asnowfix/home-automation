@@ -17,7 +17,10 @@ var Cmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		out, err := options.MyHomeClient.CallE("device.list", nil)
+		ctx, cancel := options.InterruptibleContext()
+		defer cancel()
+
+		out, err := options.MyHomeClient.CallE(ctx, "device.list", nil)
 		if err != nil {
 			return err
 		}

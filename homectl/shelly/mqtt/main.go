@@ -1,6 +1,7 @@
 package mqtt
 
 import (
+	"context"
 	"encoding/json"
 	"hlog"
 
@@ -31,8 +32,8 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(via, "Mqtt", "GetConfig", nil)
+func setupOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+	out, err := device.CallE(ctx, via, "Mqtt", "GetConfig", nil)
 	if err != nil {
 		log.Error(err, "Unable to get MQTT config")
 		return nil, err
@@ -45,7 +46,7 @@ func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, a
 	}
 	log.Info("initial MQTT", "config", configStr)
 
-	out, err = device.CallE(via, "Mqtt", "GetStatus", nil)
+	out, err = device.CallE(ctx, via, "Mqtt", "GetStatus", nil)
 	if err != nil {
 		log.Error(err, "Unable to get MQTT status")
 		return nil, err
@@ -62,14 +63,14 @@ func setupOneDevice(log logr.Logger, via types.Channel, device *shelly.Device, a
 	configStr, _ = json.Marshal(config)
 	log.Info("new MQTT config", "config", string(configStr))
 
-	out, err = device.CallE(via, "Mqtt", "SetConfig", config)
+	out, err = device.CallE(ctx, via, "Mqtt", "SetConfig", config)
 	if err != nil {
 		log.Error(err, "Unable to set MQTT config")
 		return nil, err
 	}
 	res := out.(*mqtt.ConfigResults)
 	if res.Result.RestartRequired {
-		device.CallE(via, "Shelly", "Reboot", nil)
+		device.CallE(ctx, via, "Shelly", "Reboot", nil)
 	}
 	return out, nil
 }

@@ -50,7 +50,7 @@ func (hc *client) Shutdown() {
 	}
 }
 
-func (hc *client) CallE(method string, params any) (any, error) {
+func (hc *client) CallE(ctx context.Context, method string, params any) (any, error) {
 	requestId, err := RandStringBytesMaskImprRandReaderUnsafe(16)
 	if err != nil {
 		return nil, err

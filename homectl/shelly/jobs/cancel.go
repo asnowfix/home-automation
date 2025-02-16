@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"fmt"
 	"hlog"
 	hopts "homectl/options"
@@ -41,9 +42,9 @@ var cancelCtl = &cobra.Command{
 	},
 }
 
-func cancelOneDeviceJob(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func cancelOneDeviceJob(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	if cancelFlag.all {
-		out, err := schedule.CancelAllJobs(via, device)
+		out, err := schedule.CancelAllJobs(ctx, log, via, device)
 		if err != nil {
 			log.Error(err, "Unable to cancel all Scheduled Jobs: %v", err)
 			return nil, err
@@ -52,7 +53,7 @@ func cancelOneDeviceJob(log logr.Logger, via types.Channel, device *shelly.Devic
 	} else if cancelFlag.id < 0 {
 		return nil, fmt.Errorf("No job ID provided to cancel")
 	} else {
-		out, err := schedule.CancelJob(via, device, uint32(cancelFlag.id))
+		out, err := schedule.CancelJob(ctx, log, via, device, uint32(cancelFlag.id))
 		if err != nil {
 			log.Error(err, "Unable to cancel all Scheduled Jobs: %v", err)
 			return nil, err

@@ -1,6 +1,7 @@
 package kvs
 
 import (
+	"context"
 	"hlog"
 
 	"github.com/go-logr/logr"
@@ -33,8 +34,8 @@ var setCtl = &cobra.Command{
 	},
 }
 
-func setKeyValue(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func setKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	key := args[0]
 	value := args[1]
-	return kvs.SetKeyValue(via, device, key, value)
+	return kvs.SetKeyValue(ctx, log, via, device, key, value)
 }

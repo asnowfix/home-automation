@@ -33,6 +33,9 @@ var showShellyCmd = &cobra.Command{
 		identifier := args[0]
 		log := hlog.Logger
 
+		ctx, cancel := options.InterruptibleContext()
+		defer cancel()
+
 		if direct {
 			var via types.Channel
 			var sd *shelly.Device
@@ -45,9 +48,9 @@ var showShellyCmd = &cobra.Command{
 				via = types.ChannelMqtt
 			}
 			var device myhome.Device
-			myhome.UpdateDeviceFromShelly(&device, sd, via)
+			myhome.UpdateDeviceFromShelly(ctx, log, &device, sd, via)
 		} else {
-			out, err = options.MyHomeClient.CallE("device.show", identifier)
+			out, err = options.MyHomeClient.CallE(ctx, "device.show", identifier)
 			device = out.(*myhome.Device)
 		}
 		if err != nil {

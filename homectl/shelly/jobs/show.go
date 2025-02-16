@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"hlog"
 	hopts "homectl/options"
 	"homectl/shelly/options"
@@ -28,8 +29,8 @@ var showCtl = &cobra.Command{
 	},
 }
 
-func showOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := schedule.ShowJobs(via, device)
+func showOneDeviceJobs(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+	out, err := schedule.ShowJobs(ctx, log, via, device)
 	if err != nil {
 		log.Error(err, "Unable to set Scheduled JobSpec: %v", err)
 		return nil, err

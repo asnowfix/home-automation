@@ -1,6 +1,7 @@
 package types
 
 import (
+	"context"
 	"net"
 )
 
@@ -14,7 +15,7 @@ type Device interface {
 	String() string
 	Ipv4() net.IP
 	Id() string
-	CallE(via Channel, comp string, verb string, params any) (any, error)
+	CallE(ctx context.Context, via Channel, comp string, verb string, params any) (any, error)
 	ReplyTo() string
 	To() chan<- []byte
 	From() <-chan []byte

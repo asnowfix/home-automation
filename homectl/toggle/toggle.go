@@ -1,6 +1,7 @@
 package toggle
 
 import (
+	"context"
 	"hlog"
 	hopts "homectl/options"
 	"pkg/shelly"
@@ -26,10 +27,10 @@ var Cmd = &cobra.Command{
 		if !useHttpChannel {
 			ch = types.ChannelMqtt
 		}
-		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, ch, func(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, ch, func(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 			sr := make(map[string]interface{})
 			sr["id"] = toggleSwitchId
-			out, err := device.CallE(ch, "Switch", "Toggle", sr)
+			out, err := device.CallE(ctx, ch, "Switch", "Toggle", sr)
 			if err != nil {
 				log.Info("Failed to toggle device %s: %v", device.Id_, err)
 				return nil, err

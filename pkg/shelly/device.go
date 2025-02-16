@@ -1,12 +1,14 @@
 package shelly
 
 import (
+	"context"
 	"devices/shelly/wifi"
 	"encoding/json"
 	"fmt"
 	"mymqtt"
 	"net"
 	"os"
+	"os/signal"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/sswitch"
 	"pkg/shelly/system"
@@ -52,8 +54,8 @@ type Device struct {
 	state             State                                     `json:"-"`
 	mqttClient        *mymqtt.Client                            `json:"-"`
 	me                string                                    `json:"-"`
-	to                chan []byte                               `json:"-"`
-	from              chan []byte                               `json:"-"`
+	to                chan<- []byte                             `json:"-"` // channel to send messages to
+	from              <-chan []byte                             `json:"-"` // channel to receive messages from
 	log               logr.Logger                               `json:"-"`
 }
 
@@ -152,8 +154,8 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func (d *Device) Call(ch types.Channel, component string, verb string, params any) any {
-	data, err := d.CallE(ch, component, verb, params)
+func (d *Device) Call(ctx context.Context, ch types.Channel, component string, verb string, params any) any {
+	data, err := d.CallE(ctx, ch, component, verb, params)
 	if err != nil {
 		panic(err)
 	}
@@ -183,8 +185,8 @@ func (d *Device) MethodHandlerE(c string, v string) (types.MethodHandler, error)
 	return mh, nil
 }
 
-func (d *Device) CallE(ch types.Channel, comp string, verb string, params any) (any, error) {
-	d.init()
+func (d *Device) CallE(ctx context.Context, ch types.Channel, comp string, verb string, params any) (any, error) {
+	d.init(ctx)
 	mh, err := d.MethodHandlerE(comp, verb)
 	if err != nil {
 		return nil, err
@@ -229,7 +231,7 @@ func NewMqttDevice(log logr.Logger, id string, mc *mymqtt.Client) *Device {
 	return d
 }
 
-func (d *Device) init() error {
+func (d *Device) init(ctx context.Context) error {
 	d.log.Info("Shelly.init", "id", d.Id_, "host", d.Host)
 
 	var via types.Channel
@@ -257,7 +259,7 @@ func (d *Device) init() error {
 		return err
 	}
 	d.me = fmt.Sprintf("%s_%s", hostname, d.Id_)
-	d.from, err = d.mqttClient.Subscribe(fmt.Sprintf("%s/rpc", d.me), 1 /*qlen*/)
+	d.from, err = d.mqttClient.Subscriber(ctx, fmt.Sprintf("%s/rpc", d.me), 1 /*qlen*/)
 	if err != nil {
 		d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
 		return err
@@ -284,19 +286,25 @@ func (d *Device) init() error {
 	}
 
 	if d.to == nil {
-		d.to = make(chan []byte, 1 /*qlen*/)
-		toDevice := fmt.Sprintf("%s/rpc", d.Id_)
-		go func() {
-			for {
-				msg := <-d.to
-				d.mqttClient.Publish(toDevice, msg)
-			}
-		}()
+		topic := fmt.Sprintf("%s/rpc", d.Id_)
+		d.to, err = d.mqttClient.Publisher(ctx, topic, 1 /*qlen*/)
+		if err != nil {
+			d.log.Error(err, "Unable to publish to device's RPC topic", "device_id", d.Id_)
+			return err
+		}
+		// d.to = make(chan []byte, 1 /*qlen*/)
+		// go func() {
+		// 	for {
+		// 		msg := <-d.to
+		// 		d.mqttClient.Publish(toDevice, msg)
+		// 	}
+		// }()
 	}
 
 	if d.Methods == nil {
 		m, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "ListMethods"), nil)
 		if err != nil {
+			d.log.Error(err, "Unable to list device's methods")
 			return err
 		}
 
@@ -326,7 +334,7 @@ func (d *Device) init() error {
 	return nil
 }
 
-type Do func(logr.Logger, types.Channel, *Device, []string) (any, error)
+type Do func(context.Context, logr.Logger, types.Channel, *Device, []string) (any, error)
 
 func Print(log logr.Logger, d any) error {
 	buf, err := json.Marshal(d)
@@ -340,6 +348,14 @@ func Print(log logr.Logger, d any) error {
 
 func Foreach(log logr.Logger, mc *mymqtt.Client, names []string, via types.Channel, do Do, args []string) error {
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt)
+		<-c
+		cancel()
+	}()
 
 	if len(names) > 0 {
 		for _, name := range names {
@@ -354,7 +370,7 @@ func Foreach(log logr.Logger, mc *mymqtt.Client, names []string, via types.Chann
 				sd = NewMqttDevice(log, name, mc)
 				via = types.ChannelMqtt
 			}
-			out, err := do(log, via, sd, args)
+			out, err := do(ctx, log, via, sd, args)
 			if err != nil {
 				log.Error(err, "Operation failed", "device", name)
 				continue
@@ -371,7 +387,7 @@ func Foreach(log logr.Logger, mc *mymqtt.Client, names []string, via types.Chann
 		// FIXME: implement lookup with request to myhome
 		devices := make(map[string]*Device, 0)
 		for _, device := range devices {
-			item, err := do(log, via, device, args)
+			item, err := do(ctx, log, via, device, args)
 			if err != nil {
 				log.Error(err, "Operation failed", "device", device.Host)
 				continue

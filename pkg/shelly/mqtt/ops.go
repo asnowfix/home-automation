@@ -1,6 +1,7 @@
 package mqtt
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"pkg/shelly/types"
@@ -55,7 +56,7 @@ func (ch *MqttChannel) Init(log logr.Logger, timeout time.Duration) {
 	ch.log.Info("Init MQTT channel", "timeout", ch.timeout)
 }
 
-func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
+func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
 	var req Request
 
 	req.Src = device.ReplyTo()
@@ -64,8 +65,7 @@ func (ch *MqttChannel) CallDevice(device types.Device, verb types.MethodHandler,
 	req.Params = params
 
 	if req.Src == "" {
-		panic("empty Src")
-		// return nil, fmt.Errorf("empty Src")
+		panic("req.Src is empty")
 	}
 
 	reqPayload, err := json.Marshal(req)

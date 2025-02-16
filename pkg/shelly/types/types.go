@@ -8,7 +8,7 @@ import (
 type MethodsRegistrar interface {
 	RegisterMethodHandler(comp string, verb string, mh MethodHandler)
 	RegisterDeviceCaller(ch Channel, dc DeviceCaller)
-	CallE(d Device, ch Channel, mh MethodHandler, params any) (any, error)
+	CallE(ctx context.Context, d Device, ch Channel, mh MethodHandler, params any) (any, error)
 }
 
 type Device interface {
@@ -21,7 +21,7 @@ type Device interface {
 	From() <-chan []byte
 }
 
-type DeviceCaller func(device Device, mh MethodHandler, out any, params any) (any, error)
+type DeviceCaller func(ctx context.Context, device Device, mh MethodHandler, out any, params any) (any, error)
 
 type Channel uint
 

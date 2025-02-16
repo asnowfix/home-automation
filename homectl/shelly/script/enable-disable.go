@@ -27,12 +27,14 @@ var enableCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		shelly.Init(log, hopts.Flags.MqttTimeout)
+		ctx, cancel := hopts.InterruptibleContext()
+		defer cancel()
 
 		via := types.ChannelMqtt
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, doEnableDisable, []string{"true"})
+		return shelly.Foreach(ctx, log, hopts.MqttClient, hopts.Devices, via, doEnableDisable, []string{"true"})
 	},
 }
 
@@ -43,12 +45,14 @@ var disableCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		shelly.Init(log, hopts.Flags.MqttTimeout)
+		ctx, cancel := hopts.InterruptibleContext()
+		defer cancel()
 
 		via := types.ChannelMqtt
 		if options.UseHttpChannel {
 			via = types.ChannelHttp
 		}
-		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, via, doEnableDisable, []string{"false"})
+		return shelly.Foreach(ctx, log, hopts.MqttClient, hopts.Devices, via, doEnableDisable, []string{"false"})
 	},
 }
 

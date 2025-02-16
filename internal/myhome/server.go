@@ -12,8 +12,8 @@ type server struct {
 	mc      *mymqtt.Client
 	handler Server
 	cancel  context.CancelFunc
-	from    <-chan []byte
-	to      chan<- []byte
+	from    chan []byte
+	to      chan []byte
 }
 
 type Server interface {
@@ -22,21 +22,19 @@ type Server interface {
 }
 
 func NewServerE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler Server) (Server, error) {
-	sctx, cancel := context.WithCancel(ctx)
 	from, err := mc.Subscriber(ctx, ServerTopic(), 1)
 	if err != nil {
-		cancel()
+		log.Error(err, "Failed to subscribe to server", "topic", ServerTopic())
 		return nil, err
 	}
 	to, err := mc.Publisher(ctx, ServerTopic(), 1)
 	if err != nil {
-		cancel()
+		log.Error(err, "Failed to publish to server", "topic", ServerTopic())
 		return nil, err
 	}
 	s := server{
 		mc:      mc,
 		handler: handler,
-		cancel:  cancel,
 		from:    from,
 		to:      to,
 	}
@@ -45,7 +43,7 @@ func NewServerE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler
 		for {
 			select {
 			case <-ctx.Done():
-				log.Info("Cancelled")
+				log.Info("Cancelled", "reason", ctx.Err())
 				return
 			case inMsg := <-from:
 				log.Info("Received message", "payload", string(inMsg))
@@ -115,7 +113,7 @@ func NewServerE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler
 				// mc.Publish(ClientTopic(req.Src), outMsg)
 			}
 		}
-	}(sctx, log.WithName("Server#Subscriber"))
+	}(ctx, log.WithName("Server#Subscriber"))
 
 	log.Info("Server running")
 	return &s, nil

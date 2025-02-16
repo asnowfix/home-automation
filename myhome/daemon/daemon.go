@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"hlog"
 	"homectl/options"
 	"myhome/http"
@@ -77,7 +76,7 @@ func Run() error {
 	shelly.Init(log, options.Flags.MqttTimeout)
 
 	var mc *mymqtt.Client
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := options.InterruptibleContext()
 	defer cancel()
 
 	// Conditionally start the embedded MQTT broker
@@ -91,7 +90,7 @@ func Run() error {
 		defer mdnsServer.Shutdown()
 
 		// Connect to the embedded MQTT broker
-		mc, err = mymqtt.NewClientE(log, "me", myhome.MYHOME, options.Flags.MqttTimeout)
+		mc, err = mymqtt.InitClientE(ctx, log, "me", myhome.MYHOME, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
@@ -102,7 +101,7 @@ func Run() error {
 		go gen1.Publisher(ctx, log, gen1Ch, mc)
 	} else {
 		// Connect to the network's MQTT broker
-		mc, err = mymqtt.NewClientE(log, options.Flags.MqttBroker, myhome.MYHOME, options.Flags.MqttTimeout)
+		mc, err = mymqtt.InitClientE(ctx, log, options.Flags.MqttBroker, myhome.MYHOME, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err

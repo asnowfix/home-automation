@@ -88,7 +88,7 @@ func Run() error {
 		defer mdnsServer.Shutdown()
 
 		// Connect to the embedded MQTT broker
-		mc, err = mymqtt.NewClientE(log, "me", myhome.MYHOME)
+		mc, err = mymqtt.NewClientE(log, "me", myhome.MYHOME, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
@@ -99,7 +99,7 @@ func Run() error {
 		go gen1.Publisher(log, gen1Ch, mc)
 	} else {
 		// Connect to the network's MQTT broker
-		mc, err = mymqtt.NewClientE(log, mqttBroker, myhome.MYHOME)
+		mc, err = mymqtt.NewClientE(log, mqttBroker, myhome.MYHOME, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err

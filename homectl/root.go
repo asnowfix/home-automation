@@ -40,7 +40,7 @@ var Cmd = &cobra.Command{
 		log.Info("Will use", "devices", options.Devices)
 
 		var err error
-		options.MqttClient, err = mymqtt.NewClientE(log, options.Flags.MqttBroker, "")
+		options.MqttClient, err = mymqtt.NewClientE(log, options.Flags.MqttBroker, "", options.Flags.MqttTimeout)
 		if err != nil {
 			return err
 		}

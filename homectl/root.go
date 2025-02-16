@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"homectl/group"
 	"homectl/list"
@@ -39,12 +38,14 @@ var Cmd = &cobra.Command{
 		options.Devices = strings.Split(options.Flags.Devices, ",")
 		log.Info("Will use", "devices", options.Devices)
 
+		ctx, cancel := options.InterruptibleContext()
+		defer cancel()
 		var err error
-		options.MqttClient, err = mymqtt.NewClientE(log, options.Flags.MqttBroker, "", options.Flags.MqttTimeout)
+		options.MqttClient, err = mymqtt.InitClientE(ctx, log, options.Flags.MqttBroker, "", options.Flags.MqttTimeout)
 		if err != nil {
 			return err
 		}
-		options.MyHomeClient, err = myhome.NewClientE(context.Background(), log, options.MqttClient, options.Flags.MqttTimeout)
+		options.MyHomeClient, err = myhome.NewClientE(ctx, log, options.MqttClient, options.Flags.MqttTimeout)
 		if err != nil {
 			return err
 		}

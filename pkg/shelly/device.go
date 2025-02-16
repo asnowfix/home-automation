@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"mymqtt"
 	"net"
-	"os"
-	"os/signal"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/sswitch"
 	"pkg/shelly/system"
@@ -52,7 +50,6 @@ type Device struct {
 	ComponentsMethods map[string]map[string]types.MethodHandler `json:"-"`
 	Components        *[]Component                              `json:"-"`
 	state             State                                     `json:"-"`
-	mqttClient        *mymqtt.Client                            `json:"-"`
 	me                string                                    `json:"-"`
 	to                chan<- []byte                             `json:"-"` // channel to send messages to
 	from              <-chan []byte                             `json:"-"` // channel to receive messages from
@@ -189,9 +186,10 @@ func (d *Device) CallE(ctx context.Context, ch types.Channel, comp string, verb 
 	d.init(ctx)
 	mh, err := d.MethodHandlerE(comp, verb)
 	if err != nil {
+		d.log.Error(err, "Unable to find method handler", "comp", comp, "verb", verb)
 		return nil, err
 	}
-	return GetRegistrar().CallE(d, ch, mh, params)
+	return GetRegistrar().CallE(ctx, d, ch, mh, params)
 }
 
 func (d *Device) String() string {
@@ -222,11 +220,10 @@ func NewHttpDevice(log logr.Logger, ip net.IP) *Device {
 
 func NewMqttDevice(log logr.Logger, id string, mc *mymqtt.Client) *Device {
 	d := &Device{
-		Id_:        id,
-		Host:       fmt.Sprintf("%s.local.", id),
-		mqttClient: mc,
-		state:      New,
-		log:        log,
+		Id_:   id,
+		Host:  fmt.Sprintf("%s.local.", id),
+		state: New,
+		log:   log,
 	}
 	return d
 }
@@ -235,39 +232,42 @@ func (d *Device) init(ctx context.Context) error {
 	d.log.Info("Shelly.init", "id", d.Id_, "host", d.Host)
 
 	var via types.Channel
-	if d.mqttClient == nil {
+	var err error
+	var mc *mymqtt.Client
+
+	if d.Id_ == "" {
 		via = types.ChannelHttp
 	} else {
 		via = types.ChannelMqtt
-	}
-
-	var err error
-	if d.Id_ == "" {
-		di, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "GetDeviceInfo"), map[string]interface{}{"ident": true})
+		mc, err = mymqtt.GetClientE(ctx, d.log)
 		if err != nil {
+			d.log.Error(err, "Unable to get MQTT client for the current process")
 			return err
 		}
-		d.Info = di.(*DeviceInfo)
-		d.log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
-		d.Id_ = d.Info.Id
-		d.MacAddress = d.Info.MacAddress
+		d.me = fmt.Sprintf("%s_%s", mc.Id(), d.Id_)
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		d.log.Error(err, "Unable to get local hostname")
-		return err
+	if d.from == nil && mc != nil {
+		d.from, err = mc.Subscriber(ctx, fmt.Sprintf("%s/rpc", d.me), 1 /*qlen*/)
+		if err != nil {
+			d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
+			return err
+		}
 	}
-	d.me = fmt.Sprintf("%s_%s", hostname, d.Id_)
-	d.from, err = d.mqttClient.Subscriber(ctx, fmt.Sprintf("%s/rpc", d.me), 1 /*qlen*/)
-	if err != nil {
-		d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
-		return err
+
+	if d.to == nil && mc != nil {
+		topic := fmt.Sprintf("%s/rpc", d.Id_)
+		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/)
+		if err != nil {
+			d.log.Error(err, "Unable to publish to device's RPC topic", "device_id", d.Id_)
+			return err
+		}
 	}
 
 	if d.Info == nil {
-		di, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "GetDeviceInfo"), map[string]interface{}{"ident": true})
+		di, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(Shelly, "GetDeviceInfo"), map[string]interface{}{"ident": true})
 		if err != nil {
+			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
 			return err
 		}
 		d.Info = di.(*DeviceInfo)
@@ -277,7 +277,7 @@ func (d *Device) init(ctx context.Context) error {
 	}
 
 	if d.Components == nil {
-		out, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "GetComponents"), &ComponentsRequest{})
+		out, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(Shelly, "GetComponents"), &ComponentsRequest{})
 		if err != nil {
 			return err
 		}
@@ -285,24 +285,8 @@ func (d *Device) init(ctx context.Context) error {
 		d.log.Info("Shelly.GetComponents", "components", *d.Components)
 	}
 
-	if d.to == nil {
-		topic := fmt.Sprintf("%s/rpc", d.Id_)
-		d.to, err = d.mqttClient.Publisher(ctx, topic, 1 /*qlen*/)
-		if err != nil {
-			d.log.Error(err, "Unable to publish to device's RPC topic", "device_id", d.Id_)
-			return err
-		}
-		// d.to = make(chan []byte, 1 /*qlen*/)
-		// go func() {
-		// 	for {
-		// 		msg := <-d.to
-		// 		d.mqttClient.Publish(toDevice, msg)
-		// 	}
-		// }()
-	}
-
 	if d.Methods == nil {
-		m, err := GetRegistrar().CallE(d, via, GetRegistrar().MethodHandler(Shelly, "ListMethods"), nil)
+		m, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(Shelly, "ListMethods"), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to list device's methods")
 			return err
@@ -346,17 +330,8 @@ func Print(log logr.Logger, d any) error {
 	return nil
 }
 
-func Foreach(log logr.Logger, mc *mymqtt.Client, names []string, via types.Channel, do Do, args []string) error {
+func Foreach(ctx context.Context, log logr.Logger, mc *mymqtt.Client, names []string, via types.Channel, do Do, args []string) error {
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt)
-		<-c
-		cancel()
-	}()
-
 	if len(names) > 0 {
 		for _, name := range names {
 			log.Info("Looking for Shelly device", "name", name)

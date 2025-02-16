@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -44,7 +45,7 @@ type HttpChannel struct {
 
 var httpChannel HttpChannel
 
-func (ch *HttpChannel) callE(device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
+func (ch *HttpChannel) callE(ctx context.Context, device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
 	var res *http.Response
 	var err error
 

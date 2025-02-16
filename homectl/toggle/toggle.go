@@ -23,11 +23,14 @@ var Cmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 
+		ctx, cancel := hopts.InterruptibleContext()
+		defer cancel()
+
 		ch := types.ChannelHttp
 		if !useHttpChannel {
 			ch = types.ChannelMqtt
 		}
-		return shelly.Foreach(log, hopts.MqttClient, hopts.Devices, ch, func(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+		return shelly.Foreach(ctx, log, hopts.MqttClient, hopts.Devices, ch, func(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 			sr := make(map[string]interface{})
 			sr["id"] = toggleSwitchId
 			out, err := device.CallE(ctx, ch, "Switch", "Toggle", sr)

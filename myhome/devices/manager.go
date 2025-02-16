@@ -190,7 +190,8 @@ func (dm *DeviceManager) Shutdown() {
 func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error {
 	var sd *shelly.Device
 
-	ch, err := mc.Subscriber(ctx, "+/events/rpc", 16)
+	topic := "+/events/rpc"
+	ch, err := mc.Subscriber(ctx, topic, 16)
 	if err != nil {
 		dm.log.Error(err, "Failed to subscribe to shelly devices events")
 		return err
@@ -200,11 +201,11 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 		for {
 			select {
 			case <-ctx.Done():
-				log.Info("Cancelled")
+				log.Info("Cancelled", "topic", topic)
 				return ctx.Err()
 
 			case msg := <-ch:
-				log.Info("Received message", "payload", string(msg))
+				log.Info("Received message", "topic", topic, "payload", string(msg))
 				event := &mqtt.Event{}
 				err := json.Unmarshal(msg, &event)
 				if err != nil {

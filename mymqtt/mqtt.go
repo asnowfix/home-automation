@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,39 +26,56 @@ type Client struct {
 	mqtt      mqtt.Client // MQTT stack
 	brokerUrl *url.URL    // MQTT broker to connect to
 	log       logr.Logger // Logger to use
-	lock      sync.Mutex  // Lock to serialize access to the client
 	timeout   time.Duration
 }
 
-var client Client
+var client *Client
 
-func NewClient(log logr.Logger, broker string, me string, timeout time.Duration) *Client {
-	c, err := NewClientE(log, broker, me, timeout)
+var mutex sync.Mutex
+
+func GetClientE(ctx context.Context, log logr.Logger) (*Client, error) {
+	mutex.Lock()
+	for client == nil {
+		mutex.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Second):
+		}
+		log.Info("Waiting for MQTT client to be initialized")
+		time.Sleep(time.Second)
+		mutex.Lock()
+	}
+	mutex.Unlock()
+	return client, nil
+}
+
+func InitClient(ctx context.Context, log logr.Logger, broker string, me string, timeout time.Duration) *Client {
+	c, err := InitClientE(ctx, log, broker, me, timeout)
 	if err != nil {
 		panic(fmt.Errorf("could not initialize MQTT client: %w", err))
 	}
 	return c
 }
 
-func NewClientE(log logr.Logger, broker string, me string, timeout time.Duration) (*Client, error) {
-	defer client.lock.Unlock()
-	client.lock.Lock()
+func InitClientE(ctx context.Context, log logr.Logger, broker string, clientId string, timeout time.Duration) (*Client, error) {
+	defer mutex.Unlock()
+	mutex.Lock()
 
-	if me == "" {
+	if clientId == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
-			return nil, fmt.Errorf("could not get hostname: %w", err)
+			log.Error(err, "could not get hostname")
+			return nil, err
 		}
-
-		me = fmt.Sprintf("%v-%v-%v", hostname, path.Base(os.Args[0]), os.Getpid())
-
+		clientId = fmt.Sprintf("%v-%v", hostname, os.Getpid())
 	}
-	log.Info("Initializing MQTT client", "client_id", me, "timeout", timeout)
+	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", timeout)
 
 	opts := mqtt.NewClientOptions()
 	opts.SetUsername(MqttUsername)
 	opts.SetPassword(MqttPassword)
-	opts.SetClientID(me)
+	opts.SetClientID(clientId)
 	opts.SetAutoReconnect(true)
 	opts.SetCleanSession(true)
 
@@ -73,11 +89,13 @@ func NewClientE(log logr.Logger, broker string, me string, timeout time.Duration
 	opts.AddBroker(brokerUrl.String())
 	opts.Servers = []*url.URL{brokerUrl}
 
-	client.clientId = me
-	client.mqtt = mqtt.NewClient(opts)
-	client.log = log
-	client.brokerUrl = brokerUrl
-	client.timeout = timeout
+	client = &Client{
+		clientId:  clientId,
+		mqtt:      mqtt.NewClient(opts),
+		brokerUrl: brokerUrl,
+		log:       log,
+		timeout:   timeout,
+	}
 
 	// FIXME: get MQTT logging right
 	// mqtt.DEBUG = mqtt.Logger{
@@ -85,8 +103,8 @@ func NewClientE(log logr.Logger, broker string, me string, timeout time.Duration
 	// 	Printf:  log.I,
 	// }
 
-	client.log.Info("MQTT client initialized", "client_id", client.clientId, "timeout", client.timeout)
-	return &client, nil
+	log.Info("MQTT client initialized", "client_id", client.clientId, "timeout", client.timeout)
+	return client, nil
 }
 
 func (c *Client) Id() string {
@@ -102,8 +120,8 @@ func (c *Client) IsConnected() bool {
 }
 
 func (c *Client) connect() error {
-	defer c.lock.Unlock()
-	c.lock.Lock()
+	defer mutex.Unlock()
+	mutex.Lock()
 	if c.mqtt.IsConnected() {
 		return nil
 	}
@@ -270,7 +288,7 @@ type MqttMessage struct {
 // 	}
 // }
 
-func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan<- []byte, error) {
+func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan []byte, error) {
 	err := c.connect()
 	if err != nil {
 		c.log.Error(err, "Unable to connect to create publisher channel", "topic", topic)
@@ -285,7 +303,7 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan<-
 				return
 			case msg, ok := <-mch:
 				if !ok {
-					log.Info("Channel closed")
+					log.Info("Channel closed", "topic", topic)
 					return
 				}
 				log.Info("Publishing to MQTT:", "topic", topic, "payload", string(msg))
@@ -303,7 +321,7 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan<-
 	return mch, nil
 }
 
-func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (<-chan []byte, error) {
+func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (chan []byte, error) {
 	err := c.connect()
 	if err != nil {
 		c.log.Error(err, "Unable to connect to create subscriber channel", "topic", topic)
@@ -311,25 +329,32 @@ func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (<-cha
 	}
 	mch := make(chan []byte, qlen)
 
-	c.mqtt.Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
+	token := c.mqtt.Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
 		go func() {
-			c.log.Info("Received from MQTT:", "topic", topic, "payload", string(msg.Payload()))
+			c.log.Info("Received from MQTT:", "topic", msg.Topic(), "payload", string(msg.Payload()))
 			mch <- msg.Payload()
+			c.log.Info("Sent downstream:", "payload", string(msg.Payload()))
 		}()
 	})
+	for !token.WaitTimeout(c.timeout) {
+		c.log.Info("Trying to subscribe", "topic", topic, "as client_id", c.Id(), "timeout", c.timeout)
+	}
+	if err := token.Error(); err != nil {
+		c.log.Error(token.Error(), "Subscription failed", "topic", topic, "as client_id", c.Id())
+		return nil, err
+	}
+	c.log.Info("Subscribed", "to topic", topic, "as client_id", c.Id())
 
 	go func(ctx context.Context, log logr.Logger) {
 		<-ctx.Done()
-		log.Info("Cancelled")
+		log.Info("Cancelled", "topic", topic)
 		token := c.mqtt.Unsubscribe(topic)
 		if token.WaitTimeout(c.timeout) {
-			log.Info("Unsubscribed")
+			log.Info("Unsubscribed", "from topic", topic)
 		} else {
-			log.Error(token.Error(), "Failed to unsubscribe")
+			log.Error(token.Error(), "Failed to unsubscribe", "from topic", topic)
 		}
-		log.Info("Subscriber closed")
-	}(ctx, c.log.WithName("Client#Subscriber"))
+	}(ctx, c.log.WithName("Subscriber#Monitor"))
 
-	c.log.Info("Subscribed to:", "topic", topic)
 	return mch, nil
 }

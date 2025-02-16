@@ -1,6 +1,7 @@
 package shelly
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"pkg/shelly/input"
@@ -113,9 +114,9 @@ func (r *Registrar) RegisterDeviceCaller(ch types.Channel, dc types.DeviceCaller
 	r.channels[ch] = dc
 }
 
-func (r *Registrar) CallE(d types.Device, ch types.Channel, mh types.MethodHandler, params any) (any, error) {
+func (r *Registrar) CallE(ctx context.Context, d types.Device, ch types.Channel, mh types.MethodHandler, params any) (any, error) {
 	out := mh.Allocate()
 	// r.log.Info("Calling", "channel", ch, "method", mh.Method, "http_method", mh.HttpMethod, "params", params, "out_type", reflect.TypeOf(out))
 	r.log.Info("Calling", "channel", ch, "params", params, "out_type", reflect.TypeOf(out))
-	return r.channels[ch](d, mh, out, params)
+	return r.channels[ch](ctx, d, mh, out, params)
 }

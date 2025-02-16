@@ -1,11 +1,14 @@
 package myhome
 
 import (
+	"context"
 	"net"
 	"pkg/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
 	"schedule"
+
+	"github.com/go-logr/logr"
 )
 
 type DeviceIdentifier struct {
@@ -51,30 +54,30 @@ type GroupDevice struct {
 	Group        string `db:"group" json:"group"`
 }
 
-func UpdateDeviceFromShelly(d *Device, sd *shelly.Device, via types.Channel) {
+func UpdateDeviceFromShelly(ctx context.Context, log logr.Logger, d *Device, sd *shelly.Device, via types.Channel) {
 	if d.Info == nil {
-		d.Info = sd.Call(via, "Shelly", "GetDeviceInfo", &shelly.DeviceInfo{}).(*shelly.DeviceInfo)
+		d.Info = sd.Call(ctx, via, "Shelly", "GetDeviceInfo", &shelly.DeviceInfo{}).(*shelly.DeviceInfo)
 	}
 
 	if d.Components == nil {
-		d.Components = sd.Call(via, "Shelly", "GetComponents", nil).(*shelly.ComponentsResponse).Components
+		d.Components = sd.Call(ctx, via, "Shelly", "GetComponents", nil).(*shelly.ComponentsResponse).Components
 	}
 
 	if d.Config == nil {
-		d.Config = sd.Call(via, "Shelly", "GetConfig", &shelly.Config{}).(*shelly.Config)
+		d.Config = sd.Call(ctx, via, "Shelly", "GetConfig", &shelly.Config{}).(*shelly.Config)
 	}
 	if d.Config.System == nil {
-		d.Config.System = sd.Call(via, "System", "GetConfig", &system.Config{}).(*system.Config)
+		d.Config.System = sd.Call(ctx, via, "System", "GetConfig", &system.Config{}).(*system.Config)
 	}
 	if d.Config.Schedule == nil {
-		d.Config.Schedule = sd.Call(via, "Schedule", "List", &schedule.Scheduled{}).(*schedule.Scheduled)
+		d.Config.Schedule = sd.Call(ctx, via, "Schedule", "List", &schedule.Scheduled{}).(*schedule.Scheduled)
 	}
 
 	if d.Status == nil {
-		d.Status = sd.Call(via, "Shelly", "GetStatus", &shelly.Status{}).(*shelly.Status)
+		d.Status = sd.Call(ctx, via, "Shelly", "GetStatus", &shelly.Status{}).(*shelly.Status)
 	}
 	if d.Status.System == nil {
-		d.Status.System = sd.Call(via, "System", "GetStatus", &system.Status{}).(*system.Status)
+		d.Status.System = sd.Call(ctx, via, "System", "GetStatus", &system.Status{}).(*system.Status)
 	}
 
 	d.MAC = net.HardwareAddr(sd.Info.MacAddress.String())

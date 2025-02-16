@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	hopts "homectl/options"
 	"homectl/shelly/options"
 
@@ -30,6 +31,6 @@ var scheduleCtl = &cobra.Command{
 	},
 }
 
-func scheduleOneDeviceJobs(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	return schedule.ScheduleJobs(via, device)
+func scheduleOneDeviceJobs(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+	return schedule.ScheduleJobs(ctx, log, via, device)
 }

@@ -1,6 +1,7 @@
 package script
 
 import (
+	"context"
 	"hlog"
 	hopts "homectl/options"
 	"homectl/shelly/options"
@@ -75,7 +76,7 @@ var deleteCtl = &cobra.Command{
 	},
 }
 
-func doStartStop(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func doStartStop(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	operation := args[0]
-	return script.StartStopDelete(via, device, flags.Name, flags.Id, operation)
+	return script.StartStopDelete(ctx, via, device, flags.Name, flags.Id, operation)
 }

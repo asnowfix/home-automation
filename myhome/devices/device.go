@@ -1,6 +1,7 @@
 package devices
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -164,6 +165,6 @@ func (d *Device) UpdateFromMqttEvent(event *mqtt.Event) error {
 // 	return d
 // }
 
-func UpdateDeviceFromShelly(d *Device, sd *shelly.Device, via types.Channel) {
-	myhome.UpdateDeviceFromShelly(&d.Device, sd, via)
+func UpdateDeviceFromShelly(ctx context.Context, log logr.Logger, d *Device, sd *shelly.Device, via types.Channel) {
+	myhome.UpdateDeviceFromShelly(ctx, log, &d.Device, sd, via)
 }

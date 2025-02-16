@@ -1,6 +1,7 @@
 package kvs
 
 import (
+	"context"
 	"hlog"
 
 	"github.com/go-logr/logr"
@@ -33,6 +34,6 @@ var getManyCtl = &cobra.Command{
 	},
 }
 
-func getMany(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	return kvs.GetMany(via, device)
+func getMany(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+	return kvs.GetMany(ctx, log, via, device)
 }

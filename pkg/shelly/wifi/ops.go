@@ -1,6 +1,7 @@
 package wifi
 
 import (
+	"context"
 	"net/http"
 	"pkg/shelly/types"
 	"reflect"
@@ -28,8 +29,8 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	// System.SetConfig
 }
 
-func GetStatus(via types.Channel, d types.Device) (any, error) {
-	out, err := d.CallE(via, "WiFi", "GetStatus", nil)
+func GetStatus(ctx context.Context, via types.Channel, d types.Device) (any, error) {
+	out, err := d.CallE(ctx, via, "WiFi", "GetStatus", nil)
 	if err != nil {
 		log.Error(err, "Unable to get WiFi status")
 		return nil, err
@@ -37,8 +38,8 @@ func GetStatus(via types.Channel, d types.Device) (any, error) {
 	return out, nil
 }
 
-func ScanNetworks(via types.Channel, d types.Device) (any, error) {
-	out, err := d.CallE(via, "WiFi", "Scan", nil)
+func ScanNetworks(ctx context.Context, via types.Channel, d types.Device) (any, error) {
+	out, err := d.CallE(ctx, via, "WiFi", "Scan", nil)
 	if err != nil {
 		log.Error(err, "Unable to scan WiFi networks")
 		return nil, err
@@ -46,12 +47,12 @@ func ScanNetworks(via types.Channel, d types.Device) (any, error) {
 	return out, nil
 }
 
-func Connect(via types.Channel, d types.Device, ssid, password string) (any, error) {
+func Connect(ctx context.Context, via types.Channel, d types.Device, ssid, password string) (any, error) {
 	params := map[string]string{
 		"ssid":     ssid,
 		"password": password,
 	}
-	out, err := d.CallE(via, "WiFi", "Connect", params)
+	out, err := d.CallE(ctx, via, "WiFi", "Connect", params)
 	if err != nil {
 		log.Error(err, "Unable to connect to WiFi network")
 		return nil, err
@@ -59,8 +60,8 @@ func Connect(via types.Channel, d types.Device, ssid, password string) (any, err
 	return out, nil
 }
 
-func Disconnect(via types.Channel, d types.Device) (any, error) {
-	out, err := d.CallE(via, "WiFi", "Disconnect", nil)
+func Disconnect(ctx context.Context, via types.Channel, d types.Device) (any, error) {
+	out, err := d.CallE(ctx, via, "WiFi", "Disconnect", nil)
 	if err != nil {
 		log.Error(err, "Unable to disconnect from WiFi network")
 		return nil, err

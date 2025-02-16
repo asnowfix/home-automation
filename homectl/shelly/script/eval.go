@@ -1,6 +1,7 @@
 package script
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"hlog"
@@ -35,8 +36,8 @@ var evalCtl = &cobra.Command{
 	},
 }
 
-func doEval(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(via, "Script", "Eval", &script.EvalRequest{
+func doEval(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+	out, err := device.CallE(ctx, via, "Script", "Eval", &script.EvalRequest{
 		Id:   script.Id{Id: flags.Id},
 		Code: args[0],
 	})

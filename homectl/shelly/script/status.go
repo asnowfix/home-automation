@@ -1,6 +1,7 @@
 package script
 
 import (
+	"context"
 	"hlog"
 	hopts "homectl/options"
 	"homectl/shelly/options"
@@ -33,8 +34,8 @@ var statusCtl = &cobra.Command{
 	},
 }
 
-func doStatus(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(via, "Script", "GetStatus", &script.Id{
+func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+	out, err := device.CallE(ctx, via, "Script", "GetStatus", &script.Id{
 		Id: uint32(flags.Id),
 	})
 	if err != nil {

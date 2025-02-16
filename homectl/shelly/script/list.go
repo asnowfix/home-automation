@@ -1,6 +1,7 @@
 package script
 
 import (
+	"context"
 	"hlog"
 	hopts "homectl/options"
 	"homectl/shelly/options"
@@ -32,6 +33,6 @@ var listCtl = &cobra.Command{
 	},
 }
 
-func doList(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	return script.List(device, via)
+func doList(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+	return script.List(ctx, device, via)
 }

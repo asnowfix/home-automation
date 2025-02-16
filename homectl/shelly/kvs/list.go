@@ -1,6 +1,7 @@
 package kvs
 
 import (
+	"context"
 	"hlog"
 
 	"github.com/go-logr/logr"
@@ -33,12 +34,12 @@ var listCtl = &cobra.Command{
 	},
 }
 
-func listKeys(log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func listKeys(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	var match string
 	if len(args) > 0 {
 		match = args[0]
 	} else {
 		match = "*" // default
 	}
-	return kvs.ListKeys(via, device, match)
+	return kvs.ListKeys(ctx, log, via, device, match)
 }

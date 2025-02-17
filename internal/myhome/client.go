@@ -82,10 +82,14 @@ func (hc *client) CallE(ctx context.Context, method string, params any) (any, er
 
 	var resStr []byte
 	select {
+	case <-ctx.Done():
+		hc.log.Error(ctx.Err(), "Waiting for response to method", "method", req.Method)
+		return nil, ctx.Err()
 	case resStr = <-hc.from:
 		hc.log.Info("Response", "payload", resStr)
-	case <-time.After(hc.timeout):
-		return nil, fmt.Errorf("timed out waiting for response to method %s (%v)", method, hc.timeout)
+		break
+		// case <-time.After(hc.timeout):
+		// 	return nil, fmt.Errorf("timed out waiting for response to method %s (%v)", method, hc.timeout)
 	}
 
 	var res response

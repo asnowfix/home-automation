@@ -27,6 +27,7 @@ type Client struct {
 	brokerUrl *url.URL    // MQTT broker to connect to
 	log       logr.Logger // Logger to use
 	timeout   time.Duration
+	grace     time.Duration
 }
 
 var client *Client
@@ -50,20 +51,19 @@ func GetClientE(ctx context.Context, log logr.Logger) (*Client, error) {
 	return client, nil
 }
 
-func InitClient(ctx context.Context, log logr.Logger, broker string, me string, timeout time.Duration) *Client {
-	c, err := InitClientE(ctx, log, broker, me, timeout)
+func InitClient(ctx context.Context, log logr.Logger, broker string, me string, timeout time.Duration, grace time.Duration) *Client {
+	c, err := InitClientE(ctx, log, broker, me, timeout, grace)
 	if err != nil {
 		panic(fmt.Errorf("could not initialize MQTT client: %w", err))
 	}
 	return c
 }
 
-func InitClientE(ctx context.Context, log logr.Logger, broker string, clientId string, timeout time.Duration) (*Client, error) {
+func InitClientE(ctx context.Context, log logr.Logger, broker string, clientId string, timeout time.Duration, grace time.Duration) (*Client, error) {
 	defer mutex.Unlock()
 	mutex.Lock()
 
 	if client != nil {
-		panic("client already initialized")
 		return client, nil
 	}
 
@@ -102,6 +102,7 @@ func InitClientE(ctx context.Context, log logr.Logger, broker string, clientId s
 		brokerUrl: brokerUrl,
 		log:       log,
 		timeout:   timeout,
+		grace:     grace,
 	}
 
 	// FIXME: get MQTT logging right
@@ -109,6 +110,12 @@ func InitClientE(ctx context.Context, log logr.Logger, broker string, clientId s
 	// 	Println: log.Info,
 	// 	Printf:  log.I,
 	// }
+
+	go func(log logr.Logger) {
+		<-ctx.Done()
+		log.Error(ctx.Err(), "Context done: MQTT client disconnecting")
+		client.mqtt.Disconnect(uint(client.grace.Milliseconds()))
+	}(log.WithName("Client#Monitor"))
 
 	log.Info("MQTT client initialized", "client_id", client.clientId, "timeout", client.timeout)
 	return client, nil
@@ -308,7 +315,7 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan [
 			log.Info("Waiting for message", "topic", topic)
 			select {
 			case <-ctx.Done():
-				log.Info("Context done", "topic", topic)
+				log.Error(ctx.Err(), "Context done", "topic", topic)
 				return
 			case msg, ok := <-mch:
 				if !ok {
@@ -362,7 +369,7 @@ func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (chan 
 
 	go func(ctx context.Context, log logr.Logger) {
 		<-ctx.Done()
-		log.Info("Cancelled", "topic", topic)
+		log.Error(ctx.Err(), "Context done", "topic", topic)
 		token := c.mqtt.Unsubscribe(topic)
 		if token.WaitTimeout(c.timeout) {
 			log.Info("Unsubscribed", "from topic", topic)

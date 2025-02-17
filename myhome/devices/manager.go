@@ -230,24 +230,24 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 					device.impl = sd
 				}
 
-				if device.Config == nil {
-					sd, ok := device.impl.(*shelly.Device)
-					if !ok {
-						dm.log.Info("Device is not a shelly device", "device_id", event.Src)
-					} else {
-						out, err := sd.CallE(ctx, types.ChannelMqtt, "Shelly", "GetConfig", nil)
-						if err != nil {
-							dm.log.Error(err, "Failed to get shelly config", "device_id", event.Src)
-						} else {
-							config, ok := out.(*shelly.Config)
-							if ok {
-								device.Config = config
-							} else {
-								dm.log.Info("discarding incomplete or unknown shelly config", "out", out)
-							}
-						}
-					}
-				}
+				// if device.Config == nil {
+				// 	sd, ok := device.impl.(*shelly.Device)
+				// 	if !ok {
+				// 		dm.log.Info("Device is not a shelly device", "device_id", event.Src)
+				// 	} else {
+				// 		out, err := sd.CallE(ctx, types.ChannelMqtt, "Shelly", "GetConfig", nil)
+				// 		if err != nil {
+				// 			dm.log.Error(err, "Failed to get shelly config", "device_id", event.Src)
+				// 		} else {
+				// 			config, ok := out.(*shelly.Config)
+				// 			if ok {
+				// 				device.Config = config
+				// 			} else {
+				// 				dm.log.Info("discarding incomplete or unknown shelly config", "out", out)
+				// 			}
+				// 		}
+				// 	}
+				// }
 
 				dm.log.Info("Updating device", "device", device)
 				err = device.UpdateFromMqttEvent(event)

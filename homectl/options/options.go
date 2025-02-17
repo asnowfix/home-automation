@@ -17,6 +17,7 @@ var Flags struct {
 	Devices     string
 	MqttBroker  string
 	MqttTimeout time.Duration
+	MqttGrace   time.Duration
 }
 
 var Devices []string

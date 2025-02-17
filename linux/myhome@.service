@@ -6,7 +6,7 @@ After=local-fs.target network.target
 
 [Service]
 Type=simple
-ExecStart=/home/%i/go/bin/myhome -v
+ExecStart=/home/%i/go/bin/myhome daemon --disable-device-manager
 Restart=on-failure
 RestartSec=5
 User=%i

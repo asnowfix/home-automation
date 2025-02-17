@@ -15,7 +15,7 @@ func ServerTopic() string {
 }
 
 func ClientTopic(clientId string) string {
-	return fmt.Sprintf("%s/%s/rpc", MYHOME, clientId)
+	return fmt.Sprintf("%s/rpc", clientId)
 }
 
 type Dialog struct {

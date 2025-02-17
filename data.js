@@ -445,3 +445,144 @@ device_1 =     {
     "ws": null
   }
 }
+
+get_config_response = {
+  "dst": "myhome_shelly1minig3-543204522cb4",
+  "error": null,
+  "id": 0,
+  "result": {
+    "ble": {
+      "enable": true,
+      "observer": {
+        "enable": true
+      },
+      "rpc": {
+        "enable": true
+      }
+    },
+    "bthome": {},
+    "cloud": {
+      "enable": true,
+      "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+    },
+    "input:0": {
+      "enable": true,
+      "factory_reset": true,
+      "id": 0,
+      "invert": false,
+      "name": null,
+      "type": "button"
+    },
+    "knx": {
+      "enable": false,
+      "ia": "15.15.255",
+      "routing": {
+        "addr": "224.0.23.12:3671"
+      }
+    },
+    "mqtt": {
+      "client_id": "shelly1minig3-543204522cb4",
+      "enable": true,
+      "enable_control": true,
+      "enable_rpc": true,
+      "rpc_ntf": true,
+      "server": "192.168.1.2:1883",
+      "ssl_ca": null,
+      "status_ntf": true,
+      "topic_prefix": "shelly1minig3-543204522cb4",
+      "use_client_cert": false,
+      "user": null
+    },
+    "script:1": {
+      "enable": true,
+      "id": 1,
+      "name": "ble-shelly-motion.js"
+    },
+    "switch:0": {
+      "auto_off": false,
+      "auto_off_delay": 60,
+      "auto_on": false,
+      "auto_on_delay": 60,
+      "id": 0,
+      "in_mode": "detached",
+      "initial_state": "off",
+      "name": "Lumiere Porte Entree"
+    },
+    "sys": {
+      "cfg_rev": 52,
+      "debug": {
+        "file_level": null,
+        "level": 2,
+        "mqtt": {
+          "enable": false
+        },
+        "udp": {
+          "addr": null
+        },
+        "websocket": {
+          "enable": true
+        }
+      },
+      "device": {
+        "discoverable": true,
+        "eco_mode": false,
+        "fw_id": "20241011-114456/1.4.4-g6d2a586",
+        "mac": "543204522CB4",
+        "name": "front-door-light"
+      },
+      "location": {
+        "lat": 43.6611,
+        "lon": 6.9808,
+        "tz": "Europe/Paris"
+      },
+      "rpc_udp": {
+        "dst_addr": null,
+        "listen_port": null
+      },
+      "sntp": {
+        "server": "time.google.com"
+      },
+      "ui_data": {}
+    },
+    "wifi": {
+      "ap": {
+        "enable": false,
+        "is_open": true,
+        "range_extender": {
+          "enable": false
+        },
+        "ssid": "Shelly1MiniG3-543204522CB4"
+      },
+      "roam": {
+        "interval": 60,
+        "rssi_thr": -80
+      },
+      "sta": {
+        "enable": true,
+        "gw": null,
+        "ip": null,
+        "ipv4mode": "dhcp",
+        "is_open": false,
+        "nameserver": null,
+        "netmask": null,
+        "ssid": "Linksys_7A50"
+      },
+      "sta1": {
+        "enable": false,
+        "gw": null,
+        "ip": null,
+        "ipv4mode": "dhcp",
+        "is_open": true,
+        "nameserver": null,
+        "netmask": null,
+        "ssid": null
+      }
+    },
+    "ws": {
+      "enable": false,
+      "server": null,
+      "ssl_ca": "ca.pem"
+    }
+  },
+  "src": "shelly1minig3-543204522cb4"
+}

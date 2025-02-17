@@ -182,14 +182,14 @@ func (d *Device) MethodHandlerE(c string, v string) (types.MethodHandler, error)
 	return mh, nil
 }
 
-func (d *Device) CallE(ctx context.Context, ch types.Channel, comp string, verb string, params any) (any, error) {
-	d.init(ctx)
+func (d *Device) CallE(ctx context.Context, via types.Channel, comp string, verb string, params any) (any, error) {
+	d.methods(ctx, via)
 	mh, err := d.MethodHandlerE(comp, verb)
 	if err != nil {
 		d.log.Error(err, "Unable to find method handler", "comp", comp, "verb", verb)
 		return nil, err
 	}
-	return GetRegistrar().CallE(ctx, d, ch, mh, params)
+	return GetRegistrar().CallE(ctx, d, via, mh, params)
 }
 
 func (d *Device) String() string {
@@ -208,23 +208,25 @@ func (d *Device) ReplyTo() string {
 	return d.me
 }
 
-func NewHttpDevice(log logr.Logger, ip net.IP) *Device {
+func NewHttpDevice(ctx context.Context, log logr.Logger, ip net.IP) *Device {
 	d := &Device{
 		Ipv4_: ip,
 		Host:  ip.String(),
 		state: New,
 		log:   log,
 	}
+	d.init(ctx)
 	return d
 }
 
-func NewMqttDevice(log logr.Logger, id string, mc *mymqtt.Client) *Device {
+func NewMqttDevice(ctx context.Context, log logr.Logger, id string, mc *mymqtt.Client) *Device {
 	d := &Device{
 		Id_:   id,
 		Host:  fmt.Sprintf("%s.local.", id),
 		state: New,
 		log:   log,
 	}
+	d.init(ctx)
 	return d
 }
 
@@ -275,6 +277,12 @@ func (d *Device) init(ctx context.Context) error {
 		d.Id_ = d.Info.Id
 		d.MacAddress = d.Info.MacAddress
 	}
+
+	return nil
+}
+
+func (d *Device) methods(ctx context.Context, via types.Channel) error {
+	d.log.Info("Shelly.methods", "id", d.Id_, "host", d.Host)
 
 	if d.Components == nil {
 		out, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(Shelly, "GetComponents"), &ComponentsRequest{})
@@ -339,10 +347,10 @@ func Foreach(ctx context.Context, log logr.Logger, mc *mymqtt.Client, names []st
 			var sd *Device
 			ip := net.ParseIP(name)
 			if ip != nil {
-				sd = NewHttpDevice(log, ip)
+				sd = NewHttpDevice(ctx, log, ip)
 				via = types.ChannelHttp
 			} else {
-				sd = NewMqttDevice(log, name, mc)
+				sd = NewMqttDevice(ctx, log, name, mc)
 				via = types.ChannelMqtt
 			}
 			out, err := do(ctx, log, via, sd, args)

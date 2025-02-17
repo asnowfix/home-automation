@@ -21,8 +21,7 @@ var createCmd = &cobra.Command{
 		if len(args) > 1 {
 			description = args[1]
 		}
-		ctx, cancel := options.InterruptibleContext()
-		defer cancel()
+		ctx := options.CommandLineContext()
 		_, err := options.MyHomeClient.CallE(ctx, "group.create", &myhome.Group{Name: name, Description: description})
 		return err
 	},

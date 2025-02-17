@@ -23,8 +23,7 @@ var Cmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 
-		ctx, cancel := hopts.InterruptibleContext()
-		defer cancel()
+		ctx := hopts.CommandLineContext()
 
 		ch := types.ChannelHttp
 		if !useHttpChannel {

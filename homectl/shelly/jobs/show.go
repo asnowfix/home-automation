@@ -20,8 +20,7 @@ var showCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		shelly.Init(log, hopts.Flags.MqttTimeout)
-		ctx, cancel := hopts.InterruptibleContext()
-		defer cancel()
+		ctx := hopts.CommandLineContext()
 
 		via := types.ChannelMqtt
 		if options.UseHttpChannel {

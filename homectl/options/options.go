@@ -6,6 +6,7 @@ import (
 	"mymqtt"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -24,13 +25,14 @@ var MqttClient *mymqtt.Client
 
 var MyHomeClient myhome.Client
 
-func InterruptibleContext() (context.Context, context.CancelFunc) {
+func CommandLineContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, os.Interrupt)
+		signal.Notify(signals, syscall.SIGTERM)
 		<-signals
 		cancel()
 	}()
-	return ctx, cancel
+	return ctx
 }

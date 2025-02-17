@@ -16,8 +16,7 @@ var deleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		ctx, cancel := options.InterruptibleContext()
-		defer cancel()
+		ctx := options.CommandLineContext()
 		_, err := options.MyHomeClient.CallE(ctx, "group.delete", name)
 		return err
 	},

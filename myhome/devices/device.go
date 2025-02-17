@@ -40,7 +40,7 @@ func NewDevice(manufacturer, id string) *Device {
 }
 
 func (d *Device) WithMAC(mac net.HardwareAddr) *Device {
-	d.MAC = mac
+	d.MAC = mac.String()
 	return d
 }
 

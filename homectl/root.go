@@ -38,15 +38,16 @@ var Cmd = &cobra.Command{
 		options.Devices = strings.Split(options.Flags.Devices, ",")
 		log.Info("Will use", "devices", options.Devices)
 
-		ctx, cancel := options.InterruptibleContext()
-		defer cancel()
+		ctx := options.CommandLineContext()
 		var err error
 		options.MqttClient, err = mymqtt.InitClientE(ctx, log, options.Flags.MqttBroker, "", options.Flags.MqttTimeout)
 		if err != nil {
+			log.Error(err, "Failed to initialize MQTT client")
 			return err
 		}
 		options.MyHomeClient, err = myhome.NewClientE(ctx, log, options.MqttClient, options.Flags.MqttTimeout)
 		if err != nil {
+			log.Error(err, "Failed to initialize MyHome client")
 			return err
 		}
 		return nil

@@ -15,22 +15,20 @@ type client struct {
 	log     logr.Logger
 	to      chan<- []byte
 	from    <-chan []byte
-	cancel  context.CancelFunc
 	me      string
 	timeout time.Duration
 }
 
 func NewClientE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, timeout time.Duration) (Client, error) {
-	hctx, cancel := context.WithCancel(ctx)
-	from, err := mc.Subscriber(hctx, ClientTopic(mc.Id()), 1)
+	from, err := mc.Subscriber(ctx, ClientTopic(mc.Id()), 1)
 	if err != nil {
-		cancel()
+		log.Error(err, "Failed to subscribe to client topic", "topic", ClientTopic(mc.Id()))
 		return nil, err
 	}
 
-	to, err := mc.Publisher(hctx, ServerTopic(), 1)
+	to, err := mc.Publisher(ctx, ServerTopic(), 1)
 	if err != nil {
-		cancel()
+		log.Error(err, "Failed to prepare publishing to server topic", "topic", ServerTopic())
 		return nil, err
 	}
 
@@ -38,16 +36,13 @@ func NewClientE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, timeout
 		log:     log,
 		from:    from,
 		to:      to,
-		cancel:  cancel,
 		me:      mc.Id(),
 		timeout: timeout,
 	}, nil
 }
 
 func (hc *client) Shutdown() {
-	if hc.cancel != nil {
-		hc.cancel()
-	}
+	hc.log.Info("Shutting down client")
 }
 
 func (hc *client) CallE(ctx context.Context, method string, params any) (any, error) {

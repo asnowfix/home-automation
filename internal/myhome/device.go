@@ -2,7 +2,6 @@ package myhome
 
 import (
 	"context"
-	"net"
 	"pkg/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -20,9 +19,9 @@ type DeviceIdentifier struct {
 
 type DeviceSummary struct {
 	DeviceIdentifier
-	MAC  net.HardwareAddr `db:"mac" json:"mac,omitempty"` // The Ethernet hardware address of the device, globally unique & assigned by the manufacturer
-	Host string           `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
-	Name string           `db:"name" json:"name"`         // The local unique name of the device, defined by the user
+	MAC  string `db:"mac" json:"mac,omitempty"` // The Ethernet hardware address of the device, globally unique & assigned by the manufacturer
+	Host string `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
+	Name string `db:"name" json:"name"`         // The local unique name of the device, defined by the user
 }
 
 type Device struct {
@@ -80,7 +79,7 @@ func UpdateDeviceFromShelly(ctx context.Context, log logr.Logger, d *Device, sd 
 		d.Status.System = sd.Call(ctx, via, "System", "GetStatus", &system.Status{}).(*system.Status)
 	}
 
-	d.MAC = net.HardwareAddr(sd.Info.MacAddress.String())
+	d.MAC = sd.Info.MacAddress.String()
 	d.Host = sd.Ipv4().String()
 	d.Name = d.Config.System.Device.Name
 	d.Manufacturer = "Shelly"

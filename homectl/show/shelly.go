@@ -33,18 +33,17 @@ var showShellyCmd = &cobra.Command{
 		identifier := args[0]
 		log := hlog.Logger
 
-		ctx, cancel := options.InterruptibleContext()
-		defer cancel()
+		ctx := options.CommandLineContext()
 
 		if direct {
 			var via types.Channel
 			var sd *shelly.Device
 			ip := net.ParseIP(identifier)
 			if ip != nil {
-				sd = shelly.NewHttpDevice(log, ip)
+				sd = shelly.NewHttpDevice(ctx, log, ip)
 				via = types.ChannelHttp
 			} else {
-				sd = shelly.NewMqttDevice(log, identifier, options.MqttClient)
+				sd = shelly.NewMqttDevice(ctx, log, identifier, options.MqttClient)
 				via = types.ChannelMqtt
 			}
 			var device myhome.Device

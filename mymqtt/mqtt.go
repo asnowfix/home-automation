@@ -52,14 +52,14 @@ func GetClientE(ctx context.Context, log logr.Logger) (*Client, error) {
 }
 
 func InitClient(ctx context.Context, log logr.Logger, broker string, me string, timeout time.Duration, grace time.Duration) *Client {
-	c, err := InitClientE(ctx, log, broker, me, timeout, grace)
+	c, err := InitClientE(ctx, log, broker, timeout, grace)
 	if err != nil {
 		panic(fmt.Errorf("could not initialize MQTT client: %w", err))
 	}
 	return c
 }
 
-func InitClientE(ctx context.Context, log logr.Logger, broker string, clientId string, timeout time.Duration, grace time.Duration) (*Client, error) {
+func InitClientE(ctx context.Context, log logr.Logger, broker string, timeout time.Duration, grace time.Duration) (*Client, error) {
 	defer mutex.Unlock()
 	mutex.Lock()
 
@@ -67,14 +67,12 @@ func InitClientE(ctx context.Context, log logr.Logger, broker string, clientId s
 		return client, nil
 	}
 
-	if clientId == "" {
-		hostname, err := os.Hostname()
-		if err != nil {
-			log.Error(err, "could not get hostname")
-			return nil, err
-		}
-		clientId = fmt.Sprintf("%v-%v", hostname, os.Getpid())
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Error(err, "could not get hostname")
+		return nil, err
 	}
+	clientId := fmt.Sprintf("%v-%v", hostname, os.Getpid())
 	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", timeout)
 
 	opts := mqtt.NewClientOptions()

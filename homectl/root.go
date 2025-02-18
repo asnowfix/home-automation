@@ -42,7 +42,7 @@ var Cmd = &cobra.Command{
 		log.Info("Will use", "devices", options.Devices)
 
 		var err error
-		options.MqttClient, err = mymqtt.InitClientE(cmd.Context(), log, options.Flags.MqttBroker, "", options.Flags.MqttTimeout, options.Flags.MqttGrace)
+		options.MqttClient, err = mymqtt.InitClientE(cmd.Context(), log, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err

@@ -31,14 +31,13 @@ var cancelCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		shelly.Init(log, hopts.Flags.MqttTimeout)
-		ctx := hopts.CommandLineContext()
 
 		via := types.ChannelHttp
 		if !options.UseHttpChannel {
 			via = types.ChannelMqtt
 		}
 
-		shelly.Foreach(ctx, log, hopts.MqttClient, hopts.Devices, via, cancelOneDeviceJob, args)
+		shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, cancelOneDeviceJob, args)
 		return nil
 	},
 }

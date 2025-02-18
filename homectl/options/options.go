@@ -26,7 +26,7 @@ var MqttClient *mymqtt.Client
 
 var MyHomeClient myhome.Client
 
-func CommandLineContext() context.Context {
+func CommandLineContext() (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		signals := make(chan os.Signal, 1)
@@ -35,5 +35,5 @@ func CommandLineContext() context.Context {
 		<-signals
 		cancel()
 	}()
-	return ctx
+	return ctx, cancel
 }

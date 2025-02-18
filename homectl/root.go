@@ -22,7 +22,10 @@ import (
 )
 
 func main() {
-	if err := Cmd.Execute(); err != nil {
+	ctx, cancel := options.CommandLineContext()
+	err := Cmd.ExecuteContext(ctx)
+	cancel()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -31,21 +34,21 @@ func main() {
 var Cmd = &cobra.Command{
 	Use:  "homectl",
 	Args: cobra.NoArgs,
-	// run for this command and any sub-command
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		hlog.Init(options.Flags.Verbose)
 		log := hlog.Logger
+
 		options.Devices = strings.Split(options.Flags.Devices, ",")
 		log.Info("Will use", "devices", options.Devices)
 
-		ctx := options.CommandLineContext()
 		var err error
-		options.MqttClient, err = mymqtt.InitClientE(ctx, log, options.Flags.MqttBroker, "", options.Flags.MqttTimeout, options.Flags.MqttGrace)
+		options.MqttClient, err = mymqtt.InitClientE(cmd.Context(), log, options.Flags.MqttBroker, "", options.Flags.MqttTimeout, options.Flags.MqttGrace)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
 		}
-		options.MyHomeClient, err = myhome.NewClientE(ctx, log, options.MqttClient, options.Flags.MqttTimeout)
+
+		options.MyHomeClient, err = myhome.NewClientE(cmd.Context(), log, options.MqttClient, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome client")
 			return err

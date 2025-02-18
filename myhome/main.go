@@ -27,8 +27,10 @@ func init() {
 }
 
 func main() {
-	// cobra main parser
-	if err := Cmd.Execute(); err != nil {
+	ctx, cancel := options.CommandLineContext()
+	err := Cmd.ExecuteContext(ctx)
+	cancel()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

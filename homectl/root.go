@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"global"
 	"homectl/group"
 	"homectl/list"
 	"homectl/mqtt"
@@ -22,9 +24,7 @@ import (
 )
 
 func main() {
-	ctx, cancel := options.CommandLineContext()
-	err := Cmd.ExecuteContext(ctx)
-	cancel()
+	err := Cmd.Execute()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -37,6 +37,10 @@ var Cmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		hlog.Init(options.Flags.Verbose)
 		log := hlog.Logger
+
+		ctx, cancel := options.CommandLineContext(log)
+		ctx = context.WithValue(ctx, global.CancelKey, cancel)
+		cmd.SetContext(ctx)
 
 		options.Devices = strings.Split(options.Flags.Devices, ",")
 		log.Info("Will use", "devices", options.Devices)
@@ -53,6 +57,22 @@ var Cmd = &cobra.Command{
 			log.Error(err, "Failed to initialize MyHome client")
 			return err
 		}
+		return nil
+	},
+	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		log := hlog.Logger
+		c, err := mymqtt.GetClientE(ctx)
+		if err != nil {
+			log.Error(err, "Failed to get MQTT client")
+			return err
+		}
+		cancel := ctx.Value(global.CancelKey).(context.CancelFunc)
+		cancel()
+		c.Close()
+		<-ctx.Done()
+		// time.Sleep(1 * time.Second)
+		hlog.Logger.Info("Finished")
 		return nil
 	},
 }

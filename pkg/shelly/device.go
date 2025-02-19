@@ -241,7 +241,7 @@ func (d *Device) init(ctx context.Context) error {
 		via = types.ChannelHttp
 	} else {
 		via = types.ChannelMqtt
-		mc, err = mymqtt.GetClientE(ctx, d.log)
+		mc, err = mymqtt.GetClientE(ctx)
 		if err != nil {
 			d.log.Error(err, "Unable to get MQTT client for the current process")
 			return err

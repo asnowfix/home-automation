@@ -3,6 +3,7 @@ package mymqtt
 import (
 	"context"
 	"fmt"
+	"hlog"
 	"mynet"
 	"net"
 	"net/url"
@@ -34,7 +35,8 @@ var client *Client
 
 var mutex sync.Mutex
 
-func GetClientE(ctx context.Context, log logr.Logger) (*Client, error) {
+func GetClientE(ctx context.Context) (*Client, error) {
+	log := hlog.Logger
 	mutex.Lock()
 	for client == nil {
 		mutex.Unlock()
@@ -72,7 +74,12 @@ func InitClientE(ctx context.Context, log logr.Logger, broker string, timeout ti
 		log.Error(err, "could not get hostname")
 		return nil, err
 	}
-	clientId := fmt.Sprintf("%v-%v", hostname, os.Getpid())
+	programName := os.Args[0]
+	if i := strings.LastIndex(programName, "/"); i != -1 {
+		programName = programName[i+1:]
+	}
+	clientId := fmt.Sprintf("%s-%s-%d", programName, hostname, os.Getpid())
+
 	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", timeout)
 
 	opts := mqtt.NewClientOptions()
@@ -112,7 +119,7 @@ func InitClientE(ctx context.Context, log logr.Logger, broker string, timeout ti
 	go func(log logr.Logger) {
 		<-ctx.Done()
 		log.Error(ctx.Err(), "Context done: MQTT client disconnecting")
-		client.mqtt.Disconnect(uint(client.grace.Milliseconds()))
+		client.Close()
 	}(log.WithName("Client#Monitor"))
 
 	log.Info("MQTT client initialized", "client_id", client.clientId, "timeout", client.timeout)
@@ -202,8 +209,11 @@ func lookupBroker(log logr.Logger, where string) (*url.URL, error) {
 }
 
 func (c *Client) Close() {
+	c.log.Info("Closing MQTT client", "client_id", c.Id())
 	if c.mqtt.IsConnected() {
-		c.mqtt.Disconnect(250 /* milliseconds */)
+		c.log.Info("Disconnecting MQTT client", "client_id", c.Id())
+		client.mqtt.Disconnect(uint(client.grace.Milliseconds()))
+		c.log.Info("Disconnected MQTT client", "client_id", c.Id())
 	}
 }
 

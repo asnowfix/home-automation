@@ -17,6 +17,7 @@ use (
 	./homectl/shelly/script
 	./homectl/show
 	./homectl/toggle
+	./internal/global
 	./internal/myhome
 	./internal/myip
 	./internal/mynet

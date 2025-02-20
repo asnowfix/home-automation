@@ -164,22 +164,24 @@ jobs:
             - package-msi
         steps:
             -
+                if: github.event.inputs.previous == ''
+                id: checkout
                 name: Checkout
                 uses: actions/checkout@v4
                 with:
-                    fetch-depth: 0
+                  fetch-depth: 0    
             -
-                id: get-latest-tag
-                uses: actions-ecosystem/action-get-latest-tag@v1
-                with:
-                    semver_only: true
+                id: previous-tag
+                name: Get latest ancestor tag
+                run: |
+                    echo "previous=$((test -n "${{ github.event.inputs.previous }}" && echo "${{ github.event.inputs.previous }}") || git describe --tags --abbrev=0 HEAD^)" >> $env:GITHUB_OUTPUT
             -
                 name: Generate Release Notes
                 id: release_notes
                 uses: gableroux/generate-github-release-notes@v0.1.2
                 with:
                     repository: ${{ github.repository }}
-                    base_tag: ${{ steps.get-latest-tag.outputs.tag }}
+                    base_tag: "${{ steps.previous-tag.outputs.previous }}"
                     head_tag: ${{ github.sha }}
                     github_token: ${{ secrets.GITHUB_TOKEN }}
             -

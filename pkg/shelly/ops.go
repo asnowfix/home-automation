@@ -10,6 +10,7 @@ import (
 	"pkg/shelly/script"
 	shttp "pkg/shelly/shttp"
 	"pkg/shelly/sswitch"
+	"pkg/shelly/system"
 	"pkg/shelly/types"
 	"reflect"
 	"schedule"
@@ -20,6 +21,7 @@ import (
 
 func Init(log logr.Logger, timeout time.Duration) {
 	registrar.Init(log)
+	system.Init(log, &registrar)
 	input.Init(log, &registrar)
 	mqtt.Init(log, &registrar, timeout)
 	schedule.Init(log, &registrar)

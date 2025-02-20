@@ -164,12 +164,17 @@ jobs:
             - package-msi
         steps:
             -
+                id: previous-tag
+                name: Get latest ancestor tag
+                run: |
+                    echo "previous=$((test -n "${{ github.event.inputs.previous }}" && echo "${{ github.event.inputs.previous }}") || git describe --tags --abbrev=0 HEAD^)" >> $env:GITHUB_OUTPUT
+            -
                 name: Generate Release Notes
                 id: release_notes
                 uses: gableroux/generate-github-release-notes@v0.1.2
                 with:
                     repository: ${{ github.repository }}
-                    base_tag: ${{ github.event.inputs.previous }}
+                    base_tag: ${{ steps.previous-tag.outputs.previous }}
                     head_tag: ${{ github.sha }}
                     github_token: ${{ secrets.GITHUB_TOKEN }}
             -

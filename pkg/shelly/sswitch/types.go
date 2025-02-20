@@ -96,8 +96,8 @@ type Status struct {
 	Id             int         `json:"id"`                         //Id of the Switch component instance
 	Source         string      `json:"source"`                     // Source of the last command, for example: init, WS_in, http, ...
 	Output         bool        `json:"output"`                     // true if the output channel is currently on, false otherwise
-	TimerStartedAt int         `json:"timer_started_at,omitempty"` // Unix timestamp, start time of the timer (in UTC) (shown if the timer is triggered)
-	TimerDuration  int         `json:"timer_duration,omitempty"`   // Duration of the timer in seconds (shown if the timer is triggered)
+	TimerStartedAt float32     `json:"timer_started_at,omitempty"` // Unix timestamp, start time of the timer (in UTC) (shown if the timer is triggered)
+	TimerDuration  float32     `json:"timer_duration,omitempty"`   // Duration of the timer in seconds (shown if the timer is triggered)
 	Apower         float32     `json:"apower,omitempty"`           // Last measured instantaneous active power (in Watts) delivered to the attached load (shown if applicable)
 	Voltage        float32     `json:"voltage,omitempty"`          // Last measured voltage in Volts (shown if applicable)
 	Current        float32     `json:"current,omitempty"`          // Last measured current in Amperes (shown if applicable)

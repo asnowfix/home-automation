@@ -3,9 +3,7 @@ package myhome
 import (
 	"context"
 	"pkg/shelly"
-	"pkg/shelly/system"
 	"pkg/shelly/types"
-	"schedule"
 
 	"github.com/go-logr/logr"
 )
@@ -54,33 +52,28 @@ type GroupDevice struct {
 }
 
 func UpdateDeviceFromShelly(ctx context.Context, log logr.Logger, d *Device, sd *shelly.Device, via types.Channel) {
+	log.Info("Updating device", "device", d)
 	if d.Info == nil {
 		d.Info = sd.Call(ctx, via, "Shelly", "GetDeviceInfo", &shelly.DeviceInfo{}).(*shelly.DeviceInfo)
 	}
-
 	if d.Components == nil {
 		d.Components = sd.Call(ctx, via, "Shelly", "GetComponents", nil).(*shelly.ComponentsResponse).Components
 	}
-
 	if d.Config == nil {
 		d.Config = sd.Call(ctx, via, "Shelly", "GetConfig", &shelly.Config{}).(*shelly.Config)
 	}
-	if d.Config.System == nil {
-		d.Config.System = sd.Call(ctx, via, "System", "GetConfig", &system.Config{}).(*system.Config)
-	}
-	if d.Config.Schedule == nil {
-		d.Config.Schedule = sd.Call(ctx, via, "Schedule", "List", &schedule.Scheduled{}).(*schedule.Scheduled)
-	}
-
 	if d.Status == nil {
 		d.Status = sd.Call(ctx, via, "Shelly", "GetStatus", &shelly.Status{}).(*shelly.Status)
 	}
-	if d.Status.System == nil {
-		d.Status.System = sd.Call(ctx, via, "System", "GetStatus", &system.Status{}).(*system.Status)
-	}
-
+	// if d.Config.System == nil {
+	// 	d.Config.System = sd.Call(ctx, via, "Sys", "GetConfig", &system.Config{}).(*system.Config)
+	// }
+	// if d.Status.System == nil {
+	// 	d.Status.System = sd.Call(ctx, via, "Sys", "GetStatus", &system.Status{}).(*system.Status)
+	// }
 	d.MAC = sd.Info.MacAddress.String()
 	d.Host = sd.Ipv4().String()
-	d.Name = d.Config.System.Device.Name
+	// d.Name = d.Config.System.Device.Name
 	d.Manufacturer = "Shelly"
+	log.Info("Updated device", "device", d)
 }

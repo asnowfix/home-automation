@@ -226,7 +226,9 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 					device = *NewDevice("Shelly", deviceId)
 					sd = shelly.NewMqttDevice(ctx, dm.log, deviceId, mc)
 					device.MAC = sd.MacAddress.String()
-					device.Host = sd.Ipv4_.String()
+					device.Host = sd.Ipv4().String()
+					UpdateDeviceFromShelly(ctx, dm.log, &device, sd, types.ChannelMqtt)
+					// device.Name = device.Config.System.Device.Name
 					device.impl = sd
 				}
 

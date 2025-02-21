@@ -24,7 +24,15 @@ jobs:
                 fallback: 0.0.0 # Optional fallback tag to use when no tag can be found
         -
             name: Shw previous tag
-            run: echo "Previous tag: ${{ steps.previoustag.outputs.tag }}"
+            run: |
+                set -x
+                echo $GITHUB_TAG
+                echo $GITHUB_REF
+                echo $GITHUB_SHA
+                echo $GITHUB_WORKSPACE
+                echo $GITHUB_OUTPUT
+                cat $GITHUB_OUTPUT
+                echo "Previous tag: ${{ steps.previoustag.outputs.tag }}"
 
         # -
         #     name: Trigger Packaging Workflow

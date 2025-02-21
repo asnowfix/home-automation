@@ -3,43 +3,28 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 on:
-    push:
-        tags:
-            - 'v[0-9]+.[0-9]+.[0-9]+'
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
 
 jobs:
   tag-main:
     runs-on: ubuntu-latest
     steps:
-        -
-            name: Checkout
-            uses: actions/checkout@v4
-            with:
-              fetch-depth: 0
-        -
-            name: Get previous tag
-            id: previoustag
-            uses: 'WyriHaximus/github-action-get-previous-tag@v1'
-            with:
-                fallback: 0.0.0 # Optional fallback tag to use when no tag can be found
-        -
-            name: Show previous tag
-            run: |
-                set -x
-                echo $GITHUB_TAG
-                echo $GITHUB_REF
-                echo $GITHUB_SHA
-                echo $GITHUB_WORKSPACE
-                echo $GITHUB_OUTPUT
-                cat $GITHUB_OUTPUT
-                echo "Previous tag: ${{ steps.previoustag.outputs.tag }}"
-                git describe --tags --abbrev=0 HEAD^
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-        # -
-        #     name: Trigger Packaging Workflow
-        #     run: |
-        #         curl -X POST \
-        #             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-        #             -H "Accept: application/vnd.github.v3+json" \
-        #             https://api.github.com/repos/${{ github.repository }}/actions/workflows/package.yml/dispatches \
-        #             -d '{"ref":"v${{ steps.semver.outputs.patch }}","inputs":{"previous":"${{ steps.previoustag.outputs.tag }}"}}'
+      - name: Show previous tag
+        id: previous-tag
+        run: |
+          echo "previous=$(git describe --tags --abbrev=0 HEAD^)" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Trigger Packaging Workflow
+        run: |
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/package.yml/dispatches \
+            -d '{"ref":"v${{ steps.previous-tag.outputs.previous }}","inputs":{"previous":"${{ steps.previoustag.outputs.tag }}"}}'

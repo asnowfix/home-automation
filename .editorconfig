@@ -3,3 +3,10 @@ root = true
 indent_style = space
 indent_size = 4
 trim_trailing_whitespace = true
+
+[Makefile,*makefile*]
+indent_style = tab
+tab_width = 8
+
+[*.yaml,*.yml]
+indent_size = 2

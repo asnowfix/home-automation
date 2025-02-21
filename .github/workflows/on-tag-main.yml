@@ -27,4 +27,4 @@ jobs:
             -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/${{ github.repository }}/actions/workflows/package.yml/dispatches \
-            -d '{"ref":"${{ steps.previous-tag.outputs.previous }}","inputs":{"previous":"${{ steps.previoustag.outputs.tag }}"}}'
+            -d '{"ref":"${{ github.ref }}","inputs":{"previous":"${{ steps.previous-tag.outputs.previous }}"}}'

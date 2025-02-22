@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily update of myhome package
+
+[Timer]
+OnCalendar=daily
+AccuracySec=1h
+
+[Install]
+WantedBy=timers.target

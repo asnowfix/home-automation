@@ -22,6 +22,7 @@ func init() {
 var setCtl = &cobra.Command{
 	Use:   "set",
 	Short: "Set or update a key-value on the given shelly device(s)",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, after := hopts.SplitArgs(args)

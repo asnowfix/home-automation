@@ -23,7 +23,7 @@ func init() {
 var evalCtl = &cobra.Command{
 	Use:   "eval",
 	Short: "Evaluate the given JavaScript code on the given SHelly device(s)",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, after := hopts.SplitArgs(args)

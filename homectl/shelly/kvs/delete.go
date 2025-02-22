@@ -22,6 +22,7 @@ func init() {
 var deleteCtl = &cobra.Command{
 	Use:   "delete",
 	Short: "Delete existing key-value from given shelly devices",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, after := hopts.SplitArgs(args)

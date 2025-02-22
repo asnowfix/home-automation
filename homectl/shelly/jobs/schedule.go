@@ -18,7 +18,7 @@ import (
 var scheduleCtl = &cobra.Command{
 	Use:   "schedule",
 	Short: "Configure Shelly devices scheduled jobs",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, after := hopts.SplitArgs(args)

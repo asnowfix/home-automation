@@ -20,7 +20,7 @@ func init() {
 var listCtl = &cobra.Command{
 	Use:   "list",
 	Short: "Report status of every scripts loaded on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, after := hopts.SplitArgs(args)

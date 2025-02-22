@@ -21,7 +21,7 @@ func init() {
 var statusCtl = &cobra.Command{
 	Use:   "status",
 	Short: "Report status of a script loaded on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, after := hopts.SplitArgs(args)

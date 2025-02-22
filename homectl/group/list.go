@@ -21,7 +21,7 @@ var listCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 
-		out, err := options.MyHomeClient.CallE(cmd.Context(), "group.list", nil)
+		out, err := options.MyHomeClient.CallE(cmd.Context(), myhome.GroupList, nil)
 		if err != nil {
 			return err
 		}

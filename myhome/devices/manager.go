@@ -224,7 +224,7 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 				if err != nil {
 					log.Info("Device not found, creating new one", "device_id", deviceId)
 					device = *NewDevice("Shelly", deviceId)
-					sd = shelly.NewMqttDevice(ctx, dm.log, deviceId, mc)
+					sd = shelly.NewDeviceFromMqttId(ctx, dm.log, deviceId, mc)
 					device.MAC = sd.MacAddress.String()
 					device.Host = sd.Ipv4().String()
 					UpdateDeviceFromShelly(ctx, dm.log, &device, sd, types.ChannelMqtt)
@@ -437,7 +437,7 @@ func (dm *DeviceManager) Save(ctx context.Context, d *Device) (*Device, error) {
 	if d.Manufacturer == Shelly {
 		sd, ok := d.impl.(*shelly.Device)
 		if !ok {
-			sd = shelly.NewMqttDevice(ctx, dm.log, d.Id, dm.mqttClient)
+			sd = shelly.NewDeviceFromMqttId(ctx, dm.log, d.Id, dm.mqttClient)
 		}
 		groups, err := dm.storage.GetDeviceGroups(d.Manufacturer, d.Id)
 		if err != nil {

@@ -112,7 +112,7 @@ func GetRegistrar() *Registrar {
 
 type Registrar struct {
 	log      logr.Logger
-	methods  map[any]types.MethodHandler
+	methods  map[string]types.MethodHandler
 	channel  types.Channel
 	channels []types.DeviceCaller
 }
@@ -121,10 +121,10 @@ func (r *Registrar) Init(log logr.Logger) {
 	r.log = log
 	r.channel = types.ChannelHttp
 	r.channels = make([]types.DeviceCaller, 3 /*sizeof(Channel)*/)
-	r.methods = make(map[any]types.MethodHandler)
+	r.methods = make(map[string]types.MethodHandler)
 }
 
-func (r *Registrar) MethodHandlerE(m any) (types.MethodHandler, error) {
+func (r *Registrar) MethodHandlerE(m string) (types.MethodHandler, error) {
 	mh, ok := r.methods[m]
 	if !ok {
 		return types.MethodHandler{}, fmt.Errorf("method not found in registrar: %s", m)

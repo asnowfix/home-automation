@@ -29,7 +29,7 @@ type Device struct {
 }
 
 type Group struct {
-	myhome.Group
+	myhome.GroupInfo
 }
 
 func NewDevice(manufacturer, id string) *Device {

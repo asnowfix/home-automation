@@ -10,7 +10,7 @@ const (
 	GroupList         Verb = "group.list"
 	GroupCreate       Verb = "group.create"
 	GroupDelete       Verb = "group.delete"
-	GroupListDevices  Verb = "group.getdevices"
+	GroupShow         Verb = "group.show"
 	GroupAddDevice    Verb = "group.adddevice"
 	GroupRemoveDevice Verb = "group.removedevice"
 )

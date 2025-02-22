@@ -36,14 +36,19 @@ type Devices struct {
 	Devices []DeviceSummary `json:"devices"`
 }
 
-type Group struct {
+type GroupInfo struct {
 	ID          int    `db:"id" json:"-"`
 	Name        string `db:"name" json:"name"`
 	Description string `db:"description" json:"description"`
 }
 
 type Groups struct {
-	Groups []Group `json:"groups"`
+	Groups []GroupInfo `json:"groups"`
+}
+
+type Group struct {
+	GroupInfo
+	Devices []DeviceSummary `json:"devices"`
 }
 
 type GroupDevice struct {

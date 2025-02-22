@@ -14,7 +14,7 @@ type Method struct {
 	ActionE   MethodHandler
 }
 
-func Methods(name string) (*Method, error) {
+func Methods(name Verb) (*Method, error) {
 	m, exists := methods[name]
 	if !exists {
 		return nil, fmt.Errorf("unknown or unregistered method %s", name)
@@ -22,7 +22,7 @@ func Methods(name string) (*Method, error) {
 	return m, nil
 }
 
-func RegisterMethodHandler(name string, mh MethodHandler) {
+func RegisterMethodHandler(name Verb, mh MethodHandler) {
 	s, exists := signatures[name]
 	if !exists {
 		panic(fmt.Errorf("unknown method %s", name))
@@ -33,10 +33,10 @@ func RegisterMethodHandler(name string, mh MethodHandler) {
 	}
 }
 
-var methods map[string]*Method = make(map[string]*Method)
+var methods map[Verb]*Method = make(map[Verb]*Method)
 
-var signatures map[string]MethodSignature = map[string]MethodSignature{
-	"device.list": {
+var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
+	DeviceList: {
 		NewParams: func() any {
 			return nil
 		},
@@ -44,7 +44,7 @@ var signatures map[string]MethodSignature = map[string]MethodSignature{
 			return &Devices{}
 		},
 	},
-	"device.show": {
+	DeviceShow: {
 		NewParams: func() any {
 			return ""
 		},
@@ -52,7 +52,7 @@ var signatures map[string]MethodSignature = map[string]MethodSignature{
 			return &Device{}
 		},
 	},
-	"group.list": {
+	GroupList: {
 		NewParams: func() any {
 			return nil
 		},
@@ -60,7 +60,7 @@ var signatures map[string]MethodSignature = map[string]MethodSignature{
 			return &Groups{}
 		},
 	},
-	"group.create": {
+	GroupCreate: {
 		NewParams: func() any {
 			return &Group{}
 		},
@@ -68,7 +68,7 @@ var signatures map[string]MethodSignature = map[string]MethodSignature{
 			return nil
 		},
 	},
-	"group.delete": {
+	GroupDelete: {
 		NewParams: func() any {
 			return ""
 		},
@@ -76,7 +76,7 @@ var signatures map[string]MethodSignature = map[string]MethodSignature{
 			return nil
 		},
 	},
-	"group.getdevices": {
+	GroupListDevices: {
 		NewParams: func() any {
 			return ""
 		},
@@ -84,7 +84,7 @@ var signatures map[string]MethodSignature = map[string]MethodSignature{
 			return Devices{}
 		},
 	},
-	"group.adddevice": {
+	GroupAddDevice: {
 		NewParams: func() any {
 			return GroupDevice{}
 		},
@@ -92,7 +92,7 @@ var signatures map[string]MethodSignature = map[string]MethodSignature{
 			return nil
 		},
 	},
-	"group.removedevice": {
+	GroupRemoveDevice: {
 		NewParams: func() any {
 			return GroupDevice{}
 		},

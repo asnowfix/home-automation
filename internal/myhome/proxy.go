@@ -6,7 +6,7 @@ import (
 )
 
 type Client interface {
-	CallE(ctx context.Context, method string, params any) (any, error)
+	CallE(ctx context.Context, method Verb, params any) (any, error)
 	Shutdown()
 }
 
@@ -26,8 +26,8 @@ type Dialog struct {
 
 type request struct {
 	Dialog
-	Method string `json:"method"`
-	Params any    `json:"params,omitempty"`
+	Method Verb `json:"method"`
+	Params any  `json:"params,omitempty"`
 }
 
 type Error struct {

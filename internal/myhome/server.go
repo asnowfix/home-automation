@@ -17,7 +17,7 @@ type server struct {
 }
 
 type Server interface {
-	MethodE(method string) (*Method, error)
+	MethodE(method Verb) (*Method, error)
 	Shutdown()
 }
 
@@ -135,7 +135,7 @@ func (sp *server) fail(code int, err error, req *request, mc *mymqtt.Client) {
 	mc.Publish(ClientTopic(res.Dst), outMsg)
 }
 
-func (sp *server) MethodE(method string) (*Method, error) {
+func (sp *server) MethodE(method Verb) (*Method, error) {
 	return sp.handler.MethodE(method)
 }
 

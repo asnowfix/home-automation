@@ -22,9 +22,9 @@ func (v Verb) String() string {
 }
 
 const (
-	GetStatus Verb = "GetStatus"
-	GetConfig Verb = "GetConfig"
-	SetConfig Verb = "SetConfig"
+	GetStatus Verb = "MQTT.GetStatus"
+	GetConfig Verb = "MQTT.GetConfig"
+	SetConfig Verb = "MQTT.SetConfig"
 )
 
 var registrar types.MethodsRegistrar

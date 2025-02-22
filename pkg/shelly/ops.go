@@ -86,10 +86,6 @@ func Init(log logr.Logger, timeout time.Duration) {
 		Allocate:   func() any { return new(CheckForUpdateResponse) },
 		HttpMethod: http.MethodGet,
 	})
-	registrar.RegisterMethodHandler(Reboot.String(), types.MethodHandler{
-		Allocate:   func() any { return 0 },
-		HttpMethod: http.MethodGet,
-	})
 	registrar.RegisterMethodHandler(FactoryReset.String(), types.MethodHandler{
 		Allocate:   func() any { return nil },
 		HttpMethod: http.MethodPost,
@@ -141,6 +137,10 @@ func (r *Registrar) MethodHandlerE(m any) (types.MethodHandler, error) {
 // }
 
 func (r *Registrar) RegisterMethodHandler(verb string, mh types.MethodHandler) {
+	r.log.Info("Registering", "method", verb)
+	if _, exists := r.methods[verb]; exists {
+		panic(fmt.Errorf("method %s already registered", verb))
+	}
 	mh.Method = verb
 	if mh.Allocate == nil {
 		mh.Allocate = func() any {

@@ -21,11 +21,11 @@ func (v Verb) String() string {
 }
 
 const (
-	GetConfig     Verb = "GetConfig"
-	SetConfig     Verb = "SetConfig"
-	GetStatus     Verb = "GetStatus"
-	Scan          Verb = "Scan"          // TODO
-	ListAPClients Verb = "ListAPClients" //TODO
+	GetConfig     Verb = "Wifi.GetConfig"
+	SetConfig     Verb = "Wifi.SetConfig"
+	GetStatus     Verb = "Wifi.GetStatus"
+	Scan          Verb = "Wifi.Scan"          // TODO
+	ListAPClients Verb = "Wifi.ListAPClients" //TODO
 )
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {

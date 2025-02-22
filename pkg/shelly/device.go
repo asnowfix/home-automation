@@ -169,19 +169,15 @@ func (d *Device) Call(ctx context.Context, ch types.Channel, verb string, params
 	return data
 }
 
-func (d *Device) CallE(ctx context.Context, via types.Channel, method any, params any) (any, error) {
+func (d *Device) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
 	var mh types.MethodHandler
 	var err error
 
-	if _, ok := method.(string); !ok {
-		return nil, fmt.Errorf("not a method: %v", method)
-	}
-
-	switch reflect.TypeOf(method) {
-	case reflect.TypeOf(ListMethods):
+	switch reflect.TypeOf(method).PkgPath() {
+	case reflect.TypeOf(ListMethods).PkgPath():
 		// Shelly.*
 		fallthrough
-	case reflect.TypeOf(system.GetConfig):
+	case reflect.TypeOf(system.GetConfig).PkgPath():
 		// Sys.*
 		mh, err = registrar.MethodHandlerE(method)
 	default:
@@ -297,7 +293,7 @@ func (d *Device) init(ctx context.Context) error {
 	}
 
 	if d.Info == nil {
-		mh, err := GetRegistrar().MethodHandlerE(GetDeviceInfo)
+		mh, err := GetRegistrar().MethodHandlerE(GetDeviceInfo.String())
 		if err != nil {
 			d.log.Error(err, "Unable to get method handler", "method", GetDeviceInfo)
 			return err
@@ -320,7 +316,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 	d.log.Info("Shelly.methods", "id", d.Id_, "host", d.Host)
 
 	if d.Components == nil {
-		mh, err := GetRegistrar().MethodHandlerE(GetComponents)
+		mh, err := GetRegistrar().MethodHandlerE(GetComponents.String())
 		if err != nil {
 			d.log.Error(err, "Unable to get method handler", "method", GetComponents)
 			return err
@@ -334,7 +330,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 	}
 
 	if d.Methods == nil {
-		mh, err := GetRegistrar().MethodHandlerE(ListMethods)
+		mh, err := GetRegistrar().MethodHandlerE(ListMethods.String())
 		if err != nil {
 			d.log.Error(err, "Unable to get method handler", "method", ListMethods)
 			return err

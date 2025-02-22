@@ -19,11 +19,11 @@ func (v Verb) String() string {
 }
 
 const (
-	GetConfig Verb = "GetConfig"
-	SetConfig Verb = "SetConfig"
-	GetStatus Verb = "GetStatus"
-	Toggle    Verb = "Toggle"
-	Set       Verb = "Set"
+	GetConfig Verb = "Switch.GetConfig"
+	SetConfig Verb = "Switch.SetConfig"
+	GetStatus Verb = "Switch.GetStatus"
+	Toggle    Verb = "Switch.Toggle"
+	Set       Verb = "Switch.Set"
 )
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {

@@ -19,8 +19,8 @@ func (v Verb) String() string {
 }
 
 const (
-	Get  Verb = "GET"
-	Post Verb = "POST"
+	Get  Verb = "HTTP.GET"
+	Post Verb = "HTTP.POST"
 )
 
 func Init(log logr.Logger, r types.MethodsRegistrar) {

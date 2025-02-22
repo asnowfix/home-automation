@@ -21,9 +21,9 @@ func (v Verb) String() string {
 }
 
 const (
-	SetConfig Verb = "SetConfig"
-	GetConfig Verb = "GetConfig"
-	GetStatus Verb = "GetStatus"
+	SetConfig Verb = "Sys.SetConfig"
+	GetConfig Verb = "Sys.GetConfig"
+	GetStatus Verb = "Sys.GetStatus"
 )
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {

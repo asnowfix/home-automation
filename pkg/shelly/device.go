@@ -14,12 +14,9 @@ import (
 	"reflect"
 	"regexp"
 	"schedule"
-	"strings"
 
 	"github.com/go-logr/logr"
 )
-
-const Shelly = "Shelly"
 
 type Product struct {
 	Model       string           `json:"model"`
@@ -40,20 +37,19 @@ const (
 
 type Device struct {
 	Product
-	Id_               string                                    `json:"id"`
-	Service           string                                    `json:"service"`
-	Host              string                                    `json:"host"`
-	Ipv4_             net.IP                                    `json:"ipv4"`
-	Port              int                                       `json:"port"`
-	Info              *DeviceInfo                               `json:"info"`
-	Methods           []string                                  `json:"methods"`
-	ComponentsMethods map[string]map[string]types.MethodHandler `json:"-"`
-	Components        *[]Component                              `json:"-"`
-	state             State                                     `json:"-"`
-	me                string                                    `json:"-"`
-	to                chan<- []byte                             `json:"-"` // channel to send messages to
-	from              <-chan []byte                             `json:"-"` // channel to receive messages from
-	log               logr.Logger                               `json:"-"`
+	Id_        string        `json:"id"`
+	Service    string        `json:"service"`
+	Host       string        `json:"host"`
+	Ipv4_      net.IP        `json:"ipv4"`
+	Port       int           `json:"port"`
+	Info       *DeviceInfo   `json:"info"`
+	Methods    []string      `json:"methods"`
+	Components *[]Component  `json:"-"`
+	state      State         `json:"-"`
+	me         string        `json:"-"`
+	to         chan<- []byte `json:"-"` // channel to send messages to
+	from       <-chan []byte `json:"-"` // channel to receive messages from
+	log        logr.Logger   `json:"-"`
 }
 
 func (d *Device) Id() string {
@@ -120,6 +116,19 @@ type Status struct {
 	WebSocket *any                 `json:"ws,omitempty"`
 }
 
+// From https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellycheckforupdate
+
+type CheckForUpdateResponse struct {
+	Stable *struct {
+		Version string `json:"version"`  // The version of the stable firmware
+		BuildId string `json:"build_id"` // The build ID of the stable firmware
+	} `json:"stable,omitempty"`
+	Beta *struct {
+		Version string `json:"version"`  // The version of the beta firmware
+		BuildId string `json:"build_id"` // The build ID of the beta firmware
+	} `json:"beta,omitempty"`
+}
+
 // From https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellygetcomponents
 type ComponentsRequest struct {
 	Offset      int      `json:"offset,omitempty"`       // Index of the component from which to start generating the result Optional
@@ -136,9 +145,10 @@ type ComponentsResponse struct {
 }
 
 type Component struct {
-	Key    string      `json:"key"`    // Component's key (in format <type>:<cid>, for example boolean:200)
-	Status interface{} `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
-	Config interface{} `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
+	Key     string                         `json:"key"`    // Component's key (in format <type>:<cid>, for example boolean:200)
+	Status  interface{}                    `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
+	Config  interface{}                    `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
+	Methods map[string]types.MethodHandler `json:"-"`
 }
 
 var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", MDNS_SHELLIES))
@@ -151,45 +161,47 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func (d *Device) Call(ctx context.Context, ch types.Channel, component string, verb string, params any) any {
-	data, err := d.CallE(ctx, ch, component, verb, params)
+func (d *Device) Call(ctx context.Context, ch types.Channel, verb string, params any) any {
+	data, err := d.CallE(ctx, ch, verb, params)
 	if err != nil {
 		panic(err)
 	}
 	return data
 }
 
-func (d *Device) MethodHandlerE(c string, v string) (types.MethodHandler, error) {
+func (d *Device) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
 	var mh types.MethodHandler
-	var exists bool
+	var err error
 
-	if c == Shelly {
-		mh, exists = registrar.methods[Shelly][v]
-		if !exists {
-			return types.MethodNotFound, fmt.Errorf("did not find any registrar handler for method: %v.%v", c, v)
-		}
-	} else {
-		found := false
-		if comp, exists := d.ComponentsMethods[c]; exists {
-			if mh, exists = comp[v]; exists {
-				found = true
-			}
-		}
-		if !found {
-			return types.MethodNotFound, fmt.Errorf("did not find any device handler for method: %v.%v", c, v)
-		}
+	switch reflect.TypeOf(method).PkgPath() {
+	case reflect.TypeOf(ListMethods).PkgPath():
+		// Shelly.*
+		fallthrough
+	case reflect.TypeOf(system.GetConfig).PkgPath():
+		// Sys.*
+		mh, err = registrar.MethodHandlerE(method)
+	default:
+		d.methods(ctx, via)
+		mh, err = d.MethodHandlerE(method)
+
 	}
-	return mh, nil
-}
-
-func (d *Device) CallE(ctx context.Context, via types.Channel, comp string, verb string, params any) (any, error) {
-	d.methods(ctx, via)
-	mh, err := d.MethodHandlerE(comp, verb)
 	if err != nil {
-		d.log.Error(err, "Unable to find method handler", "comp", comp, "verb", verb)
+		d.log.Error(err, "Unable to find method handler", "method", method)
 		return nil, err
 	}
 	return GetRegistrar().CallE(ctx, d, via, mh, params)
+}
+
+func (d *Device) MethodHandlerE(v any) (types.MethodHandler, error) {
+	m, ok := v.(string)
+	if !ok {
+		return types.NotAMethod, fmt.Errorf("not a method: %v", v)
+	}
+	mh, exists := registrar.methods[m]
+	if !exists {
+		return types.MethodNotFound, fmt.Errorf("did not find any registrar handler for method: %v", v)
+	}
+	return mh, nil
 }
 
 func (d *Device) String() string {
@@ -208,7 +220,7 @@ func (d *Device) ReplyTo() string {
 	return d.me
 }
 
-func NewHttpDevice(ctx context.Context, log logr.Logger, ip net.IP) *Device {
+func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) *Device {
 	d := &Device{
 		Ipv4_: ip,
 		Host:  ip.String(),
@@ -219,13 +231,27 @@ func NewHttpDevice(ctx context.Context, log logr.Logger, ip net.IP) *Device {
 	return d
 }
 
-func NewMqttDevice(ctx context.Context, log logr.Logger, id string, mc *mymqtt.Client) *Device {
+func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string, mc *mymqtt.Client) *Device {
 	d := &Device{
 		Id_:   id,
 		Host:  fmt.Sprintf("%s.local.", id),
 		state: New,
 		log:   log,
 	}
+	d.init(ctx)
+	return d
+}
+
+func NewDeviceFromInfo(ctx context.Context, log logr.Logger, info *DeviceInfo) *Device {
+	d := &Device{
+		Id_:   info.Id,
+		Host:  fmt.Sprintf("%s.local.", info.Id),
+		state: New,
+		log:   log,
+		Info:  info,
+	}
+	d.Id_ = d.Info.Id
+	d.MacAddress = d.Info.MacAddress
 	d.init(ctx)
 	return d
 }
@@ -267,7 +293,12 @@ func (d *Device) init(ctx context.Context) error {
 	}
 
 	if d.Info == nil {
-		di, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(Shelly, "GetDeviceInfo"), map[string]interface{}{"ident": true})
+		mh, err := GetRegistrar().MethodHandlerE(GetDeviceInfo.String())
+		if err != nil {
+			d.log.Error(err, "Unable to get method handler", "method", GetDeviceInfo)
+			return err
+		}
+		di, err := GetRegistrar().CallE(ctx, d, via, mh, map[string]interface{}{"ident": true})
 		if err != nil {
 			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
 			return err
@@ -285,7 +316,12 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 	d.log.Info("Shelly.methods", "id", d.Id_, "host", d.Host)
 
 	if d.Components == nil {
-		out, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(Shelly, "GetComponents"), &ComponentsRequest{})
+		mh, err := GetRegistrar().MethodHandlerE(GetComponents.String())
+		if err != nil {
+			d.log.Error(err, "Unable to get method handler", "method", GetComponents)
+			return err
+		}
+		out, err := GetRegistrar().CallE(ctx, d, via, mh, &ComponentsRequest{})
 		if err != nil {
 			return err
 		}
@@ -294,7 +330,12 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 	}
 
 	if d.Methods == nil {
-		m, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(Shelly, "ListMethods"), nil)
+		mh, err := GetRegistrar().MethodHandlerE(ListMethods.String())
+		if err != nil {
+			d.log.Error(err, "Unable to get method handler", "method", ListMethods)
+			return err
+		}
+		m, err := GetRegistrar().CallE(ctx, d, via, mh, nil)
 		if err != nil {
 			d.log.Error(err, "Unable to list device's methods")
 			return err
@@ -303,24 +344,16 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 		d.Methods = m.(*MethodsResponse).Methods
 		d.log.Info("Shelly.ListMethods", "methods", d.Methods)
 
-		d.ComponentsMethods = make(map[string]map[string]types.MethodHandler)
-		for _, m := range d.Methods {
-			mi := strings.Split(m, ".")
-			c := mi[0] // component
-			v := mi[1] // verb
-			for component := types.Shelly; component < types.None; component++ {
-				if c == component.String() {
-					if _, exists := d.ComponentsMethods[c]; !exists {
-						d.ComponentsMethods[c] = make(map[string]types.MethodHandler)
-					}
-					if _, exists := registrar.methods[c]; exists {
-						if _, exists := registrar.methods[c][v]; exists {
-							d.ComponentsMethods[c][v] = registrar.methods[c][v]
-						}
-					}
-				}
-			}
-		}
+		// for _, method := range d.Methods {
+		// 	cn := strings.SplitN(method, ".", 2)[0]
+		// 	if c, exists := d.Components[cn]; !exists {
+		// 		return fmt.Errorf("component not found: %s", cn)
+		// 	}
+		// 	c.Methods = make(map[string]types.MethodHandler)
+		// 	for _, m := range d.Methods {
+		// 		d.ComponentsMethods[m] = registrar.methods[m]
+		// 	}
+		// }
 	}
 
 	return nil
@@ -347,10 +380,10 @@ func Foreach(ctx context.Context, log logr.Logger, mc *mymqtt.Client, names []st
 			var sd *Device
 			ip := net.ParseIP(name)
 			if ip != nil {
-				sd = NewHttpDevice(ctx, log, ip)
+				sd = NewDeviceFromIp(ctx, log, ip)
 				via = types.ChannelHttp
 			} else {
-				sd = NewMqttDevice(ctx, log, name, mc)
+				sd = NewDeviceFromMqttId(ctx, log, name, mc)
 				via = types.ChannelMqtt
 			}
 			out, err := do(ctx, log, via, sd, args)

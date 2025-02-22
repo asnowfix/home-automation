@@ -10,6 +10,7 @@ License
 Functions
 ---------
 
+[ ] Get IP addresses in the 'host' column of the 'devices' table
 [ ] Create/Configure scripts in a single operation
 [x] Status for one / multiple scripts in a single operation
 [ ] Run simple JavaScript in a single operation
@@ -49,7 +50,7 @@ Functions
 
 [ ] Re-init list of live devices at startup... or lazy version?
 [x] Timeout on missing/non-responsive devices/server
-[ ] Ctrl-C should stop myhome program (whatever the option)
+[x] Ctrl-C should stop myhome program (whatever the option)
 [ ] Fix inbound IPv6 communication
 
 Integration
@@ -59,7 +60,7 @@ Integration
 
 [ ] Add GitHub actions attestation <https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds>
 [x] GPG signed commits on Windows/WSL/Linux
-[ ] Fix error
+[x] Fix error
 
         This version of c:\Program Files\MyHome\myhome.exe is not compatible with the version of Windows you're running. Check your computer's system information and then contact the software publisher.
         
@@ -76,7 +77,7 @@ Integration
 [ ] Ship linux/amd64 binary in the release
 [ ] Add cron-job to download the binary from the latest release
 [ ] Package systemd scripts in-place (with stop, disable & reload as preuninstall, ans reload enable & start as postinstall)
-[ ] Create verified tags
+[x] Create verified tags
 [ ] Use goreleaser-cross if needed
 
         - https://github.com/goreleaser/goreleaser-cross

@@ -23,32 +23,22 @@ func init() {
 var enableCtl = &cobra.Command{
 	Use:   "enable",
 	Short: "Enable (creating it if necessary) a named JavaScript script on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelMqtt
-		if options.UseHttpChannel {
-			via = types.ChannelHttp
-		}
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, doEnableDisable, []string{"true"})
+		before, _ := hopts.SplitArgs(args)
+		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doEnableDisable, []string{"true"})
 	},
 }
 
 var disableCtl = &cobra.Command{
 	Use:   "disable",
 	Short: "Disable (creating it if necessary) a named JavaScript script on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelMqtt
-		if options.UseHttpChannel {
-			via = types.ChannelHttp
-		}
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, doEnableDisable, []string{"false"})
+		before, _ := hopts.SplitArgs(args)
+		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doEnableDisable, []string{"false"})
 	},
 }
 

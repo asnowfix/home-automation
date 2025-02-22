@@ -19,8 +19,7 @@ var Cmd = &cobra.Command{
 	Args: cobra.NoArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		hlog.Init(options.Flags.Verbose)
-		ctx, cancel := options.CommandLineContext(hlog.Logger)
-		ctx = context.WithValue(ctx, global.CancelKey, cancel)
+		ctx := options.CommandLineContext(hlog.Logger)
 		cmd.SetContext(ctx)
 		return nil
 	},
@@ -39,6 +38,7 @@ func init() {
 }
 
 func main() {
+	cobra.EnableTraverseRunHooks = true
 	err := Cmd.Execute()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

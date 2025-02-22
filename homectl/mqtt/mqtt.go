@@ -22,17 +22,20 @@ var Cmd = &cobra.Command{
 var pubCmd = &cobra.Command{
 	Use:   "pub",
 	Short: "Publish to device(s) MQTT topic(s)",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		// devices.Init()
 
-		log.Info("looking for devices: %v", options.Devices)
-		topics, err := devices.Topics(log, options.Devices)
+		before, after := options.SplitArgs(args)
+
+		log.Info("looking for devices: %v", before)
+		topics, err := devices.Topics(log, before)
 		if err != nil {
 			log.Error(err, "Failed to list devices")
 			return err
 		}
-		msg := strings.Join(args, "")
+		msg := strings.Join(after, "")
 		for _, topic := range topics {
 			log.Info("MQTT <<< %v", msg)
 			topic.Publish([]byte(msg))
@@ -48,7 +51,7 @@ var subCmd = &cobra.Command{
 		log := hlog.Logger
 		// devices.Init()
 
-		topics, err := devices.Topics(log, options.Devices)
+		topics, err := devices.Topics(log, args)
 		if err != nil {
 			log.Error(err, "Failed to list devices")
 			return err

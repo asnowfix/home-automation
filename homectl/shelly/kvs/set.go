@@ -22,15 +22,11 @@ func init() {
 var setCtl = &cobra.Command{
 	Use:   "set",
 	Short: "Set or update a key-value on the given shelly device(s)",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelMqtt
-		if options.UseHttpChannel {
-			via = types.ChannelHttp
-		}
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, setKeyValue, args)
+		before, after := hopts.SplitArgs(args)
+		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, setKeyValue, after)
 	},
 }
 

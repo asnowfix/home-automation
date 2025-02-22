@@ -1,5 +1,7 @@
 package wifi
 
+// <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/WiFi>
+
 type Status struct {
 	SSID     string `json:"ssid"`
 	IP       string `json:"ip"`

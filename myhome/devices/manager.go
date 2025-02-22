@@ -67,25 +67,47 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		return &devices, nil
 	})
-	myhome.RegisterMethodHandler("device.show", func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DeviceShow, func(in any) (any, error) {
 		return dm.storage.GetDeviceByIdentifier(in.(string))
 	})
-	myhome.RegisterMethodHandler("group.list", func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.GroupList, func(in any) (any, error) {
 		return dm.storage.GetAllGroups()
 	})
-	myhome.RegisterMethodHandler("group.create", func(in any) (any, error) {
-		return dm.storage.AddGroup(in.(*myhome.Group))
+	myhome.RegisterMethodHandler(myhome.GroupCreate, func(in any) (any, error) {
+		return dm.storage.AddGroup(in.(*myhome.GroupInfo))
 	})
-	myhome.RegisterMethodHandler("group.delete", func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.GroupDelete, func(in any) (any, error) {
 		return dm.storage.RemoveGroup(in.(string))
 	})
-	myhome.RegisterMethodHandler("group.getdevices", func(in any) (any, error) {
-		return dm.storage.GetDevicesByGroupName(in.(string))
+	myhome.RegisterMethodHandler(myhome.GroupShow, func(in any) (any, error) {
+		name := in.(string)
+
+		gi, err := dm.storage.GetGroupInfo(in.(string))
+		if err != nil {
+			log.Error(err, "Failed to get group info", "group", name)
+			return nil, err
+		}
+
+		gd, err := dm.storage.GetDevicesByGroupName(name)
+		if err != nil {
+			log.Error(err, "Failed to get devices for group", "group", name)
+			return nil, err
+		}
+
+		g := myhome.Group{
+			GroupInfo: gi,
+			Devices:   make([]myhome.DeviceSummary, 0),
+		}
+		for _, d := range gd {
+			g.Devices = append(g.Devices, d.DeviceSummary)
+		}
+
+		return &g, nil
 	})
-	myhome.RegisterMethodHandler("group.adddevice", func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.GroupAddDevice, func(in any) (any, error) {
 		return dm.storage.AddDeviceToGroup(in.(myhome.GroupDevice))
 	})
-	myhome.RegisterMethodHandler("group.removedevice", func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.GroupRemoveDevice, func(in any) (any, error) {
 		return dm.storage.RemoveDeviceFromGroup(in.(myhome.GroupDevice))
 	})
 
@@ -224,7 +246,7 @@ func (dm *DeviceManager) WatchMqtt(ctx context.Context, mc *mymqtt.Client) error
 				if err != nil {
 					log.Info("Device not found, creating new one", "device_id", deviceId)
 					device = *NewDevice("Shelly", deviceId)
-					sd = shelly.NewMqttDevice(ctx, dm.log, deviceId, mc)
+					sd = shelly.NewDeviceFromMqttId(ctx, dm.log, deviceId, mc)
 					device.MAC = sd.MacAddress.String()
 					device.Host = sd.Ipv4().String()
 					UpdateDeviceFromShelly(ctx, dm.log, &device, sd, types.ChannelMqtt)
@@ -437,7 +459,7 @@ func (dm *DeviceManager) Save(ctx context.Context, d *Device) (*Device, error) {
 	if d.Manufacturer == Shelly {
 		sd, ok := d.impl.(*shelly.Device)
 		if !ok {
-			sd = shelly.NewMqttDevice(ctx, dm.log, d.Id, dm.mqttClient)
+			sd = shelly.NewDeviceFromMqttId(ctx, dm.log, d.Id, dm.mqttClient)
 		}
 		groups, err := dm.storage.GetDeviceGroups(d.Manufacturer, d.Id)
 		if err != nil {
@@ -455,7 +477,7 @@ func (dm *DeviceManager) Save(ctx context.Context, d *Device) (*Device, error) {
 	return d, dm.storage.UpsertDevice(d.Device)
 }
 
-func (dm *DeviceManager) CallE(method string, params any) (any, error) {
+func (dm *DeviceManager) CallE(method myhome.Verb, params any) (any, error) {
 	dm.log.Info("Calling method", "method", method, "params", params)
 	var err error
 	mh, err := myhome.Methods(method)
@@ -475,7 +497,7 @@ func (dm *DeviceManager) CallE(method string, params any) (any, error) {
 	return result, nil
 }
 
-func (dm *DeviceManager) MethodE(method string) (*myhome.Method, error) {
+func (dm *DeviceManager) MethodE(method myhome.Verb) (*myhome.Method, error) {
 	mh, err := myhome.Methods(method)
 	if err != nil {
 		return nil, err

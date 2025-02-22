@@ -19,8 +19,80 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly>
+
+type Verb string
+
+func (v Verb) String() string {
+	return string(v) // Convert Verb to string
+}
+
+const (
+	GetStatus        Verb = "Shelly.GetStatus"
+	GetConfig        Verb = "Shelly.GetConfig"
+	ListMethods      Verb = "Shelly.ListMethods"
+	GetDeviceInfo    Verb = "Shelly.GetDeviceInfo"
+	ListProfiles     Verb = "Shelly.ListProfiles"
+	SetProfile       Verb = "Shelly.SetProfile"
+	ListTimezones    Verb = "Shelly.ListTimezones"
+	DetectLocation   Verb = "Shelly.DetectLocation"
+	CheckForUpdate   Verb = "Shelly.CheckForUpdate"
+	Update           Verb = "Shelly.Update"
+	FactoryReset     Verb = "Shelly.FactoryReset"
+	ResetWiFiConfig  Verb = "Shelly.ResetWiFiConfig"
+	Reboot           Verb = "Shelly.Reboot"
+	SetAuth          Verb = "Shelly.SetAuth"
+	PutUserCA        Verb = "Shelly.PutUserCA"
+	PutTLSClientCert Verb = "Shelly.PutTLSClientCert"
+	PutTLSClientKey  Verb = "Shelly.PutTLSClientKey"
+	GetComponents    Verb = "Shelly.GetComponents"
+)
+
+type empty struct{}
+
 func Init(log logr.Logger, timeout time.Duration) {
+	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	registrar.Init(log)
+
+	registrar.RegisterMethodHandler(GetStatus.String(), types.MethodHandler{
+		Allocate:   func() any { return new(Status) },
+		HttpMethod: http.MethodGet,
+	})
+	registrar.RegisterMethodHandler(GetConfig.String(), types.MethodHandler{
+		Allocate:   func() any { return new(Config) },
+		HttpMethod: http.MethodGet,
+	})
+	registrar.RegisterMethodHandler(ListMethods.String(), types.MethodHandler{
+		Allocate:   func() any { return new(MethodsResponse) },
+		HttpMethod: http.MethodGet,
+	})
+	registrar.RegisterMethodHandler(GetDeviceInfo.String(), types.MethodHandler{
+		Allocate:   func() any { return new(DeviceInfo) },
+		HttpMethod: http.MethodGet,
+	})
+
+	// TODO complete the lsit of handlers
+
+	registrar.RegisterMethodHandler(GetComponents.String(), types.MethodHandler{
+		// InputType:  reflect.TypeOf(ComponentsRequest{}),
+		Allocate:   func() any { return new(ComponentsResponse) },
+		HttpMethod: http.MethodPost,
+	})
+	registrar.RegisterMethodHandler(Reboot.String(), types.MethodHandler{
+		Allocate:   func() any { return nil },
+		HttpMethod: http.MethodPost,
+	})
+	registrar.RegisterMethodHandler(CheckForUpdate.String(), types.MethodHandler{
+		Allocate:   func() any { return new(CheckForUpdateResponse) },
+		HttpMethod: http.MethodGet,
+	})
+	registrar.RegisterMethodHandler(FactoryReset.String(), types.MethodHandler{
+		Allocate:   func() any { return nil },
+		HttpMethod: http.MethodPost,
+	})
+
+	// TODO complete the lsit of handlers
+
 	system.Init(log, &registrar)
 	input.Init(log, &registrar)
 	mqtt.Init(log, &registrar, timeout)
@@ -40,7 +112,7 @@ func GetRegistrar() *Registrar {
 
 type Registrar struct {
 	log      logr.Logger
-	methods  map[string]map[string]types.MethodHandler
+	methods  map[string]types.MethodHandler
 	channel  types.Channel
 	channels []types.DeviceCaller
 }
@@ -49,62 +121,33 @@ func (r *Registrar) Init(log logr.Logger) {
 	r.log = log
 	r.channel = types.ChannelHttp
 	r.channels = make([]types.DeviceCaller, 3 /*sizeof(Channel)*/)
-
-	r.methods = make(map[string]map[string]types.MethodHandler)
-	r.RegisterMethodHandler("Shelly", "ListMethods", types.MethodHandler{
-		Method:     "Shelly.ListMethods",
-		Allocate:   func() any { return new(MethodsResponse) },
-		HttpMethod: http.MethodGet,
-	})
-	// Shelly.PutTLSClientKey
-	// Shelly.PutTLSClientCert
-	// Shelly.PutUserCA
-	// Shelly.SetAuth
-	// Shelly.Update
-	// Shelly.CheckForUpdate
-	// Shelly.DetectLocation
-	// Shelly.ListTimezones
-	r.RegisterMethodHandler("Shelly", "GetComponents", types.MethodHandler{
-		// InputType:  reflect.TypeOf(ComponentsRequest{}),
-		Allocate:   func() any { return new(ComponentsResponse) },
-		HttpMethod: http.MethodPost,
-	})
-	r.RegisterMethodHandler("Shelly", "GetStatus", types.MethodHandler{
-		Allocate:   func() any { return new(Status) },
-		HttpMethod: http.MethodGet,
-	})
-	// Shelly.FactoryReset
-	// Shelly.ResetWiFiConfig
-	r.RegisterMethodHandler("Shelly", "GetConfig", types.MethodHandler{
-		Allocate:   func() any { return new(Config) },
-		HttpMethod: http.MethodGet,
-	})
-	r.RegisterMethodHandler("Shelly", "GetDeviceInfo", types.MethodHandler{
-		Allocate:   func() any { return new(DeviceInfo) },
-		HttpMethod: http.MethodGet,
-	})
-	r.RegisterMethodHandler("Shelly", "Reboot", types.MethodHandler{
-		Allocate:   func() any { return new(string) },
-		HttpMethod: http.MethodGet,
-	})
+	r.methods = make(map[string]types.MethodHandler)
 }
 
-func (r *Registrar) MethodHandler(c string, v string) types.MethodHandler {
-	return r.methods[c][v]
+func (r *Registrar) MethodHandlerE(m string) (types.MethodHandler, error) {
+	mh, ok := r.methods[m]
+	if !ok {
+		return types.MethodHandler{}, fmt.Errorf("method not found in registrar: %s", m)
+	}
+	return mh, nil
 }
 
-func (r *Registrar) RegisterMethodHandler(c string, v string, m types.MethodHandler) {
-	// r.log.Info("Registering", "component", c, "verb", v)
-	if _, exists := r.methods[c]; !exists {
-		r.methods[c] = make(map[string]types.MethodHandler)
-		// r.log.Info("Added", "component", c)
+// func (r *Registrar) MethodHandler(m string) types.MethodHandler {
+// 	return r.methods[m]
+// }
+
+func (r *Registrar) RegisterMethodHandler(verb string, mh types.MethodHandler) {
+	r.log.Info("Registering", "method", verb)
+	if _, exists := r.methods[verb]; exists {
+		panic(fmt.Errorf("method %s already registered", verb))
 	}
-	if _, exists := r.methods[c][v]; !exists {
-		m.Method = fmt.Sprintf("%s.%s", c, v)
-		r.methods[c][v] = m
-		// r.log.Info("Registered", "component", c, "verb", v, "http_method", m.HttpMethod)
+	mh.Method = verb
+	if mh.Allocate == nil {
+		mh.Allocate = func() any {
+			return make(map[string]interface{})
+		}
 	}
-	// r.log.Info("Registered methods", "num", len(r.methods))
+	r.methods[verb] = mh
 }
 
 func (r *Registrar) RegisterDeviceCaller(ch types.Channel, dc types.DeviceCaller) {

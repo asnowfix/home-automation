@@ -22,18 +22,14 @@ func init() {
 var getManyCtl = &cobra.Command{
 	Use:   "get-many",
 	Short: "List Shelly devices Key-Value Store",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelMqtt
-		if options.UseHttpChannel {
-			via = types.ChannelHttp
-		}
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, getMany, args)
+		before, after := hopts.SplitArgs(args)
+		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, getMany, after)
 	},
 }
 
 func getMany(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	return kvs.GetMany(ctx, log, via, device)
+	return kvs.GetManyValues(ctx, log, via, device)
 }

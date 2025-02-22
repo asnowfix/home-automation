@@ -2,6 +2,8 @@ package system
 
 import "net"
 
+// <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys>
+
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys/#configuration
 
 type Config struct {

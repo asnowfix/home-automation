@@ -20,20 +20,16 @@ import (
 var Cmd = &cobra.Command{
 	Use:   "mqtt",
 	Short: "Set Shelly devices MQTT configuration",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelMqtt
-		if options.UseHttpChannel {
-			via = types.ChannelHttp
-		}
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, setupOneDevice, args)
+		before, after := hopts.SplitArgs(args)
+		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, setupOneDevice, after)
 	},
 }
 
 func setupOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(ctx, via, "Mqtt", "GetConfig", nil)
+	out, err := device.CallE(ctx, via, string(mqtt.GetConfig), nil)
 	if err != nil {
 		log.Error(err, "Unable to get MQTT config")
 		return nil, err
@@ -46,7 +42,7 @@ func setupOneDevice(ctx context.Context, log logr.Logger, via types.Channel, dev
 	}
 	log.Info("initial MQTT", "config", configStr)
 
-	out, err = device.CallE(ctx, via, "Mqtt", "GetStatus", nil)
+	out, err = device.CallE(ctx, via, string(mqtt.GetStatus), nil)
 	if err != nil {
 		log.Error(err, "Unable to get MQTT status")
 		return nil, err
@@ -63,14 +59,14 @@ func setupOneDevice(ctx context.Context, log logr.Logger, via types.Channel, dev
 	configStr, _ = json.Marshal(config)
 	log.Info("new MQTT config", "config", string(configStr))
 
-	out, err = device.CallE(ctx, via, "Mqtt", "SetConfig", config)
+	out, err = device.CallE(ctx, via, string(mqtt.SetConfig), config)
 	if err != nil {
 		log.Error(err, "Unable to set MQTT config")
 		return nil, err
 	}
 	res := out.(*mqtt.ConfigResults)
 	if res.Result.RestartRequired {
-		device.CallE(ctx, via, "Shelly", "Reboot", nil)
+		device.CallE(ctx, via, string(shelly.Reboot), nil)
 	}
 	return out, nil
 }

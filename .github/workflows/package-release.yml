@@ -68,9 +68,16 @@ jobs:
                     mkdir -p .debpkg/usr/bin
                     cp $(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -r '.[] | select(.name == "myhome") | .path') .debpkg/usr/bin/myhome
 
-                    # systemd script as a shared file
-                    mkdir -p .debpkg/usr/share/myhome
-                    cp linux/debian/myhome.service .debpkg/usr/share/myhome/myhome.service
+                    # systemd scripts
+                    mkdir -p .debpkg/etc/systemd/system/
+                    cp linux/debian/myhome.service .debpkg/lib/systemd/system/
+                    cp linux/debian/myhome-update.service .debpkg/etc/systemd/system/
+                    cp linux/debian/myhome-update.timer .debpkg/etc/systemd/system/
+
+                    # auto-update script as a shared file
+                    mkdir -p .debpkg/usr/share/myhome/update
+                    cp linux/debian/update.sh .debpkg/usr/share/myhome/update.sh
+                    chmod +x .debpkg/usr/share/myhome/update.sh
 
                     # create DEBIAN directory if you want to add other pre/post scripts
                     mkdir -p .debpkg/DEBIAN
@@ -87,7 +94,7 @@ jobs:
                     # `https://hub.docker.com/r/jiro4989/build-deb-action` wants format like version: refs/tags/v*.*.*
                     version: refs/tags/${{ steps.version.outputs.release }}
                     arch: 'arm64' # optional
-                    depends: 'libc6 (>= 2.2.1), systemd' # optional
+                    depends: 'libc6 (>= 2.2.1), systemd, jq, curl' # optional
                     desc: 'MyHome Automation.' # optional
                     homepage: 'https://github.com/asnowfix/home-automation' # optional
             -

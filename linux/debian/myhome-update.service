@@ -1,0 +1,17 @@
+# https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html
+
+[Unit]
+Description=Update MyHome Package from GitHub Release
+
+[Service]
+Type=simple
+ExecStart=/usr/share/myhome/update.sh
+Restart=no
+WorkingDirectory=/var/lib/myhome
+
+[Install]
+# multi-user.target normally defines a system state where all network services
+# are started up and the system will accept logins, but a local GUI is not
+# started. This is the typical default system state for server systems, which
+# might be rack-mounted headless systems in a remote server room.
+WantedBy=multi-user.target

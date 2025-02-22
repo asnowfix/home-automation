@@ -34,5 +34,5 @@ var listCtl = &cobra.Command{
 }
 
 func doList(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	return script.List(ctx, device, via)
+	return script.ListAll(ctx, device, via)
 }

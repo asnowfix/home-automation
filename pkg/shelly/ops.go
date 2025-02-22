@@ -2,7 +2,6 @@ package shelly
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"pkg/shelly/input"
 	"pkg/shelly/kvs"
@@ -17,6 +16,19 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+)
+
+type Verb string
+
+const (
+	GetDeviceInfo  Verb = "Shelly.GetDeviceInfo"
+	ListMethods    Verb = "Shelly.ListMethods"
+	Reboot         Verb = "Shelly.Reboot"
+	SetConfig      Verb = "Shelly.SetConfig"
+	GetConfig      Verb = "Shelly.GetConfig"
+	CheckForUpdate Verb = "Shelly.CheckForUpdate"
+	GetStatus      Verb = "Shelly.GetStatus"
+	GetComponents  Verb = "Shelly.GetComponents"
 )
 
 func Init(log logr.Logger, timeout time.Duration) {
@@ -40,7 +52,7 @@ func GetRegistrar() *Registrar {
 
 type Registrar struct {
 	log      logr.Logger
-	methods  map[string]map[string]types.MethodHandler
+	methods  map[string]types.MethodHandler
 	channel  types.Channel
 	channels []types.DeviceCaller
 }
@@ -50,9 +62,9 @@ func (r *Registrar) Init(log logr.Logger) {
 	r.channel = types.ChannelHttp
 	r.channels = make([]types.DeviceCaller, 3 /*sizeof(Channel)*/)
 
-	r.methods = make(map[string]map[string]types.MethodHandler)
-	r.RegisterMethodHandler("Shelly", "ListMethods", types.MethodHandler{
-		Method:     "Shelly.ListMethods",
+	r.methods = make(map[string]types.MethodHandler)
+	r.RegisterMethodHandler(string(ListMethods), types.MethodHandler{
+		// Method:     ListMethods,
 		Allocate:   func() any { return new(MethodsResponse) },
 		HttpMethod: http.MethodGet,
 	})
@@ -64,47 +76,42 @@ func (r *Registrar) Init(log logr.Logger) {
 	// Shelly.CheckForUpdate
 	// Shelly.DetectLocation
 	// Shelly.ListTimezones
-	r.RegisterMethodHandler("Shelly", "GetComponents", types.MethodHandler{
+	r.RegisterMethodHandler(string(GetComponents), types.MethodHandler{
 		// InputType:  reflect.TypeOf(ComponentsRequest{}),
 		Allocate:   func() any { return new(ComponentsResponse) },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler("Shelly", "GetStatus", types.MethodHandler{
+	r.RegisterMethodHandler(string(GetStatus), types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
 	// Shelly.FactoryReset
 	// Shelly.ResetWiFiConfig
-	r.RegisterMethodHandler("Shelly", "GetConfig", types.MethodHandler{
+	r.RegisterMethodHandler(string(GetConfig), types.MethodHandler{
 		Allocate:   func() any { return new(Config) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler("Shelly", "GetDeviceInfo", types.MethodHandler{
+	r.RegisterMethodHandler(string(GetDeviceInfo), types.MethodHandler{
 		Allocate:   func() any { return new(DeviceInfo) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler("Shelly", "Reboot", types.MethodHandler{
+	r.RegisterMethodHandler(string(Reboot), types.MethodHandler{
 		Allocate:   func() any { return new(string) },
 		HttpMethod: http.MethodGet,
 	})
 }
 
-func (r *Registrar) MethodHandler(c string, v string) types.MethodHandler {
-	return r.methods[c][v]
+func (r *Registrar) MethodHandler(m string) types.MethodHandler {
+	return r.methods[m]
 }
 
-func (r *Registrar) RegisterMethodHandler(c string, v string, m types.MethodHandler) {
-	// r.log.Info("Registering", "component", c, "verb", v)
-	if _, exists := r.methods[c]; !exists {
-		r.methods[c] = make(map[string]types.MethodHandler)
-		// r.log.Info("Added", "component", c)
+func (r *Registrar) RegisterMethodHandler(v string, m types.MethodHandler) {
+	if m.Allocate == nil {
+		m.Allocate = func() any {
+			return make(map[string]interface{})
+		}
 	}
-	if _, exists := r.methods[c][v]; !exists {
-		m.Method = fmt.Sprintf("%s.%s", c, v)
-		r.methods[c][v] = m
-		// r.log.Info("Registered", "component", c, "verb", v, "http_method", m.HttpMethod)
-	}
-	// r.log.Info("Registered methods", "num", len(r.methods))
+	r.methods[v] = m
 }
 
 func (r *Registrar) RegisterDeviceCaller(ch types.Channel, dc types.DeviceCaller) {

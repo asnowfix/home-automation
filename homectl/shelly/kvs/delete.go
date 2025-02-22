@@ -37,5 +37,5 @@ var deleteCtl = &cobra.Command{
 
 func deleteKeys(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	key := args[0]
-	return kvs.Delete(ctx, log, via, device, key)
+	return kvs.DeleteKey(ctx, log, via, device, key)
 }

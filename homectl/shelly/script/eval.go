@@ -37,7 +37,7 @@ var evalCtl = &cobra.Command{
 }
 
 func doEval(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(ctx, via, "Script", "Eval", &script.EvalRequest{
+	out, err := device.CallE(ctx, via, string(script.Eval), &script.EvalRequest{
 		Id:   script.Id{Id: flags.Id},
 		Code: args[0],
 	})

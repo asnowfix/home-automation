@@ -5,6 +5,7 @@ import (
 	"hlog"
 	hopts "homectl/options"
 	"pkg/shelly"
+	"pkg/shelly/sswitch"
 	"pkg/shelly/types"
 
 	"github.com/go-logr/logr"
@@ -30,7 +31,7 @@ var Cmd = &cobra.Command{
 		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, ch, func(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 			sr := make(map[string]interface{})
 			sr["id"] = toggleSwitchId
-			out, err := device.CallE(ctx, ch, "Switch", "Toggle", sr)
+			out, err := device.CallE(ctx, ch, string(sswitch.Toggle), sr)
 			if err != nil {
 				log.Info("Failed to toggle device %s: %v", device.Id_, err)
 				return nil, err

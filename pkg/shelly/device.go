@@ -14,12 +14,9 @@ import (
 	"reflect"
 	"regexp"
 	"schedule"
-	"strings"
 
 	"github.com/go-logr/logr"
 )
-
-const Shelly = "Shelly"
 
 type Product struct {
 	Model       string           `json:"model"`
@@ -40,20 +37,20 @@ const (
 
 type Device struct {
 	Product
-	Id_               string                                    `json:"id"`
-	Service           string                                    `json:"service"`
-	Host              string                                    `json:"host"`
-	Ipv4_             net.IP                                    `json:"ipv4"`
-	Port              int                                       `json:"port"`
-	Info              *DeviceInfo                               `json:"info"`
-	Methods           []string                                  `json:"methods"`
-	ComponentsMethods map[string]map[string]types.MethodHandler `json:"-"`
-	Components        *[]Component                              `json:"-"`
-	state             State                                     `json:"-"`
-	me                string                                    `json:"-"`
-	to                chan<- []byte                             `json:"-"` // channel to send messages to
-	from              <-chan []byte                             `json:"-"` // channel to receive messages from
-	log               logr.Logger                               `json:"-"`
+	Id_               string                         `json:"id"`
+	Service           string                         `json:"service"`
+	Host              string                         `json:"host"`
+	Ipv4_             net.IP                         `json:"ipv4"`
+	Port              int                            `json:"port"`
+	Info              *DeviceInfo                    `json:"info"`
+	Methods           []string                       `json:"methods"`
+	ComponentsMethods map[string]types.MethodHandler `json:"-"`
+	Components        *[]Component                   `json:"-"`
+	state             State                          `json:"-"`
+	me                string                         `json:"-"`
+	to                chan<- []byte                  `json:"-"` // channel to send messages to
+	from              <-chan []byte                  `json:"-"` // channel to receive messages from
+	log               logr.Logger                    `json:"-"`
 }
 
 func (d *Device) Id() string {
@@ -151,42 +148,27 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func (d *Device) Call(ctx context.Context, ch types.Channel, component string, verb string, params any) any {
-	data, err := d.CallE(ctx, ch, component, verb, params)
+func (d *Device) Call(ctx context.Context, ch types.Channel, verb string, params any) any {
+	data, err := d.CallE(ctx, ch, verb, params)
 	if err != nil {
 		panic(err)
 	}
 	return data
 }
 
-func (d *Device) MethodHandlerE(c string, v string) (types.MethodHandler, error) {
-	var mh types.MethodHandler
-	var exists bool
-
-	if c == Shelly {
-		mh, exists = registrar.methods[Shelly][v]
-		if !exists {
-			return types.MethodNotFound, fmt.Errorf("did not find any registrar handler for method: %v.%v", c, v)
-		}
-	} else {
-		found := false
-		if comp, exists := d.ComponentsMethods[c]; exists {
-			if mh, exists = comp[v]; exists {
-				found = true
-			}
-		}
-		if !found {
-			return types.MethodNotFound, fmt.Errorf("did not find any device handler for method: %v.%v", c, v)
-		}
+func (d *Device) MethodHandlerE(v string) (types.MethodHandler, error) {
+	mh, exists := registrar.methods[v]
+	if !exists {
+		return types.MethodNotFound, fmt.Errorf("did not find any registrar handler for method: %v", v)
 	}
 	return mh, nil
 }
 
-func (d *Device) CallE(ctx context.Context, via types.Channel, comp string, verb string, params any) (any, error) {
+func (d *Device) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
 	d.methods(ctx, via)
-	mh, err := d.MethodHandlerE(comp, verb)
+	mh, err := d.MethodHandlerE(method)
 	if err != nil {
-		d.log.Error(err, "Unable to find method handler", "comp", comp, "verb", verb)
+		d.log.Error(err, "Unable to find method handler", "verb", method)
 		return nil, err
 	}
 	return GetRegistrar().CallE(ctx, d, via, mh, params)
@@ -267,7 +249,7 @@ func (d *Device) init(ctx context.Context) error {
 	}
 
 	if d.Info == nil {
-		di, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(Shelly, "GetDeviceInfo"), map[string]interface{}{"ident": true})
+		di, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(string(GetDeviceInfo)), map[string]interface{}{"ident": true})
 		if err != nil {
 			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
 			return err
@@ -285,7 +267,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 	d.log.Info("Shelly.methods", "id", d.Id_, "host", d.Host)
 
 	if d.Components == nil {
-		out, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(Shelly, "GetComponents"), &ComponentsRequest{})
+		out, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(string(GetComponents)), &ComponentsRequest{})
 		if err != nil {
 			return err
 		}
@@ -294,7 +276,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 	}
 
 	if d.Methods == nil {
-		m, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(Shelly, "ListMethods"), nil)
+		m, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(string(ListMethods)), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to list device's methods")
 			return err
@@ -303,23 +285,9 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 		d.Methods = m.(*MethodsResponse).Methods
 		d.log.Info("Shelly.ListMethods", "methods", d.Methods)
 
-		d.ComponentsMethods = make(map[string]map[string]types.MethodHandler)
+		d.ComponentsMethods = make(map[string]types.MethodHandler)
 		for _, m := range d.Methods {
-			mi := strings.Split(m, ".")
-			c := mi[0] // component
-			v := mi[1] // verb
-			for component := types.Shelly; component < types.None; component++ {
-				if c == component.String() {
-					if _, exists := d.ComponentsMethods[c]; !exists {
-						d.ComponentsMethods[c] = make(map[string]types.MethodHandler)
-					}
-					if _, exists := registrar.methods[c]; exists {
-						if _, exists := registrar.methods[c][v]; exists {
-							d.ComponentsMethods[c][v] = registrar.methods[c][v]
-						}
-					}
-				}
-			}
+			d.ComponentsMethods[m] = registrar.methods[m]
 		}
 	}
 

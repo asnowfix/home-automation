@@ -1,5 +1,7 @@
 package http
 
+// <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/HTTP>
+
 type Response struct {
 	// Code of the HTTP response
 	Code int `json:"code"`

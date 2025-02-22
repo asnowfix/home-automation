@@ -28,7 +28,7 @@ func listAvailable() ([]string, error) {
 }
 
 func listLoaded(ctx context.Context, via types.Channel, device types.Device) ([]Status, error) {
-	out, err := device.CallE(ctx, via, "Script", "List", nil)
+	out, err := device.CallE(ctx, via, string(List), nil)
 	if err != nil {
 		log.Error(err, "Unable to list scripts")
 		return nil, err
@@ -63,7 +63,7 @@ func Load(ctx context.Context, device types.Device, via types.Channel, name stri
 
 	id, err := isLoaded(ctx, via, device, name, 0)
 	if err != nil {
-		out, err := device.CallE(ctx, via, "Script", "Create", &Configuration{
+		out, err := device.CallE(ctx, via, string(Create), &Configuration{
 			Name:   name,
 			Enable: autostart,
 		})
@@ -80,7 +80,7 @@ func Load(ctx context.Context, device types.Device, via types.Channel, name stri
 		log.Info("Created script", "name", name, "id", id.Id)
 	}
 
-	out, err := device.CallE(ctx, via, "Script", "PutCode", &PutCodeRequest{
+	out, err := device.CallE(ctx, via, string(PutCode), &PutCodeRequest{
 		Id:   *id,
 		Code: string(buf),
 	})
@@ -91,7 +91,7 @@ func Load(ctx context.Context, device types.Device, via types.Channel, name stri
 	return id, nil
 }
 
-func List(ctx context.Context, device types.Device, via types.Channel) ([]Status, error) {
+func ListAll(ctx context.Context, device types.Device, via types.Channel) ([]Status, error) {
 	available, err := listAvailable()
 	if err != nil {
 		return nil, err
@@ -128,14 +128,14 @@ func List(ctx context.Context, device types.Device, via types.Channel) ([]Status
 	return status, nil
 }
 
-func StartStopDelete(ctx context.Context, via types.Channel, device types.Device, name string, id uint32, operation string) (any, error) {
+func StartStopDelete(ctx context.Context, via types.Channel, device types.Device, name string, id uint32, operation Verb) (any, error) {
 	sid, err := isLoaded(ctx, via, device, name, id)
 	if err != nil {
 		log.Error(err, "Did not find loaded script", "id", id, "name", name)
 		return nil, err
 	}
 
-	out, err := device.CallE(ctx, via, "Script", operation, sid)
+	out, err := device.CallE(ctx, via, string(operation), sid)
 	if err != nil {
 		log.Error(err, "Unable to run on script", "id", id, "operation", operation)
 		return nil, err
@@ -147,7 +147,7 @@ func EnableDisable(ctx context.Context, via types.Channel, device types.Device, 
 	sid, err := isLoaded(ctx, via, device, name, id)
 	if err != nil {
 		// Did not find the named script, create it
-		out, err := device.CallE(ctx, via, "Script", "Create", &Configuration{
+		out, err := device.CallE(ctx, via, string(Create), &Configuration{
 			Name:   name,
 			Enable: enable,
 		})
@@ -157,7 +157,7 @@ func EnableDisable(ctx context.Context, via types.Channel, device types.Device, 
 		}
 		return out, nil
 	} else {
-		out, err := device.CallE(ctx, via, "Script", "SetConfig", &ConfigurationRequest{
+		out, err := device.CallE(ctx, via, string(SetConfig), &ConfigurationRequest{
 			Id: *sid,
 			Configuration: Configuration{
 				Id:     *sid,

@@ -20,6 +20,7 @@ import (
 var Cmd = &cobra.Command{
 	Use:   "mqtt",
 	Short: "Set Shelly devices MQTT configuration",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, after := hopts.SplitArgs(args)

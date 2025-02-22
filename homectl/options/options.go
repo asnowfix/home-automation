@@ -16,7 +16,6 @@ import (
 var Flags struct {
 	Verbose     bool
 	Json        bool
-	Devices     string
 	MqttBroker  string
 	MqttTimeout time.Duration
 	MqttGrace   time.Duration

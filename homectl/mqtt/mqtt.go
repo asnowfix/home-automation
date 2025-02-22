@@ -22,6 +22,7 @@ var Cmd = &cobra.Command{
 var pubCmd = &cobra.Command{
 	Use:   "pub",
 	Short: "Publish to device(s) MQTT topic(s)",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		// devices.Init()

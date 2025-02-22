@@ -22,6 +22,7 @@ func init() {
 var getManyCtl = &cobra.Command{
 	Use:   "get-many",
 	Short: "List Shelly devices Key-Value Store",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, after := hopts.SplitArgs(args)

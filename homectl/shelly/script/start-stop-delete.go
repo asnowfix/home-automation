@@ -21,7 +21,7 @@ func init() {
 var startCtl = &cobra.Command{
 	Use:   "start",
 	Short: "Start a script loaded on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, _ := hopts.SplitArgs(args)
@@ -37,7 +37,7 @@ func init() {
 var stopCtl = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop a script loaded on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, _ := hopts.SplitArgs(args)
@@ -53,7 +53,7 @@ func init() {
 var deleteCtl = &cobra.Command{
 	Use:   "delete",
 	Short: "Delete a script loaded on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, _ := hopts.SplitArgs(args)

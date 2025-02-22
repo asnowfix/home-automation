@@ -23,7 +23,7 @@ func init() {
 var enableCtl = &cobra.Command{
 	Use:   "enable",
 	Short: "Enable (creating it if necessary) a named JavaScript script on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, _ := hopts.SplitArgs(args)
@@ -34,7 +34,7 @@ var enableCtl = &cobra.Command{
 var disableCtl = &cobra.Command{
 	Use:   "disable",
 	Short: "Disable (creating it if necessary) a named JavaScript script on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, _ := hopts.SplitArgs(args)

@@ -28,16 +28,11 @@ func init() {
 var cancelCtl = &cobra.Command{
 	Use:   "cancel",
 	Short: "Cancel scheduled jobs on Shelly devices",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelHttp
-		if !options.UseHttpChannel {
-			via = types.ChannelMqtt
-		}
-
-		shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, cancelOneDeviceJob, args)
+		before, after := hopts.SplitArgs(args)
+		shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, cancelOneDeviceJob, after)
 		return nil
 	},
 }
@@ -51,7 +46,7 @@ func cancelOneDeviceJob(ctx context.Context, log logr.Logger, via types.Channel,
 		}
 		return out, nil
 	} else if cancelFlag.id < 0 {
-		return nil, fmt.Errorf("No job ID provided to cancel")
+		return nil, fmt.Errorf("no job ID provided to cancel")
 	} else {
 		out, err := schedule.CancelJob(ctx, log, via, device, uint32(cancelFlag.id))
 		if err != nil {

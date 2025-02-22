@@ -3,7 +3,6 @@ module github.com/asnowfix/home-automation
 go 1.23.0
 
 require (
-	github.com/go-logr/logr v1.4.2
 	github.com/spf13/cobra v1.8.0
 	internal/myip v0.0.0-00010101000000-000000000000
 	internal/myzone v0.0.0-00010101000000-000000000000
@@ -37,6 +36,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/eclipse/paho.mqtt.golang v1.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.3 // indirect

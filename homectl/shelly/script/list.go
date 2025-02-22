@@ -20,19 +20,14 @@ func init() {
 var listCtl = &cobra.Command{
 	Use:   "list",
 	Short: "Report status of every scripts loaded on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelMqtt
-		if options.UseHttpChannel {
-			via = types.ChannelHttp
-		}
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, doList, args)
+		before, after := hopts.SplitArgs(args)
+		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doList, after)
 	},
 }
 
 func doList(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	return script.List(ctx, device, via)
+	return script.ListAll(ctx, device, via)
 }

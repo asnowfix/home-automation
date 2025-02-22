@@ -21,7 +21,7 @@ var createCmd = &cobra.Command{
 		if len(args) > 1 {
 			description = args[1]
 		}
-		_, err := options.MyHomeClient.CallE(cmd.Context(), "group.create", &myhome.Group{Name: name, Description: description})
+		_, err := options.MyHomeClient.CallE(cmd.Context(), myhome.GroupCreate, &myhome.GroupInfo{Name: name, Description: description})
 		return err
 	},
 }

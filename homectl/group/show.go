@@ -7,6 +7,7 @@ import (
 	"myhome"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func init() {
@@ -19,21 +20,23 @@ var showCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		out, err := options.MyHomeClient.CallE(cmd.Context(), "group.getdevices", name)
+		out, err := options.MyHomeClient.CallE(cmd.Context(), myhome.GroupShow, name)
 		if err != nil {
 			return err
 		}
-		devices := out.(*[]myhome.Device)
+		group := out.(*myhome.Group)
 		if options.Flags.Json {
-			s, err := json.Marshal(devices)
+			s, err := json.Marshal(group)
 			if err != nil {
 				return err
 			}
 			fmt.Println(string(s))
 		} else {
-			for _, device := range *devices {
-				fmt.Println(device)
+			s, err := yaml.Marshal(group)
+			if err != nil {
+				return err
 			}
+			fmt.Println(string(s))
 		}
 		return nil
 	},

@@ -6,7 +6,7 @@ import (
 )
 
 type MethodsRegistrar interface {
-	RegisterMethodHandler(comp string, verb string, mh MethodHandler)
+	RegisterMethodHandler(method string, mh MethodHandler)
 	RegisterDeviceCaller(ch Channel, dc DeviceCaller)
 	CallE(ctx context.Context, d Device, ch Channel, mh MethodHandler, params any) (any, error)
 }
@@ -15,7 +15,7 @@ type Device interface {
 	String() string
 	Ipv4() net.IP
 	Id() string
-	CallE(ctx context.Context, via Channel, comp string, verb string, params any) (any, error)
+	CallE(ctx context.Context, via Channel, method string, params any) (any, error)
 	ReplyTo() string
 	To() chan<- []byte
 	From() <-chan []byte
@@ -42,6 +42,8 @@ type MethodHandler struct {
 }
 
 var MethodNotFound = MethodHandler{}
+
+var NotAMethod = MethodHandler{}
 
 type Api uint
 

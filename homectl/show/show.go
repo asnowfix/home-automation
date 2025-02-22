@@ -8,6 +8,8 @@ import (
 	"myhome"
 	"reflect"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +25,7 @@ var Cmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 
-		out, err := options.MyHomeClient.CallE(cmd.Context(), "device.show", args[0])
+		out, err := options.MyHomeClient.CallE(cmd.Context(), myhome.DeviceShow, args[0])
 		if err != nil {
 			return err
 		}
@@ -36,7 +38,11 @@ var Cmd = &cobra.Command{
 			}
 			fmt.Println(string(s))
 		} else {
-			fmt.Println(device)
+			s, err := yaml.Marshal(device)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(s))
 		}
 		return nil
 	},

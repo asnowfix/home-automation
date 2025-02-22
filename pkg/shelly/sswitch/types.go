@@ -119,7 +119,7 @@ type ToogleSetResponse struct {
 	WasOn bool `json:"was_on"`
 }
 
-type Set struct {
+type SetRequest struct {
 	Id          int  `json:"id"`                     // Id of the Switch component instance. Required
 	On          bool `json:"on"`                     // true for switch on, false otherwise. Required
 	ToggleAfter int  `json:"toggle_after,omitempty"` // Optional flip-back timer in seconds. Optional

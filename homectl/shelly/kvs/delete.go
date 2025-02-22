@@ -5,6 +5,7 @@ import (
 	"hlog"
 
 	hopts "homectl/options"
+	"homectl/shelly/options"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -12,8 +13,6 @@ import (
 	"pkg/shelly"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
-
-	"homectl/shelly/options"
 )
 
 func init() {
@@ -23,19 +22,15 @@ func init() {
 var deleteCtl = &cobra.Command{
 	Use:   "delete",
 	Short: "Delete existing key-value from given shelly devices",
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelMqtt
-		if options.UseHttpChannel {
-			via = types.ChannelHttp
-		}
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, deleteKeys, args)
+		before, after := hopts.SplitArgs(args)
+		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, deleteKeys, after)
 	},
 }
 
 func deleteKeys(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	key := args[0]
-	return kvs.Delete(ctx, log, via, device, key)
+	return kvs.DeleteKey(ctx, log, via, device, key)
 }

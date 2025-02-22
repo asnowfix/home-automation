@@ -21,7 +21,7 @@ func init() {
 }
 
 func ShowJobs(ctx context.Context, log logr.Logger, via types.Channel, d types.Device) (any, error) {
-	out, err := d.CallE(ctx, via, "Schedule", "List", nil)
+	out, err := d.CallE(ctx, via, string(List), nil)
 	if err != nil {
 		log.Error(err, "Unable to list scheduled jobs")
 		return nil, err
@@ -46,7 +46,7 @@ func ScheduleJobs(ctx context.Context, log logr.Logger, via types.Channel, d typ
 }
 
 func scheduleOneJob(ctx context.Context, log logr.Logger, via types.Channel, d types.Device, js JobSpec) (any, error) {
-	out, err := d.CallE(ctx, via, "Schedule", "List", nil)
+	out, err := d.CallE(ctx, via, string(List), nil)
 	if err != nil {
 		log.Error(err, "Unable to list scheduled jobs")
 		return nil, err
@@ -58,7 +58,7 @@ func scheduleOneJob(ctx context.Context, log logr.Logger, via types.Channel, d t
 		if job.Timespec == js.Timespec {
 			// The job is already scheduled, update it
 			log.Info("Updating scheduled", "job", job)
-			_, err := d.CallE(ctx, via, "Schedule", "Update", &Job{JobId: job.JobId, JobSpec: js})
+			_, err := d.CallE(ctx, via, string(Update), &Job{JobId: job.JobId, JobSpec: js})
 			if err != nil {
 				log.Error(err, "Unable to update scheduled", "job_id", job.JobId)
 				return nil, err
@@ -70,13 +70,13 @@ func scheduleOneJob(ctx context.Context, log logr.Logger, via types.Channel, d t
 	// The job is not scheduled yet, create it
 	if !updated {
 		log.Info("Scheduling", "job", js)
-		return d.CallE(ctx, via, "Schedule", "Create", js)
+		return d.CallE(ctx, via, string(Create), js)
 	}
 	return nil, nil
 }
 
 func CancelJob(ctx context.Context, log logr.Logger, via types.Channel, d types.Device, jobId uint32) (any, error) {
-	out, err := d.CallE(ctx, via, "Schedule", "List", nil)
+	out, err := d.CallE(ctx, via, string(List), nil)
 	if err != nil {
 		log.Error(err, "Unable to list scheduled jobs")
 		return nil, err
@@ -86,7 +86,7 @@ func CancelJob(ctx context.Context, log logr.Logger, via types.Channel, d types.
 	for _, job := range scheduled.Jobs {
 		if job.JobId.Id == jobId {
 			log.Info("Found scheduled", "job", job)
-			_, err := d.CallE(ctx, via, "Schedule", "Delete", &JobId{Id: jobId})
+			_, err := d.CallE(ctx, via, string(Delete), &JobId{Id: jobId})
 			if err != nil {
 				log.Error(err, "Unable to update scheduled", "job_id", job.JobId)
 				return nil, err
@@ -96,15 +96,15 @@ func CancelJob(ctx context.Context, log logr.Logger, via types.Channel, d types.
 
 	// The job is not scheduled yet, create it
 	log.Info("Cancelled", "jobId", jobId)
-	return d.CallE(ctx, via, "Schedule", "List", nil)
+	return d.CallE(ctx, via, string(List), nil)
 }
 
 func CancelAllJobs(ctx context.Context, log logr.Logger, via types.Channel, d types.Device) (any, error) {
-	_, err := d.CallE(ctx, via, "Schedule", "DeleteAll", nil)
+	_, err := d.CallE(ctx, via, string(DeleteAll), nil)
 	if err != nil {
 		log.Error(err, "Unable to cancel all scheduled jobs")
 		return nil, err
 	}
 	log.Info("Cancelled all jobs")
-	return d.CallE(ctx, via, "Schedule", "List", nil)
+	return d.CallE(ctx, via, string(List), nil)
 }

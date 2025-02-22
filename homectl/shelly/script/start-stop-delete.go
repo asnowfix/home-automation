@@ -21,16 +21,11 @@ func init() {
 var startCtl = &cobra.Command{
 	Use:   "start",
 	Short: "Start a script loaded on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelMqtt
-		if options.UseHttpChannel {
-			via = types.ChannelHttp
-		}
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, doStartStop, []string{"Start"})
+		before, _ := hopts.SplitArgs(args)
+		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doStartStop, []string{"Start"})
 	},
 }
 
@@ -42,16 +37,11 @@ func init() {
 var stopCtl = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop a script loaded on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelMqtt
-		if options.UseHttpChannel {
-			via = types.ChannelHttp
-		}
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, doStartStop, []string{"Stop"})
+		before, _ := hopts.SplitArgs(args)
+		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doStartStop, []string{"Stop"})
 	},
 }
 
@@ -63,20 +53,15 @@ func init() {
 var deleteCtl = &cobra.Command{
 	Use:   "delete",
 	Short: "Delete a script loaded on the given Shelly device(s)",
-	Args:  cobra.NoArgs,
+	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelMqtt
-		if options.UseHttpChannel {
-			via = types.ChannelHttp
-		}
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, doStartStop, []string{"Delete"})
+		before, _ := hopts.SplitArgs(args)
+		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doStartStop, []string{"Delete"})
 	},
 }
 
 func doStartStop(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	operation := args[0]
-	return script.StartStopDelete(ctx, via, device, flags.Name, flags.Id, operation)
+	return script.StartStopDelete(ctx, via, device, flags.Name, flags.Id, script.Verb(operation))
 }

@@ -12,26 +12,40 @@ var log logr.Logger
 
 type empty struct{}
 
+type Verb string
+
+func (v Verb) String() string {
+	return string(v) // Convert Verb to string
+}
+
+const (
+	Create    Verb = "Schedule.Create"
+	Update    Verb = "Schedule.Update"
+	List      Verb = "Schedule.List"
+	Delete    Verb = "Schedule.Delete"
+	DeleteAll Verb = "Schedule.DeleteAll"
+)
+
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log = l
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
-	r.RegisterMethodHandler("Schedule", "Create", types.MethodHandler{
+	r.RegisterMethodHandler(Create.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Job) },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler("Schedule", "Update", types.MethodHandler{
+	r.RegisterMethodHandler(Update.String(), types.MethodHandler{
 		Allocate:   func() any { return new(JobsRevision) },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler("Schedule", "List", types.MethodHandler{
+	r.RegisterMethodHandler(List.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Scheduled) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler("Schedule", "Delete", types.MethodHandler{
+	r.RegisterMethodHandler(Delete.String(), types.MethodHandler{
 		Allocate:   func() any { return new(JobId) },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler("Schedule", "DeleteAll", types.MethodHandler{
+	r.RegisterMethodHandler(DeleteAll.String(), types.MethodHandler{
 		Allocate:   func() any { return nil },
 		HttpMethod: http.MethodPost,
 	})

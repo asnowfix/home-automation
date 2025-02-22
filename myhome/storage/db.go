@@ -214,6 +214,22 @@ func (s *DeviceStorage) GetAllGroups() (myhome.Groups, error) {
 	return groups, nil
 }
 
+// GetGroupInfo retrieves information about a specific group.
+func (s *DeviceStorage) GetGroupInfo(name string) (myhome.GroupInfo, error) {
+	log := s.log.WithValues("group", name)
+	log.Info("Retrieving group info")
+	var gi myhome.GroupInfo
+
+	query := "SELECT id, name, description FROM groups WHERE name = $1"
+	err := s.db.Get(&gi, query, name)
+	if err != nil {
+		log.Error(err, "Failed to get group info")
+		return myhome.GroupInfo{}, err
+	}
+
+	return gi, nil
+}
+
 // GetDevicesByGroupName retrieves the devices for a specific group.
 func (s *DeviceStorage) GetDevicesByGroupName(name string) ([]Device, error) {
 	log := s.log.WithValues("group", name)
@@ -252,7 +268,7 @@ func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (myhome.Groups,
 }
 
 // AddGroup adds a new group to the database.
-func (s *DeviceStorage) AddGroup(group *myhome.Group) (any, error) {
+func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (any, error) {
 	log := s.log.WithValues("name", group.Name)
 	log.Info("Adding new group")
 	query := `INSERT INTO groups (name, description) VALUES (:name, :description)`

@@ -1,5 +1,7 @@
 package mqtt
 
+// <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt>
+
 type Qos uint
 
 const (
@@ -15,8 +17,6 @@ func (qos Qos) String() string {
 		"ExactlyOnce",
 	}[qos]
 }
-
-// ChannelMqtt
 
 type Event struct {
 	Src    string `json:"src"`    // Source of the event (Device Id)

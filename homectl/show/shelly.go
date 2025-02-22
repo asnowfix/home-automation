@@ -38,10 +38,10 @@ var showShellyCmd = &cobra.Command{
 			var sd *shelly.Device
 			ip := net.ParseIP(identifier)
 			if ip != nil {
-				sd = shelly.NewHttpDevice(cmd.Context(), log, ip)
+				sd = shelly.NewDeviceFromIp(cmd.Context(), log, ip)
 				via = types.ChannelHttp
 			} else {
-				sd = shelly.NewMqttDevice(cmd.Context(), log, identifier, options.MqttClient)
+				sd = shelly.NewDeviceFromMqttId(cmd.Context(), log, identifier, options.MqttClient)
 				via = types.ChannelMqtt
 			}
 			var device myhome.Device

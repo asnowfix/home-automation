@@ -37,20 +37,19 @@ const (
 
 type Device struct {
 	Product
-	Id_               string                         `json:"id"`
-	Service           string                         `json:"service"`
-	Host              string                         `json:"host"`
-	Ipv4_             net.IP                         `json:"ipv4"`
-	Port              int                            `json:"port"`
-	Info              *DeviceInfo                    `json:"info"`
-	Methods           []string                       `json:"methods"`
-	ComponentsMethods map[string]types.MethodHandler `json:"-"`
-	Components        *[]Component                   `json:"-"`
-	state             State                          `json:"-"`
-	me                string                         `json:"-"`
-	to                chan<- []byte                  `json:"-"` // channel to send messages to
-	from              <-chan []byte                  `json:"-"` // channel to receive messages from
-	log               logr.Logger                    `json:"-"`
+	Id_        string        `json:"id"`
+	Service    string        `json:"service"`
+	Host       string        `json:"host"`
+	Ipv4_      net.IP        `json:"ipv4"`
+	Port       int           `json:"port"`
+	Info       *DeviceInfo   `json:"info"`
+	Methods    []string      `json:"methods"`
+	Components *[]Component  `json:"-"`
+	state      State         `json:"-"`
+	me         string        `json:"-"`
+	to         chan<- []byte `json:"-"` // channel to send messages to
+	from       <-chan []byte `json:"-"` // channel to receive messages from
+	log        logr.Logger   `json:"-"`
 }
 
 func (d *Device) Id() string {
@@ -133,9 +132,10 @@ type ComponentsResponse struct {
 }
 
 type Component struct {
-	Key    string      `json:"key"`    // Component's key (in format <type>:<cid>, for example boolean:200)
-	Status interface{} `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
-	Config interface{} `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
+	Key     string                         `json:"key"`    // Component's key (in format <type>:<cid>, for example boolean:200)
+	Status  interface{}                    `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
+	Config  interface{}                    `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
+	Methods map[string]types.MethodHandler `json:"-"`
 }
 
 var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", MDNS_SHELLIES))
@@ -156,22 +156,44 @@ func (d *Device) Call(ctx context.Context, ch types.Channel, verb string, params
 	return data
 }
 
-func (d *Device) MethodHandlerE(v string) (types.MethodHandler, error) {
-	mh, exists := registrar.methods[v]
+func (d *Device) CallE(ctx context.Context, via types.Channel, method any, params any) (any, error) {
+	var mh types.MethodHandler
+	var err error
+
+	if _, ok := method.(string); !ok {
+		return nil, fmt.Errorf("not a method: %v", method)
+	}
+
+	switch reflect.TypeOf(method) {
+	case reflect.TypeOf(ListMethods):
+		// Shelly.*
+		fallthrough
+	case reflect.TypeOf(system.GetConfig):
+		// Sys.*
+		mh, err = registrar.MethodHandlerE(method)
+		break
+	default:
+		d.methods(ctx, via)
+		mh, err = d.MethodHandlerE(method)
+
+	}
+	if err != nil {
+		d.log.Error(err, "Unable to find method handler", "method", method)
+		return nil, err
+	}
+	return GetRegistrar().CallE(ctx, d, via, mh, params)
+}
+
+func (d *Device) MethodHandlerE(v any) (types.MethodHandler, error) {
+	m, ok := v.(string)
+	if !ok {
+		return types.NotAMethod, fmt.Errorf("not a method: %v", v)
+	}
+	mh, exists := registrar.methods[m]
 	if !exists {
 		return types.MethodNotFound, fmt.Errorf("did not find any registrar handler for method: %v", v)
 	}
 	return mh, nil
-}
-
-func (d *Device) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
-	d.methods(ctx, via)
-	mh, err := d.MethodHandlerE(method)
-	if err != nil {
-		d.log.Error(err, "Unable to find method handler", "verb", method)
-		return nil, err
-	}
-	return GetRegistrar().CallE(ctx, d, via, mh, params)
 }
 
 func (d *Device) String() string {
@@ -190,7 +212,7 @@ func (d *Device) ReplyTo() string {
 	return d.me
 }
 
-func NewHttpDevice(ctx context.Context, log logr.Logger, ip net.IP) *Device {
+func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) *Device {
 	d := &Device{
 		Ipv4_: ip,
 		Host:  ip.String(),
@@ -201,13 +223,27 @@ func NewHttpDevice(ctx context.Context, log logr.Logger, ip net.IP) *Device {
 	return d
 }
 
-func NewMqttDevice(ctx context.Context, log logr.Logger, id string, mc *mymqtt.Client) *Device {
+func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string, mc *mymqtt.Client) *Device {
 	d := &Device{
 		Id_:   id,
 		Host:  fmt.Sprintf("%s.local.", id),
 		state: New,
 		log:   log,
 	}
+	d.init(ctx)
+	return d
+}
+
+func NewDeviceFromInfo(ctx context.Context, log logr.Logger, info *DeviceInfo) *Device {
+	d := &Device{
+		Id_:   info.Id,
+		Host:  fmt.Sprintf("%s.local.", info.Id),
+		state: New,
+		log:   log,
+		Info:  info,
+	}
+	d.Id_ = d.Info.Id
+	d.MacAddress = d.Info.MacAddress
 	d.init(ctx)
 	return d
 }
@@ -249,7 +285,12 @@ func (d *Device) init(ctx context.Context) error {
 	}
 
 	if d.Info == nil {
-		di, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(string(GetDeviceInfo)), map[string]interface{}{"ident": true})
+		mh, err := GetRegistrar().MethodHandlerE(string(GetDeviceInfo))
+		if err != nil {
+			d.log.Error(err, "Unable to get method handler", "method", GetDeviceInfo)
+			return err
+		}
+		di, err := GetRegistrar().CallE(ctx, d, via, mh, map[string]interface{}{"ident": true})
 		if err != nil {
 			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
 			return err
@@ -267,7 +308,12 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 	d.log.Info("Shelly.methods", "id", d.Id_, "host", d.Host)
 
 	if d.Components == nil {
-		out, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(string(GetComponents)), &ComponentsRequest{})
+		mh, err := GetRegistrar().MethodHandlerE(GetComponents)
+		if err != nil {
+			d.log.Error(err, "Unable to get method handler", "method", GetComponents)
+			return err
+		}
+		out, err := GetRegistrar().CallE(ctx, d, via, mh, &ComponentsRequest{})
 		if err != nil {
 			return err
 		}
@@ -276,7 +322,12 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 	}
 
 	if d.Methods == nil {
-		m, err := GetRegistrar().CallE(ctx, d, via, GetRegistrar().MethodHandler(string(ListMethods)), nil)
+		mh, err := GetRegistrar().MethodHandlerE(ListMethods)
+		if err != nil {
+			d.log.Error(err, "Unable to get method handler", "method", ListMethods)
+			return err
+		}
+		m, err := GetRegistrar().CallE(ctx, d, via, mh, nil)
 		if err != nil {
 			d.log.Error(err, "Unable to list device's methods")
 			return err
@@ -285,10 +336,16 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 		d.Methods = m.(*MethodsResponse).Methods
 		d.log.Info("Shelly.ListMethods", "methods", d.Methods)
 
-		d.ComponentsMethods = make(map[string]types.MethodHandler)
-		for _, m := range d.Methods {
-			d.ComponentsMethods[m] = registrar.methods[m]
-		}
+		// for _, method := range d.Methods {
+		// 	cn := strings.SplitN(method, ".", 2)[0]
+		// 	if c, exists := d.Components[cn]; !exists {
+		// 		return fmt.Errorf("component not found: %s", cn)
+		// 	}
+		// 	c.Methods = make(map[string]types.MethodHandler)
+		// 	for _, m := range d.Methods {
+		// 		d.ComponentsMethods[m] = registrar.methods[m]
+		// 	}
+		// }
 	}
 
 	return nil
@@ -315,10 +372,10 @@ func Foreach(ctx context.Context, log logr.Logger, mc *mymqtt.Client, names []st
 			var sd *Device
 			ip := net.ParseIP(name)
 			if ip != nil {
-				sd = NewHttpDevice(ctx, log, ip)
+				sd = NewDeviceFromIp(ctx, log, ip)
 				via = types.ChannelHttp
 			} else {
-				sd = NewMqttDevice(ctx, log, name, mc)
+				sd = NewDeviceFromMqttId(ctx, log, name, mc)
 				via = types.ChannelMqtt
 			}
 			out, err := do(ctx, log, via, sd, args)

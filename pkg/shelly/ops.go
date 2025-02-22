@@ -2,6 +2,7 @@ package shelly
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"pkg/shelly/input"
 	"pkg/shelly/kvs"
@@ -52,7 +53,7 @@ func GetRegistrar() *Registrar {
 
 type Registrar struct {
 	log      logr.Logger
-	methods  map[string]types.MethodHandler
+	methods  map[any]types.MethodHandler
 	channel  types.Channel
 	channels []types.DeviceCaller
 }
@@ -62,8 +63,8 @@ func (r *Registrar) Init(log logr.Logger) {
 	r.channel = types.ChannelHttp
 	r.channels = make([]types.DeviceCaller, 3 /*sizeof(Channel)*/)
 
-	r.methods = make(map[string]types.MethodHandler)
-	r.RegisterMethodHandler(string(ListMethods), types.MethodHandler{
+	r.methods = make(map[any]types.MethodHandler)
+	r.RegisterMethodHandler(ListMethods, types.MethodHandler{
 		// Method:     ListMethods,
 		Allocate:   func() any { return new(MethodsResponse) },
 		HttpMethod: http.MethodGet,
@@ -76,36 +77,44 @@ func (r *Registrar) Init(log logr.Logger) {
 	// Shelly.CheckForUpdate
 	// Shelly.DetectLocation
 	// Shelly.ListTimezones
-	r.RegisterMethodHandler(string(GetComponents), types.MethodHandler{
+	r.RegisterMethodHandler(GetComponents, types.MethodHandler{
 		// InputType:  reflect.TypeOf(ComponentsRequest{}),
 		Allocate:   func() any { return new(ComponentsResponse) },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler(string(GetStatus), types.MethodHandler{
+	r.RegisterMethodHandler(GetStatus, types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
 	// Shelly.FactoryReset
 	// Shelly.ResetWiFiConfig
-	r.RegisterMethodHandler(string(GetConfig), types.MethodHandler{
+	r.RegisterMethodHandler(GetConfig, types.MethodHandler{
 		Allocate:   func() any { return new(Config) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(string(GetDeviceInfo), types.MethodHandler{
+	r.RegisterMethodHandler(GetDeviceInfo, types.MethodHandler{
 		Allocate:   func() any { return new(DeviceInfo) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(string(Reboot), types.MethodHandler{
+	r.RegisterMethodHandler(Reboot, types.MethodHandler{
 		Allocate:   func() any { return new(string) },
 		HttpMethod: http.MethodGet,
 	})
 }
 
-func (r *Registrar) MethodHandler(m string) types.MethodHandler {
-	return r.methods[m]
+func (r *Registrar) MethodHandlerE(m any) (types.MethodHandler, error) {
+	mh, ok := r.methods[m]
+	if !ok {
+		return types.MethodHandler{}, fmt.Errorf("method not found in registrar: %s", m)
+	}
+	return mh, nil
 }
 
-func (r *Registrar) RegisterMethodHandler(v string, m types.MethodHandler) {
+// func (r *Registrar) MethodHandler(m string) types.MethodHandler {
+// 	return r.methods[m]
+// }
+
+func (r *Registrar) RegisterMethodHandler(v any, m types.MethodHandler) {
 	if m.Allocate == nil {
 		m.Allocate = func() any {
 			return make(map[string]interface{})

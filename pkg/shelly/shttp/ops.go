@@ -23,11 +23,11 @@ func Init(log logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 
 	// register methods
-	r.RegisterMethodHandler(string(Get), types.MethodHandler{
+	r.RegisterMethodHandler(Get, types.MethodHandler{
 		Allocate:   func() any { return new(Response) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(string(Post), types.MethodHandler{
+	r.RegisterMethodHandler(Post, types.MethodHandler{
 		Allocate:   func() any { return new(Response) },
 		HttpMethod: http.MethodPost,
 	})

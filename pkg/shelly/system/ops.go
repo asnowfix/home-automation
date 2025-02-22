@@ -24,14 +24,14 @@ const (
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
-	r.RegisterMethodHandler(string(SetConfig), types.MethodHandler{
+	r.RegisterMethodHandler(SetConfig, types.MethodHandler{
 		// InputType:  reflect.TypeOf(Config{}),
 		Allocate: func() any { return nil },
 	})
-	r.RegisterMethodHandler(string(GetConfig), types.MethodHandler{
+	r.RegisterMethodHandler(GetConfig, types.MethodHandler{
 		Allocate: func() any { return new(Config) },
 	})
-	r.RegisterMethodHandler(string(GetStatus), types.MethodHandler{
+	r.RegisterMethodHandler(GetStatus, types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})

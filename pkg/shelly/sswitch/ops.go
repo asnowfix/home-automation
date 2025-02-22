@@ -26,23 +26,23 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log = l
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 
-	r.RegisterMethodHandler(string(GetConfig), types.MethodHandler{
+	r.RegisterMethodHandler(GetConfig, types.MethodHandler{
 		Allocate:   func() any { return new(Config) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(string(SetConfig), types.MethodHandler{
+	r.RegisterMethodHandler(SetConfig, types.MethodHandler{
 		Allocate:   func() any { return new(Config) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(string(GetStatus), types.MethodHandler{
+	r.RegisterMethodHandler(GetStatus, types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(string(Toggle), types.MethodHandler{
+	r.RegisterMethodHandler(Toggle, types.MethodHandler{
 		Allocate:   func() any { return new(ToogleSetResponse) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(string(Set), types.MethodHandler{
+	r.RegisterMethodHandler(Set, types.MethodHandler{
 		Allocate:   func() any { return new(ToogleSetResponse) },
 		HttpMethod: http.MethodGet,
 	})

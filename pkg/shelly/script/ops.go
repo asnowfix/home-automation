@@ -32,57 +32,57 @@ const (
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
-	r.RegisterMethodHandler(string(SetConfig), types.MethodHandler{
+	r.RegisterMethodHandler(SetConfig, types.MethodHandler{
 		// InputType:  reflect.TypeOf(ConfigurationRequest{}),
 		Allocate:   func() any { return new(Configuration) },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler(string(GetConfig), types.MethodHandler{
+	r.RegisterMethodHandler(GetConfig, types.MethodHandler{
 		// InputType:  reflect.TypeOf(Configuration{}),
 		Allocate:   func() any { return new(Configuration) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(string(GetStatus), types.MethodHandler{
+	r.RegisterMethodHandler(GetStatus, types.MethodHandler{
 		//InputType:  reflect.TypeOf(Id{}),
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(string(Create), types.MethodHandler{
+	r.RegisterMethodHandler(Create, types.MethodHandler{
 		// InputType:  reflect.TypeOf(Configuration{}),
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler(string(Delete), types.MethodHandler{
+	r.RegisterMethodHandler(Delete, types.MethodHandler{
 		// InputType:  reflect.TypeOf(Id{}),
 		Allocate:   func() any { return nil },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler(string(PutCode), types.MethodHandler{
+	r.RegisterMethodHandler(PutCode, types.MethodHandler{
 		// InputType:  reflect.TypeOf(PutCodeRequest{}),
 		Allocate:   func() any { return new(PutCodeResponse) },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler(string(GetCode), types.MethodHandler{
+	r.RegisterMethodHandler(GetCode, types.MethodHandler{
 		// InputType:  reflect.TypeOf(GetCodeRequest{}),
 		Allocate:   func() any { return new(GetCodeResponse) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(string(Eval), types.MethodHandler{
+	r.RegisterMethodHandler(Eval, types.MethodHandler{
 		// InputType:  reflect.TypeOf(EvalRequest{}),
 		Allocate:   func() any { return new(EvalResponse) },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler(string(Start), types.MethodHandler{
+	r.RegisterMethodHandler(Start, types.MethodHandler{
 		// InputType:  reflect.TypeOf(Id{}),
 		Allocate:   func() any { return new(FormerStatus) },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler(string(Stop), types.MethodHandler{
+	r.RegisterMethodHandler(Stop, types.MethodHandler{
 		// InputType:  reflect.TypeOf(Id{}),
 		Allocate:   func() any { return new(FormerStatus) },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler(string(List), types.MethodHandler{
+	r.RegisterMethodHandler(List, types.MethodHandler{
 		// InputType:  nil,
 		Allocate:   func() any { return new(ListResponse) },
 		HttpMethod: http.MethodGet,

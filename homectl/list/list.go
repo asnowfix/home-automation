@@ -9,6 +9,7 @@ import (
 	"reflect"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var Cmd = &cobra.Command{
@@ -16,24 +17,25 @@ var Cmd = &cobra.Command{
 	Short: "List known devices",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var err error
 		log := hlog.Logger
+
 		out, err := options.MyHomeClient.CallE(cmd.Context(), "device.list", nil)
 		if err != nil {
 			return err
 		}
 		log.Info("result", "out", out, "type", reflect.TypeOf(out))
 		devices := out.(*myhome.Devices)
+		var s []byte
 		if options.Flags.Json {
-			s, err := json.Marshal(devices)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(s))
+			s, err = json.Marshal(devices)
 		} else {
-			for _, device := range devices.Devices {
-				fmt.Println(device)
-			}
+			s, err = yaml.Marshal(devices)
 		}
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(s))
 		return nil
 	},
 }

@@ -14,6 +14,10 @@ type empty struct{}
 
 type Verb string
 
+func (v Verb) String() string {
+	return string(v) // Convert Verb to string
+}
+
 const (
 	GetConfig Verb = "GetConfig"
 	SetConfig Verb = "SetConfig"
@@ -26,23 +30,23 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log = l
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 
-	r.RegisterMethodHandler(GetConfig, types.MethodHandler{
+	r.RegisterMethodHandler(GetConfig.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Config) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(SetConfig, types.MethodHandler{
+	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Config) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(GetStatus, types.MethodHandler{
+	r.RegisterMethodHandler(GetStatus.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(Toggle, types.MethodHandler{
+	r.RegisterMethodHandler(Toggle.String(), types.MethodHandler{
 		Allocate:   func() any { return new(ToogleSetResponse) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(Set, types.MethodHandler{
+	r.RegisterMethodHandler(Set.String(), types.MethodHandler{
 		Allocate:   func() any { return new(ToogleSetResponse) },
 		HttpMethod: http.MethodGet,
 	})

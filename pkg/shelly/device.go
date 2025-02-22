@@ -116,6 +116,19 @@ type Status struct {
 	WebSocket *any                 `json:"ws,omitempty"`
 }
 
+// From https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellycheckforupdate
+
+type CheckForUpdateResponse struct {
+	Stable *struct {
+		Version string `json:"version"`  // The version of the stable firmware
+		BuildId string `json:"build_id"` // The build ID of the stable firmware
+	} `json:"stable,omitempty"`
+	Beta *struct {
+		Version string `json:"version"`  // The version of the beta firmware
+		BuildId string `json:"build_id"` // The build ID of the beta firmware
+	} `json:"beta,omitempty"`
+}
+
 // From https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellygetcomponents
 type ComponentsRequest struct {
 	Offset      int      `json:"offset,omitempty"`       // Index of the component from which to start generating the result Optional
@@ -171,7 +184,6 @@ func (d *Device) CallE(ctx context.Context, via types.Channel, method any, param
 	case reflect.TypeOf(system.GetConfig):
 		// Sys.*
 		mh, err = registrar.MethodHandlerE(method)
-		break
 	default:
 		d.methods(ctx, via)
 		mh, err = d.MethodHandlerE(method)
@@ -285,7 +297,7 @@ func (d *Device) init(ctx context.Context) error {
 	}
 
 	if d.Info == nil {
-		mh, err := GetRegistrar().MethodHandlerE(string(GetDeviceInfo))
+		mh, err := GetRegistrar().MethodHandlerE(GetDeviceInfo)
 		if err != nil {
 			d.log.Error(err, "Unable to get method handler", "method", GetDeviceInfo)
 			return err

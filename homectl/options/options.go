@@ -2,6 +2,7 @@ package options
 
 import (
 	"context"
+	"global"
 	"myhome"
 	"mymqtt"
 	"os"
@@ -14,7 +15,6 @@ import (
 
 var Flags struct {
 	Verbose     bool
-	ViaHttp     bool
 	Json        bool
 	Devices     string
 	MqttBroker  string
@@ -22,14 +22,15 @@ var Flags struct {
 	MqttGrace   time.Duration
 }
 
-var Devices []string
-
 var MqttClient *mymqtt.Client
 
 var MyHomeClient myhome.Client
 
-func CommandLineContext(log logr.Logger) (context.Context, context.CancelFunc) {
-	ctx, cancel := context.WithCancel(context.Background())
+func CommandLineContext(log logr.Logger) context.Context {
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, global.LogKey, log)
+	ctx, cancel := context.WithCancel(ctx)
+	ctx = context.WithValue(ctx, global.CancelKey, cancel)
 	go func() {
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, os.Interrupt)
@@ -38,5 +39,21 @@ func CommandLineContext(log logr.Logger) (context.Context, context.CancelFunc) {
 		log.Info("Received signal")
 		cancel()
 	}()
-	return ctx, cancel
+	return ctx
+}
+
+func SplitArgs(args []string) (before []string, after []string) {
+	foundDelimiter := false
+	for _, arg := range args {
+		if arg == "--" {
+			foundDelimiter = true
+			continue
+		}
+		if foundDelimiter {
+			after = append(after, arg)
+		} else {
+			before = append(before, arg)
+		}
+	}
+	return
 }

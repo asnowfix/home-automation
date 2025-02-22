@@ -13,7 +13,6 @@ import (
 	"homectl/toggle"
 	"myhome"
 	"os"
-	"strings"
 	"time"
 
 	"mymqtt"
@@ -24,6 +23,7 @@ import (
 )
 
 func main() {
+	cobra.EnableTraverseRunHooks = true
 	err := Cmd.Execute()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -38,12 +38,8 @@ var Cmd = &cobra.Command{
 		hlog.Init(options.Flags.Verbose)
 		log := hlog.Logger
 
-		ctx, cancel := options.CommandLineContext(log)
-		ctx = context.WithValue(ctx, global.CancelKey, cancel)
+		ctx := options.CommandLineContext(log)
 		cmd.SetContext(ctx)
-
-		options.Devices = strings.Split(options.Flags.Devices, ",")
-		log.Info("Will use", "devices", options.Devices)
 
 		var err error
 		options.MqttClient, err = mymqtt.InitClientE(cmd.Context(), log, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace)

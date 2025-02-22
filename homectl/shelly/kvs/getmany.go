@@ -24,13 +24,8 @@ var getManyCtl = &cobra.Command{
 	Short: "List Shelly devices Key-Value Store",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		shelly.Init(log, hopts.Flags.MqttTimeout)
-
-		via := types.ChannelMqtt
-		if options.UseHttpChannel {
-			via = types.ChannelHttp
-		}
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, hopts.Devices, via, getMany, args)
+		before, after := hopts.SplitArgs(args)
+		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, getMany, after)
 	},
 }
 

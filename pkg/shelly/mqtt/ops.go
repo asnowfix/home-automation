@@ -17,6 +17,10 @@ type empty struct{}
 
 type Verb string
 
+func (v Verb) String() string {
+	return string(v) // Convert Verb to string
+}
+
 const (
 	GetStatus Verb = "GetStatus"
 	GetConfig Verb = "GetConfig"
@@ -28,15 +32,15 @@ var registrar types.MethodsRegistrar
 func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	registrar = r
-	r.RegisterMethodHandler(GetStatus, types.MethodHandler{
+	r.RegisterMethodHandler(GetStatus.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(GetConfig, types.MethodHandler{
+	r.RegisterMethodHandler(GetConfig.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Config) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(SetConfig, types.MethodHandler{
+	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
 		Allocate:   func() any { return new(ConfigResults) },
 		HttpMethod: http.MethodPost,
 	})

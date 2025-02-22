@@ -7,6 +7,7 @@ import (
 	"myhome"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func init() {
@@ -31,12 +32,11 @@ var showCmd = &cobra.Command{
 			}
 			fmt.Println(string(s))
 		} else {
-			fmt.Println("name:", group.Name)
-			fmt.Println("description:", group.Description)
-			fmt.Println("devices:")
-			for _, device := range group.Devices {
-				fmt.Println("-" + string(device.Name))
+			s, err := yaml.Marshal(group)
+			if err != nil {
+				return err
 			}
+			fmt.Println(string(s))
 		}
 		return nil
 	},

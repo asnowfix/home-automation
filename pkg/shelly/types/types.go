@@ -6,7 +6,7 @@ import (
 )
 
 type MethodsRegistrar interface {
-	RegisterMethodHandler(method any, mh MethodHandler)
+	RegisterMethodHandler(method string, mh MethodHandler)
 	RegisterDeviceCaller(ch Channel, dc DeviceCaller)
 	CallE(ctx context.Context, d Device, ch Channel, mh MethodHandler, params any) (any, error)
 }

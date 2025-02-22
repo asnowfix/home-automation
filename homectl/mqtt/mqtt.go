@@ -26,13 +26,15 @@ var pubCmd = &cobra.Command{
 		log := hlog.Logger
 		// devices.Init()
 
-		log.Info("looking for devices: %v", options.Devices)
-		topics, err := devices.Topics(log, options.Devices)
+		before, after := options.SplitArgs(args)
+
+		log.Info("looking for devices: %v", before)
+		topics, err := devices.Topics(log, before)
 		if err != nil {
 			log.Error(err, "Failed to list devices")
 			return err
 		}
-		msg := strings.Join(args, "")
+		msg := strings.Join(after, "")
 		for _, topic := range topics {
 			log.Info("MQTT <<< %v", msg)
 			topic.Publish([]byte(msg))
@@ -48,7 +50,7 @@ var subCmd = &cobra.Command{
 		log := hlog.Logger
 		// devices.Init()
 
-		topics, err := devices.Topics(log, options.Devices)
+		topics, err := devices.Topics(log, args)
 		if err != nil {
 			log.Error(err, "Failed to list devices")
 			return err

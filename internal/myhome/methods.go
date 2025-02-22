@@ -10,6 +10,7 @@ type MethodSignature struct {
 }
 
 type Method struct {
+	Name      Verb
 	Signature MethodSignature
 	ActionE   MethodHandler
 }
@@ -28,6 +29,7 @@ func RegisterMethodHandler(name Verb, mh MethodHandler) {
 		panic(fmt.Errorf("unknown method %s", name))
 	}
 	methods[name] = &Method{
+		Name:      name,
 		Signature: s,
 		ActionE:   mh,
 	}

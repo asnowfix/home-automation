@@ -14,6 +14,10 @@ type empty struct{}
 
 type Verb string
 
+func (v Verb) String() string {
+	return string(v) // Convert Verb to string
+}
+
 const (
 	Get  Verb = "GET"
 	Post Verb = "POST"
@@ -23,11 +27,11 @@ func Init(log logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 
 	// register methods
-	r.RegisterMethodHandler(Get, types.MethodHandler{
+	r.RegisterMethodHandler(Get.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Response) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(Post, types.MethodHandler{
+	r.RegisterMethodHandler(Post.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Response) },
 		HttpMethod: http.MethodPost,
 	})

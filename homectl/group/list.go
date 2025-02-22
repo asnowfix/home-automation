@@ -9,6 +9,7 @@ import (
 	"reflect"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 func init() {
@@ -37,10 +38,11 @@ var listCmd = &cobra.Command{
 			}
 			fmt.Println(string(s))
 		} else {
-			fmt.Println("Groups:")
-			for _, group := range groups.Groups {
-				fmt.Println(group)
+			s, err := yaml.Marshal(groups)
+			if err != nil {
+				return err
 			}
+			fmt.Println(string(s))
 		}
 		return nil
 	},

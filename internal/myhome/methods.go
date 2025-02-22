@@ -62,7 +62,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 	},
 	GroupCreate: {
 		NewParams: func() any {
-			return &Group{}
+			return &GroupInfo{}
 		},
 		NewResult: func() any {
 			return nil
@@ -76,12 +76,12 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return nil
 		},
 	},
-	GroupListDevices: {
+	GroupShow: {
 		NewParams: func() any {
 			return ""
 		},
 		NewResult: func() any {
-			return Devices{}
+			return &Group{}
 		},
 	},
 	GroupAddDevice: {

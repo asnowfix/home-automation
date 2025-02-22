@@ -74,13 +74,35 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return dm.storage.GetAllGroups()
 	})
 	myhome.RegisterMethodHandler(myhome.GroupCreate, func(in any) (any, error) {
-		return dm.storage.AddGroup(in.(*myhome.Group))
+		return dm.storage.AddGroup(in.(*myhome.GroupInfo))
 	})
 	myhome.RegisterMethodHandler(myhome.GroupDelete, func(in any) (any, error) {
 		return dm.storage.RemoveGroup(in.(string))
 	})
-	myhome.RegisterMethodHandler(myhome.GroupListDevices, func(in any) (any, error) {
-		return dm.storage.GetDevicesByGroupName(in.(string))
+	myhome.RegisterMethodHandler(myhome.GroupShow, func(in any) (any, error) {
+		name := in.(string)
+
+		gi, err := dm.storage.GetGroupInfo(in.(string))
+		if err != nil {
+			log.Error(err, "Failed to get group info", "group", name)
+			return nil, err
+		}
+
+		gd, err := dm.storage.GetDevicesByGroupName(name)
+		if err != nil {
+			log.Error(err, "Failed to get devices for group", "group", name)
+			return nil, err
+		}
+
+		g := myhome.Group{
+			GroupInfo: gi,
+			Devices:   make([]myhome.DeviceSummary, 0),
+		}
+		for _, d := range gd {
+			g.Devices = append(g.Devices, d.DeviceSummary)
+		}
+
+		return &g, nil
 	})
 	myhome.RegisterMethodHandler(myhome.GroupAddDevice, func(in any) (any, error) {
 		return dm.storage.AddDeviceToGroup(in.(myhome.GroupDevice))

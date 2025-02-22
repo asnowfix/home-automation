@@ -78,5 +78,5 @@ var deleteCtl = &cobra.Command{
 
 func doStartStop(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	operation := args[0]
-	return script.StartStopDelete(ctx, via, device, flags.Name, flags.Id, operation)
+	return script.StartStopDelete(ctx, via, device, flags.Name, flags.Id, script.Verb(operation))
 }

@@ -35,5 +35,5 @@ var getManyCtl = &cobra.Command{
 }
 
 func getMany(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	return kvs.GetMany(ctx, log, via, device)
+	return kvs.GetManyValues(ctx, log, via, device)
 }

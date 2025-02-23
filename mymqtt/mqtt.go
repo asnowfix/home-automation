@@ -340,10 +340,9 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan [
 }
 
 func (c *Client) Publish(topic string, msg []byte) error {
-	c.log.Info("Publishing", "to topic", topic, "payload", string(msg))
 	token := c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, false /*retain*/, msg)
 	if token.WaitTimeout(c.timeout) {
-		c.log.Info("Published", "to topic", topic, "payload", string(msg))
+		// c.log.Info("Published", "to topic", topic, "payload", string(msg))
 		return nil
 	} else {
 		c.log.Error(token.Error(), "Failed to publish", "to topic", topic, "payload", string(msg))
@@ -363,7 +362,6 @@ func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (chan 
 		go func() {
 			c.log.Info("Received", "from topic", msg.Topic(), "payload", string(msg.Payload()))
 			mch <- msg.Payload()
-			c.log.Info("Sent downstream:", "payload", string(msg.Payload()))
 		}()
 	})
 	for !token.WaitTimeout(c.timeout) {

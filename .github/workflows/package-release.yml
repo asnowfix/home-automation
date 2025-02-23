@@ -69,10 +69,10 @@ jobs:
                     cp $(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -r '.[] | select(.name == "myhome") | .path') .debpkg/usr/bin/myhome
 
                     # systemd scripts
-                    mkdir -p .debpkg/etc/systemd/system/
+                    mkdir -p .debpkg/lib/systemd/system/
                     cp linux/debian/myhome.service .debpkg/lib/systemd/system/
-                    cp linux/debian/myhome-update.service .debpkg/etc/systemd/system/
-                    cp linux/debian/myhome-update.timer .debpkg/etc/systemd/system/
+                    cp linux/debian/myhome-update.service .debpkg/lib/systemd/system/
+                    cp linux/debian/myhome-update.timer .debpkg/lib/systemd/system/
 
                     # auto-update script as a shared file
                     mkdir -p .debpkg/usr/share/myhome/update

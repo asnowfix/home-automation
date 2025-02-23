@@ -162,14 +162,6 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
-func (d *Device) Call(ctx context.Context, ch types.Channel, verb string, params any) any {
-	data, err := d.CallE(ctx, ch, verb, params)
-	if err != nil {
-		panic(err)
-	}
-	return data
-}
-
 func (d *Device) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
 	var mh types.MethodHandler
 	var err error
@@ -255,12 +247,10 @@ func NewDeviceFromInfo(ctx context.Context, log logr.Logger, info *DeviceInfo) *
 	d := &Device{
 		Id_:   info.Id,
 		Host:  fmt.Sprintf("%s.local.", info.Id),
+		Info:  info,
 		state: New,
 		log:   log,
-		Info:  info,
 	}
-	d.Id_ = d.Info.Id
-	d.MacAddress = d.Info.MacAddress
 	return d
 }
 
@@ -350,7 +340,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 		}
 
 		d.Methods = m.(*MethodsResponse).Methods
-		d.log.Info("Shelly.ListMethods", "methods", d.Methods)
+		// d.log.Info("Shelly.ListMethods", "methods", d.Methods)
 
 		// for _, method := range d.Methods {
 		// 	cn := strings.SplitN(method, ".", 2)[0]

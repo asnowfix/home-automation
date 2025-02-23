@@ -39,7 +39,7 @@ func NewDeviceManager(log logr.Logger, storage *storage.DeviceStorage, mqttClien
 	return &DeviceManager{
 		storage:       storage,
 		log:           log.WithName("DeviceManager"),
-		update:        make(chan *Device, 1),
+		update:        make(chan *Device, 64), // TODO configurable buffer size
 		devicesById:   make(map[string]*Device),
 		devicesByMAC:  make(map[string]*Device),
 		devicesByHost: make(map[string]*Device),
@@ -142,23 +142,25 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 	}(ctx, log.WithName("DeviceManager#DeviceChannel"), dm.update)
 
-	// // Load every devices from storage & init them
-	// devices, err := dm.storage.GetAllDevices()
-	// if err != nil {
-	// 	log.Error(err, "Failed to get all devices")
-	// 	return err
-	// }
-	// log.Info("Loaded", "devices", len(devices))
-	// for _, device := range devices {
-	// 	log.Info("Background update of device", "id", device.Id)
-	// 	go func(log logr.Logger, device myhome.Device) {
-	// 		var d Device = Device{
-	// 			Device: device,
-	// 		}
-	// 		log.Info("Scheduling update of device", "id", device.Id)
-	// 		dm.update <- d.WithImpl(shelly.NewMqttDevice(dm.log.WithName(device.Id), device.Id, dm.mqttClient))
-	// 	}(log.WithName(device.Id), device)
-	// }
+	// Load every devices from storage & init them
+	devices, err := dm.storage.GetAllDevices()
+	if err != nil {
+		log.Error(err, "Failed to get all devices")
+		return err
+	}
+	log.Info("Loaded", "devices", len(devices))
+	for _, device := range devices {
+		var d Device = Device{
+			Device: device,
+		}
+		if device.Info == nil {
+			log.Info("Skipping update of device without info", "device", device)
+			continue
+		} else {
+			log.Info("Preparing update of device", "id", device.Id)
+			dm.update <- d.WithImpl(shelly.NewDeviceFromInfo(ctx, log, device.Info))
+		}
+	}
 
 	// Loop on MQTT event devices discovery
 	err = dm.WatchMqtt(ctx, dm.mqttClient)

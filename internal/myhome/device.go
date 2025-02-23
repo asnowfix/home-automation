@@ -2,6 +2,7 @@ package myhome
 
 import (
 	"context"
+	"fmt"
 	"pkg/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -60,26 +61,73 @@ type GroupDevice struct {
 func UpdateDeviceFromShelly(ctx context.Context, log logr.Logger, d *Device, sd *shelly.Device, via types.Channel) {
 	log.Info("Updating device", "device", d)
 	if d.Info == nil {
-		d.Info = sd.Call(ctx, via, string(shelly.GetDeviceInfo), &shelly.DeviceInfo{}).(*shelly.DeviceInfo)
+		out, err := sd.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
+		if err != nil {
+			log.Error(err, "Unable to get device info (giving-up)")
+			return
+		}
+		d.Info = out.(*shelly.DeviceInfo)
 	}
-	if d.Components == nil {
-		d.Components = sd.Call(ctx, via, string(shelly.GetComponents), nil).(*shelly.ComponentsResponse).Components
-	}
-	if d.Config == nil {
-		d.Config = sd.Call(ctx, via, string(shelly.GetConfig), &shelly.Config{}).(*shelly.Config)
-	}
-	if d.Status == nil {
-		d.Status = sd.Call(ctx, via, string(shelly.GetStatus), &shelly.Status{}).(*shelly.Status)
-	}
-	if d.Config.System == nil {
-		d.Config.System = sd.Call(ctx, via, string(system.GetConfig), &system.Config{}).(*system.Config)
-	}
-	if d.Status.System == nil {
-		d.Status.System = sd.Call(ctx, via, string(system.GetStatus), &system.Status{}).(*system.Status)
-	}
-	d.MAC = sd.Info.MacAddress.String()
-	d.Host = sd.Ipv4().String()
-	// d.Name = d.Config.System.Device.Name
 	d.Manufacturer = "Shelly"
+	d.Id = d.Info.Id
+	d.MAC = sd.Info.MacAddress.String()
+
+	if d.Components == nil {
+		out, err := sd.CallE(ctx, via, shelly.GetComponents.String(), nil)
+		if err != nil {
+			log.Error(err, "Unable to get device's components (continuing)")
+		} else {
+			d.Components = out.(*shelly.ComponentsResponse).Components
+		}
+	}
+
+	if d.Config == nil {
+		out, err := sd.CallE(ctx, via, shelly.GetConfig.String(), nil)
+		if err != nil {
+			log.Error(err, "Unable to get device config (continuing)")
+		} else {
+			d.Config = out.(*shelly.Config)
+		}
+	}
+
+	if d.Config != nil && d.Config.System == nil {
+		out, err := sd.CallE(ctx, via, system.GetConfig.String(), &system.Config{})
+		if err != nil {
+			log.Error(err, "Unable to get device system config (continuing)")
+		} else {
+			d.Config.System = out.(*system.Config)
+		}
+	}
+
+	if d.Config != nil && d.Config.System != nil && d.Config.System.Device.Name != "" {
+		d.Name = d.Config.System.Device.Name
+	} else {
+		d.Name = d.Id
+	}
+
+	if d.Status == nil {
+		out, err := sd.CallE(ctx, via, shelly.GetStatus.String(), nil)
+		if err != nil {
+			log.Error(err, "Unable to get device status (continuing)")
+		} else {
+			d.Status = out.(*shelly.Status)
+		}
+	}
+
+	if d.Status != nil && d.Status.System == nil {
+		out, err := sd.CallE(ctx, via, system.GetStatus.String(), &system.Status{})
+		if err != nil {
+			log.Error(err, "Unable to get device system status (continuing)")
+		} else {
+			d.Status.System = out.(*system.Status)
+		}
+	}
+
+	if d.Status != nil && d.Status.Wifi != nil && d.Status.Wifi.IP != "" {
+		d.Host = d.Status.Wifi.IP
+	} else {
+		d.Host = fmt.Sprintf("%s.local.", d.Id)
+	}
+
 	log.Info("Updated device", "device", d)
 }

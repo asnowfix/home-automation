@@ -43,7 +43,7 @@ func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb
 		ch.log.Error(err, "Unable to marshal", "request", req)
 		return nil, err
 	}
-	ch.log.Info("Sending to", "device", device.Id(), "request", req)
+	// ch.log.Info("Sending to", "device", device.Id(), "request", req)
 	device.To() <- reqPayload
 
 	ch.log.Info("Waiting for response from", "device", device.Id(), "timeout", ch.timeout)
@@ -64,7 +64,7 @@ func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb
 		return nil, err
 	}
 
-	ch.log.Info("Received", "response", res)
+	// ch.log.Info("Received", "response", res)
 	if res.Error != nil {
 		return nil, fmt.Errorf("%v (code:%v)", res.Error.Message, res.Error.Code)
 	}

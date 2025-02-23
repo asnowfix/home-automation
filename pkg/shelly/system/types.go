@@ -17,9 +17,9 @@ type Config struct {
 		AddOnType    string           `json:"addon_type,omitempty"`
 	} `json:"device"`
 	Location struct {
-		TimeZone  string `json:"tz,omitempty"`
-		Latitude  string `json:"lat,omitempty"`
-		Longitude string `json:"lon,omitempty"`
+		TimeZone  string  `json:"tz,omitempty"`
+		Latitude  float32 `json:"lat,omitempty"`
+		Longitude float32 `json:"lon,omitempty"`
 	} `json:"location"`
 	Debug struct {
 		Mqtt struct {

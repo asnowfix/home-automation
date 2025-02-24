@@ -11,14 +11,12 @@ import (
 type server struct {
 	// mc      *mymqtt.Client
 	handler Server
-	cancel  context.CancelFunc
 	from    chan []byte
 	// to      chan []byte
 }
 
 type Server interface {
 	MethodE(method Verb) (*Method, error)
-	Shutdown()
 }
 
 func NewServerE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler Server) (Server, error) {
@@ -137,11 +135,4 @@ func (sp *server) fail(code int, err error, req *request, mc *mymqtt.Client) {
 
 func (sp *server) MethodE(method Verb) (*Method, error) {
 	return sp.handler.MethodE(method)
-}
-
-func (sp *server) Shutdown() {
-	if sp.cancel != nil {
-		sp.cancel()
-		sp.cancel = nil
-	}
 }

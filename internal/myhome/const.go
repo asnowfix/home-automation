@@ -2,6 +2,12 @@ package myhome
 
 const MYHOME string = "myhome"
 
+type Manufacturer string
+
+const (
+	Shelly Manufacturer = "Shelly"
+)
+
 type Verb string
 
 const (

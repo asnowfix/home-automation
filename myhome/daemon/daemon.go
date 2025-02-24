@@ -3,6 +3,7 @@ package daemon
 import (
 	"hlog"
 	"homectl/options"
+	"myhome/devices/impl"
 	"myhome/mqtt"
 	"myhome/storage"
 	"mymqtt"
@@ -10,8 +11,6 @@ import (
 	"time"
 
 	"myhome"
-
-	"myhome/devices"
 
 	"github.com/spf13/cobra"
 )
@@ -91,22 +90,20 @@ var Cmd = &cobra.Command{
 				return err
 			}
 
-			dm := devices.NewDeviceManager(log, storage, mc)
+			dm := impl.NewDeviceManager(cmd.Context(), storage, mc)
 			err = dm.Start(cmd.Context())
 			if err != nil {
 				log.Error(err, "Failed to start device manager")
 				return err
 			}
 
-			defer dm.Shutdown()
 			log.Info("Started device manager", "manager", dm)
 
-			ds, err := myhome.NewServerE(cmd.Context(), log, mc, dm)
+			_, err = myhome.NewServerE(cmd.Context(), log, mc, dm)
 			if err != nil {
 				log.Error(err, "Failed to start MyHome service")
 				return err
 			}
-			defer ds.Shutdown()
 		}
 
 		log.Info("Running")

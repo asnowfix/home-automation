@@ -5,7 +5,6 @@ import (
 	"devices/shelly/wifi"
 	"encoding/json"
 	"fmt"
-	"global"
 	"mymqtt"
 	"net"
 	"pkg/shelly/mqtt"
@@ -165,7 +164,6 @@ var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 func (d *Device) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
 	var mh types.MethodHandler
 	var err error
-	log := ctx.Value(global.LogKey).(logr.Logger)
 
 	switch reflect.TypeOf(method).PkgPath() {
 	case reflect.TypeOf(ListMethods).PkgPath():
@@ -175,14 +173,14 @@ func (d *Device) CallE(ctx context.Context, via types.Channel, method string, pa
 		// Sys.*
 		mh, err = registrar.MethodHandlerE(method)
 	default:
-		err = d.init(ctx)
+		err = d.Init(ctx)
 		if err != nil {
-			log.Error(err, "Unable to initialize device", "id", d.Id(), "host", d.Host)
+			d.log.Error(err, "Unable to initialize device", "id", d.Id(), "host", d.Host)
 			return nil, err
 		}
 		err = d.methods(ctx, via)
 		if err != nil {
-			log.Error(err, "Unable to get device's methods", "id", d.Id(), "host", d.Host)
+			d.log.Error(err, "Unable to get device's methods", "id", d.Id(), "host", d.Host)
 			return nil, err
 		}
 		mh, err = d.MethodHandlerE(method)
@@ -254,7 +252,7 @@ func NewDeviceFromInfo(ctx context.Context, log logr.Logger, info *DeviceInfo) *
 	return d
 }
 
-func (d *Device) init(ctx context.Context) error {
+func (d *Device) Init(ctx context.Context) error {
 	d.log.Info("Shelly.init", "id", d.Id_, "host", d.Host)
 
 	var via types.Channel
@@ -324,7 +322,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 			return err
 		}
 		d.Components = out.(*ComponentsResponse).Components
-		d.log.Info("Shelly.GetComponents", "components", *d.Components)
+		d.log.Info("Shelly.GetComponents", " id", d.Id(), "components", *d.Components)
 	}
 
 	if d.Methods == nil {

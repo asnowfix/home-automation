@@ -58,6 +58,7 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 					}
 				}
 
+				sd.MqttOk(true)
 				log.Info("Updating device", "device", device)
 				err = UpdateFromMqttEvent(ctx, device, event)
 				if err != nil {

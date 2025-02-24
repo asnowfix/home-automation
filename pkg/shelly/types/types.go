@@ -19,20 +19,25 @@ type Device interface {
 	ReplyTo() string
 	To() chan<- []byte
 	From() <-chan []byte
+	MqttOk(ok bool) // When MQTT dialog was successful or an MQTT event was received
+	Channel(Channel) Channel
 }
 
 type DeviceCaller func(ctx context.Context, device Device, mh MethodHandler, out any, params any) (any, error)
 
 type Channel uint
 
+var Channels = [...]string{"default", "http", "mqtt", "udp"}
+
 const (
-	ChannelHttp Channel = iota
+	ChannelDefault Channel = iota
+	ChannelHttp
 	ChannelMqtt
 	ChannelUdp
 )
 
 func (ch Channel) String() string {
-	return [...]string{"Http", "Mqtt", "Udp"}[ch]
+	return Channels[ch]
 }
 
 type MethodHandler struct {

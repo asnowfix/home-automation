@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net"
 	"strconv"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
@@ -52,9 +51,9 @@ func NewDeviceFromZeroConfEntry(log logr.Logger, entry *zeroconf.ServiceEntry) (
 	}
 
 	d := &Device{
-		Id_:     strings.ToLower(nameRe.ReplaceAllString(entry.HostName, "${id}")),
+		Id_:     entry.Instance,
 		Service: entry.Service,
-		Host:    strings.ToLower(entry.HostName),
+		Host:    ip.String(),
 		Ipv4_:   ip,
 		Port:    entry.Port,
 		Product: Product{

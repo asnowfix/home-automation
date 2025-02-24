@@ -91,7 +91,11 @@ func Init(log logr.Logger, timeout time.Duration) {
 		HttpMethod: http.MethodPost,
 	})
 
-	// TODO complete the lsit of handlers
+	// TODO complete the list of handlers
+
+	registrar.RegisterDeviceCaller(types.ChannelDefault, func(ctx context.Context, d types.Device, mh types.MethodHandler, out any, params any) (any, error) {
+		return nil, fmt.Errorf("not implemented")
+	})
 
 	system.Init(log, &registrar)
 	input.Init(log, &registrar)
@@ -159,9 +163,9 @@ func (r *Registrar) RegisterDeviceCaller(ch types.Channel, dc types.DeviceCaller
 	r.channels[ch] = dc
 }
 
-func (r *Registrar) CallE(ctx context.Context, d types.Device, ch types.Channel, mh types.MethodHandler, params any) (any, error) {
+func (r *Registrar) CallE(ctx context.Context, d types.Device, via types.Channel, mh types.MethodHandler, params any) (any, error) {
 	out := mh.Allocate()
-	// r.log.Info("Calling", "channel", ch, "method", mh.Method, "http_method", mh.HttpMethod, "params", params, "out_type", reflect.TypeOf(out))
-	r.log.Info("Calling", "channel", ch, "params", params, "out_type", reflect.TypeOf(out))
-	return r.channels[ch](ctx, d, mh, out, params)
+	via = d.Channel(via)
+	r.log.Info("Calling", "channel", via, "params", params, "out_type", reflect.TypeOf(out))
+	return r.channels[via](ctx, d, mh, out, params)
 }

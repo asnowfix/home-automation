@@ -44,7 +44,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 				if err != nil {
 					sd, err := shelly.NewDeviceFromZeroConfEntry(log, entry)
 					if err != nil {
-						log.Error(err, "Failed to parse device from zeroconf entry", "entry", entry)
+						log.Error(err, "Failed to create device from zeroconf entry", "entry", entry)
 						continue
 					}
 					device, err = myhome.NewDeviceFromShellyDevice(ctx, log, sd)
@@ -52,6 +52,8 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 						log.Error(err, "Failed to create device from shelly device", "entry", entry)
 						continue
 					}
+				} else {
+					device = device.WithZeroConfEntry(entry)
 				}
 				dm.UpdateChannel() <- device
 			}

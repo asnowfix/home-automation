@@ -52,13 +52,12 @@ Functions
 [x] Timeout on missing/non-responsive devices/server
 [x] Ctrl-C should stop myhome program (whatever the option)
 [ ] Fix inbound IPv6 communication
-[ ] Fix Unhandled device type device
+[x] Fix Unhandled device type device
 
         9:34AM ERR devices/impl/manager.go:121 > Unhandled device type device={"components":null,"config":{"ble":{"enable":true,"observer":{"enable":true},"rpc":{"enable":true}},"cloud":{"enable":true,"server":"shelly-78-eu.shelly.cloud:6022/jrpc"},"input:0":{"auto_off":false,"auto_off_delay":0,"auto_on":false,"auto_on_delay":0,"id":0,"in_mode":"","initial_state":"","name":null},"mqtt":{"client_id":"shelly1minig3-54320464f17c","enable":true,"enable_control":true,"rpc_ntf":true,"server":"192.168.1.2:1883","status_ntf":true,"topic_prefix":"shelly1minig3-54320464f17c","use_client_cert":false},"switch:0":{"auto_off":false,"auto_off_delay":60,"auto_on":false,"auto_on_delay":60,"id":0,"in_mode":"follow","initial_state":"off","name":"Lumière Escalier Exterieur"},"system":{"cfg_rev":23,"debug":{"mqtt":{"enable":false},"udp":{"enable":false},"websocket":{"enable":false}},"device":{"discoverable":true,"eco_mode":false,"fw_id":"20231121-110944/1.1.99-minig3prod1-ga898543","mac":"54320464F17C","name":"light-outside-steps","profile":""},"location":{"lat":43.6611,"lon":6.9808,"tz":"Europe/Paris"},"rpc_udp":{"dst_addr":{"IP":"","Zone":""}},"sntp":{"server":"time.google.com"}},"wifi":{"ap":{"password":"","ssid":"Shelly1MiniG3-54320464F17C"},"mode":"","password":"","ssid":"","sta":{"password":"","ssid":"Shelly1MiniG3-54320464A1D0"},"sta1":{"password":"","ssid":"Linksys_7A50-guest"}},"ws":{"enable":false,"server":null,"ssl_ca":"ca.pem"}},"config_revision":0,"host":"shelly1minig3-54320464f17c.local.","id":"shelly1minig3-54320464f17c","info":{"app":"Mini1G3","auth_en":false,"discoverable":false,"fw_id":"20231121-110944/1.1.99-minig3prod1-ga898543","gen":3,"id":"shelly1minig3-54320464f17c","mac":"54320464F17C","model":"S3SW-001X8EU","ver":"1.1.99-minig3prod1"},"mac":"e7:8d:f6:d3:8e:b8:17:5e:c2","manufacturer":"Shelly","name":"light-outside-steps","status":{"ble":{},"cloud":{"connected":true},"input:0":{"id":0,"state":false},"mqtt":{"connected":true},"switch:0":{"aenergy":{"by_minute":null,"minute_ts":0,"total":0},"errors":null,"freq":0,"id":0,"input":{"id":0,"state":false},"output":false,"pf":0,"source":"loopback","temperature":{"tC":41.1,"tF":106}},"wifi":{"ip":"","ssid":"Shelly1MiniG3-54320464A1D0","strength":0},"ws":{"connected":false}}} logger=DeviceManager/DeviceManager#DeviceChannel type=null
- [ ] Fix timeout on MQTT
+ [ ] Fix timeout on MQTT (always on Shelly.GetComponents)
 
-        9:34AM INF ../mymqtt/mqtt.go:323 > Waiting for message logger=Client#Publisher:shellyplus1-08b61fcfe6c0/rpc topic=shellyplus1-08b61fcfe6c0/rpc v=0
-        9:34AM ERR ../pkg/shelly/mqtt/channel.go:54 > Timeout waiting for response from device=shellyplus1-08b61fcfe6c0 logger=mqtt timeout=5s
+        12:10AM ERR ../pkg/shelly/mqtt/channel.go:54 > Timeout waiting for response from device=shellypro1-30c6f782d274 logger=mqtt timeout=5s to verb=Shelly.GetComponents
 
 Integration
 -----------

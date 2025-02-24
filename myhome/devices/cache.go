@@ -60,7 +60,7 @@ func (c *Cache) insert(d *myhome.Device) (*myhome.Device, error) {
 	c.devicesByMAC[d.MAC] = d
 	c.devicesByHost[d.Host] = d
 	c.devicesByName[d.Name] = d
-	c.log.Info("inserted", "device", *d)
+	c.log.Info("inserted/updated device", "id", d.Id, "name", d.Name)
 	return d, nil
 }
 

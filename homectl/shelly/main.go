@@ -22,14 +22,18 @@ var Cmd = &cobra.Command{
 		log := hlog.Logger
 		log.Info("Init Shelly client API")
 		shelly.Init(log, hopts.Flags.MqttTimeout)
-		if options.Flags.ViaHttp {
-			options.Via = types.ChannelHttp
+
+		for i, c := range types.Channels {
+			if options.Flags.Via == c {
+				options.Via = types.Channel(i)
+				break
+			}
 		}
 	},
 }
 
 func init() {
-	Cmd.PersistentFlags().BoolVarP(&options.Flags.ViaHttp, "via-http", "H", false, "Use HTTP channel to communicate with Shelly devices")
+	Cmd.PersistentFlags().StringVarP(&options.Flags.Via, "via", "V", types.ChannelDefault.String(), "Use given channel to communicate with Shelly devices (default is to discover it from the network)")
 
 	Cmd.AddCommand(jobsCtl.Cmd)
 	Cmd.AddCommand(mqttCtl.Cmd)

@@ -9,6 +9,7 @@ import (
 	"pkg/shelly/types"
 
 	"github.com/go-logr/logr"
+	"github.com/grandcat/zeroconf"
 )
 
 type DeviceIdentifier struct {
@@ -182,4 +183,13 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 	}
 
 	d.log.Info("Updated device", "device", d)
+}
+
+func (d *Device) WithZeroConfEntry(entry *zeroconf.ServiceEntry) *Device {
+	d.log.Info("Updating device", "id", d.Id, "zeroconf entry", entry)
+	if len(entry.AddrIPv4) > 0 {
+		return d.WithHost(string(entry.AddrIPv4[0]))
+	} else {
+		return d.WithHost(entry.HostName)
+	}
 }

@@ -29,12 +29,6 @@ type Product struct {
 
 type State uint
 
-const (
-	New State = iota
-	HttpOk
-	MqttOk
-)
-
 type Device struct {
 	Product
 	Id_        string        `json:"id"`
@@ -45,7 +39,7 @@ type Device struct {
 	Info       *DeviceInfo   `json:"info"`
 	Methods    []string      `json:"methods"`
 	Components *[]Component  `json:"-"`
-	state      State         `json:"-"`
+	isMqttOk   bool          `json:"-"`
 	me         string        `json:"-"`
 	to         chan<- []byte `json:"-"` // channel to send messages to
 	from       <-chan []byte `json:"-"` // channel to receive messages from
@@ -58,6 +52,23 @@ func (d *Device) Id() string {
 
 func (d *Device) Ipv4() net.IP {
 	return d.Ipv4_
+}
+
+func (d *Device) MqttOk(ok bool) {
+	d.isMqttOk = ok
+}
+
+func (d *Device) Channel(via types.Channel) types.Channel {
+	if via != types.ChannelDefault {
+		return via
+	}
+	if d.isMqttOk {
+		return types.ChannelMqtt
+	}
+	if d.Host != "" {
+		return types.ChannelHttp
+	}
+	return types.ChannelDefault
 }
 
 type MethodsResponse struct {
@@ -225,7 +236,6 @@ func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) *Device {
 	d := &Device{
 		Ipv4_: ip,
 		Host:  ip.String(),
-		state: New,
 		log:   log,
 	}
 	return d
@@ -233,21 +243,19 @@ func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) *Device {
 
 func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string, mc *mymqtt.Client) *Device {
 	d := &Device{
-		Id_:   id,
-		Host:  fmt.Sprintf("%s.local.", id),
-		state: New,
-		log:   log,
+		Id_:  id,
+		Host: fmt.Sprintf("%s.local.", id),
+		log:  log,
 	}
 	return d
 }
 
 func NewDeviceFromInfo(ctx context.Context, log logr.Logger, info *DeviceInfo) *Device {
 	d := &Device{
-		Id_:   info.Id,
-		Host:  fmt.Sprintf("%s.local.", info.Id),
-		Info:  info,
-		state: New,
-		log:   log,
+		Id_:  info.Id,
+		Host: fmt.Sprintf("%s.local.", info.Id),
+		Info: info,
+		log:  log,
 	}
 	return d
 }
@@ -255,21 +263,23 @@ func NewDeviceFromInfo(ctx context.Context, log logr.Logger, info *DeviceInfo) *
 func (d *Device) Init(ctx context.Context) error {
 	d.log.Info("Shelly.init", "id", d.Id_, "host", d.Host)
 
-	var via types.Channel
 	var err error
 	var mc *mymqtt.Client
 
-	if d.Id_ == "" {
-		via = types.ChannelHttp
-	} else {
-		via = types.ChannelMqtt
-		mc, err = mymqtt.GetClientE(ctx)
-		if err != nil {
-			d.log.Error(err, "Unable to get MQTT client for the current process")
-			return err
-		}
-		d.me = fmt.Sprintf("%s_%s", mc.Id(), d.Id_)
+	if d.Id_ == "" && d.Host == "" {
+		return fmt.Errorf("device id & host is empty")
 	}
+
+	if d.Id_ != "" && d.Host == "" {
+		d.Host = fmt.Sprintf("%s.local.", d.Id_)
+	}
+
+	mc, err = mymqtt.GetClientE(ctx)
+	if err != nil {
+		d.log.Error(err, "Unable to get MQTT client for the current process")
+		return err
+	}
+	d.me = fmt.Sprintf("%s_%s", mc.Id(), d.Id_)
 
 	if d.from == nil && mc != nil {
 		d.from, err = mc.Subscriber(ctx, fmt.Sprintf("%s/rpc", d.me), 1 /*qlen*/)
@@ -294,7 +304,7 @@ func (d *Device) Init(ctx context.Context) error {
 			d.log.Error(err, "Unable to get method handler", "method", GetDeviceInfo)
 			return err
 		}
-		di, err := GetRegistrar().CallE(ctx, d, via, mh, map[string]interface{}{"ident": true})
+		di, err := GetRegistrar().CallE(ctx, d, types.ChannelDefault, mh, map[string]interface{}{"ident": true})
 		if err != nil {
 			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
 			return err

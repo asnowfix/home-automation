@@ -1,12 +1,9 @@
 package options
 
-import (
-	"pkg/shelly/types"
-)
+import "pkg/shelly/types"
 
 var Flags struct {
-	ViaHttp bool
-	Devices string
+	Via string
 }
 
-var Via types.Channel = types.ChannelMqtt
+var Via types.Channel

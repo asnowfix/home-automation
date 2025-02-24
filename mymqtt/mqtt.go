@@ -320,7 +320,7 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan [
 
 	go func(log logr.Logger) {
 		for {
-			log.Info("Waiting for message", "topic", topic)
+			// log.Info("Waiting for message", "topic", topic)
 			select {
 			case <-ctx.Done():
 				log.Error(ctx.Err(), "Context done", "topic", topic)
@@ -360,7 +360,7 @@ func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (chan 
 
 	token := c.mqtt.Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
 		go func() {
-			c.log.Info("Received", "from topic", msg.Topic(), "payload", string(msg.Payload()))
+			// c.log.Info("Received", "from topic", msg.Topic(), "payload", string(msg.Payload()))
 			mch <- msg.Payload()
 		}()
 	})

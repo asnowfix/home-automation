@@ -3,6 +3,7 @@ package myhome
 import (
 	"context"
 	"fmt"
+	"net"
 	"pkg/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -31,6 +32,40 @@ type Device struct {
 	Info           *shelly.DeviceInfo  `db:"-" json:"info"`
 	Config         *shelly.Config      `db:"-" json:"config"`
 	Status         *shelly.Status      `db:"-" json:"status"`
+	impl           any                 `db:"-" json:"-"` // Reference to the inner implementation
+	log            logr.Logger         `db:"-" json:"-"`
+}
+
+func (d *Device) WithImpl(i any) *Device {
+	d.impl = i
+	return d
+}
+
+func (d *Device) Impl() any {
+	return d.impl
+}
+
+func NewDevice(log logr.Logger, manufacturer Manufacturer, id string) *Device {
+	d := &Device{}
+	d.log = log
+	d.Manufacturer = string(manufacturer)
+	d.Id = id
+	return d
+}
+
+func (d *Device) WithMAC(mac net.HardwareAddr) *Device {
+	d.MAC = mac.String()
+	return d
+}
+
+func (d *Device) WithHost(host string) *Device {
+	d.Host = host
+	return d
+}
+
+func (d *Device) WithName(name string) *Device {
+	d.Name = name
+	return d
 }
 
 type Devices struct {
@@ -58,24 +93,41 @@ type GroupDevice struct {
 	Group        string `db:"group" json:"group"`
 }
 
-func UpdateDeviceFromShelly(ctx context.Context, log logr.Logger, d *Device, sd *shelly.Device, via types.Channel) {
-	log.Info("Updating device", "device", d)
+func NewDeviceFromShellyDevice(ctx context.Context, log logr.Logger, sd *shelly.Device) (*Device, error) {
+	err := sd.Init(ctx)
+	if err != nil {
+		log.Error(err, "Unable to initialize device")
+		return nil, err
+	}
+
+	d := NewDevice(log, Shelly, sd.Id())
+	d = d.WithImpl(sd)
+	d = d.WithMAC(sd.Info.MacAddress)
+	d = d.WithHost(sd.Ipv4().String())
+	// d = d.WithName(sd.Config.Sys.DeviceName)
+
+	return d, nil
+}
+
+func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via types.Channel) {
+	d.log.Info("Updating device", "device", d)
 	if d.Info == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
 		if err != nil {
-			log.Error(err, "Unable to get device info (giving-up)")
+			d.log.Error(err, "Unable to get device info (giving-up)")
 			return
 		}
 		d.Info = out.(*shelly.DeviceInfo)
 	}
-	d.Manufacturer = "Shelly"
+	// d.Manufacturer = devices.Shelly
+
 	d.Id = d.Info.Id
 	d.MAC = sd.Info.MacAddress.String()
 
 	if d.Components == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetComponents.String(), nil)
 		if err != nil {
-			log.Error(err, "Unable to get device's components (continuing)")
+			d.log.Error(err, "Unable to get device's components (continuing)")
 		} else {
 			d.Components = out.(*shelly.ComponentsResponse).Components
 		}
@@ -84,7 +136,7 @@ func UpdateDeviceFromShelly(ctx context.Context, log logr.Logger, d *Device, sd 
 	if d.Config == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetConfig.String(), nil)
 		if err != nil {
-			log.Error(err, "Unable to get device config (continuing)")
+			d.log.Error(err, "Unable to get device config (continuing)")
 		} else {
 			d.Config = out.(*shelly.Config)
 		}
@@ -93,7 +145,7 @@ func UpdateDeviceFromShelly(ctx context.Context, log logr.Logger, d *Device, sd 
 	if d.Config != nil && d.Config.System == nil {
 		out, err := sd.CallE(ctx, via, system.GetConfig.String(), &system.Config{})
 		if err != nil {
-			log.Error(err, "Unable to get device system config (continuing)")
+			d.log.Error(err, "Unable to get device system config (continuing)")
 		} else {
 			d.Config.System = out.(*system.Config)
 		}
@@ -108,7 +160,7 @@ func UpdateDeviceFromShelly(ctx context.Context, log logr.Logger, d *Device, sd 
 	if d.Status == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetStatus.String(), nil)
 		if err != nil {
-			log.Error(err, "Unable to get device status (continuing)")
+			d.log.Error(err, "Unable to get device status (continuing)")
 		} else {
 			d.Status = out.(*shelly.Status)
 		}
@@ -117,7 +169,7 @@ func UpdateDeviceFromShelly(ctx context.Context, log logr.Logger, d *Device, sd 
 	if d.Status != nil && d.Status.System == nil {
 		out, err := sd.CallE(ctx, via, system.GetStatus.String(), &system.Status{})
 		if err != nil {
-			log.Error(err, "Unable to get device system status (continuing)")
+			d.log.Error(err, "Unable to get device system status (continuing)")
 		} else {
 			d.Status.System = out.(*system.Status)
 		}
@@ -129,5 +181,5 @@ func UpdateDeviceFromShelly(ctx context.Context, log logr.Logger, d *Device, sd 
 		d.Host = fmt.Sprintf("%s.local.", d.Id)
 	}
 
-	log.Info("Updated device", "device", d)
+	d.log.Info("Updated device", "device", d)
 }

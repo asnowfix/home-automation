@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"global"
-	"net"
 	"net/http"
 	"net/url"
 	"pkg/shelly/types"
@@ -29,9 +28,9 @@ func (ch *HttpChannel) callE(ctx context.Context, device types.Device, verb type
 
 	switch verb.HttpMethod {
 	case http.MethodGet:
-		res, err = ch.getE(ctx, device.Ipv4(), verb.Method, params)
+		res, err = ch.getE(ctx, device.Host(), verb.Method, params)
 	default:
-		res, err = ch.postE(ctx, device.Ipv4(), http.MethodPost, verb.Method, params)
+		res, err = ch.postE(ctx, device.Host(), http.MethodPost, verb.Method, params)
 	}
 
 	if err != nil {
@@ -49,7 +48,7 @@ func (ch *HttpChannel) callE(ctx context.Context, device types.Device, verb type
 
 }
 
-func (ch *HttpChannel) getE(ctx context.Context, ip net.IP, cmd string, params any) (*http.Response, error) {
+func (ch *HttpChannel) getE(ctx context.Context, host string, cmd string, params any) (*http.Response, error) {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 
 	values := url.Values{}
@@ -72,7 +71,7 @@ func (ch *HttpChannel) getE(ctx context.Context, ip net.IP, cmd string, params a
 		qs = fmt.Sprintf("?%s", values.Encode())
 	}
 
-	requestURL := fmt.Sprintf("http://%s/rpc/%s%s", ip, cmd, qs)
+	requestURL := fmt.Sprintf("http://%s/rpc/%s%s", host, cmd, qs)
 	log.Info("Calling", "method", http.MethodGet, "url", requestURL)
 
 	res, err := http.Get(requestURL)
@@ -85,7 +84,7 @@ func (ch *HttpChannel) getE(ctx context.Context, ip net.IP, cmd string, params a
 	return res, err
 }
 
-func (ch *HttpChannel) postE(ctx context.Context, ip net.IP, hm string, cmd string, params any) (*http.Response, error) {
+func (ch *HttpChannel) postE(ctx context.Context, host string, hm string, cmd string, params any) (*http.Response, error) {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 
 	var requestURL string
@@ -105,9 +104,9 @@ func (ch *HttpChannel) postE(ctx context.Context, ip net.IP, hm string, cmd stri
 		if err != nil {
 			return nil, err
 		}
-		requestURL = fmt.Sprintf("http://%s/rpc", ip)
+		requestURL = fmt.Sprintf("http://%s/rpc", host)
 	} else {
-		requestURL = fmt.Sprintf("http://%s/rpc/%s", ip, cmd)
+		requestURL = fmt.Sprintf("http://%s/rpc/%s", host, cmd)
 		if params != nil {
 			jsonData, err = json.Marshal(params)
 			if err != nil {

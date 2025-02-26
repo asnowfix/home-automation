@@ -2,7 +2,6 @@ package types
 
 import (
 	"context"
-	"net"
 )
 
 type MethodsRegistrar interface {
@@ -13,7 +12,7 @@ type MethodsRegistrar interface {
 
 type Device interface {
 	String() string
-	Ipv4() net.IP
+	Host() string
 	Id() string
 	CallE(ctx context.Context, via Channel, method string, params any) (any, error)
 	ReplyTo() string

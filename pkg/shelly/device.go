@@ -33,8 +33,7 @@ type Device struct {
 	Product
 	Id_        string        `json:"id"`
 	Service    string        `json:"service"`
-	Host       string        `json:"host"`
-	Ipv4_      net.IP        `json:"ipv4"`
+	Host_      string        `json:"host"`
 	Port       int           `json:"port"`
 	Info       *DeviceInfo   `json:"info"`
 	Methods    []string      `json:"methods"`
@@ -50,8 +49,12 @@ func (d *Device) Id() string {
 	return d.Id_
 }
 
-func (d *Device) Ipv4() net.IP {
-	return d.Ipv4_
+func (d *Device) Host() string {
+	return d.Host_
+}
+
+func (d *Device) SetHost(host string) {
+	d.Host_ = host
 }
 
 func (d *Device) MqttOk(ok bool) {
@@ -65,7 +68,7 @@ func (d *Device) Channel(via types.Channel) types.Channel {
 	if d.isMqttOk {
 		return types.ChannelMqtt
 	}
-	if d.Host != "" {
+	if d.Host() != "" {
 		return types.ChannelHttp
 	}
 	return types.ChannelDefault
@@ -186,12 +189,12 @@ func (d *Device) CallE(ctx context.Context, via types.Channel, method string, pa
 	default:
 		err = d.Init(ctx)
 		if err != nil {
-			d.log.Error(err, "Unable to initialize device", "id", d.Id(), "host", d.Host)
+			d.log.Error(err, "Unable to initialize device", "id", d.Id(), "host", d.Host())
 			return nil, err
 		}
 		err = d.methods(ctx, via)
 		if err != nil {
-			d.log.Error(err, "Unable to get device's methods", "id", d.Id(), "host", d.Host)
+			d.log.Error(err, "Unable to get device's methods", "id", d.Id(), "host", d.Host())
 			return nil, err
 		}
 		mh, err = d.MethodHandlerE(method)
@@ -234,8 +237,7 @@ func (d *Device) ReplyTo() string {
 
 func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) *Device {
 	d := &Device{
-		Ipv4_: ip,
-		Host:  ip.String(),
+		Host_: ip.String(),
 		log:   log,
 	}
 	return d
@@ -243,35 +245,33 @@ func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) *Device {
 
 func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string, mc *mymqtt.Client) *Device {
 	d := &Device{
-		Id_:  id,
-		Host: fmt.Sprintf("%s.local.", id),
-		log:  log,
+		Id_:   id,
+		Host_: fmt.Sprintf("%s.local.", id),
+		log:   log,
 	}
 	return d
 }
 
 func NewDeviceFromInfo(ctx context.Context, log logr.Logger, info *DeviceInfo) *Device {
 	d := &Device{
-		Id_:  info.Id,
-		Host: fmt.Sprintf("%s.local.", info.Id),
-		Info: info,
-		log:  log,
+		Id_:   info.Id,
+		Host_: fmt.Sprintf("%s.local.", info.Id),
+		Info:  info,
+		log:   log,
 	}
 	return d
 }
 
 func (d *Device) Init(ctx context.Context) error {
-	d.log.Info("Shelly.init", "id", d.Id_, "host", d.Host)
-
 	var err error
 	var mc *mymqtt.Client
 
-	if d.Id_ == "" && d.Host == "" {
+	if d.Id() == "" && d.Host() == "" {
 		return fmt.Errorf("device id & host is empty")
 	}
 
-	if d.Id_ != "" && d.Host == "" {
-		d.Host = fmt.Sprintf("%s.local.", d.Id_)
+	if d.Id() != "" && d.Host() == "" {
+		d.SetHost(fmt.Sprintf("%s.local.", d.Id()))
 	}
 
 	mc, err = mymqtt.GetClientE(ctx)
@@ -319,8 +319,6 @@ func (d *Device) Init(ctx context.Context) error {
 }
 
 func (d *Device) methods(ctx context.Context, via types.Channel) error {
-	d.log.Info("Shelly.methods", "id", d.Id_, "host", d.Host)
-
 	if d.Components == nil {
 		mh, err := GetRegistrar().MethodHandlerE(GetComponents.String())
 		if err != nil {
@@ -332,7 +330,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 			return err
 		}
 		d.Components = out.(*ComponentsResponse).Components
-		d.log.Info("Shelly.GetComponents", " id", d.Id(), "components", *d.Components)
+		d.log.Info("response", "verb", GetComponents, "id", d.Id(), "components", *d.Components)
 	}
 
 	if d.Methods == nil {

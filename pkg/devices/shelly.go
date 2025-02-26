@@ -17,11 +17,7 @@ func (d ShellyDevice) Provider() string {
 }
 
 func (d ShellyDevice) Name() string {
-	return d.shelly.Host
-}
-
-func (d ShellyDevice) Ip() net.IP {
-	return d.shelly.Ipv4()
+	return d.shelly.Host()
 }
 
 func (d ShellyDevice) Mac() net.HardwareAddr {

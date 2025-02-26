@@ -104,7 +104,7 @@ func NewDeviceFromShellyDevice(ctx context.Context, log logr.Logger, sd *shelly.
 	d := NewDevice(log, Shelly, sd.Id())
 	d = d.WithImpl(sd)
 	d = d.WithMAC(sd.Info.MacAddress)
-	d = d.WithHost(sd.Ipv4().String())
+	d = d.WithHost(sd.Host())
 	// d = d.WithName(sd.Config.Sys.DeviceName)
 
 	return d, nil

@@ -53,8 +53,7 @@ func NewDeviceFromZeroConfEntry(log logr.Logger, entry *zeroconf.ServiceEntry) (
 	d := &Device{
 		Id_:     entry.Instance,
 		Service: entry.Service,
-		Host:    ip.String(),
-		Ipv4_:   ip,
+		Host_:   ip.String(),
 		Port:    entry.Port,
 		Product: Product{
 			Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),

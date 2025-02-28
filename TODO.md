@@ -10,7 +10,8 @@ License
 Functions
 ---------
 
-[ ] Get IP addresses in the 'host' column of the 'devices' table
+[ ] Check/force MQTT configuration
+[x] Get IP addresses in the 'host' column of the 'devices' table
 [ ] Create/Configure scripts in a single operation
 [x] Status for one / multiple scripts in a single operation
 [ ] Run simple JavaScript in a single operation

@@ -160,8 +160,8 @@ type ComponentsResponse struct {
 
 type Component struct {
 	Key     string                         `json:"key"`    // Component's key (in format <type>:<cid>, for example boolean:200)
-	Status  interface{}                    `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
-	Config  interface{}                    `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
+	Status  map[string]any                 `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
+	Config  map[string]any                 `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
 	Methods map[string]types.MethodHandler `json:"-"`
 }
 
@@ -304,7 +304,7 @@ func (d *Device) Init(ctx context.Context) error {
 			d.log.Error(err, "Unable to get method handler", "method", GetDeviceInfo)
 			return err
 		}
-		di, err := GetRegistrar().CallE(ctx, d, types.ChannelDefault, mh, map[string]interface{}{"ident": true})
+		di, err := GetRegistrar().CallE(ctx, d, types.ChannelDefault, mh, map[string]any{"ident": true})
 		if err != nil {
 			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
 			return err
@@ -336,6 +336,55 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 		d.log.Info("response", "verb", GetComponents, "id", d.Id(), "components", *d.Components)
 	}
 
+	if d.Components != nil {
+		var mqttComponent *Component
+		for _, c := range *d.Components {
+			if c.Key == "mqtt" {
+				mqttComponent = &c
+				break
+			}
+		}
+
+		mc, err := mymqtt.GetClientE(ctx)
+		if err != nil {
+			d.log.Error(err, "Unable to get MQTT client")
+			return err
+		}
+
+		if mqttComponent != nil {
+			// "mqtt": {
+			// 	"client_id": "shellyplus1-08b61fd9d708",
+			// 	"enable": true,
+			// 	"enable_control": true,
+			// 	"rpc_ntf": true,
+			// 	"server": "192.168.1.2:1883",
+			// 	"status_ntf": true,
+			// 	"topic_prefix": "shellyplus1-08b61fd9d708",
+			// 	"use_client_cert": false
+			// }
+			brokerUrl := mc.BrokerUrl().Host
+			if mqttComponent.Config == nil || mqttComponent.Config["server"].(string) != brokerUrl {
+				d.log.Info("Configuring MQTT", "broker", brokerUrl)
+				mh, err := GetRegistrar().MethodHandlerE(mqtt.SetConfig.String())
+				if err != nil {
+					d.log.Error(err, "Unable to get method handler", "method", mqtt.SetConfig)
+					return err
+				}
+				_, err = GetRegistrar().CallE(ctx, d, via, mh, &mqtt.Config{
+					Enable:        true,
+					Server:        brokerUrl,
+					RpcNotifs:     true,
+					StatusNotifs:  true,
+					EnableControl: true,
+				})
+				if err != nil {
+					d.log.Error(err, "Unable to set MQTT config")
+					return err
+				}
+			}
+		}
+	}
+
 	if d.Methods == nil {
 		mh, err := GetRegistrar().MethodHandlerE(ListMethods.String())
 		if err != nil {
@@ -348,6 +397,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 			return err
 		}
 
+		// TODO: implement dynamic method binding
 		d.Methods = m.(*MethodsResponse).Methods
 		// d.log.Info("Shelly.ListMethods", "methods", d.Methods)
 

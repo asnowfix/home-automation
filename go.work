@@ -25,7 +25,7 @@ use (
 	./myhome/daemon
 	./myhome/daemon/watch
 	./myhome/devices
-	myhome/devices/impl
+	./myhome/devices/impl
 	./myhome/http
 	./myhome/mqtt
 	./myhome/storage

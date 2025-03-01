@@ -3,7 +3,7 @@ package temperature
 // The status of the Temperature component represents the measurement of the associated temperature sensor. To obtain the status of the Temperature component its id must be specified.
 type Status struct {
 	// Id of the Temperature component instance
-	Id uint `json:"id"`
+	Id uint32 `json:"id"`
 	// Temperature in Celsius (null if valid value could not be obtained)
 	Celsius float32 `json:"tC,omitempty"`
 	// Temperature in Fahrenheit (null if valid value could not be obtained)

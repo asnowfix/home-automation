@@ -33,8 +33,8 @@ type XmlHost struct {
 	Ip        net.IP           `xml:"ip,attr"`
 	Mac       net.HardwareAddr `xml:"mac,attr"`
 	Interface string           `xml:"iface,attr"`
-	Probe     uint             `xml:"probe,attr"`
-	Alive     uint             `xml:"alive,attr"`
+	Probe     uint32           `xml:"probe,attr"`
+	Alive     uint32           `xml:"alive,attr"`
 	Status    string           `xml:"status,attr"`
 }
 

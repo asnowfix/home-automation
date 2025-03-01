@@ -38,7 +38,7 @@ type PutCodeRequest struct {
 }
 
 type PutCodeResponse struct {
-	Length uint32 `json:"len"` // The total code length in bytes
+	Length uint `json:"len"` // The total code length in bytes
 }
 
 type GetCodeRequest struct {

@@ -2,7 +2,6 @@ package myhome
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"pkg/shelly"
 	"pkg/shelly/system"
@@ -28,13 +27,14 @@ type DeviceSummary struct {
 
 type Device struct {
 	DeviceSummary
-	ConfigRevision int                 `db:"config_revision" json:"config_revision"`
-	Components     *[]shelly.Component `db:"-" json:"components"`
-	Info           *shelly.DeviceInfo  `db:"-" json:"info"`
-	Config         *shelly.Config      `db:"-" json:"config"`
-	Status         *shelly.Status      `db:"-" json:"status"`
-	impl           any                 `db:"-" json:"-"` // Reference to the inner implementation
-	log            logr.Logger         `db:"-" json:"-"`
+	ConfigRevision uint32             `db:"config_revision" json:"config_revision"`
+	Info           *shelly.DeviceInfo `db:"-" json:"info"`
+	Config         *shelly.Config     `db:"-" json:"config"`
+	Status         *shelly.Status     `db:"-" json:"status"`
+	StatusChanged  bool               `db:"-" json:"-"`
+	impl           any                `db:"-" json:"-"` // Reference to the inner implementation
+	log            logr.Logger        `db:"-" json:"-"`
+	// Components     *[]shelly.Component `db:"-" json:"components"`
 }
 
 func (d *Device) WithImpl(i any) *Device {
@@ -110,36 +110,48 @@ func NewDeviceFromShellyDevice(ctx context.Context, log logr.Logger, sd *shelly.
 	return d, nil
 }
 
-func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via types.Channel) {
+func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via types.Channel) bool {
+	updated := d.StatusChanged
+	d.StatusChanged = false
+
 	d.log.Info("Updating device", "device", d)
 	if d.Info == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device info (giving-up)")
-			return
+			return updated
 		}
 		d.Info = out.(*shelly.DeviceInfo)
+		updated = true
 	}
 	// d.Manufacturer = devices.Shelly
 
-	d.Id = d.Info.Id
-	d.MAC = sd.Info.MacAddress.String()
-
-	if d.Components == nil {
-		out, err := sd.CallE(ctx, via, shelly.GetComponents.String(), nil)
-		if err != nil {
-			d.log.Error(err, "Unable to get device's components (continuing)")
-		} else {
-			d.Components = out.(*shelly.ComponentsResponse).Components
-		}
+	if d.Id == "" {
+		d.Id = d.Info.Id
+		updated = true
 	}
 
-	if d.Config == nil {
+	if d.MAC == "" {
+		d.MAC = sd.Info.MacAddress.String()
+		updated = true
+	}
+
+	// if d.Components == nil {
+	// 	out, err := sd.CallE(ctx, via, shelly.GetComponents.String(), nil)
+	// 	if err != nil {
+	// 		d.log.Error(err, "Unable to get device's components (continuing)")
+	// 	} else {
+	// 		d.Components = out.(*shelly.ComponentsResponse).Components
+	// 	}
+	// }
+
+	if d.Config == nil || d.Config.System.ConfigRevision != d.ConfigRevision {
 		out, err := sd.CallE(ctx, via, shelly.GetConfig.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device config (continuing)")
 		} else {
 			d.Config = out.(*shelly.Config)
+			updated = true
 		}
 	}
 
@@ -149,11 +161,14 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 			d.log.Error(err, "Unable to get device system config (continuing)")
 		} else {
 			d.Config.System = out.(*system.Config)
+			d.ConfigRevision = d.Config.System.ConfigRevision
+			updated = true
 		}
 	}
 
 	if d.Config != nil && d.Config.System != nil && d.Config.System.Device.Name != "" {
 		d.Name = d.Config.System.Device.Name
+		updated = true
 	} else {
 		d.Name = d.Id
 	}
@@ -164,25 +179,27 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 			d.log.Error(err, "Unable to get device status (continuing)")
 		} else {
 			d.Status = out.(*shelly.Status)
+			updated = true
 		}
 	}
 
 	if d.Status != nil && d.Status.System == nil {
-		out, err := sd.CallE(ctx, via, system.GetStatus.String(), &system.Status{})
+		out, err := sd.CallE(ctx, via, system.GetStatus.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device system status (continuing)")
 		} else {
 			d.Status.System = out.(*system.Status)
+			updated = true
 		}
 	}
 
 	if d.Status != nil && d.Status.Wifi != nil && d.Status.Wifi.IP != "" {
 		d.Host = d.Status.Wifi.IP
-	} else {
-		d.Host = fmt.Sprintf("%s.local.", d.Id)
+		updated = true
 	}
 
 	d.log.Info("Updated device", "device", d)
+	return updated
 }
 
 func (d *Device) WithZeroConfEntry(entry *zeroconf.ServiceEntry) *Device {

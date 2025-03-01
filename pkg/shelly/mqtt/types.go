@@ -2,7 +2,7 @@ package mqtt
 
 // <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt>
 
-type Qos uint
+type Qos uint32
 
 const (
 	AtMostOnce Qos = iota
@@ -26,7 +26,7 @@ type Event struct {
 		Code    int    `json:"code"`    // Error code
 		Message string `json:"message"` // Error message
 	} `json:"error,omitempty"`
-	Params *map[string]interface{} `json:"params,omitempty"` // Parameters of the event
+	Params *map[string]any `json:"params,omitempty"` // Parameters of the event
 	// Params *struct {
 	// 	Status
 	// 	Timestamp float64           `json:"ts"`
@@ -36,15 +36,15 @@ type Event struct {
 
 type ComponentEvent struct {
 	Component       string  `json:"component"`
-	Id              int     `json:"id"`
+	Id              uint32  `json:"id"`
 	Event           string  `json:"event"`
 	RestartRequired bool    `json:"restart_required"`
 	Ts              float64 `json:"ts"`
-	CfgRev          int     `json:"cfg_rev"`
+	ConfigRevision  uint32  `json:"cfg_rev"`
 }
 
 type Dialog struct {
-	Id  uint   `json:"id"`
+	Id  uint32 `json:"id"`
 	Src string `json:"src"`
 }
 
@@ -66,7 +66,7 @@ type Response struct {
 
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/
 
-type SslCa uint
+type SslCa uint32
 
 const (
 	NoSsl          SslCa = iota // Plain TCP connection
@@ -94,7 +94,7 @@ type Status struct {
 }
 
 type ConfigResults struct {
-	Id     uint   `json:"id"`
+	Id     uint32 `json:"id"`
 	Source string `json:"src"`
 	Result struct {
 		RestartRequired bool `json:"restart_required"`

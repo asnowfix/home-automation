@@ -5,7 +5,7 @@ import (
 	"net"
 )
 
-type Output uint
+type Output uint32
 
 const (
 	Plug Output = iota

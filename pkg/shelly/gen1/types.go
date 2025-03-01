@@ -13,7 +13,7 @@ type HTSensor struct {
 
 type Flood struct {
 	Temperature    float32 `schema:"temp,required" json:"temperature"`
-	Flood          uint    `schema:"flood,required"  json:"flood"`
+	Flood          uint32  `schema:"flood,required"  json:"flood"`
 	BatteryVoltage float32 `schema:"batV,required"  json:"battery_voltage"`
 	Id             string  `schema:"id,required"   json:"id"`
 }

@@ -24,7 +24,7 @@ type Device interface {
 
 type DeviceCaller func(ctx context.Context, device Device, mh MethodHandler, out any, params any) (any, error)
 
-type Channel uint
+type Channel uint32
 
 var Channels = [...]string{"default", "http", "mqtt", "udp"}
 
@@ -49,7 +49,7 @@ var MethodNotFound = MethodHandler{}
 
 var NotAMethod = MethodHandler{}
 
-type Api uint
+type Api uint32
 
 const (
 	Shelly Api = iota

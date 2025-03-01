@@ -115,12 +115,16 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 			case device := <-dc:
 				sd, ok := device.Impl().(*shelly.Device)
-				if ok {
-					device.UpdateFromShelly(ctx, sd, types.ChannelMqtt)
-				} else {
-					log.Error(nil, "Unhandled device type", "device", device, "type", reflect.TypeOf(device.Impl()))
+				if !ok {
+					log.Error(nil, "Unhandled device type", "device id", device.Id, "type", reflect.TypeOf(device.Impl()))
 					continue
 				}
+
+				updated := device.UpdateFromShelly(ctx, sd, types.ChannelMqtt)
+				if !updated {
+					continue
+				}
+
 				err = dm.dr.SetDevice(ctx, device, true)
 				if err != nil {
 					dm.log.Error(err, "Failed to set device", "device", device)

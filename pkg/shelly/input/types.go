@@ -1,7 +1,7 @@
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Input/
 package input
 
-type Type uint
+type Type uint32
 
 const (
 	Switch Type = iota

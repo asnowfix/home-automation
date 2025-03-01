@@ -56,12 +56,18 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 						log.Error(err, "Failed to create device from shelly device")
 						continue
 					}
+				} else {
+					log.Info("Found device in DB", "device_id", deviceId)
+					if device.Impl() == nil {
+						log.Info("Loading device details in memory", "device_id", deviceId)
+						device.WithImpl(shelly.NewDeviceFromInfo(ctx, log, device.Info))
+					}
 				}
 
-				log.Info("Updating device", "device", device)
+				log.Info("Updating device", "device id", device.Id)
 				err = UpdateFromMqttEvent(ctx, device, event)
 				if err != nil {
-					log.Error(err, "Failed to update device from MQTT event", "device_id", event.Src)
+					log.Error(err, "Failed to update device from MQTT event", "event src", event.Src)
 					continue
 				}
 
@@ -85,7 +91,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Even
 	if event.Method == "NotifyStatus" {
 		if event.Params != nil {
 			var err error
-			status := make(map[string]interface{})
+			status := make(map[string]any)
 			if d.Status != nil {
 				// FIXME: Convoluted way to merge status update map event in the current status
 				out, err := json.Marshal(d.Status)
@@ -110,6 +116,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Even
 				log.Error(err, "failed to (re)unmarshal updated status")
 				return err
 			}
+			d.StatusChanged = true
 			// v := reflect.ValueOf(d.Status)
 			// for i := 0; i < v.NumField(); i++ {
 			// 	typeField := v.Type().Field(i)
@@ -131,6 +138,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Even
 			log.Error(err, "failed to unmarshal updated full status")
 			return err
 		}
+		d.StatusChanged = true
 	}
 
 	// - '{"dst":"NCELRND1279_shellyplus1-08b61fd9333c","error":{"code":-109,"message":"shutting down in 952 ms"},"id":0,"result":{"methods":null},"src":"shellyplus1-08b61fd9333c"}'
@@ -139,7 +147,10 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Even
 		if event.Params != nil {
 			evs, ok := (*event.Params)["events"].([]mqtt.ComponentEvent)
 			if ok {
-				log.Info("Received event", "events", evs)
+				for _, ev := range evs {
+					log.Info("Event", "event", ev)
+					d.ConfigRevision = ev.ConfigRevision
+				}
 			} else {
 				return fmt.Errorf("unable to parse event parameters: %v", event)
 			}

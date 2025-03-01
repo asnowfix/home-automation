@@ -2,7 +2,7 @@ package sswitch
 
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Switch
 
-type InMode uint
+type InMode uint32
 
 const (
 	Momentary InMode = iota
@@ -16,7 +16,7 @@ func (im InMode) String() string {
 	return [...]string{"momentary", "follow", "flip", "detached", "cycle"}[im]
 }
 
-type InitialState uint
+type InitialState uint32
 
 const (
 	Off InitialState = iota
@@ -29,7 +29,7 @@ func (is InitialState) String() string {
 	return [...]string{"off", "on", "restore_last", "match_input"}[is]
 }
 
-type Error uint
+type Error uint32
 
 const (
 	OverTemp Error = iota

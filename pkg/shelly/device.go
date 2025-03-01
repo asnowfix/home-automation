@@ -27,7 +27,7 @@ type Product struct {
 	Generation  int              `json:"gen"`
 }
 
-type State uint
+type State uint32
 
 type Device struct {
 	Product
@@ -58,7 +58,12 @@ func (d *Device) SetHost(host string) {
 }
 
 func (d *Device) MqttOk(ok bool) {
-	d.isMqttOk = ok
+	if d.Host_ == "" {
+		// No IP=> No other way to reach out to Shelly than MQTT
+		d.isMqttOk = true
+	} else {
+		d.isMqttOk = ok
+	}
 }
 
 func (d *Device) Channel(via types.Channel) types.Channel {
@@ -159,10 +164,10 @@ type ComponentsResponse struct {
 }
 
 type Component struct {
-	Key     string                         `json:"key"`    // Component's key (in format <type>:<cid>, for example boolean:200)
-	Status  map[string]any                 `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
-	Config  map[string]any                 `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
-	Methods map[string]types.MethodHandler `json:"-"`
+	Key    string         `json:"key"`    // Component's key (in format <type>:<cid>, for example boolean:200)
+	Config map[string]any `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
+	// Status  map[string]any                 `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
+	// Methods map[string]types.MethodHandler `json:"-"`
 }
 
 var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", MDNS_SHELLIES))
@@ -237,27 +242,28 @@ func (d *Device) ReplyTo() string {
 
 func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) *Device {
 	d := &Device{
-		Host_: ip.String(),
-		log:   log,
+		Host_:    ip.String(),
+		log:      log,
+		isMqttOk: false,
 	}
 	return d
 }
 
 func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string, mc *mymqtt.Client) *Device {
 	d := &Device{
-		Id_:   id,
-		Host_: fmt.Sprintf("%s.local.", id),
-		log:   log,
+		Id_:      id,
+		log:      log,
+		isMqttOk: true,
 	}
 	return d
 }
 
 func NewDeviceFromInfo(ctx context.Context, log logr.Logger, info *DeviceInfo) *Device {
 	d := &Device{
-		Id_:   info.Id,
-		Host_: fmt.Sprintf("%s.local.", info.Id),
-		Info:  info,
-		log:   log,
+		Id_:      info.Id,
+		Info:     info,
+		log:      log,
+		isMqttOk: true,
 	}
 	return d
 }
@@ -268,10 +274,6 @@ func (d *Device) Init(ctx context.Context) error {
 
 	if d.Id() == "" && d.Host() == "" {
 		return fmt.Errorf("device id & host is empty")
-	}
-
-	if d.Id() != "" && d.Host() == "" {
-		d.SetHost(fmt.Sprintf("%s.local.", d.Id()))
 	}
 
 	mc, err = mymqtt.GetClientE(ctx)
@@ -326,14 +328,20 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 			return err
 		}
 		out, err := GetRegistrar().CallE(ctx, d, via, mh, &ComponentsRequest{
-			Offset:  0,
-			Include: []string{"config", "status"},
+			Offset:      0,
+			Include:     []string{"config"},
+			DynamicOnly: false,
 		})
 		if err != nil {
 			return err
 		}
-		d.Components = out.(*ComponentsResponse).Components
-		d.log.Info("response", "verb", GetComponents, "id", d.Id(), "components", *d.Components)
+		res, ok := out.(*ComponentsResponse)
+		if ok && res.Components != nil {
+			d.Components = res.Components
+			// d.log.Info("response", "verb", GetComponents, "id", d.Id(), "components", *d.Components)
+		} else {
+			d.log.Info("Unable to get components", "for device_id", d.Id())
+		}
 	}
 
 	if d.Components != nil {
@@ -363,6 +371,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 			// 	"use_client_cert": false
 			// }
 			brokerUrl := mc.BrokerUrl().Host
+
 			if mqttComponent.Config == nil || mqttComponent.Config["server"].(string) != brokerUrl {
 				d.log.Info("Configuring MQTT", "broker", brokerUrl)
 				mh, err := GetRegistrar().MethodHandlerE(mqtt.SetConfig.String())

@@ -39,26 +39,26 @@ type Config struct {
 	Sntp struct {
 		Server string `json:"server"`
 	} `json:"sntp"`
-	ConfigurationRevision uint32 `json:"cfg_rev"`
+	ConfigRevision uint32 `json:"cfg_rev"`
 }
 
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys/#status
 
 type Status struct {
-	MacAddress            net.HardwareAddr `json:"mac"`
-	RestartRequired       bool             `json:"restart_required"`
-	CurrentTime           string           `json:"time"`
-	UnixTime              uint32           `json:"unixtime"`
-	UpTime                uint32           `json:"uptime"`
-	RamSize               uint32           `json:"ram_size"`
-	RamFree               uint32           `json:"ram_free"`
-	FsSize                uint32           `json:"fs_size"`
-	FsFree                uint32           `json:"fs_free"`
-	ConfigurationRevision uint32           `json:"cfg_rev"`
-	KvsRevision           uint32           `json:"kvs_rev"`
-	ScheduleRevision      uint32           `json:"schedule_rev"`
-	WebHookRevision       uint32           `json:"webhook_rev"`
-	AvailableUpdates      struct {
+	MacAddress       net.HardwareAddr `json:"mac"`
+	RestartRequired  bool             `json:"restart_required"`
+	CurrentTime      string           `json:"time"`
+	UnixTime         uint32           `json:"unixtime"`
+	UpTime           uint32           `json:"uptime"`
+	RamSize          uint32           `json:"ram_size"`
+	RamFree          uint32           `json:"ram_free"`
+	FsSize           uint32           `json:"fs_size"`
+	FsFree           uint32           `json:"fs_free"`
+	ConfigRevision   uint32           `json:"cfg_rev"`
+	KvsRevision      uint32           `json:"kvs_rev"`
+	ScheduleRevision uint32           `json:"schedule_rev"`
+	WebHookRevision  uint32           `json:"webhook_rev"`
+	AvailableUpdates struct {
 		Beta *struct {
 			Version string `json:"version"`
 			Url     string `json:"url"`

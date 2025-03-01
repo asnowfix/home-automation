@@ -93,7 +93,7 @@ func (ch *HttpChannel) postE(ctx context.Context, host string, hm string, cmd st
 
 	if false {
 		var payload struct {
-			// Id     uint   `json:"id"`
+			// Id     uint32   `json:"id"`
 			Method string `json:"method"`
 			Params any    `json:"params"`
 		}

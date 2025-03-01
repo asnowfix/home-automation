@@ -15,12 +15,12 @@ import (
 )
 
 var cancelFlag struct {
-	id  int
+	id  uint32
 	all bool
 }
 
 func init() {
-	cancelCtl.Flags().IntVarP(&cancelFlag.id, "id", "i", -1, "Scheduled job ID to cancel.")
+	cancelCtl.Flags().Uint32VarP(&cancelFlag.id, "id", "i", 0, "Scheduled job ID to cancel.")
 	cancelCtl.Flags().BoolVarP(&cancelFlag.all, "all", "a", false, "Cancel every scheduled job Id on given device(s).")
 	cancelCtl.MarkFlagsMutuallyExclusive("id", "all")
 }
@@ -48,7 +48,7 @@ func cancelOneDeviceJob(ctx context.Context, log logr.Logger, via types.Channel,
 	} else if cancelFlag.id < 0 {
 		return nil, fmt.Errorf("no job ID provided to cancel")
 	} else {
-		out, err := schedule.CancelJob(ctx, log, via, device, uint32(cancelFlag.id))
+		out, err := schedule.CancelJob(ctx, log, via, device, cancelFlag.id)
 		if err != nil {
 			log.Error(err, "Unable to cancel all Scheduled Jobs: %v", err)
 			return nil, err

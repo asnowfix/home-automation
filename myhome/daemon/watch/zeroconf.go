@@ -41,7 +41,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 				log.Info("Browsed", "entry", entry)
 				deviceId := entry.Instance
 				device, err := db.GetDeviceById(ctx, deviceId)
-				if err != nil {
+				if err != nil || device.Info == nil {
 					sd, err := shelly.NewDeviceFromZeroConfEntry(log, entry)
 					if err != nil {
 						log.Error(err, "Failed to create device from zeroconf entry", "entry", entry)
@@ -53,6 +53,11 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 						continue
 					}
 				} else {
+					log.Info("Found device in DB", "device_id", deviceId, "name", device.Name)
+					if device.Impl() == nil {
+						log.Info("Loading device details in memory", "device_id", deviceId, "name", device.Name)
+						device.WithImpl(shelly.NewDeviceFromInfo(ctx, log, device.Info))
+					}
 					device = device.WithZeroConfEntry(entry)
 				}
 				dm.UpdateChannel() <- device

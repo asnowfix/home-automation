@@ -31,7 +31,7 @@ var statusCtl = &cobra.Command{
 
 func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	out, err := device.CallE(ctx, via, string(script.GetStatus), &script.Id{
-		Id: uint32(flags.Id),
+		Id: flags.Id,
 	})
 	if err != nil {
 		log.Error(err, "Unable to get status for script", "id", flags.Id)

@@ -20,7 +20,7 @@ var Cmd = &cobra.Command{
 		var err error
 		log := hlog.Logger
 
-		out, err := options.MyHomeClient.CallE(cmd.Context(), "device.list", nil)
+		out, err := myhome.TheClient.CallE(cmd.Context(), "device.list", nil)
 		if err != nil {
 			return err
 		}

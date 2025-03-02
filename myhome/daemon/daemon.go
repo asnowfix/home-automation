@@ -75,7 +75,7 @@ var Cmd = &cobra.Command{
 			// go gen1.Publisher(ctx, log, gen1Ch, mc)
 		} else {
 			// Connect to the network's MQTT broker
-			mc, err = mymqtt.InitClientE(cmd.Context(), log, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+			mc, err = mymqtt.InitClientE(cmd.Context(), log, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
 			if err != nil {
 				log.Error(err, "Failed to initialize MQTT client")
 				return err

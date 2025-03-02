@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hlog"
 	"myhome"
+	"mymqtt"
 	"net"
 	"pkg/shelly"
 	"pkg/shelly/types"
@@ -41,13 +42,17 @@ var showShellyCmd = &cobra.Command{
 				sd = shelly.NewDeviceFromIp(cmd.Context(), log, ip)
 				via = types.ChannelHttp
 			} else {
-				sd = shelly.NewDeviceFromMqttId(cmd.Context(), log, identifier, options.MqttClient)
+				mc, err := mymqtt.GetClientE(cmd.Context())
+				if err != nil {
+					return err
+				}
+				sd = shelly.NewDeviceFromMqttId(cmd.Context(), log, identifier, mc)
 				via = types.ChannelMqtt
 			}
 			var device myhome.Device
 			device.UpdateFromShelly(cmd.Context(), sd, via)
 		} else {
-			out, err = options.MyHomeClient.CallE(cmd.Context(), "device.show", identifier)
+			out, err = myhome.TheClient.CallE(cmd.Context(), "device.show", identifier)
 			device = out.(*myhome.Device)
 		}
 		if err != nil {

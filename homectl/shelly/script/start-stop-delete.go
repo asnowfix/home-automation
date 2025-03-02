@@ -25,7 +25,7 @@ var startCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, _ := hopts.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doStartStop, []string{"Start"})
+		return shelly.Foreach(cmd.Context(), log, before, options.Via, doStartStop, []string{"Start"})
 	},
 }
 
@@ -41,7 +41,7 @@ var stopCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, _ := hopts.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doStartStop, []string{"Stop"})
+		return shelly.Foreach(cmd.Context(), log, before, options.Via, doStartStop, []string{"Stop"})
 	},
 }
 
@@ -57,7 +57,7 @@ var deleteCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, _ := hopts.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doStartStop, []string{"Delete"})
+		return shelly.Foreach(cmd.Context(), log, before, options.Via, doStartStop, []string{"Delete"})
 	},
 }
 

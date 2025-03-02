@@ -269,16 +269,12 @@ func NewDeviceFromInfo(ctx context.Context, log logr.Logger, info *DeviceInfo) *
 }
 
 func (d *Device) Init(ctx context.Context) error {
-	var err error
-	var mc *mymqtt.Client
-
 	if d.Id() == "" && d.Host() == "" {
 		return fmt.Errorf("device id & host is empty")
 	}
 
-	mc, err = mymqtt.GetClientE(ctx)
+	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
-		d.log.Error(err, "Unable to get MQTT client for the current process")
 		return err
 	}
 	d.me = fmt.Sprintf("%s_%s", mc.Id(), d.Id_)
@@ -355,10 +351,8 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 
 		mc, err := mymqtt.GetClientE(ctx)
 		if err != nil {
-			d.log.Error(err, "Unable to get MQTT client")
 			return err
 		}
-
 		if mqttComponent != nil {
 			// "mqtt": {
 			// 	"client_id": "shellyplus1-08b61fd9d708",
@@ -437,7 +431,12 @@ func Print(log logr.Logger, d any) error {
 	return nil
 }
 
-func Foreach(ctx context.Context, log logr.Logger, mc *mymqtt.Client, names []string, via types.Channel, do Do, args []string) error {
+func Foreach(ctx context.Context, log logr.Logger, names []string, via types.Channel, do Do, args []string) error {
+	mc, err := mymqtt.GetClientE(ctx)
+	if err != nil {
+		return err
+	}
+
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
 	if len(names) > 0 {
 		for _, name := range names {

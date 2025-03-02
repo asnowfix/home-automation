@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"hlog"
+	"mymqtt"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -24,7 +25,7 @@ var Cmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, after := hopts.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, setupOneDevice, after)
+		return shelly.Foreach(cmd.Context(), log, before, options.Via, setupOneDevice, after)
 	},
 }
 
@@ -54,7 +55,13 @@ func setupOneDevice(ctx context.Context, log logr.Logger, via types.Channel, dev
 	config.Enable = true
 	config.RpcNotifs = true
 	config.StatusNotifs = true
-	config.Server = hopts.MqttClient.BrokerUrl().String()
+
+	mc, err := mymqtt.GetClientE(ctx)
+	if err != nil {
+		log.Error(err, "Unable to get MQTT client to reach device")
+		return nil, err
+	}
+	config.Server = mc.BrokerUrl().String()
 
 	configStr, _ = json.Marshal(config)
 	log.Info("new MQTT config", "config", string(configStr))

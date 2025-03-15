@@ -114,7 +114,7 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 	updated := d.StatusChanged
 	d.StatusChanged = false
 
-	d.log.Info("Updating device", "device", d)
+	d.log.Info("Updating from shelly", "via", via, "device", d)
 	if d.Info == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
 		if err != nil {

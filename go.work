@@ -9,6 +9,7 @@ use (
 	./homectl/list
 	./homectl/mqtt
 	./homectl/options
+	./homectl/set
 	./homectl/shelly
 	./homectl/shelly/jobs
 	./homectl/shelly/kvs

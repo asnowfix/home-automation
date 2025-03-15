@@ -36,29 +36,27 @@ var client *Client
 var mutex sync.Mutex
 
 func GetClientE(ctx context.Context) (*Client, error) {
-	mc, ok := ctx.Value(global.MqttClientKey).(*Client)
+	log, ok := ctx.Value(global.LogKey).(logr.Logger)
 	if !ok {
-		err := fmt.Errorf("unable to get MQTT client for the current process")
-		return nil, err
+		panic("no logger initialized")
 	}
-	return mc, nil
 
-	// log := hlog.Logger
-	// mutex.Lock()
-	// if client == nil {
-	// 	mutex.Unlock()
-	// 	select {
-	// 	case <-ctx.Done():
-	// 		log.Error(ctx.Err(), "could not get MQTT client")
-	// 		return nil
-	// 	case <-time.After(time.Second):
-	// 	}
-	// 	log.Info("Waiting for MQTT client to be initialized")
-	// 	time.Sleep(time.Second)
-	// 	mutex.Lock()
-	// }
-	// mutex.Unlock()
-	// return client
+	mutex.Lock()
+	if client == nil {
+		mutex.Unlock()
+		select {
+		case <-ctx.Done():
+			log.Error(ctx.Err(), "could not get MQTT client")
+			return nil, ctx.Err()
+		case <-time.After(time.Second):
+		}
+		log.Info("Waiting for MQTT client to be initialized")
+		time.Sleep(time.Second)
+		mutex.Lock()
+	}
+	mutex.Unlock()
+
+	return client, nil
 }
 
 func InitClient(ctx context.Context, log logr.Logger, broker string, me string, mqttTimeout time.Duration, mqttGrace time.Duration, mdnsTimeout time.Duration) *Client {

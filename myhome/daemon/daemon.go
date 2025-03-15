@@ -49,7 +49,7 @@ var Cmd = &cobra.Command{
 		// }
 
 		// Initialize Shelly devices handler
-		shelly.Init(log, options.Flags.MqttTimeout)
+		shelly.Init(cmd.Context(), options.Flags.MqttTimeout)
 
 		var mc *mymqtt.Client
 

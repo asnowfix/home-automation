@@ -8,8 +8,6 @@ var Cmd = &cobra.Command{
 	Use:   "script",
 	Short: "Manage scripts running on Shelly devices",
 	Args:  cobra.NoArgs,
-	Run: func(cmd *cobra.Command, args []string) {
-	},
 }
 
 var flags struct {

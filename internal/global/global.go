@@ -1,9 +1,8 @@
 package global
 
-type ContextKey string
+type ContextKey uint
 
-const CancelKey ContextKey = "cancel"
-
-const LogKey ContextKey = "log"
-
-const MqttClientKey ContextKey = "mqtt"
+const (
+	CancelKey ContextKey = iota
+	LogKey
+)

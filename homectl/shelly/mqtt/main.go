@@ -71,7 +71,7 @@ func setupOneDevice(ctx context.Context, log logr.Logger, via types.Channel, dev
 		log.Error(err, "Unable to set MQTT config")
 		return nil, err
 	}
-	res := out.(*mqtt.ConfigResults)
+	res := out.(*mqtt.ConfigResponse)
 	if res.Result.RestartRequired {
 		device.CallE(ctx, via, string(shelly.Reboot), nil)
 	}

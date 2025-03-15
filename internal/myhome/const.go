@@ -12,6 +12,7 @@ type Verb string
 
 const (
 	DeviceList        Verb = "device.list"
+	DeviceLookup      Verb = "device.lookup"
 	DeviceShow        Verb = "device.show"
 	GroupList         Verb = "group.list"
 	GroupCreate       Verb = "group.create"

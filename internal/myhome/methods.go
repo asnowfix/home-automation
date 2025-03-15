@@ -46,6 +46,14 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &Devices{}
 		},
 	},
+	DeviceLookup: {
+		NewParams: func() any {
+			return ""
+		},
+		NewResult: func() any {
+			return &DeviceSummary{}
+		},
+	},
 	DeviceShow: {
 		NewParams: func() any {
 			return ""

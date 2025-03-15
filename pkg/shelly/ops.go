@@ -3,6 +3,7 @@ package shelly
 import (
 	"context"
 	"fmt"
+	"global"
 	"net/http"
 	"pkg/shelly/input"
 	"pkg/shelly/kvs"
@@ -50,7 +51,9 @@ const (
 
 type empty struct{}
 
-func Init(log logr.Logger, timeout time.Duration) {
+func Init(ctx context.Context, timeout time.Duration) {
+	log := ctx.Value(global.LogKey).(logr.Logger)
+
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	registrar.Init(log)
 

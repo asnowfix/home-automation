@@ -8,6 +8,7 @@ import (
 	"homectl/list"
 	"homectl/mqtt"
 	"homectl/options"
+	"homectl/set"
 	"homectl/shelly"
 	"homectl/show"
 	"homectl/toggle"
@@ -39,6 +40,7 @@ var Cmd = &cobra.Command{
 		log := hlog.Logger
 
 		ctx := options.CommandLineContext(log)
+		cmd.SetContext(ctx)
 
 		var err error
 		mc, err := mymqtt.InitClientE(ctx, log, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
@@ -46,9 +48,6 @@ var Cmd = &cobra.Command{
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
 		}
-
-		ctx = context.WithValue(ctx, global.MqttClientKey, mc)
-		cmd.SetContext(ctx)
 
 		myhome.TheClient, err = myhome.NewClientE(cmd.Context(), log, mc, options.Flags.MqttTimeout)
 		if err != nil {
@@ -60,11 +59,11 @@ var Cmd = &cobra.Command{
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		mc, ok := ctx.Value(global.MqttClientKey).(*mymqtt.Client)
-		if !ok {
-			err := fmt.Errorf("not an get MQTT client")
+		mc, err := mymqtt.GetClientE(ctx)
+		if err != nil {
 			return err
 		}
+
 		cancel := ctx.Value(global.CancelKey).(context.CancelFunc)
 		cancel()
 		mc.Close()
@@ -84,6 +83,7 @@ func init() {
 	Cmd.AddCommand(versionCmd)
 	Cmd.AddCommand(list.Cmd)
 	Cmd.AddCommand(show.Cmd)
+	Cmd.AddCommand(set.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(toggle.Cmd)
 	Cmd.AddCommand(shelly.Cmd)

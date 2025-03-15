@@ -275,7 +275,8 @@ func (d *Device) Init(ctx context.Context) error {
 
 	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
-		return err
+		d.log.Error(err, "Unable to get MQTT client", "device_id", d.Id_)
+		panic(err)
 	}
 	d.me = fmt.Sprintf("%s_%s", mc.Id(), d.Id_)
 
@@ -307,7 +308,13 @@ func (d *Device) Init(ctx context.Context) error {
 			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
 			return err
 		}
-		d.Info = di.(*DeviceInfo)
+
+		var ok bool
+		d.Info, ok = di.(*DeviceInfo)
+		if !ok {
+			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
+			return err
+		}
 		d.log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
 		d.Id_ = d.Info.Id
 		d.MacAddress = d.Info.MacAddress
@@ -373,12 +380,15 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 					d.log.Error(err, "Unable to get method handler", "method", mqtt.SetConfig)
 					return err
 				}
-				_, err = GetRegistrar().CallE(ctx, d, via, mh, &mqtt.Config{
-					Enable:        true,
-					Server:        brokerUrl,
-					RpcNotifs:     true,
-					StatusNotifs:  true,
-					EnableControl: true,
+				_, err = GetRegistrar().CallE(ctx, d, via, mh, &mqtt.ConfigRequest{
+					Config: mqtt.Config{
+						Enable:        true,
+						Server:        brokerUrl,
+						RpcNotifs:     true,
+						StatusNotifs:  true,
+						EnableRpc:     true,
+						EnableControl: true,
+					},
 				})
 				if err != nil {
 					d.log.Error(err, "Unable to set MQTT config")

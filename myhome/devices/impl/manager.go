@@ -46,7 +46,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	dm.log.Info("Starting device manager")
 
-	myhome.RegisterMethodHandler("device.list", func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DeviceList, func(in any) (any, error) {
 		devices := myhome.Devices{
 			Devices: make([]myhome.DeviceSummary, 0),
 		}
@@ -60,6 +60,14 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			devices.Devices = append(devices.Devices, d.DeviceSummary)
 		}
 		return &devices, nil
+	})
+	myhome.RegisterMethodHandler(myhome.DeviceLookup, func(in any) (any, error) {
+		device, err := dm.GetDeviceByAny(ctx, in.(string))
+		if err != nil {
+			dm.log.Error(err, "Failed to get device by any", "any", in.(string))
+			return nil, err
+		}
+		return &device.DeviceSummary, nil
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceShow, func(in any) (any, error) {
 		return dm.GetDeviceByAny(ctx, in.(string))
@@ -120,7 +128,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 					continue
 				}
 
-				updated := device.UpdateFromShelly(ctx, sd, types.ChannelMqtt)
+				updated := device.UpdateFromShelly(ctx, sd, types.ChannelDefault)
 				if !updated {
 					continue
 				}

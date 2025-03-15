@@ -35,6 +35,14 @@ var client *Client
 
 var mutex sync.Mutex
 
+func GetClient(ctx context.Context) *Client {
+	c, err := GetClientE(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return c
+}
+
 func GetClientE(ctx context.Context) (*Client, error) {
 	log, ok := ctx.Value(global.LogKey).(logr.Logger)
 	if !ok {

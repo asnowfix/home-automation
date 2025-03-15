@@ -102,7 +102,7 @@ type Status struct {
 	Voltage        float32     `json:"voltage,omitempty"`          // Last measured voltage in Volts (shown if applicable)
 	Current        float32     `json:"current,omitempty"`          // Last measured current in Amperes (shown if applicable)
 	PowerFactor    float32     `json:"pf"`                         // Last measured power factor (shown if applicable)
-	Freq           int         `json:"freq"`                       // Last measured network frequency in Hz (shown if applicable)
+	Freq           float32     `json:"freq"`                       // Last measured network frequency in Hz (shown if applicable)
 	Aenergy        struct {
 		Total    float32   `json:"total"`     // Total energy consumed in Watt-hours
 		ByMinute []float32 `json:"by_minute"` // Energy consumption by minute (in Milliwatt-hours) for the last three minutes (the lower the index of the element in the array, the closer to the current moment the minute)

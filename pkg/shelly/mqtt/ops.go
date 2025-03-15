@@ -41,8 +41,8 @@ func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
-		// params: ConfigResponse
-		Allocate:   func() any { return new(ConfigResponse) },
+		// InputType: SetConfigRequest
+		Allocate:   func() any { return new(SetConfigResponse) },
 		HttpMethod: http.MethodPost,
 	})
 

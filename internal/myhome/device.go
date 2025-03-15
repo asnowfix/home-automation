@@ -37,6 +37,12 @@ type Device struct {
 	// Components     *[]shelly.Component `db:"-" json:"components"`
 }
 
+type DeviceImplementation interface {
+	Info() *shelly.DeviceInfo
+	Config() *shelly.Config
+	Status() *shelly.Status
+}
+
 func (d *Device) WithImpl(i any) *Device {
 	d.impl = i
 	return d
@@ -114,7 +120,7 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 	updated := d.StatusChanged
 	d.StatusChanged = false
 
-	d.log.Info("Updating from shelly", "via", via, "device", d)
+	d.log.Info("Updating from shelly", "via", via, "device_id", d.Id)
 	if d.Info == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
 		if err != nil {
@@ -205,7 +211,7 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 func (d *Device) WithZeroConfEntry(entry *zeroconf.ServiceEntry) *Device {
 	d.log.Info("Updating device", "id", d.Id, "zeroconf entry", entry)
 	if len(entry.AddrIPv4) > 0 {
-		return d.WithHost(string(entry.AddrIPv4[0]))
+		return d.WithHost(entry.AddrIPv4[0].String())
 	} else {
 		return d.WithHost(entry.HostName)
 	}

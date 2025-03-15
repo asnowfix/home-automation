@@ -380,7 +380,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 					d.log.Error(err, "Unable to get method handler", "method", mqtt.SetConfig)
 					return err
 				}
-				_, err = GetRegistrar().CallE(ctx, d, via, mh, &mqtt.ConfigRequest{
+				_, err = GetRegistrar().CallE(ctx, d, via, mh, &mqtt.SetConfigRequest{
 					Config: mqtt.Config{
 						Enable:        true,
 						Server:        brokerUrl,

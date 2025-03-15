@@ -96,7 +96,7 @@ type Group struct {
 
 type GroupDevice struct {
 	Manufacturer string `db:"manufacturer" json:"manufacturer"`
-	ID           string `db:"id" json:"id"`
+	Id           string `db:"id" json:"id"`
 	Group        string `db:"group" json:"group"`
 }
 

@@ -15,6 +15,7 @@ Model
 Functions
 ---------
 
+[ ] BUG Group ID's (integers) do not increment
 [ ] Ability to change device name
 [x] Check/force MQTT configuration
 [x] Get IP addresses in the 'host' column of the 'devices' table

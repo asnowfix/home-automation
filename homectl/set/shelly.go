@@ -6,6 +6,8 @@ import (
 	"homectl/options"
 	"myhome"
 	"mymqtt"
+	"mynet"
+	"net"
 	"pkg/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -45,11 +47,17 @@ var setShellyCmd = &cobra.Command{
 			return fmt.Errorf("device not found '%s'", identifier)
 		}
 
-		mc, err := mymqtt.GetClientE(cmd.Context())
-		if err != nil {
-			return err
+		var sd *shelly.Device
+		ip := net.ParseIP(device.Host)
+		if ip != nil && mynet.IsSameNetwork(log, ip) == nil {
+			log.Info("Using IP to reach device", "host", device.Host)
+			sd = shelly.NewDeviceFromIp(cmd.Context(), log, ip)
+		} else {
+			log.Info("Using MQTT to reach device", "id", identifier)
+			sd = shelly.NewDeviceFromMqttId(cmd.Context(), log, identifier, mymqtt.GetClient(cmd.Context()))
 		}
-		sd := shelly.NewDeviceFromMqttId(cmd.Context(), log, device.Id, mc)
+		// TODO implement
+		//sd := shelly.NewDeviceFromDeviceSummary(cmd.Context(), log, device)
 
 		out, err = sd.CallE(cmd.Context(), types.ChannelDefault, system.GetConfig.String(), nil)
 		if err != nil {
@@ -61,7 +69,20 @@ var setShellyCmd = &cobra.Command{
 		if name != "" {
 			config.Device.Name = name
 		}
-		sd.CallE(cmd.Context(), types.ChannelDefault, system.SetConfig.String(), &config)
+
+		configReq := system.SetConfigRequest{
+			Config: *config,
+		}
+		log.Info("Setting device system config", "id", device.Id, "host", device.Host, "config", config)
+		out, err = sd.CallE(cmd.Context(), types.ChannelDefault, system.SetConfig.String(), &configReq)
+		if err != nil {
+			log.Error(err, "Unable to set device config", "id", device.Id, "host", device.Host)
+			return err
+		}
+		configRes := out.(*system.SetConfigResponse)
+		if configRes.RestartRequired {
+			sd.CallE(cmd.Context(), types.ChannelDefault, shelly.Reboot.String(), nil)
+		}
 		return nil
 	},
 }

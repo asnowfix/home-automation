@@ -6,6 +6,7 @@ import (
 	"hlog"
 	"myhome"
 	"mymqtt"
+	"mynet"
 	"net"
 	"pkg/shelly"
 	"pkg/shelly/types"
@@ -43,17 +44,14 @@ var showShellyCmd = &cobra.Command{
 			var via types.Channel
 			var sd *shelly.Device
 			ip := net.ParseIP(identifier)
-			if ip != nil {
-				sd = shelly.NewDeviceFromIp(cmd.Context(), log, ip)
-				via = types.ChannelHttp
+			if ip == nil || mynet.IsSameNetwork(log, ip) != nil {
+				sd = shelly.NewDeviceFromMqttId(cmd.Context(), log, identifier, mymqtt.GetClient(cmd.Context()))
 			} else {
-				mc, err := mymqtt.GetClientE(cmd.Context())
-				if err != nil {
-					return err
-				}
-				sd = shelly.NewDeviceFromMqttId(cmd.Context(), log, identifier, mc)
-				via = types.ChannelMqtt
+				sd = shelly.NewDeviceFromIp(cmd.Context(), log, net.IP(device.Host))
 			}
+			// TODO implement
+			//sd := shelly.NewDeviceFromDeviceSummary(cmd.Context(), log, device)
+
 			var device myhome.Device
 			device.UpdateFromShelly(cmd.Context(), sd, via)
 		} else {

@@ -95,14 +95,14 @@ type Status struct {
 }
 
 // <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt#mqttsetconfig>
-type ConfigRequest struct {
+type SetConfigRequest struct {
 	Config Config `json:"config"` // Configuration that the method takes
 }
 
-type ConfigResponse struct {
+type SetConfigResponse struct {
 	Id     uint32 `json:"id"`
 	Source string `json:"src"`
 	Result struct {
 		RestartRequired bool `json:"restart_required"`
-	}
+	} `json:"result"`
 }

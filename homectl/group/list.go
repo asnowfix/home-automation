@@ -27,10 +27,7 @@ var listCmd = &cobra.Command{
 			return err
 		}
 		log.Info("result", "out", out, "type", reflect.TypeOf(out))
-		groups, ok := out.(*myhome.Groups)
-		if !ok {
-			panic("unexpected format (failed to cast groups)")
-		}
+		groups := out.(*myhome.Groups)
 		if options.Flags.Json {
 			s, err := json.Marshal(groups)
 			if err != nil {

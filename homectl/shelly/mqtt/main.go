@@ -3,8 +3,10 @@ package mqtt
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"hlog"
 	"mymqtt"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -35,7 +37,11 @@ func setupOneDevice(ctx context.Context, log logr.Logger, via types.Channel, dev
 		log.Error(err, "Unable to get MQTT config")
 		return nil, err
 	}
-	config := out.(*mqtt.Config)
+	config, ok := out.(*mqtt.Config)
+	if !ok {
+		log.Error(nil, "Invalid MQTT config type", "type", reflect.TypeOf(out))
+		return nil, fmt.Errorf("invalid MQTT config type %T", out)
+	}
 	configStr, err := json.Marshal(config)
 	if err != nil {
 		log.Info("Unable to marshal MQTT config: %v", err)
@@ -63,15 +69,23 @@ func setupOneDevice(ctx context.Context, log logr.Logger, via types.Channel, dev
 	}
 	config.Server = mc.BrokerUrl().String()
 
-	configStr, _ = json.Marshal(config)
+	configReq := mqtt.SetConfigRequest{
+		Config: *config,
+	}
+
+	payload, _ := json.Marshal(configReq)
 	log.Info("new MQTT config", "config", string(configStr))
 
-	out, err = device.CallE(ctx, via, string(mqtt.SetConfig), config)
+	out, err = device.CallE(ctx, via, string(mqtt.SetConfig), payload)
 	if err != nil {
 		log.Error(err, "Unable to set MQTT config")
 		return nil, err
 	}
-	res := out.(*mqtt.ConfigResponse)
+	res, ok := out.(*mqtt.SetConfigResponse)
+	if !ok {
+		log.Error(nil, "Invalid MQTT set config response type", "type", reflect.TypeOf(out))
+		return nil, fmt.Errorf("invalid MQTT set config response type %T", out)
+	}
 	if res.Result.RestartRequired {
 		device.CallE(ctx, via, string(shelly.Reboot), nil)
 	}

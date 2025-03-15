@@ -7,10 +7,16 @@ License
 [ ] Change license from MPL-2.0 to MIT/BSD when ready
 [ ] Add SPDX license identifier everywhere
 
+Model
+-----
+
+[ ] replace dependency of myhome.* on shelly.* by interfaces
+
 Functions
 ---------
 
-[ ] Check/force MQTT configuration
+[ ] Ability to change device name
+[x] Check/force MQTT configuration
 [x] Get IP addresses in the 'host' column of the 'devices' table
 [ ] Create/Configure scripts in a single operation
 [x] Status for one / multiple scripts in a single operation

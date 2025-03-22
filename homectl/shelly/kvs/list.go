@@ -2,10 +2,13 @@ package kvs
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"hlog"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"pkg/shelly"
 	"pkg/shelly/kvs"
@@ -37,5 +40,23 @@ func listKeys(ctx context.Context, log logr.Logger, via types.Channel, device *s
 	} else {
 		match = "*" // default
 	}
-	return kvs.ListKeys(ctx, log, via, device, match)
+	kis, err := kvs.ListKeys(ctx, log, via, device, match)
+	if err != nil {
+		log.Error(err, "Unable to list keys")
+		return nil, err
+	}
+	if hopts.Flags.Json {
+		s, err := json.Marshal(kis)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Println(string(s))
+	} else {
+		s, err := yaml.Marshal(kis)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Println(string(s))
+	}
+	return nil, nil
 }

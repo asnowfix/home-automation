@@ -55,7 +55,7 @@ func (ch *HttpChannel) getE(ctx context.Context, host string, cmd string, params
 
 	qs := ""
 	if params != nil {
-		qp, ok := params.(map[string]interface{})
+		qp, ok := params.(map[string]any)
 		if ok {
 			for key, value := range qp {
 				s, err := json.Marshal(value)

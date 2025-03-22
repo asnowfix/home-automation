@@ -7,6 +7,7 @@ import (
 	"myhome/mqtt"
 	"myhome/storage"
 	"mymqtt"
+	"mynet"
 	"pkg/shelly"
 	"time"
 
@@ -53,18 +54,18 @@ var Cmd = &cobra.Command{
 
 		var mc *mymqtt.Client
 
+		resolver := mynet.MyResolver(log.WithName("mynet.Resolver"))
+
 		// Conditionally start the embedded MQTT broker
 		if !disableEmbeddedMqttBroker {
-			mdnsServer, _, err := mqtt.MyHome(log, "myhome", nil)
+			err := mqtt.MyHome(cmd.Context(), log, resolver, "myhome", nil)
 			if err != nil {
-				log.Error(err, "Failed to initialize mDNS server")
+				log.Error(err, "Failed to initialize MyHome")
 				return err
 			}
-			log.Info("Started embedded MQTT broker & published it over mDNS/Zeroconf", "server", mdnsServer)
-			defer mdnsServer.Shutdown()
 
 			// // Connect to the embedded MQTT broker
-			// mc, err = mymqtt.InitClientE(ctx, log, "me", myhome.MYHOME, options.Flags.MqttTimeout)
+			// mc, err = mymqtt.InitClientE(ctx, log, resolver, "me", myhome.MYHOME, options.Flags.MqttTimeout)
 			// if err != nil {
 			// 	log.Error(err, "Failed to initialize MQTT client")
 			// 	return err
@@ -75,7 +76,7 @@ var Cmd = &cobra.Command{
 			// go gen1.Publisher(ctx, log, gen1Ch, mc)
 		} else {
 			// Connect to the network's MQTT broker
-			mc, err = mymqtt.InitClientE(cmd.Context(), log, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
+			mc, err = mymqtt.InitClientE(cmd.Context(), log, resolver, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
 			if err != nil {
 				log.Error(err, "Failed to initialize MQTT client")
 				return err
@@ -105,6 +106,8 @@ var Cmd = &cobra.Command{
 				return err
 			}
 		}
+
+		resolver.Start(cmd.Context())
 
 		log.Info("Running")
 		// Run server until interrupted

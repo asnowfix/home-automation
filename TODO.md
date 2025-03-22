@@ -33,8 +33,9 @@ Functions
 [x] Re-enable mDNS for early devices discovery
 [x] Use ZeroConf to discover (quickly) MQTT broker
 [x] Configure MQTT broker immediatelly after device discovery
-[ ] Resolve hostname using mDNS, on systems (eg. Windows) that do not have it in their system resolvers
-[ ] Publish mqtt.local. or myhome.local. hostname using mDNS, using
+[x] Resolve hostname using mDNS, on systems (eg. Windows) that do not have it in their system resolvers
+[x] Publish mqtt.local. using mDNS
+[ ] Publish myhome.local. ("penates.local."?) using mDNS
 [ ] Rework file/folder layout to be more generic using <https://github.com/golang-standards/project-layout>
 [ ] Move homectl as ctl subcommand of myhome
 [ ] Find out proper layout

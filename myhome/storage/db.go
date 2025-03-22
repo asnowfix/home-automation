@@ -327,14 +327,14 @@ func (s *DeviceStorage) RemoveGroup(name string) (any, error) {
 
 // AddDeviceToGroup adds a device to a group.
 func (s *DeviceStorage) AddDeviceToGroup(groupDevice *myhome.GroupDevice) (any, error) {
-	query := `INSERT INTO groupsMember (manufacturer, id, group_id) VALUES (:manufacturer, :id, :group_id)`
+	query := `INSERT INTO groupsMember (manufacturer, id, group_id) VALUES (:manufacturer, :id, (SELECT id FROM groups WHERE name = :group))`
 	_, err := s.db.NamedExec(query, groupDevice)
 	return nil, err
 }
 
 // RemoveDeviceFromGroup removes a device from a group.
 func (s *DeviceStorage) RemoveDeviceFromGroup(groupDevice *myhome.GroupDevice) (any, error) {
-	query := `DELETE FROM groupsMember WHERE manufacturer = $1 AND id = $2 AND group_id = $3`
+	query := `DELETE FROM groupsMember WHERE manufacturer = $1 AND id = $2 AND group_id = (SELECT id FROM groups WHERE name = $3)`
 	_, err := s.db.Exec(query, groupDevice.Manufacturer, groupDevice.Id, groupDevice.Group)
 	return nil, err
 }

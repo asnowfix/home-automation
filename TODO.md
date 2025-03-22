@@ -15,8 +15,8 @@ Model
 Functions
 ---------
 
-[ ] BUG Group ID's (integers) do not increment
-[ ] BUG no tieout if tyheere is no myhome instance running
+[x] BUG Group ID's (integers) do not increment
+[ ] BUG no timeout if tyheere is no myhome instance running
 [ ] Ability to change device name
 [x] Check/force MQTT configuration
 [x] Get IP addresses in the 'host' column of the 'devices' table
@@ -68,6 +68,7 @@ Functions
 Integration
 -----------
 
+[ ] Avoid the popup about public network to always pop-up on Windows
 [ ] Build every target using matrix+go-releaser (to cache & build faster)slr268
 [ ] BUG Do not complain at each startup on Windows
 [ ] Add GitHub actions attestation <https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds>

@@ -70,7 +70,13 @@ func (r *resolver) Start(ctx context.Context) Resolver {
 		return r
 	}
 
-	zc, err := zeroconf.NewResolver(nil)
+	iface, ip, err := MainInterface(r.log)
+	if err != nil {
+		r.log.Error(err, "Unable to find main interface")
+		return nil
+	}
+
+	zc, err := zeroconf.NewResolver(zeroconf.SelectIPTraffic(zeroconf.IPv4AndIPv6), zeroconf.SelectIfaces([]net.Interface{*iface}))
 	if err != nil {
 		r.log.Error(err, "Failed to initialize ZeroConf resolver")
 		return nil
@@ -99,12 +105,6 @@ func (r *resolver) Start(ctx context.Context) Resolver {
 	l6, err := net.ListenUDP("udp6", addr6)
 	if err != nil {
 		r.log.Error(err, "Unable to listen on mDNS IPv6 UDP address", "address", addr6)
-		return nil
-	}
-
-	_, ip, err := MainInterface(r.log)
-	if err != nil {
-		r.log.Error(err, "Unable to find main interface")
 		return nil
 	}
 

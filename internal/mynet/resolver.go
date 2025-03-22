@@ -29,6 +29,12 @@ func MyResolver(log logr.Logger) Resolver {
 	defer theResolverLock.Unlock()
 
 	if theResolver == nil {
+		// Initialize firewall rules before creating the resolver
+		if err := InitializeFirewall(log); err != nil {
+			log.Error(err, "Failed to initialize firewall rules")
+			return nil
+		}
+
 		theResolver = &resolver{
 			log: log,
 		}

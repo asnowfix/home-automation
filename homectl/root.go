@@ -8,10 +8,12 @@ import (
 	"homectl/list"
 	"homectl/mqtt"
 	"homectl/options"
+	"homectl/set"
 	"homectl/shelly"
 	"homectl/show"
 	"homectl/toggle"
 	"myhome"
+	"mynet"
 	"os"
 	"time"
 
@@ -42,13 +44,13 @@ var Cmd = &cobra.Command{
 		cmd.SetContext(ctx)
 
 		var err error
-		options.MqttClient, err = mymqtt.InitClientE(cmd.Context(), log, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+		mc, err := mymqtt.InitClientE(ctx, log, mynet.MyResolver(log), options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
 		}
 
-		options.MyHomeClient, err = myhome.NewClientE(cmd.Context(), log, options.MqttClient, options.Flags.MqttTimeout)
+		myhome.TheClient, err = myhome.NewClientE(cmd.Context(), log, mc, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome client")
 			return err
@@ -57,18 +59,16 @@ var Cmd = &cobra.Command{
 	},
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		log := hlog.Logger
-		c, err := mymqtt.GetClientE(ctx)
+
+		mc, err := mymqtt.GetClientE(ctx)
 		if err != nil {
-			log.Error(err, "Failed to get MQTT client")
 			return err
 		}
+
 		cancel := ctx.Value(global.CancelKey).(context.CancelFunc)
 		cancel()
-		c.Close()
+		mc.Close()
 		<-ctx.Done()
-		// time.Sleep(1 * time.Second)
-		hlog.Logger.Info("Finished")
 		return nil
 	},
 }
@@ -79,10 +79,12 @@ func init() {
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", 7*time.Second, "Timeout for MQTT operations")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttGrace, "mqtt-grace", "G", 500*time.Millisecond, "MQTT disconnection grace period")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Json, "json", "j", false, "output in json format")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns", "M", time.Second*5, "Timeout for mDNS lookups")
 
 	Cmd.AddCommand(versionCmd)
 	Cmd.AddCommand(list.Cmd)
 	Cmd.AddCommand(show.Cmd)
+	Cmd.AddCommand(set.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(toggle.Cmd)
 	Cmd.AddCommand(shelly.Cmd)

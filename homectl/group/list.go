@@ -22,15 +22,12 @@ var listCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 
-		out, err := options.MyHomeClient.CallE(cmd.Context(), myhome.GroupList, nil)
+		out, err := myhome.TheClient.CallE(cmd.Context(), myhome.GroupList, nil)
 		if err != nil {
 			return err
 		}
 		log.Info("result", "out", out, "type", reflect.TypeOf(out))
-		groups, ok := out.(*myhome.Groups)
-		if !ok {
-			panic("unexpected format (failed to cast groups)")
-		}
+		groups := out.(*myhome.Groups)
 		if options.Flags.Json {
 			s, err := json.Marshal(groups)
 			if err != nil {

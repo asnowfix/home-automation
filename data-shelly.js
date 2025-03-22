@@ -1,3 +1,92 @@
+var shellyplugsg3_get_components = {
+  "id": 0,
+  "src": "shellyplugsg3-b08184a53f24",
+  "dst": "__debug_bin1660191309-palmbeach-405485_shellyplugsg3-b08184a53f24",
+  "result": {
+    "components": [
+      {
+        "key": "ble",
+        "config": {
+          "enable": true,
+          "rpc": {
+            "enable": true
+          },
+          "observer": {
+            "enable": false
+          }
+        }
+      },
+      {
+        "key": "cloud",
+        "config": {
+          "enable": true,
+          "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+        }
+      },
+      {
+        "key": "mqtt",
+        "config": {
+          "enable": true,
+          "server": "192.168.1.2",
+          "client_id": "shellyplugsg3-b08184a53f24",
+          "user": null,
+          "ssl_ca": null,
+          "topic_prefix": "shellyplugsg3-b08184a53f24",
+          "rpc_ntf": true,
+          "status_ntf": true,
+          "use_client_cert": false,
+          "enable_rpc": true,
+          "enable_control": true
+        }
+      },
+      {
+        "key": "plugs_ui",
+        "config": {
+          "leds": {
+            "mode": "power",
+            "colors": {
+              "switch:0": {
+                "on": {
+                  "rgb": [
+                    0,
+                    100,
+                    0
+                  ],
+                  "brightness": 100
+                },
+                "off": {
+                  "rgb": [
+                    100,
+                    0,
+                    0
+                  ],
+                  "brightness": 100
+                }
+              },
+              "power": {
+                "brightness": 100
+              }
+            },
+            "night_mode": {
+              "enable": false,
+              "brightness": 100,
+              "active_between": []
+            }
+          },
+          "controls": {
+            "switch:0": {
+              "in_mode": "momentary"
+            }
+          }
+        }
+      }
+    ],
+    "cfg_rev": 13,
+    "offset": 0,
+    "total": 8
+  }
+}
+
 result = {
   "ble": {
     "enable": true,

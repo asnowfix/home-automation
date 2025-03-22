@@ -269,17 +269,14 @@ func NewDeviceFromInfo(ctx context.Context, log logr.Logger, info *DeviceInfo) *
 }
 
 func (d *Device) Init(ctx context.Context) error {
-	var err error
-	var mc *mymqtt.Client
-
 	if d.Id() == "" && d.Host() == "" {
 		return fmt.Errorf("device id & host is empty")
 	}
 
-	mc, err = mymqtt.GetClientE(ctx)
+	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
-		d.log.Error(err, "Unable to get MQTT client for the current process")
-		return err
+		d.log.Error(err, "Unable to get MQTT client", "device_id", d.Id_)
+		panic(err)
 	}
 	d.me = fmt.Sprintf("%s_%s", mc.Id(), d.Id_)
 
@@ -311,7 +308,13 @@ func (d *Device) Init(ctx context.Context) error {
 			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
 			return err
 		}
-		d.Info = di.(*DeviceInfo)
+
+		var ok bool
+		d.Info, ok = di.(*DeviceInfo)
+		if !ok {
+			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
+			return err
+		}
 		d.log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
 		d.Id_ = d.Info.Id
 		d.MacAddress = d.Info.MacAddress
@@ -355,10 +358,8 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 
 		mc, err := mymqtt.GetClientE(ctx)
 		if err != nil {
-			d.log.Error(err, "Unable to get MQTT client")
 			return err
 		}
-
 		if mqttComponent != nil {
 			// "mqtt": {
 			// 	"client_id": "shellyplus1-08b61fd9d708",
@@ -379,12 +380,15 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 					d.log.Error(err, "Unable to get method handler", "method", mqtt.SetConfig)
 					return err
 				}
-				_, err = GetRegistrar().CallE(ctx, d, via, mh, &mqtt.Config{
-					Enable:        true,
-					Server:        brokerUrl,
-					RpcNotifs:     true,
-					StatusNotifs:  true,
-					EnableControl: true,
+				_, err = GetRegistrar().CallE(ctx, d, via, mh, &mqtt.SetConfigRequest{
+					Config: mqtt.Config{
+						Enable:        true,
+						Server:        brokerUrl,
+						RpcNotifs:     true,
+						StatusNotifs:  true,
+						EnableRpc:     true,
+						EnableControl: true,
+					},
 				})
 				if err != nil {
 					d.log.Error(err, "Unable to set MQTT config")
@@ -437,7 +441,12 @@ func Print(log logr.Logger, d any) error {
 	return nil
 }
 
-func Foreach(ctx context.Context, log logr.Logger, mc *mymqtt.Client, names []string, via types.Channel, do Do, args []string) error {
+func Foreach(ctx context.Context, log logr.Logger, names []string, via types.Channel, do Do, args []string) error {
+	mc, err := mymqtt.GetClientE(ctx)
+	if err != nil {
+		return err
+	}
+
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
 	if len(names) > 0 {
 		for _, name := range names {

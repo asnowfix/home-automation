@@ -1,7 +1,6 @@
 package shelly
 
 import (
-	"hlog"
 	hopts "homectl/options"
 	jobsCtl "homectl/shelly/jobs"
 	kvsCtl "homectl/shelly/kvs"
@@ -19,9 +18,7 @@ var Cmd = &cobra.Command{
 	Short: "Shelly devices features",
 	Args:  cobra.NoArgs,
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		log := hlog.Logger
-		log.Info("Init Shelly client API")
-		shelly.Init(log, hopts.Flags.MqttTimeout)
+		shelly.Init(cmd.Context(), hopts.Flags.MqttTimeout)
 
 		for i, c := range types.Channels {
 			if options.Flags.Via == c {

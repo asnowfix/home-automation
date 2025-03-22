@@ -50,6 +50,7 @@ func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb
 	var resMsg []byte
 	select {
 	case resMsg = <-device.From():
+		// ch.log.Info("Got response", "to verb", verb.Method, "from device", device.Id(), "response", string(resMsg))
 	case <-time.After(ch.timeout):
 		ch.log.Error(nil, "Timeout waiting for response", "to verb", verb.Method, "from device", device.Id(), "timeout", ch.timeout)
 		device.MqttOk(false)
@@ -67,7 +68,7 @@ func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb
 
 	// ch.log.Info("Received", "response", res)
 	if res.Error != nil {
-		return nil, fmt.Errorf("%v (code:%v)", res.Error.Message, res.Error.Code)
+		return nil, fmt.Errorf("device replied error '%v' (code:%v) to request '%v'", res.Error.Message, res.Error.Code, string(reqPayload))
 	}
 
 	device.MqttOk(true)

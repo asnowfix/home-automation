@@ -25,7 +25,7 @@ var statusCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, after := hopts.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doStatus, after)
+		return shelly.Foreach(cmd.Context(), log, before, options.Via, doStatus, after)
 	},
 }
 

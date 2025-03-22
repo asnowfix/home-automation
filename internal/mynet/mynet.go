@@ -46,3 +46,29 @@ func MainInterface(log logr.Logger) (*net.Interface, *net.IP, error) {
 	}
 	return nil, nil, fmt.Errorf("did not find any interface on the same network as the network gateway IP %v", gw)
 }
+
+func IsSameNetwork(log logr.Logger, ip net.IP) error {
+	var err error
+	var network *net.IPNet
+
+	myip, err := gateway.DiscoverInterface()
+	if err != nil {
+		return err
+	}
+	log.Info("my ip", "addr", myip.String())
+
+	maskLen, _ := myip.DefaultMask().Size()
+	_, network, err = net.ParseCIDR(myip.String() + "/" + fmt.Sprintf("%d", maskLen))
+	if err != nil {
+		return err
+	}
+	log.Info("my network", "addr", network.String())
+
+	if network.Contains(ip) {
+		log.Info("ip is in my network", "ip", ip.String())
+		return nil
+	} else {
+		log.Info("ip is not in my network", "ip", ip.String())
+		return fmt.Errorf("ip is not in my network")
+	}
+}

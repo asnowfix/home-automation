@@ -66,13 +66,13 @@ type Response struct {
 
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt/
 
-type SslCa uint32
+type SslCa string
 
 const (
-	NoSsl          SslCa = iota // Plain TCP connection
-	SkipValidation              // TLS with disabled certificate validation
-	UserCa                      // TLS connection verified by the user-provided CA
-	BuiltinCa                   // TLS connection verified by the built-in CA bundle
+	//NoSsl        = nil           // Plain TCP connection
+	SkipValidation = "*"           // TLS with disabled certificate validation
+	UserCa         = "user_ca.pem" // TLS connection verified by the user-provided CA
+	BuiltinCa      = "ca.pem"      // TLS connection verified by the built-in CA bundle
 )
 
 // The configuration of the MQTT component contains information about the credentials and prefix used and the protection and notifications settings of the MQTT connection.
@@ -86,17 +86,23 @@ type Config struct {
 	RpcNotifs      bool   `json:"rpc_ntf"`                // Enables RPC notifications (NotifyStatus and NotifyEvent) to be published on <device_id|topic_prefix>/events/rpc (<topic_prefix> when a custom prefix is set, <device_id> otherwise). Default value: true.
 	StatusNotifs   bool   `json:"status_ntf"`             // Enables publishing the complete component status on <device_id|topic_prefix>/status/<component>:<id> (<topic_prefix> when a custom prefix is set, <device_id> otherwise). The complete status will be published if a signifficant change occurred. Default value: false
 	UseClientCerts bool   `json:"use_client_cert"`        // Enable or diable usage of client certifactes to use MQTT with encription, default: false
-	EnableControl  bool   `json:"enable_control"`         // Enable the MQTT control feature. Defalut value: true
+	EnableControl  bool   `json:"enable_control"`         // Enable controlling the MQTT device.  Requires `enable_rpc` to be true. Defalut value: true
+	EnableRpc      bool   `json:"enable_rpc,omitempty"`   // Communication (read, status, control) over MQTT is enabled MQTT.GetConfig only.
 }
 
 type Status struct {
 	Connected bool `json:"connected"` // True if the device is MQTT connected, false otherwise
 }
 
-type ConfigResults struct {
+// <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt#mqttsetconfig>
+type SetConfigRequest struct {
+	Config Config `json:"config"` // Configuration that the method takes
+}
+
+type SetConfigResponse struct {
 	Id     uint32 `json:"id"`
 	Source string `json:"src"`
 	Result struct {
 		RestartRequired bool `json:"restart_required"`
-	}
+	} `json:"result"`
 }

@@ -3,7 +3,6 @@ package jobs
 import (
 	"context"
 	"hlog"
-	hopts "homectl/options"
 	"homectl/shelly/options"
 	"schedule"
 
@@ -20,7 +19,7 @@ var showCtl = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, args, options.Via, showOneDeviceJobs, args)
+		return shelly.Foreach(cmd.Context(), log, args, options.Via, showOneDeviceJobs, args)
 	},
 }
 

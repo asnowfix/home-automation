@@ -80,7 +80,7 @@ type Devices struct {
 }
 
 type GroupInfo struct {
-	ID          int    `db:"id" json:"-"`
+	ID          int    `db:"id" json:"id"`
 	Name        string `db:"name" json:"name"`
 	Description string `db:"description" json:"description"`
 }

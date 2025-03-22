@@ -289,11 +289,14 @@ func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (any, error) {
 	log := s.log.WithValues("name", group.Name)
 	log.Info("Adding new group")
 	query := `INSERT INTO groups (name, description) VALUES (:name, :description)`
-	_, err := s.db.NamedExec(query, map[string]interface{}{
+	result, err := s.db.NamedExec(query, map[string]interface{}{
 		"name":        group.Name,
 		"description": group.Description,
 	})
-	return nil, err
+	if err != nil {
+		return nil, err
+	}
+	return result.LastInsertId()
 }
 
 // RemoveGroup removes a group from the database by its name.

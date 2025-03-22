@@ -16,6 +16,7 @@ Functions
 ---------
 
 [ ] BUG Group ID's (integers) do not increment
+[ ] BUG no tieout if tyheere is no myhome instance running
 [ ] Ability to change device name
 [x] Check/force MQTT configuration
 [x] Get IP addresses in the 'host' column of the 'devices' table
@@ -68,7 +69,7 @@ Integration
 -----------
 
 [ ] Build every target using matrix+go-releaser (to cache & build faster)slr268
-
+[ ] BUG Do not complain at each startup on Windows
 [ ] Add GitHub actions attestation <https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds>
 [x] GPG signed commits on Windows/WSL/Linux
 [x] Fix error
@@ -87,6 +88,7 @@ Integration
 [ ] Ship linux/arm64 binary in the release
 [ ] Ship linux/amd64 binary in the release
 [ ] Add cron-job to download the binary from the latest release
+[ ] Add command to auto-update Debian package installation from latest release
 [ ] Package systemd scripts in-place (with stop, disable & reload as preuninstall, ans reload enable & start as postinstall)
 [x] Create verified tags
 [ ] Use goreleaser-cross if needed
@@ -95,5 +97,4 @@ Integration
 
 [ ] Build Debian package the official way using <https://github.com/marketplace/actions/build-debian-packages>
 [x] Build MSI package for Windows on new tagged version
-[ ] Add command to auto-update Debian package installation from latest release
 [ ] Run myhome as a windows service <https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/create-user-defined-service>

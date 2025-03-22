@@ -5,25 +5,19 @@ import (
 	"global"
 	"myhome"
 	"myhome/devices"
+	"mynet"
 	"pkg/shelly"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
 )
 
-func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry) error {
+func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry, dr mynet.Resolver) error {
 	log := ctx.Value(global.LogKey).(logr.Logger)
-
-	resolver, err := zeroconf.NewResolver(nil)
-	if err != nil {
-		log.Error(err, "Failed to initialize ZeroConf resolver")
-		return err
-	}
-	log.Info("Initialized ZeroConf resolver")
 
 	scan := make(chan *zeroconf.ServiceEntry, 1)
 
-	err = resolver.Browse(ctx, shelly.MDNS_SHELLIES, "local.", scan)
+	err := dr.BrowseService(ctx, shelly.MDNS_SHELLIES, "local.", scan)
 	if err != nil {
 		log.Error(err, "Failed to browse ZeroConf")
 		return err
@@ -42,7 +36,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 				deviceId := entry.Instance
 				device, err := db.GetDeviceById(ctx, deviceId)
 				if err != nil || device.Info == nil {
-					sd, err := shelly.NewDeviceFromZeroConfEntry(log, entry)
+					sd, err := shelly.NewDeviceFromZeroConfEntry(ctx, log, dr, entry)
 					if err != nil {
 						log.Error(err, "Failed to create device from zeroconf entry", "entry", entry)
 						continue

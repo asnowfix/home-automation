@@ -9,6 +9,7 @@ import (
 	"myhome/devices"
 	"myhome/storage"
 	"mymqtt"
+	"mynet"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
@@ -24,9 +25,10 @@ type DeviceManager struct {
 	cancel     context.CancelFunc
 	log        logr.Logger
 	mqttClient *mymqtt.Client
+	resolver   mynet.Resolver
 }
 
-func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, mqttClient *mymqtt.Client) *DeviceManager {
+func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient *mymqtt.Client) *DeviceManager {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 	return &DeviceManager{
 		dr:         devices.NewCache(ctx, s),
@@ -34,6 +36,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, mqttClient 
 		log:        log.WithName("DeviceManager"),
 		update:     make(chan *myhome.Device, 64), // TODO configurable buffer size
 		mqttClient: mqttClient,
+		resolver:   resolver,
 	}
 }
 
@@ -167,7 +170,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	}
 
 	// Loop on ZeroConf devices discovery
-	err = watch.ZeroConf(ctx, dm, dm.dr)
+	err = watch.ZeroConf(ctx, dm, dm.dr, dm.resolver)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch ZeroConf devices")
 		return err

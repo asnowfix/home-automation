@@ -1,15 +1,15 @@
-package devices
+package shelly
 
 import (
+	"devices"
 	"net"
-	"pkg/shelly"
 
 	"github.com/go-logr/logr"
 )
 
 type ShellyDevice struct {
 	log    logr.Logger
-	shelly *shelly.Device
+	shelly *Device
 }
 
 func (d ShellyDevice) Provider() string {
@@ -28,7 +28,7 @@ func (d ShellyDevice) Online() bool {
 	return true // TODO because found by mDNS
 }
 
-func (d ShellyDevice) Topic() Topic {
+func (d ShellyDevice) Topic() devices.Topic {
 	return nil // TODO connect to real MQTT
 }
 
@@ -45,23 +45,23 @@ func (d ShellyDevice) Subscribe(handler func(msg []byte)) {
 }
 
 func (d ShellyDevice) MarshalJSON() ([]byte, error) {
-	return MarshalJSON(d)
+	return devices.MarshalJSON(d)
 }
 
 func (d ShellyDevice) Ip() net.IP {
 	if ip := net.ParseIP(d.shelly.Host()); ip != nil {
 		return ip
 	}
-	ips, err := net.LookupIP(d.shelly.Host())
-	if err != nil {
-		d.log.Error(err, "Failed to resolve IP of", "hostname", d.shelly.Host())
-		return nil
-	}
-	for _, ip := range ips {
-		if ip.To4() != nil {
-			d.shelly.SetHost(ip.String())
-			return ip
-		}
-	}
+	// ips, err := d.shelly.LookupHost(ctx, d.shelly.Host())
+	// if err != nil {
+	// 	d.log.Error(err, "Failed to resolve IP of", "hostname", d.shelly.Host())
+	// 	return nil
+	// }
+	// for _, ip := range ips {
+	// 	if ip.To4() != nil {
+	// 		d.shelly.SetHost(ip.String())
+	// 		return ip
+	// 	}
+	// }
 	return nil
 }

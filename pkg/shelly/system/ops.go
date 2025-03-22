@@ -29,8 +29,8 @@ const (
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
-		// InputType:  reflect.TypeOf(Config{}),
-		Allocate: func() any { return nil },
+		// InputType:  reflect.TypeOf(SetConfigRequest{}),
+		Allocate: func() any { return new(SetConfigResponse) },
 	})
 	r.RegisterMethodHandler(GetConfig.String(), types.MethodHandler{
 		Allocate: func() any { return new(Config) },

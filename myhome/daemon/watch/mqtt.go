@@ -60,7 +60,7 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 					log.Info("Found device in DB", "device_id", deviceId)
 					if device.Impl() == nil {
 						log.Info("Loading device details in memory", "device_id", deviceId)
-						device.WithImpl(shelly.NewDeviceFromInfo(ctx, log, device.Info))
+						device.WithImpl(shelly.NewDeviceFromMqttId(ctx, log, device.Id, mc))
 					}
 				}
 

@@ -3,8 +3,6 @@ package options
 import (
 	"context"
 	"global"
-	"myhome"
-	"mymqtt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,11 +17,8 @@ var Flags struct {
 	MqttBroker  string
 	MqttTimeout time.Duration
 	MqttGrace   time.Duration
+	MdnsTimeout time.Duration
 }
-
-var MqttClient *mymqtt.Client
-
-var MyHomeClient myhome.Client
 
 func CommandLineContext(log logr.Logger) context.Context {
 	ctx := context.Background()

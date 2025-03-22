@@ -2,6 +2,4 @@ module myhome/devices/impl
 
 go 1.23.0
 
-require (
-)
-
+require github.com/go-logr/logr v1.4.2

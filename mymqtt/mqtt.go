@@ -3,7 +3,7 @@ package mymqtt
 import (
 	"context"
 	"fmt"
-	"hlog"
+	"global"
 	"mynet"
 	"net"
 	"net/url"
@@ -15,9 +15,9 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/go-logr/logr"
-	"github.com/grandcat/zeroconf"
 )
 
+const HOSTNAME = "mqtt"
 const BROKER_SERVICE = "_mqtt._tcp."
 const PRIVATE_PORT = 1883
 const PUBLIC_PORT = 8883
@@ -35,13 +35,26 @@ var client *Client
 
 var mutex sync.Mutex
 
+func GetClient(ctx context.Context) *Client {
+	c, err := GetClientE(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return c
+}
+
 func GetClientE(ctx context.Context) (*Client, error) {
-	log := hlog.Logger
+	log, ok := ctx.Value(global.LogKey).(logr.Logger)
+	if !ok {
+		panic("no logger initialized")
+	}
+
 	mutex.Lock()
-	for client == nil {
+	if client == nil {
 		mutex.Unlock()
 		select {
 		case <-ctx.Done():
+			log.Error(ctx.Err(), "could not get MQTT client")
 			return nil, ctx.Err()
 		case <-time.After(time.Second):
 		}
@@ -50,18 +63,19 @@ func GetClientE(ctx context.Context) (*Client, error) {
 		mutex.Lock()
 	}
 	mutex.Unlock()
+
 	return client, nil
 }
 
-func InitClient(ctx context.Context, log logr.Logger, broker string, me string, timeout time.Duration, grace time.Duration) *Client {
-	c, err := InitClientE(ctx, log, broker, timeout, grace)
+func InitClient(ctx context.Context, log logr.Logger, resolver mynet.Resolver, broker string, me string, mqttTimeout time.Duration, mqttGrace time.Duration, mdnsTimeout time.Duration) *Client {
+	c, err := InitClientE(ctx, log, resolver, broker, mqttTimeout, mqttGrace, mdnsTimeout)
 	if err != nil {
 		panic(fmt.Errorf("could not initialize MQTT client: %w", err))
 	}
 	return c
 }
 
-func InitClientE(ctx context.Context, log logr.Logger, broker string, timeout time.Duration, grace time.Duration) (*Client, error) {
+func InitClientE(ctx context.Context, log logr.Logger, resolver mynet.Resolver, broker string, mqttTimeout time.Duration, mqttGrace time.Duration, mdnsTimeout time.Duration) (*Client, error) {
 	defer mutex.Unlock()
 	mutex.Lock()
 
@@ -80,7 +94,7 @@ func InitClientE(ctx context.Context, log logr.Logger, broker string, timeout ti
 	}
 	clientId := fmt.Sprintf("%s-%s-%d", programName, hostname, os.Getpid())
 
-	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", timeout)
+	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", mqttTimeout)
 
 	opts := mqtt.NewClientOptions()
 	opts.SetUsername(MqttUsername)
@@ -91,7 +105,8 @@ func InitClientE(ctx context.Context, log logr.Logger, broker string, timeout ti
 	opts.SetResumeSubs(true)    // automatically re-subscribe in case or disconnection/reconnection
 	opts.SetCleanSession(false) // do not save messages to be re-sent in case of disconnection
 
-	brokerUrl, err := lookupBroker(log, broker)
+	mdnsCtx, _ := context.WithTimeout(ctx, mdnsTimeout)
+	brokerUrl, err := lookupBroker(mdnsCtx, log, resolver, broker)
 	if err != nil {
 		log.Error(err, "could not find MQTT broker", "where", broker)
 		return nil, err
@@ -106,8 +121,8 @@ func InitClientE(ctx context.Context, log logr.Logger, broker string, timeout ti
 		mqtt:      mqtt.NewClient(opts),
 		brokerUrl: brokerUrl,
 		log:       log,
-		timeout:   timeout,
-		grace:     grace,
+		timeout:   mqttTimeout,
+		grace:     mqttGrace,
 	}
 
 	// FIXME: get MQTT logging right
@@ -120,7 +135,7 @@ func InitClientE(ctx context.Context, log logr.Logger, broker string, timeout ti
 		<-ctx.Done()
 		log.Error(ctx.Err(), "Context done: MQTT client disconnecting")
 		client.Close()
-	}(log.WithName("Client#Monitor"))
+	}(log.WithName("mymqtt.Client"))
 
 	log.Info("MQTT client initialized", "client_id", client.clientId, "timeout", client.timeout)
 	return client, nil
@@ -157,7 +172,7 @@ func (c *Client) connect() error {
 	return nil
 }
 
-func lookupBroker(log logr.Logger, where string) (*url.URL, error) {
+func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, where string) (*url.URL, error) {
 	log.Info("Looking up MQTT broker", "where", where)
 
 	if where == "me" {
@@ -192,7 +207,7 @@ func lookupBroker(log logr.Logger, where string) (*url.URL, error) {
 		}, nil
 	}
 
-	if _, err := net.LookupHost(host); err == nil {
+	if _, err := resolver.LookupHost(ctx, host); err == nil {
 		log.Info("Using host", "where", host, "port", port)
 		return &url.URL{
 			Scheme: "tcp",
@@ -200,9 +215,9 @@ func lookupBroker(log logr.Logger, where string) (*url.URL, error) {
 		}, nil
 	}
 
-	url, err := lookupBrokerViaZeroConf(log)
+	url, err := resolver.LookupService(ctx, BROKER_SERVICE)
 	if err != nil {
-		log.Error(err, "Zeroconf lookup failed", "service", BROKER_SERVICE)
+		log.Error(err, "Service lookup failed", "service", BROKER_SERVICE)
 		return nil, err
 	}
 	return url, nil
@@ -222,51 +237,6 @@ var MqttUsername string = ""
 var MqttPassword string = ""
 
 const ZEROCONF_SERVICE = "_mqtt._tcp."
-
-func lookupBrokerViaZeroConf(log logr.Logger) (*url.URL, error) {
-	resolver, err := zeroconf.NewResolver(nil)
-	if err != nil {
-		log.Error(err, "Failed to initialize zeronconf resolver:")
-	}
-
-	entries := make(chan *zeroconf.ServiceEntry)
-	brokers := make([]*url.URL, 0)
-
-	go func() {
-		for entry := range entries {
-			// Filter-out spurious candidates
-			if strings.Contains(entry.Service, ZEROCONF_SERVICE) {
-				log.Info("Discovered MQTT broker using mDNS", " ip", entry.AddrIPv4, "port", entry.Port)
-				for _, addrIpV4 := range entry.AddrIPv4 {
-					// Append the MQTT broker URL format host:port to known brokers
-					brokers = append(brokers, &url.URL{
-						Scheme: "tcp",
-						Host:   fmt.Sprintf("%v:%v", addrIpV4, entry.Port),
-					})
-				}
-			}
-		}
-	}()
-
-	// Start the lookup
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
-	defer cancel()
-	err = resolver.Browse(ctx, ZEROCONF_SERVICE, "local.", entries)
-	if err != nil {
-		log.Error(err, "failed to browse")
-		return nil, err
-	}
-
-	// wait for the lookup to complete
-	<-ctx.Done()
-
-	log.Info("Using MQTT", "broker", brokers, "service", ZEROCONF_SERVICE)
-	if len(brokers) == 0 {
-		return nil, fmt.Errorf("no MQTT broker found")
-	} else {
-		return brokers[0], nil
-	}
-}
 
 type MqttMessage struct {
 	Topic   string `json:"topic"`

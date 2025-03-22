@@ -57,7 +57,7 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 	}
 
 	if reflect.TypeOf(params) != reflect.TypeOf(m.NewParams()) {
-		return nil, fmt.Errorf("invalid parameters for method %s: got %v", method, reflect.TypeOf(params))
+		return nil, fmt.Errorf("invalid parameters for method %s: got %v, should be %v", method, reflect.TypeOf(params), reflect.TypeOf(m.NewParams()))
 	}
 	req := request{
 		Dialog: Dialog{

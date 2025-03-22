@@ -1,6 +1,7 @@
 package mqtt
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"mymqtt"
@@ -17,7 +18,7 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
-func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *mmqtt.Server, error) {
+func MyHome(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string) error {
 	log.Info("Starting MyHome", "program", program)
 
 	// Create the new MQTT Server.
@@ -33,8 +34,8 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 		ShowPasswords:  true,
 	})
 	if err != nil {
-		log.Error(err, "error adding debug hook")
-		return nil, nil, err
+		log.Error(err, "error adding MQTT debug hook")
+		return err
 	}
 
 	// Allow all connections.
@@ -50,21 +51,19 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 	err = mqttServer.AddListener(tcp)
 	if err != nil {
 		log.Error(err, "error adding TCP listener")
-		return nil, nil, err
+		return err
 	}
 
-	// start the mqtt server
-	go func() {
-		err := mqttServer.Serve()
-		if err != nil {
-			log.Error(err, "error starting MQTT server")
-		}
-	}()
+	err = mqttServer.Serve()
+	if err != nil {
+		log.Error(err, "error starting MQTT server")
+		return err
+	}
 
 	host, err := os.Hostname()
 	if err != nil {
 		log.Error(err, "error finding current hostname")
-		return nil, nil, err
+		return err
 	}
 
 	var instance string = program
@@ -72,22 +71,32 @@ func MyHome(log logr.Logger, program string, info []string) (*zeroconf.Server, *
 		instance = host
 	}
 
-	// Register the service with mDNS.
+	resolver.WithLocalName(mymqtt.HOSTNAME)
+
+	// Register the MQTT broker service with mDNS.
 	iface, _, err := mynet.MainInterface(log)
 	ifaces := make([]net.Interface, 1)
 	ifaces[0] = *iface
 	if err != nil {
 		log.Error(err, "Unable to get main local IP interface")
-		return nil, nil, err
+		return err
 	}
 
 	mdnsServer, err := zeroconf.Register(instance, mymqtt.ZEROCONF_SERVICE, "local.", mymqtt.PRIVATE_PORT, info, ifaces)
 	if err != nil {
 		log.Error(err, "Unable to register new ZeroConf service")
-		return nil, nil, err
+		return err
 	}
 
 	log.Info("Started new MQTT broker", "mdns_server", mdnsServer, "mdns_service", mymqtt.ZEROCONF_SERVICE)
 
-	return mdnsServer, mqttServer, nil
+	go func(ctx context.Context) {
+		<-ctx.Done()
+		mdnsServer.Shutdown()
+		mqttServer.Close()
+	}(ctx)
+
+	log.Info("Started embedded MQTT broker & published it over mDNS/Zeroconf", "server", mdnsServer)
+
+	return nil
 }

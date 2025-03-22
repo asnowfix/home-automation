@@ -27,7 +27,7 @@ var enableCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, _ := hopts.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doEnableDisable, []string{"true"})
+		return shelly.Foreach(cmd.Context(), log, before, options.Via, doEnableDisable, []string{"true"})
 	},
 }
 
@@ -38,7 +38,7 @@ var disableCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		before, _ := hopts.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, hopts.MqttClient, before, options.Via, doEnableDisable, []string{"false"})
+		return shelly.Foreach(cmd.Context(), log, before, options.Via, doEnableDisable, []string{"false"})
 	},
 }
 

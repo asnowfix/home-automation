@@ -332,7 +332,7 @@ func (s *DeviceStorage) AddDeviceToGroup(groupDevice *myhome.GroupDevice) (any, 
 // RemoveDeviceFromGroup removes a device from a group.
 func (s *DeviceStorage) RemoveDeviceFromGroup(groupDevice *myhome.GroupDevice) (any, error) {
 	query := `DELETE FROM groupsMember WHERE manufacturer = $1 AND id = $2 AND group_id = $3`
-	_, err := s.db.Exec(query, groupDevice.Manufacturer, groupDevice.ID, groupDevice.Group)
+	_, err := s.db.Exec(query, groupDevice.Manufacturer, groupDevice.Id, groupDevice.Group)
 	return nil, err
 }
 

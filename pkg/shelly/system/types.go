@@ -4,6 +4,15 @@ import "net"
 
 // <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys>
 
+// <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys#syssetconfig-example>
+type SetConfigRequest struct {
+	Config Config `json:"config"`
+}
+
+type SetConfigResponse struct {
+	RestartRequired bool `json:"restart_required"`
+}
+
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys/#configuration
 
 type Config struct {

@@ -1,6 +1,8 @@
 package options
 
-import "pkg/shelly/types"
+import (
+	"pkg/shelly/types"
+)
 
 var Flags struct {
 	Via string

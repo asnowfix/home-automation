@@ -46,6 +46,14 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &Devices{}
 		},
 	},
+	DeviceLookup: {
+		NewParams: func() any {
+			return ""
+		},
+		NewResult: func() any {
+			return &DeviceSummary{}
+		},
+	},
 	DeviceShow: {
 		NewParams: func() any {
 			return ""
@@ -88,7 +96,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 	},
 	GroupAddDevice: {
 		NewParams: func() any {
-			return GroupDevice{}
+			return &GroupDevice{}
 		},
 		NewResult: func() any {
 			return nil
@@ -96,7 +104,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 	},
 	GroupRemoveDevice: {
 		NewParams: func() any {
-			return GroupDevice{}
+			return &GroupDevice{}
 		},
 		NewResult: func() any {
 			return nil

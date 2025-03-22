@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+var TheClient Client
+
 type Client interface {
 	CallE(ctx context.Context, method Verb, params any) (any, error)
 	Shutdown()

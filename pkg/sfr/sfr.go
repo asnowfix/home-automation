@@ -1,20 +1,20 @@
-package devices
+package sfr
 
 import (
+	"devices"
 	"net"
-	"pkg/sfr"
 
 	"github.com/go-logr/logr"
 )
 
-func ListSfrDevices(log logr.Logger) ([]Host, error) {
-	xmlHosts, err := sfr.LanGetHostsList()
+func ListSfrDevices(log logr.Logger) ([]devices.Host, error) {
+	xmlHosts, err := LanGetHostsList()
 	if err != nil {
 		log.Error(err, "Failed to get SFR hosts list")
 		return nil, err
 	}
 
-	hosts := make([]Host, len(xmlHosts))
+	hosts := make([]devices.Host, len(xmlHosts))
 	sh := make([]SfrHost, len(xmlHosts))
 	for i, xmlHost := range xmlHosts {
 		log.Info("Found SFR host", "hostname", xmlHost.Name)
@@ -30,7 +30,7 @@ func ListSfrDevices(log logr.Logger) ([]Host, error) {
 
 type SfrHost struct {
 	log logr.Logger
-	xml *sfr.XmlHost
+	xml *XmlHost
 }
 
 func (h SfrHost) Provider() string {
@@ -53,7 +53,7 @@ func (h SfrHost) Online() bool {
 	return h.xml.Status == "online"
 }
 
-func (h SfrHost) Topic() Topic {
+func (h SfrHost) Topic() devices.Topic {
 	return nil
 }
 
@@ -70,5 +70,5 @@ func (h SfrHost) Subscribe(handler func(msg []byte)) {
 }
 
 func (h SfrHost) MarshalJSON() ([]byte, error) {
-	return MarshalJSON(h)
+	return devices.MarshalJSON(h)
 }

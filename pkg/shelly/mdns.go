@@ -1,6 +1,8 @@
 package shelly
 
 import (
+	"context"
+	"devices"
 	"encoding/json"
 	"net"
 	"strconv"
@@ -11,13 +13,14 @@ import (
 
 const MDNS_SHELLIES string = "_shelly._tcp."
 
-func NewDeviceFromZeroConfEntry(log logr.Logger, entry *zeroconf.ServiceEntry) (*Device, error) {
+func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver devices.Resolver, entry *zeroconf.ServiceEntry) (*Device, error) {
 	s, _ := json.Marshal(entry)
 	log.Info("Found", "entry", s)
 
 	var generation int
 	var application string
 	var version string
+
 	for _, txt := range entry.Text {
 		log.Info("Found", "TXT", txt)
 		if generationRe.Match([]byte(txt)) {
@@ -31,10 +34,17 @@ func NewDeviceFromZeroConfEntry(log logr.Logger, entry *zeroconf.ServiceEntry) (
 		}
 	}
 
-	ips, err := net.LookupIP(entry.HostName)
-	if err != nil {
-		log.Error(err, "Failed to resolve IP address", "hostname", entry.HostName)
-		return nil, err
+	var err error
+	var ips []net.IP
+	if len(entry.AddrIPv4) == 0 && len(entry.AddrIPv6) == 0 {
+		ips, err = resolver.LookupHost(ctx, entry.HostName)
+		if err != nil {
+			log.Error(err, "Failed to resolve IP address", "hostname", entry.HostName)
+			return nil, err
+		}
+	} else {
+		ips = append(ips, entry.AddrIPv4...)
+		ips = append(ips, entry.AddrIPv6...)
 	}
 
 	var ip net.IP

@@ -81,6 +81,19 @@ CommandType     Name    Version    Source
 Application     go.exe  0.0.0.0    C:\Program Files\Go\bin\go.exe    
 ```
 
+```pwsh
+winget install --id SQLite.SQLite --source winget
+
+# Copy SQLite binaries to local bin directory
+$src = "C:\Users\$env:Username\AppData\Local\Microsoft\WinGet\Packages\SQLite.SQLite_*"
+$dst = "C:\Users\$env:Username\.local.bin"
+New-Item -Path $dst -ItemType Directory -Force | Out-Null
+Get-ChildItem $src -Recurse -Filter *sqlite* | Copy-Item -Destination $dst
+
+$env:Path += ";C:\Users\$env:Username\.local.bin"
+Get-Command sqlite3
+```
+
 As administrator, install the WiX Toolset:
 
 ```pwsh

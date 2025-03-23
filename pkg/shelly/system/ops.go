@@ -30,10 +30,12 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
 		// InputType:  reflect.TypeOf(SetConfigRequest{}),
-		Allocate: func() any { return new(SetConfigResponse) },
+		Allocate:   func() any { return new(SetConfigResponse) },
+		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler(GetConfig.String(), types.MethodHandler{
-		Allocate: func() any { return new(Config) },
+		Allocate:   func() any { return new(Config) },
+		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler(GetStatus.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Status) },

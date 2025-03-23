@@ -49,7 +49,6 @@ func (s *DeviceStorage) createTable() error {
         info TEXT,
         config_revision INTEGER,  -- New column for config revision
         config TEXT,
-        status TEXT,
         PRIMARY KEY (manufacturer, id)
     );
 
@@ -63,17 +62,17 @@ func (s *DeviceStorage) createTable() error {
         manufacturer TEXT NOT NULL,
         id TEXT NOT NULL,
         group_id INTEGER NOT NULL,
-        UNIQUE(manufacturer, id, group_id),
         FOREIGN KEY (manufacturer, id) REFERENCES devices(manufacturer, id) ON DELETE CASCADE,
-        FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
-    );
-`
+        FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE RESTRICT,
+        PRIMARY KEY (manufacturer, id, group_id)
+    );`
+
 	_, err := s.db.Exec(schema)
 	if err != nil {
-		s.log.Error(err, "Failed to execute create table query")
+		s.log.Error(err, "Failed to create database schema")
+		return err
 	}
-	s.log.Info("Created table")
-	return err
+	return nil
 }
 
 // Close closes the database connection & syncs it to persistent storage.
@@ -105,25 +104,17 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 	}
 	d.Config_ = string(out)
 
-	out, err = json.Marshal(d.Status)
-	if err != nil {
-		s.log.Error(err, "Failed to marshal device status", "device_id", device.Id)
-		return err
-	}
-	d.Status_ = string(out)
-
 	// FIXME: fail device upsert if it already exists and overwrite is false
 	query := `
-    INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config, status) 
-    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config, :status)
+    INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config) 
+    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config)
     ON CONFLICT(manufacturer, id) DO UPDATE SET 
         mac = excluded.mac, 
         name = excluded.name, 
         host = excluded.host, 
         info = excluded.info, 
         config_revision = excluded.config_revision, 
-        config = excluded.config, 
-        status = excluded.status`
+        config = excluded.config`
 	_, err = s.db.NamedExec(query, d)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device", "device", device)
@@ -289,11 +280,14 @@ func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (any, error) {
 	log := s.log.WithValues("name", group.Name)
 	log.Info("Adding new group")
 	query := `INSERT INTO groups (name, description) VALUES (:name, :description)`
-	_, err := s.db.NamedExec(query, map[string]interface{}{
+	result, err := s.db.NamedExec(query, map[string]interface{}{
 		"name":        group.Name,
 		"description": group.Description,
 	})
-	return nil, err
+	if err != nil {
+		return nil, err
+	}
+	return result.LastInsertId()
 }
 
 // RemoveGroup removes a group from the database by its name.
@@ -324,14 +318,14 @@ func (s *DeviceStorage) RemoveGroup(name string) (any, error) {
 
 // AddDeviceToGroup adds a device to a group.
 func (s *DeviceStorage) AddDeviceToGroup(groupDevice *myhome.GroupDevice) (any, error) {
-	query := `INSERT INTO groupsMember (manufacturer, id, group_id) VALUES (:manufacturer, :id, :group_id)`
+	query := `INSERT INTO groupsMember (manufacturer, id, group_id) VALUES (:manufacturer, :id, (SELECT id FROM groups WHERE name = :group))`
 	_, err := s.db.NamedExec(query, groupDevice)
 	return nil, err
 }
 
 // RemoveDeviceFromGroup removes a device from a group.
 func (s *DeviceStorage) RemoveDeviceFromGroup(groupDevice *myhome.GroupDevice) (any, error) {
-	query := `DELETE FROM groupsMember WHERE manufacturer = $1 AND id = $2 AND group_id = $3`
+	query := `DELETE FROM groupsMember WHERE manufacturer = $1 AND id = $2 AND group_id = (SELECT id FROM groups WHERE name = $3)`
 	_, err := s.db.Exec(query, groupDevice.Manufacturer, groupDevice.Id, groupDevice.Group)
 	return nil, err
 }
@@ -346,11 +340,6 @@ func unmarshallDevice(log logr.Logger, device Device) (*myhome.Device, error) {
 	err = json.Unmarshal([]byte(device.Config_), &device.Config)
 	if err != nil {
 		log.Error(err, "Failed to unmarshal storage config", "device_id", device.Id, "config", device.Config_)
-		// return myhome.Device{}, err
-	}
-	err = json.Unmarshal([]byte(device.Status_), &device.Status)
-	if err != nil {
-		log.Error(err, "Failed to unmarshal storage status", "device_id", device.Id, "status", device.Status_)
 		// return myhome.Device{}, err
 	}
 	return &device.Device, nil

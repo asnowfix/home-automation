@@ -27,7 +27,7 @@ help:
 	@echo make help build run install start stop
 
 ifneq ($(MODULE),)
-# make module MODULE=homectl/shelly/options
+# make module MODULE=homectl/options
 module:
 	(mkdir -p $(MODULE) && cd $(MODULE) && $(GO) mod init $(MODULE)) && $(GO) work use $(MODULE)
 endif

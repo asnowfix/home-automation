@@ -49,7 +49,6 @@ func (s *DeviceStorage) createTable() error {
         info TEXT,
         config_revision INTEGER,  -- New column for config revision
         config TEXT,
-        status TEXT,
         PRIMARY KEY (manufacturer, id)
     );
 
@@ -105,25 +104,17 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 	}
 	d.Config_ = string(out)
 
-	out, err = json.Marshal(d.Status)
-	if err != nil {
-		s.log.Error(err, "Failed to marshal device status", "device_id", device.Id)
-		return err
-	}
-	d.Status_ = string(out)
-
 	// FIXME: fail device upsert if it already exists and overwrite is false
 	query := `
-    INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config, status) 
-    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config, :status)
+    INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config) 
+    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config)
     ON CONFLICT(manufacturer, id) DO UPDATE SET 
         mac = excluded.mac, 
         name = excluded.name, 
         host = excluded.host, 
         info = excluded.info, 
         config_revision = excluded.config_revision, 
-        config = excluded.config, 
-        status = excluded.status`
+        config = excluded.config`
 	_, err = s.db.NamedExec(query, d)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device", "device", device)
@@ -349,11 +340,6 @@ func unmarshallDevice(log logr.Logger, device Device) (*myhome.Device, error) {
 	err = json.Unmarshal([]byte(device.Config_), &device.Config)
 	if err != nil {
 		log.Error(err, "Failed to unmarshal storage config", "device_id", device.Id, "config", device.Config_)
-		// return myhome.Device{}, err
-	}
-	err = json.Unmarshal([]byte(device.Status_), &device.Status)
-	if err != nil {
-		log.Error(err, "Failed to unmarshal storage status", "device_id", device.Id, "status", device.Status_)
 		// return myhome.Device{}, err
 	}
 	return &device.Device, nil

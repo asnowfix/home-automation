@@ -14,7 +14,6 @@ use (
 	./homectl/shelly/jobs
 	./homectl/shelly/kvs
 	./homectl/shelly/mqtt
-	./homectl/shelly/options
 	./homectl/shelly/script
 	./homectl/show
 	./homectl/toggle

@@ -7,6 +7,7 @@ require (
 	internal/myip v0.0.0-00010101000000-000000000000
 	internal/myzone v0.0.0-00010101000000-000000000000
 	mymqtt v0.0.0-00010101000000-000000000000
+	pkg/shelly/types v0.0.0-00010101000000-000000000000
 )
 
 replace internal/myip => ./internal/myip

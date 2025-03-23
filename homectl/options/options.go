@@ -5,6 +5,7 @@ import (
 	"global"
 	"os"
 	"os/signal"
+	"pkg/shelly/types"
 	"syscall"
 	"time"
 
@@ -18,7 +19,10 @@ var Flags struct {
 	MqttTimeout time.Duration
 	MqttGrace   time.Duration
 	MdnsTimeout time.Duration
+	Via         string
 }
+
+var Via types.Channel
 
 func CommandLineContext(log logr.Logger) context.Context {
 	ctx := context.Background()

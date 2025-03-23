@@ -14,8 +14,7 @@ import (
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 
-	hopts "homectl/options"
-	"homectl/shelly/options"
+	"homectl/options"
 )
 
 func init() {
@@ -41,7 +40,7 @@ func setKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device
 		log.Error(err, "Unable to set", "key", key, "value", value)
 		return nil, err
 	}
-	if hopts.Flags.Json {
+	if options.Flags.Json {
 		s, err := json.Marshal(status)
 		if err != nil {
 			return nil, err

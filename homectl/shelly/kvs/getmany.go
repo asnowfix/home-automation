@@ -14,8 +14,7 @@ import (
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 
-	hopts "homectl/options"
-	"homectl/shelly/options"
+	"homectl/options"
 )
 
 func init() {
@@ -42,7 +41,7 @@ func getMany(ctx context.Context, log logr.Logger, via types.Channel, device *sh
 		log.Error(err, "Unable to get many key-values")
 		return nil, err
 	}
-	if hopts.Flags.Json {
+	if options.Flags.Json {
 		s, err := json.Marshal(kv)
 		if err != nil {
 			return nil, err

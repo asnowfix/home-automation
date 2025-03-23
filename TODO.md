@@ -64,15 +64,22 @@ Functions
 [x] Re-init list of live devices at startup... or lazy version?
 [x] Timeout on missing/non-responsive devices/server
 [x] Ctrl-C should stop myhome program (whatever the option)
-[ ] Fix inbound IPv6 communication
+[x] Fix inbound IPv6 communication
 
 Integration
 -----------
 
+[ ] BUG: Fix dpkg upgrade
+
+        Failed to enable unit: Refusing to operate on alias name or linked unit file: myhome.service
+        dpkg: error processing package myhome (--install):
+        installed myhome package post-installation script subprocess returned error exit status 1
+        Errors were encountered while processing:
+        myhome
+
 [ ] BUG: internal/ SHOULD NOT need go.mod
-[ ] Avoid the popup about public network to always pop-up on Windows
+[ ] BUG (windows) Avoid the popup about public network to always pop-up
 [ ] Build every target using matrix+go-releaser (to cache & build faster)slr268
-[ ] BUG Do not complain at each startup on Windows
 [ ] Add GitHub actions attestation <https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds>
 [x] GPG signed commits on Windows/WSL/Linux
 [x] Fix error

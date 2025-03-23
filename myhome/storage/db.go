@@ -63,17 +63,17 @@ func (s *DeviceStorage) createTable() error {
         manufacturer TEXT NOT NULL,
         id TEXT NOT NULL,
         group_id INTEGER NOT NULL,
-        UNIQUE(manufacturer, id, group_id),
         FOREIGN KEY (manufacturer, id) REFERENCES devices(manufacturer, id) ON DELETE CASCADE,
-        FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
-    );
-`
+        FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE RESTRICT,
+        PRIMARY KEY (manufacturer, id, group_id)
+    );`
+
 	_, err := s.db.Exec(schema)
 	if err != nil {
-		s.log.Error(err, "Failed to execute create table query")
+		s.log.Error(err, "Failed to create database schema")
+		return err
 	}
-	s.log.Info("Created table")
-	return err
+	return nil
 }
 
 // Close closes the database connection & syncs it to persistent storage.

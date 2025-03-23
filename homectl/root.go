@@ -23,7 +23,7 @@ import (
 
 	"hlog"
 
-	"internal/debug"
+	"debug"
 
 	"github.com/spf13/cobra"
 )

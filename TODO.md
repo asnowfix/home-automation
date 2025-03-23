@@ -69,6 +69,7 @@ Functions
 Integration
 -----------
 
+[ ] BUG: internal/ SHOULD NOT need go.mod
 [ ] Avoid the popup about public network to always pop-up on Windows
 [ ] Build every target using matrix+go-releaser (to cache & build faster)slr268
 [ ] BUG Do not complain at each startup on Windows

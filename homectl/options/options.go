@@ -5,6 +5,7 @@ import (
 	"global"
 	"os"
 	"os/signal"
+	"pkg/shelly/types"
 	"syscall"
 	"time"
 
@@ -12,19 +13,29 @@ import (
 )
 
 var Flags struct {
-	Verbose     bool
-	Json        bool
-	MqttBroker  string
-	MqttTimeout time.Duration
-	MqttGrace   time.Duration
-	MdnsTimeout time.Duration
+	Verbose        bool
+	Json           bool
+	MqttBroker     string
+	MqttTimeout    time.Duration
+	MqttGrace      time.Duration
+	MdnsTimeout    time.Duration
+	CommandTimeout time.Duration
+	Via            string
 }
 
-func CommandLineContext(log logr.Logger) context.Context {
+var Via types.Channel
+
+func CommandLineContext(log logr.Logger, timeout time.Duration) context.Context {
 	ctx := context.Background()
 	ctx = context.WithValue(ctx, global.LogKey, log)
-	ctx, cancel := context.WithCancel(ctx)
-	ctx = context.WithValue(ctx, global.CancelKey, cancel)
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		ctx = context.WithValue(ctx, global.CancelKey, cancel)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+		ctx = context.WithValue(ctx, global.CancelKey, cancel)
+	}
 	go func() {
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, os.Interrupt)

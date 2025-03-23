@@ -10,8 +10,8 @@ import (
 )
 
 func ListKeys(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, match string) (*KeyItems, error) {
-	out, err := device.CallE(ctx, via, string(List), &KeyValuesMatching{
-		Match: match,
+	out, err := device.CallE(ctx, via, string(List), map[string]any{
+		"match": match,
 	})
 	if err != nil {
 		log.Error(err, "Unable to List keys")
@@ -21,8 +21,10 @@ func ListKeys(ctx context.Context, log logr.Logger, via types.Channel, device ty
 	return keys, nil
 }
 
-func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, device types.Device) (*KeyValueItems, error) {
-	out, err := device.CallE(ctx, via, string(GetMany), nil)
+func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, match string) (*KeyValueItems, error) {
+	out, err := device.CallE(ctx, via, string(GetMany), map[string]any{
+		"match": match,
+	})
 	if err != nil {
 		log.Error(err, "Unable to get many key-values")
 		return nil, err
@@ -51,8 +53,8 @@ func SetKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device
 }
 
 func DeleteKey(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, key string) (*Status, error) {
-	out, err := device.CallE(ctx, via, string(Delete), &Key{
-		Key: key,
+	out, err := device.CallE(ctx, via, string(Delete), map[string]any{
+		"key": key,
 	})
 	if err != nil {
 		log.Error(err, "Unable to delete", "key", key)

@@ -11,6 +11,8 @@ import (
 
 	"myhome/daemon"
 
+	"debug"
+
 	"github.com/spf13/cobra"
 )
 
@@ -19,8 +21,15 @@ var Cmd = &cobra.Command{
 	Args: cobra.NoArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		hlog.Init(options.Flags.Verbose)
-		ctx := options.CommandLineContext(hlog.Logger)
+		if debug.IsDebuggerAttached() {
+			hlog.Logger.Info("Running under debugger (will wait forever)")
+			// You can set different timeouts or behavior here
+			options.Flags.CommandTimeout = 0
+		}
+
+		ctx := options.CommandLineContext(hlog.Logger, options.Flags.CommandTimeout)
 		cmd.SetContext(ctx)
+
 		return nil
 	},
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {

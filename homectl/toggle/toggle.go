@@ -3,8 +3,7 @@ package toggle
 import (
 	"context"
 	"hlog"
-	hopts "homectl/options"
-	"homectl/shelly/options"
+	"homectl/options"
 	"pkg/shelly"
 	"pkg/shelly/sswitch"
 	"pkg/shelly/types"
@@ -25,7 +24,7 @@ var Cmd = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		before, after := hopts.SplitArgs(args)
+		before, after := options.SplitArgs(args)
 		return shelly.Foreach(cmd.Context(), log, before, options.Via, toggleOneDevice, after)
 	},
 }

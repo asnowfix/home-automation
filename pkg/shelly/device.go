@@ -2,7 +2,6 @@ package shelly
 
 import (
 	"context"
-	"devices/shelly/wifi"
 	"encoding/json"
 	"fmt"
 	"mymqtt"
@@ -11,6 +10,7 @@ import (
 	"pkg/shelly/sswitch"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
+	"pkg/shelly/wifi"
 	"reflect"
 	"regexp"
 	"schedule"
@@ -31,18 +31,18 @@ type State uint32
 
 type Device struct {
 	Product
-	Id_        string        `json:"id"`
-	Service    string        `json:"service"`
-	Host_      string        `json:"host"`
-	Port       int           `json:"port"`
-	Info       *DeviceInfo   `json:"info"`
-	Methods    []string      `json:"methods"`
-	Components *[]Component  `json:"-"`
-	isMqttOk   bool          `json:"-"`
-	me         string        `json:"-"`
-	to         chan<- []byte `json:"-"` // channel to send messages to
-	from       <-chan []byte `json:"-"` // channel to receive messages from
-	log        logr.Logger   `json:"-"`
+	Id_     string      `json:"id"`
+	Service string      `json:"service"`
+	Host_   string      `json:"host"`
+	Port    int         `json:"port"`
+	Info    *DeviceInfo `json:"info"`
+	Methods []string    `json:"methods"`
+	// Components *[]Component  `json:"-"`
+	isMqttOk bool          `json:"-"`
+	me       string        `json:"-"`
+	to       chan<- []byte `json:"-"` // channel to send messages to
+	from     <-chan []byte `json:"-"` // channel to receive messages from
+	log      logr.Logger   `json:"-"`
 }
 
 func (d *Device) Id() string {
@@ -157,16 +157,16 @@ type ComponentsRequest struct {
 }
 
 type ComponentsResponse struct {
-	Components     *[]Component `json:"components"`
-	ConfigRevision int          `json:"cfg_revision"` // The current config revision. See SystemGetConfig#ConfigRevision
-	Offset         int          `json:"offset"`       // The index of the first component in the list.
-	Total          int          `json:"total"`        // Total number of components with all filters applied.
+	Components     *[]ComponentResponse `json:"components"`
+	ConfigRevision int                  `json:"cfg_revision"` // The current config revision. See SystemGetConfig#ConfigRevision
+	Offset         int                  `json:"offset"`       // The index of the first component in the list.
+	Total          int                  `json:"total"`        // Total number of components with all filters applied.
 }
 
-type Component struct {
+type ComponentResponse struct {
 	Key    string         `json:"key"`    // Component's key (in format <type>:<cid>, for example boolean:200)
 	Config map[string]any `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
-	// Status  map[string]any                 `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
+	Status map[string]any `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
 	// Methods map[string]types.MethodHandler `json:"-"`
 }
 
@@ -315,7 +315,12 @@ func (d *Device) Init(ctx context.Context) error {
 			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
 			return err
 		}
-		d.log.Info("Shelly.GetDeviceInfo: loaded", "info", *d.Info)
+		d.log.Info("Shelly.GetDeviceInfo: got", "info", *d.Info)
+
+		if d.Info.Id == "" || len(d.Info.MacAddress) == 0 {
+			err = fmt.Errorf("invalid device info: ignoring:%v", *d.Info)
+			return err
+		}
 		d.Id_ = d.Info.Id
 		d.MacAddress = d.Info.MacAddress
 	}
@@ -324,80 +329,6 @@ func (d *Device) Init(ctx context.Context) error {
 }
 
 func (d *Device) methods(ctx context.Context, via types.Channel) error {
-	if d.Components == nil {
-		mh, err := GetRegistrar().MethodHandlerE(GetComponents.String())
-		if err != nil {
-			d.log.Error(err, "Unable to get method handler", "method", GetComponents)
-			return err
-		}
-		out, err := GetRegistrar().CallE(ctx, d, via, mh, &ComponentsRequest{
-			Offset:      0,
-			Include:     []string{"config"},
-			DynamicOnly: false,
-		})
-		if err != nil {
-			return err
-		}
-		res, ok := out.(*ComponentsResponse)
-		if ok && res.Components != nil {
-			d.Components = res.Components
-			// d.log.Info("response", "verb", GetComponents, "id", d.Id(), "components", *d.Components)
-		} else {
-			d.log.Info("Unable to get components", "for device_id", d.Id())
-		}
-	}
-
-	if d.Components != nil {
-		var mqttComponent *Component
-		for _, c := range *d.Components {
-			if c.Key == "mqtt" {
-				mqttComponent = &c
-				break
-			}
-		}
-
-		mc, err := mymqtt.GetClientE(ctx)
-		if err != nil {
-			return err
-		}
-		if mqttComponent != nil {
-			// "mqtt": {
-			// 	"client_id": "shellyplus1-08b61fd9d708",
-			// 	"enable": true,
-			// 	"enable_control": true,
-			// 	"rpc_ntf": true,
-			// 	"server": "192.168.1.2:1883",
-			// 	"status_ntf": true,
-			// 	"topic_prefix": "shellyplus1-08b61fd9d708",
-			// 	"use_client_cert": false
-			// }
-			brokerUrl := mc.BrokerUrl().Host
-
-			if mqttComponent.Config == nil || mqttComponent.Config["server"].(string) != brokerUrl {
-				d.log.Info("Configuring MQTT", "broker", brokerUrl)
-				mh, err := GetRegistrar().MethodHandlerE(mqtt.SetConfig.String())
-				if err != nil {
-					d.log.Error(err, "Unable to get method handler", "method", mqtt.SetConfig)
-					return err
-				}
-				_, err = GetRegistrar().CallE(ctx, d, via, mh, &mqtt.SetConfigRequest{
-					Config: mqtt.Config{
-						Enable:        true,
-						Server:        brokerUrl,
-						RpcNotifs:     true,
-						StatusNotifs:  true,
-						EnableRpc:     true,
-						EnableControl: true,
-					},
-				})
-				if err != nil {
-					d.log.Error(err, "Unable to set MQTT config")
-					return err
-				}
-			}
-		}
-	}
-
 	if d.Methods == nil {
 		mh, err := GetRegistrar().MethodHandlerE(ListMethods.String())
 		if err != nil {

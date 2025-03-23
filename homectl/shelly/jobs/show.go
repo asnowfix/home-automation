@@ -3,7 +3,7 @@ package jobs
 import (
 	"context"
 	"hlog"
-	"homectl/shelly/options"
+	"homectl/options"
 	"schedule"
 
 	"github.com/go-logr/logr"

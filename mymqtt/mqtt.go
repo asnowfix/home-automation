@@ -89,7 +89,7 @@ func InitClientE(ctx context.Context, log logr.Logger, resolver mynet.Resolver, 
 		return nil, err
 	}
 	programName := os.Args[0]
-	if i := strings.LastIndex(programName, "/"); i != -1 {
+	if i := strings.LastIndex(programName, string(os.PathSeparator)); i != -1 {
 		programName = programName[i+1:]
 	}
 	clientId := fmt.Sprintf("%s-%s-%d", programName, hostname, os.Getpid())
@@ -199,27 +199,42 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 		}
 	}
 
+	log.Info("Looking up broker by IP", "addr", host)
 	if ip := net.ParseIP(host); ip != nil {
-		log.Info("Using IP", "where", host, "port", port)
+		log.Info("Found IP", "addr", ip.String(), "port", port)
 		return &url.URL{
 			Scheme: "tcp",
-			Host:   fmt.Sprintf("%s:%d", host, port),
+			Host:   fmt.Sprintf("%s:%d", ip.String(), port),
 		}, nil
 	}
 
-	if _, err := resolver.LookupHost(ctx, host); err == nil {
-		log.Info("Using host", "where", host, "port", port)
+	log.Info("Looking up broker by given host", "hostname", host)
+	if ips, err := resolver.LookupHost(ctx, host); err == nil {
+		ip := ips[0]
+		log.Info("Found IP", "addr", ip.String(), "port", port)
 		return &url.URL{
 			Scheme: "tcp",
-			Host:   fmt.Sprintf("%s:%d", where, PRIVATE_PORT),
+			Host:   fmt.Sprintf("%s:%d", ip.String(), PRIVATE_PORT),
 		}, nil
 	}
 
+	log.Info("Looking up broker by default host", "hostname", HOSTNAME)
+	if ips, err := resolver.LookupHost(ctx, HOSTNAME); err == nil {
+		ip := ips[0]
+		log.Info("Found IP", "addr", ip.String(), "port", port)
+		return &url.URL{
+			Scheme: "tcp",
+			Host:   fmt.Sprintf("%s:%d", ip.String(), PRIVATE_PORT),
+		}, nil
+	}
+
+	log.Info("Looking up broker by service", "service", BROKER_SERVICE)
 	url, err := resolver.LookupService(ctx, BROKER_SERVICE)
 	if err != nil {
 		log.Error(err, "Service lookup failed", "service", BROKER_SERVICE)
 		return nil, err
 	}
+	log.Info("Found service", "url", url)
 	return url, nil
 }
 

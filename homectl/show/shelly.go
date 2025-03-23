@@ -9,7 +9,6 @@ import (
 	"mynet"
 	"net"
 	"pkg/shelly"
-	"pkg/shelly/types"
 	"reflect"
 
 	"homectl/options"
@@ -39,24 +38,33 @@ var showShellyCmd = &cobra.Command{
 
 		identifier := args[0]
 		log := hlog.Logger
+		ctx := cmd.Context()
 
 		if direct {
-			var via types.Channel
 			var sd *shelly.Device
 			ip := net.ParseIP(identifier)
 			if ip == nil || mynet.IsSameNetwork(log, ip) != nil {
-				sd = shelly.NewDeviceFromMqttId(cmd.Context(), log, identifier, mymqtt.GetClient(cmd.Context()))
+				sd = shelly.NewDeviceFromMqttId(ctx, log, identifier, mymqtt.GetClient(cmd.Context()))
 			} else {
-				sd = shelly.NewDeviceFromIp(cmd.Context(), log, net.IP(device.Host))
+				sd = shelly.NewDeviceFromIp(ctx, log, ip)
 			}
 			// TODO implement
-			//sd := shelly.NewDeviceFromDeviceSummary(cmd.Context(), log, device)
+			//sd := shelly.NewDeviceFromDeviceSummary(ctx, log, device)
 
-			var device myhome.Device
-			device.UpdateFromShelly(cmd.Context(), sd, via)
+			device, err = myhome.NewDeviceFromShellyDevice(ctx, log, sd)
+			if err != nil {
+				return err
+			}
 		} else {
-			out, err = myhome.TheClient.CallE(cmd.Context(), myhome.DeviceShow, identifier)
-			device = out.(*myhome.Device)
+			out, err = myhome.TheClient.CallE(ctx, myhome.DeviceShow, identifier)
+			if err != nil {
+				return err
+			}
+			var ok bool
+			device, ok = out.(*myhome.Device)
+			if !ok {
+				return fmt.Errorf("expected myhome.Device, got %T", out)
+			}
 		}
 		if err != nil {
 			return err

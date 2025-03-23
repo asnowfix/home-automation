@@ -8,8 +8,7 @@ import (
 	"pkg/shelly/types"
 	"strconv"
 
-	hopts "homectl/options"
-	"homectl/shelly/options"
+	"homectl/options"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -26,7 +25,7 @@ var enableCtl = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		before, _ := hopts.SplitArgs(args)
+		before, _ := options.SplitArgs(args)
 		return shelly.Foreach(cmd.Context(), log, before, options.Via, doEnableDisable, []string{"true"})
 	},
 }
@@ -37,7 +36,7 @@ var disableCtl = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		before, _ := hopts.SplitArgs(args)
+		before, _ := options.SplitArgs(args)
 		return shelly.Foreach(cmd.Context(), log, before, options.Via, doEnableDisable, []string{"false"})
 	},
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"global"
-	"maps"
 	"myhome"
 	"myhome/devices"
 	"mymqtt"
@@ -88,57 +87,18 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Even
 	// - '{"src":"shelly1minig3-54320464a1d0","dst":"shelly1minig3-54320464a1d0/events","method":"NotifyStatus","params":{"ts":1736603810.49,"switch:0":{"id":0,"output":false,"source":"HTTP_in"}}}'
 	// - '{"src":"shellyplus1-08b61fd90730","dst":"shellyplus1-08b61fd90730/events","method":"NotifyStatus","params":{"ts":1736604020.06,"cloud":{"connected":true}}}'
 	// - '{"src":"shelly1minig3-54320464a1d0","dst":"shelly1minig3-54320464a1d0/events","method":"NotifyStatus","params":{"ts":1736605194.11,"sys":{"cfg_rev":35}}}'
-	if event.Method == "NotifyStatus" {
-		if event.Params != nil {
-			var err error
-			status := make(map[string]any)
-			if d.Status != nil {
-				// FIXME: Convoluted way to merge status update map event in the current status
-				out, err := json.Marshal(d.Status)
-				if err != nil {
-					log.Error(err, "failed to JSON-marshal current status")
-					return err
-				}
-				err = json.Unmarshal(out, &status)
-				if err != nil {
-					log.Error(err, "failed to unmarshal current status")
-					return err
-				}
-			}
-			maps.Copy(status, *event.Params)
-			out, err := json.Marshal(status)
-			if err != nil {
-				log.Error(err, "failed to JSON-(re)marshal updated status")
-				return err
-			}
-			err = json.Unmarshal(out, &d.Status)
-			if err != nil {
-				log.Error(err, "failed to (re)unmarshal updated status")
-				return err
-			}
-			d.StatusChanged = true
-			// v := reflect.ValueOf(d.Status)
-			// for i := 0; i < v.NumField(); i++ {
-			// 	typeField := v.Type().Field(i)
-			// 	valueField := v.Field(i)
-			// 	log.Info("Updated status", "field", typeField.Name, "value", valueField.Interface())
-			// }
-		}
-	}
-
+	//
 	// - '{"src":"shellyplus1-08b61fd141e8","dst":"shellyplus1-08b61fd141e8/events","method":"NotifyFullStatus","params":{"ts":1736604018.38,"ble":{},"cloud":{"connected":true},"input:0":{"id":0,"state":false},"mqtt":{"connected":true},"switch:0":{"id":0, "source":"SHC", "output":true,"temperature":{"tC":48.4, "tF":119.2}},"sys":{"mac":"08B61FD141E8","restart_required":false,"time":"15:00","unixtime":1736604018,"uptime":658773,"ram_size":268520,"ram_free":110248,"fs_size":393216,"fs_free":106496,"cfg_rev":13,"kvs_rev":0,"schedule_rev":1,"webhook_rev":0,"available_updates":{"beta":{"version":"1.5.0-beta1"}},"reset_reason":3},"wifi":{"sta_ip":"192.168.1.76","status":"got ip","ssid":"Linksys_7A50","rssi":-58,"ap_client_count":0},"ws":{"connected":false}}}'
-	if event.Method == "NotifyFullStatus" {
-		out, err := json.Marshal(event.Params)
-		if err != nil {
-			log.Error(err, "failed to marshal updated full status")
-			return err
+	if event.Method == "NotifyStatus" || event.Method == "NotifyFullStatus" {
+		if event.Params != nil {
+			for component, status := range *(event.Params) {
+				if component == "ts" {
+					continue
+				}
+				log.Info("Updating", "component", component, "status", status, "device_id", d.Id)
+				d.WithComponent(component, status.(map[string]any), nil)
+			}
 		}
-		err = json.Unmarshal(out, &d.Status)
-		if err != nil {
-			log.Error(err, "failed to unmarshal updated full status")
-			return err
-		}
-		d.StatusChanged = true
 	}
 
 	// - '{"dst":"NCELRND1279_shellyplus1-08b61fd9333c","error":{"code":-109,"message":"shutting down in 952 ms"},"id":0,"result":{"methods":null},"src":"shellyplus1-08b61fd9333c"}'
@@ -148,7 +108,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Even
 			evs, ok := (*event.Params)["events"].([]mqtt.ComponentEvent)
 			if ok {
 				for _, ev := range evs {
-					log.Info("Event", "event", ev)
+					log.Info("Event", "event", ev, "device_id", d.Id)
 					d.ConfigRevision = ev.ConfigRevision
 				}
 			} else {

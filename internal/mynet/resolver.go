@@ -18,9 +18,10 @@ import (
 
 type Resolver interface {
 	WithLocalName(hostname string) Resolver
-	Start(context.Context) error
-	LookupHost(ctx context.Context, host string) (addrs []string, err error)
+	Start(context.Context) Resolver
+	LookupHost(ctx context.Context, host string) (ips []net.IP, err error)
 	LookupService(ctx context.Context, service string) (*url.URL, error)
+	BrowseService(ctx context.Context, service, domain string, entries chan<- *zeroconf.ServiceEntry) error // TODO: use our own type rather than zeroconf.ServiceEntry
 }
 
 func MyResolver(log logr.Logger) Resolver {
@@ -41,6 +42,7 @@ type resolver struct {
 	log        logr.Logger
 	started    bool
 	mdns       *mdns.Conn
+	zeroconf   *zeroconf.Resolver
 }
 
 var theResolver *resolver
@@ -60,42 +62,50 @@ func (r *resolver) WithLocalName(hostname string) Resolver {
 	return theResolver
 }
 
-func (r *resolver) Start(ctx context.Context) error {
+func (r *resolver) Start(ctx context.Context) Resolver {
 	r.Lock()
 	defer r.Unlock()
 
 	if r.started {
+		return r
+	}
+
+	iface, ip, err := MainInterface(r.log)
+	if err != nil {
+		r.log.Error(err, "Unable to find main interface")
 		return nil
 	}
+
+	zc, err := zeroconf.NewResolver(zeroconf.SelectIPTraffic(zeroconf.IPv4AndIPv6), zeroconf.SelectIfaces([]net.Interface{*iface}))
+	if err != nil {
+		r.log.Error(err, "Failed to initialize ZeroConf resolver")
+		return nil
+	}
+
+	r.zeroconf = zc
 
 	addr4, err := net.ResolveUDPAddr("udp4", mdns.DefaultAddressIPv4)
 	if err != nil {
 		r.log.Error(err, "Unable to resolve mDNS IPv4 UDP address", "address", mdns.DefaultAddressIPv4)
-		return err
+		return nil
 	}
 
 	addr6, err := net.ResolveUDPAddr("udp6", mdns.DefaultAddressIPv6)
 	if err != nil {
 		r.log.Error(err, "Unable to resolve mDNS IPv6 UDP address", "address", mdns.DefaultAddressIPv6)
-		return err
+		return nil
 	}
 
 	l4, err := net.ListenUDP("udp4", addr4)
 	if err != nil {
 		r.log.Error(err, "Unable to listen on mDNS IPv4 UDP address", "address", addr4)
-		return err
+		return nil
 	}
 
 	l6, err := net.ListenUDP("udp6", addr6)
 	if err != nil {
 		r.log.Error(err, "Unable to listen on mDNS IPv6 UDP address", "address", addr6)
-		return err
-	}
-
-	_, ip, err := MainInterface(r.log)
-	if err != nil {
-		r.log.Error(err, "Unable to find main interface")
-		return err
+		return nil
 	}
 
 	go func(ctx context.Context, r *resolver) {
@@ -108,38 +118,42 @@ func (r *resolver) Start(ctx context.Context) error {
 			panic(err)
 		}
 		r.log.Info("Published over mDNS", "hostnames", r.localNames, "ip", ip.String())
+		r.started = true
 		<-ctx.Done()
 		r.mdns.Close()
 		l4.Close()
 		l6.Close()
 	}(ctx, r)
 
-	r.started = true
-	return nil
+	return r
 }
 
 func (r *resolver) waitForStart(ctx context.Context) {
 	r.Lock()
-	defer r.Unlock()
-
 	for !r.started {
-
 		r.Unlock()
 		select {
 		case <-ctx.Done():
+			r.log.Error(ctx.Err(), "resolver did not start")
 			return
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(time.Second):
 		}
-
+		r.log.Info("Waiting for resolver to start")
+		time.Sleep(100 * time.Millisecond)
 		r.Lock()
 	}
+	r.Unlock()
 }
 
-func (r *resolver) LookupHost(ctx context.Context, host string) (addrs []string, err error) {
+func (r *resolver) LookupHost(ctx context.Context, host string) ([]net.IP, error) {
 	r.waitForStart(ctx)
 
-	ips, err := net.LookupHost(host)
+	addrs, err := net.LookupHost(host)
 	if err == nil {
+		ips := make([]net.IP, len(addrs))
+		for i, addr := range addrs {
+			ips[i] = net.ParseIP(addr)
+		}
 		return ips, nil
 	}
 	_, addr, err := r.mdns.QueryAddr(ctx, fmt.Sprintf("%s.local", host))
@@ -149,7 +163,7 @@ func (r *resolver) LookupHost(ctx context.Context, host string) (addrs []string,
 
 	//TODO: query myhome device server
 
-	return []string{addr.String()}, nil
+	return []net.IP{addr.AsSlice()}, nil
 }
 
 func (r *resolver) LookupService(ctx context.Context, service string) (*url.URL, error) {
@@ -197,4 +211,9 @@ func (r *resolver) LookupService(ctx context.Context, service string) (*url.URL,
 	} else {
 		return instances[0], nil
 	}
+}
+
+func (r *resolver) BrowseService(ctx context.Context, service, domain string, entries chan<- *zeroconf.ServiceEntry) error {
+	r.waitForStart(ctx)
+	return r.zeroconf.Browse(ctx, service, domain, entries)
 }

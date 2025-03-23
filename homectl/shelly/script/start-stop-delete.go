@@ -3,8 +3,7 @@ package script
 import (
 	"context"
 	"hlog"
-	hopts "homectl/options"
-	"homectl/shelly/options"
+	"homectl/options"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
@@ -24,7 +23,7 @@ var startCtl = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		before, _ := hopts.SplitArgs(args)
+		before, _ := options.SplitArgs(args)
 		return shelly.Foreach(cmd.Context(), log, before, options.Via, doStartStop, []string{"Start"})
 	},
 }
@@ -40,7 +39,7 @@ var stopCtl = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		before, _ := hopts.SplitArgs(args)
+		before, _ := options.SplitArgs(args)
 		return shelly.Foreach(cmd.Context(), log, before, options.Via, doStartStop, []string{"Stop"})
 	},
 }
@@ -56,7 +55,7 @@ var deleteCtl = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		before, _ := hopts.SplitArgs(args)
+		before, _ := options.SplitArgs(args)
 		return shelly.Foreach(cmd.Context(), log, before, options.Via, doStartStop, []string{"Delete"})
 	},
 }

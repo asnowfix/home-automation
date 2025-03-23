@@ -21,10 +21,6 @@ type Status struct {
 	Rev  *uint32 `json:"rev,omitempty"`  // Revision number of the key-value pair (after update). Optional
 }
 
-type KeyValuesMatching struct {
-	Match string `json:"match,omitempty"` // Pattern against which keys are matched. default is * which matches all.
-}
-
 type KeyItems struct {
 	Keys     map[string]Status `json:"keys"` // Whose keys are the keys which matched against the requested pattern and the only property of the corresponding etag
 	Revision uint32            `json:"rev"`  // Current revision of the store

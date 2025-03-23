@@ -83,6 +83,8 @@ var Cmd = &cobra.Command{
 			}
 		}
 
+		resolver.Start(cmd.Context())
+
 		if !disableDeviceManager {
 			// Initialize DeviceManager
 			storage, err := storage.NewDeviceStorage(log, "myhome.db")
@@ -91,7 +93,7 @@ var Cmd = &cobra.Command{
 				return err
 			}
 
-			dm := impl.NewDeviceManager(cmd.Context(), storage, mc)
+			dm := impl.NewDeviceManager(cmd.Context(), storage, resolver, mc)
 			err = dm.Start(cmd.Context())
 			if err != nil {
 				log.Error(err, "Failed to start device manager")
@@ -106,8 +108,6 @@ var Cmd = &cobra.Command{
 				return err
 			}
 		}
-
-		resolver.Start(cmd.Context())
 
 		log.Info("Running")
 		// Run server until interrupted

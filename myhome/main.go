@@ -11,7 +11,7 @@ import (
 
 	"myhome/daemon"
 
-	"internal/debug"
+	"debug"
 
 	"github.com/spf13/cobra"
 )

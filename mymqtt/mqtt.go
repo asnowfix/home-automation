@@ -89,7 +89,7 @@ func InitClientE(ctx context.Context, log logr.Logger, resolver mynet.Resolver, 
 		return nil, err
 	}
 	programName := os.Args[0]
-	if i := strings.LastIndex(programName, "/"); i != -1 {
+	if i := strings.LastIndex(programName, string(os.PathSeparator)); i != -1 {
 		programName = programName[i+1:]
 	}
 	clientId := fmt.Sprintf("%s-%s-%d", programName, hostname, os.Getpid())

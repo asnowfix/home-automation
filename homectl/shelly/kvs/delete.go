@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"hlog"
 
-	hopts "homectl/options"
-	"homectl/shelly/options"
+	"homectl/options"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -39,7 +38,7 @@ func deleteKeys(ctx context.Context, log logr.Logger, via types.Channel, device 
 		log.Error(err, "Unable to delete", "key", key)
 		return nil, err
 	}
-	if hopts.Flags.Json {
+	if options.Flags.Json {
 		s, err := json.Marshal(s)
 		if err != nil {
 			return nil, err

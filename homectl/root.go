@@ -15,6 +15,8 @@ import (
 	"myhome"
 	"mynet"
 	"os"
+	shellyPkg "pkg/shelly"
+	"pkg/shelly/types"
 	"time"
 
 	"mymqtt"
@@ -54,6 +56,16 @@ var Cmd = &cobra.Command{
 			log.Error(err, "Failed to initialize MyHome client")
 			return err
 		}
+
+		shellyPkg.Init(cmd.Context(), options.Flags.MqttTimeout)
+
+		for i, c := range types.Channels {
+			if options.Flags.Via == c {
+				options.Via = types.Channel(i)
+				break
+			}
+		}
+
 		return nil
 	},
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
@@ -79,6 +91,7 @@ func init() {
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttGrace, "mqtt-grace", "G", 500*time.Millisecond, "MQTT disconnection grace period")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Json, "json", "j", false, "output in json format")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns", "M", time.Second*5, "Timeout for mDNS lookups")
+	Cmd.PersistentFlags().StringVarP(&options.Flags.Via, "via", "V", types.ChannelDefault.String(), "Use given channel to communicate with Shelly devices (default is to discover it from the network)")
 
 	Cmd.AddCommand(versionCmd)
 	Cmd.AddCommand(list.Cmd)

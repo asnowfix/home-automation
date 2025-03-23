@@ -3,6 +3,7 @@ module homectl/group
 go 1.23.0
 
 require (
+	github.com/go-logr/logr v1.4.2
 	github.com/spf13/cobra v1.8.1
 	gopkg.in/yaml.v3 v3.0.1
 )

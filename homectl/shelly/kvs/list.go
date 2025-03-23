@@ -14,8 +14,7 @@ import (
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 
-	hopts "homectl/options"
-	"homectl/shelly/options"
+	"homectl/options"
 )
 
 func init() {
@@ -28,7 +27,7 @@ var listCtl = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		before, after := hopts.SplitArgs(args)
+		before, after := options.SplitArgs(args)
 		return shelly.Foreach(cmd.Context(), log, before, options.Via, listKeys, after)
 	},
 }
@@ -45,7 +44,7 @@ func listKeys(ctx context.Context, log logr.Logger, via types.Channel, device *s
 		log.Error(err, "Unable to list keys")
 		return nil, err
 	}
-	if hopts.Flags.Json {
+	if options.Flags.Json {
 		s, err := json.Marshal(kis)
 		if err != nil {
 			return nil, err

@@ -15,9 +15,10 @@ Model
 Functions
 ---------
 
+[ ] BUG ZeroConf scanning not working on Windows
 [x] BUG Group ID's (integers) do not increment
-[ ] BUG no timeout if tyheere is no myhome instance running
-[ ] Ability to change device name
+[x] BUG no timeout if there is no myhome instance running
+[ ] BUG ability to change device name
 [x] Check/force MQTT configuration
 [x] Get IP addresses in the 'host' column of the 'devices' table
 [ ] Create/Configure scripts in a single operation

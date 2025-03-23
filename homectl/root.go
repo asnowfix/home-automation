@@ -23,6 +23,8 @@ import (
 
 	"hlog"
 
+	"internal/debug"
+
 	"github.com/spf13/cobra"
 )
 
@@ -42,7 +44,13 @@ var Cmd = &cobra.Command{
 		hlog.Init(options.Flags.Verbose)
 		log := hlog.Logger
 
-		ctx := options.CommandLineContext(log)
+		if debug.IsDebuggerAttached() {
+			hlog.Logger.Info("Running under debugger (will wait forever)")
+			// You can set different timeouts or behavior here
+			options.Flags.CommandTimeout = 0
+		}
+
+		ctx := options.CommandLineContext(log, options.Flags.CommandTimeout)
 		cmd.SetContext(ctx)
 
 		mc, err := mymqtt.InitClientE(ctx, log, mynet.MyResolver(log).Start(ctx), options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
@@ -86,11 +94,12 @@ var Cmd = &cobra.Command{
 
 func init() {
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.CommandTimeout, "timeout", "", 7*time.Second, "Timeout for overall command")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")
-	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", 7*time.Second, "Timeout for MQTT operations")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", 6*time.Second, "Timeout for MQTT operations")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttGrace, "mqtt-grace", "G", 500*time.Millisecond, "MQTT disconnection grace period")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Json, "json", "j", false, "output in json format")
-	Cmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns", "M", time.Second*5, "Timeout for mDNS lookups")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns-timeout", "M", time.Second*5, "Timeout for mDNS lookups")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.Via, "via", "V", types.ChannelDefault.String(), "Use given channel to communicate with Shelly devices (default is to discover it from the network)")
 
 	Cmd.AddCommand(versionCmd)

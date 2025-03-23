@@ -154,9 +154,14 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 		}
 		info, ok := out.(*shelly.DeviceInfo)
 		if !ok {
-			d.log.Error(err, "Unable to get device info (giving-up)")
+			d.log.Error(err, "Invalid response to get device info (giving-up)", "response", out)
 			return updated
 		}
+		if info.Id == "" || len(info.MacAddress) == 0 {
+			d.log.Error(err, "Invalid response to get device info (giving-up)", "info", *info)
+			return updated
+		}
+
 		d.Info = info
 		d = d.WithId(info.Id).WithMAC(info.MacAddress)
 		updated = true

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"global"
+	"net"
 	"net/http"
 	"net/url"
 	"pkg/shelly/types"
@@ -71,6 +72,11 @@ func (ch *HttpChannel) getE(ctx context.Context, host string, cmd string, params
 		qs = fmt.Sprintf("?%s", values.Encode())
 	}
 
+	ip := net.ParseIP(host)
+	if ip.To4() == nil {
+		// v6
+		host = fmt.Sprintf("[%s]", host)
+	}
 	requestURL := fmt.Sprintf("http://%s/rpc/%s%s", host, cmd, qs)
 	log.Info("Calling", "method", http.MethodGet, "url", requestURL)
 
@@ -79,6 +85,12 @@ func (ch *HttpChannel) getE(ctx context.Context, host string, cmd string, params
 		log.Error(err, "HTTP GET error")
 		return nil, err
 	}
+
+	if res.StatusCode >= 400 {
+		err = fmt.Errorf("http error %d (%s)", res.StatusCode, res.Status)
+		return nil, err
+	}
+
 	log.Info("status code", "code", res.StatusCode)
 
 	return res, err
@@ -134,6 +146,12 @@ func (ch *HttpChannel) postE(ctx context.Context, host string, hm string, cmd st
 	if err != nil {
 		log.Error(err, "HTTP error")
 	}
+
+	if res.StatusCode >= 400 {
+		err = fmt.Errorf("http error %d (%s)", res.StatusCode, res.Status)
+		return nil, err
+	}
+
 	log.Info("status code", "code", res.StatusCode)
 
 	return res, err

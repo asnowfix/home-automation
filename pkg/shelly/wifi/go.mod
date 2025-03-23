@@ -1,4 +1,4 @@
-module devices/shelly/wifi
+module pkg/shelly/wifi
 
 go 1.23.0
 

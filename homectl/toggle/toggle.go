@@ -21,9 +21,9 @@ func init() {
 }
 
 var Cmd = &cobra.Command{
-	Use:   "toggle",
-	Short: "Toggle switch devices",
-	Args:  cobra.ExactArgs(1),
+	Use:   "switch",
+	Short: "Switch devices",
+	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		ctx := cmd.Context()
@@ -40,17 +40,41 @@ var Cmd = &cobra.Command{
 			ids[i] = d.Id
 		}
 
-		return shelly.Foreach(ctx, log, ids, options.Via, toggleOneDevice, nil)
+		op := "toggle"
+		if len(args) == 2 {
+			op = args[1]
+		}
+		return shelly.Foreach(ctx, log, ids, options.Via, toggleOneDevice, []string{op})
 	},
 }
 
 func toggleOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	sr := make(map[string]interface{})
-	sr["id"] = toggleSwitchId
-	out, err := device.CallE(ctx, via, string(sswitch.Toggle), sr)
+	var op string
+	if len(args) == 0 {
+		op = "toggle"
+	} else {
+		op = args[0]
+	}
+
+	var out any
+	var err error
+
+	switch op {
+	case "toggle":
+		out, err = device.CallE(ctx, via, sswitch.Toggle.String(), &sswitch.ToggleRequest{Id: toggleSwitchId})
+	case "on":
+		out, err = device.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: toggleSwitchId, On: true})
+	case "off":
+		out, err = device.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: toggleSwitchId, On: false})
+	default:
+		return nil, fmt.Errorf("unknown operation %s", args[0])
+	}
+
 	if err != nil {
-		log.Info("Failed to toggle device %s: %v", device.Id_, err)
+		err = fmt.Errorf("failed to run %s device %s: %v", op, device.Id_, err)
+		log.Info("Failed to run %s device %s: %v", device.Id_, err)
 		return nil, err
 	}
+
 	return out, err
 }

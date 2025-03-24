@@ -149,7 +149,7 @@ func (r *Registrar) MethodHandlerE(m string) (types.MethodHandler, error) {
 // }
 
 func (r *Registrar) RegisterMethodHandler(verb string, mh types.MethodHandler) {
-	r.log.Info("Registering", "method", verb)
+	// r.log.Info("Registering", "method", verb)
 	if _, exists := r.methods[verb]; exists {
 		panic(fmt.Errorf("method %s already registered", verb))
 	}

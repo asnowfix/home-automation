@@ -45,6 +45,18 @@ func (hc *client) Shutdown() {
 	hc.log.Info("Shutting down client")
 }
 
+func (hc *client) LookupDevices(ctx context.Context, name string) (*Devices, error) {
+	out, err := TheClient.CallE(ctx, DeviceLookup, name)
+	if err != nil {
+		return nil, err
+	}
+	devices, ok := out.(*Devices)
+	if !ok {
+		return nil, fmt.Errorf("expected *myhome.Devices, got %T", out)
+	}
+	return devices, nil
+}
+
 func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, error) {
 	requestId, err := RandStringBytesMaskImprRandReaderUnsafe(16)
 	if err != nil {

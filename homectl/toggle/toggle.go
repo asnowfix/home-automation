@@ -7,8 +7,10 @@ import (
 	"homectl/options"
 	"myhome"
 	"pkg/shelly"
+	"pkg/shelly/kvs"
 	"pkg/shelly/sswitch"
 	"pkg/shelly/types"
+	"strconv"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -27,13 +29,9 @@ var Cmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		ctx := cmd.Context()
-		out, err := myhome.TheClient.CallE(ctx, myhome.DeviceLookup, args[0])
+		devices, err := myhome.TheClient.LookupDevices(ctx, args[0])
 		if err != nil {
 			return err
-		}
-		devices, ok := out.(*myhome.Devices)
-		if !ok {
-			return fmt.Errorf("expected *myhome.Devices, got %T", out)
 		}
 		ids := make([]string, len(devices.Devices))
 		for i, d := range devices.Devices {
@@ -63,9 +61,9 @@ func toggleOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 	case "toggle":
 		out, err = device.CallE(ctx, via, sswitch.Toggle.String(), &sswitch.ToggleRequest{Id: toggleSwitchId})
 	case "on":
-		out, err = device.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: toggleSwitchId, On: true})
+		out, err = device.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: toggleSwitchId, On: !offValue(ctx, log, via, device)})
 	case "off":
-		out, err = device.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: toggleSwitchId, On: false})
+		out, err = device.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: toggleSwitchId, On: offValue(ctx, log, via, device)})
 	default:
 		return nil, fmt.Errorf("unknown operation %s", args[0])
 	}
@@ -77,4 +75,23 @@ func toggleOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 	}
 
 	return out, err
+}
+
+func offValue(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device) bool {
+	out, err := device.CallE(ctx, via, kvs.Get.String(), sswitch.SwitchedOffKey)
+	if err != nil {
+		log.Info("Unable to get value", "key", sswitch.SwitchedOffKey, "reason", err)
+		return false
+	}
+	kv, ok := out.(*kvs.Value)
+	if !ok {
+		log.Error(err, "Invalid value", "key", sswitch.SwitchedOffKey, "value", out)
+		return false
+	}
+	off, err := strconv.ParseBool(kv.Value)
+	if err != nil {
+		log.Error(err, "Invalid value", "key", sswitch.SwitchedOffKey, "value", kv.Value)
+		return false
+	}
+	return off
 }

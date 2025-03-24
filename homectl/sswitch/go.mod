@@ -1,4 +1,4 @@
-module homectl/set
+module homectl/sswitch
 
 go 1.23.0
 

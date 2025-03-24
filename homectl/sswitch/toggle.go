@@ -1,4 +1,4 @@
-package toggle
+package sswitch
 
 import (
 	"context"

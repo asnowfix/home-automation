@@ -47,10 +47,10 @@ Functions
     - Consider using Pion mDNS <https://github.com/pion/mdns> or HashiCorp mDNS <https://github.com/hashicorp/mdns/blob/main/server.go> rather than ZeroConf.
     - <https://dave.cheney.net/2011/10/15/scratching-my-own-itch-or-how-to-publish-multicast-dns-records-in-go> and with supporting repo fork follow-up <https://github.com/ugjka/mdns>
 
-[ ] Add Home Assistant integration
-[ ] Add Amazon Alexa integration
-[ ] Add Google Home integration
 [ ] Add interactive shell
+[ ] Add Amazon Alexa integration with <https://github.com/ericdaugherty/alexa-skills-kit-golang?tab=readme-ov-file>
+[ ] Add Google Home integration
+[ ] Add Home Assistant integration
 
         - https://www.dolthub.com/blog/2023-03-29-interactive-shell-golang/
         - https://github.com/abiosoft/ishell

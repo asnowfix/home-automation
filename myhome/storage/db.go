@@ -55,7 +55,7 @@ func (s *DeviceStorage) createTable() error {
     CREATE TABLE IF NOT EXISTS groups (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL,
-        description TEXT
+        kvs TEXT
     );
 
     CREATE TABLE IF NOT EXISTS groupsMember (
@@ -213,7 +213,7 @@ func (s *DeviceStorage) DeleteDevice(mac string) error {
 func (s *DeviceStorage) GetAllGroups() (*myhome.Groups, error) {
 	s.log.Info("Retrieving all groups")
 	var groups myhome.Groups
-	query := "SELECT id, name, description FROM groups"
+	query := "SELECT id, name, kvs FROM groups"
 	err := s.db.Select(&groups.Groups, query)
 	if err != nil {
 		s.log.Error(err, "Failed to retrieve groups")
@@ -228,7 +228,7 @@ func (s *DeviceStorage) GetGroupInfo(name string) (*myhome.GroupInfo, error) {
 	log.Info("Retrieving group info")
 	var gi myhome.GroupInfo
 
-	query := "SELECT id, name, description FROM groups WHERE name = $1"
+	query := "SELECT id, name, kvs FROM groups WHERE name = $1"
 	err := s.db.Get(&gi, query, name)
 	if err != nil {
 		log.Error(err, "Failed to get group info")
@@ -279,10 +279,10 @@ func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (*myhome.Groups
 func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (any, error) {
 	log := s.log.WithValues("name", group.Name)
 	log.Info("Adding new group")
-	query := `INSERT INTO groups (name, description) VALUES (:name, :description)`
+	query := `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)`
 	result, err := s.db.NamedExec(query, map[string]interface{}{
-		"name":        group.Name,
-		"description": group.Description,
+		"name": group.Name,
+		"kvs":  group.KVS,
 	})
 	if err != nil {
 		return nil, err

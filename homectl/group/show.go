@@ -24,7 +24,10 @@ var showCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		group := out.(*myhome.Group)
+		group, ok := out.(*myhome.Group)
+		if !ok {
+			return fmt.Errorf("expected myhome.Group, got %T", out)
+		}
 		if options.Flags.Json {
 			s, err := json.Marshal(group)
 			if err != nil {

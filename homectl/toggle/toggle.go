@@ -2,8 +2,10 @@ package toggle
 
 import (
 	"context"
+	"fmt"
 	"hlog"
 	"homectl/options"
+	"myhome"
 	"pkg/shelly"
 	"pkg/shelly/sswitch"
 	"pkg/shelly/types"
@@ -21,11 +23,24 @@ func init() {
 var Cmd = &cobra.Command{
 	Use:   "toggle",
 	Short: "Toggle switch devices",
-	Args:  cobra.MinimumNArgs(1),
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		before, after := options.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, before, options.Via, toggleOneDevice, after)
+		ctx := cmd.Context()
+		out, err := myhome.TheClient.CallE(ctx, myhome.DeviceLookup, args[0])
+		if err != nil {
+			return err
+		}
+		devices, ok := out.(*myhome.Devices)
+		if !ok {
+			return fmt.Errorf("expected *myhome.Devices, got %T", out)
+		}
+		ids := make([]string, len(devices.Devices))
+		for i, d := range devices.Devices {
+			ids[i] = d.Id
+		}
+
+		return shelly.Foreach(ctx, log, ids, options.Via, toggleOneDevice, nil)
 	},
 }
 

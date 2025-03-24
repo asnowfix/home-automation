@@ -65,12 +65,29 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return &devices, nil
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceLookup, func(in any) (any, error) {
-		device, err := dm.GetDeviceByAny(ctx, in.(string))
-		if err != nil {
-			dm.log.Error(err, "Failed to get device by any", "any", in.(string))
-			return nil, err
+		name := in.(string)
+
+		devices := myhome.Devices{
+			Devices: make([]myhome.DeviceSummary, 0),
 		}
-		return &device.DeviceSummary, nil
+		device, err := dm.GetDeviceByAny(ctx, name)
+		if err == nil {
+			dm.log.Info("Found device by identifier", "identifier", name)
+			devices.Devices = append(devices.Devices, device.DeviceSummary)
+			return &devices, nil
+		}
+		dm.log.Info("Failed to get device by any identifier: trying group", "identifier", name)
+
+		gd, err := dm.gr.GetDevicesByGroupName(name)
+		if err == nil {
+			dm.log.Info("Found devices by group name", "group", name)
+			for _, d := range gd {
+				devices.Devices = append(devices.Devices, d.DeviceSummary)
+			}
+			return &devices, nil
+		}
+
+		return nil, fmt.Errorf("failed to get device by group or any identifier: %v", err)
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceShow, func(in any) (any, error) {
 		return dm.GetDeviceByAny(ctx, in.(string))

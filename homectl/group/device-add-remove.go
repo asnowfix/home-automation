@@ -53,7 +53,14 @@ func deviceDo(ctx context.Context, v myhome.Verb, fn func(context.Context, logr.
 	if err != nil {
 		return err
 	}
-	summary := out.(*myhome.DeviceSummary)
+	devices, ok := out.(*myhome.Devices)
+	if !ok {
+		return fmt.Errorf("expected myhome.Devices, got %T", out)
+	}
+	if len(devices.Devices) != 1 {
+		return fmt.Errorf("expected 1 device, got %d", len(devices.Devices))
+	}
+	summary := devices.Devices[0]
 
 	fn(ctx, log, types.ChannelDefault, shelly.NewDeviceFromIp(ctx, log, net.ParseIP(summary.Host)), []string{group})
 

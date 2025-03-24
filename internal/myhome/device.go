@@ -2,6 +2,7 @@ package myhome
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"pkg/shelly"
 	"pkg/shelly/system"
@@ -107,9 +108,38 @@ type Devices struct {
 }
 
 type GroupInfo struct {
-	ID          int    `db:"id" json:"id"`
-	Name        string `db:"name" json:"name"`
-	Description string `db:"description" json:"description"`
+	ID   int               `db:"id" json:"id"`
+	Name string            `db:"name" json:"name"`
+	KVS  string            `db:"kvs" json:"kvs"`
+	kvs  map[string]string `db:"-" json:"-"`
+}
+
+func (g *GroupInfo) WithKeyValue(key, value string) *GroupInfo {
+	if len(key) == 0 {
+		return g
+	}
+	if len(g.kvs) == 0 {
+		g.kvs = make(map[string]string)
+		json.Unmarshal([]byte(g.KVS), &g.kvs)
+	}
+	if len(value) == 0 {
+		delete(g.kvs, key)
+	} else {
+		g.kvs[key] = value
+	}
+	buf, err := json.Marshal(g.kvs)
+	if err == nil {
+		g.KVS = string(buf)
+	}
+	return g
+}
+
+func (g *GroupInfo) KeyValues() map[string]string {
+	if len(g.kvs) == 0 {
+		g.kvs = make(map[string]string)
+		json.Unmarshal([]byte(g.KVS), &g.kvs)
+	}
+	return g.kvs
 }
 
 type Groups struct {

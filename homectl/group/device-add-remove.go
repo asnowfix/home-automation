@@ -20,36 +20,56 @@ func init() {
 }
 
 var deviceAddCmd = &cobra.Command{
-	Use:   "add-device",
+	Use:   "add",
 	Short: "Add device to group",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group := args[0]
 		device := args[1]
 
-		return deviceDo(cmd.Context(), myhome.GroupAddDevice, func(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*kvs.Status, error) {
+		return deviceDo(cmd.Context(), myhome.GroupAddDevice, group, device, func(ctx context.Context, log logr.Logger, via types.Channel, gi *myhome.GroupInfo, device *shelly.Device) (*kvs.Status, error) {
+			for k, v := range gi.KeyValues() {
+				log.Info("Adding", "key", k, "value", v)
+				kvs.SetKeyValue(ctx, hlog.Logger, types.ChannelDefault, device, k, v)
+			}
 			return kvs.SetKeyValue(ctx, hlog.Logger, types.ChannelDefault, device, fmt.Sprintf("group/%s", group), "true")
-		}, group, device)
+		})
 	},
 }
 
 var deviceRemoveCmd = &cobra.Command{
-	Use:   "remove-device",
+	Use:   "remove",
 	Short: "Remove device from group",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group := args[0]
 		device := args[1]
 
-		return deviceDo(cmd.Context(), myhome.GroupRemoveDevice, func(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (*kvs.Status, error) {
+		return deviceDo(cmd.Context(), myhome.GroupRemoveDevice, group, device, func(ctx context.Context, log logr.Logger, via types.Channel, gi *myhome.GroupInfo, device *shelly.Device) (*kvs.Status, error) {
+			for k, v := range gi.KeyValues() {
+				log.Info("Will NOT remove", "key", k, "value", v)
+				// kvs.DeleteKey(ctx, hlog.Logger, types.ChannelDefault, device, k)
+			}
 			return kvs.DeleteKey(ctx, hlog.Logger, types.ChannelDefault, device, fmt.Sprintf("group/%s", group))
-		}, group, device)
+		})
 	},
 }
 
-func deviceDo(ctx context.Context, v myhome.Verb, fn func(context.Context, logr.Logger, types.Channel, *shelly.Device, []string) (*kvs.Status, error), group, device string) error {
+func deviceDo(ctx context.Context, v myhome.Verb, group, device string, fn func(ctx context.Context, log logr.Logger, via types.Channel, gi *myhome.GroupInfo, device *shelly.Device) (*kvs.Status, error)) error {
 	log := hlog.Logger
-	out, err := myhome.TheClient.CallE(ctx, myhome.DeviceLookup, device)
+
+	// get group info
+	out, err := myhome.TheClient.CallE(ctx, myhome.GroupShow, group)
+	if err != nil {
+		return err
+	}
+	g, ok := out.(*myhome.Group)
+	if !ok {
+		return fmt.Errorf("expected myhome.Group, got %T", out)
+	}
+
+	// lookup devices
+	out, err = myhome.TheClient.CallE(ctx, myhome.DeviceLookup, device)
 	if err != nil {
 		return err
 	}
@@ -62,7 +82,7 @@ func deviceDo(ctx context.Context, v myhome.Verb, fn func(context.Context, logr.
 	}
 	summary := devices.Devices[0]
 
-	fn(ctx, log, types.ChannelDefault, shelly.NewDeviceFromIp(ctx, log, net.ParseIP(summary.Host)), []string{group})
+	fn(ctx, log, types.ChannelDefault, &g.GroupInfo, shelly.NewDeviceFromIp(ctx, log, net.ParseIP(summary.Host)))
 
 	_, err = myhome.TheClient.CallE(ctx, v, &myhome.GroupDevice{
 		Group:        group,

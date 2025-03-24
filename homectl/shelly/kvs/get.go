@@ -19,10 +19,10 @@ import (
 )
 
 func init() {
-	Cmd.AddCommand(getManyCtl)
+	Cmd.AddCommand(getCtl)
 }
 
-var getManyCtl = &cobra.Command{
+var getCtl = &cobra.Command{
 	Use:   "get",
 	Short: "Get values from Shelly devices Key-Value Store",
 	Args:  cobra.RangeArgs(1, 2),
@@ -43,11 +43,11 @@ var getManyCtl = &cobra.Command{
 		if len(args) == 2 {
 			match = args[1]
 		}
-		return shelly.Foreach(cmd.Context(), log, ids, options.Via, getMany, []string{match})
+		return shelly.Foreach(cmd.Context(), log, ids, options.Via, get, []string{match})
 	},
 }
 
-func getMany(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func get(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	kv, err := kvs.GetManyValues(ctx, log, via, device, args[0])
 	if err != nil {
 		log.Error(err, "Unable to get many key-values")

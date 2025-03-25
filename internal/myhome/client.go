@@ -46,7 +46,15 @@ func (hc *client) Shutdown() {
 }
 
 func (hc *client) LookupDevices(ctx context.Context, name string) (*Devices, error) {
-	out, err := TheClient.CallE(ctx, DeviceLookup, name)
+	var out any
+	var err error
+
+	if name == "*" {
+		out, err = TheClient.CallE(ctx, DeviceList, nil)
+
+	} else {
+		out, err = TheClient.CallE(ctx, DeviceLookup, name)
+	}
 	if err != nil {
 		return nil, err
 	}

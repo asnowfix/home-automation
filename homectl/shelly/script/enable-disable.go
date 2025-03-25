@@ -3,6 +3,7 @@ package script
 import (
 	"context"
 	"hlog"
+	"myhome"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
@@ -24,9 +25,7 @@ var enableCtl = &cobra.Command{
 	Short: "Enable (creating it if necessary) a named JavaScript script on the given Shelly device(s)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		before, _ := options.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, before, options.Via, doEnableDisable, []string{"true"})
+		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEnableDisable, []string{"true"})
 	},
 }
 
@@ -35,9 +34,7 @@ var disableCtl = &cobra.Command{
 	Short: "Disable (creating it if necessary) a named JavaScript script on the given Shelly device(s)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		before, _ := options.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, before, options.Via, doEnableDisable, []string{"false"})
+		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEnableDisable, []string{"false"})
 	},
 }
 

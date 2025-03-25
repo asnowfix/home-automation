@@ -27,23 +27,11 @@ var getCtl = &cobra.Command{
 	Short: "Get values from Shelly devices Key-Value Store",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		ctx := cmd.Context()
-
-		devices, err := myhome.TheClient.LookupDevices(ctx, args[0])
-		if err != nil {
-			return err
-		}
-		ids := make([]string, len(devices.Devices))
-		for i, d := range devices.Devices {
-			ids[i] = d.Id
-		}
-
 		match := "*"
 		if len(args) == 2 {
 			match = args[1]
 		}
-		return shelly.Foreach(cmd.Context(), log, ids, options.Via, get, []string{match})
+		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, get, []string{match})
 	},
 }
 

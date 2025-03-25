@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hlog"
 	"homectl/options"
+	"myhome"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
@@ -24,9 +25,7 @@ var evalCtl = &cobra.Command{
 	Short: "Evaluate the given JavaScript code on the given SHelly device(s)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		before, after := options.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, before, options.Via, doEval, after)
+		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEval, options.Args(args))
 	},
 }
 

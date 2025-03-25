@@ -2,10 +2,10 @@ package shelly
 
 import (
 	"context"
-	"devices"
 	"encoding/json"
 	"fmt"
 	"net"
+	"pkg/devices"
 	"strconv"
 
 	"github.com/go-logr/logr"

@@ -379,42 +379,24 @@ func Foreach(ctx context.Context, log logr.Logger, names []string, via types.Cha
 	}
 
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
-	if len(names) > 0 {
-		for _, name := range names {
-			log.Info("Looking for Shelly device", "name", name)
-			var via types.Channel
-			var sd *Device
-			ip := net.ParseIP(name)
-			if ip != nil {
-				sd = NewDeviceFromIp(ctx, log, ip)
-				via = types.ChannelHttp
-			} else {
-				sd = NewDeviceFromMqttId(ctx, log, name, mc)
-				via = types.ChannelMqtt
-			}
-			out, err := do(ctx, log, via, sd, args)
-			if err != nil {
-				log.Error(err, "Operation failed", "device", name)
-				continue
-			}
-			s, err := json.Marshal(out)
-			if err != nil {
-				return err
-			}
-			fmt.Print(string(s))
+	for _, name := range names {
+		log.Info("Looking for Shelly device", "name", name)
+		var via types.Channel
+		var sd *Device
+
+		ip := net.ParseIP(name)
+		if ip != nil {
+			sd = NewDeviceFromIp(ctx, log, ip)
+			via = types.ChannelHttp
+		} else {
+			sd = NewDeviceFromMqttId(ctx, log, name, mc)
+			via = types.ChannelMqtt
 		}
-	} else {
-		log.Info("Running on every device")
-		out := make([]any, 0)
-		// FIXME: implement lookup with request to myhome
-		devices := make(map[string]*Device, 0)
-		for _, device := range devices {
-			item, err := do(ctx, log, via, device, args)
-			if err != nil {
-				log.Error(err, "Operation failed", "device", device.Host)
-				continue
-			}
-			out = append(out, item)
+
+		out, err := do(ctx, log, via, sd, args)
+		if err != nil {
+			log.Error(err, "Operation failed", "device", name)
+			continue
 		}
 		s, err := json.Marshal(out)
 		if err != nil {

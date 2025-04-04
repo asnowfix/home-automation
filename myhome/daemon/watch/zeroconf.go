@@ -47,9 +47,9 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 						continue
 					}
 				} else {
-					log.Info("Found device in DB", "device_id", deviceId, "name", device.Name)
+					log.Info("Found device in DB", "device_id", device.Id(), "name", device.Name())
 					if device.Impl() == nil {
-						log.Info("Loading device details in memory", "device_id", deviceId, "name", device.Name)
+						log.Info("Loading device details in memory", "device_id", device.Id(), "name", device.Name())
 						device.WithImpl(shelly.NewDeviceFromInfo(ctx, log, device.Info))
 					}
 					device = device.WithZeroConfEntry(entry)

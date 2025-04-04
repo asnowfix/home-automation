@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"mymqtt"
+	"pkg/devices"
 	"reflect"
 	"time"
 
@@ -45,7 +46,7 @@ func (hc *client) Shutdown() {
 	hc.log.Info("Shutting down client")
 }
 
-func (hc *client) LookupDevices(ctx context.Context, name string) (*Devices, error) {
+func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.Device, error) {
 	var out any
 	var err error
 
@@ -58,11 +59,17 @@ func (hc *client) LookupDevices(ctx context.Context, name string) (*Devices, err
 	if err != nil {
 		return nil, err
 	}
-	devices, ok := out.(*Devices)
+
+	mhd, ok := out.(*[]DeviceSummary)
 	if !ok {
-		return nil, fmt.Errorf("expected *myhome.Devices, got %T", out)
+		return nil, fmt.Errorf("expected *[]myhome.DeviceSummary, got %T", out)
 	}
-	return devices, nil
+
+	devices := make([]devices.Device, len(*mhd))
+	for i, d := range *mhd {
+		devices[i] = d
+	}
+	return &devices, nil
 }
 
 func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, error) {

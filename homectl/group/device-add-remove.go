@@ -73,21 +73,21 @@ func deviceDo(ctx context.Context, v myhome.Verb, group, device string, fn func(
 	if err != nil {
 		return err
 	}
-	devices, ok := out.(*myhome.Devices)
+	devices, ok := out.(*[]myhome.Device)
 	if !ok {
-		return fmt.Errorf("expected myhome.Devices, got %T", out)
+		return fmt.Errorf("expected *[]myhome.Device, got %T", out)
 	}
-	if len(devices.Devices) != 1 {
-		return fmt.Errorf("expected 1 device, got %d", len(devices.Devices))
+	if len(*devices) != 1 {
+		return fmt.Errorf("expected 1 device, got %d", len(*devices))
 	}
-	summary := devices.Devices[0]
+	summary := (*devices)[0]
 
 	fn(ctx, log, types.ChannelDefault, &g.GroupInfo, shelly.NewDeviceFromIp(ctx, log, net.ParseIP(summary.Host)))
 
 	_, err = myhome.TheClient.CallE(ctx, v, &myhome.GroupDevice{
 		Group:        group,
 		Manufacturer: summary.Manufacturer,
-		Id:           summary.Id,
+		Id:           summary.Id(),
 	})
 	return err
 }

@@ -14,10 +14,6 @@ func Foreach(ctx context.Context, log logr.Logger, name string, via types.Channe
 	if err != nil {
 		return err
 	}
-	ids := make([]string, len(devices.Devices))
-	for i, d := range devices.Devices {
-		ids[i] = d.Id
-	}
 
-	return shelly.Foreach(ctx, log, ids, options.Via, fn, args)
+	return shelly.Foreach(ctx, log, *devices, options.Via, fn, args)
 }

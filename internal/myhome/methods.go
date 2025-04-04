@@ -1,6 +1,8 @@
 package myhome
 
-import "fmt"
+import (
+	"fmt"
+)
 
 type MethodHandler func(in any) (any, error)
 
@@ -43,7 +45,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return nil
 		},
 		NewResult: func() any {
-			return &Devices{}
+			return &[]DeviceSummary{}
 		},
 	},
 	DeviceLookup: {
@@ -51,7 +53,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return ""
 		},
 		NewResult: func() any {
-			return &Devices{}
+			return &[]DeviceSummary{}
 		},
 	},
 	DeviceShow: {

@@ -123,6 +123,18 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 	return nil
 }
 
+// GetAllDevices retrieves all devices from the database.
+func (s *DeviceStorage) GetAllDevices(ctx context.Context) ([]*myhome.Device, error) {
+	devices := make([]Device, 0)
+	query := `SELECT * FROM devices`
+	err := s.db.Select(&devices, query)
+	if err != nil {
+		s.log.Error(err, "Failed to get all devices")
+		return nil, err
+	}
+	return unmarshallDevices(s.log, devices)
+}
+
 // GetDeviceByAny retrieves a device from the database by one of its identifiers (Id, MAC address, name, host)
 func (s *DeviceStorage) GetDeviceByAny(ctx context.Context, any string) (*myhome.Device, error) {
 	var device Device
@@ -185,18 +197,6 @@ func (s *DeviceStorage) GetDeviceByHost(ctx context.Context, host string) (*myho
 		return nil, err
 	}
 	return unmarshallDevice(s.log, device)
-}
-
-// GetAllDevices retrieves all devices from the database.
-func (s *DeviceStorage) GetAllDevices(ctx context.Context) ([]*myhome.Device, error) {
-	devices := make([]Device, 0)
-	query := `SELECT * FROM devices`
-	err := s.db.Select(&devices, query)
-	if err != nil {
-		s.log.Error(err, "Failed to get all devices")
-		return nil, err
-	}
-	return unmarshallDevices(s.log, devices)
 }
 
 // DeleteDevice deletes a device from the database by its MAC address.
@@ -346,9 +346,9 @@ func unmarshallDevice(log logr.Logger, device Device) (*myhome.Device, error) {
 }
 
 // unmarshallDevices takes a slice of Device structs and unmarshals the Info, Config, and Status fields
-func unmarshallDevices(log logr.Logger, devices []Device) ([]*myhome.Device, error) {
+func unmarshallDevices(log logr.Logger, ds []Device) ([]*myhome.Device, error) {
 	mhd := make([]*myhome.Device, 0)
-	for _, device := range devices {
+	for _, device := range ds {
 		d, err := unmarshallDevice(log, device)
 		if err != nil {
 			log.Error(err, "Failed to unmarshall storage", "device_id", device.Id)

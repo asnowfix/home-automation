@@ -51,7 +51,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return ""
 		},
 		NewResult: func() any {
-			return &DeviceSummary{}
+			return &Devices{}
 		},
 	},
 	DeviceShow: {

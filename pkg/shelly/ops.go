@@ -13,6 +13,7 @@ import (
 	"pkg/shelly/sswitch"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
+	"pkg/shelly/wifi"
 	"reflect"
 	"schedule"
 	"time"
@@ -100,14 +101,18 @@ func Init(ctx context.Context, timeout time.Duration) {
 		return nil, fmt.Errorf("not implemented")
 	})
 
-	system.Init(log, &registrar)
+	// Keep in lexical order
+	// gen1.Init(log, &registrar)
 	input.Init(log, &registrar)
+	kvs.Init(log, &registrar)
 	mqtt.Init(log, &registrar, timeout)
 	schedule.Init(log, &registrar)
 	script.Init(log, &registrar)
 	shttp.Init(log, &registrar)
 	sswitch.Init(log, &registrar)
-	kvs.Init(log, &registrar)
+	system.Init(log, &registrar)
+	// temperature.Init(log, &registrar)
+	wifi.Init(log, &registrar)
 }
 
 var registrar Registrar
@@ -144,7 +149,7 @@ func (r *Registrar) MethodHandlerE(m string) (types.MethodHandler, error) {
 // }
 
 func (r *Registrar) RegisterMethodHandler(verb string, mh types.MethodHandler) {
-	r.log.Info("Registering", "method", verb)
+	// r.log.Info("Registering", "method", verb)
 	if _, exists := r.methods[verb]; exists {
 		panic(fmt.Errorf("method %s already registered", verb))
 	}

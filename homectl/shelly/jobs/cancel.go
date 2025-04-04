@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hlog"
 	"homectl/options"
+	"myhome"
 	"pkg/shelly"
 	"pkg/shelly/types"
 	"schedule"
@@ -29,9 +30,7 @@ var cancelCtl = &cobra.Command{
 	Short: "Cancel scheduled jobs on Shelly devices",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		before, after := options.SplitArgs(args)
-		shelly.Foreach(cmd.Context(), log, before, options.Via, cancelOneDeviceJob, after)
+		myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, cancelOneDeviceJob, options.Args(args))
 		return nil
 	},
 }

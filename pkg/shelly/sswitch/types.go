@@ -42,10 +42,6 @@ func (e Error) String() string {
 	return [...]string{"overtemp", "overpower", "overvoltage", "undervoltage"}[e]
 }
 
-type Request struct {
-	Id int `json:"id"`
-}
-
 type Config struct {
 	Id                       int     `json:"id"`                                   // Id of the Switch component instance
 	Name                     string  `json:"name,omitempty"`                       // Name of the switch instance
@@ -119,8 +115,14 @@ type ToogleSetResponse struct {
 	WasOn bool `json:"was_on"`
 }
 
+type ToggleRequest struct {
+	Id int `json:"id"`
+}
+
 type SetRequest struct {
 	Id          int  `json:"id"`                     // Id of the Switch component instance. Required
 	On          bool `json:"on"`                     // true for switch on, false otherwise. Required
 	ToggleAfter int  `json:"toggle_after,omitempty"` // Optional flip-back timer in seconds. Optional
 }
+
+var SwitchedOffKey map[string]any = map[string]any{"key": "switched-off"}

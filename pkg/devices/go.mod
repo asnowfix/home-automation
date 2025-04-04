@@ -1,4 +1,4 @@
-module devices
+module pkg/devices
 
 go 1.23.0
 

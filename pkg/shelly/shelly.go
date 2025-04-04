@@ -1,8 +1,8 @@
 package shelly
 
 import (
-	"devices"
 	"net"
+	"pkg/devices"
 
 	"github.com/go-logr/logr"
 )

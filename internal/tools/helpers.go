@@ -1,4 +1,4 @@
-package devices
+package tools
 
 import (
 	"runtime"

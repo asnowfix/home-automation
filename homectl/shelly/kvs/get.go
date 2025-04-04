@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
+	"myhome"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -18,24 +19,23 @@ import (
 )
 
 func init() {
-	Cmd.AddCommand(getManyCtl)
+	Cmd.AddCommand(getCtl)
 }
 
-var getManyCtl = &cobra.Command{
-	Use:   "get-many",
-	Short: "List Shelly devices Key-Value Store",
+var getCtl = &cobra.Command{
+	Use:   "get",
+	Short: "Get values from Shelly devices Key-Value Store",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
 		match := "*"
 		if len(args) == 2 {
 			match = args[1]
 		}
-		return shelly.Foreach(cmd.Context(), log, []string{args[0]}, options.Via, getMany, []string{match})
+		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, get, []string{match})
 	},
 }
 
-func getMany(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func get(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
 	kv, err := kvs.GetManyValues(ctx, log, via, device, args[0])
 	if err != nil {
 		log.Error(err, "Unable to get many key-values")

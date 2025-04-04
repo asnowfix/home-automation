@@ -2,10 +2,12 @@ package myhome
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"pkg/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
+	"pkg/shelly/wifi"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
@@ -27,14 +29,17 @@ type DeviceSummary struct {
 
 type Device struct {
 	DeviceSummary
-	ConfigRevision uint32             `db:"config_revision" json:"config_revision"`
-	Info           *shelly.DeviceInfo `db:"-" json:"info"`
-	Config         *shelly.Config     `db:"-" json:"config"`
-	Status         *shelly.Status     `db:"-" json:"status"`
-	StatusChanged  bool               `db:"-" json:"-"`
-	impl           any                `db:"-" json:"-"` // Reference to the inner implementation
-	log            logr.Logger        `db:"-" json:"-"`
-	// Components     *[]shelly.Component `db:"-" json:"components"`
+	ConfigRevision uint32               `db:"config_revision" json:"config_revision"`
+	Info           *shelly.DeviceInfo   `db:"-" json:"info"`
+	Config         *shelly.Config       `db:"-" json:"config"`
+	impl           any                  `db:"-" json:"-"` // Reference to the inner implementation
+	log            logr.Logger          `db:"-" json:"-"`
+	components     map[string]Component `db:"-" json:"-"`
+}
+
+type Component struct {
+	Config map[string]any `json:"config"`
+	Status map[string]any `json:"status"`
 }
 
 type DeviceImplementation interface {
@@ -60,6 +65,11 @@ func NewDevice(log logr.Logger, manufacturer Manufacturer, id string) *Device {
 	return d
 }
 
+func (d *Device) WithId(id string) *Device {
+	d.Id = id
+	return d
+}
+
 func (d *Device) WithMAC(mac net.HardwareAddr) *Device {
 	d.MAC = mac.String()
 	return d
@@ -75,14 +85,61 @@ func (d *Device) WithName(name string) *Device {
 	return d
 }
 
+func (d *Device) WithComponent(component string, status map[string]any, config map[string]any) {
+	if len(d.components) == 0 {
+		d.components = make(map[string]Component)
+	}
+	c, exists := d.components[component]
+	if !exists {
+		c = Component{}
+	}
+
+	if len(status) > 0 {
+		c.Status = status
+	}
+	if len(config) > 0 {
+		c.Config = config
+	}
+	d.components[component] = c
+}
+
 type Devices struct {
 	Devices []DeviceSummary `json:"devices"`
 }
 
 type GroupInfo struct {
-	ID          int    `db:"id" json:"id"`
-	Name        string `db:"name" json:"name"`
-	Description string `db:"description" json:"description"`
+	ID   int               `db:"id" json:"id"`
+	Name string            `db:"name" json:"name"`
+	KVS  string            `db:"kvs" json:"kvs"`
+	kvs  map[string]string `db:"-" json:"-"`
+}
+
+func (g *GroupInfo) WithKeyValue(key, value string) *GroupInfo {
+	if len(key) == 0 {
+		return g
+	}
+	if len(g.kvs) == 0 {
+		g.kvs = make(map[string]string)
+		json.Unmarshal([]byte(g.KVS), &g.kvs)
+	}
+	if len(value) == 0 {
+		delete(g.kvs, key)
+	} else {
+		g.kvs[key] = value
+	}
+	buf, err := json.Marshal(g.kvs)
+	if err == nil {
+		g.KVS = string(buf)
+	}
+	return g
+}
+
+func (g *GroupInfo) KeyValues() map[string]string {
+	if len(g.kvs) == 0 {
+		g.kvs = make(map[string]string)
+		json.Unmarshal([]byte(g.KVS), &g.kvs)
+	}
+	return g.kvs
 }
 
 type Groups struct {
@@ -117,94 +174,96 @@ func NewDeviceFromShellyDevice(ctx context.Context, log logr.Logger, sd *shelly.
 }
 
 func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via types.Channel) bool {
-	updated := d.StatusChanged
-	d.StatusChanged = false
+	updated := false
 
-	d.log.Info("Updating from shelly", "via", via, "device_id", d.Id)
-	if d.Info == nil {
+	if d.Id == "" || d.MAC == "" || d.Info == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device info (giving-up)")
 			return updated
 		}
-		d.Info = out.(*shelly.DeviceInfo)
+		info, ok := out.(*shelly.DeviceInfo)
+		if !ok {
+			d.log.Error(err, "Invalid response to get device info (giving-up)", "response", out)
+			return updated
+		}
+		if info.Id == "" || len(info.MacAddress) == 0 {
+			d.log.Error(err, "Invalid response to get device info (giving-up)", "info", *info)
+			return updated
+		}
+
+		d.Info = info
+		d = d.WithId(info.Id).WithMAC(info.MacAddress)
 		updated = true
 	}
-	// d.Manufacturer = devices.Shelly
 
-	if d.Id == "" {
-		d.Id = d.Info.Id
-		updated = true
+	if d.components == nil {
+		out, err := sd.CallE(ctx, via, shelly.GetComponents.String(), &shelly.ComponentsRequest{
+			Keys: []string{"config", "status"},
+		})
+		if err != nil {
+			d.log.Error(err, "Unable to get device's components (continuing)")
+		} else {
+			crs, ok := out.(*shelly.ComponentsResponse)
+			if ok {
+				for _, cr := range *crs.Components {
+					d.WithComponent(cr.Key, cr.Status, cr.Config)
+				}
+				updated = true
+			} else {
+				d.log.Error(err, "Invalid response to get device's components (continuing)", "response", out)
+			}
+		}
 	}
 
-	if d.MAC == "" {
-		d.MAC = sd.Info.MacAddress.String()
-		updated = true
-	}
-
-	// if d.Components == nil {
-	// 	out, err := sd.CallE(ctx, via, shelly.GetComponents.String(), nil)
-	// 	if err != nil {
-	// 		d.log.Error(err, "Unable to get device's components (continuing)")
-	// 	} else {
-	// 		d.Components = out.(*shelly.ComponentsResponse).Components
-	// 	}
-	// }
-
-	if d.Config == nil || d.Config.System.ConfigRevision != d.ConfigRevision {
+	if d.Config == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetConfig.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device config (continuing)")
 		} else {
-			d.Config = out.(*shelly.Config)
-			updated = true
+			c, ok := out.(*shelly.Config)
+			if ok {
+				d.Config = c
+				updated = true
+			} else {
+				d.log.Error(err, "Invalid response to get device config (continuing)", "response", out)
+			}
 		}
 	}
-
-	if d.Config != nil && d.Config.System == nil {
-		out, err := sd.CallE(ctx, via, system.GetConfig.String(), &system.Config{})
+	if d.ConfigRevision == 0 || d.Name == "" {
+		out, err := sd.CallE(ctx, via, system.GetConfig.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device system config (continuing)")
 		} else {
-			d.Config.System = out.(*system.Config)
-			d.ConfigRevision = d.Config.System.ConfigRevision
-			updated = true
+			sc, ok := out.(*system.Config)
+			if ok {
+				d.Name = sc.Device.Name
+				d.ConfigRevision = sc.ConfigRevision
+				// d.SetComponentStatus("system", nil, *sc) FIXME
+				updated = true
+			} else {
+				d.log.Error(err, "Invalid response to get device system config (continuing)", "response", out)
+			}
 		}
 	}
 
-	if d.Config != nil && d.Config.System != nil && d.Config.System.Device.Name != "" {
-		d.Name = d.Config.System.Device.Name
-		updated = true
-	} else {
-		d.Name = d.Id
-	}
-
-	if d.Status == nil {
-		out, err := sd.CallE(ctx, via, shelly.GetStatus.String(), nil)
+	if d.Host == "" {
+		out, err := sd.CallE(ctx, via, wifi.GetStatus.String(), nil)
 		if err != nil {
-			d.log.Error(err, "Unable to get device status (continuing)")
+			d.log.Error(err, "Unable to get device wifi status (continuing)")
 		} else {
-			d.Status = out.(*shelly.Status)
-			updated = true
+			ws, ok := out.(*wifi.Status)
+			if ok {
+				d.Host = ws.IP
+				d.log.Error(err, "Invalid response to get device wifi status (continuing)", "response", out)
+				updated = true
+			} else {
+				d.log.Error(err, "Invalid response to get device wifi status (continuing)", "response", out)
+			}
 		}
 	}
 
-	if d.Status != nil && d.Status.System == nil {
-		out, err := sd.CallE(ctx, via, system.GetStatus.String(), nil)
-		if err != nil {
-			d.log.Error(err, "Unable to get device system status (continuing)")
-		} else {
-			d.Status.System = out.(*system.Status)
-			updated = true
-		}
-	}
-
-	if d.Status != nil && d.Status.Wifi != nil && d.Status.Wifi.IP != "" {
-		d.Host = d.Status.Wifi.IP
-		updated = true
-	}
-
-	d.log.Info("Updated device", "device", d)
+	d.log.Info("Device update", "device", d, "updated", updated)
 	return updated
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"mymqtt"
 	"net"
+	"pkg/devices"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/sswitch"
 	"pkg/shelly/system"
@@ -372,30 +373,29 @@ func Print(log logr.Logger, d any) error {
 	return nil
 }
 
-func Foreach(ctx context.Context, log logr.Logger, names []string, via types.Channel, do Do, args []string) error {
+func Foreach(ctx context.Context, log logr.Logger, devices []devices.Device, via types.Channel, do Do, args []string) error {
 	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
 		return err
 	}
 
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
-	for _, name := range names {
-		log.Info("Looking for Shelly device", "name", name)
+	for _, device := range devices {
 		var via types.Channel
 		var sd *Device
 
-		ip := net.ParseIP(name)
+		ip := device.Ip()
 		if ip != nil {
 			sd = NewDeviceFromIp(ctx, log, ip)
 			via = types.ChannelHttp
 		} else {
-			sd = NewDeviceFromMqttId(ctx, log, name, mc)
+			sd = NewDeviceFromMqttId(ctx, log, device.Id(), mc)
 			via = types.ChannelMqtt
 		}
 
 		out, err := do(ctx, log, via, sd, args)
 		if err != nil {
-			log.Error(err, "Operation failed", "device", name)
+			log.Error(err, "Operation failed device", "id", device.Id(), "name", device.Name(), "ip", device.Ip())
 			continue
 		}
 		s, err := json.Marshal(out)

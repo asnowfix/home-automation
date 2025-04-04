@@ -40,7 +40,7 @@ var deleteCmd = &cobra.Command{
 				_, err := myhome.TheClient.CallE(ctx, myhome.GroupRemoveDevice, &myhome.GroupDevice{
 					Group:        name,
 					Manufacturer: device.Manufacturer,
-					Id:           device.Id,
+					Id:           device.Id(),
 				})
 				if err != nil {
 					return err

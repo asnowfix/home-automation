@@ -6,6 +6,7 @@ import (
 	"hlog"
 	"homectl/options"
 	"myhome"
+	"pkg/devices"
 	"reflect"
 
 	"github.com/spf13/cobra"
@@ -32,9 +33,9 @@ var Cmd = &cobra.Command{
 			return err
 		}
 		log.Info("result", "out", out, "type", reflect.TypeOf(out))
-		devices, ok := out.(*myhome.Devices)
+		devices, ok := out.([]devices.Device)
 		if !ok {
-			return fmt.Errorf("expected myhome.Devices, got %T", reflect.TypeOf(out))
+			return fmt.Errorf("expected []devices.Device, got %T", reflect.TypeOf(out))
 		}
 		var s []byte
 		if options.Flags.Json {

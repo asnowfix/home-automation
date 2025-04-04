@@ -29,36 +29,33 @@ type Provider interface {
 	Search(names []string) []Host
 }
 
-type Host interface {
-	Provider() string
-	Name() string
-	Ip() net.IP
-	Mac() net.HardwareAddr
-	Online() bool
-	Topic() Topic
-	MarshalJSON() ([]byte, error)
+// type Devices struct {
+// 	List []Device
+// }
+
+type Device interface {
+	Id() string   // Device immutable Id (usually set by manufacturer)
+	Name() string // Device user-set (mutable) Name
+	Ip() net.IP   // Device IP address
+	// MarshalJSON() ([]byte, error)
 }
 
-func MarshalJSON(h Host) ([]byte, error) {
+func MarshalJSON(d Device) ([]byte, error) {
 	type MarshalledHost struct {
-		Provider string           `json:"provider"`
-		Name     string           `json:"name"`
-		Ip       net.IP           `json:"ip"`
-		Mac      net.HardwareAddr `json:"mac"`
-		Online   bool             `json:"online"`
+		Id   string `json:"id"`
+		Name string `json:"name"`
+		Ip   net.IP `json:"ip"`
 	}
 	var hs = MarshalledHost{
-		Provider: h.Provider(),
-		Name:     h.Name(),
-		Ip:       h.Ip(),
-		Mac:      h.Mac(),
-		Online:   h.Online(),
+		Name: d.Name(),
+		Ip:   d.Ip(),
+		Id:   d.Id(),
 	}
 	return json.Marshal(hs)
 }
 
-type Topic interface {
-	IsConnected() bool
-	Publish(msg []byte)
-	Subscribe(handler func(msg []byte))
+type Host interface {
+	Device
+	Provider() string
+	Online() bool
 }

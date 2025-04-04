@@ -41,21 +41,6 @@ func Filter[T any](s []T, cond func(t T) bool) []T {
 	return res
 }
 
-func Topics(log logr.Logger, dn []string) ([]Topic, error) {
-	hosts, err := Hosts(log, dn)
-	if err != nil {
-		log.Info("cannot get hosts for", "topic", dn)
-		return nil, err
-	}
-	topics := make([]Topic, len(hosts))
-	log.Info("found hosts", "num_hosts", len(hosts))
-
-	for i, host := range hosts {
-		topics[i] = host.Topic()
-	}
-	return topics, nil
-}
-
 func Hosts(log logr.Logger, args []string) ([]Host, error) {
 	if len(args) == 0 || len(args[0]) == 0 {
 		log.Info("not host provided: using all of them")

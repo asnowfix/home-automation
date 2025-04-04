@@ -6,10 +6,11 @@ import (
 	"global"
 	"myhome"
 	"myhome/daemon/watch"
-	"myhome/devices"
+	mhd "myhome/devices"
 	"myhome/storage"
 	"mymqtt"
 	"mynet"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
@@ -19,8 +20,8 @@ import (
 )
 
 type DeviceManager struct {
-	dr         devices.DeviceRegistry
-	gr         devices.GroupRegistry
+	dr         mhd.DeviceRegistry
+	gr         mhd.GroupRegistry
 	update     chan *myhome.Device
 	cancel     context.CancelFunc
 	log        logr.Logger
@@ -31,7 +32,7 @@ type DeviceManager struct {
 func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient *mymqtt.Client) *DeviceManager {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 	return &DeviceManager{
-		dr:         devices.NewCache(ctx, s),
+		dr:         mhd.NewCache(ctx, s),
 		gr:         s,
 		log:        log.WithName("DeviceManager"),
 		update:     make(chan *myhome.Device, 64), // TODO configurable buffer size
@@ -50,9 +51,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	dm.log.Info("Starting device manager")
 
 	myhome.RegisterMethodHandler(myhome.DeviceList, func(in any) (any, error) {
-		devices := myhome.Devices{
-			Devices: make([]myhome.DeviceSummary, 0),
-		}
+		devices := make([]devices.Device, 0)
 		ds, err := dm.dr.GetAllDevices(ctx)
 		if err != nil {
 			dm.log.Error(err, "Failed to get all devices")
@@ -60,20 +59,18 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		dm.log.Info("Found devices", "num_devices", len(ds))
 		for _, d := range ds {
-			devices.Devices = append(devices.Devices, d.DeviceSummary)
+			devices = append(devices, d)
 		}
 		return &devices, nil
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceLookup, func(in any) (any, error) {
 		name := in.(string)
 
-		devices := myhome.Devices{
-			Devices: make([]myhome.DeviceSummary, 0),
-		}
+		devices := make([]devices.Device, 0)
 		device, err := dm.GetDeviceByAny(ctx, name)
 		if err == nil {
 			dm.log.Info("Found device by identifier", "identifier", name)
-			devices.Devices = append(devices.Devices, device.DeviceSummary)
+			devices = append(devices, device.DeviceSummary)
 			return &devices, nil
 		}
 		dm.log.Info("Failed to get device by any identifier: trying group", "identifier", name)
@@ -82,7 +79,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		if err == nil {
 			dm.log.Info("Found devices by group name", "group", name)
 			for _, d := range gd {
-				devices.Devices = append(devices.Devices, d.DeviceSummary)
+				devices = append(devices, d)
 			}
 			return &devices, nil
 		}
@@ -174,7 +171,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			dm.log.Info("Skipping update of device without info", "device", device)
 			continue
 		} else {
-			dm.log.Info("Preparing update of device", "id", device.Id)
+			dm.log.Info("Preparing update of device", "id", device.Id())
 			dm.update <- device.WithImpl(shelly.NewDeviceFromInfo(ctx, dm.log, device.Info))
 		}
 	}
@@ -238,9 +235,9 @@ func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwr
 	if d.Manufacturer == string(myhome.Shelly) {
 		sd, ok := d.Impl().(*shelly.Device)
 		if !ok {
-			sd = shelly.NewDeviceFromMqttId(ctx, dm.log, d.Id, dm.mqttClient)
+			sd = shelly.NewDeviceFromMqttId(ctx, dm.log, d.Id(), dm.mqttClient)
 		}
-		groups, err := dm.gr.GetDeviceGroups(d.Manufacturer, d.Id)
+		groups, err := dm.gr.GetDeviceGroups(d.Manufacturer, d.Id())
 		if err != nil {
 			return err
 		}

@@ -59,11 +59,11 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 					log.Info("Found device in DB", "device_id", deviceId)
 					if device.Impl() == nil {
 						log.Info("Loading device details in memory", "device_id", deviceId)
-						device.WithImpl(shelly.NewDeviceFromMqttId(ctx, log, device.Id, mc))
+						device.WithImpl(shelly.NewDeviceFromMqttId(ctx, log, device.Id(), mc))
 					}
 				}
 
-				log.Info("Updating device", "device id", device.Id)
+				log.Info("Updating device", "device id", device.Id())
 				err = UpdateFromMqttEvent(ctx, device, event)
 				if err != nil {
 					log.Error(err, "Failed to update device from MQTT event", "event src", event.Src)

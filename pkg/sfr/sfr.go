@@ -41,32 +41,20 @@ func (h SfrHost) Name() string {
 	return h.xml.Name
 }
 
-func (h SfrHost) Ip() net.IP {
-	return h.xml.Ip
+func (h SfrHost) Id() string {
+	return h.xml.Mac.String()
 }
 
-func (h SfrHost) Mac() net.HardwareAddr {
-	return h.xml.Mac
+func (h SfrHost) Ip() net.IP {
+	return h.xml.Ip
 }
 
 func (h SfrHost) Online() bool {
 	return h.xml.Status == "online"
 }
 
-func (h SfrHost) Topic() devices.Topic {
-	return nil
-}
-
 func (h SfrHost) IsConnected() bool {
 	return false
-}
-
-func (h SfrHost) Publish(msg []byte) {
-	h.log.Info("Fake topic, discarding message.", "topic", h.Provider(), "msg", string(msg)) // TODO connect to real MQTT
-}
-
-func (h SfrHost) Subscribe(handler func(msg []byte)) {
-	h.log.Info("Fake topic, will not receive anything.", "topic", h.Provider()) // TODO connect to real MQTT
 }
 
 func (h SfrHost) MarshalJSON() ([]byte, error) {

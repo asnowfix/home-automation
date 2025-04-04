@@ -593,6 +593,25 @@ $ curl http://192.168.1.1:49152/rootDesc.xml | xmlstarlet fo
 $ go get github.com/mochi-mqtt/server/v2
 ```
 
+### Port reserved by SFR-Box
+
+These ports are not usable for NAT > Port Redirection.
+
+```
+1287/tcp
+1288/tcp
+1290-1339/tcp
+2427/udp
+5060/both
+35500-35599/udp
+68/udp
+8254/udp
+64035-65535/both
+9/udp
+5086/tcp
+15086/udp
+```
+
 ## References
 
 1. Google Cloud

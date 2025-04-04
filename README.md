@@ -62,6 +62,75 @@ Unless you suceed to set `$env:Path` in pwsh, you need to call GNU Make with its
 C:\ProgramData\chocolatey\bin\make build
 ```
 
+## Groups of devices
+
+Groups are collections of devices that can be controlled together.
+
+### Create a group
+
+```shell
+group create radiateurs switched-off=on
+```
+
+The optional key-value pair `switched-off=on` indicates that Shelly switch devices controlling the _radiateurs_ need to be turned `on` for the _radiateurs_ to be turned `off`.
+
+### Add a devices to a group
+
+By device name:
+
+```shell
+group add radiateurs radiateur-bureau
+```
+
+...or by IP:
+
+```shell
+group add radiateurs 192.168.1.37
+```
+
+...or by device Id:
+
+```shell
+group add radiateurs shelly1minig3-84fce63bf464
+```
+
+### List groups
+
+```shell
+group list
+```
+```yaml
+groups:
+    - id: 2
+      name: radiateurs
+      kvs: '{"switched-off":"on"}'
+```
+
+### Show a group
+
+```shell
+group show radiateurs
+```
+```yaml
+groupinfo:
+    id: 2
+    name: radiateurs
+    kvs: '{"switched-off":"on"}'
+devices:
+    - deviceidentifier:
+        manufacturer: Shelly
+        id_: shellyplus1-b8d61a85a970
+      mac: 07:c0:fa:d4:0f:39:03:de:f4
+      host: 192.168.1.78
+      name_: radiateur-bureau
+```
+
+### Delete a group
+
+```shell
+group delete radiateurs
+```
+
 ## Shelly Notes
 
 ```

@@ -73,9 +73,9 @@ func deviceDo(ctx context.Context, v myhome.Verb, group, device string, fn func(
 	if err != nil {
 		return err
 	}
-	devices, ok := out.(*[]myhome.Device)
+	devices, ok := out.(*[]myhome.DeviceSummary)
 	if !ok {
-		return fmt.Errorf("expected *[]myhome.Device, got %T", out)
+		return fmt.Errorf("expected *[]myhome.DeviceSummary, got %T", out)
 	}
 	if len(*devices) != 1 {
 		return fmt.Errorf("expected 1 device, got %d", len(*devices))

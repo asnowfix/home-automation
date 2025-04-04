@@ -49,14 +49,13 @@ func (s *DeviceStorage) createTable() error {
         info TEXT,
         config_revision INTEGER,  -- New column for config revision
         config TEXT,
-        status TEXT,
         PRIMARY KEY (manufacturer, id)
     );
 
     CREATE TABLE IF NOT EXISTS groups (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL,
-        description TEXT
+        kvs TEXT
     );
 
     CREATE TABLE IF NOT EXISTS groupsMember (
@@ -105,25 +104,17 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 	}
 	d.Config_ = string(out)
 
-	out, err = json.Marshal(d.Status)
-	if err != nil {
-		s.log.Error(err, "Failed to marshal device status", "device_id", device.Id)
-		return err
-	}
-	d.Status_ = string(out)
-
 	// FIXME: fail device upsert if it already exists and overwrite is false
 	query := `
-    INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config, status) 
-    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config, :status)
+    INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config) 
+    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config)
     ON CONFLICT(manufacturer, id) DO UPDATE SET 
         mac = excluded.mac, 
         name = excluded.name, 
         host = excluded.host, 
         info = excluded.info, 
         config_revision = excluded.config_revision, 
-        config = excluded.config, 
-        status = excluded.status`
+        config = excluded.config`
 	_, err = s.db.NamedExec(query, d)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device", "device", device)
@@ -222,7 +213,7 @@ func (s *DeviceStorage) DeleteDevice(mac string) error {
 func (s *DeviceStorage) GetAllGroups() (*myhome.Groups, error) {
 	s.log.Info("Retrieving all groups")
 	var groups myhome.Groups
-	query := "SELECT id, name, description FROM groups"
+	query := "SELECT id, name, kvs FROM groups"
 	err := s.db.Select(&groups.Groups, query)
 	if err != nil {
 		s.log.Error(err, "Failed to retrieve groups")
@@ -237,7 +228,7 @@ func (s *DeviceStorage) GetGroupInfo(name string) (*myhome.GroupInfo, error) {
 	log.Info("Retrieving group info")
 	var gi myhome.GroupInfo
 
-	query := "SELECT id, name, description FROM groups WHERE name = $1"
+	query := "SELECT id, name, kvs FROM groups WHERE name = $1"
 	err := s.db.Get(&gi, query, name)
 	if err != nil {
 		log.Error(err, "Failed to get group info")
@@ -288,10 +279,10 @@ func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (*myhome.Groups
 func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (any, error) {
 	log := s.log.WithValues("name", group.Name)
 	log.Info("Adding new group")
-	query := `INSERT INTO groups (name, description) VALUES (:name, :description)`
+	query := `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)`
 	result, err := s.db.NamedExec(query, map[string]interface{}{
-		"name":        group.Name,
-		"description": group.Description,
+		"name": group.Name,
+		"kvs":  group.KVS,
 	})
 	if err != nil {
 		return nil, err
@@ -349,11 +340,6 @@ func unmarshallDevice(log logr.Logger, device Device) (*myhome.Device, error) {
 	err = json.Unmarshal([]byte(device.Config_), &device.Config)
 	if err != nil {
 		log.Error(err, "Failed to unmarshal storage config", "device_id", device.Id, "config", device.Config_)
-		// return myhome.Device{}, err
-	}
-	err = json.Unmarshal([]byte(device.Status_), &device.Status)
-	if err != nil {
-		log.Error(err, "Failed to unmarshal storage status", "device_id", device.Id, "status", device.Status_)
 		// return myhome.Device{}, err
 	}
 	return &device.Device, nil

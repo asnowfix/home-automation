@@ -36,18 +36,20 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	})
 	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Config) },
-		HttpMethod: http.MethodGet,
+		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler(GetStatus.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler(Toggle.String(), types.MethodHandler{
+		// InputType:  reflect.TypeOf(ToggleRequest{}),
 		Allocate:   func() any { return new(ToogleSetResponse) },
-		HttpMethod: http.MethodGet,
+		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler(Set.String(), types.MethodHandler{
+		// InputType:  reflect.TypeOf(SetRequest{}),
 		Allocate:   func() any { return new(ToogleSetResponse) },
-		HttpMethod: http.MethodGet,
+		HttpMethod: http.MethodPost,
 	})
 }

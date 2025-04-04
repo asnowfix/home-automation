@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
+	"myhome"
 
 	"homectl/options"
 
@@ -23,16 +24,36 @@ func init() {
 
 var deleteCtl = &cobra.Command{
 	Use:   "delete",
-	Short: "Delete existing key-value from given shelly devices",
+	Short: "Delete matching key-value from given shelly devices",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		return shelly.Foreach(cmd.Context(), log, []string{args[0]}, options.Via, deleteKeys, []string{args[1]})
+		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, deleteKeys, options.Args(args))
 	},
 }
 
 func deleteKeys(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	key := args[0]
+	var match string
+	if len(args) > 0 {
+		match = args[0]
+	} else {
+		match = "*" // default
+	}
+	keys, err := kvs.ListKeys(ctx, log, via, device, match)
+	if err != nil {
+		log.Error(err, "Unable to list keys")
+		return nil, err
+	}
+
+	log.Info("Deleting", "keys", keys.Keys, "count", len(keys.Keys))
+
+	for key := range keys.Keys {
+		log.Info("Deleting key", "key", key, "device", device.Host)
+		deleteKey(ctx, log, via, device, key)
+	}
+	return nil, nil
+}
+
+func deleteKey(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, key string) (any, error) {
 	s, err := kvs.DeleteKey(ctx, log, via, device, key)
 	if err != nil {
 		log.Error(err, "Unable to delete", "key", key)

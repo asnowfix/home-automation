@@ -8,10 +8,9 @@ import (
 	"homectl/list"
 	"homectl/mqtt"
 	"homectl/options"
-	"homectl/set"
 	"homectl/shelly"
 	"homectl/show"
-	"homectl/toggle"
+	"homectl/sswitch"
 	"myhome"
 	"mynet"
 	"os"
@@ -23,7 +22,7 @@ import (
 
 	"hlog"
 
-	"internal/debug"
+	"debug"
 
 	"github.com/spf13/cobra"
 )
@@ -105,9 +104,8 @@ func init() {
 	Cmd.AddCommand(versionCmd)
 	Cmd.AddCommand(list.Cmd)
 	Cmd.AddCommand(show.Cmd)
-	Cmd.AddCommand(set.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
-	Cmd.AddCommand(toggle.Cmd)
+	Cmd.AddCommand(sswitch.Cmd)
 	Cmd.AddCommand(shelly.Cmd)
 	Cmd.AddCommand(group.Cmd)
 }

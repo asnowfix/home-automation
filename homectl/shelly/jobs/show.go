@@ -4,6 +4,7 @@ import (
 	"context"
 	"hlog"
 	"homectl/options"
+	"myhome"
 	"schedule"
 
 	"github.com/go-logr/logr"
@@ -18,8 +19,7 @@ var showCtl = &cobra.Command{
 	Short: "Show Shelly devices scheduled jobs",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		return shelly.Foreach(cmd.Context(), log, args, options.Via, showOneDeviceJobs, args)
+		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, showOneDeviceJobs, options.Args(args))
 	},
 }
 

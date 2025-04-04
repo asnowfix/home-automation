@@ -2,9 +2,10 @@ package shelly
 
 import (
 	"context"
-	"devices"
 	"encoding/json"
+	"fmt"
 	"net"
+	"pkg/devices"
 	"strconv"
 
 	"github.com/go-logr/logr"
@@ -36,34 +37,39 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 
 	var err error
 	var ips []net.IP
-	if len(entry.AddrIPv4) == 0 && len(entry.AddrIPv6) == 0 {
+	if len(entry.AddrIPv4) != 0 || len(entry.AddrIPv6) != 0 {
+		ips = make([]net.IP, 0, len(entry.AddrIPv4)+len(entry.AddrIPv6))
+		for _, ip := range entry.AddrIPv4 {
+			if !ip.IsLinkLocalUnicast() {
+				ips = append(ips, ip)
+			}
+		}
+		for _, ip := range entry.AddrIPv6 {
+			if !ip.IsLinkLocalUnicast() {
+				ips = append(ips, ip)
+			}
+		}
+	}
+
+	if len(ips) == 0 {
 		ips, err = resolver.LookupHost(ctx, entry.HostName)
 		if err != nil {
 			log.Error(err, "Failed to resolve IP address", "hostname", entry.HostName)
 			return nil, err
 		}
-	} else {
-		ips = append(ips, entry.AddrIPv4...)
-		ips = append(ips, entry.AddrIPv6...)
 	}
 
-	var ip net.IP
 	if len(ips) > 0 {
 		log.Info("Resolved", "hostname", entry.HostName, "ip[]", ips)
-		for _, ip = range ips {
-			if ip.To4() != nil {
-				break
-			}
-		}
 	} else {
-		log.Error(nil, "No IP addresses found for hostname", "hostname", entry.HostName)
+		err = fmt.Errorf("no IP addresses found for hostname %s", entry.HostName)
 		return nil, err
 	}
 
 	d := &Device{
 		Id_:     entry.Instance,
 		Service: entry.Service,
-		Host_:   ip.String(),
+		Host_:   ips[0].String(),
 		Port:    entry.Port,
 		Product: Product{
 			Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),

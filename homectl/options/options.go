@@ -47,18 +47,9 @@ func CommandLineContext(log logr.Logger, timeout time.Duration) context.Context 
 	return ctx
 }
 
-func SplitArgs(args []string) (before []string, after []string) {
-	foundDelimiter := false
-	for _, arg := range args {
-		if arg == "--" {
-			foundDelimiter = true
-			continue
-		}
-		if foundDelimiter {
-			after = append(after, arg)
-		} else {
-			before = append(before, arg)
-		}
+func Args(args []string) []string {
+	if len(args) > 1 {
+		return args[:1]
 	}
-	return
+	return make([]string, 0)
 }

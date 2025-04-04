@@ -4,6 +4,7 @@ import (
 	"context"
 	"hlog"
 	"homectl/options"
+	"myhome"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
@@ -22,9 +23,7 @@ var startCtl = &cobra.Command{
 	Short: "Start a script loaded on the given Shelly device(s)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		before, _ := options.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, before, options.Via, doStartStop, []string{"Start"})
+		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStartStop, []string{"Start"})
 	},
 }
 
@@ -38,9 +37,7 @@ var stopCtl = &cobra.Command{
 	Short: "Stop a script loaded on the given Shelly device(s)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		before, _ := options.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, before, options.Via, doStartStop, []string{"Stop"})
+		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStartStop, []string{"Stop"})
 	},
 }
 
@@ -54,9 +51,7 @@ var deleteCtl = &cobra.Command{
 	Short: "Delete a script loaded on the given Shelly device(s)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		before, _ := options.SplitArgs(args)
-		return shelly.Foreach(cmd.Context(), log, before, options.Via, doStartStop, []string{"Delete"})
+		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStartStop, []string{"Delete"})
 	},
 }
 

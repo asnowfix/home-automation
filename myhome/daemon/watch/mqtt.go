@@ -95,7 +95,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Even
 				if component == "ts" {
 					continue
 				}
-				log.Info("Updating", "component", component, "status", status, "device_id", d.Id)
+				log.Info("Updating", "component", component, "status", status, "device_id", d.Id())
 				d.WithComponent(component, status.(map[string]any), nil)
 			}
 		}

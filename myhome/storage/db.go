@@ -188,6 +188,17 @@ func (s *DeviceStorage) GetDeviceByName(ctx context.Context, name string) (*myho
 	return unmarshallDevice(s.log, device)
 }
 
+func (s *DeviceStorage) GetDevicesMatchingName(ctx context.Context, name string) ([]*myhome.Device, error) {
+	devices := make([]Device, 0)
+	query := `SELECT * FROM devices WHERE name LIKE '%' || $1 || '%'`
+	err := s.db.Select(&devices, query, name)
+	if err != nil {
+		s.log.Error(err, "Failed to get all devices")
+		return nil, err
+	}
+	return unmarshallDevices(s.log, devices)
+}
+
 func (s *DeviceStorage) GetDeviceByHost(ctx context.Context, host string) (*myhome.Device, error) {
 	var device Device
 	query := `SELECT * FROM devices WHERE host = $1`

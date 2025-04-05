@@ -7,6 +7,7 @@ import (
 	"mymqtt"
 	"pkg/devices"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -50,9 +51,8 @@ func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.De
 	var out any
 	var err error
 
-	if name == "*" {
-		out, err = TheClient.CallE(ctx, DeviceList, nil)
-
+	if strings.HasPrefix(name, "*") || strings.HasSuffix(name, "*") {
+		out, err = TheClient.CallE(ctx, DevicesMatch, name)
 	} else {
 		out, err = TheClient.CallE(ctx, DeviceLookup, name)
 	}

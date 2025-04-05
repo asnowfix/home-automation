@@ -40,9 +40,9 @@ func RegisterMethodHandler(name Verb, mh MethodHandler) {
 var methods map[Verb]*Method = make(map[Verb]*Method)
 
 var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
-	DeviceList: {
+	DevicesMatch: {
 		NewParams: func() any {
-			return nil
+			return ""
 		},
 		NewResult: func() any {
 			return &[]DeviceSummary{}

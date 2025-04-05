@@ -15,6 +15,7 @@ import (
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 	"reflect"
+	"strings"
 
 	"github.com/go-logr/logr"
 )
@@ -50,9 +51,21 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	dm.log.Info("Starting device manager")
 
-	myhome.RegisterMethodHandler(myhome.DeviceList, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DevicesMatch, func(in any) (any, error) {
+		name := in.(string)
 		devices := make([]devices.Device, 0)
-		ds, err := dm.dr.GetAllDevices(ctx)
+
+		var ds []*myhome.Device
+		var err error
+
+		if name == "*" {
+			dm.log.Info("Getting all devices")
+			ds, err = dm.dr.GetAllDevices(ctx)
+		} else {
+			name = strings.TrimPrefix(strings.TrimSuffix(name, "*"), "*")
+			dm.log.Info("Getting devices matching name", "name", name)
+			ds, err = dm.dr.GetDevicesMatchingName(ctx, name)
+		}
 		if err != nil {
 			dm.log.Error(err, "Failed to get all devices")
 			return nil, err
@@ -209,6 +222,10 @@ func (dm *DeviceManager) Flush() error {
 
 func (dm *DeviceManager) GetAllDevices(ctx context.Context) ([]*myhome.Device, error) {
 	return dm.dr.GetAllDevices(ctx)
+}
+
+func (dm *DeviceManager) GetDevicesMatchingName(ctx context.Context, name string) ([]*myhome.Device, error) {
+	return dm.dr.GetDevicesMatchingName(ctx, name)
 }
 
 func (dm *DeviceManager) GetDeviceByAny(ctx context.Context, any string) (*myhome.Device, error) {

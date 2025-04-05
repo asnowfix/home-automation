@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"mymqtt"
+	"pkg/devices"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -43,6 +45,31 @@ func NewClientE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, timeout
 
 func (hc *client) Shutdown() {
 	hc.log.Info("Shutting down client")
+}
+
+func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.Device, error) {
+	var out any
+	var err error
+
+	if strings.HasPrefix(name, "*") || strings.HasSuffix(name, "*") {
+		out, err = TheClient.CallE(ctx, DevicesMatch, name)
+	} else {
+		out, err = TheClient.CallE(ctx, DeviceLookup, name)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	mhd, ok := out.(*[]DeviceSummary)
+	if !ok {
+		return nil, fmt.Errorf("expected *[]myhome.DeviceSummary, got %T", out)
+	}
+
+	devices := make([]devices.Device, len(*mhd))
+	for i, d := range *mhd {
+		devices[i] = d
+	}
+	return &devices, nil
 }
 
 func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, error) {

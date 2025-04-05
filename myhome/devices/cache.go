@@ -39,7 +39,7 @@ func (c *Cache) Flush() error {
 
 func (c *Cache) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) error {
 	for i, existing := range c.devices {
-		if existing.Id == d.Id || existing.MAC == d.MAC || existing.Host == d.Host || existing.Name == d.Name {
+		if existing.Id() == d.Id() || existing.MAC == d.MAC || existing.Host == d.Host || existing.Name() == d.Name() {
 			if !overwrite {
 				return fmt.Errorf("device already exists: %v", *d)
 			}
@@ -56,11 +56,11 @@ func (c *Cache) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool)
 
 func (c *Cache) insert(d *myhome.Device) (*myhome.Device, error) {
 	c.devices = append(c.devices, d)
-	c.devicesById[d.Id] = d
+	c.devicesById[d.Id()] = d
 	c.devicesByMAC[d.MAC] = d
 	c.devicesByHost[d.Host] = d
-	c.devicesByName[d.Name] = d
-	c.log.Info("inserted/updated device", "id", d.Id, "name", d.Name)
+	c.devicesByName[d.Name()] = d
+	c.log.Info("inserted/updated device", "id", d.Id(), "name", d.Name())
 	return d, nil
 }
 
@@ -127,5 +127,11 @@ func (c *Cache) GetDeviceByName(ctx context.Context, name string) (*myhome.Devic
 }
 
 func (c *Cache) GetAllDevices(ctx context.Context) ([]*myhome.Device, error) {
+	// TODO: use cache content
 	return c.db.GetAllDevices(ctx)
+}
+
+func (c *Cache) GetDevicesMatchingName(ctx context.Context, name string) ([]*myhome.Device, error) {
+	// TODO: use cache content
+	return c.db.GetDevicesMatchingName(ctx, name)
 }

@@ -3,10 +3,8 @@ package list
 import (
 	"encoding/json"
 	"fmt"
-	"hlog"
 	"homectl/options"
 	"myhome"
-	"reflect"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -15,17 +13,17 @@ import (
 var Cmd = &cobra.Command{
 	Use:   "list",
 	Short: "List known devices",
-	Args:  cobra.NoArgs,
+	Args:  cobra.RangeArgs(0, 1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		var err error
-		log := hlog.Logger
+		name := "*"
+		if len(args) == 1 {
+			name = args[0]
+		}
 
-		out, err := myhome.TheClient.CallE(cmd.Context(), myhome.DeviceList, nil)
+		devices, err := myhome.TheClient.LookupDevices(cmd.Context(), name)
 		if err != nil {
 			return err
 		}
-		log.Info("result", "out", out, "type", reflect.TypeOf(out))
-		devices := out.(*myhome.Devices)
 		var s []byte
 		if options.Flags.Json {
 			s, err = json.Marshal(devices)

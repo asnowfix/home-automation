@@ -2,6 +2,7 @@ package myhome
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"pkg/shelly"
 	"pkg/shelly/system"
@@ -16,15 +17,37 @@ type DeviceIdentifier struct {
 	// The manufacturer of the device
 	Manufacturer string `db:"manufacturer" json:"manufacturer"`
 	// The unique identifier of the device, defined by the manufacturer
-	Id string `db:"id" json:"id"`
+	Id_ string `db:"id" json:"id"`
 }
 
 type DeviceSummary struct {
 	DeviceIdentifier
-	MAC  string `db:"mac" json:"mac,omitempty"` // The Ethernet hardware address of the device, globally unique & assigned by the manufacturer
-	Host string `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
-	Name string `db:"name" json:"name"`         // The local unique name of the device, defined by the user
+	MAC   string `db:"mac" json:"mac,omitempty"` // The Ethernet hardware address of the device, globally unique & assigned by the manufacturer
+	Host  string `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
+	Name_ string `db:"name" json:"name"`         // The local unique name of the device, defined by the user
 }
+
+func (d DeviceSummary) Id() string {
+	return d.Id_
+}
+
+func (d DeviceSummary) Name() string {
+	return d.Name_
+}
+
+func (d DeviceSummary) Ip() net.IP {
+	return net.ParseIP(d.Host)
+}
+
+// func (d DeviceSummary) MarshalJSON() ([]byte, error) {
+// 	type MarshalledHost struct {
+// 		Host string `json:"host"`
+// 	}
+// 	return json.Marshal(struct {
+// 		DeviceIdentifier
+// 		Host MarshalledHost `json:"host"`
+// 	})
+// }
 
 type Device struct {
 	DeviceSummary
@@ -60,12 +83,12 @@ func NewDevice(log logr.Logger, manufacturer Manufacturer, id string) *Device {
 	d := &Device{}
 	d.log = log
 	d.Manufacturer = string(manufacturer)
-	d.Id = id
+	d.Id_ = id
 	return d
 }
 
 func (d *Device) WithId(id string) *Device {
-	d.Id = id
+	d.Id_ = id
 	return d
 }
 
@@ -80,7 +103,7 @@ func (d *Device) WithHost(host string) *Device {
 }
 
 func (d *Device) WithName(name string) *Device {
-	d.Name = name
+	d.Name_ = name
 	return d
 }
 
@@ -102,14 +125,43 @@ func (d *Device) WithComponent(component string, status map[string]any, config m
 	d.components[component] = c
 }
 
-type Devices struct {
-	Devices []DeviceSummary `json:"devices"`
-}
+// type Devices struct {
+// 	Devices []DeviceSummary `json:"devices"`
+// }
 
 type GroupInfo struct {
-	ID          int    `db:"id" json:"id"`
-	Name        string `db:"name" json:"name"`
-	Description string `db:"description" json:"description"`
+	ID   int               `db:"id" json:"id"`
+	Name string            `db:"name" json:"name"`
+	KVS  string            `db:"kvs" json:"kvs"`
+	kvs  map[string]string `db:"-" json:"-"`
+}
+
+func (g *GroupInfo) WithKeyValue(key, value string) *GroupInfo {
+	if len(key) == 0 {
+		return g
+	}
+	if len(g.kvs) == 0 {
+		g.kvs = make(map[string]string)
+		json.Unmarshal([]byte(g.KVS), &g.kvs)
+	}
+	if len(value) == 0 {
+		delete(g.kvs, key)
+	} else {
+		g.kvs[key] = value
+	}
+	buf, err := json.Marshal(g.kvs)
+	if err == nil {
+		g.KVS = string(buf)
+	}
+	return g
+}
+
+func (g *GroupInfo) KeyValues() map[string]string {
+	if len(g.kvs) == 0 {
+		g.kvs = make(map[string]string)
+		json.Unmarshal([]byte(g.KVS), &g.kvs)
+	}
+	return g.kvs
 }
 
 type Groups struct {
@@ -146,7 +198,7 @@ func NewDeviceFromShellyDevice(ctx context.Context, log logr.Logger, sd *shelly.
 func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via types.Channel) bool {
 	updated := false
 
-	if d.Id == "" || d.MAC == "" || d.Info == nil {
+	if d.Id() == "" || d.MAC == "" || d.Info == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device info (giving-up)")
@@ -200,14 +252,14 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 			}
 		}
 	}
-	if d.ConfigRevision == 0 || d.Name == "" {
+	if d.ConfigRevision == 0 || d.Name() == "" {
 		out, err := sd.CallE(ctx, via, system.GetConfig.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device system config (continuing)")
 		} else {
 			sc, ok := out.(*system.Config)
 			if ok {
-				d.Name = sc.Device.Name
+				d.Name_ = sc.Device.Name
 				d.ConfigRevision = sc.ConfigRevision
 				// d.SetComponentStatus("system", nil, *sc) FIXME
 				updated = true

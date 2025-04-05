@@ -3,11 +3,13 @@ package myhome
 import (
 	"context"
 	"fmt"
+	"pkg/devices"
 )
 
 var TheClient Client
 
 type Client interface {
+	LookupDevices(ctx context.Context, name string) (*[]devices.Device, error)
 	CallE(ctx context.Context, method Verb, params any) (any, error)
 	Shutdown()
 }

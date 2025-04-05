@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
+	"myhome"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -26,8 +27,7 @@ var setCtl = &cobra.Command{
 	Short: "Set or update a key-value on the given shelly device(s)",
 	Args:  cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		return shelly.Foreach(cmd.Context(), log, []string{args[0]}, options.Via, setKeyValue, args[1:])
+		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, setKeyValue, options.Args(args))
 	},
 }
 

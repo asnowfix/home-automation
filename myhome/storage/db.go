@@ -55,7 +55,7 @@ func (s *DeviceStorage) createTable() error {
     CREATE TABLE IF NOT EXISTS groups (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT UNIQUE NOT NULL,
-        description TEXT
+        kvs TEXT
     );
 
     CREATE TABLE IF NOT EXISTS groupsMember (
@@ -123,6 +123,18 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 	return nil
 }
 
+// GetAllDevices retrieves all devices from the database.
+func (s *DeviceStorage) GetAllDevices(ctx context.Context) ([]*myhome.Device, error) {
+	devices := make([]Device, 0)
+	query := `SELECT * FROM devices`
+	err := s.db.Select(&devices, query)
+	if err != nil {
+		s.log.Error(err, "Failed to get all devices")
+		return nil, err
+	}
+	return unmarshallDevices(s.log, devices)
+}
+
 // GetDeviceByAny retrieves a device from the database by one of its identifiers (Id, MAC address, name, host)
 func (s *DeviceStorage) GetDeviceByAny(ctx context.Context, any string) (*myhome.Device, error) {
 	var device Device
@@ -176,6 +188,17 @@ func (s *DeviceStorage) GetDeviceByName(ctx context.Context, name string) (*myho
 	return unmarshallDevice(s.log, device)
 }
 
+func (s *DeviceStorage) GetDevicesMatchingName(ctx context.Context, name string) ([]*myhome.Device, error) {
+	devices := make([]Device, 0)
+	query := `SELECT * FROM devices WHERE name LIKE '%' || $1 || '%'`
+	err := s.db.Select(&devices, query, name)
+	if err != nil {
+		s.log.Error(err, "Failed to get all devices")
+		return nil, err
+	}
+	return unmarshallDevices(s.log, devices)
+}
+
 func (s *DeviceStorage) GetDeviceByHost(ctx context.Context, host string) (*myhome.Device, error) {
 	var device Device
 	query := `SELECT * FROM devices WHERE host = $1`
@@ -185,18 +208,6 @@ func (s *DeviceStorage) GetDeviceByHost(ctx context.Context, host string) (*myho
 		return nil, err
 	}
 	return unmarshallDevice(s.log, device)
-}
-
-// GetAllDevices retrieves all devices from the database.
-func (s *DeviceStorage) GetAllDevices(ctx context.Context) ([]*myhome.Device, error) {
-	devices := make([]Device, 0)
-	query := `SELECT * FROM devices`
-	err := s.db.Select(&devices, query)
-	if err != nil {
-		s.log.Error(err, "Failed to get all devices")
-		return nil, err
-	}
-	return unmarshallDevices(s.log, devices)
 }
 
 // DeleteDevice deletes a device from the database by its MAC address.
@@ -213,7 +224,7 @@ func (s *DeviceStorage) DeleteDevice(mac string) error {
 func (s *DeviceStorage) GetAllGroups() (*myhome.Groups, error) {
 	s.log.Info("Retrieving all groups")
 	var groups myhome.Groups
-	query := "SELECT id, name, description FROM groups"
+	query := "SELECT id, name, kvs FROM groups"
 	err := s.db.Select(&groups.Groups, query)
 	if err != nil {
 		s.log.Error(err, "Failed to retrieve groups")
@@ -228,7 +239,7 @@ func (s *DeviceStorage) GetGroupInfo(name string) (*myhome.GroupInfo, error) {
 	log.Info("Retrieving group info")
 	var gi myhome.GroupInfo
 
-	query := "SELECT id, name, description FROM groups WHERE name = $1"
+	query := "SELECT id, name, kvs FROM groups WHERE name = $1"
 	err := s.db.Get(&gi, query, name)
 	if err != nil {
 		log.Error(err, "Failed to get group info")
@@ -279,10 +290,10 @@ func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (*myhome.Groups
 func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (any, error) {
 	log := s.log.WithValues("name", group.Name)
 	log.Info("Adding new group")
-	query := `INSERT INTO groups (name, description) VALUES (:name, :description)`
+	query := `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)`
 	result, err := s.db.NamedExec(query, map[string]interface{}{
-		"name":        group.Name,
-		"description": group.Description,
+		"name": group.Name,
+		"kvs":  group.KVS,
 	})
 	if err != nil {
 		return nil, err
@@ -346,9 +357,9 @@ func unmarshallDevice(log logr.Logger, device Device) (*myhome.Device, error) {
 }
 
 // unmarshallDevices takes a slice of Device structs and unmarshals the Info, Config, and Status fields
-func unmarshallDevices(log logr.Logger, devices []Device) ([]*myhome.Device, error) {
+func unmarshallDevices(log logr.Logger, ds []Device) ([]*myhome.Device, error) {
 	mhd := make([]*myhome.Device, 0)
-	for _, device := range devices {
+	for _, device := range ds {
 		d, err := unmarshallDevice(log, device)
 		if err != nil {
 			log.Error(err, "Failed to unmarshall storage", "device_id", device.Id)

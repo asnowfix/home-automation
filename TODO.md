@@ -16,6 +16,7 @@ Functions
 ---------
 
 [ ] BUG ZeroConf scanning not working on Windows
+[ ] Support matter protocol for Gen3/4 devices
 [x] BUG Group ID's (integers) do not increment
 [x] BUG no timeout if there is no myhome instance running
 [ ] BUG ability to change device name
@@ -68,6 +69,19 @@ Functions
 
 Integration
 -----------
+
+[ ] BUG: Fix dpkg upgrade
+
+        admin@myhome:~ $ sudo dpkg -i ./myhome_0.2.4_arm64.deb
+        (Reading database ... 76658 files and directories currently installed.)
+        Preparing to unpack ./myhome_0.2.4_arm64.deb ...
+        Unpacking myhome (0.2.4) over (0.2.3) ...
+        Setting up myhome (0.2.4) ...
+        Failed to enable unit: Refusing to operate on alias name or linked unit file: myhome.service
+        dpkg: error processing package myhome (--install):
+        installed myhome package post-installation script subprocess returned error exit status 1
+        Errors were encountered while processing:
+        myhome
 
 [ ] BUG: Fix dpkg upgrade
 

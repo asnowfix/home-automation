@@ -35,3 +35,5 @@ SECRETS.md
 /myhome/myhome
 /myip/myip*
 /mqtt-cli-*.deb
+/wix.build.json
+

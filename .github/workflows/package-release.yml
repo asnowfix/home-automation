@@ -136,9 +136,9 @@ jobs:
                 id: version
                 name: Get package version from latest (current or prior) tag
                 run: |
-                    $tag = git describe
+                    $tag = (git describe) -replace '^v',''
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "release=$tag"
-                    $version = $tag -split '\.'
+                    $version = $tag -split '\.' 
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "version_major=$($version[0])"
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "version_minor=$($version[1])"
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "version_patch=$($version[2])"

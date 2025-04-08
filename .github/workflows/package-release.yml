@@ -121,6 +121,10 @@ jobs:
                 name: Install go-msi
                 run: choco install go-msi
             - 
+                name: Install Windows SDK
+                run: |
+                    choco install windows-sdk-10-version-2004-windbg
+            - 
                 name: Checkout
                 uses: actions/checkout@v4
                 with:
@@ -169,14 +173,37 @@ jobs:
                     Copy-Item "$out\$msi" -Destination "."
                     Get-Item $msi
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=$msi"
+            - 
+                id: sign
+                name: Sign MSI Package
+                env:
+                    CERTIFICATE_BASE64: ${{ secrets.SIGNING_CERTIFICATE }}
+                    CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+                run: |
+                    # Convert base64 certificate to pfx file
+                    $certBytes = [Convert]::FromBase64String($env:CERTIFICATE_BASE64)
+                    $certPath = ".\certificate.pfx"
+                    [IO.File]::WriteAllBytes($certPath, $certBytes)
+                    
+                    # Sign the MSI using Windows SDK SignTool
+                    & "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64\signtool.exe" sign /f $certPath /p $env:CERTIFICATE_PASSWORD /fd sha256 /tr [http://timestamp.digicert.com](http://timestamp.digicert.com) /td sha256 "${{ steps.build.outputs.msi_file }}"
+                    
+                    # Clean up certificate
+                    Remove-Item $certPath
+            - 
+                name: Generate SLSA attestation
+                uses: slsa-framework/slsa-github-generator@v2
+                with:
+                    artifact-path: ${{ steps.build.outputs.msi_file }}
             -
                 name: Upload MyHome MSI as artifact
                 uses: actions/upload-artifact@v4
                 with:
                     name: msi_file
-                    path: ${{ steps.build-msi.outputs.msi_file }}
-
-    release:
+                    path: |
+                        ${{ steps.build-msi.outputs.msi_file }}
+                        ${{ steps.build.outputs.msi_file }}.intoto.jsonl
+            release:
         runs-on: ubuntu-latest
         needs:
             - package-deb

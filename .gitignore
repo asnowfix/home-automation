@@ -28,6 +28,7 @@
 
 *__debug_*
 
+/*.pfx
 /secrets.sh
 SECRETS.md
 
@@ -36,4 +37,3 @@ SECRETS.md
 /myip/myip*
 /mqtt-cli-*.deb
 /wix.build.json
-

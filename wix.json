@@ -3,6 +3,15 @@
   "company": "AsNowFiX",
   "license": "LICENSE",
   "upgrade-code": "b25f3b95-7f8b-43c6-af70-036454f54374",
+  "version": "0.0.0",
+  "version-major": 0,
+  "version-minor": 0,
+  "version-patch": 0,
+  "upgrade": {
+    "version-min": "0.0.0",
+    "version-max": "0.0.0",
+    "remove-existing": true
+  },
   "files": {
     "guid": "5b4e432c-e6da-4259-8981-67cd54d07471",
     "items": [
@@ -22,12 +31,28 @@
       }
     ]
   },
+  "service": {
+    "guid": "8f712c3d-7c31-4c96-9c31-27f059428c57",
+    "name": "MyHome",
+    "display_name": "MyHome Home Automation Service",
+    "description": "Home Automation service for managing smart home devices and automation",
+    "arguments": "daemon -B mqtt.local",
+    "start_type": "auto",
+    "type": "shareprocess",
+    "service_host": "LocalService",
+    "error_control": "normal",
+    "interactive": false,
+    "delayed_start": true,
+    "dependencies": [
+      "Dnscache"
+    ]
+  },
   "shortcuts": {
     "guid": "0bd5eaaa-55ae-44b1-99d0-20fcbe48e611",
     "items": [
       {
         "name": "MyHome",
-        "description": "MSI pakage for MyHome Home Automation",
+        "description": "MSI package for MyHome Home Automation",
         "target": "[INSTALLFOLDER]myhome.exe",
         "wdir": "INSTALLFOLDER",
         "arguments": "",

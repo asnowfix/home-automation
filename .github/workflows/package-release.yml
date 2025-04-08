@@ -138,6 +138,21 @@ jobs:
                 run: |
                     $tag = git describe
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "release=$tag"
+                    $version = $tag -split '\.'
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "version_major=$($version[0])"
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "version_minor=$($version[1])"
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "version_patch=$($version[2])"
+            -
+                id: set-version
+                name: Set version in wix.json
+                run: |
+                    $json = Get-Content .\wix.json | ConvertFrom-Json
+                    $json.'version' = "${{ steps.version.outputs.release }}"
+                    $json.'version-major' = ${{ steps.version.outputs.version_major }}
+                    $json.'version-minor' = ${{ steps.version.outputs.version_minor }}
+                    $json.'version-patch' = ${{ steps.version.outputs.version_patch }}
+                    $json.upgrade.'version-max' = "${{ steps.version.outputs.release }}"
+                    $json | ConvertTo-Json -Depth 10 | Set-Content .\wix.build.json
             - 
                 id: build
                 name: Build Windows Exectutable
@@ -150,7 +165,7 @@ jobs:
                 run: |
                     $out = New-Item -Type Directory -Path . -Name "msi_build"
                     $msi = "MyHome-${{ steps.version.outputs.release }}.msi"
-                    go-msi make --msi "$out\$msi" --version ${{ steps.version.outputs.release }} --path .\wix.json --arch amd64 --license .\LICENSE --out $out --keep
+                    go-msi make --msi "$out\$msi" --path .\wix.build.json --arch amd64 --license .\LICENSE --out $out --keep
                     Copy-Item "$out\$msi" -Destination "."
                     Get-Item $msi
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=$msi"

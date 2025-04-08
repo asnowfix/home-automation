@@ -203,7 +203,7 @@ jobs:
                     path: |
                         ${{ steps.build-msi.outputs.msi_file }}
                         ${{ steps.build.outputs.msi_file }}.intoto.jsonl
-            release:
+    release:
         runs-on: ubuntu-latest
         needs:
             - package-deb

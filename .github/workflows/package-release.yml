@@ -109,10 +109,15 @@ jobs:
             release_version: ${{ steps.version.outputs.release }}
             msi_file: ${{ steps.build-msi.outputs.msi_file }}
         steps:
-            - 
-                name: Install WiXToolset
-                id: install-wix
-                run: choco install wixtoolset --version=3.14.0.6526 -y
+            # - 
+            #     name: Install WiXToolset
+            #     id: install-wix
+            #     run: |
+            #         if (-not (Test-Path "C:\Program Files (x86)\WiX Toolset v3.14\bin\candle.exe")) {
+            #             choco install wixtoolset --version=3.14.0.6526 -y --force
+            #         } else {
+            #             Write-Host "WiX Toolset is already installed"
+            #         }
             - 
                 id: install-go-msi
                 name: Install go-msi

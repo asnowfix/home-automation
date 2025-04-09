@@ -109,6 +109,40 @@ jobs:
             release_version: ${{ steps.version.outputs.release }}
             msi_file: ${{ steps.build-msi.outputs.msi_file }}
         steps:
+            - 
+                name: Checkout
+                uses: actions/checkout@v4
+                with:
+                    fetch-depth: 0
+                    ref: ${{ github.event.ref }}
+            -
+                id: version
+                name: Get package version from latest (current or prior) tag
+                run: |
+                    $tag = (git describe) -replace '^v',''
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "release=$tag"
+                    $version = $tag -split '\.' 
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "version_major=$($version[0])"
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "version_minor=$($version[1])"
+                    Add-Content -Path $env:GITHUB_OUTPUT -Value "version_patch=$($version[2])"
+            - 
+                id: install-go
+                name: Set up Go
+                uses: actions/setup-go@v5
+                with:
+                    go-version: 1.23.0
+            - 
+                id: build
+                name: Build Windows Exectutable
+                run: go build -o "myhome.exe" ".\\myhome"
+            -
+                name: Install ImageMagick
+                id: install-imagemagick
+                run: choco install imagemagick.app -y
+            -
+                name: Convert SVG to ICO
+                run: |
+                    magick convert "assets/penates.svg" -define icon:auto-resize=256,128,64,48,32,16 "assets/penates.ico"
             # - 
             #     name: Install WiXToolset
             #     id: install-wix
@@ -122,34 +156,8 @@ jobs:
                 id: install-go-msi
                 name: Install go-msi
                 run: choco install go-msi
-            - 
-                name: Install Windows SDK
-                run: |
-                    choco install windows-sdk-10-version-2004-windbg
-            - 
-                name: Checkout
-                uses: actions/checkout@v4
-                with:
-                    fetch-depth: 0
-                    ref: ${{ github.event.ref }}
-            - 
-                id: install-go
-                name: Set up Go
-                uses: actions/setup-go@v5
-                with:
-                    go-version: 1.23.0
             -
-                id: version
-                name: Get package version from latest (current or prior) tag
-                run: |
-                    $tag = (git describe) -replace '^v',''
-                    Add-Content -Path $env:GITHUB_OUTPUT -Value "release=$tag"
-                    $version = $tag -split '\.' 
-                    Add-Content -Path $env:GITHUB_OUTPUT -Value "version_major=$($version[0])"
-                    Add-Content -Path $env:GITHUB_OUTPUT -Value "version_minor=$($version[1])"
-                    Add-Content -Path $env:GITHUB_OUTPUT -Value "version_patch=$($version[2])"
-            -
-                id: set-version
+                id: wix-version
                 name: Set version in wix.json
                 run: |
                     $json = Get-Content .\wix.json | ConvertFrom-Json
@@ -159,18 +167,6 @@ jobs:
                     $json.'version-patch' = ${{ steps.version.outputs.version_patch }}
                     $json.upgrade.'version-max' = "${{ steps.version.outputs.release }}"
                     $json | ConvertTo-Json -Depth 10 | Set-Content .\wix.build.json
-            - 
-                id: build
-                name: Build Windows Exectutable
-                run: go build -o "myhome.exe" ".\\myhome"
-            -
-                name: Install ImageMagick
-                id: install-imagemagick
-                run: choco install imagemagick.app -y
-            -
-                name: Convert SVG to ICO
-                run: |
-                    magick convert "assets/penates.svg" -define icon:auto-resize=256,128,64,48,32,16 "assets/penates.ico"
             -
                 id: build-msi
                 name: Build Windows Installer MSI from exe file
@@ -184,6 +180,10 @@ jobs:
                     Get-Item $msi
                     Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=$msi"
             - 
+                name: Install Windows SDK
+                run: |
+                    choco install windows-sdk-10-version-2004-windbg
+            - 
                 id: sign
                 name: Sign MSI Package
                 env:
@@ -191,16 +191,38 @@ jobs:
                     CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
                 run: |
                     # Convert base64 certificate to pfx file
-                    $certBytes = [Convert]::FromBase64String($env:CERTIFICATE_BASE64)
-                    $certPath = ".\certificate.pfx"
-                    [IO.File]::WriteAllBytes($certPath, $certBytes)
-                    
-                    # Sign the MSI using Windows SDK SignTool
-                    $signtool = "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.0.17763.0\x64\signtool.exe"
-                    & $signtool sign /f $certPath /p $env:CERTIFICATE_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 "${{ steps.build-msi.outputs.msi_file }}"
-                    
-                    # Clean up certificate
-                    Remove-Item $certPath
+                    try {
+                        $certBytes = [Convert]::FromBase64String($env:CERTIFICATE_BASE64)
+                        $certPath = Join-Path $env:TEMP "certificate.pfx"
+                        [IO.File]::WriteAllBytes($certPath, $certBytes)
+                        
+                        # Verify certificate can be loaded
+                        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certPath, $env:CERTIFICATE_PASSWORD)
+                        Write-Host "Certificate loaded successfully. Subject: $($cert.Subject)"
+                        $cert.Dispose()
+                        
+                        # Sign the MSI using Windows SDK SignTool
+                        $signtool = "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.0.17763.0\x64\signtool.exe"
+                        
+                        # Try signing with more detailed output
+                        $result = & $signtool sign /v /debug /f $certPath /p $env:CERTIFICATE_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 "${{ steps.build-msi.outputs.msi_file }}" 2>&1
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-Error "SignTool failed with exit code $LASTEXITCODE"
+                            Write-Error $result
+                            throw "Signing failed"
+                        }
+                        
+                        Write-Host "Package signed successfully"
+                    }
+                    catch {
+                        Write-Error "Error during signing process: $_"
+                        throw
+                    }
+                    finally {
+                        if (Test-Path $certPath) {
+                            Remove-Item $certPath -Force
+                        }
+                    }
             -
                 name: Upload MyHome MSI as artifact
                 uses: actions/upload-artifact@v4

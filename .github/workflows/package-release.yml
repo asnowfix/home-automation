@@ -163,7 +163,8 @@ jobs:
                 run: go build -o "myhome.exe" ".\\myhome"
             -
                 name: Install ImageMagick
-                run: winget install ImageMagick.ImageMagick
+                id: install-imagemagick
+                run: winget install --id ImageMagick.ImageMagick --version 7.1.1.47 --source winget --disable-interactivity --accept-source-agreements --force
             -
                 name: Convert SVG to ICO
                 run: |

@@ -190,22 +190,43 @@ jobs:
                     CERTIFICATE_BASE64: ${{ secrets.SIGNING_CERTIFICATE }}
                     CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
                 run: |
-                    # Convert base64 certificate to pfx file
                     try {
+                        Write-Host "Starting certificate processing..."
+                        
+                        # Convert base64 certificate to pfx file
                         $certBytes = [Convert]::FromBase64String($env:CERTIFICATE_BASE64)
                         $certPath = Join-Path $env:TEMP "certificate.pfx"
                         [IO.File]::WriteAllBytes($certPath, $certBytes)
                         
-                        # Verify certificate can be loaded
-                        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certPath, $env:CERTIFICATE_PASSWORD)
-                        Write-Host "Certificate loaded successfully. Subject: $($cert.Subject)"
+                        Write-Host "Certificate file written to: $certPath"
+                        Write-Host "Certificate file size: $((Get-Item $certPath).Length) bytes"
+                        
+                        # Try loading certificate with explicit flags
+                        $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable -bor 
+                                [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::MachineKeySet -bor 
+                                [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet
+                        
+                        Write-Host "Attempting to load certificate..."
+                        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certPath, $env:CERTIFICATE_PASSWORD, $flags)
+                        Write-Host "Certificate loaded successfully."
+                        Write-Host "Certificate Subject: $($cert.Subject)"
+                        Write-Host "Certificate Issuer: $($cert.Issuer)"
+                        Write-Host "Certificate Valid From: $($cert.NotBefore)"
+                        Write-Host "Certificate Valid To: $($cert.NotAfter)"
+                        Write-Host "Has Private Key: $($cert.HasPrivateKey)"
                         $cert.Dispose()
                         
                         # Sign the MSI using Windows SDK SignTool
+                        Write-Host "Starting MSI signing process..."
                         $signtool = "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.0.17763.0\x64\signtool.exe"
+                        Write-Host "SignTool path: $signtool"
+                        
+                        Write-Host "MSI file to sign: ${{ steps.build-msi.outputs.msi_file }}"
                         
                         # Try signing with more detailed output
                         $result = & $signtool sign /v /debug /f $certPath /p $env:CERTIFICATE_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 "${{ steps.build-msi.outputs.msi_file }}" 2>&1
+                        Write-Host "SignTool Output: $result"
+                        
                         if ($LASTEXITCODE -ne 0) {
                             Write-Error "SignTool failed with exit code $LASTEXITCODE"
                             Write-Error $result
@@ -216,11 +237,14 @@ jobs:
                     }
                     catch {
                         Write-Error "Error during signing process: $_"
+                        Write-Host "Exception details: $($_.Exception.Message)"
+                        Write-Host "Stack trace: $($_.Exception.StackTrace)"
                         throw
                     }
                     finally {
                         if (Test-Path $certPath) {
                             Remove-Item $certPath -Force
+                            Write-Host "Certificate file cleaned up"
                         }
                     }
             -

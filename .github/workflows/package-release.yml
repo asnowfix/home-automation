@@ -162,6 +162,13 @@ jobs:
                 name: Build Windows Exectutable
                 run: go build -o "myhome.exe" ".\\myhome"
             -
+                name: Install ImageMagick
+                run: winget install ImageMagick.ImageMagick
+            -
+                name: Convert SVG to ICO
+                run: |
+                    magick convert "assets/penates.svg" -define icon:auto-resize=256,128,64,48,32,16 "assets/penates.ico"
+            -
                 id: build-msi
                 name: Build Windows Installer MSI from exe file
                 env:

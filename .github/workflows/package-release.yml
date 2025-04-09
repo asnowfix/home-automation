@@ -109,15 +109,12 @@ jobs:
             release_version: ${{ steps.version.outputs.release }}
             msi_file: ${{ steps.build-msi.outputs.msi_file }}
         steps:
-            -
-                name: Install winget
-                uses: Cyberboss/install-winget@v1
             - 
                 name: Install WiXToolset
-                id: wix
-                run: winget install --id WiXToolset.WiXToolset --version 3.14.1.8722 --source winget --disable-interactivity --accept-source-agreements --force
+                id: install-wix
+                run: choco install wixtoolset --version=3.14.0.6526 -y
             - 
-                id: go-msi
+                id: install-go-msi
                 name: Install go-msi
                 run: choco install go-msi
             - 
@@ -131,7 +128,7 @@ jobs:
                     fetch-depth: 0
                     ref: ${{ github.event.ref }}
             - 
-                id: go
+                id: install-go
                 name: Set up Go
                 uses: actions/setup-go@v5
                 with:
@@ -164,7 +161,7 @@ jobs:
             -
                 name: Install ImageMagick
                 id: install-imagemagick
-                run: winget install --id ImageMagick.ImageMagick --version 7.1.1.47 --source winget --disable-interactivity --accept-source-agreements --force
+                run: choco install imagemagick.app -y
             -
                 name: Convert SVG to ICO
                 run: |
@@ -173,7 +170,7 @@ jobs:
                 id: build-msi
                 name: Build Windows Installer MSI from exe file
                 env:
-                    Path: "C:\\Windows\\System32;$env:Path;C:\\Program Files\\go-msi;C:\\Program Files (x86)\\WiX Toolset v3.14\\bin"
+                    Path: "C:\\Windows\\System32;$env:Path;C:\\Program Files\\go-msi;C:\\Program Files (x86)\\WiX Toolset v3.14\\bin;C:\\Program Files (x86)\\Wix Toolset v3.14"
                 run: |
                     $out = New-Item -Type Directory -Path . -Name "msi_build"
                     $msi = "MyHome-${{ steps.version.outputs.release }}.msi"

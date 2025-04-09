@@ -56,7 +56,7 @@
         "target": "[INSTALLFOLDER]myhome.exe",
         "wdir": "INSTALLFOLDER",
         "arguments": "",
-        "icon": ""
+        "icon": "assets/penates.svg"
       }
     ]
   },

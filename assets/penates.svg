@@ -1,0 +1,18 @@
+<svg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <!-- Cercle protecteur -->
+  <circle cx="50" cy="50" r="48" stroke="#6A4E42" stroke-width="4" fill="#F5EFE6"/>
+ 
+  <!-- Petit autel/foyer -->
+  <rect x="35" y="65" width="30" height="10" fill="#A0522D"/>
+  <rect x="40" y="60" width="20" height="5" fill="#D2691E"/>
+ 
+  <!-- Flamme sacrée -->
+  <path d="M50 50 C52 54, 48 56, 50 60 C51 58, 55 56, 50 50" fill="#FF4500"/>
+
+  <!-- Silhouette du Penate (gardien divin) -->
+  <path d="M48 40 C46 45, 46 55, 50 55 C54 55, 54 45, 52 40" fill="#6A4E42"/>
+  <circle cx="50" cy="38" r="3" fill="#6A4E42"/>
+
+  <!-- Halo protecteur -->
+  <circle cx="50" cy="38" r="6" stroke="#FFD700" stroke-width="1.5" fill="none"/>
+</svg>

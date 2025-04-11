@@ -32,6 +32,10 @@
 /secrets.sh
 SECRETS.md
 
+# Code signing certificates
+*.pfx
+*.key
+
 /homectl/homectl*
 /myhome/myhome
 /myip/myip*

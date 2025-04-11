@@ -1,8 +1,8 @@
-# Home Automation
+# MyHome - Penates
 
 ## Abstract
 
-Collection of tools (including myhome) automating my own House, mostly using (very cool) Shelly devices, from Alterco Robotics.
+MyHome Penates is the home automation system I develop & use to control my house.  This is a hobby project to leqrn Go, mostly using (very cool) Shelly devices, from Alterco Robotics.
 
 ## Table of Contents <!-- omit in toc -->
 

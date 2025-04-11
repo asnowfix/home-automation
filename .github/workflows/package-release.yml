@@ -193,13 +193,39 @@ jobs:
                     try {
                         Write-Host "Starting certificate processing..."
                         
-                        # Convert base64 certificate to pfx file
-                        $certBytes = [Convert]::FromBase64String($env:CERTIFICATE_BASE64)
+                        # Validate certificate data
+                        if ([string]::IsNullOrWhiteSpace($env:CERTIFICATE_BASE64)) {
+                            throw "Certificate data is empty"
+                        }
+                        
+                        Write-Host "Certificate data length: $($env:CERTIFICATE_BASE64.Length) characters"
+                        
+                        # Clean potential issues with base64 string
+                        $cleanBase64 = $env:CERTIFICATE_BASE64 -replace '\s+',''
+                        Write-Host "Cleaned certificate data length: $($cleanBase64.Length) characters"
+                        
+                        # Validate base64 format
+                        try {
+                            $certBytes = [Convert]::FromBase64String($cleanBase64)
+                            Write-Host "Base64 decoded successfully. Byte length: $($certBytes.Length)"
+                            
+                            # Validate minimum PFX size (typically at least 1KB)
+                            if ($certBytes.Length -lt 1024) {
+                                throw "Decoded certificate data is too small to be a valid PFX file"
+                            }
+                        }
+                        catch [FormatException] {
+                            throw "Invalid base64 format in certificate data"
+                        }
+                        
+                        # Write certificate to file
                         $certPath = Join-Path $env:TEMP "certificate.pfx"
                         [IO.File]::WriteAllBytes($certPath, $certBytes)
                         
+                        $fileInfo = Get-Item $certPath
                         Write-Host "Certificate file written to: $certPath"
-                        Write-Host "Certificate file size: $((Get-Item $certPath).Length) bytes"
+                        Write-Host "Certificate file size: $($fileInfo.Length) bytes"
+                        Write-Host "Certificate file last write time: $($fileInfo.LastWriteTime)"
                         
                         # Try loading certificate with explicit flags
                         $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable -bor 
@@ -207,13 +233,30 @@ jobs:
                                 [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet
                         
                         Write-Host "Attempting to load certificate..."
-                        $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certPath, $env:CERTIFICATE_PASSWORD, $flags)
+                        
+                        # Try alternative loading methods if the first one fails
+                        try {
+                            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certPath, $env:CERTIFICATE_PASSWORD, $flags)
+                        }
+                        catch {
+                            Write-Host "First certificate loading attempt failed: $_"
+                            Write-Host "Trying alternative loading method..."
+                            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
+                            $cert.Import($certPath, $env:CERTIFICATE_PASSWORD, $flags)
+                        }
+                        
                         Write-Host "Certificate loaded successfully."
                         Write-Host "Certificate Subject: $($cert.Subject)"
                         Write-Host "Certificate Issuer: $($cert.Issuer)"
                         Write-Host "Certificate Valid From: $($cert.NotBefore)"
                         Write-Host "Certificate Valid To: $($cert.NotAfter)"
                         Write-Host "Has Private Key: $($cert.HasPrivateKey)"
+                        Write-Host "Certificate Thumbprint: $($cert.Thumbprint)"
+                        
+                        if (-not $cert.HasPrivateKey) {
+                            throw "Certificate does not contain a private key"
+                        }
+                        
                         $cert.Dispose()
                         
                         # Sign the MSI using Windows SDK SignTool

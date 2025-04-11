@@ -5,7 +5,7 @@
 - [Ubuntu/Debian Linux](#ubuntu-debian-linux)
 - [Windows - WSL](#windows-wsl)
 
-## Code signin
+## Code signing
 
 See
 - <https://wiki.gnupg.org/AgentForwarding>
@@ -46,6 +46,31 @@ netsh interface portproxy add v4tov4 listenport=1883 listenaddress=0.0.0.0 conne
 ```
 
 ## Windows - Native
+
+### Services
+
+As developer:
+
+```cmd
+go build myhome
+````
+
+Then as administrator:
+
+```cmd
+taskkill /F /IM myhome.exe
+copy /Y myhome.exe "C:\Program Files\MyHome\myhome.exe"
+sc create MyHome binPath= "C:\Program Files\MyHome\myhome.exe"
+sc config MyHome start= auto
+sc config MyHome obj= LocalSystem
+sc config MyHome DisplayName= "MyHome Automation Service"
+sc config MyHome description= "MyHome Automation Service"
+sc start MyHome
+sc query MyHome
+sc stop MyHome
+```
+
+TODO: add all of the above steps in wix.json
 
 ### Git Bash
 

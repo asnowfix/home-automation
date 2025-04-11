@@ -218,14 +218,39 @@ jobs:
                             throw "Invalid base64 format in certificate data"
                         }
                         
-                        # Write certificate to file
-                        $certPath = Join-Path $env:TEMP "certificate.pfx"
-                        [IO.File]::WriteAllBytes($certPath, $certBytes)
+                        # Ensure temp directory exists and is writable
+                        $tempDir = [System.IO.Path]::GetTempPath()
+                        Write-Host "Temp directory: $tempDir"
+                        if (-not (Test-Path $tempDir)) {
+                            Write-Host "Creating temp directory..."
+                            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+                        }
                         
-                        $fileInfo = Get-Item $certPath
-                        Write-Host "Certificate file written to: $certPath"
-                        Write-Host "Certificate file size: $($fileInfo.Length) bytes"
-                        Write-Host "Certificate file last write time: $($fileInfo.LastWriteTime)"
+                        # Generate a unique filename
+                        $certFileName = [System.IO.Path]::GetRandomFileName() + ".pfx"
+                        $certPath = [System.IO.Path]::Combine($tempDir, $certFileName)
+                        Write-Host "Generated certificate path: $certPath"
+                        
+                        # Write certificate to file with validation
+                        try {
+                            [IO.File]::WriteAllBytes($certPath, $certBytes)
+                            if (-not (Test-Path $certPath)) {
+                                throw "Certificate file was not created"
+                            }
+                            
+                            $fileInfo = Get-Item $certPath
+                            Write-Host "Certificate file written to: $certPath"
+                            Write-Host "Certificate file size: $($fileInfo.Length) bytes"
+                            Write-Host "Certificate file last write time: $($fileInfo.LastWriteTime)"
+                            
+                            if ($fileInfo.Length -eq 0) {
+                                throw "Certificate file was created but is empty"
+                            }
+                        }
+                        catch {
+                            Write-Error "Failed to write certificate file: $_"
+                            throw
+                        }
                         
                         # Try loading certificate with explicit flags
                         $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable -bor 

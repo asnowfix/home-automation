@@ -6,8 +6,7 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
+	"hlog"
 	"sync"
 	"time"
 
@@ -15,10 +14,7 @@ import (
 	"golang.org/x/sys/windows/svc/debug"
 	"golang.org/x/sys/windows/svc/eventlog"
 
-	"hlog"
-
 	"github.com/go-logr/logr"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 type myhomeService struct {
@@ -46,35 +42,60 @@ func NewService(ctx context.Context, cancel context.CancelFunc, run func(context
 		ctx:    ctx,
 		cancel: cancel,
 		run:    run,
+		log:    hlog.Logger,
 	}
 }
 
-// Execute is called when the service is started by svc.Run()
+// Execute is called by Windows Service Control Manager
 func (m *myhomeService) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown
 
-	changes <- svc.Status{State: svc.StartPending}
+	// Report start pending with a timeout
+	changes <- svc.Status{State: svc.StartPending, WaitHint: 30 * 1000}
 
 	// Start main service logic
+	errChan := make(chan error, 1)
 	m.wg.Add(1)
+
 	go func() {
 		defer m.wg.Done()
 		if err := m.run(m.ctx, m.log); err != nil {
 			m.elog.Error(2, fmt.Sprintf("Service failed: %v", err))
+			errChan <- err
 		}
+		close(errChan)
 	}()
 
+	// Wait briefly to see if the service starts successfully
+	select {
+	case err := <-errChan:
+		if err != nil {
+			m.log.Error(err, "Service failed to start")
+			return false, 1
+		}
+	case <-time.After(1 * time.Second):
+		// Service started without immediate error
+	}
+
+	// Report running state
 	changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
+	m.elog.Info(1, "Service started successfully")
 
 	// Service loop
 	for {
 		select {
+		case err := <-errChan:
+			if err != nil {
+				m.log.Error(err, "Service encountered an error")
+				return false, 1
+			}
+			return false, 0
 		case c := <-r:
 			switch c.Cmd {
 			case svc.Interrogate:
 				changes <- c.CurrentStatus
 			case svc.Stop, svc.Shutdown:
-				changes <- svc.Status{State: svc.StopPending}
+				changes <- svc.Status{State: svc.StopPending, WaitHint: uint32(10 * 1000)}
 				m.cancel()
 
 				// Wait with timeout
@@ -106,54 +127,28 @@ func (mhs *myhomeService) Run(foreground bool) error {
 	}
 }
 
-func setupServiceLogging() error {
-	// Create logs directory in ProgramData
-	logDir := filepath.Join("C:", "ProgramData", "MyHome", "logs")
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return fmt.Errorf("failed to create log directory: %v", err)
-	}
-
-	// Setup rotating logger
-	logger := &lumberjack.Logger{
-		Filename:   filepath.Join(logDir, "myhome.log"),
-		MaxSize:    10, // megabytes
-		MaxBackups: 5,  // number of backups
-		MaxAge:     28, // days
-		Compress:   true,
-	}
-
-	// Initialize logger
-	hlog.InitWithWriter(true, logger)
-	return nil
-}
-
 func (mhs *myhomeService) runInBackground() error {
 	var err error
 
-	// Setup logging
-	if err = setupServiceLogging(); err != nil {
-		mhs.elog.Error(1, fmt.Sprintf("Failed to setup logging: %v", err))
-		return err
-	}
-	mhs.log = hlog.Logger
-
-	// Running as a service
+	// Initialize event logger first
 	mhs.elog, err = eventlog.Open("MyHome")
 	if err != nil {
-		return err
+		mhs.log.Error(err, "Failed to open event log")
+		return fmt.Errorf("failed to open event log: %v", err)
 	}
 	defer mhs.elog.Close()
 
-	// svc.Run will create the necessary channels and call Execute
-	return svc.Run("MyHome", mhs)
+	mhs.log.Info("Running in background (creating Windows Service)")
+
+	// svc.Run blocks until the service is stopped
+	if err := svc.Run("MyHome", mhs); err != nil {
+		mhs.log.Error(err, "Service execution failed")
+		return fmt.Errorf("service execution failed: %v", err)
+	}
+	return nil
 }
 
 func (mhs *myhomeService) runInForeground() error {
-	// When running in foreground, pass nil channels to Execute
-	// This simulates running as a service but without Windows service control
-	_, errno := mhs.Execute(nil, nil, nil)
-	if errno != 0 {
-		return fmt.Errorf("service execution failed with error %d", errno)
-	}
-	return nil
+	mhs.log.Info("Running in foreground")
+	return mhs.run(mhs.ctx, mhs.log)
 }

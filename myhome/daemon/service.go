@@ -27,6 +27,5 @@ func NewService(ctx context.Context, cancel context.CancelFunc, run func(context
 }
 
 func (mhs *myhomeService) Run(foreground bool) error {
-	hlog.Init(false)
 	return mhs.run(mhs.ctx, hlog.Logger)
 }

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"global"
+	"hlog"
 	"homectl/options"
 	"time"
 
@@ -26,6 +27,7 @@ var Cmd = &cobra.Command{
 	Long:  "MyHome Daemon, with embedded MQTT broker and persistent device manager",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		hlog.Logger.Info("Running daemon")
 		mhs := NewService(cmd.Context(), cmd.Context().Value(global.CancelKey).(context.CancelFunc), run)
 		return mhs.Run(foreground)
 	},

@@ -120,7 +120,8 @@ Integration
         - https://github.com/goreleaser/goreleaser-cross
 
 [ ] Build Debian package the official way using <https://github.com/marketplace/actions/build-debian-packages>
-[x] Sign Windows package (public key°)
-[x] Sign Windows package (self-signed key°)
+[ ] Sign Windows package (public key)
+[x] Sign Windows package (self-signed key)
 [x] Build MSI package for Windows on new tagged version
 [ ] Run myhome as a windows service <https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/create-user-defined-service>
+[ ] Run every service under <https://github.com/kardianos/service> rather than manual packaging?

@@ -9,55 +9,105 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
+
+	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/debug"
+	"golang.org/x/sys/windows/svc/eventlog"
 
 	"hlog"
 
-	"github.com/kardianos/service"
-	"github.com/spf13/cobra"
+	"github.com/go-logr/logr"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-type App struct {
-	cmd    *cobra.Command
+type myhomeService struct {
+	run    func(context.Context, logr.Logger) error
 	cancel context.CancelFunc
 	ctx    context.Context
 	wg     sync.WaitGroup
+	log    logr.Logger
+	elog   debug.Log
 }
 
-func (a *App) Run() error {
-	if !service.Interactive() {
-		// Setup file logging when running as a service
-		if err := setupServiceLogging(); err != nil {
-			return fmt.Errorf("failed to setup logging: %v", err)
-		}
+func isInteractive(foreground bool) bool {
+	if foreground {
+		return true
 	}
+	isService, err := svc.IsWindowsService()
+	if err != nil {
+		return false
+	}
+	return !isService
+}
 
-	// Create a cancellable context
-	a.ctx, a.cancel = context.WithCancel(context.Background())
-	a.cmd.SetContext(a.ctx)
+func NewService(ctx context.Context, cancel context.CancelFunc, run func(context.Context, logr.Logger) error) *myhomeService {
+	return &myhomeService{
+		ctx:    ctx,
+		cancel: cancel,
+		run:    run,
+	}
+}
 
-	// Run the command in a goroutine
-	a.wg.Add(1)
+// Execute is called when the service is started by svc.Run()
+func (m *myhomeService) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
+	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown
+
+	changes <- svc.Status{State: svc.StartPending}
+
+	// Start main service logic
+	m.wg.Add(1)
 	go func() {
-		defer a.wg.Done()
-		if err := a.cmd.Execute(); err != nil {
-			hlog.Logger.Error(err, "Command execution failed")
+		defer m.wg.Done()
+		if err := m.run(m.ctx, m.log); err != nil {
+			m.elog.Error(2, fmt.Sprintf("Service failed: %v", err))
 		}
 	}()
 
-	return nil
+	changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
+
+	// Service loop
+	for {
+		select {
+		case c := <-r:
+			switch c.Cmd {
+			case svc.Interrogate:
+				changes <- c.CurrentStatus
+			case svc.Stop, svc.Shutdown:
+				changes <- svc.Status{State: svc.StopPending}
+				m.cancel()
+
+				// Wait with timeout
+				done := make(chan struct{})
+				go func() {
+					m.wg.Wait()
+					close(done)
+				}()
+
+				select {
+				case <-done:
+					m.elog.Info(1, "Service stopped gracefully")
+				case <-time.After(10 * time.Second):
+					m.elog.Warning(1, "Service stop timed out")
+				}
+				return
+			default:
+				m.elog.Error(1, fmt.Sprintf("Unexpected control request #%d", c))
+			}
+		}
+	}
 }
 
-func (a *App) Stop() error {
-	if a.cancel != nil {
-		a.cancel()  // Signal all goroutines to stop
-		a.wg.Wait() // Wait for all goroutines to finish
+func (mhs *myhomeService) Run(foreground bool) error {
+	if isInteractive(foreground) {
+		return mhs.runInForeground()
+	} else {
+		return mhs.runInBackground()
 	}
-	return nil
 }
 
 func setupServiceLogging() error {
-	// Create logs directory in ProgramData instead of Program Files
+	// Create logs directory in ProgramData
 	logDir := filepath.Join("C:", "ProgramData", "MyHome", "logs")
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return fmt.Errorf("failed to create log directory: %v", err)
@@ -66,46 +116,44 @@ func setupServiceLogging() error {
 	// Setup rotating logger
 	logger := &lumberjack.Logger{
 		Filename:   filepath.Join(logDir, "myhome.log"),
-		MaxSize:    10,   // megabytes after which new file is created
-		MaxBackups: 5,    // number of backups to keep
-		MaxAge:     28,   // days to keep old logs
-		Compress:   true, // compress old log files
+		MaxSize:    10, // megabytes
+		MaxBackups: 5,  // number of backups
+		MaxAge:     28, // days
+		Compress:   true,
 	}
 
-	// Initialize logger with rotating file output
+	// Initialize logger
 	hlog.InitWithWriter(true, logger)
 	return nil
 }
 
-func runAsService(app *App) error {
-	svcConfig := &service.Config{
-		Name:        "MyHome",
-		DisplayName: "MyHome Automation Service",
-		Description: "Home automation service for controlling Shelly devices",
-	}
+func (mhs *myhomeService) runInBackground() error {
+	var err error
 
-	prg := &program{app: app}
-	s, err := service.New(prg, svcConfig)
+	// Setup logging
+	if err = setupServiceLogging(); err != nil {
+		mhs.elog.Error(1, fmt.Sprintf("Failed to setup logging: %v", err))
+		return err
+	}
+	mhs.log = hlog.Logger
+
+	// Running as a service
+	mhs.elog, err = eventlog.Open("MyHome")
 	if err != nil {
 		return err
 	}
+	defer mhs.elog.Close()
 
-	return s.Run()
+	// svc.Run will create the necessary channels and call Execute
+	return svc.Run("MyHome", mhs)
 }
 
-type program struct {
-	app *App
-}
-
-func (p *program) Start(s service.Service) error {
-	// Start should not block. Do the actual work async.
-	go p.app.Run()
-	return nil
-}
-
-func (p *program) Stop(s service.Service) error {
-	if p.app != nil {
-		return p.app.Stop()
+func (mhs *myhomeService) runInForeground() error {
+	// When running in foreground, pass nil channels to Execute
+	// This simulates running as a service but without Windows service control
+	_, errno := mhs.Execute(nil, nil, nil)
+	if errno != 0 {
+		return fmt.Errorf("service execution failed with error %d", errno)
 	}
 	return nil
 }

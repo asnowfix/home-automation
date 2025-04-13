@@ -54,7 +54,7 @@ func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb
 	case <-time.After(ch.timeout):
 		ch.log.Error(nil, "Timeout waiting for response", "to verb", verb.Method, "from device", device.Id(), "timeout", ch.timeout)
 		device.MqttOk(false)
-		return nil, fmt.Errorf("timeout waiting for response from %v", device.Id())
+		return nil, fmt.Errorf("timeout waiting for response from %s", device)
 	}
 
 	var res Response

@@ -33,6 +33,7 @@ type State uint32
 type Device struct {
 	Product
 	Id_     string      `json:"id"`
+	Name_   string      `json:"name"`
 	Service string      `json:"service"`
 	Host_   string      `json:"host"`
 	Port    int         `json:"port"`
@@ -52,6 +53,16 @@ func (d *Device) Id() string {
 
 func (d *Device) Host() string {
 	return d.Host_
+}
+
+func (d *Device) Ip() net.IP {
+	// TODO: get it from inner Shelly structs (Wi-Fi or Eth)
+	return net.ParseIP(d.Host_)
+}
+
+func (d *Device) Name() string {
+	// FIXME: not the actual device name (should be from Components.System.Name)
+	return d.Name_
 }
 
 func (d *Device) SetHost(host string) {
@@ -226,7 +237,12 @@ func (d *Device) MethodHandlerE(v any) (types.MethodHandler, error) {
 }
 
 func (d *Device) String() string {
-	return fmt.Sprintf("%s_%s", d.Model, d.Id_)
+	name := d.Name()
+	if len(name) == 0 {
+		return d.Id()
+	}
+
+	return fmt.Sprintf("%s (%s)", name, d.Id())
 }
 
 func (d *Device) To() chan<- []byte {

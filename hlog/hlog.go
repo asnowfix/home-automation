@@ -58,9 +58,7 @@ func Init(verbose bool) {
 	Logger = zerologr.New(&zl)
 	Logger.Info("Initialized", "verbose", verbose)
 
-	if debugLog != nil {
-		debugLog.Info(1, "Logger initialization complete")
-	}
+	debugInit("Logger initialization complete")
 }
 
 func isColorTerminal() bool {
@@ -101,21 +99,15 @@ func isColorTerminal() bool {
 
 func logWriter() (io.Writer, error) {
 	logDir := getLogDir()
-	if debugLog != nil {
-		debugLog.Info(1, fmt.Sprintf("Creating log directory: %s", logDir))
-	}
+	debugInit(fmt.Sprintf("Creating log directory: %s", logDir))
 
 	if err := os.MkdirAll(logDir, 0755); err != nil {
-		if debugLog != nil {
-			debugLog.Error(1, fmt.Sprintf("Failed to create log directory: %v", err))
-		}
+		debugInit(fmt.Sprintf("Failed to create log directory: %v", err))
 		return nil, fmt.Errorf("failed to create log directory: %v", err)
 	}
 
 	logPath := filepath.Join(logDir, "myhome.log")
-	if debugLog != nil {
-		debugLog.Info(1, fmt.Sprintf("Log file path: %s", logPath))
-	}
+	debugInit(fmt.Sprintf("Log file path: %s", logPath))
 
 	// Setup rotating logger
 	logger := &lumberjack.Logger{

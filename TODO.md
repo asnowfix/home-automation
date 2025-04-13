@@ -19,7 +19,7 @@ Functions
 [ ] Support matter protocol for Gen3/4 devices
 [x] BUG Group ID's (integers) do not increment
 [x] BUG no timeout if there is no myhome instance running
-[ ] BUG ability to change device name
+[x] ability to change device name
 [x] Check/force MQTT configuration
 [x] Get IP addresses in the 'host' column of the 'devices' table
 [ ] Create/Configure scripts in a single operation

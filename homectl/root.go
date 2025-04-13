@@ -8,6 +8,7 @@ import (
 	"homectl/list"
 	"homectl/mqtt"
 	"homectl/options"
+	"homectl/set"
 	"homectl/shelly"
 	"homectl/show"
 	"homectl/sswitch"

@@ -1,3 +1,108 @@
+var shelly_pro2 = {
+  "config": {
+    "ble": {
+      "enable": true,
+      "observer": {
+        "enable": false
+      },
+      "rpc": {
+        "enable": true
+      }
+    },
+    "cloud": {
+      "enable": true,
+      "server": "shelly-78-eu.shelly.cloud:6022/jrpc"
+    },
+    "input:0": {
+      "auto_off": false,
+      "auto_off_delay": 0,
+      "auto_on": false,
+      "auto_on_delay": 0,
+      "id": 0,
+      "in_mode": "",
+      "initial_state": "",
+      "name": null
+    },
+    "input:1": {
+      "auto_off": false,
+      "auto_off_delay": 0,
+      "auto_on": false,
+      "auto_on_delay": 0,
+      "id": 1,
+      "in_mode": "",
+      "initial_state": "",
+      "name": null
+    },
+    "mqtt": {
+      "client_id": "shellypro2-2cbcbb9fb834",
+      "enable": false,
+      "enable_control": true,
+      "enable_rpc": true,
+      "rpc_ntf": true,
+      "status_ntf": false,
+      "topic_prefix": "shellypro2-2cbcbb9fb834",
+      "use_client_cert": false
+    },
+    "switch:0": {
+      "auto_off": false,
+      "auto_off_delay": 60,
+      "auto_on": false,
+      "auto_on_delay": 60,
+      "id": 0,
+      "in_mode": "momentary",
+      "initial_state": "off"
+    },
+    "switch:1": {
+      "auto_off": false,
+      "auto_off_delay": 60,
+      "auto_on": false,
+      "auto_on_delay": 60,
+      "id": 1,
+      "in_mode": "momentary",
+      "initial_state": "off"
+    },
+    "wifi": {
+      "ap": {
+        "password": "",
+        "ssid": "ShellyPro2-2CBCBB9FB834"
+      },
+      "mode": "",
+      "password": "",
+      "ssid": "",
+      "sta": {
+        "password": "",
+        "ssid": "Linksys_7A50"
+      },
+      "sta1": {
+        "password": "",
+        "ssid": ""
+      }
+    },
+    "ws": {
+      "enable": false,
+      "server": null,
+      "ssl_ca": "ca.pem"
+    }
+  },
+  "config_revision": 18,
+  "host": "192.168.1.42",
+  "id": "shellypro2-2cbcbb9fb834",
+  "info": {
+    "app": "Pro2",
+    "auth_en": false,
+    "discoverable": false,
+    "fw_id": "20240625-122917/1.3.3-gbdfd9b3",
+    "gen": 2,
+    "id": "shellypro2-2cbcbb9fb834",
+    "mac": "2CBCBB9FB834",
+    "model": "SPSW-202XE12UL",
+    "ver": "1.3.3"
+  },
+  "mac": "d8:20:42:04:1f:45:07:cd:f8",
+  "manufacturer": "Shelly",
+  "name": ""
+}
+
 var shellyplugsg3_get_components = {
   "id": 0,
   "src": "shellyplugsg3-b08184a53f24",

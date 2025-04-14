@@ -15,8 +15,8 @@ func debugInit(msg string) {
 	fmt.Fprintln(os.Stderr, msg)
 }
 
-func IsConsole() bool {
-	return isatty.IsTerminal(os.Stdout.Fd())
+func IsTerminal() bool {
+	return isatty.IsTerminal(os.Stderr.Fd())
 }
 
 func getLogDir() string {

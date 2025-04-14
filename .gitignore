@@ -24,7 +24,8 @@
 /vendor
 
 # Visual Studio Code
-/.vscode
+/.vscode/*
+!/.vscode/launch.json
 
 *__debug_*
 

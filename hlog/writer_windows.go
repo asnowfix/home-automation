@@ -41,7 +41,7 @@ func debugInit(msg string) {
 	}
 }
 
-func IsConsole() bool {
+func IsTerminal() bool {
 	// First check if we're running as a service
 	isService, err := svc.IsWindowsService()
 	if err != nil {

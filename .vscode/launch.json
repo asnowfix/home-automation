@@ -1,0 +1,116 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "homectl shelly jobs show <IP>",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["-v", "-B", "192.168.1.2", "shelly", "-H", "jobs", "show", "192.168.1.66"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl shelly jobs show <ID>",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["-v", "-B", "192.168.1.2", "shelly", "jobs", "show", "shellyplus1-08b61fd9d708"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl group create (radiateurs)",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["-B", "192.168.1.2" ,"group", "create", "radiateurs", "Tous les radiateurs"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl group show (radiateurs)",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["-B", "192.168.1.2" ,"group", "show", "radiateurs"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl group delete (radiateurs)",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["-B", "192.168.1.2" ,"group", "delete", "radiateurs"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "myhome daemon (w/o MQTT broker)",
+            "type": "go",
+            "request": "launch",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["-v", "daemon", "-B", "192.168.1.2"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "myhome daemon (MQTT broker only)",
+            "type": "go",
+            "request": "launch",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["-v", "daemon", "-D"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl group list",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["group", "list"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl switch radiateur-bureau off",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["-B" ,"192.168.1.2" ,"switch" ,"radiateur-bureau" ,"off"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl set shelly -N prise-routeurs shellyplugsg3-b08184a53f24",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["set" ,"shelly", "-N", "prise-routeurs", "shellyplugsg3-b08184a53f24"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        }
+    ]
+}

@@ -15,6 +15,10 @@ import (
 
 var Logger logr.Logger
 
+func LogToStderr() bool {
+	return os.Getenv("MYHOME_LOG") == "stderr"
+}
+
 func Init(verbose bool) {
 	debugInit("Initializing logger")
 
@@ -23,10 +27,11 @@ func Init(verbose bool) {
 	zerologr.NameSeparator = "/"
 
 	var w io.Writer
-	isConsole := IsConsole()
-	debugInit(fmt.Sprintf("IsConsole: %v", isConsole))
 
-	if isConsole {
+	logToStderr := LogToStderr()
+	isTerminal := IsTerminal()
+
+	if logToStderr || isTerminal {
 		w = os.Stderr
 		debugInit("Using stderr for logging")
 	} else {
@@ -41,7 +46,7 @@ func Init(verbose bool) {
 
 	zl := zerolog.New(w)
 
-	if isConsole {
+	if isTerminal {
 		zl = zl.Output(zerolog.ConsoleWriter{
 			Out:     w,
 			NoColor: !isColorTerminal(),
@@ -94,10 +99,16 @@ func isColorTerminal() bool {
 		}
 	}
 
-	return IsConsole()
+	return IsTerminal()
 }
 
 func logWriter() (io.Writer, error) {
+	// When running under VSCode debugger, use stderr
+	if LogToStderr() {
+		debugInit("VSCode debug session detected, using stderr for logging")
+		return os.Stderr, nil
+	}
+
 	logDir := getLogDir()
 	debugInit(fmt.Sprintf("Creating log directory: %s", logDir))
 

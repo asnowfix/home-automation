@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"global"
+	"homectl/follow"
 	"homectl/group"
 	"homectl/list"
 	"homectl/mqtt"
@@ -104,11 +105,14 @@ func init() {
 
 	Cmd.AddCommand(versionCmd)
 	Cmd.AddCommand(list.Cmd)
+	Cmd.AddCommand(set.Cmd)
 	Cmd.AddCommand(show.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(sswitch.Cmd)
 	Cmd.AddCommand(shelly.Cmd)
 	Cmd.AddCommand(group.Cmd)
+	Cmd.AddCommand(follow.FollowCmd)
+	Cmd.AddCommand(follow.UnfollowCmd)
 }
 
 var Commit string

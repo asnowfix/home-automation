@@ -3,6 +3,7 @@ go 1.23.0
 use (
 	.
 	./hlog
+	./homectl/follow
 	./homectl/group
 	./homectl/list
 	./homectl/mqtt

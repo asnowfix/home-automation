@@ -26,6 +26,7 @@ Functions
 [x] Status for one / multiple scripts in a single operation
 [ ] Run simple JavaScript in a single operation
 [ ] Do not scan ZeroConf when devices are explicit
+[ ] BUG: Find mqtt.local. using mDNS in homectl
 [x] HTTP POST (spurious "config" layer)
 [x] Fix MQTT when several CallE() invocations are in the same run
 [ ] Add support for linksys velop devices (via JNAP protocol) 

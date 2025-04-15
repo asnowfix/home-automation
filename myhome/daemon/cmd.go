@@ -3,10 +3,11 @@ package daemon
 import (
 	"context"
 	"global"
-	"hlog"
 	"homectl/options"
 	"time"
 
+	"github.com/go-logr/logr"
+	"github.com/kardianos/service"
 	"github.com/spf13/cobra"
 )
 
@@ -27,8 +28,54 @@ var Cmd = &cobra.Command{
 	Long:  "MyHome Daemon, with embedded MQTT broker and persistent device manager",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		hlog.Logger.Info("Running daemon")
-		mhs := NewService(cmd.Context(), cmd.Context().Value(global.CancelKey).(context.CancelFunc), run)
-		return mhs.Run(foreground)
+		// // Initialize viper
+		// viper.SetConfigName("myhome") // name of config file (without extension)
+		// viper.SetConfigType("yaml")   // or viper.SetConfigType("toml")
+		// viper.AddConfigPath(".")      // optionally look for config in the working directory
+		// err := viper.ReadInConfig()   // Find and read the config file
+		// if err != nil {
+		// 	log.Error(err, "Error reading config file")
+		// 	disableEmbeddedMqttBroker = false
+		// 	disableDeviceManager = true
+		// } else {
+		// 	// Read the configuration option to disable MQTT broker startup
+		// 	disableEmbeddedMqttBroker = viper.GetBool("disable_embedded_mqtt")
+		// 	disableDeviceManager = viper.GetBool("disable_device_manager")
+		// }
+
+		ctx := cmd.Context()
+		cancel := ctx.Value(global.CancelKey).(context.CancelFunc)
+		log := ctx.Value(global.LogKey).(logr.Logger)
+
+		config := service.Config{
+			Name:        "myhome",
+			DisplayName: "MyHome",
+			Description: "MyHome Daemon, with embedded MQTT broker and persistent device manager",
+		}
+
+		daemon := NewDaemon(ctx, cancel, log)
+		if foreground {
+			log.Info("Starting service in foreground")
+			return daemon.Run()
+		} else {
+			s, err := service.New(daemon, &config)
+			if err != nil {
+				log.Error(err, "Failed to create (background) service")
+				return err
+			}
+			logger, err := s.Logger(nil)
+			if err != nil {
+				log.Error(err, "Failed to get service logger")
+				return err
+			}
+			logger.Info("Starting service")
+			err = s.Run()
+			if err != nil {
+				log.Error(err, "Failed to run service")
+				return err
+			}
+			logger.Info("Service started")
+			return nil
+		}
 	},
 }

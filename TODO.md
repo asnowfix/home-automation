@@ -84,6 +84,7 @@ Integration
         Errors were encountered while processing:
         myhome
 
+[ ] Sign dpkg package
 [ ] BUG: Fix dpkg upgrade
 
         Failed to enable unit: Refusing to operate on alias name or linked unit file: myhome.service
@@ -112,7 +113,7 @@ Integration
 [x] Build Debian package for arm64
 [ ] Ship linux/arm64 binary in the release
 [ ] Ship linux/amd64 binary in the release
-[ ] Add cron-job to download the binary from the latest release
+[ ] Add cron-job to download (only) the binary from the latest release
 [ ] Add command to auto-update Debian package installation from latest release
 [ ] Package systemd scripts in-place (with stop, disable & reload as preuninstall, ans reload enable & start as postinstall)
 [x] Create verified tags

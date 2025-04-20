@@ -1,7 +1,8 @@
-go 1.23.0
+go 1.24.2
 
 use (
 	.
+	./cmd/wsl-mdns-bridge
 	./hlog
 	./homectl/follow
 	./homectl/group

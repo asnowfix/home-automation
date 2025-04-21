@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zerologr"
+	"github.com/kardianos/service"
 	"github.com/rs/zerolog"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -106,6 +107,11 @@ func logWriter() (io.Writer, error) {
 	// When running under VSCode debugger, use stderr
 	if LogToStderr() {
 		debugInit("VSCode debug session detected, using stderr for logging")
+		return os.Stderr, nil
+	}
+
+	if service.Interactive() {
+		debugInit("Running in interactive mode, using stderr for logging")
 		return os.Stderr, nil
 	}
 

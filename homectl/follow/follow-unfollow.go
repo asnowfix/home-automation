@@ -26,7 +26,8 @@ var FollowCmd = &cobra.Command{
 	Short: "Start following other device(s)",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return devicesDo(cmd.Context(), follow, args[0], args[1])
+		_, err := devicesDo(cmd.Context(), follow, args[0], args[1])
+		return err
 	},
 }
 
@@ -35,16 +36,17 @@ var UnfollowCmd = &cobra.Command{
 	Short: "Stop following other device(s)",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return devicesDo(cmd.Context(), unfollow, args[0], args[1])
+		_, err := devicesDo(cmd.Context(), unfollow, args[0], args[1])
+		return err
 	},
 }
 
 type doFollowFunc func(ctx context.Context, log logr.Logger, via types.Channel, follower *shelly.Device, following []*shelly.Device) (any, error)
 
-func devicesDo(ctx context.Context, f doFollowFunc, follower, following string) error {
+func devicesDo(ctx context.Context, f doFollowFunc, follower, following string) (any, error) {
 	followingDevices, err := myhome.TheClient.LookupDevices(ctx, following)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	return myhome.Foreach(ctx, hlog.Logger, follower, types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {

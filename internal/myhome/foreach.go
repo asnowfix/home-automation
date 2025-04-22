@@ -9,11 +9,12 @@ import (
 	"github.com/go-logr/logr"
 )
 
-func Foreach(ctx context.Context, log logr.Logger, name string, via types.Channel, fn func(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error), args []string) error {
+func Foreach(ctx context.Context, log logr.Logger, name string, via types.Channel, fn func(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error), args []string) (any, error) {
 	devices, err := TheClient.LookupDevices(ctx, name)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return shelly.Foreach(ctx, log, *devices, options.Via, fn, args)
+	out, err := shelly.Foreach(ctx, log, *devices, options.Via, fn, args)
+	return out, err
 }

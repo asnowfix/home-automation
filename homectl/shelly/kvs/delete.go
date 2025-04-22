@@ -27,7 +27,8 @@ var deleteCtl = &cobra.Command{
 	Short: "Delete matching key-value from given shelly devices",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, deleteKeys, options.Args(args))
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, deleteKeys, options.Args(args))
+		return err
 	},
 }
 

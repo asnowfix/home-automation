@@ -27,7 +27,8 @@ var setCtl = &cobra.Command{
 	Short: "Set or update a key-value on the given shelly device(s)",
 	Args:  cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, setKeyValue, options.Args(args))
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, setKeyValue, options.Args(args))
+		return err
 	},
 }
 

@@ -64,7 +64,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["-v", "daemon", "-B", "192.168.1.2"],
+            "args": ["-v", "daemon", "run", "-B", "192.168.1.2"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -74,7 +74,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["-v", "daemon", "-D"],
+            "args": ["-v", "daemon", "run", "-D"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }

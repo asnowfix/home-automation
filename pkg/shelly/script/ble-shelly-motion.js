@@ -13,7 +13,8 @@ let CONFIG = {
     // When `allowedMacAddresses` is set to null, evets from every bluetooth device are accepted.
     // allowedMacAddresses: null,
     allowedMacAddresses: [
-        "e8:e0:7e:d0:f9:89", // motion-front-door
+        "e8:e0:7e:d0:f9:89",    // motion-front-door
+        "b0:c7:de:11:58:d5",    // motion-parking
         // "e8:e0:7e:a6:0c:6f", // motion-pool-house
     ],
 

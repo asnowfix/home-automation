@@ -102,6 +102,17 @@
             }
         },
         {
+            "name": "homectl forget light-outside-steps",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["-B" ,"192.168.1.2" ,"forget" ,"light-outside-steps"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
             "name": "homectl set shelly -N prise-routeurs shellyplugsg3-b08184a53f24",
             "type": "go",
             "request": "launch",

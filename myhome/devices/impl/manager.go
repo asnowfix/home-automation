@@ -102,6 +102,9 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	myhome.RegisterMethodHandler(myhome.DeviceShow, func(in any) (any, error) {
 		return dm.GetDeviceByAny(ctx, in.(string))
 	})
+	myhome.RegisterMethodHandler(myhome.DeviceForget, func(in any) (any, error) {
+		return nil, dm.DeleteDevice(ctx, in.(string))
+	})
 	myhome.RegisterMethodHandler(myhome.GroupList, func(in any) (any, error) {
 		return dm.gr.GetAllGroups()
 	})
@@ -246,6 +249,10 @@ func (dm *DeviceManager) GetDeviceByMAC(ctx context.Context, mac string) (*myhom
 
 func (dm *DeviceManager) GetDeviceByName(ctx context.Context, name string) (*myhome.Device, error) {
 	return dm.dr.GetDeviceByName(ctx, name)
+}
+
+func (dm *DeviceManager) DeleteDevice(ctx context.Context, id string) error {
+	return dm.dr.DeleteDevice(ctx, id)
 }
 
 func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) error {

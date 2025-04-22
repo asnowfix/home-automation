@@ -5,6 +5,7 @@ use (
 	./cmd/wsl-mdns-bridge
 	./hlog
 	./homectl/follow
+	./homectl/forget
 	./homectl/group
 	./homectl/list
 	./homectl/mqtt

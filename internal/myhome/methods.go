@@ -64,6 +64,14 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &Device{}
 		},
 	},
+	DeviceForget: {
+		NewParams: func() any {
+			return ""
+		},
+		NewResult: func() any {
+			return nil
+		},
+	},
 	GroupList: {
 		NewParams: func() any {
 			return nil

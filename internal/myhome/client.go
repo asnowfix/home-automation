@@ -72,6 +72,23 @@ func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.De
 	return &devices, nil
 }
 
+func (hc *client) ForgetDevices(ctx context.Context, name string) error {
+	var err error
+
+	devices, err := hc.LookupDevices(ctx, name)
+	if err != nil {
+		return err
+	}
+
+	for _, d := range *devices {
+		_, err = TheClient.CallE(ctx, DeviceForget, d.Id())
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, error) {
 	requestId, err := RandStringBytesMaskImprRandReaderUnsafe(16)
 	if err != nil {
@@ -84,7 +101,9 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 	}
 
 	if reflect.TypeOf(params) != reflect.TypeOf(m.NewParams()) {
-		return nil, fmt.Errorf("invalid parameters for method %s: got %v, should be %v", method, reflect.TypeOf(params), reflect.TypeOf(m.NewParams()))
+		err := fmt.Errorf("invalid parameter type for method %s: got %v, should be %v", method, reflect.TypeOf(params), reflect.TypeOf(m.NewParams()))
+		hc.log.Error(err, "Invalid parameter type")
+		return nil, err
 	}
 	req := request{
 		Dialog: Dialog{

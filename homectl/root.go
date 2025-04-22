@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"global"
 	"homectl/follow"
+	"homectl/forget"
 	"homectl/group"
 	"homectl/list"
 	"homectl/mqtt"
@@ -107,6 +108,7 @@ func init() {
 	Cmd.AddCommand(list.Cmd)
 	Cmd.AddCommand(set.Cmd)
 	Cmd.AddCommand(show.Cmd)
+	Cmd.AddCommand(forget.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(sswitch.Cmd)
 	Cmd.AddCommand(shelly.Cmd)

@@ -44,19 +44,30 @@ func oneDeviceListApClients(ctx context.Context, log logr.Logger, via types.Chan
 		log.Error(nil, "Invalid WiFi Access Point clients type", "type", reflect.TypeOf(out))
 		return nil, fmt.Errorf("invalid WiFi Access Point clients type %T", out)
 	}
+
+	clients := make([]wifi.APClient, len(result.APClients))
+	for i, client := range result.APClients {
+		devices, err := myhome.TheClient.LookupDevices(ctx, client.MAC)
+		if err == nil {
+			device := (*devices)[0]
+			client.Name = device.Name()
+			client.Id = device.Id()
+		}
+		clients[i] = client
+	}
 	if options.Flags.Json {
-		s, err := json.Marshal(result)
+		s, err := json.Marshal(clients)
 		if err != nil {
 			return nil, err
 		}
 		fmt.Println(string(s))
 	} else {
-		s, err := yaml.Marshal(result)
+		s, err := yaml.Marshal(clients)
 		if err != nil {
 			return nil, err
 		}
 		fmt.Println(string(s))
 	}
 
-	return out, nil
+	return clients, nil
 }

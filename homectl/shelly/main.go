@@ -5,6 +5,7 @@ import (
 	kvsCtl "homectl/shelly/kvs"
 	mqttCtl "homectl/shelly/mqtt"
 	scriptCtl "homectl/shelly/script"
+	wifiCtl "homectl/shelly/wifi"
 
 	"github.com/spf13/cobra"
 )
@@ -20,4 +21,5 @@ func init() {
 	Cmd.AddCommand(mqttCtl.Cmd)
 	Cmd.AddCommand(kvsCtl.Cmd)
 	Cmd.AddCommand(scriptCtl.Cmd)
+	Cmd.AddCommand(wifiCtl.Cmd)
 }

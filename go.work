@@ -16,6 +16,7 @@ use (
 	./homectl/shelly/kvs
 	./homectl/shelly/mqtt
 	./homectl/shelly/script
+	./homectl/shelly/wifi
 	./homectl/show
 	./homectl/sswitch
 	./internal/debug

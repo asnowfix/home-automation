@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"fmt"
 )
 
 type MethodsRegistrar interface {
@@ -37,6 +38,15 @@ const (
 
 func (ch Channel) String() string {
 	return Channels[ch]
+}
+
+func ParseChannel(s string) (Channel, error) {
+	for i, ch := range Channels {
+		if ch == s {
+			return Channel(i), nil
+		}
+	}
+	return ChannelDefault, fmt.Errorf("unknown channel %s (expected one of %v)", s, Channels)
 }
 
 type MethodHandler struct {

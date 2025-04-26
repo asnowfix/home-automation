@@ -1,3 +1,37 @@
+var shelly_pro3_evt_wifi_connecting = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1745667977.96,
+    "wifi": {
+      "rssi": 0,
+      "ssid": null,
+      "sta_ip": "0.0.0.0",
+      "status": "connecting"
+    }
+  }
+}
+
+var shelly_pro3_evt_wifi_disconnected = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyEvent",
+  "params": {
+    "ts": 1745666408.35,
+    "events": [
+      {
+        "component": "wifi",
+        "event": "sta_disconnected",
+        "sta_ip": null,
+        "ssid": null,
+        "reason": 8,
+        "ts": 1745666408.35
+      }
+    ]
+  }
+}
+
 var shelly_pro2 = {
   "config": {
     "ble": {
@@ -314,7 +348,31 @@ result = {
   }
 }
 
-
+var shelly_1minig3_get_wifi_list_ap_clients = {
+  "id": 0,
+  "src": "shelly1minig3-54320464a1d0",
+  "dst": "homectl-viganj.local-24434_shelly1minig3-54320464a1d0",
+  "result": {
+    "ts": 1745693071,
+    "ap_clients": [
+      {
+        "mac": "54:32:04:64:19:f8",
+        "ip": "192.168.33.29",
+        "ip_static": false,
+        "mport": 12552,
+        "since": 1745650958
+      },
+      {
+        "mac": "54:32:04:64:f1:7c",
+        "ip": "192.168.33.18",
+        "ip_static": false,
+        "mport": 10380,
+        "since": 1745509881
+      }
+    ]
+  }
+}
+  
 results_sys_get_config_1 = {
   "id": 0,
   "src": "shelly1minig3-543204522cb4",

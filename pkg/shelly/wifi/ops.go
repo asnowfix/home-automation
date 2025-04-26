@@ -35,10 +35,18 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	})
 	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
-		HttpMethod: http.MethodGet,
+		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler(GetStatus.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
+	})
+	r.RegisterMethodHandler(Scan.String(), types.MethodHandler{
+		Allocate:   func() any { return new(ScanResult) },
+		HttpMethod: http.MethodPost,
+	})
+	r.RegisterMethodHandler(ListAPClients.String(), types.MethodHandler{
+		Allocate:   func() any { return new(ListAPClientsResult) },
+		HttpMethod: http.MethodPost,
 	})
 }

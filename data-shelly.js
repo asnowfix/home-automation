@@ -348,7 +348,24 @@ result = {
   }
 }
 
-var shelly_1minig3_get_wifi_list_ap_clients = {
+var shelly_minig3_evt_reboot = {
+  "src": "shelly1minig3-54320464a1d0",
+  "dst": "shelly1minig3-54320464a1d0/events",
+  "method": "NotifyEvent",
+  "params": {
+    "ts": 1745409198.28,
+    "events": [
+      {
+        "component": "sys",
+        "event": "scheduled_restart",
+        "time_ms": 996,
+        "ts": 1745409198.28
+      }
+    ]
+  }
+}
+
+var shelly_minig3_get_wifi_list_ap_clients = {
   "id": 0,
   "src": "shelly1minig3-54320464a1d0",
   "dst": "homectl-viganj.local-24434_shelly1minig3-54320464a1d0",

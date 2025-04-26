@@ -138,7 +138,7 @@ func (s *DeviceStorage) GetAllDevices(ctx context.Context) ([]*myhome.Device, er
 // GetDeviceByAny retrieves a device from the database by one of its identifiers (Id, MAC address, name, host)
 func (s *DeviceStorage) GetDeviceByAny(ctx context.Context, any string) (*myhome.Device, error) {
 	var device Device
-	query := `SELECT * FROM devices WHERE id = $1 OR mac = $1 OR name = $1 OR host = $1`
+	query := `SELECT * FROM devices WHERE name = $1 OR id = $1 OR mac = $1 OR host = $1`
 	err := s.db.Get(&device, query, any)
 	if err != nil {
 		s.log.Error(err, "Failed to get device by identifier", "identifier", any)
@@ -188,9 +188,9 @@ func (s *DeviceStorage) GetDeviceByName(ctx context.Context, name string) (*myho
 	return unmarshallDevice(s.log, device)
 }
 
-func (s *DeviceStorage) GetDevicesMatchingName(ctx context.Context, name string) ([]*myhome.Device, error) {
+func (s *DeviceStorage) GetDevicesMatchingAny(ctx context.Context, name string) ([]*myhome.Device, error) {
 	devices := make([]Device, 0)
-	query := `SELECT * FROM devices WHERE name LIKE '%' || $1 || '%'`
+	query := `SELECT * FROM devices WHERE name LIKE '%' || $1 || '%' OR id LIKE '%' || $1 || '%' OR mac LIKE '%' || $1 || '%' OR host LIKE '%' || $1 || '%'`
 	err := s.db.Select(&devices, query, name)
 	if err != nil {
 		s.log.Error(err, "Failed to get all devices")

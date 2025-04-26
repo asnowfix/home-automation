@@ -64,7 +64,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		} else {
 			name = strings.TrimPrefix(strings.TrimSuffix(name, "*"), "*")
 			dm.log.Info("Getting devices matching name", "name", name)
-			ds, err = dm.dr.GetDevicesMatchingName(ctx, name)
+			ds, err = dm.dr.GetDevicesMatchingAny(ctx, name)
 		}
 		if err != nil {
 			dm.log.Error(err, "Failed to get all devices")
@@ -227,8 +227,8 @@ func (dm *DeviceManager) GetAllDevices(ctx context.Context) ([]*myhome.Device, e
 	return dm.dr.GetAllDevices(ctx)
 }
 
-func (dm *DeviceManager) GetDevicesMatchingName(ctx context.Context, name string) ([]*myhome.Device, error) {
-	return dm.dr.GetDevicesMatchingName(ctx, name)
+func (dm *DeviceManager) GetDevicesMatchingAny(ctx context.Context, name string) ([]*myhome.Device, error) {
+	return dm.dr.GetDevicesMatchingAny(ctx, name)
 }
 
 func (dm *DeviceManager) GetDeviceByAny(ctx context.Context, any string) (*myhome.Device, error) {

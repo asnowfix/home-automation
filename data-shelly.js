@@ -1,3 +1,107 @@
+
+// curl -X POST -d '{"id":1,"method":"HTTP.GET","params":{"url":"http://192.168.33.18/rpc/Shelly.GetDeviceInfo"}}' http://Shelly1MiniG3-54320464A1D0.local/rpc
+
+var shelly_http_proxied_getdeviceinfo_response = {
+  "id": 1,
+  "src": "shelly1minig3-54320464a1d0",
+  "result": {
+    "code": 200,
+    "message": "OK",
+    "headers": {
+      "Connection": "close",
+      "Content-Length": "254",
+      "Content-Type": "application/json",
+      "Server": "ShellyHTTP/1.0.0"
+    },
+    "body": "{\"name\":\"lumiere-escalier\",\"id\":\"shelly1minig3-54320464f17c\",\"mac\":\"54320464F17C\",\"slot\":1,\"model\":\"S3SW-001X8EU\",\"gen\":3,\"fw_id\":\"20231121-110944/1.1.99-minig3prod1-ga898543\",\"ver\":\"1.1.99-minig3prod1\",\"app\":\"Mini1G3\",\"auth_en\":false,\"auth_domain\":null}"
+  }
+}
+
+var shelly_http_proxied_response_body = {
+  "name": "lumiere-escalier",
+  "id": "shelly1minig3-54320464f17c",
+  "mac": "54320464F17C",
+  "slot": 1,
+  "model": "S3SW-001X8EU",
+  "gen": 3,
+  "fw_id": "20231121-110944/1.1.99-minig3prod1-ga898543",
+  "ver": "1.1.99-minig3prod1",
+  "app": "Mini1G3",
+  "auth_en": false,
+  "auth_domain": null
+}
+
+// curl -X POST -d '{"id":1,"method":"HTTP.GET","params":{"url":"http://192.168.33.18/rpc/Shelly.Update"}}' http://Shelly1MiniG3-54320464A1D0.local/rpc
+
+var shelly_http_proxied_update_response = {
+  "id": 1,
+  "src": "shelly1minig3-54320464a1d0",
+  "result": {
+    "code": 200,
+    "message": "OK",
+    "headers": {
+      "Connection": "close",
+      "Content-Length": "4",
+      "Content-Type": "application/json",
+      "Server": "ShellyHTTP/1.0.0"
+    },
+    "body": "null"
+  }
+}
+
+// curl -X POST -d '{"id":1,"method":"HTTP.GET","params":{"url":"http://192.168.33.18/rpc/WiFi.GetConfig"}}' http://Shelly1MiniG3-54320464A1D0.local/rpc
+
+var shelly_http_proxied_wifi_getconfig_response = {
+  "id": 1,
+  "src": "shelly1minig3-54320464a1d0",
+  "result": {
+    "code": 200,
+    "message": "OK",
+    "headers": {
+      "Connection": "close",
+      "Content-Length": "433",
+      "Content-Type": "application/json",
+      "Server": "ShellyHTTP/1.0.0"
+    },
+    "body": "{\"ap\":{\"ssid\":\"Shelly1MiniG3-54320464F17C\",\"is_open\":false, \"enable\":true, \"range_extender\": {\"enable\":false}},\"sta\":{\"ssid\":\"Shelly1MiniG3-54320464A1D0\",\"is_open\":false, \"enable\":true, \"ipv4mode\":\"dhcp\",\"ip\":null,\"netmask\":null,\"gw\":null,\"nameserver\":null},\"sta1\":{\"ssid\":\"FiX Work iPhone\",\"is_open\":false, \"enable\":true, \"ipv4mode\":\"dhcp\",\"ip\":null,\"netmask\":null,\"gw\":null,\"nameserver\":null},\"roam\":{\"rssi_thr\":-80,\"interval\":60}}"
+  }
+}
+
+var shelly_http_proxied_wifi_getconfig_response_body = {
+  "ap": {
+    "ssid": "Shelly1MiniG3-54320464F17C",
+    "is_open": false,
+    "enable": true,
+    "range_extender": {
+      "enable": false
+    }
+  },
+  "sta": {
+    "ssid": "Shelly1MiniG3-54320464A1D0",
+    "is_open": false,
+    "enable": true,
+    "ipv4mode": "dhcp",
+    "ip": null,
+    "netmask": null,
+    "gw": null,
+    "nameserver": null
+  },
+  "sta1": {
+    "ssid": "FiX Work iPhone",
+    "is_open": false,
+    "enable": true,
+    "ipv4mode": "dhcp",
+    "ip": null,
+    "netmask": null,
+    "gw": null,
+    "nameserver": null
+  },
+  "roam": {
+    "rssi_thr": -80,
+    "interval": 60
+  }
+}
+
 var shelly_pro3_evt_wifi_connecting = {
   "src": "shellypro3-a0dd6ca1c588",
   "dst": "shellypro3-a0dd6ca1c588/events",

@@ -42,7 +42,6 @@ func init() {
 	configCmd.Flags().StringVarP(&flags.Ip, "ip", "I", "", "Static IP address (Station mode only)")
 	configCmd.Flags().StringVarP(&flags.Netmask, "netmask", "N", "", "Static netmask (Access Point mode only)")
 	configCmd.Flags().StringVarP(&flags.Gateway, "gateway", "g", "", "Static gateway (Access Point mode only)")
-	configCmd.Flags().BoolVarP(&flags.Open, "open", "O", false, "Set WiFi as open (no password)")
 }
 
 var configCmd = &cobra.Command{
@@ -69,9 +68,18 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 
 	// Update config from flags, if any provided
 	var changed bool = false
-	var sta wifi.STA = config.STA
-	var sta1 wifi.STA = config.STA1
-	var ap wifi.AP = config.AP
+	var sta wifi.STA
+	var sta1 wifi.STA
+	var ap wifi.AP
+	if config.STA != nil && !flags.AP && !flags.STA1 {
+		sta = *config.STA
+	}
+	if config.STA1 != nil && flags.STA1 {
+		sta1 = *config.STA1
+	}
+	if config.AP != nil && flags.AP {
+		ap = *config.AP
+	}
 
 	if flags.Ssid != "" {
 		sta.SSID = flags.Ssid
@@ -80,37 +88,45 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 		changed = true
 	}
 	if flags.Password != "" {
-		sta.Password = flags.Password
-		sta1.Password = flags.Password
-		ap.Password = flags.Password
+		sta.Password = &flags.Password
+		sta1.Password = &flags.Password
+		ap.Password = &flags.Password
 		changed = true
 	}
 
 	if flags.Ip != "" {
-		sta.IP = flags.Ip
-		sta1.IP = flags.Ip
+		sta.IP = &flags.Ip
+		sta1.IP = &flags.Ip
 		changed = true
 	}
 	if flags.Netmask != "" {
-		sta.Netmask = flags.Netmask
-		sta1.Netmask = flags.Netmask
+		sta.Netmask = &flags.Netmask
+		sta1.Netmask = &flags.Netmask
 		changed = true
 	}
 	if flags.Gateway != "" {
-		sta.Gateway = flags.Gateway
-		sta1.Gateway = flags.Gateway
+		sta.Gateway = &flags.Gateway
+		sta1.Gateway = &flags.Gateway
 		changed = true
 	}
 
-	if flags.AP {
-		config.AP = ap
-	} else if flags.STA1 {
-		config.STA1 = sta1
-	} else if changed {
-		config.STA = sta
-	}
-
 	if changed {
+		if flags.AP {
+			config.AP = &ap
+		} else {
+			config.AP = nil
+		}
+		if flags.STA1 {
+			config.STA1 = &sta1
+		} else {
+			config.STA1 = nil
+		}
+		if !flags.AP && !flags.STA1 {
+			config.STA = &sta
+		} else {
+			config.STA = nil
+		}
+
 		// some config was changed: update device
 		out, err = device.CallE(ctx, via, wifi.SetConfig.String(), wifi.SetConfigRequest{
 			Config: *config,

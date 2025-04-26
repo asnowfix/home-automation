@@ -80,11 +80,13 @@ type WiFiNetwork struct {
 // See: https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/WiFi#listapclients
 // Example fields: mac, ip, ip_static, mport, since
 type APClient struct {
-	MAC      string `json:"mac"`       // MAC address of the client
-	IP       string `json:"ip"`        // IP address assigned to the client
-	IPStatic bool   `json:"ip_static"` // Whether the IP is static
-	MPort    int    `json:"mport"`     // mDNS port (usually 0)
-	Since    int64  `json:"since"`     // Unix timestamp when client connected
+	MAC      string `json:"mac"`            // MAC address of the client
+	Id       string `json:"id,omitempty"`   // ID of the client
+	Name     string `json:"name,omitempty"` // Name of the client
+	IP       string `json:"ip"`             // IP address assigned to the client
+	IPStatic bool   `json:"ip_static"`      // Whether the IP is static
+	MPort    int    `json:"mport"`          // mDNS port (usually 0)
+	Since    int64  `json:"since"`          // Unix timestamp when client connected
 }
 
 // ListAPClientsResult represents the result of WiFi.ListAPClients

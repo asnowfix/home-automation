@@ -13,6 +13,7 @@ type MethodsRegistrar interface {
 
 type Device interface {
 	String() string
+	Name() string
 	Host() string
 	Id() string
 	CallE(ctx context.Context, via Channel, method string, params any) (any, error)

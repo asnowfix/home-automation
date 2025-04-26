@@ -23,7 +23,7 @@ type DeviceIdentifier struct {
 type DeviceSummary struct {
 	DeviceIdentifier
 	MAC   string `db:"mac" json:"mac,omitempty"` // The Ethernet hardware address of the device, globally unique & assigned by the manufacturer
-	Host  string `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
+	Host_ string `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
 	Name_ string `db:"name" json:"name"`         // The local unique name of the device, defined by the user
 }
 
@@ -36,7 +36,11 @@ func (d DeviceSummary) Name() string {
 }
 
 func (d DeviceSummary) Ip() net.IP {
-	return net.ParseIP(d.Host)
+	return net.ParseIP(d.Host_)
+}
+
+func (d DeviceSummary) Host() string {
+	return d.Host_
 }
 
 // func (d DeviceSummary) MarshalJSON() ([]byte, error) {
@@ -98,7 +102,7 @@ func (d *Device) WithMAC(mac net.HardwareAddr) *Device {
 }
 
 func (d *Device) WithHost(host string) *Device {
-	d.Host = host
+	d.Host_ = host
 	return d
 }
 
@@ -269,14 +273,14 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 		}
 	}
 
-	if d.Host == "" {
+	if d.Host_ == "" {
 		out, err := sd.CallE(ctx, via, wifi.GetStatus.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device wifi status (continuing)")
 		} else {
 			ws, ok := out.(*wifi.Status)
 			if ok {
-				d.Host = ws.IP
+				d.Host_ = ws.IP
 				d.log.Error(err, "Invalid response to get device wifi status (continuing)", "response", out)
 				updated = true
 			} else {

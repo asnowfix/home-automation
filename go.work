@@ -9,6 +9,7 @@ use (
 	./homectl/group
 	./homectl/list
 	./homectl/mqtt
+	./homectl/open
 	./homectl/options
 	./homectl/set
 	./homectl/shelly

@@ -9,6 +9,7 @@ import (
 	"homectl/group"
 	"homectl/list"
 	"homectl/mqtt"
+	"homectl/open"
 	"homectl/options"
 	"homectl/set"
 	"homectl/shelly"
@@ -108,6 +109,7 @@ func init() {
 	Cmd.AddCommand(list.Cmd)
 	Cmd.AddCommand(set.Cmd)
 	Cmd.AddCommand(show.Cmd)
+	Cmd.AddCommand(open.Cmd)
 	Cmd.AddCommand(forget.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(sswitch.Cmd)

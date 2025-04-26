@@ -51,6 +51,10 @@ func (d ShellyDevice) Id() string {
 	return d.shelly.Id()
 }
 
+func (d ShellyDevice) Host() string {
+	return d.shelly.Host()
+}
+
 func (d ShellyDevice) Ip() net.IP {
 	if ip := net.ParseIP(d.shelly.Host()); ip != nil {
 		return ip

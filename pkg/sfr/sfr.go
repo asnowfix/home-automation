@@ -49,6 +49,10 @@ func (h SfrHost) Ip() net.IP {
 	return h.xml.Ip
 }
 
+func (h SfrHost) Host() string {
+	return h.xml.Ip.String()
+}
+
 func (h SfrHost) Online() bool {
 	return h.xml.Status == "online"
 }

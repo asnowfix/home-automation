@@ -39,7 +39,7 @@ func (c *Cache) Flush() error {
 
 func (c *Cache) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) error {
 	for i, existing := range c.devices {
-		if existing.Id() == d.Id() || existing.MAC == d.MAC || existing.Host == d.Host || existing.Name() == d.Name() {
+		if existing.Id() == d.Id() || existing.MAC == d.MAC || existing.Host_ == d.Host_ || existing.Name() == d.Name() {
 			if !overwrite {
 				return fmt.Errorf("device already exists: %v", *d)
 			}
@@ -58,7 +58,7 @@ func (c *Cache) insert(d *myhome.Device) (*myhome.Device, error) {
 	c.devices = append(c.devices, d)
 	c.devicesById[d.Id()] = d
 	c.devicesByMAC[d.MAC] = d
-	c.devicesByHost[d.Host] = d
+	c.devicesByHost[d.Host_] = d
 	c.devicesByName[d.Name()] = d
 	c.log.Info("inserted/updated device", "id", d.Id(), "name", d.Name())
 	return d, nil

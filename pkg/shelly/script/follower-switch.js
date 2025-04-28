@@ -1,5 +1,5 @@
 let CONFIG = {
-    // TODO:configurable via KVS (Id, switch in, switch out)
+    // TODO:configurable via KVS
     // light-outside-steps / escalier-exterieur
     device: "shelly1minig3-54320464f17c",
 };
@@ -22,7 +22,7 @@ MQTT.subscribe(
             //     }
             // }
             msg = JSON.parse(message)
-            if (msg.method === "NotifyStatus" && msg.params["switch:0"] !== undefined) {
+            if (msg.method === "NotifyStatus" && msg.params["switch:0"] !== undefined && msg.params["switch:0"].output !== undefined) {
                 console.log("Calling Switch.Set", msg.params["switch:0"].output, "for", CONFIG.device)
                 Shelly.call("Switch.Set", { id: 1, on: msg.params["switch:0"].output });
             } else {

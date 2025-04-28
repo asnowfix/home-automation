@@ -1,4 +1,5 @@
 
+
 // curl -X POST -d '{"id":1,"method":"HTTP.GET","params":{"url":"http://192.168.33.18/rpc/Shelly.GetDeviceInfo"}}' http://Shelly1MiniG3-54320464A1D0.local/rpc
 
 var shelly_http_proxied_getdeviceinfo_response = {
@@ -575,5 +576,84 @@ results_sys_get_config_2 = {
       "server": "time.google.com"
     },
     "cfg_rev": 52
+  }
+}
+
+var shelly_plus1_switch_toggle_notify_status = {
+  "src": "shellyplus1-b8d61a85a8e0",
+  "dst": "shellyplus1-b8d61a85a8e0/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1728655743.99,
+    "switch:0": {
+      "id": 0,
+      "output": true,
+      "source": "button"
+    }
+  }
+}
+
+var shelly_plus1_switch_toggle_notify_event_btn_down = {
+  "src": "shellyplus1-b8d61a85a8e0",
+  "dst": "shellyplus1-b8d61a85a8e0/events",
+  "method": "NotifyEvent",
+  "params": {
+    "ts": 1728655743.99,
+    "events": [
+      {
+        "component": "input:0",
+        "id": 0,
+        "event": "btn_down",
+        "ts": 1728655743.99
+      }
+    ]
+  }
+}
+
+var shelly_plus1_switch_toggle_notify_event_btn_up = {
+  "src": "shellyplus1-b8d61a85a8e0",
+  "dst": "shellyplus1-b8d61a85a8e0/events",
+  "method": "NotifyEvent",
+  "params": {
+    "ts": 1728655744.17,
+    "events": [
+      {
+        "component": "input:0",
+        "id": 0,
+        "event": "btn_up",
+        "ts": 1728655744.17
+      }
+    ]
+  }
+}
+
+var shelly_plus1_switch_toggle_notify_event_single_push = {
+  "src": "shellyplus1-b8d61a85a8e0",
+  "dst": "shellyplus1-b8d61a85a8e0/events",
+  "method": "NotifyEvent",
+  "params": {
+    "ts": 1728655744.49,
+    "events": [
+      {
+        "component": "input:0",
+        "id": 0,
+        "event": "single_push",
+        "ts": 1728655744.49
+      }
+    ]
+  }
+}
+
+var shelly_plus1_switch_toggle_notify_status = {
+  "src": "shellyplus1-b8d61a85a8e0",
+  "dst": "shellyplus1-b8d61a85a8e0/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1728655745.60,
+    "switch:0": {
+      "id": 0,
+      "output": false,
+      "source": "button"
+    }
   }
 }

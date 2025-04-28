@@ -1,6 +1,7 @@
 package shelly
 
 import (
+	compsCtl "homectl/shelly/components"
 	jobsCtl "homectl/shelly/jobs"
 	kvsCtl "homectl/shelly/kvs"
 	mqttCtl "homectl/shelly/mqtt"
@@ -24,4 +25,5 @@ func init() {
 	Cmd.AddCommand(scriptCtl.Cmd)
 	Cmd.AddCommand(wifiCtl.Cmd)
 	Cmd.AddCommand(sysCtl.Cmd)
+	Cmd.AddCommand(compsCtl.Cmd)
 }

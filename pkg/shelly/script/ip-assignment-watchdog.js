@@ -37,14 +37,32 @@ let failCounter = 0;
 let pingTimer = null;
 
 function checkForWifi() {
-    const response = Shelly.getComponentStatus('wifi')
+    // 'wifi'
+    const wifi = Shelly.getComponentStatus('wifi')
 
-    const isConnected = response.status === 'got ip';
+    const isWifiConnected = wifi.status === 'got ip';
+
+    // 'eth'
+    // - key: eth
+    // config:
+    //   enable: true
+    //   gw: null
+    //   ip: null
+    //   ipv4mode: dhcp
+    //   nameserver: null
+    //   netmask: null
+    //   server_mode: false
+    // status:
+    //   ip: 192.168.1.80
+
+    const eth = Shelly.getComponentStatus('eth')
+
+    const isEthConnected = eth.status === 'got ip';
 
     // Connection is now established OR was never broken
     // Reset counter and start over
-    if (isConnected) {
-        console.log(Date.now(), 'WiFi works correctly. Resetting counter to 0')
+    if (isWifiConnected || isEthConnected) {
+        console.log(Date.now(), 'WiFi or Ethernet works correctly. Resetting counter to 0')
         failCounter = 0;
         return;
     }
@@ -54,11 +72,11 @@ function checkForWifi() {
 
     if (failCounter < CONFIG.numberOfFails) {
         const remainingAttemptsBeforeRestart = CONFIG.numberOfFails - failCounter;
-        console.log(Date.now(), 'WiFi healthcheck failed ', failCounter, ' out of ', CONFIG.numberOfFails, ' times')
+        console.log(Date.now(), 'WiFi or Ethernet healthcheck failed ', failCounter, ' out of ', CONFIG.numberOfFails, ' times')
         return;
     }
 
-    console.log(Date.now(), 'WiFi healthcheck failed all attempts. Restarting device...')
+    console.log(Date.now(), 'WiFi or Ethernet healthcheck failed all attempts. Restarting device...')
     Shelly.call('Shelly.Reboot')
 }
 

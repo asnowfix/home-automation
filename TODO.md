@@ -15,6 +15,8 @@ Model
 Functions
 ---------
 
+[ ] Upload ip-assignment-watchdog.js on every device that have scripting
+[ ] Configure adaptive heater control on every device that are known to be heaters (based on group membership)
 [ ] Upload daily-reboot.js on every device that have scripting
 [ ] Turn on/off heaters based on kalman filter and <https://developer.accuweather.com>
 [ ] Daily reboot script to upload everywhere (inspired by <https://github.com/ALLTERCO/shelly-script-examples>)

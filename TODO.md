@@ -15,6 +15,7 @@ Model
 Functions
 ---------
 
+[ ] Upload daily-reboot.js on every device that have scripting
 [ ] Turn on/off heaters based on kalman filter and <https://developer.accuweather.com>
 [ ] Daily reboot script to upload everywhere (inspired by <https://github.com/ALLTERCO/shelly-script-examples>)
 [x] BUG make homectl `forget` actually work (right now it does not seem to update the DB storage)

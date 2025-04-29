@@ -19,6 +19,7 @@ var METEOFRANCE_API_KEY = '<YOUR_METEOFRANCE_API_KEY>';
 var METEOFRANCE_LAT = '<YOUR_LATITUDE>';
 var METEOFRANCE_LON = '<YOUR_LONGITUDE>';
 var METEOFRANCE_FORECAST_URL = 'https://api.meteofrance.com/public/forecast?lat=' + METEOFRANCE_LAT + '&lon=' + METEOFRANCE_LON;
+var PREHEAT_HOURS = 2;
 
 function loadHeaterConfigFromKV() {
   if (typeof Shelly !== 'undefined' && Shelly.getKV) {
@@ -38,8 +39,9 @@ function loadHeaterConfigFromKV() {
           if (cfg.meteofrance_api_key) METEOFRANCE_API_KEY = cfg.meteofrance_api_key;
           if (cfg.meteofrance_lat) METEOFRANCE_LAT = cfg.meteofrance_lat;
           if (cfg.meteofrance_lon) METEOFRANCE_LON = cfg.meteofrance_lon;
+          if (cfg.preheat_hours !== undefined) PREHEAT_HOURS = cfg.preheat_hours;
           // Update forecast URLs if any of the above changed
-          ACCUWEATHER_FORECAST_URL = 'http://dataservice.accuweather.com/forecasts/v1/hourly/1hour/' + ACCUWEATHER_LOCATION_KEY + '?apikey=' + ACCUWEATHER_API_KEY + '&metric=true';
+          ACCUWEATHER_FORECAST_URL = 'http://dataservice.accuweather.com/forecasts/v1/hourly/1hour/' + ACCUWEATHER_LOCATION_KEY + '?apikey=' + ACCUWEATHER_API_KEY + '&metric=true;';
           METEOFRANCE_FORECAST_URL = 'https://api.meteofrance.com/public/forecast?lat=' + METEOFRANCE_LAT + '&lon=' + METEOFRANCE_LON;
           print('Loaded heater config from KV:', val);
         } catch (e) {
@@ -161,22 +163,45 @@ function getMinutesToEndOfCheapWindow() {
   return minutesEnd - minutesNow;
 }
 
+// === ADVANCED COOLING MODEL: LOSS DEPENDS ON TEMP DIFFERENCE ===
+// We now use: predictedDrop = COOLING_COEFF * (filteredTemp - externalTemp) * hoursToEnd
+// COOLING_COEFF is learned as before (from data)
+
 function shouldPreheat(filteredTemp, forecastTemp, mfTemp, cb) {
-  getCoolingRate(function(rate) {
+  getCoolingRate(function(k) { // k is now a cooling coefficient (per hour)
     var minutesToEnd = getMinutesToEndOfCheapWindow();
     var hoursToEnd = minutesToEnd / 60.0;
-    // Use the lowest forecast for the next N hours
-    var futureTemp = filteredTemp;
-    if (forecastTemp !== null && mfTemp !== null) futureTemp = Math.min(forecastTemp, mfTemp);
-    else if (forecastTemp !== null) futureTemp = forecastTemp;
-    else if (mfTemp !== null) futureTemp = mfTemp;
-    // Predict indoor temp at end of cheap window
-    var predictedDrop = rate * hoursToEnd;
+    // Use the lowest forecast for the next N hours for external temp
+    var futureExternal = null;
+    if (forecastTemp !== null && mfTemp !== null) futureExternal = Math.min(forecastTemp, mfTemp);
+    else if (forecastTemp !== null) futureExternal = forecastTemp;
+    else if (mfTemp !== null) futureExternal = mfTemp;
+    // Fallback to current external temp if no forecast
+    if (futureExternal === null && typeof EXTERNAL_THERMOMETER_URL !== 'undefined') {
+      // Use last measured external temp if available
+      if (typeof lastExternalTemp !== 'undefined') futureExternal = lastExternalTemp;
+    }
+    // If still null, fallback to 0
+    if (futureExternal === null) futureExternal = 0;
+    // Predict indoor temp at end of cheap window using exponential model
+    // T_end = T_start - k * (T_start - T_ext) * hours
+    var predictedDrop = k * (filteredTemp - futureExternal) * hoursToEnd;
     var predictedTemp = filteredTemp - predictedDrop;
-    // Preheat if predicted temp will be below setpoint soon after cheap window ends
     cb((hoursToEnd <= PREHEAT_HOURS) && (predictedTemp < SETPOINT));
   });
 }
+
+// Store last measured external temp for fallback in shouldPreheat
+var lastExternalTemp = null;
+
+// Patch fetchAllControlInputs to store last external temp
+var origFetchAll = fetchAllControlInputs;
+fetchAllControlInputs = function(cb) {
+  origFetchAll(function(results) {
+    if (results.external !== null) lastExternalTemp = results.external;
+    cb(results);
+  });
+};
 
 function getOccupancy(cb) {
   HTTP.request({

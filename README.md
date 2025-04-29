@@ -143,6 +143,7 @@ The following object is to be stored in the KV store, with key `heater_config`:
   "min_temp": 14.0,
   "cheap_start": 22,
   "cheap_end": 6,
+  "preheat_hours": 2
   "poll_interval_ms": 300000,
   "accuweather_api_key": "YOUR_KEY",
   "accuweather_location_key": "YOUR_LOC_KEY",

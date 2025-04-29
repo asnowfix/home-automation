@@ -136,7 +136,7 @@ func (c *Cache) GetDevicesMatchingAny(ctx context.Context, name string) ([]*myho
 	return c.db.GetDevicesMatchingAny(ctx, name)
 }
 
-func (c *Cache) DeleteDevice(ctx context.Context, id string) error {
+func (c *Cache) ForgetDevice(ctx context.Context, id string) error {
 	// TODO: use cache content
-	return c.db.DeleteDevice(ctx, id)
+	return c.db.ForgetDevice(ctx, id)
 }

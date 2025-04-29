@@ -14,7 +14,7 @@ type DeviceRegistry interface {
 	GetDeviceByHost(ctx context.Context, host string) (*myhome.Device, error)
 	GetDeviceByMAC(ctx context.Context, mac string) (*myhome.Device, error)
 	GetDeviceByName(ctx context.Context, name string) (*myhome.Device, error)
-	DeleteDevice(ctx context.Context, id string) error
+	ForgetDevice(ctx context.Context, id string) error
 	GetAllDevices(ctx context.Context) ([]*myhome.Device, error)
 }
 

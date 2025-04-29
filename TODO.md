@@ -15,7 +15,11 @@ Model
 Functions
 ---------
 
-[ ] BUG ZeroConf scanning not working on Windows
+[ ] Turn on/off heaters based on kalman filter and <https://developer.accuweather.com>
+[ ] Daily reboot script to upload everywhere (inspired by <https://github.com/ALLTERCO/shelly-script-examples>)
+[x] BUG make homectl `forget` actually work (right now it does not seem to update the DB storage)
+[ ] BUG ZeroConf scanning (automatic resolver) not working on Windows or macOS
+[ ] BUG ZeroConf scanning stops working after a while (few minutes)
 [ ] Support matter protocol for Gen3/4 devices
 [x] BUG Group ID's (integers) do not increment
 [x] BUG no timeout if there is no myhome instance running

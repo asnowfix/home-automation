@@ -210,13 +210,14 @@ func (s *DeviceStorage) GetDeviceByHost(ctx context.Context, host string) (*myho
 	return unmarshallDevice(s.log, device)
 }
 
-// DeleteDevice deletes a device from the database by any of its identifiers (Id, MAC address, name, host)
-func (s *DeviceStorage) DeleteDevice(ctx context.Context, identifier string) error {
+// ForgetDevice deletes a device from the database by any of its identifiers (Id, MAC address, name, host)
+func (s *DeviceStorage) ForgetDevice(ctx context.Context, identifier string) error {
 	query := `DELETE FROM devices WHERE id = $1 OR mac = $1 OR name = $1 OR host = $1`
 	_, err := s.db.Exec(query, identifier)
 	if err != nil {
 		s.log.Error(err, "Failed to delete device", "identifier", identifier)
 	}
+	s.log.Info("Device deleted", "identifier", identifier)
 	return err
 }
 

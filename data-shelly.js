@@ -137,6 +137,219 @@ var shelly_pro3_evt_wifi_disconnected = {
   }
 }
 
+var shelly_pro3_evt_mqtt_connected = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746116317.37,
+    "mqtt": {
+      "connected": true
+    }
+  }
+}
+
+var shelly_pro3_evt_wifi_connected = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746116468.60,
+    "wifi": {
+      "rssi": -95,
+      "ssid": "Linksys_7A50",
+      "sta_ip": "0.0.0.0",
+      "status": "connected"
+    }
+  }
+}
+
+var shelly_pro3_input0_true = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746116501.28,
+    "input:0": {
+      "id": 0,
+      "state": true
+    }
+  }
+}
+
+var shelly_pro3_input0_false = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746116508.89,
+    "input:0": {
+      "id": 0,
+      "state": false
+    }
+  }
+}
+
+var shelly_pro3_switch0_true = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746116501.28,
+    "switch:0": {
+      "id": 0,
+      "output": true,
+      "source": "switch"
+    }
+  }
+}
+
+var shelly_pro3_switch0_false = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746116508.89,
+    "switch:0": {
+      "id": 0,
+      "output": false,
+      "source": "switch"
+    }
+  }
+}
+
+var shelly_pro3_switch0_source_http = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746116508.89,
+    "switch:0": {
+      "id": 0,
+      "output": false,
+      "source": "HTTP"
+    }
+  }
+}
+
+var shelly_pro3_input0_source_switch = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746116508.89,
+    "input:0": {
+      "id": 0,
+      "state": false,
+      "source": "switch"
+    }
+  }
+}
+
+var shelly_pro3_input0_source_mqtt = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746116508.89,
+    "input:0": {
+      "id": 0,
+      "state": false,
+      "source": "MQTT"
+    }
+  }
+}
+
+  var shelly_pro3_switch0_source_switch = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746116508.89,
+    "switch:0": {
+      "id": 0,
+      "output": false,
+      "source": "switch"
+    }
+  }
+}
+
+var shelly_pro3_switch0_source_mqtt = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746116508.89,
+    "switch:0": {
+      "id": 0,
+      "output": false,
+      "source": "MQTT"
+    }
+  }
+}
+
+var shelly_pro3_switch0_config_changed = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyEvent",
+  "params": {
+    "ts": 1746117052.62,
+    "events": [
+      {
+        "component": "switch:0",
+        "id": 0,
+        "event": "config_changed",
+        "restart_required": false,
+        "ts": 1746117052.62,
+        "cfg_rev": 25
+      }
+    ]
+  }
+}
+
+var shelly_pro3_sys_cfg_rev_25 = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746117052.62,
+    "sys": {
+      "cfg_rev": 25
+    }
+  }
+}
+
+var shelly_pro3_switch2_config_changed = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyEvent",
+  "params": {
+    "ts": 1746117176.14,
+    "events": [
+      {
+        "component": "switch:2",
+        "id": 2,
+        "event": "config_changed",
+        "restart_required": false,
+        "ts": 1746117176.14,
+        "cfg_rev": 27
+      }
+    ]
+  }
+}
+
+var shelly_pro3_sys_cfg_rev_27 = {
+  "src": "shellypro3-a0dd6ca1c588",
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1746117176.14,
+    "sys": {
+      "cfg_rev": 27
+    }
+  }
+}
+
 var shelly_pro2 = {
   "config": {
     "ble": {

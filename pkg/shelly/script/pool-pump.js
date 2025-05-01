@@ -149,36 +149,23 @@ function enforceSingleSwitchOnAtStartup() {
 
 enforceSingleSwitchOnAtStartup();
 
-// Subscribe to status changes for all three switches
-switches.forEach(function (sw) {
-    Shelly.addEventHandler(function (event) {
-        // var event = {
-        //     "id": 1,
-        //     "now": 1744662788.17941999435,
-        //     "info": {
-        //         "component": "switch:1",
-        //         "id": 1,
-        //         "event": "toggle",
-        //         "state": false,
-        //         "ts": 1744662788.17999982833
-        //     }
-        // }
-        print("event", event)
-        info = event.info
-        if (info && typeof (info.component) === "string") {
-            if (info.component.indexOf("switch:") === 0 && info.id === sw && typeof info.state === "boolean") {
-                // Only allow switching if not forced off by input:0
-                if (!input0_forced_off) {
-                    handleSwitchEvent(info);
-                } else if (info.state === true) {
-                    // If input:0 is ON, immediately turn off any switch that tries to turn ON
-                    Shelly.call("Switch.Set", { id: sw, on: false });
-                }
-            } else if (info.component === "input:0" && typeof info.state === "boolean") {
-                handleInput0Event(info);
+// Subscribe to status changes for all switches and input:0 with a single handler
+Shelly.addEventHandler(function (event) {
+    print("event", event)
+    var info = event.info;
+    if (info && typeof (info.component) === "string") {
+        if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
+            // Only allow switching if not forced off by input:0
+            if (!input0_forced_off) {
+                handleSwitchEvent(info);
+            } else if (info.state === true) {
+                // If input:0 is ON, immediately turn off any switch that tries to turn ON
+                Shelly.call("Switch.Set", { id: info.id, on: false });
             }
+        } else if (info.component === "input:0" && typeof info.state === "boolean") {
+            handleInput0Event(info);
         }
-    });
+    }
 });
 
 print("Running: pool-pump.js")

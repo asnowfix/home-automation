@@ -14,6 +14,7 @@ const (
 	DevicesMatch      Verb = "device.match"
 	DeviceLookup      Verb = "device.lookup"
 	DeviceShow        Verb = "device.show"
+	DeviceForget      Verb = "device.forget"
 	GroupList         Verb = "group.list"
 	GroupCreate       Verb = "group.create"
 	GroupDelete       Verb = "group.delete"

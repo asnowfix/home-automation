@@ -31,7 +31,8 @@ var Cmd = &cobra.Command{
 		if len(args) == 2 {
 			op = args[1]
 		}
-		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, toggleOneDevice, []string{op})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, toggleOneDevice, []string{op})
+		return err
 	},
 }
 

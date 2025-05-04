@@ -36,6 +36,7 @@ type Provider interface {
 type Device interface {
 	Id() string   // Device immutable Id (usually set by manufacturer)
 	Name() string // Device user-set (mutable) Name
+	Host() string // Device host address (resolvable hostname or IP address)
 	Ip() net.IP   // Device IP address
 	// MarshalJSON() ([]byte, error)
 }

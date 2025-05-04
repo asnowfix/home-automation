@@ -33,6 +33,7 @@ type State uint32
 type Device struct {
 	Product
 	Id_     string      `json:"id"`
+	Name_   string      `json:"name"`
 	Service string      `json:"service"`
 	Host_   string      `json:"host"`
 	Port    int         `json:"port"`
@@ -52,6 +53,16 @@ func (d *Device) Id() string {
 
 func (d *Device) Host() string {
 	return d.Host_
+}
+
+func (d *Device) Ip() net.IP {
+	// TODO: get it from inner Shelly structs (Wi-Fi or Eth)
+	return net.ParseIP(d.Host_)
+}
+
+func (d *Device) Name() string {
+	// FIXME: not the actual device name (should be from Components.System.Name)
+	return d.Name_
 }
 
 func (d *Device) SetHost(host string) {
@@ -226,7 +237,12 @@ func (d *Device) MethodHandlerE(v any) (types.MethodHandler, error) {
 }
 
 func (d *Device) String() string {
-	return fmt.Sprintf("%s_%s", d.Model, d.Id_)
+	name := d.Name()
+	if len(name) == 0 {
+		return d.Id()
+	}
+
+	return fmt.Sprintf("%s (%s)", name, d.Id())
 }
 
 func (d *Device) To() chan<- []byte {
@@ -373,10 +389,13 @@ func Print(log logr.Logger, d any) error {
 	return nil
 }
 
-func Foreach(ctx context.Context, log logr.Logger, devices []devices.Device, via types.Channel, do Do, args []string) error {
+func Foreach(ctx context.Context, log logr.Logger, devices []devices.Device, via types.Channel, do Do, args []string) (any, error) {
+	out := make([]any, 0, len(devices))
+	var err error
+
 	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
@@ -393,16 +412,12 @@ func Foreach(ctx context.Context, log logr.Logger, devices []devices.Device, via
 			via = types.ChannelMqtt
 		}
 
-		out, err := do(ctx, log, via, sd, args)
+		one, err := do(ctx, log, via, sd, args)
+		out = append(out, one)
 		if err != nil {
 			log.Error(err, "Operation failed device", "id", device.Id(), "name", device.Name(), "ip", device.Ip())
-			continue
+			return nil, err
 		}
-		s, err := json.Marshal(out)
-		if err != nil {
-			return err
-		}
-		fmt.Print(string(s))
 	}
-	return nil
+	return out, nil
 }

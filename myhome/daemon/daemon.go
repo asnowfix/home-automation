@@ -1,7 +1,7 @@
 package daemon
 
 import (
-	"hlog"
+	"context"
 	"homectl/options"
 	"myhome/devices/impl"
 	"myhome/mqtt"
@@ -9,110 +9,118 @@ import (
 	"mymqtt"
 	"mynet"
 	"pkg/shelly"
-	"time"
 
 	"myhome"
 
-	"github.com/spf13/cobra"
+	"github.com/go-logr/logr"
+	"github.com/kardianos/service"
 )
 
-func init() {
-	Cmd.Flags().BoolVarP(&disableDeviceManager, "disable-device-manager", "D", false, "Disable the device manager")
-	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")
-	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", 5*time.Second, "Timeout for MQTT operations")
+type daemon struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	log    logr.Logger
 }
 
-var disableDeviceManager bool
+func NewDaemon(ctx context.Context, cancel context.CancelFunc, log logr.Logger) *daemon {
+	return &daemon{
+		ctx:    ctx,
+		cancel: cancel,
+		log:    log,
+	}
+}
 
-var Cmd = &cobra.Command{
-	Use:   "daemon",
-	Short: "MyHome Daemon",
-	Long:  "MyHome Daemon, with embedded MQTT broker and persistent device manager",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		var disableEmbeddedMqttBroker bool = len(options.Flags.MqttBroker) != 0
-		var err error
-		log := hlog.Logger
+func (d *daemon) Start(s service.Service) error {
+	// Start should not block. Do the actual work async.
+	go d.Run()
+	return nil
+}
 
-		// // Initialize viper
-		// viper.SetConfigName("myhome") // name of config file (without extension)
-		// viper.SetConfigType("yaml")   // or viper.SetConfigType("toml")
-		// viper.AddConfigPath(".")      // optionally look for config in the working directory
-		// err := viper.ReadInConfig()   // Find and read the config file
+func (d *daemon) Stop(s service.Service) error {
+	d.cancel()
+	return nil
+}
+
+func (d *daemon) Run() error {
+	var disableEmbeddedMqttBroker bool = len(options.Flags.MqttBroker) != 0
+	var err error
+
+	// Initialize Shelly devices handler
+	shelly.Init(d.ctx, options.Flags.MqttTimeout)
+
+	var mc *mymqtt.Client
+
+	resolver := mynet.MyResolver(d.log.WithName("mynet.Resolver"))
+	// defer resolver.Stop()
+
+	// Conditionally start the embedded MQTT broker
+	if !disableEmbeddedMqttBroker {
+		err := mqtt.MyHome(d.ctx, d.log, resolver, "myhome", nil)
+		if err != nil {
+			d.log.Error(err, "Failed to initialize MyHome")
+			return err
+		}
+
+		// // Connect to the embedded MQTT broker
+		// mc, err = mymqtt.InitClientE(ctx, log, resolver, "me", myhome.MYHOME, options.Flags.MqttTimeout)
 		// if err != nil {
-		// 	log.Error(err, "Error reading config file")
-		// 	disableEmbeddedMqttBroker = false
-		// 	disableDeviceManager = true
-		// } else {
-		// 	// Read the configuration option to disable MQTT broker startup
-		// 	disableEmbeddedMqttBroker = viper.GetBool("disable_embedded_mqtt")
-		// 	disableDeviceManager = viper.GetBool("disable_device_manager")
+		// 	log.Error(err, "Failed to initialize MQTT client")
+		// 	return err
 		// }
 
-		// Initialize Shelly devices handler
-		shelly.Init(cmd.Context(), options.Flags.MqttTimeout)
-
-		var mc *mymqtt.Client
-
-		resolver := mynet.MyResolver(log.WithName("mynet.Resolver"))
-
-		// Conditionally start the embedded MQTT broker
-		if !disableEmbeddedMqttBroker {
-			err := mqtt.MyHome(cmd.Context(), log, resolver, "myhome", nil)
-			if err != nil {
-				log.Error(err, "Failed to initialize MyHome")
-				return err
-			}
-
-			// // Connect to the embedded MQTT broker
-			// mc, err = mymqtt.InitClientE(ctx, log, resolver, "me", myhome.MYHOME, options.Flags.MqttTimeout)
-			// if err != nil {
-			// 	log.Error(err, "Failed to initialize MQTT client")
-			// 	return err
-			// }
-
-			// gen1Ch := make(chan gen1.Device, 1)
-			// go http.MyHome(log, gen1Ch)
-			// go gen1.Publisher(ctx, log, gen1Ch, mc)
-		} else {
-			// Connect to the network's MQTT broker
-			mc, err = mymqtt.InitClientE(cmd.Context(), log, resolver, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
-			if err != nil {
-				log.Error(err, "Failed to initialize MQTT client")
-				return err
-			}
+		// gen1Ch := make(chan gen1.Device, 1)
+		// go http.MyHome(log, gen1Ch)
+		// go gen1.Publisher(ctx, log, gen1Ch, mc)
+	} else {
+		// Connect to the network's MQTT broker
+		mc, err = mymqtt.InitClientE(d.ctx, d.log, resolver, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
+		if err != nil {
+			d.log.Error(err, "Failed to initialize MQTT client")
+			return err
 		}
+		defer mc.Close()
+	}
 
-		resolver.Start(cmd.Context())
+	resolver.Start(d.ctx)
 
-		if !disableDeviceManager {
-			// Initialize DeviceManager
-			storage, err := storage.NewDeviceStorage(log, "myhome.db")
-			if err != nil {
-				log.Error(err, "Failed to initialize device storage")
-				return err
-			}
-
-			dm := impl.NewDeviceManager(cmd.Context(), storage, resolver, mc)
-			err = dm.Start(cmd.Context())
-			if err != nil {
-				log.Error(err, "Failed to start device manager")
-				return err
-			}
-
-			log.Info("Started device manager", "manager", dm)
-
-			_, err = myhome.NewServerE(cmd.Context(), log, mc, dm)
-			if err != nil {
-				log.Error(err, "Failed to start MyHome service")
-				return err
-			}
+	if !disableDeviceManager {
+		// Initialize DeviceManager
+		storage, err := storage.NewDeviceStorage(d.log, "myhome.db")
+		if err != nil {
+			d.log.Error(err, "Failed to initialize device storage")
+			return err
 		}
+		defer storage.Close()
 
-		log.Info("Running")
-		// Run server until interrupted
-		<-cmd.Context().Done()
-		log.Info("Shutting down")
-		return nil
-	},
+		dm := impl.NewDeviceManager(d.ctx, storage, resolver, mc)
+		err = dm.Start(d.ctx)
+		if err != nil {
+			d.log.Error(err, "Failed to start device manager")
+			return err
+		}
+		// defer dm.Stop()
+
+		d.log.Info("Started device manager", "manager", dm)
+
+		_, err = myhome.NewServerE(d.ctx, d.log, mc, dm)
+		if err != nil {
+			d.log.Error(err, "Failed to start MyHome service")
+			return err
+		}
+		// defer server.Close()
+	}
+
+	d.log.Info("Running")
+
+	// Create a channel to handle OS signals
+	done := make(chan struct{})
+	go func() {
+		<-d.ctx.Done()
+		close(done)
+	}()
+
+	// Wait for context cancellation
+	<-done
+	d.log.Info("Shutting down")
+	return nil
 }

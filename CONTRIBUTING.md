@@ -4,8 +4,11 @@
 
 - [Ubuntu/Debian Linux](#ubuntu-debian-linux)
 - [Windows - WSL](#windows-wsl)
+- [Windows - Native](#windows-native)
+- [macOS TBC](#macos-tbc)
+- [VSCode](#vscode)
 
-## Code signin
+## Code signing
 
 See
 - <https://wiki.gnupg.org/AgentForwarding>
@@ -46,6 +49,114 @@ netsh interface portproxy add v4tov4 listenport=1883 listenaddress=0.0.0.0 conne
 ```
 
 ## Windows - Native
+
+### Services
+
+#### Build the Service
+
+As developer:
+```cmd
+go build myhome
+```
+
+#### Install the Service
+
+As administrator:
+
+```cmd
+# 1. Create program and log directories with proper permissions
+mkdir "C:\Program Files\MyHome"
+mkdir "C:\ProgramData\MyHome"
+mkdir "C:\ProgramData\MyHome\logs"
+icacls "C:\ProgramData\MyHome" /inheritance:r
+icacls "C:\ProgramData\MyHome" /grant:r "NT AUTHORITY\SYSTEM":(OI)(CI)F
+icacls "C:\ProgramData\MyHome" /grant:r "BUILTIN\Administrators":(OI)(CI)F
+
+# 2. Register event log source
+eventcreate /ID 1 /L APPLICATION /T INFORMATION /SO MyHome /D "MyHome service registration"
+
+# 3. Copy the executable
+taskkill /F /IM myhome.exe 2>nul
+copy /y "myhome.exe" "C:\Program Files\MyHome\myhome.exe"
+
+# 4. Create and configure the service
+sc create MyHome binPath= "\"C:\Program Files\MyHome\myhome.exe\" daemon -B mqtt.local"
+sc config MyHome start= auto
+sc config MyHome obj= LocalSystem
+sc config MyHome DisplayName= "MyHome Automation Service"
+sc config MyHome description= "MyHome Automation Service"
+
+# 5. Start the service
+sc start MyHome
+
+# 6. Verify service status
+sc query MyHome
+
+SERVICE_NAME: MyHome
+        TYPE               : 10  WIN32_OWN_PROCESS
+        STATE              : 4  RUNNING
+                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+        SERVICE_EXIT_CODE  : 0  (0x0)
+        CHECKPOINT         : 0x0
+        WAIT_HINT          : 0x0
+
+```
+
+#### Service Management Commands
+
+```cmd
+# 7. Stop service
+sc stop MyHome
+
+# 8. Verify service status
+sc query MyHome
+
+SERVICE_NAME: MyHome
+        TYPE               : 10  WIN32_OWN_PROCESS
+        STATE              : 3  STOP_PENDING
+                                (NOT_STOPPABLE, NOT_PAUSABLE, IGNORES_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+        SERVICE_EXIT_CODE  : 0  (0x0)
+        CHECKPOINT         : 0x0
+        WAIT_HINT          : 0x2710
+
+# 9. Remove the service
+sc delete MyHome
+```
+
+#### Troubleshooting
+
+1. Check Windows Event Viewer > Windows Logs > Application for events from source "MyHome"
+   ```cmd
+   # View last 100 events from MyHome service
+   wevtutil qe Application /q:"*[System[Provider[@Name='MyHome']]]" /f:text /c:100
+   
+   # Or using PowerShell
+   Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='MyHome'} -MaxEvents 100 | Format-List
+   ```
+2. Check service logs in `C:\ProgramData\MyHome\logs\myhome.log`
+3. If the service fails to start, ensure all directories have correct permissions
+4. Use `sc qc MyHome` to verify service configuration
+
+example output:
+
+```
+[SC] QueryServiceConfig SUCCESS
+
+SERVICE_NAME: MyHome
+        TYPE               : 10  WIN32_OWN_PROCESS
+        START_TYPE         : 3   DEMAND_START
+        ERROR_CONTROL      : 1   NORMAL
+        BINARY_PATH_NAME   : C:\Program Files\MyHome\myhome.exe daemon -B mqtt.local
+        LOAD_ORDER_GROUP   :
+        TAG                : 0
+        DISPLAY_NAME       : MyHome
+        DEPENDENCIES       :
+        SERVICE_START_NAME : LocalSystem
+
+
+TODO: add all of the above steps in wix.json
 
 ### Git Bash
 
@@ -175,4 +286,3 @@ brew install git
         }
     ]
 }
-```

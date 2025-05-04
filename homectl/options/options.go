@@ -21,6 +21,7 @@ var Flags struct {
 	MdnsTimeout    time.Duration
 	CommandTimeout time.Duration
 	Via            string
+	SwitchId       uint32
 }
 
 var Via types.Channel

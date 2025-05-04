@@ -23,7 +23,8 @@ var startCtl = &cobra.Command{
 	Short: "Start a script loaded on the given Shelly device(s)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStartStop, []string{"Start"})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStartStop, []string{"Start"})
+		return err
 	},
 }
 
@@ -37,7 +38,8 @@ var stopCtl = &cobra.Command{
 	Short: "Stop a script loaded on the given Shelly device(s)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStartStop, []string{"Stop"})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStartStop, []string{"Stop"})
+		return err
 	},
 }
 
@@ -51,7 +53,8 @@ var deleteCtl = &cobra.Command{
 	Short: "Delete a script loaded on the given Shelly device(s)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStartStop, []string{"Delete"})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStartStop, []string{"Delete"})
+		return err
 	},
 }
 

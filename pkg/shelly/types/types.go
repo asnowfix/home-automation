@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"fmt"
 )
 
 type MethodsRegistrar interface {
@@ -12,6 +13,7 @@ type MethodsRegistrar interface {
 
 type Device interface {
 	String() string
+	Name() string
 	Host() string
 	Id() string
 	CallE(ctx context.Context, via Channel, method string, params any) (any, error)
@@ -37,6 +39,15 @@ const (
 
 func (ch Channel) String() string {
 	return Channels[ch]
+}
+
+func ParseChannel(s string) (Channel, error) {
+	for i, ch := range Channels {
+		if ch == s {
+			return Channel(i), nil
+		}
+	}
+	return ChannelDefault, fmt.Errorf("unknown channel %s (expected one of %v)", s, Channels)
 }
 
 type MethodHandler struct {

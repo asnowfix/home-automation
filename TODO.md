@@ -15,17 +15,25 @@ Model
 Functions
 ---------
 
-[ ] BUG ZeroConf scanning not working on Windows
+[ ] Upload ip-assignment-watchdog.js on every device that have scripting
+[ ] Configure adaptive heater control on every device that are known to be heaters (based on group membership)
+[ ] Upload daily-reboot.js on every device that have scripting
+[ ] Turn on/off heaters based on kalman filter and <https://developer.accuweather.com>
+[ ] Daily reboot script to upload everywhere (inspired by <https://github.com/ALLTERCO/shelly-script-examples>)
+[x] BUG make homectl `forget` actually work (right now it does not seem to update the DB storage)
+[ ] BUG ZeroConf scanning (automatic resolver) not working on Windows or macOS
+[ ] BUG ZeroConf scanning stops working after a while (few minutes)
 [ ] Support matter protocol for Gen3/4 devices
 [x] BUG Group ID's (integers) do not increment
 [x] BUG no timeout if there is no myhome instance running
-[ ] BUG ability to change device name
+[x] ability to change device name
 [x] Check/force MQTT configuration
 [x] Get IP addresses in the 'host' column of the 'devices' table
 [ ] Create/Configure scripts in a single operation
 [x] Status for one / multiple scripts in a single operation
 [ ] Run simple JavaScript in a single operation
 [ ] Do not scan ZeroConf when devices are explicit
+[ ] BUG: Find mqtt.local. using mDNS in homectl
 [x] HTTP POST (spurious "config" layer)
 [x] Fix MQTT when several CallE() invocations are in the same run
 [ ] Add support for linksys velop devices (via JNAP protocol) 
@@ -83,6 +91,7 @@ Integration
         Errors were encountered while processing:
         myhome
 
+[ ] Sign dpkg package
 [ ] BUG: Fix dpkg upgrade
 
         Failed to enable unit: Refusing to operate on alias name or linked unit file: myhome.service
@@ -111,7 +120,7 @@ Integration
 [x] Build Debian package for arm64
 [ ] Ship linux/arm64 binary in the release
 [ ] Ship linux/amd64 binary in the release
-[ ] Add cron-job to download the binary from the latest release
+[ ] Add cron-job to download (only) the binary from the latest release
 [ ] Add command to auto-update Debian package installation from latest release
 [ ] Package systemd scripts in-place (with stop, disable & reload as preuninstall, ans reload enable & start as postinstall)
 [x] Create verified tags
@@ -120,7 +129,8 @@ Integration
         - https://github.com/goreleaser/goreleaser-cross
 
 [ ] Build Debian package the official way using <https://github.com/marketplace/actions/build-debian-packages>
-[x] Sign Windows package (public key°)
-[x] Sign Windows package (self-signed key°)
+[ ] Sign Windows package (public key)
+[x] Sign Windows package (self-signed key)
 [x] Build MSI package for Windows on new tagged version
 [ ] Run myhome as a windows service <https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/create-user-defined-service>
+[ ] Run every service under <https://github.com/kardianos/service> rather than manual packaging?

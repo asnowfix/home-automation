@@ -1,9 +1,27 @@
 package shelly
 
 import (
+	"context"
+	"mymqtt"
 	"net"
 	"pkg/devices"
+
+	"github.com/go-logr/logr"
 )
+
+func Devices(ctx context.Context, log logr.Logger, devices []devices.Device) []*Device {
+	var result []*Device
+	for _, d := range devices {
+		sd, ok := d.(*Device)
+		if ok {
+			result = append(result, sd)
+		} else {
+			sd = NewDeviceFromMqttId(ctx, log, d.Id(), mymqtt.GetClient(ctx))
+			result = append(result, sd)
+		}
+	}
+	return result
+}
 
 type ShellyDevice struct {
 	shelly *Device
@@ -31,6 +49,10 @@ func (d ShellyDevice) MarshalJSON() ([]byte, error) {
 
 func (d ShellyDevice) Id() string {
 	return d.shelly.Id()
+}
+
+func (d ShellyDevice) Host() string {
+	return d.shelly.Host()
 }
 
 func (d ShellyDevice) Ip() net.IP {

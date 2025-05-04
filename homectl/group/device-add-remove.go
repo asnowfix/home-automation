@@ -82,7 +82,7 @@ func deviceDo(ctx context.Context, v myhome.Verb, group, device string, fn func(
 	}
 	summary := (*devices)[0]
 
-	fn(ctx, log, types.ChannelDefault, &g.GroupInfo, shelly.NewDeviceFromIp(ctx, log, net.ParseIP(summary.Host)))
+	fn(ctx, log, types.ChannelDefault, &g.GroupInfo, shelly.NewDeviceFromIp(ctx, log, net.ParseIP(summary.Host_)))
 
 	_, err = myhome.TheClient.CallE(ctx, v, &myhome.GroupDevice{
 		Group:        group,

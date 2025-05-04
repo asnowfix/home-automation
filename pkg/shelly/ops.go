@@ -80,7 +80,7 @@ func Init(ctx context.Context, timeout time.Duration) {
 	registrar.RegisterMethodHandler(GetComponents.String(), types.MethodHandler{
 		// InputType:  reflect.TypeOf(ComponentsRequest{}),
 		Allocate:   func() any { return new(ComponentsResponse) },
-		HttpMethod: http.MethodPost,
+		HttpMethod: http.MethodGet,
 	})
 	registrar.RegisterMethodHandler(Reboot.String(), types.MethodHandler{
 		Allocate:   func() any { return nil },

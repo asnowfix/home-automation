@@ -20,7 +20,8 @@ var scheduleCtl = &cobra.Command{
 	Short: "Configure Shelly devices scheduled jobs",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, scheduleOneDeviceJobs, options.Args(args))
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, scheduleOneDeviceJobs, options.Args(args))
+		return err
 	},
 }
 

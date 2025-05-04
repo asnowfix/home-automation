@@ -24,8 +24,8 @@ const (
 	GetConfig     Verb = "Wifi.GetConfig"
 	SetConfig     Verb = "Wifi.SetConfig"
 	GetStatus     Verb = "Wifi.GetStatus"
-	Scan          Verb = "Wifi.Scan"          // TODO
-	ListAPClients Verb = "Wifi.ListAPClients" //TODO
+	Scan          Verb = "Wifi.Scan"
+	ListAPClients Verb = "Wifi.ListAPClients"
 )
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
@@ -34,11 +34,19 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 		Allocate: func() any { return new(Config) },
 	})
 	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
-		Allocate:   func() any { return new(Status) },
-		HttpMethod: http.MethodGet,
+		Allocate:   func() any { return new(SetConfigResponse) },
+		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler(GetStatus.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
+	})
+	r.RegisterMethodHandler(Scan.String(), types.MethodHandler{
+		Allocate:   func() any { return new(ScanResult) },
+		HttpMethod: http.MethodPost,
+	})
+	r.RegisterMethodHandler(ListAPClients.String(), types.MethodHandler{
+		Allocate:   func() any { return new(ListAPClientsResult) },
+		HttpMethod: http.MethodPost,
 	})
 }

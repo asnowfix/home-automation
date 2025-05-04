@@ -19,7 +19,8 @@ var showCtl = &cobra.Command{
 	Short: "Show Shelly devices scheduled jobs",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, showOneDeviceJobs, options.Args(args))
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, showOneDeviceJobs, options.Args(args))
+		return err
 	},
 }
 

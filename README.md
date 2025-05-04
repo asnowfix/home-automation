@@ -131,6 +131,43 @@ devices:
 group delete radiateurs
 ```
 
+## Heaters adaptative control
+
+The following object is to be stored in the KV store, with key `heater_config`:
+
+```json
+{
+  "internal_url": "http://192.168.1.10/status",
+  "external_url": "http://192.168.1.20/status",
+  "setpoint": 20.5,
+  "min_temp": 14.0,
+  "cheap_start": 22,
+  "cheap_end": 6,
+  "preheat_hours": 2
+  "poll_interval_ms": 300000,
+  "accuweather_api_key": "YOUR_KEY",
+  "accuweather_location_key": "YOUR_LOC_KEY",
+  "meteofrance_api_key": "YOUR_MF_KEY",
+  "meteofrance_lat": "48.8566",
+  "meteofrance_lon": "2.3522"
+}
+```
+
+### Kalman Filter Heater Control Script
+
+The `kalman-heater-control-shelly.js` script is a Shelly script that uses a Kalman filter to control a heater.
+It is designed to be used with a Shelly 1 Plus device connected to a relay that controls the heater.
+The script will periodically poll the relay's status and the internal and external temperatures
+and then use the Kalman filter to estimate the current temperature of the room.
+If the estimated temperature is below the setpoint, the script will turn the heater on.
+If the estimated temperature is above the setpoint, the script will turn the heater off.
+The script will also use the Accuweather and MeteoFrance APIs to get the forecast for the next day
+and turn the heater on if the forecasted temperature is below the setpoint.
+
+but only if the current time is between `cheap_start` and `cheap_end`, and hose occupants are present.
+
+Home occupancy is detected by polling the occupancy sensor at the specified URL.
+
 ## Shelly Notes
 
 ```

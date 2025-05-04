@@ -64,7 +64,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		} else {
 			name = strings.TrimPrefix(strings.TrimSuffix(name, "*"), "*")
 			dm.log.Info("Getting devices matching name", "name", name)
-			ds, err = dm.dr.GetDevicesMatchingName(ctx, name)
+			ds, err = dm.dr.GetDevicesMatchingAny(ctx, name)
 		}
 		if err != nil {
 			dm.log.Error(err, "Failed to get all devices")
@@ -101,6 +101,9 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceShow, func(in any) (any, error) {
 		return dm.GetDeviceByAny(ctx, in.(string))
+	})
+	myhome.RegisterMethodHandler(myhome.DeviceForget, func(in any) (any, error) {
+		return nil, dm.ForgetDevice(ctx, in.(string))
 	})
 	myhome.RegisterMethodHandler(myhome.GroupList, func(in any) (any, error) {
 		return dm.gr.GetAllGroups()
@@ -224,8 +227,8 @@ func (dm *DeviceManager) GetAllDevices(ctx context.Context) ([]*myhome.Device, e
 	return dm.dr.GetAllDevices(ctx)
 }
 
-func (dm *DeviceManager) GetDevicesMatchingName(ctx context.Context, name string) ([]*myhome.Device, error) {
-	return dm.dr.GetDevicesMatchingName(ctx, name)
+func (dm *DeviceManager) GetDevicesMatchingAny(ctx context.Context, name string) ([]*myhome.Device, error) {
+	return dm.dr.GetDevicesMatchingAny(ctx, name)
 }
 
 func (dm *DeviceManager) GetDeviceByAny(ctx context.Context, any string) (*myhome.Device, error) {
@@ -246,6 +249,10 @@ func (dm *DeviceManager) GetDeviceByMAC(ctx context.Context, mac string) (*myhom
 
 func (dm *DeviceManager) GetDeviceByName(ctx context.Context, name string) (*myhome.Device, error) {
 	return dm.dr.GetDeviceByName(ctx, name)
+}
+
+func (dm *DeviceManager) ForgetDevice(ctx context.Context, id string) error {
+	return dm.dr.ForgetDevice(ctx, id)
 }
 
 func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) error {

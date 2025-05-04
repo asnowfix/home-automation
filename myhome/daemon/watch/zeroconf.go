@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"fmt"
 	"global"
 	"myhome"
 	"myhome/devices"
@@ -19,10 +20,10 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 
 	err := dr.BrowseService(ctx, shelly.MDNS_SHELLIES, "local.", scan)
 	if err != nil {
-		log.Error(err, "Failed to browse ZeroConf")
+		log.Error(err, "Failed to start ZeroConf browser")
 		return err
 	}
-	log.Info("Started ZeroConf browsing")
+	log.Info("Started ZeroConf browser")
 
 	go func(ctx context.Context, log logr.Logger, scan <-chan *zeroconf.ServiceEntry) error {
 		for {
@@ -31,7 +32,11 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 				log.Error(ctx.Err(), "Cancelled")
 				return ctx.Err()
 
-			case entry := <-scan:
+			case entry, ok := <-scan:
+				if !ok || entry == nil {
+					log.Error(fmt.Errorf("entry=%v, ok=%v", entry, ok), "Failed to browse ZeroConf : terminating browser")
+					return nil
+				}
 				log.Info("Browsed", "entry", entry)
 				deviceId := entry.Instance
 				device, err := db.GetDeviceById(ctx, deviceId)

@@ -16,39 +16,43 @@ type SetConfigResponse struct {
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys/#configuration
 
 type Config struct {
-	Device struct {
-		Name         string           `json:"name"`
-		EcoMode      bool             `json:"eco_mode"`
-		MacAddress   net.HardwareAddr `json:"mac"`
-		FirmwareId   string           `json:"fw_id"`
-		Profile      string           `json:"profile"`
-		Discoverable bool             `json:"discoverable"`
-		AddOnType    string           `json:"addon_type,omitempty"`
-	} `json:"device"`
-	Location struct {
+	Device   *DeviceConfig `json:"device"`
+	Location *struct {
 		TimeZone  string  `json:"tz,omitempty"`
 		Latitude  float32 `json:"lat,omitempty"`
 		Longitude float32 `json:"lon,omitempty"`
-	} `json:"location"`
-	Debug struct {
-		Mqtt struct {
-			Enable bool `json:"enable"`
-		} `json:"mqtt"`
-		WebSocket struct {
-			Enable bool `json:"enable"`
-		} `json:"websocket"`
-		Udp struct {
-			Enable bool `json:"enable"`
-		} `json:"udp"`
-	} `json:"debug"`
-	RpcUdp struct {
-		DestinationAddress net.IPAddr `json:"dst_addr"`
-		ListenPort         uint16     `json:"listen_port,omitempty"`
-	} `json:"rpc_udp"`
-	Sntp struct {
+	} `json:"location,omitempty"`
+	Debug  *DeviceDebug `json:"debug,omitempty"`
+	RpcUdp *struct {
+		DestinationAddress string `json:"dst_addr"`
+		ListenPort         uint16 `json:"listen_port,omitempty"`
+	} `json:"rpc_udp,omitempty"`
+	Sntp *struct {
 		Server string `json:"server"`
-	} `json:"sntp"`
-	ConfigRevision uint32 `json:"cfg_rev"`
+	} `json:"sntp,omitempty"`
+	ConfigRevision uint32 `json:"cfg_rev,omitempty"`
+}
+
+type DeviceConfig struct {
+	Name         string           `json:"name,omitempty"`
+	EcoMode      bool             `json:"eco_mode,omitempty"`
+	MacAddress   net.HardwareAddr `json:"mac,omitempty"`
+	FirmwareId   string           `json:"fw_id,omitempty"`
+	Profile      string           `json:"profile,omitempty"`
+	Discoverable bool             `json:"discoverable,omitempty"`
+	AddOnType    string           `json:"addon_type,omitempty"`
+}
+
+type DeviceDebug struct {
+	Mqtt struct {
+		Enable bool `json:"enable"`
+	} `json:"mqtt"`
+	WebSocket struct {
+		Enable bool `json:"enable"`
+	} `json:"websocket"`
+	Udp struct {
+		Enable bool `json:"enable"`
+	} `json:"udp"`
 }
 
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys/#status

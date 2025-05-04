@@ -10,6 +10,7 @@ var TheClient Client
 
 type Client interface {
 	LookupDevices(ctx context.Context, name string) (*[]devices.Device, error)
+	ForgetDevices(ctx context.Context, name string) error
 	CallE(ctx context.Context, method Verb, params any) (any, error)
 	Shutdown()
 }

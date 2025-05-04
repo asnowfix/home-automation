@@ -25,7 +25,8 @@ var enableCtl = &cobra.Command{
 	Short: "Enable (creating it if necessary) a named JavaScript script on the given Shelly device(s)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEnableDisable, []string{"true"})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEnableDisable, []string{"true"})
+		return err
 	},
 }
 
@@ -34,7 +35,8 @@ var disableCtl = &cobra.Command{
 	Short: "Disable (creating it if necessary) a named JavaScript script on the given Shelly device(s)",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEnableDisable, []string{"false"})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEnableDisable, []string{"false"})
+		return err
 	},
 }
 

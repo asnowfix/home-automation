@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"global"
+	"homectl/follow"
+	"homectl/forget"
 	"homectl/group"
 	"homectl/list"
 	"homectl/mqtt"
+	"homectl/open"
 	"homectl/options"
+	"homectl/set"
 	"homectl/shelly"
 	"homectl/show"
 	"homectl/sswitch"
@@ -103,11 +107,16 @@ func init() {
 
 	Cmd.AddCommand(versionCmd)
 	Cmd.AddCommand(list.Cmd)
+	Cmd.AddCommand(set.Cmd)
 	Cmd.AddCommand(show.Cmd)
+	Cmd.AddCommand(open.Cmd)
+	Cmd.AddCommand(forget.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(sswitch.Cmd)
 	Cmd.AddCommand(shelly.Cmd)
 	Cmd.AddCommand(group.Cmd)
+	Cmd.AddCommand(follow.FollowCmd)
+	Cmd.AddCommand(follow.UnfollowCmd)
 }
 
 var Commit string

@@ -7,46 +7,11 @@ let CONFIG = {
     // Active scan means the scanner will ping back the Bluetooth device to receive all its data, but it will drain the battery faster
     active: false,
 
-    // The amount of second before turning off the switch, when triggered by a bluetooth event
-    autoOffTimeout: 300,
-
     // When `allowedMacAddresses` is set to null, evets from every bluetooth device are accepted.
     // allowedMacAddresses: null,
-    allowedMacAddresses: [
-        "e8:e0:7e:d0:f9:89",    // motion-front-door
-        "b0:c7:de:11:58:d5",    // motion-parking
-        // "e8:e0:7e:a6:0c:6f", // motion-pool-house
-    ],
 
-    /**
-     * Called when motion is reported from the filtered Shelly BLU Motion devices.
-     * @param {Boolean} motion true, when there is a motion, false otherwise.
-     * @param {Object} eventData Object, containing all parameters received from the Shelly BLU Motion device. Example: {"encryption":false,"BTHome_version":2,"pid":16,"battery":100,"illuminance":109,"motion":1,"button":1,"rssi":-53,"address":"aa:bc:12:34:56:78"}
-     */
-    motionHandler: function (motion, eventData) {
-        console.log("Motion", motion);
-
-        // Compile the topic based on the mac address of the reporter.
-        let topic = eventData.address + "/motion";
-
-        // Publish the data.
-        MQTT.publish(topic, String(motion));
-    },
-
-    /**
-     * Called when illuminance is reported from the filtered Shelly BLU Motion devices.
-     * @param {Number} illuminance Current illuminance value.
-     * @param {Object} eventData Object, containing all parameters received from the Shelly BLU Motion device. Example: {"encryption":false,"BTHome_version":2,"pid":16,"battery":100,"illuminance":109,"motion":1,"button":1,"rssi":-53,"address":"aa:bc:12:34:56:78"}
-     */
-    illuminanceHandler: function (illuminance, eventData) {
-        console.log("Illuminance", illuminance);
-
-        // Compile the topic based on the mac address of the reporter.
-        let topic = eventData.address + "/illuminance";
-
-        // Publish the data.
-        MQTT.publish(topic, String(illuminance));
-    },
+    // Initialize with empty array, will be populated by the callback
+    allowedMacAddresses: [],
 
     /**
      * Called when packet from filtered Shelly BLU Motion devices is received.
@@ -63,34 +28,32 @@ let CONFIG = {
         //     "rssi": -75,
         //     "address": "e8:e0:7e:d0:f9:89"
         // }
-        console.log("onStatusUpdate eventData", eventData);
+        print("onStatusUpdate eventData", eventData);
         try {
             // Turn on the light if the motion is detected & illuminance is below 100.
             if (eventData.motion === 1 && eventData.illuminance < 100) {
-
-                Shelly.call("switch.getstatus", { id: 0 }, CONFIG.turnOnIfOff, "Switch.GetStatus");
+                MQTT.publish("groups/pool-house-lights", JSON.stringify({ "op": "on", "keep": false }), 2 /*exactly-once*/, false);
             }
         } catch (error) {
             console.error("onStatusUpdate error", error);
         }
-        MQTT.publish(eventData.address, JSON.stringify(eventData))
     },
     turnOnIfOff: function (result, error_code, error_message, user_data) {
-        console.log("turnOnIfOff result:", result, "error_code:", error_code, "error_message:", error_message, "user_data:", user_data);
+        //print("turnOnIfOff result:", result, "error_code:", error_code, "error_message:", error_message, "user_data:", user_data);
         if (result.output === false) {
-            console.log("switch off: turn it on, with auto-off after", CONFIG.autoOffTimeout, "seconds")
+            print("switch off: turn it on, with auto-off after", CONFIG.autoOffTimeout, "seconds")
             Shelly.call("Switch.Set", { id: 0, on: true });
             function timerCode() {
-                console.log("auto-off: turning off the switch")
+                print("auto-off: turning off the switch")
                 Shelly.call("Switch.Set", { id: 0, on: false });
             };
             Timer.set(
-                1000 * CONFIG.autoOffTimeout, /* number of miliseconds */
-                false, /* repeat? */
-                timerCode /* callback */
+            /* number of miliseconds */ 1000 * CONFIG.autoOffTimeout,
+            /* repeat? */ false,
+            /* callback */ timerCode
             );
         } else {
-            console.log("switch already on ")
+            print("switch already on ")
         }
     }
 };
@@ -133,7 +96,7 @@ function logger(message, prefix) {
     }
 
     //log the result
-    console.log(prefix, finalText);
+    print(prefix, finalText);
 }
 
 // The BTH object defines the structure of the BTHome data
@@ -234,22 +197,6 @@ function onReceivedPacket(data) {
         }
     }
 
-    if (
-        typeof CONFIG.motionHandler === "function" &&
-        typeof data.motion !== "undefined"
-    ) {
-        CONFIG.motionHandler(data.motion === 1, data);
-        logger("Motion handler called", "Info");
-    }
-
-    if (
-        typeof CONFIG.illuminanceHandler === "function" &&
-        typeof data.illuminance !== "undefined"
-    ) {
-        CONFIG.illuminanceHandler(data.illuminance, data);
-        logger("Illuminance handler called", "Info");
-    }
-
     if (typeof CONFIG.onStatusUpdate === "function") {
         CONFIG.onStatusUpdate(data);
         logger("New status update", "Info");
@@ -303,9 +250,11 @@ function BLEScanCallback(event, result) {
 
 // Initializes the script and performs the necessary checks and configurations
 function init() {
+    print("Initializing ble-shelly-motion.js")
+
     //exit if can't find the config
     if (typeof CONFIG === "undefined") {
-        console.log("Error: Undefined config");
+        print("Error: Undefined CONFIG");
         return;
     }
 
@@ -314,17 +263,18 @@ function init() {
 
     //exit if the BLE isn't enabled
     if (!BLEConfig.enable) {
-        console.log(
+        print(
             "Error: The Bluetooth is not enabled, please enable it from settings"
         );
         return;
     }
+    print("BLE config:", JSON.stringify(BLEConfig));
 
     //check if the scanner is already running
     if (BLE.Scanner.isRunning()) {
-        console.log("Info: The BLE gateway is running, the BLE scan configuration is managed by the device");
-    }
-    else {
+        print("Info: The BLE gateway is running, the BLE scan configuration is managed by the device");
+    } else {
+        print("Starting the scanner");
         //start the scanner
         let bleScanner = BLE.Scanner.Start({
             duration_ms: BLE.Scanner.INFINITE_SCAN,
@@ -332,28 +282,37 @@ function init() {
         });
 
         if (!bleScanner) {
-            console.log("Error: Can not start new scanner");
+            print("Error: Can not start new scanner");
         }
     }
 
-    if (
-        typeof CONFIG.allowedMacAddresses !== "undefined"
-    ) {
-        if (CONFIG.allowedMacAddresses !== null) {
-            // Process configured mac addresses all to lower case and remove duplicates.
-            CONFIG._processedMacAddresses =
-                CONFIG
-                    .allowedMacAddresses
-                    .map(function (mac) { return mac.toLowerCase(); })
-                    .filter(function (value, index, array) { return array.indexOf(value) === index; })
-        }
-        else {
-            CONFIG._processedMacAddresses = null;
-        }
-    }
+    CONFIG._processedMacAddresses = null;
 
-    //subscribe a callback to BLE scanner
-    BLE.Scanner.Subscribe(BLEScanCallback);
+    print("Loading allowed MAC addresses from KVS");
+    Shelly.call("KVS.Get", { key: "following/ble-shelly-motion" }, function (result, error_code, error_message) {
+        if (error_code === 0 && result) {
+            try {
+                print("Result:", result);
+                CONFIG.allowedMacAddresses = JSON.parse(result.value || "[]");
+                print("Loaded allowed MAC addresses:", JSON.stringify(CONFIG.allowedMacAddresses));
+
+                // Process configured mac addresses all to lower case and remove duplicates.
+                CONFIG._processedMacAddresses =
+                    CONFIG
+                        .allowedMacAddresses
+                        .map(function (mac) { return mac.toLowerCase(); })
+                        .filter(function (value, index, array) { return array.indexOf(value) === index; })
+
+                print("Subscribing to BLE scanner");
+                BLE.Scanner.Subscribe(BLEScanCallback);
+            } catch (e) {
+                print("Error: Can not parse allowed MAC addresses", e);
+            }
+        } else {
+            print("Error: Can not load allowed MAC addresses from KVS", error_code, error_message);
+        }
+    });
+
 }
 
 init();

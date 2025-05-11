@@ -16,7 +16,7 @@ let CONFIG = {
 
 // Shelly provides print()
 // if (CONFIG && CONFIG.debug) {
-//  print = console.log;
+//  print = print;
 // } else {
 //   print = function() {};
 // }

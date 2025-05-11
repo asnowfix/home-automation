@@ -870,3 +870,18 @@ var shelly_plus1_switch_toggle_notify_status = {
     }
   }
 }
+
+// topic = "shelly1minig3-54320464074c/debug/log"
+var debug_log = {}
+
+// MqttPublish{topic=shelly1minig3-54320464074c/debug/log, payload=146byte, qos=AT_MOST_ONCE, retain=false, messageExpiryInterval=86400}
+// shelly1minig3-54320464074c 31 1746800591.367 1|shos_dns_sd_respond:236 wa(0x3fcbf358): Announced Shelly1MiniG3-54320464074C any@any (192.168.33.1)
+// Client 'd0f0uv2k604ou5ij8ec0@192.168.1.2' received PUBLISH ('shelly1minig3-54320464074c 32 1746800591.386 1|shos_dns_sd_respond:236 ws(0x3fcca9d0): Announced Shelly1MiniG3-54320464074C any@any (192.168.34.3)')
+
+// MqttPublish{topic=shelly1minig3-54320464074c/debug/log, payload=139byte, qos=AT_MOST_ONCE, retain=false, messageExpiryInterval=86400}
+// shelly1minig3-54320464074c 565 1746827545.392 1|shelly_user_script.:250 UserScript.HandleError (script:2) [2] syntax_error Error in EjsCall
+// Client 'd0f7gt2k604ou5ij8ee0@192.168.1.2' received PUBLISH ('shelly1minig3-54320464074c 566 1746827545.424 1|shelly_notification:165 Status change of script:2: {"id":2,"error_msg":"Uncaught SyntaxError: Expecting a valid value, got ID\n at line 1 col 1\n[object Object]\n^\nin function called from system\n\n","errors":["syntax_error"],"running":false}')
+
+// MqttPublish{topic=shelly1minig3-54320464074c/debug/log, payload=132byte, qos=AT_MOST_ONCE, retain=false, messageExpiryInterval=86400}
+// shelly1minig3-54320464074c 723 1746829345.669 1|shelly_user_script.:250 UserScript.HandleError (script:2) [9] error Error in EjsCall
+// Client 'd0f7gt2k604ou5ij8ee0@192.168.1.2' received PUBLISH ('shelly1minig3-54320464074c 724 1746829345.716 1|shelly_notification:165 Status change of script:2: {"id":2,"error_msg":"Uncaught Error: Function \"error\" not found!\n at                 console.error(\"Error: Can not parse allowed ...\n                        ^\nin function called from system\n\n","errors":["error"],"running":false}')

@@ -131,7 +131,7 @@ const BTHomeDecoder = {
     while (buffer.length > 0) {
       _bth = BTH[buffer.at(0)];
       if (typeof _bth === "undefined") {
-        console.log("BTH: Unknown type");
+        print("BTH: Unknown type");
         break;
       }
       buffer = buffer.slice(1);
@@ -169,7 +169,7 @@ function emitData(data) {
     return;
   }
 
-  console.log("Emitting event data: ", data);
+  print("Emitting event data: ", data);
   Shelly.emitEvent(CONFIG.eventName, data);
 }
 
@@ -201,7 +201,7 @@ function BLEScanCallback(event, result) {
     typeof unpackedData === "undefined" ||
     unpackedData["encryption"]
   ) {
-    console.log("Error: Encrypted devices are not supported");
+    print("Error: Encrypted devices are not supported");
     return;
   }
 
@@ -223,7 +223,7 @@ function BLEScanCallback(event, result) {
 function init() {
   //exit if can't find the config
   if (typeof CONFIG === "undefined") {
-    console.log("Error: Undefined config");
+    print("Error: Undefined config");
     return;
   }
 
@@ -232,7 +232,7 @@ function init() {
 
   //exit if the BLE isn't enabled
   if (!BLEConfig.enable) {
-    console.log(
+    print(
       "Error: The Bluetooth is not enabled, please enable it from settings"
     );
     return;
@@ -240,7 +240,7 @@ function init() {
 
   //check if the scanner is already running
   if (BLE.Scanner.isRunning()) {
-    console.log("Info: The BLE gateway is running, the BLE scan configuration is managed by the device");
+    print("Info: The BLE gateway is running, the BLE scan configuration is managed by the device");
   }
   else {
     //start the scanner
@@ -250,16 +250,16 @@ function init() {
     });
 
     if (!bleScanner) {
-      console.log("Error: Can not start new scanner");
+      print("Error: Can not start new scanner");
     }
   }
 
   //subscribe a callback to BLE scanner
   BLE.Scanner.Subscribe(BLEScanCallback);
 
-  // disable console.log when logs are disabled
+  // disable print when logs are disabled
   if (!CONFIG.debug) {
-    console.log = function () { };
+    print = function () { };
   }
 }
 

@@ -49,7 +49,6 @@ var Cmd = &cobra.Command{
 
 		if debug.IsDebuggerAttached() {
 			hlog.Logger.Info("Running under debugger (will wait forever)")
-			// You can set different timeouts or behavior here
 			options.Flags.CommandTimeout = 0
 		}
 

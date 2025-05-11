@@ -499,6 +499,16 @@ Reason: required, Message: Login Required.
 
 ## Shelly Devices
 
+### BLE - Bluetooth Low Energy
+
+```json
+[
+  "e8:e0:7e:d0:f9:89",  // motion-front-door
+  "b0:c7:de:11:58:d5",  // motion-parking
+  "e8:e0:7e:a6:0c:6f",  // motion-pool-house
+]
+```
+
 ### Gen 3
 
 ### Gen 2

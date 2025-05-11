@@ -38,8 +38,6 @@ func MainInterface(log logr.Logger) (*net.Interface, *net.IP, error) {
 					log.Info("selecting iface: contains gw ip", "iface_addr", addr, "iface_ip", ip, "gw_ip", gw)
 
 					return &iface, &ip, nil
-				} else {
-					log.Info("skipping iface: does not contains gw ip", "iface_addr", addr, "gw_ip", gw)
 				}
 			}
 		}

@@ -2,6 +2,8 @@ package options
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"global"
 	"os"
 	"os/signal"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"gopkg.in/yaml.v2"
 )
 
 var Flags struct {
@@ -50,7 +53,24 @@ func CommandLineContext(log logr.Logger, timeout time.Duration) context.Context 
 
 func Args(args []string) []string {
 	if len(args) > 1 {
-		return args[:1]
+		return args[1:]
 	}
 	return make([]string, 0)
+}
+
+func PrintResult(out any) error {
+	if Flags.Json {
+		s, err := json.Marshal(out)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(s))
+	} else {
+		s, err := yaml.Marshal(out)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(s))
+	}
+	return nil
 }

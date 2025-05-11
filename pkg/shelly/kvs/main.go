@@ -59,8 +59,8 @@ func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device ty
 
 func SetKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, key string, value string) (*Status, error) {
 	out, err := device.CallE(ctx, via, string(Set), &KeyValue{
-		Key:   Key{Key: key},
-		Value: Value{Value: value},
+		Key:   key,
+		Value: value,
 	})
 	if err != nil {
 		log.Error(err, "Unable to set", "key", key, "value", value)

@@ -180,9 +180,7 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 	}
 
 	// upload chunks of 2048
-
 	append := false // first chunk is a replacement
-
 	chunkSize := 2048
 	for i := 0; i < len(buf); i += chunkSize {
 		end := i + chunkSize
@@ -202,10 +200,24 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 		log.Info("Uploaded script chunk", "name", name, "id", id, "index", i, "out", out)
 		append = true
 	}
-
 	log.Info("Uploaded script", "name", name, "id", id)
 
-	out, err := device.CallE(ctx, via, string(Start), &StartStopDeleteRequest{Id: id})
+	// enable: auto-start at next reboot
+	out, err := device.CallE(ctx, via, string(SetConfig), &ConfigurationRequest{
+		Id: id,
+		Configuration: Configuration{
+			Id:     id,
+			Enable: true,
+		},
+	})
+	if err != nil {
+		log.Error(err, "Unable to configure script", "id", id, "name", name)
+		return 0, err
+	}
+	log.Info("Configured script", "name", name, "id", id, "out", out)
+
+	// start now
+	out, err = device.CallE(ctx, via, string(Start), &StartStopDeleteRequest{Id: id})
 	if err != nil {
 		log.Error(err, "Unable to start script", "id", id, "name", name)
 		return 0, err

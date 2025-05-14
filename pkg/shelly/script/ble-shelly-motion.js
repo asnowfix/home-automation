@@ -13,6 +13,8 @@ let CONFIG = {
     // Initialize with empty array, will be populated by the callback
     allowedMacAddresses: [],
 
+    topic: "groups/pool-house-lights",
+
     /**
      * Called when packet from filtered Shelly BLU Motion devices is received.
      * @param {Object} eventData Object, containing all parameters received from the Shelly BLU Motion device. Example: {"encryption":false,"BTHome_version":2,"pid":16,"battery":100,"illuminance":109,"motion":1,"button":1,"rssi":-53,"address":"aa:bc:12:34:56:78"}
@@ -32,7 +34,9 @@ let CONFIG = {
         try {
             // Turn on the light if the motion is detected & illuminance is below 100.
             if (eventData.motion === 1 && eventData.illuminance < 100) {
-                MQTT.publish("groups/pool-house-lights", JSON.stringify({ "op": "on", "keep": false }), 2 /*exactly-once*/, false);
+                msg = JSON.stringify({ "op": "on", "keep": false })
+                print("MQTT publishing: ", "topic", CONFIG.topic, "msg", msg)
+                MQTT.publish(CONFIG.topic, msg, 2 /*exactly-once*/, false);
             }
         } catch (error) {
             console.error("onStatusUpdate error", error);

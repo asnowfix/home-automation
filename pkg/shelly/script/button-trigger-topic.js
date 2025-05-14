@@ -6,11 +6,17 @@ Shelly.addEventHandler(function (eventData) {
     print("Handling event: ", eventData);
     try {
         var msg = null
-        if (eventData.id === 0 && eventData.info.event === "single_push") {
-            print("Button single push: toggle")
+        var toggle_event = "btn_up"
+        //var toggle_event = "btn_down"
+        //var toggle_event = "single_push"
+        var hold_event = "double_push"
+        //var hold_event = "long_push"
+
+        if (eventData.id === 0 && eventData.info.event === toggle_event) {
+            print("Button toggle event: ", toggle_event)
             msg = JSON.stringify({"op":"toggle"})
-        } else if (eventData.id === 0 && eventData.info.event === "double_push") {
-            print("Button double push: turn on & keep-on")
+        } else if (eventData.id === 0 && eventData.info.event === hold_event) {
+            print("Button hold event: ", hold_event)
             msg = JSON.stringify({"op":"on", "keep": true})
         }
         // else if (eventData.id === 0 && eventData.info.event === "long_push") {

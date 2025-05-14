@@ -36,9 +36,15 @@ var flags struct {
 var debugCtl = &cobra.Command{
 	Use:   "debug",
 	Short: "Turn on/off script debugging using system.SetConfig",
-	Args:  cobra.ExactArgs(1),
+	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
+
+		var active bool
+		if len(args) == 2 {
+			active = args[1] == "true"
+		}
+
 		log := hlog.Logger
 
 		// if configCmd.Flags().Changed("debug-mqtt") && flags.DebugMqtt != config.Debug.Mqtt.Enable {
@@ -62,90 +68,94 @@ var debugCtl = &cobra.Command{
 		// 	changed = true
 		// }
 
-		port := flags.Port
-		_, ip, err := mynet.MainInterface(hlog.Logger)
-		if err != nil {
-			return err
-		}
-		listener, err := net.ListenUDP("udp", &net.UDPAddr{IP: *ip, Port: port})
-		if err != nil {
-			log.Error(err, "Unable to listen on UDP", "ip", ip.String(), "port", port)
-			return err
-		}
-		defer listener.Close()
+		var udpContext context.Context
+		var udpCancel context.CancelFunc
 
-		// Get the actual port that was assigned (especially important if port was 0)
-		localAddr := listener.LocalAddr().(*net.UDPAddr)
-		port = localAddr.Port
-		log.Info("Listening on UDP", "ip", ip.String(), "port", port)
-
-		// Create a context for the UDP server only: others (MQTT ...etc) will timeout on their own
-		udpContext, udpCancel := context.WithCancel(context.Background())
-		defer udpCancel()
-		udpChan := make(chan []byte)
-
-		// Start a goroutine to read from UDP and send to channel
-		go func(ctx context.Context, log logr.Logger, ch chan []byte) {
-			for {
-				buf := make([]byte, 1024)
-				n, addr, err := listener.ReadFromUDP(buf)
-				if err != nil {
-					log.Error(err, "Unable to read from UDP", "ip", addr.String())
-					continue
-				}
-				// log.Info("Received UDP message", "ip", addr.String(), "port", addr.Port, "bytes", n)
-
-				// Make a copy of the data to avoid buffer reuse issues
-				dataCopy := make([]byte, n)
-				copy(dataCopy, buf[:n])
-
-				// Send to channel or exit if context is done
-				select {
-				case ch <- dataCopy:
-				case <-ctx.Done():
-					return
-				}
+		if active {
+			port := flags.Port
+			_, ip, err := mynet.MainInterface(hlog.Logger)
+			if err != nil {
+				return err
 			}
-		}(udpContext, log.WithName("UDP-logger"), udpChan)
-
-		go func(ctx context.Context, log logr.Logger, ch chan []byte) {
-			// Process messages from channel
-			for {
-				select {
-				case <-ctx.Done():
-					log.Info("Done")
-					return
-
-				case data := <-ch:
-					parseMessage(log, data)
-				}
+			listener, err := net.ListenUDP("udp", &net.UDPAddr{IP: *ip, Port: port})
+			if err != nil {
+				log.Error(err, "Unable to listen on UDP", "ip", ip.String(), "port", port)
+				return err
 			}
-		}(udpContext, log, udpChan)
+			defer listener.Close()
 
-		addr := fmt.Sprintf("%s:%d", ip.String(), port)
+			// Get the actual port that was assigned (especially important if port was 0)
+			localAddr := listener.LocalAddr().(*net.UDPAddr)
+			port = localAddr.Port
+			log.Info("Listening on UDP", "ip", ip.String(), "port", port)
+
+			// Create a context for the UDP server only: others (MQTT ...etc) will timeout on their own
+			udpContext, udpCancel = context.WithCancel(context.Background())
+			defer udpCancel()
+			udpChan := make(chan []byte)
+
+			// Start a goroutine to read from UDP and send to channel
+			go func(ctx context.Context, log logr.Logger, ch chan []byte) {
+				for {
+					buf := make([]byte, 1024)
+					n, addr, err := listener.ReadFromUDP(buf)
+					if err != nil {
+						log.Error(err, "Unable to read from UDP", "ip", addr.String())
+						continue
+					}
+					// log.Info("Received UDP message", "ip", addr.String(), "port", addr.Port, "bytes", n)
+
+					// Make a copy of the data to avoid buffer reuse issues
+					dataCopy := make([]byte, n)
+					copy(dataCopy, buf[:n])
+
+					// Send to channel or exit if context is done
+					select {
+					case ch <- dataCopy:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}(udpContext, log.WithName("UDP-logger"), udpChan)
+
+			go func(ctx context.Context, log logr.Logger, ch chan []byte) {
+				// Process messages from channel
+				for {
+					select {
+					case <-ctx.Done():
+						log.Info("Done")
+						return
+
+					case data := <-ch:
+						parseMessage(log, data)
+					}
+				}
+			}(udpContext, log, udpChan)
+
+			addr := fmt.Sprintf("%s:%d", ip.String(), port)
+			args = []string{addr}
+		} else {
+			args = []string{}
+		}
+
 		// FIXME: use udpContext
-		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doDebug, []string{addr})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doDebug, args)
 		if err != nil {
 			return err
 		}
 
-		// Wait for ctrl-c signal to cancel the UDP context
-		go func(log logr.Logger, cancel context.CancelFunc) {
-			signals := make(chan os.Signal, 1)
-			signal.Notify(signals, os.Interrupt)
-			signal.Notify(signals, syscall.SIGTERM)
-			<-signals
-			log.Info("Received signal")
-			cancel()
-		}(log, udpCancel)
-		<-udpContext.Done()
-
-		log.Info("Turning off debugging")
-		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doDebug, []string{})
-		if err != nil {
-			return err
+		if active {
+			// Wait for ctrl-c signal to cancel the UDP context
+			go func(log logr.Logger, cancel context.CancelFunc) {
+				signals := make(chan os.Signal, 1)
+				signal.Notify(signals, os.Interrupt)
+				signal.Notify(signals, syscall.SIGTERM)
+				<-signals
+				log.Info("Received signal")
+				cancel()
+			}(log, udpCancel)
+			<-udpContext.Done()
 		}
-
 		return nil
 	},
 }
@@ -223,7 +233,6 @@ func parseMessage(log logr.Logger, data []byte) {
 		// header is before "|", message is after
 		entry := strings.SplitN(line, "|", 2)
 		header := entry[0]
-		msg := entry[1]
 
 		fields := strings.Split(header, " ")
 		if len(fields) != 5 {
@@ -256,6 +265,12 @@ func parseMessage(log logr.Logger, data []byte) {
 		// 	log.Error(err, "Invalid lvl", "lvl", fields[4])
 		// 	continue
 		// }
+
+		if len(entry) != 2 {
+			log.Error(nil, "Invalid line", "line", line)
+			continue
+		}
+		msg := entry[1]
 
 		// if <component> is 1xx, xx is the script number
 		if component >= 100 && component < 200 {

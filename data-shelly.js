@@ -897,3 +897,25 @@ var debug_log = {}
 // onStatusUpdate eventData Turn on & auto-off" script=2 ts=99481.364
 // onStatusUpdate eventData shos_rpc_inst.c:243     Switch.Set [5887@RPC.LOCAL] via loopback" ts=99481.391
 // onStatusUpdate eventData shelly_notification:164 Status change of switch:0: {\"output\":true,\"source\":\"loopback\"}" ts=99481.392
+
+// Motion on, then off
+
+// onStatusUpdate eventData { \"encryption\": false, \"BTHome_version\": 2, \"pid\": 180, \"battery\": 89," script=1 ts=1111.908
+// onStatusUpdate eventData \"illuminance\": 0, \"motion\": 1, \"rssi\": -58," script=1 ts=1111.909
+// onStatusUpdate eventData \"address\": \"e8:e0:7e:a6:0c:6f\"" script=1 ts=1111.91
+// onStatusUpdate eventData } script=1 ts=1111.91
+// onStatusUpdate eventData Info: \"New status update\"" script=1 ts=1111.911
+
+// onStatusUpdate eventData { \"encryption\": false, \"BTHome_version\": 2, \"pid\": 181, \"battery\": 89," script=1 ts=1174.131
+// onStatusUpdate eventData \"illuminance\": 0, \"motion\": 0, \"rssi\": -59," script=1 ts=1174.132
+// onStatusUpdate eventData \"address\": \"e8:e0:7e:a6:0c:6f\"" script=1 ts=1174.133
+// onStatusUpdate eventData } script=1 ts=1174.133
+
+// msg="\"name\": \"switch\"," script=1 ts=128.592 v=0
+// msg="\"id\": 0, \"now\": 1747252166.87912797927," script=1 ts=128.594 v=0
+// msg="\"info\": {" script=1 ts=128.594 v=0
+// msg="\"component\": \"switch:0\"," script=1 ts=128.596 v=0
+// msg="\"id\": 0," script=1 ts=128.597 v=0
+// msg="\"event\": \"temperature_update\"," script=1 ts=128.597 v=0
+// msg="\"temperature\": 54.9, \"range_min\": 2.9, \"ts\": 1747252166.87999987602 }" script=1 ts=128.598 v=0
+// msg=} script=1 ts=128.599 v=0

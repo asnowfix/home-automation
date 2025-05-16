@@ -80,7 +80,11 @@ Functions
 Cleanup
 -------
 
-[ ] Code review byWindsurf
+[ ] Code review by Windsurf
+[ ] Auto-Stop script at upload if running
+
+        shelly_notification:164 Status change of script:1: {"error_msg":null,"errors":[],"running":true}
+
 [ ] Use Native slog.in-context like:
 
         ```go
@@ -109,6 +113,7 @@ Cleanup
         Script.Stop via MQTT" msg-count=23063 timestamp=87379.528 v=0
         shelly_notification:165 Status change of script:1: {\"id\":1,\"error_msg\":null,\"errors\":[],\"running\":false}" msg-count=23064 timestamp=87379.542 v=0
 
+[ ] Filter out debug messages: remove messages not tight to the given script name or id
 [ ] Reassemble multi-line debug message (separated by \n, not \x00) & missing leading "{" like:
 
         msg="\"info\": {"
@@ -118,7 +123,7 @@ Cleanup
         msg="\"ts\": 1746978309.23000001907 }" 
         msg=}"
 
-[x] Take into acount doubel-push events:
+[x] Take into acount double-push events:
 
         msg="shelly_notification:211 Event from input:0: {\"component\":\"input:0\",\"id\":0,\"event\":\"double_push\",\"ts\":1746980857.36}" 
 
@@ -127,6 +132,9 @@ Cleanup
 Integration
 -----------
 
+[ ] Add support for Matter protocol for Gen2 devices via GW
+[ ] Add support for Matter protocol for Gen1 devices via GW
+[ ] Add GoLang profiling support es explained in <https://go.dev/blog/pprof>
 [ ] BUG: Fix dpkg upgrade
 
         admin@myhome:~ $ sudo dpkg -i ./myhome_0.2.4_arm64.deb

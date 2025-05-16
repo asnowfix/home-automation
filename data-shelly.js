@@ -919,3 +919,25 @@ var debug_log = {}
 // msg="\"event\": \"temperature_update\"," script=1 ts=128.597 v=0
 // msg="\"temperature\": 54.9, \"range_min\": 2.9, \"ts\": 1747252166.87999987602 }" script=1 ts=128.598 v=0
 // msg=} script=1 ts=128.599 v=0
+
+
+// // Long Push (pool-house-1) w/ inverted-logic: true
+
+// msg="shelly_notification:210 Event from input:0: {\"component\":\"input:0\",\"id\":0,\"event\":\"btn_down\",\"ts\":1747394072.52}" ts=140947.164
+// msg="shelly_notification:210 Event from input:0: {\"component\":\"input:0\",\"id\":0,\"event\":\"long_push\",\"ts\":1747394073.52}" ts=140948.165
+// msg="shelly_notification:210 Event from input:0: {\"component\":\"input:0\",\"id\":0,\"event\":\"btn_up\",\"ts\":1747394075.01}" ts=140949.654
+
+// // Long push (lumiere-exterieure-droite) w/ inverted-logic: true
+// msg="shelly_notification:210 Event from input:0: {\"component\":\"input:0\",\"id\":0,\"event\":\"btn_up\",\"ts\":1747394206.88}" ts=29445.847
+// msg="shelly_notification:210 Event from input:0: {\"component\":\"input:0\",\"id\":0,\"event\":\"btn_down\",\"ts\":1747394208.82}" ts=29447.795
+// msg="shelly_notification:210 Event from input:0: {\"component\":\"input:0\",\"id\":0,\"event\":\"long_push\",\"ts\":1747394209.83}" ts=29448.796
+
+// // Time sync
+// msg="shos_time.c:58          Setting time from SNTP (1747395389.708 delta -0.058)" ts=30628.746
+// msg="shelly_sys.cpp:281      Time set to 30628.698585 from 1" ts=30628.748
+// msg="shos_cron.c:223         And before: 1747519200 [2025/05/17 22:00:00 UTC]" ts=30628.75
+// msg="shos_cron.c:223         Looking for next sunrise/sunset after: 1747395389 [2025/05/16 11:36:29 UTC]" ts=30628.749
+// msg="shos_cron.c:223         And before: 1747432800 [2025/05/16 22:00:00 UTC]" ts=30628.749
+// msg="shos_cron.c:223         Looking for next sunrise/sunset after: 1747432800 [2025/05/16 22:00:00 UTC]" ts=30628.749
+// msg="shelly_notification:164 Status change of sys: {\"last_sync_ts\":1747395389}" ts=30628.793
+// msg="shelly_notification:164 Status change of sys: {\"time\":\"13:36\",\"unixtime\":1747395389}" ts=30628.794

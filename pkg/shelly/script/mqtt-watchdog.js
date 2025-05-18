@@ -2,8 +2,7 @@
 let CONFIG = {
     numberOfFails: 5,
     retryIntervalSeconds: 10,
-    notificationTopic: "notifications/mqtt-watchdog",
-    debugLog: true
+    debug: true
 }
 
 let failCounter = 0;
@@ -11,7 +10,7 @@ let timer = null;
 
 // Helper function for logging
 function log(message) {
-    if (CONFIG.debugLog) {
+    if (CONFIG.debug) {
         print(message);
     }
 }

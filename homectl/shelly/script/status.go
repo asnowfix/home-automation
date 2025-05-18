@@ -15,13 +15,12 @@ import (
 
 func init() {
 	Cmd.AddCommand(statusCtl)
-	statusCtl.MarkFlagRequired("id")
 }
 
 var statusCtl = &cobra.Command{
 	Use:   "status",
-	Short: "Report status of a script loaded on the given Shelly device(s)",
-	Args:  cobra.MinimumNArgs(1),
+	Short: "Report status of all scripts loaded on the given Shelly device(s)",
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStatus, options.Args(args))
 		return err
@@ -29,13 +28,11 @@ var statusCtl = &cobra.Command{
 }
 
 func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(ctx, via, string(script.GetStatus), &script.Id{
-		Id: flags.Id,
-	})
+	out, err := script.DeviceStatus(ctx, device, via)
 	if err != nil {
-		log.Error(err, "Unable to get status for script", "id", flags.Id)
+		hlog.Logger.Error(err, "Unable to get scripts status")
 		return nil, err
 	}
-	response := out.(*script.Status)
-	return response, nil
+	options.PrintResult(out)
+	return out, nil
 }

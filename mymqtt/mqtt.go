@@ -105,7 +105,8 @@ func InitClientE(ctx context.Context, log logr.Logger, resolver mynet.Resolver, 
 	opts.SetResumeSubs(true)    // automatically re-subscribe in case or disconnection/reconnection
 	opts.SetCleanSession(false) // do not save messages to be re-sent in case of disconnection
 
-	mdnsCtx, _ := context.WithTimeout(ctx, mdnsTimeout)
+	mdnsCtx, mdnsCancel := context.WithTimeout(ctx, mdnsTimeout)
+	defer mdnsCancel()
 	brokerUrl, err := lookupBroker(mdnsCtx, log, resolver, broker)
 	if err != nil {
 		log.Error(err, "could not find MQTT broker", "where", broker)
@@ -130,12 +131,6 @@ func InitClientE(ctx context.Context, log logr.Logger, resolver mynet.Resolver, 
 	// 	Println: log.Info,
 	// 	Printf:  log.I,
 	// }
-
-	go func(log logr.Logger) {
-		<-ctx.Done()
-		log.Error(ctx.Err(), "Context done: MQTT client disconnecting")
-		client.Close()
-	}(log.WithName("mymqtt.Client"))
 
 	log.Info("MQTT client initialized", "client_id", client.clientId, "timeout", client.timeout)
 	return client, nil

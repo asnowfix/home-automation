@@ -111,7 +111,7 @@ const BTHomeDecoder = {
     while (buffer.length > 0) {
       _bth = BTH[buffer.at(0)];
       if (typeof _bth === "undefined") {
-        console.log("BTH: Unknown type");
+        print("BTH: Unknown type");
         break;
       }
       buffer = buffer.slice(1);
@@ -177,13 +177,13 @@ function scanCB(ev, res) {
       service_data: decodeData,
     };
 
-    // console.log(res.local_name, JSON.stringify(postMessage));
+    // print(res.local_name, JSON.stringify(postMessage));
 
     // post data to MQTT
     pushToMQ(addr, JSON.stringify(postMessage));
 
   } catch (err) {
-    console.log(err)
+    print(err)
   }
 
 }
@@ -194,7 +194,7 @@ function init() {
 
   // exit if the BLE isn't enabled
   if (!BLEConfig.enable) {
-    console.log(
+    print(
       "Error: The Bluetooth is not enabled, please enable it from settings"
     );
     return;
@@ -202,14 +202,14 @@ function init() {
 
   // check if the scanner is already running
   if (BLE.Scanner.isRunning()) {
-    console.log("Info: The BLE gateway is running, the BLE scan configuration is managed by the device");
+    print("Info: The BLE gateway is running, the BLE scan configuration is managed by the device");
   }
   else {
     // start the scanner
     const bleScanner = BLE.Scanner.Start(SCAN_OPTION);
 
     if (!bleScanner) {
-      console.log("Error: Can not start new scanner");
+      print("Error: Can not start new scanner");
     }
   }
 

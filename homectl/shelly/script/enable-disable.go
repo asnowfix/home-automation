@@ -22,29 +22,33 @@ func init() {
 
 var enableCtl = &cobra.Command{
 	Use:   "enable",
-	Short: "Enable (creating it if necessary) a named JavaScript script on the given Shelly device(s)",
-	Args:  cobra.MinimumNArgs(1),
+	Short: "Enable an existing script on the given Shelly device(s)",
+	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEnableDisable, []string{"true"})
+		device := args[0]
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doEnableDisable, []string{"true"})
 		return err
 	},
 }
 
 var disableCtl = &cobra.Command{
 	Use:   "disable",
-	Short: "Disable (creating it if necessary) a named JavaScript script on the given Shelly device(s)",
-	Args:  cobra.MinimumNArgs(1),
+	Short: "Disable an existing script on the given Shelly device(s)",
+	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEnableDisable, []string{"false"})
+		device := args[0]
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doEnableDisable, []string{"false"})
 		return err
 	},
 }
 
 func doEnableDisable(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	enable, err := strconv.ParseBool(args[0])
+	scriptName := args[0]
+	enable, err := strconv.ParseBool(args[1])
 	if err != nil {
-		log.Error(err, "Invalid enable/disable argument", "arg", args[0])
+		log.Error(err, "Invalid enable/disable argument", "arg", args[1])
 		return nil, err
 	}
-	return script.EnableDisable(ctx, via, device, flags.Name, flags.Id, enable)
+
+	return script.EnableDisable(ctx, via, device, scriptName, enable)
 }

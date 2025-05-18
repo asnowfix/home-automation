@@ -16,6 +16,7 @@ import (
 )
 
 var Flags struct {
+	CpuProfile     string
 	Verbose        bool
 	Json           bool
 	MqttBroker     string

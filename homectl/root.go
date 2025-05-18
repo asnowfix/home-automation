@@ -20,6 +20,7 @@ import (
 	"os"
 	shellyPkg "pkg/shelly"
 	"pkg/shelly/types"
+	"runtime/pprof"
 	"time"
 
 	"mymqtt"
@@ -52,7 +53,17 @@ var Cmd = &cobra.Command{
 			options.Flags.CommandTimeout = 0
 		}
 
-		ctx := options.CommandLineContext(log, options.Flags.CommandTimeout)
+		f, err := os.Create(options.Flags.CpuProfile)
+		if err != nil {
+			log.Error(err, "Failed to create CPU profile")
+			return err
+		}
+		pprof.StartCPUProfile(f)
+		ctx := cmd.Context()
+		ctx = context.WithValue(ctx, global.CpuProfileKey, f)
+		cmd.SetContext(ctx)
+
+		ctx = options.CommandLineContext(log, options.Flags.CommandTimeout)
 		cmd.SetContext(ctx)
 
 		mc, err := mymqtt.InitClientE(ctx, log, mynet.MyResolver(log).Start(ctx), options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
@@ -81,6 +92,11 @@ var Cmd = &cobra.Command{
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
+		f := ctx.Value(global.CpuProfileKey)
+		if f != nil {
+			defer pprof.StopCPUProfile()
+		}
+
 		mc, err := mymqtt.GetClientE(ctx)
 		if err != nil {
 			return err
@@ -95,6 +111,7 @@ var Cmd = &cobra.Command{
 }
 
 func init() {
+	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "p", "", "write CPU profile to `file`")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.CommandTimeout, "timeout", "", 7*time.Second, "Timeout for overall command")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")

@@ -941,3 +941,118 @@ var debug_log = {}
 // msg="shos_cron.c:223         Looking for next sunrise/sunset after: 1747432800 [2025/05/16 22:00:00 UTC]" ts=30628.749
 // msg="shelly_notification:164 Status change of sys: {\"last_sync_ts\":1747395389}" ts=30628.793
 // msg="shelly_notification:164 Status change of sys: {\"time\":\"13:36\",\"unixtime\":1747395389}" ts=30628.794
+
+var ble_msgs = [{
+  "addr":"6a:54:77:57:9f:3e",
+  "rssi":-46,
+  "addr_type":4,
+  "advData":"02011a0303befe0dff0115101eecf33dfeaea8c43a",
+  "flags":26,
+  "service_uuids":["febe"],
+  "manufacturer":"1501",
+  "manufacturer_data":"101eecf33dfeaea8c43a"
+},{
+  "addr":"6a:54:77:57:9f:3e",
+  "rssi":-44,
+  "addr_type":4,
+  "advData":"02011a0303befe0dff0115101eecf33dfeaea8c43a",
+  "flags":26,
+  "service_uuids":["febe"],
+  "manufacturer":"1501",
+  "manufacturer_data":"101eecf33dfeaea8c43a"
+},{
+  "addr":"6a:54:77:57:9f:3e",
+  "rssi":-47,
+  "addr_type":4,
+  "advData":"02011a0303befe0dff0115101eecf33dfeaea8c43a",
+  "flags":26,
+  "service_uuids":["febe"],
+  "manufacturer":"1501",
+  "manufacturer_data":"101eecf33dfeaea8c43a"
+},{
+  "addr":"90:f1:57:ae:b0:04",
+  "rssi":-92,
+  "addr_type":1,
+  "advData":"02010605ff87000cdb",
+  "flags":6,
+  "manufacturer":"0087",
+  "manufacturer_data":"0cdb"
+},{
+  {"addr":"08:b6:1f:d9:d7:0a","rssi":-96,"addr_type":1,"advData":"02010610ffa90b0105000b00100a08d7d91fb608","flags":6,"manufacturer":"0ba9","manufacturer_data":"0105000b00100a08d7d91fb608"}
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312683 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"6b:0c:3f:4d:5c:8a\",\"rssi\":-89,\"addr_type\":4,\"advData\":\"02011a020a0c0bff4c001006361e44776266\",\"flags\":26,\"man" script=3 ts=52962.145 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312684 device=shellyplus1-b8d61a85ed58 msg="ufacturer\":\"004c\",\"manufacturer_data\":\"1006361e44776266\"}" script=3 ts=52962.146 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312685 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"e0:05:02:68:49:d7\",\"rssi\":-74,\"addr_type\":2,\"advData\":\"1eff4c00121910dff0717a22fe09a14800e7ddbf3ab67b7897da1" script=3 ts=52962.146 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312686 device=shellyplus1-b8d61a85ed58 msg="170be01b2\",\"manufacturer\":\"004c\",\"manufacturer_data\":\"121910dff0717a22fe09a14800e7ddbf3ab67b7897da1170be01b2\"}" script=3 ts=52962.147 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312687 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"4c:4e:65:42:47:ab\",\"rssi\":-74,\"addr_type\":4,\"advData\":\"02011a17ff4c0009081304c0a801371b58160800eb7d17c663176" script=3 ts=52962.542 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312688 device=shellyplus1-b8d61a85ed58 msg="b\",\"flags\":26,\"manufacturer\":\"004c\",\"manufacturer_data\":\"09081304c0a801371b58160800eb7d17c663176b\"}" script=3 ts=52962.545 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312689 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"08:b6:1f:d9:33:3e\",\"rssi\":-88,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b00100a3c33d91fb608\",\"flags\":6,\"" script=3 ts=52962.547 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312690 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b00100a3c33d91fb608\"}" script=3 ts=52962.548 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312691 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"84:fc:e6:3b:f4:66\",\"rssi\":-91,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b15100a64f43be6fc84\",\"flags\":6,\"" script=3 ts=52962.549 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312692 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b15100a64f43be6fc84\"}" script=3 ts=52962.549 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312693 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"08:b6:1f:d8:b8:9e\",\"rssi\":-86,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b00100a9cb8d81fb608\",\"flags\":6,\"" script=3 ts=52963.154 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312694 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b00100a9cb8d81fb608\"}" script=3 ts=52963.154 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312695 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"48:55:19:9c:98:8a\",\"rssi\":-58,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b00100a88989c195548\",\"flags\":6,\"" script=3 ts=52963.159 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312696 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b00100a88989c195548\"}" script=3 ts=52963.159 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312697 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"b8:d6:1a:85:a9:72\",\"rssi\":-78,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b00100a70a9851ad6b8\",\"flags\":6,\"" script=3 ts=52963.159 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312698 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b00100a70a9851ad6b8\"}" script=3 ts=52963.16 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312699 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"b0:81:84:a5:3f:26\",\"rssi\":-96,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b05180a243fa58481b0\",\"flags\":6,\"" script=3 ts=52963.16 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312700 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b05180a243fa58481b0\"}" script=3 ts=52963.16 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312701 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"90:f1:57:ae:b0:04\",\"rssi\":-90,\"addr_type\":1,\"advData\":\"02010605ff87000cdb\",\"flags\":6,\"manufacturer\":\"0087\",\"" script=3 ts=52963.739 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312702 device=shellyplus1-b8d61a85ed58 msg="manufacturer_data\":\"0cdb\"}" script=3 ts=52963.744 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312703 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"a0:dd:6c:a1:c5:8a\",\"rssi\":-96,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b04200a88c5a16cdda0\",\"flags\":6,\"" script=3 ts=52963.747 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312704 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b04200a88c5a16cdda0\"}" script=3 ts=52963.747 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312705 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"b8:d6:1a:85:a8:e2\",\"rssi\":-50,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b00100ae0a8851ad6b8\",\"flags\":6,\"" script=3 ts=52963.747 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312706 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b00100ae0a8851ad6b8\"}" script=3 ts=52963.747 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312707 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"47:83:29:e1:05:7e\",\"rssi\":-84,\"addr_type\":4,\"advData\":\"02011a020a090aff4c0010050b18c93534\",\"flags\":26,\"manuf" script=3 ts=52963.748 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312708 device=shellyplus1-b8d61a85ed58 msg="acturer\":\"004c\",\"manufacturer_data\":\"10050b18c93534\"}" script=3 ts=52963.748 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312709 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"52:45:aa:f0:ac:44\",\"rssi\":-97,\"addr_type\":4,\"advData\":\"02011a0dff4c00160800d2c1459762" script=3 ts=52964.456 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312710 device=shellyplus1-b8d61a85ed58 msg="acturer\":\"004c\",\"manufacturer_data\":\"160800d2c14597620938\"}" script=3 ts=52964.459 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312711 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"73:1e:95:f3:71:59\",\"rssi\":-47,\"addr_type\":4,\"advData\":\"02011a0303befe0dff0115101eecf33dfeaea8c43a\",\"flags\":2" script=3 ts=52964.864 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312712 device=shellyplus1-b8d61a85ed58 msg="6,\"service_uuids\":[\"febe\"],\"manufacturer\":\"1501\",\"manufacturer_data\":\"101eecf33dfeaea8c43a\"}" script=3 ts=52964.865 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312713 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"fa:9a:dc:e3:41:da\",\"rssi\":-69,\"addr_type\":2,\"advData\":\"1eff4c001219aa71670bcb98de9acdeb3e22fbd3775e76ab46961" script=3 ts=52964.866 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312714 device=shellyplus1-b8d61a85ed58 msg="e49530263\",\"manufacturer\":\"004c\",\"manufacturer_data\":\"1219aa71670bcb98de9acdeb3e22fbd3775e76ab46961e49530263\"}" script=3 ts=52964.866 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312715 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"54:32:04:64:19:fa\",\"rssi\":-74,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b15100af81964043254\",\"flags\":6,\"" script=3 ts=52965.224 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312716 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b15100af81964043254\"}" script=3 ts=52965.227 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312717 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"56:53:69:c4:68:81\",\"rssi\":-78,\"addr_type\":4,\"advData\":\"02011a0dff4c001608005948617a31e8a9\",\"flags\":26,\"manuf" script=3 ts=52965.228 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312718 device=shellyplus1-b8d61a85ed58 msg="acturer\":\"004c\",\"manufacturer_data\":\"1608005948617a31e8a9\"}" script=3 ts=52965.229 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312719 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"54:32:04:52:2c:b6\",\"rssi\":-89,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b15100ab42c52043254\",\"flags\":6,\"" script=3 ts=52965.23 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312720 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b15100ab42c52043254\"}" script=3 ts=52965.231 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312721 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"b8:d6:1a:86:ca:c2\",\"rssi\":-94,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b00100ac0ca861ad6b8\",\"flags\":6,\"" script=3 ts=52965.86 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312722 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b00100ac0ca861ad6b8\"}" script=3 ts=52965.864 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312723 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"54:32:04:40:d0:2e\",\"rssi\":-95,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b15100a2cd040043254\",\"flags\":6,\"" script=3 ts=52965.865 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312724 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b15100a2cd040043254\"}" script=3 ts=52965.867 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312725 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"56:11:e1:94:5c:c8\",\"rssi\":-94,\"addr_type\":4,\"advData\":\"02011a020a0c0cff4c001007301ff2d7174738\",\"flags\":26,\"m" script=3 ts=52965.868 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312726 device=shellyplus1-b8d61a85ed58 msg="anufacturer\":\"004c\",\"manufacturer_data\":\"1007301ff2d7174738\"}" script=3 ts=52965.869 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312727 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"4c:4e:65:42:47:ab\",\"rssi\":-78,\"addr_type\":4,\"advData\":\"02011a17ff4c0009081304c0a801371b58160800eb7d17c663176" script=3 ts=52965.869 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312728 device=shellyplus1-b8d61a85ed58 msg="b\",\"flags\":26,\"manufacturer\":\"004c\",\"manufacturer_data\":\"09081304c0a801371b58160800eb7d17c663176b\"}" script=3 ts=52965.87 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312729 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"08:b6:1f:d1:41:ea\",\"rssi\":-87,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b00100ae841d11fb608\",\"flags\":6,\"" script=3 ts=52966.712 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312730 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b00100ae841d11fb608\"}" script=3 ts=52966.717 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312731 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"6b:0c:3f:4d:5c:8a\",\"rssi\":-92,\"addr_type\":4,\"advData\":\"02011a020a0c0bff4c001006361e44776266\",\"flags\":26,\"man" script=3 ts=52966.718 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312732 device=shellyplus1-b8d61a85ed58 msg="ufacturer\":\"004c\",\"manufacturer_data\":\"1006361e44776266\"}" script=3 ts=52966.718 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312733 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"54:32:04:40:f8:7a\",\"rssi\":-96,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b15100a78f840043254\",\"flags\":6,\"" script=3 ts=52966.719 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312734 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b15100a78f840043254\"}" script=3 ts=52966.719 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312735 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"48:55:19:9d:b0:66\",\"rssi\":-78,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b00100a64b09d195548\",\"flags\":6,\"" script=3 ts=52966.719 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312736 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b00100a64b09d195548\"}" script=3 ts=52966.72 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312737 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"b8:d6:1a:85:a8:e2\",\"rssi\":-54,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b00100ae0a8851ad6b8\",\"flags\":6,\"" script=3 ts=52967.404 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312738 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b00100ae0a8851ad6b8\"}" script=3 ts=52967.405 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312739 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"b0:81:84:a5:3f:26\",\"rssi\":-92,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b05180a243fa58481b0\",\"flags\":6,\"" script=3 ts=52967.406 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312740 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b05180a243fa58481b0\"}" script=3 ts=52967.407 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312741 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"84:fc:e6:3b:f4:66\",\"rssi\":-90,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b15100a64f43be6fc84\",\"flags\":6,\"" script=3 ts=52967.407 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312742 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b15100a64f43be6fc84\"}" script=3 ts=52967.408 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312743 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"08:b6:1f:d9:33:3e\",\"rssi\":-82,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b00100a3c33d91fb608\",\"flags\":6,\"" script=3 ts=52967.409 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312744 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b00100a3c33d91fb608\"}" script=3 ts=52967.409 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312745 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"ed:5f:c2:0a:06:86\",\"rssi\":-94,\"addr_type\":2,\"advData\":\"07ff4c0012020003\",\"manufacturer\":\"004c\",\"manufacturer" script=3 ts=52967.721 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312746 device=shellyplus1-b8d61a85ed58 msg="_data\":\"12020003\"}" script=3 ts=52967.723 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312747 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"47:83:29:e1:05:7e\",\"rssi\":-94,\"addr_type\":4,\"advData\":\"02011a020a090aff4c0010050b18c93534\",\"flags\":26,\"manuf" script=3 ts=52967.724 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312748 device=shellyplus1-b8d61a85ed58 msg="acturer\":\"004c\",\"manufacturer_data\":\"10050b18c93534\"}" script=3 ts=52967.724 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312749 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"d3:26:37:c2:77:b6\",\"rssi\":-77,\"addr_type\":2,\"advData\":\"07ff4c0012020003\",\"manufacturer\":\"004c\",\"manufacturer" script=3 ts=52967.724 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312750 device=shellyplus1-b8d61a85ed58 msg="_data\":\"12020003\"}" script=3 ts=52967.724 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312751 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"08:b6:1f:d9:d7:0a\",\"rssi\":-90,\"addr_type\":1,\"advData\":\"02010610ffa90b0105000b00100a08d7d91fb608\",\"flags\":6,\"" script=3 ts=52967.856 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312752 device=shellyplus1-b8d61a85ed58 msg="manufacturer\":\"0ba9\",\"manufacturer_data\":\"0105000b00100a08d7d91fb608\"}" script=3 ts=52967.856 v=0
+  7:46PM INF shelly/script/debug.go:280 > UDP-logger component=1 count=312753 device=shellyplus1-b8d61a85ed58 msg="shos_mqtt_conn.c:965    MQTT0 queue overflow!" ts=52967.859 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312754 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"56:53:69:c4:68:81\",\"rssi\":-72,\"addr_type\":4,\"advData\":\"02011a0dff4c001608005948617a31e8a9\",\"flags\":26,\"manuf" script=3 ts=52968.321 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312755 device=shellyplus1-b8d61a85ed58 msg="acturer\":\"004c\",\"manufacturer_data\":\"1608005948617a31e8a9\"}" script=3 ts=52968.321 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312756 device=shellyplus1-b8d61a85ed58 msg="[BLE-MQTT] {\"addr\":\"73:1e:95:f3:71:59\",\"rssi\":-48,\"addr_type\":4,\"advData\":\"02011a0303befe0dff0115101eecf33dfeaea8c43a\",\"flags\":2" script=3 ts=52968.547 v=0
+  7:46PM INF shelly/script/debug.go:278 > UDP-logger count=312757 device=shellyplus1-b8d61a85ed58 msg="6,\"service_uuids\":[\"febe\"],\"manufacturer\":\"1501\",\"manufacturer_data\":\"101eecf33dfeaea8c43a\"}" script=3 ts=52968.551 v=0
+
+}]

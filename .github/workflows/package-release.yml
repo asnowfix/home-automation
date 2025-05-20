@@ -61,6 +61,13 @@ jobs:
                     #echo "::set-output name=release::$(git describe)"
                     echo "release=$(git describe)" | tee -a "$GITHUB_OUTPUT"
             -
+                id: upload-myhome-arm64-artifact
+                name: Upload MyHome artifact
+                uses: actions/upload-artifact@v4
+                with:
+                    name: myhome-arm64
+                    path: $(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -r '.[] | select(.name == "myhome") | .path')
+            -
                 id: prepare-deb
                 name: Prepare package content
                 run: |

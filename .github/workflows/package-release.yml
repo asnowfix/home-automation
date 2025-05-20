@@ -366,6 +366,12 @@ jobs:
                     name: deb_file
                     #path: ${{ needs.package-deb.outputs.deb_file }}
             -
+                name: Download MyHome ARM64 from package-release
+                uses: actions/download-artifact@v4
+                with:
+                    name: myhome-arm64
+                    #path: ${{ needs.package-release.outputs.myhome-arm64 }}
+            -
                 name: List files in workspace
                 run: ls -al
             -
@@ -375,7 +381,7 @@ jobs:
                 with:
                     name: Release ${{ needs.package-deb.outputs.release_version }}
                     artifactErrorsFailBuild: true
-                    artifacts: "${{ needs.package-deb.outputs.deb_file }},${{ needs.package-msi.outputs.msi_file }}"
+                    artifacts: "${{ needs.package-deb.outputs.deb_file }},${{ needs.package-msi.outputs.msi_file }},${{ needs.package-release.outputs.myhome-arm64 }}"
                     body: ${{ steps.release_notes.outputs.notes }}
                     #tag: ${{ needs.package-deb.outputs.release_version }}-rc${{ github.run_number }}
                     tag: ${{ needs.package-deb.outputs.release_version }}

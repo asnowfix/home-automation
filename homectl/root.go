@@ -47,7 +47,7 @@ var Cmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		hlog.Init(options.Flags.Verbose)
 		log := hlog.Logger
-		var ctx context.Context
+		ctx := cmd.Context()
 
 		if debug.IsDebuggerAttached() {
 			hlog.Logger.Info("Running under debugger (will wait forever)")
@@ -62,13 +62,11 @@ var Cmd = &cobra.Command{
 					return err
 				}
 				pprof.StartCPUProfile(f)
-				ctx = cmd.Context()
 				ctx = context.WithValue(ctx, global.CpuProfileKey, f)
-				cmd.SetContext(ctx)
 			}
 		}
 
-		ctx = options.CommandLineContext(log, options.Flags.CommandTimeout)
+		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout)
 		cmd.SetContext(ctx)
 
 		mc, err := mymqtt.InitClientE(ctx, log, mynet.MyResolver(log).Start(ctx), options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
@@ -77,13 +75,13 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		myhome.TheClient, err = myhome.NewClientE(cmd.Context(), log, mc, options.Flags.MqttTimeout)
+		myhome.TheClient, err = myhome.NewClientE(ctx, log, mc, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome client")
 			return err
 		}
 
-		shellyPkg.Init(cmd.Context(), options.Flags.MqttTimeout)
+		shellyPkg.Init(ctx, options.Flags.MqttTimeout)
 
 		for i, c := range types.Channels {
 			if options.Flags.Via == c {
@@ -116,7 +114,7 @@ var Cmd = &cobra.Command{
 }
 
 func init() {
-	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "p", "", "write CPU profile to `file`")
+	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "P", "", "write CPU profile to `file`")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.CommandTimeout, "timeout", "", 7*time.Second, "Timeout for overall command")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")

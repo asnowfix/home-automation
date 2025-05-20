@@ -134,7 +134,7 @@ Integration
 
 [ ] Add support for Matter protocol for Gen2 devices via GW
 [ ] Add support for Matter protocol for Gen1 devices via GW
-[ ] Add GoLang profiling support es explained in <https://go.dev/blog/pprof>
+[x] Add GoLang profiling support es explained in <https://go.dev/blog/pprof>
 [ ] BUG: Fix dpkg upgrade
 
         admin@myhome:~ $ sudo dpkg -i ./myhome_0.2.4_arm64.deb

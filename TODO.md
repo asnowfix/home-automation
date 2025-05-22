@@ -15,6 +15,16 @@ Model
 Functions
 ---------
 
+[ ] BUG fix on Windows: 'Failed to install event source: Access is denied.'
+[ ] BUG fix wrong HTTP verb:
+
+        1:23PM INF ..\pkg\shelly\shttp\channel.go:81 > Calling method=GET url=http://192.168.1.40/rpc/Shelly.GetDeviceInfo v=0
+        1:23PM INF ..\pkg\shelly\shttp\channel.go:94 > status code code=200 v=0
+        1:23PM INF ..\pkg\shelly\ops.go:177 > Calling channel=http out_type=*shelly.ComponentsResponse params={"keys":["config","status"]} v=0
+        1:23PM ERR ..\pkg\shelly\shttp\channel.go:69 > Params error error error="GET support query parameters only (got *shelly.ComponentsRequest)"
+        1:23PM ERR ..\pkg\shelly\shttp\channel.go:38 > HTTP error error="GET support query parameters only (got *shelly.ComponentsRequest)"
+        1:23PM ERR ..\internal\myhome\device.go:231 > Unable to get device's components (continuing) error="GET support query parameters only (got *shelly.ComponentsRequest)" logger=DeviceManager#WatchZeroConf
+
 [ ] Upload ip-assignment-watchdog.js on every device that have scripting
 [ ] Configure adaptive heater control on every device that are known to be heaters (based on group membership)
 [ ] Upload daily-reboot.js on every device that have scripting

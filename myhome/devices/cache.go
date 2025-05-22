@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"global"
 	"myhome"
+	"sync"
 
 	"github.com/go-logr/logr"
 )
@@ -17,6 +18,7 @@ type Cache struct {
 	devicesByMAC  map[string]*myhome.Device
 	devicesByHost map[string]*myhome.Device
 	devicesByName map[string]*myhome.Device
+	mutex         sync.Mutex
 }
 
 func NewCache(ctx context.Context, db DeviceRegistry) *Cache {
@@ -29,6 +31,9 @@ func NewCache(ctx context.Context, db DeviceRegistry) *Cache {
 }
 
 func (c *Cache) Flush() error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	c.devices = make([]*myhome.Device, 0)
 	c.devicesById = make(map[string]*myhome.Device)
 	c.devicesByMAC = make(map[string]*myhome.Device)
@@ -38,6 +43,9 @@ func (c *Cache) Flush() error {
 }
 
 func (c *Cache) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	for i, existing := range c.devices {
 		if existing.Id() == d.Id() || existing.MAC == d.MAC || existing.Host_ == d.Host_ || existing.Name() == d.Name() {
 			if !overwrite {
@@ -55,6 +63,7 @@ func (c *Cache) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool)
 }
 
 func (c *Cache) insert(d *myhome.Device) (*myhome.Device, error) {
+	// No need to lock here as this is only called from SetDevice which already has the lock
 	c.devices = append(c.devices, d)
 	c.devicesById[d.Id()] = d
 	c.devicesByMAC[d.MAC] = d
@@ -65,6 +74,9 @@ func (c *Cache) insert(d *myhome.Device) (*myhome.Device, error) {
 }
 
 func (c *Cache) GetDeviceByAny(ctx context.Context, any string) (*myhome.Device, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var exists bool
 	var d *myhome.Device
 	d, exists = c.devicesById[any]
@@ -87,6 +99,9 @@ func (c *Cache) GetDeviceByAny(ctx context.Context, any string) (*myhome.Device,
 }
 
 func (c *Cache) GetDeviceById(ctx context.Context, id string) (*myhome.Device, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var exists bool
 	var d *myhome.Device
 	d, exists = c.devicesById[id]
@@ -97,6 +112,9 @@ func (c *Cache) GetDeviceById(ctx context.Context, id string) (*myhome.Device, e
 }
 
 func (c *Cache) GetDeviceByMAC(ctx context.Context, mac string) (*myhome.Device, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var exists bool
 	var d *myhome.Device
 	d, exists = c.devicesByMAC[mac]
@@ -107,6 +125,9 @@ func (c *Cache) GetDeviceByMAC(ctx context.Context, mac string) (*myhome.Device,
 }
 
 func (c *Cache) GetDeviceByHost(ctx context.Context, host string) (*myhome.Device, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var exists bool
 	var d *myhome.Device
 	d, exists = c.devicesByHost[host]
@@ -117,6 +138,9 @@ func (c *Cache) GetDeviceByHost(ctx context.Context, host string) (*myhome.Devic
 }
 
 func (c *Cache) GetDeviceByName(ctx context.Context, name string) (*myhome.Device, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	var exists bool
 	var d *myhome.Device
 	d, exists = c.devicesByName[name]
@@ -127,16 +151,25 @@ func (c *Cache) GetDeviceByName(ctx context.Context, name string) (*myhome.Devic
 }
 
 func (c *Cache) GetAllDevices(ctx context.Context) ([]*myhome.Device, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	// TODO: use cache content
 	return c.db.GetAllDevices(ctx)
 }
 
 func (c *Cache) GetDevicesMatchingAny(ctx context.Context, name string) ([]*myhome.Device, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	// TODO: use cache content
 	return c.db.GetDevicesMatchingAny(ctx, name)
 }
 
 func (c *Cache) ForgetDevice(ctx context.Context, id string) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
 	// TODO: use cache content
 	return c.db.ForgetDevice(ctx, id)
 }

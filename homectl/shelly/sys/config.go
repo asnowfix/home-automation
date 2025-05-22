@@ -18,11 +18,8 @@ import (
 )
 
 var flags struct {
-	EcoMode        bool
-	Name           string
-	DebugMqtt      bool
-	DebugWebSocket bool
-	DebugUdp       string
+	EcoMode bool
+	Name    string
 }
 
 func init() {
@@ -30,10 +27,6 @@ func init() {
 
 	configCmd.Flags().BoolVarP(&flags.EcoMode, "ecomode", "E", false, "Set eco mode")
 	configCmd.Flags().StringVarP(&flags.Name, "name", "N", "", "Device name")
-
-	configCmd.Flags().BoolVarP(&flags.DebugMqtt, "debug-mqtt", "M", false, "Activate debug traces over MQTT")
-	configCmd.Flags().BoolVarP(&flags.DebugWebSocket, "debug-ws", "W", false, "Activate debug traces over WebSocket")
-	configCmd.Flags().StringVarP(&flags.DebugUdp, "debug-udp", "U", "", "Activate debug traces over UDP (format: <host>:<port>)")
 }
 
 var configCmd = &cobra.Command{
@@ -66,27 +59,6 @@ func oneDeviceConfig(ctx context.Context, log logr.Logger, via types.Channel, de
 
 	// if configCmd.Flags().Changed("name") && flags.Name != "" && flags.Name != config.Device.Name {
 	// 	config.Device.Name = flags.Name
-	// 	changed = true
-	// }
-
-	// if configCmd.Flags().Changed("debug-mqtt") && flags.DebugMqtt != config.Debug.Mqtt.Enable {
-	// 	config.Debug.Mqtt.Enable = flags.DebugMqtt
-	// 	changed = true
-	// }
-
-	// if configCmd.Flags().Changed("debug-ws") && flags.DebugWebSocket != config.Debug.WebSocket.Enable {
-	// 	config.Debug.WebSocket.Enable = flags.DebugWebSocket
-	// 	changed = true
-	// }
-
-	// if configCmd.Flags().Changed("debug-udp") && flags.DebugUdp != "" && flags.DebugUdp != config.RpcUdp.DestinationAddress+":"+strconv.Itoa(int(config.RpcUdp.ListenPort)) {
-	// 	config.RpcUdp.DestinationAddress = strings.Split(flags.DebugUdp, ":")[0]
-	// 	port, err := strconv.Atoi(strings.Split(flags.DebugUdp, ":")[1])
-	// 	if err != nil {
-	// 		log.Error(err, "Invalid debug UDP address", "address", flags.DebugUdp)
-	// 		return nil, err
-	// 	}
-	// 	config.RpcUdp.ListenPort = uint16(port)
 	// 	changed = true
 	// }
 

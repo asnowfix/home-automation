@@ -343,7 +343,7 @@ jobs:
                 uses: gableroux/generate-github-release-notes@v0.1.2
                 with:
                     repository: ${{ github.repository }}
-                    base_tag: "${{ github.event.inputs.previous }}"
+                    base_tag: "${{ github.event.inputs.previous != '' ? github.event.inputs.previous : 'v0.0.0' }}"
                     head_tag: ${{ github.ref }}
                     github_token: ${{ secrets.GITHUB_TOKEN }}
             -

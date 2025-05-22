@@ -62,7 +62,7 @@ function checkForWifi() {
     // Connection is now established OR was never broken
     // Reset counter and start over
     if (isWifiConnected || isEthConnected) {
-        console.log(Date.now(), 'WiFi or Ethernet works correctly. Resetting counter to 0')
+        print(Date.now(), 'WiFi or Ethernet works correctly. Resetting counter to 0')
         failCounter = 0;
         return;
     }
@@ -72,11 +72,11 @@ function checkForWifi() {
 
     if (failCounter < CONFIG.numberOfFails) {
         const remainingAttemptsBeforeRestart = CONFIG.numberOfFails - failCounter;
-        console.log(Date.now(), 'WiFi or Ethernet healthcheck failed ', failCounter, ' out of ', CONFIG.numberOfFails, ' times')
+        print(Date.now(), 'WiFi or Ethernet healthcheck failed ', failCounter, ' out of ', CONFIG.numberOfFails, ' times')
         return;
     }
 
-    console.log(Date.now(), 'WiFi or Ethernet healthcheck failed all attempts. Restarting device...')
+    print(Date.now(), 'WiFi or Ethernet healthcheck failed all attempts. Restarting device...')
     Shelly.call('Shelly.Reboot')
 }
 

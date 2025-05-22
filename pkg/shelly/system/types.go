@@ -16,7 +16,7 @@ type SetConfigResponse struct {
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys/#configuration
 
 type Config struct {
-	Device   *DeviceConfig `json:"device"`
+	Device   *DeviceConfig `json:"device,omitempty"`
 	Location *struct {
 		TimeZone  string  `json:"tz,omitempty"`
 		Latitude  float32 `json:"lat,omitempty"`
@@ -43,16 +43,20 @@ type DeviceConfig struct {
 	AddOnType    string           `json:"addon_type,omitempty"`
 }
 
+type Enabler struct {
+	Enable bool `json:"enable"`
+	Level  int  `json:"level,omitempty"`
+}
+
+type EnablerUDP struct {
+	Address *string `json:"addr"`
+	Level   int     `json:"level,omitempty"`
+}
+
 type DeviceDebug struct {
-	Mqtt struct {
-		Enable bool `json:"enable"`
-	} `json:"mqtt"`
-	WebSocket struct {
-		Enable bool `json:"enable"`
-	} `json:"websocket"`
-	Udp struct {
-		Enable bool `json:"enable"`
-	} `json:"udp"`
+	Mqtt      Enabler    `json:"mqtt"`
+	WebSocket Enabler    `json:"websocket"`
+	Udp       EnablerUDP `json:"udp"`
 }
 
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys/#status

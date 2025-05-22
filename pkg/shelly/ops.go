@@ -84,14 +84,15 @@ func Init(ctx context.Context, timeout time.Duration) {
 	})
 	registrar.RegisterMethodHandler(Reboot.String(), types.MethodHandler{
 		Allocate:   func() any { return nil },
-		HttpMethod: http.MethodPost,
+		HttpMethod: http.MethodGet,
 	})
 	registrar.RegisterMethodHandler(CheckForUpdate.String(), types.MethodHandler{
 		Allocate:   func() any { return new(CheckForUpdateResponse) },
 		HttpMethod: http.MethodGet,
 	})
 	registrar.RegisterMethodHandler(FactoryReset.String(), types.MethodHandler{
-		Allocate:   func() any { return nil },
+		Allocate: func() any { return nil },
+		// https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellyfactoryreset-example
 		HttpMethod: http.MethodPost,
 	})
 

@@ -7,7 +7,7 @@ MQTT.subscribe(
     CONFIG.device + "/events/rpc",
     function (topic, message, ud) {
         try {
-            console.log("Handling event topic:", topic, "message", message, "userData", ud);
+            print("Handling event topic:", topic, "message", message, "userData", ud);
             // message = {
             //     "src":"shelly1minig3-54320464f17c",
             //     "dst":"shelly1minig3-54320464f17c/events",
@@ -23,15 +23,15 @@ MQTT.subscribe(
             // }
             msg = JSON.parse(message)
             if (msg.method === "NotifyStatus" && msg.params["switch:0"] !== undefined && msg.params["switch:0"].output !== undefined) {
-                console.log("Calling Switch.Set", msg.params["switch:0"].output, "for", CONFIG.device)
+                print("Calling Switch.Set", msg.params["switch:0"].output, "for", CONFIG.device)
                 Shelly.call("Switch.Set", { id: 1, on: msg.params["switch:0"].output });
             } else {
-              console.log("ignoring msg:", msg)
+              print("ignoring msg:", msg)
             }
         } catch (e) {
-            console.log("Error handling event: ", e);
+            print("Error handling event: ", e);
         }
     },
     "none"
 );
-console.log("Now handling MQTT RPC events from", CONFIG.device);
+print("Now handling MQTT RPC events from", CONFIG.device);

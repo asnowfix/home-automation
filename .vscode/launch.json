@@ -122,6 +122,39 @@
             "env": {
                 "MYHOME_LOG": "stderr"
             }
+        },
+        {
+            "name": "homectl shelly script list shelly1minig3-54320464074c",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["shelly", "script", "list", "shelly1minig3-54320464074c"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl shelly script fetch shelly1minig3-54320464074c",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["shelly", "script", "fetch", "shelly1minig3-54320464074c"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl shelly script eval shelly1minig3-54320464074c",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["shelly", "script", "eval", "shelly1minig3-54320464074c", "2", "print(CONFIG.allowedMacAddresses)"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
         }
     ]
 }

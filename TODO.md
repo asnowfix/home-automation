@@ -25,6 +25,8 @@ Functions
         1:23PM ERR ..\pkg\shelly\shttp\channel.go:38 > HTTP error error="GET support query parameters only (got *shelly.ComponentsRequest)"
         1:23PM ERR ..\internal\myhome\device.go:231 > Unable to get device's components (continuing) error="GET support query parameters only (got *shelly.ComponentsRequest)" logger=DeviceManager#WatchZeroConf
 
+[ ] Deactivate Wi-Fi if Ethernet is available & active.
+[x] Disable auto-off timer of the pool-house switches (using double push)
 [ ] Upload ip-assignment-watchdog.js on every device that have scripting
 [ ] Configure adaptive heater control on every device that are known to be heaters (based on group membership)
 [ ] Upload daily-reboot.js on every device that have scripting
@@ -85,9 +87,64 @@ Functions
 [x] Ctrl-C should stop myhome program (whatever the option)
 [x] Fix inbound IPv6 communication
 
+Cleanup
+-------
+
+[ ] Code review by Windsurf
+[ ] Auto-Stop script at upload if running
+
+        shelly_notification:164 Status change of script:1: {"error_msg":null,"errors":[],"running":true}
+
+[ ] Use Native slog.in-context like:
+
+        ```go
+	ctx = logr.NewContext(ctx, logr.New(logr.NewJSONEncoder()))
+
+        [...]
+
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+        ctx = slog.NewContext(ctx, slog.New(slog.NewTextHandler(os.Stdout, nil)))
+        ```
+
+[ ] Reduce MQTT traffic (prefer using device lookup result when possible)
+
+        Wifi.GetStatus via MQTT" msg-count=23054 timestamp=87339.946 v=0
+        Shelly.GetComponents via SHC 35.205.206.219:6022" msg-count=23055 timestamp=87339.946 v=0
+        Shelly.GetComponents via SHC 35.205.206.219:6022" msg-count=23056 timestamp=87340.148 v=0
+        Wifi.GetStatus via MQTT" msg-count=23057 timestamp=87340.834 v=0
+        Shelly.GetDeviceInfo via MQTT" msg-count=23058 timestamp=87346.675 v=0
+        Shelly.ListMethods via MQTT" msg-count=23059 timestamp=87347.041 v=0
+        Script.List via MQTT" msg-count=23060 timestamp=87347.137 v=0
+        Shelly.GetDeviceInfo via MQTT" msg-count=23061 timestamp=87378.928 v=0
+        Shelly.ListMethods via MQTT" msg-count=23062 timestamp=87379.331 v=0
+        Script.Stop via MQTT" msg-count=23063 timestamp=87379.528 v=0
+        shelly_notification:165 Status change of script:1: {\"id\":1,\"error_msg\":null,\"errors\":[],\"running\":false}" msg-count=23064 timestamp=87379.542 v=0
+
+[ ] Filter out debug messages: remove messages not tight to the given script name or id
+[ ] Reassemble multi-line debug message (separated by \n, not \x00) & missing leading "{" like:
+
+        msg="\"info\": {"
+        msg="\"component\": \"input:0\","
+        msg="\"id\": 0," 
+        msg="\"event\": \"btn_up\"," 
+        msg="\"ts\": 1746978309.23000001907 }" 
+        msg=}"
+
+[x] Take into acount double-push events:
+
+        msg="shelly_notification:211 Event from input:0: {\"component\":\"input:0\",\"id\":0,\"event\":\"double_push\",\"ts\":1746980857.36}" 
+
+[ ] Use options.PrintResult() every where in homectl
+
 Integration
 -----------
 
+[ ] Add support for Matter protocol for Gen2 devices via GW
+[ ] Add support for Matter protocol for Gen1 devices via GW
+[ ] Add GoLang profiling support es explained in <https://go.dev/blog/pprof>
 [ ] BUG: Fix dpkg upgrade
 
         admin@myhome:~ $ sudo dpkg -i ./myhome_0.2.4_arm64.deb

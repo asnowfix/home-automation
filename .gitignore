@@ -42,3 +42,4 @@ SECRETS.md
 /myip/myip*
 /mqtt-cli-*.deb
 /wix.build.json
+/homectl/shelly*/*.js

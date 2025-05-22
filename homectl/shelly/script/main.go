@@ -9,15 +9,3 @@ var Cmd = &cobra.Command{
 	Short: "Manage scripts running on Shelly devices",
 	Args:  cobra.NoArgs,
 }
-
-var flags struct {
-	Id   uint32
-	Name string
-}
-
-func init() {
-	Cmd.PersistentFlags().Uint32VarP(&flags.Id, "id", "i", 0, "Script Id")
-	Cmd.PersistentFlags().StringVarP(&flags.Name, "name", "n", "", "Script Name")
-	Cmd.MarkFlagsMutuallyExclusive("id", "name")
-	// Cmd.MarkFlagsOneRequired("id", "name", "all")
-}

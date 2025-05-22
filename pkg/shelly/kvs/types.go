@@ -2,13 +2,10 @@ package kvs
 
 // <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/KVS/>
 
-type Key struct {
-	Key string `json:"key"` // The key to be looked-up / added / updated. (Required)
-}
-
 type KeyValue struct {
-	Key
-	Value
+	Key   string `json:"key"`   // The key to be looked-up / added / updated. (Required)
+	Value string `json:"value"` // any JSON value to be added / updated.
+	Status
 }
 
 type Value struct {
@@ -27,5 +24,5 @@ type KeyItems struct {
 }
 
 type KeyValueItems struct {
-	Items map[string]Value `json:"items"` // The key-value pairs to be added / updated.
+	Items []KeyValue `json:"items"` // The key-value pairs to be added / updated.
 }

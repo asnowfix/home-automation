@@ -51,7 +51,6 @@ jobs:
                 id: show-artifacts
                 run: |
                     echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
-                    cp $() .debpkg/usr/bin/myhome
                     echo "bin_arm64=$(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -r '.[] | select(.name == "myhome") | .path')" | tee -a $GITHUB_OUTPUT
             -
                 id: version

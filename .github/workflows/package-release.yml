@@ -48,7 +48,11 @@ jobs:
                 #     GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
             -
                 name: Show artifacts
-                run: echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
+                id: show-artifacts
+                run: |
+                    echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
+                    cp $() .debpkg/usr/bin/myhome
+                    echo "bin_arm64=$(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -r '.[] | select(.name == "myhome") | .path')" | tee -a $GITHUB_OUTPUT
             -
                 id: version
                 name: Get package version from latest (current or prior) tag
@@ -62,18 +66,18 @@ jobs:
                     echo "release=$(git describe)" | tee -a "$GITHUB_OUTPUT"
             -
                 id: upload-myhome-arm64-artifact
-                name: Upload MyHome artifact
+                name: Upload MyHome ARM64 binary as artifact
                 uses: actions/upload-artifact@v4
                 with:
-                    name: myhome-arm64
-                    path: $(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -r '.[] | select(.name == "myhome") | .path')
+                    name: bin_arm64
+                    path: ${{ steps.show-artifacts.outputs.bin_arm64 }}
             -
                 id: prepare-deb
                 name: Prepare package content
                 run: |
                     # main program
                     mkdir -p .debpkg/usr/bin
-                    cp $(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -r '.[] | select(.name == "myhome") | .path') .debpkg/usr/bin/myhome
+                    cp ${{ steps.show-artifacts.outputs.bin_arm64 }} .debpkg/usr/bin/myhome
 
                     # systemd scripts
                     mkdir -p .debpkg/lib/systemd/system/
@@ -369,7 +373,7 @@ jobs:
                 name: Download MyHome ARM64 from package-release
                 uses: actions/download-artifact@v4
                 with:
-                    name: myhome-arm64
+                    name: bin_arm64
                     #path: ${{ needs.package-release.outputs.myhome-arm64 }}
             -
                 name: List files in workspace
@@ -381,7 +385,7 @@ jobs:
                 with:
                     name: Release ${{ needs.package-deb.outputs.release_version }}
                     artifactErrorsFailBuild: true
-                    artifacts: "${{ needs.package-deb.outputs.deb_file }},${{ needs.package-msi.outputs.msi_file }},${{ needs.package-release.outputs.myhome-arm64 }}"
+                    artifacts: "${{ needs.package-deb.outputs.deb_file }},${{ needs.package-deb.outputs.bin_arm64 }},${{ needs.package-msi.outputs.msi_file }}"
                     body: ${{ steps.release_notes.outputs.notes }}
                     #tag: ${{ needs.package-deb.outputs.release_version }}-rc${{ github.run_number }}
                     tag: ${{ needs.package-deb.outputs.release_version }}

@@ -13,6 +13,7 @@ jobs:
     outputs:
       release_version: ${{ steps.version.outputs.release }}
       deb_file: ${{ steps.build-deb.outputs.file_name }}
+      bin_arm64: ${{ steps.show-artifacts.outputs.bin_arm64 }}
     steps:
       - name: Install jq
         uses: awalsh128/cache-apt-pkgs-action@latest

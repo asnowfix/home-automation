@@ -1,7 +1,6 @@
 name: Build and Test
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 on:
   push:
     branches:
@@ -10,20 +9,16 @@ on:
     branches:
       - main
       - v[0-9]+.[0-9x]+.x
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-        -
-            name: Checkout
-            uses: actions/checkout@v4
-        -
-            name: Setup Go
-            uses: actions/setup-go@v5
-            with:
-                go-version: '1.23.x'
-        -
-            id: go-test
-            name: Run go test
-            run: go test ./...
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - id: go-test
+        name: Run go test
+        run: go test ./...

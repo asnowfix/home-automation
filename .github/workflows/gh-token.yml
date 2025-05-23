@@ -1,21 +1,16 @@
 name: get-token
-
 "on":
-  push: { branches: ["main"] }
-
+  push: {branches: ["main"]}
 jobs:
-  
   gh-token:
     permissions: write-all
     name: print-token
     # environment: github
     # needs: pre-pkr
     runs-on: ubuntu-latest
-
     steps:
       - name: Check out code
         uses: actions/checkout@v2
-
       - name: Get registration token
         id: getRegToken
         run: |

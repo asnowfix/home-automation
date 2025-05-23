@@ -1,65 +1,53 @@
 name: auto-tag-patch
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 on:
   push:
-    branches:
-        'v[0-9]+.[0-9]+.x'
-
+    branches: 'v[0-9]+.[0-9]+.x'
 jobs:
   tag-patch:
     runs-on: ubuntu-latest
     steps:
-        -
-            name: Checkout
-            uses: actions/checkout@v4
-            with:
-              fetch-depth: 0
-        -
-            name: Setup Go
-            uses: actions/setup-go@v5
-            with:
-                go-version: '1.23.x'
-        -
-            id: go-build
-            name: Run go build
-            run: go build ./...
-        -
-            id: go-test
-            name: Run go test
-            run: go test ./...
-        -
-            name: Get previous tag
-            id: previoustag
-            run: |
-                echo "tag=$(git describe --tags --abbrev=0)" | tee -a $GITHUB_OUTPUT
-        -
-            name: Get semantic version
-            id: semver
-            uses: 'WyriHaximus/github-action-next-semvers@v1'
-            with:
-                version: ${{ steps.previoustag.outputs.tag }}
-        -
-            name: Import GPG key
-            uses: crazy-max/ghaction-import-gpg@v6
-            with:
-                gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-                passphrase: ${{ secrets.GPG_PASSPHRASE }}
-                git_config_global: true
-                git_user_signingkey: true
-                git_commit_gpgsign: true
-                git_tag_gpgsign: true
-        -
-            name: Create signed tag
-            run: |
-                git tag -s "v${{ steps.semver.outputs.patch }}" -m "Release v${{ steps.semver.outputs.patch }}"
-                git push origin "v${{ steps.semver.outputs.patch }}"
-        -
-            name: Trigger Packaging Workflow
-            run: |
-                curl -X POST \
-                    -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                    -H "Accept: application/vnd.github.v3+json" \
-                    https://api.github.com/repos/${{ github.repository }}/actions/workflows/package-release.yml/dispatches \
-                    -d '{"ref":"v${{ steps.semver.outputs.patch }}","inputs":{"previous":"${{ steps.previoustag.outputs.tag }}"}}'
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - id: go-build
+        name: Run go build
+        run: go build ./...
+      - id: go-test
+        name: Run go test
+        run: go test ./...
+      - name: Get previous tag
+        id: previoustag
+        run: |
+          echo "tag=$(git describe --tags --abbrev=0)" | tee -a $GITHUB_OUTPUT
+      - name: Get semantic version
+        id: semver
+        uses: 'WyriHaximus/github-action-next-semvers@v1'
+        with:
+          version: ${{ steps.previoustag.outputs.tag }}
+      - name: Import GPG key
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_config_global: true
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+          git_tag_gpgsign: true
+      - name: Create signed tag
+        run: |
+          git tag -s "v${{ steps.semver.outputs.patch }}" -m "Release v${{ steps.semver.outputs.patch }}"
+          git push origin "v${{ steps.semver.outputs.patch }}"
+      - name: Trigger Packaging Workflow
+        run: |
+          curl -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              https://api.github.com/repos/${{ github.repository }}/actions/workflows/package-release.yml/dispatches \
+              -d '{"ref":"v${{ steps.semver.outputs.patch }}","inputs":{"previous":"${{ steps.previoustag.outputs.tag }}"}}'

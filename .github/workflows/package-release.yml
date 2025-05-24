@@ -44,12 +44,13 @@ jobs:
       - name: Shape artifacts
         id: shape-artifacts
         run: |
-          echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
-          entry=$(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -r '.[] | select(.name == "myhome")')
+          set -x
+          echo "${{ steps.go-releaser.outputs.artifacts }}" | jq
+          entry=$(echo "${{ steps.go-releaser.outputs.artifacts }}" | jq -cr '.[] | select(.name == "myhome") | .')
           echo "entry=$entry"
-          file=$(echo '${entry}' | jq -r '.name')-$(echo '${entry}' | jq -r '.os')-$(echo '${entry}' | jq -r '.arch')
+          file=$(echo "$entry" | jq -cr '.name')-$(echo "$entry" | jq -cr '.os')-$(echo "$entry" | jq -cr '.arch')
           echo "file=$file"
-          cp $(echo '${entry}' | jq -r '.path') $file
+          cp $(echo "$entry" | jq -cr '.path') $file
           echo "bin_arm64=$file" | tee -a $GITHUB_OUTPUT
       - id: version
         name: Get package version from latest (current or prior) tag

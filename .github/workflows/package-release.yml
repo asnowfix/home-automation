@@ -214,7 +214,7 @@ jobs:
           name: bin_arm64
           path: myhome_arm64
       - name: List files in workspace
-        run: ls -al
+        run: ls -alR
       - name: Release
         id: release
         uses: ncipollo/release-action@v1

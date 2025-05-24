@@ -212,7 +212,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bin_arm64
-          #path: ${{ needs.package-release.outputs.myhome-arm64 }}
+          path: myhome_arm64
       - name: List files in workspace
         run: ls -al
       - name: Release
@@ -221,7 +221,7 @@ jobs:
         with:
           name: Release ${{ needs.package-deb.outputs.release_version }}
           artifactErrorsFailBuild: true
-          artifacts: "${{ needs.package-deb.outputs.deb_file }},${{ needs.package-deb.outputs.bin_arm64 }},${{ needs.package-msi.outputs.msi_file }}"
+          artifacts: "${{ needs.package-deb.outputs.deb_file }},myhome_arm64,${{ needs.package-msi.outputs.msi_file }}"
           body: ${{ steps.release_notes.outputs.notes }}
           #tag: ${{ needs.package-deb.outputs.release_version }}-rc${{ github.run_number }}
           tag: ${{ needs.package-deb.outputs.release_version }}

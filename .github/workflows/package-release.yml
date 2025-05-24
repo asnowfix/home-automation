@@ -48,7 +48,7 @@ jobs:
           echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
           entry=$(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -cr '.[] | select(.name == "myhome") | .')
           echo "entry=$entry"
-          file=$(echo $entry | jq -cr '.name')-$(echo $entry | jq -cr '.os')-$(echo $entry | jq -cr '.arch')
+          file=$(echo $entry | jq -cr '.name')-$(echo $entry | jq -cr '.goos')-$(echo $entry | jq -cr '.goarch')
           echo "file=$file"
           cp $(echo $entry | jq -cr '.path') $file
           echo "bin_arm64=$file" | tee -a $GITHUB_OUTPUT

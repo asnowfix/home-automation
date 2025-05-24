@@ -13,7 +13,7 @@ jobs:
     outputs:
       release_version: ${{ steps.version.outputs.release }}
       deb_file: ${{ steps.build-deb.outputs.file_name }}
-      bin_arm64: ${{ steps.show-artifacts.outputs.bin_arm64 }}
+      bin_arm64: ${{ steps.shape-artifacts.outputs.bin_arm64 }}
     steps:
       - name: Install jq
         uses: awalsh128/cache-apt-pkgs-action@latest
@@ -41,11 +41,16 @@ jobs:
           # env:
           #     # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
           #     GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
-      - name: Show artifacts
-        id: show-artifacts
+      - name: Shape artifacts
+        id: shape-artifacts
         run: |
           echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
-          echo "bin_arm64=$(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -r '.[] | select(.name == "myhome") | .path')" | tee -a $GITHUB_OUTPUT
+          entry=$(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -r '.[] | select(.name == "myhome")')
+          echo "entry=$entry"
+          file=$(echo '${entry}' | jq -r '.name')-$(echo '${entry}' | jq -r '.os')-$(echo '${entry}' | jq -r '.arch')
+          echo "file=$file"
+          cp $(echo '${entry}' | jq -r '.path') $file
+          echo "bin_arm64=$file" | tee -a $GITHUB_OUTPUT
       - id: version
         name: Get package version from latest (current or prior) tag
         run: |
@@ -61,13 +66,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bin_arm64
-          path: ${{ steps.show-artifacts.outputs.bin_arm64 }}
+          path: ${{ steps.shape-artifacts.outputs.bin_arm64 }}
       - id: prepare-deb
         name: Prepare package content
         run: |
           # main program
           mkdir -p .debpkg/usr/bin
-          cp ${{ steps.show-artifacts.outputs.bin_arm64 }} .debpkg/usr/bin/myhome
+          cp ${{ steps.shape-artifacts.outputs.bin_arm64 }} .debpkg/usr/bin/myhome
 
           # systemd scripts
           mkdir -p .debpkg/lib/systemd/system/
@@ -202,17 +207,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: msi_file
-          #path: ${{ needs.package-msi.outputs.msi_file }}
       - name: Download MyHome DEB from package-deb
         uses: actions/download-artifact@v4
         with:
           name: deb_file
-          #path: ${{ needs.package-deb.outputs.deb_file }}
       - name: Download MyHome ARM64 from package-release
         uses: actions/download-artifact@v4
         with:
           name: bin_arm64
-          path: myhome_arm64
       - name: List files in workspace
         run: ls -alR
       - name: Release
@@ -221,7 +223,7 @@ jobs:
         with:
           name: Release ${{ needs.package-deb.outputs.release_version }}
           artifactErrorsFailBuild: true
-          artifacts: "${{ needs.package-deb.outputs.deb_file }},myhome_arm64,${{ needs.package-msi.outputs.msi_file }}"
+          artifacts: "${{ needs.package-deb.outputs.deb_file }},${{ needs.package-deb.outputs.bin_arm64 }},${{ needs.package-msi.outputs.msi_file }}"
           body: ${{ steps.release_notes.outputs.notes }}
           #tag: ${{ needs.package-deb.outputs.release_version }}-rc${{ github.run_number }}
           tag: ${{ needs.package-deb.outputs.release_version }}

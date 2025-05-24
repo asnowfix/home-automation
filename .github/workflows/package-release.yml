@@ -41,17 +41,6 @@ jobs:
           # env:
           #     # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
           #     GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
-      - name: Shape artifacts
-        id: shape-artifacts
-        run: |
-          set -x
-          echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
-          entry=$(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -cr '.[] | select(.name == "myhome") | .')
-          echo "entry=$entry"
-          file=$(echo $entry | jq -cr '.name')-$(echo $entry | jq -cr '.goos')-$(echo $entry | jq -cr '.goarch')
-          echo "file=$file"
-          cp $(echo $entry | jq -cr '.path') $file
-          echo "bin_arm64=$file" | tee -a $GITHUB_OUTPUT
       - id: version
         name: Get package version from latest (current or prior) tag
         run: |
@@ -62,6 +51,17 @@ jobs:
           #echo "debian_version=$(git describe | sed -E 's|^v*(.*)$|\1|g')" | tee -a $GITHUB_OUTPUT
           #echo "::set-output name=release::$(git describe)"
           echo "release=$(git describe)" | tee -a "$GITHUB_OUTPUT"
+      - name: Shape artifacts
+        id: shape-artifacts
+        run: |
+          set -x
+          echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
+          entry=$(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -cr '.[] | select(.name == "myhome") | .')
+          echo "entry=$entry"
+          file=$(echo $entry | jq -cr '.name')-${{ steps.version.outputs.release }}-$(echo $entry | jq -cr '.goos')-$(echo $entry | jq -cr '.goarch')
+          echo "file=$file"
+          cp $(echo $entry | jq -cr '.path') $file
+          echo "bin_arm64=$file" | tee -a $GITHUB_OUTPUT
       - id: upload-myhome-arm64-artifact
         name: Upload MyHome ARM64 binary as artifact
         uses: actions/upload-artifact@v4

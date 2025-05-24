@@ -191,3 +191,24 @@ Integration
 [x] Build MSI package for Windows on new tagged version
 [ ] Run myhome as a windows service <https://learn.microsoft.com/en-us/troubleshoot/windows-client/setup-upgrade-and-drivers/create-user-defined-service>
 [ ] Run every service under <https://github.com/kardianos/service> rather than manual packaging?
+[x] BUG fix crash on Rapsbian
+
+        May 24 10:03:30 gruissan myhome[618]: panic: runtime error: invalid memory address or nil pointer dereference
+        May 24 10:03:30 gruissan myhome[618]: [signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x62bb04]
+        May 24 10:03:30 gruissan myhome[618]: goroutine 1 [running]:
+        May 24 10:03:30 gruissan myhome[618]: myhome/mqtt.MyHome({0xa94770, 0x40002ba060}, {{0xa98780?, 0x40000473e0?}, 0x40001ffd50?}, {0xa96fa0, 0x40000b8000}, {0x81e18c, 0x6}, {0x0, ...})
+        May 24 10:03:30 gruissan myhome[618]:         /home/runner/work/home-automation/home-automation/myhome/mqtt/server.go:79 +0x584
+        May 24 10:03:30 gruissan myhome[618]: myhome/daemon.(*daemon).Run(0x40002ba0f0)
+        May 24 10:03:30 gruissan myhome[618]:         /home/runner/work/home-automation/home-automation/myhome/daemon/daemon.go:58 +0x1e0
+        May 24 10:03:30 gruissan myhome[618]: myhome/daemon.init.func3(0xfced80?, {0x4000281f20?, 0x4?, 0x81d5ab?})
+        May 24 10:03:30 gruissan myhome[618]:         /home/runner/work/home-automation/home-automation/myhome/daemon/run.go:32 +0x13c
+        May 24 10:03:30 gruissan myhome[618]: github.com/spf13/cobra.(*Command).execute(0xfced80, {0x4000281ec0, 0x3, 0x3})
+        May 24 10:03:30 gruissan myhome[618]:         /home/runner/go/pkg/mod/github.com/spf13/cobra@v1.8.1/command.go:985 +0x830
+        May 24 10:03:30 gruissan myhome[618]: github.com/spf13/cobra.(*Command).ExecuteC(0xfcdf20)
+        May 24 10:03:30 gruissan myhome[618]:         /home/runner/go/pkg/mod/github.com/spf13/cobra@v1.8.1/command.go:1117 +0x344
+        May 24 10:03:30 gruissan myhome[618]: github.com/spf13/cobra.(*Command).Execute(...)
+        May 24 10:03:30 gruissan myhome[618]:         /home/runner/go/pkg/mod/github.com/spf13/cobra@v1.8.1/command.go:1041
+        May 24 10:03:30 gruissan myhome[618]: main.main()
+        May 24 10:03:30 gruissan myhome[618]:         /home/runner/work/home-automation/home-automation/myhome/main.go:76 +0x30
+        May 24 10:03:30 gruissan systemd[1]: myhome.service: Main process exited, code=exited, status=2/INVALIDARGUMENT
+

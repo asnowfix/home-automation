@@ -75,12 +75,12 @@ func MyHome(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 
 	// Register the MQTT broker service with mDNS.
 	iface, _, err := mynet.MainInterface(log)
-	ifaces := make([]net.Interface, 1)
-	ifaces[0] = *iface
 	if err != nil {
 		log.Error(err, "Unable to get main local IP interface")
 		return err
 	}
+	ifaces := make([]net.Interface, 1)
+	ifaces[0] = *iface
 
 	mdnsServer, err := zeroconf.Register(instance, mymqtt.ZEROCONF_SERVICE, "local.", mymqtt.PRIVATE_PORT, info, ifaces)
 	if err != nil {

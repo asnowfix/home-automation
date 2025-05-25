@@ -50,16 +50,13 @@ jobs:
           #echo "debian_revision=$(git describe | sed -E 's|^v*([0-9]+\.[0-9]+\.[0-9]+)-(.*)$|\2|g')" | tee -a $GITHUB_OUTPUT
           #echo "debian_version=$(git describe | sed -E 's|^v*(.*)$|\1|g')" | tee -a $GITHUB_OUTPUT
           #echo "::set-output name=release::$(git describe)"
-          echo "release=$(git describe)" | tee -a "$GITHUB_OUTPUT"
+          echo "release=$(git describe | sed -E 's|^v*(.*)$|\1|g')" | tee -a "$GITHUB_OUTPUT"
       - name: Shape artifacts
         id: shape-artifacts
         run: |
-          set -x
           echo '${{ steps.go-releaser.outputs.artifacts }}' | jq
           entry=$(echo '${{ steps.go-releaser.outputs.artifacts }}' | jq -cr '.[] | select(.name == "myhome") | .')
-          echo "entry=$entry"
           file=$(echo $entry | jq -cr '.name')-${{ steps.version.outputs.release }}-$(echo $entry | jq -cr '.goos')-$(echo $entry | jq -cr '.goarch')
-          echo "file=$file"
           cp $(echo $entry | jq -cr '.path') $file
           echo "bin_arm64=$file" | tee -a $GITHUB_OUTPUT
       - id: upload-myhome-arm64-artifact

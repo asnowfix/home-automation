@@ -27,9 +27,12 @@
 /.vscode/*
 !/.vscode/launch.json
 
+# Debug
 *__debug_*
+*.prof
 
-/*.pfx
+# Certificates
+*.pfx
 /secrets.sh
 SECRETS.md
 
@@ -38,7 +41,7 @@ SECRETS.md
 *.key
 
 /homectl/homectl*
-/myhome/myhome
+/myhome/myhome*
 /myip/myip*
 /mqtt-cli-*.deb
 /wix.build.json

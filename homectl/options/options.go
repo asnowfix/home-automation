@@ -30,8 +30,7 @@ var Flags struct {
 
 var Via types.Channel
 
-func CommandLineContext(log logr.Logger, timeout time.Duration) context.Context {
-	ctx := context.Background()
+func CommandLineContext(ctx context.Context, log logr.Logger, timeout time.Duration) context.Context {
 	ctx = context.WithValue(ctx, global.LogKey, log)
 	var cancel context.CancelFunc
 	if timeout > 0 {

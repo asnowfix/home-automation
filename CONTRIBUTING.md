@@ -263,7 +263,55 @@ go run . -h
 ## macOS TBC
 
 ```bash
-brew install git
+brew install git go sqlite sqlite3 graphviz
+```
+
+## Profiling
+
+See <https://go.dev/blog/pprof> for details.
+
+To profile homectl:
+
+```bash
+homectl --cpuprofile 0.prof
+```
+
+To profile myhome:
+
+```bash
+myhome --cpuprofile 0.prof
+```
+
+To view the profile:
+
+```bash
+$go tool pprof 0.prof 
+File: homectl
+Type: cpu
+Time: 2025-05-20 21:51:58 CEST
+Duration: 1.01s, Total samples = 20ms ( 1.98%)
+Entering interactive mode (type "help" for commands, "o" for options)
+(pprof) top 10
+Showing nodes accounting for 20ms, 100% of 20ms total
+Showing top 10 nodes out of 23
+      flat  flat%   sum%        cum   cum%
+      10ms 50.00% 50.00%       10ms 50.00%  runtime.(*unwinder).resolveInternal
+      10ms 50.00%   100%       10ms 50.00%  runtime.pthread_cond_signal
+         0     0%   100%       10ms 50.00%  github.com/eclipse/paho%2emqtt%2egolang.startOutgoingComms.func1
+         0     0%   100%       10ms 50.00%  runtime.(*unwinder).next
+         0     0%   100%       10ms 50.00%  runtime.deductAssistCredit
+         0     0%   100%       10ms 50.00%  runtime.gcAssistAlloc
+         0     0%   100%       10ms 50.00%  runtime.gcAssistAlloc.func2
+         0     0%   100%       10ms 50.00%  runtime.gcAssistAlloc1
+         0     0%   100%       10ms 50.00%  runtime.gcDrainN
+         0     0%   100%       10ms 50.00%  runtime.mallocgc
+```
+
+To see the graph of dependencies:
+
+```bash
+$go tool pprof 0.prof
+(pprof) web
 ```
 
 ## VSCode

@@ -23,23 +23,27 @@ var Cmd = &cobra.Command{
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		hlog.Init(options.Flags.Verbose)
 		log := hlog.Logger
+		ctx := cmd.Context()
+
 		if debug.IsDebuggerAttached() {
 			log.Info("Running under debugger (will wait forever)")
 			// You can set different timeouts or behavior here
 			options.Flags.CommandTimeout = 0
 		}
 
-		f, err := os.Create(options.Flags.CpuProfile)
-		if err != nil {
-			log.Error(err, "Failed to create CPU profile")
-			return err
+		if options.Flags.CpuProfile != "" {
+			if options.Flags.CpuProfile != "" {
+				f, err := os.Create(options.Flags.CpuProfile)
+				if err != nil {
+					log.Error(err, "Failed to create CPU profile")
+					return err
+				}
+				pprof.StartCPUProfile(f)
+				ctx = context.WithValue(ctx, global.CpuProfileKey, f)
+			}
 		}
-		pprof.StartCPUProfile(f)
-		ctx := cmd.Context()
-		ctx = context.WithValue(ctx, global.CpuProfileKey, f)
-		cmd.SetContext(ctx)
 
-		ctx = options.CommandLineContext(log, options.Flags.CommandTimeout)
+		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout)
 		cmd.SetContext(ctx)
 
 		return nil
@@ -62,6 +66,7 @@ var Cmd = &cobra.Command{
 }
 
 func init() {
+	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "P", "", "write CPU profile to `file`")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
 	Cmd.AddCommand(daemon.Cmd)
 }

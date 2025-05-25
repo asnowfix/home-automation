@@ -6,7 +6,7 @@ After=local-fs.target network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/myhome daemon --disable-device-manager
+ExecStart=/usr/bin/myhome daemon run --disable-device-manager
 Restart=on-failure
 RestartSec=5
 WorkingDirectory=/var/lib/myhome

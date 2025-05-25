@@ -178,8 +178,8 @@ Integration
 [ ] Ship linux/arm64 binary in the release
 [ ] Ship linux/amd64 binary in the release
 [ ] Add cron-job to download (only) the binary from the latest release
-[ ] Add command to auto-update Debian package installation from latest release
-[ ] Package systemd scripts in-place (with stop, disable & reload as preuninstall, ans reload enable & start as postinstall)
+[x] Add command to auto-update Debian package installation from latest release
+[x] Package systemd scripts in-place (with stop, disable & reload as preuninstall, ans reload enable & start as postinstall)
 [x] Create verified tags
 [ ] Use goreleaser-cross if needed
 

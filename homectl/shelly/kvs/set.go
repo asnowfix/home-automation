@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"hlog"
 	"myhome"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
@@ -32,11 +34,15 @@ var setCtl = &cobra.Command{
 	},
 }
 
-func setKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func setKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
 	key := args[0]
 	value := args[1]
-	log.Info("Setting key", "key", key, "value", value, "device", device.Host)
-	status, err := kvs.SetKeyValue(ctx, log, via, device, key, value)
+	log.Info("Setting key", "key", key, "value", value, "device", sd.Id())
+	status, err := kvs.SetKeyValue(ctx, log, via, sd, key, value)
 	if err != nil {
 		log.Error(err, "Unable to set", "key", key, "value", value)
 		return nil, err

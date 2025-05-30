@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/types"
@@ -34,8 +35,12 @@ var configCmd = &cobra.Command{
 	},
 }
 
-func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(ctx, via, mqtt.GetConfig.String(), nil)
+func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
+	out, err := sd.CallE(ctx, via, mqtt.GetConfig.String(), nil)
 	if err != nil {
 		log.Error(err, "Unable to get MQTT config")
 		return nil, err
@@ -58,7 +63,7 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 	}
 	config.Server = mc.BrokerUrl().String()
 
-	out, err = device.CallE(ctx, via, mqtt.SetConfig.String(), mqtt.SetConfigRequest{
+	out, err = sd.CallE(ctx, via, mqtt.SetConfig.String(), mqtt.SetConfigRequest{
 		Config: *config,
 	})
 	if err != nil {
@@ -71,10 +76,14 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 		return nil, fmt.Errorf("invalid MQTT set config response type %T", out)
 	}
 	if res.Result.RestartRequired {
-		device.CallE(ctx, via, string(shelly.Reboot), nil)
+		_, err := sd.CallE(ctx, via, string(shelly.Reboot), nil)
+		if err != nil {
+			log.Error(err, "Unable to reboot device")
+			return nil, err
+		}
 	}
 
-	out, err = device.CallE(ctx, via, mqtt.GetConfig.String(), nil)
+	out, err = sd.CallE(ctx, via, mqtt.GetConfig.String(), nil)
 	if err != nil {
 		log.Error(err, "Unable to get MQTT config")
 		return nil, err

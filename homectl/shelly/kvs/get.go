@@ -2,12 +2,15 @@ package kvs
 
 import (
 	"context"
+	"fmt"
 	"hlog"
 	"myhome"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
@@ -33,8 +36,12 @@ var getCtl = &cobra.Command{
 	},
 }
 
-func get(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := kvs.GetManyValues(ctx, log, via, device, args[0])
+func get(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
+	out, err := kvs.GetManyValues(ctx, log, via, sd, args[0])
 	if err != nil {
 		log.Error(err, "Unable to get many key-values")
 		return nil, err

@@ -188,7 +188,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			continue
 		} else {
 			dm.log.Info("Preparing update of device", "id", device.Id())
-			dm.update <- device.WithImpl(shelly.NewDeviceFromInfo(ctx, dm.log, device.Info))
+			dm.update <- device.WithImpl(shelly.NewDeviceFromSummary(ctx, dm.log, device))
 		}
 	}
 
@@ -259,7 +259,7 @@ func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwr
 	if d.Manufacturer == string(myhome.Shelly) {
 		sd, ok := d.Impl().(*shelly.Device)
 		if !ok {
-			sd = shelly.NewDeviceFromMqttId(ctx, dm.log, d.Id(), dm.mqttClient)
+			return fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(d.Impl()), d)
 		}
 		groups, err := dm.gr.GetDeviceGroups(d.Manufacturer, d.Id())
 		if err != nil {

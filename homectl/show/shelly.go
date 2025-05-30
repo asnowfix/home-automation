@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"hlog"
 	"myhome"
-	"mymqtt"
-	"mynet"
-	"net"
 	"pkg/shelly"
 	"reflect"
 
@@ -17,12 +14,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var direct bool
 var long bool
 
 func init() {
-	showShellyCmd.PersistentFlags().BoolVarP(&direct, "direct", "d", false, "contact device directly, do not query the MyHome server")
-	showShellyCmd.PersistentFlags().BoolVarP(&direct, "long", "l", false, "long output")
+	showShellyCmd.PersistentFlags().BoolVarP(&long, "long", "l", false, "long output")
 }
 
 var showShellyCmd = &cobra.Command{
@@ -40,34 +35,14 @@ var showShellyCmd = &cobra.Command{
 		log := hlog.Logger
 		ctx := cmd.Context()
 
-		if direct {
-			var sd *shelly.Device
-			ip := net.ParseIP(identifier)
-			if ip == nil || mynet.IsSameNetwork(log, ip) != nil {
-				sd = shelly.NewDeviceFromMqttId(ctx, log, identifier, mymqtt.GetClient(cmd.Context()))
-			} else {
-				sd = shelly.NewDeviceFromIp(ctx, log, ip)
-			}
-			// TODO implement
-			//sd := shelly.NewDeviceFromDeviceSummary(ctx, log, device)
-
-			device, err = myhome.NewDeviceFromShellyDevice(ctx, log, sd)
-			if err != nil {
-				return err
-			}
-		} else {
-			out, err = myhome.TheClient.CallE(ctx, myhome.DeviceShow, identifier)
-			if err != nil {
-				return err
-			}
-			var ok bool
-			device, ok = out.(*myhome.Device)
-			if !ok {
-				return fmt.Errorf("expected myhome.Device, got %T", out)
-			}
-		}
+		out, err = myhome.TheClient.CallE(ctx, myhome.DeviceShow, identifier)
 		if err != nil {
 			return err
+		}
+		var ok bool
+		device, ok = out.(*myhome.Device)
+		if !ok {
+			return fmt.Errorf("expected myhome.Device, got %T", out)
 		}
 		log.Info("result", "out", out, "type", reflect.TypeOf(out))
 

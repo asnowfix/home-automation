@@ -49,8 +49,8 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 				device, err := db.GetDeviceById(ctx, deviceId)
 				if err != nil {
 					log.Info("Device not found, creating new one", "device_id", deviceId)
-					sd = shelly.NewDeviceFromMqttId(ctx, log, deviceId, mc)
-					device, err = myhome.NewDeviceFromShellyDevice(ctx, log, sd)
+					sd = shelly.NewDeviceFromMqttId(ctx, log, deviceId)
+					device, err = myhome.NewDeviceFromImpl(ctx, log, sd)
 					if err != nil {
 						log.Error(err, "Failed to create device from shelly device")
 						continue
@@ -59,7 +59,7 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 					log.Info("Found device in DB", "device_id", deviceId)
 					if device.Impl() == nil {
 						log.Info("Loading device details in memory", "device_id", deviceId)
-						device.WithImpl(shelly.NewDeviceFromMqttId(ctx, log, device.Id(), mc))
+						device.WithImpl(shelly.NewDeviceFromSummary(ctx, log, device))
 					}
 				}
 

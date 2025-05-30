@@ -65,6 +65,14 @@ func (d *Device) Name() string {
 	return d.Name_
 }
 
+func (d *Device) Mac() net.HardwareAddr {
+	// FIXME: put a device update on the backburner
+	if d.Info == nil || d.Info.Product == nil || d.Info.Product.MacAddress == nil {
+		return nil
+	}
+	return d.Info.Product.MacAddress
+}
+
 func (d *Device) SetHost(host string) {
 	d.Host_ = host
 }
@@ -112,6 +120,7 @@ type Config struct {
 	BLE       *any                 `json:"ble,omitempty"`
 	BtHome    *any                 `json:"bthome,omitempty"`
 	Cloud     *any                 `json:"cloud,omitempty"`
+	Ethernet  *any                 `json:"eth,omitempty"`
 	Input0    *sswitch.InputConfig `json:"input:0,omitempty"`
 	Input1    *sswitch.InputConfig `json:"input:1,omitempty"`
 	Input2    *sswitch.InputConfig `json:"input:2,omitempty"`
@@ -132,6 +141,7 @@ type Status struct {
 	BLE       *any                 `json:"ble,omitempty"`
 	BtHome    *any                 `json:"bthome,omitempty"`
 	Cloud     *any                 `json:"cloud,omitempty"`
+	Ethernet  *any                 `json:"eth,omitempty"`
 	Input0    *sswitch.InputStatus `json:"input:0,omitempty"`
 	Input1    *sswitch.InputStatus `json:"input:1,omitempty"`
 	Input2    *sswitch.InputStatus `json:"input:2,omitempty"`
@@ -204,11 +214,6 @@ func (d *Device) CallE(ctx context.Context, via types.Channel, method string, pa
 		// Sys.*
 		mh, err = registrar.MethodHandlerE(method)
 	default:
-		err = d.Init(ctx)
-		if err != nil {
-			d.log.Error(err, "Unable to initialize device", "id", d.Id(), "host", d.Host())
-			return nil, err
-		}
 		err = d.methods(ctx, via)
 		if err != nil {
 			d.log.Error(err, "Unable to get device's methods", "id", d.Id(), "host", d.Host())
@@ -257,47 +262,66 @@ func (d *Device) ReplyTo() string {
 	return d.me
 }
 
-func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) *Device {
-	d := &Device{
-		Host_:    ip.String(),
-		log:      log,
-		isMqttOk: false,
-	}
-	return d
-}
+// func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) *Device {
+// 	d := &Device{
+// 		Host_:    ip.String(),
+// 		log:      log,
+// 		isMqttOk: false,
+// 	}
+// 	return d
+// }
 
-func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string, mc *mymqtt.Client) *Device {
+func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) *Device {
 	d := &Device{
 		Id_:      id,
 		log:      log,
 		isMqttOk: true,
 	}
+	err := d.init(ctx)
+	if err != nil {
+		log.Error(err, "Unable to initialize device", "id", id)
+		panic(err)
+	}
+
 	return d
 }
 
-func NewDeviceFromInfo(ctx context.Context, log logr.Logger, info *DeviceInfo) *Device {
+func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.Device) devices.Device {
 	d := &Device{
-		Id_:      info.Id,
-		Info:     info,
+		Id_:   summary.Id(),
+		Name_: summary.Name(),
+		Host_: summary.Host(),
+		Info: &DeviceInfo{
+			Id: summary.Id(),
+			Product: &Product{
+				MacAddress: summary.Mac(),
+			},
+		},
 		log:      log,
 		isMqttOk: true,
 	}
+	err := d.init(ctx)
+	if err != nil {
+		log.Error(err, "Unable to initialize device", "id", summary.Id())
+		panic(err)
+	}
 	return d
 }
 
-func (d *Device) Init(ctx context.Context) error {
-	if d.Id() == "" && d.Host() == "" {
-		return fmt.Errorf("device id & host is empty")
-	}
-
+func (d *Device) init(ctx context.Context) error {
 	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
 		d.log.Error(err, "Unable to get MQTT client", "device_id", d.Id_)
 		panic(err)
 	}
-	d.me = fmt.Sprintf("%s_%s", mc.Id(), d.Id_)
+	if d.Id() == "" && d.Host() == "" {
+		return fmt.Errorf("device id & host is empty")
+	}
+
+	d.me = fmt.Sprintf("%s_%s", mc.Id(), d.Id())
 
 	if d.from == nil && mc != nil {
+		var err error
 		d.from, err = mc.Subscriber(ctx, fmt.Sprintf("%s/rpc", d.me), 1 /*qlen*/)
 		if err != nil {
 			d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
@@ -307,6 +331,7 @@ func (d *Device) Init(ctx context.Context) error {
 
 	if d.to == nil && mc != nil {
 		topic := fmt.Sprintf("%s/rpc", d.Id_)
+		var err error
 		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/)
 		if err != nil {
 			d.log.Error(err, "Unable to publish to device's RPC topic", "device_id", d.Id_)
@@ -377,7 +402,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 	return nil
 }
 
-type Do func(context.Context, logr.Logger, types.Channel, *Device, []string) (any, error)
+type Do func(context.Context, logr.Logger, types.Channel, devices.Device, []string) (any, error)
 
 func Print(log logr.Logger, d any) error {
 	buf, err := json.Marshal(d)
@@ -391,27 +416,10 @@ func Print(log logr.Logger, d any) error {
 
 func Foreach(ctx context.Context, log logr.Logger, devices []devices.Device, via types.Channel, do Do, args []string) (any, error) {
 	out := make([]any, 0, len(devices))
-	var err error
-
-	mc, err := mymqtt.GetClientE(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
+
 	for _, device := range devices {
-		var via types.Channel
-		var sd *Device
-
-		ip := device.Ip()
-		if ip != nil {
-			sd = NewDeviceFromIp(ctx, log, ip)
-			via = types.ChannelHttp
-		} else {
-			sd = NewDeviceFromMqttId(ctx, log, device.Id(), mc)
-			via = types.ChannelMqtt
-		}
-
+		sd := NewDeviceFromSummary(ctx, log, device)
 		one, err := do(ctx, log, via, sd, args)
 		out = append(out, one)
 		if err != nil {
@@ -419,5 +427,6 @@ func Foreach(ctx context.Context, log logr.Logger, devices []devices.Device, via
 			return nil, err
 		}
 	}
+
 	return out, nil
 }

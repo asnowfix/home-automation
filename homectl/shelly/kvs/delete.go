@@ -2,14 +2,17 @@ package kvs
 
 import (
 	"context"
+	"fmt"
 	"hlog"
 	"myhome"
+	"reflect"
 
 	"homectl/options"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
@@ -31,15 +34,19 @@ var deleteCtl = &cobra.Command{
 	},
 }
 
-func doDeleteKeys(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func doDeleteKeys(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
 	var match string
 	if len(args) > 0 {
 		match = args[0]
 	} else {
 		match = "*" // default
 	}
-	log.Info("Deleting keys matching", "match", match, "device", device)
-	keys, err := kvs.ListKeys(ctx, log, via, device, match)
+	log.Info("Deleting keys matching", "match", match, "device", sd.Id())
+	keys, err := kvs.ListKeys(ctx, log, via, sd, match)
 	if err != nil {
 		log.Error(err, "Unable to list keys")
 		return nil, err
@@ -48,8 +55,8 @@ func doDeleteKeys(ctx context.Context, log logr.Logger, via types.Channel, devic
 	log.Info("Deleting keys", "keys", keys.Keys, "count", len(keys.Keys))
 
 	for key := range keys.Keys {
-		log.Info("Deleting key", "key", key, "device", device)
-		_, err := doDeleteKey(ctx, log, via, device, key)
+		log.Info("Deleting key", "key", key, "device", sd.Id())
+		_, err := doDeleteKey(ctx, log, via, sd, key)
 		if err != nil {
 			log.Error(err, "Unable to delete (skipping)", "key", key)
 		}
@@ -57,8 +64,12 @@ func doDeleteKeys(ctx context.Context, log logr.Logger, via types.Channel, devic
 	return nil, nil
 }
 
-func doDeleteKey(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, key string) (any, error) {
-	out, err := kvs.DeleteKey(ctx, log, via, device, key)
+func doDeleteKey(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, key string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
+	out, err := kvs.DeleteKey(ctx, log, via, sd, key)
 	if err != nil {
 		log.Error(err, "Unable to delete", "key", key)
 		return nil, err

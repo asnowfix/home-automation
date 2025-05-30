@@ -46,7 +46,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 						log.Error(err, "Failed to create device from zeroconf entry", "entry", entry)
 						continue
 					}
-					device, err = myhome.NewDeviceFromShellyDevice(ctx, log, sd)
+					device, err = myhome.NewDeviceFromImpl(ctx, log, sd)
 					if err != nil {
 						log.Error(err, "Failed to create device from shelly device", "entry", entry)
 						continue
@@ -55,7 +55,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 					log.Info("Found device in DB", "device_id", device.Id(), "name", device.Name())
 					if device.Impl() == nil {
 						log.Info("Loading device details in memory", "device_id", device.Id(), "name", device.Name())
-						device.WithImpl(shelly.NewDeviceFromInfo(ctx, log, device.Info))
+						device.WithImpl(shelly.NewDeviceFromSummary(ctx, log, device))
 					}
 					device = device.WithZeroConfEntry(entry)
 				}

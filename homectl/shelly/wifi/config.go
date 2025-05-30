@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/types"
 	"pkg/shelly/wifi"
@@ -54,8 +55,12 @@ var configCmd = &cobra.Command{
 	},
 }
 
-func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(ctx, via, wifi.GetConfig.String(), nil)
+func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
+	out, err := sd.CallE(ctx, via, wifi.GetConfig.String(), nil)
 	if err != nil {
 		log.Error(err, "Unable to get WiFi config")
 		return nil, err
@@ -128,7 +133,7 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 		}
 
 		// some config was changed: update device
-		out, err = device.CallE(ctx, via, wifi.SetConfig.String(), wifi.SetConfigRequest{
+		out, err = sd.CallE(ctx, via, wifi.SetConfig.String(), wifi.SetConfigRequest{
 			Config: *config,
 		})
 		if err != nil {
@@ -141,11 +146,11 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 			return nil, fmt.Errorf("invalid WiFi set config response type %T", out)
 		}
 		if res.Result.RestartRequired {
-			device.CallE(ctx, via, string(shelly.Reboot), nil)
+			sd.CallE(ctx, via, string(shelly.Reboot), nil)
 		}
 
 		// get updated config from devices after applied
-		out, err = device.CallE(ctx, via, wifi.GetConfig.String(), nil)
+		out, err = sd.CallE(ctx, via, wifi.GetConfig.String(), nil)
 		if err != nil {
 			log.Error(err, "Unable to get WiFi config")
 			return nil, err

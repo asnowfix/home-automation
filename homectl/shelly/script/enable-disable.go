@@ -2,11 +2,14 @@ package script
 
 import (
 	"context"
+	"fmt"
 	"hlog"
 	"myhome"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
+	"reflect"
 	"strconv"
 
 	"homectl/options"
@@ -42,7 +45,11 @@ var disableCtl = &cobra.Command{
 	},
 }
 
-func doEnableDisable(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func doEnableDisable(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
 	scriptName := args[0]
 	enable, err := strconv.ParseBool(args[1])
 	if err != nil {
@@ -50,5 +57,5 @@ func doEnableDisable(ctx context.Context, log logr.Logger, via types.Channel, de
 		return nil, err
 	}
 
-	return script.EnableDisable(ctx, via, device, scriptName, enable)
+	return script.EnableDisable(ctx, via, sd, scriptName, enable)
 }

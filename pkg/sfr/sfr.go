@@ -42,7 +42,7 @@ func (h SfrHost) Name() string {
 }
 
 func (h SfrHost) Id() string {
-	return h.xml.Mac.String()
+	return "eth:" + h.xml.Mac.String()
 }
 
 func (h SfrHost) Ip() net.IP {
@@ -51,6 +51,10 @@ func (h SfrHost) Ip() net.IP {
 
 func (h SfrHost) Host() string {
 	return h.xml.Ip.String()
+}
+
+func (h SfrHost) Mac() net.HardwareAddr {
+	return h.xml.Mac
 }
 
 func (h SfrHost) Online() bool {

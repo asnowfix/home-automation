@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"global"
 	"myhome"
-	"mymqtt"
 	"pkg/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -35,7 +34,11 @@ var nameCmd = &cobra.Command{
 			return err
 		}
 
-		sd := shelly.NewDeviceFromMqttId(ctx, log, (*devices)[0].Id(), mymqtt.GetClient(ctx))
+		device := shelly.NewDeviceFromSummary(ctx, log, (*devices)[0])
+		sd, ok := device.(*shelly.Device)
+		if !ok {
+			return fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+		}
 
 		log.Info("Getting system config of device", "name", name, "device", sd.Id())
 

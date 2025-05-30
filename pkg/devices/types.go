@@ -34,25 +34,30 @@ type Provider interface {
 // }
 
 type Device interface {
-	Id() string   // Device immutable Id (usually set by manufacturer)
-	Name() string // Device user-set (mutable) Name
-	Host() string // Device host address (resolvable hostname or IP address)
-	Ip() net.IP   // Device IP address
+	Id() string            // Device immutable Id (usually set by manufacturer)
+	Name() string          // Device user-set (mutable) Name
+	Host() string          // Device host address (resolvable hostname or IP address)
+	Ip() net.IP            // Device IP address
+	Mac() net.HardwareAddr // Device MAC address
 	// MarshalJSON() ([]byte, error)
 }
 
 func MarshalJSON(d Device) ([]byte, error) {
-	type MarshalledHost struct {
-		Id   string `json:"id"`
-		Name string `json:"name"`
-		Ip   net.IP `json:"ip"`
+	type MarshallableDevice struct {
+		Id   string           `json:"id"`
+		Name string           `json:"name"`
+		Host string           `json:"host"`
+		Ip   net.IP           `json:"ip"`
+		Mac  net.HardwareAddr `json:"mac"`
 	}
-	var hs = MarshalledHost{
+	var md = MarshallableDevice{
 		Name: d.Name(),
+		Host: d.Host(),
 		Ip:   d.Ip(),
 		Id:   d.Id(),
+		Mac:  d.Mac(),
 	}
-	return json.Marshal(hs)
+	return json.Marshal(md)
 }
 
 type Host interface {

@@ -7,6 +7,7 @@ import (
 	"hlog"
 	"homectl/options"
 	"myhome"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -39,10 +40,14 @@ var configCmd = &cobra.Command{
 	},
 }
 
-func oneDeviceConfig(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(ctx, via, system.GetConfig.String(), nil)
+func oneDeviceConfig(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
+	out, err := sd.CallE(ctx, via, system.GetConfig.String(), nil)
 	if err != nil {
-		log.Error(err, "Unable to get config", "device", device.String())
+		log.Error(err, "Unable to get config", "device", sd.Id())
 		return nil, err
 	}
 	config, ok := out.(*system.Config)
@@ -65,9 +70,9 @@ func oneDeviceConfig(ctx context.Context, log logr.Logger, via types.Channel, de
 	if changed {
 		var req system.SetConfigRequest
 		req.Config = *config
-		out, err := device.CallE(ctx, via, system.SetConfig.String(), &req)
+		out, err := sd.CallE(ctx, via, system.SetConfig.String(), &req)
 		if err != nil {
-			log.Error(err, "Unable to set config", "device", device.String())
+			log.Error(err, "Unable to set config", "device", sd.Id())
 			return nil, err
 		}
 		return out, nil

@@ -2,12 +2,15 @@ package script
 
 import (
 	"context"
+	"fmt"
 	"hlog"
 	"homectl/options"
 	"myhome"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -28,6 +31,10 @@ var evalCtl = &cobra.Command{
 	},
 }
 
-func doEval(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	return script.EvalInDevice(ctx, via, device, args[0], args[1])
+func doEval(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
+	return script.EvalInDevice(ctx, via, sd, args[0], args[1])
 }

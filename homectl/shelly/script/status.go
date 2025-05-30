@@ -2,12 +2,15 @@ package script
 
 import (
 	"context"
+	"fmt"
 	"hlog"
 	"homectl/options"
 	"myhome"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -27,8 +30,12 @@ var statusCtl = &cobra.Command{
 	},
 }
 
-func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := script.DeviceStatus(ctx, device, via)
+func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
+	out, err := script.DeviceStatus(ctx, sd, via)
 	if err != nil {
 		hlog.Logger.Error(err, "Unable to get scripts status")
 		return nil, err

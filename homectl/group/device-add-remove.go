@@ -91,7 +91,12 @@ func deviceDo(ctx context.Context, v myhome.Verb, group, device string, fn func(
 	}
 	summary := (*devices)[0]
 
-	fn(ctx, log, types.ChannelDefault, &g.GroupInfo, shelly.NewDeviceFromSummary(ctx, log, summary))
+	sd, err := shelly.NewDeviceFromSummary(ctx, log, summary)
+	if err != nil {
+		log.Error(err, "Unable to create device from summary", "device", summary)
+		return err
+	}
+	fn(ctx, log, types.ChannelDefault, &g.GroupInfo, sd)
 
 	_, err = myhome.TheClient.CallE(ctx, v, &myhome.GroupDevice{
 		Group:        group,

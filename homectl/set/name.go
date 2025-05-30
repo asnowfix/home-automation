@@ -34,7 +34,11 @@ var nameCmd = &cobra.Command{
 			return err
 		}
 
-		device := shelly.NewDeviceFromSummary(ctx, log, (*devices)[0])
+		device, err := shelly.NewDeviceFromSummary(ctx, log, (*devices)[0])
+		if err != nil {
+			log.Error(err, "Unable to create device from summary", "device", (*devices)[0])
+			return err
+		}
 		sd, ok := device.(*shelly.Device)
 		if !ok {
 			return fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)

@@ -7,6 +7,7 @@ import (
 	"mymqtt"
 	"net"
 	"pkg/devices"
+	"pkg/shelly/ethernet"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/sswitch"
 	"pkg/shelly/system"
@@ -120,7 +121,7 @@ type Config struct {
 	BLE       *any                 `json:"ble,omitempty"`
 	BtHome    *any                 `json:"bthome,omitempty"`
 	Cloud     *any                 `json:"cloud,omitempty"`
-	Ethernet  *any                 `json:"eth,omitempty"`
+	Ethernet  *ethernet.Config     `json:"eth,omitempty"`
 	Input0    *sswitch.InputConfig `json:"input:0,omitempty"`
 	Input1    *sswitch.InputConfig `json:"input:1,omitempty"`
 	Input2    *sswitch.InputConfig `json:"input:2,omitempty"`
@@ -141,7 +142,7 @@ type Status struct {
 	BLE       *any                 `json:"ble,omitempty"`
 	BtHome    *any                 `json:"bthome,omitempty"`
 	Cloud     *any                 `json:"cloud,omitempty"`
-	Ethernet  *any                 `json:"eth,omitempty"`
+	Ethernet  *ethernet.Status     `json:"eth,omitempty"`
 	Input0    *sswitch.InputStatus `json:"input:0,omitempty"`
 	Input1    *sswitch.InputStatus `json:"input:1,omitempty"`
 	Input2    *sswitch.InputStatus `json:"input:2,omitempty"`
@@ -179,10 +180,47 @@ type ComponentsRequest struct {
 }
 
 type ComponentsResponse struct {
+	Config         *Config              `json:"-"`
+	Status         *Status              `json:"-"`
 	Components     *[]ComponentResponse `json:"components"`
 	ConfigRevision int                  `json:"cfg_revision"` // The current config revision. See SystemGetConfig#ConfigRevision
 	Offset         int                  `json:"offset"`       // The index of the first component in the list.
 	Total          int                  `json:"total"`        // Total number of components with all filters applied.
+}
+
+func (cr *ComponentsResponse) UnmarshalJSON(data []byte) error {
+	type Alias ComponentsResponse
+	if err := json.Unmarshal(data, (*Alias)(cr)); err != nil {
+		return err
+	}
+	if cr.Components == nil {
+		cr.Components = &[]ComponentResponse{}
+	}
+	config := make(map[string]any)
+	status := make(map[string]any)
+
+	for _, comp := range *cr.Components {
+		config[comp.Key] = comp.Config
+		status[comp.Key] = comp.Status
+	}
+
+	configStr, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	cr.Config = &Config{}
+	if err := json.Unmarshal(configStr, cr.Config); err != nil {
+		return err
+	}
+	statusStr, err := json.Marshal(status)
+	if err != nil {
+		return err
+	}
+	cr.Status = &Status{}
+	if err := json.Unmarshal(statusStr, cr.Status); err != nil {
+		return err
+	}
+	return nil
 }
 
 type ComponentResponse struct {
@@ -271,7 +309,7 @@ func (d *Device) ReplyTo() string {
 // 	return d
 // }
 
-func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) *Device {
+func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (*Device, error) {
 	d := &Device{
 		Id_:      id,
 		log:      log,
@@ -280,13 +318,13 @@ func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) *Devic
 	err := d.init(ctx)
 	if err != nil {
 		log.Error(err, "Unable to initialize device", "id", id)
-		panic(err)
+		return nil, err
 	}
 
-	return d
+	return d, nil
 }
 
-func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.Device) devices.Device {
+func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.Device) (devices.Device, error) {
 	d := &Device{
 		Id_:   summary.Id(),
 		Name_: summary.Name(),
@@ -303,16 +341,16 @@ func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.
 	err := d.init(ctx)
 	if err != nil {
 		log.Error(err, "Unable to initialize device", "id", summary.Id())
-		panic(err)
+		return nil, err
 	}
-	return d
+	return d, nil
 }
 
 func (d *Device) init(ctx context.Context) error {
 	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
 		d.log.Error(err, "Unable to get MQTT client", "device_id", d.Id_)
-		panic(err)
+		return err
 	}
 	if d.Id() == "" && d.Host() == "" {
 		return fmt.Errorf("device id & host is empty")
@@ -419,8 +457,12 @@ func Foreach(ctx context.Context, log logr.Logger, devices []devices.Device, via
 	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
 
 	for _, device := range devices {
-		sd := NewDeviceFromSummary(ctx, log, device)
-		one, err := do(ctx, log, via, sd, args)
+		device, err := NewDeviceFromSummary(ctx, log, device)
+		if err != nil {
+			log.Error(err, "Unable to create device from summary", "device", device)
+			return nil, err
+		}
+		one, err := do(ctx, log, via, device, args)
 		out = append(out, one)
 		if err != nil {
 			log.Error(err, "Operation failed device", "id", device.Id(), "name", device.Name(), "ip", device.Ip())

@@ -188,7 +188,12 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			continue
 		} else {
 			dm.log.Info("Preparing update of device", "id", device.Id())
-			dm.update <- device.WithImpl(shelly.NewDeviceFromSummary(ctx, dm.log, device))
+			sd, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+			if err != nil {
+				dm.log.Error(err, "Failed to create device from summary", "device", device)
+				continue
+			}
+			dm.update <- device.WithImpl(sd)
 		}
 	}
 

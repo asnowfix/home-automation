@@ -17,8 +17,6 @@ import (
 func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices.DeviceRegistry) error {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 
-	var sd *shelly.Device
-
 	topic := "+/events/rpc"
 	ch, err := mc.Subscriber(ctx, topic, 16)
 	if err != nil {
@@ -49,7 +47,11 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 				device, err := db.GetDeviceById(ctx, deviceId)
 				if err != nil {
 					log.Info("Device not found, creating new one", "device_id", deviceId)
-					sd = shelly.NewDeviceFromMqttId(ctx, log, deviceId)
+					sd, err := shelly.NewDeviceFromMqttId(ctx, log, deviceId)
+					if err != nil {
+						log.Error(err, "Failed to create device from shelly device")
+						continue
+					}
 					device, err = myhome.NewDeviceFromImpl(ctx, log, sd)
 					if err != nil {
 						log.Error(err, "Failed to create device from shelly device")
@@ -59,7 +61,12 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 					log.Info("Found device in DB", "device_id", deviceId)
 					if device.Impl() == nil {
 						log.Info("Loading device details in memory", "device_id", deviceId)
-						device.WithImpl(shelly.NewDeviceFromSummary(ctx, log, device))
+						sd, err := shelly.NewDeviceFromSummary(ctx, log, device)
+						if err != nil {
+							log.Error(err, "Failed to create device from summary", "device", device)
+							continue
+						}
+						device = device.WithImpl(sd)
 					}
 				}
 

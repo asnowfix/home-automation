@@ -1,6 +1,7 @@
 package devices
 
 import (
+	"encoding/json"
 	"net"
 )
 
@@ -44,4 +45,22 @@ type Host interface {
 	Device
 	Provider() string
 	Online() bool
+}
+
+func MarshalJSON(d Device) ([]byte, error) {
+	type MarshallableDevice struct {
+		Id   string           `json:"id"`
+		Name string           `json:"name"`
+		Host string           `json:"host"`
+		Ip   net.IP           `json:"ip"`
+		Mac  net.HardwareAddr `json:"mac"`
+	}
+	var md = MarshallableDevice{
+		Name: d.Name(),
+		Host: d.Host(),
+		Ip:   d.Ip(),
+		Id:   d.Id(),
+		Mac:  d.Mac(),
+	}
+	return json.Marshal(md)
 }

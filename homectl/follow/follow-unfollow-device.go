@@ -7,6 +7,7 @@ import (
 	"hlog"
 	"homectl/options"
 	"myhome"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
@@ -64,7 +65,7 @@ var UnfollowCmd = &cobra.Command{
 	},
 }
 
-type doFollowFunc func(ctx context.Context, log logr.Logger, via types.Channel, follower *shelly.Device, followKey string, following []string) (any, error)
+type doFollowFunc func(ctx context.Context, log logr.Logger, via types.Channel, follower devices.Device, followKey string, following []string) (any, error)
 
 func devicesDo(ctx context.Context, f doFollowFunc, follower string, args []string) (any, error) {
 	log := hlog.Logger
@@ -94,21 +95,25 @@ func devicesDo(ctx context.Context, f doFollowFunc, follower string, args []stri
 		following = args
 	}
 
-	return myhome.Foreach(ctx, log, follower, types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+	return myhome.Foreach(ctx, log, follower, types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 		return f(ctx, log, via, device, followKey, following)
 	}, []string{})
 }
 
-func follow(ctx context.Context, log logr.Logger, via types.Channel, follower *shelly.Device, followKey string, following []string) (any, error) {
+func follow(ctx context.Context, log logr.Logger, via types.Channel, follower devices.Device, followKey string, following []string) (any, error) {
 	f := make([]string, 0)
-	fv, err := kvs.GetValue(ctx, log, via, follower, followKey)
+	sd, ok := follower.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("follower is not a ShellyDevice")
+	}
+	fv, err := kvs.GetValue(ctx, log, via, sd, followKey)
 	if err != nil {
 		log.Info("Unable to get list of followed devices. Assuming none", "error", err)
 	} else {
 		json.Unmarshal([]byte(fv.Value), &f)
 	}
 
-	log.Info("Will follow", "follower", follower.Id(), "following", following)
+	log.Info("Will follow", "follower", sd.Id(), "following", following)
 	for _, d := range following {
 		log.Info("Adding followed device to list", "device", d, "list", following)
 		// add device id to the list , if not already present
@@ -117,27 +122,27 @@ func follow(ctx context.Context, log logr.Logger, via types.Channel, follower *s
 		}
 	}
 
-	log.Info("Will now follow", "follower", follower.Id(), "following", f)
+	log.Info("Will now follow", "follower", sd.Id(), "following", f)
 	buf, err := json.Marshal(f)
 	if err != nil {
 		log.Error(err, "Unable to marshal list of followed devices")
 		return nil, err
 	}
 
-	kvsStatus, err := kvs.SetKeyValue(ctx, log, via, follower, followKey, string(buf))
+	kvsStatus, err := kvs.SetKeyValue(ctx, log, via, sd, followKey, string(buf))
 	if err != nil {
 		log.Error(err, "Unable to set list of followed devices")
 		return nil, err
 	}
 	log.Info("Set list of followed devices", "status", kvsStatus)
 
-	// script, err := scripts.Load(follower, "following.js")
+	// script, err := scripts.Load(sd, "following.js")
 	// if err != nil {
 	// 	log.Error(err, "Unable to load script following.js")
 	// 	return nil, err
 	// }
 
-	// status, err := scripts.Enable(follower, script)
+	// status, err := scripts.Enable(sd, script)
 	// if err != nil {
 	// 	log.Error(err, "Unable to enable script following.js")
 	// 	return nil, err
@@ -147,6 +152,6 @@ func follow(ctx context.Context, log logr.Logger, via types.Channel, follower *s
 
 }
 
-func unfollow(ctx context.Context, log logr.Logger, via types.Channel, follower *shelly.Device, followKey string, following []string) (any, error) {
+func unfollow(ctx context.Context, log logr.Logger, via types.Channel, follower devices.Device, followKey string, following []string) (any, error) {
 	return nil, fmt.Errorf("not implemented")
 }

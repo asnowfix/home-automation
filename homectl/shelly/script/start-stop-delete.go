@@ -2,12 +2,15 @@ package script
 
 import (
 	"context"
+	"fmt"
 	"hlog"
 	"homectl/options"
 	"myhome"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -29,9 +32,13 @@ var uploadCtl = &cobra.Command{
 	},
 }
 
-func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
 	scriptName := args[0]
-	return script.Upload(ctx, via, device, scriptName)
+	return script.Upload(ctx, via, sd, scriptName)
 }
 
 func init() {
@@ -82,10 +89,14 @@ var deleteCtl = &cobra.Command{
 	},
 }
 
-func doStartStopDelete(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func doStartStopDelete(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
 	operation := args[0]
 	scriptName := args[1]
-	out, err := script.StartStopDelete(ctx, via, device, scriptName, script.Verb(operation))
+	out, err := script.StartStopDelete(ctx, via, sd, scriptName, script.Verb(operation))
 	if err != nil {
 		log.Error(err, "Unable to start/stop/delete script")
 		return nil, err

@@ -6,10 +6,12 @@ import (
 	"hlog"
 	"homectl/options"
 	"myhome"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
 	"pkg/shelly/sswitch"
 	"pkg/shelly/types"
+	"reflect"
 	"strconv"
 
 	"github.com/go-logr/logr"
@@ -36,7 +38,11 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func toggleOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func toggleOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
 	var op string
 	if len(args) == 0 {
 		op = "toggle"
@@ -49,26 +55,30 @@ func toggleOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 
 	switch op {
 	case "toggle":
-		out, err = device.CallE(ctx, via, sswitch.Toggle.String(), &sswitch.ToggleRequest{Id: toggleSwitchId})
+		out, err = sd.CallE(ctx, via, sswitch.Toggle.String(), &sswitch.ToggleRequest{Id: toggleSwitchId})
 	case "on":
-		out, err = device.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: toggleSwitchId, On: !offValue(ctx, log, via, device)})
+		out, err = sd.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: toggleSwitchId, On: !offValue(ctx, log, via, device)})
 	case "off":
-		out, err = device.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: toggleSwitchId, On: offValue(ctx, log, via, device)})
+		out, err = sd.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: toggleSwitchId, On: offValue(ctx, log, via, device)})
 	default:
 		return nil, fmt.Errorf("unknown operation %s", args[0])
 	}
 
 	if err != nil {
-		err = fmt.Errorf("failed to run %s device %s: %v", op, device.Id_, err)
-		log.Info("Failed to run %s device %s: %v", device.Id_, err)
+		err = fmt.Errorf("failed to run %s device %s: %v", op, sd.Id(), err)
+		log.Info("Failed to run %s device %s: %v", sd.Id(), err)
 		return nil, err
 	}
 
 	return out, err
 }
 
-func offValue(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device) bool {
-	out, err := device.CallE(ctx, via, kvs.Get.String(), sswitch.SwitchedOffKey)
+func offValue(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device) bool {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return false
+	}
+	out, err := sd.CallE(ctx, via, kvs.Get.String(), sswitch.SwitchedOffKey)
 	if err != nil {
 		log.Info("Unable to get value", "key", sswitch.SwitchedOffKey, "reason", err)
 		return false

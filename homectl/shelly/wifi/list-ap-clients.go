@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v2"
 
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/types"
 	"pkg/shelly/wifi"
@@ -33,8 +34,12 @@ var listApClientsCmd = &cobra.Command{
 	},
 }
 
-func oneDeviceListApClients(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(ctx, via, wifi.ListAPClients.String(), nil)
+func oneDeviceListApClients(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
+	out, err := sd.CallE(ctx, via, wifi.ListAPClients.String(), nil)
 	if err != nil {
 		log.Error(err, "Unable to get WiFi Access Point clients")
 		return nil, err

@@ -7,6 +7,7 @@ import (
 	"hlog"
 	"homectl/options"
 	"myhome"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/types"
 	"reflect"
@@ -26,10 +27,14 @@ var Cmd = &cobra.Command{
 	},
 }
 
-func doList(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	out, err := device.CallE(ctx, via, shelly.GetComponents.String(), nil)
+func doList(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
+	out, err := sd.CallE(ctx, via, shelly.GetComponents.String(), nil)
 	if err != nil {
-		log.Error(err, "Unable to get components", "device", device.String())
+		log.Error(err, "Unable to get components", "device", sd.Id())
 		return nil, err
 	}
 	components, ok := out.(*shelly.ComponentsResponse)

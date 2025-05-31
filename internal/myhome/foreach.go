@@ -3,13 +3,14 @@ package myhome
 import (
 	"context"
 	"homectl/options"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/types"
 
 	"github.com/go-logr/logr"
 )
 
-func Foreach(ctx context.Context, log logr.Logger, name string, via types.Channel, fn func(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error), args []string) (any, error) {
+func Foreach(ctx context.Context, log logr.Logger, name string, via types.Channel, fn func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error), args []string) (any, error) {
 	devices, err := TheClient.LookupDevices(ctx, name)
 	if err != nil {
 		return nil, err

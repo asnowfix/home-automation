@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -160,7 +161,11 @@ var debugCtl = &cobra.Command{
 	},
 }
 
-func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
 	var addr *string
 	if len(args) > 0 {
 		addr = &args[0]
@@ -179,7 +184,7 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device *sh
 			},
 		},
 	}
-	out, err := device.CallE(ctx, via, string(system.SetConfig), &system.SetConfigRequest{Config: config})
+	out, err := sd.CallE(ctx, via, string(system.SetConfig), &system.SetConfigRequest{Config: config})
 	if err != nil {
 		log.Error(err, "Unable to turn script UDP debugging", "addr", addr)
 		return nil, err

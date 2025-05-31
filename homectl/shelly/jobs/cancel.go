@@ -6,8 +6,10 @@ import (
 	"hlog"
 	"homectl/options"
 	"myhome"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/types"
+	"reflect"
 	"schedule"
 
 	"github.com/go-logr/logr"
@@ -35,9 +37,13 @@ var cancelCtl = &cobra.Command{
 	},
 }
 
-func cancelOneDeviceJob(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
+func cancelOneDeviceJob(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
 	if cancelFlag.all {
-		out, err := schedule.CancelAllJobs(ctx, log, via, device)
+		out, err := schedule.CancelAllJobs(ctx, log, via, sd)
 		if err != nil {
 			log.Error(err, "Unable to cancel all Scheduled Jobs: %v", err)
 			return nil, err
@@ -46,9 +52,9 @@ func cancelOneDeviceJob(ctx context.Context, log logr.Logger, via types.Channel,
 	} else if cancelFlag.id < 0 {
 		return nil, fmt.Errorf("no job ID provided to cancel")
 	} else {
-		out, err := schedule.CancelJob(ctx, log, via, device, cancelFlag.id)
+		out, err := schedule.CancelJob(ctx, log, via, sd, cancelFlag.id)
 		if err != nil {
-			log.Error(err, "Unable to cancel all Scheduled Jobs: %v", err)
+			log.Error(err, "Unable to cancel Scheduled Job: %v", err)
 			return nil, err
 		}
 		return out, nil

@@ -6,6 +6,7 @@ import (
 	"hlog"
 	"homectl/options"
 	"myhome"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/script"
 	"pkg/shelly/types"
@@ -46,6 +47,10 @@ var listCtl = &cobra.Command{
 	},
 }
 
-func doList(ctx context.Context, log logr.Logger, via types.Channel, device *shelly.Device, args []string) (any, error) {
-	return script.DeviceStatus(ctx, device, via)
+func doList(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+	}
+	return script.DeviceStatus(ctx, sd, via)
 }

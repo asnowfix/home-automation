@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -41,6 +42,14 @@ func (d DeviceSummary) Ip() net.IP {
 
 func (d DeviceSummary) Host() string {
 	return d.Host_
+}
+
+func (d DeviceSummary) Mac() net.HardwareAddr {
+	mac, err := net.ParseMAC(d.MAC)
+	if err != nil {
+		return nil
+	}
+	return mac
 }
 
 // func (d DeviceSummary) MarshalJSON() ([]byte, error) {
@@ -111,27 +120,9 @@ func (d *Device) WithName(name string) *Device {
 	return d
 }
 
-func (d *Device) WithComponent(component string, status map[string]any, config map[string]any) {
-	if len(d.components) == 0 {
-		d.components = make(map[string]Component)
-	}
-	c, exists := d.components[component]
-	if !exists {
-		c = Component{}
-	}
-
-	if len(status) > 0 {
-		c.Status = status
-	}
-	if len(config) > 0 {
-		c.Config = config
-	}
-	d.components[component] = c
+func (d *Device) Update(status any) {
+	// TODO: update status & save
 }
-
-// type Devices struct {
-// 	Devices []DeviceSummary `json:"devices"`
-// }
 
 type GroupInfo struct {
 	ID   int               `db:"id" json:"id"`
@@ -183,18 +174,12 @@ type GroupDevice struct {
 	Group        string `db:"group" json:"group"`
 }
 
-func NewDeviceFromShellyDevice(ctx context.Context, log logr.Logger, sd *shelly.Device) (*Device, error) {
-	err := sd.Init(ctx)
-	if err != nil {
-		log.Error(err, "Unable to initialize device")
-		return nil, err
-	}
-
-	d := NewDevice(log, Shelly, sd.Id())
-	d = d.WithImpl(sd)
-	d = d.WithMAC(sd.Info.MacAddress)
-	d = d.WithHost(sd.Host())
-	// d = d.WithName(sd.Config.Sys.DeviceName)
+func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Device) (*Device, error) {
+	d := NewDevice(log, Shelly, device.Id())
+	d = d.WithImpl(device)
+	d = d.WithMAC(device.Mac())
+	d = d.WithHost(device.Host())
+	d = d.WithName(device.Name())
 
 	return d, nil
 }
@@ -202,7 +187,7 @@ func NewDeviceFromShellyDevice(ctx context.Context, log logr.Logger, sd *shelly.
 func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via types.Channel) bool {
 	updated := false
 
-	if d.Id() == "" || d.MAC == "" || d.Info == nil {
+	if d.Id() == "" || d.Mac().String() == "" || d.Info == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device info (giving-up)")
@@ -231,10 +216,7 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 			d.log.Error(err, "Unable to get device's components (continuing)")
 		} else {
 			crs, ok := out.(*shelly.ComponentsResponse)
-			if ok {
-				for _, cr := range *crs.Components {
-					d.WithComponent(cr.Key, cr.Status, cr.Config)
-				}
+			if ok && crs != nil {
 				updated = true
 			} else {
 				d.log.Error(err, "Invalid response to get device's components (continuing)", "response", out)
@@ -248,7 +230,7 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 			d.log.Error(err, "Unable to get device config (continuing)")
 		} else {
 			c, ok := out.(*shelly.Config)
-			if ok {
+			if ok && c != nil {
 				d.Config = c
 				updated = true
 			} else {
@@ -256,13 +238,14 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 			}
 		}
 	}
+
 	if d.ConfigRevision == 0 || d.Name() == "" {
 		out, err := sd.CallE(ctx, via, system.GetConfig.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device system config (continuing)")
 		} else {
 			sc, ok := out.(*system.Config)
-			if ok {
+			if ok && sc != nil && sc.Device != nil {
 				d.Name_ = sc.Device.Name
 				d.ConfigRevision = sc.ConfigRevision
 				// d.SetComponentStatus("system", nil, *sc) FIXME
@@ -279,7 +262,7 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 			d.log.Error(err, "Unable to get device wifi status (continuing)")
 		} else {
 			ws, ok := out.(*wifi.Status)
-			if ok {
+			if ok && ws != nil && ws.IP != "" {
 				d.Host_ = ws.IP
 				d.log.Error(err, "Invalid response to get device wifi status (continuing)", "response", out)
 				updated = true

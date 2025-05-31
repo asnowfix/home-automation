@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"hlog"
 	"myhome"
-	"net"
+	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -27,12 +28,16 @@ var deviceAddCmd = &cobra.Command{
 		group := args[0]
 		device := args[1]
 
-		return deviceDo(cmd.Context(), myhome.GroupAddDevice, group, device, func(ctx context.Context, log logr.Logger, via types.Channel, gi *myhome.GroupInfo, device *shelly.Device) (*kvs.Status, error) {
+		return deviceDo(cmd.Context(), myhome.GroupAddDevice, group, device, func(ctx context.Context, log logr.Logger, via types.Channel, gi *myhome.GroupInfo, device devices.Device) (*kvs.Status, error) {
+			sd, ok := device.(*shelly.Device)
+			if !ok {
+				return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+			}
 			for k, v := range gi.KeyValues() {
 				log.Info("Adding", "key", k, "value", v)
-				kvs.SetKeyValue(ctx, hlog.Logger, types.ChannelDefault, device, k, v)
+				kvs.SetKeyValue(ctx, hlog.Logger, types.ChannelDefault, sd, k, v)
 			}
-			return kvs.SetKeyValue(ctx, hlog.Logger, types.ChannelDefault, device, fmt.Sprintf("group/%s", group), "true")
+			return kvs.SetKeyValue(ctx, hlog.Logger, types.ChannelDefault, sd, fmt.Sprintf("group/%s", group), "true")
 		})
 	},
 }
@@ -45,17 +50,21 @@ var deviceRemoveCmd = &cobra.Command{
 		group := args[0]
 		device := args[1]
 
-		return deviceDo(cmd.Context(), myhome.GroupRemoveDevice, group, device, func(ctx context.Context, log logr.Logger, via types.Channel, gi *myhome.GroupInfo, device *shelly.Device) (*kvs.Status, error) {
+		return deviceDo(cmd.Context(), myhome.GroupRemoveDevice, group, device, func(ctx context.Context, log logr.Logger, via types.Channel, gi *myhome.GroupInfo, device devices.Device) (*kvs.Status, error) {
+			sd, ok := device.(*shelly.Device)
+			if !ok {
+				return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
+			}
 			for k, v := range gi.KeyValues() {
 				log.Info("Will NOT remove", "key", k, "value", v)
 				// kvs.DeleteKey(ctx, hlog.Logger, types.ChannelDefault, device, k)
 			}
-			return kvs.DeleteKey(ctx, hlog.Logger, types.ChannelDefault, device, fmt.Sprintf("group/%s", group))
+			return kvs.DeleteKey(ctx, hlog.Logger, types.ChannelDefault, sd, fmt.Sprintf("group/%s", group))
 		})
 	},
 }
 
-func deviceDo(ctx context.Context, v myhome.Verb, group, device string, fn func(ctx context.Context, log logr.Logger, via types.Channel, gi *myhome.GroupInfo, device *shelly.Device) (*kvs.Status, error)) error {
+func deviceDo(ctx context.Context, v myhome.Verb, group, device string, fn func(ctx context.Context, log logr.Logger, via types.Channel, gi *myhome.GroupInfo, device devices.Device) (*kvs.Status, error)) error {
 	log := hlog.Logger
 
 	// get group info
@@ -82,7 +91,12 @@ func deviceDo(ctx context.Context, v myhome.Verb, group, device string, fn func(
 	}
 	summary := (*devices)[0]
 
-	fn(ctx, log, types.ChannelDefault, &g.GroupInfo, shelly.NewDeviceFromIp(ctx, log, net.ParseIP(summary.Host_)))
+	sd, err := shelly.NewDeviceFromSummary(ctx, log, summary)
+	if err != nil {
+		log.Error(err, "Unable to create device from summary", "device", summary)
+		return err
+	}
+	fn(ctx, log, types.ChannelDefault, &g.GroupInfo, sd)
 
 	_, err = myhome.TheClient.CallE(ctx, v, &myhome.GroupDevice{
 		Group:        group,

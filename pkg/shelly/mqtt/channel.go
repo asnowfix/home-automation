@@ -30,7 +30,7 @@ func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb
 	var req Request
 
 	req.Src = device.ReplyTo()
-	req.Id = 0
+	req.Id = 0 // TODO: implement correlation
 	req.Method = verb.Method
 	req.Params = params
 

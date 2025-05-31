@@ -7,6 +7,7 @@ import (
 	"net"
 	"pkg/devices"
 	"strconv"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
@@ -67,7 +68,7 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 	}
 
 	d := &Device{
-		Id_:     entry.Instance,
+		Id_:     strings.ToLower(entry.Instance),
 		Service: entry.Service,
 		Host_:   ips[0].String(),
 		Port:    entry.Port,
@@ -79,7 +80,6 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 			Serial:      hostRe.ReplaceAllString(entry.HostName, "${serial}"),
 		},
 	}
-	log.Info("Discovered", "device", d)
-
+	log.Info("Zeroconf discovered", "device", d)
 	return d, nil
 }

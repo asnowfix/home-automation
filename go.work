@@ -40,6 +40,7 @@ use (
 	./pkg/devices
 	./pkg/sfr
 	./pkg/shelly
+	./pkg/shelly/ethernet
 	./pkg/shelly/gen1
 	./pkg/shelly/input
 	./pkg/shelly/kvs

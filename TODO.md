@@ -16,7 +16,7 @@ Functions
 ---------
 
 [ ] BUG fix on Windows: 'Failed to install event source: Access is denied.'
-[ ] BUG fix wrong HTTP verb:
+[x] BUG fix wrong HTTP verb:
 
         1:23PM INF ..\pkg\shelly\shttp\channel.go:81 > Calling method=GET url=http://192.168.1.40/rpc/Shelly.GetDeviceInfo v=0
         1:23PM INF ..\pkg\shelly\shttp\channel.go:94 > status code code=200 v=0
@@ -109,7 +109,7 @@ Cleanup
         ctx = slog.NewContext(ctx, slog.New(slog.NewTextHandler(os.Stdout, nil)))
         ```
 
-[ ] Reduce MQTT traffic (prefer using device lookup result when possible)
+[x] Reduce MQTT traffic (prefer using device lookup result when possible)
 
         Wifi.GetStatus via MQTT" msg-count=23054 timestamp=87339.946 v=0
         Shelly.GetComponents via SHC 35.205.206.219:6022" msg-count=23055 timestamp=87339.946 v=0

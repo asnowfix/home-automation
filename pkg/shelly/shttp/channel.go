@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 )
@@ -57,17 +56,18 @@ func (ch *HttpChannel) getE(ctx context.Context, host string, cmd string, params
 	qs := ""
 	if params != nil {
 		qp, ok := params.(map[string]any)
-		if ok {
-			for key, value := range qp {
-				s, err := json.Marshal(value)
-				if err == nil {
-					values.Add(key, string(s))
-				}
+		if !ok {
+			b, err := json.Marshal(params)
+			if err != nil {
+				return nil, err
 			}
-		} else {
-			err := fmt.Errorf("%s support query parameters only (got %v)", http.MethodGet, reflect.TypeOf(params))
-			log.Error(err, "Params error error")
-			return nil, err
+			json.Unmarshal(b, &qp)
+		}
+		for key, value := range qp {
+			s, err := json.Marshal(value)
+			if err == nil {
+				values.Add(key, string(s))
+			}
 		}
 		qs = fmt.Sprintf("?%s", values.Encode())
 	}

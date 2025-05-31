@@ -120,27 +120,9 @@ func (d *Device) WithName(name string) *Device {
 	return d
 }
 
-func (d *Device) WithComponent(component string, status map[string]any, config map[string]any) {
-	if len(d.components) == 0 {
-		d.components = make(map[string]Component)
-	}
-	c, exists := d.components[component]
-	if !exists {
-		c = Component{}
-	}
-
-	if len(status) > 0 {
-		c.Status = status
-	}
-	if len(config) > 0 {
-		c.Config = config
-	}
-	d.components[component] = c
+func (d *Device) Update(status any) {
+	// TODO: update status & save
 }
-
-// type Devices struct {
-// 	Devices []DeviceSummary `json:"devices"`
-// }
 
 type GroupInfo struct {
 	ID   int               `db:"id" json:"id"`
@@ -205,7 +187,7 @@ func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Devi
 func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via types.Channel) bool {
 	updated := false
 
-	if d.Id() == "" || d.MAC == "" || d.Info == nil {
+	if d.Id() == "" || d.Mac().String() == "" || d.Info == nil {
 		out, err := sd.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
 		if err != nil {
 			d.log.Error(err, "Unable to get device info (giving-up)")
@@ -234,10 +216,7 @@ func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via ty
 			d.log.Error(err, "Unable to get device's components (continuing)")
 		} else {
 			crs, ok := out.(*shelly.ComponentsResponse)
-			if ok && crs != nil && crs.Components != nil {
-				for _, cr := range *crs.Components {
-					d.WithComponent(cr.Key, cr.Status, cr.Config)
-				}
+			if ok && crs != nil {
 				updated = true
 			} else {
 				d.log.Error(err, "Invalid response to get device's components (continuing)", "response", out)

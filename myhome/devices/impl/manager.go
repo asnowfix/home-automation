@@ -160,6 +160,11 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 					log.Error(nil, "Unhandled device type", "device id", device.Id, "type", reflect.TypeOf(device.Impl()))
 					continue
 				}
+				err := sd.Load(ctx)
+				if err != nil {
+					log.Error(err, "Unable to load device", "device", device)
+					continue
+				}
 
 				updated := device.UpdateFromShelly(ctx, sd, types.ChannelDefault)
 				if !updated {

@@ -75,7 +75,7 @@ func Init(ctx context.Context, timeout time.Duration) {
 		HttpMethod: http.MethodGet,
 	})
 
-	// TODO complete the lsit of handlers
+	// TODO complete the list of handlers
 
 	registrar.RegisterMethodHandler(GetComponents.String(), types.MethodHandler{
 		// InputType:  reflect.TypeOf(ComponentsRequest{}),

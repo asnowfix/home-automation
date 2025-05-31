@@ -98,13 +98,17 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Even
 	// - '{"src":"shellyplus1-08b61fd141e8","dst":"shellyplus1-08b61fd141e8/events","method":"NotifyFullStatus","params":{"ts":1736604018.38,"ble":{},"cloud":{"connected":true},"input:0":{"id":0,"state":false},"mqtt":{"connected":true},"switch:0":{"id":0, "source":"SHC", "output":true,"temperature":{"tC":48.4, "tF":119.2}},"sys":{"mac":"08B61FD141E8","restart_required":false,"time":"15:00","unixtime":1736604018,"uptime":658773,"ram_size":268520,"ram_free":110248,"fs_size":393216,"fs_free":106496,"cfg_rev":13,"kvs_rev":0,"schedule_rev":1,"webhook_rev":0,"available_updates":{"beta":{"version":"1.5.0-beta1"}},"reset_reason":3},"wifi":{"sta_ip":"192.168.1.76","status":"got ip","ssid":"Linksys_7A50","rssi":-58,"ap_client_count":0},"ws":{"connected":false}}}'
 	if event.Method == "NotifyStatus" || event.Method == "NotifyFullStatus" {
 		if event.Params != nil {
-			for component, status := range *(event.Params) {
-				if component == "ts" {
-					continue
-				}
-				log.Info("Updating", "component", component, "status", status, "device_id", d.Id())
-				d.WithComponent(component, status.(map[string]any), nil)
+			statusStr, err := json.Marshal(event.Params)
+			if err != nil {
+				log.Error(err, "Failed to (re-)marshal status", "event", event)
+				return err
 			}
+			status := &shelly.Status{}
+			if err := json.Unmarshal(statusStr, status); err != nil {
+				log.Error(err, "Failed to unmarshal status", "event", event)
+				return err
+			}
+			d.Update(status)
 		}
 	}
 

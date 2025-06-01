@@ -334,6 +334,10 @@ func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (*Devi
 		log:      log,
 		isMqttOk: true,
 	}
+	err := d.init(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 
@@ -351,11 +355,14 @@ func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.
 		log:      log,
 		isMqttOk: true,
 	}
+	err := d.init(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 
-func (d *Device) Load(ctx context.Context) error {
-	d.log.Info("Loading device", "id", d.Id(), "host", d.Host())
+func (d *Device) init(ctx context.Context) error {
 	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
 		d.log.Error(err, "Unable to get MQTT client")
@@ -387,6 +394,11 @@ func (d *Device) Load(ctx context.Context) error {
 		}
 	}
 
+	return nil
+}
+
+func (d *Device) Load(ctx context.Context) error {
+	d.log.Info("Loading device", "id", d.Id(), "host", d.Host())
 	if d.MacAddress == nil {
 		mh, err := GetRegistrar().MethodHandlerE(GetDeviceInfo.String())
 		if err != nil {

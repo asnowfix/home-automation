@@ -29,7 +29,10 @@ func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, devi
 		log.Error(err, "Unable to get many key-values")
 		return nil, err
 	}
-	kvs := out.(*KeyValueItems)
+	kvs, ok := out.(*KeyValueItems)
+	if !ok {
+		return nil, fmt.Errorf("expected *KeyValueItems, got %T", out)
+	}
 	s, err := json.Marshal(kvs)
 	if err != nil {
 		return nil, err
@@ -47,7 +50,10 @@ func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device ty
 		log.Error(err, "Unable to get on key")
 		return nil, err
 	}
-	value := out.(*Value)
+	value, ok := out.(*Value)
+	if !ok {
+		return nil, fmt.Errorf("expected *Value, got %T", out)
+	}
 	s, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
@@ -66,7 +72,10 @@ func SetKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device
 		log.Error(err, "Unable to set", "key", key, "value", value)
 		return nil, err
 	}
-	status := out.(*Status)
+	status, ok := out.(*Status)
+	if !ok {
+		return nil, fmt.Errorf("expected *Status, got %T", out)
+	}
 	return status, nil
 }
 
@@ -78,7 +87,10 @@ func DeleteKey(ctx context.Context, log logr.Logger, via types.Channel, device t
 		log.Error(err, "Unable to delete", "key", key)
 		return nil, err
 	}
-	status := out.(*Status)
+	status, ok := out.(*Status)
+	if !ok {
+		return nil, fmt.Errorf("expected *Status, got %T", out)
+	}
 	s, err := json.Marshal(status)
 	if err != nil {
 		return nil, err

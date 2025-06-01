@@ -162,7 +162,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/homectl",
-            "args": ["shelly", "kvs", "get", "*"],
+            "args": ["-B" ,"192.168.1.2" ,"shelly", "kvs", "get", "*"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }

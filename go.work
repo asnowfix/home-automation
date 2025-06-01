@@ -33,6 +33,7 @@ use (
 	./myhome/daemon/watch
 	./myhome/devices
 	./myhome/devices/impl
+	./myhome/groups
 	./myhome/http
 	./myhome/mqtt
 	./myhome/storage

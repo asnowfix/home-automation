@@ -41,6 +41,10 @@ func (h SfrHost) Name() string {
 	return h.xml.Name
 }
 
+func (h SfrHost) Manufacturer() string {
+	return ""
+}
+
 func (h SfrHost) Id() string {
 	return "eth:" + h.xml.Mac.String()
 }

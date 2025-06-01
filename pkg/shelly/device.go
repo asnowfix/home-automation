@@ -49,6 +49,10 @@ type Device struct {
 	log      logr.Logger   `json:"-"`
 }
 
+func (d *Device) Manufacturer() string {
+	return "Shelly"
+}
+
 func (d *Device) Id() string {
 	return d.Id_
 }

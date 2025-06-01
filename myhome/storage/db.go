@@ -289,8 +289,16 @@ func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (*myhome.Groups
 
 // AddGroup adds a new group to the database.
 func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (any, error) {
+	// Check if the group already exists
+	var exists bool
+	err := s.db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM groups WHERE name = $1)", group.Name)
+	if exists {
+		s.log.Info("Group already exists", "name", group.Name)
+		return nil, nil
+	}
+
 	log := s.log.WithValues("name", group.Name)
-	log.Info("Adding new group")
+	log.Info("Adding new group", "name", group.Name)
 	query := `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)`
 	result, err := s.db.NamedExec(query, map[string]interface{}{
 		"name": group.Name,
@@ -306,13 +314,13 @@ func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (any, error) {
 // RemoveGroup removes a group from the database by its name.
 func (s *DeviceStorage) RemoveGroup(name string) (any, error) {
 	log := s.log.WithValues("name", name)
-	log.Info("Removing group")
+	log.Info("Removing group", "name", name)
 
 	// Check if the group exists
 	var exists bool
 	err := s.db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM groups WHERE name = $1)", name)
 	if err != nil {
-		log.Error(err, "Failed to check if group exists")
+		log.Error(err, "Failed to check if group exists", "name", name)
 		return nil, err
 	}
 	if !exists {

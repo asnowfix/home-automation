@@ -15,6 +15,7 @@ type Device interface {
 	String() string
 	Name() string
 	Host() string
+	Manufacturer() string
 	Id() string
 	CallE(ctx context.Context, via Channel, method string, params any) (any, error)
 	ReplyTo() string

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hlog"
 	"myhome"
+	"myhome/groups"
 	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
@@ -37,7 +38,7 @@ var deviceAddCmd = &cobra.Command{
 				log.Info("Adding", "key", k, "value", v)
 				kvs.SetKeyValue(ctx, hlog.Logger, types.ChannelDefault, sd, k, v)
 			}
-			return kvs.SetKeyValue(ctx, hlog.Logger, types.ChannelDefault, sd, fmt.Sprintf("group/%s", group), "true")
+			return kvs.SetKeyValue(ctx, hlog.Logger, types.ChannelDefault, sd, groups.KvsGroupPrefix+group, "true")
 		})
 	},
 }
@@ -59,7 +60,7 @@ var deviceRemoveCmd = &cobra.Command{
 				log.Info("Will NOT remove", "key", k, "value", v)
 				// kvs.DeleteKey(ctx, hlog.Logger, types.ChannelDefault, device, k)
 			}
-			return kvs.DeleteKey(ctx, hlog.Logger, types.ChannelDefault, sd, fmt.Sprintf("group/%s", group))
+			return kvs.DeleteKey(ctx, hlog.Logger, types.ChannelDefault, sd, groups.KvsGroupPrefix+group)
 		})
 	},
 }
@@ -100,7 +101,7 @@ func deviceDo(ctx context.Context, v myhome.Verb, group, device string, fn func(
 
 	_, err = myhome.TheClient.CallE(ctx, v, &myhome.GroupDevice{
 		Group:        group,
-		Manufacturer: summary.Manufacturer,
+		Manufacturer: summary.Manufacturer(),
 		Id:           summary.Id(),
 	})
 	return err

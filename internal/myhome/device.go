@@ -16,7 +16,7 @@ import (
 
 type DeviceIdentifier struct {
 	// The manufacturer of the device
-	Manufacturer string `db:"manufacturer" json:"manufacturer"`
+	Manufacturer_ string `db:"manufacturer" json:"manufacturer"`
 	// The unique identifier of the device, defined by the manufacturer
 	Id_ string `db:"id" json:"id"`
 }
@@ -26,6 +26,10 @@ type DeviceSummary struct {
 	MAC   string `db:"mac" json:"mac,omitempty"` // The Ethernet hardware address of the device, globally unique & assigned by the manufacturer
 	Host_ string `db:"host" json:"host"`         // The host address of the device (Host address or resolvable hostname), assigned on this network
 	Name_ string `db:"name" json:"name"`         // The local unique name of the device, defined by the user
+}
+
+func (d DeviceSummary) Manufacturer() string {
+	return d.Manufacturer_
 }
 
 func (d DeviceSummary) Id() string {
@@ -95,7 +99,7 @@ func (d *Device) Impl() any {
 func NewDevice(log logr.Logger, manufacturer Manufacturer, id string) *Device {
 	d := &Device{}
 	d.log = log
-	d.Manufacturer = string(manufacturer)
+	d.Manufacturer_ = string(manufacturer)
 	d.Id_ = id
 	return d
 }

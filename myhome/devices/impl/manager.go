@@ -7,6 +7,7 @@ import (
 	"myhome"
 	"myhome/daemon/watch"
 	mhd "myhome/devices"
+	"myhome/groups"
 	"myhome/storage"
 	"mymqtt"
 	"mynet"
@@ -155,15 +156,36 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 				return ctx.Err()
 
 			case device := <-dc:
+				log.Info("Processing updated device", "device", device)
+
 				sd, ok := device.Impl().(*shelly.Device)
 				if !ok {
 					log.Error(nil, "Unhandled device type", "device id", device.Id, "type", reflect.TypeOf(device.Impl()))
 					continue
 				}
+
 				err := sd.Load(ctx)
 				if err != nil {
-					log.Error(err, "Unable to load device", "device", device)
+					log.Error(err, "Unable to load device", "device id", device.Id())
 					continue
+				}
+
+				groups, err := groups.GetDeviceGroups(ctx, device)
+				if err != nil {
+					dm.log.Error(err, "Failed to get device groups", "device", device)
+					continue
+				}
+				dm.log.Info("Device is in groups", "device", device, "groups", groups)
+				for _, group := range groups {
+					_, err := dm.gr.AddDeviceToGroup(&myhome.GroupDevice{
+						Group:        group,
+						Manufacturer: device.Manufacturer(),
+						Id:           device.Id(),
+					})
+					if err != nil {
+						dm.log.Error(err, "Failed to add device to group", "device", device, "group", group)
+						continue
+					}
 				}
 
 				updated := device.UpdateFromShelly(ctx, sd, types.ChannelDefault)
@@ -186,7 +208,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		dm.log.Error(err, "Failed to get all devices")
 		return err
 	}
-	dm.log.Info("Loaded", "devices", len(devices))
+	dm.log.Info("Loaded devices", "num", len(devices))
 	for _, device := range devices {
 		if device.Info == nil {
 			dm.log.Info("Skipping update of device without info", "device", device)
@@ -266,12 +288,12 @@ func (dm *DeviceManager) ForgetDevice(ctx context.Context, id string) error {
 }
 
 func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) error {
-	if d.Manufacturer == string(myhome.Shelly) {
+	if d.Manufacturer_ == string(myhome.Shelly) {
 		sd, ok := d.Impl().(*shelly.Device)
 		if !ok {
 			return fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(d.Impl()), d)
 		}
-		groups, err := dm.gr.GetDeviceGroups(d.Manufacturer, d.Id())
+		groups, err := dm.gr.GetDeviceGroups(d.Manufacturer(), d.Id())
 		if err != nil {
 			return err
 		}

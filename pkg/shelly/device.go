@@ -106,7 +106,7 @@ func (d *Device) Channel(via types.Channel) types.Channel {
 	if via != types.ChannelDefault {
 		return via
 	}
-	if d.isMqttOk {
+	if d.isMqttOk && d.Id() != "" {
 		return types.ChannelMqtt
 	}
 	if d.Host() != "" {
@@ -259,6 +259,8 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
+var deviceIdRe = regexp.MustCompile("^shelly[a-zA-Z0-9]+-[a-f0-9]{12}$")
+
 func (d *Device) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
 	var mh types.MethodHandler
 	var err error
@@ -363,14 +365,18 @@ func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.
 }
 
 func (d *Device) init(ctx context.Context) error {
+	if d.Id() == "" && d.Host() == "" {
+		return fmt.Errorf("device id & host are empty")
+	}
+
+	if d.Id() == "" {
+		return nil
+	}
+
 	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
 		d.log.Error(err, "Unable to get MQTT client")
 		return err
-	}
-
-	if d.Id() == "" && d.Host() == "" {
-		return fmt.Errorf("device id & host are empty")
 	}
 
 	d.replyTo = fmt.Sprintf("%s_%s", mc.Id(), d.Id())
@@ -399,13 +405,16 @@ func (d *Device) init(ctx context.Context) error {
 
 func (d *Device) Load(ctx context.Context) error {
 	d.log.Info("Loading device", "id", d.Id(), "host", d.Host())
+	if d.Id() != "" {
+		d.init(ctx)
+	}
 	if d.MacAddress == nil {
 		mh, err := GetRegistrar().MethodHandlerE(GetDeviceInfo.String())
 		if err != nil {
 			d.log.Error(err, "Unable to get method handler", "method", GetDeviceInfo)
 			return err
 		}
-		di, err := GetRegistrar().CallE(ctx, d, types.ChannelDefault, mh, map[string]any{"ident": true})
+		di, err := GetRegistrar().CallE(ctx, d, d.Channel(types.ChannelDefault), mh, map[string]any{"ident": true})
 		if err != nil {
 			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
 			return err
@@ -425,6 +434,8 @@ func (d *Device) Load(ctx context.Context) error {
 		}
 		d.Id_ = d.info.Id
 		d.MacAddress = d.info.MacAddress
+		d.isMqttOk = true
+		d.init(ctx)
 	}
 
 	if d.Host() == "" || d.Host() == "<nil>" || d.Ip() == nil {

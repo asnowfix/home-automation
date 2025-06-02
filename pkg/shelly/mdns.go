@@ -19,6 +19,14 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 	s, _ := json.Marshal(entry)
 	log.Info("Found", "entry", s)
 
+	// deviceId is the ZeroConf instance name, e.g. "shelly1minig3-54320464074c" if matching deviceIdRe
+	deviceId := ""
+	isMqttOk := false
+	if deviceIdRe.MatchString(entry.Instance) {
+		deviceId = strings.ToLower(entry.Instance)
+		isMqttOk = true
+	}
+
 	var generation int
 	var application string
 	var version string
@@ -68,10 +76,11 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 	}
 
 	d := &Device{
-		Id_:     strings.ToLower(entry.Instance),
-		Service: entry.Service,
-		Host_:   ips[0].String(),
-		Port:    entry.Port,
+		isMqttOk: isMqttOk,
+		Id_:      deviceId,
+		Service:  entry.Service,
+		Host_:    ips[0].String(),
+		Port:     entry.Port,
 		Product: Product{
 			Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),
 			Generation:  generation,

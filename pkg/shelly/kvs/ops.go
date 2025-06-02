@@ -30,20 +30,21 @@ const (
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
+
 	r.RegisterMethodHandler(Set.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler(Get.String(), types.MethodHandler{
-		Allocate:   func() any { return new(Value) },
+		Allocate:   func() any { return new(GetResponse) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler(GetMany.String(), types.MethodHandler{
-		Allocate:   func() any { return new(KeyValueItems) },
+		Allocate:   func() any { return new(GetManyResponse) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler(List.String(), types.MethodHandler{
-		Allocate:   func() any { return new(KeyItems) },
+		Allocate:   func() any { return new(ListResponse) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler(Delete.String(), types.MethodHandler{

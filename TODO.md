@@ -15,6 +15,10 @@ Model
 Functions
 ---------
 
+[ ] BUG shellyplugsg3 not working
+
+        "level":"error","error":"timeout waiting for response from shellyplugsg3-b08184a53f24 ()","logger":"mqtt","to verb":"Shelly.GetComponents","id":"shellyplugsg3-b08184a53f24","name":"","timeout":"5s","caller":"/Users/fix/Desktop/GIT/home-automation/pkg/shelly/mqtt/channel.go:56","time":1748895703248,"message":"Timeout waiting for device response"
+
 [ ] BUG fix on Windows: 'Failed to install event source: Access is denied.'
 [x] BUG fix wrong HTTP verb:
 

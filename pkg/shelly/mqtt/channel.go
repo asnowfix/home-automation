@@ -52,8 +52,8 @@ func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb
 	case resMsg = <-device.From():
 		// ch.log.Info("Got response", "to verb", verb.Method, "from device", device.Id(), "response", string(resMsg))
 	case <-time.After(ch.timeout):
-		err := fmt.Errorf("timeout waiting for response from %s", device.String())
-		ch.log.Error(err, "Timeout waiting for device response", "to verb", verb.Method, "from device", device.String(), "timeout", ch.timeout)
+		err := fmt.Errorf("timeout waiting for response from %s (%s)", device.Id(), device.Name())
+		ch.log.Error(err, "Timeout waiting for device response", "to verb", verb.Method, "id", device.Id(), "name", device.Name(), "timeout", ch.timeout)
 		device.MqttOk(false)
 		return nil, err
 	}

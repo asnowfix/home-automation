@@ -9,29 +9,29 @@ import (
 	"github.com/go-logr/logr"
 )
 
-func ListKeys(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, match string) (*KeyItems, error) {
-	out, err := device.CallE(ctx, via, string(List), map[string]any{
-		"match": match,
+func ListKeys(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, match string) (*ListResponse, error) {
+	out, err := device.CallE(ctx, via, string(List), &GetManyRequest{
+		Match: match,
 	})
 	if err != nil {
 		log.Error(err, "Unable to List keys")
 		return nil, err
 	}
-	keys := out.(*KeyItems)
+	keys := out.(*ListResponse)
 	return keys, nil
 }
 
-func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, match string) (*KeyValueItems, error) {
-	out, err := device.CallE(ctx, via, string(GetMany), map[string]any{
-		"match": match,
+func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, match string) (*GetManyResponse, error) {
+	out, err := device.CallE(ctx, via, string(GetMany), &GetManyRequest{
+		Match: match,
 	})
 	if err != nil {
 		log.Error(err, "Unable to get many key-values")
 		return nil, err
 	}
-	kvs, ok := out.(*KeyValueItems)
+	kvs, ok := out.(*GetManyResponse)
 	if !ok {
-		return nil, fmt.Errorf("expected *KeyValueItems, got %T", out)
+		return nil, fmt.Errorf("expected *GetManyResponse, got %T", out)
 	}
 	s, err := json.Marshal(kvs)
 	if err != nil {
@@ -43,8 +43,8 @@ func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, devi
 }
 
 func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, key string) (*Value, error) {
-	out, err := device.CallE(ctx, via, string(Get), map[string]any{
-		"key": key,
+	out, err := device.CallE(ctx, via, string(Get), &GetRequest{
+		Key: key,
 	})
 	if err != nil {
 		log.Error(err, "Unable to get on key")

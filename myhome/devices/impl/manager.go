@@ -156,11 +156,11 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 				return ctx.Err()
 
 			case device := <-dc:
-				log.Info("Processing updated device", "device", device)
+				log.Info("Processing updated device", "id", device.Id(), "name", device.Name())
 
 				sd, ok := device.Impl().(*shelly.Device)
 				if !ok {
-					log.Error(nil, "Unhandled device type", "device id", device.Id, "type", reflect.TypeOf(device.Impl()))
+					log.Error(nil, "Unhandled device type", "device id", device.Id(), "type", reflect.TypeOf(device.Impl()))
 					continue
 				}
 
@@ -170,12 +170,12 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 					continue
 				}
 
-				groups, err := groups.GetDeviceGroups(ctx, device)
+				groups, err := groups.GetDeviceGroups(ctx, sd)
 				if err != nil {
-					dm.log.Error(err, "Failed to get device groups", "device", device)
+					dm.log.Error(err, "Failed to get device groups", "id", device.Id(), "name", device.Name())
 					continue
 				}
-				dm.log.Info("Device is in groups", "device", device, "groups", groups)
+				dm.log.Info("Device is in groups", "id", device.Id(), "name", device.Name(), "groups", groups)
 				for _, group := range groups {
 					_, err := dm.gr.AddDeviceToGroup(&myhome.GroupDevice{
 						Group:        group,
@@ -183,7 +183,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 						Id:           device.Id(),
 					})
 					if err != nil {
-						dm.log.Error(err, "Failed to add device to group", "device", device, "group", group)
+						dm.log.Error(err, "Failed to add device to group", "id", device.Id(), "name", device.Name(), "group", group)
 						continue
 					}
 				}
@@ -195,7 +195,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 				err = dm.dr.SetDevice(ctx, device, true)
 				if err != nil {
-					dm.log.Error(err, "Failed to set device", "device", device)
+					dm.log.Error(err, "Failed to set device", "id", device.Id(), "name", device.Name())
 					continue
 				}
 			}
@@ -211,13 +211,13 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	dm.log.Info("Loaded devices", "num", len(devices))
 	for _, device := range devices {
 		if device.Info == nil {
-			dm.log.Info("Skipping update of device without info", "device", device)
+			dm.log.Info("Skipping update of device without info", "id", device.Id(), "name", device.Name())
 			continue
 		} else {
-			dm.log.Info("Preparing update of device", "id", device.Id())
+			dm.log.Info("Preparing update of device", "id", device.Id(), "name", device.Name())
 			sd, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
 			if err != nil {
-				dm.log.Error(err, "Failed to create device from summary", "device", device)
+				dm.log.Error(err, "Failed to create device from summary", "id", device.Id(), "name", device.Name())
 				continue
 			}
 			dm.update <- device.WithImpl(sd)

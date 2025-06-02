@@ -2,13 +2,10 @@ package groups
 
 import (
 	"context"
-	"fmt"
 	"hlog"
 	"myhome"
-	"pkg/devices"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
-	"reflect"
 )
 
 const KvsGroupPrefix = "group/"
@@ -31,18 +28,14 @@ func RemoveDevice(ctx context.Context, group string, device types.Device) error 
 	return err
 }
 
-func GetDeviceGroups(ctx context.Context, device devices.Device) ([]string, error) {
-	sd, ok := device.(types.Device)
-	if !ok {
-		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
-	}
-	kvs, err := kvs.GetManyValues(ctx, hlog.Logger, types.ChannelDefault, sd, KvsGroupPrefix+"*")
+func GetDeviceGroups(ctx context.Context, device types.Device) ([]string, error) {
+	kvs, err := kvs.GetManyValues(ctx, hlog.Logger, types.ChannelDefault, device, KvsGroupPrefix+"*")
 	if err != nil {
 		return nil, err
 	}
 	groups := make([]string, 0)
-	for _, kv := range kvs.Items {
-		group := kv.Key[len(KvsGroupPrefix):]
+	for key, _ := range kvs.Items {
+		group := key[len(KvsGroupPrefix):]
 		groups = append(groups, group)
 	}
 	return groups, nil

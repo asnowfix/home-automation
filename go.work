@@ -48,6 +48,7 @@ use (
 	./pkg/shelly/mqtt
 	./pkg/shelly/schedule
 	./pkg/shelly/script
+	./pkg/shelly/shelly
 	./pkg/shelly/shttp
 	./pkg/shelly/sswitch
 	./pkg/shelly/system

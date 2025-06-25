@@ -5,10 +5,9 @@ import (
 	"encoding/json"
 	"net"
 	"pkg/devices"
-	"pkg/shelly"
-	"pkg/shelly/system"
+	shellyapi "pkg/shelly"
+	"pkg/shelly/shelly"
 	"pkg/shelly/types"
-	"pkg/shelly/wifi"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
@@ -188,95 +187,8 @@ func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Devi
 	return d, nil
 }
 
-func (d *Device) UpdateFromShelly(ctx context.Context, sd *shelly.Device, via types.Channel) bool {
-	updated := false
-
-	if d.Id() == "" || d.Mac().String() == "" || d.Info == nil {
-		out, err := sd.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
-		if err != nil {
-			d.log.Error(err, "Unable to get device info (giving-up)")
-			return updated
-		}
-		info, ok := out.(*shelly.DeviceInfo)
-		if !ok {
-			d.log.Error(err, "Invalid response to get device info (giving-up)", "response", out)
-			return updated
-		}
-		if info.Id == "" || len(info.MacAddress) == 0 {
-			d.log.Error(err, "Invalid response to get device info (giving-up)", "info", *info)
-			return updated
-		}
-
-		d.Info = info
-		d = d.WithId(info.Id).WithMAC(info.MacAddress)
-		updated = true
-	}
-
-	if d.components == nil {
-		out, err := sd.CallE(ctx, via, shelly.GetComponents.String(), &shelly.ComponentsRequest{
-			Keys: []string{"config", "status"},
-		})
-		if err != nil {
-			d.log.Error(err, "Unable to get device's components (continuing)")
-		} else {
-			crs, ok := out.(*shelly.ComponentsResponse)
-			if ok && crs != nil {
-				updated = true
-			} else {
-				d.log.Error(err, "Invalid response to get device's components (continuing)", "response", out)
-			}
-		}
-	}
-
-	if d.Config == nil {
-		out, err := sd.CallE(ctx, via, shelly.GetConfig.String(), nil)
-		if err != nil {
-			d.log.Error(err, "Unable to get device config (continuing)")
-		} else {
-			c, ok := out.(*shelly.Config)
-			if ok && c != nil {
-				d.Config = c
-				updated = true
-			} else {
-				d.log.Error(err, "Invalid response to get device config (continuing)", "response", out)
-			}
-		}
-	}
-
-	if d.ConfigRevision == 0 || d.Name() == "" {
-		out, err := sd.CallE(ctx, via, system.GetConfig.String(), nil)
-		if err != nil {
-			d.log.Error(err, "Unable to get device system config (continuing)")
-		} else {
-			sc, ok := out.(*system.Config)
-			if ok && sc != nil && sc.Device != nil {
-				d.Name_ = sc.Device.Name
-				d.ConfigRevision = sc.ConfigRevision
-				// d.SetComponentStatus("system", nil, *sc) FIXME
-				updated = true
-			} else {
-				d.log.Error(err, "Invalid response to get device system config (continuing)", "response", out)
-			}
-		}
-	}
-
-	if d.Host_ == "" {
-		out, err := sd.CallE(ctx, via, wifi.GetStatus.String(), nil)
-		if err != nil {
-			d.log.Error(err, "Unable to get device wifi status (continuing)")
-		} else {
-			ws, ok := out.(*wifi.Status)
-			if ok && ws != nil && ws.IP != "" {
-				d.Host_ = ws.IP
-				d.log.Error(err, "Invalid response to get device wifi status (continuing)", "response", out)
-				updated = true
-			} else {
-				d.log.Error(err, "Invalid response to get device wifi status (continuing)", "response", out)
-			}
-		}
-	}
-
-	d.log.Info("Device update", "device", d, "updated", updated)
+func (d *Device) UpdateFromShelly(ctx context.Context, sd *shellyapi.Device, via types.Channel) bool {
+	updated, _ := sd.Refresh(ctx, via)
 	return updated
 }
 

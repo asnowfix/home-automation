@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"pkg/devices"
+	"pkg/shelly/shelly"
 	"strconv"
 	"strings"
 
@@ -81,7 +82,7 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 		Service:  entry.Service,
 		Host_:    ips[0].String(),
 		Port:     entry.Port,
-		Product: Product{
+		Product: shelly.Product{
 			Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),
 			Generation:  generation,
 			Application: application,

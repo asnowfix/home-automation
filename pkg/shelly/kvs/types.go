@@ -43,12 +43,12 @@ type GetManyRequest struct {
 }
 
 // FlexibleMap can be either a map[string]string or []KeyValue
-type FlexibleMap map[string]string
+type FlexibleMap map[string]any
 
 // UnmarshalJSON implements the json.Unmarshaler interface
 func (fm *FlexibleMap) UnmarshalJSON(data []byte) error {
 	// First try to unmarshal as a map
-	var m map[string]string
+	var m map[string]any
 	if err := json.Unmarshal(data, &m); err == nil {
 		*fm = m
 		return nil
@@ -57,7 +57,7 @@ func (fm *FlexibleMap) UnmarshalJSON(data []byte) error {
 	// If that fails, try to unmarshal as an array of KeyValue
 	var kvs []KeyValue
 	if err := json.Unmarshal(data, &kvs); err == nil {
-		result := make(map[string]string, len(kvs))
+		result := make(map[string]any, len(kvs))
 		for _, kv := range kvs {
 			result[kv.Key] = kv.Value
 		}
@@ -65,7 +65,7 @@ func (fm *FlexibleMap) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 
-	return fmt.Errorf("could not unmarshal into either map[string]string or []KeyValue")
+	return fmt.Errorf("could not unmarshal into either map[string]any or []KeyValue")
 }
 
 type GetManyResponse struct {

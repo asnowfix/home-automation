@@ -23,12 +23,32 @@ const PRIVATE_PORT = 1883
 const PUBLIC_PORT = 8883
 
 type Client struct {
-	clientId  string      // MQTT client_id (this client)
+	// clientId  string      // MQTT client_id (this client)
 	mqtt      mqtt.Client // MQTT stack
 	brokerUrl *url.URL    // MQTT broker to connect to
 	log       logr.Logger // Logger to use
 	timeout   time.Duration
 	grace     time.Duration
+}
+
+const BROKER_DEFAULT_NAME = "mqtt"
+
+const BROKER_LOOKUP_TIMEOUT time.Duration = 7 * time.Second
+
+const MQTT_DEFAULT_TIMEOUT time.Duration = 14 * time.Second
+
+const MQTT_DEFAULT_GRACE time.Duration = 2 * time.Second
+
+var mqttBroker string = BROKER_DEFAULT_NAME
+
+var mqttTimeout time.Duration = MQTT_DEFAULT_TIMEOUT
+
+var mqttGrace time.Duration = MQTT_DEFAULT_GRACE
+
+var mqttOps *mqtt.ClientOptions
+
+func init() {
+	mqttOps = mqtt.NewClientOptions()
 }
 
 var client *Client
@@ -50,76 +70,27 @@ func GetClientE(ctx context.Context) (*Client, error) {
 	}
 
 	mutex.Lock()
-	if client == nil {
-		mutex.Unlock()
-		select {
-		case <-ctx.Done():
-			log.Error(ctx.Err(), "could not get MQTT client")
-			return nil, ctx.Err()
-		case <-time.After(time.Second):
-		}
-		log.Info("Waiting for MQTT client to be initialized")
-		time.Sleep(time.Second)
-		mutex.Lock()
-	}
-	mutex.Unlock()
-
-	return client, nil
-}
-
-func InitClient(ctx context.Context, log logr.Logger, resolver mynet.Resolver, broker string, me string, mqttTimeout time.Duration, mqttGrace time.Duration, mdnsTimeout time.Duration) *Client {
-	c, err := InitClientE(ctx, log, resolver, broker, mqttTimeout, mqttGrace, mdnsTimeout)
-	if err != nil {
-		panic(fmt.Errorf("could not initialize MQTT client: %w", err))
-	}
-	return c
-}
-
-func InitClientE(ctx context.Context, log logr.Logger, resolver mynet.Resolver, broker string, mqttTimeout time.Duration, mqttGrace time.Duration, mdnsTimeout time.Duration) (*Client, error) {
 	defer mutex.Unlock()
-	mutex.Lock()
 
 	if client != nil {
 		return client, nil
 	}
 
-	hostname, err := os.Hostname()
-	if err != nil {
-		log.Error(err, "could not get hostname")
-		return nil, err
-	}
-	programName := os.Args[0]
-	if i := strings.LastIndex(programName, string(os.PathSeparator)); i != -1 {
-		programName = programName[i+1:]
-	}
-	clientId := fmt.Sprintf("%s-%s-%d", programName, hostname, os.Getpid())
-
-	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", mqttTimeout)
-
-	opts := mqtt.NewClientOptions()
-	opts.SetUsername(MqttUsername)
-	opts.SetPassword(MqttPassword)
-	opts.SetClientID(clientId)
-
-	opts.SetAutoReconnect(true) // automatically reconnect in case of disconnection
-	opts.SetResumeSubs(true)    // automatically re-subscribe in case or disconnection/reconnection
-	opts.SetCleanSession(false) // do not save messages to be re-sent in case of disconnection
-
-	mdnsCtx, mdnsCancel := context.WithTimeout(ctx, mdnsTimeout)
+	mdnsCtx, mdnsCancel := context.WithTimeout(ctx, BROKER_LOOKUP_TIMEOUT)
 	defer mdnsCancel()
-	brokerUrl, err := lookupBroker(mdnsCtx, log, resolver, broker)
+	brokerUrl, err := lookupBroker(mdnsCtx, log, mynet.MyResolver(log), mqttBroker)
 	if err != nil {
-		log.Error(err, "could not find MQTT broker", "where", broker)
+		log.Error(err, "could not find MQTT broker", "where", mqttBroker)
 		return nil, err
 	}
 	log.Info("Using MQTT broker", "url", brokerUrl)
 
-	opts.AddBroker(brokerUrl.String())
-	opts.Servers = []*url.URL{brokerUrl}
+	mqttOps.AddBroker(brokerUrl.String())
+	mqttOps.Servers = []*url.URL{brokerUrl}
 
 	client = &Client{
-		clientId:  clientId,
-		mqtt:      mqtt.NewClient(opts),
+		// clientId:  clientId,
+		mqtt:      mqtt.NewClient(mqttOps),
 		brokerUrl: brokerUrl,
 		log:       log,
 		timeout:   mqttTimeout,
@@ -132,12 +103,57 @@ func InitClientE(ctx context.Context, log logr.Logger, resolver mynet.Resolver, 
 	// 	Printf:  log.I,
 	// }
 
-	log.Info("MQTT client initialized", "client_id", client.clientId, "timeout", client.timeout)
+	log.Info("MQTT client initialized", "client_id", client.Id(), "timeout", client.timeout, "grace", client.grace)
 	return client, nil
 }
 
+func NewClientE(ctx context.Context, log logr.Logger, broker string, timeout time.Duration, grace time.Duration) error {
+	defer mutex.Unlock()
+	mutex.Lock()
+
+	if client != nil {
+		return nil
+	}
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Error(err, "could not get hostname")
+		return err
+	}
+	programName := os.Args[0]
+	if i := strings.LastIndex(programName, string(os.PathSeparator)); i != -1 {
+		programName = programName[i+1:]
+	}
+	clientId := fmt.Sprintf("%s-%s-%d", programName, hostname, os.Getpid())
+
+	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", timeout, "grace", grace)
+
+	mqttOps.SetUsername(MqttUsername)
+	mqttOps.SetPassword(MqttPassword)
+	mqttOps.SetClientID(clientId)
+
+	mqttOps.SetAutoReconnect(true) // automatically reconnect in case of disconnection
+	mqttOps.SetResumeSubs(true)    // automatically re-subscribe in case or disconnection/reconnection
+	mqttOps.SetCleanSession(false) // do not save messages to be re-sent in case of disconnection
+
+	if broker != "" {
+		mqttBroker = broker
+	}
+
+	if timeout > 0 {
+		mqttTimeout = timeout
+	}
+	if grace > 0 {
+		mqttGrace = grace
+	}
+
+	mqttOps.SetConnectTimeout(mqttTimeout)
+	return nil
+}
+
 func (c *Client) Id() string {
-	return c.clientId
+	opts := c.mqtt.OptionsReader()
+	return opts.ClientID()
 }
 
 func (c *Client) BrokerUrl() *url.URL {
@@ -237,7 +253,7 @@ func (c *Client) Close() {
 	c.log.Info("Closing MQTT client", "client_id", c.Id())
 	if c.mqtt.IsConnected() {
 		c.log.Info("Disconnecting MQTT client", "client_id", c.Id())
-		client.mqtt.Disconnect(uint(client.grace.Milliseconds()))
+		c.mqtt.Disconnect(uint(c.grace.Milliseconds()))
 		c.log.Info("Disconnected MQTT client", "client_id", c.Id())
 	}
 }

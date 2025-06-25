@@ -170,21 +170,43 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 					continue
 				}
 
+				// //  TODO: Load KVS revision from device & compare it with the one in the DB. If they are different, update the device in the DB.
+				// status := system.GetStatus(ctx, sd)
+
+				// kvsRevision, err := kvs.GetRevision(ctx, sd)
+				// if err != nil {
+				// 	dm.log.Error(err, "Failed to get device KVS revision", "id", device.Id(), "name", device.Name())
+				// 	continue
+				// }
+				// YYY
+
 				groups, err := groups.GetDeviceGroups(ctx, sd)
 				if err != nil {
 					dm.log.Error(err, "Failed to get device groups", "id", device.Id(), "name", device.Name())
 					continue
 				}
-				dm.log.Info("Device is in groups", "id", device.Id(), "name", device.Name(), "groups", groups)
+				dm.log.Info("Device claims to be in groups", "id", device.Id(), "name", device.Name(), "groups", groups)
+
 				for _, group := range groups {
-					_, err := dm.gr.AddDeviceToGroup(&myhome.GroupDevice{
-						Group:        group,
+					out, err := dm.gr.AddGroup(&myhome.GroupInfo{
+						Name: group,
+					})
+					if err != nil {
+						dm.log.Error(err, "Failed to add group", "group", group)
+					}
+					gi := out.(*myhome.GroupInfo)
+					_, err = dm.gr.AddDeviceToGroup(&myhome.GroupDevice{
+						Group:        gi.Name,
 						Manufacturer: device.Manufacturer(),
 						Id:           device.Id(),
 					})
 					if err != nil {
 						dm.log.Error(err, "Failed to add device to group", "id", device.Id(), "name", device.Name(), "group", group)
 						continue
+					}
+					// Add GroupInfo Key/Values to device
+					for k, v := range gi.KeyValues() {
+						kvs.SetKeyValue(ctx, dm.log, types.ChannelDefault, sd, k, v)
 					}
 				}
 

@@ -38,5 +38,6 @@ func GetDeviceGroups(ctx context.Context, device types.Device) ([]string, error)
 		group := key[len(KvsGroupPrefix):]
 		groups = append(groups, group)
 	}
+	hlog.Logger.Info("GetDeviceGroups", "device", device, "groups", groups)
 	return groups, nil
 }

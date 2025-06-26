@@ -43,20 +43,7 @@ var nameCmd = &cobra.Command{
 			return fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 		}
 
-		log.Info("Getting system config of device", "name", name, "device", sd.Id())
-
-		// out, err := sd.CallE(ctx, types.ChannelDefault, system.GetConfig.String(), nil)
-		// if err != nil {
-		// 	log.Error(err, "Unable to get device system config", "name", name, "device", sd.Id())
-		// 	return err
-		// }
-		// c, ok := out.(*system.Config)
-		// if !ok {
-		// 	err = fmt.Errorf("invalid response to get device config: type='%v' expected='*system.Config'", reflect.TypeOf(out))
-		// 	log.Error(err, "Invalid response to get device config", "name", name, "device", sd.Id())
-		// 	return err
-		// }
-
+		log.Info("Setting name of device", "name", name, "device", sd.Id())
 		_, err = system.DoSetName(ctx, sd, name)
 		return err
 	},

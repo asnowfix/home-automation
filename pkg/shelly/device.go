@@ -42,7 +42,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	if d.Id() == "" || d.Id() == "<nil>" || d.Mac() == nil {
 		info, err := shelly.DoGetDeviceInfo(ctx, d)
 		if err != nil {
-			return false, fmt.Errorf("Unable to shelly.GetDeviceInfo (%v)", err)
+			return false, fmt.Errorf("unable to shelly.GetDeviceInfo (%v)", err)
 		}
 		d.info = info
 		d.Id_ = info.Id
@@ -52,13 +52,19 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	if d.Name() == "" || d.Name() == "<nil>" {
 		config, err := system.DoGetConfig(ctx, d)
 		if err != nil {
-			return false, fmt.Errorf("Unable to system.GetDeviceConfig (%v)", err)
+			return false, fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
+		}
+		if d.config == nil {
+			d.config = &shelly.Config{}
 		}
 		d.config.System = config
 		d.Name_ = config.Device.Name
 		updated = true
 	}
 	if d.Host() == "" || d.Host() == "<nil>" {
+		if d.status == nil {
+			d.status = &shelly.Status{}
+		}
 		ws, err := wifi.DoGetStatus(ctx, via, d)
 		if err == nil && ws.IP != "" {
 			d.status.Wifi = ws
@@ -89,24 +95,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	// 	}
 	// }
 
-	// if d.ConfigRevision == 0 || d.Name() == "" {
-	// 	out, err := sd.CallE(ctx, via, system.GetConfig.String(), nil)
-	// 	if err != nil {
-	// 		d.log.Error(err, "Unable to get device system config (continuing)")
-	// 	} else {
-	// 		sc, ok := out.(*system.Config)
-	// 		if ok && sc != nil && sc.Device != nil {
-	// 			d.Name_ = sc.Device.Name
-	// 			d.ConfigRevision = sc.ConfigRevision
-	// 			// d.SetComponentStatus("system", nil, *sc) FIXME
-	// 			updated = true
-	// 		} else {
-	// 			d.log.Error(err, "Invalid response to get device system config (continuing)", "response", out)
-	// 		}
-	// 	}
-	// }
-
-	d.log.Info("Device update", "device", d, "updated", updated)
+	d.log.Info("Device refreshed", "device", d, "updated", updated)
 
 	return updated, nil
 }
@@ -124,31 +113,23 @@ func (d *Device) Host() string {
 }
 
 func (d *Device) Ip() net.IP {
-	if d.status == nil || (d.status.Wifi == nil && d.status.Ethernet == nil) {
-		return nil
+	if d.status != nil {
+		if d.status.Ethernet != nil {
+			return net.ParseIP(d.status.Ethernet.IP)
+		}
+		if d.status.Wifi != nil {
+			return net.ParseIP(d.status.Wifi.IP)
+		}
 	}
-	if d.status.Wifi != nil {
-		return net.ParseIP(d.status.Wifi.IP)
-	}
-	if d.status.Ethernet != nil {
-		return net.ParseIP(d.status.Ethernet.IP)
-	}
-	return nil
+	return net.ParseIP(d.Host_)
 }
 
 func (d *Device) Name() string {
-	if d.config == nil || d.config.System == nil || d.config.System.Device == nil {
-		return ""
-	}
-	return d.config.System.Device.Name
+	return d.Name_
 }
 
 func (d *Device) Mac() net.HardwareAddr {
-	// FIXME: put a device update on the backburner
-	if d.info == nil || d.info.Product == nil || d.info.Product.MacAddress == nil {
-		return nil
-	}
-	return d.info.Product.MacAddress
+	return net.HardwareAddr(d.MacAddress_)
 }
 
 func (d *Device) SetHost(host string) {

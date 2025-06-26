@@ -48,15 +48,16 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 func DoGetConfig(ctx context.Context, device types.Device) (*Config, error) {
 	out, err := device.CallE(ctx, types.ChannelDefault, GetConfig.String(), nil)
 	if err != nil {
+		log.Error(err, "Unable to get config", "device", device.Id())
 		return nil, err
 	}
-	c, ok := out.(*Config)
+	config, ok := out.(*Config)
 	if !ok {
 		err = fmt.Errorf("invalid response to get device config: type='%v' expected='*system.Config'", reflect.TypeOf(out))
 		log.Error(err, "Invalid response to get device config", "device", device.Id())
 		return nil, err
 	}
-	return c, nil
+	return config, nil
 }
 
 func DoSetName(ctx context.Context, device types.Device, name string) (*SetConfigResponse, error) {

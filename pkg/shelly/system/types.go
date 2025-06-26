@@ -33,15 +33,23 @@ type Config struct {
 	ConfigRevision uint32 `json:"cfg_rev,omitempty"`
 }
 
+// <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Sys/#configuration>
+
 type DeviceConfig struct {
-	Name         string           `json:"name,omitempty"`
-	EcoMode      bool             `json:"eco_mode,omitempty"`
-	MacAddress   net.HardwareAddr `json:"mac,omitempty"`
-	FirmwareId   string           `json:"fw_id,omitempty"`
-	Profile      string           `json:"profile,omitempty"`
-	Discoverable bool             `json:"discoverable,omitempty"`
-	AddOnType    string           `json:"addon_type,omitempty"`
+	Name         string           `json:"name,omitempty"`           // Name of the device
+	EcoMode      bool             `json:"eco_mode,omitempty"`       // Experimental Decreases power consumption when set to true, at the cost of reduced execution speed and increased network latency
+	MacAddress   net.HardwareAddr `json:"mac,omitempty"`            // Read-only base MAC address of the device
+	FirmwareId   string           `json:"fw_id,omitempty"`          // Read-only build identifier of the current firmware image
+	Profile      *string          `json:"profile,omitempty"`        // Name of the device profile (only applicable for multi-profile devices)
+	Discoverable bool             `json:"discoverable,omitempty"`   // Discoverable (shown if applicable)
+	AddOnType    *string          `json:"addon_type,omitempty"`     // Add-on type (shown if applicable)
+	SysBtnToggle *bool            `json:"sys_btn_toggle,omitempty"` // Enable/disable outputs toggle when the system (reset) button is pressed (shown if applicable)
 }
+
+// TODO: sys_btn_toggle has different effect: In switch mode/profile:
+// If at least one switch is ON -> set all switches to OFF.
+// If all switches are OFF -> set all switches to ON.
+// In cover mode/profile, the device is acting as in cover->in_mode->single configuration (affected device: ShellyPro2PM).
 
 type Enabler struct {
 	Enable bool `json:"enable"`

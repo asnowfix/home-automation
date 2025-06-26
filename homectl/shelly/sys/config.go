@@ -45,15 +45,10 @@ func oneDeviceConfig(ctx context.Context, log logr.Logger, via types.Channel, de
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
-	out, err := sd.CallE(ctx, via, system.GetConfig.String(), nil)
+
+	config, err := system.DoGetConfig(ctx, sd)
 	if err != nil {
-		log.Error(err, "Unable to get config", "device", sd.Id())
-		return nil, err
-	}
-	config, ok := out.(*system.Config)
-	if !ok {
-		log.Error(nil, "Invalid config type", "type", reflect.TypeOf(out))
-		return nil, fmt.Errorf("invalid config type %T (should be *shelly.Config)", out)
+		return nil, fmt.Errorf("unable to get config: %v", err)
 	}
 
 	var changed bool = false

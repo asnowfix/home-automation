@@ -2,6 +2,7 @@ package shelly
 
 import (
 	"context"
+	"fmt"
 	"pkg/shelly/input"
 	"pkg/shelly/kvs"
 	"pkg/shelly/mqtt"
@@ -42,7 +43,12 @@ func Init(log logr.Logger, timeout time.Duration) {
 
 func (r *Registrar) CallE(ctx context.Context, d types.Device, via types.Channel, mh types.MethodHandler, params any) (any, error) {
 	out := mh.Allocate()
+
 	via = d.Channel(via)
+	if via == types.ChannelDefault {
+		return nil, fmt.Errorf("device %s (%s) has no possible comm channel", d.Id(), d.Name())
+	}
+
 	r.log.Info("Calling", "device_id", d.Id(), "method", mh.Method, "channel", via, "params", params, "out_type", reflect.TypeOf(out))
 	return r.channels[via](ctx, d, mh, out, params)
 }

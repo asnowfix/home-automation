@@ -21,7 +21,10 @@ type Device interface {
 	ReplyTo() string
 	To() chan<- []byte
 	From() <-chan []byte
-	MqttOk(ok bool) // When MQTT dialog was successful or an MQTT event was received
+	StartDialog() uint32
+	StopDialog(id uint32)
+	IsMqttReady() bool
+	DisableMqtt()
 	Channel(Channel) Channel
 }
 

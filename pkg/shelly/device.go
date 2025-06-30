@@ -14,6 +14,7 @@ import (
 	"pkg/shelly/wifi"
 	"reflect"
 	"regexp"
+	"strings"
 
 	"github.com/go-logr/logr"
 )
@@ -30,26 +31,39 @@ type Device struct {
 	Methods     []string           `json:"-"`
 	config      *shelly.Config     `json:"-"`
 	status      *shelly.Status     `json:"-"`
-	isMqttOk    bool               `json:"-"`
+	mqttReady   bool               `json:"-"`
 	replyTo     string             `json:"-"`
 	to          chan<- []byte      `json:"-"` // channel to send messages to
 	from        <-chan []byte      `json:"-"` // channel to receive messages from
+	dialogId    uint32             `json:"-"`
+	dialogs     map[uint32]bool    `json:"-"`
 	log         logr.Logger        `json:"-"`
 }
 
 func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	updated := false
-	if d.Id() == "" || d.Id() == "<nil>" || d.Mac() == nil {
-		info, err := shelly.DoGetDeviceInfo(ctx, d)
+	if d.Id() == "" || d.Mac() == nil {
+		err := d.initDeviceInfo(ctx, types.ChannelHttp)
 		if err != nil {
-			return false, fmt.Errorf("unable to shelly.GetDeviceInfo (%v)", err)
+			return false, fmt.Errorf("unable to init device (%v)", err)
 		}
-		d.info = info
-		d.Id_ = info.Id
-		d.MacAddress_ = info.MacAddress.String()
 		updated = true
 	}
-	if d.Name() == "" || d.Name() == "<nil>" {
+	if len(d.Methods) == 0 {
+		err := d.initMethods(ctx, via)
+		if err != nil {
+			return false, fmt.Errorf("unable to init methods (%v)", err)
+		}
+		updated = true
+	}
+	if !d.IsMqttReady() {
+		_, err := d.initMqtt(ctx)
+		if err != nil {
+			return false, fmt.Errorf("unable to init MQTT (%v)", err)
+		}
+		updated = true
+	}
+	if d.Name() == "" {
 		config, err := system.DoGetConfig(ctx, d)
 		if err != nil {
 			return false, fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
@@ -61,7 +75,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 		d.Name_ = config.Device.Name
 		updated = true
 	}
-	if d.Host() == "" || d.Host() == "<nil>" {
+	if d.Host() == "" {
 		if d.status == nil {
 			d.status = &shelly.Status{}
 		}
@@ -105,10 +119,16 @@ func (d *Device) Manufacturer() string {
 }
 
 func (d *Device) Id() string {
+	if d.Id_ == "" || d.Id_ == "<nil>" {
+		return ""
+	}
 	return d.Id_
 }
 
 func (d *Device) Host() string {
+	if d.Host_ == "" || d.Host_ == "<nil>" {
+		return ""
+	}
 	return d.Host_
 }
 
@@ -125,10 +145,16 @@ func (d *Device) Ip() net.IP {
 }
 
 func (d *Device) Name() string {
+	if d.Name_ == "" || d.Name_ == "<nil>" {
+		return ""
+	}
 	return d.Name_
 }
 
 func (d *Device) Mac() net.HardwareAddr {
+	if d.MacAddress_ == "" || d.MacAddress_ == "<nil>" {
+		return nil
+	}
 	return net.HardwareAddr(d.MacAddress_)
 }
 
@@ -136,20 +162,38 @@ func (d *Device) SetHost(host string) {
 	d.Host_ = host
 }
 
-func (d *Device) MqttOk(ok bool) {
-	if d.Host_ == "" {
-		// No IP=> No other way to reach out to Shelly than MQTT
-		d.isMqttOk = true
-	} else {
-		d.isMqttOk = ok
-	}
+func (d *Device) IsMqttReady() bool {
+	return d.mqttReady
+}
+
+func (d *Device) DisableMqtt() {
+	d.mqttReady = false
+}
+
+func (d *Device) StartDialog() uint32 {
+	d.dialogId++
+	d.dialogs[d.dialogId] = true
+	return d.dialogId
+}
+
+func (d *Device) StopDialog(id uint32) {
+	delete(d.dialogs, id)
 }
 
 func (d *Device) Channel(via types.Channel) types.Channel {
-	if via != types.ChannelDefault {
-		return via
+	if via == types.ChannelMqtt {
+		if d.IsMqttReady() {
+			return types.ChannelMqtt
+		}
+		return types.ChannelDefault
 	}
-	if d.isMqttOk && d.Id() != "" {
+	if via == types.ChannelHttp {
+		if d.Host() != "" {
+			return types.ChannelHttp
+		}
+		return types.ChannelDefault
+	}
+	if d.IsMqttReady() {
 		return types.ChannelMqtt
 	}
 	if d.Host() != "" {
@@ -174,21 +218,10 @@ func (d *Device) CallE(ctx context.Context, via types.Channel, method string, pa
 	var mh types.MethodHandler
 	var err error
 
-	switch reflect.TypeOf(method).PkgPath() {
-	case reflect.TypeOf(shelly.ListMethods).PkgPath():
-		// Shelly.*
-		fallthrough
-	case reflect.TypeOf(system.GetConfig).PkgPath():
-		// Sys.*
-		mh, err = registrar.MethodHandlerE(method)
-	default:
-		err = d.methods(ctx, via)
-		if err != nil {
-			d.log.Error(err, "Unable to get device's methods", "id", d.Id(), "host", d.Host())
-			return nil, err
-		}
+	if strings.HasPrefix(method, "Shelly.") {
+		mh, err = GetRegistrar().MethodHandlerE(method)
+	} else {
 		mh, err = d.MethodHandlerE(method)
-
 	}
 	if err != nil {
 		d.log.Error(err, "Unable to find method handler", "method", method)
@@ -230,26 +263,22 @@ func (d *Device) ReplyTo() string {
 	return d.replyTo
 }
 
-func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) *Device {
+func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) (devices.Device, error) {
 	d := &Device{
-		Host_:    ip.String(),
-		log:      log,
-		isMqttOk: false,
+		Host_:     ip.String(),
+		log:       log,
+		mqttReady: false,
 	}
-	return d
+	return d.init(ctx)
 }
 
-func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (*Device, error) {
+func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devices.Device, error) {
 	d := &Device{
-		Id_:      id,
-		log:      log,
-		isMqttOk: true,
+		Id_:       id,
+		log:       log,
+		mqttReady: false,
 	}
-	err := d.init(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return d, nil
+	return d.init(ctx)
 }
 
 func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.Device) (devices.Device, error) {
@@ -263,39 +292,52 @@ func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.
 				MacAddress: summary.Mac(),
 			},
 		},
-		log:      log,
-		isMqttOk: true,
+		log:       log,
+		mqttReady: false,
 	}
-	err := d.init(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return d, nil
+	return d.init(ctx)
 }
 
-func (d *Device) init(ctx context.Context) error {
-	if d.Id() == "" && d.Host() == "" {
-		return fmt.Errorf("device id & host are empty")
-	}
-
+func (d *Device) init(ctx context.Context) (devices.Device, error) {
 	if d.Id() == "" {
-		return nil
+		err := d.initHttp(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return d.initMqtt(ctx)
+}
+
+func (d *Device) initHttp(ctx context.Context) error {
+	if d.Host() == "" {
+		return fmt.Errorf("device host is empty: no channel to communicate with HTTP")
+	}
+	d.initDeviceInfo(ctx, types.ChannelHttp)
+	d.initMethods(ctx, types.ChannelHttp)
+	d.mqttReady = false
+	return nil
+}
+
+func (d *Device) initMqtt(ctx context.Context) (devices.Device, error) {
+	if d.Id() == "" {
+		return nil, fmt.Errorf("device id is empty: no channel to communicate")
 	}
 
 	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
 		d.log.Error(err, "Unable to get MQTT client")
-		return err
+		return nil, err
 	}
 
 	d.replyTo = fmt.Sprintf("%s_%s", mc.Id(), d.Id())
+	d.dialogs = make(map[uint32]bool)
 
 	if d.from == nil && mc != nil {
 		var err error
 		d.from, err = mc.Subscriber(ctx, fmt.Sprintf("%s/rpc", d.replyTo), 1 /*qlen*/)
 		if err != nil {
 			d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
-			return err
+			return nil, err
 		}
 	}
 
@@ -305,50 +347,37 @@ func (d *Device) init(ctx context.Context) error {
 		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/)
 		if err != nil {
 			d.log.Error(err, "Unable to publish to device's RPC topic", "device_id", d.Id_)
-			return err
+			return nil, err
 		}
 	}
 
+	d.initDeviceInfo(ctx, types.ChannelMqtt)
+	d.initMethods(ctx, types.ChannelMqtt)
+	d.mqttReady = true
+
+	return d, nil
+}
+
+func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
+	if d.Id() == "" || d.Mac() == nil {
+		out, err := d.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
+		if err != nil {
+			return err
+		}
+		info, ok := out.(*shelly.DeviceInfo)
+		if !ok {
+			return fmt.Errorf("invalid response to get device info")
+		}
+		d.info = info
+		d.Id_ = info.Id
+		d.MacAddress_ = info.MacAddress.String()
+	}
 	return nil
 }
 
-func (d *Device) Load(ctx context.Context) error {
-	d.log.Info("Loading device", "id", d.Id(), "host", d.Host())
-	if d.Id() != "" {
-		d.init(ctx)
-	}
-	if d.MacAddress_ == "" || d.MacAddress_ == "<nil>" {
-		mh, err := GetRegistrar().MethodHandlerE(shelly.GetDeviceInfo.String())
-		if err != nil {
-			d.log.Error(err, "Unable to get method handler", "method", shelly.GetDeviceInfo)
-			return err
-		}
-		di, err := GetRegistrar().CallE(ctx, d, d.Channel(types.ChannelDefault), mh, map[string]any{"ident": true})
-		if err != nil {
-			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
-			return err
-		}
-
-		var ok bool
-		d.info, ok = di.(*shelly.DeviceInfo)
-		if !ok {
-			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
-			return err
-		}
-		d.log.Info("Shelly.GetDeviceInfo: got", "info", *d.info)
-
-		if d.info.Id == "" || len(d.info.MacAddress) == 0 {
-			err = fmt.Errorf("invalid device info: ignoring:%v", *d.info)
-			return err
-		}
-		d.Id_ = d.info.Id
-		d.MacAddress_ = d.info.MacAddress.String()
-		d.isMqttOk = true
-		d.init(ctx)
-	}
-
-	if d.Host() == "" || d.Host() == "<nil>" || d.Ip() == nil { // XXX avoid <nil>
-		out, err := d.CallE(ctx, types.ChannelDefault, shelly.GetComponents.String(), &shelly.ComponentsRequest{
+func (d *Device) initComponents(ctx context.Context, via types.Channel) error {
+	if d.Host() == "" || d.Ip() == nil { // XXX avoid <nil>
+		out, err := d.CallE(ctx, via, shelly.GetComponents.String(), &shelly.ComponentsRequest{
 			Keys: []string{"config", "status"},
 		})
 		if err != nil {
@@ -368,7 +397,7 @@ func (d *Device) Load(ctx context.Context) error {
 	return nil
 }
 
-func (d *Device) methods(ctx context.Context, via types.Channel) error {
+func (d *Device) initMethods(ctx context.Context, via types.Channel) error {
 	if d.Methods == nil {
 		mh, err := GetRegistrar().MethodHandlerE(shelly.ListMethods.String())
 		if err != nil {

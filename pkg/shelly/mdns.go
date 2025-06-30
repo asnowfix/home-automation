@@ -16,16 +16,14 @@ import (
 
 const MDNS_SHELLIES string = "_shelly._tcp."
 
-func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver devices.Resolver, entry *zeroconf.ServiceEntry) (*Device, error) {
+func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver devices.Resolver, entry *zeroconf.ServiceEntry) (devices.Device, error) {
 	s, _ := json.Marshal(entry)
 	log.Info("Found", "entry", s)
 
 	// deviceId is the ZeroConf instance name, e.g. "shelly1minig3-54320464074c" if matching deviceIdRe
 	deviceId := ""
-	isMqttOk := false
 	if deviceIdRe.MatchString(entry.Instance) {
 		deviceId = strings.ToLower(entry.Instance)
-		isMqttOk = true
 	}
 
 	var generation int
@@ -77,11 +75,10 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 	}
 
 	d := &Device{
-		isMqttOk: isMqttOk,
-		Id_:      deviceId,
-		Service:  entry.Service,
-		Host_:    ips[0].String(),
-		Port:     entry.Port,
+		Id_:     deviceId,
+		Service: entry.Service,
+		Host_:   ips[0].String(),
+		Port:    entry.Port,
 		Product: shelly.Product{
 			Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),
 			Generation:  generation,
@@ -91,5 +88,5 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 		},
 	}
 	log.Info("Zeroconf discovered", "device", d)
-	return d, nil
+	return d.init(ctx)
 }

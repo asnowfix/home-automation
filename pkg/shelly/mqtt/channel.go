@@ -29,12 +29,14 @@ func (ch *MqttChannel) Init(log logr.Logger, timeout time.Duration) {
 func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
 	var req Request
 
+	req.Id = device.StartDialog()
 	req.Src = device.ReplyTo()
-	req.Id = 0 // TODO: implement correlation
 	req.Method = verb.Method
 	req.Params = params
 
 	if req.Src == "" {
+		// FIXME: should not happen
+		ch.log.Error(fmt.Errorf("req.Src is empty"), "Unable to call device", "device", device.Id(), "method", verb.Method)
 		panic("req.Src is empty")
 	}
 
@@ -45,7 +47,10 @@ func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb
 	}
 	// ch.log.Info("Sending to", "device", device.Id(), "request", req)
 	device.To() <- reqPayload
+	return ch.receiveResponse(ctx, device, verb.Method, req.Id, out)
+}
 
+func (ch *MqttChannel) receiveResponse(ctx context.Context, device types.Device, method string, reqId uint32, out any) (any, error) {
 	// ch.log.Info("Waiting for response", "to verb", verb.Method, "from device", device.Id(), "timeout", ch.timeout)
 	var resMsg []byte
 	select {
@@ -53,25 +58,40 @@ func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb
 		// ch.log.Info("Got response", "to verb", verb.Method, "from device", device.Id(), "response", string(resMsg))
 	case <-time.After(ch.timeout):
 		err := fmt.Errorf("timeout waiting for response from %s (%s)", device.Id(), device.Name())
-		ch.log.Error(err, "Timeout waiting for device response", "to verb", verb.Method, "id", device.Id(), "name", device.Name(), "timeout", ch.timeout)
-		device.MqttOk(false)
+		ch.log.Error(err, "Timeout waiting for device response", "to method", method, "id", device.Id(), "name", device.Name(), "timeout", ch.timeout)
+		device.StopDialog(reqId)
+		device.DisableMqtt()
 		return nil, err
 	}
 
 	var res Response
 	res.Result = &out
 
-	err = json.Unmarshal(resMsg, &res)
+	err := json.Unmarshal(resMsg, &res)
 	if err != nil {
 		ch.log.Error(err, "Unable to unmarshal response", "payload", resMsg)
 		return nil, err
 	}
 
-	// ch.log.Info("Received", "response", res)
-	if res.Error != nil {
-		return nil, fmt.Errorf("device replied error '%v' (code:%v) to request '%v'", res.Error.Message, res.Error.Code, string(reqPayload))
+	device.StopDialog(reqId)
+	if res.Id != reqId {
+		ch.log.Error(fmt.Errorf("response.id does not match request.id"), "response", res, "request.id", reqId)
+		out, err = ch.receiveResponse(ctx, device, method, reqId, out)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	device.MqttOk(true)
+	if out == nil {
+		// FIXME: should not happen
+		ch.log.Error(fmt.Errorf("out is nil"), "call device failed", "device", device.Id(), "method", method, "res_msg", string(resMsg))
+		panic("out is nil")
+	}
+
+	// ch.log.Info("Received", "response", res)
+	if res.Error != nil {
+		return nil, fmt.Errorf("device replied error '%v' (code:%v) to request '%v'", res.Error.Message, res.Error.Code, string(resMsg))
+	}
+
 	return out, nil
 }

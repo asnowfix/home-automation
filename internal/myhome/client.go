@@ -78,7 +78,10 @@ func (hc *client) start(ctx context.Context) {
 func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.Device, error) {
 	ip := net.ParseIP(name)
 	if ip != nil {
-		device := shelly.NewDeviceFromIp(ctx, hc.log, ip)
+		device, err := shelly.NewDeviceFromIp(ctx, hc.log, ip)
+		if err != nil {
+			return nil, err
+		}
 		return &[]devices.Device{device}, nil
 	}
 

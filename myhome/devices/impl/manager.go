@@ -164,12 +164,6 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 					continue
 				}
 
-				err := sd.Load(ctx)
-				if err != nil {
-					log.Error(err, "Unable to load device", "device id", device.Id())
-					continue
-				}
-
 				// //  TODO: Load KVS revision from device & compare it with the one in the DB. If they are different, update the device in the DB.
 				// status := system.GetStatus(ctx, sd)
 

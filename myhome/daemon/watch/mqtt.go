@@ -11,6 +11,7 @@ import (
 	shellyapi "pkg/shelly"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/shelly"
+	"pkg/shelly/types"
 
 	"github.com/go-logr/logr"
 )
@@ -79,7 +80,7 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 				}
 
 				if sd, ok := device.Impl().(*shellyapi.Device); ok {
-					sd.MqttOk(true)
+					sd.Refresh(ctx, types.ChannelDefault)
 				}
 				dm.UpdateChannel() <- device
 			}

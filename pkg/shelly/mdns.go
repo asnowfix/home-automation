@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"pkg/devices"
+	"pkg/shelly/shelly"
 	"strconv"
 	"strings"
 
@@ -15,9 +16,15 @@ import (
 
 const MDNS_SHELLIES string = "_shelly._tcp."
 
-func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver devices.Resolver, entry *zeroconf.ServiceEntry) (*Device, error) {
+func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver devices.Resolver, entry *zeroconf.ServiceEntry) (devices.Device, error) {
 	s, _ := json.Marshal(entry)
 	log.Info("Found", "entry", s)
+
+	// deviceId is the ZeroConf instance name, e.g. "shelly1minig3-54320464074c" if matching deviceIdRe
+	deviceId := ""
+	if deviceIdRe.MatchString(entry.Instance) {
+		deviceId = strings.ToLower(entry.Instance)
+	}
 
 	var generation int
 	var application string
@@ -68,11 +75,11 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 	}
 
 	d := &Device{
-		Id_:     strings.ToLower(entry.Instance),
+		Id_:     deviceId,
 		Service: entry.Service,
 		Host_:   ips[0].String(),
 		Port:    entry.Port,
-		Product: Product{
+		Product: shelly.Product{
 			Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),
 			Generation:  generation,
 			Application: application,
@@ -81,5 +88,5 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 		},
 	}
 	log.Info("Zeroconf discovered", "device", d)
-	return d, nil
+	return d.init(ctx)
 }

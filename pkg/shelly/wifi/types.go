@@ -46,10 +46,10 @@ type RoamConfig struct {
 
 // Config represents the WiFi configuration for the device.
 type Config struct {
-	AP   *AP        `json:"ap,omitempty"`   // Access point configuration
-	STA  *STA       `json:"sta,omitempty"`  // Station configuration
-	STA1 *STA       `json:"sta1,omitempty"` // Fallback station configuration
-	Roam RoamConfig `json:"roam"`           // Roaming configuration
+	AP   *AP         `json:"ap,omitempty"`   // Access point configuration
+	STA  *STA        `json:"sta,omitempty"`  // Station configuration
+	STA1 *STA        `json:"sta1,omitempty"` // Fallback station configuration
+	Roam *RoamConfig `json:"roam"`           // Roaming configuration
 }
 
 type SetConfigRequest struct {

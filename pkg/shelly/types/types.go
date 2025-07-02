@@ -15,12 +15,16 @@ type Device interface {
 	String() string
 	Name() string
 	Host() string
+	Manufacturer() string
 	Id() string
 	CallE(ctx context.Context, via Channel, method string, params any) (any, error)
 	ReplyTo() string
 	To() chan<- []byte
 	From() <-chan []byte
-	MqttOk(ok bool) // When MQTT dialog was successful or an MQTT event was received
+	StartDialog() uint32
+	StopDialog(id uint32)
+	IsMqttReady() bool
+	DisableMqtt()
 	Channel(Channel) Channel
 }
 

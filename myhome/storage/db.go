@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"myhome"
@@ -289,30 +290,58 @@ func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (*myhome.Groups
 
 // AddGroup adds a new group to the database.
 func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (any, error) {
-	log := s.log.WithValues("name", group.Name)
-	log.Info("Adding new group")
-	query := `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)`
-	result, err := s.db.NamedExec(query, map[string]interface{}{
-		"name": group.Name,
-		"kvs":  group.KVS,
-	})
+
+	// Check if the group already exists, if so, update it
+	var exists bool
+	var result sql.Result
+	var id int64
+	var err error
+
+	err = s.db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM groups WHERE name = $1)", group.Name)
+	if err != nil {
+		s.log.Error(err, "Failed to check if group exists", "name", group.Name)
+		return nil, err
+	}
+
+	if exists {
+		s.log.Info("Group already exists, updating", "name", group.Name)
+		query := `UPDATE groups SET kvs = :kvs WHERE name = :name`
+		result, err = s.db.NamedExec(query, map[string]interface{}{
+			"name": group.Name,
+			"kvs":  group.KVS,
+		})
+	} else {
+		log := s.log.WithValues("name", group.Name)
+		log.Info("Adding new group", "name", group.Name)
+		query := `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)`
+		result, err = s.db.NamedExec(query, map[string]interface{}{
+			"name": group.Name,
+			"kvs":  group.KVS,
+		})
+	}
+
 	if err != nil {
 		return nil, err
 	}
-	return result.LastInsertId()
+	id, err = result.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	group.ID = int(id)
+	return group, nil
 }
 
 // RemoveGroup removes a group from the database by its name.
 // RemoveGroup removes a group from the database by its name.
 func (s *DeviceStorage) RemoveGroup(name string) (any, error) {
 	log := s.log.WithValues("name", name)
-	log.Info("Removing group")
+	log.Info("Removing group", "name", name)
 
 	// Check if the group exists
 	var exists bool
 	err := s.db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM groups WHERE name = $1)", name)
 	if err != nil {
-		log.Error(err, "Failed to check if group exists")
+		log.Error(err, "Failed to check if group exists", "name", name)
 		return nil, err
 	}
 	if !exists {

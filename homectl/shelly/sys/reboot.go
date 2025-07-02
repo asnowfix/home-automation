@@ -7,7 +7,8 @@ import (
 	"homectl/options"
 	"myhome"
 	"pkg/devices"
-	"pkg/shelly"
+	shellyapi "pkg/shelly"
+	"pkg/shelly/shelly"
 	"pkg/shelly/types"
 	"reflect"
 
@@ -30,7 +31,7 @@ var rebootCmd = &cobra.Command{
 }
 
 func oneDeviceReboot(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
-	sd, ok := device.(*shelly.Device)
+	sd, ok := device.(*shellyapi.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}

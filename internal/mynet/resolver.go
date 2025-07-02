@@ -18,7 +18,6 @@ import (
 
 type Resolver interface {
 	WithLocalName(hostname string) Resolver
-	Start(context.Context) Resolver
 	LookupHost(ctx context.Context, host string) (ips []net.IP, err error)
 	LookupService(ctx context.Context, service string) (*url.URL, error)
 	BrowseService(ctx context.Context, service, domain string, entries chan<- *zeroconf.ServiceEntry) error // TODO: use our own type rather than zeroconf.ServiceEntry
@@ -62,7 +61,7 @@ func (r *resolver) WithLocalName(hostname string) Resolver {
 	return theResolver
 }
 
-func (r *resolver) Start(ctx context.Context) Resolver {
+func (r *resolver) start(ctx context.Context) Resolver {
 	r.Lock()
 	defer r.Unlock()
 
@@ -146,6 +145,7 @@ func (r *resolver) waitForStart(ctx context.Context) {
 }
 
 func (r *resolver) LookupHost(ctx context.Context, host string) ([]net.IP, error) {
+	r.start(ctx)
 	r.waitForStart(ctx)
 
 	addrs, err := net.LookupHost(host)
@@ -167,6 +167,7 @@ func (r *resolver) LookupHost(ctx context.Context, host string) ([]net.IP, error
 }
 
 func (r *resolver) LookupService(ctx context.Context, service string) (*url.URL, error) {
+	r.start(ctx)
 	r.waitForStart(ctx)
 
 	resolver, err := zeroconf.NewResolver(nil)
@@ -214,6 +215,7 @@ func (r *resolver) LookupService(ctx context.Context, service string) (*url.URL,
 }
 
 func (r *resolver) BrowseService(ctx context.Context, service, domain string, entries chan<- *zeroconf.ServiceEntry) error {
+	r.start(ctx)
 	r.waitForStart(ctx)
 	return r.zeroconf.Browse(ctx, service, domain, entries)
 }

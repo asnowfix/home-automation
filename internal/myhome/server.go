@@ -19,7 +19,11 @@ type Server interface {
 	MethodE(method Verb) (*Method, error)
 }
 
-func NewServerE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, handler Server) (Server, error) {
+func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, error) {
+	mc, err := mymqtt.GetClientE(ctx)
+	if err != nil {
+		return nil, err
+	}
 	from, err := mc.Subscriber(ctx, ServerTopic(), 1)
 	if err != nil {
 		log.Error(err, "Failed to subscribe to server", "topic", ServerTopic())

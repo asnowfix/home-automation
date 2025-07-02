@@ -43,15 +43,13 @@ func (d *daemon) Stop(s service.Service) error {
 
 func (d *daemon) Run() error {
 	var disableEmbeddedMqttBroker bool = len(options.Flags.MqttBroker) != 0
-	var err error
 
 	// Initialize Shelly devices handler
-	shelly.Init(d.ctx, options.Flags.MqttTimeout)
+	shelly.Init(d.log, options.Flags.MqttTimeout)
 
 	var mc *mymqtt.Client
 
 	resolver := mynet.MyResolver(d.log.WithName("mynet.Resolver"))
-	// defer resolver.Stop()
 
 	// Conditionally start the embedded MQTT broker
 	if !disableEmbeddedMqttBroker {
@@ -73,15 +71,18 @@ func (d *daemon) Run() error {
 		// go gen1.Publisher(ctx, log, gen1Ch, mc)
 	} else {
 		// Connect to the network's MQTT broker
-		mc, err = mymqtt.InitClientE(d.ctx, d.log, resolver, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
+		err := mymqtt.NewClientE(d.ctx, d.log, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 		if err != nil {
 			d.log.Error(err, "Failed to initialize MQTT client")
 			return err
 		}
+		mc, err = mymqtt.GetClientE(d.ctx)
+		if err != nil {
+			d.log.Error(err, "Failed to start MQTT client")
+			return err
+		}
 		defer mc.Close()
 	}
-
-	resolver.Start(d.ctx)
 
 	if !disableDeviceManager {
 		// Initialize DeviceManager
@@ -102,7 +103,7 @@ func (d *daemon) Run() error {
 
 		d.log.Info("Started device manager", "manager", dm)
 
-		_, err = myhome.NewServerE(d.ctx, d.log, mc, dm)
+		_, err = myhome.NewServerE(d.ctx, d.log, dm)
 		if err != nil {
 			d.log.Error(err, "Failed to start MyHome service")
 			return err

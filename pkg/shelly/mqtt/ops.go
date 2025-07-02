@@ -1,6 +1,8 @@
 package mqtt
 
 import (
+	"context"
+	"fmt"
 	"pkg/shelly/types"
 	"time"
 
@@ -52,4 +54,24 @@ func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
 
 func init() {
 	rand.Seed(uint64(time.Now().UnixNano()))
+}
+
+func SetServer(ctx context.Context, d types.Device, server string) (any, error) {
+	out, err := d.CallE(ctx, types.ChannelDefault, string(SetConfig.String()), SetConfigRequest{
+		Config: Config{
+			Enable:        true,
+			Server:        server,
+			RpcNotifs:     true,
+			StatusNotifs:  true,
+			EnableControl: true,
+			EnableRpc:     true,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if res, ok := out.(*SetConfigResponse); ok {
+		return res, nil
+	}
+	return nil, fmt.Errorf("expected SetConfigResponse, got %T", out)
 }

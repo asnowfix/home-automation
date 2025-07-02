@@ -15,6 +15,32 @@ Model
 Functions
 ---------
 
+[ ] Fix new (rebooting) device not being discovered & indexed
+
+        {"level":"error","error":"sql: no rows in result set","logger":"DeviceStorage","id":"shelly1minig3-54320464074c","caller":"/Users/fix/Desktop/GIT/home-automation/myhome/storage/db.go:158","time":1750609120341,"message":"Failed to get device by Id"}
+        {"level":"info","v":0,"logger":"Mqtt#Watcher","device_id":"shelly1minig3-54320464074c","caller":"/Users/fix/Desktop/GIT/home-automation/myhome/daemon/watch/mqtt.go:49","time":1750609120341,"message":"Device not found, creating new one"}
+        {"level":"error","error":"sql: no rows in result set","logger":"DeviceStorage","id":"shelly1minig3-54320464074c","caller":"/Users/fix/Desktop/GIT/home-automation/myhome/storage/db.go:158","time":1750609125355,"message":"Failed to get device by Id"}
+        {"level":"error","error":"sql: no rows in result set","logger":"DeviceStorage","id":"shelly1minig3-54320464074c","caller":"/Users/fix/Desktop/GIT/home-automation/myhome/storage/db.go:158","time":1750609125373,"message":"Failed to get device by Id"}
+        {"level":"info","v":0,"logger":"Mqtt#Watcher","device_id":"shelly1minig3-54320464074c","caller":"/Users/fix/Desktop/GIT/home-automation/myhome/daemon/watch/mqtt.go:49","time":1750609125373,"message":"Device not found, creating new one"}
+        {"level":"error","error":"sql: no rows in result set","logger":"DeviceStorage","id":"shelly1minig3-54320464074c","caller":"/Users/fix/Desktop/GIT/home-automation/myhome/storage/db.go:158","time":1750609125384,"message":"Failed to get device by Id"}
+        {"level":"info","v":0,"logger":"Mqtt#Watcher","device_id":"shelly1minig3-54320464074c","caller":"/Users/fix/Desktop/GIT/home-automation/myhome/daemon/watch/mqtt.go:49","time":1750609125385,"message":"Device not found, creating new one"}
+        {"level":"error","error":"sql: no rows in result set","logger":"DeviceStorage","id":"shelly1minig3-54320464074c","caller":"/Users/fix/Desktop/GIT/home-automation/myhome/storage/db.go:158","time":1750609126730,"message":"Failed to get device by Id"}
+        {"level":"error","error":"sql: no rows in result set","logger":"DeviceStorage","id":"shelly1minig3-54320464074c","caller":"/Users/fix/Desktop/GIT/home-automation/myhome/storage/db.go:158","time":1750609139158,"message":"Failed to get device by Id"}
+        {"level":"info","v":0,"logger":"Mqtt#Watcher","device_id":"shelly1minig3-54320464074c","caller":"/Users/fix/Desktop/GIT/home-automation/myhome/daemon/watch/mqtt.go:49","time":1750609139158,"message":"Device not found, creating new one"}
+
+[ ] synchomized device names reports device name (from user) rather than device ID in Instance:
+
+{"level":"info","v":0,"logger":"DeviceManager#WatchZeroConf","device":"shellyplus1-b8d61a85ed58","caller":"/Users/fix/Desktop/GIT/home-automation/pkg/shelly/mdns.go:83","time":1748897948959,"message":"Zeroconf discovered"}
+{"level":"info","v":0,"logger":"DeviceManager#WatchZeroConf","entry":{"name":"lumiere-exterieure-droite","type":"_shelly._tcp.","domain":"local.","hostname":"lumiere-exterieure-droite.local.","port":80,"text":["gen=2","app=Plus1","ver=1.6.1"],"ttl":120},"caller":"/Users/fix/Desktop/GIT/home-automation/myhome/daemon/watch/zeroconf.go:40","time":1748897948959,"message":"Browsed"}
+
+[ ] BUG use Ip() rather than Host() to avoid an error like the below:
+
+        {"level":"error","error":"Get \"http://[<nil>]/rpc/Shelly.GetDeviceInfo?ident=true\": dial tcp: lookup <nil>: no such host","caller":"/Users/fix/Desktop/GIT/home-automation/pkg/shelly/shttp/channel.go:37","time":1748900840030,"message":"HTTP error"}
+
+[ ] BUG shellyplugsg3 not working
+
+        "level":"error","error":"timeout waiting for response from shellyplugsg3-b08184a53f24 ()","logger":"mqtt","to verb":"Shelly.GetComponents","id":"shellyplugsg3-b08184a53f24","name":"","timeout":"5s","caller":"/Users/fix/Desktop/GIT/home-automation/pkg/shelly/mqtt/channel.go:56","time":1748895703248,"message":"Timeout waiting for device response"
+
 [ ] BUG fix on Windows: 'Failed to install event source: Access is denied.'
 [x] BUG fix wrong HTTP verb:
 

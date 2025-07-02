@@ -39,7 +39,7 @@ var deleteCmd = &cobra.Command{
 			for _, device := range group.Devices {
 				_, err := myhome.TheClient.CallE(ctx, myhome.GroupRemoveDevice, &myhome.GroupDevice{
 					Group:        name,
-					Manufacturer: device.Manufacturer,
+					Manufacturer: device.Manufacturer(),
 					Id:           device.Id(),
 				})
 				if err != nil {

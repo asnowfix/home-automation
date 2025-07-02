@@ -8,8 +8,10 @@ import (
 	"myhome"
 	"myhome/devices"
 	"mymqtt"
-	"pkg/shelly"
+	shellyapi "pkg/shelly"
 	"pkg/shelly/mqtt"
+	"pkg/shelly/shelly"
+	"pkg/shelly/types"
 
 	"github.com/go-logr/logr"
 )
@@ -47,7 +49,7 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 				device, err := db.GetDeviceById(ctx, deviceId)
 				if err != nil {
 					log.Info("Device not found, creating new one", "device_id", deviceId)
-					sd, err := shelly.NewDeviceFromMqttId(ctx, log, deviceId)
+					sd, err := shellyapi.NewDeviceFromMqttId(ctx, log, deviceId)
 					if err != nil {
 						log.Error(err, "Failed to create device from shelly device")
 						continue
@@ -61,7 +63,7 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 					log.Info("Found device in DB", "device_id", deviceId)
 					if device.Impl() == nil {
 						log.Info("Loading device details in memory", "device_id", deviceId)
-						sd, err := shelly.NewDeviceFromSummary(ctx, log, device)
+						sd, err := shellyapi.NewDeviceFromSummary(ctx, log, device)
 						if err != nil {
 							log.Error(err, "Failed to create device from summary", "device", device)
 							continue
@@ -77,8 +79,8 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 					continue
 				}
 
-				if sd, ok := device.Impl().(*shelly.Device); ok {
-					sd.MqttOk(true)
+				if sd, ok := device.Impl().(*shellyapi.Device); ok {
+					sd.Refresh(ctx, types.ChannelDefault)
 				}
 				dm.UpdateChannel() <- device
 			}
@@ -123,7 +125,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Even
 					d.ConfigRevision = ev.ConfigRevision
 				}
 			} else {
-				return fmt.Errorf("unable to parse event parameters: %v", event)
+				return fmt.Errorf("unable to parse event parameters: %v", *event)
 			}
 		} else {
 			return fmt.Errorf("missing event parameters in event: %v", event)

@@ -5,6 +5,7 @@ import (
 	jobsCtl "homectl/shelly/jobs"
 	kvsCtl "homectl/shelly/kvs"
 	mqttCtl "homectl/shelly/mqtt"
+	newCtl "homectl/shelly/new"
 	scriptCtl "homectl/shelly/script"
 	sysCtl "homectl/shelly/sys"
 	wifiCtl "homectl/shelly/wifi"
@@ -26,4 +27,5 @@ func init() {
 	Cmd.AddCommand(wifiCtl.Cmd)
 	Cmd.AddCommand(sysCtl.Cmd)
 	Cmd.AddCommand(compsCtl.Cmd)
+	Cmd.AddCommand(newCtl.Cmd)
 }

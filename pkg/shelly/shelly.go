@@ -24,7 +24,7 @@ type ShellyDevice struct {
 }
 
 func (d ShellyDevice) Provider() string {
-	return "shelly"
+	return d.shelly.Manufacturer()
 }
 
 func (d ShellyDevice) Name() string {
@@ -41,6 +41,10 @@ func (d ShellyDevice) Online() bool {
 
 func (d ShellyDevice) MarshalJSON() ([]byte, error) {
 	return devices.MarshalJSON(d)
+}
+
+func (d ShellyDevice) Manufacturer() string {
+	return d.shelly.Manufacturer()
 }
 
 func (d ShellyDevice) Id() string {

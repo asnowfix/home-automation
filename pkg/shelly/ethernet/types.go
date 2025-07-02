@@ -18,7 +18,7 @@ type Config struct {
 // Status represents the Ethernet status
 // From <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Eth/#status>
 type Status struct {
-	Ip string `json:"ip"` // IP of the device in the network
+	IP string `json:"ip"` // IP of the device in the network
 }
 
 // ListClientsResponse represents the response of the ListClients method

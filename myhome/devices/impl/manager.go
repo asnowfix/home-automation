@@ -7,6 +7,7 @@ import (
 	"myhome"
 	"myhome/daemon/watch"
 	mhd "myhome/devices"
+	"myhome/groups"
 	"myhome/storage"
 	"mymqtt"
 	"mynet"
@@ -155,15 +156,52 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 				return ctx.Err()
 
 			case device := <-dc:
+				log.Info("Processing updated device", "id", device.Id(), "name", device.Name())
+
 				sd, ok := device.Impl().(*shelly.Device)
 				if !ok {
-					log.Error(nil, "Unhandled device type", "device id", device.Id, "type", reflect.TypeOf(device.Impl()))
+					log.Error(nil, "Unhandled device type", "device id", device.Id(), "type", reflect.TypeOf(device.Impl()))
 					continue
 				}
-				err := sd.Load(ctx)
+
+				// //  TODO: Load KVS revision from device & compare it with the one in the DB. If they are different, update the device in the DB.
+				// status := system.GetStatus(ctx, sd)
+
+				// kvsRevision, err := kvs.GetRevision(ctx, sd)
+				// if err != nil {
+				// 	dm.log.Error(err, "Failed to get device KVS revision", "id", device.Id(), "name", device.Name())
+				// 	continue
+				// }
+				// YYY
+
+				groups, err := groups.GetDeviceGroups(ctx, sd)
 				if err != nil {
-					log.Error(err, "Unable to load device", "device", device)
+					dm.log.Error(err, "Failed to get device groups", "id", device.Id(), "name", device.Name())
 					continue
+				}
+				dm.log.Info("Device claims to be in groups", "id", device.Id(), "name", device.Name(), "groups", groups)
+
+				for _, group := range groups {
+					out, err := dm.gr.AddGroup(&myhome.GroupInfo{
+						Name: group,
+					})
+					if err != nil {
+						dm.log.Error(err, "Failed to add group", "group", group)
+					}
+					gi := out.(*myhome.GroupInfo)
+					_, err = dm.gr.AddDeviceToGroup(&myhome.GroupDevice{
+						Group:        gi.Name,
+						Manufacturer: device.Manufacturer(),
+						Id:           device.Id(),
+					})
+					if err != nil {
+						dm.log.Error(err, "Failed to add device to group", "id", device.Id(), "name", device.Name(), "group", group)
+						continue
+					}
+					// Add GroupInfo Key/Values to device
+					for k, v := range gi.KeyValues() {
+						kvs.SetKeyValue(ctx, dm.log, types.ChannelDefault, sd, k, v)
+					}
 				}
 
 				updated := device.UpdateFromShelly(ctx, sd, types.ChannelDefault)
@@ -173,7 +211,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 				err = dm.dr.SetDevice(ctx, device, true)
 				if err != nil {
-					dm.log.Error(err, "Failed to set device", "device", device)
+					dm.log.Error(err, "Failed to set device", "id", device.Id(), "name", device.Name())
 					continue
 				}
 			}
@@ -186,16 +224,16 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		dm.log.Error(err, "Failed to get all devices")
 		return err
 	}
-	dm.log.Info("Loaded", "devices", len(devices))
+	dm.log.Info("Loaded devices", "num", len(devices))
 	for _, device := range devices {
 		if device.Info == nil {
-			dm.log.Info("Skipping update of device without info", "device", device)
+			dm.log.Info("Skipping update of device without info", "id", device.Id(), "name", device.Name())
 			continue
 		} else {
-			dm.log.Info("Preparing update of device", "id", device.Id())
+			dm.log.Info("Preparing update of device", "id", device.Id(), "name", device.Name())
 			sd, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
 			if err != nil {
-				dm.log.Error(err, "Failed to create device from summary", "device", device)
+				dm.log.Error(err, "Failed to create device from summary", "id", device.Id(), "name", device.Name())
 				continue
 			}
 			dm.update <- device.WithImpl(sd)
@@ -266,12 +304,12 @@ func (dm *DeviceManager) ForgetDevice(ctx context.Context, id string) error {
 }
 
 func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) error {
-	if d.Manufacturer == string(myhome.Shelly) {
+	if d.Manufacturer_ == string(myhome.Shelly) {
 		sd, ok := d.Impl().(*shelly.Device)
 		if !ok {
 			return fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(d.Impl()), d)
 		}
-		groups, err := dm.gr.GetDeviceGroups(d.Manufacturer, d.Id())
+		groups, err := dm.gr.GetDeviceGroups(d.Manufacturer(), d.Id())
 		if err != nil {
 			return err
 		}

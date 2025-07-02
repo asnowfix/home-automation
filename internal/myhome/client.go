@@ -5,15 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"mymqtt"
+	"net"
 	"pkg/devices"
+	"pkg/shelly"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
 )
 
 type client struct {
+	lock    sync.Mutex
 	log     logr.Logger
 	to      chan<- []byte
 	from    <-chan []byte
@@ -21,33 +25,68 @@ type client struct {
 	timeout time.Duration
 }
 
-func NewClientE(ctx context.Context, log logr.Logger, mc *mymqtt.Client, timeout time.Duration) (Client, error) {
-	from, err := mc.Subscriber(ctx, ClientTopic(mc.Id()), 1)
-	if err != nil {
-		log.Error(err, "Failed to subscribe to client topic", "topic", ClientTopic(mc.Id()))
-		return nil, err
-	}
-
-	to, err := mc.Publisher(ctx, ServerTopic(), 1)
-	if err != nil {
-		log.Error(err, "Failed to prepare publishing to server topic", "topic", ServerTopic())
-		return nil, err
-	}
-
-	return &client{
+func NewClientE(ctx context.Context, log logr.Logger, timeout time.Duration) (Client, error) {
+	c := &client{
 		log:     log,
-		from:    from,
-		to:      to,
-		me:      mc.Id(),
 		timeout: timeout,
-	}, nil
+	}
+	return c, nil
 }
 
-func (hc *client) Shutdown() {
-	hc.log.Info("Shutting down client")
+func (hc *client) start(ctx context.Context) {
+	hc.lock.Lock()
+	defer hc.lock.Unlock()
+	if hc.me != "" {
+		hc.log.Info("Client already started", "me", hc.me)
+		return
+	}
+	mc, err := mymqtt.GetClientE(ctx)
+	if err != nil {
+		hc.log.Error(err, "Failed to get MQTT client")
+		return
+	}
+	hc.me = mc.Id()
+
+	hc.from, err = mc.Subscriber(ctx, ClientTopic(mc.Id()), 1)
+	if err != nil {
+		hc.log.Error(err, "Failed to subscribe to client topic", "topic", ClientTopic(mc.Id()))
+		return
+	}
+
+	hc.to, err = mc.Publisher(ctx, ServerTopic(), 1)
+	if err != nil {
+		hc.log.Error(err, "Failed to prepare publishing to server topic", "topic", ServerTopic())
+		return
+	}
+
+	hc.log.Info("Started client", "me", mc.Id())
 }
+
+// func (hc *client) Shutdown() {
+// 	hc.lock.Lock()
+// 	defer hc.lock.Unlock()
+// 	if hc.me == "" {
+// 		hc.log.Info("Client not started")
+// 		return
+// 	}
+// 	hc.log.Info("Shutting down client", "me", hc.me)
+// 	hc.me = ""
+// 	hc.from = nil
+// 	hc.to = nil
+// }
 
 func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.Device, error) {
+	ip := net.ParseIP(name)
+	if ip != nil {
+		device, err := shelly.NewDeviceFromIp(ctx, hc.log, ip)
+		if err != nil {
+			return nil, err
+		}
+		return &[]devices.Device{device}, nil
+	}
+
+	hc.start(ctx)
+
 	var out any
 	var err error
 
@@ -73,7 +112,7 @@ func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.De
 }
 
 func (hc *client) ForgetDevices(ctx context.Context, name string) error {
-	var err error
+	hc.start(ctx)
 
 	devices, err := hc.LookupDevices(ctx, name)
 	if err != nil {
@@ -90,6 +129,8 @@ func (hc *client) ForgetDevices(ctx context.Context, name string) error {
 }
 
 func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, error) {
+	hc.start(ctx)
+
 	requestId, err := RandStringBytesMaskImprRandReaderUnsafe(16)
 	if err != nil {
 		return nil, err

@@ -8,241 +8,198 @@ import (
 	"net"
 	"pkg/devices"
 	"pkg/shelly/ethernet"
-	"pkg/shelly/mqtt"
-	"pkg/shelly/sswitch"
+	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
 	"pkg/shelly/wifi"
 	"reflect"
 	"regexp"
-	"schedule"
+	"strings"
 
 	"github.com/go-logr/logr"
 )
 
-type Product struct {
-	Model       string           `json:"model"`
-	Serial      string           `json:"serial,omitempty"`
-	MacAddress  net.HardwareAddr `json:"mac"`
-	Application string           `json:"app"`
-	Version     string           `json:"ver"`
-	Generation  int              `json:"gen"`
+type Device struct {
+	shelly.Product
+	Id_         string             `json:"id"`
+	MacAddress_ string             `json:"mac"`
+	Name_       string             `json:"name"`
+	Service     string             `json:"service"`
+	Host_       string             `json:"host"`
+	Port        int                `json:"port"`
+	info        *shelly.DeviceInfo `json:"-"`
+	Methods     []string           `json:"-"`
+	config      *shelly.Config     `json:"-"`
+	status      *shelly.Status     `json:"-"`
+	mqttReady   bool               `json:"-"`
+	replyTo     string             `json:"-"`
+	to          chan<- []byte      `json:"-"` // channel to send messages to
+	from        <-chan []byte      `json:"-"` // channel to receive messages from
+	dialogId    uint32             `json:"-"`
+	dialogs     map[uint32]bool    `json:"-"`
+	log         logr.Logger        `json:"-"`
 }
 
-type State uint32
+func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
+	updated := false
+	if d.Id() == "" || d.Mac() == nil {
+		err := d.initDeviceInfo(ctx, types.ChannelHttp)
+		if err != nil {
+			return false, fmt.Errorf("unable to init device (%v)", err)
+		}
+		updated = true
+	}
+	if len(d.Methods) == 0 {
+		err := d.initMethods(ctx, via)
+		if err != nil {
+			return false, fmt.Errorf("unable to init methods (%v)", err)
+		}
+		updated = true
+	}
+	if !d.IsMqttReady() {
+		_, err := d.initMqtt(ctx)
+		if err != nil {
+			return false, fmt.Errorf("unable to init MQTT (%v)", err)
+		}
+		updated = true
+	}
+	if d.Name() == "" {
+		config, err := system.DoGetConfig(ctx, d)
+		if err != nil {
+			return false, fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
+		}
+		if d.config == nil {
+			d.config = &shelly.Config{}
+		}
+		d.config.System = config
+		d.Name_ = config.Device.Name
+		updated = true
+	}
+	if d.Host() == "" {
+		if d.status == nil {
+			d.status = &shelly.Status{}
+		}
+		ws, err := wifi.DoGetStatus(ctx, via, d)
+		if err == nil && ws.IP != "" {
+			d.status.Wifi = ws
+			d.Host_ = ws.IP
+			updated = true
+		}
+		es, err := ethernet.DoGetStatus(ctx, via, d)
+		if err == nil && es.IP != "" {
+			d.status.Ethernet = es
+			d.Host_ = es.IP
+			updated = true
+		}
+	}
 
-type Device struct {
-	Product
-	Id_      string        `json:"id"`
-	Name_    string        `json:"name"`
-	Service  string        `json:"service"`
-	Host_    string        `json:"host"`
-	Port     int           `json:"port"`
-	info     *DeviceInfo   `json:"-"`
-	Methods  []string      `json:"-"`
-	config   *Config       `json:"-"`
-	status   *Status       `json:"-"`
-	isMqttOk bool          `json:"-"`
-	replyTo  string        `json:"-"`
-	to       chan<- []byte `json:"-"` // channel to send messages to
-	from     <-chan []byte `json:"-"` // channel to receive messages from
-	log      logr.Logger   `json:"-"`
+	// if d.components == nil {
+	// 	out, err := d.CallE(ctx, via, shelly.GetComponents.String(), &shelly.ComponentsRequest{
+	// 		Keys: []string{"config", "status"},
+	// 	})
+	// 	if err != nil {
+	// 		d.log.Error(err, "Unable to get device's components (continuing)")
+	// 	} else {
+	// 		crs, ok := out.(*shelly.ComponentsResponse)
+	// 		if ok && crs != nil {
+	// 			updated = true
+	// 		} else {
+	// 			d.log.Error(err, "Invalid response to get device's components (continuing)", "response", out)
+	// 		}
+	// 	}
+	// }
+
+	d.log.Info("Device refreshed", "device", d, "updated", updated)
+
+	return updated, nil
+}
+
+func (d *Device) Manufacturer() string {
+	return "Shelly"
 }
 
 func (d *Device) Id() string {
+	if d.Id_ == "" || d.Id_ == "<nil>" {
+		return ""
+	}
 	return d.Id_
 }
 
 func (d *Device) Host() string {
+	if d.Host_ == "" || d.Host_ == "<nil>" {
+		return ""
+	}
 	return d.Host_
 }
 
 func (d *Device) Ip() net.IP {
-	if d.status == nil || (d.status.Wifi == nil && d.status.Ethernet == nil) {
-		return nil
+	if d.status != nil {
+		if d.status.Ethernet != nil {
+			return net.ParseIP(d.status.Ethernet.IP)
+		}
+		if d.status.Wifi != nil {
+			return net.ParseIP(d.status.Wifi.IP)
+		}
 	}
-	if d.status.Wifi != nil {
-		return net.ParseIP(d.status.Wifi.IP)
-	}
-	if d.status.Ethernet != nil {
-		return net.ParseIP(d.status.Ethernet.Ip)
-	}
-	return nil
+	return net.ParseIP(d.Host_)
 }
 
 func (d *Device) Name() string {
-	if d.config == nil || d.config.System == nil || d.config.System.Device == nil {
+	if d.Name_ == "" || d.Name_ == "<nil>" {
 		return ""
 	}
-	return d.config.System.Device.Name
+	return d.Name_
 }
 
 func (d *Device) Mac() net.HardwareAddr {
-	// FIXME: put a device update on the backburner
-	if d.info == nil || d.info.Product == nil || d.info.Product.MacAddress == nil {
+	if d.MacAddress_ == "" || d.MacAddress_ == "<nil>" {
 		return nil
 	}
-	return d.info.Product.MacAddress
+	return net.HardwareAddr(d.MacAddress_)
 }
 
 func (d *Device) SetHost(host string) {
 	d.Host_ = host
 }
 
-func (d *Device) MqttOk(ok bool) {
-	if d.Host_ == "" {
-		// No IP=> No other way to reach out to Shelly than MQTT
-		d.isMqttOk = true
-	} else {
-		d.isMqttOk = ok
-	}
+func (d *Device) IsMqttReady() bool {
+	return d.mqttReady
+}
+
+func (d *Device) DisableMqtt() {
+	d.mqttReady = false
+}
+
+func (d *Device) StartDialog() uint32 {
+	d.dialogId++
+	d.dialogs[d.dialogId] = true
+	return d.dialogId
+}
+
+func (d *Device) StopDialog(id uint32) {
+	delete(d.dialogs, id)
 }
 
 func (d *Device) Channel(via types.Channel) types.Channel {
-	if via != types.ChannelDefault {
-		return via
+	if via == types.ChannelMqtt {
+		if d.IsMqttReady() {
+			return types.ChannelMqtt
+		}
+		return types.ChannelDefault
 	}
-	if d.isMqttOk {
+	if via == types.ChannelHttp {
+		if d.Host() != "" {
+			return types.ChannelHttp
+		}
+		return types.ChannelDefault
+	}
+	if d.IsMqttReady() {
 		return types.ChannelMqtt
 	}
 	if d.Host() != "" {
 		return types.ChannelHttp
 	}
 	return types.ChannelDefault
-}
-
-type MethodsResponse struct {
-	Methods []string `json:"methods"`
-}
-
-type DeviceInfo struct {
-	*Product
-	Id                    string `json:"id"`
-	FirmwareId            string `json:"fw_id"`
-	Profile               string `json:"profile,omitempty"`
-	AuthenticationEnabled bool   `json:"auth_en"`
-	AuthenticationDomain  string `json:"auth_domain,omitempty"`
-	Discoverable          bool   `json:"discoverable"`
-	CloudKey              string `json:"key,omitempty"`
-	Batch                 string `json:"batch,omitempty"`
-	FirmwareSBits         string `json:"fw_sbits,omitempty"`
-}
-
-type Config struct {
-	BLE       *any                 `json:"ble,omitempty"`
-	BtHome    *any                 `json:"bthome,omitempty"`
-	Cloud     *any                 `json:"cloud,omitempty"`
-	Ethernet  *ethernet.Config     `json:"eth,omitempty"`
-	Input0    *sswitch.InputConfig `json:"input:0,omitempty"`
-	Input1    *sswitch.InputConfig `json:"input:1,omitempty"`
-	Input2    *sswitch.InputConfig `json:"input:2,omitempty"`
-	Input3    *sswitch.InputConfig `json:"input:3,omitempty"`
-	Knx       *any                 `json:"knx,omitempty"`
-	Mqtt      *mqtt.Config         `json:"mqtt,omitempty"`
-	Schedule  *schedule.Scheduled  `json:"schedule,omitempty"`
-	Switch0   *sswitch.Config      `json:"switch:0,omitempty"`
-	Switch1   *sswitch.Config      `json:"switch:1,omitempty"`
-	Switch2   *sswitch.Config      `json:"switch:2,omitempty"`
-	Switch3   *sswitch.Config      `json:"switch:3,omitempty"`
-	System    *system.Config       `json:"system,omitempty"`
-	Wifi      *wifi.Config         `json:"wifi,omitempty"`
-	WebSocket *any                 `json:"ws,omitempty"`
-}
-
-type Status struct {
-	BLE       *any                 `json:"ble,omitempty"`
-	BtHome    *any                 `json:"bthome,omitempty"`
-	Cloud     *any                 `json:"cloud,omitempty"`
-	Ethernet  *ethernet.Status     `json:"eth,omitempty"`
-	Input0    *sswitch.InputStatus `json:"input:0,omitempty"`
-	Input1    *sswitch.InputStatus `json:"input:1,omitempty"`
-	Input2    *sswitch.InputStatus `json:"input:2,omitempty"`
-	Input3    *sswitch.InputStatus `json:"input:3,omitempty"`
-	Knx       *any                 `json:"knx,omitempty"`
-	Mqtt      *mqtt.Status         `json:"mqtt,omitempty"`
-	Switch0   *sswitch.Status      `json:"switch:0,omitempty"`
-	Switch1   *sswitch.Status      `json:"switch:1,omitempty"`
-	Switch2   *sswitch.Status      `json:"switch:2,omitempty"`
-	Switch3   *sswitch.Status      `json:"switch:3,omitempty"`
-	System    *system.Status       `json:"system,omitempty"`
-	Wifi      *wifi.Status         `json:"wifi,omitempty"`
-	WebSocket *any                 `json:"ws,omitempty"`
-}
-
-// From https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellycheckforupdate
-
-type CheckForUpdateResponse struct {
-	Stable *struct {
-		Version string `json:"version"`  // The version of the stable firmware
-		BuildId string `json:"build_id"` // The build ID of the stable firmware
-	} `json:"stable,omitempty"`
-	Beta *struct {
-		Version string `json:"version"`  // The version of the beta firmware
-		BuildId string `json:"build_id"` // The build ID of the beta firmware
-	} `json:"beta,omitempty"`
-}
-
-// From https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellygetcomponents
-type ComponentsRequest struct {
-	Offset      int      `json:"offset,omitempty"`       // Index of the component from which to start generating the result Optional
-	Include     []string `json:"include,omitempty"`      // "status" will include the component's status, "config" - the config. The keys are always included. Combination of both (["config", "status"]) to get the full config and status of each component. Optional
-	Keys        []string `json:"keys,omitempty"`         // An array of component keys in the format <type> <cid> (for example, boolean:200) which is used to filter the response list. If empty/not provided, all components will be returned. Optional
-	DynamicOnly bool     `json:"dynamic_only,omitempty"` // If true, only dynamic components will be returned. Optional
-}
-
-type Components struct {
-	Config *Config `json:"-"`
-	Status *Status `json:"-"`
-}
-
-type ComponentsResponse struct {
-	Components
-	Response_      *[]ComponentResponse `json:"components"`
-	ConfigRevision int                  `json:"cfg_revision"` // The current config revision. See SystemGetConfig#ConfigRevision
-	Offset         int                  `json:"offset"`       // The index of the first component in the list.
-	Total          int                  `json:"total"`        // Total number of components with all filters applied.
-}
-
-func (cr *ComponentsResponse) UnmarshalJSON(data []byte) error {
-	type Alias ComponentsResponse
-	if err := json.Unmarshal(data, (*Alias)(cr)); err != nil {
-		return err
-	}
-	if cr.Response_ == nil {
-		cr.Response_ = &[]ComponentResponse{}
-	}
-	config := make(map[string]any)
-	status := make(map[string]any)
-
-	for _, comp := range *cr.Response_ {
-		config[comp.Key] = comp.Config
-		status[comp.Key] = comp.Status
-	}
-
-	configStr, err := json.Marshal(config)
-	if err != nil {
-		return err
-	}
-	cr.Config = &Config{}
-	if err := json.Unmarshal(configStr, cr.Config); err != nil {
-		return err
-	}
-	statusStr, err := json.Marshal(status)
-	if err != nil {
-		return err
-	}
-	cr.Status = &Status{}
-	if err := json.Unmarshal(statusStr, cr.Status); err != nil {
-		return err
-	}
-	return nil
-}
-
-type ComponentResponse struct {
-	Key    string         `json:"key"`    // Component's key (in format <type>:<cid>, for example boolean:200)
-	Config map[string]any `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
-	Status map[string]any `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
-	// Methods map[string]types.MethodHandler `json:"-"`
 }
 
 var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", MDNS_SHELLIES))
@@ -255,25 +212,16 @@ var applicationRe = regexp.MustCompile("^app=(?P<application>[a-zA-Z0-9]+)$")
 
 var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
+var deviceIdRe = regexp.MustCompile("^shelly[a-zA-Z0-9]+-[a-f0-9]{12}$")
+
 func (d *Device) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
 	var mh types.MethodHandler
 	var err error
 
-	switch reflect.TypeOf(method).PkgPath() {
-	case reflect.TypeOf(ListMethods).PkgPath():
-		// Shelly.*
-		fallthrough
-	case reflect.TypeOf(system.GetConfig).PkgPath():
-		// Sys.*
-		mh, err = registrar.MethodHandlerE(method)
-	default:
-		err = d.methods(ctx, via)
-		if err != nil {
-			d.log.Error(err, "Unable to get device's methods", "id", d.Id(), "host", d.Host())
-			return nil, err
-		}
+	if strings.HasPrefix(method, "Shelly.") {
+		mh, err = GetRegistrar().MethodHandlerE(method)
+	} else {
 		mh, err = d.MethodHandlerE(method)
-
 	}
 	if err != nil {
 		d.log.Error(err, "Unable to find method handler", "method", method)
@@ -315,22 +263,22 @@ func (d *Device) ReplyTo() string {
 	return d.replyTo
 }
 
-// func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) *Device {
-// 	d := &Device{
-// 		Host_:    ip.String(),
-// 		log:      log,
-// 		isMqttOk: false,
-// 	}
-// 	return d
-// }
-
-func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (*Device, error) {
+func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) (devices.Device, error) {
 	d := &Device{
-		Id_:      id,
-		log:      log,
-		isMqttOk: true,
+		Host_:     ip.String(),
+		log:       log,
+		mqttReady: false,
 	}
-	return d, nil
+	return d.init(ctx)
+}
+
+func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devices.Device, error) {
+	d := &Device{
+		Id_:       id,
+		log:       log,
+		mqttReady: false,
+	}
+	return d.init(ctx)
 }
 
 func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.Device) (devices.Device, error) {
@@ -338,38 +286,58 @@ func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.
 		Id_:   summary.Id(),
 		Name_: summary.Name(),
 		Host_: summary.Host(),
-		info: &DeviceInfo{
+		info: &shelly.DeviceInfo{
 			Id: summary.Id(),
-			Product: &Product{
+			Product: &shelly.Product{
 				MacAddress: summary.Mac(),
 			},
 		},
-		log:      log,
-		isMqttOk: true,
+		log:       log,
+		mqttReady: false,
 	}
-	return d, nil
+	return d.init(ctx)
 }
 
-func (d *Device) Load(ctx context.Context) error {
-	d.log.Info("Loading device", "id", d.Id(), "host", d.Host())
+func (d *Device) init(ctx context.Context) (devices.Device, error) {
+	if d.Id() == "" {
+		err := d.initHttp(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return d.initMqtt(ctx)
+}
+
+func (d *Device) initHttp(ctx context.Context) error {
+	if d.Host() == "" {
+		return fmt.Errorf("device host is empty: no channel to communicate with HTTP")
+	}
+	d.initDeviceInfo(ctx, types.ChannelHttp)
+	d.initMethods(ctx, types.ChannelHttp)
+	d.mqttReady = false
+	return nil
+}
+
+func (d *Device) initMqtt(ctx context.Context) (devices.Device, error) {
+	if d.Id() == "" {
+		return nil, fmt.Errorf("device id is empty: no channel to communicate")
+	}
+
 	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
 		d.log.Error(err, "Unable to get MQTT client")
-		return err
-	}
-
-	if d.Id() == "" && d.Host() == "" {
-		return fmt.Errorf("device id & host are empty")
+		return nil, err
 	}
 
 	d.replyTo = fmt.Sprintf("%s_%s", mc.Id(), d.Id())
+	d.dialogs = make(map[uint32]bool)
 
 	if d.from == nil && mc != nil {
 		var err error
 		d.from, err = mc.Subscriber(ctx, fmt.Sprintf("%s/rpc", d.replyTo), 1 /*qlen*/)
 		if err != nil {
 			d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
-			return err
+			return nil, err
 		}
 	}
 
@@ -379,47 +347,44 @@ func (d *Device) Load(ctx context.Context) error {
 		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/)
 		if err != nil {
 			d.log.Error(err, "Unable to publish to device's RPC topic", "device_id", d.Id_)
-			return err
+			return nil, err
 		}
 	}
 
-	if d.MacAddress == nil {
-		mh, err := GetRegistrar().MethodHandlerE(GetDeviceInfo.String())
-		if err != nil {
-			d.log.Error(err, "Unable to get method handler", "method", GetDeviceInfo)
-			return err
-		}
-		di, err := GetRegistrar().CallE(ctx, d, types.ChannelDefault, mh, map[string]any{"ident": true})
-		if err != nil {
-			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
-			return err
-		}
+	d.initDeviceInfo(ctx, types.ChannelMqtt)
+	d.initMethods(ctx, types.ChannelMqtt)
+	d.mqttReady = true
 
-		var ok bool
-		d.info, ok = di.(*DeviceInfo)
+	return d, nil
+}
+
+func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
+	if d.Id() == "" || d.Mac() == nil {
+		out, err := d.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
+		if err != nil {
+			return err
+		}
+		info, ok := out.(*shelly.DeviceInfo)
 		if !ok {
-			d.log.Error(err, "Unable to get device info", "device_id", d.Id_)
-			return err
+			return fmt.Errorf("invalid response to get device info")
 		}
-		d.log.Info("Shelly.GetDeviceInfo: got", "info", *d.info)
-
-		if d.info.Id == "" || len(d.info.MacAddress) == 0 {
-			err = fmt.Errorf("invalid device info: ignoring:%v", *d.info)
-			return err
-		}
-		d.Id_ = d.info.Id
-		d.MacAddress = d.info.MacAddress
+		d.info = info
+		d.Id_ = info.Id
+		d.MacAddress_ = info.MacAddress.String()
 	}
+	return nil
+}
 
-	if d.Host() == "" || d.Host() == "<nil>" || d.Ip() == nil {
-		out, err := d.CallE(ctx, types.ChannelDefault, GetComponents.String(), &ComponentsRequest{
+func (d *Device) initComponents(ctx context.Context, via types.Channel) error {
+	if d.Host() == "" || d.Ip() == nil { // XXX avoid <nil>
+		out, err := d.CallE(ctx, via, shelly.GetComponents.String(), &shelly.ComponentsRequest{
 			Keys: []string{"config", "status"},
 		})
 		if err != nil {
 			d.log.Error(err, "Unable to get device's components", "device_id", d.Id_)
 			return err
 		}
-		cr, ok := out.(*ComponentsResponse)
+		cr, ok := out.(*shelly.ComponentsResponse)
 		if !ok {
 			d.log.Error(err, "Unable to get device's components", "device_id", d.Id_)
 			return err
@@ -432,11 +397,11 @@ func (d *Device) Load(ctx context.Context) error {
 	return nil
 }
 
-func (d *Device) methods(ctx context.Context, via types.Channel) error {
+func (d *Device) initMethods(ctx context.Context, via types.Channel) error {
 	if d.Methods == nil {
-		mh, err := GetRegistrar().MethodHandlerE(ListMethods.String())
+		mh, err := GetRegistrar().MethodHandlerE(shelly.ListMethods.String())
 		if err != nil {
-			d.log.Error(err, "Unable to get method handler", "method", ListMethods)
+			d.log.Error(err, "Unable to get method handler", "method", shelly.ListMethods)
 			return err
 		}
 		m, err := GetRegistrar().CallE(ctx, d, via, mh, nil)
@@ -446,7 +411,7 @@ func (d *Device) methods(ctx context.Context, via types.Channel) error {
 		}
 
 		// TODO: implement dynamic method binding
-		d.Methods = m.(*MethodsResponse).Methods
+		d.Methods = m.(*shelly.MethodsResponse).Methods
 		// d.log.Info("Shelly.ListMethods", "methods", d.Methods)
 
 		// for _, method := range d.Methods {

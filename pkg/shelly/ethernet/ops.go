@@ -2,6 +2,7 @@ package ethernet
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"pkg/shelly/types"
 	"reflect"
@@ -75,4 +76,17 @@ func GetStatus(ctx context.Context, device types.Device, via types.Channel) (*St
 		return nil, err
 	}
 	return out.(*Status), nil
+}
+
+func DoGetStatus(ctx context.Context, via types.Channel, device types.Device) (*Status, error) {
+	out, err := device.CallE(ctx, via, getStatus.String(), nil)
+	if err != nil {
+		log.Error(err, "Unable to get device ethernet status")
+		return nil, err
+	}
+	res, ok := out.(*Status)
+	if ok && res != nil {
+		return res, nil
+	}
+	return nil, fmt.Errorf("invalid response to get device ethernet status (type=%s, expected=%s)", reflect.TypeOf(out), reflect.TypeOf(Status{}))
 }

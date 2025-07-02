@@ -16,7 +16,6 @@ import (
 	"homectl/show"
 	"homectl/sswitch"
 	"myhome"
-	"mynet"
 	"os"
 	shellyPkg "pkg/shelly"
 	"pkg/shelly/types"
@@ -69,19 +68,19 @@ var Cmd = &cobra.Command{
 		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout)
 		cmd.SetContext(ctx)
 
-		mc, err := mymqtt.InitClientE(ctx, log, mynet.MyResolver(log).Start(ctx), options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MdnsTimeout)
+		err := mymqtt.NewClientE(ctx, log, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
 		}
 
-		myhome.TheClient, err = myhome.NewClientE(ctx, log, mc, options.Flags.MqttTimeout)
+		myhome.TheClient, err = myhome.NewClientE(ctx, log, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome client")
 			return err
 		}
 
-		shellyPkg.Init(ctx, options.Flags.MqttTimeout)
+		shellyPkg.Init(log, options.Flags.MqttTimeout)
 
 		for i, c := range types.Channels {
 			if options.Flags.Via == c {
@@ -118,7 +117,7 @@ func init() {
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.CommandTimeout, "timeout", "", 7*time.Second, "Timeout for overall command")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")
-	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", 6*time.Second, "Timeout for MQTT operations")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", 7*time.Second, "Timeout for MQTT operations")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttGrace, "mqtt-grace", "G", 500*time.Millisecond, "MQTT disconnection grace period")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Json, "json", "j", false, "output in json format")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns-timeout", "M", time.Second*5, "Timeout for mDNS lookups")

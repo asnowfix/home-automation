@@ -38,8 +38,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 					return nil
 				}
 				log.Info("Browsed", "entry", entry)
-				deviceId := entry.Instance
-				device, err := db.GetDeviceById(ctx, deviceId)
+				device, err := db.GetDeviceByAny(ctx, entry.Instance)
 				if err != nil || device.Info == nil {
 					sd, err := shelly.NewDeviceFromZeroConfEntry(ctx, log, dr, entry)
 					if err != nil {

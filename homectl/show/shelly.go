@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"hlog"
 	"myhome"
-	"pkg/shelly"
+	shellyapi "pkg/shelly"
 	"reflect"
 
 	"homectl/options"
@@ -25,7 +25,7 @@ var showShellyCmd = &cobra.Command{
 	Short: "Show Shelly devices",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		shelly.Init(cmd.Context(), options.Flags.MqttTimeout)
+		shellyapi.Init(hlog.Logger, options.Flags.MqttTimeout)
 
 		var out any
 		var err error

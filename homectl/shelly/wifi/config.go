@@ -13,7 +13,8 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"pkg/devices"
-	"pkg/shelly"
+	shellyapi "pkg/shelly"
+	"pkg/shelly/shelly"
 	"pkg/shelly/types"
 	"pkg/shelly/wifi"
 
@@ -56,7 +57,7 @@ var configCmd = &cobra.Command{
 }
 
 func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
-	sd, ok := device.(*shelly.Device)
+	sd, ok := device.(*shellyapi.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}

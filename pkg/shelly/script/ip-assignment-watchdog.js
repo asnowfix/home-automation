@@ -36,7 +36,7 @@ let CONFIG = {
 let failCounter = 0;
 let pingTimer = null;
 
-function checkForWifi() {
+function checkForIp() {
     // 'wifi'
     const wifi = Shelly.getComponentStatus('wifi')
 
@@ -80,9 +80,9 @@ function checkForWifi() {
     Shelly.call('Shelly.Reboot')
 }
 
-print(Date.now(), "Start WiFi monitor");
+print(Date.now(), "Start IP monitor");
 
-pingTimer = Timer.set(CONFIG.retryIntervalSeconds * 1000, true, checkForWifi);
+pingTimer = Timer.set(CONFIG.retryIntervalSeconds * 1000, true, checkForIp);
 
 Shelly.addStatusHandler(function (status) {
     //is the component a switch
@@ -103,5 +103,5 @@ Shelly.addStatusHandler(function (status) {
     Timer.clear(pingTimer);
 
     // start the loop to ping the endpoints again
-    pingTimer = Timer.set(CONFIG.retryIntervalSeconds * 1000, true, checkForWifi);
+    pingTimer = Timer.set(CONFIG.retryIntervalSeconds * 1000, true, checkForIp);
 });

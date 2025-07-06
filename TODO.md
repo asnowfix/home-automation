@@ -1,5 +1,13 @@
-TODO
+TODO <!-- omit in toc -->
 ====
+
+Table of Contents <!-- omit in toc -->
+
+- [License](#license)
+- [Model](#model)
+- [Functions](#functions)
+- [Cleanup](#cleanup)
+- [Integration](#integration)
 
 License
 -------

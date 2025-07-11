@@ -37,7 +37,17 @@ var flags struct {
 var debugCtl = &cobra.Command{
 	Use:   "debug",
 	Short: "Turn on/off script debugging using system.SetConfig",
-	Args:  cobra.ExactArgs(2),
+	Long: `Usage: homectl shelly script debug <device> [true|false]
+
+	<device> is the name of one or more Shelly devices to target. The device(s) must be part of the local network.
+
+	[true|false] is the desired state of script debugging on the device(s). If not specified, the current state is returned.
+
+	Example:
+
+	homectl shelly script debug "Shelly Plus 1" true
+	homectl shelly script debug "Shelly Plus 1" false`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 

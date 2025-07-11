@@ -4,6 +4,7 @@
 // 2. Daily reboot: Schedules a random reboot once per day within a configured time window
 // 3. IP Assignment watchdog: Monitors network connectivity and reboots if no IP is assigned
 // 4. Firmware updater: Checks for firmware updates weekly and applies them automatically
+// 5. Prometheus metrics: Exposes device metrics in Prometheus format via HTTP endpoint
 
 // Shared state and configuration for all components
 let SHARED_STATE = {
@@ -46,7 +47,13 @@ let CONFIG = {
         autoUpdate: true       // Whether to automatically apply updates
     },
     // Global settings
-    debug: true
+    debug: true,
+    // Prometheus metrics settings
+    prometheus: {
+        enabled: true,
+        endpoint: "metrics",
+        monitoredSwitches: ["switch:0"]
+    }
 };
 
 // Use namespaces to avoid variable/function conflicts
@@ -482,9 +489,136 @@ let RemoteLogger = {
     debug: function(message) { return this.send(this.severity.DEBUG, message); }
 };
 
+// Add Prometheus Metrics module
+let PrometheusMetrics = {
+    // Constants
+    TYPE_GAUGE: "gauge",
+    TYPE_COUNTER: "counter",
+    
+    // Device info
+    deviceInfo: null,
+    defaultLabels: [],
+    
+    // Helper function for logging
+    log: function(message) {
+        if (CONFIG.debug) {
+            print("[PrometheusMetrics] " + message);
+        }
+    },
+    
+    // Initialize Prometheus metrics
+    init: function() {
+        if (!CONFIG.prometheus || !CONFIG.prometheus.enabled) {
+            this.log("Prometheus metrics are disabled in configuration");
+            return;
+        }
+        
+        try {
+            // Get device info
+            this.deviceInfo = Shelly.getDeviceInfo();
+            
+            // Set up default labels
+            this.defaultLabels = [
+                ["name", this.deviceInfo.name],
+                ["id", this.deviceInfo.id],
+                ["mac", this.deviceInfo.mac],
+                ["app", this.deviceInfo.app]
+            ].map(function(data) {
+                return this.promLabel(data[0], data[1]);
+            }, this);
+            
+            // Register HTTP endpoint
+            const endpoint = CONFIG.prometheus.endpoint || "metrics";
+            HTTPServer.registerEndpoint(endpoint, function(request, response) {
+                PrometheusMetrics.httpServerHandler(request, response);
+            });
+            
+            this.log("Prometheus metrics endpoint registered at /" + endpoint);
+        } catch (e) {
+            this.log("Error initializing Prometheus metrics: " + e.message);
+        }
+    },
+    
+    // Create a Prometheus label
+    promLabel: function(label, value) {
+        return [label, "=", '"', value, '"'].join("");
+    },
+    
+    // Generate one metric output
+    printPrometheusMetric: function(name, type, specificLabels, description, value) {
+        const metricPrefix = "shelly_";
+        return [
+            "# HELP ", metricPrefix, name, " ", description, "\n",
+            "# TYPE ", metricPrefix, name, " ", type, "\n",
+            metricPrefix, name, "{", this.defaultLabels.join(","), specificLabels.length > 0 ? "," : "", specificLabels.join(","), "}", " ", value, "\n\n"
+        ].join("");
+    },
+    
+    // HTTP handler for metrics endpoint
+    httpServerHandler: function(request, response) {
+        response.body = [
+            this.generateMetricsForSystem(),
+            this.generateMetricsForSwitches()
+        ].join("");
+        response.code = 200;
+        response.headers = [["Content-Type", "text/plain; version=0.0.4"]];
+        response.send();
+    },
+    
+    // Generate metrics for the system
+    generateMetricsForSystem: function() {
+        const sys = Shelly.getComponentStatus("sys");
+        return [
+            this.printPrometheusMetric("uptime_seconds", this.TYPE_COUNTER, [], "System uptime in seconds", sys.uptime),
+            this.printPrometheusMetric("ram_size_bytes", this.TYPE_GAUGE, [], "Internal board RAM size in bytes", sys.ram_size),
+            this.printPrometheusMetric("ram_free_bytes", this.TYPE_GAUGE, [], "Internal board free RAM size in bytes", sys.ram_free),
+            // Add MQTT watchdog metrics
+            this.printPrometheusMetric("mqtt_fail_counter", this.TYPE_GAUGE, [], "MQTT connection failure counter", MqttWatchdog.failCounter)
+        ].join("");
+    },
+    
+    // Generate metrics for all monitored switches
+    generateMetricsForSwitches: function() {
+        const monitoredSwitches = CONFIG.prometheus.monitoredSwitches || ["switch:0"];
+        
+        let result = "";
+        for (let i = 0; i < monitoredSwitches.length; i++) {
+            result += this.generateMetricsForSwitch(monitoredSwitches[i]);
+        }
+        
+        return result;
+    },
+    
+    // Generate metrics for a specific switch
+    generateMetricsForSwitch: function(stringId) {
+        try {
+            const sw = Shelly.getComponentStatus(stringId);
+            if (!sw) {
+                this.log("Switch not found: " + stringId);
+                return "";
+            }
+            
+            const switchLabel = this.promLabel("switch", sw.id);
+            
+            return [
+                this.printPrometheusMetric("switch_power_watts", this.TYPE_GAUGE, [switchLabel], "Instant power consumption in watts", sw.apower || 0),
+                this.printPrometheusMetric("switch_voltage_volts", this.TYPE_GAUGE, [switchLabel], "Instant voltage in volts", sw.voltage || 0),
+                this.printPrometheusMetric("switch_current_amperes", this.TYPE_GAUGE, [switchLabel], "Instant current in amperes", sw.current || 0),
+                this.printPrometheusMetric("switch_temperature_celsius", this.TYPE_GAUGE, [switchLabel], "Temperature of the device in celsius", sw.temperature && sw.temperature.tC ? sw.temperature.tC : 0),
+                this.printPrometheusMetric("switch_power_total", this.TYPE_COUNTER, [switchLabel], "Accumulated energy consumed in watts hours", sw.aenergy && sw.aenergy.total ? sw.aenergy.total : 0),
+                this.printPrometheusMetric("switch_output", this.TYPE_GAUGE, [switchLabel], "Switch state (1=on, 0=off)", sw.output ? 1 : 0)
+            ].join("");
+        } catch (e) {
+            this.log("Error generating metrics for switch " + stringId + ": " + e.message);
+            return "";
+        }
+    }
+};
+
 // Initialize all components
 MqttWatchdog.init();
 DailyReboot.init();
 IpAssignmentWatchdog.init();
 FirmwareUpdater.init();
 RemoteLogger.init();
+PrometheusMetrics.init();

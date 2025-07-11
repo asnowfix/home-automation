@@ -17,7 +17,7 @@ let CONFIG = {
     // Remote logging settings
     logging: {
         enabled: false,           // Set to true to enable remote logging
-        method: "webhook",        // "webhook" or "mqtt"
+        method: "mqtt",           // "webhook" or "mqtt"
         url: "http://192.168.1.100:8080/logs", // Webhook URL for HTTP logging
         mqttTopic: "shelly/logs", // MQTT topic for logging if method is "mqtt"
         hostname: "shelly",       // Device hostname in logs
@@ -397,17 +397,26 @@ let RemoteLogger = {
         }
         
         try {
-            // Get device ID and name to use in logs
-            Shelly.call("Shelly.GetDeviceInfo", {}, function(result, error_code, error_message) {
-                if (!error_code && result) {
-                    this.deviceId = result.id || "unknown";
-                    this.deviceName = result.name || this.deviceId;
-                    SHARED_STATE.syslogEnabled = true;
-                    print("[RemoteLogger] Logger initialized for device: " + this.deviceName);
-                } else {
-                    print("[RemoteLogger] Failed to get device info: " + (error_message || "Unknown error"));
-                }
-            }.bind(this));
+            // Get device ID from Shelly.getDeviceInfo()
+            const deviceInfo = Shelly.getDeviceInfo();
+            if (!deviceInfo || !deviceInfo.id) {
+                print("[RemoteLogger] Failed to get device ID");
+                return;
+            }
+            
+            this.deviceId = deviceInfo.id;
+            
+            // Get device name from Sys.GetConfig
+            const sysConfig = Shelly.getComponentConfig("sys");
+            if (sysConfig && sysConfig.device && sysConfig.device.name) {
+                this.deviceName = sysConfig.device.name;
+            } else {
+                // Fallback to device ID if name is not set
+                this.deviceName = this.deviceId;
+            }
+            
+            SHARED_STATE.syslogEnabled = true;
+            print("[RemoteLogger] Logger initialized for device: " + this.deviceName);
         } catch (e) {
             print("[RemoteLogger] Error during initialization: " + e.message);
         }

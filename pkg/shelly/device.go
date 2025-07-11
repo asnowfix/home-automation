@@ -28,7 +28,6 @@ type Device struct {
 	Host_       string             `json:"host"`
 	Port        int                `json:"port"`
 	info        *shelly.DeviceInfo `json:"-"`
-	Methods     []string           `json:"-"`
 	config      *shelly.Config     `json:"-"`
 	status      *shelly.Status     `json:"-"`
 	mqttReady   bool               `json:"-"`
@@ -46,13 +45,6 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 		err := d.initDeviceInfo(ctx, types.ChannelHttp)
 		if err != nil {
 			return false, fmt.Errorf("unable to init device (%v)", err)
-		}
-		updated = true
-	}
-	if len(d.Methods) == 0 {
-		err := d.initMethods(ctx, via)
-		if err != nil {
-			return false, fmt.Errorf("unable to init methods (%v)", err)
 		}
 		updated = true
 	}
@@ -313,7 +305,6 @@ func (d *Device) initHttp(ctx context.Context) error {
 		return fmt.Errorf("device host is empty: no channel to communicate with HTTP")
 	}
 	d.initDeviceInfo(ctx, types.ChannelHttp)
-	d.initMethods(ctx, types.ChannelHttp)
 	d.mqttReady = false
 	return nil
 }
@@ -352,7 +343,6 @@ func (d *Device) initMqtt(ctx context.Context) (devices.Device, error) {
 	}
 
 	d.initDeviceInfo(ctx, types.ChannelMqtt)
-	d.initMethods(ctx, types.ChannelMqtt)
 	d.mqttReady = true
 
 	return d, nil
@@ -392,38 +382,6 @@ func (d *Device) initComponents(ctx context.Context, via types.Channel) error {
 		d.log.Info("Shelly.GetComponents: got", "components", *cr)
 		d.status = cr.Status
 		d.config = cr.Config
-	}
-
-	return nil
-}
-
-func (d *Device) initMethods(ctx context.Context, via types.Channel) error {
-	if d.Methods == nil {
-		mh, err := GetRegistrar().MethodHandlerE(shelly.ListMethods.String())
-		if err != nil {
-			d.log.Error(err, "Unable to get method handler", "method", shelly.ListMethods)
-			return err
-		}
-		m, err := GetRegistrar().CallE(ctx, d, via, mh, nil)
-		if err != nil {
-			d.log.Error(err, "Unable to list device's methods")
-			return err
-		}
-
-		// TODO: implement dynamic method binding
-		d.Methods = m.(*shelly.MethodsResponse).Methods
-		// d.log.Info("Shelly.ListMethods", "methods", d.Methods)
-
-		// for _, method := range d.Methods {
-		// 	cn := strings.SplitN(method, ".", 2)[0]
-		// 	if c, exists := d.Components[cn]; !exists {
-		// 		return fmt.Errorf("component not found: %s", cn)
-		// 	}
-		// 	c.Methods = make(map[string]types.MethodHandler)
-		// 	for _, m := range d.Methods {
-		// 		d.ComponentsMethods[m] = registrar.methods[m]
-		// 	}
-		// }
 	}
 
 	return nil

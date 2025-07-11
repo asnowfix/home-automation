@@ -60,6 +60,12 @@ Functions
         1:23PM ERR ..\pkg\shelly\shttp\channel.go:38 > HTTP error error="GET support query parameters only (got *shelly.ComponentsRequest)"
         1:23PM ERR ..\internal\myhome\device.go:231 > Unable to get device's components (continuing) error="GET support query parameters only (got *shelly.ComponentsRequest)" logger=DeviceManager#WatchZeroConf
 
+[x] Add Prometheus metrics endpoint for device monitoring and switch metrics
+[ ] Write instructions to configure prometheus to scrape metrics from known Shelly devices
+[ ] Add Grafana/Perses dashboard for Shelly devices
+[ ] Add mqtt-to-syslog in myhome daemon (non broker part) to collect log messages from Shelly devices
+[ ] Add shelly script config to homect to manipulate CONFIG object
+[ ] Overload CONFIG objects from values found as JSON-pathh in KVS:config/*
 [ ] Deactivate Wi-Fi if Ethernet is available & active.
 [x] Disable auto-off timer of the pool-house switches (using double push)
 [ ] Consolidated watchdog.js (mqtt, ip-assignment, daily-reboot)

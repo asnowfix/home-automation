@@ -2,6 +2,7 @@ TODO <!-- omit in toc -->
 ====
 
 Table of Contents <!-- omit in toc -->
+-----------------
 
 - [License](#license)
 - [Model](#model)
@@ -12,7 +13,7 @@ Table of Contents <!-- omit in toc -->
 License
 -------
 
-[ ] Change license from MPL-2.0 to MIT/BSD when ready
+[ ] Change license from MPL-2.0 to MIT/BSD (or GPL v3) when ready
 [ ] Add SPDX license identifier everywhere
 
 Model
@@ -61,16 +62,15 @@ Functions
 
 [ ] Deactivate Wi-Fi if Ethernet is available & active.
 [x] Disable auto-off timer of the pool-house switches (using double push)
-[ ] Upload ip-assignment-watchdog.js on every device that have scripting
+[ ] Consolidated watchdog.js (mqtt, ip-assignment, daily-reboot)
+[ ] Upload watchdog.js on every device that have scripting
 [ ] Configure adaptive heater control on every device that are known to be heaters (based on group membership)
-[ ] Upload daily-reboot.js on every device that have scripting
 [ ] Turn on/off heaters based on kalman filter and <https://developer.accuweather.com>
-[ ] Daily reboot script to upload everywhere (inspired by <https://github.com/ALLTERCO/shelly-script-examples>)
 [x] BUG make homectl `forget` actually work (right now it does not seem to update the DB storage)
 [ ] BUG ZeroConf scanning (automatic resolver) not working on Windows or macOS
 [ ] BUG ZeroConf scanning stops working after a while (few minutes)
-[ ] Support matter protocol for Gen3/4 devices
-[x] BUG Group ID's (integers) do not increment
+[ ] Support Matter protocol for Gen3/4 devices
+[x] BUG Group ID's (integers) does not increment
 [x] BUG no timeout if there is no myhome instance running
 [x] ability to change device name
 [x] Check/force MQTT configuration
@@ -82,11 +82,8 @@ Functions
 [ ] BUG: Find mqtt.local. using mDNS in homectl
 [x] HTTP POST (spurious "config" layer)
 [x] Fix MQTT when several CallE() invocations are in the same run
-[ ] Add support for linksys velop devices (via JNAP protocol) 
-
-    - https://github.com/uvjim/linksys_velop
-    - https://github.com/uvjim/linksys_velop/blob/master/README.md
-
+[ ] ~~Add support for linksys velop devices (via JNAP protocol), see <https://github.com/uvjim/linksys_velop/blob/master/README.md>~~
+[ ] Add support for Devolo Magic2 devices, via [go-devolo-plc](https://github.com/asnowfix/go-devolo-plc>)
 [x] Re-enable mDNS for early devices discovery
 [x] Use ZeroConf to discover (quickly) MQTT broker
 [x] Configure MQTT broker immediatelly after device discovery

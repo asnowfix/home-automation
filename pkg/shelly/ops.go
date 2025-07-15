@@ -49,6 +49,6 @@ func (r *Registrar) CallE(ctx context.Context, d types.Device, via types.Channel
 		return nil, fmt.Errorf("device %s (%s) has no possible comm channel", d.Id(), d.Name())
 	}
 
-	r.log.Info("Calling", "device_id", d.Id(), "method", mh.Method, "channel", via, "params", params, "out_type", reflect.TypeOf(out))
+	// r.log.Info("Calling", "device_id", d.Id(), "method", mh.Method, "channel", via, "params", params, "out_type", reflect.TypeOf(out))
 	return r.channels[via](ctx, d, mh, out, params)
 }

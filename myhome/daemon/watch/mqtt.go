@@ -34,48 +34,48 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 				return ctx.Err()
 
 			case msg := <-ch:
-				log.Info("Received message", "topic", topic, "payload", string(msg))
+				log.Info("Received RPC event", "topic", topic, "payload", string(msg))
 				event := &mqtt.Event{}
 				err := json.Unmarshal(msg, &event)
 				if err != nil {
-					log.Error(err, "Failed to unmarshal event from payload", "payload", string(msg))
+					log.Error(err, "Failed to unmarshal RPC event from payload", "payload", string(msg))
 					continue
 				}
 				if event.Src[:6] != "shelly" {
-					log.Info("Skipping non-shelly event", "event", event)
+					log.Info("Skipping non-shelly RPC event", "event", event)
 					continue
 				}
 				deviceId := event.Src
 				device, err := db.GetDeviceById(ctx, deviceId)
 				if err != nil {
-					log.Info("Device not found, creating new one", "device_id", deviceId)
+					log.Info("Device not found from DB, creating new one", "device_id", deviceId)
 					sd, err := shellyapi.NewDeviceFromMqttId(ctx, log, deviceId)
 					if err != nil {
-						log.Error(err, "Failed to create device from shelly device")
+						log.Error(err, "Failed to create device from shelly device", "device_id", deviceId)
 						continue
 					}
 					device, err = myhome.NewDeviceFromImpl(ctx, log, sd)
 					if err != nil {
-						log.Error(err, "Failed to create device from shelly device")
+						log.Error(err, "Failed to create device from shelly device", "device_id", deviceId)
 						continue
 					}
 				} else {
-					log.Info("Found device in DB", "device_id", deviceId)
+					log.Info("Found device in DB", "device", device.DeviceSummary)
 					if device.Impl() == nil {
-						log.Info("Loading device details in memory", "device_id", deviceId)
+						log.Info("Loading device details in memory", "device", device.DeviceSummary)
 						sd, err := shellyapi.NewDeviceFromSummary(ctx, log, device)
 						if err != nil {
-							log.Error(err, "Failed to create device from summary", "device", device)
+							log.Error(err, "Failed to create device from summary", "device", device.DeviceSummary)
 							continue
 						}
 						device = device.WithImpl(sd)
 					}
 				}
 
-				log.Info("Updating device", "device id", device.Id())
+				log.Info("Updating device from MQTT event", "device", device.DeviceSummary)
 				err = UpdateFromMqttEvent(ctx, device, event)
 				if err != nil {
-					log.Error(err, "Failed to update device from MQTT event", "event src", event.Src)
+					log.Error(err, "Failed to update device from MQTT event", "src", event.Src, "device", device.DeviceSummary)
 					continue
 				}
 

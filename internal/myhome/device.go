@@ -67,14 +67,12 @@ func (d DeviceSummary) Mac() net.HardwareAddr {
 
 type Device struct {
 	DeviceSummary
-	ConfigRevision uint32               `db:"config_revision" json:"config_revision"`
-	Info           *shelly.DeviceInfo   `db:"-" json:"info"`
-	Config         *shelly.Config       `db:"-" json:"config"`
-	impl           any                  `db:"-" json:"-"` // Reference to the inner implementation
-	log            logr.Logger          `db:"-" json:"-"`
-	components     map[string]Component `db:"-" json:"-"`
+	ConfigRevision uint32             `db:"config_revision" json:"config_revision"`
+	Info           *shelly.DeviceInfo `db:"-" json:"info"`
+	Config         *shelly.Config     `db:"-" json:"config"`
+	impl           any                `db:"-" json:"-"` // Reference to the inner implementation
+	log            logr.Logger        `db:"-" json:"-"`
 }
-
 type Component struct {
 	Config map[string]any `json:"config"`
 	Status map[string]any `json:"status"`
@@ -187,9 +185,26 @@ func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Devi
 	return d, nil
 }
 
-func (d *Device) UpdateFromShelly(ctx context.Context, sd *shellyapi.Device, via types.Channel) bool {
-	updated, _ := sd.Refresh(ctx, via)
-	return updated
+func (d *Device) Refresh(ctx context.Context, sd *shellyapi.Device) (bool, error) {
+	d.log.Info("Refreshing device", "id", d.Id)
+	err := sd.Refresh(ctx, types.ChannelDefault)
+	if err != nil {
+		d.log.Error(err, "Failed to update device", "device", d.DeviceSummary)
+		return false, err
+	}
+	if !sd.IsModified() {
+		d.log.Info("Device is up to date", "device", d.DeviceSummary)
+		return false, nil
+	}
+	d.DeviceSummary.Id_ = sd.Id()
+	d.DeviceSummary.Host_ = sd.Host()
+	d.DeviceSummary.Name_ = sd.Name()
+	d.DeviceSummary.MAC = sd.Mac().String()
+	d.ConfigRevision = sd.ConfigRevision()
+	d.Info = sd.Info()
+	d.Config = sd.Config()
+	sd.ResetModified()
+	return true, nil
 }
 
 func (d *Device) WithZeroConfEntry(entry *zeroconf.ServiceEntry) *Device {

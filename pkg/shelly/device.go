@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"mymqtt"
+	"mynet"
 	"net"
 	"pkg/devices"
 	"pkg/shelly/ethernet"
@@ -64,7 +65,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) error {
 		d.config.System = config
 		d.UpdateName(config.Device.Name)
 	}
-	if d.Host() == "" {
+	if !d.IsHttpReady() {
 		if d.status == nil {
 			d.status = &shelly.Status{}
 		}
@@ -169,16 +170,22 @@ func (d *Device) Mac() net.HardwareAddr {
 	}
 	mac, err := net.ParseMAC(d.MacAddress_)
 	if err != nil {
+		d.log.Error(err, "Failed to parse MAC address", "mac", d.MacAddress_)
+		d.UpdateMac(nil)
 		return nil
 	}
 	return mac
 }
 
 func (d *Device) UpdateMac(mac net.HardwareAddr) {
-	if mac == nil || mac.String() == "" || mac.String() == "<nil>" || mac.String() == d.MacAddress_ {
+	if mac.String() == d.MacAddress_ {
 		return
 	}
-	d.MacAddress_ = mac.String()
+	if mac == nil || mac.String() == "" || mac.String() == "<nil>" {
+		d.MacAddress_ = ""
+	} else {
+		d.MacAddress_ = mac.String()
+	}
 	d.modified = true
 }
 
@@ -191,6 +198,12 @@ func (d *Device) Config() *shelly.Config {
 }
 
 func (d *Device) ConfigRevision() uint32 {
+	if d.config == nil {
+		return 0
+	}
+	if d.config.System == nil {
+		return 0
+	}
 	return d.config.System.ConfigRevision
 }
 
@@ -210,6 +223,31 @@ func (d *Device) DisableMqtt() {
 	d.mqttReady = false
 }
 
+func (d *Device) EnableMqtt() {
+	d.mqttReady = true
+}
+
+func (d *Device) IsHttpReady() bool {
+	var ip net.IP
+	if d.status != nil {
+		if d.status.Ethernet != nil {
+			ip = net.ParseIP(d.status.Ethernet.IP)
+		} else if d.status.Wifi != nil {
+			ip = net.ParseIP(d.status.Wifi.IP)
+		}
+	} else {
+		ip = net.ParseIP(d.Host_)
+	}
+
+	if ip == nil {
+		d.Host_ = ""
+		return false
+	}
+
+	d.UpdateHost(ip.String())
+	return mynet.IsSameNetwork(d.log, ip) == nil
+}
+
 func (d *Device) StartDialog() uint32 {
 	d.dialogId++
 	d.dialogs[d.dialogId] = true
@@ -221,25 +259,24 @@ func (d *Device) StopDialog(id uint32) {
 }
 
 func (d *Device) Channel(via types.Channel) types.Channel {
-	if via == types.ChannelMqtt {
+	switch via {
+	case types.ChannelDefault:
 		if d.IsMqttReady() {
 			return types.ChannelMqtt
 		}
-		return types.ChannelDefault
-	}
-	if via == types.ChannelHttp {
-		if d.Host() != "" {
+		if d.IsHttpReady() {
 			return types.ChannelHttp
 		}
-		return types.ChannelDefault
+	case types.ChannelMqtt:
+		if d.IsMqttReady() {
+			return types.ChannelMqtt
+		}
+	case types.ChannelHttp:
+		if d.IsHttpReady() {
+			return types.ChannelHttp
+		}
 	}
-	if d.IsMqttReady() {
-		return types.ChannelMqtt
-	}
-	if d.Host() != "" {
-		return types.ChannelHttp
-	}
-	return types.ChannelDefault
+	panic("no channel is usable")
 }
 
 var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", MDNS_SHELLIES))
@@ -305,18 +342,16 @@ func (d *Device) ReplyTo() string {
 
 func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) (devices.Device, error) {
 	d := &Device{
-		Host_:     ip.String(),
-		log:       log,
-		mqttReady: false,
+		Host_: ip.String(),
+		log:   log,
 	}
 	return d.init(ctx)
 }
 
 func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devices.Device, error) {
 	d := &Device{
-		Id_:       id,
-		log:       log,
-		mqttReady: false,
+		Id_: id,
+		log: log,
 	}
 	return d.init(ctx)
 }
@@ -332,8 +367,7 @@ func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.
 				MacAddress: summary.Mac(),
 			},
 		},
-		log:       log,
-		mqttReady: false,
+		log: log,
 	}
 	return d.init(ctx)
 }
@@ -349,11 +383,10 @@ func (d *Device) init(ctx context.Context) (devices.Device, error) {
 }
 
 func (d *Device) initHttp(ctx context.Context) error {
-	if d.Host() == "" {
+	if !d.IsHttpReady() {
 		return fmt.Errorf("device host is empty: no channel to communicate with HTTP")
 	}
 	d.initDeviceInfo(ctx, types.ChannelHttp)
-	d.mqttReady = false
 	return nil
 }
 
@@ -390,13 +423,14 @@ func (d *Device) initMqtt(ctx context.Context) (devices.Device, error) {
 		}
 	}
 
-	d.mqttReady = true
+	d.EnableMqtt()
 	d.initDeviceInfo(ctx, types.ChannelMqtt)
 	return d, nil
 }
 
 func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
 	if d.Id() == "" || d.Mac() == nil {
+		d.log.Info("Initializing device info", "device_id", d.Id(), "mac", d.Mac())
 		out, err := d.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
 		if err != nil {
 			return err
@@ -415,7 +449,7 @@ func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
 }
 
 func (d *Device) initComponents(ctx context.Context, via types.Channel) error {
-	if d.Host() == "" || d.Ip() == nil { // XXX avoid <nil>
+	if !d.IsHttpReady() {
 		out, err := d.CallE(ctx, via, shelly.GetComponents.String(), &shelly.ComponentsRequest{
 			Keys: []string{"config", "status"},
 		})

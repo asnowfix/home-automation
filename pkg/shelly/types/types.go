@@ -25,8 +25,13 @@ type Device interface {
 	From() <-chan []byte
 	StartDialog() uint32
 	StopDialog(id uint32)
+
+	IsHttpReady() bool
+
 	IsMqttReady() bool
 	DisableMqtt()
+	EnableMqtt()
+
 	Channel(Channel) Channel
 
 	UpdateName(name string)

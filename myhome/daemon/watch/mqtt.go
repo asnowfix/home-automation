@@ -92,6 +92,8 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 
 func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Event) error {
 	log := ctx.Value(global.LogKey).(logr.Logger)
+	d.EnableMqtt()
+
 	// Events like:
 	// - '{"src":"shelly1minig3-54320464a1d0","dst":"shelly1minig3-54320464a1d0/events","method":"NotifyStatus","params":{"ts":1736603810.49,"switch:0":{"id":0,"output":false,"source":"HTTP_in"}}}'
 	// - '{"src":"shellyplus1-08b61fd90730","dst":"shellyplus1-08b61fd90730/events","method":"NotifyStatus","params":{"ts":1736604020.06,"cloud":{"connected":true}}}'

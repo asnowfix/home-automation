@@ -2,6 +2,7 @@ package shelly
 
 import (
 	"context"
+	"pkg/shelly/ethernet"
 	"pkg/shelly/input"
 	"pkg/shelly/kvs"
 	"pkg/shelly/mqtt"
@@ -38,6 +39,7 @@ func Init(log logr.Logger, timeout time.Duration) {
 	system.Init(log, &registrar)
 	// temperature.Init(log, &registrar)
 	wifi.Init(log, &registrar)
+	ethernet.Init(log, &registrar)
 }
 
 func (r *Registrar) CallE(ctx context.Context, d types.Device, via types.Channel, mh types.MethodHandler, params any) (any, error) {

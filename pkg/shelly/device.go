@@ -23,15 +23,14 @@ import (
 type Device struct {
 	shelly.Product
 	Id_         string             `json:"id"`
-	MacAddress_ string             `json:"mac"`
+	MacAddress_ net.HardwareAddr   `json:"mac"`
 	Name_       string             `json:"name"`
 	Service     string             `json:"service"`
-	Host_       string             `json:"host"`
+	Host_       net.IP             `json:"host"`
 	Port        int                `json:"port"`
 	info        *shelly.DeviceInfo `json:"-"`
 	config      *shelly.Config     `json:"-"`
 	status      *shelly.Status     `json:"-"`
-	mqttReady   bool               `json:"-"`
 	replyTo     string             `json:"-"`
 	to          chan<- []byte      `json:"-"` // channel to send messages to
 	from        <-chan []byte      `json:"-"` // channel to receive messages from
@@ -48,8 +47,14 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) error {
 			return fmt.Errorf("unable to init MQTT (%v)", err)
 		}
 	}
-	if d.Id() == "" || d.Mac() == nil {
+	if d.Id() == "" {
 		err := d.initDeviceInfo(ctx, types.ChannelHttp)
+		if err != nil {
+			return fmt.Errorf("unable to init device (%v) using HTTP", err)
+		}
+	}
+	if d.Mac() == nil {
+		err := d.initDeviceInfo(ctx, types.ChannelDefault)
 		if err != nil {
 			return fmt.Errorf("unable to init device (%v)", err)
 		}
@@ -73,7 +78,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) error {
 		d.log.Info("Wifi status", "device", d.Id(), "status", ws, "error", err)
 		if err == nil && ws.IP != "" {
 			d.status.Wifi = ws
-			d.Host_ = ws.IP
+			d.Host_ = net.ParseIP(ws.IP)
 			d.UpdateHost(ws.IP)
 		}
 		es, err := ethernet.DoGetStatus(ctx, via, d)
@@ -123,30 +128,35 @@ func (d *Device) UpdateId(id string) {
 }
 
 func (d *Device) Host() string {
-	if d.Host_ == "" || d.Host_ == "<nil>" {
+	if d.Host_ == nil {
 		return ""
 	}
-	return d.Host_
+	return d.Host_.String()
 }
 
 func (d *Device) UpdateHost(host string) {
-	if host == "" || host == "<nil>" || host == d.Host_ || net.ParseIP(host) == nil {
+	if host == "" || host == "<nil>" {
 		return
 	}
-	d.Host_ = host
-	d.modified = true
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return
+	}
+	if !ip.Equal(d.Host_) {
+		d.modified = true
+		d.Host_ = ip
+	}
 }
 
 func (d *Device) Ip() net.IP {
 	if d.status != nil {
 		if d.status.Ethernet != nil {
-			return net.ParseIP(d.status.Ethernet.IP)
-		}
-		if d.status.Wifi != nil {
-			return net.ParseIP(d.status.Wifi.IP)
+			d.Host_ = net.ParseIP(d.status.Ethernet.IP)
+		} else if d.status.Wifi != nil {
+			d.Host_ = net.ParseIP(d.status.Wifi.IP)
 		}
 	}
-	return net.ParseIP(d.Host_)
+	return d.Host_
 }
 
 func (d *Device) Name() string {
@@ -165,26 +175,25 @@ func (d *Device) UpdateName(name string) {
 }
 
 func (d *Device) Mac() net.HardwareAddr {
-	if d.MacAddress_ == "" || d.MacAddress_ == "<nil>" {
-		return nil
-	}
-	mac, err := net.ParseMAC(d.MacAddress_)
-	if err != nil {
-		d.log.Error(err, "Failed to parse MAC address", "mac", d.MacAddress_)
-		d.UpdateMac(nil)
-		return nil
-	}
-	return mac
+	return d.MacAddress_
 }
 
-func (d *Device) UpdateMac(mac net.HardwareAddr) {
-	if mac.String() == d.MacAddress_ {
+func (d *Device) UpdateMac(mac string) {
+	if mac == d.MacAddress_.String() {
 		return
 	}
-	if mac == nil || mac.String() == "" || mac.String() == "<nil>" {
-		d.MacAddress_ = ""
+	if mac == "" || mac == "<nil>" {
+		d.MacAddress_ = nil
 	} else {
-		d.MacAddress_ = mac.String()
+		if len(mac) == 12 {
+			mac = fmt.Sprintf("%s:%s:%s:%s:%s:%s", mac[0:2], mac[2:4], mac[4:6], mac[6:8], mac[8:10], mac[10:12])
+		}
+		addr, err := net.ParseMAC(mac)
+		if err != nil {
+			d.log.Error(err, "Failed to parse MAC address", "mac", mac)
+			return
+		}
+		d.MacAddress_ = addr
 	}
 	d.modified = true
 }
@@ -216,15 +225,19 @@ func (d *Device) ResetModified() {
 }
 
 func (d *Device) IsMqttReady() bool {
-	return d.mqttReady
-}
-
-func (d *Device) DisableMqtt() {
-	d.mqttReady = false
-}
-
-func (d *Device) EnableMqtt() {
-	d.mqttReady = true
+	if d.to == nil {
+		return false
+	}
+	if d.from == nil {
+		return false
+	}
+	if d.Id() == "" {
+		return false
+	}
+	if d.replyTo == "" {
+		return false
+	}
+	return true
 }
 
 func (d *Device) IsHttpReady() bool {
@@ -236,14 +249,13 @@ func (d *Device) IsHttpReady() bool {
 			ip = net.ParseIP(d.status.Wifi.IP)
 		}
 	} else {
-		ip = net.ParseIP(d.Host_)
+		ip = d.Host_
 	}
 
 	if ip == nil {
-		d.Host_ = ""
+		d.log.Error(nil, "Device has no IP address")
 		return false
 	}
-
 	d.UpdateHost(ip.String())
 	return mynet.IsSameNetwork(d.log, ip) == nil
 }
@@ -342,7 +354,7 @@ func (d *Device) ReplyTo() string {
 
 func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) (devices.Device, error) {
 	d := &Device{
-		Host_: ip.String(),
+		Host_: ip,
 		log:   log,
 	}
 	return d.init(ctx)
@@ -360,15 +372,14 @@ func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.
 	d := &Device{
 		Id_:   summary.Id(),
 		Name_: summary.Name(),
-		Host_: summary.Host(),
 		info: &shelly.DeviceInfo{
-			Id: summary.Id(),
-			Product: &shelly.Product{
-				MacAddress: summary.Mac(),
-			},
+			Id:      summary.Id(),
+			Product: &shelly.Product{},
 		},
 		log: log,
 	}
+	d.UpdateHost(summary.Host())
+	d.UpdateMac(summary.Mac().String())
 	return d.init(ctx)
 }
 
@@ -423,7 +434,6 @@ func (d *Device) initMqtt(ctx context.Context) (devices.Device, error) {
 		}
 	}
 
-	d.EnableMqtt()
 	d.initDeviceInfo(ctx, types.ChannelMqtt)
 	return d, nil
 }
@@ -441,9 +451,8 @@ func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
 		}
 		d.info = info
 		d.Id_ = info.Id
-		d.MacAddress_ = info.MacAddress.String()
-		d.UpdateId(info.Id)
 		d.UpdateMac(info.MacAddress)
+		d.UpdateId(info.Id)
 	}
 	return nil
 }

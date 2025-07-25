@@ -2,7 +2,6 @@ package shelly
 
 import (
 	"encoding/json"
-	"net"
 	"pkg/shelly/ethernet"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/sswitch"
@@ -12,12 +11,12 @@ import (
 )
 
 type Product struct {
-	Model       string           `json:"model"`
-	Serial      string           `json:"serial,omitempty"`
-	MacAddress  net.HardwareAddr `json:"mac"`
-	Application string           `json:"app"`
-	Version     string           `json:"ver"`
-	Generation  int              `json:"gen"`
+	Model       string `json:"model"`
+	Serial      string `json:"serial,omitempty"`
+	MacAddress  string `json:"mac"`
+	Application string `json:"app"`
+	Version     string `json:"ver"`
+	Generation  int    `json:"gen"`
 }
 
 type State uint32

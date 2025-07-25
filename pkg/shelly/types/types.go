@@ -29,14 +29,12 @@ type Device interface {
 	IsHttpReady() bool
 
 	IsMqttReady() bool
-	DisableMqtt()
-	EnableMqtt()
 
 	Channel(Channel) Channel
 
 	UpdateName(name string)
 	UpdateHost(host string)
-	UpdateMac(mac net.HardwareAddr)
+	UpdateMac(mac string)
 	UpdateId(id string)
 	IsModified() bool
 	ResetModified()

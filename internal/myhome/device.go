@@ -83,7 +83,6 @@ type DeviceImplementation interface {
 	Info() *shelly.DeviceInfo
 	Config() *shelly.Config
 	Status() *shelly.Status
-	EnableMqtt()
 }
 
 func (d *Device) WithImpl(i any) *Device {
@@ -125,10 +124,6 @@ func (d *Device) WithName(name string) *Device {
 
 func (d *Device) Update(status any) {
 	// TODO: update status & save
-}
-
-func (d *Device) EnableMqtt() {
-	d.impl.(DeviceImplementation).EnableMqtt()
 }
 
 type GroupInfo struct {

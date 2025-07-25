@@ -60,7 +60,6 @@ func (ch *MqttChannel) receiveResponse(ctx context.Context, device types.Device,
 		err := fmt.Errorf("timeout waiting for response from %s (%s)", device.Id(), device.Name())
 		ch.log.Error(err, "Timeout waiting for device response", "to method", method, "id", device.Id(), "name", device.Name(), "timeout", ch.timeout)
 		device.StopDialog(reqId)
-		device.DisableMqtt()
 		return nil, err
 	}
 

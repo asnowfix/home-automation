@@ -77,7 +77,7 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 	d := &Device{
 		Id_:     deviceId,
 		Service: entry.Service,
-		Host_:   ips[0].String(),
+		Host_:   ips[0],
 		Port:    entry.Port,
 		Product: shelly.Product{
 			Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),

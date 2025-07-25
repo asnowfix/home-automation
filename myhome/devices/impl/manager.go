@@ -149,18 +149,19 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	ctx, dm.cancel = context.WithCancel(ctx)
 	go func(ctx context.Context, log logr.Logger, dc <-chan *myhome.Device) error {
+		log.Info("Starting updater loop")
 		for {
 			select {
 			case <-ctx.Done():
-				log.Info("Cancelled")
+				log.Info("Exiting updater loop")
 				return ctx.Err()
 
 			case device := <-dc:
-				log.Info("Processing updated device", "id", device.Id(), "name", device.Name())
+				log.Info("Updater loop: processing", "device", device.DeviceSummary)
 
 				sd, ok := device.Impl().(*shelly.Device)
 				if !ok {
-					log.Error(nil, "Unhandled device type", "device id", device.Id(), "type", reflect.TypeOf(device.Impl()))
+					log.Error(nil, "Unhandled device type", "device", device.DeviceSummary, "type", reflect.TypeOf(device.Impl()))
 					continue
 				}
 
@@ -176,47 +177,55 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 				groups, err := groups.GetDeviceGroups(ctx, sd)
 				if err != nil {
-					dm.log.Error(err, "Failed to get device groups", "id", device.Id(), "name", device.Name())
+					dm.log.Error(err, "Failed to get device groups", "device", device.DeviceSummary)
 					continue
 				}
-				dm.log.Info("Device claims to be in groups", "id", device.Id(), "name", device.Name(), "groups", groups)
+				if len(groups) > 0 {
+					dm.log.Info("Device claims to be in groups", "device", device.DeviceSummary, "groups", groups)
 
-				for _, group := range groups {
-					out, err := dm.gr.AddGroup(&myhome.GroupInfo{
-						Name: group,
-					})
-					if err != nil {
-						dm.log.Error(err, "Failed to add group", "group", group)
-					}
-					gi := out.(*myhome.GroupInfo)
-					_, err = dm.gr.AddDeviceToGroup(&myhome.GroupDevice{
-						Group:        gi.Name,
-						Manufacturer: device.Manufacturer(),
-						Id:           device.Id(),
-					})
-					if err != nil {
-						dm.log.Error(err, "Failed to add device to group", "id", device.Id(), "name", device.Name(), "group", group)
-						continue
-					}
-					// Add GroupInfo Key/Values to device
-					for k, v := range gi.KeyValues() {
-						kvs.SetKeyValue(ctx, dm.log, types.ChannelDefault, sd, k, v)
+					for _, group := range groups {
+						out, err := dm.gr.AddGroup(&myhome.GroupInfo{
+							Name: group,
+						})
+						if err != nil {
+							dm.log.Error(err, "Failed to add group", "group", group)
+						}
+						gi := out.(*myhome.GroupInfo)
+						_, err = dm.gr.AddDeviceToGroup(&myhome.GroupDevice{
+							Group:        gi.Name,
+							Manufacturer: device.Manufacturer(),
+							Id:           device.Id(),
+						})
+						if err != nil {
+							dm.log.Error(err, "Failed to add device to group", "device", device.DeviceSummary, "group", group)
+							continue
+						}
+						// Add GroupInfo Key/Values to device
+						for k, v := range gi.KeyValues() {
+							kvs.SetKeyValue(ctx, dm.log, types.ChannelDefault, sd, k, v)
+						}
 					}
 				}
 
-				updated := device.UpdateFromShelly(ctx, sd, types.ChannelDefault)
-				if !updated {
+				modified, err := device.Refresh(ctx, sd)
+				if err != nil {
+					dm.log.Error(err, "Failed to refresh device", "device", device.DeviceSummary)
+					continue
+				}
+				if !modified {
+					dm.log.Info("Device is up to date", "device", device.DeviceSummary)
 					continue
 				}
 
 				err = dm.dr.SetDevice(ctx, device, true)
 				if err != nil {
-					dm.log.Error(err, "Failed to set device", "id", device.Id(), "name", device.Name())
+					dm.log.Error(err, "Failed to upsert", "device", device.DeviceSummary)
 					continue
 				}
+				dm.log.Info("Updated", "device", device.DeviceSummary)
 			}
 		}
-	}(ctx, dm.log.WithName("DeviceManager#DeviceChannel"), dm.update)
+	}(ctx, dm.log.WithName("DeviceManager#Updater"), dm.update)
 
 	// Load every devices from storage & init them
 	devices, err := dm.dr.GetAllDevices(ctx)
@@ -226,8 +235,8 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	}
 	dm.log.Info("Loaded devices", "num", len(devices))
 	for _, device := range devices {
-		if device.Info == nil {
-			dm.log.Info("Skipping update of device without info", "id", device.Id(), "name", device.Name())
+		if device.Id_ == "" {
+			dm.log.Info("Skipping update of device without Id", "device", device)
 			continue
 		} else {
 			dm.log.Info("Preparing update of device", "id", device.Id(), "name", device.Name())

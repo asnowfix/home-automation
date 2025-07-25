@@ -32,7 +32,7 @@ func (d ShellyDevice) Name() string {
 }
 
 func (d ShellyDevice) Mac() net.HardwareAddr {
-	return d.shelly.MacAddress
+	return d.shelly.Mac()
 }
 
 func (d ShellyDevice) Online() bool {

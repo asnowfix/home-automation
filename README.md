@@ -6,12 +6,22 @@ MyHome Penates is the home automation system I develop & use to control my house
 
 ## Table of Contents <!-- omit in toc -->
 
-- [Home Automation](#home-automation)
+- [MyHome - Penates](#myhome---penates)
   - [Abstract](#abstract)
+  - [Releases](#releases)
   - [Usage - Linux](#usage---linux)
     - [Is daemon running?](#is-daemon-running)
     - [Manual start](#manual-start)
   - [Usage Windows](#usage-windows)
+  - [Reporting issues](#reporting-issues)
+  - [Groups of devices](#groups-of-devices)
+    - [Create a group](#create-a-group)
+    - [Add a devices to a group](#add-a-devices-to-a-group)
+    - [List groups](#list-groups)
+    - [Show a group](#show-a-group)
+    - [Delete a group](#delete-a-group)
+  - [Heaters adaptative control](#heaters-adaptative-control)
+    - [Kalman Filter Heater Control Script](#kalman-filter-heater-control-script)
   - [Shelly Notes](#shelly-notes)
     - [Shelly 1 H\&T](#shelly-1-ht)
     - [Web-Sockets Logs](#web-sockets-logs)
@@ -22,6 +32,7 @@ MyHome Penates is the home automation system I develop & use to control my house
       - [Shelly H\&T Gen1](#shelly-ht-gen1)
   - [GCP Notes](#gcp-notes)
   - [Shelly Devices](#shelly-devices)
+    - [BLE - Bluetooth Low Energy](#ble---bluetooth-low-energy)
     - [Gen 3](#gen-3)
     - [Gen 2](#gen-2)
       - [Pro1 - Gen 2](#pro1---gen-2)
@@ -29,6 +40,7 @@ MyHome Penates is the home automation system I develop & use to control my house
   - [Red-by-SFR Box Notes](#red-by-sfr-box-notes)
     - [Main API](#main-api)
     - [UPnP](#upnp)
+    - [Port reserved by SFR-Box](#port-reserved-by-sfr-box)
   - [References](#references)
 
 ## Releases
@@ -61,6 +73,42 @@ Unless you suceed to set `$env:Path` in pwsh, you need to call GNU Make with its
 ```bash
 C:\ProgramData\chocolatey\bin\make build
 ```
+
+## Reporting issues
+
+Please report issues on GitHub: <https://github.com/asnowfix/home-automation/issues>
+
+### Issue Labels
+
+When reporting issues, please use the appropriate label from the following categories:
+
+#### Standard GitHub Labels
+
+| Label | Description |
+|-------|-------------|
+| `bug` | Something isn't working |
+| `documentation` | Improvements or additions to documentation |
+| `duplicate` | This issue or pull request already exists |
+| `enhancement` | New feature or request |
+| `good first issue` | Good for newcomers |
+| `help wanted` | Extra attention is needed |
+| `invalid` | This doesn't seem right |
+| `question` | Further information is requested |
+| `wontfix` | This will not be worked on |
+
+#### Project-Specific Labels
+
+| Label | Description |
+|-------|-------------|
+| `license` | License-related tasks |
+| `core-architecture` | Core architecture and design tasks |
+| `user-interface` | User interface improvements and features |
+| `integrations` | Integration with external systems and protocols |
+| `code-quality` | Code quality improvements and refactoring |
+| `packaging` | Packaging and deployment tasks |
+| `device-feature` | Device-specific features and improvements |
+| `monitoring` | Monitoring and metrics features |
+| `networking` | Networking and device discovery features |
 
 ## Groups of devices
 

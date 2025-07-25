@@ -91,21 +91,20 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 	d := Device{
 		Device: *device,
 	}
-	out, err := json.Marshal(d.Info)
+	b, err := json.Marshal(device.Info)
 	if err != nil {
-		s.log.Error(err, "Failed to marshal device info", "device_id", device.Id)
+		s.log.Error(err, "Failed to marshal device info", "device", device)
 		return err
 	}
-	d.Info_ = string(out)
-
-	out, err = json.Marshal(d.Config)
+	d.Info_ = string(b)
+	b, err = json.Marshal(device.Config)
 	if err != nil {
-		s.log.Error(err, "Failed to marshal device config", "device_id", device.Id)
+		s.log.Error(err, "Failed to marshal device config", "device", device)
 		return err
 	}
-	d.Config_ = string(out)
+	d.Config_ = string(b)
 
-	// FIXME: fail device upsert if it already exists and overwrite is false
+	// First, try to insert or update based on manufacturer and id
 	query := `
     INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config) 
     VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config)
@@ -118,9 +117,30 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
         config = excluded.config`
 	_, err = s.db.NamedExec(query, d)
 	if err != nil {
-		s.log.Error(err, "Failed to upsert device", "device", device)
+		s.log.Error(err, "Failed to upsert device by manufacturer and id", "device", device)
 		return err
 	}
+
+	// If MAC address is provided, also handle conflicts based on MAC address
+	if d.MAC != "" {
+		macQuery := `
+    UPDATE devices SET 
+        manufacturer = :manufacturer,
+        id = :id,
+        name = :name, 
+        host = :host, 
+        info = :info, 
+        config_revision = :config_revision, 
+        config = :config
+    WHERE mac = :mac`
+
+		_, err = s.db.NamedExec(macQuery, d)
+		if err != nil {
+			s.log.Error(err, "Failed to update device by MAC address", "device", device)
+			return err
+		}
+	}
+
 	return nil
 }
 

@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"fmt"
+	"net"
 )
 
 type MethodsRegistrar interface {
@@ -17,15 +18,26 @@ type Device interface {
 	Host() string
 	Manufacturer() string
 	Id() string
+	Mac() net.HardwareAddr
 	CallE(ctx context.Context, via Channel, method string, params any) (any, error)
 	ReplyTo() string
 	To() chan<- []byte
 	From() <-chan []byte
 	StartDialog() uint32
 	StopDialog(id uint32)
+
+	IsHttpReady() bool
+
 	IsMqttReady() bool
-	DisableMqtt()
+
 	Channel(Channel) Channel
+
+	UpdateName(name string)
+	UpdateHost(host string)
+	UpdateMac(mac string)
+	UpdateId(id string)
+	IsModified() bool
+	ResetModified()
 }
 
 type DeviceCaller func(ctx context.Context, device Device, mh MethodHandler, out any, params any) (any, error)

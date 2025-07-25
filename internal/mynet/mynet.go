@@ -45,13 +45,17 @@ func MainInterface(log logr.Logger) (*net.Interface, *net.IP, error) {
 	return nil, nil, fmt.Errorf("did not find any interface on the same network as the network gateway IP %v", gw)
 }
 
+var myip net.IP
+
 func IsSameNetwork(log logr.Logger, ip net.IP) error {
 	var err error
 	var network *net.IPNet
 
-	myip, err := gateway.DiscoverInterface()
-	if err != nil {
-		return err
+	if myip == nil {
+		myip, err = gateway.DiscoverInterface()
+		if err != nil {
+			return err
+		}
 	}
 	log.Info("my ip", "addr", myip.String())
 

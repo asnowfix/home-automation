@@ -16,57 +16,70 @@ import (
 func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry, dr mynet.Resolver) error {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 
-	scan := make(chan *zeroconf.ServiceEntry, 1)
-
-	err := dr.BrowseService(ctx, shelly.MDNS_SHELLIES, "local.", scan)
-	if err != nil {
-		log.Error(err, "Failed to start ZeroConf browser")
-		return err
-	}
-	log.Info("Started ZeroConf browser")
-
-	go func(ctx context.Context, log logr.Logger, scan <-chan *zeroconf.ServiceEntry) error {
+	go func(ctx context.Context, log logr.Logger) error {
+		stopped := make(chan struct{}, 1)
+		scan := make(chan *zeroconf.ServiceEntry, 1)
 		for {
+			err := dr.BrowseService(ctx, shelly.MDNS_SHELLIES, "local.", scan)
+			if err != nil {
+				log.Error(err, "Failed to start ZeroConf browser")
+				return err
+			}
+			log.Info("(Re)Started ZeroConf browser")
+
+			go func(ctx context.Context, log logr.Logger, scan <-chan *zeroconf.ServiceEntry, stopped chan<- struct{}) error {
+				for {
+					select {
+					case <-ctx.Done():
+						log.Error(ctx.Err(), "Cancelled")
+						stopped <- struct{}{}
+						return ctx.Err()
+
+					case entry, ok := <-scan:
+						if !ok || entry == nil {
+							log.Error(fmt.Errorf("entry=%v, ok=%v", entry, ok), "Failed to browse ZeroConf : terminating browser")
+							return nil
+						}
+						log.Info("Browsed", "entry", entry)
+						device, err := db.GetDeviceByAny(ctx, entry.Instance)
+						if err != nil || device.Info == nil {
+							sd, err := shelly.NewDeviceFromZeroConfEntry(ctx, log, dr, entry)
+							if err != nil {
+								log.Error(err, "Failed to create device from zeroconf entry", "entry", entry)
+								continue
+							}
+							device, err = myhome.NewDeviceFromImpl(ctx, log, sd)
+							if err != nil {
+								log.Error(err, "Failed to create device from shelly device", "entry", entry)
+								continue
+							}
+						} else {
+							log.Info("Found device in DB", "device_id", device.Id(), "name", device.Name())
+							if device.Impl() == nil {
+								log.Info("Loading device details in memory", "device_id", device.Id(), "name", device.Name())
+								sd, err := shelly.NewDeviceFromSummary(ctx, log, device)
+								if err != nil {
+									log.Error(err, "Failed to create device from summary", "device", device)
+									continue
+								}
+								device = device.WithImpl(sd)
+							}
+							device = device.WithZeroConfEntry(entry)
+						}
+						dm.UpdateChannel() <- device
+					}
+				}
+			}(ctx, log.WithName("DeviceManager#WatchZeroConf"), scan, stopped)
+
 			select {
 			case <-ctx.Done():
 				log.Error(ctx.Err(), "Cancelled")
 				return ctx.Err()
-
-			case entry, ok := <-scan:
-				if !ok || entry == nil {
-					log.Error(fmt.Errorf("entry=%v, ok=%v", entry, ok), "Failed to browse ZeroConf : terminating browser")
-					return nil
-				}
-				log.Info("Browsed", "entry", entry)
-				device, err := db.GetDeviceByAny(ctx, entry.Instance)
-				if err != nil || device.Info == nil {
-					sd, err := shelly.NewDeviceFromZeroConfEntry(ctx, log, dr, entry)
-					if err != nil {
-						log.Error(err, "Failed to create device from zeroconf entry", "entry", entry)
-						continue
-					}
-					device, err = myhome.NewDeviceFromImpl(ctx, log, sd)
-					if err != nil {
-						log.Error(err, "Failed to create device from shelly device", "entry", entry)
-						continue
-					}
-				} else {
-					log.Info("Found device in DB", "device_id", device.Id(), "name", device.Name())
-					if device.Impl() == nil {
-						log.Info("Loading device details in memory", "device_id", device.Id(), "name", device.Name())
-						sd, err := shelly.NewDeviceFromSummary(ctx, log, device)
-						if err != nil {
-							log.Error(err, "Failed to create device from summary", "device", device)
-							continue
-						}
-						device = device.WithImpl(sd)
-					}
-					device = device.WithZeroConfEntry(entry)
-				}
-				dm.UpdateChannel() <- device
+			case <-stopped:
+				log.Info("Restarting ZeroConf browser")
 			}
 		}
-	}(ctx, log.WithName("DeviceManager#WatchZeroConf"), scan)
+	}(ctx, log)
 
 	return nil
 }

@@ -57,12 +57,14 @@ func DoGetConfig(ctx context.Context, device types.Device) (*Config, error) {
 		log.Error(err, "Invalid response to get device config", "device", device.Id())
 		return nil, err
 	}
+	if config.Device != nil && config.Device.Name != "" {
+		device.UpdateName(config.Device.Name)
+	}
 	return config, nil
 }
 
 func DoSetName(ctx context.Context, device types.Device, name string) (*SetConfigResponse, error) {
 	log.Info("Setting name of device", "name", name, "device", device.Id())
-	// c.Device.Name = name
 
 	out, err := device.CallE(ctx, types.ChannelDefault, SetConfig.String(), &SetConfigRequest{
 		Config: Config{
@@ -82,5 +84,6 @@ func DoSetName(ctx context.Context, device types.Device, name string) (*SetConfi
 		log.Error(err, "Invalid response to set device name", "name", name, "device", device.Id())
 		return nil, err
 	}
+	device.UpdateName(name)
 	return cres, nil
 }

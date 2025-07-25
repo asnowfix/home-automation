@@ -60,7 +60,6 @@ func (ch *MqttChannel) receiveResponse(ctx context.Context, device types.Device,
 		err := fmt.Errorf("timeout waiting for response from %s (%s)", device.Id(), device.Name())
 		ch.log.Error(err, "Timeout waiting for device response", "to method", method, "id", device.Id(), "name", device.Name(), "timeout", ch.timeout)
 		device.StopDialog(reqId)
-		device.DisableMqtt()
 		return nil, err
 	}
 
@@ -82,13 +81,6 @@ func (ch *MqttChannel) receiveResponse(ctx context.Context, device types.Device,
 		}
 	}
 
-	if out == nil {
-		// FIXME: should not happen
-		ch.log.Error(fmt.Errorf("out is nil"), "call device failed", "device", device.Id(), "method", method, "res_msg", string(resMsg))
-		panic("out is nil")
-	}
-
-	// ch.log.Info("Received", "response", res)
 	if res.Error != nil {
 		return nil, fmt.Errorf("device replied error '%v' (code:%v) to request '%v'", res.Error.Message, res.Error.Code, string(resMsg))
 	}

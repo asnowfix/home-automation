@@ -207,7 +207,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 					}
 				}
 
-				modified, err := device.Refresh(ctx, sd)
+				modified, err := device.Refresh(ctx)
 				if err != nil {
 					dm.log.Error(err, "Failed to refresh device", "device", device.DeviceSummary)
 					continue

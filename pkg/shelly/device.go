@@ -16,6 +16,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/go-logr/logr"
 )
@@ -28,6 +29,7 @@ type Device struct {
 	Service     string             `json:"service"`
 	Host_       net.IP             `json:"host"`
 	Port        int                `json:"port"`
+	mutex       sync.Mutex         `json:"-"`
 	info        *shelly.DeviceInfo `json:"-"`
 	config      *shelly.Config     `json:"-"`
 	status      *shelly.Status     `json:"-"`
@@ -41,6 +43,8 @@ type Device struct {
 }
 
 func (d *Device) Refresh(ctx context.Context, via types.Channel) error {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
 	if !d.IsMqttReady() {
 		_, err := d.initMqtt(ctx)
 		if err != nil {
@@ -60,7 +64,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) error {
 		}
 	}
 	if d.Name() == "" {
-		config, err := system.DoGetConfig(ctx, d)
+		config, err := system.GetConfig(ctx, d)
 		if err != nil {
 			return fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
 		}
@@ -107,7 +111,6 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) error {
 
 	return nil
 }
-
 func (d *Device) Manufacturer() string {
 	return "Shelly"
 }
@@ -261,12 +264,16 @@ func (d *Device) IsHttpReady() bool {
 }
 
 func (d *Device) StartDialog() uint32 {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
 	d.dialogId++
 	d.dialogs[d.dialogId] = true
 	return d.dialogId
 }
 
 func (d *Device) StopDialog(id uint32) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
 	delete(d.dialogs, id)
 }
 

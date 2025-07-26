@@ -9,6 +9,7 @@ import (
 	"mymqtt"
 	"mynet"
 	"pkg/shelly"
+	"time"
 
 	"myhome"
 
@@ -20,6 +21,15 @@ type daemon struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	log    logr.Logger
+	dm     *impl.DeviceManager
+}
+
+type Config struct {
+	RefreshInterval time.Duration `json:"refresh_interval"`
+}
+
+var DefaultConfig = Config{
+	RefreshInterval: 3 * time.Minute,
 }
 
 func NewDaemon(ctx context.Context, cancel context.CancelFunc, log logr.Logger) *daemon {
@@ -93,22 +103,23 @@ func (d *daemon) Run() error {
 		}
 		defer storage.Close()
 
-		dm := impl.NewDeviceManager(d.ctx, storage, resolver, mc)
-		err = dm.Start(d.ctx)
+		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc)
+		err = d.dm.Start(d.ctx)
 		if err != nil {
 			d.log.Error(err, "Failed to start device manager")
 			return err
 		}
-		// defer dm.Stop()
 
-		d.log.Info("Started device manager", "manager", dm)
+		d.log.Info("Started device manager", "manager", d.dm)
 
-		_, err = myhome.NewServerE(d.ctx, d.log, dm)
+		// Start continuous device refresh job
+		go d.runDeviceRefreshJob(d.ctx, d.log.WithName("Daemon#Refresher"), DefaultConfig.RefreshInterval)
+
+		_, err = myhome.NewServerE(d.ctx, d.log, d.dm)
 		if err != nil {
 			d.log.Error(err, "Failed to start MyHome service")
 			return err
 		}
-		// defer server.Close()
 	}
 
 	d.log.Info("Running")
@@ -124,4 +135,25 @@ func (d *daemon) Run() error {
 	<-done
 	d.log.Info("Shutting down")
 	return nil
+}
+
+func (d *daemon) runDeviceRefreshJob(ctx context.Context, log logr.Logger, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-ticker.C:
+			devices, err := d.dm.GetAllDevices(ctx)
+			if err != nil {
+				log.Error(err, "Failed to get all devices")
+				return
+			}
+			for _, device := range devices {
+				d.dm.UpdateChannel() <- device
+			}
+		}
+	}
 }

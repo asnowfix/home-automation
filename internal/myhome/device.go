@@ -3,11 +3,13 @@ package myhome
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/shelly"
 	"pkg/shelly/types"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
@@ -186,8 +188,14 @@ func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Devi
 	return d, nil
 }
 
-func (d *Device) Refresh(ctx context.Context, sd *shellyapi.Device) (bool, error) {
+func (d *Device) Refresh(ctx context.Context) (bool, error) {
 	d.log.Info("Refreshing device", "id", d.Id)
+
+	sd, ok := d.Impl().(*shellyapi.Device)
+	if !ok {
+		return false, fmt.Errorf("device is not a Shelly: %v (expected: %v)", reflect.TypeOf(d.Impl()), reflect.TypeOf(&shellyapi.Device{}))
+	}
+
 	err := sd.Refresh(ctx, types.ChannelDefault)
 	if err != nil {
 		d.log.Error(err, "Failed to update device", "device", d.DeviceSummary)

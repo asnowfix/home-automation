@@ -74,11 +74,13 @@ func (ch *MqttChannel) receiveResponse(ctx context.Context, device types.Device,
 
 	device.StopDialog(reqId)
 	if res.Id != reqId {
-		ch.log.Error(fmt.Errorf("response.id does not match request.id"), "response", res, "request.id", reqId)
-		out, err = ch.receiveResponse(ctx, device, method, reqId, out)
-		if err != nil {
-			return nil, err
-		}
+		err = fmt.Errorf("response.id (%v) does not match request.id (%v)", res.Id, reqId)
+		ch.log.Error(err, "Dropping response", "out", out, "device", device.Id(), "method", method)
+		return nil, err
+		// out, err = ch.receiveResponse(ctx, device, method, reqId, out)
+		// if err != nil {
+		// 	return nil, err
+		// }
 	}
 
 	if res.Error != nil {

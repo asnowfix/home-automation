@@ -60,7 +60,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) error {
 		}
 	}
 	if d.Name() == "" {
-		config, err := system.DoGetConfig(ctx, d)
+		config, err := system.GetConfig(ctx, d)
 		if err != nil {
 			return fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
 		}

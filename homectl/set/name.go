@@ -44,7 +44,7 @@ var nameCmd = &cobra.Command{
 		}
 
 		log.Info("Setting name of device", "name", name, "device", sd.Id())
-		_, err = system.DoSetName(ctx, sd, name)
+		_, err = system.SetName(ctx, sd, name)
 		return err
 	},
 }

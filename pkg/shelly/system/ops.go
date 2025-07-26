@@ -23,30 +23,30 @@ func (v Verb) String() string {
 }
 
 const (
-	SetConfig Verb = "Sys.SetConfig"
-	GetConfig Verb = "Sys.GetConfig"
-	GetStatus Verb = "Sys.GetStatus"
+	setConfig Verb = "Sys.SetConfig"
+	getConfig Verb = "Sys.GetConfig"
+	getStatus Verb = "Sys.GetStatus"
 )
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
-	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
+	r.RegisterMethodHandler(setConfig.String(), types.MethodHandler{
 		// InputType:  reflect.TypeOf(SetConfigRequest{}),
 		Allocate:   func() any { return &SetConfigResponse{} },
 		HttpMethod: http.MethodPost,
 	})
-	r.RegisterMethodHandler(GetConfig.String(), types.MethodHandler{
+	r.RegisterMethodHandler(getConfig.String(), types.MethodHandler{
 		Allocate:   func() any { return &Config{} },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(GetStatus.String(), types.MethodHandler{
+	r.RegisterMethodHandler(getStatus.String(), types.MethodHandler{
 		Allocate:   func() any { return &Status{} },
 		HttpMethod: http.MethodGet,
 	})
 }
 
-func DoGetConfig(ctx context.Context, device types.Device) (*Config, error) {
-	out, err := device.CallE(ctx, types.ChannelDefault, GetConfig.String(), nil)
+func GetConfig(ctx context.Context, device types.Device) (*Config, error) {
+	out, err := device.CallE(ctx, types.ChannelDefault, getConfig.String(), nil)
 	if err != nil {
 		log.Error(err, "Unable to get config", "device", device.Id())
 		return nil, err
@@ -57,33 +57,35 @@ func DoGetConfig(ctx context.Context, device types.Device) (*Config, error) {
 		log.Error(err, "Invalid response to get device config", "device", device.Id())
 		return nil, err
 	}
-	if config.Device != nil && config.Device.Name != "" {
-		device.UpdateName(config.Device.Name)
-	}
 	return config, nil
 }
 
-func DoSetName(ctx context.Context, device types.Device, name string) (*SetConfigResponse, error) {
+func SetConfig(ctx context.Context, device types.Device, config *Config) (*SetConfigResponse, error) {
+	var req SetConfigRequest
+	req.Config = *config
+	out, err := device.CallE(ctx, types.ChannelDefault, setConfig.String(), &req)
+	if err != nil {
+		log.Error(err, "Unable to set config", "device", device.Id())
+		return nil, err
+	}
+	res, ok := out.(*SetConfigResponse)
+	if !ok {
+		err = fmt.Errorf("Unexpected response type: got %v, expected %v", reflect.TypeOf(out), reflect.TypeOf(&SetConfigResponse{}))
+		log.Error(err, "Unexpected response type", "device", device.Id(), "response", out)
+		return nil, err
+	}
+	return res, nil
+}
+
+func SetName(ctx context.Context, device types.Device, name string) (*SetConfigResponse, error) {
 	log.Info("Setting name of device", "name", name, "device", device.Id())
 
-	out, err := device.CallE(ctx, types.ChannelDefault, SetConfig.String(), &SetConfigRequest{
-		Config: Config{
-			Device: &DeviceConfig{
-				Name: name,
-			},
-		},
-	})
+	config, err := GetConfig(ctx, device)
 	if err != nil {
-		log.Error(err, "Unable to set device name", "name", name, "device", device.Id())
 		return nil, err
 	}
 
-	cres, ok := out.(*SetConfigResponse)
-	if !ok {
-		err = fmt.Errorf("invalid response to set device name: type='%v' expected='*system.SetConfigResponse'", reflect.TypeOf(out))
-		log.Error(err, "Invalid response to set device name", "name", name, "device", device.Id())
-		return nil, err
-	}
-	device.UpdateName(name)
-	return cres, nil
+	config.Device.Name = name
+
+	return SetConfig(ctx, device, config)
 }

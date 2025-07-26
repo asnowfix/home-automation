@@ -180,31 +180,29 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	if len(args) > 0 {
 		addr = &args[0]
 	}
-	config := system.Config{
-		Debug: &system.DeviceDebug{
-			Mqtt: system.Enabler{
-				Enable: false,
-			},
-			WebSocket: system.Enabler{
-				Enable: false,
-			},
-			Udp: system.EnablerUDP{
-				Address: addr,
-				Level:   4,
-			},
-		},
-	}
-	out, err := sd.CallE(ctx, via, string(system.SetConfig), &system.SetConfigRequest{Config: config})
+	config, err := system.GetConfig(ctx, sd)
 	if err != nil {
-		log.Error(err, "Unable to turn script UDP debugging", "addr", addr)
+		log.Error(err, "Unable to get config", "device", sd.Id())
 		return nil, err
 	}
-	options.PrintResult(out)
-
-	res, ok := out.(*system.SetConfigResponse)
-	if !ok {
-		return nil, fmt.Errorf("unexpected format '%v' (failed to cast response)", reflect.TypeOf(out))
+	config.Debug = &system.DeviceDebug{
+		Mqtt: system.Enabler{
+			Enable: false,
+		},
+		WebSocket: system.Enabler{
+			Enable: false,
+		},
+		Udp: system.EnablerUDP{
+			Address: addr,
+			Level:   4,
+		},
 	}
+	res, err := system.SetConfig(ctx, sd, config)
+	if err != nil {
+		log.Error(err, "Unable to turn on script UDP debugging", "addr", addr)
+		return nil, err
+	}
+	options.PrintResult(res)
 
 	if res.RestartRequired {
 		log.Info("Restart required")
@@ -217,7 +215,7 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		// log.Info("Restarted", "out", out)
 	}
 
-	return out, nil
+	return res, nil
 }
 
 func parseMessage(log logr.Logger, data []byte) {

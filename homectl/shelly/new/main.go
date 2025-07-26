@@ -81,7 +81,7 @@ Arguments:
 				return nil, fmt.Errorf("expected types.Device, got %T", device)
 			}
 			// - set device name to args[0]
-			_, err := system.DoSetName(ctx, sd, name)
+			_, err := system.SetName(ctx, sd, name)
 			if err != nil {
 				return nil, err
 			}

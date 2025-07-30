@@ -81,7 +81,7 @@ func (d *daemon) Run() error {
 		// go gen1.Publisher(ctx, log, gen1Ch, mc)
 	} else {
 		// Connect to the network's MQTT broker
-		err := mymqtt.NewClientE(d.ctx, d.log, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+		err := mymqtt.NewClientE(d.ctx, d.log, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 		if err != nil {
 			d.log.Error(err, "Failed to initialize MQTT client")
 			return err

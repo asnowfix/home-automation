@@ -15,6 +15,14 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+const MDNS_LOOKUP_TIMEOUT time.Duration = 7 * time.Second
+
+const MQTT_DEFAULT_TIMEOUT time.Duration = 14 * time.Second
+
+const MQTT_DEFAULT_GRACE time.Duration = 2 * time.Second
+
+const COMMAND_TIMEOUT = 15 * time.Second
+
 var Flags struct {
 	CpuProfile     string
 	Verbose        bool

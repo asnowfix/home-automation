@@ -141,6 +141,8 @@ func (d *daemon) runDeviceRefreshJob(ctx context.Context, log logr.Logger, inter
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	i := 0
+
 	for {
 		select {
 		case <-d.ctx.Done():
@@ -151,8 +153,11 @@ func (d *daemon) runDeviceRefreshJob(ctx context.Context, log logr.Logger, inter
 				log.Error(err, "Failed to get all devices")
 				return
 			}
-			for _, device := range devices {
-				d.dm.UpdateChannel() <- device
+
+			d.dm.UpdateChannel() <- devices[i]
+			i++
+			if i >= len(devices) {
+				i = 0
 			}
 		}
 	}

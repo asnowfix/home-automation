@@ -112,9 +112,6 @@ func (d *daemon) Run() error {
 
 		d.log.Info("Started device manager", "manager", d.dm)
 
-		// Start continuous device refresh job
-		go d.runDeviceRefreshJob(d.ctx, d.log.WithName("Daemon#Refresher"), DefaultConfig.RefreshInterval)
-
 		_, err = myhome.NewServerE(d.ctx, d.log, d.dm)
 		if err != nil {
 			d.log.Error(err, "Failed to start MyHome service")
@@ -135,30 +132,4 @@ func (d *daemon) Run() error {
 	<-done
 	d.log.Info("Shutting down")
 	return nil
-}
-
-func (d *daemon) runDeviceRefreshJob(ctx context.Context, log logr.Logger, interval time.Duration) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	i := 0
-
-	for {
-		select {
-		case <-d.ctx.Done():
-			return
-		case <-ticker.C:
-			devices, err := d.dm.GetAllDevices(ctx)
-			if err != nil {
-				log.Error(err, "Failed to get all devices")
-				return
-			}
-
-			d.dm.UpdateChannel() <- devices[i]
-			i++
-			if i >= len(devices) {
-				i = 0
-			}
-		}
-	}
 }

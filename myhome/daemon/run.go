@@ -17,6 +17,7 @@ func init() {
 	runCmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns-timeout", "M", options.MDNS_LOOKUP_DEFAULT_TIMEOUT, "Timeout for mDNS lookups")
 	runCmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", options.MQTT_DEFAULT_TIMEOUT, "Timeout for MQTT operations")
 	runCmd.PersistentFlags().DurationVarP(&options.Flags.MqttGrace, "mqtt-grace", "G", options.MQTT_DEFAULT_GRACE, "MQTT disconnection grace period")
+	runCmd.PersistentFlags().DurationVarP(&options.Flags.RefreshInterval, "refresh-interval", "R", options.DEVICE_REFRESH_INTERVAL, "Known devices refresh interval")
 }
 
 var runCmd = &cobra.Command{

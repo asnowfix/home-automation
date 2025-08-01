@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"global"
+	"homectl/options"
 	"myhome"
 	"myhome/daemon/watch"
 	mhd "myhome/devices"
@@ -17,6 +18,7 @@ import (
 	"pkg/shelly/types"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -25,6 +27,7 @@ type DeviceManager struct {
 	dr         mhd.DeviceRegistry
 	gr         mhd.GroupRegistry
 	update     chan *myhome.Device
+	refreshed  chan *myhome.Device
 	cancel     context.CancelFunc
 	log        logr.Logger
 	mqttClient *mymqtt.Client
@@ -38,6 +41,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		gr:         s,
 		log:        log.WithName("DeviceManager"),
 		update:     make(chan *myhome.Device, 64), // TODO configurable buffer size
+		refreshed:  make(chan *myhome.Device, 64), // TODO configurable buffer size
 		mqttClient: mqttClient,
 		resolver:   resolver,
 	}
@@ -113,7 +117,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return dm.gr.AddGroup(in.(*myhome.GroupInfo))
 	})
 	myhome.RegisterMethodHandler(myhome.GroupDelete, func(in any) (any, error) {
-		return dm.gr.RemoveGroup(in.(string))
+		return nil, dm.gr.RemoveGroup(in.(string))
 	})
 	myhome.RegisterMethodHandler(myhome.GroupShow, func(in any) (any, error) {
 		name := in.(string)
@@ -141,113 +145,16 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return &g, nil
 	})
 	myhome.RegisterMethodHandler(myhome.GroupAddDevice, func(in any) (any, error) {
-		return dm.gr.AddDeviceToGroup(in.(*myhome.GroupDevice))
+		return nil, dm.gr.AddDeviceToGroup(in.(*myhome.GroupDevice))
 	})
 	myhome.RegisterMethodHandler(myhome.GroupRemoveDevice, func(in any) (any, error) {
-		return dm.gr.RemoveDeviceFromGroup(in.(*myhome.GroupDevice))
+		return nil, dm.gr.RemoveDeviceFromGroup(in.(*myhome.GroupDevice))
 	})
 
 	ctx, dm.cancel = context.WithCancel(ctx)
-	go func(ctx context.Context, log logr.Logger, dc <-chan *myhome.Device) error {
-		log.Info("Starting updater loop")
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("Exiting updater loop")
-				return ctx.Err()
-
-			case device := <-dc:
-				log.Info("Updater loop: processing", "device", device.DeviceSummary)
-
-				sd, ok := device.Impl().(*shelly.Device)
-				if !ok {
-					log.Error(nil, "Unhandled device type", "device", device.DeviceSummary, "type", reflect.TypeOf(device.Impl()))
-					continue
-				}
-
-				// //  TODO: Load KVS revision from device & compare it with the one in the DB. If they are different, update the device in the DB.
-				// status := system.GetStatus(ctx, sd)
-
-				// kvsRevision, err := kvs.GetRevision(ctx, sd)
-				// if err != nil {
-				// 	dm.log.Error(err, "Failed to get device KVS revision", "id", device.Id(), "name", device.Name())
-				// 	continue
-				// }
-				// YYY
-
-				groups, err := groups.GetDeviceGroups(ctx, sd)
-				if err != nil {
-					dm.log.Error(err, "Failed to get device groups", "device", device.DeviceSummary)
-					continue
-				}
-				if len(groups) > 0 {
-					dm.log.Info("Device claims to be in groups", "device", device.DeviceSummary, "groups", groups)
-
-					for _, group := range groups {
-						out, err := dm.gr.AddGroup(&myhome.GroupInfo{
-							Name: group,
-						})
-						if err != nil {
-							dm.log.Error(err, "Failed to add group", "group", group)
-						}
-						gi := out.(*myhome.GroupInfo)
-						_, err = dm.gr.AddDeviceToGroup(&myhome.GroupDevice{
-							Group:        gi.Name,
-							Manufacturer: device.Manufacturer(),
-							Id:           device.Id(),
-						})
-						if err != nil {
-							dm.log.Error(err, "Failed to add device to group", "device", device.DeviceSummary, "group", group)
-							continue
-						}
-						// Add GroupInfo Key/Values to device
-						for k, v := range gi.KeyValues() {
-							kvs.SetKeyValue(ctx, dm.log, types.ChannelDefault, sd, k, v)
-						}
-					}
-				}
-
-				modified, err := device.Refresh(ctx)
-				if err != nil {
-					dm.log.Error(err, "Failed to refresh device", "device", device.DeviceSummary)
-					continue
-				}
-				if !modified {
-					dm.log.Info("Device is up to date", "device", device.DeviceSummary)
-					continue
-				}
-
-				err = dm.dr.SetDevice(ctx, device, true)
-				if err != nil {
-					dm.log.Error(err, "Failed to upsert", "device", device.DeviceSummary)
-					continue
-				}
-				dm.log.Info("Updated", "device", device.DeviceSummary)
-			}
-		}
-	}(ctx, dm.log.WithName("DeviceManager#Updater"), dm.update)
-
-	// Load every devices from storage & init them
-	devices, err := dm.dr.GetAllDevices(ctx)
-	if err != nil {
-		dm.log.Error(err, "Failed to get all devices")
-		return err
-	}
-	dm.log.Info("Loaded devices", "num", len(devices))
-	for _, device := range devices {
-		if device.Id_ == "" {
-			dm.log.Info("Skipping update of device without Id", "device", device)
-			continue
-		} else {
-			dm.log.Info("Preparing update of device", "id", device.Id(), "name", device.Name())
-			sd, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
-			if err != nil {
-				dm.log.Error(err, "Failed to create device from summary", "id", device.Id(), "name", device.Name())
-				continue
-			}
-			dm.update <- device.WithImpl(sd)
-		}
-	}
+	go dm.storeDeviceLoop(ctx, dm.log.WithName("DeviceManager#storeDeviceLoop"), dm.refreshed)
+	go deviceUpdaterLoop(ctx, dm.log.WithName("DeviceManager#deviceUpdaterLoop"), dm.update, dm.gr, dm.refreshed)
+	go dm.runDeviceRefreshJob(ctx, dm.log.WithName("DeviceManager#runDeviceRefreshJob"), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
 	err = watch.Mqtt(ctx, dm.mqttClient, dm, dm)
@@ -264,6 +171,115 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func deviceUpdaterLoop(ctx context.Context, log logr.Logger, update <-chan *myhome.Device, gr mhd.GroupRegistry, refreshed chan<- *myhome.Device) {
+	log.Info("Starting updater loop")
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Exiting updater loop")
+			return
+
+		case device := <-update:
+			log.Info("Updater loop: processing", "device", device.DeviceSummary)
+			go refreshOneDevice(ctx, log.WithName("DeviceManager#refreshOneDevice("+device.Name()+")"), device, gr, refreshed)
+		}
+	}
+}
+
+func refreshOneDevice(ctx context.Context, log logr.Logger, device *myhome.Device, gr mhd.GroupRegistry, refreshed chan<- *myhome.Device) {
+	modified, err := device.Refresh(ctx)
+	if err != nil {
+		log.Error(err, "Failed to refresh device", "device", device.DeviceSummary)
+		return
+	}
+
+	groups, err := groups.GetDeviceGroups(ctx, device.Impl().(*shelly.Device))
+	if err != nil {
+		log.Error(err, "Failed to get device groups", "device", device.DeviceSummary)
+		return
+	}
+	if len(groups) > 0 {
+		log.Info("Device claims to be in groups", "device", device.DeviceSummary, "groups", groups)
+
+		for _, group := range groups {
+			gi, err := gr.AddGroup(&myhome.GroupInfo{
+				Name: group,
+			})
+			if err != nil {
+				log.Error(err, "Failed to add group", "group", group)
+			}
+			err = gr.AddDeviceToGroup(&myhome.GroupDevice{
+				Group:        gi.Name,
+				Manufacturer: device.Manufacturer(),
+				Id:           device.Id(),
+			})
+			if err != nil {
+				log.Error(err, "Failed to add device to group", "device", device.DeviceSummary, "group", group)
+				continue
+			}
+			// Add GroupInfo Key/Values to device
+			for k, v := range gi.KeyValues() {
+				kvs.SetKeyValue(ctx, log, types.ChannelDefault, device.Impl().(*shelly.Device), k, v)
+			}
+		}
+	}
+
+	if !modified {
+		log.Info("Device is up to date", "device", device.DeviceSummary)
+		return
+	}
+
+	log.Info("Ready for storage", "device", device.DeviceSummary)
+	refreshed <- device
+}
+
+func (dm *DeviceManager) storeDeviceLoop(ctx context.Context, log logr.Logger, refreshed <-chan *myhome.Device) {
+	log.Info("Starting storage loop")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case device := <-refreshed:
+			err := dm.dr.SetDevice(ctx, device, true)
+			if err != nil {
+				log.Error(err, "Failed to upsert", "device", device.DeviceSummary)
+				return
+			}
+			log.Info("Stored device", "device", device.DeviceSummary)
+		}
+	}
+}
+
+func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, log logr.Logger, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	i := 0
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			log.Info("Refreshing one device", "index", i)
+			devices, err := dm.GetAllDevices(ctx)
+			if err != nil {
+				log.Error(err, "Failed to get all devices")
+				return
+			}
+
+			if i < len(devices) {
+				log.Info("Refreshing device", "device", devices[i].DeviceSummary)
+				dm.UpdateChannel() <- devices[i]
+				i++
+			}
+			if i >= len(devices) {
+				i = 0
+			}
+		}
+	}
 }
 
 func (dm *DeviceManager) Flush() error {
@@ -313,7 +329,7 @@ func (dm *DeviceManager) ForgetDevice(ctx context.Context, id string) error {
 }
 
 func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) error {
-	if d.Manufacturer_ == string(myhome.Shelly) {
+	if d.Manufacturer_ == string(myhome.SHELLY) {
 		sd, ok := d.Impl().(*shelly.Device)
 		if !ok {
 			return fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(d.Impl()), d)

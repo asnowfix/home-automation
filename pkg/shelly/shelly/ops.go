@@ -22,7 +22,7 @@ const (
 	GetStatus        Verb = "Shelly.GetStatus"
 	GetConfig        Verb = "Shelly.GetConfig"
 	ListMethods      Verb = "Shelly.ListMethods"
-	GetDeviceInfo    Verb = "Shelly.GetDeviceInfo"
+	getDeviceInfo    Verb = "Shelly.GetDeviceInfo"
 	ListProfiles     Verb = "Shelly.ListProfiles"
 	SetProfile       Verb = "Shelly.SetProfile"
 	ListTimezones    Verb = "Shelly.ListTimezones"
@@ -54,7 +54,7 @@ func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
 		Allocate:   func() any { return new(MethodsResponse) },
 		HttpMethod: http.MethodGet,
 	})
-	r.RegisterMethodHandler(GetDeviceInfo.String(), types.MethodHandler{
+	r.RegisterMethodHandler(getDeviceInfo.String(), types.MethodHandler{
 		Allocate:   func() any { return new(DeviceInfo) },
 		HttpMethod: http.MethodGet,
 	})
@@ -105,8 +105,8 @@ func DoReboot(ctx context.Context, d types.Device) error {
 	return err
 }
 
-func DoGetDeviceInfo(ctx context.Context, d types.Device) (*DeviceInfo, error) {
-	out, err := d.CallE(ctx, types.ChannelDefault, string(GetDeviceInfo.String()), nil)
+func GetDeviceInfo(ctx context.Context, d types.Device, via types.Channel) (*DeviceInfo, error) {
+	out, err := d.CallE(ctx, via, string(getDeviceInfo.String()), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func DoGetDeviceInfo(ctx context.Context, d types.Device) (*DeviceInfo, error) {
 		return nil, fmt.Errorf("invalid device info type %T (should be *DeviceInfo)", out)
 	}
 	if info.Id == "" || len(info.MacAddress) == 0 {
-		return nil, fmt.Errorf("invalid device info: %v", *info)
+		panic("invalid device info id:" + info.Id + " mac:" + info.MacAddress)
 	}
 
 	return info, nil

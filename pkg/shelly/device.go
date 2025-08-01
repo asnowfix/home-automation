@@ -22,14 +22,10 @@ import (
 )
 
 type Device struct {
-	shelly.Product
 	Id_         string             `json:"id"`
-	MacAddress_ net.HardwareAddr   `json:"mac"`
+	MacAddress_ net.HardwareAddr   `json:"-"`
 	Name_       string             `json:"name"`
-	Service     string             `json:"service"`
 	Host_       net.IP             `json:"host"`
-	Port        int                `json:"port"`
-	mutex       sync.Mutex         `json:"-"`
 	info        *shelly.DeviceInfo `json:"-"`
 	config      *shelly.Config     `json:"-"`
 	status      *shelly.Status     `json:"-"`
@@ -37,16 +33,14 @@ type Device struct {
 	to          chan<- []byte      `json:"-"` // channel to send messages to
 	from        <-chan []byte      `json:"-"` // channel to receive messages from
 	dialogId    uint32             `json:"-"`
-	dialogs     map[uint32]bool    `json:"-"`
+	dialogs     sync.Map           `json:"-"` // map[uint32]bool
 	log         logr.Logger        `json:"-"`
 	modified    bool               `json:"-"`
 }
 
 func (d *Device) Refresh(ctx context.Context, via types.Channel) error {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	if !d.IsMqttReady() {
-		_, err := d.initMqtt(ctx)
+	if !d.IsMqttReady() && d.Id() != "" {
+		err := d.initMqtt(ctx)
 		if err != nil {
 			return fmt.Errorf("unable to init MQTT (%v)", err)
 		}
@@ -123,7 +117,10 @@ func (d *Device) Id() string {
 }
 
 func (d *Device) UpdateId(id string) {
-	if id == "" || id == "<nil>" || id == d.Id_ || !deviceIdRe.MatchString(id) {
+	if id == "" || id == "<nil>" || !deviceIdRe.MatchString(id) {
+		panic("invalid device id: " + id)
+	}
+	if d.Id_ == id {
 		return
 	}
 	d.Id_ = id
@@ -186,7 +183,7 @@ func (d *Device) UpdateMac(mac string) {
 		return
 	}
 	if mac == "" || mac == "<nil>" {
-		d.MacAddress_ = nil
+		panic("invalid MAC address: " + mac)
 	} else {
 		if len(mac) == 12 {
 			mac = fmt.Sprintf("%s:%s:%s:%s:%s:%s", mac[0:2], mac[2:4], mac[4:6], mac[6:8], mac[8:10], mac[10:12])
@@ -264,17 +261,13 @@ func (d *Device) IsHttpReady() bool {
 }
 
 func (d *Device) StartDialog() uint32 {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
 	d.dialogId++
-	d.dialogs[d.dialogId] = true
+	d.dialogs.Store(d.dialogId, true)
 	return d.dialogId
 }
 
 func (d *Device) StopDialog(id uint32) {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	delete(d.dialogs, id)
+	d.dialogs.Delete(id)
 }
 
 func (d *Device) Channel(via types.Channel) types.Channel {
@@ -341,10 +334,10 @@ func (d *Device) MethodHandlerE(v any) (types.MethodHandler, error) {
 func (d *Device) String() string {
 	name := d.Name()
 	if len(name) == 0 {
-		return d.Id()
+		return fmt.Sprintf("%s [%v]", d.Id(), d.Ip())
+	} else {
+		return fmt.Sprintf("%s (%s) [%v]", d.Id(), name, d.Ip())
 	}
-
-	return fmt.Sprintf("%s (%s)", name, d.Id())
 }
 
 func (d *Device) To() chan<- []byte {
@@ -364,43 +357,58 @@ func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) (devices.D
 		Host_: ip,
 		log:   log,
 	}
-	return d.init(ctx)
+	err := d.init(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devices.Device, error) {
+	if id == "" || id == "<nil>" {
+		return nil, fmt.Errorf("invalid device id: %s", id)
+	}
 	d := &Device{
-		Id_: id,
 		log: log,
 	}
-	return d.init(ctx)
+	d.UpdateId(id)
+	return d, nil
 }
 
 func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.Device) (devices.Device, error) {
 	d := &Device{
-		Id_:   summary.Id(),
-		Name_: summary.Name(),
-		info: &shelly.DeviceInfo{
-			Id:      summary.Id(),
-			Product: &shelly.Product{},
-		},
+		// info: &shelly.DeviceInfo{
+		// 	Name:    summary.Name(),
+		// 	Id:      summary.Id(),
+		// 	Product: shelly.Product{},
+		// },
 		log: log,
 	}
+	d.UpdateId(summary.Id())
 	d.UpdateHost(summary.Host())
 	d.UpdateMac(summary.Mac().String())
-	return d.init(ctx)
+	d.UpdateName(summary.Name())
+
+	return d, nil
 }
 
-func (d *Device) init(ctx context.Context) (devices.Device, error) {
+func (d *Device) init(ctx context.Context) error {
 	if d.Id() == "" {
 		err := d.initHttp(ctx)
 		if err != nil {
-			return nil, err
+			return err
+		}
+		if d.info == nil {
+			panic("info is nil")
 		}
 	}
 	return d.initMqtt(ctx)
 }
 
 func (d *Device) initHttp(ctx context.Context) error {
+	if d == nil {
+		panic("device is nil")
+	}
 	if !d.IsHttpReady() {
 		return fmt.Errorf("device host is empty: no channel to communicate with HTTP")
 	}
@@ -408,26 +416,31 @@ func (d *Device) initHttp(ctx context.Context) error {
 	return nil
 }
 
-func (d *Device) initMqtt(ctx context.Context) (devices.Device, error) {
+func (d *Device) initMqtt(ctx context.Context) error {
+	if d == nil {
+		panic("device is nil")
+	}
+
 	if d.Id() == "" {
-		return nil, fmt.Errorf("device id is empty: no channel to communicate")
+		panic("device id is empty: no channel to communicate")
+		// return fmt.Errorf("device id is empty: no channel to communicate")
 	}
 
 	mc, err := mymqtt.GetClientE(ctx)
 	if err != nil {
 		d.log.Error(err, "Unable to get MQTT client")
-		return nil, err
+		return err
 	}
 
 	d.replyTo = fmt.Sprintf("%s_%s", mc.Id(), d.Id())
-	d.dialogs = make(map[uint32]bool)
+	// dialogs sync.Map doesn't need initialization
 
 	if d.from == nil && mc != nil {
 		var err error
 		d.from, err = mc.Subscriber(ctx, fmt.Sprintf("%s/rpc", d.replyTo), 1 /*qlen*/)
 		if err != nil {
 			d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
-			return nil, err
+			return err
 		}
 	}
 
@@ -437,29 +450,27 @@ func (d *Device) initMqtt(ctx context.Context) (devices.Device, error) {
 		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/)
 		if err != nil {
 			d.log.Error(err, "Unable to publish to device's RPC topic", "device_id", d.Id_)
-			return nil, err
+			return err
 		}
 	}
 
 	d.initDeviceInfo(ctx, types.ChannelMqtt)
-	return d, nil
+	return nil
 }
 
 func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
+	if d == nil {
+		panic("device is nil")
+	}
 	if d.Id() == "" || d.Mac() == nil {
-		d.log.Info("Initializing device info", "device_id", d.Id(), "mac", d.Mac())
-		out, err := d.CallE(ctx, via, shelly.GetDeviceInfo.String(), nil)
+		info, err := shelly.GetDeviceInfo(ctx, d, via)
 		if err != nil {
 			return err
 		}
-		info, ok := out.(*shelly.DeviceInfo)
-		if !ok {
-			return fmt.Errorf("invalid response to get device info")
-		}
 		d.info = info
-		d.Id_ = info.Id
 		d.UpdateMac(info.MacAddress)
 		d.UpdateId(info.Id)
+		d.UpdateName(info.Name)
 	}
 	return nil
 }

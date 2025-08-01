@@ -23,17 +23,20 @@ const MQTT_DEFAULT_GRACE time.Duration = 2 * time.Second
 
 const COMMAND_DEFAULT_TIMEOUT time.Duration = 15 * time.Second
 
+const DEVICE_REFRESH_INTERVAL time.Duration = 1 * time.Minute
+
 var Flags struct {
-	CpuProfile     string
-	Verbose        bool
-	Json           bool
-	MqttBroker     string
-	MqttTimeout    time.Duration // the value taken by --mqtt-timeout / -T
-	MqttGrace      time.Duration // the value taken by --mqtt-grace / -G
-	MdnsTimeout    time.Duration // the value taken by --mdns-timeout / -M
-	CommandTimeout time.Duration // the value taken by --command-timeout / -C
-	Via            string
-	SwitchId       uint32
+	CpuProfile      string
+	Verbose         bool
+	Json            bool
+	MqttBroker      string
+	MqttTimeout     time.Duration // the value taken by --mqtt-timeout / -T
+	MqttGrace       time.Duration // the value taken by --mqtt-grace / -G
+	MdnsTimeout     time.Duration // the value taken by --mdns-timeout / -M
+	CommandTimeout  time.Duration // the value taken by --command-timeout / -C
+	RefreshInterval time.Duration // the value taken by --refresh-interval / -R
+	Via             string
+	SwitchId        uint32
 }
 
 var Via types.Channel

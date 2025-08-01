@@ -75,18 +75,28 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 	}
 
 	d := &Device{
-		Id_:     deviceId,
-		Service: entry.Service,
-		Host_:   ips[0],
-		Port:    entry.Port,
-		Product: shelly.Product{
-			Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),
-			Generation:  generation,
-			Application: application,
-			Version:     version,
-			Serial:      hostRe.ReplaceAllString(entry.HostName, "${serial}"),
+		Id_: deviceId,
+		info: &shelly.DeviceInfo{
+			Id: deviceId,
+			Product: shelly.Product{
+				Model:       hostRe.ReplaceAllString(entry.HostName, "${model}"),
+				Generation:  generation,
+				Application: application,
+				Version:     version,
+				Serial:      hostRe.ReplaceAllString(entry.HostName, "${serial}"),
+			},
 		},
 	}
-	log.Info("Zeroconf discovered", "device", d)
-	return d.init(ctx)
+
+	var ip net.IP
+	for _, ip = range ips {
+		if ip.IsGlobalUnicast() {
+			d.UpdateHost(ip.String())
+			break
+		}
+	}
+	d.UpdateName(entry.Instance)
+
+	log.Info("Zeroconf-discovered", "device", d)
+	return d, nil
 }

@@ -9,6 +9,8 @@ MyHome Penates is the home automation system I develop & use to control my house
 - [MyHome - Penates](#myhome---penates)
   - [Abstract](#abstract)
   - [Releases](#releases)
+  - [Development Tools](#development-tools)
+    - [Shelly Device Data Collector](#shelly-device-data-collector)
   - [Usage - Linux](#usage---linux)
     - [Is daemon running?](#is-daemon-running)
     - [Manual start](#manual-start)
@@ -46,6 +48,32 @@ MyHome Penates is the home automation system I develop & use to control my house
 ## Releases
 
 Published here: <https://github.com/asnowfix/home-automation/releases>.
+
+## Development Tools
+
+### Shelly Device Data Collector
+
+A comprehensive tool for collecting API interaction data from all local Shelly devices for non-regression testing. The data collector systematically calls known API methods on discovered devices and records request/response pairs in JSON format.
+
+**Location**: [`cmd/datacollector/`](cmd/datacollector/)
+
+**Key Features**:
+- Automatic device discovery via MQTT
+- Comprehensive API method testing (17+ methods per device)
+- Structured JSON output for test suite integration
+- Error handling and timeout management
+- Support for all Shelly device types (Gen1, Gen2, Gen3)
+
+**Usage**:
+```bash
+cd cmd/datacollector
+go build -o datacollector .
+./datacollector
+```
+
+Results are saved to `test_data/shelly_api_test_data_YYYYMMDD_HHMMSS.json` for use in automated testing.
+
+For detailed documentation, see the [Data Collector README](cmd/datacollector/README.md).
 
 ## Usage - Linux
 

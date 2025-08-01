@@ -4,12 +4,24 @@ go 1.23.0
 
 require (
 	github.com/spf13/cobra v1.8.1
+	hlog v0.0.0-00010101000000-000000000000
+	homectl/options v0.0.0-00010101000000-000000000000
+	internal/global v0.0.0-00010101000000-000000000000
+	internal/myhome v0.0.0-00010101000000-000000000000
 	internal/myip v0.0.0-00010101000000-000000000000
 	internal/myzone v0.0.0-00010101000000-000000000000
 	mymqtt v0.0.0-00010101000000-000000000000
 	pkg/shelly v0.0.0-00010101000000-000000000000
 	pkg/shelly/types v0.0.0-00010101000000-000000000000
 )
+
+replace hlog => ./hlog
+
+replace homectl/options => ./homectl/options
+
+replace internal/global => ./internal/global
+
+replace internal/myhome => ./internal/myhome
 
 replace internal/myip => ./internal/myip
 

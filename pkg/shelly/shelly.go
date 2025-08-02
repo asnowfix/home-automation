@@ -28,7 +28,7 @@ func (d ShellyDevice) Provider() string {
 }
 
 func (d ShellyDevice) Name() string {
-	return d.shelly.Id()
+	return d.shelly.Name()
 }
 
 func (d ShellyDevice) Mac() net.HardwareAddr {

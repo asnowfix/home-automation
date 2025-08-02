@@ -24,10 +24,10 @@ type GroupRegistry interface {
 	GetGroupInfo(name string) (*myhome.GroupInfo, error)
 	GetDevicesByGroupName(name string) ([]*myhome.Device, error)
 	GetDeviceGroups(manufacturer, id string) (*myhome.Groups, error)
-	AddGroup(group *myhome.GroupInfo) (any, error)
-	RemoveGroup(name string) (any, error)
-	AddDeviceToGroup(groupDevice *myhome.GroupDevice) (any, error)
-	RemoveDeviceFromGroup(groupDevice *myhome.GroupDevice) (any, error)
+	AddGroup(group *myhome.GroupInfo) (*myhome.GroupInfo, error)
+	RemoveGroup(name string) error
+	AddDeviceToGroup(groupDevice *myhome.GroupDevice) error
+	RemoveDeviceFromGroup(groupDevice *myhome.GroupDevice) error
 }
 
 type Manager interface {

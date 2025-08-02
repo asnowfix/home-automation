@@ -9,7 +9,6 @@ import (
 	shellyapi "pkg/shelly"
 	"pkg/shelly/shelly"
 	"pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
@@ -179,7 +178,7 @@ type GroupDevice struct {
 }
 
 func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Device) (*Device, error) {
-	d := NewDevice(log, Shelly, device.Id())
+	d := NewDevice(log, SHELLY, device.Id())
 	d = d.WithImpl(device)
 	d = d.WithMAC(device.Mac())
 	d = d.WithHost(device.Host())
@@ -189,30 +188,53 @@ func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Devi
 }
 
 func (d *Device) Refresh(ctx context.Context) (bool, error) {
-	d.log.Info("Refreshing device", "id", d.Id)
+	d.log.Info("Refreshing device", "id", d.Id(), "name", d.Name())
 
-	sd, ok := d.Impl().(*shellyapi.Device)
-	if !ok {
-		return false, fmt.Errorf("device is not a Shelly: %v (expected: %v)", reflect.TypeOf(d.Impl()), reflect.TypeOf(&shellyapi.Device{}))
+	switch d.Manufacturer() {
+	case string(SHELLY):
+		sd, ok := d.Impl().(*shellyapi.Device)
+		if !ok || sd == nil {
+			var err error
+			device, err := shellyapi.NewDeviceFromSummary(ctx, d.log, d)
+			if err != nil {
+				d.log.Error(err, "Failed to create device from summary", "device", d.DeviceSummary)
+				return false, err
+			}
+			sd, ok = device.(*shellyapi.Device)
+			if !ok {
+				return false, fmt.Errorf("device is not a Shelly device: %T", device)
+			}
+			d.WithImpl(sd)
+		}
+
+		// //  TODO: Load KVS revision from device & compare it with the one in the DB. If they are different, update the device in the DB.
+		// status := system.GetStatus(ctx, sd)
+
+		// kvsRevision, err := kvs.GetRevision(ctx, sd)
+		// if err != nil {
+		// 	dm.log.Error(err, "Failed to get device KVS revision", "id", device.Id(), "name", device.Name())
+		// 	continue
+		// }
+
+		err := sd.Refresh(ctx, types.ChannelDefault)
+		if err != nil {
+			d.log.Error(err, "Failed to update device", "device", d.DeviceSummary)
+			return false, err
+		}
+		if !sd.IsModified() {
+			d.log.Info("Device is up to date", "device", d.DeviceSummary)
+			return false, nil
+		}
+		d.DeviceSummary.Id_ = sd.Id()
+		d.DeviceSummary.Host_ = sd.Host()
+		d.DeviceSummary.Name_ = sd.Name()
+		d.DeviceSummary.MAC = sd.Mac().String()
+		d.ConfigRevision = sd.ConfigRevision()
+		d.Info = sd.Info()
+		d.Config = sd.Config()
+		sd.ResetModified()
 	}
 
-	err := sd.Refresh(ctx, types.ChannelDefault)
-	if err != nil {
-		d.log.Error(err, "Failed to update device", "device", d.DeviceSummary)
-		return false, err
-	}
-	if !sd.IsModified() {
-		d.log.Info("Device is up to date", "device", d.DeviceSummary)
-		return false, nil
-	}
-	d.DeviceSummary.Id_ = sd.Id()
-	d.DeviceSummary.Host_ = sd.Host()
-	d.DeviceSummary.Name_ = sd.Name()
-	d.DeviceSummary.MAC = sd.Mac().String()
-	d.ConfigRevision = sd.ConfigRevision()
-	d.Info = sd.Info()
-	d.Config = sd.Config()
-	sd.ResetModified()
 	return true, nil
 }
 

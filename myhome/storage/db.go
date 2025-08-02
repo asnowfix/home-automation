@@ -309,7 +309,7 @@ func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (*myhome.Groups
 }
 
 // AddGroup adds a new group to the database.
-func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (any, error) {
+func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (*myhome.GroupInfo, error) {
 
 	// Check if the group already exists, if so, update it
 	var exists bool
@@ -353,7 +353,7 @@ func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (any, error) {
 
 // RemoveGroup removes a group from the database by its name.
 // RemoveGroup removes a group from the database by its name.
-func (s *DeviceStorage) RemoveGroup(name string) (any, error) {
+func (s *DeviceStorage) RemoveGroup(name string) error {
 	log := s.log.WithValues("name", name)
 	log.Info("Removing group", "name", name)
 
@@ -362,11 +362,11 @@ func (s *DeviceStorage) RemoveGroup(name string) (any, error) {
 	err := s.db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM groups WHERE name = $1)", name)
 	if err != nil {
 		log.Error(err, "Failed to check if group exists", "name", name)
-		return nil, err
+		return err
 	}
 	if !exists {
 		log.Info("Group does not exist", "name", name)
-		return nil, errors.New("group does not exist")
+		return errors.New("group does not exist")
 	}
 
 	// Proceed to delete the group
@@ -374,21 +374,21 @@ func (s *DeviceStorage) RemoveGroup(name string) (any, error) {
 	_, err = s.db.NamedExec(query, map[string]interface{}{
 		"name": name,
 	})
-	return nil, err
+	return err
 }
 
 // AddDeviceToGroup adds a device to a group.
-func (s *DeviceStorage) AddDeviceToGroup(groupDevice *myhome.GroupDevice) (any, error) {
+func (s *DeviceStorage) AddDeviceToGroup(groupDevice *myhome.GroupDevice) error {
 	query := `INSERT INTO groupsMember (manufacturer, id, group_id) VALUES (:manufacturer, :id, (SELECT id FROM groups WHERE name = :group))`
 	_, err := s.db.NamedExec(query, groupDevice)
-	return nil, err
+	return err
 }
 
 // RemoveDeviceFromGroup removes a device from a group.
-func (s *DeviceStorage) RemoveDeviceFromGroup(groupDevice *myhome.GroupDevice) (any, error) {
+func (s *DeviceStorage) RemoveDeviceFromGroup(groupDevice *myhome.GroupDevice) error {
 	query := `DELETE FROM groupsMember WHERE manufacturer = $1 AND id = $2 AND group_id = (SELECT id FROM groups WHERE name = $3)`
 	_, err := s.db.Exec(query, groupDevice.Manufacturer, groupDevice.Id, groupDevice.Group)
-	return nil, err
+	return err
 }
 
 // unmarshallDevice takes a Device struct and unmarshals the Info, Config, and Status fields

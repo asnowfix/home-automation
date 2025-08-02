@@ -20,7 +20,6 @@ import (
 	shellyPkg "pkg/shelly"
 	"pkg/shelly/types"
 	"runtime/pprof"
-	"time"
 
 	"mymqtt"
 
@@ -68,7 +67,7 @@ var Cmd = &cobra.Command{
 		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout)
 		cmd.SetContext(ctx)
 
-		err := mymqtt.NewClientE(ctx, log, options.Flags.MqttBroker, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+		err := mymqtt.NewClientE(ctx, log, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
@@ -115,12 +114,12 @@ var Cmd = &cobra.Command{
 func init() {
 	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "P", "", "write CPU profile to `file`")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
-	Cmd.PersistentFlags().DurationVarP(&options.Flags.CommandTimeout, "timeout", "", 7*time.Second, "Timeout for overall command")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.CommandTimeout, "timeout", "", options.COMMAND_DEFAULT_TIMEOUT, "Timeout for overall command")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")
-	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", 7*time.Second, "Timeout for MQTT operations")
-	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttGrace, "mqtt-grace", "G", 500*time.Millisecond, "MQTT disconnection grace period")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", options.MQTT_DEFAULT_TIMEOUT, "Timeout for MQTT operations")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttGrace, "mqtt-grace", "G", options.MQTT_DEFAULT_GRACE, "MQTT disconnection grace period")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Json, "json", "j", false, "output in json format")
-	Cmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns-timeout", "M", time.Second*5, "Timeout for mDNS lookups")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns-timeout", "M", options.MDNS_LOOKUP_DEFAULT_TIMEOUT, "Timeout for mDNS lookups")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.Via, "via", "V", types.ChannelDefault.String(), "Use given channel to communicate with Shelly devices (default is to discover it from the network)")
 
 	Cmd.AddCommand(versionCmd)

@@ -22,16 +22,18 @@ type Product struct {
 type State uint32
 
 type DeviceInfo struct {
-	*Product
+	Product
+	Name                  string `json:"name,omitempty"`
 	Id                    string `json:"id"`
 	FirmwareId            string `json:"fw_id"`
 	Profile               string `json:"profile,omitempty"`
 	AuthenticationEnabled bool   `json:"auth_en"`
 	AuthenticationDomain  string `json:"auth_domain,omitempty"`
-	Discoverable          bool   `json:"discoverable"`
+	Discoverable          bool   `json:"discoverable,omitempty"`
 	CloudKey              string `json:"key,omitempty"`
 	Batch                 string `json:"batch,omitempty"`
 	FirmwareSBits         string `json:"fw_sbits,omitempty"`
+	Slot                  int    `json:"slot,omitempty"` // only for Pro2, not documented
 }
 
 type Config struct {

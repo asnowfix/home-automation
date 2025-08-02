@@ -5,7 +5,7 @@ const MYHOME string = "myhome"
 type Manufacturer string
 
 const (
-	Shelly Manufacturer = "Shelly"
+	SHELLY Manufacturer = "Shelly"
 )
 
 type Verb string

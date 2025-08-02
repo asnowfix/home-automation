@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"global"
+	"homectl/options"
 	"mynet"
 	"net"
 	"net/url"
@@ -24,26 +25,17 @@ const PUBLIC_PORT = 8883
 
 type Client struct {
 	// clientId  string      // MQTT client_id (this client)
-	mqtt      mqtt.Client // MQTT stack
-	brokerUrl *url.URL    // MQTT broker to connect to
-	log       logr.Logger // Logger to use
-	timeout   time.Duration
-	grace     time.Duration
+	mqtt              mqtt.Client   // MQTT stack
+	brokerUrl         *url.URL      // MQTT broker to connect to
+	log               logr.Logger   // Logger to use
+	resolutionTimeout time.Duration // MQTT broker (mDNS) lookup resolution timeout
+	timeout           time.Duration // MQTT operations timeout
+	grace             time.Duration // MQTT disconnection grace period
 }
 
 const BROKER_DEFAULT_NAME = "mqtt"
 
-const BROKER_LOOKUP_TIMEOUT time.Duration = 7 * time.Second
-
-const MQTT_DEFAULT_TIMEOUT time.Duration = 14 * time.Second
-
-const MQTT_DEFAULT_GRACE time.Duration = 2 * time.Second
-
 var mqttBroker string = BROKER_DEFAULT_NAME
-
-var mqttTimeout time.Duration = MQTT_DEFAULT_TIMEOUT
-
-var mqttGrace time.Duration = MQTT_DEFAULT_GRACE
 
 var mqttOps *mqtt.ClientOptions
 
@@ -76,7 +68,7 @@ func GetClientE(ctx context.Context) (*Client, error) {
 		return client, nil
 	}
 
-	mdnsCtx, mdnsCancel := context.WithTimeout(ctx, BROKER_LOOKUP_TIMEOUT)
+	mdnsCtx, mdnsCancel := context.WithTimeout(ctx, options.Flags.MdnsTimeout)
 	defer mdnsCancel()
 	brokerUrl, err := lookupBroker(mdnsCtx, log, mynet.MyResolver(log), mqttBroker)
 	if err != nil {
@@ -90,11 +82,12 @@ func GetClientE(ctx context.Context) (*Client, error) {
 
 	client = &Client{
 		// clientId:  clientId,
-		mqtt:      mqtt.NewClient(mqttOps),
-		brokerUrl: brokerUrl,
-		log:       log,
-		timeout:   mqttTimeout,
-		grace:     mqttGrace,
+		mqtt:              mqtt.NewClient(mqttOps),
+		brokerUrl:         brokerUrl,
+		log:               log,
+		resolutionTimeout: options.Flags.MdnsTimeout,
+		timeout:           options.Flags.MqttTimeout,
+		grace:             options.Flags.MqttGrace,
 	}
 
 	// FIXME: get MQTT logging right
@@ -107,7 +100,7 @@ func GetClientE(ctx context.Context) (*Client, error) {
 	return client, nil
 }
 
-func NewClientE(ctx context.Context, log logr.Logger, broker string, timeout time.Duration, grace time.Duration) error {
+func NewClientE(ctx context.Context, log logr.Logger, broker string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration) error {
 	defer mutex.Unlock()
 	mutex.Lock()
 
@@ -126,7 +119,7 @@ func NewClientE(ctx context.Context, log logr.Logger, broker string, timeout tim
 	}
 	clientId := fmt.Sprintf("%s-%s-%d", programName, hostname, os.Getpid())
 
-	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", timeout, "grace", grace)
+	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", mqttTimeout, "grace", mqttGrace)
 
 	mqttOps.SetUsername(MqttUsername)
 	mqttOps.SetPassword(MqttPassword)
@@ -138,13 +131,6 @@ func NewClientE(ctx context.Context, log logr.Logger, broker string, timeout tim
 
 	if broker != "" {
 		mqttBroker = broker
-	}
-
-	if timeout > 0 {
-		mqttTimeout = timeout
-	}
-	if grace > 0 {
-		mqttGrace = grace
 	}
 
 	mqttOps.SetConnectTimeout(mqttTimeout)

@@ -182,12 +182,12 @@ func getXML(url string) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return []byte{}, fmt.Errorf("Status error: %v", resp.StatusCode)
+		return []byte{}, fmt.Errorf("status error: %v", resp.StatusCode)
 	}
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return []byte{}, fmt.Errorf("Read body: %v", err)
+		return []byte{}, fmt.Errorf("read body: %v", err)
 	}
 
 	return data, nil

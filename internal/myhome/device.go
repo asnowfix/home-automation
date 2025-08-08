@@ -216,12 +216,12 @@ func (d *Device) Refresh(ctx context.Context) (bool, error) {
 		// 	continue
 		// }
 
-		err := sd.Refresh(ctx, types.ChannelDefault)
+		modified, err := sd.Refresh(ctx, types.ChannelDefault)
 		if err != nil {
 			d.log.Error(err, "Failed to update device", "device", d.DeviceSummary)
 			return false, err
 		}
-		if !sd.IsModified() {
+		if !modified {
 			d.log.Info("Device is up to date", "device", d.DeviceSummary)
 			return false, nil
 		}

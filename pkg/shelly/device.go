@@ -38,29 +38,29 @@ type Device struct {
 	modified    bool               `json:"-"`
 }
 
-func (d *Device) Refresh(ctx context.Context, via types.Channel) error {
+func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	if !d.IsMqttReady() && d.Id() != "" {
 		err := d.initMqtt(ctx)
 		if err != nil {
-			return fmt.Errorf("unable to init MQTT (%v)", err)
+			return false, fmt.Errorf("unable to init MQTT (%v)", err)
 		}
 	}
 	if d.Id() == "" {
 		err := d.initDeviceInfo(ctx, types.ChannelHttp)
 		if err != nil {
-			return fmt.Errorf("unable to init device (%v) using HTTP", err)
+			return d.IsModified(), fmt.Errorf("unable to init device (%v) using HTTP", err)
 		}
 	}
 	if d.Mac() == nil {
 		err := d.initDeviceInfo(ctx, types.ChannelDefault)
 		if err != nil {
-			return fmt.Errorf("unable to init device (%v)", err)
+			return d.IsModified(), fmt.Errorf("unable to init device (%v)", err)
 		}
 	}
 	if d.Name() == "" {
 		config, err := system.GetConfig(ctx, d)
 		if err != nil {
-			return fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
+			return d.IsModified(), fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
 		}
 		if d.config == nil {
 			d.config = &shelly.Config{}
@@ -103,7 +103,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) error {
 	// 	}
 	// }
 
-	return nil
+	return d.IsModified(), nil
 }
 func (d *Device) Manufacturer() string {
 	return "Shelly"
@@ -519,6 +519,18 @@ func Foreach(ctx context.Context, log logr.Logger, devices []devices.Device, via
 			log.Error(err, "Unable to create device from summary", "device", device)
 			return nil, err
 		}
+
+		sd, ok := device.(*Device)
+		if !ok {
+			log.Error(nil, "Invalid device type", "type", reflect.TypeOf(device))
+			return nil, fmt.Errorf("invalid device type %T", device)
+		}
+		_, err = sd.Refresh(ctx, via)
+		if err != nil {
+			log.Error(err, "Unable to refresh device", "device", device)
+			return nil, err
+		}
+
 		one, err := do(ctx, log, via, device, args)
 		out = append(out, one)
 		if err != nil {

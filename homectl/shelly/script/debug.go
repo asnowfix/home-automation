@@ -47,14 +47,22 @@ var debugCtl = &cobra.Command{
 
 	homectl shelly script debug "Shelly Plus 1" true
 	homectl shelly script debug "Shelly Plus 1" false`,
-	Args: cobra.ExactArgs(2),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) != 2 {
+			return fmt.Errorf("requires 2 args: <device> <true|false>")
+		}
+		if strings.TrimSpace(args[0]) == "" {
+			return fmt.Errorf("device name/IP/MAC must be non-empty")
+		}
+		if _, err := strconv.ParseBool(args[1]); err != nil {
+			return fmt.Errorf("second arg must be boolean (true/false/1/0): %v", err)
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 
-		var active bool
-		if len(args) == 2 {
-			active = args[1] == "true"
-		}
+		active, _ := strconv.ParseBool(args[1])
 
 		log := hlog.Logger
 

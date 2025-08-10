@@ -169,6 +169,28 @@
             }
         },
         {
+            "name": "homectl shelly script debug lampe-salon-hiver true",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["shelly", "script", "debug", "lampe-salon-hiver", "true"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl shelly script debug lampe-salon-hiver false",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["shelly", "script", "debug", "lampe-salon-hiver", "false"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
             "name": "homectl shelly kvs get '*'",
             "type": "go",
             "request": "launch",

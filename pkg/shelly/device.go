@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -317,6 +318,9 @@ func (d *Device) CallE(ctx context.Context, via types.Channel, method string, pa
 		d.log.Error(err, "Unable to find method handler", "method", method)
 		return nil, err
 	}
+	// FIXME: rather use per-device flow-controlled Channel
+	time.Sleep(500 * time.Millisecond)
+
 	return GetRegistrar().CallE(ctx, d, via, mh, params)
 }
 

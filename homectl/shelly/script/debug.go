@@ -11,7 +11,8 @@ import (
 	"os"
 	"os/signal"
 	"pkg/devices"
-	"pkg/shelly"
+	shellyapi "pkg/shelly"
+	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
 	"reflect"
@@ -180,7 +181,7 @@ var debugCtl = &cobra.Command{
 }
 
 func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
-	sd, ok := device.(*shelly.Device)
+	sd, ok := device.(*shellyapi.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
@@ -193,6 +194,7 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		log.Error(err, "Unable to get config", "device", sd.Id())
 		return nil, err
 	}
+	log.Info("Current config", "config", config)
 	config.Debug = &system.DeviceDebug{
 		Mqtt: system.Enabler{
 			Enable: false,
@@ -205,10 +207,21 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device dev
 			Level:   4,
 		},
 	}
+	log.Info("Applying new config", "config", config)
 	res, err := system.SetConfig(ctx, sd, config)
 	if err != nil {
 		log.Error(err, "Unable to turn on script UDP debugging", "addr", addr)
 		return nil, err
+	}
+	log.Info("Applied new config", "config", config)
+	if res.RestartRequired {
+		log.Info("Restart required")
+		err := shelly.DoReboot(ctx, sd)
+		if err != nil {
+			log.Error(err, "Unable to restart")
+			return nil, err
+		}
+		log.Info("Restarted", "res", res)
 	}
 	options.PrintResult(res)
 

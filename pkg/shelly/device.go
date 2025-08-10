@@ -85,6 +85,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 			d.status.Ethernet = es
 			d.UpdateHost(es.IP)
 		}
+		d.log.Info("Will use IP", "device", d.Id(), "ip", d.Host())
 	}
 
 	// if d.components == nil {
@@ -525,9 +526,9 @@ func Foreach(ctx context.Context, log logr.Logger, devices []devices.Device, via
 			log.Error(nil, "Invalid device type", "type", reflect.TypeOf(device))
 			return nil, fmt.Errorf("invalid device type %T", device)
 		}
-		_, err = sd.Refresh(ctx, via)
+		err = sd.init(ctx)
 		if err != nil {
-			log.Error(err, "Unable to refresh device", "device", device)
+			log.Error(err, "Unable to init device", "device", device)
 			return nil, err
 		}
 

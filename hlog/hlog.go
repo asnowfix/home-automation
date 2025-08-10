@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zerologr"
@@ -49,8 +50,9 @@ func Init(verbose bool) {
 
 	if isTerminal {
 		zl = zl.Output(zerolog.ConsoleWriter{
-			Out:     w,
-			NoColor: !isColorTerminal(),
+			Out:        w,
+			NoColor:    !isColorTerminal(),
+			TimeFormat: time.RFC3339,
 		})
 	}
 

@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"tools"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -116,6 +117,7 @@ var debugCtl = &cobra.Command{
 
 			// Start a goroutine to read from UDP and send to channel
 			go func(ctx context.Context, log logr.Logger, ch chan []byte) {
+				ctx = tools.WithToken(ctx)
 				for {
 					buf := make([]byte, 1024)
 					n, addr, err := listener.ReadFromUDP(buf)
@@ -139,6 +141,8 @@ var debugCtl = &cobra.Command{
 			}(udpContext, log.WithName("UDP-logger"), udpChan)
 
 			go func(ctx context.Context, log logr.Logger, ch chan []byte) {
+				ctx = tools.WithToken(ctx)
+
 				// Process messages from channel
 				for {
 					select {
@@ -159,7 +163,7 @@ var debugCtl = &cobra.Command{
 		}
 
 		// FIXME: use udpContext
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doDebug, args)
+		_, err := myhome.Foreach(tools.WithToken(cmd.Context()), hlog.Logger, device, options.Via, doDebug, args)
 		if err != nil {
 			return err
 		}
@@ -195,6 +199,7 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		return nil, err
 	}
 	log.Info("Current config", "config", config)
+	config.RpcUdp = nil // FIXME: force no-UDP channel (otherwise tries to set dst_addr="")
 	config.Debug = &system.DeviceDebug{
 		Mqtt: system.Enabler{
 			Enable: false,

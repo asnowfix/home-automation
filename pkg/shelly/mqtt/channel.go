@@ -29,7 +29,7 @@ func (ch *MqttChannel) Init(log logr.Logger, timeout time.Duration) {
 func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
 	var req Request
 
-	req.Id = device.StartDialog()
+	req.Id = device.StartDialog(ctx)
 	req.Src = device.ReplyTo()
 	req.Method = verb.Method
 	req.Params = params
@@ -59,7 +59,7 @@ func (ch *MqttChannel) receiveResponse(ctx context.Context, device types.Device,
 	case <-time.After(ch.timeout):
 		err := fmt.Errorf("timeout waiting for response from %s (%s)", device.Id(), device.Name())
 		ch.log.Error(err, "Timeout waiting for device response", "to method", method, "id", device.Id(), "name", device.Name(), "timeout", ch.timeout)
-		device.StopDialog(reqId)
+		device.StopDialog(ctx, reqId)
 		return nil, err
 	}
 
@@ -72,7 +72,7 @@ func (ch *MqttChannel) receiveResponse(ctx context.Context, device types.Device,
 		return nil, err
 	}
 
-	device.StopDialog(reqId)
+	device.StopDialog(ctx, reqId)
 	if res.Id != reqId {
 		err = fmt.Errorf("response.id (%v) does not match request.id (%v)", res.Id, reqId)
 		ch.log.Error(err, "Dropping response", "out", out, "device", device.Id(), "method", method)

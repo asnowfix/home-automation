@@ -18,28 +18,33 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"tools"
 
 	"github.com/go-logr/logr"
 )
 
 type Device struct {
-	Id_         string             `json:"id"`
-	MacAddress_ net.HardwareAddr   `json:"-"`
-	Name_       string             `json:"name"`
-	Host_       net.IP             `json:"host"`
-	info        *shelly.DeviceInfo `json:"-"`
-	config      *shelly.Config     `json:"-"`
-	status      *shelly.Status     `json:"-"`
-	replyTo     string             `json:"-"`
-	to          chan<- []byte      `json:"-"` // channel to send messages to
-	from        <-chan []byte      `json:"-"` // channel to receive messages from
-	dialogId    uint32             `json:"-"`
-	dialogs     sync.Map           `json:"-"` // map[uint32]bool
-	log         logr.Logger        `json:"-"`
-	modified    bool               `json:"-"`
+	Id_         string               `json:"id"`
+	MacAddress_ net.HardwareAddr     `json:"-"`
+	Name_       string               `json:"name"`
+	Host_       net.IP               `json:"host"`
+	info        *shelly.DeviceInfo   `json:"-"`
+	config      *shelly.Config       `json:"-"`
+	status      *shelly.Status       `json:"-"`
+	replyTo     string               `json:"-"`
+	to          chan<- []byte        `json:"-"` // channel to send messages to
+	from        <-chan []byte        `json:"-"` // channel to receive messages from
+	dialogId    uint32               `json:"-"`
+	dialogs     sync.Map             `json:"-"` // map[uint32]bool
+	log         logr.Logger          `json:"-"`
+	modified    bool                 `json:"-"`
+	mutex       tools.ReentrantMutex `json:"-"`
 }
 
 func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
+	d.mutex.Lock(ctx)
+	defer d.mutex.Unlock(ctx)
+
 	if !d.IsMqttReady() && d.Id() != "" {
 		err := d.initMqtt(ctx)
 		if err != nil {
@@ -107,6 +112,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 
 	return d.IsModified(), nil
 }
+
 func (d *Device) Manufacturer() string {
 	return "Shelly"
 }
@@ -119,6 +125,7 @@ func (d *Device) Id() string {
 }
 
 func (d *Device) UpdateId(id string) {
+
 	if id == "" || id == "<nil>" || !deviceIdRe.MatchString(id) {
 		panic("invalid device id: " + id)
 	}
@@ -262,13 +269,18 @@ func (d *Device) IsHttpReady() bool {
 	return mynet.IsSameNetwork(d.log, ip) == nil
 }
 
-func (d *Device) StartDialog() uint32 {
+func (d *Device) StartDialog(ctx context.Context) uint32 {
+	d.mutex.Lock(ctx)
+	defer d.mutex.Unlock(ctx)
+
 	d.dialogId++
 	d.dialogs.Store(d.dialogId, true)
 	return d.dialogId
 }
 
-func (d *Device) StopDialog(id uint32) {
+func (d *Device) StopDialog(ctx context.Context, id uint32) {
+	d.mutex.Lock(ctx)
+	defer d.mutex.Unlock(ctx)
 	d.dialogs.Delete(id)
 }
 
@@ -309,6 +321,9 @@ func (d *Device) CallE(ctx context.Context, via types.Channel, method string, pa
 	var mh types.MethodHandler
 	var err error
 
+	d.mutex.Lock(ctx)
+	defer d.mutex.Unlock(ctx)
+
 	if strings.HasPrefix(method, "Shelly.") {
 		mh, err = GetRegistrar().MethodHandlerE(method)
 	} else {
@@ -319,7 +334,7 @@ func (d *Device) CallE(ctx context.Context, via types.Channel, method string, pa
 		return nil, err
 	}
 	// FIXME: rather use per-device flow-controlled Channel
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 
 	return GetRegistrar().CallE(ctx, d, via, mh, params)
 }

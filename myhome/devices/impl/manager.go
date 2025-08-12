@@ -19,6 +19,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"tools"
 
 	"github.com/go-logr/logr"
 )
@@ -183,7 +184,7 @@ func deviceUpdaterLoop(ctx context.Context, log logr.Logger, update <-chan *myho
 
 		case device := <-update:
 			log.Info("Updater loop: processing", "device", device.DeviceSummary)
-			go refreshOneDevice(ctx, log.WithName("DeviceManager#refreshOneDevice("+device.Name()+")"), device, gr, refreshed)
+			go refreshOneDevice(tools.WithToken(ctx), log.WithName("DeviceManager#refreshOneDevice("+device.Name()+")"), device, gr, refreshed)
 		}
 	}
 }

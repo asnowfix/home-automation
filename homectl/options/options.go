@@ -38,6 +38,7 @@ var Flags struct {
 	Via             string
 	SwitchId        uint32
 	EventsDir       string
+	ProxyPort       int
 }
 
 var Via types.Channel

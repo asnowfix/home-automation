@@ -71,6 +71,16 @@
             }
         },
         {
+            "name": "myhome daemon (w/ Events Dir & w/o MQTT broker)",
+            "type": "go",
+            "request": "launch",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["-v", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2", "-E", "events"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
             "name": "myhome daemon (MQTT broker only)",
             "type": "go",
             "request": "launch",

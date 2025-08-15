@@ -17,10 +17,11 @@ import (
 )
 
 type Resolver interface {
-	WithLocalName(hostname string) Resolver
+	WithLocalName(ctx context.Context, hostname string) Resolver
 	LookupHost(ctx context.Context, host string) (ips []net.IP, err error)
 	LookupService(ctx context.Context, service string) (*url.URL, error)
 	BrowseService(ctx context.Context, service, domain string, entries chan<- *zeroconf.ServiceEntry) error // TODO: use our own type rather than zeroconf.ServiceEntry
+	PublishService(ctx context.Context, instance, service, domain string, port int, txt []string, ifaces []net.Interface) (*zeroconf.Server, error)
 }
 
 func MyResolver(log logr.Logger) Resolver {
@@ -48,7 +49,7 @@ var theResolver *resolver
 
 var theResolverLock sync.Mutex
 
-func (r *resolver) WithLocalName(hostname string) Resolver {
+func (r *resolver) WithLocalName(ctx context.Context, hostname string) Resolver {
 	r.Lock()
 	defer r.Unlock()
 
@@ -58,6 +59,9 @@ func (r *resolver) WithLocalName(hostname string) Resolver {
 	}
 
 	r.localNames = append(r.localNames, fmt.Sprintf("%s.local", hostname))
+	// Lazy-start the mDNS publisher as soon as a local hostname is queued for publication.
+	// Using Background here ensures publication even if no lookup/browse is triggered later.
+	go r.start(ctx)
 	return theResolver
 }
 
@@ -218,4 +222,16 @@ func (r *resolver) BrowseService(ctx context.Context, service, domain string, en
 	r.start(ctx)
 	r.waitForStart(ctx)
 	return r.zeroconf.Browse(ctx, service, domain, entries)
+}
+
+// PublishService registers a Zeroconf/DNS-SD service and ensures the resolver is started.
+// It returns the zeroconf.Server so callers can Shutdown it when needed.
+func (r *resolver) PublishService(ctx context.Context, instance, service, domain string, port int, txt []string, ifaces []net.Interface) (*zeroconf.Server, error) {
+	r.start(ctx)
+	r.waitForStart(ctx)
+	srv, err := zeroconf.Register(instance, service, domain, port, txt, ifaces)
+	if err != nil {
+		return nil, err
+	}
+	return srv, nil
 }

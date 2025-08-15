@@ -37,6 +37,8 @@ var Flags struct {
 	RefreshInterval time.Duration // the value taken by --refresh-interval / -R
 	Via             string
 	SwitchId        uint32
+	EventsDir       string
+	ProxyPort       int
 }
 
 var Via types.Channel

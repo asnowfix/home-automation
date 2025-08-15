@@ -11,13 +11,15 @@ import (
 	"os"
 	"os/signal"
 	"pkg/devices"
-	"pkg/shelly"
+	shellyapi "pkg/shelly"
+	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
 	"reflect"
 	"strconv"
 	"strings"
 	"syscall"
+	"tools"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -47,14 +49,22 @@ var debugCtl = &cobra.Command{
 
 	homectl shelly script debug "Shelly Plus 1" true
 	homectl shelly script debug "Shelly Plus 1" false`,
-	Args: cobra.ExactArgs(2),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) != 2 {
+			return fmt.Errorf("requires 2 args: <device> <true|false>")
+		}
+		if strings.TrimSpace(args[0]) == "" {
+			return fmt.Errorf("device name/IP/MAC must be non-empty")
+		}
+		if _, err := strconv.ParseBool(args[1]); err != nil {
+			return fmt.Errorf("second arg must be boolean (true/false/1/0): %v", err)
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 
-		var active bool
-		if len(args) == 2 {
-			active = args[1] == "true"
-		}
+		active, _ := strconv.ParseBool(args[1])
 
 		log := hlog.Logger
 
@@ -107,6 +117,7 @@ var debugCtl = &cobra.Command{
 
 			// Start a goroutine to read from UDP and send to channel
 			go func(ctx context.Context, log logr.Logger, ch chan []byte) {
+				ctx = tools.WithToken(ctx)
 				for {
 					buf := make([]byte, 1024)
 					n, addr, err := listener.ReadFromUDP(buf)
@@ -130,6 +141,8 @@ var debugCtl = &cobra.Command{
 			}(udpContext, log.WithName("UDP-logger"), udpChan)
 
 			go func(ctx context.Context, log logr.Logger, ch chan []byte) {
+				ctx = tools.WithToken(ctx)
+
 				// Process messages from channel
 				for {
 					select {
@@ -150,7 +163,7 @@ var debugCtl = &cobra.Command{
 		}
 
 		// FIXME: use udpContext
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doDebug, args)
+		_, err := myhome.Foreach(tools.WithToken(cmd.Context()), hlog.Logger, device, options.Via, doDebug, args)
 		if err != nil {
 			return err
 		}
@@ -172,7 +185,7 @@ var debugCtl = &cobra.Command{
 }
 
 func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
-	sd, ok := device.(*shelly.Device)
+	sd, ok := device.(*shellyapi.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
@@ -185,6 +198,8 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		log.Error(err, "Unable to get config", "device", sd.Id())
 		return nil, err
 	}
+	log.Info("Current config", "config", config)
+	config.RpcUdp = nil // FIXME: force no-UDP channel (otherwise tries to set dst_addr="")
 	config.Debug = &system.DeviceDebug{
 		Mqtt: system.Enabler{
 			Enable: false,
@@ -197,10 +212,21 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device dev
 			Level:   4,
 		},
 	}
+	log.Info("Applying new config", "config", config)
 	res, err := system.SetConfig(ctx, sd, config)
 	if err != nil {
 		log.Error(err, "Unable to turn on script UDP debugging", "addr", addr)
 		return nil, err
+	}
+	log.Info("Applied new config", "config", config)
+	if res.RestartRequired {
+		log.Info("Restart required")
+		err := shelly.DoReboot(ctx, sd)
+		if err != nil {
+			log.Error(err, "Unable to restart")
+			return nil, err
+		}
+		log.Info("Restarted", "res", res)
 	}
 	options.PrintResult(res)
 

@@ -23,8 +23,8 @@ type Device interface {
 	ReplyTo() string
 	To() chan<- []byte
 	From() <-chan []byte
-	StartDialog() uint32
-	StopDialog(id uint32)
+	StartDialog(ctx context.Context) uint32
+	StopDialog(ctx context.Context, id uint32)
 
 	IsHttpReady() bool
 

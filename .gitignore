@@ -46,3 +46,4 @@ SECRETS.md
 /mqtt-cli-*.deb
 /wix.build.json
 /homectl/shelly*/*.js
+/myhome/events/*

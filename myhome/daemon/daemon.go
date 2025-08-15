@@ -5,6 +5,7 @@ import (
 	"homectl/options"
 	"myhome/devices/impl"
 	"myhome/mqtt"
+	"myhome/proxy"
 	"myhome/storage"
 	"mymqtt"
 	"mynet"
@@ -103,6 +104,12 @@ func (d *daemon) Run() error {
 		}
 		defer storage.Close()
 
+		// Start reverse HTTP proxy
+		if err := proxy.Start(d.ctx, d.log.WithName("proxy"), options.Flags.ProxyPort, resolver, storage); err != nil {
+			d.log.Error(err, "Failed to start reverse proxy")
+			return err
+		}
+
 		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc)
 		err = d.dm.Start(d.ctx)
 		if err != nil {
@@ -117,6 +124,9 @@ func (d *daemon) Run() error {
 			d.log.Error(err, "Failed to start MyHome service")
 			return err
 		}
+
+		// Publish a hostname for the DeviceManager host: myhome.local
+		resolver.WithLocalName(d.ctx, myhome.MYHOME_HOSTNAME)
 	}
 
 	d.log.Info("Running")

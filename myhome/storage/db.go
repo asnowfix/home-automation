@@ -311,35 +311,17 @@ func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (*myhome.Groups
 // AddGroup adds a new group to the database.
 func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (*myhome.GroupInfo, error) {
 
-	// Check if the group already exists, if so, update it
-	var exists bool
+	// Insert or update group atomically to avoid race conditions
 	var result sql.Result
 	var id int64
 	var err error
 
-	err = s.db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM groups WHERE name = $1)", group.Name)
-	if err != nil {
-		s.log.Error(err, "Failed to check if group exists", "name", group.Name)
-		return nil, err
-	}
-
-	if exists {
-		s.log.Info("Group already exists, updating", "name", group.Name)
-		query := `UPDATE groups SET kvs = :kvs WHERE name = :name`
-		result, err = s.db.NamedExec(query, map[string]interface{}{
-			"name": group.Name,
-			"kvs":  group.KVS,
-		})
-	} else {
-		log := s.log.WithValues("name", group.Name)
-		log.Info("Adding new group", "name", group.Name)
-		query := `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)`
-		result, err = s.db.NamedExec(query, map[string]interface{}{
-			"name": group.Name,
-			"kvs":  group.KVS,
-		})
-	}
-
+	query := `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)
+		ON CONFLICT(name) DO UPDATE SET kvs = excluded.kvs`
+	result, err = s.db.NamedExec(query, map[string]interface{}{
+		"name": group.Name,
+		"kvs":  group.KVS,
+	})
 	if err != nil {
 		return nil, err
 	}

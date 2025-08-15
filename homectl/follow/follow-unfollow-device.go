@@ -95,7 +95,7 @@ func devicesDo(ctx context.Context, f doFollowFunc, follower string, args []stri
 		following = args
 	}
 
-	return myhome.Foreach(ctx, log, follower, types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	return myhome.Foreach(ctx, log, follower, options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 		return f(ctx, log, via, device, followKey, following)
 	}, []string{})
 }

@@ -2,7 +2,6 @@ package myhome
 
 import (
 	"context"
-	"homectl/options"
 	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/types"
@@ -16,6 +15,6 @@ func Foreach(ctx context.Context, log logr.Logger, name string, via types.Channe
 		return nil, err
 	}
 
-	out, err := shelly.Foreach(ctx, log, *devices, options.Via, fn, args)
+	out, err := shelly.Foreach(ctx, log, *devices, via, fn, args)
 	return out, err
 }

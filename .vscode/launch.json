@@ -4,6 +4,7 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
+
         {
             "name": "homectl shelly jobs show <IP>",
             "type": "go",
@@ -65,6 +66,16 @@
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
             "args": ["-v", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "myhome daemon (w/ Events Dir & w/o MQTT broker)",
+            "type": "go",
+            "request": "launch",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["-v", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2", "-E", "events"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -152,6 +163,39 @@
             "mode": "auto",
             "program": "${workspaceFolder}/homectl",
             "args": ["shelly", "script", "eval", "shelly1minig3-54320464074c", "2", "print(CONFIG.allowedMacAddresses)"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl shelly script upload lampe-salon-hiver prometheus.js",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["shelly", "script", "upload", "lampe-salon-hiver", "prometheus.js"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl shelly script debug lampe-salon-hiver true",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["shelly", "script", "debug", "lampe-salon-hiver", "true"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "homectl shelly script debug lampe-salon-hiver false",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/homectl",
+            "args": ["shelly", "script", "debug", "lampe-salon-hiver", "false"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }

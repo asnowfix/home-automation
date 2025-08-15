@@ -5,12 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"global"
+	"homectl/options"
 	"myhome"
 	"myhome/devices"
 	"mymqtt"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/shelly"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -34,6 +38,27 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 
 			case msg := <-ch:
 				log.Info("Received RPC event", "topic", topic, "payload", string(msg))
+				if len(msg) < 2 {
+					log.Info("Skipping RPC event with invalid payload", "payload", string(msg))
+					continue
+				}
+
+				// If an events directory is configured, persist raw payload as a JSON file
+				if dir := options.Flags.EventsDir; dir != "" {
+					if err := os.MkdirAll(dir, 0o755); err != nil {
+						log.Error(err, "Failed to create events directory", "dir", dir)
+					} else {
+						// Use RFC3339 timestamp for filename
+						ts := time.Now().UTC().Format(time.RFC3339)
+						filename := filepath.Join(dir, fmt.Sprintf("%s.json", ts))
+						if werr := os.WriteFile(filename, msg, 0o644); werr != nil {
+							log.Error(werr, "Failed to write event payload", "file", filename)
+						} else {
+							log.Info("Wrote event", "file", filename)
+						}
+					}
+				}
+
 				event := &mqtt.Event{}
 				err := json.Unmarshal(msg, &event)
 				if err != nil {

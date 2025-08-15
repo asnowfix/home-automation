@@ -22,10 +22,24 @@ jobs:
       - id: go-test
         name: Run go test
         run: go test ./...
-      - name: Get previous tag
+      - name: Get previous tag (constrained to branch line)
         id: previoustag
         run: |
-          echo "tag=$(git describe --tags --abbrev=0)" | tee -a $GITHUB_OUTPUT
+          set -euo pipefail
+          BRANCH="${GITHUB_REF_NAME}"
+          if [[ "$BRANCH" =~ ^v([0-9]+)\.([0-9]+)\.x$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PREFIX="v${MAJOR}.${MINOR}."
+          else
+            echo "Branch name '$BRANCH' does not match v<MAJOR>.<MINOR>.x" >&2
+            exit 1
+          fi
+          PREV_TAG=$(git tag --list "${PREFIX}*" --sort=-v:refname | head -n1 || true)
+          if [[ -z "${PREV_TAG}" ]]; then
+            PREV_TAG="${PREFIX}0"   # e.g. v0.4.0
+          fi
+          echo "tag=${PREV_TAG}" | tee -a "$GITHUB_OUTPUT"
       - name: Get semantic version
         id: semver
         uses: 'WyriHaximus/github-action-next-semvers@v1'

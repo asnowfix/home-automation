@@ -34,6 +34,7 @@ type DeviceInfo struct {
 	Batch                 string `json:"batch,omitempty"`
 	FirmwareSBits         string `json:"fw_sbits,omitempty"`
 	Slot                  int    `json:"slot,omitempty"` // only for Pro2, not documented
+	Matter                bool   `json:"matter,omitempty"`
 }
 
 type Config struct {

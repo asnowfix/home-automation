@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -12,13 +13,12 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
-	"runtime/debug"
 	"regexp"
+	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
-	"compress/gzip"
-	"strconv"
 
 	"myhome/storage"
 	"mynet"
@@ -67,29 +67,33 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 			return
 		}
 
-		        // Serve global static websocket patch resource for caching
-        if path == "_ws_patch.js" {
-            buf := getWsPatch()
-            w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-            w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-            _, _ = w.Write(buf)
-            return
-        }
+		// Serve global static websocket patch resource for caching
+		if path == "_ws_patch.js" {
+			buf := getWsPatch()
+			w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			_, _ = w.Write(buf)
+			return
+		}
 
-        // New routing scheme: /devices/{hostToken}/... (strict)
-        var hostToken string
-        var rest string
-        if strings.HasPrefix(path, "devices/") {
-            after := strings.TrimPrefix(path, "devices/")
-            parts := strings.SplitN(after, "/", 2)
-            hostToken = parts[0]
-            if len(parts) == 2 { rest = parts[1] } else { rest = "" }
-        } else {
-            // Strict mode: only /devices/... is supported (plus static endpoints above)
-            log.Info("unsupported-path", "path", "/"+path)
-            http.NotFound(w, r)
-            return
-        }
+		// New routing scheme: /devices/{hostToken}/... (strict)
+		var hostToken string
+		var rest string
+		if strings.HasPrefix(path, "devices/") {
+			after := strings.TrimPrefix(path, "devices/")
+			parts := strings.SplitN(after, "/", 2)
+			hostToken = parts[0]
+			if len(parts) == 2 {
+				rest = parts[1]
+			} else {
+				rest = ""
+			}
+		} else {
+			// Strict mode: only /devices/... is supported (plus static endpoints above)
+			log.Info("unsupported-path", "path", "/"+path)
+			http.NotFound(w, r)
+			return
+		}
 
 		log.Info("route", "hostToken", hostToken, "rest", rest)
 
@@ -133,20 +137,22 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 				if u, err := url.Parse(loc); err == nil {
 					prefix := "/devices/" + hostToken
 					if u.IsAbs() {
-                        // Absolute redirect: rewrite if it targets the proxy host OR the backend host
-                        backendHost := targetURL.Host
-                        sameProxy := resp.Request != nil && u.Host == resp.Request.Host
-                        sameBackend := u.Host == backendHost || u.Host == backendHost+":80"
-                        if sameProxy || sameBackend {
-                            if u.Path == "" { u.Path = "/" }
-                            if strings.HasPrefix(u.Path, "/") {
-                                u.Path = prefix + u.Path
-                            }
-                            u.Scheme = ""
-                            u.Host = ""
-                            resp.Header.Set("Location", u.String())
-                        }
-                    } else {
+						// Absolute redirect: rewrite if it targets the proxy host OR the backend host
+						backendHost := targetURL.Host
+						sameProxy := resp.Request != nil && u.Host == resp.Request.Host
+						sameBackend := u.Host == backendHost || u.Host == backendHost+":80"
+						if sameProxy || sameBackend {
+							if u.Path == "" {
+								u.Path = "/"
+							}
+							if strings.HasPrefix(u.Path, "/") {
+								u.Path = prefix + u.Path
+							}
+							u.Scheme = ""
+							u.Host = ""
+							resp.Header.Set("Location", u.String())
+						}
+					} else {
 						// Relative URL
 						if strings.HasPrefix(u.Path, "/") {
 							u.Path = prefix + u.Path
@@ -170,14 +176,20 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 				var raw []byte
 				if isGzip {
 					gr, err := gzip.NewReader(resp.Body)
-					if err != nil { return nil }
+					if err != nil {
+						return nil
+					}
 					defer gr.Close()
 					raw, err = io.ReadAll(gr)
-					if err != nil { return nil }
+					if err != nil {
+						return nil
+					}
 					_ = resp.Body.Close()
 				} else {
 					b, err := io.ReadAll(resp.Body)
-					if err != nil { return nil }
+					if err != nil {
+						return nil
+					}
 					_ = resp.Body.Close()
 					raw = b
 				}
@@ -243,7 +255,9 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 		sw := &statusWriter{ResponseWriter: w, status: 0}
 		proxy.ServeHTTP(sw, r)
 
-		if sw.status == 0 { sw.status = http.StatusOK }
+		if sw.status == 0 {
+			sw.status = http.StatusOK
+		}
 		log.Info("proxied", "host", hostToken, "backend", targetURL.String(), "path", "/"+rest, "status", sw.status, "bytes", sw.bytes, "dur", time.Since(start))
 	})
 
@@ -271,39 +285,39 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 
 // statusWriter captures response status code and bytes written
 type statusWriter struct {
-    http.ResponseWriter
-    status int
-    bytes  int64
+	http.ResponseWriter
+	status int
+	bytes  int64
 }
 
 func (w *statusWriter) WriteHeader(code int) {
-    w.status = code
-    w.ResponseWriter.WriteHeader(code)
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *statusWriter) Write(b []byte) (int, error) {
-    if w.status == 0 {
-        // default if WriteHeader not called
-        w.status = http.StatusOK
-    }
-    n, err := w.ResponseWriter.Write(b)
-    w.bytes += int64(n)
-    return n, err
+	if w.status == 0 {
+		// default if WriteHeader not called
+		w.status = http.StatusOK
+	}
+	n, err := w.ResponseWriter.Write(b)
+	w.bytes += int64(n)
+	return n, err
 }
 
 // Ensure websocket upgrades can hijack the connection through this wrapper
 func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-    if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
-        return hj.Hijack()
-    }
-    return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
+	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
 }
 
 // Pass through Flush when supported
 func (w *statusWriter) Flush() {
-    if f, ok := w.ResponseWriter.(http.Flusher); ok {
-        f.Flush()
-    }
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // index template and renderer

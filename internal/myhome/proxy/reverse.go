@@ -3,12 +3,13 @@ package proxy
 import (
 	"bufio"
 	"bytes"
-	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -19,12 +20,21 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"compress/gzip"
+	"sync"
+	"crypto/tls"
+	"embed"
 
+	"myhome"
 	"myhome/storage"
 	"mynet"
 
 	"github.com/go-logr/logr"
 )
+
+// Embed static assets under this package
+//go:embed static/*
+var staticFS embed.FS
 
 // Start launches an HTTP reverse proxy that listens on the given port and proxies
 // requests shaped like: http://<listen_host>:<port>/<hostname>/<path...>
@@ -37,6 +47,37 @@ import (
 func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db *storage.DeviceStorage) error {
 	addr := fmt.Sprintf(":%d", listenPort)
 	srv := &http.Server{Addr: addr}
+
+	// Simple in-process SSE broadcaster for device refresh completion
+	type sseClient chan string
+	var sse struct {
+		mu      sync.Mutex
+		clients map[sseClient]struct{}
+	}
+	sse.clients = make(map[sseClient]struct{})
+
+	notifyRefresh := func(id string) {
+		msg := fmt.Sprintf("event: device-refresh\n") + fmt.Sprintf("data: %s\n\n", id)
+		sse.mu.Lock()
+		defer sse.mu.Unlock()
+		for ch := range sse.clients {
+			select { case ch <- msg: default: }
+		}
+	}
+
+	mux := http.NewServeMux()
+
+	// Static assets with long cache
+	sub, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		return fmt.Errorf("embed fs subdir: %w", err)
+	}
+	fileServer := http.FileServer(http.FS(sub))
+	mux.HandleFunc("/static/", func(w http.ResponseWriter, r *http.Request) {
+		// Cache aggressively; bump version query to invalidate
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		http.StripPrefix("/static/", fileServer).ServeHTTP(w, r)
+	})
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Panic recovery to avoid blank pages
@@ -76,6 +117,77 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 			return
 		}
 
+		// RPC endpoint to call device manager methods (e.g., device.refresh)
+		if path == "rpc" && r.Method == http.MethodPost {
+			var req struct {
+				Method myhome.Verb `json:"method"`
+				Params any         `json:"params"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid JSON", http.StatusBadRequest)
+				return
+			}
+			mh, err := myhome.Methods(req.Method)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			res, err := mh.ActionE(req.Params)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+				return
+			}
+			// Successful call: if it's a device.refresh with string id, notify SSE listeners
+			if req.Method == myhome.DeviceRefresh {
+				if id, ok := req.Params.(string); ok && id != "" {
+					notifyRefresh(id)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": res})
+			return
+		}
+
+		// SSE events stream: /events?device=<id>
+		if path == "events" && r.Method == http.MethodGet {
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				http.Error(w, "stream unsupported", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			_ = r.ParseForm()
+			want := r.Form.Get("device")
+			ch := make(sseClient, 4)
+			sse.mu.Lock(); sse.clients[ch] = struct{}{}; sse.mu.Unlock()
+			defer func() { sse.mu.Lock(); delete(sse.clients, ch); sse.mu.Unlock() }()
+			// Send initial comment to open the stream
+			_, _ = w.Write([]byte(": connected\n\n"))
+			flusher.Flush()
+			ctx := r.Context()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case msg := <-ch:
+					// If a device filter is present, only forward matching events
+					if want != "" {
+						// msg format: lines with data: <id>
+						if strings.Contains(msg, "data: "+want+"\n") {
+							_, _ = w.Write([]byte(msg))
+							flusher.Flush()
+						}
+					} else {
+						_, _ = w.Write([]byte(msg))
+						flusher.Flush()
+					}
+				}
+			}
+		}
+
 		// New routing scheme: /devices/{hostToken}/... (strict)
 		var hostToken string
 		var rest string
@@ -104,8 +216,32 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 			return
 		}
 
-		targetURL, _ := url.Parse("http://" + targetIP.String())
+		// Decide backend scheme by probing ports: try 80 (http), else 443 (https)
+		scheme := "http"
+		d80, _ := net.DialTimeout("tcp", net.JoinHostPort(targetIP.String(), "80"), 600*time.Millisecond)
+		if d80 != nil {
+			_ = d80.Close()
+		} else {
+			d443, _ := net.DialTimeout("tcp", net.JoinHostPort(targetIP.String(), "443"), 800*time.Millisecond)
+			if d443 != nil {
+				_ = d443.Close()
+				scheme = "https"
+			} else {
+				log.Error(fmt.Errorf("no http/https service"), "backend ports closed", "ip", targetIP.String())
+				http.Error(w, "backend not reachable on 80/443", http.StatusBadGateway)
+				return
+			}
+		}
+
+		targetURL, _ := url.Parse(scheme + "://" + targetIP.String())
 		proxy := httputil.NewSingleHostReverseProxy(targetURL)
+		if scheme == "https" {
+			// accept self-signed device certs
+			if tp, ok := proxy.Transport.(*http.Transport); ok && tp != nil {
+				// unexpected: ReverseProxy.Transport is nil by default, so ok==false
+			}
+			proxy.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+		}
 
 		// Customize director to preserve the remainder path and query
 		originalDirector := proxy.Director
@@ -120,7 +256,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 			connHdr := strings.ToLower(req.Header.Get("Connection"))
 			upgHdr := strings.ToLower(req.Header.Get("Upgrade"))
 			if strings.Contains(connHdr, "upgrade") || upgHdr == "websocket" {
-				backendOrigin := "http://" + targetURL.Host
+				backendOrigin := scheme + "://" + targetURL.Host
 				if got := req.Header.Get("Origin"); got != backendOrigin {
 					log.Info("ws-origin-rewrite", "from", got, "to", backendOrigin, "path", "/"+rest)
 					req.Header.Set("Origin", backendOrigin)
@@ -261,7 +397,9 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 		log.Info("proxied", "host", hostToken, "backend", targetURL.String(), "path", "/"+rest, "status", sw.status, "bytes", sw.bytes, "dur", time.Since(start))
 	})
 
-	srv.Handler = handler
+	mux.Handle("/", handler)
+
+	srv.Handler = mux
 
 	// Start server
 	go func() {
@@ -327,20 +465,8 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>MyHome Devices</title>
-  <style>
-    :root { color-scheme: light dark; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; margin: 2rem; }
-    h1 { margin-bottom: 0.5rem; }
-    .subtitle { color: #6b7280; margin-bottom: 1.5rem; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; }
-    .card { border: 1px solid #e5e7eb33; border-radius: 12px; padding: 1rem; background: #ffffff0d; backdrop-filter: blur(2px); }
-    .name { font-weight: 600; font-size: 1.05rem; margin-bottom: 0.25rem; }
-    .meta { font-size: 0.9rem; color: #6b7280; }
-    a.button { display:inline-block; margin-top:0.6rem; padding:0.4rem 0.7rem; border-radius:8px; text-decoration:none; background:#2563eb; color:white; }
-    .empty { color:#6b7280; font-style: italic; }
-    footer { margin-top:2rem; font-size: 0.85rem; color:#9ca3af; }
-  </style>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🏠</text></svg>">
+  <link rel="stylesheet" href="/static/myhome.css?v=1"/>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🏠</text></svg>"/>
   </head>
 <body>
   <h1>MyHome</h1>
@@ -353,10 +479,15 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       <div class="meta">{{.Manufacturer}} · {{.Id}}</div>
       {{if .Host}}
         <div class="meta">Host: {{.Host}}</div>
-        <a class="button" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer">Open</a>
       {{else}}
         <div class="meta">No host known</div>
       {{end}}
+      <div class="actions {{if not .Host}}single{{end}}">
+        {{if .Host}}
+          <div class="slot"><a class="button" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer">Open</a></div>
+        {{end}}
+        <div class="slot"><button class="button button--refresh" id="btn-{{.Id}}" onclick="refreshDevice('{{.Id}}')">Refresh</button></div>
+      </div>
     </div>
     {{end}}
   </div>
@@ -364,6 +495,41 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
     <p class="empty">No devices found.</p>
   {{end}}
   <footer>Served by MyHome reverse proxy</footer>
+  <script>
+    async function refreshDevice(id) {
+      const btn = document.getElementById('btn-' + id);
+      if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
+      let es;
+      try {
+        es = new EventSource('/events?device=' + encodeURIComponent(id));
+        es.addEventListener('device-refresh', function(ev) {
+          if (btn) { btn.textContent = 'Done'; }
+          try { es.close(); } catch {}
+          location.reload();
+        });
+        es.onerror = function() { /* keep open or close silently */ };
+
+        const res = await fetch('/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: 'device.refresh', params: id })
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
+          alert('Refresh failed: ' + t);
+          if (es) try { es.close(); } catch {}
+          return;
+        }
+        // If backend completed before SSE connected, fallback: reload soon
+        setTimeout(() => { if (btn) { btn.textContent = 'Done'; } location.reload(); }, 1500);
+      } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
+        if (es) try { es.close(); } catch {}
+        alert('Refresh error: ' + e);
+      }
+    }
+  </script>
 </body>
 </html>`))
 

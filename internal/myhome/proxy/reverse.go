@@ -339,7 +339,7 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       <div class="meta">{{.Manufacturer}} · {{.Id}}</div>
       {{if .Host}}
         <div class="meta">Host: {{.Host}}</div>
-        <a class="button" href="/devices/{{.LinkToken}}/">Open</a>
+        <a class="button" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer">Open</a>
       {{else}}
         <div class="meta">No host known</div>
       {{end}}

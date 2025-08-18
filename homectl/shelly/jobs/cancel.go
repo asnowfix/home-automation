@@ -49,8 +49,6 @@ func cancelOneDeviceJob(ctx context.Context, log logr.Logger, via types.Channel,
 			return nil, err
 		}
 		return out, nil
-	} else if cancelFlag.id < 0 {
-		return nil, fmt.Errorf("no job ID provided to cancel")
 	} else {
 		out, err := schedule.CancelJob(ctx, log, via, sd, cancelFlag.id)
 		if err != nil {

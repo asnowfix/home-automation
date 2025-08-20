@@ -43,9 +43,9 @@ func init() {
 }
 
 var Cmd = &cobra.Command{
-	Use:   `new <device_name>`,
+	Use:   `setup <device_name> <device_ip>`,
 	Short: "Shelly devices features",
-	Long: `Configure a new Shelly device with the specified settings.
+	Long: `Setup a new Shelly device with the specified settings.
 
 Arguments:
   <device_name>    Name to assign to the Shelly device`,

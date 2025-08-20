@@ -1,4 +1,4 @@
-package new
+package setup
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"pkg/devices"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/mqtt"
+	"pkg/shelly/script"
 	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -112,6 +113,44 @@ Arguments:
 			if err != nil {
 				return nil, err
 			}
+
+			// load watchdog.js as script #1
+			// - Check if watchdog.js is already loaded as script #1
+			loaded, err := script.ListLoaded(ctx, via, sd)
+			if err != nil {
+				return nil, err
+			}
+			ok = false
+			for _, s := range loaded {
+				if s.Name == "watchdog.js" {
+					log.Info("watchdog.js is already loaded")
+					if s.Running && s.Id == 1 {
+						log.Info("watchdog.js is already running as script #1")
+						continue
+					}
+					err := fmt.Errorf("watchdog.js is already loaded but not running as script #1 on device %s", sd.Id())
+					log.Error(err, "watchdog.js improper configuration", "device", sd.Id(), "script_id", s.Id)
+					return nil, err
+				}
+			}
+			if !ok {
+				// Not already in place: upload, ...
+				_, err = script.Upload(ctx, via, sd, "watchdog.js")
+				if err != nil {
+					return nil, err
+				}
+				// ...enable (auto-restart at boot, ...
+				_, err = script.EnableDisable(ctx, via, sd, "watchdog.js", true)
+				if err != nil {
+					return nil, err
+				}
+				// ...and start it.
+				_, err = script.StartStopDelete(ctx, via, sd, "watchdog.js", script.Start)
+				if err != nil {
+					return nil, err
+				}
+			}
+
 			return nil, nil
 		}, []string{args[0]})
 

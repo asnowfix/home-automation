@@ -21,7 +21,7 @@ func init() {
 
 var prometheusScrapeConfigCmd = &cobra.Command{
 	Use:     "prometheus-scrape-config",
-	Short:   "Generate Prometheus scrape_configs: for Shelly devices running prometheus.js",
+	Short:   "Generate Prometheus scrape_configs: for Shelly devices running watchdog.js, which exposes Prometheus metrics via /script/<id>/metrics",
 	Aliases: []string{"prom-config", "pc"},
 	Args:    cobra.RangeArgs(0, 1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -47,7 +47,7 @@ func generatePrometheusScrapeConfig(ctx context.Context, log logr.Logger, via ty
 	}
 
 	for _, s := range loaded {
-		if s.Name == "prometheus.js" && s.Running {
+		if s.Name == "watchdog.js" && s.Running {
 			fmt.Printf(`
 - job_name: 'shelly_%s'
   metrics_path: /script/%d/metrics

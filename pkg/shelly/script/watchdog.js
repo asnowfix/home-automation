@@ -498,6 +498,7 @@ let PrometheusMetrics = {
     // Device info
     deviceInfo: null,
     defaultLabels: [],
+    monitoredSwitches: [],
     
     // Helper function for logging
     log: function(message) {
@@ -526,6 +527,9 @@ let PrometheusMetrics = {
             ].map(function(data) {
                 return this.promLabel(data[0], data[1]);
             }, this);
+
+            // Discover available switches dynamically (supports up to switch:3)
+            this.discoverSwitches();
             
             // Register HTTP endpoint
             const endpoint = CONFIG.prometheus.endpoint || "metrics";
@@ -542,6 +546,27 @@ let PrometheusMetrics = {
     // Create a Prometheus label
     promLabel: function(label, value) {
         return [label, "=", '"', value, '"'].join("");
+    },
+
+    // Discover available switches using Shelly API
+    discoverSwitches: function() {
+        var discovered = [];
+        for (var i = 0; i <= 3; i++) {
+            var id = "switch:" + i;
+            try {
+                var st = Shelly.getComponentStatus(id);
+                if (st && typeof st.id !== "undefined") {
+                    discovered.push(id);
+                }
+            } catch (e) {
+                // Ignore missing components
+            }
+        }
+        if (discovered.length === 0) {
+            discovered = ["switch:0"]; // fallback
+        }
+        this.monitoredSwitches = discovered;
+        this.log("Discovered switches: " + this.monitoredSwitches.join(", "));
     },
     
     // Generate one metric output
@@ -579,13 +604,11 @@ let PrometheusMetrics = {
     
     // Generate metrics for all monitored switches
     generateMetricsForSwitches: function() {
-        const monitoredSwitches = CONFIG.prometheus.monitoredSwitches || ["switch:0"];
-        
+        const list = this.monitoredSwitches && this.monitoredSwitches.length > 0 ? this.monitoredSwitches : ["switch:0"];
         let result = "";
-        for (let i = 0; i < monitoredSwitches.length; i++) {
-            result += this.generateMetricsForSwitch(monitoredSwitches[i]);
+        for (let i = 0; i < list.length; i++) {
+            result += this.generateMetricsForSwitch(list[i]);
         }
-        
         return result;
     },
     

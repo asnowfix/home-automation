@@ -1,12 +1,16 @@
 package script
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"fmt"
 	"pkg/shelly/types"
 	"reflect"
 	"strconv"
+
+	"github.com/tdewolff/minify/v2"
+	mjs "github.com/tdewolff/minify/v2/js"
 )
 
 //go:embed *.js
@@ -27,6 +31,16 @@ func ListAvailable() ([]string, error) {
 	}
 
 	return scripts, nil
+}
+
+func minifyJS(src []byte) ([]byte, error) {
+	m := minify.New()
+	m.AddFunc("text/javascript", mjs.Minify)
+	var out bytes.Buffer
+	if err := m.Minify("text/javascript", &out, bytes.NewReader(src)); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
 
 func ListLoaded(ctx context.Context, via types.Channel, device types.Device) ([]Status, error) {
@@ -144,12 +158,23 @@ func Download(ctx context.Context, via types.Channel, device types.Device, name 
 	return res.Data, nil
 }
 
-func Upload(ctx context.Context, via types.Channel, device types.Device, name string) (uint32, error) {
-
+func Upload(ctx context.Context, via types.Channel, device types.Device, name string, minify bool) (uint32, error) {
 	buf, err := content.ReadFile(name)
 	if err != nil {
 		log.Error(err, "Unknown script", "name", name)
 		return 0, err
+	}
+
+	// Minify before splitting and uploading (only if requested)
+	if minify {
+		origLen := len(buf)
+		if minified, err := minifyJS(buf); err != nil {
+			log.Error(err, "Minify failed", "name", name)
+			return 0, err
+		} else {
+			buf = minified
+			log.Info("Minified script", "name", name, "from", origLen, "to", len(buf))
+		}
 	}
 
 	id, err := isLoaded(ctx, via, device, name)

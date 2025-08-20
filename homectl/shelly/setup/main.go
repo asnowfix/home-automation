@@ -78,8 +78,8 @@ Arguments:
 		}
 
 		// If we are connected to a shelly device
-        // Use a long-lived context decoupled from the global command timeout
-        longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute)
+		// Use a long-lived context decoupled from the global command timeout
+		longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute)
 		myhome.Foreach(longCtx, hlog.Logger, ip.String(), types.ChannelHttp, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 			sd, ok := device.(*shellyapi.Device)
 			if !ok {
@@ -139,7 +139,7 @@ Arguments:
 			}
 			if !ok {
 				// Not already in place: upload, ...
-				_, err = script.Upload(ctx, via, sd, "watchdog.js")
+				_, err = script.Upload(ctx, via, sd, "watchdog.js", true)
 				if err != nil {
 					return nil, err
 				}

@@ -11,6 +11,7 @@ import (
 	"pkg/shelly/script"
 	"pkg/shelly/types"
 	"reflect"
+	"strconv"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -18,6 +19,8 @@ import (
 
 func init() {
 	Cmd.AddCommand(uploadCtl)
+	// Flag to disable minification on upload
+	uploadCtl.Flags().BoolVar(&noMinify, "no-minify", false, "Do not minify script before upload")
 }
 
 var uploadCtl = &cobra.Command{
@@ -27,10 +30,14 @@ var uploadCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doUpload, []string{scriptName})
+		// minify is true by default unless --no-minify is set
+		minify := !noMinify
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doUpload, []string{scriptName, strconv.FormatBool(minify)})
 		return err
 	},
 }
+
+var noMinify bool
 
 func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
@@ -38,7 +45,11 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
 	scriptName := args[0]
-	return script.Upload(ctx, via, sd, scriptName)
+	minify, err := strconv.ParseBool(args[1])
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse minify argument: %w", err)
+	}
+	return script.Upload(ctx, via, sd, scriptName, minify)
 }
 
 func init() {

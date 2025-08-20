@@ -490,7 +490,9 @@ func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
 		d.info = info
 		d.UpdateMac(info.MacAddress)
 		d.UpdateId(info.Id)
-		d.UpdateName(info.Name)
+		if info.Name != nil {
+			d.UpdateName(*info.Name)
+		}
 	}
 	return nil
 }

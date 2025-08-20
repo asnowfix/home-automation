@@ -1,5 +1,20 @@
 
 
+var shelly_plugsg3_get_deviceinfo_response = {
+  "name": null,
+  "id": "shellyplugsg3-28372f2dc824",
+  "mac": "28372F2DC824",
+  "slot": 1,
+  "model": "S3PL-00112EU",
+  "gen": 3,
+  "fw_id": "20240820-134301/1.2.3-plugsg3prod0-gec79607",
+  "ver": "1.2.3-matter22",
+  "app": "PlugSG3",
+  "auth_en": false,
+  "auth_domain": null,
+  "matter": true
+}
+
 // curl -X POST -d '{"id":1,"method":"HTTP.GET","params":{"url":"http://192.168.33.18/rpc/Shelly.GetDeviceInfo"}}' http://Shelly1MiniG3-54320464A1D0.local/rpc
 
 var shelly_http_proxied_getdeviceinfo_response = {

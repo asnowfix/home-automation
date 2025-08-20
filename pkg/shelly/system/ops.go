@@ -57,6 +57,12 @@ func GetConfig(ctx context.Context, device types.Device) (*Config, error) {
 		log.Error(err, "Invalid response to get device config", "device", device.Id())
 		return nil, err
 	}
+
+	// FIXME: unconfigured RPC UDP should be `null` but comes as empty string
+	if config.RpcUdp != nil && config.RpcUdp.DestinationAddress == "" {
+		config.RpcUdp = nil
+	}
+
 	return config, nil
 }
 
@@ -70,7 +76,7 @@ func SetConfig(ctx context.Context, device types.Device, config *Config) (*SetCo
 	}
 	res, ok := out.(*SetConfigResponse)
 	if !ok {
-		err = fmt.Errorf("Unexpected response type: got %v, expected %v", reflect.TypeOf(out), reflect.TypeOf(&SetConfigResponse{}))
+		err = fmt.Errorf("unexpected response type: got %v, expected %v", reflect.TypeOf(out), reflect.TypeOf(&SetConfigResponse{}))
 		log.Error(err, "Unexpected response type", "device", device.Id(), "response", out)
 		return nil, err
 	}

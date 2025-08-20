@@ -498,7 +498,10 @@ let PrometheusMetrics = {
     // Device info
     deviceInfo: null,
     defaultLabels: [],
+    defaultLabelsStr: "",
     monitoredSwitches: [],
+    metricPrefix: "shelly_",
+    emittedMeta: {},
     
     // Helper function for logging
     log: function(message) {
@@ -527,6 +530,10 @@ let PrometheusMetrics = {
             ].map(function(data) {
                 return this.promLabel(data[0], data[1]);
             }, this);
+
+            // Precompute default labels string and reset meta registry
+            this.defaultLabelsStr = this.defaultLabels.join(",");
+            this.emittedMeta = {};
 
             // Discover available switches dynamically (supports up to switch:3)
             this.discoverSwitches();
@@ -569,18 +576,30 @@ let PrometheusMetrics = {
         this.log("Discovered switches: " + this.monitoredSwitches.join(", "));
     },
     
-    // Generate one metric output
+    // Generate one metric output with minimal allocations
     printPrometheusMetric: function(name, type, specificLabels, description, value) {
-        const metricPrefix = "shelly_";
-        return [
-            "# HELP ", metricPrefix, name, " ", description, "\n",
-            "# TYPE ", metricPrefix, name, " ", type, "\n",
-            metricPrefix, name, "{", this.defaultLabels.join(","), specificLabels.length > 0 ? "," : "", specificLabels.join(","), "}", " ", value, "\n\n"
-        ].join("");
+        // Build labels string with precomputed default labels
+        var labels = this.defaultLabelsStr;
+        if (specificLabels && specificLabels.length > 0) {
+            labels = labels + "," + specificLabels.join(",");
+        }
+
+        var out = "";
+        // Emit HELP/TYPE once per metric family
+        if (!this.emittedMeta[name]) {
+            out += "# HELP " + this.metricPrefix + name + " " + description + "\n";
+            out += "# TYPE " + this.metricPrefix + name + " " + type + "\n";
+            this.emittedMeta[name] = true;
+        }
+
+        out += this.metricPrefix + name + "{" + labels + "} " + String(value) + "\n\n";
+        return out;
     },
     
     // HTTP handler for metrics endpoint
     httpServerHandler: function(request, response) {
+        // Reset meta registry so HELP/TYPE are emitted once per scrape
+        this.emittedMeta = {};
         response.body = [
             this.generateMetricsForSystem(),
             this.generateMetricsForSwitches()

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"hlog"
+	"homectl/options"
 	"myhome"
 	"net"
 	"pkg/devices"
@@ -15,6 +16,7 @@ import (
 	"pkg/shelly/types"
 	"pkg/shelly/wifi"
 	"strconv"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -76,7 +78,9 @@ Arguments:
 		}
 
 		// If we are connected to a shelly device
-		myhome.Foreach(cmd.Context(), hlog.Logger, ip.String(), types.ChannelHttp, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+        // Use a long-lived context decoupled from the global command timeout
+        longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute)
+		myhome.Foreach(longCtx, hlog.Logger, ip.String(), types.ChannelHttp, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 			sd, ok := device.(*shellyapi.Device)
 			if !ok {
 				return nil, fmt.Errorf("expected types.Device, got %T", device)
@@ -109,7 +113,7 @@ Arguments:
 				}
 			}
 			// reboot device
-			err = shelly.DoReboot(cmd.Context(), sd)
+			err = shelly.DoReboot(ctx, sd)
 			if err != nil {
 				return nil, err
 			}

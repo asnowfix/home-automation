@@ -2,6 +2,9 @@ package myhome
 
 const MYHOME string = "myhome"
 
+// MYHOME_HOSTNAME is the base hostname published via mDNS (e.g., "myhome.local").
+const MYHOME_HOSTNAME string = "myhome"
+
 type Manufacturer string
 
 const (

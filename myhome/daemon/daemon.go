@@ -117,6 +117,9 @@ func (d *daemon) Run() error {
 			d.log.Error(err, "Failed to start MyHome service")
 			return err
 		}
+
+		// Publish a hostname for the DeviceManager host: myhome.local
+		resolver.WithLocalName(d.ctx, myhome.MYHOME_HOSTNAME)
 	}
 
 	d.log.Info("Running")

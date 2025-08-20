@@ -10,7 +10,6 @@ import (
 	"os"
 
 	"github.com/go-logr/logr"
-	"github.com/grandcat/zeroconf"
 
 	mmqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
@@ -71,7 +70,7 @@ func MyHome(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 		instance = host
 	}
 
-	resolver.WithLocalName(mymqtt.HOSTNAME)
+	resolver.WithLocalName(ctx, mymqtt.HOSTNAME)
 
 	// Register the MQTT broker service with mDNS.
 	iface, _, err := mynet.MainInterface(log)
@@ -82,7 +81,7 @@ func MyHome(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 	ifaces := make([]net.Interface, 1)
 	ifaces[0] = *iface
 
-	mdnsServer, err := zeroconf.Register(instance, mymqtt.ZEROCONF_SERVICE, "local.", mymqtt.PRIVATE_PORT, info, ifaces)
+	mdnsServer, err := resolver.PublishService(ctx, instance, mymqtt.ZEROCONF_SERVICE, "local.", mymqtt.PRIVATE_PORT, info, ifaces)
 	if err != nil {
 		log.Error(err, "Unable to register new ZeroConf service")
 		return err

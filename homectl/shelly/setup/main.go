@@ -93,6 +93,15 @@ Arguments:
 
 			config.Device.Name = name
 
+			// NTP Pool Project (recommended)
+			// - pool.ntp.org
+			// - Regional pools for better latency, e.g.:
+			// 	- europe.pool.ntp.org
+			// 	- north-america.pool.ntp.org
+			// 	- asia.pool.ntp.org
+			// These resolve to multiple servers run by volunteers worldwide.
+			config.Sntp.Server = "pool.ntp.org"
+
 			_, err = system.SetConfig(ctx, sd, config)
 			if err != nil {
 				return nil, err

@@ -43,6 +43,132 @@ func minifyJS(src []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// downgradeTemplates converts ES6 template literals without interpolations (${...})
+// into normal double-quoted strings with escaped newlines and quotes. This helps
+// older JS engines that don't support backtick template strings.
+func downgradeTemplates(src []byte) []byte {
+	out := make([]byte, 0, len(src))
+	inStr := false
+	strQuote := byte(0)
+	esc := false
+	inLineComment := false
+	inBlockComment := false
+
+	for i := 0; i < len(src); i++ {
+		b := src[i]
+
+		// Handle existing string/comment contexts
+		if inStr {
+			out = append(out, b)
+			if esc {
+				esc = false
+			} else if b == '\\' {
+				esc = true
+			} else if b == strQuote {
+				inStr = false
+			}
+			continue
+		}
+		if inLineComment {
+			out = append(out, b)
+			if b == '\n' {
+				inLineComment = false
+			}
+			continue
+		}
+		if inBlockComment {
+			out = append(out, b)
+			if b == '*' && i+1 < len(src) && src[i+1] == '/' {
+				out = append(out, '/')
+				i++
+				inBlockComment = false
+			}
+			continue
+		}
+
+		// Entering comment?
+		if b == '/' && i+1 < len(src) {
+			if src[i+1] == '/' {
+				inLineComment = true
+				out = append(out, b, src[i+1])
+				i++
+				continue
+			} else if src[i+1] == '*' {
+				inBlockComment = true
+				out = append(out, b, src[i+1])
+				i++
+				continue
+			}
+		}
+
+		// Entering normal quote string?
+		if b == '\'' || b == '"' {
+			inStr = true
+			strQuote = b
+			out = append(out, b)
+			continue
+		}
+
+		// Handle template literal starting with backtick
+		if b == '`' {
+			// Scan until matching backtick; if we see an interpolation (${), abort conversion
+			j := i + 1
+			hasInterp := false
+			esc2 := false
+			for ; j < len(src); j++ {
+				c := src[j]
+				if esc2 {
+					esc2 = false
+					continue
+				}
+				if c == '\\' {
+					esc2 = true
+					continue
+				}
+				if c == '$' && j+1 < len(src) && src[j+1] == '{' {
+					hasInterp = true
+					break
+				}
+				if c == '`' {
+					break
+				}
+			}
+			if j < len(src) && src[j] == '`' && !hasInterp {
+				// Convert content src[i+1:j] to a quoted string
+				out = append(out, '"')
+				for k := i + 1; k < j; k++ {
+					ch := src[k]
+					switch ch {
+					case '\\':
+						out = append(out, '\\', '\\')
+					case '"':
+						out = append(out, '\\', '"')
+					case '\n':
+						out = append(out, '\\', 'n')
+					case '\r':
+						out = append(out, '\\', 'r')
+					case '\t':
+						out = append(out, '\\', 't')
+					default:
+						out = append(out, ch)
+					}
+				}
+				out = append(out, '"')
+				i = j // skip to closing backtick
+				continue
+			}
+			// Otherwise, emit as-is and continue
+			out = append(out, b)
+			continue
+		}
+
+		// Default
+		out = append(out, b)
+	}
+
+	return out
+}
+
 func ListLoaded(ctx context.Context, via types.Channel, device types.Device) ([]Status, error) {
 	out, err := device.CallE(ctx, via, string(List), nil)
 	if err != nil {
@@ -174,6 +300,12 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 		} else {
 			buf = minified
 			log.Info("Minified script", "name", name, "from", origLen, "to", len(buf))
+			// Downgrade ES6 template literals without interpolations to plain strings
+			before := len(buf)
+			buf = downgradeTemplates(buf)
+			if len(buf) != before {
+				log.Info("Downgraded template literals in minified script", "name", name)
+			}
 		}
 	}
 

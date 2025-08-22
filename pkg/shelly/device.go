@@ -533,7 +533,7 @@ func Print(log logr.Logger, d any) error {
 
 func Foreach(ctx context.Context, log logr.Logger, devices []devices.Device, via types.Channel, do Do, args []string) (any, error) {
 	out := make([]any, 0, len(devices))
-	log.Info("Running", "func", reflect.TypeOf(do), "args", args)
+	log.Info("Running", "func_type", reflect.TypeOf(do), "args", args, "nb_devices", len(devices))
 
 	for _, device := range devices {
 		device, err := NewDeviceFromSummary(ctx, log, device)

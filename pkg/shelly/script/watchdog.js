@@ -204,12 +204,14 @@ let IpAssignmentWatchdog = {
     // Check if the device has a valid IP assignment
     checkForIp: function() {
         // Check WiFi connection
-        const wifi = Shelly.getComponentStatus('wifi');
-        const isWifiConnected = wifi.status === 'got ip';
+        let wifi = null;
+        try { wifi = Shelly.getComponentStatus('wifi'); } catch (e) { wifi = null; if (CONFIG.debug) this.log("WiFi status error: " + (e && e.message ? e.message : "")); }
+        const isWifiConnected = (wifi && wifi.status === 'got ip');
         
         // Check Ethernet connection
-        const eth = Shelly.getComponentStatus('eth');
-        const isEthConnected = eth.status === 'got ip';
+        let eth = null;
+        try { eth = Shelly.getComponentStatus('eth'); } catch (e) { eth = null; if (CONFIG.debug) this.log("Ethernet status error: " + (e && e.message ? e.message : "")); }
+        const isEthConnected = (eth && eth.status === 'got ip');
         
         // Connection is now established OR was never broken
         // Reset counter and start over
@@ -250,13 +252,13 @@ let IpAssignmentWatchdog = {
             if (status.id !== 0) return;
             
             // Does it have a delta.source property
-            if (typeof status.delta.source === "undefined") return;
+            if (!status.delta || typeof status.delta.source === "undefined") return;
             
             // Is the source a timer
             if (status.delta.source !== "timer") return;
             
             // Is it turned on
-            if (status.delta.output !== true) return;
+            if (!status.delta || status.delta.output !== true) return;
             
             Timer.clear(self.pingTimer);
             
@@ -538,15 +540,21 @@ let PrometheusMetrics = {
             // Discover available switches dynamically (supports up to switch:3)
             this.discoverSwitches();
             
-            // Register HTTP endpoint
-            const endpoint = CONFIG.prometheus.endpoint || "metrics";
-            HTTPServer.registerEndpoint(endpoint, function(request, response) {
-                PrometheusMetrics.httpServerHandler(request, response);
-            });
-            
-            this.log("Prometheus metrics endpoint registered at /" + endpoint);
+            // Register HTTP endpoint (path segment only, no leading slash). It will be available at /script/<id>/<endpoint>
+            var endpoint = CONFIG.prometheus.endpoint || "metrics";
+            var ep = (endpoint && endpoint[0] === "/") ? endpoint.slice(1) : endpoint;
+            this.log("Registering HTTP endpoint: /script/" + Script.id + "/" + ep);
+            try {
+                HTTPServer.registerEndpoint(ep, function(request, response) {
+                    PrometheusMetrics.httpServerHandler(request, response);
+                });
+                this.log("Prometheus metrics endpoint registered at /script/" + Script.id + "/" + ep);
+            } catch (re) {
+                this.log("Failed to register endpoint '" + ep + "': " + re.message);
+                throw re;
+            }
         } catch (e) {
-            this.log("Error initializing Prometheus metrics: " + e.message);
+            this.log("Error while initializing Prometheus metrics: " + e.message);
         }
     },
     
@@ -566,7 +574,8 @@ let PrometheusMetrics = {
                     discovered.push(id);
                 }
             } catch (e) {
-                // Ignore missing components
+                // Ignore missing components (log in debug to retain catch binding when minified)
+                if (CONFIG.debug) this.log("discoverSwitches error for " + id + ": " + (e && e.message ? e.message : ""));
             }
         }
         if (discovered.length === 0) {
@@ -584,16 +593,16 @@ let PrometheusMetrics = {
             labels = labels + "," + specificLabels.join(",");
         }
 
-        var out = "";
+        var parts = [];
         // Emit HELP/TYPE once per metric family
         if (!this.emittedMeta[name]) {
-            out += "# HELP " + this.metricPrefix + name + " " + description + "\n";
-            out += "# TYPE " + this.metricPrefix + name + " " + type + "\n";
+            parts.push("# HELP ", this.metricPrefix, name, " ", description, "\n");
+            parts.push("# TYPE ", this.metricPrefix, name, " ", type, "\n");
             this.emittedMeta[name] = true;
         }
 
-        out += this.metricPrefix + name + "{" + labels + "} " + String(value) + "\n\n";
-        return out;
+        parts.push(this.metricPrefix, name, "{", labels, "} ", String(value), "\n\n");
+        return parts.join("");
     },
     
     // HTTP handler for metrics endpoint
@@ -605,7 +614,8 @@ let PrometheusMetrics = {
             this.generateMetricsForSwitches()
         ].join("");
         response.code = 200;
-        response.headers = [["Content-Type", "text/plain; version=0.0.4"]];
+        // Use object-form headers per Shelly Gen2 examples
+        response.headers = { "Content-Type": "text/plain; version=0.0.4" };
         response.send();
     },
     
@@ -657,10 +667,12 @@ let PrometheusMetrics = {
     }
 };
 
-// Initialize all components
-MqttWatchdog.init();
-DailyReboot.init();
-IpAssignmentWatchdog.init();
-FirmwareUpdater.init();
-RemoteLogger.init();
-PrometheusMetrics.init();
+// Initialize all components (wrapped to prevent minifier collapsing into comma sequences)
+(function() {
+    MqttWatchdog.init();
+    DailyReboot.init();
+    IpAssignmentWatchdog.init();
+    FirmwareUpdater.init();
+    RemoteLogger.init();
+    PrometheusMetrics.init();
+})();

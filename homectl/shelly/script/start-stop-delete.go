@@ -12,6 +12,7 @@ import (
 	"pkg/shelly/types"
 	"reflect"
 	"strconv"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -32,7 +33,9 @@ var uploadCtl = &cobra.Command{
 		scriptName := args[1]
 		// minify is true by default unless --no-minify is set
 		minify := !noMinify
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doUpload, []string{scriptName, strconv.FormatBool(minify)})
+		// Script upload can be long: Use a long-lived context decoupled from the global command timeout
+		longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute)
+		_, err := myhome.Foreach(longCtx, hlog.Logger, device, options.Via, doUpload, []string{scriptName, strconv.FormatBool(minify)})
 		return err
 	},
 }

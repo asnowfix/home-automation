@@ -1,4 +1,14 @@
 
+var shelly_plugsg3_get_status_response_with_exception = {
+  "id": 1,
+  "running": false,
+  "mem_free": 25200,
+  "cpu": 0,
+  "errors": [
+    "syntax_error"
+  ],
+  "error_msg": "Uncaught SyntaxError: Got TEMPLATE LITERAL expected EOF\n at ...,this.metricPrefix,e,\" \",s,`\n                              ^\nin function \"printPrometheusMetric\" called from ...uptime in seconds\",e.uptime),this.printPrometheusMetric(\"ram...\n                              ^\nin function \"generateMetricsForSystem\" called from ...s.generateMetricsForSystem(),this.generateMetricsForSwitches...\n                              ^\nin function \"httpServerHandler\" called from PrometheusMe..."
+}
 
 var shelly_plugsg3_get_deviceinfo_response = {
   "name": null,

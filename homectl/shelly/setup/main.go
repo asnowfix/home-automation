@@ -86,10 +86,18 @@ Arguments:
 				return nil, fmt.Errorf("expected types.Device, got %T", device)
 			}
 			// - set device name to args[0]
-			_, err := system.SetName(ctx, sd, name)
+			config, err := system.GetConfig(ctx, sd)
 			if err != nil {
 				return nil, err
 			}
+
+			config.Device.Name = name
+
+			_, err = system.SetConfig(ctx, sd, config)
+			if err != nil {
+				return nil, err
+			}
+
 			// - set Wifi STA ESSID & passwd
 			if staEssid != "" && staPasswd != "" {
 				_, err = wifi.SetSta(ctx, sd, staEssid, staPasswd)

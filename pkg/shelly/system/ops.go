@@ -82,16 +82,3 @@ func SetConfig(ctx context.Context, device types.Device, config *Config) (*SetCo
 	}
 	return res, nil
 }
-
-func SetName(ctx context.Context, device types.Device, name string) (*SetConfigResponse, error) {
-	log.Info("Setting name of device", "name", name, "device", device.Id())
-
-	config, err := GetConfig(ctx, device)
-	if err != nil {
-		return nil, err
-	}
-
-	config.Device.Name = name
-
-	return SetConfig(ctx, device, config)
-}

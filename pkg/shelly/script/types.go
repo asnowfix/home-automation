@@ -27,21 +27,22 @@ var Errors []string = []string{
 }
 
 type Status struct {
-	Id      uint32   `json:"id"`                 // Id of the script
-	Running bool     `json:"running"`            // true if the script is currently running, false otherwise (absent at configuration-time)
-	Name    string   `json:"name,omitempty"`     // Name of the script
-	MemUsed uint32   `json:"mem_used,omitempty"` // Memory used by the script in bytes
-	MemPeak uint32   `json:"mem_peak,omitempty"` // Peak memory used by the script in bytes
-	MemFree uint32   `json:"mem_free,omitempty"` // Free memory available to the script in bytes
-	Manual  bool     `json:"loaded,omitempty"`   // Is loaded on the device
-	Errors  []string `json:"errors,omitempty"`   // Optional, present only when the script execution resulted in an error. The array contains description of the type of error.
+	Id           uint32   `json:"id"`                  // Id of the script
+	Running      bool     `json:"running"`             // true if the script is currently running, false otherwise (absent at configuration-time)
+	Name         string   `json:"name,omitempty"`      // Name of the script
+	MemUsed      uint32   `json:"mem_used,omitempty"`  // Memory used by the script in bytes
+	MemPeak      uint32   `json:"mem_peak,omitempty"`  // Peak memory used by the script in bytes
+	MemFree      uint32   `json:"mem_free,omitempty"`  // Free memory available to the script in bytes
+	Manual       bool     `json:"loaded,omitempty"`    // Is loaded on the device
+	Errors       []string `json:"errors,omitempty"`    // Optional, present only when the script execution resulted in an error. The array contains description of the type of error.
+	ErrorMessage string   `json:"error_msg,omitempty"` // Optional, present only when the script execution resulted in an error. The array contains error message (stack trace).
 }
 
 type FormerStatus struct {
 	WasRunning bool `json:"was_running"` // true if the script was running before the operation, false otherwise
 }
 
-type StartStopDeleteRequest struct {
+type StatusStartStopDeleteRequest struct {
 	Id uint32 `json:"id"` // Id of the script
 }
 

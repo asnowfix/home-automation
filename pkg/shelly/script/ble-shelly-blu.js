@@ -15,7 +15,6 @@
  * @property {number} battery - The battery level of the device in percentage (%).
  * @property {number} rssi - The signal strength in decibels (dB).
  * @property {string} address - The MAC address of the Shelly BLU device.
- * @property {string} model - The model of the Shelly BLU device.
  * @property {number | number[]} [temperature] - The temperature value in degrees Celsius if the device has a temperature sensor. (Can be an array if has multiple instances)
  * @property {number | number[]} [humidity] - The humidity value in percentage (%) if the device has a humidity sensor. (Can be an array if has multiple instances)
  * @property {number | number[]} [illuminance] - The illuminance value in lux if the device has a light sensor. (Can be an array if has multiple instances)
@@ -171,6 +170,13 @@ function emitData(data) {
 
   print("Emitting event data: ", data);
   Shelly.emitEvent(CONFIG.eventName, data);
+
+  if (MQTT.isConnected()) {
+    topic = CONFIG.eventName + "/events/" + data.address;
+    print("Publishing as MQTT on topic: ", topic);
+    MQTT.publish(topic, JSON.stringify(data), 1, false);
+  } 
+  
 }
 
 //saving the id of the last packet, this is used to filter the duplicated packets
@@ -214,7 +220,6 @@ function BLEScanCallback(event, result) {
 
   unpackedData.rssi = result.rssi;
   unpackedData.address = result.addr;
-  unpackedData.model = result.local_name;
 
   emitData(unpackedData);
 }

@@ -201,6 +201,25 @@ func isLoaded(ctx context.Context, via types.Channel, device types.Device, name 
 	return 0, fmt.Errorf("script not found: name=%v id=%v", name, id)
 }
 
+func ScriptStatus(ctx context.Context, device types.Device, via types.Channel, name string) (*Status, error) {
+	id, err := isLoaded(ctx, via, device, name)
+	if err != nil {
+		return nil, err
+	}
+	out, err := device.CallE(ctx, via, string(GetStatus), &StatusStartStopDeleteRequest{Id: id})
+	if err != nil {
+		log.Error(err, "Unable to get script status", "id", id, "name", name)
+		return nil, err
+	}
+	status, ok := out.(*Status)
+	if !ok {
+		err := fmt.Errorf("unexpected format '%v' (failed to cast response into script.Status)", reflect.TypeOf(out))
+		log.Error(err, "Unable to get script status", "id", id, "name", name)
+		return nil, err
+	}
+	return status, nil
+}
+
 func DeviceStatus(ctx context.Context, device types.Device, via types.Channel) ([]Status, error) {
 	available, err := ListAvailable()
 	if err != nil {
@@ -240,7 +259,7 @@ func StartStopDelete(ctx context.Context, via types.Channel, device types.Device
 		return nil, err
 	}
 
-	out, err := device.CallE(ctx, via, string(operation), &StartStopDeleteRequest{Id: id})
+	out, err := device.CallE(ctx, via, string(operation), &StatusStartStopDeleteRequest{Id: id})
 	if err != nil {
 		log.Error(err, "Unable to run on script", "id", id, "operation", operation)
 		return nil, err
@@ -328,7 +347,7 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 		log.Info("Created script", "name", name, "id", id)
 	} else {
 		// script loaded: stop it, in case it is running
-		out, err := device.CallE(ctx, via, Stop.String(), &StartStopDeleteRequest{Id: id})
+		out, err := device.CallE(ctx, via, Stop.String(), &StatusStartStopDeleteRequest{Id: id})
 		if err != nil {
 			log.Error(err, "Unable to stop script", "id", id, "name", name)
 			return 0, err
@@ -374,7 +393,7 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 	log.Info("Configured script", "name", name, "id", id, "out", out)
 
 	// start now
-	out, err = device.CallE(ctx, via, string(Start), &StartStopDeleteRequest{Id: id})
+	out, err = device.CallE(ctx, via, string(Start), &StatusStartStopDeleteRequest{Id: id})
 	if err != nil {
 		log.Error(err, "Unable to start script", "id", id, "name", name)
 		return 0, err

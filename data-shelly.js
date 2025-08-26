@@ -1,4 +1,15 @@
 
+var shelly_blu_event = {
+  "encryption":false,
+  "BTHome_version":2,
+  "pid":56,
+  "battery":89,
+  "illuminance":709,
+  "motion":1,
+  "rssi":-71,
+  "address":"e8:e0:7e:a6:0c:6f"
+}
+
 var shelly_plugsg3_get_status_response_with_exception = {
   "id": 1,
   "running": false,

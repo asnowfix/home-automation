@@ -1,5 +1,29 @@
+// Publishing as MQTT on topic:  shelly-blu/events/e8:e0:7e:d0:f9:89
+var shelly_blu_entree_motion_event = {
+  "encryption": false,
+  "BTHome_version": 2,
+  "pid": 40,
+  "battery": 100,
+  "illuminance": 0,
+  "motion": 1,
+  "rssi": -92,
+  "address": "e8:e0:7e:d0:f9:89"
+}
 
-var shelly_blu_event = {
+// Publishing as MQTT on topic:  shelly-blu/events/b0:c7:de:11:58:d5
+var shelly_blu_parking_motion_event = {
+  "encryption": false,
+  "BTHome_version": 2,
+  "pid": 40,
+  "battery": 100,
+  "illuminance": 0,
+  "motion": 1,
+  "rssi": -92,
+  "address": "b0:c7:de:11:58:d5"
+}
+
+// Publishing as MQTT on topic:  shelly-blu/events/e8:e0:7e:a6:0c:6f
+var shelly_blu_pool_motion_event = {
   "encryption":false,
   "BTHome_version":2,
   "pid":56,

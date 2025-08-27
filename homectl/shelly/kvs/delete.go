@@ -25,7 +25,7 @@ func init() {
 var deleteCtl = &cobra.Command{
 	Use:   "delete",
 	Short: "Delete matching key-value from given shelly devices",
-	Args:  cobra.ExactArgs(2),
+	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		device := args[0]

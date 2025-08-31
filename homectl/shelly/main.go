@@ -2,6 +2,7 @@ package shelly
 
 import (
 	compsCtl "homectl/shelly/components"
+	listenbluCtl "homectl/shelly/listenblu"
 	jobsCtl "homectl/shelly/jobs"
 	kvsCtl "homectl/shelly/kvs"
 	mqttCtl "homectl/shelly/mqtt"
@@ -28,4 +29,5 @@ func init() {
 	Cmd.AddCommand(sysCtl.Cmd)
 	Cmd.AddCommand(compsCtl.Cmd)
 	Cmd.AddCommand(setupCtl.Cmd)
+	Cmd.AddCommand(listenbluCtl.Cmd)
 }

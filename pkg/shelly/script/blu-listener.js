@@ -1,8 +1,21 @@
 // Shelly Script: BLE MQTT listener
 // - Subscribes to MQTT topics under "shelly-blu/events/#"
 // - Keeps only events whose MAC is followed via KVS keys: follow/shelly-blu/<MAC>
-//   Value must be a JSON string: {"switch_id":"switch:0","auto_off":5}
+//   Value must be a JSON string: matching documentation below
 // - On match: Switch.Set on the configured switch; if auto_off>0, turns it off after N seconds.
+//
+
+/**
+ * The KVS value `follow/shelly-blu/<MAC>` must be a JSON string matching this type.
+ * @typedef {Object} FollowConfig
+ * @property {string} switch_id - The switch ID to be used for turning on the switch.
+ * @property {number} auto_off - The number of seconds to wait before turning off the switch.
+ * @property {number} illuminance_min - The minimum illuminance value in lux.
+ * @property {number} illuminance_max - The maximum illuminance value in lux.
+ * @property {string} next_switch - The next switch ID to be used for turning on the switch.
+ * @example
+ * {"switch_id":"switch:0","auto_off":500,"illuminance_min":10}
+ */
 
 var CONFIG = {
   script: "[blu-listener] ",

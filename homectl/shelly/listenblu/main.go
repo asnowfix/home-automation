@@ -42,12 +42,10 @@ var Cmd = &cobra.Command{
 		payload := make(map[string]any)
 		payload["switch_id"] = flagSwitchID
 		payload["auto_off"] = flagAutoOff
-		payload["illuminance_min"] = flagIllumMin
-		// Only include illuminance_max if the flag was explicitly provided
-		if cmd.Flags().Changed("illuminance-max") {
-			payload["illuminance_max"] = flagIllumMax
+		if cmd.Flags().Changed("illuminance-min") {
+			payload["illuminance_min"] = flagIllumMin
 		}
-		// Only include next_switch if explicitly provided (non-empty and flag set)
+		payload["illuminance_max"] = flagIllumMax
 		if cmd.Flags().Changed("next-switch") && strings.TrimSpace(flagNextSwitch) != "" {
 			payload["next_switch"] = flagNextSwitch
 		}
@@ -66,8 +64,8 @@ var Cmd = &cobra.Command{
 func init() {
 	// Defaults as requested: auto_off=300s, illuminance_min=10, no default for illuminance_max or next_switch, switch_id=switch:0
 	Cmd.Flags().IntVar(&flagAutoOff, "auto-off", 300, "Seconds before auto turning off (default 300)")
-	Cmd.Flags().IntVar(&flagIllumMin, "illuminance-min", 10, "Minimum illuminance (lux) to trigger (default 10)")
-	Cmd.Flags().IntVar(&flagIllumMax, "illuminance-max", 0, "Maximum illuminance (lux) to trigger (unset by default)")
+	Cmd.Flags().IntVar(&flagIllumMin, "illuminance-min", 0, "Minimum illuminance (lux) to trigger (default 0)")
+	Cmd.Flags().IntVar(&flagIllumMax, "illuminance-max", 10, "Maximum illuminance (lux) to trigger (default 10)")
 	Cmd.Flags().StringVar(&flagSwitchID, "switch-id", "switch:0", "Switch ID to operate, e.g. switch:0")
 	Cmd.Flags().StringVar(&flagNextSwitch, "next-switch", "", "Optional next switch ID to turn on after auto-off (unset by default)")
 }

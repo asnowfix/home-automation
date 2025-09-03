@@ -15,6 +15,17 @@
  * @property {string} next_switch - The next switch ID to be used for turning on the switch.
  * @example
  * {"switch_id":"switch:0","auto_off":500,"illuminance_min":10}
+ * topic: shelly-blu/events/e8:e0:7e:d0:f9:89
+ * message: {
+ *     "encryption":false,
+ *     "BTHome_version":2,
+ *     "pid":248,
+ *     "battery":98,
+ *     "illuminance":57,
+ *     "motion":0,
+ *     "rssi":-82,
+ *     "address":"e8:e0:7e:d0:f9:89"
+ * }
  */
 
 var CONFIG = {
@@ -205,6 +216,8 @@ function handleBluEvent(topic, message) {
     return;
   }
 
+  log("Motion detected for", mac, "illuminance", data.illuminance, "min", follow.illuminanceMin, "max", follow.illuminanceMax);
+
   // If illuminance bounds are configured, enforce them
   var hasMin = typeof follow.illuminanceMin === "number";
   var hasMax = typeof follow.illuminanceMax === "number";
@@ -215,13 +228,16 @@ function handleBluEvent(topic, message) {
       log("Ignoring due to missing illuminance for bounds", mac, { min: follow.illuminanceMin, max: follow.illuminanceMax });
       return;
     }
-    if (hasMin && illum < follow.illuminanceMin) {
+    // Strictly greater than illuminance_min
+    if (hasMin && illum <= follow.illuminanceMin) {
       return;
     }
-    if (hasMax && illum > follow.illuminanceMax) {
+    // Strictly less than illuminance_max
+    if (hasMax && illum >= follow.illuminanceMax) {
       return;
     }
   }
+  log("Illuminance bounds ok for", mac, "illuminance", data.illuminance, "min", follow.illuminanceMin, "max", follow.illuminanceMax);
 
   // Act: turn on configured switch, then setup auto-off
   var idx = follow.switchIndex;

@@ -45,6 +45,11 @@ const CONFIG = {
   log: true
 };
 
+var STATE = {
+  // mac (lowercase) => { switchIdStr: string, switchIndex: number }
+  follows: {},
+};
+
 function log() {
   if (!CONFIG.log) return;
   var s = "";
@@ -66,10 +71,21 @@ function log() {
   print(CONFIG.script, s);
 }
 
-var STATE = {
-  // mac (lowercase) => { switchIdStr: string, switchIndex: number }
-  follows: {},
-};
+function normalizeMac(mac) {
+  if (!mac) return "";
+  return String(mac).toLowerCase();
+}
+
+function parseSwitchIndex(switchIdStr) {
+  // Expecting format "switch:<number>"
+  if (typeof switchIdStr !== "string") return null;
+  var parts = switchIdStr.split(":");
+  if (parts.length !== 2) return null;
+  if (parts[0] !== "switch") return null;
+  var n = Number(parts[1]);
+  if (isNaN(n)) return null;
+  return n;
+}
 
 function loadFollowsFromKVS(callback) {
   // Refresh STATE.follows from KVS

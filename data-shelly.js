@@ -1,4 +1,64 @@
+// Publishing as MQTT on topic:  shelly-blu/events/e8:e0:7e:d0:f9:89
+var shelly_blu_entree_motion_event = {
+  "encryption": false,
+  "BTHome_version": 2,
+  "pid": 40,
+  "battery": 100,
+  "illuminance": 0,
+  "motion": 1,
+  "rssi": -92,
+  "address": "e8:e0:7e:d0:f9:89"
+}
 
+// Publishing as MQTT on topic:  shelly-blu/events/b0:c7:de:11:58:d5
+var shelly_blu_parking_motion_event = {
+  "encryption": false,
+  "BTHome_version": 2,
+  "pid": 40,
+  "battery": 100,
+  "illuminance": 0,
+  "motion": 1,
+  "rssi": -92,
+  "address": "b0:c7:de:11:58:d5"
+}
+
+// Publishing as MQTT on topic:  shelly-blu/events/e8:e0:7e:a6:0c:6f
+var shelly_blu_pool_motion_event = {
+  "encryption":false,
+  "BTHome_version":2,
+  "pid":56,
+  "battery":89,
+  "illuminance":709,
+  "motion":1,
+  "rssi":-71,
+  "address":"e8:e0:7e:a6:0c:6f"
+}
+
+var shelly_plugsg3_get_status_response_with_exception = {
+  "id": 1,
+  "running": false,
+  "mem_free": 25200,
+  "cpu": 0,
+  "errors": [
+    "syntax_error"
+  ],
+  "error_msg": "Uncaught SyntaxError: Got TEMPLATE LITERAL expected EOF\n at ...,this.metricPrefix,e,\" \",s,`\n                              ^\nin function \"printPrometheusMetric\" called from ...uptime in seconds\",e.uptime),this.printPrometheusMetric(\"ram...\n                              ^\nin function \"generateMetricsForSystem\" called from ...s.generateMetricsForSystem(),this.generateMetricsForSwitches...\n                              ^\nin function \"httpServerHandler\" called from PrometheusMe..."
+}
+
+var shelly_plugsg3_get_deviceinfo_response = {
+  "name": null,
+  "id": "shellyplugsg3-28372f2dc824",
+  "mac": "28372F2DC824",
+  "slot": 1,
+  "model": "S3PL-00112EU",
+  "gen": 3,
+  "fw_id": "20240820-134301/1.2.3-plugsg3prod0-gec79607",
+  "ver": "1.2.3-matter22",
+  "app": "PlugSG3",
+  "auth_en": false,
+  "auth_domain": null,
+  "matter": true
+}
 
 // curl -X POST -d '{"id":1,"method":"HTTP.GET","params":{"url":"http://192.168.33.18/rpc/Shelly.GetDeviceInfo"}}' http://Shelly1MiniG3-54320464A1D0.local/rpc
 

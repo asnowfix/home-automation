@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"global"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"pkg/shelly/types"
+	"strconv"
+	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -80,14 +83,20 @@ func (ch *HttpChannel) getE(ctx context.Context, host string, cmd string, params
 	requestURL := fmt.Sprintf("http://%s/rpc/%s%s", host, cmd, qs)
 	log.Info("Calling", "method", http.MethodGet, "url", requestURL)
 
-	res, err := http.Get(requestURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		log.Error(err, "error creating HTTP request")
+		return nil, err
+	}
+
+	res, err := doWithRetry(ctx, http.DefaultClient, req, 4, 200*time.Millisecond, 3*time.Second, log)
 	if err != nil {
 		log.Error(err, "HTTP GET error")
 		return nil, err
 	}
 
 	if res.StatusCode >= 400 {
-		err = fmt.Errorf("http error %d (%s)", res.StatusCode, res.Status)
+		err = fmt.Errorf("http client error %d (%s)", res.StatusCode, res.Status)
 		return nil, err
 	}
 
@@ -118,6 +127,11 @@ func (ch *HttpChannel) postE(ctx context.Context, host string, hm string, cmd st
 		}
 		requestURL = fmt.Sprintf("http://%s/rpc", host)
 	} else {
+		ip := net.ParseIP(host)
+		if ip.To4() == nil {
+			// v6
+			host = fmt.Sprintf("[%s]", host)
+		}
 		requestURL = fmt.Sprintf("http://%s/rpc/%s", host, cmd)
 		if params != nil {
 			jsonData, err = json.Marshal(params)
@@ -128,7 +142,7 @@ func (ch *HttpChannel) postE(ctx context.Context, host string, hm string, cmd st
 	}
 
 	log.Info("Preparing", "method", hm, "url", requestURL, "body", string(jsonData))
-	req, err := http.NewRequest(hm, requestURL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, hm, requestURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		log.Error(err, "error creating HTTP request")
 		return nil, err
@@ -141,18 +155,115 @@ func (ch *HttpChannel) postE(ctx context.Context, host string, hm string, cmd st
 
 	req.Header.Add("Content-Type", "application/json")
 
+	// Ensure we can retry by replaying the body
+	if len(jsonData) > 0 {
+		bodyCopy := append([]byte(nil), jsonData...)
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(bodyCopy)), nil
+		}
+	}
+
 	log.Info("Calling", "method", hm, "url", requestURL)
-	res, err := http.DefaultClient.Do(req)
+	res, err := doWithRetry(ctx, http.DefaultClient, req, 4, 200*time.Millisecond, 3*time.Second, log)
 	if err != nil {
 		log.Error(err, "HTTP error")
+		return nil, err
 	}
 
 	if res.StatusCode >= 400 {
-		err = fmt.Errorf("http error %d (%s)", res.StatusCode, res.Status)
+		err = fmt.Errorf("http client error %d (%s)", res.StatusCode, res.Status)
 		return nil, err
 	}
 
 	log.Info("status code", "code", res.StatusCode)
 
 	return res, err
+}
+
+// doWithRetry performs an HTTP request with simple exponential backoff retries.
+// It retries on transport errors, 5xx, and 429, honoring Retry-After when present.
+func doWithRetry(ctx context.Context, client *http.Client, req *http.Request, maxRetries int, baseDelay, maxDelay time.Duration, log logr.Logger) (*http.Response, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	backoff := baseDelay
+	if backoff <= 0 {
+		backoff = 100 * time.Millisecond
+	}
+	if maxDelay <= 0 {
+		maxDelay = 5 * time.Second
+	}
+
+	attempt := 0
+	for {
+		// rewind body if needed
+		if attempt > 0 && req.Body != nil {
+			if req.GetBody != nil {
+				b, err := req.GetBody()
+				if err != nil {
+					return nil, err
+				}
+				req.Body = b
+			}
+		}
+
+		res, err := client.Do(req)
+		if err == nil && (res.StatusCode < 500 && res.StatusCode != http.StatusTooManyRequests) {
+			return res, nil
+		}
+
+		shouldRetry := false
+		var wait time.Duration
+
+		if err != nil {
+			shouldRetry = true
+		} else {
+			if res.StatusCode >= 500 || res.StatusCode == http.StatusTooManyRequests {
+				shouldRetry = true
+				if ra := res.Header.Get("Retry-After"); ra != "" {
+					if secs, e := strconv.Atoi(ra); e == nil {
+						wait = time.Duration(secs) * time.Second
+					} else if t, e := http.ParseTime(ra); e == nil {
+						wait = time.Until(t)
+						if wait < 0 {
+							wait = 0
+						}
+					}
+				}
+			}
+			if shouldRetry && res != nil && res.Body != nil {
+				_ = res.Body.Close()
+			}
+		}
+
+		if !shouldRetry || attempt >= maxRetries {
+			if err != nil {
+				return nil, err
+			}
+			return res, nil
+		}
+
+		if wait == 0 {
+			wait = backoff
+			if wait > maxDelay {
+				wait = maxDelay
+			}
+		}
+
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return nil, ctx.Err()
+		case <-t.C:
+			// continue
+		}
+
+		backoff *= 2
+		if backoff > maxDelay {
+			backoff = maxDelay
+		}
+		attempt++
+	}
 }

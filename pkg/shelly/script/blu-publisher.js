@@ -1,21 +1,20 @@
 /**
  * This script will use BLE observer to listen for advertising data from nearby Shelly BLU devices,
- * decodes the data using a BTHome data structure, and emits the decoded data for further processing.
+ * decodes the data using a BTHome data structure, and publishes the decoded data over MQTT.
  *
- * This script DOESN'T execute actions, only emit events. Can be used with `ble-events-handler.js` example.
- * You can configure the event name, by default its `shelly-blu`, the body of the event contains all the data
- * parsed from the BLE device
+ * This script DOESN'T execute actions, only publishes events. Can be used in conjunction with
+ * `ble-events-handler.js` example. By default, it publishes under the topic `shelly-blu/events/<MAC>`,
+ * but you can configure this via the `ble.mqtt.topic` configuration variable. The body of the MQTT
+ * message contains all the data parsed from the BLE device.
  *
  * Represents data provided by each device.
  * Every value illustrating a sensor reading (e.g., button) may be a singular sensor value or
  * an array of values if the object has multiple instances.
- *
  * @typedef {Object} DeviceData
  * @property {number} pid - Packet ID.
  * @property {number} battery - The battery level of the device in percentage (%).
  * @property {number} rssi - The signal strength in decibels (dB).
  * @property {string} address - The MAC address of the Shelly BLU device.
- * @property {string} model - The model of the Shelly BLU device.
  * @property {number | number[]} [temperature] - The temperature value in degrees Celsius if the device has a temperature sensor. (Can be an array if has multiple instances)
  * @property {number | number[]} [humidity] - The humidity value in percentage (%) if the device has a humidity sensor. (Can be an array if has multiple instances)
  * @property {number | number[]} [illuminance] - The illuminance value in lux if the device has a light sensor. (Can be an array if has multiple instances)
@@ -30,17 +29,138 @@
 
 /******************* START CHANGE HERE *******************/
 const CONFIG = {
+  script: "[blu-publisher] ",
+
   // Specify the destination event where the decoded BLE data will be emitted. It allows for easy identification by other applications/scripts
   eventName: "shelly-blu",
+
+  kvsPrefix: "follow/shelly-blu/",
 
   // If the script owns the scanner and this value is set to true, the scan will be active.
   // If the script does not own the scanner, it may remain passive even when set to true.
   // Active scan means the scanner will ping back the Bluetooth device to receive all its data, but it will drain the battery faster
   active: false,
 
-  // When set to true, debug messages will be logged to the console
-  debug: true,
+  log: true
 };
+
+var STATE = {
+  // mac (lowercase) => { switchIdStr: string, switchIndex: number }
+  follows: {},
+};
+
+function log() {
+  if (!CONFIG.log) return;
+  var s = "";
+  for (var i = 0; i < arguments.length; i++) {
+    try {
+      var a = arguments[i];
+      if (typeof a === "object") {
+        s += JSON.stringify(a);
+      } else {
+        s += String(a);
+      }
+    } catch (e) {
+      s += String(arguments[i]);
+      // Ensure 'e' is referenced so the minifier doesn't drop it and produce `catch {}`
+      if (e && false) {}
+    }
+    if (i + 1 < arguments.length) s += " ";
+  }
+  print(CONFIG.script, s);
+}
+
+function normalizeMac(mac) {
+  if (!mac) return "";
+  return String(mac).toLowerCase();
+}
+
+function parseSwitchIndex(switchIdStr) {
+  // Expecting format "switch:<number>"
+  if (typeof switchIdStr !== "string") return null;
+  var parts = switchIdStr.split(":");
+  if (parts.length !== 2) return null;
+  if (parts[0] !== "switch") return null;
+  var n = Number(parts[1]);
+  if (isNaN(n)) return null;
+  return n;
+}
+
+function loadFollowsFromKVS(callback) {
+  // Refresh STATE.follows from KVS
+  Shelly.call("KVS.List", { prefix: CONFIG.kvsPrefix }, function (resp, err) {
+    if (err) {
+      log("KVS.List error:", err);
+      if (callback) callback(false);
+      return;
+    }
+    // Normalize possible response shapes:
+    // - resp.keys: ["key1", "key2", ...]
+    // - resp.keys: { "key1": true, ... } (object map)
+    // - resp.items: [{ key: "key1" }, ...]
+    var list = [];
+    if (resp) {
+      if (resp.keys) {
+        if (Array.isArray(resp.keys)) {
+          list = resp.keys;
+        } else if (typeof resp.keys === "object") {
+          list = Object.keys(resp.keys);
+        }
+      } else if (Array.isArray(resp.items)) {
+        for (var li = 0; li < resp.items.length; li++) {
+          var it = resp.items[li];
+          if (it && it.key) list.push(it.key);
+        }
+      }
+    }
+    log("KVS.List keys:", list.length);
+    var newMap = {};
+    if (!list || !list.length) {
+      STATE.follows = newMap;
+      log("No followed MACs.");
+      if (callback) callback(true);
+      return;
+    }
+
+    var pending = list.length;
+    for (var i = 0; i < list.length; i++) {
+      (function (k) {
+        Shelly.call("KVS.Get", { key: k }, function (gresp, gerr) {
+          if (gerr) {
+            log("KVS.Get error for", k, ":", gerr);
+          } else if (gresp && typeof gresp.value === "string") {
+            try {
+              var value = JSON.parse(gresp.value);
+              var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
+              var mac = k.substr(CONFIG.kvsPrefix.length);
+              mac = normalizeMac(mac);
+              var idx = parseSwitchIndex(switchIdStr);
+              if (mac && idx !== null) {
+                newMap[mac] = {
+                  switchIdStr: switchIdStr,
+                  switchIndex: idx,
+                };
+              } else {
+                log("Ignoring invalid follow entry:", k, gresp.value);
+              }
+            } catch (e) {
+              log("JSON parse error for", k, e);
+            }
+          } else {
+            log("KVS.Get error for", k, gerr);
+          }
+          pending--;
+          if (pending === 0) {
+            STATE.follows = newMap;
+            log("Loaded follows:", newMap);
+            if (callback) callback(true);
+          }
+        });
+      })(list[i]);
+    }
+  });
+}
+
 /******************* STOP CHANGE HERE *******************/
 
 const BTHOME_SVC_ID_STR = "fcd2";
@@ -131,7 +251,7 @@ const BTHomeDecoder = {
     while (buffer.length > 0) {
       _bth = BTH[buffer.at(0)];
       if (typeof _bth === "undefined") {
-        print("BTH: Unknown type");
+        log("BTH: Unknown type");
         break;
       }
       buffer = buffer.slice(1);
@@ -169,8 +289,21 @@ function emitData(data) {
     return;
   }
 
-  print("Emitting event data: ", data);
-  Shelly.emitEvent(CONFIG.eventName, data);
+  if (MQTT.isConnected()) {
+    topic = CONFIG.eventName + "/events/" + data.address;
+    log("Publishing event via MQTT on topic: ", topic, "data:", data);
+    MQTT.publish(topic, JSON.stringify(data), 1, false);
+  }
+
+  try {
+    var follow = STATE.follows[data.mac];
+    if (!follow) return; // not followed
+
+    log("Emitting local event data: ", data);
+    Shelly.emitEvent(CONFIG.eventName, data);
+  } catch (e) {
+    log("Error emitting local event: ", e);
+  }
 }
 
 //saving the id of the last packet, this is used to filter the duplicated packets
@@ -201,7 +334,7 @@ function BLEScanCallback(event, result) {
     typeof unpackedData === "undefined" ||
     unpackedData["encryption"]
   ) {
-    print("Error: Encrypted devices are not supported");
+    log("Error: Encrypted devices are not supported");
     return;
   }
 
@@ -214,16 +347,15 @@ function BLEScanCallback(event, result) {
 
   unpackedData.rssi = result.rssi;
   unpackedData.address = result.addr;
-  unpackedData.model = result.local_name;
 
   emitData(unpackedData);
 }
 
 // Initializes the script and performs the necessary checks and configurations
-function init() {
+function initBLEScanner() {
   //exit if can't find the config
   if (typeof CONFIG === "undefined") {
-    print("Error: Undefined config");
+    log("Error: Undefined config");
     return;
   }
 
@@ -232,15 +364,13 @@ function init() {
 
   //exit if the BLE isn't enabled
   if (!BLEConfig.enable) {
-    print(
-      "Error: The Bluetooth is not enabled, please enable it from settings"
-    );
+    log("Error: The Bluetooth is not enabled, please enable it from settings");
     return;
   }
 
   //check if the scanner is already running
   if (BLE.Scanner.isRunning()) {
-    print("Info: The BLE gateway is running, the BLE scan configuration is managed by the device");
+    log("Info: The BLE gateway is running, the BLE scan configuration is managed by the device");
   }
   else {
     //start the scanner
@@ -250,17 +380,33 @@ function init() {
     });
 
     if (!bleScanner) {
-      print("Error: Can not start new scanner");
+      log("Error: Can not start new scanner");
     }
   }
 
   //subscribe a callback to BLE scanner
   BLE.Scanner.Subscribe(BLEScanCallback);
-
-  // disable print when logs are disabled
-  if (!CONFIG.debug) {
-    print = function () { };
-  }
 }
 
-init();
+function subscribeKvsEvents() {
+  Shelly.addEventHandler(function (eventData) {
+    try {
+      if (eventData && eventData.info && eventData.info.event === "kvs") {
+        var kvsEvent = eventData.info;
+        // Check if the KVS change affects our prefix
+        if (kvsEvent.key && kvsEvent.key.indexOf(CONFIG.kvsPrefix) === 0) {
+          log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
+          loadFollowsFromKVS();
+        }
+      }
+    } catch (e) {
+      log("Error handling KVS event:", e);
+    }
+  });
+  log("Subscribed to KVS change events");
+}
+
+// Init
+loadFollowsFromKVS();
+initBLEScanner();
+subscribeKvsEvents();

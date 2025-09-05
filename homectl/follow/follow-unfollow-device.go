@@ -12,6 +12,7 @@ import (
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 	"slices"
+	"tools"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -92,7 +93,15 @@ func devicesDo(ctx context.Context, f doFollowFunc, follower string, args []stri
 	if flags.BleShellyMotion {
 		log.Info("Following BLE Shelly Motion", "mac", args)
 		followKey = FOLLOW_KEY_PREFIX + "/" + BLE_SHELLY_MOTION
-		following = args
+		// Normalize provided MAC addresses
+		norm := make([]string, 0, len(args))
+		for _, a := range args {
+			m := tools.NormalizeMac(a)
+			if m != "" {
+				norm = append(norm, m)
+			}
+		}
+		following = norm
 	}
 
 	return myhome.Foreach(ctx, log, follower, options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {

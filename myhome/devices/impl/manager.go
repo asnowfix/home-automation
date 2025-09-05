@@ -111,6 +111,48 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	myhome.RegisterMethodHandler(myhome.DeviceForget, func(in any) (any, error) {
 		return nil, dm.ForgetDevice(ctx, in.(string))
 	})
+	myhome.RegisterMethodHandler(myhome.DeviceRefresh, func(in any) (any, error) {
+		ident := in.(string)
+		dm.log.Info("RPC: device.refresh", "ident", ident)
+		device, err := dm.GetDeviceByAny(ctx, ident)
+		if err != nil {
+			return nil, err
+		}
+		// Ensure implementation is loaded
+		if device.Impl() == nil {
+			sd, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+			if err != nil {
+				return nil, err
+			}
+			device = device.WithImpl(sd)
+		}
+
+		modified, err := device.Refresh(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		// Sync groups like refreshOneDevice
+		grps, err := groups.GetDeviceGroups(ctx, device.Impl().(*shelly.Device))
+		if err == nil && len(grps) > 0 {
+			for _, group := range grps {
+				gi, gerr := dm.gr.AddGroup(&myhome.GroupInfo{Name: group})
+				if gerr == nil {
+					_ = dm.gr.AddDeviceToGroup(&myhome.GroupDevice{Group: gi.Name, Manufacturer: device.Manufacturer(), Id: device.Id()})
+					for k, v := range gi.KeyValues() {
+						kvs.SetKeyValue(ctx, dm.log, types.ChannelDefault, device.Impl().(*shelly.Device), k, v)
+					}
+				}
+			}
+		}
+
+		if modified {
+			if err := dm.dr.SetDevice(ctx, device, true); err != nil {
+				return nil, err
+			}
+		}
+		return nil, nil
+	})
 	myhome.RegisterMethodHandler(myhome.GroupList, func(in any) (any, error) {
 		return dm.gr.GetAllGroups()
 	})

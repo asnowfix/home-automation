@@ -1,19 +1,22 @@
-package new
+package setup
 
 import (
 	"context"
 	"fmt"
 	"hlog"
+	"homectl/options"
 	"myhome"
 	"net"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/mqtt"
+	"pkg/shelly/script"
 	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
 	"pkg/shelly/wifi"
 	"strconv"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -42,9 +45,9 @@ func init() {
 }
 
 var Cmd = &cobra.Command{
-	Use:   `new <device_name>`,
+	Use:   `setup <device_name> <device_ip>`,
 	Short: "Shelly devices features",
-	Long: `Configure a new Shelly device with the specified settings.
+	Long: `Setup a new Shelly device with the specified settings.
 
 Arguments:
   <device_name>    Name to assign to the Shelly device`,
@@ -75,16 +78,35 @@ Arguments:
 		}
 
 		// If we are connected to a shelly device
-		myhome.Foreach(cmd.Context(), hlog.Logger, ip.String(), types.ChannelHttp, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+		// Use a long-lived context decoupled from the global command timeout
+		longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute)
+		myhome.Foreach(longCtx, hlog.Logger, ip.String(), types.ChannelHttp, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 			sd, ok := device.(*shellyapi.Device)
 			if !ok {
 				return nil, fmt.Errorf("expected types.Device, got %T", device)
 			}
 			// - set device name to args[0]
-			_, err := system.SetName(ctx, sd, name)
+			config, err := system.GetConfig(ctx, sd)
 			if err != nil {
 				return nil, err
 			}
+
+			config.Device.Name = name
+
+			// NTP Pool Project (recommended)
+			// - pool.ntp.org
+			// - Regional pools for better latency, e.g.:
+			// 	- europe.pool.ntp.org
+			// 	- north-america.pool.ntp.org
+			// 	- asia.pool.ntp.org
+			// These resolve to multiple servers run by volunteers worldwide.
+			config.Sntp.Server = "pool.ntp.org"
+
+			_, err = system.SetConfig(ctx, sd, config)
+			if err != nil {
+				return nil, err
+			}
+
 			// - set Wifi STA ESSID & passwd
 			if staEssid != "" && staPasswd != "" {
 				_, err = wifi.SetSta(ctx, sd, staEssid, staPasswd)
@@ -108,10 +130,48 @@ Arguments:
 				}
 			}
 			// reboot device
-			err = shelly.DoReboot(cmd.Context(), sd)
+			err = shelly.DoReboot(ctx, sd)
 			if err != nil {
 				return nil, err
 			}
+
+			// load watchdog.js as script #1
+			// - Check if watchdog.js is already loaded as script #1
+			loaded, err := script.ListLoaded(ctx, via, sd)
+			if err != nil {
+				return nil, err
+			}
+			ok = false
+			for _, s := range loaded {
+				if s.Name == "watchdog.js" {
+					log.Info("watchdog.js is already loaded")
+					if s.Running && s.Id == 1 {
+						log.Info("watchdog.js is already running as script #1")
+						continue
+					}
+					err := fmt.Errorf("watchdog.js is already loaded but not running as script #1 on device %s", sd.Id())
+					log.Error(err, "watchdog.js improper configuration", "device", sd.Id(), "script_id", s.Id)
+					return nil, err
+				}
+			}
+			if !ok {
+				// Not already in place: upload, ...
+				_, err = script.Upload(ctx, via, sd, "watchdog.js", true)
+				if err != nil {
+					return nil, err
+				}
+				// ...enable (auto-restart at boot, ...
+				_, err = script.EnableDisable(ctx, via, sd, "watchdog.js", true)
+				if err != nil {
+					return nil, err
+				}
+				// ...and start it.
+				_, err = script.StartStopDelete(ctx, via, sd, "watchdog.js", script.Start)
+				if err != nil {
+					return nil, err
+				}
+			}
+
 			return nil, nil
 		}, []string{args[0]})
 

@@ -168,23 +168,23 @@
             }
         },
         {
-            "name": "homectl shelly script upload lampe-salon-hiver prometheus.js",
+            "name": "homectl shelly script upload --no-minify lampadaire-salon watchdog.js",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/homectl",
-            "args": ["shelly", "script", "upload", "lampe-salon-hiver", "prometheus.js"],
+            "args": ["shelly", "script", "upload", " --no-minify", "lampadaire-salon", "watchdog.js"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl shelly script debug lampe-salon-hiver true",
+            "name": "homectl shelly script debug lampadaire-salon true",
             "type": "go",
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/homectl",
-            "args": ["shelly", "script", "debug", "lampe-salon-hiver", "true"],
+            "args": ["shelly", "script", "debug", "lampadaire-salon", "true"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }

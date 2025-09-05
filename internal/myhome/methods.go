@@ -72,6 +72,14 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return nil
 		},
 	},
+	DeviceRefresh: {
+		NewParams: func() any {
+			return "" // device identifier (id/name/host/etc)
+		},
+		NewResult: func() any {
+			return nil
+		},
+	},
 	GroupList: {
 		NewParams: func() any {
 			return nil

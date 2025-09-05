@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
+	shellyscript "pkg/shelly/script"
 	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -36,28 +37,70 @@ var flags struct {
 	Port int
 }
 
+func doScriptDebug(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	if len(args) != 2 {
+		return nil, fmt.Errorf("doScriptDebug requires [scriptName, true|false]")
+	}
+
+	sd, ok := device.(*shellyapi.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
+	}
+
+	scriptName := args[0]
+	desired := args[1]
+	active, err := strconv.ParseBool(desired)
+	if err != nil {
+		return nil, fmt.Errorf("invalid bool value: %s", desired)
+	}
+
+	// Build JS code to toggle CONFIG.debug inside the running script.
+	// Avoid ES6 features; keep it ES5-compatible for Shelly JS engine.
+	state := "false"
+	if active {
+		state = "true"
+	}
+
+	code := "(function(){try{if(typeof CONFIG==='object'&&CONFIG){CONFIG.debug=" + state + ";return {ok:true,debug:CONFIG.debug};}var g=(typeof globalThis!=='undefined')?globalThis:this;if(typeof g.CONFIG!=='object'){g.CONFIG={};}g.CONFIG.debug=" + state + ";return {ok:true,debug:g.CONFIG.debug,created:true};}catch(e){return {ok:false,error:String(e)}}})();"
+
+	res, err := shellyscript.EvalInDevice(ctx, via, sd, scriptName, code)
+	if err != nil {
+		log.Error(err, "Script.Eval failed", "script", scriptName)
+		return nil, err
+	}
+	options.PrintResult(res)
+	return res, nil
+}
+
 var debugCtl = &cobra.Command{
 	Use:   "debug",
-	Short: "Turn on/off script debugging using system.SetConfig",
-	Long: `Usage: homectl shelly script debug <device> [true|false]
+	Short: "Enable/disable debugging. Device-level by default, or script-level via Script.Eval when a script name is provided",
+	Long: `Usage:
 
-	<device> is the name of one or more Shelly devices to target. The device(s) must be part of the local network.
+	homectl shelly script debug <device> <true|false> [script]
 
-	[true|false] is the desired state of script debugging on the device(s). If not specified, the current state is returned.
+	<device> is the name/IP/MAC of one or more Shelly devices on the local network.
+	<true|false> desired state.
+	[script] optional script file name, e.g. watchdog.js. If provided, toggles CONFIG.debug inside that script via Script.Eval.
+	If omitted, configures device-level UDP debugging via system.SetConfig.
 
-	Example:
-
-	homectl shelly script debug "Shelly Plus 1" true
-	homectl shelly script debug "Shelly Plus 1" false`,
+	Examples:
+	- Device-level UDP debug on:  homectl shelly script debug "Shelly Plus 1" true
+	- Device-level UDP debug off: homectl shelly script debug "Shelly Plus 1" false
+	- Script-level debug on:     homectl shelly script debug "Shelly Plus 1" true watchdog.js
+	- Script-level debug off:    homectl shelly script debug "Shelly Plus 1" false watchdog.js`,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) != 2 {
-			return fmt.Errorf("requires 2 args: <device> <true|false>")
+		if len(args) != 2 && len(args) != 3 {
+			return fmt.Errorf("requires 2 or 3 args: <device> <true|false> [script]")
 		}
 		if strings.TrimSpace(args[0]) == "" {
 			return fmt.Errorf("device name/IP/MAC must be non-empty")
 		}
 		if _, err := strconv.ParseBool(args[1]); err != nil {
 			return fmt.Errorf("second arg must be boolean (true/false/1/0): %v", err)
+		}
+		if len(args) == 3 && strings.TrimSpace(args[2]) == "" {
+			return fmt.Errorf("script name must be non-empty when provided")
 		}
 		return nil
 	},
@@ -68,29 +111,20 @@ var debugCtl = &cobra.Command{
 
 		log := hlog.Logger
 
-		// if configCmd.Flags().Changed("debug-mqtt") && flags.DebugMqtt != config.Debug.Mqtt.Enable {
-		// 	config.Debug.Mqtt.Enable = flags.DebugMqtt
-		// 	changed = true
-		// }
-
-		// if configCmd.Flags().Changed("debug-ws") && flags.DebugWebSocket != config.Debug.WebSocket.Enable {
-		// 	config.Debug.WebSocket.Enable = flags.DebugWebSocket
-		// 	changed = true
-		// }
-
-		// if configCmd.Flags().Changed("debug-udp") && flags.DebugUdp != "" && flags.DebugUdp != config.RpcUdp.DestinationAddress+":"+strconv.Itoa(int(config.RpcUdp.ListenPort)) {
-		// 	config.RpcUdp.DestinationAddress = strings.Split(flags.DebugUdp, ":")[0]
-		// 	port, err := strconv.Atoi(strings.Split(flags.DebugUdp, ":")[1])
-		// 	if err != nil {
-		// 		log.Error(err, "Invalid debug UDP address", "address", flags.DebugUdp)
-		// 		return nil, err
-		// 	}
-		// 	config.RpcUdp.ListenPort = uint16(port)
-		// 	changed = true
-		// }
-
 		var udpContext context.Context
 		var udpCancel context.CancelFunc
+
+		if len(args) == 3 {
+			// Script-level debug via Script.Eval (no UDP needed)
+			scriptName := args[2]
+			evalArgState := "false"
+			if active {
+				evalArgState = "true"
+			}
+			// pass: [scriptName, true|false]
+			_, err := myhome.Foreach(tools.WithToken(cmd.Context()), hlog.Logger, device, options.Via, doScriptDebug, []string{scriptName, evalArgState})
+			return err
+		}
 
 		if active {
 			port := flags.Port

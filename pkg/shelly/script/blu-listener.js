@@ -33,7 +33,6 @@ var CONFIG = {
   eventName: "shelly-blu",
   topicPrefix: "shelly-blu/events",
   kvsPrefix: "follow/shelly-blu/",
-  refreshMs: 60 * 1000, // periodically refresh followed MACs
   log: true
 };
 
@@ -269,15 +268,26 @@ function subscribeEvent() {
 });
 }
 
-function scheduleRefresh() {
-  Timer.set(CONFIG.refreshMs, true, function () {
-    loadFollowsFromKVS();
+function subscribeKvsEvents() {
+  Shelly.addEventHandler(function (eventData) {
+    try {
+      if (eventData && eventData.info && eventData.info.event === "kvs") {
+        var kvsEvent = eventData.info;
+        // Check if the KVS change affects our prefix
+        if (kvsEvent.key && kvsEvent.key.indexOf(CONFIG.kvsPrefix) === 0) {
+          log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
+          loadFollowsFromKVS();
+        }
+      }
+    } catch (e) {
+      log("Error handling KVS event:", e);
+    }
   });
+  log("Subscribed to KVS change events");
 }
 
 // Init
-loadFollowsFromKVS(function () {
-  scheduleRefresh();
-});
+loadFollowsFromKVS();
 subscribeMqtt();
 subscribeEvent();
+subscribeKvsEvents();

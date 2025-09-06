@@ -43,8 +43,9 @@ var Flags struct {
 
 var Via types.Channel
 
-func CommandLineContext(ctx context.Context, log logr.Logger, timeout time.Duration) context.Context {
+func CommandLineContext(ctx context.Context, log logr.Logger, timeout time.Duration, version string) context.Context {
 	ctx = context.WithValue(ctx, global.LogKey, log)
+
 	var cancel context.CancelFunc
 	if timeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
@@ -53,6 +54,9 @@ func CommandLineContext(ctx context.Context, log logr.Logger, timeout time.Durat
 		ctx, cancel = context.WithCancel(ctx)
 		ctx = context.WithValue(ctx, global.CancelKey, cancel)
 	}
+
+	ctx = context.WithValue(ctx, global.VersionKey, version)
+
 	go func() {
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, os.Interrupt)

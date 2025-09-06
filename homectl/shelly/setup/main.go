@@ -3,6 +3,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	"global"
 	"hlog"
 	"homectl/options"
 	"myhome"
@@ -79,7 +80,7 @@ Arguments:
 
 		// If we are connected to a shelly device
 		// Use a long-lived context decoupled from the global command timeout
-		longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute)
+		longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute, global.Version(cmd.Context()))
 		myhome.Foreach(longCtx, hlog.Logger, ip.String(), types.ChannelHttp, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 			sd, ok := device.(*shellyapi.Device)
 			if !ok {

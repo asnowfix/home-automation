@@ -13,6 +13,7 @@ import (
 
 var (
 	statusFlagSwitchID string
+	statusFlagFollowID string
 )
 
 var statusCmd = &cobra.Command{
@@ -26,9 +27,10 @@ var statusCmd = &cobra.Command{
 			return fmt.Errorf("invalid remote device ID: %q", args[1])
 		}
 
-		// Build JSON payload - only switch_id is needed for status-listener.js
+		// Build JSON payload for status-listener.js
 		payload := make(map[string]any)
 		payload["switch_id"] = statusFlagSwitchID
+		payload["follow_id"] = statusFlagFollowID
 
 		valueBytes, err := json.Marshal(payload)
 		if err != nil {
@@ -42,5 +44,6 @@ var statusCmd = &cobra.Command{
 }
 
 func init() {
-	statusCmd.Flags().StringVar(&statusFlagSwitchID, "switch-id", "switch:0", "Local switch ID to mirror remote status to, e.g. switch:0")
+	statusCmd.Flags().StringVar(&statusFlagSwitchID, "switch-id", "switch:0", "Local switch ID to control, e.g. switch:0")
+	statusCmd.Flags().StringVar(&statusFlagFollowID, "follow-id", "switch:0", "Remote input ID to monitor: switch:X (mirror state) or input:X (toggle on button press)")
 }

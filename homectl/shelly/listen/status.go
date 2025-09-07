@@ -6,7 +6,6 @@ import (
 	"hlog"
 	"homectl/options"
 	"myhome"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -22,9 +21,20 @@ var statusCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
-		remoteDeviceId := strings.ToLower(strings.TrimSpace(args[1]))
+
+		remoteDevice := args[1]
+
+		remoteDevices, err := myhome.TheClient.LookupDevices(cmd.Context(), remoteDevice)
+		if err != nil {
+			return fmt.Errorf("failed to lookup remote device: %w", err)
+		}
+		if len(*remoteDevices) == 0 {
+			return fmt.Errorf("remote device not found: %q", remoteDevice)
+		}
+		remoteDeviceId := (*remoteDevices)[0].Id()
+		hlog.Logger.Info("Lookup remote device", "identifier", remoteDevice, "device", remoteDeviceId)
 		if remoteDeviceId == "" {
-			return fmt.Errorf("invalid remote device ID: %q", args[1])
+			return fmt.Errorf("invalid remote device ID: %q", remoteDevice)
 		}
 
 		// Build JSON payload for status-listener.js

@@ -21,16 +21,25 @@ type ConnectParams struct {
 	Password string `json:"password"` // Password for the network
 }
 
+type RangeExtender struct {
+	Enable bool `json:"enable,omitempty"` // Set to true to enable the range extender mode
+}
+
 // AP contains information about the device's access point configuration.
 type AP struct {
-	SSID     string  `json:"ssid"`           // SSID of the access point (up to 29 symbols). Default is device ID. Set to null to restore default.
-	Password *string `json:"pass,omitempty"` // Password for the AP network. Default is open network. Set to null to restore default.
+	Enable        bool           `json:"enable,omitempty"`         // Set to true to enable the access point configuration
+	SSID          string         `json:"ssid"`                     // SSID of the access point (up to 29 symbols). Default is device ID. Set to null to restore default.
+	Password      *string        `json:"pass,omitempty"`           // Password for the AP network. Default is open network. Set to null to restore default.
+	IsOpen        bool           `json:"is_open,omitempty"`        // Set to true to use open network (password is ignored)
+	RangeExtender *RangeExtender `json:"range_extender,omitempty"` // Set to true to enable range extender mode
 }
 
 // STA contains information about the station (client) configuration.
 type STA struct {
+	Enable   bool    `json:"enable,omitempty"`  // Set to true to enable the station (client) configuration
 	SSID     string  `json:"ssid"`              // SSID of the network
 	Password *string `json:"pass,omitempty"`    // Password for the SSID
+	IsOpen   bool    `json:"is_open,omitempty"` // Set to true to use open network (password is ignored)
 	IP       *string `json:"ip,omitempty"`      // IP to use when IPv4 mode is static
 	Netmask  *string `json:"netmask,omitempty"` // Netmask to use when IPv4 mode is static
 	Gateway  *string `json:"gateway,omitempty"` // Gateway to use when IPv4 mode is static

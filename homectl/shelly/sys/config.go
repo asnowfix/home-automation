@@ -46,7 +46,7 @@ func oneDeviceConfig(ctx context.Context, log logr.Logger, via types.Channel, de
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
 
-	config, err := system.GetConfig(ctx, sd)
+	config, err := system.GetConfig(ctx, via, sd)
 	if err != nil {
 		return nil, fmt.Errorf("unable to get config: %v", err)
 	}
@@ -63,7 +63,7 @@ func oneDeviceConfig(ctx context.Context, log logr.Logger, via types.Channel, de
 	// }
 
 	if changed {
-		out, err := system.SetConfig(ctx, sd, config)
+		out, err := system.SetConfig(ctx, via, sd, config)
 		if err != nil {
 			return nil, fmt.Errorf("unable to set config: %v", err)
 		}

@@ -54,37 +54,21 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	})
 }
 
-func SetSta(ctx context.Context, device types.Device, essid string, passwd string) (any, error) {
-	out, err := device.CallE(ctx, types.ChannelHttp, string(SetConfig), &SetConfigRequest{
-		Config: Config{
-			STA: &STA{
-				SSID:     essid,
-				Password: &passwd,
-			},
-			Roam: &RoamConfig{
-				RSSIThreshold: -90,
-				Interval:      60,
-			},
-		},
-	})
+func DoGetConfig(ctx context.Context, via types.Channel, device types.Device) (*Config, error) {
+	out, err := device.CallE(ctx, via, string(GetConfig), nil)
 	if err != nil {
 		return nil, err
 	}
-	res, ok := out.(*SetConfigResponse)
+	res, ok := out.(*Config)
 	if !ok {
-		return nil, fmt.Errorf("expected SetConfigResponse, got %T", out)
+		return nil, fmt.Errorf("expected Config, got %T", out)
 	}
 	return res, nil
 }
 
-func SetAp(ctx context.Context, device types.Device, essid string, passwd string) (any, error) {
-	out, err := device.CallE(ctx, types.ChannelHttp, string(SetConfig), &SetConfigRequest{
-		Config: Config{
-			AP: &AP{
-				SSID:     essid,
-				Password: &passwd,
-			},
-		},
+func DoSetConfig(ctx context.Context, via types.Channel, device types.Device, config *Config) (any, error) {
+	out, err := device.CallE(ctx, via, string(SetConfig), &SetConfigRequest{
+		Config: *config,
 	})
 	if err != nil {
 		return nil, err

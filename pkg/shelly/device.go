@@ -52,19 +52,19 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 		}
 	}
 	if d.Id() == "" {
-		err := d.initDeviceInfo(ctx, types.ChannelHttp)
+		err := d.initDeviceInfo(ctx, via)
 		if err != nil {
 			return d.IsModified(), fmt.Errorf("unable to init device (%v) using HTTP", err)
 		}
 	}
 	if d.Mac() == nil {
-		err := d.initDeviceInfo(ctx, types.ChannelDefault)
+		err := d.initDeviceInfo(ctx, via)
 		if err != nil {
 			return d.IsModified(), fmt.Errorf("unable to init device (%v)", err)
 		}
 	}
 	if d.Name() == "" {
-		config, err := system.GetConfig(ctx, d)
+		config, err := system.GetConfig(ctx, via, d)
 		if err != nil {
 			return d.IsModified(), fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
 		}

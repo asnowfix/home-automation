@@ -160,7 +160,7 @@ func testDeviceAPIs(ctx context.Context, device *shelly.Device, testSuite *TestS
 		{
 			name: "Sys.GetConfig",
 			caller: func() (interface{}, error) {
-				return system.GetConfig(ctx, device)
+				return system.GetConfig(ctx, types.ChannelDefault, device)
 			},
 		},
 		{
@@ -178,13 +178,13 @@ func testDeviceAPIs(ctx context.Context, device *shelly.Device, testSuite *TestS
 		{
 			name: "WiFi.GetConfig",
 			caller: func() (interface{}, error) {
-				return device.CallE(ctx, types.ChannelDefault, "WiFi.GetConfig", nil)
+				return wifi.DoGetConfig(ctx, types.ChannelDefault, device)
 			},
 		},
 		{
 			name: "Eth.GetConfig",
 			caller: func() (interface{}, error) {
-				return ethernet.GetConfig(ctx, device, types.ChannelDefault)
+				return ethernet.GetConfig(ctx, types.ChannelDefault, device)
 			},
 		},
 		{

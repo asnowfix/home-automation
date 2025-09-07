@@ -25,6 +25,8 @@ MyHome Penates is the home automation system I develop & use to control my house
     - [List groups](#list-groups)
     - [Show a group](#show-a-group)
     - [Delete a group](#delete-a-group)
+  - [Device Control](#device-control)
+    - [Switch Command](#switch-command)
   - [Device Following](#device-following)
     - [Follow Shelly Device Status](#follow-shelly-device-status)
     - [Follow Shelly BLU Device](#follow-shelly-blu-device)
@@ -212,6 +214,49 @@ devices:
 
 ```shell
 group delete radiateurs
+```
+
+## Device Control
+
+### Switch Command
+
+The `switch` command provides subcommands to control device switches:
+
+```shell
+homectl switch [toggle|on|off] <device-identifier>
+```
+
+**Subcommands:**
+- `toggle`: Toggle the current state of the device
+- `on`: Turn the device on
+- `off`: Turn the device off
+
+**Examples:**
+
+Toggle a device (switches between on/off):
+```shell
+homectl switch toggle lumiere-exterieure-droite
+```
+
+Turn a device on:
+```shell
+homectl switch on lumiere-exterieure-droite
+```
+
+Turn a device off:
+```shell
+homectl switch off lumiere-exterieure-droite
+```
+
+**Flags:**
+- `-S, --switch int`: Use specific switch ID (default: 0)
+
+**Help:**
+```shell
+homectl switch --help              # Show available subcommands
+homectl switch toggle --help       # Help for toggle subcommand
+homectl switch on --help           # Help for on subcommand
+homectl switch off --help          # Help for off subcommand
 ```
 
 ## Device Following

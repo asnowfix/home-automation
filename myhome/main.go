@@ -43,7 +43,7 @@ var Cmd = &cobra.Command{
 			}
 		}
 
-		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout, global.Version(cmd.Context()))
+		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout, Version)
 		cmd.SetContext(ctx)
 
 		return nil

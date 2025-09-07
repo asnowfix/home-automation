@@ -165,8 +165,8 @@ function handleStatusEvent(topic, message) {
     return;
   }
 
-  if (!msg || msg.method !== "NotifyStatus") {
-    log("Ignoring non-NotifyStatus message", msg ? msg.method : "null", "from topic", topic);
+  if (!msg || (msg.method !== "NotifyStatus" && msg.method !== "NotifyEvent")) {
+    log("Ignoring non-NotifyStatus/NotifyEvent message", msg ? msg.method : "null", "from topic", topic);
     return;
   }
   
@@ -184,6 +184,53 @@ function handleStatusEvent(topic, message) {
   }
 
   log("Got message from a device we are following", src, follow, msg);
+
+  // Handle NotifyEvent messages (single_push events treated as input:0 state false)
+  if (msg.method === "NotifyEvent") {
+    var events = msg.params && msg.params.events;
+    if (!events || !Array.isArray(events)) {
+      log("No events array in NotifyEvent message", msg);
+      return;
+    }
+    
+    // Look for single_push events on the followed input component
+    var relevantEvent = null;
+    for (var i = 0; i < events.length; i++) {
+      var evt = events[i];
+      if (evt.component === follow.followId && evt.event === "single_push") {
+        relevantEvent = evt;
+        break;
+      }
+    }
+    
+    if (!relevantEvent) {
+      log("No relevant single_push event found for", follow.followId, "in events:", events);
+      return;
+    }
+    
+    // Only handle input types for single_push events (buttons)
+    if (follow.inputType !== "input") {
+      log("Ignoring single_push event for non-input type:", follow.inputType);
+      return;
+    }
+    
+    // Treat single_push as equivalent to input:0 state false (button release)
+    log("Processing single_push event as button release for", follow.followId);
+    var idx = follow.switchIndex;
+    
+    if (follow.action === "toggle") {
+      log("Attempting to toggle switch", follow.switchIdStr, "index", idx, "triggered by single_push on", follow.followId);
+      Shelly.call("Switch.Toggle", { id: idx }, function (resp, err) {
+        if (err) {
+          log("Switch.Toggle error for", follow.switchIdStr, "index", idx, "error:", err);
+        } else {
+          log("Switch.Toggle success for", follow.switchIdStr, "index", idx, "response:", resp);
+          log("Toggled", src, "=>", follow.switchIdStr, "(single_push event)");
+        }
+      });
+    }
+    return;
+  }
 
   var params = msg.params || {};
   var idx = follow.switchIndex;

@@ -18,7 +18,7 @@ func (t Type) String() string {
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Input#configuration
 type Configuration struct {
 	// Id of the Input component instance
-	Id string `json:"id"`
+	Id int `json:"id"`
 	// Name of the input instance
 	Name string `json:"name"`
 	// Type of associated input. Range of values switch, button, analog, count (only if applicable).
@@ -49,7 +49,7 @@ type Configuration struct {
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Input#status
 type Status struct {
 	// Id of the Input component instance
-	Id string `json:"id"`
+	Id int `json:"id"`
 	// (only for type switch, button) State of the input (null if the input instance is stateless, i.e. for type button)
 	State bool `json:"state,omitempty"`
 	// (only for type analog) Analog value in percent (null if the valid value could not be obtained)

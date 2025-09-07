@@ -16,12 +16,19 @@ MyHome Penates is the home automation system I develop & use to control my house
     - [Manual start](#manual-start)
   - [Usage Windows](#usage-windows)
   - [Reporting issues](#reporting-issues)
+    - [Issue Labels](#issue-labels)
+      - [Standard GitHub Labels](#standard-github-labels)
+      - [Project-Specific Labels](#project-specific-labels)
   - [Groups of devices](#groups-of-devices)
     - [Create a group](#create-a-group)
     - [Add a devices to a group](#add-a-devices-to-a-group)
     - [List groups](#list-groups)
     - [Show a group](#show-a-group)
     - [Delete a group](#delete-a-group)
+  - [Device Following](#device-following)
+    - [Follow Shelly Device Status](#follow-shelly-device-status)
+    - [Follow Shelly BLU Device](#follow-shelly-blu-device)
+    - [How It Works](#how-it-works)
   - [Heaters adaptative control](#heaters-adaptative-control)
     - [Kalman Filter Heater Control Script](#kalman-filter-heater-control-script)
   - [Shelly Notes](#shelly-notes)
@@ -206,6 +213,69 @@ devices:
 ```shell
 group delete radiateurs
 ```
+
+## Device Following
+
+The `follow` command allows you to configure devices to automatically respond to other devices or BLE devices. This creates automation relationships where one device (follower) reacts to changes in another device (followed).
+
+### Follow Shelly Device Status
+
+Configure a Shelly device to follow another Shelly device's status:
+
+```shell
+homectl follow shelly <follower-device> <followed-device> [flags]
+```
+
+**Examples:**
+
+Mirror a switch state (when followed device switch turns on/off, follower mirrors the action):
+```shell
+homectl follow shelly mezzanine lustre --follow-id switch:0 --switch-id switch:0
+```
+
+Toggle on button press (when followed device input button is pressed, follower toggles):
+```shell
+homectl follow shelly mezzanine mirroir-salon --follow-id input:0 --switch-id switch:0
+```
+
+**Flags:**
+- `--follow-id`: Remote input ID to monitor (default: "switch:0")
+  - `switch:X`: Mirror the given relay (switch) state
+  - `input:X`: Toggle on button press (triggers on button release)
+- `--switch-id`: Local switch ID to control (default: "switch:0")
+
+### Follow Shelly BLU Device
+
+Configure a Shelly device to follow a Shelly BLU (Bluetooth Low Energy) device:
+
+```shell
+homectl follow blu <follower-device> <blu-mac> [flags]
+```
+
+**Example:**
+
+Configure a device to turn on when BLU motion is detected:
+```shell
+homectl follow blu mezzanine e8:e0:7e:d0:f9:89 --switch-id switch:0 --auto-off 300
+```
+
+**Flags:**
+- `--switch-id`: Switch ID to operate (default: "switch:0")
+- `--auto-off`: Seconds before auto turning off (default: 300)
+- `--illuminance-min`: Minimum illuminance (lux) to trigger (default: 0)
+- `--illuminance-max`: Maximum illuminance (lux) to trigger (default: 10)
+- `--next-switch`: Optional next switch ID to turn on after auto-off
+
+### How It Works
+
+The follow commands configure the follower device with a script that:
+
+1. **For Shelly devices**: Listens to MQTT events from the followed device and reacts based on the configured input type
+2. **For BLU devices**: Monitors BLE advertisements and triggers actions based on motion detection and illuminance levels
+
+The action is automatically inferred from the input type:
+- **switch:X inputs**: Mirror the exact state (on/off)
+- **input:X inputs**: Toggle the follower's switch when the button is released (`state: false`)
 
 ## Heaters adaptative control
 

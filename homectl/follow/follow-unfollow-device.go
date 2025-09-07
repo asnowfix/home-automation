@@ -29,6 +29,11 @@ const BLE_SHELLY_MOTION = "ble-shelly-motion"
 const DEVICE = "device"
 
 func init() {
+	// Add subcommands to follow
+	FollowCmd.AddCommand(ShellyCmd)
+	FollowCmd.AddCommand(BluCmd)
+	
+	// Keep the original follow/unfollow commands for backward compatibility
 	FollowCmd.PersistentFlags().Uint32VarP(&options.Flags.SwitchId, "switch-id", "i", 0, "Switch Id, if relevant")
 	UnfollowCmd.PersistentFlags().Uint32VarP(&options.Flags.SwitchId, "switch-id", "i", 0, "Switch Id, if relevant")
 
@@ -37,22 +42,12 @@ func init() {
 
 	FollowCmd.PersistentFlags().BoolVarP(&flags.Device, DEVICE, "d", false, "Device name / IP address / ID")
 	UnfollowCmd.PersistentFlags().BoolVarP(&flags.Device, DEVICE, "d", false, "Device name / IP address / ID")
-
-	FollowCmd.MarkFlagsOneRequired(BLE_SHELLY_MOTION, DEVICE)
-	UnfollowCmd.MarkFlagsOneRequired(BLE_SHELLY_MOTION, DEVICE)
-	FollowCmd.MarkFlagsMutuallyExclusive(BLE_SHELLY_MOTION, DEVICE)
-	UnfollowCmd.MarkFlagsMutuallyExclusive(BLE_SHELLY_MOTION, DEVICE)
 }
 
 var FollowCmd = &cobra.Command{
 	Use:   "follow",
 	Short: "Start following other device(s)",
-	Args:  cobra.ExactArgs(2),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		follower := args[0]
-		_, err := devicesDo(cmd.Context(), follow, follower, args[1:])
-		return err
-	},
+	Long:  "Configure devices to follow other devices or BLE devices. Use subcommands for specific follow types.",
 }
 
 var UnfollowCmd = &cobra.Command{
@@ -159,6 +154,18 @@ func follow(ctx context.Context, log logr.Logger, via types.Channel, follower de
 
 	return nil, nil
 
+}
+
+// doSetKVS is a helper function for setting KVS entries on Shelly devices
+func doSetKVS(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
+	}
+	key := args[0]
+	value := args[1]
+	log.Info("Setting follow config", "key", key, "value", value, "device", sd.Id())
+	return kvs.SetKeyValue(ctx, log, via, sd, key, value)
 }
 
 func unfollow(ctx context.Context, log logr.Logger, via types.Channel, follower devices.Device, followKey string, following []string) (any, error) {

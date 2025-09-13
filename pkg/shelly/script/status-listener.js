@@ -176,10 +176,10 @@ function handleStatusEvent(topic, message) {
     return;
   }
 
-  log("Checking follows for device", src, "available follows:", Object.keys(STATE.follows));
+  //log("Checking follows for device", src, "available follows:", Object.keys(STATE.follows));
   var follow = STATE.follows[src];
   if (!follow) {
-    log("Device not followed", src);
+    //log("Device not followed", src);
     return;
   }
 

@@ -221,12 +221,14 @@ func (d *Device) Refresh(ctx context.Context) (bool, error) {
 		// }
 
 		if sd.Ip() == nil && sd.Id() != "" && sd.Name() != "" {
+			d.log.Info("Resolving IP of device without an IP or Id", "device", d.DeviceSummary)
 			ip, err := mynet.MyResolver(d.log).LookupHost(ctx, sd.Name())
 			if err != nil {
 				d.log.Error(err, "Failed to resolve device host", "device", d.DeviceSummary)
 				return false, err
 			}
 			sd.Host_ = ip[0]
+			d.WithHost(ip[0].String())
 			modified = true
 		}
 

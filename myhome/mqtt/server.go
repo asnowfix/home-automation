@@ -17,7 +17,7 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
-func MyHome(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string) error {
+func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string) error {
 	log.Info("Starting MyHome", "program", program)
 
 	// Create the new MQTT Server.

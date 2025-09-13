@@ -64,7 +64,7 @@ func (d *daemon) Run() error {
 
 	// Conditionally start the embedded MQTT broker
 	if !disableEmbeddedMqttBroker {
-		err := mqtt.MyHome(d.ctx, d.log, resolver, "myhome", nil)
+		err := mqtt.Broker(d.ctx, d.log.WithName("mqtt.Broker"), resolver, "myhome", nil)
 		if err != nil {
 			d.log.Error(err, "Failed to initialize MyHome")
 			return err
@@ -104,7 +104,7 @@ func (d *daemon) Run() error {
 		}
 		defer storage.Close()
 
-		// Start reverse HTTP proxy
+		// Start UI reverse HTTP proxy
 		if err := proxy.Start(d.ctx, d.log.WithName("proxy"), options.Flags.ProxyPort, resolver, storage); err != nil {
 			d.log.Error(err, "Failed to start reverse proxy")
 			return err

@@ -11,14 +11,13 @@ require (
 	internal/myhome v0.0.0-00010101000000-000000000000
 	internal/myip v0.0.0-00010101000000-000000000000
 	internal/myzone v0.0.0-00010101000000-000000000000
-	mymqtt v0.0.0-00010101000000-000000000000
 	pkg/shelly v0.0.0-00010101000000-000000000000
 	pkg/shelly/types v0.0.0-00010101000000-000000000000
 )
 
 replace hlog => ./hlog
 
-replace homectl/options => ./homectl/options
+replace homectl/options => ./myhome/ctl/options
 
 replace internal/global => ./internal/global
 
@@ -58,7 +57,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.2 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.3 // indirect
-	github.com/gorilla/schema v1.4.1 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -68,8 +66,6 @@ require (
 	github.com/miekg/dns v1.1.65 // indirect
 	github.com/rs/zerolog v1.33.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/tdewolff/minify/v2 v2.24.3 // indirect
-	github.com/tdewolff/parse/v2 v2.8.3 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0 // indirect
 	go.opentelemetry.io/otel v1.24.0 // indirect
@@ -90,6 +86,7 @@ require (
 	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
+	mymqtt v0.0.0-00010101000000-000000000000 // indirect
 	pkg/shelly/shttp v0.0.0-00010101000000-000000000000 // indirect
 	pkg/shelly/sswitch v0.0.0-00010101000000-000000000000 // indirect
 )

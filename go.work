@@ -4,24 +4,25 @@ use (
 	.
 	./cmd/wsl-mdns-bridge
 	./hlog
-	./homectl/follow
-	./homectl/forget
-	./homectl/group
-	./homectl/list
-	./homectl/mqtt
-	./homectl/open
-	./homectl/options
-	./homectl/shelly
-	./homectl/shelly/call
-	./homectl/shelly/components
-	./homectl/shelly/jobs
-	./homectl/shelly/kvs
-	./homectl/shelly/mqtt
-	./homectl/shelly/script
-	./homectl/shelly/sys
-	./homectl/shelly/wifi
-	./homectl/show
-	./homectl/sswitch
+	./myhome/ctl
+	./myhome/ctl/follow
+	./myhome/ctl/forget
+	./myhome/ctl/group
+	./myhome/ctl/list
+	./myhome/ctl/mqtt
+	./myhome/ctl/open
+	./myhome/ctl/options
+	./myhome/ctl/shelly
+	./myhome/ctl/shelly/call
+	./myhome/ctl/shelly/components
+	./myhome/ctl/shelly/jobs
+	./myhome/ctl/shelly/kvs
+	./myhome/ctl/shelly/mqtt
+	./myhome/ctl/shelly/script
+	./myhome/ctl/shelly/sys
+	./myhome/ctl/shelly/wifi
+	./myhome/ctl/show
+	./myhome/ctl/sswitch
 	./internal/debug
 	./internal/global
 	./internal/myhome

@@ -223,7 +223,7 @@ group delete radiateurs
 The `switch` command provides subcommands to control device switches:
 
 ```shell
-homectl switch [toggle|on|off] <device-identifier>
+myhome ctl switch [toggle|on|off] <device-identifier>
 ```
 
 **Subcommands:**
@@ -235,17 +235,17 @@ homectl switch [toggle|on|off] <device-identifier>
 
 Toggle a device (switches between on/off):
 ```shell
-homectl switch toggle lumiere-exterieure-droite
+myhome ctl switch toggle lumiere-exterieure-droite
 ```
 
 Turn a device on:
 ```shell
-homectl switch on lumiere-exterieure-droite
+myhome ctl switch on lumiere-exterieure-droite
 ```
 
 Turn a device off:
 ```shell
-homectl switch off lumiere-exterieure-droite
+myhome ctl switch off lumiere-exterieure-droite
 ```
 
 **Flags:**
@@ -253,10 +253,10 @@ homectl switch off lumiere-exterieure-droite
 
 **Help:**
 ```shell
-homectl switch --help              # Show available subcommands
-homectl switch toggle --help       # Help for toggle subcommand
-homectl switch on --help           # Help for on subcommand
-homectl switch off --help          # Help for off subcommand
+myhome ctl switch --help              # Show available subcommands
+myhome ctl switch toggle --help       # Help for toggle subcommand
+myhome ctl switch on --help           # Help for on subcommand
+myhome ctl switch off --help          # Help for off subcommand
 ```
 
 ## Device Following
@@ -268,19 +268,19 @@ The `follow` command allows you to configure devices to automatically respond to
 Configure a Shelly device to follow another Shelly device's status:
 
 ```shell
-homectl follow shelly <follower-device> <followed-device> [flags]
+myhome ctl follow shelly <follower-device> <followed-device> [flags]
 ```
 
 **Examples:**
 
 Mirror a switch state (when followed device switch turns on/off, follower mirrors the action):
 ```shell
-homectl follow shelly mezzanine lustre --follow-id switch:0 --switch-id switch:0
+myhome ctl follow shelly mezzanine lustre --follow-id switch:0 --switch-id switch:0
 ```
 
 Toggle on button press (when followed device input button is pressed, follower toggles):
 ```shell
-homectl follow shelly mezzanine mirroir-salon --follow-id input:0 --switch-id switch:0
+myhome ctl follow shelly mezzanine mirroir-salon --follow-id input:0 --switch-id switch:0
 ```
 
 **Flags:**
@@ -294,14 +294,14 @@ homectl follow shelly mezzanine mirroir-salon --follow-id input:0 --switch-id sw
 Configure a Shelly device to follow a Shelly BLU (Bluetooth Low Energy) device:
 
 ```shell
-homectl follow blu <follower-device> <blu-mac> [flags]
+myhome ctl follow blu <follower-device> <blu-mac> [flags]
 ```
 
 **Example:**
 
 Configure a device to turn on when BLU motion is detected:
 ```shell
-homectl follow blu mezzanine e8:e0:7e:d0:f9:89 --switch-id switch:0 --auto-off 300
+myhome ctl follow blu mezzanine e8:e0:7e:d0:f9:89 --switch-id switch:0 --auto-off 300
 ```
 
 **Flags:**

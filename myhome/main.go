@@ -10,6 +10,7 @@ import (
 
 	"hlog"
 
+	"myhome/ctl"
 	"myhome/daemon"
 
 	"debug"
@@ -69,6 +70,7 @@ func init() {
 	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "P", "", "write CPU profile to `file`")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
 	Cmd.AddCommand(daemon.Cmd)
+	Cmd.AddCommand(ctl.Cmd)
 }
 
 func main() {

@@ -270,12 +270,6 @@ brew install git go sqlite sqlite3 graphviz
 
 See <https://go.dev/blog/pprof> for details.
 
-To profile homectl:
-
-```bash
-homectl --cpuprofile 0.prof
-```
-
 To profile myhome:
 
 ```bash
@@ -286,7 +280,7 @@ To view the profile:
 
 ```bash
 $go tool pprof 0.prof 
-File: homectl
+File: myhome
 Type: cpu
 Time: 2025-05-20 21:51:58 CEST
 Duration: 1.01s, Total samples = 20ms ( 1.98%)

@@ -1,19 +1,19 @@
-package main
+package ctl
 
 import (
 	"context"
 	"fmt"
 	"global"
-	"homectl/follow"
-	"homectl/forget"
-	"homectl/group"
-	"homectl/list"
-	"homectl/mqtt"
-	"homectl/open"
-	"homectl/options"
-	"homectl/shelly"
-	"homectl/show"
-	"homectl/sswitch"
+	"myhome/ctl/follow"
+	"myhome/ctl/forget"
+	"myhome/ctl/group"
+	"myhome/ctl/list"
+	"myhome/ctl/mqtt"
+	"myhome/ctl/open"
+	"myhome/ctl/options"
+	"myhome/ctl/shelly"
+	"myhome/ctl/show"
+	"myhome/ctl/sswitch"
 	"myhome"
 	"os"
 	shellyPkg "pkg/shelly"
@@ -29,18 +29,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func main() {
-	cobra.EnableTraverseRunHooks = true
-	err := Cmd.Execute()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
 
 var Cmd = &cobra.Command{
-	Use:  "homectl",
-	Args: cobra.NoArgs,
+	Use:   "ctl",
+	Short: "Control and manage home automation devices",
+	Args:  cobra.NoArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		hlog.Init(options.Flags.Verbose)
 		log := hlog.Logger

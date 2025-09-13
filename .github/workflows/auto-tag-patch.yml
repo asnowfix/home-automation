@@ -56,12 +56,12 @@ jobs:
           git_tag_gpgsign: true
       - name: Create signed tag
         run: |
-          git tag -s "v${{ steps.semver.outputs.patch }}" -m "Release v${{ steps.semver.outputs.patch }}"
-          git push origin "v${{ steps.semver.outputs.patch }}"
+          git tag -s "${{ steps.semver.outputs.v_patch }}" -m "Release ${{ steps.semver.outputs.v_patch }}"
+          git push origin "${{ steps.semver.outputs.v_patch }}"
       - name: Trigger Packaging Workflow
         run: |
           curl -X POST \
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
               https://api.github.com/repos/${{ github.repository }}/actions/workflows/package-release.yml/dispatches \
-              -d '{"ref":"v${{ steps.semver.outputs.patch }}","inputs":{"previous":"${{ steps.previoustag.outputs.tag }}"}}'
+              -d '{"ref":"${{ steps.semver.outputs.v_patch }}","inputs":{"previous":"${{ steps.previoustag.outputs.tag }}"}}' 

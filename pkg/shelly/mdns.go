@@ -43,10 +43,8 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 		}
 	}
 
-	var err error
-	var ips []net.IP
+	ips := make([]net.IP, 0)
 	if len(entry.AddrIPv4) != 0 || len(entry.AddrIPv6) != 0 {
-		ips = make([]net.IP, 0, len(entry.AddrIPv4)+len(entry.AddrIPv6))
 		for _, ip := range entry.AddrIPv4 {
 			if !ip.IsLinkLocalUnicast() {
 				ips = append(ips, ip)
@@ -59,16 +57,18 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 		}
 	}
 
+	var err error
 	if len(ips) == 0 {
+		log.Info("No IP in mDNS entry: resolving", "hostname", entry.HostName)
 		ips, err = resolver.LookupHost(ctx, entry.HostName)
-		if err != nil {
-			log.Error(err, "Failed to resolve IP address", "hostname", entry.HostName)
+		if err != nil || len(ips) == 0 {
+			log.Error(err, "Failed to resolve", "hostname", entry.HostName)
 			return nil, err
 		}
 	}
 
 	if len(ips) > 0 {
-		log.Info("Resolved", "hostname", entry.HostName, "ip[]", ips)
+		log.Info("Resolved from mDNS entry", "hostname", entry.HostName, "ip[]", ips)
 	} else {
 		err = fmt.Errorf("no IP addresses found for hostname %s", entry.HostName)
 		return nil, err

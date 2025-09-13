@@ -3,9 +3,11 @@ package setup
 import (
 	"context"
 	"fmt"
+	"global"
 	"hlog"
 	"homectl/options"
 	"myhome"
+	"mynet"
 	"net"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
@@ -31,6 +33,10 @@ var staPasswd string
 // options for AP
 var apPasswd string
 
+// options for STA1
+var sta1Essid string
+var sta1Passwd string
+
 // options for MQTT
 var mqttBroker string
 var mqttPort int
@@ -38,8 +44,10 @@ var mqttPort int
 func init() {
 	Cmd.Flags().StringVar(&staEssid, "sta-essid", "", "STA ESSID")
 	Cmd.Flags().StringVar(&staPasswd, "sta-passwd", "", "STA Password")
+	Cmd.Flags().StringVar(&sta1Essid, "sta1-essid", "", "STA1 ESSID")
+	Cmd.Flags().StringVar(&sta1Passwd, "sta1-passwd", "", "STA1 Password")
 	Cmd.Flags().StringVar(&apPasswd, "ap-passwd", "", "AP Password")
-	Cmd.Flags().StringVar(&mqttBroker, "mqtt-broker", "", "MQTT broker address")
+	Cmd.Flags().StringVar(&mqttBroker, "mqtt-broker", "mqtt.local", "MQTT broker address")
 	Cmd.Flags().IntVar(&mqttPort, "mqtt-port", 1883, "MQTT broker port")
 	Cmd.AddCommand()
 }
@@ -79,19 +87,26 @@ Arguments:
 
 		// If we are connected to a shelly device
 		// Use a long-lived context decoupled from the global command timeout
-		longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute)
+		longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute, global.Version(cmd.Context()))
 		myhome.Foreach(longCtx, hlog.Logger, ip.String(), types.ChannelHttp, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 			sd, ok := device.(*shellyapi.Device)
 			if !ok {
 				return nil, fmt.Errorf("expected types.Device, got %T", device)
 			}
+
 			// - set device name to args[0]
-			config, err := system.GetConfig(ctx, sd)
+			configModified := false
+			config, err := system.GetConfig(ctx, via, sd)
 			if err != nil {
 				return nil, err
 			}
 
-			config.Device.Name = name
+			log.Info("Device config", "device", sd.Id(), "config", config)
+
+			if config.Device.Name != name {
+				configModified = true
+				config.Device.Name = name
+			}
 
 			// NTP Pool Project (recommended)
 			// - pool.ntp.org
@@ -100,39 +115,114 @@ Arguments:
 			// 	- north-america.pool.ntp.org
 			// 	- asia.pool.ntp.org
 			// These resolve to multiple servers run by volunteers worldwide.
-			config.Sntp.Server = "pool.ntp.org"
-
-			_, err = system.SetConfig(ctx, sd, config)
-			if err != nil {
-				return nil, err
+			if config.Sntp.Server != "pool.ntp.org" {
+				configModified = true
+				config.Sntp.Server = "pool.ntp.org"
 			}
 
-			// - set Wifi STA ESSID & passwd
-			if staEssid != "" && staPasswd != "" {
-				_, err = wifi.SetSta(ctx, sd, staEssid, staPasswd)
+			if configModified {
+				_, err = system.SetConfig(ctx, via, sd, config)
 				if err != nil {
 					return nil, err
 				}
+			}
+
+			var wifiModified bool = false
+			wc, err := wifi.DoGetConfig(ctx, via, sd)
+			if err != nil {
+				return nil, err
+			}
+			log.Info("Current device wifi config", "device", sd.Id(), "config", wc)
+
+			// - set Wifi STA ESSID & passwd
+			if staEssid != "" {
+				wc.STA.SSID = staEssid
+				wc.STA.Enable = true
+				if staPasswd != "" {
+					wc.STA.IsOpen = false
+					wc.STA.Password = &staPasswd
+				} else {
+					wc.STA.IsOpen = true
+				}
+				wifiModified = true
+			} else {
+				wc.STA = nil
+			}
+
+			// - set Wifi STA1 ESSID & passwd
+			if sta1Essid != "" {
+				wc.STA1.SSID = sta1Essid
+				wc.STA1.Enable = true
+				if sta1Passwd != "" {
+					wc.STA1.IsOpen = false
+					wc.STA1.Password = &sta1Passwd
+				} else {
+					wc.STA1.IsOpen = true
+				}
+				wifiModified = true
+			} else {
+				wc.STA1 = nil
 			}
 
 			// - set Wifi AP password to arg[1]
 			if apPasswd != "" {
-				_, err = wifi.SetAp(ctx, sd, "", apPasswd)
+				wc.AP.SSID = sd.Id() // Factory default SSID
+				wc.AP.Password = &apPasswd
+				wc.AP.Enable = true
+				wc.AP.IsOpen = false
+				wc.AP.RangeExtender = &wifi.RangeExtender{Enable: true}
+				wifiModified = true
+			} else {
+				wc.AP = nil
+			}
+
+			log.Info("Setting device wifi config", "device", sd.Id(), "config", wc)
+			if wifiModified {
+				_, err = wifi.DoSetConfig(ctx, via, sd, wc)
 				if err != nil {
 					return nil, err
 				}
 			}
-			// - configure MQTT server to arg[2] (if provided)
+
+			// - configure MQTT server
 			if mqttBroker != "" {
-				_, err = mqtt.SetServer(ctx, sd, mqttBroker+":"+strconv.Itoa(mqttPort))
+				ips, err := mynet.MyResolver(hlog.Logger).LookupHost(ctx, mqttBroker)
+				if err != nil {
+					return nil, err
+				}
+				if len(ips) == 0 {
+					return nil, fmt.Errorf("no IP address resolved for %s", mqttBroker)
+				}
+				mqttBroker = ips[0].String()
+				_, err = mqtt.SetServer(ctx, via, sd, mqttBroker+":"+strconv.Itoa(mqttPort))
 				if err != nil {
 					return nil, err
 				}
 			}
-			// reboot device
-			err = shelly.DoReboot(ctx, sd)
+
+			status, err := system.GetStatus(ctx, via, sd)
 			if err != nil {
 				return nil, err
+			}
+			log.Info("Device status", "device", sd.Id(), "status", status)
+
+			// reboot device, if necessary (required after MQTT configuration change)
+			if status.RestartRequired {
+				hlog.Logger.Info("Device rebooting", "device", sd.Id())
+				err = shelly.DoReboot(ctx, sd)
+				if err != nil {
+					return nil, err
+				}
+
+				// wait for device to reboot checking device status
+				for {
+					time.Sleep(3 * time.Second)
+					status, err = system.GetStatus(ctx, via, sd)
+					if err != nil {
+						return nil, err
+					}
+				}
+				hlog.Logger.Info("Device rebooted", "device", sd.Id(), "status", status)
 			}
 
 			// load watchdog.js as script #1

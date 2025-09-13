@@ -12,6 +12,7 @@ use (
 	./homectl/open
 	./homectl/options
 	./homectl/shelly
+	./homectl/shelly/call
 	./homectl/shelly/components
 	./homectl/shelly/jobs
 	./homectl/shelly/kvs
@@ -33,7 +34,6 @@ use (
 	./myhome/devices
 	./myhome/devices/impl
 	./myhome/groups
-	./myhome/http
 	./myhome/mqtt
 	./myhome/storage
 	./mymqtt

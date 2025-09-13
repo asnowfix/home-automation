@@ -227,7 +227,7 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	if len(args) > 0 {
 		addr = &args[0]
 	}
-	config, err := system.GetConfig(ctx, sd)
+	config, err := system.GetConfig(ctx, via, sd)
 	if err != nil {
 		log.Error(err, "Unable to get config", "device", sd.Id())
 		return nil, err
@@ -247,7 +247,7 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		},
 	}
 	log.Info("Applying new config", "config", config)
-	res, err := system.SetConfig(ctx, sd, config)
+	res, err := system.SetConfig(ctx, via, sd, config)
 	if err != nil {
 		log.Error(err, "Unable to turn on script UDP debugging", "addr", addr)
 		return nil, err

@@ -27,16 +27,16 @@ import (
 
 // APICall represents a single API call with request and response
 type APICall struct {
-	Timestamp    time.Time   `json:"timestamp"`
-	DeviceID     string      `json:"device_id"`
-	DeviceName   string      `json:"device_name"`
-	DeviceModel  string      `json:"device_model,omitempty"`
-	Method       string      `json:"method"`
-	Channel      string      `json:"channel"`
-	Request      interface{} `json:"request"`
-	Response     interface{} `json:"response"`
-	Error        string      `json:"error,omitempty"`
-	Duration     string      `json:"duration"`
+	Timestamp   time.Time   `json:"timestamp"`
+	DeviceID    string      `json:"device_id"`
+	DeviceName  string      `json:"device_name"`
+	DeviceModel string      `json:"device_model,omitempty"`
+	Method      string      `json:"method"`
+	Channel     string      `json:"channel"`
+	Request     interface{} `json:"request"`
+	Response    interface{} `json:"response"`
+	Error       string      `json:"error,omitempty"`
+	Duration    string      `json:"duration"`
 }
 
 // TestSuite represents the complete collection of API calls
@@ -55,21 +55,23 @@ type TestSuite struct {
 
 var logger logr.Logger
 
+var Version string = "dirty"
+
 func main() {
 	// Initialize logger
 	hlog.Init(false) // not verbose
 	logger = hlog.Logger
-	
+
 	ctx := context.Background()
-	ctx = options.CommandLineContext(ctx, logger, 30*time.Second)
-	
+	ctx = options.CommandLineContext(ctx, logger, 30*time.Second, Version)
+
 	// Debug: Check if logger is in context
 	if logFromCtx, ok := ctx.Value(global.LogKey).(logr.Logger); ok {
 		fmt.Printf("Logger successfully added to context: %T\n", logFromCtx)
 	} else {
 		fmt.Printf("Failed to add logger to context\n")
 	}
-	
+
 	// Initialize the home automation client
 	client, err := myhome.NewClientE(ctx, logger, 30*time.Second)
 	if err != nil {
@@ -97,7 +99,7 @@ func main() {
 	// Test each device
 	for _, device := range *devices {
 		logger.Info("Testing device", "id", device.Id(), "name", device.Name())
-		
+
 		// Create Shelly device instance
 		shellyDevice, err := shelly.NewDeviceFromSummary(ctx, logger, device)
 		if err != nil {
@@ -113,7 +115,7 @@ func main() {
 
 		// Test core API methods for this device
 		testDeviceAPIs(ctx, sd, testSuite)
-		
+
 		// Track device types (simplified)
 		deviceTypes[device.Id()[:strings.Index(device.Id(), "-")]] = true
 	}
@@ -141,7 +143,7 @@ func main() {
 		log.Fatalf("Failed to save test suite: %v", err)
 	}
 
-	logger.Info("Data collection completed", 
+	logger.Info("Data collection completed",
 		"output_file", outputFile,
 		"total_calls", testSuite.Summary.TotalCalls,
 		"successful_calls", testSuite.Summary.SuccessfulCalls,
@@ -158,7 +160,7 @@ func testDeviceAPIs(ctx context.Context, device *shelly.Device, testSuite *TestS
 		{
 			name: "Sys.GetConfig",
 			caller: func() (interface{}, error) {
-				return system.GetConfig(ctx, device)
+				return system.GetConfig(ctx, types.ChannelDefault, device)
 			},
 		},
 		{
@@ -176,13 +178,13 @@ func testDeviceAPIs(ctx context.Context, device *shelly.Device, testSuite *TestS
 		{
 			name: "WiFi.GetConfig",
 			caller: func() (interface{}, error) {
-				return device.CallE(ctx, types.ChannelDefault, "WiFi.GetConfig", nil)
+				return wifi.DoGetConfig(ctx, types.ChannelDefault, device)
 			},
 		},
 		{
 			name: "Eth.GetConfig",
 			caller: func() (interface{}, error) {
-				return ethernet.GetConfig(ctx, device, types.ChannelDefault)
+				return ethernet.GetConfig(ctx, types.ChannelDefault, device)
 			},
 		},
 		{
@@ -262,7 +264,7 @@ func testDeviceAPIs(ctx context.Context, device *shelly.Device, testSuite *TestS
 	// Test each method
 	for _, method := range methods {
 		start := time.Now()
-		
+
 		call := APICall{
 			Timestamp:  start,
 			DeviceID:   device.Id(),
@@ -284,7 +286,7 @@ func testDeviceAPIs(ctx context.Context, device *shelly.Device, testSuite *TestS
 		}
 
 		testSuite.APICalls = append(testSuite.APICalls, call)
-		
+
 		// Small delay between calls to avoid overwhelming the device
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -299,7 +301,7 @@ func saveTestSuite(testSuite *TestSuite, filename string) error {
 	}
 
 	filePath := filepath.Join(outputDir, filename)
-	
+
 	// Marshal to JSON with pretty printing
 	jsonData, err := json.MarshalIndent(testSuite, "", "  ")
 	if err != nil {

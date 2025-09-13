@@ -1,8 +1,8 @@
 package shelly
 
 import (
+	callCtl "homectl/shelly/call"
 	compsCtl "homectl/shelly/components"
-	listenCtl "homectl/shelly/listen"
 	jobsCtl "homectl/shelly/jobs"
 	kvsCtl "homectl/shelly/kvs"
 	mqttCtl "homectl/shelly/mqtt"
@@ -21,6 +21,7 @@ var Cmd = &cobra.Command{
 }
 
 func init() {
+	Cmd.AddCommand(callCtl.Cmd)
 	Cmd.AddCommand(jobsCtl.Cmd)
 	Cmd.AddCommand(mqttCtl.Cmd)
 	Cmd.AddCommand(kvsCtl.Cmd)
@@ -29,5 +30,4 @@ func init() {
 	Cmd.AddCommand(sysCtl.Cmd)
 	Cmd.AddCommand(compsCtl.Cmd)
 	Cmd.AddCommand(setupCtl.Cmd)
-	Cmd.AddCommand(listenCtl.Cmd)
 }

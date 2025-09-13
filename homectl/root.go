@@ -63,7 +63,7 @@ var Cmd = &cobra.Command{
 			}
 		}
 
-		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout)
+		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout, Version)
 		cmd.SetContext(ctx)
 
 		err := mymqtt.NewClientE(ctx, log, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
@@ -135,6 +135,7 @@ func init() {
 }
 
 var Commit string
+var Version string
 
 var versionCmd = &cobra.Command{
 	Use:   "version",

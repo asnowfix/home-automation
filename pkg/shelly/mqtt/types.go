@@ -50,7 +50,7 @@ type Dialog struct {
 
 type Request struct {
 	Dialog
-	Method string `json:"method"`
+	Method string `json:"method"` // One of NotifyStatus, NotifyEvent, NotifyFullStatus
 	Params any    `json:"params,omitempty"`
 }
 

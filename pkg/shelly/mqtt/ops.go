@@ -56,8 +56,8 @@ func init() {
 	rand.Seed(uint64(time.Now().UnixNano()))
 }
 
-func SetServer(ctx context.Context, d types.Device, server string) (any, error) {
-	out, err := d.CallE(ctx, types.ChannelDefault, string(SetConfig.String()), SetConfigRequest{
+func SetServer(ctx context.Context, via types.Channel, device types.Device, server string) (*SetConfigResponse, error) {
+	out, err := device.CallE(ctx, via, string(SetConfig.String()), SetConfigRequest{
 		Config: Config{
 			Enable:        true,
 			Server:        server,

@@ -5,6 +5,8 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"global"
+	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 	"reflect"
 	"strconv"
@@ -399,6 +401,17 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 		return 0, err
 	}
 	log.Info("Started script", "name", name, "id", id, "out", out)
+
+	// Create/update KVS entry with script version
+	kvsKey := fmt.Sprintf("script/%s", name)
+	version := global.Version(ctx)
+	_, err = kvs.SetKeyValue(ctx, log, via, device, kvsKey, version)
+	if err != nil {
+		log.Error(err, "Unable to set KVS entry for script version", "key", kvsKey, "version", version)
+		// Don't fail the upload if KVS fails, just log the error
+	} else {
+		log.Info("Set KVS entry for script version", "key", kvsKey, "version", version)
+	}
 
 	return id, nil
 }

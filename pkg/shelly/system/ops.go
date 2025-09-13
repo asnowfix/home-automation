@@ -45,8 +45,8 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	})
 }
 
-func GetConfig(ctx context.Context, device types.Device) (*Config, error) {
-	out, err := device.CallE(ctx, types.ChannelDefault, getConfig.String(), nil)
+func GetConfig(ctx context.Context, via types.Channel, device types.Device) (*Config, error) {
+	out, err := device.CallE(ctx, via, getConfig.String(), nil)
 	if err != nil {
 		log.Error(err, "Unable to get config", "device", device.Id())
 		return nil, err
@@ -66,10 +66,10 @@ func GetConfig(ctx context.Context, device types.Device) (*Config, error) {
 	return config, nil
 }
 
-func SetConfig(ctx context.Context, device types.Device, config *Config) (*SetConfigResponse, error) {
+func SetConfig(ctx context.Context, via types.Channel, device types.Device, config *Config) (*SetConfigResponse, error) {
 	var req SetConfigRequest
 	req.Config = *config
-	out, err := device.CallE(ctx, types.ChannelDefault, setConfig.String(), &req)
+	out, err := device.CallE(ctx, via, setConfig.String(), &req)
 	if err != nil {
 		log.Error(err, "Unable to set config", "device", device.Id())
 		return nil, err
@@ -81,4 +81,19 @@ func SetConfig(ctx context.Context, device types.Device, config *Config) (*SetCo
 		return nil, err
 	}
 	return res, nil
+}
+
+func GetStatus(ctx context.Context, via types.Channel, device types.Device) (*Status, error) {
+	out, err := device.CallE(ctx, via, getStatus.String(), nil)
+	if err != nil {
+		log.Error(err, "Unable to get status", "device", device.Id())
+		return nil, err
+	}
+	status, ok := out.(*Status)
+	if !ok {
+		err = fmt.Errorf("invalid response to get device status: type='%v' expected='*system.Status'", reflect.TypeOf(out))
+		log.Error(err, "Invalid response to get device status", "device", device.Id())
+		return nil, err
+	}
+	return status, nil
 }

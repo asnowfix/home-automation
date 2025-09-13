@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mynet"
 	"net"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
@@ -190,6 +191,9 @@ func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Devi
 func (d *Device) Refresh(ctx context.Context) (bool, error) {
 	d.log.Info("Refreshing device", "id", d.Id(), "name", d.Name())
 
+	var modified bool = false
+	var err error
+
 	switch d.Manufacturer() {
 	case string(SHELLY):
 		sd, ok := d.Impl().(*shellyapi.Device)
@@ -216,7 +220,19 @@ func (d *Device) Refresh(ctx context.Context) (bool, error) {
 		// 	continue
 		// }
 
-		modified, err := sd.Refresh(ctx, types.ChannelDefault)
+		if sd.Ip() == nil && sd.Id() != "" && sd.Name() != "" {
+			d.log.Info("Resolving IP of device without an IP or Id", "device", d.DeviceSummary)
+			ip, err := mynet.MyResolver(d.log).LookupHost(ctx, sd.Name())
+			if err != nil {
+				d.log.Error(err, "Failed to resolve device host", "device", d.DeviceSummary)
+				return false, err
+			}
+			sd.Host_ = ip[0]
+			d.WithHost(ip[0].String())
+			modified = true
+		}
+
+		modified, err = sd.Refresh(ctx, types.ChannelDefault)
 		if err != nil {
 			d.log.Error(err, "Failed to update device", "device", d.DeviceSummary)
 			return false, err

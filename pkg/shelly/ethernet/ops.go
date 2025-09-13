@@ -55,7 +55,7 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 }
 
 // GetConfig retrieves the current Ethernet configuration
-func GetConfig(ctx context.Context, device types.Device, via types.Channel) (*Config, error) {
+func GetConfig(ctx context.Context, via types.Channel, device types.Device) (*Config, error) {
 	out, err := device.CallE(ctx, via, getConfig.String(), nil)
 	if err != nil {
 		return nil, err

@@ -3,6 +3,7 @@ package script
 import (
 	"context"
 	"fmt"
+	"global"
 	"hlog"
 	"homectl/options"
 	"myhome"
@@ -34,7 +35,7 @@ var uploadCtl = &cobra.Command{
 		// minify is true by default unless --no-minify is set
 		minify := !noMinify
 		// Script upload can be long: Use a long-lived context decoupled from the global command timeout
-		longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute)
+		longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute, global.Version(cmd.Context()))
 		_, err := myhome.Foreach(longCtx, hlog.Logger, device, options.Via, doUpload, []string{scriptName, strconv.FormatBool(minify)})
 		return err
 	},

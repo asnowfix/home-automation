@@ -7,6 +7,7 @@ import (
 	"myhome"
 	"myhome/devices"
 	"mynet"
+	"net"
 	"pkg/shelly"
 
 	"github.com/go-logr/logr"
@@ -41,6 +42,13 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 							return nil
 						}
 						log.Info("Browsed", "entry", entry)
+
+						err = completeEntry(ctx, log, dr, entry)
+						if err != nil {
+							log.Error(err, "Failed to complete zeroconf entry", "entry", entry)
+							continue
+						}
+
 						device, err := db.GetDeviceByAny(ctx, entry.Instance)
 						if err != nil || device.Info == nil {
 							sd, err := shelly.NewDeviceFromZeroConfEntry(ctx, log, dr, entry)
@@ -81,6 +89,52 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 		}
 	}(ctx, log)
 
+	return nil
+}
+
+func completeEntry(ctx context.Context, log logr.Logger, resolver mynet.Resolver, entry *zeroconf.ServiceEntry) error {
+
+	ips := make([]net.IP, 0)
+	if len(entry.AddrIPv4) != 0 || len(entry.AddrIPv6) != 0 {
+		for _, ip := range entry.AddrIPv4 {
+			if !ip.IsLinkLocalUnicast() {
+				ips = append(ips, ip)
+			}
+		}
+		for _, ip := range entry.AddrIPv6 {
+			if !ip.IsLinkLocalUnicast() {
+				ips = append(ips, ip)
+			}
+		}
+	}
+
+	var err error
+	if len(ips) == 0 {
+		log.Info("No IP in mDNS entry: resolving", "hostname", entry.HostName)
+		ips, err = resolver.LookupHost(ctx, entry.HostName)
+		if err != nil || len(ips) == 0 {
+			log.Error(err, "Failed to resolve", "hostname", entry.HostName)
+			return err
+		}
+		if len(ips) > 0 {
+			entry.AddrIPv4 = make([]net.IP, 0)
+			entry.AddrIPv6 = make([]net.IP, 0)
+			for _, ip := range ips {
+				if ip.To4() != nil {
+					entry.AddrIPv4 = append(entry.AddrIPv4, ip)
+				} else {
+					entry.AddrIPv6 = append(entry.AddrIPv6, ip)
+				}
+			}
+		}
+	}
+
+	if len(ips) == 0 {
+		err = fmt.Errorf("no IP addresses found for hostname %s", entry.HostName)
+		return err
+	}
+
+	log.Info("Resolved from mDNS entry", "entry", entry)
 	return nil
 }
 

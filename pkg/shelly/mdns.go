@@ -3,7 +3,6 @@ package shelly
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net"
 	"pkg/devices"
 	"pkg/shelly/shelly"
@@ -43,39 +42,9 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 		}
 	}
 
-	ips := make([]net.IP, 0)
-	if len(entry.AddrIPv4) != 0 || len(entry.AddrIPv6) != 0 {
-		for _, ip := range entry.AddrIPv4 {
-			if !ip.IsLinkLocalUnicast() {
-				ips = append(ips, ip)
-			}
-		}
-		for _, ip := range entry.AddrIPv6 {
-			if !ip.IsLinkLocalUnicast() {
-				ips = append(ips, ip)
-			}
-		}
-	}
-
-	var err error
-	if len(ips) == 0 {
-		log.Info("No IP in mDNS entry: resolving", "hostname", entry.HostName)
-		ips, err = resolver.LookupHost(ctx, entry.HostName)
-		if err != nil || len(ips) == 0 {
-			log.Error(err, "Failed to resolve", "hostname", entry.HostName)
-			return nil, err
-		}
-	}
-
-	if len(ips) > 0 {
-		log.Info("Resolved from mDNS entry", "hostname", entry.HostName, "ip[]", ips)
-	} else {
-		err = fmt.Errorf("no IP addresses found for hostname %s", entry.HostName)
-		return nil, err
-	}
-
 	d := &Device{
-		Id_: deviceId,
+		Id_:   deviceId,
+		Name_: entry.Instance,
 		info: &shelly.DeviceInfo{
 			Id: deviceId,
 			Product: shelly.Product{
@@ -89,7 +58,7 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 	}
 
 	var ip net.IP
-	for _, ip = range ips {
+	for _, ip = range entry.AddrIPv4 {
 		if ip.IsGlobalUnicast() {
 			d.UpdateHost(ip.String())
 			break

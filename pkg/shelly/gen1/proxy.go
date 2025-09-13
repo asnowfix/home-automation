@@ -97,6 +97,7 @@ func (hp *httpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 // <https://shelly-api-docs.shelly.cloud/gen2/General/RPCChannels#mqtt>
 func (hp *httpProxy) formatAsGen2(device Device) (topic string, msg []byte, err error) {
+	topic = fmt.Sprintf("%s/events/rpc", device.Id)
 	var tC float32
 	if device.HTSensor != nil {
 		tC = device.HTSensor.Temperature

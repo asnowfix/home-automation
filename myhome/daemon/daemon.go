@@ -10,6 +10,7 @@ import (
 	"mymqtt"
 	"mynet"
 	"pkg/shelly"
+	"pkg/shelly/gen1"
 	"time"
 
 	"myhome"
@@ -69,30 +70,24 @@ func (d *daemon) Run() error {
 			d.log.Error(err, "Failed to initialize MyHome")
 			return err
 		}
+	}
 
-		// // Connect to the embedded MQTT broker
-		// mc, err = mymqtt.InitClientE(ctx, log, resolver, "me", myhome.MYHOME, options.Flags.MqttTimeout)
-		// if err != nil {
-		// 	log.Error(err, "Failed to initialize MQTT client")
-		// 	return err
-		// }
+	// Connect to the network's MQTT broker or use the embedded broker
+	err := mymqtt.NewClientE(d.ctx, d.log.WithName("mymqtt.Client"), options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+	if err != nil {
+		d.log.Error(err, "Failed to initialize MQTT client")
+		return err
+	}
+	mc, err = mymqtt.GetClientE(d.ctx)
+	if err != nil {
+		d.log.Error(err, "Failed to start MQTT client")
+		return err
+	}
+	defer mc.Close()
 
-		// gen1Ch := make(chan gen1.Device, 1)
-		// go http.MyHome(log, gen1Ch)
-		// go gen1.Publisher(ctx, log, gen1Ch, mc)
-	} else {
-		// Connect to the network's MQTT broker
-		err := mymqtt.NewClientE(d.ctx, d.log, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
-		if err != nil {
-			d.log.Error(err, "Failed to initialize MQTT client")
-			return err
-		}
-		mc, err = mymqtt.GetClientE(d.ctx)
-		if err != nil {
-			d.log.Error(err, "Failed to start MQTT client")
-			return err
-		}
-		defer mc.Close()
+	// Proxy from Gen1 (HTTP-only) devices to MQTT, co-located with the embedded MQTT broker
+	if !disableEmbeddedMqttBroker {
+		gen1.Proxy(d.ctx, d.log.WithName("gen1.Listen"), 8888, mc)
 	}
 
 	if !disableDeviceManager {

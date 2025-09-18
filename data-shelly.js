@@ -1,3 +1,15 @@
+// Publishing as MQTT on topic:  shelly-blu/events/e8:e0:7e:a6:0c:6f
+var shelly_blu_pool_motion_event = {
+  "encryption":false,
+  "BTHome_version":2,
+  "pid":44,
+  "battery":100,
+  "illuminance":10,
+  "motion":1,
+  "rssi":-65,
+  "address":"e8:e0:7e:a6:0c:6f"
+}
+
 // Publishing as MQTT on topic:  shelly-blu/events/e8:e0:7e:d0:f9:89
 var shelly_blu_entree_motion_event = {
   "encryption": false,

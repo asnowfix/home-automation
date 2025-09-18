@@ -255,6 +255,18 @@ function subscribeMqtt() {
   log("Subscribed to", topic);
 }
 
+function cancelAllTimers() {
+  // Cancel all ongoing auto-off timers when manual operation is detected
+  for (var switchIndex in STATE.offTimers) {
+    var timerId = STATE.offTimers[switchIndex];
+    if (timerId) {
+      Timer.clear(timerId);
+      STATE.offTimers[switchIndex] = 0;
+      log("Cancelled auto-off timer for switch", switchIndex, "due to manual operation");
+    }
+  }
+}
+
 function subscribeEvent() {
   Shelly.addEventHandler(function (eventData) {
     log("Handling event: ", eventData);
@@ -268,6 +280,11 @@ function subscribeEvent() {
               log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
               loadFollowsFromKVS();
             }
+        } else if (eventData && eventData.info && eventData.info.component && 
+                   eventData.info.component.indexOf("input:") === 0) {
+            // Local input event detected - cancel all timers (manual operation takes precedence)
+            log("Local input event detected:", eventData.info.component, "event:", eventData.info.event);
+            cancelAllTimers();
         }
     } catch (e) {
         log("Error handling event: ", e);

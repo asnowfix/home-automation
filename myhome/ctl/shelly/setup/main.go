@@ -3,12 +3,19 @@ package setup
 import (
 	"context"
 	"fmt"
+	"net"
+	"strconv"
+	"time"
+
+	"github.com/go-logr/logr"
+	"github.com/spf13/cobra"
+	"github.com/jackpal/gateway"
+
 	"global"
 	"hlog"
-	"homectl/options"
+	"myhome/ctl/options"
 	"myhome"
 	"mynet"
-	"net"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/mqtt"
@@ -17,13 +24,6 @@ import (
 	"pkg/shelly/system"
 	"pkg/shelly/types"
 	"pkg/shelly/wifi"
-	"strconv"
-	"time"
-
-	"github.com/go-logr/logr"
-	"github.com/spf13/cobra"
-
-	"github.com/jackpal/gateway"
 )
 
 // options for STA

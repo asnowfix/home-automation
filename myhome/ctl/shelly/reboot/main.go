@@ -1,11 +1,11 @@
-package sys
+package reboot
 
 import (
 	"context"
 	"fmt"
 	"hlog"
-	"myhome/ctl/options"
 	"myhome"
+	"myhome/ctl/options"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/shelly"
@@ -16,12 +16,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func init() {
-	Cmd.AddCommand(rebootCmd)
-}
-
-var rebootCmd = &cobra.Command{
-	Use:   "reboot",
+var Cmd = &cobra.Command{
+	Use:   "reboot <device-name-or-ip>",
 	Short: "Reboot Shelly device",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -40,5 +36,6 @@ func oneDeviceReboot(ctx context.Context, log logr.Logger, via types.Channel, de
 		log.Error(err, "Unable to reboot device", "device", sd.Id())
 		return nil, err
 	}
+	log.Info("Device reboot initiated", "device", sd.Id())
 	return out, nil
 }

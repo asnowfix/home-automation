@@ -9,11 +9,11 @@ import (
 	"myhome"
 	"myhome/devices"
 	"mymqtt"
+	"os"
+	"path/filepath"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/shelly"
-	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/go-logr/logr"

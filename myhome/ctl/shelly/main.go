@@ -1,15 +1,16 @@
 package shelly
 
 import (
-	callCtl "homectl/shelly/call"
-	compsCtl "homectl/shelly/components"
-	jobsCtl "homectl/shelly/jobs"
-	kvsCtl "homectl/shelly/kvs"
-	mqttCtl "homectl/shelly/mqtt"
-	scriptCtl "homectl/shelly/script"
-	setupCtl "homectl/shelly/setup"
-	sysCtl "homectl/shelly/sys"
-	wifiCtl "homectl/shelly/wifi"
+	"myhome/ctl/shelly/call"
+	"myhome/ctl/shelly/components"
+	"myhome/ctl/shelly/jobs"
+	"myhome/ctl/shelly/kvs"
+	"myhome/ctl/shelly/mqtt"
+	"myhome/ctl/shelly/reboot"
+	"myhome/ctl/shelly/script"
+	"myhome/ctl/shelly/setup"
+	"myhome/ctl/shelly/sys"
+	"myhome/ctl/shelly/wifi"
 
 	"github.com/spf13/cobra"
 )
@@ -21,13 +22,14 @@ var Cmd = &cobra.Command{
 }
 
 func init() {
-	Cmd.AddCommand(callCtl.Cmd)
-	Cmd.AddCommand(jobsCtl.Cmd)
-	Cmd.AddCommand(mqttCtl.Cmd)
-	Cmd.AddCommand(kvsCtl.Cmd)
-	Cmd.AddCommand(scriptCtl.Cmd)
-	Cmd.AddCommand(wifiCtl.Cmd)
-	Cmd.AddCommand(sysCtl.Cmd)
-	Cmd.AddCommand(compsCtl.Cmd)
-	Cmd.AddCommand(setupCtl.Cmd)
+	Cmd.AddCommand(call.Cmd)
+	Cmd.AddCommand(jobs.Cmd)
+	Cmd.AddCommand(mqtt.Cmd)
+	Cmd.AddCommand(kvs.Cmd)
+	Cmd.AddCommand(script.Cmd)
+	Cmd.AddCommand(wifi.Cmd)
+	Cmd.AddCommand(sys.Cmd)
+	Cmd.AddCommand(components.Cmd)
+	Cmd.AddCommand(setup.Cmd)
+	Cmd.AddCommand(reboot.Cmd)
 }

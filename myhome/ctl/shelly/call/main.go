@@ -1,19 +1,20 @@
 package call
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"hlog"
-	"homectl/options"
-	"myhome"
-	"pkg/devices"
-	"pkg/shelly"
-	"pkg/shelly/types"
-	"context"
 	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
+	
+	"hlog"
+	"myhome"
+	"myhome/ctl/options"
+	"pkg/devices"
+	"pkg/shelly"
+	"pkg/shelly/types"
 )
 
 var Cmd = &cobra.Command{

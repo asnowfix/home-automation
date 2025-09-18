@@ -46,10 +46,12 @@ type DeviceConfig struct {
 	SysBtnToggle *bool            `json:"sys_btn_toggle,omitempty"` // Enable/disable outputs toggle when the system (reset) button is pressed (shown if applicable)
 }
 
-// TODO: sys_btn_toggle has different effect: In switch mode/profile:
-// If at least one switch is ON -> set all switches to OFF.
-// If all switches are OFF -> set all switches to ON.
-// In cover mode/profile, the device is acting as in cover->in_mode->single configuration (affected device: ShellyPro2PM).
+// TODO: sys_btn_toggle has different effect:
+// In switch mode/profile:
+// - If at least one switch is ON -> set all switches to OFF.
+// - If all switches are OFF -> set all switches to ON.
+// In cover mode/profile:
+// - the device is acting as in cover->in_mode->single configuration (affected device: ShellyPro2PM).
 
 type Enabler struct {
 	Enable bool `json:"enable"`

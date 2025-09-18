@@ -36,11 +36,11 @@ type Event struct {
 
 type ComponentEvent struct {
 	Component       string  `json:"component"`
-	Id              uint32  `json:"id"`
 	Event           string  `json:"event"`
-	RestartRequired bool    `json:"restart_required"`
 	Ts              float64 `json:"ts"`
-	ConfigRevision  uint32  `json:"cfg_rev"`
+	Id              *uint32 `json:"id,omitempty"`
+	RestartRequired *bool   `json:"restart_required,omitempty"`
+	ConfigRevision  *uint32 `json:"cfg_rev,omitempty"`
 }
 
 type Dialog struct {

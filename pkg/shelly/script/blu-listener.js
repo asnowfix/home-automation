@@ -271,25 +271,28 @@ function subscribeEvent() {
   Shelly.addEventHandler(function (eventData) {
     log("Handling event: ", eventData);
     try {
+      if (eventData && eventData.info && eventData.info.event) {
         if (eventData.info.event === CONFIG.eventName) {
-            handleBluEvent(eventData.info.address, eventData.info.data);
-        } else if (eventData && eventData.info && eventData.info.event === "kvs") {
-            var kvsEvent = eventData.info;
-            // Check if the KVS change affects our prefix
-            if (kvsEvent.key && kvsEvent.key.indexOf(CONFIG.kvsPrefix) === 0) {
-              log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
-              loadFollowsFromKVS();
-            }
-        } else if (eventData && eventData.info && eventData.info.component && 
-                   eventData.info.component.indexOf("input:") === 0) {
-            // Local input event detected - cancel all timers (manual operation takes precedence)
-            log("Local input event detected:", eventData.info.component, "event:", eventData.info.event);
+          handleBluEvent(eventData.info.address, eventData.info.data);
+        } else if (eventData.info.event === "kvs") {
+          var kvsEvent = eventData.info;
+          // Check if the KVS change affects our prefix
+          if (kvsEvent.key && kvsEvent.key.indexOf(CONFIG.kvsPrefix) === 0) {
+            log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
+            loadFollowsFromKVS();
+          } else if (eventData.info.event === "remote-input-event") {
+            log("Remote input event detected (cancelAllTimers)");
             cancelAllTimers();
+          } else if (eventData.info.component && eventData.info.component.indexOf("input:") === 0) {
+              log("Local input event detected (cancelAllTimers)");
+              cancelAllTimers();
+          }
         }
+      }
     } catch (e) {
         log("Error handling event: ", e);
     }
-});
+  });
 }
 
 // Init

@@ -35,10 +35,12 @@ var BluCmd = &cobra.Command{
 		payload := make(map[string]any)
 		payload["switch_id"] = bluFlagSwitchID
 		payload["auto_off"] = bluFlagAutoOff
-		if cmd.Flags().Changed("illuminance-min") {
+		if cmd.Flags().Changed("illuminance-min") && bluFlagIllumMin > 0 {
 			payload["illuminance_min"] = bluFlagIllumMin
 		}
-		payload["illuminance_max"] = bluFlagIllumMax
+		if cmd.Flags().Changed("illuminance-max") && bluFlagIllumMax > 0 {
+			payload["illuminance_max"] = bluFlagIllumMax
+		}
 		if cmd.Flags().Changed("next-switch") && strings.TrimSpace(bluFlagNextSwitch) != "" {
 			payload["next_switch"] = bluFlagNextSwitch
 		}

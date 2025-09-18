@@ -43,7 +43,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 						}
 						log.Info("Browsed", "entry", entry)
 
-						err = completeEntry(ctx, log, dr, entry)
+						entry, err = completeEntry(ctx, log, dr, entry)
 						if err != nil {
 							log.Error(err, "Failed to complete zeroconf entry", "entry", entry)
 							continue
@@ -92,7 +92,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 	return nil
 }
 
-func completeEntry(ctx context.Context, log logr.Logger, resolver mynet.Resolver, entry *zeroconf.ServiceEntry) error {
+func completeEntry(ctx context.Context, log logr.Logger, resolver mynet.Resolver, entry *zeroconf.ServiceEntry) (*zeroconf.ServiceEntry, error) {
 
 	ips := make([]net.IP, 0)
 	if len(entry.AddrIPv4) != 0 || len(entry.AddrIPv6) != 0 {
@@ -114,7 +114,7 @@ func completeEntry(ctx context.Context, log logr.Logger, resolver mynet.Resolver
 		ips, err = resolver.LookupHost(ctx, entry.HostName)
 		if err != nil || len(ips) == 0 {
 			log.Error(err, "Failed to resolve", "hostname", entry.HostName)
-			return err
+			return entry, err
 		}
 		if len(ips) > 0 {
 			entry.AddrIPv4 = make([]net.IP, 0)
@@ -131,11 +131,11 @@ func completeEntry(ctx context.Context, log logr.Logger, resolver mynet.Resolver
 
 	if len(ips) == 0 {
 		err = fmt.Errorf("no IP addresses found for hostname %s", entry.HostName)
-		return err
+		return entry, err
 	}
 
-	log.Info("Resolved from mDNS entry", "entry", entry)
-	return nil
+	log.Info("Resolved from mDNS entry", "entry", entry, "ipv4", entry.AddrIPv4, "ipv6", entry.AddrIPv6)
+	return entry, nil
 }
 
 // // function type that knows how to mak a zerofon entry into a device

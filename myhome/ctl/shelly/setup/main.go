@@ -49,7 +49,7 @@ func init() {
 	Cmd.Flags().StringVar(&apPasswd, "ap-passwd", "", "AP Password")
 	Cmd.Flags().StringVar(&mqttBroker, "mqtt-broker", "mqtt.local", "MQTT broker address")
 	Cmd.Flags().IntVar(&mqttPort, "mqtt-port", 1883, "MQTT broker port")
-	Cmd.AddCommand()
+	// No subcommands for setup
 }
 
 var Cmd = &cobra.Command{
@@ -219,10 +219,10 @@ Arguments:
 					time.Sleep(3 * time.Second)
 					status, err = system.GetStatus(ctx, via, sd)
 					if err != nil {
+						hlog.Logger.Info("Device rebooted", "device", sd.Id(), "status", status)
 						return nil, err
 					}
 				}
-				hlog.Logger.Info("Device rebooted", "device", sd.Id(), "status", status)
 			}
 
 			// load watchdog.js as script #1

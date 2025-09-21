@@ -19,6 +19,8 @@ import (
 //go:embed *.js
 var content embed.FS
 
+// Package logger is declared in ops.go
+
 func ListAvailable() ([]string, error) {
 	dir, err := content.ReadDir(".")
 	if err != nil {

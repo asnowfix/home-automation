@@ -12,7 +12,10 @@ import (
 )
 
 func debugInit(msg string) {
-	fmt.Fprintln(os.Stderr, msg)
+	// Only output debug messages if MYHOME_DEBUG_INIT is set
+	if os.Getenv("MYHOME_DEBUG_INIT") != "" {
+		fmt.Fprintln(os.Stderr, "hlog: "+msg)
+	}
 }
 
 func IsTerminal() bool {

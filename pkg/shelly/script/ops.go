@@ -6,6 +6,7 @@ import (
 	"reflect"
 
 	"github.com/go-logr/logr"
+	"hlog"
 )
 
 var log logr.Logger
@@ -35,6 +36,7 @@ const (
 )
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
+	log = hlog.GetLogger("pkg/shelly/script")
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
 		// InputType:  reflect.TypeOf(ConfigurationRequest{}),

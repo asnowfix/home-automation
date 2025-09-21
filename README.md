@@ -11,6 +11,13 @@ MyHome Penates is the home automation system I develop & use to control my house
   - [Releases](#releases)
   - [Development Tools](#development-tools)
     - [Shelly Device Data Collector](#shelly-device-data-collector)
+  - [Logging System](#logging-system)
+    - [Log Levels](#log-levels)
+    - [Usage Examples](#usage-examples)
+    - [Available Flags](#available-flags)
+    - [VSCode Development](#vscode-development)
+    - [Per-Package Logging](#per-package-logging)
+    - [Environment Variables](#environment-variables)
   - [Usage - Linux](#usage---linux)
     - [Is daemon running?](#is-daemon-running)
     - [Manual start](#manual-start)
@@ -83,6 +90,64 @@ go build -o datacollector .
 Results are saved to `test_data/shelly_api_test_data_YYYYMMDD_HHMMSS.json` for use in automated testing.
 
 For detailed documentation, see the [Data Collector README](cmd/datacollector/README.md).
+
+## Logging System
+
+MyHome uses a flexible, per-package logging system with automatic environment detection for optimal development and production experience.
+
+### Log Levels
+
+The system supports standard log levels with different default behaviors based on the execution environment:
+
+| **Environment** | **Default Level** | **Description** |
+|-----------------|-------------------|-----------------|
+| **Normal CLI** | `error` | Clean output for production use |
+| **VSCode Debug** | `debug` | **Auto-detected**, full debugging info |
+| **Daemon** | `warning` | Service-appropriate visibility |
+| **Manual flags** | As specified | `--verbose`, `--debug`, `-L level` |
+
+### Usage Examples
+
+```bash
+# Clean output (error level - default for CLI)
+myhome ctl list
+
+# Info level logging (verbose)
+myhome ctl --verbose list
+myhome ctl -v list
+
+# Info level logging (explicit)
+myhome ctl --log-level info list
+myhome ctl -L info list
+
+# Debug level logging
+myhome ctl --debug list
+myhome ctl --log-level debug list
+myhome ctl -L debug list
+
+# Specific log levels
+myhome ctl -L warn list    # Warning level
+myhome ctl -L error list   # Error level only
+```
+
+### Available Flags
+
+- **`-v, --verbose`**: Verbose output (equivalent to `--log-level info`)
+- **`--debug`**: Debug output (equivalent to `--log-level debug`)
+- **`-L, --log-level`**: Set explicit log level (`error`, `warn`, `info`, `debug`)
+
+### VSCode Development
+
+When running processes through VSCode's debugger (launch.json), the logging system **automatically detects** the development environment and enables debug-level logging without any configuration changes. This provides rich debugging information during development while maintaining clean output for production use.
+
+### Per-Package Logging
+
+The system provides per-package loggers with context information. Each package gets its own named logger (e.g., `pkg/shelly/script`, `myhome/ctl/shelly`) for better log organization and debugging.
+
+### Environment Variables
+
+- **`MYHOME_LOG=stderr`**: Force logging to stderr (automatically set in VSCode launch configs)
+- **`MYHOME_DEBUG_INIT=1`**: Show logging system initialization messages (for debugging the logger itself)
 
 ## Usage - Linux
 

@@ -17,7 +17,7 @@ import (
 	"pkg/shelly/types"
 	"pkg/shelly/wifi"
 
-	"homectl/options"
+	"myhome/ctl/options"
 )
 
 func init() {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"hlog"
 	"myhome"
-	"mymqtt"
+	mqttclient "myhome/mqtt"
 	"reflect"
 
 	"github.com/go-logr/logr"
@@ -15,11 +15,11 @@ import (
 
 	"pkg/devices"
 	shellyapi "pkg/shelly"
-	"pkg/shelly/mqtt"
+	shellymqtt "pkg/shelly/mqtt"
 	"pkg/shelly/shelly"
 	"pkg/shelly/types"
 
-	"homectl/options"
+	"myhome/ctl/options"
 )
 
 func init() {
@@ -41,12 +41,12 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
-	out, err := sd.CallE(ctx, via, mqtt.GetConfig.String(), nil)
+	out, err := sd.CallE(ctx, via, shellymqtt.GetConfig.String(), nil)
 	if err != nil {
 		log.Error(err, "Unable to get MQTT config")
 		return nil, err
 	}
-	config, ok := out.(*mqtt.Config)
+	config, ok := out.(*shellymqtt.Config)
 	if !ok {
 		log.Error(nil, "Invalid MQTT config type", "type", reflect.TypeOf(out))
 		return nil, fmt.Errorf("invalid MQTT config type %T (should be *mqtt.Config)", out)
@@ -57,21 +57,21 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 	config.RpcNotifs = true
 	config.StatusNotifs = true
 
-	mc, err := mymqtt.GetClientE(ctx)
+	mc, err := mqttclient.GetClientE(ctx)
 	if err != nil {
 		log.Error(err, "Unable to get MQTT client to reach device")
 		return nil, err
 	}
 	config.Server = mc.BrokerUrl().String()
 
-	out, err = sd.CallE(ctx, via, mqtt.SetConfig.String(), mqtt.SetConfigRequest{
+	out, err = sd.CallE(ctx, via, shellymqtt.SetConfig.String(), shellymqtt.SetConfigRequest{
 		Config: *config,
 	})
 	if err != nil {
 		log.Error(err, "Unable to set MQTT config")
 		return nil, err
 	}
-	res, ok := out.(*mqtt.SetConfigResponse)
+	res, ok := out.(*shellymqtt.SetConfigResponse)
 	if !ok {
 		log.Error(nil, "Invalid MQTT set config response type", "type", reflect.TypeOf(out))
 		return nil, fmt.Errorf("invalid MQTT set config response type %T", out)
@@ -84,12 +84,12 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 		}
 	}
 
-	out, err = sd.CallE(ctx, via, mqtt.GetConfig.String(), nil)
+	out, err = sd.CallE(ctx, via, shellymqtt.GetConfig.String(), nil)
 	if err != nil {
 		log.Error(err, "Unable to get MQTT config")
 		return nil, err
 	}
-	config, ok = out.(*mqtt.Config)
+	config, ok = out.(*shellymqtt.Config)
 	if !ok {
 		log.Error(nil, "Invalid MQTT config type", "type", reflect.TypeOf(out))
 		return nil, fmt.Errorf("invalid MQTT config type %T (should be *mqtt.Config)", out)

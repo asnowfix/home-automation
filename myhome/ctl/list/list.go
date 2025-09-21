@@ -3,8 +3,8 @@ package list
 import (
 	"encoding/json"
 	"fmt"
-	"homectl/options"
 	"myhome"
+	"myhome/ctl/options"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"

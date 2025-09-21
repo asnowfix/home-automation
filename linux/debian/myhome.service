@@ -8,8 +8,19 @@ After=local-fs.target network.target
 Type=simple
 ExecStart=/usr/bin/myhome daemon run --disable-device-manager
 Restart=on-failure
-RestartSec=5
+RestartSec=10
 WorkingDirectory=/var/lib/myhome
+#User=myhome
+StandardOutput=journal
+StandardError=journal
+
+# Restart the service if it fails due to MQTT issues
+RestartKillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=30
+
+# Environment variables
+Environment=HOME=/var/lib/myhome
 
 [Install]
 # multi-user.target normally defines a system state where all network services

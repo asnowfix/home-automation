@@ -1,9 +1,5 @@
 module myhome/groups
 
-go 1.23.0
+go 1.24.2
 
-require (
-)
-
-require (
-)
+toolchain go1.24.3

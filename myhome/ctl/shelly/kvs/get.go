@@ -15,7 +15,7 @@ import (
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 
-	"homectl/options"
+	"myhome/ctl/options"
 )
 
 func init() {

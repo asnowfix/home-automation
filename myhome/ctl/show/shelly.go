@@ -8,7 +8,7 @@ import (
 	shellyapi "pkg/shelly"
 	"reflect"
 
-	"homectl/options"
+	"myhome/ctl/options"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"

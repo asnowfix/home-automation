@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
-	"homectl/options"
 	"myhome"
+	"myhome/ctl/options"
 	"reflect"
 
 	"gopkg.in/yaml.v3"

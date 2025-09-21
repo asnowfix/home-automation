@@ -6,7 +6,7 @@ require (
 	github.com/go-logr/logr v1.4.3
 	github.com/spf13/cobra v1.10.1
 	hlog v0.0.0-00010101000000-000000000000
-	homectl/options v0.0.0-00010101000000-000000000000
+	myhome/ctl/options v0.0.0-00010101000000-000000000000
 	internal/global v0.0.0-00010101000000-000000000000
 	internal/myhome v0.0.0-00010101000000-000000000000
 	internal/myip v0.0.0-00010101000000-000000000000
@@ -17,7 +17,7 @@ require (
 
 replace hlog => ./hlog
 
-replace homectl/options => ./myhome/ctl/options
+replace myhome/ctl/options => ./myhome/ctl/options
 
 replace internal/global => ./internal/global
 
@@ -84,7 +84,6 @@ require (
 	google.golang.org/protobuf v1.33.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	mymqtt v0.0.0-00010101000000-000000000000 // indirect
 	pkg/shelly/shttp v0.0.0-00010101000000-000000000000 // indirect
 	pkg/shelly/sswitch v0.0.0-00010101000000-000000000000 // indirect
 )

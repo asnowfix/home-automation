@@ -5,21 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"global"
-	"homectl/options"
 	"myhome"
+	"myhome/ctl/options"
 	"myhome/devices"
-	"mymqtt"
+	mqttclient "myhome/mqtt"
 	"os"
 	"path/filepath"
 	shellyapi "pkg/shelly"
-	"pkg/shelly/mqtt"
+	shellymqtt "pkg/shelly/mqtt"
 	"pkg/shelly/shelly"
 	"time"
 
 	"github.com/go-logr/logr"
 )
 
-func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices.DeviceRegistry) error {
+func Mqtt(ctx context.Context, mc *mqttclient.Client, dm devices.Manager, db devices.DeviceRegistry) error {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 
 	topic := "+/events/rpc"
@@ -59,7 +59,7 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 					}
 				}
 
-				event := &mqtt.Event{}
+				event := &shellymqtt.Event{}
 				err := json.Unmarshal(msg, &event)
 				if err != nil {
 					log.Error(err, "Failed to unmarshal RPC event from payload", "payload", string(msg))
@@ -111,7 +111,7 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 	return nil
 }
 
-func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Event) error {
+func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqtt.Event) error {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 
 	// Events like:
@@ -143,7 +143,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Even
 	// - '{"src":"shellypro3-34987a48c26c","dst":"shellypro3-34987a48c26c/events","method":"NotifyEvent","params":{"ts":1758144175.54,"events":[{"component":"sys","event":"sys_btn_push","ts":1758144175.54}]}}'
 	if event.Method == "NotifyEvent" {
 		if event.Params != nil {
-			evs, ok := (*event.Params)["events"].([]mqtt.ComponentEvent)
+			evs, ok := (*event.Params)["events"].([]shellymqtt.ComponentEvent)
 			if ok {
 				for _, ev := range evs {
 					log.Info("Event", "component", ev.Component, "event", ev.Event)

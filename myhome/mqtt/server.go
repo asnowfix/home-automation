@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"mymqtt"
 	"mynet"
 	"net"
 	"os"
 
 	"github.com/go-logr/logr"
 
-	mmqtt "github.com/mochi-mqtt/server/v2"
+	mochimmqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
 	"github.com/mochi-mqtt/server/v2/hooks/debug"
 	"github.com/mochi-mqtt/server/v2/listeners"
@@ -21,7 +20,7 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 	log.Info("Starting MyHome", "program", program)
 
 	// Create the new MQTT Server.
-	mqttServer := mmqtt.New(nil)
+	mqttServer := mochimmqtt.New(nil)
 
 	// Configure the MQTT server so that every message is logged.
 	mqttServer.Log = slog.New(logr.ToSlogHandler(log))
@@ -43,8 +42,8 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 	// Create a new MQTT TCP listener on a standard port.
 	tcp := listeners.NewTCP(listeners.Config{
 		ID:      "tcp",
-		Address: fmt.Sprintf(":%d", mymqtt.PRIVATE_PORT),
-		// Address: mymqtt.Broker(log, true).Host,
+		Address: fmt.Sprintf(":%d", PRIVATE_PORT),
+		// Address: Broker(log, true).Host,
 	})
 
 	err = mqttServer.AddListener(tcp)
@@ -70,7 +69,7 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 		instance = host
 	}
 
-	resolver.WithLocalName(ctx, mymqtt.HOSTNAME)
+	resolver.WithLocalName(ctx, HOSTNAME)
 
 	// Register the MQTT broker service with mDNS.
 	iface, _, err := mynet.MainInterface(log)
@@ -81,13 +80,13 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 	ifaces := make([]net.Interface, 1)
 	ifaces[0] = *iface
 
-	mdnsServer, err := resolver.PublishService(ctx, instance, mymqtt.ZEROCONF_SERVICE, "local.", mymqtt.PRIVATE_PORT, info, ifaces)
+	mdnsServer, err := resolver.PublishService(ctx, instance, ZEROCONF_SERVICE, "local.", PRIVATE_PORT, info, ifaces)
 	if err != nil {
 		log.Error(err, "Unable to register new ZeroConf service")
 		return err
 	}
 
-	log.Info("Started new MQTT broker", "mdns_server", mdnsServer, "mdns_service", mymqtt.ZEROCONF_SERVICE)
+	log.Info("Started new MQTT broker", "mdns_server", mdnsServer, "mdns_service", ZEROCONF_SERVICE)
 
 	go func(ctx context.Context) {
 		<-ctx.Done()

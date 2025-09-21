@@ -17,7 +17,7 @@ import (
 	"pkg/shelly/mqtt"
 	"pkg/shelly/types"
 
-	"homectl/options"
+	"myhome/ctl/options"
 )
 
 func init() {

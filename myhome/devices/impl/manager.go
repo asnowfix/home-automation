@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"global"
-	"homectl/options"
 	"myhome"
+	"myhome/ctl/options"
 	"myhome/daemon/watch"
 	mhd "myhome/devices"
 	"myhome/groups"
+	"myhome/mqtt"
 	"myhome/storage"
-	"mymqtt"
 	"mynet"
 	"pkg/devices"
 	"pkg/shelly"
@@ -31,11 +31,11 @@ type DeviceManager struct {
 	refreshed  chan *myhome.Device
 	cancel     context.CancelFunc
 	log        logr.Logger
-	mqttClient *mymqtt.Client
+	mqttClient *mqtt.Client
 	resolver   mynet.Resolver
 }
 
-func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient *mymqtt.Client) *DeviceManager {
+func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient *mqtt.Client) *DeviceManager {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 	return &DeviceManager{
 		dr:         mhd.NewCache(ctx, s),

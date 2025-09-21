@@ -18,7 +18,7 @@ import (
 	"pkg/shelly/types"
 	"pkg/shelly/wifi"
 
-	"homectl/options"
+	"myhome/ctl/options"
 )
 
 var flags struct {

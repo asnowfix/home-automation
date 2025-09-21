@@ -3,9 +3,10 @@ package script
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"embed"
+	"encoding/hex"
 	"fmt"
-	"global"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 	"reflect"
@@ -312,6 +313,42 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 		return 0, err
 	}
 
+	// Compute version as the sha1 checksum of the script before its minification
+	h := sha1.New()
+	h.Write(buf)
+	version := hex.EncodeToString(h.Sum(nil))
+
+	// read the scrip version from the KVS
+	kvsKey := fmt.Sprintf("script/%s", name)
+	kvsVersion := ""
+	out, err := kvs.GetValue(ctx, log, via, device, kvsKey)
+	if err != nil || out == nil {
+		log.Error(err, "Unable to get KVS entry for script version", "key", kvsKey)
+		// Don't fail the upload if KVS fails, just log the error
+	} else {
+		kvsVersion = out.Value
+		log.Info("Got KVS entry for script version", "key", kvsKey, "version", kvsVersion)
+	}
+
+	var id uint32
+	if version != kvsVersion {
+		log.Info("Script version is different, uploading new one", "name", name, "version", version)
+		id, err = doUpload(ctx, via, device, name, buf, minify, kvsKey, version)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		log.Info("Script version is the same, skipping upload", "name", name, "version", version)
+	}
+	_, err = StartStopDelete(ctx, via, device, name, Start)
+	if err != nil {
+		log.Error(err, "Unable to start script", "name", name)
+		return 0, err
+	}
+	return id, nil
+}
+
+func doUpload(ctx context.Context, via types.Channel, device types.Device, name string, buf []byte, minify bool, versionKey string, version string) (uint32, error) {
 	// Minify before splitting and uploading (only if requested)
 	if minify {
 		origLen := len(buf)
@@ -394,23 +431,13 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 	}
 	log.Info("Configured script", "name", name, "id", id, "out", out)
 
-	// start now
-	out, err = device.CallE(ctx, via, string(Start), &StatusStartStopDeleteRequest{Id: id})
-	if err != nil {
-		log.Error(err, "Unable to start script", "id", id, "name", name)
-		return 0, err
-	}
-	log.Info("Started script", "name", name, "id", id, "out", out)
-
 	// Create/update KVS entry with script version
-	kvsKey := fmt.Sprintf("script/%s", name)
-	version := global.Version(ctx)
-	_, err = kvs.SetKeyValue(ctx, log, via, device, kvsKey, version)
+	_, err = kvs.SetKeyValue(ctx, log, via, device, versionKey, version)
 	if err != nil {
-		log.Error(err, "Unable to set KVS entry for script version", "key", kvsKey, "version", version)
+		log.Error(err, "Unable to set KVS entry for script version", "key", versionKey, "version", version)
 		// Don't fail the upload if KVS fails, just log the error
 	} else {
-		log.Info("Set KVS entry for script version", "key", kvsKey, "version", version)
+		log.Info("Set KVS entry for script version", "key", versionKey, "version", version)
 	}
 
 	return id, nil

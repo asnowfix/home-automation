@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
-	"homectl/options"
 	"myhome"
+	"myhome/ctl/options"
 	"reflect"
 
 	"github.com/spf13/cobra"

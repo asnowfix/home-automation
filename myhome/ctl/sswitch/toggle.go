@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"hlog"
-	"homectl/options"
 	"myhome"
+	"myhome/ctl/options"
 	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
@@ -22,7 +22,7 @@ var switchId int
 
 func init() {
 	Cmd.PersistentFlags().IntVarP(&switchId, "switch", "S", 0, "Use this switch ID.")
-	
+
 	Cmd.AddCommand(toggleCmd)
 	Cmd.AddCommand(onCmd)
 	Cmd.AddCommand(offCmd)

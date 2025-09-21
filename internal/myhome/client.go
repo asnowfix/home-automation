@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"mymqtt"
+	"myhome/mqtt"
 	"net"
 	"pkg/devices"
 	"pkg/shelly"
@@ -40,7 +40,7 @@ func (hc *client) start(ctx context.Context) {
 		hc.log.Info("Client already started", "me", hc.me)
 		return
 	}
-	mc, err := mymqtt.GetClientE(ctx)
+	mc, err := mqtt.GetClientE(ctx)
 	if err != nil {
 		hc.log.Error(err, "Failed to get MQTT client")
 		return

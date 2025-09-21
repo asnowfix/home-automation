@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
-	"homectl/options"
 	"myhome"
+	"myhome/ctl/options"
 	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
@@ -32,7 +32,7 @@ func init() {
 	// Add subcommands to follow
 	FollowCmd.AddCommand(ShellyCmd)
 	FollowCmd.AddCommand(BluCmd)
-	
+
 	// Keep the original follow/unfollow commands for backward compatibility
 	FollowCmd.PersistentFlags().Uint32VarP(&options.Flags.SwitchId, "switch-id", "i", 0, "Switch Id, if relevant")
 	UnfollowCmd.PersistentFlags().Uint32VarP(&options.Flags.SwitchId, "switch-id", "i", 0, "Switch Id, if relevant")

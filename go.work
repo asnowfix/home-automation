@@ -4,6 +4,13 @@ use (
 	.
 	./cmd/wsl-mdns-bridge
 	./hlog
+	./internal/debug
+	./internal/global
+	./internal/myhome
+	./internal/myip
+	./internal/mynet
+	./internal/myzone
+	./internal/tools
 	./myhome/ctl
 	./myhome/ctl/follow
 	./myhome/ctl/forget
@@ -15,13 +22,6 @@ use (
 	./myhome/ctl/shelly
 	./myhome/ctl/show
 	./myhome/ctl/sswitch
-	./internal/debug
-	./internal/global
-	./internal/myhome
-	./internal/myip
-	./internal/mynet
-	./internal/myzone
-	./internal/tools
 	./myhome/daemon
 	./myhome/daemon/watch
 	./myhome/devices
@@ -29,7 +29,6 @@ use (
 	./myhome/groups
 	./myhome/mqtt
 	./myhome/storage
-	./mymqtt
 	./pkg/devices
 	./pkg/sfr
 	./pkg/shelly

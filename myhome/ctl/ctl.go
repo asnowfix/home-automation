@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"global"
+	"myhome"
 	"myhome/ctl/follow"
 	"myhome/ctl/forget"
 	"myhome/ctl/group"
@@ -14,13 +15,11 @@ import (
 	"myhome/ctl/shelly"
 	"myhome/ctl/show"
 	"myhome/ctl/sswitch"
-	"myhome"
+	mqttclient "myhome/mqtt"
 	"os"
 	shellyPkg "pkg/shelly"
 	"pkg/shelly/types"
 	"runtime/pprof"
-
-	"mymqtt"
 
 	"hlog"
 
@@ -28,7 +27,6 @@ import (
 
 	"github.com/spf13/cobra"
 )
-
 
 var Cmd = &cobra.Command{
 	Use:   "ctl",
@@ -59,7 +57,7 @@ var Cmd = &cobra.Command{
 		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout, Version)
 		cmd.SetContext(ctx)
 
-		err := mymqtt.NewClientE(ctx, log, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+		err := mqttclient.NewClientE(ctx, log, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
@@ -90,7 +88,7 @@ var Cmd = &cobra.Command{
 			defer pprof.StopCPUProfile()
 		}
 
-		mc, err := mymqtt.GetClientE(ctx)
+		mc, err := mqttclient.GetClientE(ctx)
 		if err != nil {
 			return err
 		}

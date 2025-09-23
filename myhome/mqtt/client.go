@@ -305,7 +305,7 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan [
 			// log.Info("Waiting for message", "topic", topic)
 			select {
 			case <-ctx.Done():
-				log.Error(ctx.Err(), "Context done", "topic", topic)
+				// Don't log context cancellation as an error
 				return
 			case msg, ok := <-mch:
 				if !ok {
@@ -357,7 +357,7 @@ func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (chan 
 
 	go func(ctx context.Context, log logr.Logger) {
 		<-ctx.Done()
-		log.Error(ctx.Err(), "Context done", "topic", topic)
+		// Don't log context cancellation as an error
 		token := c.mqtt.Unsubscribe(topic)
 		if token.WaitTimeout(c.timeout) {
 			log.Info("Unsubscribed", "from topic", topic)

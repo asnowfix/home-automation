@@ -28,8 +28,7 @@ const DEVICE_REFRESH_INTERVAL time.Duration = 1 * time.Minute
 var Flags struct {
 	CpuProfile      string
 	Verbose         bool
-	Debug           bool
-	LogLevel        string        // the value taken by --log-level (error, warn, info, debug)
+	Quiet           bool
 	Json            bool
 	MqttBroker      string
 	MqttTimeout     time.Duration // the value taken by --mqtt-timeout / -T

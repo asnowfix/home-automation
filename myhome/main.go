@@ -22,7 +22,14 @@ var Cmd = &cobra.Command{
 	Use:  "myhome",
 	Args: cobra.NoArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		hlog.Init(options.Flags.Verbose)
+		// For daemon commands, default to verbose unless --quiet is specified
+		isDaemon := cmd.Name() == "daemon" || cmd.Parent() != nil && cmd.Parent().Name() == "daemon"
+		verbose := options.Flags.Verbose
+		if isDaemon {
+			verbose = !options.Flags.Quiet // daemon is verbose by default unless --quiet
+		}
+		
+		hlog.Init(verbose)
 		log := hlog.Logger
 		ctx := cmd.Context()
 
@@ -69,6 +76,7 @@ var Cmd = &cobra.Command{
 func init() {
 	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "P", "", "write CPU profile to `file`")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Quiet, "quiet", "q", false, "quiet output (suppress info logs)")
 	Cmd.AddCommand(daemon.Cmd)
 	Cmd.AddCommand(ctl.Cmd)
 }

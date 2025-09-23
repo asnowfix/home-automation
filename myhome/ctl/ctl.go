@@ -24,7 +24,6 @@ import (
 
 	"debug"
 
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 )
 
@@ -33,7 +32,9 @@ var Cmd = &cobra.Command{
 	Short: "Control and manage home automation devices",
 	Args:  cobra.NoArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		hlog.InitWithLevel(options.Flags.LogLevel, options.Flags.Verbose, options.Flags.Debug, zerolog.ErrorLevel)
+		// For ctl commands, default to quiet (error level) unless --verbose is specified
+		verbose := options.Flags.Verbose && !options.Flags.Quiet
+		hlog.Init(verbose)
 		log := hlog.Logger
 		ctx := cmd.Context()
 
@@ -103,9 +104,8 @@ var Cmd = &cobra.Command{
 
 func init() {
 	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "P", "", "write CPU profile to `file`")
-	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output (equivalent to --log-level info)")
-	Cmd.PersistentFlags().BoolVar(&options.Flags.Debug, "debug", false, "debug output (equivalent to --log-level debug)")
-	Cmd.PersistentFlags().StringVarP(&options.Flags.LogLevel, "log-level", "L", "", "set log level: error, warn, info, debug (default: error)")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Quiet, "quiet", "q", false, "quiet output (suppress info logs)")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.CommandTimeout, "timeout", "", options.COMMAND_DEFAULT_TIMEOUT, "Timeout for overall command")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", options.MQTT_DEFAULT_TIMEOUT, "Timeout for MQTT operations")

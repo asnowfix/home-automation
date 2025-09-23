@@ -170,7 +170,7 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 	var resStr []byte
 	select {
 	case <-ctx.Done():
-		hc.log.Error(ctx.Err(), "Waiting for response to method", "method", req.Method)
+		// Don't log context cancellation as an error
 		return nil, ctx.Err()
 	case resStr = <-hc.from:
 		hc.log.Info("Response", "payload", resStr)

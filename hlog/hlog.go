@@ -1,6 +1,8 @@
 package hlog
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,16 +25,16 @@ func LogToStderr() bool {
 }
 
 func Init(verbose bool) {
-	InitWithLevel("", verbose, false, zerolog.ErrorLevel)
+	InitWithLevel(verbose, zerolog.ErrorLevel)
 }
 
-// InitForDaemon initializes logging for daemon processes with warning level as default
-func InitForDaemon(logLevel string, verbose bool, debug bool) {
-	InitWithLevel(logLevel, verbose, debug, zerolog.WarnLevel)
+// InitForDaemon initializes logging for daemon processes with info level as default (verbose by default)
+func InitForDaemon(verbose bool) {
+	InitWithLevel(verbose, zerolog.InfoLevel)
 }
 
-// InitWithLevel initializes logging with a specific level and default level
-func InitWithLevel(logLevel string, verbose bool, debug bool, defaultLevel zerolog.Level) {
+// InitWithLevel initializes logging with a specific default level
+func InitWithLevel(verbose bool, defaultLevel zerolog.Level) {
 	debugInit("Initializing logger")
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
@@ -68,8 +70,9 @@ func InitWithLevel(logLevel string, verbose bool, debug bool, defaultLevel zerol
 	}
 
 	// Determine log level
-	level := parseLogLevel(logLevel, verbose, debug, defaultLevel)
+	level := parseLogLevel(verbose, defaultLevel)
 	zerolog.SetGlobalLevel(level)
+	zl = zl.Level(level)
 
 	zl = zl.With().Caller().Timestamp().Logger()
 	Logger = zerologr.New(&zl)
@@ -78,38 +81,17 @@ func InitWithLevel(logLevel string, verbose bool, debug bool, defaultLevel zerol
 	debugInit("Logger initialization complete")
 }
 
-// parseLogLevel converts string log level to zerolog level
-func parseLogLevel(logLevel string, verbose bool, debug bool, defaultLevel zerolog.Level) zerolog.Level {
+// parseLogLevel converts verbose flag to zerolog level
+func parseLogLevel(verbose bool, defaultLevel zerolog.Level) zerolog.Level {
 	// Auto-detect VSCode debugger and force debug level
 	if isRunningUnderDebugger() {
 		debugInit("VSCode debugger detected, forcing debug log level")
 		return zerolog.DebugLevel
 	}
 	
-	// Handle debug flag (highest priority)
-	if debug {
-		return zerolog.DebugLevel
-	}
-	
 	// Handle verbose flag (--verbose = info level)
-	if verbose && logLevel == "" {
+	if verbose {
 		return zerolog.InfoLevel
-	}
-	
-	// Handle explicit log level
-	if logLevel != "" {
-		switch strings.ToLower(logLevel) {
-		case "debug":
-			return zerolog.DebugLevel
-		case "info":
-			return zerolog.InfoLevel
-		case "warn", "warning":
-			return zerolog.WarnLevel
-		case "error":
-			return zerolog.ErrorLevel
-		default:
-			return defaultLevel
-		}
 	}
 	
 	// Use the provided default level if nothing specified
@@ -248,4 +230,26 @@ func extractPackageName(filePath string) string {
 	// Fallback: use the directory name
 	dir := filepath.Dir(filePath)
 	return filepath.Base(dir)
+}
+
+// IsContextCancellation checks if an error is due to context cancellation
+func IsContextCancellation(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// ErrorIfNotCanceled logs an error only if it's not due to context cancellation
+func ErrorIfNotCanceled(log logr.Logger, err error, msg string, keysAndValues ...interface{}) {
+	if err != nil && !IsContextCancellation(err) {
+		log.Error(err, msg, keysAndValues...)
+	}
+}
+
+// LogContextDone logs context cancellation appropriately (as info, not error)
+func LogContextDone(ctx context.Context, log logr.Logger, msg string, keysAndValues ...interface{}) {
+	if ctx.Err() != nil {
+		log.Info(msg+" (context done)", keysAndValues...)
+	}
 }

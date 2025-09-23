@@ -16,7 +16,6 @@ import (
 
 func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry, dr mynet.Resolver) error {
 	log := ctx.Value(global.LogKey).(logr.Logger)
-
 	go func(ctx context.Context, log logr.Logger) error {
 		stopped := make(chan struct{}, 1)
 		scan := make(chan *zeroconf.ServiceEntry, 1)
@@ -32,7 +31,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 				for {
 					select {
 					case <-ctx.Done():
-						log.Error(ctx.Err(), "Cancelled")
+						// Don't log context cancellation as an error
 						stopped <- struct{}{}
 						return ctx.Err()
 
@@ -81,7 +80,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 
 			select {
 			case <-ctx.Done():
-				log.Error(ctx.Err(), "Cancelled")
+				// Don't log context cancellation as an error
 				return ctx.Err()
 			case <-stopped:
 				log.Info("Restarting ZeroConf browser")

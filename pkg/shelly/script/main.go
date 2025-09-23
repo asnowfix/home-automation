@@ -323,12 +323,12 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 	// read the scrip version from the KVS
 	kvsKey := fmt.Sprintf("script/%s", name)
 	kvsVersion := ""
-	out, err := kvs.GetValue(ctx, log, via, device, kvsKey)
-	if err != nil || out == nil {
+	res, err := kvs.GetValue(ctx, log, via, device, kvsKey)
+	if err != nil || res == nil {
 		log.Error(err, "Unable to get KVS entry for script version", "key", kvsKey)
 		// Don't fail the upload if KVS fails, just log the error
 	} else {
-		kvsVersion = out.Value
+		kvsVersion = res.Value
 		log.Info("Got KVS entry for script version", "key", kvsKey, "version", kvsVersion)
 	}
 

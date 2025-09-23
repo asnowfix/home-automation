@@ -10,11 +10,18 @@
  * @typedef {Object} FollowConfig
  * @property {string} switch_id - The switch ID to be used for turning on the switch.
  * @property {number} auto_off - The number of seconds to wait before turning off the switch.
- * @property {number} illuminance_min - The minimum illuminance value in lux.
- * @property {number} illuminance_max - The maximum illuminance value in lux.
+ * @property {number|string} illuminance_min - The minimum illuminance value in lux, or percentage string (e.g., "20%").
+ * @property {number|string} illuminance_max - The maximum illuminance value in lux, or percentage string (e.g., "80%").
  * @property {string} next_switch - The next switch ID to be used for turning on the switch.
  * @example
- * {"switch_id":"switch:0","auto_off":500,"illuminance_min":10}
+ * {"switch_id":"switch:0","auto_off":500,"illuminance_min":"20%","illuminance_max":"80%"}
+ * {"switch_id":"switch:0","auto_off":500,"illuminance_min":10,"illuminance_max":100}
+ * 
+ * Percentage values (0%-100%) are calculated from the 7-day min/max history:
+ * - "0%" = minimum illuminance observed in past 7 days
+ * - "100%" = maximum illuminance observed in past 7 days
+ * - "20%" = 20% between min and max (min + 0.2 * (max - min))
+ * 
  * topic: shelly-blu/events/e8:e0:7e:d0:f9:89
  * message: {
  *     "encryption":false,
@@ -33,6 +40,7 @@ var CONFIG = {
   eventName: "shelly-blu",
   topicPrefix: "shelly-blu/events",
   kvsPrefix: "follow/shelly-blu/",
+  statePrefix: "state/shelly-blu/",
   log: true
 };
 
@@ -40,7 +48,11 @@ var STATE = {
   // mac (lowercase) => { switchIdStr: string, switchIndex: number, autoOff: number, illuminanceMin?: number, illuminanceMax?: number, nextSwitchIdStr?: string, nextSwitchIndex?: number }
   follows: {},
   // switchIndex => timerId
-  offTimers: {}
+  offTimers: {},
+  // mac (lowercase) => { dailyData: [{ date: "YYYY-MM-DD", min: number, max: number }], currentMin: number, currentMax: number, lastSaveDate: "YYYY-MM-DD" }
+  illuminanceTracking: {},
+  // Timer ID for daily save
+  dailySaveTimer: null
 };
 
 function log() {
@@ -78,6 +90,250 @@ function parseSwitchIndex(switchIdStr) {
   var n = Number(parts[1]);
   if (isNaN(n)) return null;
   return n;
+}
+
+function getCurrentDate() {
+  var now = new Date();
+  var year = now.getFullYear();
+  var month = now.getMonth() + 1;
+  var day = now.getDate();
+  return year + "-" + (month < 10 ? "0" : "") + month + "-" + (day < 10 ? "0" : "") + day;
+}
+
+function loadIlluminanceState(mac, callback) {
+  var key = CONFIG.statePrefix + mac;
+  Shelly.call("KVS.Get", { key: key }, function (resp, err) {
+    if (err || !resp || !resp.value) {
+      // Initialize new tracking state
+      STATE.illuminanceTracking[mac] = {
+        dailyData: [],
+        currentMin: null,
+        currentMax: null,
+        lastSaveDate: getCurrentDate()
+      };
+      if (callback) callback();
+      return;
+    }
+    
+    try {
+      var data = JSON.parse(resp.value);
+      STATE.illuminanceTracking[mac] = {
+        dailyData: data.dailyData || [],
+        currentMin: data.currentMin || null,
+        currentMax: data.currentMax || null,
+        lastSaveDate: data.lastSaveDate || getCurrentDate()
+      };
+      log("Loaded illuminance state for", mac, ":", STATE.illuminanceTracking[mac]);
+    } catch (e) {
+      log("Error parsing illuminance state for", mac, ":", e);
+      STATE.illuminanceTracking[mac] = {
+        dailyData: [],
+        currentMin: null,
+        currentMax: null,
+        lastSaveDate: getCurrentDate()
+      };
+    }
+    if (callback) callback();
+  });
+}
+
+function saveIlluminanceState(mac, callback) {
+  var tracking = STATE.illuminanceTracking[mac];
+  if (!tracking) {
+    if (callback) callback();
+    return;
+  }
+  
+  var key = CONFIG.statePrefix + mac;
+  var value = JSON.stringify({
+    dailyData: tracking.dailyData,
+    currentMin: tracking.currentMin,
+    currentMax: tracking.currentMax,
+    lastSaveDate: tracking.lastSaveDate
+  });
+  
+  Shelly.call("KVS.Set", { key: key, value: value }, function (resp, err) {
+    if (err) {
+      log("Error saving illuminance state for", mac, ":", err);
+    } else {
+      log("Saved illuminance state for", mac);
+    }
+    if (callback) callback();
+  });
+}
+
+function updateIlluminanceTracking(mac, illuminance) {
+  if (typeof illuminance !== "number") return;
+  
+  var tracking = STATE.illuminanceTracking[mac];
+  if (!tracking) {
+    tracking = STATE.illuminanceTracking[mac] = {
+      dailyData: [],
+      currentMin: null,
+      currentMax: null,
+      lastSaveDate: getCurrentDate()
+    };
+  }
+  
+  var currentDate = getCurrentDate();
+  
+  // Check if we need to save yesterday's data and start a new day
+  if (tracking.lastSaveDate !== currentDate) {
+    // Save previous day's min/max if we have data
+    if (tracking.currentMin !== null && tracking.currentMax !== null) {
+      tracking.dailyData.push({
+        date: tracking.lastSaveDate,
+        min: tracking.currentMin,
+        max: tracking.currentMax
+      });
+      
+      // Keep only last 7 days
+      while (tracking.dailyData.length > 7) {
+        tracking.dailyData.shift();
+      }
+      
+      log("Saved daily illuminance for", mac, "date:", tracking.lastSaveDate, "min:", tracking.currentMin, "max:", tracking.currentMax);
+    }
+    
+    // Reset for new day
+    tracking.currentMin = illuminance;
+    tracking.currentMax = illuminance;
+    tracking.lastSaveDate = currentDate;
+  } else {
+    // Update current day's min/max
+    if (tracking.currentMin === null || illuminance < tracking.currentMin) {
+      tracking.currentMin = illuminance;
+    }
+    if (tracking.currentMax === null || illuminance > tracking.currentMax) {
+      tracking.currentMax = illuminance;
+    }
+  }
+}
+
+function getSevenDayMinMax(mac) {
+  var tracking = STATE.illuminanceTracking[mac];
+  if (!tracking || !tracking.dailyData || tracking.dailyData.length === 0) {
+    return { min: null, max: null };
+  }
+  
+  var overallMin = null;
+  var overallMax = null;
+  
+  // Check historical data
+  for (var i = 0; i < tracking.dailyData.length; i++) {
+    var day = tracking.dailyData[i];
+    if (typeof day.min === "number") {
+      if (overallMin === null || day.min < overallMin) {
+        overallMin = day.min;
+      }
+    }
+    if (typeof day.max === "number") {
+      if (overallMax === null || day.max > overallMax) {
+        overallMax = day.max;
+      }
+    }
+  }
+  
+  // Include current day's data
+  if (tracking.currentMin !== null) {
+    if (overallMin === null || tracking.currentMin < overallMin) {
+      overallMin = tracking.currentMin;
+    }
+  }
+  if (tracking.currentMax !== null) {
+    if (overallMax === null || tracking.currentMax > overallMax) {
+      overallMax = tracking.currentMax;
+    }
+  }
+  
+  return { min: overallMin, max: overallMax };
+}
+
+function parseIlluminanceValue(value, mac) {
+  if (typeof value === "number") {
+    return value;
+  }
+  
+  if (typeof value === "string" && value.length > 1 && value.charAt(value.length - 1) === "%") {
+    var percentStr = value.substring(0, value.length - 1);
+    var percent = Number(percentStr);
+    
+    if (isNaN(percent) || percent < 0 || percent > 100) {
+      log("Invalid percentage value:", value, "for", mac);
+      return null;
+    }
+    
+    var sevenDayRange = getSevenDayMinMax(mac);
+    if (sevenDayRange.min === null || sevenDayRange.max === null) {
+      log("No historical data available for percentage calculation:", mac);
+      return null;
+    }
+    
+    // Calculate the actual value based on percentage
+    var range = sevenDayRange.max - sevenDayRange.min;
+    var actualValue = sevenDayRange.min + (range * percent / 100);
+    
+    log("Converted", value, "to", actualValue, "for", mac, "(range:", sevenDayRange.min, "-", sevenDayRange.max, ")");
+    return actualValue;
+  }
+  
+  return null;
+}
+
+function saveAllIlluminanceStates(callback) {
+  var macs = Object.keys(STATE.illuminanceTracking);
+  if (macs.length === 0) {
+    if (callback) callback();
+    return;
+  }
+  
+  var pending = macs.length;
+  for (var i = 0; i < macs.length; i++) {
+    (function(mac) {
+      saveIlluminanceState(mac, function() {
+        pending--;
+        if (pending === 0 && callback) callback();
+      });
+    })(macs[i]);
+  }
+}
+
+function setupDailySaveTimer() {
+  // Clear existing timer
+  if (STATE.dailySaveTimer) {
+    Timer.clear(STATE.dailySaveTimer);
+  }
+  
+  // Calculate milliseconds until next midnight using basic Date methods
+  var now = new Date();
+  var currentTime = now.getTime();
+  var currentHour = now.getHours();
+  var currentMinute = now.getMinutes();
+  var currentSecond = now.getSeconds();
+  var currentMs = now.getMilliseconds();
+  
+  // Calculate milliseconds from now until midnight
+  var msUntilMidnight = (23 - currentHour) * 60 * 60 * 1000 + // remaining hours
+                        (59 - currentMinute) * 60 * 1000 +     // remaining minutes  
+                        (59 - currentSecond) * 1000 +          // remaining seconds
+                        (1000 - currentMs);                    // remaining milliseconds
+  
+  // Add 1 second to ensure we're past midnight
+  msUntilMidnight += 1000;
+  
+  // Set timer for midnight, then repeat every 24 hours
+  STATE.dailySaveTimer = Timer.set(msUntilMidnight, false, function() {
+    log("Daily save timer triggered");
+    saveAllIlluminanceStates();
+    
+    // Set up next day's timer (24 hours)
+    STATE.dailySaveTimer = Timer.set(24 * 60 * 60 * 1000, true, function() {
+      log("Daily save timer triggered (recurring)");
+      saveAllIlluminanceStates();
+    });
+  });
+  
+  log("Set up daily save timer, next save in", Math.round(msUntilMidnight / 1000), "seconds");
 }
 
 function loadFollowsFromKVS(callback) {
@@ -127,8 +383,8 @@ function loadFollowsFromKVS(callback) {
               var value = JSON.parse(gresp.value);
               var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
               var autoOff = value && typeof value.auto_off === "number" ? value.auto_off : 0;
-              var illumMin = value && typeof value.illuminance_min === "number" ? value.illuminance_min : null;
-              var illumMax = value && typeof value.illuminance_max === "number" ? value.illuminance_max : null;
+              var illumMin = value && value.illuminance_min !== undefined ? value.illuminance_min : null;
+              var illumMax = value && value.illuminance_max !== undefined ? value.illuminance_max : null;
               var nextSwitchStr = value && value.next_switch ? String(value.next_switch) : null;
               var nextIdx = parseSwitchIndex(nextSwitchStr);
               var mac = k.substr(CONFIG.kvsPrefix.length);
@@ -157,7 +413,25 @@ function loadFollowsFromKVS(callback) {
           if (pending === 0) {
             STATE.follows = newMap;
             log("Loaded follows:", newMap);
-            if (callback) callback(true);
+            
+            // Load illuminance state for all followed devices
+            var followedMacs = Object.keys(newMap);
+            if (followedMacs.length === 0) {
+              if (callback) callback(true);
+              return;
+            }
+            
+            var statePending = followedMacs.length;
+            for (var fi = 0; fi < followedMacs.length; fi++) {
+              (function(mac) {
+                loadIlluminanceState(mac, function() {
+                  statePending--;
+                  if (statePending === 0) {
+                    if (callback) callback(true);
+                  }
+                });
+              })(followedMacs[fi]);
+            }
           }
         });
       })(list[i]);
@@ -208,6 +482,12 @@ function handleBluEvent(topic, message) {
   var follow = STATE.follows[mac];
   if (!follow) return; // not followed
 
+  // Track illuminance data for all followed devices (regardless of motion)
+  var illuminance = (data && typeof data.illuminance === "number") ? data.illuminance : null;
+  if (illuminance !== null) {
+    updateIlluminanceTracking(mac, illuminance);
+  }
+
   // Only act on motion == 1 events
   var motion = data && data.motion;
   if (!(motion === 1 || motion === "1")) {
@@ -218,8 +498,11 @@ function handleBluEvent(topic, message) {
   log("Motion detected for", mac, "illuminance", data.illuminance, "min", follow.illuminanceMin, "max", follow.illuminanceMax);
 
   // If illuminance bounds are configured, enforce them
-  var hasMin = typeof follow.illuminanceMin === "number";
-  var hasMax = typeof follow.illuminanceMax === "number";
+  var parsedMin = follow.illuminanceMin !== null ? parseIlluminanceValue(follow.illuminanceMin, mac) : null;
+  var parsedMax = follow.illuminanceMax !== null ? parseIlluminanceValue(follow.illuminanceMax, mac) : null;
+  var hasMin = parsedMin !== null;
+  var hasMax = parsedMax !== null;
+  
   if (hasMin || hasMax) {
     var illum = (data && typeof data.illuminance === "number") ? data.illuminance : null;
     if (illum === null) {
@@ -228,15 +511,17 @@ function handleBluEvent(topic, message) {
       return;
     }
     // Strictly greater than illuminance_min
-    if (hasMin && illum <= follow.illuminanceMin) {
+    if (hasMin && illum <= parsedMin) {
+      log("Illuminance", illum, "too low (<=", parsedMin, "from", follow.illuminanceMin, ") for", mac);
       return;
     }
     // Strictly less than illuminance_max
-    if (hasMax && illum >= follow.illuminanceMax) {
+    if (hasMax && illum >= parsedMax) {
+      log("Illuminance", illum, "too high (>=", parsedMax, "from", follow.illuminanceMax, ") for", mac);
       return;
     }
   }
-  log("Illuminance bounds ok for", mac, "illuminance", data.illuminance, "min", follow.illuminanceMin, "max", follow.illuminanceMax);
+  log("Illuminance bounds ok for", mac, "illuminance", data.illuminance, "parsed min:", parsedMin, "parsed max:", parsedMax);
 
   // Act: turn on configured switch, then setup auto-off
   var idx = follow.switchIndex;
@@ -286,6 +571,9 @@ function subscribeEvent() {
         } else if (eventData.info.component && eventData.info.component.indexOf("input:") === 0) {
           log("Local input event detected (cancelAllTimers)");
           cancelAllTimers();
+        } else if (eventData.info.event === "reboot") {
+          log("Device reboot detected, saving illuminance data");
+          saveAllIlluminanceStates();
         }
       }
     } catch (e) {
@@ -295,6 +583,16 @@ function subscribeEvent() {
 }
 
 // Init
-loadFollowsFromKVS();
+loadFollowsFromKVS(function(success) {
+  if (success) {
+    setupDailySaveTimer();
+    
+    // Set up periodic save every hour as backup
+    Timer.set(60 * 60 * 1000, true, function() {
+      log("Hourly backup save triggered");
+      saveAllIlluminanceStates();
+    });
+  }
+});
 subscribeMqtt();
 subscribeEvent();

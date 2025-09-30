@@ -56,13 +56,6 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 		return nil, fmt.Errorf("failed to parse minify argument: %w", err)
 	}
 
-	// Get list of available scripts (embedded in the binary)
-	available, err := script.ListAvailable()
-	if err != nil {
-		log.Error(err, "Unable to list available scripts")
-		return nil, err
-	}
-
 	// Get list of scripts currently loaded on the device
 	loaded, err := script.ListLoaded(ctx, via, sd)
 	if err != nil {
@@ -70,37 +63,18 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 		return nil, err
 	}
 
-	log.Info("Starting script update process", "device", sd.Name(), "available_scripts", len(available), "loaded_scripts", len(loaded))
+	log.Info("Starting script update process", "device", sd.Name(), "loaded_scripts", len(loaded))
 
 	updateResults := make([]UpdateResult, 0)
 
-	// For each loaded script, check if we have an available version to update it with
+	// For each loaded script on the device, try to update it
 	for _, loadedScript := range loaded {
 		scriptName := loadedScript.Name
 
-		// Check if this script is available in our embedded scripts
-		isAvailable := false
-		for _, availableScript := range available {
-			if availableScript == scriptName {
-				isAvailable = true
-				break
-			}
-		}
-
-		if !isAvailable {
-			log.Info("Skipping manual script (not available in embedded scripts)", "script", scriptName, "id", loadedScript.Id)
-			updateResults = append(updateResults, UpdateResult{
-				ScriptName: scriptName,
-				ScriptId:   loadedScript.Id,
-				Status:     "skipped",
-				Message:    "Manual script - not available in embedded scripts",
-			})
-			continue
-		}
-
-		log.Info("Updating script", "script", scriptName, "id", loadedScript.Id)
+		log.Info("Checking script for update", "script", scriptName, "id", loadedScript.Id)
 
 		// Try to upload the script (this will check version hash and skip if up-to-date)
+		// If the script is not available in embedded scripts, Upload will return an error
 		id, err := script.Upload(ctx, via, sd, scriptName, minify)
 		if err != nil {
 			log.Error(err, "Failed to update script", "script", scriptName, "id", loadedScript.Id)
@@ -108,7 +82,7 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 				ScriptName: scriptName,
 				ScriptId:   loadedScript.Id,
 				Status:     "error",
-				Message:    fmt.Sprintf("Upload failed: %v", err),
+				Message:    fmt.Sprintf("Update failed: %v", err),
 			})
 			continue
 		}

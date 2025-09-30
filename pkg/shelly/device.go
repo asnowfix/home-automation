@@ -531,34 +531,85 @@ func Print(log logr.Logger, d any) error {
 	return nil
 }
 
-func Foreach(ctx context.Context, log logr.Logger, devices []devices.Device, via types.Channel, do Do, args []string) (any, error) {
-	out := make([]any, 0, len(devices))
-	log.Info("Running", "func_type", reflect.TypeOf(do), "args", args, "nb_devices", len(devices))
+// DeviceResult represents the result of an operation on a single device
+type DeviceResult struct {
+	Device devices.Device
+	Result any
+	Error  error
+}
 
-	for _, device := range devices {
-		device, err := NewDeviceFromSummary(ctx, log, device)
-		if err != nil {
-			log.Error(err, "Unable to create device from summary", "device", device)
-			return nil, err
-		}
+func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, via types.Channel, do Do, args []string) (any, error) {
+	log.Info("Running", "func_type", reflect.TypeOf(do), "args", args, "nb_devices", len(deviceList))
 
-		sd, ok := device.(*Device)
-		if !ok {
-			log.Error(nil, "Invalid device type", "type", reflect.TypeOf(device))
-			return nil, fmt.Errorf("invalid device type %T", device)
-		}
-		err = sd.init(ctx)
-		if err != nil {
-			log.Error(err, "Unable to init device", "device", device)
-			return nil, err
-		}
+	// Create channels for results
+	results := make(chan DeviceResult, len(deviceList))
+	var wg sync.WaitGroup
 
-		one, err := do(ctx, log, via, device, args)
-		out = append(out, one)
-		if err != nil {
-			log.Error(err, "Operation failed device", "id", device.Id(), "name", device.Name(), "ip", device.Ip())
-			return nil, err
+	// Process each device in parallel
+	for _, dev := range deviceList {
+		wg.Add(1)
+		go func(devSummary devices.Device) {
+			defer wg.Done()
+
+			// Create device from summary
+			device, err := NewDeviceFromSummary(ctx, log, devSummary)
+			if err != nil {
+				log.Error(err, "Unable to create device from summary", "device", devSummary)
+				results <- DeviceResult{Device: devSummary, Error: err}
+				return
+			}
+
+			// Initialize device
+			sd, ok := device.(*Device)
+			if !ok {
+				err := fmt.Errorf("invalid device type %T", device)
+				log.Error(nil, "Invalid device type", "type", reflect.TypeOf(device))
+				results <- DeviceResult{Device: devSummary, Error: err}
+				return
+			}
+			err = sd.init(ctx)
+			if err != nil {
+				log.Error(err, "Unable to init device", "device", device)
+				results <- DeviceResult{Device: devSummary, Error: err}
+				return
+			}
+
+			// Execute operation
+			one, err := do(ctx, log, via, device, args)
+			if err != nil {
+				log.Error(err, "Operation failed for device", "id", device.Id(), "name", device.Name(), "ip", device.Ip())
+				results <- DeviceResult{Device: device, Result: one, Error: err}
+				return
+			}
+
+			results <- DeviceResult{Device: device, Result: one, Error: nil}
+		}(dev)
+	}
+
+	// Wait for all goroutines to complete
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results
+	out := make([]any, 0, len(deviceList))
+	var errs []error
+	for result := range results {
+		if result.Error != nil {
+			errs = append(errs, fmt.Errorf("device %s: %w", result.Device.Id(), result.Error))
 		}
+		out = append(out, result.Result)
+	}
+
+	// If all devices failed, return error
+	if len(errs) == len(deviceList) {
+		return out, fmt.Errorf("all devices failed: %v", errs)
+	}
+
+	// If some devices failed, log but continue
+	if len(errs) > 0 {
+		log.Info("Some devices failed", "failed_count", len(errs), "total_count", len(deviceList), "errors", errs)
 	}
 
 	return out, nil

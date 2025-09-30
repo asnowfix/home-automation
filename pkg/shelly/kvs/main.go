@@ -47,7 +47,7 @@ func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device ty
 		Key: key,
 	})
 	if err != nil {
-		log.Error(err, "Unable to get on key")
+		log.Info("Unable to get on key (continuing)", "key", key)
 		return nil, err
 	}
 	res, ok := out.(*GetResponse)

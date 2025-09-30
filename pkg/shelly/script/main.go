@@ -7,6 +7,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 	"reflect"
@@ -311,7 +312,7 @@ func Download(ctx context.Context, via types.Channel, device types.Device, name 
 func Upload(ctx context.Context, via types.Channel, device types.Device, name string, minify bool) (uint32, error) {
 	buf, err := content.ReadFile(name)
 	if err != nil {
-		log.Error(err, "Unknown script", "name", name)
+		log.Error(err, "Unknown script", "name", name, "device", device.Name())
 		return 0, err
 	}
 
@@ -321,11 +322,13 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 	version := hex.EncodeToString(h.Sum(nil))
 
 	// read the scrip version from the KVS
-	kvsKey := fmt.Sprintf("script/%s", name)
+	// Use basename to get just the filename without any directory path
+	basename := filepath.Base(name)
+	kvsKey := fmt.Sprintf("script/%s", basename)
 	kvsVersion := ""
 	res, err := kvs.GetValue(ctx, log, via, device, kvsKey)
 	if err != nil || res == nil {
-		log.Error(err, "Unable to get KVS entry for script version", "key", kvsKey)
+		log.Info("Unable to get KVS entry for script version (continuing)", "key", kvsKey)
 		// Don't fail the upload if KVS fails, just log the error
 	} else {
 		kvsVersion = res.Value
@@ -344,7 +347,7 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 	}
 	_, err = StartStopDelete(ctx, via, device, name, Start)
 	if err != nil {
-		log.Error(err, "Unable to start script", "name", name)
+		log.Error(err, "Unable to start script", "name", name, "device", device.Name())
 		return 0, err
 	}
 	return id, nil
@@ -390,7 +393,7 @@ func doUpload(ctx context.Context, via types.Channel, device types.Device, name 
 		// script loaded: stop it, in case it is running
 		out, err := device.CallE(ctx, via, Stop.String(), &StatusStartStopDeleteRequest{Id: id})
 		if err != nil {
-			log.Error(err, "Unable to stop script", "id", id, "name", name)
+			log.Error(err, "Unable to stop script", "id", id, "name", name, "device", device.Name())
 			return 0, err
 		}
 		log.Info("Stopped script", "name", name, "id", id, "out", out)
@@ -411,13 +414,13 @@ func doUpload(ctx context.Context, via types.Channel, device types.Device, name 
 			Append: append,
 		})
 		if err != nil {
-			log.Error(err, "Unable to upload script", "id", id, "name", name, "index", i)
+			log.Error(err, "Unable to upload script", "id", id, "name", name, "index", i, "device", device.Name())
 			return 0, err
 		}
 		log.Info("Uploaded script chunk", "name", name, "id", id, "index", i, "out", out)
 		append = true
 	}
-	log.Info("Uploaded script", "name", name, "id", id)
+	log.Info("Uploaded script", "name", name, "id", id, "device", device.Name())
 
 	// enable: auto-start at next reboot
 	out, err := device.CallE(ctx, via, string(SetConfig), &ConfigurationRequest{
@@ -428,7 +431,7 @@ func doUpload(ctx context.Context, via types.Channel, device types.Device, name 
 		},
 	})
 	if err != nil {
-		log.Error(err, "Unable to configure script", "id", id, "name", name)
+		log.Error(err, "Unable to configure script", "id", id, "name", name, "device", device.Name())
 		return 0, err
 	}
 	log.Info("Configured script", "name", name, "id", id, "out", out)
@@ -436,10 +439,10 @@ func doUpload(ctx context.Context, via types.Channel, device types.Device, name 
 	// Create/update KVS entry with script version
 	_, err = kvs.SetKeyValue(ctx, log, via, device, versionKey, version)
 	if err != nil {
-		log.Error(err, "Unable to set KVS entry for script version", "key", versionKey, "version", version)
+		log.Error(err, "Unable to set KVS entry for script version", "key", versionKey, "version", version, "device", device.Name())
 		// Don't fail the upload if KVS fails, just log the error
 	} else {
-		log.Info("Set KVS entry for script version", "key", versionKey, "version", version)
+		log.Info("Set KVS entry for script version", "key", versionKey, "version", version, "device", device.Name())
 	}
 
 	return id, nil

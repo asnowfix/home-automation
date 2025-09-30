@@ -135,6 +135,10 @@ jobs:
       #         } else {
       #             Write-Host "WiX Toolset is already installed"
       #         }
+      - name: Install Windows SDK
+        id: install-windows-sdk
+        run: |
+          choco install windows-sdk-10.1 -y
       - id: install-go-msi
         name: Install go-msi
         run: choco install go-msi
@@ -159,9 +163,6 @@ jobs:
           Copy-Item "$out\$msi" -Destination "."
           Get-Item $msi
           Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=$msi"
-      - name: Install Windows SDK
-        run: |
-          choco install windows-sdk-10.1
       - id: sign
         name: Sign MSI Package
         env:

@@ -3,22 +3,21 @@ module github.com/asnowfix/home-automation
 go 1.23.0
 
 require (
-	github.com/go-logr/logr v1.4.2
-	github.com/spf13/cobra v1.8.1
+	github.com/go-logr/logr v1.4.3
+	github.com/spf13/cobra v1.10.1
 	hlog v0.0.0-00010101000000-000000000000
-	homectl/options v0.0.0-00010101000000-000000000000
+	myhome/ctl/options v0.0.0-00010101000000-000000000000
 	internal/global v0.0.0-00010101000000-000000000000
 	internal/myhome v0.0.0-00010101000000-000000000000
 	internal/myip v0.0.0-00010101000000-000000000000
 	internal/myzone v0.0.0-00010101000000-000000000000
-	mymqtt v0.0.0-00010101000000-000000000000
 	pkg/shelly v0.0.0-00010101000000-000000000000
 	pkg/shelly/types v0.0.0-00010101000000-000000000000
 )
 
 replace hlog => ./hlog
 
-replace homectl/options => ./homectl/options
+replace myhome/ctl/options => ./myhome/ctl/options
 
 replace internal/global => ./internal/global
 
@@ -48,7 +47,6 @@ require (
 	cloud.google.com/go/compute v1.24.0 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
-	github.com/eclipse/paho.mqtt.golang v1.5.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-logr/zerologr v1.2.3 // indirect
@@ -58,8 +56,6 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.2 // indirect
 	github.com/googleapis/gax-go/v2 v2.12.3 // indirect
-	github.com/gorilla/schema v1.4.1 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kardianos/service v1.2.4 // indirect
@@ -67,9 +63,7 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/miekg/dns v1.1.65 // indirect
 	github.com/rs/zerolog v1.33.0 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/tdewolff/minify/v2 v2.24.3 // indirect
-	github.com/tdewolff/parse/v2 v2.8.3 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.49.0 // indirect
 	go.opentelemetry.io/otel v1.24.0 // indirect

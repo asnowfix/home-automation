@@ -141,7 +141,7 @@ The collector integrates with existing home automation infrastructure:
 - `pkg/shelly` - Shelly device API implementation
 - `mymqtt` - MQTT communication layer
 - `hlog` - Structured logging
-- `homectl/options` - Context and configuration management
+- `myhome/ctl/options` - Context and configuration management
 
 ## Testing Strategy
 

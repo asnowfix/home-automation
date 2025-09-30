@@ -11,6 +11,13 @@ MyHome Penates is the home automation system I develop & use to control my house
   - [Releases](#releases)
   - [Development Tools](#development-tools)
     - [Shelly Device Data Collector](#shelly-device-data-collector)
+  - [Logging System](#logging-system)
+    - [Log Levels](#log-levels)
+    - [Usage Examples](#usage-examples)
+    - [Available Flags](#available-flags)
+    - [VSCode Development](#vscode-development)
+    - [Per-Package Logging](#per-package-logging)
+    - [Environment Variables](#environment-variables)
   - [Usage - Linux](#usage---linux)
     - [Is daemon running?](#is-daemon-running)
     - [Manual start](#manual-start)
@@ -83,6 +90,64 @@ go build -o datacollector .
 Results are saved to `test_data/shelly_api_test_data_YYYYMMDD_HHMMSS.json` for use in automated testing.
 
 For detailed documentation, see the [Data Collector README](cmd/datacollector/README.md).
+
+## Logging System
+
+MyHome uses a flexible, per-package logging system with automatic environment detection for optimal development and production experience.
+
+### Log Levels
+
+The system supports standard log levels with different default behaviors based on the execution environment:
+
+| **Environment** | **Default Level** | **Description** |
+|-----------------|-------------------|-----------------|
+| **Normal CLI** | `error` | Clean output for production use |
+| **VSCode Debug** | `debug` | **Auto-detected**, full debugging info |
+| **Daemon** | `warning` | Service-appropriate visibility |
+| **Manual flags** | As specified | `--verbose`, `--debug`, `-L level` |
+
+### Usage Examples
+
+```bash
+# Clean output (error level - default for CLI)
+myhome ctl list
+
+# Info level logging (verbose)
+myhome ctl --verbose list
+myhome ctl -v list
+
+# Info level logging (explicit)
+myhome ctl --log-level info list
+myhome ctl -L info list
+
+# Debug level logging
+myhome ctl --debug list
+myhome ctl --log-level debug list
+myhome ctl -L debug list
+
+# Specific log levels
+myhome ctl -L warn list    # Warning level
+myhome ctl -L error list   # Error level only
+```
+
+### Available Flags
+
+- **`-v, --verbose`**: Verbose output (equivalent to `--log-level info`)
+- **`--debug`**: Debug output (equivalent to `--log-level debug`)
+- **`-L, --log-level`**: Set explicit log level (`error`, `warn`, `info`, `debug`)
+
+### VSCode Development
+
+When running processes through VSCode's debugger (launch.json), the logging system **automatically detects** the development environment and enables debug-level logging without any configuration changes. This provides rich debugging information during development while maintaining clean output for production use.
+
+### Per-Package Logging
+
+The system provides per-package loggers with context information. Each package gets its own named logger (e.g., `pkg/shelly/script`, `myhome/ctl/shelly`) for better log organization and debugging.
+
+### Environment Variables
+
+- **`MYHOME_LOG=stderr`**: Force logging to stderr (automatically set in VSCode launch configs)
+- **`MYHOME_DEBUG_INIT=1`**: Show logging system initialization messages (for debugging the logger itself)
 
 ## Usage - Linux
 
@@ -223,7 +288,7 @@ group delete radiateurs
 The `switch` command provides subcommands to control device switches:
 
 ```shell
-homectl switch [toggle|on|off] <device-identifier>
+myhome ctl switch [toggle|on|off] <device-identifier>
 ```
 
 **Subcommands:**
@@ -235,17 +300,17 @@ homectl switch [toggle|on|off] <device-identifier>
 
 Toggle a device (switches between on/off):
 ```shell
-homectl switch toggle lumiere-exterieure-droite
+myhome ctl switch toggle lumiere-exterieure-droite
 ```
 
 Turn a device on:
 ```shell
-homectl switch on lumiere-exterieure-droite
+myhome ctl switch on lumiere-exterieure-droite
 ```
 
 Turn a device off:
 ```shell
-homectl switch off lumiere-exterieure-droite
+myhome ctl switch off lumiere-exterieure-droite
 ```
 
 **Flags:**
@@ -253,10 +318,10 @@ homectl switch off lumiere-exterieure-droite
 
 **Help:**
 ```shell
-homectl switch --help              # Show available subcommands
-homectl switch toggle --help       # Help for toggle subcommand
-homectl switch on --help           # Help for on subcommand
-homectl switch off --help          # Help for off subcommand
+myhome ctl switch --help              # Show available subcommands
+myhome ctl switch toggle --help       # Help for toggle subcommand
+myhome ctl switch on --help           # Help for on subcommand
+myhome ctl switch off --help          # Help for off subcommand
 ```
 
 ## Device Following
@@ -268,19 +333,19 @@ The `follow` command allows you to configure devices to automatically respond to
 Configure a Shelly device to follow another Shelly device's status:
 
 ```shell
-homectl follow shelly <follower-device> <followed-device> [flags]
+myhome ctl follow shelly <follower-device> <followed-device> [flags]
 ```
 
 **Examples:**
 
 Mirror a switch state (when followed device switch turns on/off, follower mirrors the action):
 ```shell
-homectl follow shelly mezzanine lustre --follow-id switch:0 --switch-id switch:0
+myhome ctl follow shelly mezzanine lustre --follow-id switch:0 --switch-id switch:0
 ```
 
 Toggle on button press (when followed device input button is pressed, follower toggles):
 ```shell
-homectl follow shelly mezzanine mirroir-salon --follow-id input:0 --switch-id switch:0
+myhome ctl follow shelly mezzanine mirroir-salon --follow-id input:0 --switch-id switch:0
 ```
 
 **Flags:**
@@ -294,14 +359,14 @@ homectl follow shelly mezzanine mirroir-salon --follow-id input:0 --switch-id sw
 Configure a Shelly device to follow a Shelly BLU (Bluetooth Low Energy) device:
 
 ```shell
-homectl follow blu <follower-device> <blu-mac> [flags]
+myhome ctl follow blu <follower-device> <blu-mac> [flags]
 ```
 
 **Example:**
 
 Configure a device to turn on when BLU motion is detected:
 ```shell
-homectl follow blu mezzanine e8:e0:7e:d0:f9:89 --switch-id switch:0 --auto-off 300
+myhome ctl follow blu mezzanine e8:e0:7e:d0:f9:89 --switch-id switch:0 --auto-off 300
 ```
 
 **Flags:**

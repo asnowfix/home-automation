@@ -34,10 +34,13 @@ func init() {
 }
 
 func debugInit(msg string) {
-	if debugLog != nil {
-		debugLog.Info(1, "MyHome#Init: "+msg)
-	} else {
-		fmt.Fprintf(os.Stderr, "MyHome#Init: %s\n", msg)
+	// Only output debug messages if MYHOME_DEBUG_INIT is set
+	if os.Getenv("MYHOME_DEBUG_INIT") != "" {
+		if debugLog != nil {
+			debugLog.Info(1, "hlog: "+msg)
+		} else {
+			fmt.Fprintf(os.Stderr, "hlog: %s\n", msg)
+		}
 	}
 }
 

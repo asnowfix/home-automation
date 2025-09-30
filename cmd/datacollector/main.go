@@ -20,7 +20,7 @@ import (
 	"pkg/shelly/wifi"
 
 	"hlog"
-	"homectl/options"
+	"myhome/ctl/options"
 
 	"github.com/go-logr/logr"
 )

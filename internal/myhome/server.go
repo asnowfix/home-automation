@@ -3,7 +3,7 @@ package myhome
 import (
 	"context"
 	"encoding/json"
-	"mymqtt"
+	"myhome/mqtt"
 
 	"github.com/go-logr/logr"
 )
@@ -20,7 +20,7 @@ type Server interface {
 }
 
 func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, error) {
-	mc, err := mymqtt.GetClientE(ctx)
+	mc, err := mqtt.GetClientE(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 	return &s, nil
 }
 
-func (sp *server) fail(code int, err error, req *request, mc *mymqtt.Client) {
+func (sp *server) fail(code int, err error, req *request, mc *mqtt.Client) {
 	var res response = response{
 		Dialog: Dialog{
 			Id:  req.Id,

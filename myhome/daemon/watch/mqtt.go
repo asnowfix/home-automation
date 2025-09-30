@@ -5,21 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"global"
-	"homectl/options"
 	"myhome"
+	"myhome/ctl/options"
 	"myhome/devices"
-	"mymqtt"
-	shellyapi "pkg/shelly"
-	"pkg/shelly/mqtt"
-	"pkg/shelly/shelly"
+	mqttclient "myhome/mqtt"
 	"os"
 	"path/filepath"
+	shellyapi "pkg/shelly"
+	shellymqtt "pkg/shelly/mqtt"
+	"pkg/shelly/shelly"
 	"time"
 
 	"github.com/go-logr/logr"
 )
 
-func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices.DeviceRegistry) error {
+func Mqtt(ctx context.Context, mc *mqttclient.Client, dm devices.Manager, db devices.DeviceRegistry) error {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 
 	topic := "+/events/rpc"
@@ -59,7 +59,7 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 					}
 				}
 
-				event := &mqtt.Event{}
+				event := &shellymqtt.Event{}
 				err := json.Unmarshal(msg, &event)
 				if err != nil {
 					log.Error(err, "Failed to unmarshal RPC event from payload", "payload", string(msg))
@@ -111,7 +111,7 @@ func Mqtt(ctx context.Context, mc *mymqtt.Client, dm devices.Manager, db devices
 	return nil
 }
 
-func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Event) error {
+func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqtt.Event) error {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 
 	// Events like:
@@ -138,13 +138,21 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *mqtt.Even
 
 	// - '{"dst":"NCELRND1279_shellyplus1-08b61fd9333c","error":{"code":-109,"message":"shutting down in 952 ms"},"id":0,"result":{"methods":null},"src":"shellyplus1-08b61fd9333c"}'
 	// - '{"src":"shelly1minig3-54320464a1d0","dst":"shelly1minig3-54320464a1d0/events","method":"NotifyEvent","params":{"ts":1736605194.11,"events":[{"component":"input:0","id":0,"event":"config_changed","restart_required":false,"ts":1736605194.11,"cfg_rev":35}]}}'
+	// - '{"src":"shellypro3-34987a48c26c","dst":"shellypro3-34987a48c26c/events","method":"NotifyEvent","params":{"ts":1758144175.35,"events":[{"component":"sys","event":"sys_btn_down","ts":1758144175.35}]}}
+	// - '{"src":"shellypro3-34987a48c26c","dst":"shellypro3-34987a48c26c/events","method":"NotifyEvent","params":{"ts":1758144175.54,"events":[{"component":"sys","event":"sys_btn_up","ts":1758144175.54}]}}'
+	// - '{"src":"shellypro3-34987a48c26c","dst":"shellypro3-34987a48c26c/events","method":"NotifyEvent","params":{"ts":1758144175.54,"events":[{"component":"sys","event":"sys_btn_push","ts":1758144175.54}]}}'
 	if event.Method == "NotifyEvent" {
 		if event.Params != nil {
-			evs, ok := (*event.Params)["events"].([]mqtt.ComponentEvent)
+			evs, ok := (*event.Params)["events"].([]shellymqtt.ComponentEvent)
 			if ok {
 				for _, ev := range evs {
-					log.Info("Event", "event", ev, "device_id", d.Id)
-					d.ConfigRevision = ev.ConfigRevision
+					log.Info("Event", "component", ev.Component, "event", ev.Event)
+					if ev.ConfigRevision != nil {
+						d.ConfigRevision = *ev.ConfigRevision
+					}
+					if ev.RestartRequired != nil {
+						log.Info("Event", "component", ev.Component, "event", ev.Event, "restart_required", *ev.RestartRequired)
+					}
 				}
 			} else {
 				return fmt.Errorf("unable to parse event parameters: %v", *event)

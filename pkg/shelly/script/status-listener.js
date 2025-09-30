@@ -218,6 +218,11 @@ function handleStatusEvent(topic, message) {
     log("Processing single_push event as button release for", follow.followId);
     var idx = follow.switchIndex;
     
+    Shelly.emitEvent("remote-input-event", {
+      "src": src,
+      "component": follow.switchIdStr,
+    });
+
     if (follow.action === "toggle") {
       log("Attempting to toggle switch", follow.switchIdStr, "index", idx, "triggered by single_push on", follow.followId);
       Shelly.call("Switch.Toggle", { id: idx }, function (resp, err) {

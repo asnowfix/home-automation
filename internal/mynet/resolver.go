@@ -137,7 +137,7 @@ func (r *resolver) waitForStart(ctx context.Context) {
 		r.Unlock()
 		select {
 		case <-ctx.Done():
-			r.log.Error(ctx.Err(), "resolver did not start")
+			// Don't log context cancellation as an error
 			return
 		case <-time.After(time.Second):
 		}

@@ -3,7 +3,7 @@ module tapo
 go 1.23.0
 
 require (
-	github.com/go-logr/logr v1.4.2
+	github.com/go-logr/logr v1.4.3
 	github.com/j-iot/tapo-go v0.0.0-20210626000425-49dce7306511
 )
 

@@ -3,7 +3,7 @@ package daemon
 import (
 	"context"
 	"global"
-	"homectl/options"
+	"myhome/ctl/options"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"

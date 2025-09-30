@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"mymqtt"
+	mqttclient "myhome/mqtt"
 	"net"
 	"net/http"
 	"net/url"
-	"pkg/shelly/mqtt"
+	shellymqtt "pkg/shelly/mqtt"
 	"pkg/shelly/temperature"
 	"regexp"
 
@@ -24,12 +24,12 @@ var uaRe = regexp.MustCompile(`^\[Shelly/(?P<fw_date>[0-9-]+)/(?P<fw_id>[a-z0-9-
 type httpProxy struct {
 	ctx      context.Context
 	log      logr.Logger
-	mc       *mymqtt.Client
+	mc       *mqttclient.Client
 	dialogId uint32
 	decoder  *schema.Decoder
 }
 
-func Proxy(ctx context.Context, log logr.Logger, port int, mc *mymqtt.Client) {
+func Proxy(ctx context.Context, log logr.Logger, port int, mc *mqttclient.Client) {
 	hp := httpProxy{
 		ctx:      ctx,
 		log:      log,
@@ -110,8 +110,8 @@ func (hp *httpProxy) formatAsGen2(device Device) (topic string, msg []byte, err 
 		Celsius:    tC,
 		Fahrenheit: (tC * 1.8) + 32.0,
 	}
-	req := &mqtt.Request{
-		Dialog: mqtt.Dialog{
+	req := &shellymqtt.Request{
+		Dialog: shellymqtt.Dialog{
 			Id:  hp.dialogId,
 			Src: fmt.Sprintf("%s_%s", hp.mc.Id(), device.Id),
 		},

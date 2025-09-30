@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"mymqtt"
+	"myhome/mqtt"
 	"net"
 	"pkg/devices"
 	"pkg/shelly"
@@ -40,7 +40,7 @@ func (hc *client) start(ctx context.Context) {
 		hc.log.Info("Client already started", "me", hc.me)
 		return
 	}
-	mc, err := mymqtt.GetClientE(ctx)
+	mc, err := mqtt.GetClientE(ctx)
 	if err != nil {
 		hc.log.Error(err, "Failed to get MQTT client")
 		return
@@ -170,7 +170,7 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 	var resStr []byte
 	select {
 	case <-ctx.Done():
-		hc.log.Error(ctx.Err(), "Waiting for response to method", "method", req.Method)
+		// Don't log context cancellation as an error
 		return nil, ctx.Err()
 	case resStr = <-hc.from:
 		hc.log.Info("Response", "payload", resStr)

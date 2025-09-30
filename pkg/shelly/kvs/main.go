@@ -42,25 +42,25 @@ func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, devi
 	return kvs, nil
 }
 
-func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, key string) (*Value, error) {
+func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, key string) (*GetResponse, error) {
 	out, err := device.CallE(ctx, via, string(Get), &GetRequest{
 		Key: key,
 	})
 	if err != nil {
-		log.Error(err, "Unable to get on key")
+		log.Info("Unable to get on key (continuing)", "key", key)
 		return nil, err
 	}
-	value, ok := out.(*Value)
+	res, ok := out.(*GetResponse)
 	if !ok {
-		return nil, fmt.Errorf("expected *Value, got %T", out)
+		return nil, fmt.Errorf("expected *GetResponse, got %T", out)
 	}
-	s, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(s))
+	// s, err := json.Marshal(res)
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// fmt.Print(string(s))
 
-	return value, nil
+	return res, nil
 }
 
 func SetKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, key string, value string) (*Status, error) {

@@ -27,7 +27,7 @@ help:
 	@echo make help build run install start stop
 
 ifneq ($(MODULE),)
-# make module MODULE=homectl/options
+# make module MODULE=myhome/ctl/options
 module:
 	(mkdir -p $(MODULE) && cd $(MODULE) && $(GO) mod init $(MODULE)) && $(GO) work use $(MODULE)
 endif
@@ -77,7 +77,6 @@ tidy:
 	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) mod tidy) &&) echo
 
 build run:
-	$(MAKE) -C homectl $(@)
 	$(MAKE) -C myhome $(@)
 
 push:

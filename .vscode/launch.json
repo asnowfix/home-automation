@@ -6,56 +6,56 @@
     "configurations": [
 
         {
-            "name": "homectl shelly jobs show <IP>",
+            "name": "myhome ctl shelly jobs show <IP>",
             "type": "go",
             "request": "launch",
             "mode": "debug",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["-v", "-B", "192.168.1.2", "shelly", "-H", "jobs", "show", "192.168.1.66"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "-v", "-B", "192.168.1.2", "shelly", "-H", "jobs", "show", "192.168.1.66"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl shelly jobs show <ID>",
+            "name": "myhome ctl shelly jobs show <ID>",
             "type": "go",
             "request": "launch",
             "mode": "debug",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["-v", "-B", "192.168.1.2", "shelly", "jobs", "show", "shellyplus1-08b61fd9d708"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "-v", "-B", "192.168.1.2", "shelly", "jobs", "show", "shellyplus1-08b61fd9d708"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl group create (radiateurs)",
+            "name": "myhome ctl group create (radiateurs)",
             "type": "go",
             "request": "launch",
             "mode": "debug",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["-B", "192.168.1.2" ,"group", "create", "radiateurs", "Tous les radiateurs"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "-B", "192.168.1.2" ,"group", "create", "radiateurs", "Tous les radiateurs"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl group show (radiateurs)",
+            "name": "myhome ctl group show (radiateurs)",
             "type": "go",
             "request": "launch",
             "mode": "debug",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["-B", "192.168.1.2" ,"group", "show", "radiateurs"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "-B", "192.168.1.2" ,"group", "show", "radiateurs"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl group delete (radiateurs)",
+            "name": "myhome ctl group delete (radiateurs)",
             "type": "go",
             "request": "launch",
             "mode": "debug",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["-B", "192.168.1.2" ,"group", "delete", "radiateurs"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "-B", "192.168.1.2" ,"group", "delete", "radiateurs"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -91,122 +91,122 @@
             }
         },
         {
-            "name": "homectl group list",
+            "name": "myhome ctl group list",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["group", "list"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "group", "list"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl switch radiateur-bureau off",
+            "name": "myhome ctl switch radiateur-bureau off",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["-B" ,"192.168.1.2" ,"switch" ,"radiateur-bureau" ,"off"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "-B" ,"192.168.1.2" ,"switch" ,"radiateur-bureau" ,"off"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl forget light-outside-steps",
+            "name": "myhome ctl forget light-outside-steps",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["-B" ,"192.168.1.2" ,"forget" ,"light-outside-steps"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "-B" ,"192.168.1.2" ,"forget" ,"light-outside-steps"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl set shelly -N prise-routeurs shellyplugsg3-b08184a53f24",
+            "name": "myhome ctl set shelly -N prise-routeurs shellyplugsg3-b08184a53f24",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["set" ,"shelly", "-N", "prise-routeurs", "shellyplugsg3-b08184a53f24"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "set" ,"shelly", "-N", "prise-routeurs", "shellyplugsg3-b08184a53f24"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl shelly script list shelly1minig3-54320464074c",
+            "name": "myhome ctl shelly script list shelly1minig3-54320464074c",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["shelly", "script", "list", "shelly1minig3-54320464074c"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "shelly", "script", "list", "shelly1minig3-54320464074c"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl shelly script fetch shelly1minig3-54320464074c",
+            "name": "myhome ctl shelly script fetch shelly1minig3-54320464074c",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["shelly", "script", "fetch", "shelly1minig3-54320464074c"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "shelly", "script", "fetch", "shelly1minig3-54320464074c"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl shelly script eval shelly1minig3-54320464074c",
+            "name": "myhome ctl shelly script eval shelly1minig3-54320464074c",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["shelly", "script", "eval", "shelly1minig3-54320464074c", "2", "print(CONFIG.allowedMacAddresses)"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "shelly", "script", "eval", "shelly1minig3-54320464074c", "2", "print(CONFIG.allowedMacAddresses)"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl shelly script upload --no-minify lampadaire-salon watchdog.js",
+            "name": "myhome ctl shelly script upload --no-minify lampadaire-salon watchdog.js",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["shelly", "script", "upload", " --no-minify", "lampadaire-salon", "watchdog.js"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "shelly", "script", "upload", " --no-minify", "lampadaire-salon", "watchdog.js"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl shelly script debug lampadaire-salon true",
+            "name": "myhome ctl shelly script debug lampadaire-salon true",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["shelly", "script", "debug", "lampadaire-salon", "true"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "shelly", "script", "debug", "lampadaire-salon", "true"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl shelly script debug lampe-salon-hiver false",
+            "name": "myhome ctl shelly script debug lampe-salon-hiver false",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["shelly", "script", "debug", "lampe-salon-hiver", "false"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "shelly", "script", "debug", "lampe-salon-hiver", "false"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
         },
         {
-            "name": "homectl shelly kvs get '*'",
+            "name": "myhome ctl shelly kvs get '*'",
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/homectl",
-            "args": ["-B" ,"192.168.1.2" ,"shelly", "kvs", "get", "*"],
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "-B" ,"192.168.1.2" ,"shelly", "kvs", "get", "*"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }

@@ -7,7 +7,7 @@ builds:
       # - windows
       # - darwin
     goarch:
-      # - amd64
+      - amd64
       - arm64
     # id is the name of the snapshot (and of the release) and will be used
     # as the name of the binary. It's also the directory name where the binary

@@ -16,23 +16,25 @@ This document contains coding guidelines, best practices, and important knowledg
 
 ### JavaScript Engine Limitations
 
-Shelly devices run a **modified version of Espruino** JavaScript interpreter with specific limitations and capabilities:
+Shelly devices run a **modified version of Espruino** JavaScript interpreter. Espruino implements **most of ES5** with some ES6 features, but Shelly's implementation has specific limitations:
 
 #### Official Language Support (from Shelly API Documentation)
 
 **Supported Features:**
 - Global scope variables, `let`, `var`
-- Function binding
+- Function binding (`Function.prototype.bind`)
 - `String`, `Number`, `Function`, `Array`, `Math`, `Date` objects
 - `new`, `delete` operators
-- `Object.keys`
+- `Object.keys`, `Object.assign`
 - Exceptions
+- ES5 Array methods: `Array.isArray`, `[].map`, `[].filter`, `[].forEach`, `[].reduce`, `[].indexOf`, etc.
 - `ArrayBuffer` and `AES` (Gen 3/4 devices, firmware 1.6.0+)
 
 **NOT Supported:**
-- Hoisting
+- Hoisting (intentionally omitted - requires two-pass parsing)
 - ES6 Classes (function prototypes are supported)
 - Promises and async functions
+- Regular Expressions (on some boards)
 - `\u` escape sequences (use `\xHH` for byte encoding)
 
 **Important Specifics:**
@@ -40,31 +42,39 @@ Shelly devices run a **modified version of Espruino** JavaScript interpreter wit
 - `delete` operator works without brackets only
 - Strings use byte arrays (not UTF-16), optimized for memory with UTF-8 encoding support
 
-#### ES3 Compatibility Requirements
+#### Best Practices for Shelly Scripts
 
-1. **No ES5+ Array Methods**
-   - ❌ BROKEN: `Array.prototype.slice.call(arguments)`
-   - ❌ BROKEN: `.map()`, `.filter()`, `.forEach()` on arguments object
-   - ✅ WORKING: Use traditional `for` loops and manual string concatenation
-
+1. **Array Methods - SAFE TO USE**
+   - ✅ `Array.isArray()` - Supported
+   - ✅ `[].map()`, `[].filter()`, `[].forEach()` - Supported on arrays
+   - ⚠️ `Array.prototype.slice.call(arguments)` - May fail, use for loops instead
+   
    ```javascript
-   // BROKEN - causes "Cannot read property 'call' of undefined"
+   // AVOID - may not work on arguments object
    var args = Array.prototype.slice.call(arguments);
-   print(args.map(function(a) { return String(a); }).join(" "));
-
-   // WORKING - ES3 compatible
-   var s = "";
+   
+   // PREFER - always works
+   var args = [];
    for (var i = 0; i < arguments.length; i++) {
-     s += String(arguments[i]);
-     if (i + 1 < arguments.length) s += " ";
+     args.push(arguments[i]);
    }
-   print(s);
    ```
 
-2. **Avoid Modern JavaScript Patterns**
-   - Use `var` instead of `let`/`const`
-   - Use `function` declarations instead of arrow functions
-   - Use `"property" in object` instead of `!== undefined` checks (minifier-safe)
+2. **Variable Declarations**
+   - ✅ `var` - Always safe
+   - ⚠️ `let`/`const` - Supported in Espruino v2.14+, but `var` is safer for compatibility
+   - **Recommendation**: Use `var` for maximum compatibility
+
+3. **Minifier-Safe Patterns**
+   - Use `"property" in object` instead of `!== undefined` (minifier converts to unsafe syntax)
+   
+   ```javascript
+   // AVOID - minifier breaks this
+   var value = obj.prop !== undefined ? obj.prop : null;
+   
+   // USE - minifier-safe
+   var value = ("prop" in obj) ? obj.prop : null;
+   ```
 
 #### Minification Issues
 
@@ -410,23 +420,27 @@ When creating memories during AI interactions:
 
 ---
 
-## Best Practices Summary
+### Best Practices Summary
 
 ### Shelly Scripts
 
 ✅ **DO**:
-- Use ES3-compatible JavaScript
-- Keep callback nesting ≤ 3 levels
+- Use ES5-compatible JavaScript (most ES5 features work)
+- Keep callback nesting ≤ 2-3 levels
 - Use named functions over anonymous callbacks
 - Add startup/stop logging
-- Use `--no-minify` for uploads
-- Use `"property" in object` for property checks
+- Use `--no-minify` for uploads (recommended)
+- Use `"property" in object` for property checks (minifier-safe)
+- Use `var` for variable declarations (maximum compatibility)
+- Use ES5 array methods on arrays: `[].map()`, `[].filter()`, `[].forEach()`
 
 ❌ **DON'T**:
-- Use ES5+ features (arrow functions, let/const, array methods)
-- Nest callbacks more than 3 levels deep
-- Rely on minification working correctly
-- Use `!== undefined` (breaks with minifier)
+- Nest callbacks more than 2-3 levels deep (device will crash)
+- Use `Array.prototype.slice.call(arguments)` (may fail)
+- Use `!== undefined` (minifier breaks this)
+- Use ES6 Classes, Promises, or async/await
+- Use Regular Expressions (not supported on all boards)
+- Rely on hoisting (not implemented)
 
 ### Go Commands
 

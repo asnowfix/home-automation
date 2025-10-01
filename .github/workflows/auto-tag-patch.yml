@@ -58,6 +58,8 @@ jobs:
         run: |
           git tag -s "${{ steps.semver.outputs.v_patch }}" -m "Release ${{ steps.semver.outputs.v_patch }}"
           git push origin "${{ steps.semver.outputs.v_patch }}"
+      - name: Wait for tag to propagate
+        run: sleep 5
       - name: Trigger Packaging Workflow
         run: |
           curl -X POST \

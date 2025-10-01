@@ -7,14 +7,14 @@
 // 5. Prometheus metrics: Exposes device metrics in Prometheus format via HTTP endpoint
 
 // Shared state and configuration for all components
-let SHARED_STATE = {
+var SHARED_STATE = {
     rebootLock: false,  // When true, prevents other components from triggering reboots
     rebootLockReason: "", // Reason for the reboot lock
     syslogEnabled: false  // Set to true when Syslog is initialized successfully
 };
 
 // Shared configuration for all components
-let CONFIG = {
+var CONFIG = {
     // Remote logging settings
     logging: {
         enabled: false,           // Set to true to enable remote logging
@@ -57,7 +57,7 @@ let CONFIG = {
 };
 
 // Use namespaces to avoid variable/function conflicts
-let MqttWatchdog = {
+var MqttWatchdog = {
     
     failCounter: 0,
     timer: null,
@@ -83,7 +83,7 @@ let MqttWatchdog = {
     
     // Check if MQTT is enabled in configuration
     isMqttEnabled: function() {
-        let mqttConfig = Shelly.getComponentConfig("mqtt");
+        var mqttConfig = Shelly.getComponentConfig("mqtt");
         return mqttConfig && mqttConfig.enable === true;
     },
     
@@ -116,7 +116,7 @@ let MqttWatchdog = {
         }
         
         // Schedule the next check
-        let self = this;
+        var self = this;
         this.timer = Timer.set(CONFIG.mqtt.retryIntervalSeconds * 1000, false, function() {
             self.checkMqttConnection();
         });
@@ -133,7 +133,7 @@ let MqttWatchdog = {
     }
 };
 
-let DailyReboot = {
+var DailyReboot = {
     // No local configuration - using shared CONFIG object
     
     // === INTERNAL STATE ===
@@ -153,16 +153,16 @@ let DailyReboot = {
     
     scheduleRandomReboot: function() {
         // Get current date/time
-        let now = new Date();
-        let tomorrow = new Date(now.getTime() + 24*60*60*1000);
+        var now = new Date();
+        var tomorrow = new Date(now.getTime() + 24*60*60*1000);
         // Pick a random hour/minute in the window
-        let hour = this.getRandomInt(CONFIG.dailyReboot.windowStartHour, CONFIG.dailyReboot.windowEndHour + 1);
-        let minute = this.getRandomInt(0, 60);
-        let target = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), hour, minute, 0, 0);
-        let delayMs = target.getTime() - now.getTime();
+        var hour = this.getRandomInt(CONFIG.dailyReboot.windowStartHour, CONFIG.dailyReboot.windowEndHour + 1);
+        var minute = this.getRandomInt(0, 60);
+        var target = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), hour, minute, 0, 0);
+        var delayMs = target.getTime() - now.getTime();
         this.log("Scheduling next reboot at " + target.toISOString());
         
-        let self = this;
+        var self = this;
         Timer.set(delayMs, false, function() {
             // Check if reboot is locked
             if (SHARED_STATE.rebootLock) {
@@ -190,7 +190,7 @@ let DailyReboot = {
 };
 
 // Add IP Assignment Watchdog module
-let IpAssignmentWatchdog = {
+var IpAssignmentWatchdog = {
     failCounter: 0,
     pingTimer: null,
     
@@ -204,14 +204,14 @@ let IpAssignmentWatchdog = {
     // Check if the device has a valid IP assignment
     checkForIp: function() {
         // Check WiFi connection
-        let wifi = null;
+        var wifi = null;
         try { wifi = Shelly.getComponentStatus('wifi'); } catch (e) { wifi = null; if (CONFIG.debug) this.log("WiFi status error: " + (e && e.message ? e.message : "")); }
-        const isWifiConnected = (wifi && wifi.status === 'got ip');
+        var isWifiConnected = (wifi && wifi.status === 'got ip');
         
         // Check Ethernet connection
-        let eth = null;
+        var eth = null;
         try { eth = Shelly.getComponentStatus('eth'); } catch (e) { eth = null; if (CONFIG.debug) this.log("Ethernet status error: " + (e && e.message ? e.message : "")); }
-        const isEthConnected = (eth && eth.status === 'got ip');
+        var isEthConnected = (eth && eth.status === 'got ip');
         
         // Connection is now established OR was never broken
         // Reset counter and start over
@@ -225,7 +225,7 @@ let IpAssignmentWatchdog = {
         this.failCounter++;
         
         if (this.failCounter < CONFIG.ipAssignment.numberOfFails) {
-            const remainingAttemptsBeforeRestart = CONFIG.ipAssignment.numberOfFails - this.failCounter;
+            var remainingAttemptsBeforeRestart = CONFIG.ipAssignment.numberOfFails - this.failCounter;
             this.log("WiFi or Ethernet healthcheck failed " + this.failCounter + " out of " + 
                     CONFIG.ipAssignment.numberOfFails + " times");
             return;
@@ -243,7 +243,7 @@ let IpAssignmentWatchdog = {
     
     // Setup status handler for switch events
     setupStatusHandler: function() {
-        let self = this;
+        var self = this;
         Shelly.addStatusHandler(function(status) {
             // Is the component a switch
             if (status.name !== "switch") return;
@@ -272,7 +272,7 @@ let IpAssignmentWatchdog = {
     // Initialize the IP assignment watchdog
     init: function() {
         this.log("Starting IP monitor");
-        let self = this;
+        var self = this;
         this.pingTimer = Timer.set(CONFIG.ipAssignment.retryIntervalSeconds * 1000, true, function() {
             self.checkForIp();
         });
@@ -281,7 +281,7 @@ let IpAssignmentWatchdog = {
 };
 
 // Add Firmware Update module
-let FirmwareUpdater = {
+var FirmwareUpdater = {
     updateTimer: null,
     lastCheckTimestamp: 0,
     
@@ -313,7 +313,7 @@ let FirmwareUpdater = {
             }
             
             // Determine which update to use based on configuration
-            let updateInfo = null;
+            var updateInfo = null;
             if (CONFIG.firmwareUpdate.updateChannel === "beta" && result.beta) {
                 updateInfo = result.beta;
                 this.log("Beta update available: " + updateInfo.version + " (" + updateInfo.build_id + ")");
@@ -352,7 +352,7 @@ let FirmwareUpdater = {
     // Schedule the next update check
     scheduleNextCheck: function() {
         // Calculate milliseconds until next check (CONFIG.firmwareUpdate.checkIntervalDays days)
-        const checkIntervalMs = CONFIG.firmwareUpdate.checkIntervalDays * 24 * 60 * 60 * 1000;
+        var checkIntervalMs = CONFIG.firmwareUpdate.checkIntervalDays * 24 * 60 * 60 * 1000;
         
         // Clear any existing timer
         if (this.updateTimer !== null) {
@@ -360,7 +360,7 @@ let FirmwareUpdater = {
         }
         
         // Schedule the next check
-        let self = this;
+        var self = this;
         this.updateTimer = Timer.set(checkIntervalMs, false, function() {
             self.checkForUpdate();
             self.scheduleNextCheck(); // Schedule the next check after this one completes
@@ -382,7 +382,7 @@ let FirmwareUpdater = {
 };
 
 // Remote Logger implementation
-let RemoteLogger = {
+var RemoteLogger = {
     deviceId: null,
     deviceName: null,
     
@@ -434,8 +434,8 @@ let RemoteLogger = {
     // Format a log message as JSON
     formatMessage: function(severity, message) {
         // Get timestamp in ISO format
-        const now = new Date();
-        const timestamp = now.toISOString();
+        var now = new Date();
+        var timestamp = now.toISOString();
         
         // Create a log object
         return JSON.stringify({
@@ -455,7 +455,7 @@ let RemoteLogger = {
         }
         
         try {
-            const logMessage = this.formatMessage(severity, message);
+            var logMessage = this.formatMessage(severity, message);
             
             if (CONFIG.logging.method === "webhook") {
                 // Send log via HTTP POST
@@ -492,7 +492,7 @@ let RemoteLogger = {
 };
 
 // Add Prometheus Metrics module
-let PrometheusMetrics = {
+var PrometheusMetrics = {
     // Constants
     TYPE_GAUGE: "gauge",
     TYPE_COUNTER: "counter",
@@ -621,7 +621,7 @@ let PrometheusMetrics = {
     
     // Generate metrics for the system
     generateMetricsForSystem: function() {
-        const sys = Shelly.getComponentStatus("sys");
+        var sys = Shelly.getComponentStatus("sys");
         return [
             this.printPrometheusMetric("uptime_seconds", this.TYPE_COUNTER, [], "System uptime in seconds", sys.uptime),
             this.printPrometheusMetric("ram_size_bytes", this.TYPE_GAUGE, [], "Internal board RAM size in bytes", sys.ram_size),
@@ -633,9 +633,9 @@ let PrometheusMetrics = {
     
     // Generate metrics for all monitored switches
     generateMetricsForSwitches: function() {
-        const list = this.monitoredSwitches && this.monitoredSwitches.length > 0 ? this.monitoredSwitches : ["switch:0"];
-        let result = "";
-        for (let i = 0; i < list.length; i++) {
+        var list = this.monitoredSwitches && this.monitoredSwitches.length > 0 ? this.monitoredSwitches : ["switch:0"];
+        var result = "";
+        for (var i = 0; i < list.length; i++) {
             result += this.generateMetricsForSwitch(list[i]);
         }
         return result;
@@ -644,13 +644,13 @@ let PrometheusMetrics = {
     // Generate metrics for a specific switch
     generateMetricsForSwitch: function(stringId) {
         try {
-            const sw = Shelly.getComponentStatus(stringId);
+            var sw = Shelly.getComponentStatus(stringId);
             if (!sw) {
                 this.log("Switch not found: " + stringId);
                 return "";
             }
             
-            const switchLabel = this.promLabel("switch", sw.id);
+            var switchLabel = this.promLabel("switch", sw.id);
             
             return [
                 this.printPrometheusMetric("switch_power_watts", this.TYPE_GAUGE, [switchLabel], "Instant power consumption in watts", sw.apower || 0),
@@ -669,10 +669,21 @@ let PrometheusMetrics = {
 
 // Initialize all components (wrapped to prevent minifier collapsing into comma sequences)
 (function() {
+    print("Script starting...");
+    
     MqttWatchdog.init();
     DailyReboot.init();
     IpAssignmentWatchdog.init();
     FirmwareUpdater.init();
     RemoteLogger.init();
     PrometheusMetrics.init();
+    
+    print("Script initialization complete");
+    
+    // Add stop event handler
+    Shelly.addEventHandler(function(eventData) {
+        if (eventData && eventData.info && eventData.info.event === "script_stop") {
+            print("Script stopping");
+        }
+    });
 })();

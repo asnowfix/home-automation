@@ -75,6 +75,50 @@ function normalizeId(s) {
   return String(s).toLowerCase();
 }
 
+function processKvsKey(k, newMap, onComplete) {
+  Shelly.call("KVS.Get", { key: k }, function (gresp, gerr) {
+    if (gerr) {
+      log("KVS.Get error for", k, ":", gerr);
+      onComplete();
+      return;
+    }
+    if (!gresp || typeof gresp.value !== "string") {
+      log("KVS.Get error for", k, gerr);
+      onComplete();
+      return;
+    }
+    
+    try {
+      var value = JSON.parse(gresp.value);
+      var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
+      var followIdStr = value && value.follow_id ? String(value.follow_id) : "switch:0";
+      
+      var devId = k.substr(CONFIG.kvsPrefix.length);
+      devId = normalizeId(devId);
+      var switchIdx = parseSwitchIndex(switchIdStr);
+      var inputInfo = parseInputId(followIdStr);
+      
+      if (devId && switchIdx !== null && inputInfo) {
+        // Infer action from input type: switch -> set, input -> toggle
+        var action = inputInfo.type === "switch" ? "set" : "toggle";
+        newMap[devId] = {
+          switchIdStr: switchIdStr,
+          switchIndex: switchIdx,
+          followId: followIdStr,
+          inputType: inputInfo.type,
+          inputIndex: inputInfo.index,
+          action: action
+        };
+      } else {
+        log("Ignoring invalid follow entry:", k, gresp.value);
+      }
+    } catch (e) {
+      log("JSON parse error for", k, e);
+    }
+    onComplete();
+  });
+}
+
 function loadFollowsFromKVS(callback) {
   Shelly.call("KVS.List", { prefix: CONFIG.kvsPrefix }, function (resp, err) {
     if (err) {
@@ -82,6 +126,7 @@ function loadFollowsFromKVS(callback) {
       if (callback) callback(false);
       return;
     }
+    
     var list = [];
     if (resp) {
       if (resp.keys) {
@@ -107,50 +152,17 @@ function loadFollowsFromKVS(callback) {
     }
 
     var pending = list.length;
+    function onKeyProcessed() {
+      pending--;
+      if (pending === 0) {
+        STATE.follows = newMap;
+        log("Loaded follows:", newMap);
+        if (callback) callback(true);
+      }
+    }
+    
     for (var li = 0; li < list.length; li++) {
-      (function (k) {
-        Shelly.call("KVS.Get", { key: k }, function (gresp, gerr) {
-          if (gerr) {
-            log("KVS.Get error for", k, ":", gerr);
-          } else if (gresp && typeof gresp.value === "string") {
-            try {
-              var value = JSON.parse(gresp.value);
-              var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
-              var followIdStr = value && value.follow_id ? String(value.follow_id) : "switch:0";
-              
-              var devId = k.substr(CONFIG.kvsPrefix.length);
-              devId = normalizeId(devId);
-              var switchIdx = parseSwitchIndex(switchIdStr);
-              var inputInfo = parseInputId(followIdStr);
-              
-              if (devId && switchIdx !== null && inputInfo) {
-                // Infer action from input type: switch -> set, input -> toggle
-                var action = inputInfo.type === "switch" ? "set" : "toggle";
-                newMap[devId] = {
-                  switchIdStr: switchIdStr,
-                  switchIndex: switchIdx,
-                  followId: followIdStr,
-                  inputType: inputInfo.type,
-                  inputIndex: inputInfo.index,
-                  action: action
-                };
-              } else {
-                log("Ignoring invalid follow entry:", k, gresp.value);
-              }
-            } catch (e) {
-              log("JSON parse error for", k, e);
-            }
-          } else {
-            log("KVS.Get error for", k, gerr);
-          }
-          pending--;
-          if (pending === 0) {
-            STATE.follows = newMap;
-            log("Loaded follows:", newMap);
-            if (callback) callback(true);
-          }
-        });
-      })(list[li]);
+      processKvsKey(list[li], newMap, onKeyProcessed);
     }
   });
 }
@@ -334,15 +346,24 @@ function subscribeKvsEvents() {
           log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
           loadFollowsFromKVS();
         }
+      } else if (eventData && eventData.info && eventData.info.event === "script_stop") {
+        log("Script stopping");
       }
     } catch (e) {
-      log("Error handling KVS event:", e);
+      log("Error handling event:", e);
     }
   });
   log("Subscribed to KVS change events");
 }
 
 // Init
-loadFollowsFromKVS();
+log("Script starting...");
+loadFollowsFromKVS(function(success) {
+  if (success) {
+    log("Script initialization complete");
+  } else {
+    log("Script initialization failed");
+  }
+});
 subscribeMqtt();
 subscribeKvsEvents();

@@ -288,13 +288,13 @@ function saveAllIlluminanceStates(callback) {
   }
   
   var pending = macs.length;
+  function onStateSaved() {
+    pending--;
+    if (pending === 0 && callback) callback();
+  }
+  
   for (var i = 0; i < macs.length; i++) {
-    (function(mac) {
-      saveIlluminanceState(mac, function() {
-        pending--;
-        if (pending === 0 && callback) callback();
-      });
-    })(macs[i]);
+    saveIlluminanceState(macs[i], onStateSaved);
   }
 }
 
@@ -336,18 +336,84 @@ function setupDailySaveTimer() {
   log("Set up daily save timer, next save in", Math.round(msUntilMidnight / 1000), "seconds");
 }
 
+function processKvsKey(k, newMap, onComplete) {
+  Shelly.call("KVS.Get", { key: k }, function (gresp, gerr) {
+    if (gerr) {
+      log("KVS.Get error for", k, ":", gerr);
+      onComplete();
+      return;
+    }
+    if (!gresp || typeof gresp.value !== "string") {
+      log("KVS.Get error for", k, gerr);
+      onComplete();
+      return;
+    }
+    
+    // Skip keys that don't start with our prefix
+    if (k.indexOf(CONFIG.kvsPrefix) !== 0) {
+      log("Skipping non-follow key:", k);
+      onComplete();
+      return;
+    }
+    
+    try {
+      var value = JSON.parse(gresp.value);
+      var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
+      var autoOff = value && typeof value.auto_off === "number" ? value.auto_off : 0;
+      var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : null;
+      var illumMax = value && ("illuminance_max" in value) ? value.illuminance_max : null;
+      var nextSwitchStr = value && value.next_switch ? String(value.next_switch) : null;
+      var nextIdx = parseSwitchIndex(nextSwitchStr);
+      var mac = k.substr(CONFIG.kvsPrefix.length);
+      mac = normalizeMac(mac);
+      var idx = parseSwitchIndex(switchIdStr);
+      
+      if (mac && idx !== null) {
+        newMap[mac] = {
+          switchIdStr: switchIdStr,
+          switchIndex: idx,
+          autoOff: autoOff,
+          illuminanceMin: illumMin,
+          illuminanceMax: illumMax,
+          nextSwitchIdStr: nextSwitchStr,
+          nextSwitchIndex: (typeof nextIdx === "number" ? nextIdx : null)
+        };
+      } else {
+        log("Ignoring invalid follow entry:", k, gresp.value);
+      }
+    } catch (e) {
+      log("JSON parse error for", k, e);
+    }
+    onComplete();
+  });
+}
+
+function loadAllIlluminanceStates(macs, callback) {
+  if (macs.length === 0) {
+    if (callback) callback();
+    return;
+  }
+  
+  var pending = macs.length;
+  function onStateLoaded() {
+    pending--;
+    if (pending === 0 && callback) callback();
+  }
+  
+  for (var i = 0; i < macs.length; i++) {
+    loadIlluminanceState(macs[i], onStateLoaded);
+  }
+}
+
 function loadFollowsFromKVS(callback) {
-  // Refresh STATE.follows from KVS
   Shelly.call("KVS.List", { prefix: CONFIG.kvsPrefix }, function (resp, err) {
     if (err) {
       log("KVS.List error:", err);
       if (callback) callback(false);
       return;
     }
-    // Normalize possible response shapes:
-    // - resp.keys: ["key1", "key2", ...]
-    // - resp.keys: { "key1": true, ... } (object map)
-    // - resp.items: [{ key: "key1" }, ...]
+    
+    // Normalize possible response shapes
     var list = [];
     if (resp) {
       if (resp.keys) {
@@ -363,8 +429,10 @@ function loadFollowsFromKVS(callback) {
         }
       }
     }
+    
     log("KVS.List keys:", list.length);
     var newMap = {};
+    
     if (!list || !list.length) {
       STATE.follows = newMap;
       log("No followed MACs.");
@@ -373,73 +441,19 @@ function loadFollowsFromKVS(callback) {
     }
 
     var pending = list.length;
-    for (var i = 0; i < list.length; i++) {
-      (function (k) {
-        Shelly.call("KVS.Get", { key: k }, function (gresp, gerr) {
-          if (gerr) {
-            log("KVS.Get error for", k, ":", gerr);
-          } else if (gresp && typeof gresp.value === "string") {
-            // Skip keys that don't start with our prefix (in case KVS.List returns all keys)
-            if (k.indexOf(CONFIG.kvsPrefix) !== 0) {
-              log("Skipping non-follow key:", k);
-            } else {
-              try {
-                var value = JSON.parse(gresp.value);
-                var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
-                var autoOff = value && typeof value.auto_off === "number" ? value.auto_off : 0;
-                var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : null;
-                var illumMax = value && ("illuminance_max" in value) ? value.illuminance_max : null;
-                var nextSwitchStr = value && value.next_switch ? String(value.next_switch) : null;
-                var nextIdx = parseSwitchIndex(nextSwitchStr);
-                var mac = k.substr(CONFIG.kvsPrefix.length);
-                mac = normalizeMac(mac);
-                var idx = parseSwitchIndex(switchIdStr);
-                if (mac && idx !== null) {
-                  newMap[mac] = {
-                    switchIdStr: switchIdStr,
-                    switchIndex: idx,
-                    autoOff: autoOff,
-                    illuminanceMin: illumMin,
-                    illuminanceMax: illumMax,
-                    nextSwitchIdStr: nextSwitchStr,
-                    nextSwitchIndex: (typeof nextIdx === "number" ? nextIdx : null)
-                  };
-                } else {
-                  log("Ignoring invalid follow entry:", k, gresp.value);
-                }
-              } catch (e) {
-                log("JSON parse error for", k, e);
-              }
-            }
-          } else {
-            log("KVS.Get error for", k, gerr);
-          }
-          pending--;
-          if (pending === 0) {
-            STATE.follows = newMap;
-            log("Loaded follows:", newMap);
-            
-            // Load illuminance state for all followed devices
-            var followedMacs = Object.keys(newMap);
-            if (followedMacs.length === 0) {
-              if (callback) callback(true);
-              return;
-            }
-            
-            var statePending = followedMacs.length;
-            for (var fi = 0; fi < followedMacs.length; fi++) {
-              (function(mac) {
-                loadIlluminanceState(mac, function() {
-                  statePending--;
-                  if (statePending === 0) {
-                    if (callback) callback(true);
-                  }
-                });
-              })(followedMacs[fi]);
-            }
-          }
+    function onKeyProcessed() {
+      pending--;
+      if (pending === 0) {
+        STATE.follows = newMap;
+        log("Loaded follows:", newMap);
+        loadAllIlluminanceStates(Object.keys(newMap), function() {
+          if (callback) callback(true);
         });
-      })(list[i]);
+      }
+    }
+    
+    for (var i = 0; i < list.length; i++) {
+      processKvsKey(list[i], newMap, onKeyProcessed);
     }
   });
 }

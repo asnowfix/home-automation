@@ -173,7 +173,51 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "shelly", "script", "upload", " --no-minify", "lampadaire-salon", "watchdog.js"],
+            "args": ["ctl", "--verbose", "shelly", "script", "upload", "--no-minify", "lampadaire-salon", "watchdog.js"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "myhome ctl shelly script upload --force front-door-light blu-listener.js",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "--verbose", "shelly", "script", "upload", "--force", "front-door-light", "blu-listener.js"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "myhome ctl shelly script upload --no-minify --force front-door-light blu-listener.js",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "--verbose", "shelly", "script", "upload", "--no-minify", "--force", "front-door-light", "blu-listener.js"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "myhome ctl shelly script update front-door-light",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "--verbose", "shelly", "script", "update", "front-door-light"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "myhome ctl shelly script update --force front-door-light",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "--verbose", "shelly", "script", "update", "--force", "front-door-light"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -184,7 +228,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "shelly", "script", "debug", "lampadaire-salon", "true"],
+            "args": ["ctl", "--verbose", "shelly", "script", "debug", "lampadaire-salon", "true"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -195,7 +239,18 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "shelly", "script", "debug", "lampe-salon-hiver", "false"],
+            "args": ["ctl", "--verbose", "shelly", "script", "debug", "lampe-salon-hiver", "false"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "myhome ctl shelly script debug front-door-light true",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["ctl", "--verbose", "shelly", "script", "debug", "front-door-light", "true"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }

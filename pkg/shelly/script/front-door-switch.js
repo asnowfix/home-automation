@@ -30,15 +30,23 @@ Shelly.addEventHandler(function (event) {
             //     body: JSON.stringify({ "id": 0 })
             // });
         }
-        // bottom-right switch - external-stairs
+        // bottom-right switch - lumiere-parking
         if (event.id === 3 && event.info.state === true) {
+            print("Toggle lumiere-parking light");
+            MQTT.publish("shellypro2-2cbcbb9fb834/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":1}}), 0, false);
+            // Shelly.call("HTTP.GET", {
+            //   url: 'http://shellypro2-2cbcbb9fb834.local/rpc/HTTP.GET?url="http://192.168.33.18/rpc/Switch.Toggle?id=1"'
+            // });
+        }
+        // bottom-left switch - external-stairs
+        if (event.id === 2 && event.info.state === true) {
             print("Toggle external-stairs light");
             // Call "escalier-exterieur.local" via "old-front-door-light.local"
-            // $ curl -X GET "http://shelly1minig3-54320464a1d0.local/rpc/HTTP.GET?url=\"http://192.168.33.18/rpc/Switch.Toggle?id=0\""
+            // $ curl -X GET "http://shelly1minig3-543204641d24.local/rpc/HTTP.GET?url=\"http://192.168.33.18/rpc/Switch.Toggle?id=0\""
             // {"code":200, "message":"OK", "headers":{"Connection": "close","Content-Length": "15","Content-Type": "application/json","Server": "ShellyHTTP/1.0.0"}, "body":"{\"was_on\":true}"}
-            MQTT.publish("shelly1minig3-54320464f17c/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0, false);
+            MQTT.publish("shelly1minig3-543204641d24/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0, false);
             // Shelly.call("HTTP.GET", {
-            //   url: 'http://shelly1minig3-54320464a1d0.local/rpc/HTTP.GET?url="http://192.168.33.18/rpc/Switch.Toggle?id=0"'
+            //   url: 'http://shelly1minig3-543204641d24.local/rpc/HTTP.GET?url="http://192.168.33.18/rpc/Switch.Toggle?id=0"'
             // });
         }
     } catch (e) {

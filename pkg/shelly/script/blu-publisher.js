@@ -129,22 +129,27 @@ function loadFollowsFromKVS(callback) {
           if (gerr) {
             log("KVS.Get error for", k, ":", gerr);
           } else if (gresp && typeof gresp.value === "string") {
-            try {
-              var value = JSON.parse(gresp.value);
-              var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
-              var mac = k.substr(CONFIG.kvsPrefix.length);
-              mac = normalizeMac(mac);
-              var idx = parseSwitchIndex(switchIdStr);
-              if (mac && idx !== null) {
-                newMap[mac] = {
-                  switchIdStr: switchIdStr,
-                  switchIndex: idx,
-                };
-              } else {
-                log("Ignoring invalid follow entry:", k, gresp.value);
+            // Skip keys that don't start with our prefix (in case KVS.List returns all keys)
+            if (k.indexOf(CONFIG.kvsPrefix) !== 0) {
+              log("Skipping non-follow key:", k);
+            } else {
+              try {
+                var value = JSON.parse(gresp.value);
+                var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
+                var mac = k.substr(CONFIG.kvsPrefix.length);
+                mac = normalizeMac(mac);
+                var idx = parseSwitchIndex(switchIdStr);
+                if (mac && idx !== null) {
+                  newMap[mac] = {
+                    switchIdStr: switchIdStr,
+                    switchIndex: idx,
+                  };
+                } else {
+                  log("Ignoring invalid follow entry:", k, gresp.value);
+                }
+              } catch (e) {
+                log("JSON parse error for", k, e);
               }
-            } catch (e) {
-              log("JSON parse error for", k, e);
             }
           } else {
             log("KVS.Get error for", k, gerr);
@@ -398,15 +403,19 @@ function subscribeKvsEvents() {
           log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
           loadFollowsFromKVS();
         }
+      } else if (eventData && eventData.info && eventData.info.event === "script_stop") {
+        log("Script stopping");
       }
     } catch (e) {
-      log("Error handling KVS event:", e);
+      log("Error handling event:", e);
     }
   });
   log("Subscribed to KVS change events");
 }
 
 // Init
+log("Script starting...");
 loadFollowsFromKVS();
 initBLEScanner();
 subscribeKvsEvents();
+log("Script initialization complete");

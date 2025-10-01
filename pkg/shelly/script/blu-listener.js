@@ -379,32 +379,37 @@ function loadFollowsFromKVS(callback) {
           if (gerr) {
             log("KVS.Get error for", k, ":", gerr);
           } else if (gresp && typeof gresp.value === "string") {
-            try {
-              var value = JSON.parse(gresp.value);
-              var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
-              var autoOff = value && typeof value.auto_off === "number" ? value.auto_off : 0;
-              var illumMin = value && value.illuminance_min !== undefined ? value.illuminance_min : null;
-              var illumMax = value && value.illuminance_max !== undefined ? value.illuminance_max : null;
-              var nextSwitchStr = value && value.next_switch ? String(value.next_switch) : null;
-              var nextIdx = parseSwitchIndex(nextSwitchStr);
-              var mac = k.substr(CONFIG.kvsPrefix.length);
-              mac = normalizeMac(mac);
-              var idx = parseSwitchIndex(switchIdStr);
-              if (mac && idx !== null) {
-                newMap[mac] = {
-                  switchIdStr: switchIdStr,
-                  switchIndex: idx,
-                  autoOff: autoOff,
-                  illuminanceMin: illumMin,
-                  illuminanceMax: illumMax,
-                  nextSwitchIdStr: nextSwitchStr,
-                  nextSwitchIndex: (typeof nextIdx === "number" ? nextIdx : null)
-                };
-              } else {
-                log("Ignoring invalid follow entry:", k, gresp.value);
+            // Skip keys that don't start with our prefix (in case KVS.List returns all keys)
+            if (k.indexOf(CONFIG.kvsPrefix) !== 0) {
+              log("Skipping non-follow key:", k);
+            } else {
+              try {
+                var value = JSON.parse(gresp.value);
+                var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
+                var autoOff = value && typeof value.auto_off === "number" ? value.auto_off : 0;
+                var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : null;
+                var illumMax = value && ("illuminance_max" in value) ? value.illuminance_max : null;
+                var nextSwitchStr = value && value.next_switch ? String(value.next_switch) : null;
+                var nextIdx = parseSwitchIndex(nextSwitchStr);
+                var mac = k.substr(CONFIG.kvsPrefix.length);
+                mac = normalizeMac(mac);
+                var idx = parseSwitchIndex(switchIdStr);
+                if (mac && idx !== null) {
+                  newMap[mac] = {
+                    switchIdStr: switchIdStr,
+                    switchIndex: idx,
+                    autoOff: autoOff,
+                    illuminanceMin: illumMin,
+                    illuminanceMax: illumMax,
+                    nextSwitchIdStr: nextSwitchStr,
+                    nextSwitchIndex: (typeof nextIdx === "number" ? nextIdx : null)
+                  };
+                } else {
+                  log("Ignoring invalid follow entry:", k, gresp.value);
+                }
+              } catch (e) {
+                log("JSON parse error for", k, e);
               }
-            } catch (e) {
-              log("JSON parse error for", k, e);
             }
           } else {
             log("KVS.Get error for", k, gerr);
@@ -574,6 +579,9 @@ function subscribeEvent() {
         } else if (eventData.info.event === "reboot") {
           log("Device reboot detected, saving illuminance data");
           saveAllIlluminanceStates();
+        } else if (eventData.info.event === "script_stop") {
+          log("Script stopping, saving illuminance data");
+          saveAllIlluminanceStates();
         }
       }
     } catch (e) {
@@ -583,6 +591,7 @@ function subscribeEvent() {
 }
 
 // Init
+log("Script starting...");
 loadFollowsFromKVS(function(success) {
   if (success) {
     setupDailySaveTimer();
@@ -592,6 +601,10 @@ loadFollowsFromKVS(function(success) {
       log("Hourly backup save triggered");
       saveAllIlluminanceStates();
     });
+    
+    log("Script initialization complete");
+  } else {
+    log("Script initialization failed");
   }
 });
 subscribeMqtt();

@@ -12,7 +12,6 @@ import (
 	"pkg/shelly/script"
 	"pkg/shelly/types"
 	"reflect"
-	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -23,6 +22,8 @@ func init() {
 	Cmd.AddCommand(uploadCtl)
 	// Flag to disable minification on upload
 	uploadCtl.Flags().BoolVar(&noMinify, "no-minify", false, "Do not minify script before upload")
+	// Flag to force re-upload even if version hash matches
+	uploadCtl.Flags().BoolVar(&forceUpload, "force", false, "Force re-upload even if version hash matches")
 }
 
 var uploadCtl = &cobra.Command{
@@ -32,16 +33,15 @@ var uploadCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		// minify is true by default unless --no-minify is set
-		minify := !noMinify
 		// Script upload can be long: Use a long-lived context decoupled from the global command timeout
 		longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute, global.Version(cmd.Context()))
-		_, err := myhome.Foreach(longCtx, hlog.Logger, device, options.Via, doUpload, []string{scriptName, strconv.FormatBool(minify)})
+		_, err := myhome.Foreach(longCtx, hlog.Logger, device, options.Via, doUpload, []string{scriptName})
 		return err
 	},
 }
 
 var noMinify bool
+var forceUpload bool
 
 func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
@@ -49,11 +49,14 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
 	scriptName := args[0]
-	minify, err := strconv.ParseBool(args[1])
+	fmt.Printf(". Uploading %s to %s...\n", scriptName, sd.Name())
+	id, err := script.Upload(ctx, via, sd, scriptName, !noMinify, forceUpload)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse minify argument: %w", err)
+		fmt.Printf("✗ Failed to upload %s to %s: %v\n", scriptName, sd.Name(), err)
+		return nil, err
 	}
-	return script.Upload(ctx, via, sd, scriptName, minify)
+	fmt.Printf("✓ Successfully uploaded %s to %s (id: %d)\n", scriptName, sd.Name(), id)
+	return id, nil
 }
 
 func init() {

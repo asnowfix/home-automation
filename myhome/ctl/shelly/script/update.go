@@ -12,7 +12,6 @@ import (
 	"pkg/shelly/script"
 	"pkg/shelly/types"
 	"reflect"
-	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -26,6 +25,8 @@ func init() {
 	Cmd.AddCommand(updateCtl)
 	// Flag to disable minification on update
 	updateCtl.Flags().BoolVar(&updateNoMinify, "no-minify", false, "Do not minify scripts before upload")
+	// Flag to force re-upload even if version hash matches
+	updateCtl.Flags().BoolVar(&updateForce, "force", false, "Force re-upload even if version hash matches")
 }
 
 var updateCtl = &cobra.Command{
@@ -34,26 +35,20 @@ var updateCtl = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
-		// minify is true by default unless --no-minify is set
-		minify := !updateNoMinify
 		// Script updates can be long: Use a long-lived context decoupled from the global command timeout
 		longCtx := options.CommandLineContext(context.Background(), log, 5*time.Minute, global.Version(cmd.Context()))
-		_, err := myhome.Foreach(longCtx, log, device, options.Via, doUpdate, []string{strconv.FormatBool(minify)})
+		_, err := myhome.Foreach(longCtx, log, device, options.Via, doUpdate, []string{})
 		return err
 	},
 }
 
 var updateNoMinify bool
+var updateForce bool
 
 func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
-	}
-
-	minify, err := strconv.ParseBool(args[0])
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse minify argument: %w", err)
 	}
 
 	// Get list of scripts currently loaded on the device
@@ -63,7 +58,7 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 		return nil, err
 	}
 
-	log.Info("Starting script update process", "device", sd.Name(), "loaded_scripts", len(loaded))
+	fmt.Printf("Updating scripts on %s (%d scripts loaded)\n", sd.Name(), len(loaded))
 
 	updateResults := make([]UpdateResult, 0)
 
@@ -71,13 +66,13 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 	for _, loadedScript := range loaded {
 		scriptName := loadedScript.Name
 
-		log.Info("Checking script for update", "script", scriptName, "id", loadedScript.Id)
+		fmt.Printf("  . Checking %s...\n", scriptName)
 
 		// Try to upload the script (this will check version hash and skip if up-to-date)
 		// If the script is not available in embedded scripts, Upload will return an error
-		id, err := script.Upload(ctx, via, sd, scriptName, minify)
+		id, err := script.Upload(ctx, via, sd, scriptName, !noMinify, forceUpload)
 		if err != nil {
-			log.Error(err, "Failed to update script", "script", scriptName, "id", loadedScript.Id)
+			fmt.Printf("  ✗ Failed to update %s: %v\n", scriptName, err)
 			updateResults = append(updateResults, UpdateResult{
 				ScriptName: scriptName,
 				ScriptId:   loadedScript.Id,
@@ -87,17 +82,27 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 			continue
 		}
 
-		log.Info("Successfully processed script", "script", scriptName, "old_id", loadedScript.Id, "new_id", id)
-		updateResults = append(updateResults, UpdateResult{
-			ScriptName: scriptName,
-			ScriptId:   loadedScript.Id,
-			NewId:      id,
-			Status:     "updated",
-			Message:    "Script processed successfully",
-		})
+		if id == 0 {
+			fmt.Printf("  → %s is up-to-date\n", scriptName)
+			updateResults = append(updateResults, UpdateResult{
+				ScriptName: scriptName,
+				ScriptId:   loadedScript.Id,
+				Status:     "skipped",
+				Message:    "Already up-to-date",
+			})
+		} else {
+			fmt.Printf("  ✓ Successfully updated %s (id: %d)\n", scriptName, id)
+			updateResults = append(updateResults, UpdateResult{
+				ScriptName: scriptName,
+				ScriptId:   loadedScript.Id,
+				NewId:      id,
+				Status:     "updated",
+				Message:    "Script updated successfully",
+			})
+		}
 	}
 
-	log.Info("Script update process completed", "device", sd.Name(), "total_processed", len(updateResults))
+	fmt.Printf("\nUpdate complete for %s (%d scripts processed)\n", sd.Name(), len(updateResults))
 
 	return UpdateResults{
 		Device:  sd.Name(),

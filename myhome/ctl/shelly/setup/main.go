@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/spf13/cobra"
 	"github.com/jackpal/gateway"
+	"github.com/spf13/cobra"
 
 	"global"
 	"hlog"
-	"myhome/ctl/options"
 	"myhome"
+	"myhome/ctl/options"
 	"mynet"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
@@ -246,7 +246,7 @@ Arguments:
 			}
 			if !ok {
 				// Not already in place: upload, ...
-				_, err = script.Upload(ctx, via, sd, "watchdog.js", true)
+				_, err = script.Upload(ctx, via, sd, "watchdog.js", true, false)
 				if err != nil {
 					return nil, err
 				}

@@ -309,7 +309,7 @@ func Download(ctx context.Context, via types.Channel, device types.Device, name 
 	return res.Data, nil
 }
 
-func Upload(ctx context.Context, via types.Channel, device types.Device, name string, minify bool) (uint32, error) {
+func Upload(ctx context.Context, via types.Channel, device types.Device, name string, minify bool, force bool) (uint32, error) {
 	buf, err := content.ReadFile(name)
 	if err != nil {
 		log.Error(err, "Unknown script", "name", name, "device", device.Name())
@@ -336,8 +336,12 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 	}
 
 	var id uint32
-	if version != kvsVersion {
-		log.Info("Script version is different, uploading new one", "name", name, "version", version)
+	if force || version != kvsVersion {
+		if force {
+			log.Info("Force flag set, uploading script", "name", name, "version", version)
+		} else {
+			log.Info("Script version is different, uploading new one", "name", name, "version", version)
+		}
 		id, err = doUpload(ctx, via, device, name, buf, minify, kvsKey, version)
 		if err != nil {
 			return 0, err

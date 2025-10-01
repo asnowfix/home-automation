@@ -3,7 +3,10 @@ package proxy
 import (
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/tls"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,11 +22,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
-	"compress/gzip"
 	"sync"
-	"crypto/tls"
-	"embed"
+	"time"
 
 	"myhome"
 	"myhome/storage"
@@ -33,6 +33,7 @@ import (
 )
 
 // Embed static assets under this package
+//
 //go:embed static/*
 var staticFS embed.FS
 
@@ -57,11 +58,14 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	sse.clients = make(map[sseClient]struct{})
 
 	notifyRefresh := func(id string) {
-		msg := fmt.Sprintf("event: device-refresh\n") + fmt.Sprintf("data: %s\n\n", id)
+		msg := fmt.Sprintf("event: device-refresh\ndata: %s\n\n", id)
 		sse.mu.Lock()
 		defer sse.mu.Unlock()
 		for ch := range sse.clients {
-			select { case ch <- msg: default: }
+			select {
+			case ch <- msg:
+			default:
+			}
 		}
 	}
 
@@ -162,7 +166,9 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 			_ = r.ParseForm()
 			want := r.Form.Get("device")
 			ch := make(sseClient, 4)
-			sse.mu.Lock(); sse.clients[ch] = struct{}{}; sse.mu.Unlock()
+			sse.mu.Lock()
+			sse.clients[ch] = struct{}{}
+			sse.mu.Unlock()
 			defer func() { sse.mu.Lock(); delete(sse.clients, ch); sse.mu.Unlock() }()
 			// Send initial comment to open the stream
 			_, _ = w.Write([]byte(": connected\n\n"))

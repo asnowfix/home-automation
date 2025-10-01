@@ -174,21 +174,20 @@ var debugCtl = &cobra.Command{
 				}
 			}(udpContext, log.WithName("UDP-logger"), udpChan)
 
-			go func(ctx context.Context, log logr.Logger, ch chan []byte) {
+			go func(ctx context.Context, ch chan []byte) {
 				ctx = tools.WithToken(ctx)
 
 				// Process messages from channel
 				for {
 					select {
 					case <-ctx.Done():
-						log.Info("Done")
 						return
 
 					case data := <-ch:
-						parseMessage(log, data)
+						parseMessage(data)
 					}
 				}
-			}(udpContext, log, udpChan)
+			}(udpContext, udpChan)
 
 			addr := fmt.Sprintf("%s:%d", ip.String(), port)
 			args = []string{addr}
@@ -264,21 +263,10 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	}
 	options.PrintResult(res)
 
-	if res.RestartRequired {
-		log.Info("Restart required")
-		// TODO: restart device, if necessary
-		// out, err := device.CallE(ctx, via, string(shelly.Reboot), nil)
-		// if err != nil {
-		// 	log.Error(err, "Unable to restart")
-		// 	return nil, err
-		// }
-		// log.Info("Restarted", "out", out)
-	}
-
 	return res, nil
 }
 
-func parseMessage(log logr.Logger, data []byte) {
+func parseMessage(data []byte) {
 	// shelly1minig3-54320464074c 22008 84452.340 101 2|\"restart_required\": true, \"ts\": 1746952708.27999997138, \"cfg_rev\": 55 }\x00shelly1minig3-54320464074c 22009 84452.340 101 2|}\x00shelly1minig3-54320464074c 22010 84452.340 1 2|shelly_notification:211 Event from sys: {\"component\":\"sys\",\"event\":\"config_changed\",\"restart_required\":true,\"ts\":1746952708.28,\"cfg_rev\":55}\x00shelly1minig3-54320464074c 22011 84452.340 1 2|shelly_notification:165 Status change of sys: {\"cfg_rev\":55}\x00shelly1minig3-54320464074c 22012 84452.431 1 2|shos_rpc_inst.c:243     Wifi.GetStatus via MQTT
 	// shelly1minig3-54320464074c 22061 84617.229 102 2|BLE scanner is listening to addresses: e8:e0:7e:a6:0c:6f
 	// shelly1minig3-54320464074c 22062 84619.171 1 2|shos_rpc_inst.c:243     Shelly.GetDeviceInfo via MQTT
@@ -309,7 +297,7 @@ func parseMessage(log logr.Logger, data []byte) {
 
 		fields := strings.Split(header, " ")
 		if len(fields) != 5 {
-			log.Error(nil, "Invalid line", "line", line)
+			fmt.Fprintf(os.Stderr, "Invalid line: %s\n", line)
 			continue
 		}
 
@@ -317,19 +305,19 @@ func parseMessage(log logr.Logger, data []byte) {
 
 		msgCount, err := strconv.Atoi(fields[1])
 		if err != nil {
-			log.Error(err, "Invalid msg count", "count", fields[1])
+			fmt.Fprintf(os.Stderr, "Invalid msg count: %s\n", fields[1])
 			continue
 		}
 
 		timestamp, err := strconv.ParseFloat(fields[2], 64)
 		if err != nil {
-			log.Error(err, "Invalid timestamp", "timestamp", fields[2])
+			fmt.Fprintf(os.Stderr, "Invalid timestamp: %s\n", fields[2])
 			continue
 		}
 
 		component, err := strconv.Atoi(fields[3])
 		if err != nil {
-			log.Error(err, "Invalid component", "component", fields[3])
+			fmt.Fprintf(os.Stderr, "Invalid component: %s\n", fields[3])
 			continue
 		}
 
@@ -340,7 +328,7 @@ func parseMessage(log logr.Logger, data []byte) {
 		// }
 
 		if len(entry) != 2 {
-			log.Error(nil, "Invalid line", "line", line)
+			fmt.Fprintf(os.Stderr, "Invalid line: %s\n", line)
 			continue
 		}
 		msg := entry[1]
@@ -348,9 +336,9 @@ func parseMessage(log logr.Logger, data []byte) {
 		// if <component> is 1xx, xx is the script number
 		if component >= 100 && component < 200 {
 			scriptNumber := component - 100
-			log.Info("UDP-logger", "device", device, "count", msgCount, "ts", timestamp, "script", scriptNumber, "msg", msg)
+			fmt.Printf("%s [script:%d] [%d] %.3f | %s\n", device, scriptNumber, msgCount, timestamp, msg)
 		} else {
-			log.Info("UDP-logger", "device", device, "count", msgCount, "ts", timestamp, "component", component, "msg", msg)
+			fmt.Printf("%s [comp:%d] [%d] %.3f | %s\n", device, component, msgCount, timestamp, msg)
 		}
 	}
 }

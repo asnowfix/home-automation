@@ -115,7 +115,7 @@ func GetDeviceInfo(ctx context.Context, d types.Device, via types.Channel) (*Dev
 		return nil, fmt.Errorf("invalid device info type %T (should be *DeviceInfo)", out)
 	}
 	if info.Id == "" || len(info.MacAddress) == 0 {
-		panic("invalid device info id:" + info.Id + " mac:" + info.MacAddress)
+		return nil, fmt.Errorf("invalid device info id:%s mac:%s", info.Id, info.MacAddress)
 	}
 
 	return info, nil

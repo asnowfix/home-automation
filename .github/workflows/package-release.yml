@@ -4,6 +4,9 @@ env:
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: 'Git ref to checkout (tag or branch)'
+        required: true
       previous:
         description: 'Previous ref/tag'
         required: true
@@ -14,15 +17,11 @@ jobs:
       matrix:
         arch: [amd64, arm64]
     steps:
-      - name: Install jq
-        uses: awalsh128/cache-apt-pkgs-action@latest
-        with:
-          packages: jq
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.ref }}
+          ref: ${{ github.event.inputs.ref }}
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -108,7 +107,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.ref }}
+          ref: ${{ github.event.inputs.ref }}
       - id: version
         name: Get package version from latest (current or prior) tag
         run: "$tag = (git describe) -replace '^v',''\nAdd-Content -Path $env:GITHUB_OUTPUT -Value \"release=$tag\"\n$version = $tag -split '\\.' \nAdd-Content -Path $env:GITHUB_OUTPUT -Value \"version_major=$($version[0])\"\nAdd-Content -Path $env:GITHUB_OUTPUT -Value \"version_minor=$($version[1])\"\nAdd-Content -Path $env:GITHUB_OUTPUT -Value \"version_patch=$($version[2])\"\n"
@@ -236,10 +235,8 @@ jobs:
           name: Release ${{ steps.version.outputs.release }}
           artifactErrorsFailBuild: true
           artifacts: "*.deb,${{ needs.package-msi.outputs.msi_file }}"
-          body: ${{ steps.release_notes.outputs.notes }}
-          #tag: ${{ steps.version.outputs.release }}-rc${{ github.run_number }}
           tag: ${{ steps.version.outputs.release }}
-          prerelease: false # beta, rc
-          draft: true # confirmation in the UI
+          prerelease: false
+          draft: true
           replacesArtifacts: true
           generateReleaseNotes: true

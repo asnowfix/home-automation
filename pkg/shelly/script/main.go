@@ -22,6 +22,11 @@ var content embed.FS
 
 // Package logger is declared in ops.go
 
+// ReadEmbeddedFile reads an embedded script file by name
+func ReadEmbeddedFile(name string) ([]byte, error) {
+	return content.ReadFile(name)
+}
+
 func ListAvailable() ([]string, error) {
 	dir, err := content.ReadDir(".")
 	if err != nil {

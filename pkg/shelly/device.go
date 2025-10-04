@@ -595,21 +595,40 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 	// Collect results
 	out := make([]any, 0, len(deviceList))
 	var errs []error
+	var failedDevices []string
 	for result := range results {
 		if result.Error != nil {
-			errs = append(errs, fmt.Errorf("device %s: %w", result.Device.Id(), result.Error))
+			deviceId := result.Device.Id()
+			errs = append(errs, fmt.Errorf("device %s: %w", deviceId, result.Error))
+			failedDevices = append(failedDevices, deviceId)
 		}
 		out = append(out, result.Result)
 	}
 
-	// If all devices failed, return error
-	if len(errs) == len(deviceList) {
-		return out, fmt.Errorf("all devices failed: %v", errs)
-	}
-
-	// If some devices failed, log but continue
+	// If any devices failed, report them
 	if len(errs) > 0 {
-		log.Info("Some devices failed", "failed_count", len(errs), "total_count", len(deviceList), "errors", errs)
+		successCount := len(deviceList) - len(errs)
+
+		// Print summary to stdout
+		fmt.Printf("\n")
+		if successCount > 0 {
+			fmt.Printf("✓ %d device(s) succeeded\n", successCount)
+		}
+		fmt.Printf("✗ %d device(s) failed:\n", len(errs))
+		for _, deviceId := range failedDevices {
+			fmt.Printf("  - %s\n", deviceId)
+		}
+
+		// Log details
+		log.Info("Operation completed with errors", "succeeded", successCount, "failed", len(errs), "total", len(deviceList))
+
+		// If all devices failed, return error
+		if len(errs) == len(deviceList) {
+			return out, fmt.Errorf("all %d device(s) failed", len(deviceList))
+		}
+
+		// If some devices failed, return aggregated error
+		return out, fmt.Errorf("%d of %d device(s) failed", len(errs), len(deviceList))
 	}
 
 	return out, nil

@@ -2,11 +2,80 @@
 
 ## Table of Contents <!-- omit in toc -->
 
+- [Release Workflow](#release-workflow)
 - [Ubuntu/Debian Linux](#ubuntu-debian-linux)
 - [Windows - WSL](#windows-wsl)
 - [Windows - Native](#windows-native)
 - [macOS TBC](#macos-tbc)
 - [VSCode](#vscode)
+
+## Release Workflow
+
+This project uses semantic versioning (vMAJOR.MINOR.PATCH) with automated tagging and branching.
+
+### Creating a Minor Release (vM.m.0)
+
+**When to use**: New features, API changes, or significant updates
+
+**Process**:
+1. Create and push a tag ending in `.0`:
+   ```bash
+   git tag -s v1.2.0 -m "Release v1.2.0"
+   git push origin v1.2.0
+   ```
+2. The workflow automatically:
+   - Creates a branch `v1.2.x` from the tag
+   - Triggers the packaging workflow to build release artifacts
+
+**Example**: Tag `v1.2.0` → Creates branch `v1.2.x`
+
+### Creating a Patch Release (vM.m.p)
+
+**When to use**: Bug fixes, security patches, or minor improvements
+
+**Process**:
+1. Create a PR targeting the release branch:
+   ```bash
+   git checkout -b fix-bug-123
+   # Make your changes
+   git commit -s -m "Fix bug #123"
+   gh pr create --base v1.2.x --head fix-bug-123
+   ```
+2. When the PR is merged, the workflow automatically:
+   - Finds the latest patch tag on that branch (e.g., `v1.2.3`)
+   - Creates the next patch tag (e.g., `v1.2.4`)
+   - Triggers the packaging workflow to build release artifacts
+
+**Example**: PR merged to `v1.2.x` → Automatically creates tag `v1.2.4`
+
+### Branch Strategy
+
+```
+main (development)
+  ├── v1.0.x (release branch)
+  │   ├── v1.0.0 (tag)
+  │   ├── v1.0.1 (tag)
+  │   └── v1.0.2 (tag)
+  ├── v1.1.x (release branch)
+  │   ├── v1.1.0 (tag)
+  │   └── v1.1.1 (tag)
+  └── v2.0.x (release branch)
+      └── v2.0.0 (tag)
+```
+
+### Best Practices
+
+1. **For new features**: Develop on `main`, create a minor release tag (vM.m.0) when ready
+2. **For bug fixes**:
+   - If fixing current release: Create PR to the `vM.m.x` branch
+   - If fixing next release: Develop on `main`
+3. **For hotfixes**: Create PR directly to the affected `vM.m.x` branch
+
+### Automated Workflows
+
+- **create-branch-on-minor-tag.yml**: Creates `vM.m.x` branch when `vM.m.0` tag is pushed
+- **auto-tag-patch.yml**: Creates `vM.m.p+1` tag when PR is merged to `vM.m.x` branch
+- **package-release.yml**: Builds and publishes release artifacts
 
 ## Code signing
 

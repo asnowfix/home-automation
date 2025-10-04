@@ -471,36 +471,61 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>MyHome Devices</title>
-  <link rel="stylesheet" href="/static/myhome.css?v=1"/>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css"/>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🏠</text></svg>"/>
   </head>
 <body>
-  <h1>MyHome</h1>
-  <div class="subtitle">Known devices ({{len .Devices}})</div>
-  {{if .Devices}}
-  <div class="grid">
-    {{range .Devices}}
-    <div class="card">
-      <div class="name">{{.Name}}</div>
-      <div class="meta">{{.Manufacturer}} · {{.Id}}</div>
-      {{if .Host}}
-        <div class="meta">Host: {{.Host}}</div>
-      {{else}}
-        <div class="meta">No host known</div>
-      {{end}}
-      <div class="actions {{if not .Host}}single{{end}}">
-        {{if .Host}}
-          <div class="slot"><a class="button" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer">Open</a></div>
-        {{end}}
-        <div class="slot"><button class="button button--refresh" id="btn-{{.Id}}" onclick="refreshDevice('{{.Id}}')">Refresh</button></div>
+  <section class="hero is-light is-small">
+    <div class="hero-body">
+      <div class="container">
+        <div class="level">
+          <div class="level-left">
+            <h1 class="title is-3">MyHome</h1>
+            <span class="subtitle is-6 ml-3">Known devices ({{len .Devices}})</span>
+          </div>
+          <div class="level-right">
+            <a class="button is-info" href="https://control.shelly.cloud" target="_blank" rel="noopener noreferrer">Open Shelly Control</a>
+          </div>
+        </div>
       </div>
     </div>
-    {{end}}
-  </div>
-  {{else}}
-    <p class="empty">No devices found.</p>
-  {{end}}
-  <footer>Served by MyHome reverse proxy</footer>
+  </section>
+  <section class="section">
+    <div class="container">
+      {{if .Devices}}
+      <div class="columns is-multiline">
+        {{range .Devices}}
+        <div class="column is-4-desktop is-6-tablet">
+          <div class="card">
+            <div class="card-content">
+              <p class="title is-5">{{.Name}}</p>
+              <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
+              {{if .Host}}
+                <p class="has-text-grey">Host: {{.Host}}</p>
+              {{else}}
+                <p class="has-text-grey">No host known</p>
+              {{end}}
+              <div class="buttons mt-3">
+                {{if .Host}}
+                  <a class="button is-link" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer">Open</a>
+                {{end}}
+                <button class="button is-warning" id="btn-{{.Id}}" onclick="refreshDevice('{{.Id}}')">Refresh</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+        <div class="notification is-light has-text-grey is-size-6">No devices found.</div>
+      {{end}}
+    </div>
+  </section>
+  <footer class="footer">
+    <div class="content has-text-centered has-text-grey-light is-size-7">
+      Served by MyHome reverse proxy
+    </div>
+  </footer>
   <script>
     async function refreshDevice(id) {
       const btn = document.getElementById('btn-' + id);

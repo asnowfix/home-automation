@@ -16,6 +16,14 @@ h1 {
   margin-bottom: 1.5rem;
 }
 
+/* Top toolbar */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
@@ -57,6 +65,11 @@ h1 {
   text-decoration: none;
   background: #2563eb; /* default (Open) */
   color: white;
+}
+
+/* Shelly-inspired primary action (cyan/teal) */
+.button--shelly {
+  background: #00bcd4;
 }
 
 .actions {

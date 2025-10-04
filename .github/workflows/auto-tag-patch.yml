@@ -2,11 +2,13 @@ name: auto-tag-patch
 env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches: 'v[0-9]+.[0-9]+.x'
 jobs:
   tag-patch:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,7 +28,7 @@ jobs:
         id: previoustag
         run: |
           set -euo pipefail
-          BRANCH="${GITHUB_REF_NAME}"
+          BRANCH="${{ github.event.pull_request.base.ref }}"
           if [[ "$BRANCH" =~ ^v([0-9]+)\.([0-9]+)\.x$ ]]; then
             MAJOR="${BASH_REMATCH[1]}"
             MINOR="${BASH_REMATCH[2]}"

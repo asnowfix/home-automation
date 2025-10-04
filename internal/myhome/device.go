@@ -258,6 +258,8 @@ func (d *Device) WithZeroConfEntry(entry *zeroconf.ServiceEntry) *Device {
 	d.log.Info("Updating device", "id", d.Id, "zeroconf entry", entry)
 	if len(entry.AddrIPv4) > 0 {
 		d.Host_ = entry.AddrIPv4[0].String()
+	} else if len(entry.AddrIPv6) > 0 {
+		d.Host_ = entry.AddrIPv6[0].String()
 	}
 	if entry.Instance != "" && entry.Instance != d.Id_ {
 		d.Name_ = entry.Instance

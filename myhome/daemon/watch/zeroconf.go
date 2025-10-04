@@ -113,7 +113,7 @@ func completeEntry(ctx context.Context, log logr.Logger, resolver mynet.Resolver
 		ips, err = resolver.LookupHost(ctx, entry.HostName)
 		if err != nil || len(ips) == 0 {
 			log.Error(err, "Failed to resolve", "hostname", entry.HostName)
-			return entry, err
+			return nil, err
 		}
 		if len(ips) > 0 {
 			entry.AddrIPv4 = make([]net.IP, 0)
@@ -125,12 +125,13 @@ func completeEntry(ctx context.Context, log logr.Logger, resolver mynet.Resolver
 					entry.AddrIPv6 = append(entry.AddrIPv6, ip)
 				}
 			}
+			log.Info("Resolved from mDNS entry", "entry", entry, "ipv4", entry.AddrIPv4, "ipv6", entry.AddrIPv6)
 		}
 	}
 
 	if len(ips) == 0 {
 		err = fmt.Errorf("no IP addresses found for hostname %s", entry.HostName)
-		return entry, err
+		return nil, err
 	}
 
 	log.Info("Resolved from mDNS entry", "entry", entry, "ipv4", entry.AddrIPv4, "ipv6", entry.AddrIPv6)

@@ -42,11 +42,22 @@ jobs:
             PREV_TAG="${PREFIX}0"   # e.g. v0.4.0
           fi
           echo "tag=${PREV_TAG}" | tee -a "$GITHUB_OUTPUT"
-      - name: Get semantic version
+      - name: Calculate next patch version
         id: semver
-        uses: 'WyriHaximus/github-action-next-semvers@v1'
-        with:
-          version: ${{ steps.previoustag.outputs.tag }}
+        run: |
+          PREV_TAG="${{ steps.previoustag.outputs.tag }}"
+          # Extract version components
+          if [[ "$PREV_TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
+            NEXT_PATCH=$((PATCH + 1))
+            NEXT_VERSION="v${MAJOR}.${MINOR}.${NEXT_PATCH}"
+            echo "v_patch=${NEXT_VERSION}" | tee -a "$GITHUB_OUTPUT"
+          else
+            echo "Failed to parse version from tag: $PREV_TAG" >&2
+            exit 1
+          fi
       - name: Import GPG key
         uses: crazy-max/ghaction-import-gpg@v6
         with:
@@ -68,4 +79,4 @@ jobs:
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
               https://api.github.com/repos/${{ github.repository }}/actions/workflows/package-release.yml/dispatches \
-              -d '{"ref":"${{ steps.semver.outputs.v_patch }}","inputs":{"previous":"${{ steps.previoustag.outputs.tag }}"}}' 
+              -d '{"ref":"${{ steps.semver.outputs.v_patch }}","inputs":{"ref":"refs/tags/${{ steps.semver.outputs.v_patch }}","previous":"${{ steps.previoustag.outputs.tag }}"}}' 

@@ -40,15 +40,12 @@ jobs:
           #     # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
           #     GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
       - id: version
-        name: Get package version from latest (current or prior) tag
+        name: Get package version from ref
         run: |
-          # https://www.debian.org/doc/debian-policy/ch-controlfields.html#version
-          # [epoch:]upstream_version[-debian_revision]
-          #echo "upstream_version=$(git describe | sed -E 's|^v*([0-9]+\.[0-9]+\.[0-9]+)-(.*)$|\1|g')" | tee -a $GITHUB_OUTPUT
-          #echo "debian_revision=$(git describe | sed -E 's|^v*([0-9]+\.[0-9]+\.[0-9]+)-(.*)$|\2|g')" | tee -a $GITHUB_OUTPUT
-          #echo "debian_version=$(git describe | sed -E 's|^v*(.*)$|\1|g')" | tee -a $GITHUB_OUTPUT
-          #echo "::set-output name=release::$(git describe)"
-          echo "release=$(git describe | sed -E 's|^v*(.*)$|\1|g')" | tee -a "$GITHUB_OUTPUT"
+          # Extract version from the ref input (e.g., refs/tags/v0.5.9 -> 0.5.9)
+          REF="${{ github.event.inputs.ref }}"
+          VERSION=$(echo "$REF" | sed -E 's|^refs/tags/v*(.*)$|\1|g')
+          echo "release=${VERSION}" | tee -a "$GITHUB_OUTPUT"
       - name: Shape artifacts
         id: shape-artifacts
         run: |
@@ -109,8 +106,16 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref }}
       - id: version
-        name: Get package version from latest (current or prior) tag
-        run: "$tag = (git describe) -replace '^v',''\nAdd-Content -Path $env:GITHUB_OUTPUT -Value \"release=$tag\"\n$version = $tag -split '\\.' \nAdd-Content -Path $env:GITHUB_OUTPUT -Value \"version_major=$($version[0])\"\nAdd-Content -Path $env:GITHUB_OUTPUT -Value \"version_minor=$($version[1])\"\nAdd-Content -Path $env:GITHUB_OUTPUT -Value \"version_patch=$($version[2])\"\n"
+        name: Get package version from ref
+        run: |
+          # Extract version from the ref input (e.g., refs/tags/v0.5.9 -> 0.5.9)
+          $ref = "${{ github.event.inputs.ref }}"
+          $tag = $ref -replace '^refs/tags/v*',''
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "release=$tag"
+          $version = $tag -split '\.'
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version_major=$($version[0])"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version_minor=$($version[1])"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version_patch=$($version[2])"
       - id: install-go
         name: Set up Go
         uses: actions/setup-go@v5
@@ -200,9 +205,12 @@ jobs:
         with:
           fetch-depth: 0
       - id: version
-        name: Get package version from latest tag
+        name: Get package version from ref
         run: |
-          echo "release=$(git describe | sed -E 's|^v*(.*)$|\1|g')" | tee -a "$GITHUB_OUTPUT"
+          # Extract version from the ref input (e.g., refs/tags/v0.5.9 -> 0.5.9)
+          REF="${{ github.event.inputs.ref }}"
+          VERSION=$(echo "$REF" | sed -E 's|^refs/tags/v*(.*)$|\1|g')
+          echo "release=${VERSION}" | tee -a "$GITHUB_OUTPUT"
       - name: Generate Release Notes
         id: release_notes
         uses: gableroux/generate-github-release-notes@v0.1.2

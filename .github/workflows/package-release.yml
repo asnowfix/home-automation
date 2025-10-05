@@ -243,7 +243,7 @@ jobs:
           name: Release ${{ steps.version.outputs.release }}
           artifactErrorsFailBuild: true
           artifacts: "*.deb,${{ needs.package-msi.outputs.msi_file }}"
-          tag: ${{ steps.version.outputs.release }}
+          tag: v${{ steps.version.outputs.release }}
           prerelease: false
           draft: true
           replacesArtifacts: true

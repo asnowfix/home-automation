@@ -25,21 +25,27 @@ const COMMAND_DEFAULT_TIMEOUT time.Duration = 15 * time.Second
 
 const DEVICE_REFRESH_INTERVAL time.Duration = 1 * time.Minute
 
+const MQTT_WATCHDOG_CHECK_INTERVAL time.Duration = 30 * time.Second
+
+const MQTT_WATCHDOG_MAX_FAILURES int = 3
+
 var Flags struct {
-	CpuProfile      string
-	Verbose         bool
-	Quiet           bool
-	Json            bool
-	MqttBroker      string
-	MqttTimeout     time.Duration // the value taken by --mqtt-timeout / -T
-	MqttGrace       time.Duration // the value taken by --mqtt-grace / -G
-	MdnsTimeout     time.Duration // the value taken by --mdns-timeout / -M
-	CommandTimeout  time.Duration // the value taken by --command-timeout / -C
-	RefreshInterval time.Duration // the value taken by --refresh-interval / -R
-	Via             string
-	SwitchId        uint32
-	EventsDir       string
-	ProxyPort       int
+	CpuProfile              string
+	Verbose                 bool
+	Quiet                   bool
+	Json                    bool
+	MqttBroker              string
+	MqttTimeout             time.Duration // the value taken by --mqtt-timeout / -T
+	MqttGrace               time.Duration // the value taken by --mqtt-grace / -G
+	MdnsTimeout             time.Duration // the value taken by --mdns-timeout / -M
+	CommandTimeout          time.Duration // the value taken by --command-timeout / -C
+	RefreshInterval         time.Duration // the value taken by --refresh-interval / -R
+	MqttWatchdogInterval    time.Duration // the value taken by --mqtt-watchdog-interval
+	MqttWatchdogMaxFailures int           // the value taken by --mqtt-watchdog-max-failures
+	Via                     string
+	SwitchId                uint32
+	EventsDir               string
+	ProxyPort               int
 }
 
 var Via types.Channel

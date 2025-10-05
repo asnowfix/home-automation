@@ -3,10 +3,18 @@
 ## Table of Contents <!-- omit in toc -->
 
 - [Release Workflow](#release-workflow)
-- [Ubuntu/Debian Linux](#ubuntu-debian-linux)
+  - [Creating a Minor Release](#creating-a-minor-release-vmm0)
+  - [Creating a Patch Release](#creating-a-patch-release-vmmp)
+  - [Branch Strategy](#branch-strategy)
+  - [Best Practices](#best-practices)
+  - [Automated Workflows](#automated-workflows)
+  - [Release Notes Process](#release-notes-process)
+- [Code signing](#code-signing)
+- [Ubuntu/Debian Linux](#ubuntudebian-linux)
 - [Windows - WSL](#windows-wsl)
 - [Windows - Native](#windows-native)
 - [macOS TBC](#macos-tbc)
+- [Profiling](#profiling)
 - [VSCode](#vscode)
 
 ## Release Workflow
@@ -76,6 +84,96 @@ main (development)
 - **create-branch-on-minor-tag.yml**: Creates `vM.m.x` branch when `vM.m.0` tag is pushed
 - **auto-tag-patch.yml**: Creates `vM.m.p+1` tag when PR is merged to `vM.m.x` branch
 - **package-release.yml**: Builds and publishes release artifacts
+
+### Release Notes Process
+
+#### 1. Prerequisites
+
+Install GitHub CLI:
+```bash
+# macOS
+brew install gh
+
+# Debian/Ubuntu
+sudo apt install gh
+
+# Authenticate
+gh auth login
+```
+
+#### 2. Creating Release Notes
+
+For each release, create release notes from the template:
+
+```bash
+# Copy the template
+cp RELEASE_NOTES.md RELEASE_NOTES_v0.5.2.md
+
+# Edit and fill in all sections
+# Use git log to help generate content:
+git log v0.5.1..HEAD --oneline
+git log v0.5.1..HEAD --pretty=format:"%h %s" --reverse
+```
+
+**Release Notes Checklist**:
+- [ ] Update version numbers (replace `vX.Y.Z` with actual version)
+- [ ] Update release date
+- [ ] Fill in all sections with actual changes from git log
+- [ ] Update installation URLs with correct version
+- [ ] Review breaking changes section carefully
+- [ ] Add migration instructions if needed
+- [ ] Proofread for clarity and accuracy
+
+#### 3. Uploading Release Notes
+
+After the automated workflow creates the release:
+
+```bash
+# Upload release notes for the latest tag
+make upload-release-notes
+
+# Or specify a version
+make upload-release-notes VERSION=v0.5.2
+```
+
+This will:
+- Detect the latest git tag (or use VERSION if specified)
+- Find the corresponding `RELEASE_NOTES_vX.Y.Z.md` file
+- Upload it to the GitHub release using `gh release edit`
+
+#### 4. Publishing the Release
+
+1. Review the draft release on GitHub
+2. Verify all artifacts are attached
+3. Review the release notes
+4. Click "Publish release"
+
+#### Complete Release Workflow
+
+```bash
+# 1. Create release notes
+cp RELEASE_NOTES.md RELEASE_NOTES_v0.5.2.md
+# Edit the file...
+
+# 2. Commit release notes
+git add RELEASE_NOTES_v0.5.2.md
+git commit -m "docs: add release notes for v0.5.2"
+git push
+
+# 3. Create and push tag (or let auto-tagging handle it)
+git tag -s v0.5.2 -m "Release v0.5.2"
+git push origin v0.5.2
+
+# 4. Wait for CI/CD to build packages (check GitHub Actions)
+
+# 5. Upload release notes
+make upload-release-notes
+
+# 6. Review and publish on GitHub
+gh release view v0.5.2 --web
+```
+
+For detailed documentation, see [docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md).
 
 ## Code signing
 

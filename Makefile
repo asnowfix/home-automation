@@ -24,7 +24,17 @@ mods = $(patsubst %/,%,$(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */
 default: help
 
 help:
-	@echo make help build run install start stop
+	@echo "Available targets:"
+	@echo "  help                  - Show this help message"
+	@echo "  build                 - Build the project"
+	@echo "  run                   - Run the project"
+	@echo "  install               - Install the project"
+	@echo "  start                 - Start the service"
+	@echo "  stop                  - Stop the service"
+	@echo "  status                - Show service status"
+	@echo "  logs                  - Show service logs"
+	@echo "  tidy                  - Tidy Go modules"
+	@echo "  upload-release-notes  - Upload release notes to GitHub (VERSION=vX.Y.Z optional)"
 
 ifneq ($(MODULE),)
 # make module MODULE=myhome/ctl/options
@@ -85,3 +95,37 @@ push:
 msi: build-msi
 	$msi = "$out\MyHome-0.0.18.msi"
 	go-msi make --msi $msi --version 0.0.18 --path .\wix.json --arch amd64 --license .\LICENSE --out $out
+
+# Upload release notes for the latest version to GitHub
+# Usage: make upload-release-notes [VERSION=vX.Y.Z]
+# If VERSION is not specified, uses the latest git tag
+# Extracts the specific version section from RELEASE_NOTES.md (no template/preamble)
+upload-release-notes:
+	@echo "Uploading release notes to GitHub..."
+	@echo "Fetching latest tags..."; \
+	git fetch --tags --quiet; \
+	VERSION=$${VERSION:-$$(git describe --tags --abbrev=0 2>/dev/null)}; \
+	if [ -z "$$VERSION" ]; then \
+		echo "Error: No version specified and no git tags found" >&2; \
+		exit 1; \
+	fi; \
+	echo "Version: $$VERSION"; \
+	if ! command -v gh &> /dev/null; then \
+		echo "Error: GitHub CLI (gh) is not installed" >&2; \
+		echo "Install it from: https://cli.github.com/" >&2; \
+		exit 1; \
+	fi; \
+	echo "Extracting release notes for $$VERSION..."; \
+	TEMP_NOTES=$$(mktemp); \
+	if ./scripts/extract-release-notes.sh "$$VERSION" > "$$TEMP_NOTES" 2>&1; then \
+		echo "Updating release $$VERSION on GitHub..."; \
+		gh release edit "$$VERSION" --notes-file "$$TEMP_NOTES" && \
+		echo "✓ Successfully uploaded release notes for $$VERSION"; \
+		rm -f "$$TEMP_NOTES"; \
+	else \
+		cat "$$TEMP_NOTES" >&2; \
+		rm -f "$$TEMP_NOTES"; \
+		exit 1; \
+	fi
+
+.PHONY: upload-release-notes

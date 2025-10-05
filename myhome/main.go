@@ -51,7 +51,13 @@ var Cmd = &cobra.Command{
 			}
 		}
 
-		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout, Version)
+		// Daemon commands should run indefinitely, no timeout
+		timeout := options.Flags.CommandTimeout
+		if isDaemon {
+			timeout = 0
+		}
+
+		ctx = options.CommandLineContext(ctx, log, timeout, Version)
 		cmd.SetContext(ctx)
 
 		return nil

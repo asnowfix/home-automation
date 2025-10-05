@@ -25,12 +25,16 @@ const PUBLIC_PORT = 8883
 
 type Client struct {
 	// clientId  string      // MQTT client_id (this client)
-	mqtt              mqtt.Client   // MQTT stack
-	brokerUrl         *url.URL      // MQTT broker to connect to
-	log               logr.Logger   // Logger to use
-	resolutionTimeout time.Duration // MQTT broker (mDNS) lookup resolution timeout
-	timeout           time.Duration // MQTT operations timeout
-	grace             time.Duration // MQTT disconnection grace period
+	mqtt                mqtt.Client   // MQTT stack
+	brokerUrl           *url.URL      // MQTT broker to connect to
+	log                 logr.Logger   // Logger to use
+	resolutionTimeout   time.Duration // MQTT broker (mDNS) lookup resolution timeout
+	timeout             time.Duration // MQTT operations timeout
+	grace               time.Duration // MQTT disconnection grace period
+	watchdogStarted     bool          // Whether watchdog has been started
+	watchdogMutex       sync.Mutex    // Protects watchdogStarted
+	watchdogInterval    time.Duration // Watchdog check interval
+	watchdogMaxFailures int           // Watchdog max consecutive failures
 }
 
 const BROKER_DEFAULT_NAME = "mqtt"
@@ -82,16 +86,17 @@ func GetClientE(ctx context.Context) (*Client, error) {
 
 	client = &Client{
 		// clientId:  clientId,
-		mqtt:              mqtt.NewClient(mqttOps),
-		brokerUrl:         brokerUrl,
-		log:               log,
-		resolutionTimeout: options.Flags.MdnsTimeout,
-		timeout:           options.Flags.MqttTimeout,
-		grace:             options.Flags.MqttGrace,
+		mqtt:                mqtt.NewClient(mqttOps),
+		brokerUrl:           brokerUrl,
+		log:                 log,
+		resolutionTimeout:   options.Flags.MdnsTimeout,
+		timeout:             options.Flags.MqttTimeout,
+		grace:               options.Flags.MqttGrace,
+		watchdogInterval:    options.Flags.MqttWatchdogInterval,
+		watchdogMaxFailures: options.Flags.MqttWatchdogMaxFailures,
 	}
 
 	// FIXME: get MQTT logging right
-	// mqtt.DEBUG = mqtt.Logger{
 	// 	Println: log.Info,
 	// 	Printf:  log.I,
 	// }
@@ -166,7 +171,54 @@ func (c *Client) connect() error {
 		return err
 	}
 	c.log.Info("Successfully connected as MQTT client", "client_id", c.Id())
+	
+	// Start watchdog on first successful connection
+	c.startWatchdogOnce()
+	
 	return nil
+}
+
+func (c *Client) startWatchdogOnce() {
+	c.watchdogMutex.Lock()
+	defer c.watchdogMutex.Unlock()
+	
+	if c.watchdogStarted {
+		return
+	}
+	c.watchdogStarted = true
+	
+	go c.watchdog()
+}
+
+func (c *Client) watchdog() {
+	consecutiveFailures := 0
+	
+	c.log.Info("Starting MQTT connection watchdog", "check_interval", c.watchdogInterval, "max_failures", c.watchdogMaxFailures)
+	
+	ticker := time.NewTicker(c.watchdogInterval)
+	defer ticker.Stop()
+	
+	for range ticker.C {
+		if c.mqtt.IsConnected() {
+			if consecutiveFailures > 0 {
+				c.log.Info("MQTT connection recovered", "previous_failures", consecutiveFailures)
+				consecutiveFailures = 0
+			}
+		} else {
+			consecutiveFailures++
+			c.log.Error(nil, "MQTT connection lost", "consecutive_failures", consecutiveFailures, "max_failures", c.watchdogMaxFailures)
+			
+			// Note: Paho MQTT client has AutoReconnect=true and ResumeSubs=true,
+			// so it will automatically reconnect and re-subscribe to all topics.
+			// We just monitor if reconnection is taking too long.
+			
+			if consecutiveFailures >= c.watchdogMaxFailures {
+				c.log.Error(nil, "MQTT connection failed too many times, daemon needs restart", 
+					"consecutive_failures", consecutiveFailures)
+				panic("MQTT connection permanently lost")
+			}
+		}
+	}
 }
 
 func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, where string) (*url.URL, error) {
@@ -322,6 +374,12 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan [
 }
 
 func (c *Client) Publish(topic string, msg []byte) error {
+	err := c.connect()
+	if err != nil {
+		c.log.Error(err, "Unable to connect to publish", "topic", topic)
+		return err
+	}
+
 	token := c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, false /*retain*/, msg)
 	if token.WaitTimeout(c.timeout) {
 		// c.log.Info("Published", "to topic", topic, "payload", string(msg))

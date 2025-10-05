@@ -124,10 +124,6 @@ func (d *daemon) Run() error {
 		resolver.WithLocalName(d.ctx, myhome.MYHOME_HOSTNAME)
 	}
 
-	// Start MQTT watchdog to monitor connection health
-	watchdog := NewMqttWatchdog(mc, d.log, 30*time.Second, 3)
-	go watchdog.Start(d.ctx)
-
 	d.log.Info("Running")
 
 	// Create a channel to handle OS signals

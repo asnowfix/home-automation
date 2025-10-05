@@ -7,7 +7,7 @@ After=local-fs.target network.target
 [Service]
 Type=simple
 ExecStart=/usr/bin/myhome daemon run --disable-device-manager
-Restart=on-failure
+Restart=always
 RestartSec=10
 WorkingDirectory=/var/lib/myhome
 #User=myhome
@@ -18,6 +18,10 @@ StandardError=journal
 RestartKillSignal=SIGTERM
 KillMode=mixed
 TimeoutStopSec=30
+
+# Rate limiting to prevent restart loops
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 # Environment variables
 Environment=HOME=/var/lib/myhome

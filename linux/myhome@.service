@@ -7,12 +7,16 @@ After=local-fs.target network.target
 [Service]
 Type=simple
 ExecStart=/home/%i/go/bin/myhome daemon run --disable-device-manager
-Restart=on-failure
+Restart=always
 RestartSec=5
 User=%i
 # XDG_STATE_HOME :Where user-specific state files should be written (analogous to /var/lib).
 # $HOME/.local/state is a good place to store runtime state
 WorkingDirectory=/home/%i/.local/state/myhome
+
+# Rate limiting to prevent restart loops
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Install]
 # multi-user.target normally defines a system state where all network services

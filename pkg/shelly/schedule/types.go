@@ -8,7 +8,9 @@ type JobsRevision struct {
 
 type JobId struct {
 	// Id assigned to the job when it is created. This is used in subsequent Update / Delete calls
-	Id uint32 `json:"id,omitempty"`
+	Id  uint32 `json:"id,omitempty"`
+	// Rev is the revision number, returned by Schedule.Create
+	Rev uint   `json:"rev,omitempty"`
 }
 
 type JobCall struct {

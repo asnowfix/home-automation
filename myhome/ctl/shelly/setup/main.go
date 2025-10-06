@@ -3,6 +3,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net"
 	"strconv"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"pkg/shelly/system"
 	"pkg/shelly/types"
 	"pkg/shelly/wifi"
+	"schedule"
 )
 
 // options for STA
@@ -79,10 +81,10 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	} else {
 		targetName = sd.Name()
 	}
-	
+
 	// Device identifier for all output lines
 	deviceId := fmt.Sprintf("%s (%s)", targetName, sd.Id())
-	
+
 	fmt.Printf("Setting up device %s\n", deviceId)
 
 	// - set device name to args[0]
@@ -303,8 +305,90 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		fmt.Printf("  ✓ Watchdog script setup complete on %s\n", deviceId)
 	}
 
+	// Setup auto-update scheduled job
+	fmt.Printf("  . Setting up auto-update job on %s...\n", deviceId)
+	err = setupAutoUpdateJob(ctx, log, via, sd, deviceId)
+	if err != nil {
+		fmt.Printf("  ✗ Failed to setup auto-update job on %s: %v\n", deviceId, err)
+		return nil, err
+	}
+
 	fmt.Printf("\nSetup complete for %s\n", deviceId)
 	return nil, nil
+}
+
+// setupAutoUpdateJob creates or updates a scheduled job for Shelly.Update
+// The job runs at a random time between 03:00 and 05:00 every weekday
+func setupAutoUpdateJob(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device, deviceId string) error {
+	// Get existing jobs
+	out, err := schedule.ShowJobs(ctx, log, via, sd)
+	if err != nil {
+		return fmt.Errorf("failed to list jobs: %w", err)
+	}
+	
+	scheduled := out.(*schedule.Scheduled)
+	
+	// Generate random time between 03:00 and 05:00
+	// Random hour: 3 or 4
+	// Random minute: 0-59
+	randomHour := 3 + rand.Intn(2)  // 3 or 4
+	randomMinute := rand.Intn(60)    // 0-59
+	
+	// Cron format: second minute hour day month weekday
+	// 0 <minute> <hour> * * SUN,MON,TUE,WED,THU,FRI,SAT
+	timespec := fmt.Sprintf("0 %d %d * * SUN,MON,TUE,WED,THU,FRI,SAT", randomMinute, randomHour)
+	
+	// Look for existing Shelly.Update job
+	var existingJobId *uint32
+	for _, job := range scheduled.Jobs {
+		for _, call := range job.Calls {
+			if call.Method == "Shelly.Update" {
+				existingJobId = &job.JobId.Id
+				log.Info("Found existing Shelly.Update job", "job_id", job.JobId.Id, "timespec", job.Timespec)
+				break
+			}
+		}
+		if existingJobId != nil {
+			break
+		}
+	}
+	
+	// Create the job spec
+	jobSpec := schedule.JobSpec{
+		Enable:   true,
+		Timespec: timespec,
+		Calls: []schedule.JobCall{
+			{
+				Method: "Shelly.Update",
+				Params: map[string]interface{}{
+					"stage": "stable",
+				},
+			},
+		},
+	}
+	
+	if existingJobId != nil {
+		// Update existing job
+		job := schedule.Job{
+			JobId:   schedule.JobId{Id: *existingJobId},
+			JobSpec: jobSpec,
+		}
+		_, err = sd.CallE(ctx, via, string(schedule.Update), &job)
+		if err != nil {
+			return fmt.Errorf("failed to update job: %w", err)
+		}
+		fmt.Printf("    ✓ Updated auto-update job on %s (id: %d, time: %02d:%02d daily)\n", deviceId, *existingJobId, randomHour, randomMinute)
+	} else {
+		// Create new job
+		result, err := sd.CallE(ctx, via, string(schedule.Create), jobSpec)
+		if err != nil {
+			return fmt.Errorf("failed to create job: %w", err)
+		}
+		jobId := result.(*schedule.JobId)
+		fmt.Printf("    ✓ Created auto-update job on %s (id: %d, time: %02d:%02d daily)\n", deviceId, jobId.Id, randomHour, randomMinute)
+	}
+	
+	return nil
 }
 
 var Cmd = &cobra.Command{

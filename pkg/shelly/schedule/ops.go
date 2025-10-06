@@ -30,7 +30,7 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log = l
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	r.RegisterMethodHandler(Create.String(), types.MethodHandler{
-		Allocate:   func() any { return new(Job) },
+		Allocate:   func() any { return new(JobId) },
 		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler(Update.String(), types.MethodHandler{

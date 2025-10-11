@@ -15,6 +15,7 @@ import (
 	"pkg/shelly/wifi"
 	"reflect"
 	"schedule"
+	scripts "shelly/scripts"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -33,7 +34,7 @@ func Init(log logr.Logger, timeout time.Duration) {
 	kvs.Init(log, &registrar)
 	mqtt.Init(log, &registrar, timeout)
 	schedule.Init(log, &registrar)
-	script.Init(log, &registrar)
+	script.Init(log, &registrar, scripts.GetFS())
 	shttp.Init(log, &registrar)
 	sswitch.Init(log, &registrar)
 	system.Init(log, &registrar)

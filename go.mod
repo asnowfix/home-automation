@@ -1,16 +1,16 @@
 module github.com/asnowfix/home-automation
 
-go 1.23.0
+go 1.24.2
 
 require (
 	github.com/go-logr/logr v1.4.3
 	github.com/spf13/cobra v1.10.1
 	hlog v0.0.0-00010101000000-000000000000
-	myhome/ctl/options v0.0.0-00010101000000-000000000000
 	internal/global v0.0.0-00010101000000-000000000000
 	internal/myhome v0.0.0-00010101000000-000000000000
 	internal/myip v0.0.0-00010101000000-000000000000
 	internal/myzone v0.0.0-00010101000000-000000000000
+	myhome/ctl/options v0.0.0-00010101000000-000000000000
 	pkg/shelly v0.0.0-00010101000000-000000000000
 	pkg/shelly/types v0.0.0-00010101000000-000000000000
 )
@@ -26,6 +26,8 @@ replace internal/myhome => ./internal/myhome
 replace internal/myip => ./internal/myip
 
 replace internal/myzone => ./internal/myzone
+
+replace shelly/scripts => ./internal/shelly/scripts
 
 replace devices => ./devices
 
@@ -59,6 +61,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kardianos/service v1.2.4 // indirect
+	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/miekg/dns v1.1.65 // indirect
@@ -86,4 +89,5 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	pkg/shelly/shttp v0.0.0-00010101000000-000000000000 // indirect
 	pkg/shelly/sswitch v0.0.0-00010101000000-000000000000 // indirect
+	shelly/scripts v0.0.0-00010101000000-000000000000 // indirect
 )

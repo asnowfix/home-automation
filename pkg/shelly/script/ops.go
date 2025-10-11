@@ -1,12 +1,14 @@
 package script
 
 import (
+	"io/fs"
 	"net/http"
 	"pkg/shelly/types"
 	"reflect"
 
-	"github.com/go-logr/logr"
 	"hlog"
+
+	"github.com/go-logr/logr"
 )
 
 var log logr.Logger
@@ -35,9 +37,10 @@ const (
 	Eval      Verb = "Script.Eval"
 )
 
-func Init(l logr.Logger, r types.MethodsRegistrar) {
+func Init(l logr.Logger, r types.MethodsRegistrar, scriptsFS fs.FS) {
 	log = hlog.GetLogger("pkg/shelly/script")
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
+	setFS(scriptsFS)
 	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
 		// InputType:  reflect.TypeOf(ConfigurationRequest{}),
 		Allocate:   func() any { return new(Configuration) },

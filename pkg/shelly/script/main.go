@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
-	"embed"
 	"encoding/hex"
 	"fmt"
+	"io/fs"
 	"path/filepath"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
@@ -17,18 +17,22 @@ import (
 	mjs "github.com/tdewolff/minify/v2/js"
 )
 
-//go:embed *.js
-var content embed.FS
+var content fs.FS
 
 // Package logger is declared in ops.go
 
+// setFS sets the filesystem to use for reading script files
+func setFS(scriptsFS fs.FS) {
+	content = scriptsFS
+}
+
 // ReadEmbeddedFile reads an embedded script file by name
 func ReadEmbeddedFile(name string) ([]byte, error) {
-	return content.ReadFile(name)
+	return fs.ReadFile(content, name)
 }
 
 func ListAvailable() ([]string, error) {
-	dir, err := content.ReadDir(".")
+	dir, err := fs.ReadDir(content, ".")
 	if err != nil {
 		log.Error(err, "Unable to list embedded scripts")
 		return nil, err
@@ -315,7 +319,7 @@ func Download(ctx context.Context, via types.Channel, device types.Device, name 
 }
 
 func Upload(ctx context.Context, via types.Channel, device types.Device, name string, minify bool, force bool) (uint32, error) {
-	buf, err := content.ReadFile(name)
+	buf, err := fs.ReadFile(content, name)
 	if err != nil {
 		log.Error(err, "Unknown script", "name", name, "device", device.Name())
 		return 0, err

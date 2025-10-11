@@ -46,7 +46,9 @@ Shelly devices run a **modified version of Espruino** JavaScript interpreter. Es
 
 1. **Array Methods - SAFE TO USE**
    - ✅ `Array.isArray()` - Supported
-   - ✅ `[].map()`, `[].filter()`, `[].forEach()` - Supported on arrays
+   - ✅ `[].map()`, `[].filter()`, `[].forEach()`, `[].reduce()`, `[].indexOf()` - Supported on arrays
+   - ✅ `[].push()`, `[].pop()` - Supported (add/remove from end)
+   - ❌ `[].shift()`, `[].unshift()` - **NOT supported** (add/remove from beginning)
    - ⚠️ `Array.prototype.slice.call(arguments)` - May fail, use for loops instead
    
    ```javascript
@@ -58,6 +60,16 @@ Shelly devices run a **modified version of Espruino** JavaScript interpreter. Es
    for (var i = 0; i < arguments.length; i++) {
      args.push(arguments[i]);
    }
+   
+   // BROKEN - shift() not supported
+   array.shift(); // Remove first element
+   
+   // WORKING - manual shift implementation
+   var newArray = [];
+   for (var i = 1; i < array.length; i++) {
+     newArray.push(array[i]);
+   }
+   array = newArray;
    ```
 
 2. **Variable Declarations**

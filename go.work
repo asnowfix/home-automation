@@ -10,6 +10,7 @@ use (
 	./internal/myip
 	./internal/mynet
 	./internal/myzone
+	./internal/shelly/scripts
 	./internal/tools
 	./myhome/ctl
 	./myhome/ctl/follow

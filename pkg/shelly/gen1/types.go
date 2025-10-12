@@ -1,44 +1,36 @@
 package gen1
 
 import (
-	"encoding/json"
 	"net"
 )
 
-// https://shelly-api-docs.shelly.cloud/gen1/#shelly-h-amp-t
-type HTSensor struct {
-	Id_         string  `json:"id"`
-	Humidity    uint    `schema:"hum,required"  json:"humidity"`
-	Temperature float32 `schema:"temp,required" json:"temperature"`
-}
-
-type Flood struct {
-	Id_            string  `json:"id"`
-	Temperature    float32 `schema:"temp,required" json:"temperature"`
-	Flood          uint32  `schema:"flood,required"  json:"flood"`
-	BatteryVoltage float32 `schema:"batV,required"  json:"battery_voltage"`
-}
-
+// The gen1.Device struct is used to represent a Gen1 device
+// (with both info & status data) as received from the HTTP API.
+// The specificiation for this payloas is here:
+// <https://shelly-api-docs.shelly.cloud/gen1/#shelly-h-amp-t>
 type Device struct {
-	Id           string `json:"-"`
-	Ip           net.IP `json:"ip"`
-	FirmwareDate string `json:"fw_date,omitempty"`
-	FirmwareId   string `json:"fw_id,omitempty"`
-	Model        string `json:"model,omitempty"`
-	*HTSensor
-	*Flood
+	// Common fields
+	Id           string  `schema:"id" json:"id"`
+	Ip           net.IP  `json:"ip"`
+	FirmwareDate string  `json:"fw_date,omitempty"`
+	FirmwareId   string  `json:"fw_id,omitempty"`
+	Model        string  `json:"model,omitempty"`
+	Temperature  float32 `schema:"temp" json:"temperature"`
+
+	// H&T specific (optional)
+	Humidity *uint `schema:"hum" json:"humidity,omitempty"`
+
+	// Flood specific (optional)
+	Flood          *uint32  `schema:"flood" json:"flood,omitempty"`
+	BatteryVoltage *float32 `schema:"batV" json:"battery_voltage,omitempty"`
 }
 
-func (d *Device) UnmarshalJSON(data []byte) error {
-	type Alias Device
-	if err := json.Unmarshal(data, (*Alias)(d)); err != nil {
-		return err
-	}
-	if d.HTSensor != nil {
-		d.Id = d.HTSensor.Id_
-	}
-	if d.Flood != nil {
-		d.Id = d.Flood.Id_
-	}
-	return nil
+// IsHTSensor returns true if this is a Humidity & Temperature sensor
+func (d *Device) IsHTSensor() bool {
+	return d.Humidity != nil
+}
+
+// IsFloodSensor returns true if this is a Flood sensor
+func (d *Device) IsFloodSensor() bool {
+	return d.Flood != nil
 }

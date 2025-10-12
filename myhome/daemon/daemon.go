@@ -87,7 +87,7 @@ func (d *daemon) Run() error {
 
 	// Proxy from Gen1 (HTTP-only) devices to MQTT, co-located with the embedded MQTT broker
 	if !disableEmbeddedMqttBroker {
-		gen1.Proxy(d.ctx, d.log.WithName("gen1.Listen"), 8888, mc)
+		gen1.StartHttp2MqttProxy(d.ctx, d.log.WithName("gen1.Http2MqttProxy"), 8888, mc)
 	}
 
 	if !disableDeviceManager {

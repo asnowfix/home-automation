@@ -609,10 +609,6 @@ function cancelAllTimers() {
   }
 }
 
-function subscribeEvent() {
-  Shelly.addEventHandler(onEventData.bind(null));
-}
-
 function onEventData(eventData) {
   log("Handling event: ", eventData);
   try {
@@ -642,6 +638,10 @@ function onEventData(eventData) {
   } catch (e) {
     log("Error handling event: ", e);
   }
+}
+
+function subscribeEvent() {
+  Shelly.addEventHandler(onEventData);
 }
 
 function onHourlyBackupTimer() {

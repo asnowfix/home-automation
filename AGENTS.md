@@ -77,7 +77,32 @@ Shelly devices run a **modified version of Espruino** JavaScript interpreter. Es
    - ⚠️ `let`/`const` - Supported in Espruino v2.14+, but `var` is safer for compatibility
    - **Recommendation**: Use `var` for maximum compatibility
 
-3. **Minifier-Safe Patterns**
+3. **Function Definition Order - CRITICAL**
+   - ⚠️ **No hoisting**: Functions must be defined BEFORE they are used
+   - This applies to ALL function references, including those passed to callbacks
+   - Even though JavaScript normally hoists function declarations, Shelly's engine does NOT
+   
+   ```javascript
+   // BROKEN - function used before definition
+   function subscribeEvents() {
+     Shelly.addEventHandler(onEventData);  // ERROR: onEventData not defined yet
+   }
+   
+   function onEventData(eventData) {
+     // Handle event
+   }
+   
+   // WORKING - function defined before use
+   function onEventData(eventData) {
+     // Handle event
+   }
+   
+   function subscribeEvents() {
+     Shelly.addEventHandler(onEventData);  // OK: onEventData already defined
+   }
+   ```
+
+4. **Minifier-Safe Patterns**
    - Use `"property" in object` instead of `!== undefined` (minifier converts to unsafe syntax)
    
    ```javascript
@@ -90,17 +115,17 @@ Shelly devices run a **modified version of Espruino** JavaScript interpreter. Es
 
 #### Minification Issues
 
-**Issue**: The JavaScript minifier converts `catch (e)` to `catch {}` (ES2019 optional catch binding), which isn't supported by Shelly's limited JavaScript engine.
+**Issue**: The JavaScript minifier can convert modern syntax (like `catch (e)` to `catch {}` - ES2019 optional catch binding) which may not be supported by Shelly's JavaScript engine.
 
-**Solution**: Always use `--no-minify` flag when uploading scripts to Shelly devices:
+**Troubleshooting**: Use `--no-minify` flag when debugging script issues:
 
 ```bash
 go run . ctl shelly script upload device-name script.js --no-minify
 ```
 
-**Why**: Unminified code is more compatible and easier to debug on Shelly devices.
+**Why**: Unminified code is easier to debug and error messages show actual code. However, minification generally works fine if you follow minifier-safe patterns.
 
-**Alternative**: If minification is needed, use the `in` operator instead of `!== undefined`:
+**Minifier-Safe Patterns**: Use the `in` operator instead of `!== undefined`:
 
 ```javascript
 // BROKEN with minifier
@@ -109,6 +134,8 @@ var illumMin = value && value.illuminance_min !== undefined ? value.illuminance_
 // WORKING with minifier
 var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : null;
 ```
+
+**Note**: `Function.prototype.bind()` is fully supported and works correctly with both minified and unminified code.
 
 #### Callback Depth Limits
 

@@ -47,5 +47,3 @@ SECRETS.md
 /wix.build.json
 /myhome/ctl/shelly*/*.js
 /myhome/events/*
-cmd/wsl-mdns-bridge/error.log
-cmd/wsl-mdns-bridge/output.log

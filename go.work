@@ -2,7 +2,6 @@ go 1.24.2
 
 use (
 	.
-	./cmd/wsl-mdns-bridge
 	./hlog
 	./internal/debug
 	./internal/global

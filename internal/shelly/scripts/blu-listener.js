@@ -100,41 +100,52 @@ function getCurrentDate() {
   return year + "-" + (month < 10 ? "0" : "") + month + "-" + (day < 10 ? "0" : "") + day;
 }
 
+function onLoadIlluminanceStateResponse(mac, callback, resp, err) {
+  if (err || !resp || !resp.value) {
+    // Initialize new tracking state
+    STATE.illuminanceTracking[mac] = {
+      dailyData: [],
+      currentMin: null,
+      currentMax: null,
+      lastSaveDate: getCurrentDate()
+    };
+    if (callback) callback();
+    return;
+  }
+  
+  try {
+    var data = JSON.parse(resp.value);
+    STATE.illuminanceTracking[mac] = {
+      dailyData: data.dailyData || [],
+      currentMin: data.currentMin || null,
+      currentMax: data.currentMax || null,
+      lastSaveDate: data.lastSaveDate || getCurrentDate()
+    };
+    log("Loaded illuminance state for", mac, ":", STATE.illuminanceTracking[mac]);
+  } catch (e) {
+    log("Error parsing illuminance state for", mac, ":", e);
+    STATE.illuminanceTracking[mac] = {
+      dailyData: [],
+      currentMin: null,
+      currentMax: null,
+      lastSaveDate: getCurrentDate()
+    };
+  }
+  if (callback) callback();
+}
+
 function loadIlluminanceState(mac, callback) {
   var key = CONFIG.statePrefix + mac;
-  Shelly.call("KVS.Get", { key: key }, function (resp, err) {
-    if (err || !resp || !resp.value) {
-      // Initialize new tracking state
-      STATE.illuminanceTracking[mac] = {
-        dailyData: [],
-        currentMin: null,
-        currentMax: null,
-        lastSaveDate: getCurrentDate()
-      };
-      if (callback) callback();
-      return;
-    }
-    
-    try {
-      var data = JSON.parse(resp.value);
-      STATE.illuminanceTracking[mac] = {
-        dailyData: data.dailyData || [],
-        currentMin: data.currentMin || null,
-        currentMax: data.currentMax || null,
-        lastSaveDate: data.lastSaveDate || getCurrentDate()
-      };
-      log("Loaded illuminance state for", mac, ":", STATE.illuminanceTracking[mac]);
-    } catch (e) {
-      log("Error parsing illuminance state for", mac, ":", e);
-      STATE.illuminanceTracking[mac] = {
-        dailyData: [],
-        currentMin: null,
-        currentMax: null,
-        lastSaveDate: getCurrentDate()
-      };
-    }
-    if (callback) callback();
-  });
+  Shelly.call("KVS.Get", { key: key }, onLoadIlluminanceStateResponse.bind(null, mac, callback));
+}
+
+function onSaveIlluminanceStateResponse(mac, callback, resp, err) {
+  if (err) {
+    log("Error saving illuminance state for", mac, ":", err);
+  } else {
+    log("Saved illuminance state for", mac);
+  }
+  if (callback) callback();
 }
 
 function saveIlluminanceState(mac, callback) {
@@ -152,14 +163,7 @@ function saveIlluminanceState(mac, callback) {
     lastSaveDate: tracking.lastSaveDate
   });
   
-  Shelly.call("KVS.Set", { key: key, value: value }, function (resp, err) {
-    if (err) {
-      log("Error saving illuminance state for", mac, ":", err);
-    } else {
-      log("Saved illuminance state for", mac);
-    }
-    if (callback) callback();
-  });
+  Shelly.call("KVS.Set", { key: key, value: value }, onSaveIlluminanceStateResponse.bind(null, mac, callback));
 }
 
 function updateIlluminanceTracking(mac, illuminance) {
@@ -187,9 +191,14 @@ function updateIlluminanceTracking(mac, illuminance) {
         max: tracking.currentMax
       });
       
-      // Keep only last 7 days
+      // Keep only last 7 days (remove oldest entries from beginning)
       while (tracking.dailyData.length > 7) {
-        tracking.dailyData.shift();
+        // Manual shift: remove first element (shift() not supported, pop() removes from end)
+        var newArray = [];
+        for (var i = 1; i < tracking.dailyData.length; i++) {
+          newArray.push(tracking.dailyData[i]);
+        }
+        tracking.dailyData = newArray;
       }
       
       log("Saved daily illuminance for", mac, "date:", tracking.lastSaveDate, "min:", tracking.currentMin, "max:", tracking.currentMax);
@@ -298,6 +307,18 @@ function saveAllIlluminanceStates(callback) {
   }
 }
 
+function onDailySaveRecurring() {
+  log("Daily save timer triggered (recurring)");
+  saveAllIlluminanceStates();
+}
+
+function onDailySaveFirstTime() {
+  log("Daily save timer triggered");
+  saveAllIlluminanceStates();
+  // Set up next day's timer (24 hours)
+  STATE.dailySaveTimer = Timer.set(24 * 60 * 60 * 1000, true, onDailySaveRecurring);
+}
+
 function setupDailySaveTimer() {
   // Clear existing timer
   if (STATE.dailySaveTimer) {
@@ -322,70 +343,74 @@ function setupDailySaveTimer() {
   msUntilMidnight += 1000;
   
   // Set timer for midnight, then repeat every 24 hours
-  STATE.dailySaveTimer = Timer.set(msUntilMidnight, false, function() {
-    log("Daily save timer triggered");
-    saveAllIlluminanceStates();
-    
-    // Set up next day's timer (24 hours)
-    STATE.dailySaveTimer = Timer.set(24 * 60 * 60 * 1000, true, function() {
-      log("Daily save timer triggered (recurring)");
-      saveAllIlluminanceStates();
-    });
-  });
+  STATE.dailySaveTimer = Timer.set(msUntilMidnight, false, onDailySaveFirstTime);
   
   log("Set up daily save timer, next save in", Math.round(msUntilMidnight / 1000), "seconds");
 }
 
-function processKvsKey(k, newMap, onComplete) {
-  Shelly.call("KVS.Get", { key: k }, function (gresp, gerr) {
-    if (gerr) {
-      log("KVS.Get error for", k, ":", gerr);
-      onComplete();
-      return;
-    }
-    if (!gresp || typeof gresp.value !== "string") {
-      log("KVS.Get error for", k, gerr);
-      onComplete();
-      return;
-    }
-    
-    // Skip keys that don't start with our prefix
-    if (k.indexOf(CONFIG.kvsPrefix) !== 0) {
-      log("Skipping non-follow key:", k);
-      onComplete();
-      return;
-    }
-    
-    try {
-      var value = JSON.parse(gresp.value);
-      var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
-      var autoOff = value && typeof value.auto_off === "number" ? value.auto_off : 0;
-      var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : null;
-      var illumMax = value && ("illuminance_max" in value) ? value.illuminance_max : null;
-      var nextSwitchStr = value && value.next_switch ? String(value.next_switch) : null;
-      var nextIdx = parseSwitchIndex(nextSwitchStr);
-      var mac = k.substr(CONFIG.kvsPrefix.length);
-      mac = normalizeMac(mac);
-      var idx = parseSwitchIndex(switchIdStr);
-      
-      if (mac && idx !== null) {
-        newMap[mac] = {
-          switchIdStr: switchIdStr,
-          switchIndex: idx,
-          autoOff: autoOff,
-          illuminanceMin: illumMin,
-          illuminanceMax: illumMax,
-          nextSwitchIdStr: nextSwitchStr,
-          nextSwitchIndex: (typeof nextIdx === "number" ? nextIdx : null)
-        };
-      } else {
-        log("Ignoring invalid follow entry:", k, gresp.value);
-      }
-    } catch (e) {
-      log("JSON parse error for", k, e);
-    }
+function onProcessKvsKeyResponse(k, newMap, onComplete, gresp, gerr) {
+  if (gerr) {
+    log("KVS.Get error for", k, ":", gerr);
     onComplete();
-  });
+    return;
+  }
+  if (!gresp || typeof gresp.value !== "string") {
+    log("KVS.Get error for", k, gerr);
+    onComplete();
+    return;
+  }
+  
+  // Skip keys that don't start with our prefix
+  if (k.indexOf(CONFIG.kvsPrefix) !== 0) {
+    log("Skipping non-follow key:", k);
+    onComplete();
+    return;
+  }
+  
+  try {
+    var value = JSON.parse(gresp.value);
+    var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
+    var autoOff = value && typeof value.auto_off === "number" ? value.auto_off : 0;
+    var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : null;
+    var illumMax = value && ("illuminance_max" in value) ? value.illuminance_max : null;
+    var nextSwitchStr = value && value.next_switch ? String(value.next_switch) : null;
+    var nextIdx = parseSwitchIndex(nextSwitchStr);
+    var mac = k.substr(CONFIG.kvsPrefix.length);
+    mac = normalizeMac(mac);
+    var idx = parseSwitchIndex(switchIdStr);
+    
+    if (mac && idx !== null) {
+      newMap[mac] = {
+        switchIdStr: switchIdStr,
+        switchIndex: idx,
+        autoOff: autoOff,
+        illuminanceMin: illumMin,
+        illuminanceMax: illumMax,
+        nextSwitchIdStr: nextSwitchStr,
+        nextSwitchIndex: (typeof nextIdx === "number" ? nextIdx : null)
+      };
+    } else {
+      log("Ignoring invalid follow entry:", k, gresp.value);
+    }
+  } catch (e) {
+    log("JSON parse error for", k, e);
+  }
+  onComplete();
+}
+
+function processKvsKey(k, newMap, onComplete) {
+  Shelly.call("KVS.Get", { key: k }, onProcessKvsKeyResponse.bind(null, k, newMap, onComplete))
+}
+
+function loadIlluminanceStatesSequentially(macs, callback, index) {
+  if (index >= macs.length) {
+    // All states loaded
+    if (callback) callback();
+    return;
+  }
+  
+  // Load one state at a time
+  loadIlluminanceState(macs[index], loadIlluminanceStatesSequentially.bind(null, macs, callback, index + 1));
 }
 
 function loadAllIlluminanceStates(macs, callback) {
@@ -394,68 +419,91 @@ function loadAllIlluminanceStates(macs, callback) {
     return;
   }
   
-  var pending = macs.length;
-  function onStateLoaded() {
-    pending--;
-    if (pending === 0 && callback) callback();
+  // Process sequentially to avoid "too many calls in progress"
+  loadIlluminanceStatesSequentially(macs, callback, 0);
+}
+
+function onAllIlluminanceStatesLoaded(callback) {
+  if (callback) callback(true);
+}
+
+function onAllKeysProcessed(newMap, callback) {
+  STATE.follows = newMap;
+  log("Loaded follows:", newMap);
+  loadAllIlluminanceStates(Object.keys(newMap), onAllIlluminanceStatesLoaded.bind(null, callback));
+}
+
+function processKeysSequentially(list, newMap, callback, index) {
+  if (index >= list.length) {
+    // All keys processed
+    onAllKeysProcessed(newMap, callback);
+    return;
   }
   
-  for (var i = 0; i < macs.length; i++) {
-    loadIlluminanceState(macs[i], onStateLoaded);
+  // Process one key at a time
+  processKvsKey(list[index], newMap, processKeysSequentially.bind(null, list, newMap, callback, index + 1));
+}
+
+function onKvsListResponse(callback, resp, err) {
+  if (err) {
+    log("KVS.List error:", err);
+    if (callback) callback(false);
+    return;
   }
+  
+  // Normalize possible response shapes
+  var list = [];
+  if (resp) {
+    if (resp.keys) {
+      if (Array.isArray(resp.keys)) {
+        list = resp.keys;
+      } else if (typeof resp.keys === "object") {
+        list = Object.keys(resp.keys);
+      }
+    } else if (Array.isArray(resp.items)) {
+      for (var li = 0; li < resp.items.length; li++) {
+        var it = resp.items[li];
+        if (it && it.key) list.push(it.key);
+      }
+    }
+  }
+  
+  log("KVS.List keys:", list.length);
+  var newMap = {};
+  
+  if (!list || !list.length) {
+    STATE.follows = newMap;
+    log("No followed MACs.");
+    if (callback) callback(true);
+    return;
+  }
+
+  // Process keys sequentially to avoid "too many calls in progress"
+  processKeysSequentially(list, newMap, callback, 0);
 }
 
 function loadFollowsFromKVS(callback) {
-  Shelly.call("KVS.List", { prefix: CONFIG.kvsPrefix }, function (resp, err) {
-    if (err) {
-      log("KVS.List error:", err);
-      if (callback) callback(false);
-      return;
-    }
-    
-    // Normalize possible response shapes
-    var list = [];
-    if (resp) {
-      if (resp.keys) {
-        if (Array.isArray(resp.keys)) {
-          list = resp.keys;
-        } else if (typeof resp.keys === "object") {
-          list = Object.keys(resp.keys);
-        }
-      } else if (Array.isArray(resp.items)) {
-        for (var li = 0; li < resp.items.length; li++) {
-          var it = resp.items[li];
-          if (it && it.key) list.push(it.key);
-        }
-      }
-    }
-    
-    log("KVS.List keys:", list.length);
-    var newMap = {};
-    
-    if (!list || !list.length) {
-      STATE.follows = newMap;
-      log("No followed MACs.");
-      if (callback) callback(true);
-      return;
-    }
+  Shelly.call("KVS.List", { prefix: CONFIG.kvsPrefix }, onKvsListResponse.bind(null, callback));
+}
 
-    var pending = list.length;
-    function onKeyProcessed() {
-      pending--;
-      if (pending === 0) {
-        STATE.follows = newMap;
-        log("Loaded follows:", newMap);
-        loadAllIlluminanceStates(Object.keys(newMap), function() {
-          if (callback) callback(true);
-        });
-      }
-    }
-    
-    for (var i = 0; i < list.length; i++) {
-      processKvsKey(list[i], newMap, onKeyProcessed);
-    }
-  });
+function onNextSwitchSetResponse(follow, r2, e2) {
+  if (e2) log("Next Switch.Set on error", follow.nextSwitchIndex, e2);
+  else log("Auto-next: turned on", follow.nextSwitchIdStr, "from", follow.switchIdStr);
+}
+
+function onAutoOffSwitchSetResponse(switchIndex, follow, r, e) {
+  if (e) log("Switch.Set off error", switchIndex, e);
+  else log("Auto-off switch", switchIndex);
+  var hasNext = follow && typeof follow.nextSwitchIndex === "number";
+  if (hasNext) {
+    Shelly.call("Switch.Set", { id: follow.nextSwitchIndex, on: true }, onNextSwitchSetResponse.bind(null, follow));
+  }
+}
+
+function onAutoOffTimerFired(switchIndex, follow) {
+  // Always switch OFF current first
+  Shelly.call("Switch.Set", { id: switchIndex, on: false }, onAutoOffSwitchSetResponse.bind(null, switchIndex, follow));
+  STATE.offTimers[switchIndex] = 0;
 }
 
 function ensureAutoOffTimer(switchIndex, seconds, follow) {
@@ -467,21 +515,7 @@ function ensureAutoOffTimer(switchIndex, seconds, follow) {
   }
   if (!seconds || seconds <= 0) return;
   var ms = Math.floor(seconds * 1000);
-  var tid = Timer.set(ms, false, function () {
-    var hasNext = follow && typeof follow.nextSwitchIndex === "number";
-    // Always switch OFF current first
-    Shelly.call("Switch.Set", { id: switchIndex, on: false }, function (r, e) {
-      if (e) log("Switch.Set off error", switchIndex, e);
-      else log("Auto-off switch", switchIndex);
-      if (hasNext) {
-        Shelly.call("Switch.Set", { id: follow.nextSwitchIndex, on: true }, function (r2, e2) {
-          if (e2) log("Next Switch.Set on error", follow.nextSwitchIndex, e2);
-          else log("Auto-next: turned on", follow.nextSwitchIdStr, "from", follow.switchIdStr);
-        });
-      }
-    });
-    STATE.offTimers[switchIndex] = 0;
-  });
+  var tid = Timer.set(ms, false, onAutoOffTimerFired.bind(null, switchIndex, follow));
   STATE.offTimers[switchIndex] = tid;
 }
 
@@ -544,18 +578,22 @@ function handleBluEvent(topic, message) {
 
   // Act: turn on configured switch, then setup auto-off
   var idx = follow.switchIndex;
-  Shelly.call("Switch.Set", { id: idx, on: true }, function (resp, err) {
-    if (err) log("Switch.Set on error", idx, err);
-    else log("Turned on", follow.switchIdStr, "for", mac, "auto_off=", follow.autoOff, "s");
-  });
+  Shelly.call("Switch.Set", { id: idx, on: true }, onSwitchSetOnResponse.bind(null, idx, follow, mac));
   ensureAutoOffTimer(idx, follow.autoOff, follow);
+}
+
+function onSwitchSetOnResponse(idx, follow, mac, resp, err) {
+  if (err) log("Switch.Set on error", idx, err);
+  else log("Turned on", follow.switchIdStr, "for", mac, "auto_off=", follow.autoOff, "s");
+}
+
+function onMqttMessage(t, m, r) {
+  handleBluEvent(t, m);
 }
 
 function subscribeMqtt() {
   var topic = CONFIG.topicPrefix + "/#";
-  MQTT.subscribe(topic, function (t, m, r) {
-    handleBluEvent(t, m);
-  });
+  MQTT.subscribe(topic, onMqttMessage);
   log("Subscribed to", topic);
 }
 
@@ -571,55 +609,61 @@ function cancelAllTimers() {
   }
 }
 
-function subscribeEvent() {
-  Shelly.addEventHandler(function (eventData) {
-    log("Handling event: ", eventData);
-    try {
-      if (eventData && eventData.info) {
-        if (eventData.info.event === CONFIG.eventName) {
-          handleBluEvent(eventData.info.address, eventData.info.data);
-        } else if (eventData.info.event === "kvs") {
-          var kvsEvent = eventData.info;
-          if (kvsEvent.key && kvsEvent.key.indexOf(CONFIG.kvsPrefix) === 0) {
-            log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
-            loadFollowsFromKVS();
-          }
-        } else if (eventData.info.event === "remote-input-event") {
-          log("Remote input event detected (cancelAllTimers)");
-          cancelAllTimers();
-        } else if (eventData.info.component && eventData.info.component.indexOf("input:") === 0) {
-          log("Local input event detected (cancelAllTimers)");
-          cancelAllTimers();
-        } else if (eventData.info.event === "reboot") {
-          log("Device reboot detected, saving illuminance data");
-          saveAllIlluminanceStates();
-        } else if (eventData.info.event === "script_stop") {
-          log("Script stopping, saving illuminance data");
-          saveAllIlluminanceStates();
+function onEventData(eventData) {
+  log("Handling event: ", eventData);
+  try {
+    if (eventData && eventData.info) {
+      if (eventData.info.event === CONFIG.eventName) {
+        handleBluEvent(eventData.info.address, eventData.info.data);
+      } else if (eventData.info.event === "kvs") {
+        var kvsEvent = eventData.info;
+        if (kvsEvent.key && kvsEvent.key.indexOf(CONFIG.kvsPrefix) === 0) {
+          log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
+          loadFollowsFromKVS();
         }
+      } else if (eventData.info.event === "remote-input-event") {
+        log("Remote input event detected (cancelAllTimers)");
+        cancelAllTimers();
+      } else if (eventData.info.component && eventData.info.component.indexOf("input:") === 0) {
+        log("Local input event detected (cancelAllTimers)");
+        cancelAllTimers();
+      } else if (eventData.info.event === "reboot") {
+        log("Device reboot detected, saving illuminance data");
+        saveAllIlluminanceStates();
+      } else if (eventData.info.event === "script_stop") {
+        log("Script stopping, saving illuminance data");
+        saveAllIlluminanceStates();
       }
-    } catch (e) {
-      log("Error handling event: ", e);
     }
-  });
+  } catch (e) {
+    log("Error handling event: ", e);
+  }
 }
 
-// Init
-log("Script starting...");
-loadFollowsFromKVS(function(success) {
+function subscribeEvent() {
+  Shelly.addEventHandler(onEventData);
+}
+
+function onHourlyBackupTimer() {
+  log("Hourly backup save triggered");
+  saveAllIlluminanceStates();
+}
+
+function onLoadFollowsComplete(success) {
   if (success) {
     setupDailySaveTimer();
     
     // Set up periodic save every hour as backup
-    Timer.set(60 * 60 * 1000, true, function() {
-      log("Hourly backup save triggered");
-      saveAllIlluminanceStates();
-    });
+    Timer.set(60 * 60 * 1000, true, onHourlyBackupTimer);
     
     log("Script initialization complete");
   } else {
     log("Script initialization failed");
   }
-});
+}
+
+// Init
+log("Script starting...");
+loadFollowsFromKVS(onLoadFollowsComplete);
 subscribeMqtt();
 subscribeEvent();

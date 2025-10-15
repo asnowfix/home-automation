@@ -86,96 +86,112 @@ function parseSwitchIndex(switchIdStr) {
   return n;
 }
 
-function processKvsKey(k, newMap, onComplete) {
-  Shelly.call("KVS.Get", { key: k }, function (gresp, gerr) {
-    if (gerr) {
-      log("KVS.Get error for", k, ":", gerr);
-      onComplete();
-      return;
-    }
-    if (!gresp || typeof gresp.value !== "string") {
-      log("KVS.Get error for", k, gerr);
-      onComplete();
-      return;
-    }
-    
-    // Skip keys that don't start with our prefix
-    if (k.indexOf(CONFIG.kvsPrefix) !== 0) {
-      log("Skipping non-follow key:", k);
-      onComplete();
-      return;
-    }
-    
-    try {
-      var value = JSON.parse(gresp.value);
-      var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
-      var mac = k.substr(CONFIG.kvsPrefix.length);
-      mac = normalizeMac(mac);
-      var idx = parseSwitchIndex(switchIdStr);
-      
-      if (mac && idx !== null) {
-        newMap[mac] = {
-          switchIdStr: switchIdStr,
-          switchIndex: idx,
-        };
-      } else {
-        log("Ignoring invalid follow entry:", k, gresp.value);
-      }
-    } catch (e) {
-      log("JSON parse error for", k, e);
-    }
+function onKvsGetResponse(k, newMap, onComplete, gresp, gerr) {
+  if (gerr) {
+    log("KVS.Get error for", k, ":", gerr);
     onComplete();
+    return;
+  }
+  if (!gresp || typeof gresp.value !== "string") {
+    log("KVS.Get error for", k, gerr);
+    onComplete();
+    return;
+  }
+  
+  // Skip keys that don't start with our prefix
+  if (k.indexOf(CONFIG.kvsPrefix) !== 0) {
+    log("Skipping non-follow key:", k);
+    onComplete();
+    return;
+  }
+  
+  try {
+    var value = JSON.parse(gresp.value);
+    var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
+    var mac = k.substr(CONFIG.kvsPrefix.length);
+    mac = normalizeMac(mac);
+    var idx = parseSwitchIndex(switchIdStr);
+    
+    if (mac && idx !== null) {
+      newMap[mac] = {
+        switchIdStr: switchIdStr,
+        switchIndex: idx,
+      };
+    } else {
+      log("Ignoring invalid follow entry:", k, gresp.value);
+    }
+  } catch (e) {
+    log("JSON parse error for", k, e);
+  }
+  onComplete();
+}
+
+function processKvsKey(k, newMap, onComplete) {
+  Shelly.call("KVS.Get", { key: k }, function(gresp, gerr) {
+    onKvsGetResponse(k, newMap, onComplete, gresp, gerr);
   });
 }
 
-function loadFollowsFromKVS(callback) {
-  Shelly.call("KVS.List", { prefix: CONFIG.kvsPrefix }, function (resp, err) {
-    if (err) {
-      log("KVS.List error:", err);
-      if (callback) callback(false);
-      return;
-    }
-    
-    // Normalize possible response shapes
-    var list = [];
-    if (resp) {
-      if (resp.keys) {
-        if (Array.isArray(resp.keys)) {
-          list = resp.keys;
-        } else if (typeof resp.keys === "object") {
-          list = Object.keys(resp.keys);
-        }
-      } else if (Array.isArray(resp.items)) {
-        for (var li = 0; li < resp.items.length; li++) {
-          var it = resp.items[li];
-          if (it && it.key) list.push(it.key);
-        }
-      }
-    }
-    
-    log("KVS.List keys:", list.length);
-    var newMap = {};
-    
-    if (!list || !list.length) {
-      STATE.follows = newMap;
-      log("No followed MACs.");
-      if (callback) callback(true);
-      return;
-    }
+function onAllKeysProcessed(newMap, callback) {
+  STATE.follows = newMap;
+  log("Loaded follows:", newMap);
+  if (callback) callback(true);
+}
 
-    var pending = list.length;
-    function onKeyProcessed() {
-      pending--;
-      if (pending === 0) {
-        STATE.follows = newMap;
-        log("Loaded follows:", newMap);
-        if (callback) callback(true);
+function processKeysSequentially(list, newMap, callback, index) {
+  if (index >= list.length) {
+    // All keys processed
+    onAllKeysProcessed(newMap, callback);
+    return;
+  }
+  
+  // Process one key at a time
+  processKvsKey(list[index], newMap, function() {
+    processKeysSequentially(list, newMap, callback, index + 1);
+  });
+}
+
+function onKvsListResponse(callback, resp, err) {
+  if (err) {
+    log("KVS.List error:", err);
+    if (callback) callback(false);
+    return;
+  }
+  
+  // Normalize possible response shapes
+  var list = [];
+  if (resp) {
+    if (resp.keys) {
+      if (Array.isArray(resp.keys)) {
+        list = resp.keys;
+      } else if (typeof resp.keys === "object") {
+        list = Object.keys(resp.keys);
+      }
+    } else if (Array.isArray(resp.items)) {
+      for (var li = 0; li < resp.items.length; li++) {
+        var it = resp.items[li];
+        if (it && it.key) list.push(it.key);
       }
     }
-    
-    for (var i = 0; i < list.length; i++) {
-      processKvsKey(list[i], newMap, onKeyProcessed);
-    }
+  }
+  
+  log("KVS.List keys:", list.length);
+  var newMap = {};
+  
+  if (!list || !list.length) {
+    STATE.follows = newMap;
+    log("No followed MACs.");
+    if (callback) callback(true);
+    return;
+  }
+
+  // Process keys sequentially to avoid "too many calls in progress"
+  processKeysSequentially(list, newMap, callback, 0);
+}
+
+function loadFollowsFromKVS(callback) {
+  Shelly.call("KVS.List", { prefix: CONFIG.kvsPrefix }, function(resp, err) {
+    onKvsListResponse(callback, resp, err);
   });
 }
 
@@ -406,23 +422,25 @@ function initBLEScanner() {
   BLE.Scanner.Subscribe(BLEScanCallback);
 }
 
-function subscribeKvsEvents() {
-  Shelly.addEventHandler(function (eventData) {
-    try {
-      if (eventData && eventData.info && eventData.info.event === "kvs") {
-        var kvsEvent = eventData.info;
-        // Check if the KVS change affects our prefix
-        if (kvsEvent.key && kvsEvent.key.indexOf(CONFIG.kvsPrefix) === 0) {
-          log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
-          loadFollowsFromKVS();
-        }
-      } else if (eventData && eventData.info && eventData.info.event === "script_stop") {
-        log("Script stopping");
+function onEventData(eventData) {
+  try {
+    if (eventData && eventData.info && eventData.info.event === "kvs") {
+      var kvsEvent = eventData.info;
+      // Check if the KVS change affects our prefix
+      if (kvsEvent.key && kvsEvent.key.indexOf(CONFIG.kvsPrefix) === 0) {
+        log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
+        loadFollowsFromKVS();
       }
-    } catch (e) {
-      log("Error handling event:", e);
+    } else if (eventData && eventData.info && eventData.info.event === "script_stop") {
+      log("Script stopping");
     }
-  });
+  } catch (e) {
+    log("Error handling event:", e);
+  }
+}
+
+function subscribeKvsEvents() {
+  Shelly.addEventHandler(onEventData);
   log("Subscribed to KVS change events");
 }
 

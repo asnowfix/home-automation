@@ -8,8 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	shellymqtt "pkg/shelly/mqtt"
-	"pkg/shelly/temperature"
 	"regexp"
 
 	"github.com/go-logr/logr"
@@ -21,26 +19,24 @@ type Empty struct{}
 // User-Agent: [Shelly/20230913-112531/v1.14.0-gcb84623 (SHHT-1)]
 var uaRe = regexp.MustCompile(`^\[Shelly/(?P<fw_date>[0-9-]+)/(?P<fw_id>[a-z0-9-.]+) \((?P<model>[A-Z0-9-]+)\)\]$`)
 
-type httpProxy struct {
-	ctx      context.Context
-	log      logr.Logger
-	mc       *mqttclient.Client
-	dialogId uint32
-	decoder  *schema.Decoder
+type http2MqttProxy struct {
+	ctx     context.Context
+	log     logr.Logger
+	mc      *mqttclient.Client
+	decoder *schema.Decoder
 }
 
-func Proxy(ctx context.Context, log logr.Logger, port int, mc *mqttclient.Client) {
-	hp := httpProxy{
-		ctx:      ctx,
-		log:      log,
-		mc:       mc,
-		dialogId: 0, // independent counter (we do not expect replies)
-		decoder:  schema.NewDecoder(),
+func StartHttp2MqttProxy(ctx context.Context, log logr.Logger, port int, mc *mqttclient.Client) {
+	hp := http2MqttProxy{
+		ctx:     ctx,
+		log:     log,
+		mc:      mc,
+		decoder: schema.NewDecoder(),
 	}
 	go http.ListenAndServe(fmt.Sprintf(":%d", port), &hp)
 }
 
-func (hp *httpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (hp *http2MqttProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	for k, v := range req.Header {
 		hp.log.Info("Inbound", k, v)
 	}
@@ -71,56 +67,67 @@ func (hp *httpProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	m, _ := url.ParseQuery(req.URL.RawQuery)
 	hp.log.Info("http.HandleFunc", "query", m)
 
-	var ht HTSensor
-	err = hp.decoder.Decode(&ht, m)
-	if err == nil {
-		d.HTSensor = &ht
-	}
-
-	var fl Flood
-	err = hp.decoder.Decode(&fl, m)
-	if err == nil {
-		d.Flood = &fl
-	}
-
-	// Trying to rebuild <https://shelly-api-docs.shelly.cloud/gen1/#shelly-h-amp-t-mqtt>
-	topic, msg, err := hp.formatAsGen2(d)
+	// Decode query parameters into Device struct - schema decoder will populate
+	// the appropriate fields based on what's present in the query
+	err = hp.decoder.Decode(&d, m)
 	if err != nil {
-		hp.log.Error(err, "http.HandleFunc: unable to format message", "message", d)
+		hp.log.Error(err, "http.HandleFunc: failed to decode query parameters", "query", m)
 		return
 	}
-	hp.mc.Publish(topic, msg)
 
-	hp.dialogId++
+	// Emit Gen1 MQTT format as defined in <https://shelly-api-docs.shelly.cloud/gen1/#shelly-h-amp-t-mqtt>
+	err = hp.publishAsGen1MQTT(d)
+	if err != nil {
+		hp.log.Error(err, "http.HandleFunc: unable to publish MQTT message", "device", d)
+		return
+	}
+
 	_, _ = w.Write([]byte("")) // 200 OK
 }
 
-// <https://shelly-api-docs.shelly.cloud/gen2/General/RPCChannels#mqtt>
-func (hp *httpProxy) formatAsGen2(device Device) (topic string, msg []byte, err error) {
-	topic = fmt.Sprintf("%s/events/rpc", device.Id)
-	var tC float32
-	if device.HTSensor != nil {
-		tC = device.HTSensor.Temperature
-	}
-	if device.Flood != nil {
-		tC = device.Flood.Temperature
-	}
-	t := temperature.Status{
-		Id:         0,
-		Celsius:    tC,
-		Fahrenheit: (tC * 1.8) + 32.0,
-	}
-	req := &shellymqtt.Request{
-		Dialog: shellymqtt.Dialog{
-			Id:  hp.dialogId,
-			Src: fmt.Sprintf("%s_%s", hp.mc.Id(), device.Id),
-		},
-		Method: "NotifyStatus",
-		Params: t,
-	}
-	msg, err = json.Marshal(req)
+// publishAsGen1MQTT publishes messages in Gen1 MQTT format
+// Format: shellies/<device-id>/sensor/<sensor-type> with JSON payload
+// See: https://shelly-api-docs.shelly.cloud/gen1/#shelly-h-amp-t-mqtt
+func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
+	// Publish temperature (common to both H&T and Flood sensors)
+	tempTopic := fmt.Sprintf("shellies/%s/sensor/temperature", device.Id)
+	tempMsg, err := json.Marshal(device.Temperature)
 	if err != nil {
-		return "", nil, err
+		return fmt.Errorf("failed to marshal temperature: %w", err)
 	}
-	return
+	hp.mc.Publish(tempTopic, tempMsg)
+	hp.log.Info("Published Gen1 MQTT", "topic", tempTopic, "value", device.Temperature)
+
+	if device.IsHTSensor() {
+		// Publish humidity (H&T sensor only)
+		humTopic := fmt.Sprintf("shellies/%s/sensor/humidity", device.Id)
+		humMsg, err := json.Marshal(*device.Humidity)
+		if err != nil {
+			return fmt.Errorf("failed to marshal humidity: %w", err)
+		}
+		hp.mc.Publish(humTopic, humMsg)
+		hp.log.Info("Published Gen1 MQTT", "topic", humTopic, "value", *device.Humidity)
+	}
+
+	if device.IsFloodSensor() {
+		// Publish flood status
+		floodTopic := fmt.Sprintf("shellies/%s/sensor/flood", device.Id)
+		floodMsg, err := json.Marshal(*device.Flood)
+		if err != nil {
+			return fmt.Errorf("failed to marshal flood: %w", err)
+		}
+		hp.mc.Publish(floodTopic, floodMsg)
+		hp.log.Info("Published Gen1 MQTT", "topic", floodTopic, "value", *device.Flood)
+
+		// Publish battery voltage
+		batTopic := fmt.Sprintf("shellies/%s/sensor/battery", device.Id)
+		batMsg, err := json.Marshal(*device.BatteryVoltage)
+		if err != nil {
+			return fmt.Errorf("failed to marshal battery: %w", err)
+		}
+		hp.mc.Publish(batTopic, batMsg)
+		hp.log.Info("Published Gen1 MQTT", "topic", batTopic, "value", *device.BatteryVoltage)
+	}
+
+	return nil
 }

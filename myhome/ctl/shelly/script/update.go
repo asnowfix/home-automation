@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"global"
 	"hlog"
+	mhscript "internal/myhome/shelly/script"
 	"myhome"
 	"myhome/ctl/options"
 	"pkg/devices"
 	"pkg/shelly"
-	"pkg/shelly/script"
+	pkgscript "pkg/shelly/script"
 	"pkg/shelly/types"
 	"reflect"
 	"time"
@@ -52,7 +53,7 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 	}
 
 	// Get list of scripts currently loaded on the device
-	loaded, err := script.ListLoaded(ctx, via, sd)
+	loaded, err := pkgscript.ListLoaded(ctx, via, sd)
 	if err != nil {
 		log.Error(err, "Unable to list loaded scripts on device")
 		return nil, err
@@ -70,7 +71,19 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 
 		// Try to upload the script (this will check version hash and skip if up-to-date)
 		// If the script is not available in embedded scripts, Upload will return an error
-		id, err := script.Upload(ctx, via, sd, scriptName, !noMinify, forceUpload)
+		buf, err := pkgscript.ReadEmbeddedFile(scriptName)
+		if err != nil {
+			fmt.Printf("  ✗ Failed to read script %s: %v\n", scriptName, err)
+			updateResults = append(updateResults, UpdateResult{
+				ScriptName: scriptName,
+				ScriptId:   loadedScript.Id,
+				Status:     "error",
+				Message:    fmt.Sprintf("Read failed: %v", err),
+			})
+			continue
+		}
+		
+		id, err := mhscript.UploadWithVersion(ctx, log, via, sd, scriptName, buf, !updateNoMinify, updateForce)
 		if err != nil {
 			fmt.Printf("  ✗ Failed to update %s: %v\n", scriptName, err)
 			updateResults = append(updateResults, UpdateResult{

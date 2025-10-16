@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"global"
 	"hlog"
+	mhscript "internal/myhome/shelly/script"
 	"myhome"
 	"myhome/ctl/options"
 	"pkg/devices"
 	"pkg/shelly"
-	"pkg/shelly/script"
+	pkgscript "pkg/shelly/script"
 	"pkg/shelly/types"
 	"reflect"
 	"time"
@@ -50,7 +51,16 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 	}
 	scriptName := args[0]
 	fmt.Printf(". Uploading %s to %s...\n", scriptName, sd.Name())
-	id, err := script.Upload(ctx, via, sd, scriptName, !noMinify, forceUpload)
+	
+	// Read the embedded script file
+	buf, err := pkgscript.ReadEmbeddedFile(scriptName)
+	if err != nil {
+		fmt.Printf("✗ Failed to read script %s: %v\n", scriptName, err)
+		return nil, err
+	}
+	
+	// Upload with version tracking
+	id, err := mhscript.UploadWithVersion(ctx, log, via, sd, scriptName, buf, !noMinify, forceUpload)
 	if err != nil {
 		fmt.Printf("✗ Failed to upload %s to %s: %v\n", scriptName, sd.Name(), err)
 		return nil, err
@@ -70,7 +80,7 @@ var startCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{script.Start.String(), scriptName})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{pkgscript.Start.String(), scriptName})
 		return err
 	},
 }
@@ -86,7 +96,7 @@ var stopCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{script.Stop.String(), scriptName})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{pkgscript.Stop.String(), scriptName})
 		return err
 	},
 }
@@ -102,7 +112,7 @@ var deleteCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{script.Delete.String(), scriptName})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{pkgscript.Delete.String(), scriptName})
 		return err
 	},
 }
@@ -114,11 +124,28 @@ func doStartStopDelete(ctx context.Context, log logr.Logger, via types.Channel, 
 	}
 	operation := args[0]
 	scriptName := args[1]
-	out, err := script.StartStopDelete(ctx, via, sd, scriptName, script.Verb(operation))
+	
+	// Handle delete operation with KVS cleanup
+	if operation == pkgscript.Delete.String() {
+		fmt.Printf("Deleting %s from %s...\n", scriptName, sd.Name())
+		out, err := mhscript.DeleteWithVersion(ctx, log, via, sd, scriptName)
+		if err != nil {
+			log.Error(err, "Unable to delete script")
+			fmt.Printf("✗ Failed to delete %s from %s: %v\n", scriptName, sd.Name(), err)
+			return nil, err
+		}
+		fmt.Printf("✓ Successfully deleted %s from %s (including KVS version entry)\n", scriptName, sd.Name())
+		options.PrintResult(out)
+		return out, nil
+	}
+	
+	// Handle start/stop operations
+	out, err := pkgscript.StartStopDelete(ctx, via, sd, scriptName, pkgscript.Verb(operation))
 	if err != nil {
-		log.Error(err, "Unable to start/stop/delete script")
+		log.Error(err, "Unable to start/stop script")
 		return nil, err
 	}
+	
 	options.PrintResult(out)
 	return out, nil
 }

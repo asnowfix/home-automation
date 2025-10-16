@@ -3,12 +3,8 @@ package script
 import (
 	"bytes"
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
 	"io/fs"
-	"path/filepath"
-	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 	"reflect"
 	"strconv"
@@ -318,46 +314,14 @@ func Download(ctx context.Context, via types.Channel, device types.Device, name 
 	return res.Data, nil
 }
 
-func Upload(ctx context.Context, via types.Channel, device types.Device, name string, minify bool, force bool) (uint32, error) {
-	buf, err := fs.ReadFile(content, name)
+// UploadAndStart uploads script content to a device and starts it
+// This is a generic function without MyHome-specific version tracking
+func UploadAndStart(ctx context.Context, via types.Channel, device types.Device, name string, buf []byte, minify bool) (uint32, error) {
+	id, err := doUpload(ctx, via, device, name, buf, minify)
 	if err != nil {
-		log.Error(err, "Unknown script", "name", name, "device", device.Name())
 		return 0, err
 	}
-
-	// Compute version as the sha1 checksum of the script before its minification
-	h := sha1.New()
-	h.Write(buf)
-	version := hex.EncodeToString(h.Sum(nil))
-
-	// read the scrip version from the KVS
-	// Use basename to get just the filename without any directory path
-	basename := filepath.Base(name)
-	kvsKey := fmt.Sprintf("script/%s", basename)
-	kvsVersion := ""
-	res, err := kvs.GetValue(ctx, log, via, device, kvsKey)
-	if err != nil || res == nil {
-		log.Info("Unable to get KVS entry for script version (continuing)", "key", kvsKey)
-		// Don't fail the upload if KVS fails, just log the error
-	} else {
-		kvsVersion = res.Value
-		log.Info("Got KVS entry for script version", "key", kvsKey, "version", kvsVersion)
-	}
-
-	var id uint32
-	if force || version != kvsVersion {
-		if force {
-			log.Info("Force flag set, uploading script", "name", name, "version", version)
-		} else {
-			log.Info("Script version is different, uploading new one", "name", name, "version", version)
-		}
-		id, err = doUpload(ctx, via, device, name, buf, minify, kvsKey, version)
-		if err != nil {
-			return 0, err
-		}
-	} else {
-		log.Info("Script version is the same, skipping upload", "name", name, "version", version)
-	}
+	
 	_, err = StartStopDelete(ctx, via, device, name, Start)
 	if err != nil {
 		log.Error(err, "Unable to start script", "name", name, "device", device.Name())
@@ -366,7 +330,18 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 	return id, nil
 }
 
-func doUpload(ctx context.Context, via types.Channel, device types.Device, name string, buf []byte, minify bool, versionKey string, version string) (uint32, error) {
+// Upload reads an embedded script file and uploads it
+// For MyHome-specific version tracking, use internal/myhome/shelly/script.UploadWithVersion instead
+func Upload(ctx context.Context, via types.Channel, device types.Device, name string, minify bool) (uint32, error) {
+	buf, err := fs.ReadFile(content, name)
+	if err != nil {
+		log.Error(err, "Unknown script", "name", name, "device", device.Name())
+		return 0, err
+	}
+	return UploadAndStart(ctx, via, device, name, buf, minify)
+}
+
+func doUpload(ctx context.Context, via types.Channel, device types.Device, name string, buf []byte, minify bool) (uint32, error) {
 	// Minify before splitting and uploading (only if requested)
 	if minify {
 		origLen := len(buf)
@@ -448,15 +423,6 @@ func doUpload(ctx context.Context, via types.Channel, device types.Device, name 
 		return 0, err
 	}
 	log.Info("Configured script", "name", name, "id", id, "out", out)
-
-	// Create/update KVS entry with script version
-	_, err = kvs.SetKeyValue(ctx, log, via, device, versionKey, version)
-	if err != nil {
-		log.Error(err, "Unable to set KVS entry for script version", "key", versionKey, "version", version, "device", device.Name())
-		// Don't fail the upload if KVS fails, just log the error
-	} else {
-		log.Info("Set KVS entry for script version", "key", versionKey, "version", version, "device", device.Name())
-	}
 
 	return id, nil
 }

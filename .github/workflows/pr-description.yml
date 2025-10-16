@@ -38,7 +38,8 @@ jobs:
             const commits = comparison.commits.map(commit => {
               const message = commit.commit.message.split('\n')[0]; // Get first line (headline)
               const sha = commit.sha.substring(0, 7); // Short SHA
-              return `- ${message} (\`${sha}\`)`;
+              const commitUrl = `https://github.com/${owner}/${repo}/commit/${commit.sha}`;
+              return `- ${message} ([${sha}](${commitUrl}))`;
             }).join('\n');
             
             // Get current PR description

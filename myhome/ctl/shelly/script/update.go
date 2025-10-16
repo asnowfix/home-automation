@@ -31,14 +31,18 @@ func init() {
 }
 
 var updateCtl = &cobra.Command{
-	Use:   "update DEVICE",
-	Short: "Update all scripts loaded on the given Shelly device(s) by re-uploading available versions",
-	Args:  cobra.ExactArgs(1),
+	Use:   "update DEVICE [SCRIPT]",
+	Short: "Update all scripts (or a specific script) loaded on the given Shelly device(s) by re-uploading available versions",
+	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
+		scriptArgs := []string{}
+		if len(args) > 1 {
+			scriptArgs = []string{args[1]}
+		}
 		// Script updates can be long: Use a long-lived context decoupled from the global command timeout
 		longCtx := options.CommandLineContext(context.Background(), log, 5*time.Minute, global.Version(cmd.Context()))
-		_, err := myhome.Foreach(longCtx, log, device, options.Via, doUpdate, []string{})
+		_, err := myhome.Foreach(longCtx, log, device, options.Via, doUpdate, scriptArgs)
 		return err
 	},
 }
@@ -52,6 +56,12 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
 
+	// Check if a specific script name was provided
+	var targetScript string
+	if len(args) > 0 {
+		targetScript = args[0]
+	}
+
 	// Get list of scripts currently loaded on the device
 	loaded, err := pkgscript.ListLoaded(ctx, via, sd)
 	if err != nil {
@@ -59,13 +69,22 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 		return nil, err
 	}
 
-	fmt.Printf("Updating scripts on %s (%d scripts loaded)\n", sd.Name(), len(loaded))
+	if targetScript != "" {
+		fmt.Printf("Updating %s on %s\n", targetScript, sd.Name())
+	} else {
+		fmt.Printf("Updating scripts on %s (%d scripts loaded)\n", sd.Name(), len(loaded))
+	}
 
 	updateResults := make([]UpdateResult, 0)
 
 	// For each loaded script on the device, try to update it
 	for _, loadedScript := range loaded {
 		scriptName := loadedScript.Name
+
+		// If a specific script was requested, skip others
+		if targetScript != "" && scriptName != targetScript {
+			continue
+		}
 
 		fmt.Printf("  . Checking %s...\n", scriptName)
 
@@ -113,6 +132,12 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 				Message:    "Script updated successfully",
 			})
 		}
+	}
+
+	// If a specific script was requested but not found, skip this device silently
+	if targetScript != "" && len(updateResults) == 0 {
+		fmt.Printf("  → Script %s is not loaded on %s (skipping)\n", targetScript, sd.Name())
+		return nil, nil // Return nil error to indicate success (device skipped, not failed)
 	}
 
 	fmt.Printf("\nUpdate complete for %s (%d scripts processed)\n", sd.Name(), len(updateResults))

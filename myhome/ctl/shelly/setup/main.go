@@ -13,13 +13,14 @@ import (
 
 	"global"
 	"hlog"
+	mhscript "internal/myhome/shelly/script"
 	"myhome"
 	"myhome/ctl/options"
 	"mynet"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/mqtt"
-	"pkg/shelly/script"
+	pkgscript "pkg/shelly/script"
 	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -254,7 +255,7 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	// load watchdog.js as script #1
 	// - Check if watchdog.js is already loaded as script #1
 	fmt.Printf("  . Setting up watchdog script on %s...\n", deviceId)
-	loaded, err := script.ListLoaded(ctx, via, sd)
+	loaded, err := pkgscript.ListLoaded(ctx, via, sd)
 	if err != nil {
 		fmt.Printf("  ✗ Failed to list loaded scripts on %s: %v\n", deviceId, err)
 		return nil, err
@@ -278,7 +279,12 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	if !ok {
 		// Not already in place: upload, ...
 		fmt.Printf("    - Uploading watchdog.js to %s...\n", deviceId)
-		id, err := script.Upload(ctx, via, sd, "watchdog.js", true, false)
+		buf, err := pkgscript.ReadEmbeddedFile("watchdog.js")
+		if err != nil {
+			fmt.Printf("  ✗ Failed to read watchdog script: %v\n", err)
+			return nil, err
+		}
+		id, err := mhscript.UploadWithVersion(ctx, log, via, sd, "watchdog.js", buf, true, false)
 		if err != nil {
 			fmt.Printf("  ✗ Failed to upload watchdog script to %s: %v\n", deviceId, err)
 			return nil, err
@@ -287,7 +293,7 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 
 		// ...enable (auto-restart at boot, ...
 		fmt.Printf("    - Enabling auto-start on boot for %s...\n", deviceId)
-		_, err = script.EnableDisable(ctx, via, sd, "watchdog.js", true)
+		_, err = pkgscript.EnableDisable(ctx, via, sd, "watchdog.js", true)
 		if err != nil {
 			fmt.Printf("  ✗ Failed to enable watchdog script on %s: %v\n", deviceId, err)
 			return nil, err
@@ -296,7 +302,7 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 
 		// ...and start it.
 		fmt.Printf("    - Starting watchdog script on %s...\n", deviceId)
-		_, err = script.StartStopDelete(ctx, via, sd, "watchdog.js", script.Start)
+		_, err = pkgscript.StartStopDelete(ctx, via, sd, "watchdog.js", pkgscript.Start)
 		if err != nil {
 			fmt.Printf("  ✗ Failed to start watchdog script on %s: %v\n", deviceId, err)
 			return nil, err

@@ -75,48 +75,67 @@ function normalizeId(s) {
   return String(s).toLowerCase();
 }
 
-function processKvsKey(k, newMap, onComplete) {
-  Shelly.call("KVS.Get", { key: k }, function (gresp, gerr) {
-    if (gerr) {
-      log("KVS.Get error for", k, ":", gerr);
-      onComplete();
-      return;
-    }
-    if (!gresp || typeof gresp.value !== "string") {
-      log("KVS.Get error for", k, gerr);
-      onComplete();
-      return;
-    }
-    
-    try {
-      var value = JSON.parse(gresp.value);
-      var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
-      var followIdStr = value && value.follow_id ? String(value.follow_id) : "switch:0";
-      
-      var devId = k.substr(CONFIG.kvsPrefix.length);
-      devId = normalizeId(devId);
-      var switchIdx = parseSwitchIndex(switchIdStr);
-      var inputInfo = parseInputId(followIdStr);
-      
-      if (devId && switchIdx !== null && inputInfo) {
-        // Infer action from input type: switch -> set, input -> toggle
-        var action = inputInfo.type === "switch" ? "set" : "toggle";
-        newMap[devId] = {
-          switchIdStr: switchIdStr,
-          switchIndex: switchIdx,
-          followId: followIdStr,
-          inputType: inputInfo.type,
-          inputIndex: inputInfo.index,
-          action: action
-        };
-      } else {
-        log("Ignoring invalid follow entry:", k, gresp.value);
-      }
-    } catch (e) {
-      log("JSON parse error for", k, e);
-    }
+function onProcessKvsKeyResponse(k, newMap, onComplete, gresp, gerr) {
+  if (gerr) {
+    log("KVS.Get error for", k, ":", gerr);
     onComplete();
-  });
+    return;
+  }
+  if (!gresp || typeof gresp.value !== "string") {
+    log("KVS.Get error for", k, gerr);
+    onComplete();
+    return;
+  }
+  
+  try {
+    var value = JSON.parse(gresp.value);
+    var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
+    var followIdStr = value && value.follow_id ? String(value.follow_id) : "switch:0";
+    
+    var devId = k.substr(CONFIG.kvsPrefix.length);
+    devId = normalizeId(devId);
+    var switchIdx = parseSwitchIndex(switchIdStr);
+    var inputInfo = parseInputId(followIdStr);
+    
+    if (devId && switchIdx !== null && inputInfo) {
+      // Infer action from input type: switch -> set, input -> toggle
+      var action = inputInfo.type === "switch" ? "set" : "toggle";
+      newMap[devId] = {
+        switchIdStr: switchIdStr,
+        switchIndex: switchIdx,
+        followId: followIdStr,
+        inputType: inputInfo.type,
+        inputIndex: inputInfo.index,
+        action: action
+      };
+    } else {
+      log("Ignoring invalid follow entry:", k, gresp.value);
+    }
+  } catch (e) {
+    log("JSON parse error for", k, e);
+  }
+  onComplete();
+}
+
+function processKvsKey(k, newMap, onComplete) {
+  Shelly.call("KVS.Get", { key: k }, onProcessKvsKeyResponse.bind(null, k, newMap, onComplete));
+}
+
+function onAllKeysProcessed(newMap, callback) {
+  STATE.follows = newMap;
+  log("Loaded follows:", newMap);
+  if (callback) callback(true);
+}
+
+function processKeysSequentially(list, newMap, callback, index) {
+  if (index >= list.length) {
+    // All keys processed
+    onAllKeysProcessed(newMap, callback);
+    return;
+  }
+  
+  // Process one key at a time
+  processKvsKey(list[index], newMap, processKeysSequentially.bind(null, list, newMap, callback, index + 1));
 }
 
 function loadFollowsFromKVS(callback) {
@@ -151,19 +170,8 @@ function loadFollowsFromKVS(callback) {
       return;
     }
 
-    var pending = list.length;
-    function onKeyProcessed() {
-      pending--;
-      if (pending === 0) {
-        STATE.follows = newMap;
-        log("Loaded follows:", newMap);
-        if (callback) callback(true);
-      }
-    }
-    
-    for (var li = 0; li < list.length; li++) {
-      processKvsKey(list[li], newMap, onKeyProcessed);
-    }
+    // Process keys sequentially to avoid "too many calls in progress"
+    processKeysSequentially(list, newMap, callback, 0);
   });
 }
 

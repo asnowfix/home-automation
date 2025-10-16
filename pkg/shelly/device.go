@@ -595,12 +595,17 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 	// Collect results
 	out := make([]any, 0, len(deviceList))
 	var errs []error
-	var failedDevices []string
+	type failedDevice struct {
+		name string
+		id   string
+	}
+	var failedDevices []failedDevice
 	for result := range results {
 		if result.Error != nil {
 			deviceId := result.Device.Id()
+			deviceName := result.Device.Name()
 			errs = append(errs, fmt.Errorf("device %s: %w", deviceId, result.Error))
-			failedDevices = append(failedDevices, deviceId)
+			failedDevices = append(failedDevices, failedDevice{name: deviceName, id: deviceId})
 		}
 		out = append(out, result.Result)
 	}
@@ -615,8 +620,8 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 			fmt.Printf("✓ %d device(s) succeeded\n", successCount)
 		}
 		fmt.Printf("✗ %d device(s) failed:\n", len(errs))
-		for _, deviceId := range failedDevices {
-			fmt.Printf("  - %s\n", deviceId)
+		for _, dev := range failedDevices {
+			fmt.Printf("  - %s (%s)\n", dev.name, dev.id)
 		}
 
 		// Log details

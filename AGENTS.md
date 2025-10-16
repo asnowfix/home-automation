@@ -373,6 +373,94 @@ The packaging workflow uses `git describe` to determine the version. For this to
 
 ## Project Structure
 
+### Architecture: Shelly Code Organization
+
+The project follows a three-tier architecture for Shelly device code, with clear separation of concerns:
+
+#### 1. `pkg/shelly/` - Generic Shelly API Layer
+
+**Purpose**: Pure, reusable Shelly device API implementation
+
+**Responsibilities**:
+- Direct Shelly API calls (RPC methods)
+- Generic device operations (reboot, status, configuration)
+- Script operations (upload, start, stop, delete)
+- MQTT and HTTP channel implementations
+- No business logic or application-specific code
+
+**Examples**:
+- `pkg/shelly/script/main.go`: `UploadAndStart()`, `StartStopDelete()`, `ListLoaded()`
+- `pkg/shelly/device.go`: `Foreach()`, device initialization
+- `pkg/shelly/mqtt/`: MQTT channel implementation
+
+**Key Principle**: Code here should work for any Shelly-based application, not just MyHome.
+
+#### 2. `internal/myhome/shelly/` - MyHome Business Logic
+
+**Purpose**: MyHome-specific business logic that combines Shelly operations
+
+**Responsibilities**:
+- Application-specific workflows (e.g., version tracking with KVS)
+- Combined operations (upload + version check + KVS update)
+- MyHome-specific device management
+- Business rules and policies
+
+**Examples**:
+- `internal/myhome/shelly/script/ops.go`: 
+  - `UploadWithVersion()`: Uploads script + tracks version in KVS
+  - `DeleteWithVersion()`: Deletes script + cleans up KVS entry
+
+**Key Principle**: This layer orchestrates `pkg/shelly` operations to implement MyHome-specific features.
+
+#### 3. `myhome/ctl/shelly/` - CLI/UI Layer
+
+**Purpose**: User interface and command-line interaction only
+
+**Responsibilities**:
+- Command definitions (Cobra commands)
+- User-facing output (fmt.Printf)
+- Flag parsing
+- Calling business logic from `internal/myhome/shelly`
+- No business logic implementation
+
+**Examples**:
+- `myhome/ctl/shelly/script/start-stop-delete.go`: CLI commands that call `internal/myhome/shelly/script`
+- `myhome/ctl/shelly/script/update.go`: Update command with user feedback
+
+**Key Principle**: Thin layer that translates user commands into business logic calls.
+
+#### Architecture Flow
+
+```
+User Command (myhome/ctl/shelly)
+    ↓
+Business Logic (internal/myhome/shelly)
+    ↓
+Generic Shelly API (pkg/shelly)
+    ↓
+Shelly Device
+```
+
+**Example: Script Upload with Version Tracking**
+
+1. **CLI Layer** (`myhome/ctl/shelly/script/start-stop-delete.go`):
+   - Parses command: `ctl shelly script upload device-name script.js`
+   - Reads embedded file
+   - Calls `mhscript.UploadWithVersion()`
+   - Prints success/error messages
+
+2. **Business Logic** (`internal/myhome/shelly/script/ops.go`):
+   - Calculates SHA1 version hash
+   - Checks KVS for existing version
+   - Calls `pkgscript.UploadAndStart()` if needed
+   - Updates KVS with new version
+
+3. **Generic API** (`pkg/shelly/script/main.go`):
+   - Minifies script (if requested)
+   - Creates/finds script slot
+   - Uploads code chunks
+   - Starts script
+
 ### Script Organization
 
 - `pkg/shelly/script/*.js`: Embedded Shelly scripts

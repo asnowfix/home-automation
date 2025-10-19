@@ -16,7 +16,7 @@ on:
         default: ''
 jobs:
   package-deb:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm64' || 'ubuntu-latest' }}
     strategy:
       matrix:
         arch: [amd64, arm64]

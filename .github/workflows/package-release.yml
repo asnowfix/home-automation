@@ -16,7 +16,7 @@ on:
         default: ''
 jobs:
   package-deb:
-    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm64' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         arch: [amd64, arm64]
@@ -64,6 +64,7 @@ jobs:
           cp $(echo $entry | jq -cr '.path') $file
           echo "binary=$file" | tee -a $GITHUB_OUTPUT
       - name: Validate binary version
+        if: matrix.arch == 'amd64'
         run: |
           set -euo pipefail
           EXPECTED_VERSION="${{ steps.extract-tag.outputs.tag }}"

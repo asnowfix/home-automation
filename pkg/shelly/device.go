@@ -72,7 +72,9 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 			d.config = &shelly.Config{}
 		}
 		d.config.System = config
-		d.UpdateName(config.Device.Name)
+		if config.Device.Name != "" {
+			d.UpdateName(config.Device.Name)
+		}
 	}
 	if !d.IsHttpReady() {
 		if d.status == nil {

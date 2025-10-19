@@ -52,6 +52,8 @@ func (hc *client) start(ctx context.Context) {
 		hc.log.Error(err, "Failed to subscribe to client topic", "topic", ClientTopic(mc.Id()))
 		return
 	}
+	// Note: Subscriber() waits for MQTT subscription ACK via token.WaitTimeout()
+	// so the subscription is guaranteed to be active when it returns successfully
 
 	hc.to, err = mc.Publisher(ctx, ServerTopic(), 1)
 	if err != nil {
@@ -164,8 +166,9 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 		return nil, err
 	}
 
-	hc.log.Info("Calling method", "method", req.Method, "params", req.Params)
+	hc.log.Info("Calling method", "method", req.Method, "params", req.Params, "request_id", requestId, "dst", req.Dst)
 	hc.to <- reqStr
+	hc.log.Info("Request published", "topic", ServerTopic(), "request_id", requestId)
 
 	var resStr []byte
 	select {
@@ -173,10 +176,11 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 		// Don't log context cancellation as an error
 		return nil, ctx.Err()
 	case resStr = <-hc.from:
-		hc.log.Info("Response", "payload", resStr)
+		hc.log.Info("Response received", "payload", string(resStr), "request_id", requestId)
 		break
-		// case <-time.After(hc.timeout):
-		// 	return nil, fmt.Errorf("timed out waiting for response to method %s (%v)", method, hc.timeout)
+	case <-time.After(hc.timeout):
+		return nil, fmt.Errorf("timeout waiting for response to method %s after %v (request_id: %s, dst: %s, topic: %s)", 
+			method, hc.timeout, requestId, req.Dst, ClientTopic(hc.me))
 	}
 
 	var res response

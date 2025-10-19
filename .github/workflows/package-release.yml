@@ -67,12 +67,13 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED_VERSION="${{ steps.extract-tag.outputs.tag }}"
+          BINARY_PATH="./${{ steps.shape-artifacts.outputs.binary }}"
           
           # Make binary executable
-          chmod +x ${{ steps.shape-artifacts.outputs.binary }}
+          chmod +x "$BINARY_PATH"
           
           # Get version from binary
-          VERSION=$(${{ steps.shape-artifacts.outputs.binary }} version)
+          VERSION=$("$BINARY_PATH" version)
           
           echo "Expected version: $EXPECTED_VERSION"
           echo "Actual version: $VERSION"

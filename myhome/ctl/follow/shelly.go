@@ -1,11 +1,13 @@
 package follow
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"hlog"
 	"myhome"
 	"myhome/ctl/options"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -48,8 +50,22 @@ var ShellyCmd = &cobra.Command{
 		}
 		kvKey := "follow/status/" + followedDeviceId
 
+		// Set KVS configuration
 		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
-		return err
+		if err != nil {
+			return err
+		}
+
+		// Upload and start the status-listener.js script
+		fmt.Printf("\nUploading status-listener.js script...\n")
+		longCtx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
+		defer cancel()
+		_, err = myhome.Foreach(longCtx, hlog.Logger, followerDevice, options.Via, uploadScript, []string{"status-listener.js"})
+		if err != nil {
+			return fmt.Errorf("failed to upload script: %w", err)
+		}
+
+		return nil
 	},
 }
 

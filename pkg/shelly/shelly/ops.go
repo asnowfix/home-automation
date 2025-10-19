@@ -74,6 +74,10 @@ func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
 		Allocate:   func() any { return new(CheckForUpdateResponse) },
 		HttpMethod: http.MethodGet,
 	})
+	r.RegisterMethodHandler(Update.String(), types.MethodHandler{
+		Allocate:   func() any { return nil },
+		HttpMethod: http.MethodPost,
+	})
 	r.RegisterMethodHandler(FactoryReset.String(), types.MethodHandler{
 		Allocate: func() any { return nil },
 		// https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellyfactoryreset-example
@@ -98,6 +102,31 @@ func DoGetComponents(ctx context.Context, d types.Device) (*ComponentsResponse, 
 		return nil, fmt.Errorf("invalid components type %T (should be *ComponentsResponse)", out)
 	}
 	return components, nil
+}
+
+// DoCheckForUpdate checks if firmware updates are available
+func DoCheckForUpdate(ctx context.Context, via types.Channel, d types.Device) (*CheckForUpdateResponse, error) {
+	out, err := d.CallE(ctx, via, CheckForUpdate.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	updateInfo, ok := out.(*CheckForUpdateResponse)
+	if !ok {
+		return nil, fmt.Errorf("invalid update info type %T (should be *CheckForUpdateResponse)", out)
+	}
+	return updateInfo, nil
+}
+
+// UpdateRequest represents the parameters for Shelly.Update
+type UpdateRequest struct {
+	Stage string `json:"stage"` // "stable" or "beta"
+}
+
+// DoUpdate initiates a firmware update
+func DoUpdate(ctx context.Context, via types.Channel, d types.Device, stage string) error {
+	req := UpdateRequest{Stage: stage}
+	_, err := d.CallE(ctx, via, Update.String(), &req)
+	return err
 }
 
 func DoReboot(ctx context.Context, d types.Device) error {

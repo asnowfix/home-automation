@@ -5,6 +5,7 @@ import (
 	"pkg/shelly/ethernet"
 	"pkg/shelly/input"
 	"pkg/shelly/kvs"
+	"pkg/shelly/matter"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/script"
 	"pkg/shelly/shelly"
@@ -30,8 +31,10 @@ func Init(log logr.Logger, timeout time.Duration) {
 	// Keep in lexical order
 	// gen1.Init(log, &registrar)
 	shelly.Init(log, &registrar, timeout)
+	ethernet.Init(log, &registrar)
 	input.Init(log, &registrar)
 	kvs.Init(log, &registrar)
+	matter.Init(log, &registrar)
 	mqtt.Init(log, &registrar, timeout)
 	schedule.Init(log, &registrar)
 	script.Init(log, &registrar, scripts.GetFS())
@@ -40,7 +43,6 @@ func Init(log logr.Logger, timeout time.Duration) {
 	system.Init(log, &registrar)
 	// temperature.Init(log, &registrar)
 	wifi.Init(log, &registrar)
-	ethernet.Init(log, &registrar)
 }
 
 func (r *Registrar) CallE(ctx context.Context, d types.Device, via types.Channel, mh types.MethodHandler, params any) (any, error) {

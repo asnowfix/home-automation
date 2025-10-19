@@ -23,6 +23,10 @@ type Config struct {
 		Longitude float32 `json:"lon,omitempty"`
 	} `json:"location,omitempty"`
 	Debug  *DeviceDebug `json:"debug,omitempty"`
+	UiData *struct {
+		// User interface data - structure is device-specific and not documented
+		// Store as generic map to preserve any data
+	} `json:"ui_data,omitempty"`
 	RpcUdp *struct {
 		DestinationAddress string `json:"dst_addr"`
 		ListenPort         uint16 `json:"listen_port,omitempty"`

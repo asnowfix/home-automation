@@ -13,7 +13,6 @@ import (
 	pkgscript "pkg/shelly/script"
 	"pkg/shelly/types"
 	"reflect"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -34,8 +33,8 @@ var uploadCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		// Script upload can be long: Use a long-lived context decoupled from the global command timeout
-		longCtx := options.CommandLineContext(context.Background(), hlog.Logger, 2*time.Minute, global.Version(cmd.Context()))
+		// Script upload can be long: Use a context without timeout
+		longCtx := global.ContextWithoutTimeout(cmd.Context(), hlog.Logger)
 		_, err := myhome.Foreach(longCtx, hlog.Logger, device, options.Via, doUpload, []string{scriptName})
 		return err
 	},

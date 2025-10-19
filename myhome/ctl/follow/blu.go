@@ -1,15 +1,23 @@
 package follow
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"hlog"
+	mhscript "internal/myhome/shelly/script"
 	"myhome"
 	"myhome/ctl/options"
+	"pkg/devices"
+	"pkg/shelly"
+	pkgscript "pkg/shelly/script"
+	"pkg/shelly/types"
 	"strconv"
 	"strings"
+	"time"
 	"tools"
 
+	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
@@ -125,8 +133,22 @@ Default illuminance_max is "10%" if not specified.`,
 		}
 		kvKey := "follow/shelly-blu/" + mac
 
+		// Set KVS configuration
 		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
-		return err
+		if err != nil {
+			return err
+		}
+
+		// Upload and start the blu-listener.js script
+		fmt.Printf("\nUploading blu-listener.js script...\n")
+		longCtx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
+		defer cancel()
+		_, err = myhome.Foreach(longCtx, hlog.Logger, followerDevice, options.Via, uploadScript, []string{"blu-listener.js"})
+		if err != nil {
+			return fmt.Errorf("failed to upload script: %w", err)
+		}
+
+		return nil
 	},
 }
 
@@ -137,4 +159,30 @@ func init() {
 	BluCmd.Flags().StringVar(&bluFlagIllumMax, "illuminance-max", "", "Maximum illuminance to trigger (numeric lux value or percentage like '80%', default '10%')")
 	BluCmd.Flags().StringVar(&bluFlagSwitchID, "switch-id", "switch:0", "Switch ID to operate, e.g. switch:0")
 	BluCmd.Flags().StringVar(&bluFlagNextSwitch, "next-switch", "", "Optional next switch ID to turn on after auto-off (unset by default)")
+}
+
+// uploadScript is a helper function to upload and start scripts on Shelly devices
+func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
+	}
+	scriptName := args[0]
+	fmt.Printf(". Uploading %s to %s...\n", scriptName, sd.Name())
+	
+	// Read the embedded script file
+	buf, err := pkgscript.ReadEmbeddedFile(scriptName)
+	if err != nil {
+		fmt.Printf("✗ Failed to read script %s: %v\n", scriptName, err)
+		return nil, err
+	}
+	
+	// Upload with version tracking (minify=true, force=false)
+	id, err := mhscript.UploadWithVersion(ctx, log, via, sd, scriptName, buf, true, false)
+	if err != nil {
+		fmt.Printf("✗ Failed to upload %s to %s: %v\n", scriptName, sd.Name(), err)
+		return nil, err
+	}
+	fmt.Printf("✓ Successfully uploaded %s to %s (id: %d)\n", scriptName, sd.Name(), id)
+	return id, nil
 }

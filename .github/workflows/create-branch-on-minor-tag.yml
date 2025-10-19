@@ -49,6 +49,28 @@ jobs:
             git push origin "$BRANCH"
             echo "Branch $BRANCH created successfully"
           fi
+      - name: Validate version command
+        run: |
+          set -euo pipefail
+          EXPECTED_TAG="${{ github.ref_name }}"
+          
+          # Build the binary
+          cd myhome
+          make build
+          
+          # Get version from binary
+          VERSION=$(./myhome version)
+          
+          echo "Expected version: $EXPECTED_TAG"
+          echo "Actual version: $VERSION"
+          
+          # Check if version matches the tag (may have -dirty suffix in dev)
+          if [[ "$VERSION" == "$EXPECTED_TAG" ]] || [[ "$VERSION" == "${EXPECTED_TAG}-dirty" ]]; then
+            echo "✓ Version validation passed"
+          else
+            echo "✗ Version validation failed: expected $EXPECTED_TAG but got $VERSION" >&2
+            exit 1
+          fi
       - name: Trigger Packaging Workflow
         run: |
           curl -X POST \

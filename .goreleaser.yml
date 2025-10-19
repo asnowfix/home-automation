@@ -18,5 +18,5 @@ builds:
     ldflags:
       - -X main.Program=myhome
       - -X main.Repo={{.GitURL}}
-      - -X main.Version={{.Version}}
+      - -X main.Version={{.Tag}}
       - -X main.Commit={{.FullCommit}}

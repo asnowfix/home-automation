@@ -78,11 +78,15 @@ jobs:
           echo "Expected version: $EXPECTED_VERSION"
           echo "Actual version: $VERSION"
           
-          # Check if version matches the expected tag
-          if [[ "$VERSION" == "$EXPECTED_VERSION" ]]; then
+          # Normalize versions for comparison (strip 'v' prefix if present)
+          EXPECTED_NORMALIZED="${EXPECTED_VERSION#v}"
+          VERSION_NORMALIZED="${VERSION#v}"
+          
+          # Check if versions match (with or without 'v' prefix)
+          if [[ "$VERSION_NORMALIZED" == "$EXPECTED_NORMALIZED" ]]; then
             echo "✓ Binary version validation passed"
           else
-            echo "✗ Binary version validation failed: expected $EXPECTED_VERSION but got $VERSION" >&2
+            echo "✗ Binary version validation failed: expected $EXPECTED_NORMALIZED but got $VERSION_NORMALIZED" >&2
             exit 1
           fi
       - id: prepare-deb

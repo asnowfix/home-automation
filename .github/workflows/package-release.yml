@@ -30,6 +30,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
+      - name: Extract tag name
+        id: extract-tag
+        run: |
+          # Extract tag name from ref (e.g., refs/tags/v0.5.9 -> v0.5.9)
+          REF="${{ github.event.inputs.ref }}"
+          TAG_NAME=$(echo "$REF" | sed -E 's|^refs/tags/||')
+          echo "tag=${TAG_NAME}" | tee -a "$GITHUB_OUTPUT"
       - id: go-releaser
         name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
@@ -38,11 +45,9 @@ jobs:
           distribution: goreleaser
           # 'latest', 'nightly', or a semver
           version: '~> v2'
-          #args: release --rm-dist --clean --snapshot
-          args: release -f .goreleaser.yml --clean --snapshot
-          # env:
-          #     # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
-          #     GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+          args: release -f .goreleaser.yml --clean --skip=publish
+        env:
+          GORELEASER_CURRENT_TAG: ${{ steps.extract-tag.outputs.tag }}
       - id: version
         name: Get package version from ref
         run: |
@@ -58,6 +63,27 @@ jobs:
           file=$(echo $entry | jq -cr '.name')-${{ steps.version.outputs.release }}-$(echo $entry | jq -cr '.goos')-$(echo $entry | jq -cr '.goarch')
           cp $(echo $entry | jq -cr '.path') $file
           echo "binary=$file" | tee -a $GITHUB_OUTPUT
+      - name: Validate binary version
+        run: |
+          set -euo pipefail
+          EXPECTED_VERSION="${{ steps.extract-tag.outputs.tag }}"
+          
+          # Make binary executable
+          chmod +x ${{ steps.shape-artifacts.outputs.binary }}
+          
+          # Get version from binary
+          VERSION=$(${{ steps.shape-artifacts.outputs.binary }} version)
+          
+          echo "Expected version: $EXPECTED_VERSION"
+          echo "Actual version: $VERSION"
+          
+          # Check if version matches the expected tag
+          if [[ "$VERSION" == "$EXPECTED_VERSION" ]]; then
+            echo "✓ Binary version validation passed"
+          else
+            echo "✗ Binary version validation failed: expected $EXPECTED_VERSION but got $VERSION" >&2
+            exit 1
+          fi
       - id: prepare-deb
         name: Prepare package content
         run: |

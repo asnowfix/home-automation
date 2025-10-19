@@ -15,3 +15,8 @@ builds:
     id: "snapshot"
     dir: .
     main: ./myhome
+    ldflags:
+      - -X main.Program=myhome
+      - -X main.Repo={{.GitURL}}
+      - -X main.Version={{.Version}}
+      - -X main.Commit={{.FullCommit}}

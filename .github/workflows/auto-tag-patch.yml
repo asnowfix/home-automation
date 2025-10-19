@@ -79,4 +79,4 @@ jobs:
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
               https://api.github.com/repos/${{ github.repository }}/actions/workflows/package-release.yml/dispatches \
-              -d '{"ref":"${{ steps.semver.outputs.v_patch }}","inputs":{"ref":"refs/tags/${{ steps.semver.outputs.v_patch }}","previous":"${{ steps.previoustag.outputs.tag }}"}}' 
+              -d '{"ref":"${{ steps.semver.outputs.v_patch }}","inputs":{"ref":"refs/tags/${{ steps.semver.outputs.v_patch }}","previous":"${{ steps.previoustag.outputs.tag }}","source_branch":"${{ github.event.pull_request.base.ref }}"}}' 

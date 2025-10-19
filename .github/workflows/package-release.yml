@@ -10,6 +10,10 @@ on:
       previous:
         description: 'Previous ref/tag'
         required: true
+      source_branch:
+        description: 'Source branch to merge back to (e.g., v0.5.x or main)'
+        required: false
+        default: ''
 jobs:
   package-deb:
     runs-on: ubuntu-latest
@@ -248,3 +252,53 @@ jobs:
           draft: true
           replacesArtifacts: true
           generateReleaseNotes: true
+  merge-back:
+    runs-on: ubuntu-latest
+    needs:
+      - release
+    if: github.event.inputs.source_branch != ''
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.source_branch }}
+      - name: Import GPG key
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+          git_config_global: true
+          git_user_signingkey: true
+          git_commit_gpgsign: true
+          git_tag_gpgsign: true
+      - name: Merge tag back to source branch
+        run: |
+          set -euo pipefail
+          
+          SOURCE_BRANCH="${{ github.event.inputs.source_branch }}"
+          TAG_REF="${{ github.event.inputs.ref }}"
+          
+          # Extract tag name from ref (e.g., refs/tags/v0.5.9 -> v0.5.9)
+          TAG_NAME=$(echo "$TAG_REF" | sed -E 's|^refs/tags/||')
+          
+          echo "Merging tag $TAG_NAME back to branch $SOURCE_BRANCH"
+          
+          # Fetch the tag
+          git fetch origin tag "$TAG_NAME"
+          
+          # Try fast-forward merge first
+          if git merge --ff-only "$TAG_NAME"; then
+            echo "✓ Fast-forward merge successful"
+            MERGE_TYPE="fast-forward"
+          else
+            # If fast-forward fails, do a regular merge
+            echo "⚠ Fast-forward not possible, creating merge commit"
+            git merge --no-ff -m "Merge tag '$TAG_NAME' back to $SOURCE_BRANCH" "$TAG_NAME"
+            MERGE_TYPE="merge-commit"
+          fi
+          
+          # Push the updated branch
+          git push origin "$SOURCE_BRANCH"
+          
+          echo "✓ Successfully merged $TAG_NAME to $SOURCE_BRANCH ($MERGE_TYPE)"

@@ -2,7 +2,6 @@ package ctl
 
 import (
 	"context"
-	"fmt"
 	"global"
 	"hlog"
 	"myhome"
@@ -114,7 +113,6 @@ func init() {
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns-timeout", "M", options.MDNS_LOOKUP_DEFAULT_TIMEOUT, "Timeout for mDNS lookups")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.Via, "via", "V", types.ChannelDefault.String(), "Use given channel to communicate with Shelly devices (default is to discover it from the network)")
 
-	Cmd.AddCommand(versionCmd)
 	Cmd.AddCommand(list.Cmd)
 	Cmd.AddCommand(show.Cmd)
 	Cmd.AddCommand(open.Cmd)
@@ -129,11 +127,3 @@ func init() {
 
 var Commit string
 var Version string
-
-var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Print the version number",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(Commit)
-	},
-}

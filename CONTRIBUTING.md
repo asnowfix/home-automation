@@ -3,16 +3,41 @@
 ## Table of Contents <!-- omit in toc -->
 
 - [Release Workflow](#release-workflow)
-  - [Creating a Minor Release](#creating-a-minor-release-vmm0)
-  - [Creating a Patch Release](#creating-a-patch-release-vmmp)
+  - [Workflow Overview](#workflow-overview)
+  - [Before First Release](#before-first-release)
+  - [Creating a Minor Release (vM.m.0)](#creating-a-minor-release-vmm0)
+  - [Creating a Patch Release (vM.m.p)](#creating-a-patch-release-vmmp)
+  - [Post-Release](#post-release)
   - [Branch Strategy](#branch-strategy)
   - [Best Practices](#best-practices)
   - [Automated Workflows](#automated-workflows)
+    - [Merge-Back Behavior](#merge-back-behavior)
+  - [Required GitHub Secrets](#required-github-secrets)
+  - [Version Numbering](#version-numbering)
+  - [Troubleshooting](#troubleshooting)
+    - [Workflow didn't trigger](#workflow-didnt-trigger)
+    - [Branch not created](#branch-not-created)
+    - [Build failed](#build-failed)
+    - [Package build fails](#package-build-fails)
+    - [GPG signing failed](#gpg-signing-failed)
+    - [Release not created](#release-not-created)
+    - [Auto-tag didn't create patch version](#auto-tag-didnt-create-patch-version)
   - [Release Notes Process](#release-notes-process)
+    - [1. Prerequisites](#1-prerequisites)
+    - [2. Creating Release Notes](#2-creating-release-notes)
+    - [3. Uploading Release Notes](#3-uploading-release-notes)
+    - [4. Publishing the Release](#4-publishing-the-release)
+    - [Complete Release Workflow](#complete-release-workflow)
 - [Code signing](#code-signing)
 - [Ubuntu/Debian Linux](#ubuntudebian-linux)
-- [Windows - WSL](#windows-wsl)
-- [Windows - Native](#windows-native)
+- [Windows - WSL](#windows---wsl)
+- [Windows - Native](#windows---native)
+  - [Services](#services)
+    - [Build the Service](#build-the-service)
+    - [Install the Service](#install-the-service)
+    - [Service Management Commands](#service-management-commands)
+    - [Troubleshooting](#troubleshooting-1)
+  - [PowerShell](#powershell)
 - [macOS TBC](#macos-tbc)
 - [Profiling](#profiling)
 - [VSCode](#vscode)
@@ -21,55 +46,184 @@
 
 This project uses semantic versioning (vMAJOR.MINOR.PATCH) with automated tagging and branching.
 
+### Workflow Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         MAIN BRANCH                              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ git tag v0.5.0
+                              │ git push origin v0.5.0
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  create-branch-on-minor-tag.yml (triggered by v*.*.0 tag)       │
+│  ✓ Creates branch v0.5.x from tag v0.5.0                        │
+│  ✓ Triggers package-release.yml                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  package-release.yml                                            │
+│  ✓ Builds myhome binary                                         │
+│  ✓ Creates MyHome-0.5.0.msi (Windows)                           │
+│  ✓ Creates myhome_0.5.0_amd64.deb (Linux)                       │
+│  ✓ Creates myhome_0.5.0_arm64.deb (Linux)                       │
+│  ✓ Creates draft GitHub release                                 │
+│  ✓ Merges tag v0.5.0 back to main (fast-forward if possible)    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    📦 Release v0.5.0 published
+                              │
+                              ▼
+                    ✓ Tag v0.5.0 is now an ancestor of main
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│                     MAINTENANCE BRANCH v0.5.x                   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ PR merged (bugfix)
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  auto-tag-patch.yml (triggered by PR merge to v*.*.x)           │
+│  ✓ Calculates next patch version (v0.5.1)                       │
+│  ✓ Creates signed tag v0.5.1                                    │
+│  ✓ Triggers package-release.yml                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  package-release.yml                                             │
+│  ✓ Builds myhome binary                                          │
+│  ✓ Creates MyHome-0.5.1.msi (Windows)                            │
+│  ✓ Creates myhome_0.5.1_amd64.deb (Linux)                        │
+│  ✓ Creates myhome_0.5.1_arm64.deb (Linux)                        │
+│  ✓ Creates draft GitHub release                                 │
+│  ✓ Merges tag v0.5.1 back to v0.5.x (fast-forward if possible)  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    📦 Release v0.5.1 published
+                              │
+                              ▼
+                    ✓ Tag v0.5.1 is now an ancestor of v0.5.x
+```
+
+### Before First Release
+
+- [ ] Configure GitHub Secrets:
+  - [ ] `GPG_PRIVATE_KEY` - GPG private key for signing tags
+  - [ ] `GPG_PASSPHRASE` - Passphrase for the GPG key
+  - [ ] `SIGNING_CERTIFICATE` - Code signing certificate for Windows MSI (optional)
+  - [ ] `SIGNING_PASSWORD` - Certificate password (optional)
+- [ ] Verify workflows are enabled in repository settings
+- [ ] Test build locally: `go build ./myhome`
+
 ### Creating a Minor Release (vM.m.0)
 
 **When to use**: New features, API changes, or significant updates
 
 **Process**:
-1. Create and push a tag ending in `.0`:
+1. **Tag the release from main**:
    ```bash
-   git tag -s v1.2.0 -m "Release v1.2.0"
-   git push origin v1.2.0
+   git checkout main
+   git pull origin main
+   git tag -s v0.5.0 -m "Release v0.5.0"
+   git push origin v0.5.0
    ```
-2. The workflow automatically:
-   - Creates a branch `v1.2.x` from the tag
-   - Triggers the packaging workflow to build release artifacts
 
-**Example**: Tag `v1.2.0` → Creates branch `v1.2.x`
+2. **Automatic workflow trigger**:
+   - The `create-branch-on-minor-tag.yml` workflow detects the tag
+   - Creates a maintenance branch `v0.5.x` from the tag
+   - Triggers the `package-release.yml` workflow
+   - Builds release artifacts (MSI + DEB packages)
+
+3. **Checklist**:
+   - [ ] Ensure all changes are merged to `main`
+   - [ ] Update version in documentation if needed
+   - [ ] Create release notes: `cp RELEASE_NOTES.md RELEASE_NOTES_v0.5.0.md`
+   - [ ] Fill in release notes with changes from `git log`
+   - [ ] Commit release notes
+   - [ ] Create and push tag (see step 1)
+   - [ ] Wait for workflows to complete (~15 minutes)
+   - [ ] Check GitHub Actions for any failures
+   - [ ] Verify branch `v0.5.x` was created
+   - [ ] Go to [GitHub Releases](https://github.com/asnowfix/home-automation/releases)
+   - [ ] Find draft release `v0.5.0`
+   - [ ] Upload release notes: `make upload-release-notes`
+   - [ ] Review release notes and artifacts
+   - [ ] Download and test packages
+   - [ ] Publish release
 
 ### Creating a Patch Release (vM.m.p)
 
 **When to use**: Bug fixes, security patches, or minor improvements
 
 **Process**:
-1. Create a PR targeting the release branch:
+1. **Create a PR to the maintenance branch**:
    ```bash
-   git checkout -b fix-bug-123
+   git checkout v0.5.x
+   git pull origin v0.5.x
+   git checkout -b fix/my-bugfix
    # Make your changes
-   git commit -s -m "Fix bug #123"
-   gh pr create --base v1.2.x --head fix-bug-123
+   git commit -s -m "Fix: description"
+   git push origin fix/my-bugfix
+   gh pr create --base v0.5.x --head fix/my-bugfix
    ```
-2. When the PR is merged, the workflow automatically:
-   - Finds the latest patch tag on that branch (e.g., `v1.2.3`)
-   - Creates the next patch tag (e.g., `v1.2.4`)
-   - Triggers the packaging workflow to build release artifacts
 
-**Example**: PR merged to `v1.2.x` → Automatically creates tag `v1.2.4`
+2. **Merge the PR**:
+   - Create a PR targeting the `v0.5.x` branch
+   - Get it reviewed and approved
+   - Merge the PR (do NOT delete branch yet)
+
+3. **Automatic patch tagging**:
+   - The `auto-tag-patch.yml` workflow detects the merged PR
+   - Runs tests (`go build`, `go test`)
+   - Automatically calculates the next patch version (e.g., v0.5.1)
+   - Creates and pushes the signed tag
+   - Triggers the `package-release.yml` workflow
+   - Builds release artifacts (MSI + DEB packages)
+
+4. **Checklist**:
+   - [ ] Create bugfix branch from maintenance branch (see step 1)
+   - [ ] Make changes and commit
+   - [ ] Push branch and create PR targeting `v0.5.x`
+   - [ ] Get PR reviewed and approved
+   - [ ] Merge PR
+   - [ ] Wait for auto-tag workflow (~5 minutes)
+   - [ ] Verify tag was created: `git fetch --tags && git tag -l "v0.5.*"`
+   - [ ] Wait for package workflow (~15 minutes)
+   - [ ] Check GitHub Actions for any failures
+   - [ ] Create release notes: `cp RELEASE_NOTES.md RELEASE_NOTES_v0.5.1.md`
+   - [ ] Fill in release notes
+   - [ ] Commit and push release notes
+   - [ ] Upload release notes: `make upload-release-notes`
+   - [ ] Go to [GitHub Releases](https://github.com/asnowfix/home-automation/releases)
+   - [ ] Find draft release (e.g., `v0.5.1`)
+   - [ ] Review release notes and artifacts
+   - [ ] Download and test packages
+   - [ ] Publish release
+   - [ ] Delete bugfix branch
+
+### Post-Release
+
+- [ ] Test DEB installation on clean Ubuntu/Debian machine
+- [ ] Test MSI installation on clean Windows machine
+- [ ] Verify services start automatically
+- [ ] Test core functionality
+- [ ] Update documentation if needed
+- [ ] Announce release (if applicable)
 
 ### Branch Strategy
 
-```
-main (development)
-  ├── v1.0.x (release branch)
-  │   ├── v1.0.0 (tag)
-  │   ├── v1.0.1 (tag)
-  │   └── v1.0.2 (tag)
-  ├── v1.1.x (release branch)
-  │   ├── v1.1.0 (tag)
-  │   └── v1.1.1 (tag)
-  └── v2.0.x (release branch)
-      └── v2.0.0 (tag)
-```
+- **`main`**: Active development, all new features
+- **`vMAJOR.MINOR.x`**: Maintenance branches for patch releases
+  - Created automatically when tagging `vMAJOR.MINOR.0`
+  - Only receives bug fixes via PRs
+  - Patch tags created automatically on PR merge
+  - Example: `v0.5.x`, `v0.6.x`, `v1.0.x`
 
 ### Best Practices
 
@@ -78,12 +232,92 @@ main (development)
    - If fixing current release: Create PR to the `vM.m.x` branch
    - If fixing next release: Develop on `main`
 3. **For hotfixes**: Create PR directly to the affected `vM.m.x` branch
+4. **Always sign commits**: Use `git commit -s` for signed commits
 
 ### Automated Workflows
 
 - **create-branch-on-minor-tag.yml**: Creates `vM.m.x` branch when `vM.m.0` tag is pushed
 - **auto-tag-patch.yml**: Creates `vM.m.p+1` tag when PR is merged to `vM.m.x` branch
-- **package-release.yml**: Builds and publishes release artifacts
+- **package-release.yml**: Builds and publishes release artifacts (MSI + DEB), then merges the tag back to the source branch
+- **on-tag-main.yml**: Triggers packaging workflow when a tag is pushed to main
+
+#### Merge-Back Behavior
+
+After a successful release, the workflow automatically merges the release tag back to its originating branch:
+
+- **Minor releases** (v*.*.0): Tag is merged back to `main`
+- **Patch releases** (v*.*.p): Tag is merged back to the maintenance branch (e.g., `v0.5.x`)
+
+The merge uses **fast-forward when possible**, ensuring the tag becomes a direct ancestor of the branch. If fast-forward is not possible (e.g., if commits were added to the branch after tagging), a merge commit is created instead.
+
+**Benefits**:
+- Keeps branches in sync with released versions
+- Ensures tags are ancestors of their source branches
+- Maintains clean git history with fast-forward merges when possible
+
+### Required GitHub Secrets
+
+- `GPG_PRIVATE_KEY` - GPG private key for signing tags
+- `GPG_PASSPHRASE` - Passphrase for the GPG key
+- `SIGNING_CERTIFICATE` - Code signing certificate for Windows MSI (optional)
+- `SIGNING_PASSWORD` - Certificate password (optional)
+
+To generate a GPG key:
+```bash
+gpg --full-generate-key
+gpg --armor --export-secret-keys YOUR_KEY_ID
+```
+
+### Version Numbering
+
+Follow semantic versioning: `vMAJOR.MINOR.PATCH`
+
+- **MAJOR**: Breaking changes (e.g., v1.0.0 → v2.0.0)
+- **MINOR**: New features, backward compatible (e.g., v0.5.0 → v0.6.0)
+- **PATCH**: Bug fixes, backward compatible (e.g., v0.5.0 → v0.5.1)
+
+### Troubleshooting
+
+#### Workflow didn't trigger
+- Check GitHub Actions tab for workflow runs
+- Verify tag matches pattern: `v[0-9]+.[0-9]+.[0-9]+`
+- Ensure workflows are enabled in repository settings
+- Verify tag was pushed: `git ls-remote --tags origin`
+
+#### Branch not created
+- Check if branch already exists: `git ls-remote --heads origin`
+- Review workflow logs in GitHub Actions
+- Ensure tag matches `v*.*.0` pattern
+
+#### Build failed
+- Check workflow logs in GitHub Actions
+- Verify `go.mod` and dependencies are correct
+- Test build locally: `go build ./myhome`
+- Ensure all tests pass: `go test ./...`
+
+#### Package build fails
+- Check GoReleaser logs in workflow
+- Verify `.goreleaser.yml` configuration
+- Test DEB build locally with `jiro4989/build-deb-action`
+- Check MSI build logs for WiX Toolset errors
+
+#### GPG signing failed
+- Verify `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` secrets are set
+- Check GPG key is valid and not expired
+- Review GPG import step in workflow logs
+- Ensure key has signing capabilities
+
+#### Release not created
+- Check if draft release exists in GitHub Releases
+- Verify workflow completed successfully
+- Check workflow logs for errors in release step
+- Ensure previous tag reference is correct
+
+#### Auto-tag didn't create patch version
+- Verify PR was merged (not closed without merging)
+- Check that PR target branch matches `v*.*.x` pattern
+- Review auto-tag-patch workflow logs
+- Ensure tests passed in the workflow
 
 ### Release Notes Process
 

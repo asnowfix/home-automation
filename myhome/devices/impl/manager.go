@@ -10,8 +10,10 @@ import (
 	mhd "myhome/devices"
 	"myhome/groups"
 	"myhome/mqtt"
+	"myhome/sfr"
 	"myhome/storage"
 	"mynet"
+	"net"
 	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
@@ -33,6 +35,7 @@ type DeviceManager struct {
 	log        logr.Logger
 	mqttClient *mqtt.Client
 	resolver   mynet.Resolver
+	router     myhome.Router
 }
 
 func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient *mqtt.Client) *DeviceManager {
@@ -56,6 +59,8 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	var err error
 
 	dm.log.Info("Starting device manager")
+
+	dm.router = sfr.StartRouter(ctx)
 
 	myhome.RegisterMethodHandler(myhome.DevicesMatch, func(in any) (any, error) {
 		name := in.(string)
@@ -196,7 +201,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	ctx, dm.cancel = context.WithCancel(ctx)
 	go dm.storeDeviceLoop(ctx, dm.log.WithName("DeviceManager#storeDeviceLoop"), dm.refreshed)
-	go deviceUpdaterLoop(ctx, dm.log.WithName("DeviceManager#deviceUpdaterLoop"), dm.update, dm.gr, dm.refreshed)
+	go deviceUpdaterLoop(ctx, dm.log.WithName("DeviceManager#deviceUpdaterLoop"), dm.update, dm.gr, dm.router, dm.refreshed)
 	go dm.runDeviceRefreshJob(ctx, dm.log.WithName("DeviceManager#runDeviceRefreshJob"), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
@@ -216,7 +221,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	return nil
 }
 
-func deviceUpdaterLoop(ctx context.Context, log logr.Logger, update <-chan *myhome.Device, gr mhd.GroupRegistry, refreshed chan<- *myhome.Device) {
+func deviceUpdaterLoop(ctx context.Context, log logr.Logger, update <-chan *myhome.Device, gr mhd.GroupRegistry, router myhome.Router, refreshed chan<- *myhome.Device) {
 	log.Info("Starting updater loop")
 	for {
 		select {
@@ -226,12 +231,12 @@ func deviceUpdaterLoop(ctx context.Context, log logr.Logger, update <-chan *myho
 
 		case device := <-update:
 			log.Info("Updater loop: processing", "device", device.DeviceSummary)
-			go refreshOneDevice(tools.WithToken(ctx), log.WithName("DeviceManager#refreshOneDevice("+device.Name()+")"), device, gr, refreshed)
+			go refreshOneDevice(tools.WithToken(ctx), log.WithName("DeviceManager#refreshOneDevice("+device.Name()+")"), device, gr, router, refreshed)
 		}
 	}
 }
 
-func refreshOneDevice(ctx context.Context, log logr.Logger, device *myhome.Device, gr mhd.GroupRegistry, refreshed chan<- *myhome.Device) {
+func refreshOneDevice(ctx context.Context, log logr.Logger, device *myhome.Device, gr mhd.GroupRegistry, router myhome.Router, refreshed chan<- *myhome.Device) {
 	modified, err := device.Refresh(ctx)
 	if err != nil {
 		log.Error(err, "Failed to refresh device", "device", device.DeviceSummary)
@@ -266,6 +271,14 @@ func refreshOneDevice(ctx context.Context, log logr.Logger, device *myhome.Devic
 			for k, v := range gi.KeyValues() {
 				kvs.SetKeyValue(ctx, log, types.ChannelDefault, device.Impl().(*shelly.Device), k, v)
 			}
+		}
+	}
+
+	mac, err := net.ParseMAC(device.MAC)
+	if err == nil {
+		host, err := router.GetHostByMac(ctx, mac)
+		if err == nil {
+			log.Info("Found in Router", "host", host.String())
 		}
 	}
 
@@ -304,6 +317,7 @@ func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, log logr.Logge
 	for {
 		select {
 		case <-ctx.Done():
+			log.Info("Exiting known devices refresh loop")
 			return
 		case <-ticker.C:
 			log.Info("Refreshing one device", "index", i)

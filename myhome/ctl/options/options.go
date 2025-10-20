@@ -52,6 +52,7 @@ var Via types.Channel
 
 func CommandLineContext(ctx context.Context, log logr.Logger, timeout time.Duration, version string) context.Context {
 	ctx = context.WithValue(ctx, global.LogKey, log)
+	ctx = logr.NewContext(ctx, log)
 
 	var cancel context.CancelFunc
 	if timeout > 0 {

@@ -200,12 +200,12 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	})
 
 	ctx, dm.cancel = context.WithCancel(ctx)
-	go dm.storeDeviceLoop(ctx, dm.log.WithName("DeviceManager#storeDeviceLoop"), dm.refreshed)
-	go deviceUpdaterLoop(ctx, dm.log.WithName("DeviceManager#deviceUpdaterLoop"), dm.update, dm.gr, dm.router, dm.refreshed)
-	go dm.runDeviceRefreshJob(ctx, dm.log.WithName("DeviceManager#runDeviceRefreshJob"), options.Flags.RefreshInterval)
+	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
+	go deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")), dm.update, dm.gr, dm.router, dm.refreshed)
+	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
-	err = watch.Mqtt(ctx, dm.mqttClient, dm, dm)
+	err = watch.StartMqttWatcher(ctx, dm.mqttClient, dm, dm)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch MQTT events")
 		return err
@@ -221,7 +221,11 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	return nil
 }
 
-func deviceUpdaterLoop(ctx context.Context, log logr.Logger, update <-chan *myhome.Device, gr mhd.GroupRegistry, router myhome.Router, refreshed chan<- *myhome.Device) {
+func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, gr mhd.GroupRegistry, router myhome.Router, refreshed chan<- *myhome.Device) {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
 	log.Info("Starting updater loop")
 	for {
 		select {
@@ -231,16 +235,43 @@ func deviceUpdaterLoop(ctx context.Context, log logr.Logger, update <-chan *myho
 
 		case device := <-update:
 			log.Info("Updater loop: processing", "device", device.DeviceSummary)
-			go refreshOneDevice(tools.WithToken(ctx), log.WithName("DeviceManager#refreshOneDevice("+device.Name()+")"), device, gr, router, refreshed)
+			go refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(device.Name())), device, gr, router, refreshed)
 		}
 	}
 }
 
-func refreshOneDevice(ctx context.Context, log logr.Logger, device *myhome.Device, gr mhd.GroupRegistry, router myhome.Router, refreshed chan<- *myhome.Device) {
-	modified, err := device.Refresh(ctx)
+func refreshOneDevice(ctx context.Context, device *myhome.Device, gr mhd.GroupRegistry, router myhome.Router, refreshed chan<- *myhome.Device) {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
+
+	var modified bool = false
+	mac, err := net.ParseMAC(device.MAC)
+	if err == nil {
+		host, err := router.GetHostByMac(ctx, mac)
+		if err == nil {
+			ip := host.Ip().String()
+			if ip != device.Host() {
+				log.Info("Changing IP", "device", device.DeviceSummary, "old_ip", device.Host(), "new_ip", ip)
+				device.WithHost(ip)
+				modified = true
+			}
+		} else {
+			log.Info("Dropping IP", "device", device.DeviceSummary, "old_ip", device.Host())
+			device.WithHost("")
+			modified = true
+		}
+	}
+
+	updated, err := device.Refresh(ctx)
 	if err != nil {
 		log.Error(err, "Failed to refresh device", "device", device.DeviceSummary)
 		return
+	}
+
+	if updated {
+		modified = true
 	}
 
 	groups, err := groups.GetDeviceGroups(ctx, device.Impl().(*shelly.Device))
@@ -274,24 +305,21 @@ func refreshOneDevice(ctx context.Context, log logr.Logger, device *myhome.Devic
 		}
 	}
 
-	mac, err := net.ParseMAC(device.MAC)
-	if err == nil {
-		host, err := router.GetHostByMac(ctx, mac)
-		if err == nil {
-			log.Info("Found in Router", "host", host.String())
-		}
-	}
-
 	if !modified {
 		log.Info("Device is up to date", "device", device.DeviceSummary)
 		return
 	}
 
-	log.Info("Ready for storage", "device", device.DeviceSummary)
+	log.Info("Updated: preparing to store", "device", device.DeviceSummary)
 	refreshed <- device
 }
 
-func (dm *DeviceManager) storeDeviceLoop(ctx context.Context, log logr.Logger, refreshed <-chan *myhome.Device) {
+func (dm *DeviceManager) storeDeviceLoop(ctx context.Context, refreshed <-chan *myhome.Device) {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
+
 	log.Info("Starting storage loop")
 	for {
 		select {
@@ -308,7 +336,12 @@ func (dm *DeviceManager) storeDeviceLoop(ctx context.Context, log logr.Logger, r
 	}
 }
 
-func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, log logr.Logger, interval time.Duration) {
+func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, interval time.Duration) {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 

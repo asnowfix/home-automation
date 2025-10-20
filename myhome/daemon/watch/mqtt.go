@@ -19,96 +19,104 @@ import (
 	"github.com/go-logr/logr"
 )
 
-func Mqtt(ctx context.Context, mc *mqttclient.Client, dm devices.Manager, db devices.DeviceRegistry) error {
+func StartMqttWatcher(ctx context.Context, mc *mqttclient.Client, dm devices.Manager, dr devices.DeviceRegistry) error {
 	log := ctx.Value(global.LogKey).(logr.Logger)
 
 	topic := "+/events/rpc"
 	ch, err := mc.Subscriber(ctx, topic, 16)
 	if err != nil {
-		log.Error(err, "Failed to subscribe to shelly devices events")
+		log.Error(err, "Failed to subscribe to shelly gen2+ devices events")
 		return err
 	}
 
-	go func(ctx context.Context, log logr.Logger) error {
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("Cancelled", "topic", topic)
-				return ctx.Err()
-
-			case msg := <-ch:
-				log.Info("Received RPC event", "topic", topic, "payload", string(msg))
-				if len(msg) < 2 {
-					log.Info("Skipping RPC event with invalid payload", "payload", string(msg))
-					continue
-				}
-
-				// If an events directory is configured, persist raw payload as a JSON file
-				if dir := options.Flags.EventsDir; dir != "" {
-					if err := os.MkdirAll(dir, 0o755); err != nil {
-						log.Error(err, "Failed to create events directory", "dir", dir)
-					} else {
-						// Use RFC3339 timestamp for filename
-						ts := time.Now().UTC().Format(time.RFC3339)
-						filename := filepath.Join(dir, fmt.Sprintf("%s.json", ts))
-						if werr := os.WriteFile(filename, msg, 0o644); werr != nil {
-							log.Error(werr, "Failed to write event payload", "file", filename)
-						} else {
-							log.Info("Wrote event", "file", filename)
-						}
-					}
-				}
-
-				event := &shellymqtt.Event{}
-				err := json.Unmarshal(msg, &event)
-				if err != nil {
-					log.Error(err, "Failed to unmarshal RPC event from payload", "payload", string(msg))
-					continue
-				}
-				if event.Src[:6] != "shelly" {
-					log.Info("Skipping non-shelly RPC event", "event", event)
-					continue
-				}
-				deviceId := event.Src
-				device, err := db.GetDeviceById(ctx, deviceId)
-				if err != nil {
-					log.Info("Device not found from DB, creating new one", "device_id", deviceId)
-					sd, err := shellyapi.NewDeviceFromMqttId(ctx, log, deviceId)
-					if err != nil {
-						log.Error(err, "Failed to create device from shelly device", "device_id", deviceId)
-						continue
-					}
-					device, err = myhome.NewDeviceFromImpl(ctx, log, sd)
-					if err != nil {
-						log.Error(err, "Failed to create device from shelly device", "device_id", deviceId)
-						continue
-					}
-				} else {
-					log.Info("Found device in DB", "device", device.DeviceSummary)
-					if device.Impl() == nil {
-						log.Info("Loading device details in memory", "device", device.DeviceSummary)
-						sd, err := shellyapi.NewDeviceFromSummary(ctx, log, device)
-						if err != nil {
-							log.Error(err, "Failed to create device from summary", "device", device.DeviceSummary)
-							continue
-						}
-						device = device.WithImpl(sd)
-					}
-				}
-
-				log.Info("Updating device from MQTT event", "device", device.DeviceSummary)
-				err = UpdateFromMqttEvent(ctx, device, event)
-				if err != nil {
-					log.Error(err, "Failed to update device from MQTT event", "src", event.Src, "device", device.DeviceSummary)
-					continue
-				}
-
-				dm.UpdateChannel() <- device
-			}
-		}
-	}(ctx, log.WithName("Mqtt#Watcher"))
+	log.Info("Starting MQTT watcher", "topic", topic)
+	go mqttWatcher(logr.NewContext(ctx, log.WithName("mqttWatcher")), topic, dm, dr, ch)
 
 	return nil
+}
+
+func mqttWatcher(ctx context.Context, topic string, dm devices.Manager, dr devices.DeviceRegistry, ch <-chan []byte) {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
+	log.Info("Started MQTT watcher", "topic", topic)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Cancelled MQTT watcher", "topic", topic)
+			return
+
+		case msg := <-ch:
+			log.Info("Received RPC event", "topic", topic, "payload", string(msg))
+			if len(msg) < 2 {
+				log.Info("Skipping RPC event with invalid payload", "payload", string(msg))
+				continue
+			}
+
+			// If an events directory is configured, persist raw payload as a JSON file
+			if dir := options.Flags.EventsDir; dir != "" {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					log.Error(err, "Failed to create events directory", "dir", dir)
+				} else {
+					// Use RFC3339 timestamp for filename
+					ts := time.Now().UTC().Format(time.RFC3339)
+					filename := filepath.Join(dir, fmt.Sprintf("%s.json", ts))
+					if werr := os.WriteFile(filename, msg, 0o644); werr != nil {
+						log.Error(werr, "Failed to write event payload", "file", filename)
+					} else {
+						log.Info("Wrote event", "file", filename)
+					}
+				}
+			}
+
+			event := &shellymqtt.Event{}
+			err := json.Unmarshal(msg, &event)
+			if err != nil {
+				log.Error(err, "Failed to unmarshal RPC event from payload", "payload", string(msg))
+				continue
+			}
+			if event.Src[:6] != "shelly" {
+				log.Info("Skipping non-shelly RPC event", "event", event)
+				continue
+			}
+			deviceId := event.Src
+			device, err := dr.GetDeviceById(ctx, deviceId)
+			if err != nil {
+				log.Info("Device not found from DB, creating new one", "device_id", deviceId)
+				sd, err := shellyapi.NewDeviceFromMqttId(ctx, log, deviceId)
+				if err != nil {
+					log.Error(err, "Failed to create device from shelly device", "device_id", deviceId)
+					continue
+				}
+				device, err = myhome.NewDeviceFromImpl(ctx, log, sd)
+				if err != nil {
+					log.Error(err, "Failed to create device from shelly device", "device_id", deviceId)
+					continue
+				}
+			} else {
+				log.Info("Found device in DB", "device", device.DeviceSummary)
+				if device.Impl() == nil {
+					log.Info("Loading device details in memory", "device", device.DeviceSummary)
+					sd, err := shellyapi.NewDeviceFromSummary(ctx, log, device)
+					if err != nil {
+						log.Error(err, "Failed to create device from summary", "device", device.DeviceSummary)
+						continue
+					}
+					device = device.WithImpl(sd)
+				}
+			}
+
+			log.Info("Updating device from MQTT event", "device", device.DeviceSummary)
+			err = UpdateFromMqttEvent(ctx, device, event)
+			if err != nil {
+				log.Error(err, "Failed to update device from MQTT event", "src", event.Src, "device", device.DeviceSummary)
+				continue
+			}
+
+			dm.UpdateChannel() <- device
+		}
+	}
 }
 
 func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqtt.Event) error {

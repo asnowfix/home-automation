@@ -15,12 +15,12 @@ func ListDevices(log logr.Logger) ([]Host, error) {
 
 	hosts := make([]Host, len(xmlHosts))
 	for i, xmlHost := range xmlHosts {
-		log.Info("Found SFR host", "hostname", xmlHost.Name)
 		hosts[i] = Host{
 			xml: xmlHost,
 		}
 	}
 
+	log.Info("router knows", "count", len(hosts))
 	return hosts, nil
 }
 
@@ -37,9 +37,17 @@ func (h Host) Ip() net.IP {
 }
 
 func (h Host) Mac() net.HardwareAddr {
-	return h.xml.Mac
+	mac, err := net.ParseMAC(h.xml.Mac)
+	if err != nil {
+		panic("BUG: Failed to parse MAC " + h.xml.Mac)
+	}
+	return mac
 }
 
-func (h Host) Online() bool {
+func (h Host) IsOnline() bool {
 	return h.xml.Status == "online"
+}
+
+func (h Host) String() string {
+	return h.xml.Name + " ip:" + h.xml.Ip.String() + " mac:" + h.xml.Mac + " (" + h.xml.Status + ")"
 }

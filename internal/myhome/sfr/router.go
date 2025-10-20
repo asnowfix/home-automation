@@ -34,7 +34,9 @@ func StartRouter(ctx context.Context) myhome.Router {
 		}
 		log.Info("Started connected devices refresh loop")
 
-		ticker := time.NewTicker(time.Minute)
+		r.refresh(log)
+
+		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
 
 		for {
@@ -43,15 +45,9 @@ func StartRouter(ctx context.Context) myhome.Router {
 				log.Info("Exiting...")
 				return
 			case <-ticker.C:
-				devices, err := pkgsfr.ListDevices(log)
+				err := r.refresh(log)
 				if err != nil {
-					log.Error(err, "Failed to list devices connected to the home gateway")
-					continue
-				}
-
-				log.Info("Listed devices connected to the home gateway", "count", len(devices))
-				for _, device := range devices {
-					r.hosts.Store(device.Mac().String(), device)
+					log.Error(err, "Failed to refresh devices connected to the home gateway")
 				}
 			}
 		}
@@ -59,13 +55,40 @@ func StartRouter(ctx context.Context) myhome.Router {
 	return r
 }
 
-func (r *Router) ListHosts(ctx context.Context) ([]myhome.Host, error) {
-	var hosts []myhome.Host
+func (r *Router) refresh(log logr.Logger) error {
+	devices, err := pkgsfr.ListDevices(log)
+	if err != nil {
+		return err
+	}
+
+	// Remove hosts that are not in the devices list
 	r.hosts.Range(func(key, value any) bool {
-		hosts = append(hosts, value.(myhome.Host))
+		found := false
+		for _, device := range devices {
+			if device.Mac().String() == key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			r.hosts.Delete(key)
+		}
 		return true
 	})
-	return hosts, nil
+
+	// Add listed devices
+	for _, device := range devices {
+		r.hosts.Store(device.Mac().String(), device)
+	}
+
+	// Count the number of stored devices
+	var count int
+	r.hosts.Range(func(key, value any) bool {
+		count++
+		return true
+	})
+	log.Info("Number of devices stored", "count", count)
+	return nil
 }
 
 func (r *Router) GetHostByMac(ctx context.Context, mac net.HardwareAddr) (myhome.Host, error) {
@@ -75,7 +98,7 @@ func (r *Router) GetHostByMac(ctx context.Context, mac net.HardwareAddr) (myhome
 	}
 	host, ok := out.(myhome.Host)
 	if !ok {
-		return nil, fmt.Errorf("device with MAC %s is not a host IP %v", mac, out)
+		return nil, fmt.Errorf("device with MAC %s is not a host %v", mac, out)
 	}
 	return host, nil
 }

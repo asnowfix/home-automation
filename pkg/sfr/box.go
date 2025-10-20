@@ -27,15 +27,15 @@ var password string = os.Getenv("SFR_PASSWORD")
 var token string = ""
 
 type XmlHost struct {
-	XMLName   xml.Name         `xml:"host"`
-	Type      string           `xml:"type,attr"`
-	Name      string           `xml:"name,attr"`
-	Ip        net.IP           `xml:"ip,attr"`
-	Mac       net.HardwareAddr `xml:"mac,attr"`
-	Interface string           `xml:"iface,attr"`
-	Probe     uint32           `xml:"probe,attr"`
-	Alive     uint32           `xml:"alive,attr"`
-	Status    string           `xml:"status,attr"`
+	XMLName   xml.Name `xml:"host"`
+	Type      string   `xml:"type,attr"`
+	Name      string   `xml:"name,attr"`
+	Ip        net.IP   `xml:"ip,attr"`
+	Mac       string   `xml:"mac,attr"`
+	Interface string   `xml:"iface,attr"`
+	Probe     uint32   `xml:"probe,attr"`
+	Alive     uint32   `xml:"alive,attr"`
+	Status    string   `xml:"status,attr"`
 }
 
 type Response struct {
@@ -157,6 +157,7 @@ func queryBox(method string, params *map[string]string) (any, error) {
 		return nil, err
 	}
 	log.Info("Result", "raw", string(xmlBytes))
+
 	var res Response
 	if err := xml.Unmarshal(xmlBytes, &res); err != nil {
 		return nil, err

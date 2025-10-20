@@ -42,8 +42,8 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 	}
 
 	go func(ctx context.Context, log logr.Logger) {
+		log.Info("Server message loop started")
 		for {
-			log.Info("Waiting for message")
 			select {
 			case <-ctx.Done():
 				log.Info("Cancelled", "reason", ctx.Err())

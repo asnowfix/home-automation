@@ -302,10 +302,26 @@ Follow semantic versioning: `vMAJOR.MINOR.PATCH`
 - Check MSI build logs for WiX Toolset errors
 
 #### GPG signing failed
-- Verify `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` secrets are set
-- Check GPG key is valid and not expired
+- Check GPG key is valid and not expired (run `gpg --list-secret-keys`)
 - Review GPG import step in workflow logs
 - Ensure key has signing capabilities
+- Running remotelly:
+  1. check `~/.gnupg/gpg.conf` for the GPG key ID.
+      ```
+      use-agent
+      default-key <your-default-key>
+      pinentry-mode loopback
+      ```
+   2. check `~/.gnupg/gpg-agent.conf`:
+      ```
+      enable-ssh-support
+      disable-scdaemon
+      pinentry-program /usr/bin/pinentry-tty
+      default-cache-ttl 34560000
+      max-cache-ttl 34560000
+      ```      
+   3. run `echo test | gpg --clearsign` to load the GPG passphrase manually.
+- Verify `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` secrets are set
 
 #### Release not created
 - Check if draft release exists in GitHub Releases

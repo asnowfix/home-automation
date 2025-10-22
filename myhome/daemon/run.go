@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"context"
-	"global"
 	"myhome/ctl/options"
 
 	"github.com/go-logr/logr"
@@ -22,6 +20,7 @@ func init() {
 	runCmd.PersistentFlags().IntVarP(&options.Flags.MqttWatchdogMaxFailures, "mqtt-watchdog-max-failures", "F", options.MQTT_WATCHDOG_MAX_FAILURES, "MQTT watchdog max consecutive failures before restart")
 	runCmd.PersistentFlags().StringVarP(&options.Flags.EventsDir, "events-dir", "E", "", "Directory to write received MQTT events as JSON files")
 	runCmd.PersistentFlags().IntVarP(&options.Flags.ProxyPort, "proxy-port", "p", 6080, "Reverse proxy listen port (default 6080)")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableGen1Proxy, "enable-gen1-proxy", false, "Enable the Gen1 HTTP->MQTT proxy (requires embedded broker)")
 }
 
 var runCmd = &cobra.Command{
@@ -30,10 +29,17 @@ var runCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cancel := ctx.Value(global.CancelKey).(context.CancelFunc)
-		log := ctx.Value(global.LogKey).(logr.Logger)
+		log, err := logr.FromContext(ctx)
+		if err != nil {
+			return err
+		}
 
-		daemon := NewDaemon(ctx, cancel, log)
+		if !cmd.Flags().Changed("enable-gen1-proxy") {
+			log.Info("Setting enable-gen1-proxy based on mqtt-broker flag")
+			options.Flags.EnableGen1Proxy = options.Flags.MqttBroker != ""
+		}
+
+		daemon := NewDaemon(ctx)
 		log.Info("Running in foreground")
 		return daemon.Run()
 	},

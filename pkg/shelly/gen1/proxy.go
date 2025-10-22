@@ -16,8 +16,8 @@ import (
 
 type Empty struct{}
 
-// User-Agent: [Shelly/20230913-112531/v1.14.0-gcb84623 (SHHT-1)]
-var uaRe = regexp.MustCompile(`^\[Shelly/(?P<fw_date>[0-9-]+)/(?P<fw_id>[a-z0-9-.]+) \((?P<model>[A-Z0-9-]+)\)\]$`)
+// User-Agent: Shelly/20230913-112531/v1.14.0-gcb84623 (SHHT-1)
+var uaRe = regexp.MustCompile(`^\[?Shelly/(?P<fw_date>[0-9-]+)/(?P<fw_id>[a-z0-9.-]+) \((?P<model>[A-Z0-9-]+)\)\]?$`)
 
 type http2MqttProxy struct {
 	ctx     context.Context
@@ -26,10 +26,10 @@ type http2MqttProxy struct {
 	decoder *schema.Decoder
 }
 
-func StartHttp2MqttProxy(ctx context.Context, log logr.Logger, port int, mc *mqttclient.Client) {
+func StartHttp2MqttProxy(ctx context.Context, port int, mc *mqttclient.Client) {
 	hp := http2MqttProxy{
 		ctx:     ctx,
-		log:     log,
+		log:     logr.FromContextOrDiscard(ctx).WithName("Http2MqttProxy"),
 		mc:      mc,
 		decoder: schema.NewDecoder(),
 	}
@@ -37,8 +37,10 @@ func StartHttp2MqttProxy(ctx context.Context, log logr.Logger, port int, mc *mqt
 }
 
 func (hp *http2MqttProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	defer w.Write([]byte("")) // 200 OK
+
 	for k, v := range req.Header {
-		hp.log.Info("Inbound", k, v)
+		hp.log.Info("Inbound Header", k, v)
 	}
 
 	var d Device
@@ -49,7 +51,6 @@ func (hp *http2MqttProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		d.Model = uaRe.ReplaceAllString(ua, "${model}")
 	} else {
 		hp.log.Error(fmt.Errorf("unknown User-Agent: %s", ua), "http.HandleFunc: unknown User-Agent", "remote_addr", req.RemoteAddr)
-		return
 	}
 
 	ip, _, err := net.SplitHostPort(req.RemoteAddr)
@@ -62,6 +63,8 @@ func (hp *http2MqttProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		hp.log.Error(err, "http.HandleFunc: not an IP in <ip>:<port>", "remote_addr", req.RemoteAddr)
 		return
 	}
+
+	hp.log.Info("Gen1 notification", "device", d)
 
 	hp.log.Info("http.HandleFunc", "url", req.URL)
 	m, _ := url.ParseQuery(req.URL.RawQuery)
@@ -78,11 +81,9 @@ func (hp *http2MqttProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// Emit Gen1 MQTT format as defined in <https://shelly-api-docs.shelly.cloud/gen1/#shelly-h-amp-t-mqtt>
 	err = hp.publishAsGen1MQTT(d)
 	if err != nil {
-		hp.log.Error(err, "http.HandleFunc: unable to publish MQTT message", "device", d)
+		hp.log.Error(err, "http.HandleFunc: unable to publish MQTT message as Gen1", "device", d)
 		return
 	}
-
-	_, _ = w.Write([]byte("")) // 200 OK
 }
 
 // publishAsGen1MQTT publishes messages in Gen1 MQTT format

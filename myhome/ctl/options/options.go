@@ -46,6 +46,7 @@ var Flags struct {
 	SwitchId                uint32
 	EventsDir               string
 	ProxyPort               int
+	EnableGen1Proxy         bool
 }
 
 var Via types.Channel

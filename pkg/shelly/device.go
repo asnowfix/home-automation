@@ -304,7 +304,8 @@ func (d *Device) Channel(via types.Channel) types.Channel {
 			return types.ChannelHttp
 		}
 	}
-	panic("no channel is usable")
+	// Auto discarded
+	return types.ChannelDefault
 }
 
 var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", MDNS_SHELLIES))

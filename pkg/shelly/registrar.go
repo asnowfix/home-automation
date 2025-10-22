@@ -1,6 +1,7 @@
 package shelly
 
 import (
+	"context"
 	"fmt"
 	"pkg/shelly/types"
 
@@ -26,6 +27,15 @@ func (r *Registrar) Init(log logr.Logger) {
 	r.channel = types.ChannelHttp
 	r.channels = make([]types.DeviceCaller, 3 /*sizeof(Channel)*/)
 	r.methods = make(map[string]types.MethodHandler)
+
+	r.RegisterDeviceCaller(types.ChannelDefault, discardDeviceCaller)
+}
+
+func discardDeviceCaller(ctx context.Context, device types.Device, mh types.MethodHandler, out any, params any) (any, error) {
+	log := logr.FromContextOrDiscard(ctx)
+	err := fmt.Errorf("Unable to reach device: %v (%s)", device.Name(), device.Id())
+	log.Error(err, "Discarding method call", "method", mh.Method, "params", params)
+	return nil, err
 }
 
 func (r *Registrar) MethodHandlerE(m string) (types.MethodHandler, error) {

@@ -2,73 +2,52 @@ package sfr
 
 import (
 	"net"
-	"pkg/devices"
 
 	"github.com/go-logr/logr"
 )
 
-func ListSfrDevices(log logr.Logger) ([]devices.Host, error) {
+func ListDevices(log logr.Logger) ([]Host, error) {
 	xmlHosts, err := LanGetHostsList()
 	if err != nil {
 		log.Error(err, "Failed to get SFR hosts list")
 		return nil, err
 	}
 
-	hosts := make([]devices.Host, len(xmlHosts))
-	sh := make([]SfrHost, len(xmlHosts))
+	hosts := make([]Host, len(xmlHosts))
 	for i, xmlHost := range xmlHosts {
-		log.Info("Found SFR host", "hostname", xmlHost.Name)
-		sh[i] = SfrHost{
+		hosts[i] = Host{
 			xml: xmlHost,
-			log: log,
 		}
-		hosts[i] = sh[i]
 	}
 
+	log.Info("router knows", "count", len(hosts))
 	return hosts, nil
 }
 
-type SfrHost struct {
-	log logr.Logger
+type Host struct {
 	xml *XmlHost
 }
 
-func (h SfrHost) Provider() string {
-	return "sfrbox"
-}
-
-func (h SfrHost) Name() string {
+func (h Host) Name() string {
 	return h.xml.Name
 }
 
-func (h SfrHost) Manufacturer() string {
-	return ""
-}
-
-func (h SfrHost) Id() string {
-	return "eth:" + h.xml.Mac.String()
-}
-
-func (h SfrHost) Ip() net.IP {
+func (h Host) Ip() net.IP {
 	return h.xml.Ip
 }
 
-func (h SfrHost) Host() string {
-	return h.xml.Ip.String()
+func (h Host) Mac() net.HardwareAddr {
+	mac, err := net.ParseMAC(h.xml.Mac)
+	if err != nil {
+		panic("BUG: Failed to parse MAC " + h.xml.Mac)
+	}
+	return mac
 }
 
-func (h SfrHost) Mac() net.HardwareAddr {
-	return h.xml.Mac
-}
-
-func (h SfrHost) Online() bool {
+func (h Host) IsOnline() bool {
 	return h.xml.Status == "online"
 }
 
-func (h SfrHost) IsConnected() bool {
-	return false
-}
-
-func (h SfrHost) MarshalJSON() ([]byte, error) {
-	return devices.MarshalJSON(h)
+func (h Host) String() string {
+	return h.xml.Name + " ip:" + h.xml.Ip.String() + " mac:" + h.xml.Mac + " (" + h.xml.Status + ")"
 }

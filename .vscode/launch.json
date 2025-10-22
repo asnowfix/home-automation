@@ -11,7 +11,7 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "-v", "-B", "192.168.1.2", "shelly", "-H", "jobs", "show", "192.168.1.66"],
+            "args": ["ctl", "-B", "192.168.1.2", "shelly", "-H", "jobs", "show", "192.168.1.66"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -66,6 +66,20 @@
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
             "args": ["-v", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "myhome daemon (w/ gen1 proxy only)",
+            "type": "go",
+            "request": "launch",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["-v", "daemon", "run", "-v",
+                "-P", "myhome-wo-broker.prof",
+                "-B", "192.168.1.2",
+                "--enable-gen1-proxy",
+                "--disable-device-manager"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }

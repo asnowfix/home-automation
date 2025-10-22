@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"global"
 	"myhome/ctl/options"
 	"myhome/devices/impl"
 	mqttclient "myhome/mqtt"
@@ -22,7 +23,6 @@ import (
 type daemon struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	log    logr.Logger
 	dm     *impl.DeviceManager
 }
 
@@ -34,11 +34,10 @@ var DefaultConfig = Config{
 	RefreshInterval: 3 * time.Minute,
 }
 
-func NewDaemon(ctx context.Context, cancel context.CancelFunc, log logr.Logger) *daemon {
+func NewDaemon(ctx context.Context) *daemon {
 	return &daemon{
 		ctx:    ctx,
-		cancel: cancel,
-		log:    log,
+		cancel: ctx.Value(global.CancelKey).(context.CancelFunc),
 	}
 }
 
@@ -54,77 +53,91 @@ func (d *daemon) Stop(s service.Service) error {
 }
 
 func (d *daemon) Run() error {
+	log, err := logr.FromContext(d.ctx)
+	if err != nil {
+		return err
+	}
+	log.Info("Starting MyHome daemon")
+
 	var disableEmbeddedMqttBroker bool = len(options.Flags.MqttBroker) != 0
 
 	// Initialize Shelly devices handler
-	shelly.Init(d.log, options.Flags.MqttTimeout)
+	shelly.Init(log, options.Flags.MqttTimeout)
 
 	var mc *mqttclient.Client
 
-	resolver := mynet.MyResolver(d.log.WithName("mynet.Resolver"))
+	resolver := mynet.MyResolver(log.WithName("mynet.Resolver"))
 
 	// Conditionally start the embedded MQTT broker
 	if !disableEmbeddedMqttBroker {
-		err := mqttserver.Broker(d.ctx, d.log.WithName("mqtt.Broker"), resolver, "myhome", nil)
+		log.Info("Starting embedded MQTT broker")
+		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil)
 		if err != nil {
-			d.log.Error(err, "Failed to initialize MyHome")
+			log.Error(err, "Failed to initialize MyHome")
 			return err
 		}
+	} else {
+		log.Info("Embedded MQTT broker disabled")
 	}
 
 	// Connect to the network's MQTT broker or use the embedded broker
-	err := mqttclient.NewClientE(d.ctx, d.log.WithName("mqttclient.Client"), options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+	err = mqttclient.NewClientE(d.ctx, log.WithName("mqttclient.Client"), options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 	if err != nil {
-		d.log.Error(err, "Failed to initialize MQTT client")
+		log.Error(err, "Failed to initialize MQTT client")
 		return err
 	}
 	mc, err = mqttclient.GetClientE(d.ctx)
 	if err != nil {
-		d.log.Error(err, "Failed to start MQTT client")
+		log.Error(err, "Failed to start MQTT client")
 		return err
 	}
 	defer mc.Close()
 
-	// Proxy from Gen1 (HTTP-only) devices to MQTT, co-located with the embedded MQTT broker
-	if !disableEmbeddedMqttBroker {
-		gen1.StartHttp2MqttProxy(d.ctx, d.log.WithName("gen1.Http2MqttProxy"), 8888, mc)
+	// Start Gen1 (HTTP->MQTT) proxy only when explicitly enabled, or with embedded MQTT broker
+	if options.Flags.EnableGen1Proxy {
+		log.Info("Starting Gen1 (HTTP->MQTT) proxy")
+		gen1.StartHttp2MqttProxy(logr.NewContext(d.ctx, log.WithName("gen1")), 8888, mc)
+	} else {
+		log.Info("Gen1 (HTTP->MQTT) proxy disabled")
 	}
 
 	if !disableDeviceManager {
-		// Initialize DeviceManager
-		storage, err := storage.NewDeviceStorage(d.log, "myhome.db")
+		log.Info("Starting device manager")
+		storage, err := storage.NewDeviceStorage(log, "myhome.db")
 		if err != nil {
-			d.log.Error(err, "Failed to initialize device storage")
+			log.Error(err, "Failed to initialize device storage")
 			return err
 		}
 		defer storage.Close()
 
 		// Start UI reverse HTTP proxy
-		if err := proxy.Start(d.ctx, d.log.WithName("proxy"), options.Flags.ProxyPort, resolver, storage); err != nil {
-			d.log.Error(err, "Failed to start reverse proxy")
+		if err := proxy.Start(d.ctx, log.WithName("proxy"), options.Flags.ProxyPort, resolver, storage); err != nil {
+			log.Error(err, "Failed to start reverse proxy")
 			return err
 		}
 
 		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc)
 		err = d.dm.Start(d.ctx)
 		if err != nil {
-			d.log.Error(err, "Failed to start device manager")
+			log.Error(err, "Failed to start device manager")
 			return err
 		}
 
-		d.log.Info("Started device manager", "manager", d.dm)
+		log.Info("Started device manager", "manager", d.dm)
 
-		_, err = myhome.NewServerE(d.ctx, d.log, d.dm)
+		_, err = myhome.NewServerE(d.ctx, log, d.dm)
 		if err != nil {
-			d.log.Error(err, "Failed to start MyHome service")
+			log.Error(err, "Failed to start MyHome service")
 			return err
 		}
 
 		// Publish a hostname for the DeviceManager host: myhome.local
 		resolver.WithLocalName(d.ctx, myhome.MYHOME_HOSTNAME)
+	} else {
+		log.Info("Device manager disabled")
 	}
 
-	d.log.Info("Running")
+	log.Info("Running")
 
 	// Create a channel to handle OS signals
 	done := make(chan struct{})
@@ -135,6 +148,6 @@ func (d *daemon) Run() error {
 
 	// Wait for context cancellation
 	<-done
-	d.log.Info("Shutting down")
+	log.Info("Shutting down")
 	return nil
 }

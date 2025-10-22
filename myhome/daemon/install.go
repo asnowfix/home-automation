@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"global"
 
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
@@ -15,8 +14,10 @@ func init() {
 }
 
 func load(ctx context.Context) (service.Service, service.Logger, error) {
-	cancel := ctx.Value(global.CancelKey).(context.CancelFunc)
-	log := ctx.Value(global.LogKey).(logr.Logger)
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// // Initialize viper
 	// viper.SetConfigName("myhome") // name of config file (without extension)
@@ -38,7 +39,7 @@ func load(ctx context.Context) (service.Service, service.Logger, error) {
 		Description: "MyHome Daemon, with embedded MQTT broker and persistent device manager",
 	}
 
-	daemon := NewDaemon(ctx, cancel, log)
+	daemon := NewDaemon(ctx)
 
 	s, err := service.New(daemon, &config)
 	if err != nil {

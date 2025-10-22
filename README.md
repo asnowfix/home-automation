@@ -55,6 +55,7 @@ MyHome Penates is the home automation system I develop & use to control my house
     - [Gen 2](#gen-2)
       - [Pro1 - Gen 2](#pro1---gen-2)
       - [Plus1 - Gen2](#plus1---gen2)
+      - [HT - Gen1](#ht---gen1)
   - [Red-by-SFR Box Notes](#red-by-sfr-box-notes)
     - [Main API](#main-api)
     - [UPnP](#upnp)
@@ -826,6 +827,29 @@ $ curl -s http://ShellyPlus1-4855199C9888.local/rpc/Switch.GetConfig?id=0 | jq
   "auto_off": false,
   "auto_off_delay": 1
 }
+```
+
+#### HT - Gen1
+
+MQTT Logs
+
+```log
+Client 'd3sjjq2k604lkbcvusg0@192.168.1.2' received PUBLISH ('20.25')
+    MqttPublish{topic=shellies/shellyht-EE45E9/sensor/temperature, payload=5byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+20.25
+Client 'd3sjjq2k604lkbcvusg0@192.168.1.2' received PUBLISH ('72')
+    MqttPublish{topic=shellies/shellyht-EE45E9/sensor/humidity, payload=2byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+72
+Client 'd3sjjq2k604lkbcvusg0@192.168.1.2' sending PUBACK
+    MqttPubAck{reasonCode=SUCCESS, packetIdentifier=7}
+Client 'd3sjjq2k604lkbcvusg0@192.168.1.2' sending PUBACK
+    MqttPubAck{reasonCode=SUCCESS, packetIdentifier=8}
+Client 'd3sjjq2k604lkbcvusg0@192.168.1.2' received PUBLISH ('22.75')
+    MqttPublish{topic=shellies/shellyht-208500/sensor/temperature, payload=5byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+22.75
+Client 'd3sjjq2k604lkbcvusg0@192.168.1.2' received PUBLISH ('62')
+    MqttPublish{topic=shellies/shellyht-208500/sensor/humidity, payload=2byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+62
 ```
 
 ## Red-by-SFR Box Notes

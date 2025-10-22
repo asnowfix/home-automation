@@ -30,7 +30,7 @@ type Device interface {
 
 	IsMqttReady() bool
 
-	Channel(Channel) Channel
+	Channel(via Channel) Channel
 
 	UpdateName(name string)
 	UpdateHost(host string)

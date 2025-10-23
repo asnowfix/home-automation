@@ -217,6 +217,53 @@ Shelly.addEventHandler(function(eventData) {
 - No more than **10 MQTT topic subscriptions**
 - No more than **5 HTTP registered endpoints**
 
+### KVS Key Naming Convention
+
+**All KVS (Key-Value Storage) keys must use only lowercase letters, digits, hyphens, and slashes: `[0-9a-z-/]`**
+
+#### Key Structure
+
+Keys should follow a hierarchical structure with forward slashes as separators:
+
+**For script-specific data:**
+```
+script/<script-name>/<purpose>
+```
+
+**Examples:**
+- `script/heater/config` - Main configuration for heater script
+- `script/heater/cooling-rate` - Learned cooling rate coefficient
+- `script/heater/last-cheap-end` - Temperature at end of cheap window
+- `script/heater/internal` - Internal temperature from MQTT
+- `script/heater/external` - External temperature from MQTT
+
+**For follow/state patterns:**
+```
+follow/<category>/<identifier>
+state/<category>/<identifier>
+```
+
+**Examples:**
+- `follow/shelly-blu/e8:e0:7e:d0:f9:89` - BLU device follow configuration
+- `follow/status/shelly1minig3-abc123` - Device status follow configuration
+- `state/shelly-blu/e8:e0:7e:d0:f9:89` - BLU device state data
+
+#### Naming Rules
+
+1. **Use hyphens, not underscores**: `cooling-rate` ✓ not `cooling_rate` ✗
+2. **Use lowercase only**: `script/heater/config` ✓ not `script/Heater/Config` ✗
+3. **Use forward slashes for hierarchy**: `script/heater/config` ✓ not `script.heater.config` ✗
+4. **Be descriptive but concise**: `last-cheap-end` ✓ not `last_cheap_electricity_window_end_time` ✗
+5. **Use consistent prefixes**: All script keys start with `script/`, all follow keys with `follow/`
+
+#### Benefits
+
+- **Consistent naming**: Easy to understand and maintain
+- **Namespace isolation**: Prevents key collisions between scripts
+- **Easy discovery**: Hierarchical structure allows prefix-based listing
+- **URL-safe**: Keys can be used in URLs without encoding
+- **Case-insensitive filesystems**: Avoids issues on case-insensitive systems
+
 ### Known Issues
 
 #### Non-blocking Execution

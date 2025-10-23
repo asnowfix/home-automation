@@ -36,7 +36,7 @@ var runCmd = &cobra.Command{
 
 		if !cmd.Flags().Changed("enable-gen1-proxy") {
 			log.Info("Setting enable-gen1-proxy based on mqtt-broker flag")
-			options.Flags.EnableGen1Proxy = options.Flags.MqttBroker != ""
+			options.Flags.EnableGen1Proxy = options.Flags.MqttBroker == ""
 		}
 
 		daemon := NewDaemon(ctx)

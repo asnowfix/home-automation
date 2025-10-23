@@ -28,8 +28,14 @@ var Cmd = &cobra.Command{
 		if isDaemon {
 			verbose = !options.Flags.Quiet // daemon is verbose by default unless --quiet
 		}
-		
-		hlog.Init(verbose)
+
+		// Use InitForDaemon for daemon commands to default to info level
+		if isDaemon {
+			hlog.InitForDaemon(verbose)
+		} else {
+			hlog.Init(verbose)
+		}
+
 		log := hlog.Logger
 		ctx := cmd.Context()
 
@@ -62,6 +68,7 @@ var Cmd = &cobra.Command{
 
 		return nil
 	},
+
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 

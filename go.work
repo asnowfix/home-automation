@@ -27,6 +27,7 @@ use (
 	./myhome/devices
 	./myhome/devices/impl
 	./myhome/groups
+	./myhome/occupancy
 	./myhome/mqtt
 	./myhome/storage
 	./pkg/devices

@@ -28,13 +28,13 @@ var token string = ""
 
 type XmlHost struct {
 	XMLName   xml.Name `xml:"host"`
-	Type      string   `xml:"type,attr"`
 	Name      string   `xml:"name,attr"`
 	Ip        net.IP   `xml:"ip,attr"`
 	Mac       string   `xml:"mac,attr"`
 	Interface string   `xml:"iface,attr"`
 	Probe     uint32   `xml:"probe,attr"`
 	Alive     uint32   `xml:"alive,attr"`
+	Type      string   `xml:"type,attr"`
 	Status    string   `xml:"status,attr"`
 }
 

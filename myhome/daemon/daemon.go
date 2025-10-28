@@ -7,6 +7,7 @@ import (
 	"myhome/devices/impl"
 	mqttclient "myhome/mqtt"
 	mqttserver "myhome/mqtt"
+	"myhome/occupancy"
 	"myhome/proxy"
 	"myhome/storage"
 	"mynet"
@@ -99,6 +100,17 @@ func (d *daemon) Run() error {
 		gen1.StartHttp2MqttProxy(logr.NewContext(d.ctx, log.WithName("gen1")), 8888, mc)
 	} else {
 		log.Info("Gen1 (HTTP->MQTT) proxy disabled")
+	}
+
+	// Start Occupancy HTTP service (follows MQTT broker)
+	if options.Flags.EnableOccupancyService {
+		log.Info("Starting occupancy HTTP service")
+		if err := occupancy.Start(logr.NewContext(d.ctx, log.WithName("occupancy")), 8889, mc); err != nil {
+			log.Error(err, "Failed to start occupancy service")
+			return err
+		}
+	} else {
+		log.Info("Occupancy HTTP service disabled")
 	}
 
 	if !disableDeviceManager {

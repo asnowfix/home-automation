@@ -26,7 +26,7 @@ var password string = os.Getenv("SFR_PASSWORD")
 
 var token string = ""
 
-type XmlHost struct {
+type LanHost struct {
 	XMLName   xml.Name `xml:"host"`
 	Name      string   `xml:"name,attr"`
 	Ip        net.IP   `xml:"ip,attr"`
@@ -38,13 +38,20 @@ type XmlHost struct {
 	Status    string   `xml:"status,attr"`
 }
 
+type DnsHost struct {
+	XMLName xml.Name `xml:"dns"`
+	Name    string   `xml:"name,attr"`
+	Ip      net.IP   `xml:"ip,attr"`
+}
+
 type Response struct {
-	XMLName xml.Name `xml:"rsp"`
-	Status  string   `xml:"stat,attr"`
-	Version string   `xml:"version,attr"`
-	Error   *Error
-	Auth    *Auth
-	Hosts   []*XmlHost `xml:"host"`
+	XMLName  xml.Name `xml:"rsp"`
+	Status   string   `xml:"stat,attr"`
+	Version  string   `xml:"version,attr"`
+	Error    *Error
+	Auth     *Auth
+	Hosts    *[]*LanHost `xml:"host,omitempty"`
+	DnsHosts *[]*DnsHost `xml:"dns,omitempty"`
 }
 
 type Error struct {
@@ -167,10 +174,12 @@ func queryBox(method string, params *map[string]string) (any, error) {
 		return nil, fmt.Errorf("%v (%v)", res.Error.Message, res.Error.Code)
 	} else if res.Auth != nil {
 		return res.Auth, nil
-	} else if len(res.Hosts) > 0 {
+	} else if res.Hosts != nil && len(*res.Hosts) > 0 {
 		return res.Hosts, nil
+	} else if res.DnsHosts != nil && len(*res.DnsHosts) > 0 {
+		return res.DnsHosts, nil
 	} else {
-		return nil, fmt.Errorf("unhandled response (%v)", res)
+		return nil, fmt.Errorf("unhandled response (%v)", string(xmlBytes))
 	}
 }
 

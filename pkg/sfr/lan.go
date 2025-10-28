@@ -1,6 +1,6 @@
 package sfr
 
-func GetHostsList() ([]*XmlHost, error) {
+func GetHostsList() (*[]*LanHost, error) {
 	if len(token) == 0 {
 		renewToken()
 	}
@@ -13,5 +13,21 @@ func GetHostsList() ([]*XmlHost, error) {
 		return nil, err
 	}
 
-	return res.([]*XmlHost), nil
+	return res.(*[]*LanHost), nil
+}
+
+func GetDnsHostList() (*[]*DnsHost, error) {
+	if len(token) == 0 {
+		renewToken()
+	}
+	params := map[string]string{
+		"token": token,
+	}
+	res, err := queryBox("lan.getDnsHostList", &params)
+	if err != nil {
+		log.Info("lan.getDnsHostList", err)
+		return nil, err
+	}
+
+	return res.(*[]*DnsHost), nil
 }

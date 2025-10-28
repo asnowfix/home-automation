@@ -1,6 +1,6 @@
 package sfr
 
-func LanGetHostsList() ([]*XmlHost, error) {
+func GetHostsList() ([]*XmlHost, error) {
 	if len(token) == 0 {
 		renewToken()
 	}

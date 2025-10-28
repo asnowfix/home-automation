@@ -7,7 +7,7 @@ import (
 )
 
 func ListDevices(log logr.Logger) ([]Host, error) {
-	xmlHosts, err := LanGetHostsList()
+	xmlHosts, err := GetHostsList()
 	if err != nil {
 		log.Error(err, "Failed to get SFR hosts list")
 		return nil, err

@@ -19,6 +19,7 @@ use (
 	./myhome/ctl/mqtt
 	./myhome/ctl/open
 	./myhome/ctl/options
+	./myhome/ctl/sfr
 	./myhome/ctl/shelly
 	./myhome/ctl/show
 	./myhome/ctl/sswitch

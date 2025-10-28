@@ -45,8 +45,6 @@ var CONFIG = {
 };
 
 var STATE = {
-  // mac (lowercase) => { switchIdStr: string, switchIndex: number, autoOff: number, illuminanceMin?: number, illuminanceMax?: number, nextSwitchIdStr?: string, nextSwitchIndex?: number }
-  follows: {},
   // switchIndex => timerId
   offTimers: {},
   // mac (lowercase) => { dailyData: [{ date: "YYYY-MM-DD", min: number, max: number }], currentMin: number, currentMax: number, lastSaveDate: "YYYY-MM-DD" }
@@ -54,6 +52,32 @@ var STATE = {
   // Timer ID for daily save
   dailySaveTimer: null
 };
+
+var STORAGE_KEYS = { follows: "follows" };
+
+function getFollows() {
+  var v = Script.storage.get(STORAGE_KEYS.follows);
+  return (v && typeof v === "object") ? v : {};
+}
+
+function setFollows(map) {
+  Script.storage.set(STORAGE_KEYS.follows, map || {});
+}
+
+/**
+ * Script.storage key: "follows"
+ * Stores a map of followed BLE MACs to local action and bounds info.
+ *
+ * @typedef {Object.<string, FollowEntry>} FollowsMap
+ * @typedef {Object} FollowEntry
+ * @property {string} switchIdStr        // e.g. "switch:0"
+ * @property {number} switchIndex        // numeric index parsed from switchIdStr
+ * @property {number} autoOff            // seconds to auto-off; 0 to disable
+ * @property {number|string|null} illuminanceMin // number in lux or percentage string (e.g., "20%")
+ * @property {number|string|null} illuminanceMax // number in lux or percentage string (e.g., "80%")
+ * @property {string|null} nextSwitchIdStr      // e.g. "switch:1" for optional chaining
+ * @property {number|null} nextSwitchIndex      // numeric index parsed from nextSwitchIdStr
+ */
 
 function log() {
   if (!CONFIG.log) return;
@@ -428,7 +452,7 @@ function onAllIlluminanceStatesLoaded(callback) {
 }
 
 function onAllKeysProcessed(newMap, callback) {
-  STATE.follows = newMap;
+  setFollows(newMap);
   log("Loaded follows:", newMap);
   loadAllIlluminanceStates(Object.keys(newMap), onAllIlluminanceStatesLoaded.bind(null, callback));
 }
@@ -472,7 +496,7 @@ function onKvsListResponse(callback, resp, err) {
   var newMap = {};
   
   if (!list || !list.length) {
-    STATE.follows = newMap;
+    setFollows(newMap);
     log("No followed MACs.");
     if (callback) callback(true);
     return;
@@ -532,7 +556,8 @@ function handleBluEvent(topic, message) {
   var mac = normalizeMac(data && data.address);
   if (!mac) return; // not a BLU payload we care about
 
-  var follow = STATE.follows[mac];
+  var follows = getFollows();
+  var follow = follows[mac];
   if (!follow) return; // not followed
 
   // Track illuminance data for all followed devices (regardless of motion)

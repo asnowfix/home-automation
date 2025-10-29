@@ -105,7 +105,7 @@ func (d *daemon) Run() error {
 	// Start Occupancy HTTP service (follows MQTT broker)
 	if options.Flags.EnableOccupancyService {
 		log.Info("Starting occupancy HTTP service")
-		if err := occupancy.Start(logr.NewContext(d.ctx, log.WithName("occupancy")), 8889, mc); err != nil {
+		if err := occupancy.Start(logr.NewContext(d.ctx, log.WithName("occupancy")), 8889, mc, 12*time.Hour, 5*time.Minute, []string{"iPhone"}); err != nil {
 			log.Error(err, "Failed to start occupancy service")
 			return err
 		}

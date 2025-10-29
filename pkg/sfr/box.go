@@ -7,7 +7,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,24 +24,6 @@ var username string = os.Getenv("SFR_USERNAME")
 var password string = os.Getenv("SFR_PASSWORD")
 
 var token string = ""
-
-type LanHost struct {
-	XMLName   xml.Name `xml:"host"`
-	Name      string   `xml:"name,attr"`
-	Ip        net.IP   `xml:"ip,attr"`
-	Mac       string   `xml:"mac,attr"`
-	Interface string   `xml:"iface,attr"`
-	Probe     uint32   `xml:"probe,attr"`
-	Alive     uint32   `xml:"alive,attr"`
-	Type      string   `xml:"type,attr"`
-	Status    string   `xml:"status,attr"`
-}
-
-type DnsHost struct {
-	XMLName xml.Name `xml:"dns"`
-	Name    string   `xml:"name,attr"`
-	Ip      net.IP   `xml:"ip,attr"`
-}
 
 type Response struct {
 	XMLName  xml.Name `xml:"rsp"`

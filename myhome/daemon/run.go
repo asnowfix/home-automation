@@ -8,6 +8,7 @@ import (
 )
 
 var disableGen1Proxy bool
+var disableOccupancyService bool
 
 func init() {
 	Cmd.AddCommand(runCmd)
@@ -25,7 +26,9 @@ func init() {
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableGen1Proxy, "enable-gen1-proxy", false, "Enable the Gen1 HTTP->MQTT proxy (requires embedded broker)")
 	runCmd.PersistentFlags().BoolVar(&disableGen1Proxy, "disable-gen1-proxy", false, "Disable the Gen1 HTTP->MQTT proxy (mutually exclusive with --enable-gen1-proxy)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableOccupancyService, "enable-occupancy-service", false, "Enable the occupancy HTTP service on port 8889")
+	runCmd.PersistentFlags().BoolVar(&disableOccupancyService, "disable-occupancy-service", false, "Disable the occupancy HTTP service (mutually exclusive with --enable-occupancy-service)")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
+	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 }
 
 var runCmd = &cobra.Command{
@@ -45,6 +48,14 @@ var runCmd = &cobra.Command{
 		} else if !cmd.Flags().Changed("enable-gen1-proxy") && !cmd.Flags().Changed("disable-gen1-proxy") {
 			log.Info("Setting enable-gen1-proxy based on mqtt-broker flag")
 			options.Flags.EnableGen1Proxy = options.Flags.MqttBroker == ""
+		}
+
+		// Handle occupancy service flags with mutual exclusivity
+		if cmd.Flags().Changed("disable-occupancy-service") && disableOccupancyService {
+			options.Flags.EnableOccupancyService = false
+		} else if !cmd.Flags().Changed("enable-occupancy-service") && !cmd.Flags().Changed("disable-occupancy-service") {
+			log.Info("Setting enable-occupancy-service based on mqtt-broker flag")
+			options.Flags.EnableOccupancyService = options.Flags.MqttBroker == ""
 		}
 
 		daemon := NewDaemon(ctx)

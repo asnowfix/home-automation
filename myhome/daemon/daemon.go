@@ -94,7 +94,7 @@ func (d *daemon) Run() error {
 	}
 	defer mc.Close()
 
-	// Start Gen1 (HTTP->MQTT) proxy only when explicitly enabled, or with embedded MQTT broker
+	// Start Gen1 (HTTP->MQTT) proxy (auto-enabled with embedded MQTT broker)
 	if options.Flags.EnableGen1Proxy {
 		log.Info("Starting Gen1 (HTTP->MQTT) proxy")
 		gen1.StartHttp2MqttProxy(logr.NewContext(d.ctx, log.WithName("gen1")), 8888, mc)
@@ -102,7 +102,7 @@ func (d *daemon) Run() error {
 		log.Info("Gen1 (HTTP->MQTT) proxy disabled")
 	}
 
-	// Start Occupancy HTTP service (follows MQTT broker)
+	// Start Occupancy HTTP service (auto-enabled with embedded MQTT broker)
 	if options.Flags.EnableOccupancyService {
 		log.Info("Starting occupancy HTTP service")
 		if err := occupancy.Start(logr.NewContext(d.ctx, log.WithName("occupancy")), 8889, mc, 12*time.Hour, 5*time.Minute, []string{"iPhone"}); err != nil {

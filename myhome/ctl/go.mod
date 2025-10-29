@@ -17,6 +17,7 @@ require (
 	myhome/ctl/mqtt v0.0.0-00010101000000-000000000000
 	myhome/ctl/open v0.0.0-00010101000000-000000000000
 	myhome/ctl/options v0.0.0-00010101000000-000000000000
+	myhome/ctl/sfr v0.0.0-00010101000000-000000000000
 	myhome/ctl/shelly v0.0.0-00010101000000-000000000000
 	myhome/ctl/show v0.0.0-00010101000000-000000000000
 	myhome/ctl/sswitch v0.0.0-00010101000000-000000000000
@@ -64,6 +65,8 @@ replace myhome/ctl/mqtt => ./mqtt
 replace myhome/ctl/open => ./open
 
 replace myhome/ctl/options => ./options
+
+replace myhome/ctl/sfr => ./sfr
 
 replace myhome/ctl/shelly => ./shelly
 

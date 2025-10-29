@@ -85,6 +85,16 @@
             }
         },
         {
+            "name": "myhome daemon (w/ occupancy service only)",
+            "type": "go",
+            "request": "launch",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["-v", "daemon", "run", "-B", "192.168.1.2", "--enable-occupancy-service", "--disable-device-manager", "--disable-gen1-proxy"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
             "name": "myhome daemon (w/ Events Dir & w/o MQTT broker)",
             "type": "go",
             "request": "launch",

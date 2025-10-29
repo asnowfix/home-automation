@@ -47,6 +47,7 @@ var Flags struct {
 	EventsDir               string
 	ProxyPort               int
 	EnableGen1Proxy         bool
+	EnableOccupancyService  bool
 }
 
 var Via types.Channel

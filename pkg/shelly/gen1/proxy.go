@@ -50,6 +50,10 @@ func (hp *http2MqttProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		d.FirmwareId = uaRe.ReplaceAllString(ua, "${fw_id}")
 		d.Model = uaRe.ReplaceAllString(ua, "${model}")
 	} else {
+		// User-Agent: Shelly/20230913-112531/v1.14.0-gcb84623 (SHHT-1)
+		d.FirmwareDate = "2000-01-01"
+		d.FirmwareId = "v0.0.0"
+		d.Model = "UNKNONW"
 		hp.log.Error(fmt.Errorf("unknown User-Agent: %s", ua), "http.HandleFunc: unknown User-Agent", "remote_addr", req.RemoteAddr)
 	}
 

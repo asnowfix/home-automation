@@ -44,10 +44,26 @@ const CONFIG = {
   log: true
 };
 
-var STATE = {
-  // mac (lowercase) => { switchIdStr: string, switchIndex: number }
-  follows: {},
-};
+var STORAGE_KEYS = { follows: "follows" };
+
+function getFollows() {
+  var v = Script.storage.get(STORAGE_KEYS.follows);
+  return (v && typeof v === "object") ? v : {};
+}
+
+function setFollows(map) {
+  Script.storage.set(STORAGE_KEYS.follows, map || {});
+}
+
+/**
+ * Script.storage key: "follows"
+ * Stores a map of followed BLE MACs to local switch control info.
+ *
+ * @typedef {Object.<string, FollowEntry>} FollowsMap
+ * @typedef {Object} FollowEntry
+ * @property {string} switchIdStr // e.g. "switch:0"
+ * @property {number} switchIndex // numeric index parsed from switchIdStr
+ */
 
 function log() {
   if (!CONFIG.log) return;
@@ -133,7 +149,7 @@ function processKvsKey(k, newMap, onComplete) {
 }
 
 function onAllKeysProcessed(newMap, callback) {
-  STATE.follows = newMap;
+  setFollows(newMap);
   log("Loaded follows:", newMap);
   if (callback) callback(true);
 }
@@ -179,7 +195,7 @@ function onKvsListResponse(callback, resp, err) {
   var newMap = {};
   
   if (!list || !list.length) {
-    STATE.follows = newMap;
+    setFollows(newMap);
     log("No followed MACs.");
     if (callback) callback(true);
     return;
@@ -330,7 +346,8 @@ function emitData(data) {
   }
 
   try {
-    var follow = STATE.follows[data.mac];
+    var follows = getFollows();
+    var follow = follows[data.mac];
     if (!follow) return; // not followed
 
     log("Emitting local event data: ", data);

@@ -12,6 +12,7 @@ import (
 	"myhome/ctl/mqtt"
 	"myhome/ctl/open"
 	"myhome/ctl/options"
+	"myhome/ctl/sfr"
 	"myhome/ctl/shelly"
 	"myhome/ctl/show"
 	"myhome/ctl/sswitch"
@@ -119,6 +120,7 @@ func init() {
 	Cmd.AddCommand(forget.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(sswitch.Cmd)
+	Cmd.AddCommand(sfr.Cmd)
 	Cmd.AddCommand(shelly.Cmd)
 	Cmd.AddCommand(group.Cmd)
 	Cmd.AddCommand(follow.FollowCmd)

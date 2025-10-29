@@ -7,6 +7,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var disableGen1Proxy bool
+
 func init() {
 	Cmd.AddCommand(runCmd)
 
@@ -21,6 +23,9 @@ func init() {
 	runCmd.PersistentFlags().StringVarP(&options.Flags.EventsDir, "events-dir", "E", "", "Directory to write received MQTT events as JSON files")
 	runCmd.PersistentFlags().IntVarP(&options.Flags.ProxyPort, "proxy-port", "p", 6080, "Reverse proxy listen port (default 6080)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableGen1Proxy, "enable-gen1-proxy", false, "Enable the Gen1 HTTP->MQTT proxy (requires embedded broker)")
+	runCmd.PersistentFlags().BoolVar(&disableGen1Proxy, "disable-gen1-proxy", false, "Disable the Gen1 HTTP->MQTT proxy (mutually exclusive with --enable-gen1-proxy)")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableOccupancyService, "enable-occupancy-service", false, "Enable the occupancy HTTP service on port 8889")
+	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 }
 
 var runCmd = &cobra.Command{
@@ -34,7 +39,10 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
-		if !cmd.Flags().Changed("enable-gen1-proxy") {
+		// Handle Gen1 proxy flags with mutual exclusivity
+		if cmd.Flags().Changed("disable-gen1-proxy") && disableGen1Proxy {
+			options.Flags.EnableGen1Proxy = false
+		} else if !cmd.Flags().Changed("enable-gen1-proxy") && !cmd.Flags().Changed("disable-gen1-proxy") {
 			log.Info("Setting enable-gen1-proxy based on mqtt-broker flag")
 			options.Flags.EnableGen1Proxy = options.Flags.MqttBroker == ""
 		}

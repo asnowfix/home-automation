@@ -24,10 +24,30 @@ var CONFIG = {
   log: true
 };
 
-var STATE = {
-  // deviceId (lowercase) => { switchIdStr: string, switchIndex: number }
-  follows: {}
-};
+var STORAGE_KEYS = { follows: "follows" };
+
+function getFollows() {
+  var v = Script.storage.get(STORAGE_KEYS.follows);
+  return (v && typeof v === "object") ? v : {};
+}
+
+function setFollows(map) {
+  Script.storage.set(STORAGE_KEYS.follows, map || {});
+}
+
+/**
+ * Script.storage key: "follows"
+ * Stores a map of followed devices and local action info.
+ *
+ * @typedef {Object.<string, FollowEntry>} FollowsMap
+ * @typedef {Object} FollowEntry
+ * @property {string} switchIdStr  // e.g. "switch:0"
+ * @property {number} switchIndex  // numeric index parsed from switchIdStr
+ * @property {string} followId     // e.g. "switch:0" or "input:0" on remote device
+ * @property {"switch"|"input"} inputType // inferred from followId
+ * @property {number} inputIndex   // numeric index parsed from followId
+ * @property {"set"|"toggle"} action     // inferred action based on inputType
+ */
 
 function log() {
   if (!CONFIG.log) return;
@@ -122,7 +142,7 @@ function processKvsKey(k, newMap, onComplete) {
 }
 
 function onAllKeysProcessed(newMap, callback) {
-  STATE.follows = newMap;
+  setFollows(newMap);
   log("Loaded follows:", newMap);
   if (callback) callback(true);
 }
@@ -164,7 +184,7 @@ function loadFollowsFromKVS(callback) {
 
     var newMap = {};
     if (!list || !list.length) {
-      STATE.follows = newMap;
+      setFollows(newMap);
       log("No followed devices.");
       if (callback) callback(true);
       return;
@@ -196,8 +216,9 @@ function handleStatusEvent(topic, message) {
     return;
   }
 
-  //log("Checking follows for device", src, "available follows:", Object.keys(STATE.follows));
-  var follow = STATE.follows[src];
+  //log("Checking follows for device", src, "available follows:", Object.keys(getFollows()));
+  var follows = getFollows();
+  var follow = follows[src];
   if (!follow) {
     //log("Device not followed", src);
     return;

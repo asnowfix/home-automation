@@ -7,14 +7,14 @@ import (
 )
 
 func ListDevices(log logr.Logger) ([]Host, error) {
-	xmlHosts, err := LanGetHostsList()
+	xmlHosts, err := GetHostsList()
 	if err != nil {
 		log.Error(err, "Failed to get SFR hosts list")
 		return nil, err
 	}
 
-	hosts := make([]Host, len(xmlHosts))
-	for i, xmlHost := range xmlHosts {
+	hosts := make([]Host, len(*xmlHosts))
+	for i, xmlHost := range *xmlHosts {
 		hosts[i] = Host{
 			xml: xmlHost,
 		}
@@ -25,7 +25,7 @@ func ListDevices(log logr.Logger) ([]Host, error) {
 }
 
 type Host struct {
-	xml *XmlHost
+	xml *LanHost
 }
 
 func (h Host) Name() string {

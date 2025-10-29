@@ -1,82 +1,207 @@
 // Kalman filter heater controller for Shelly Plus 1 (ES5 style, no Node.js, for Shelly scripting engine)
-// Fill in your URLs and AccuWeather credentials below
+// Uses Open-Meteo API for weather forecasts (no API key required)
 
-// === CONFIGURATION (DYNAMIC FROM KV) ===
-var CONFIG_KV_KEY = 'heater_config';
+// === STATIC CONSTANTS ===
+const SCRIPT_NAME = "heater";
+const CONFIG_KEY_PREFIX = 'script/' + SCRIPT_NAME + '/';
+const SCRIPT_PREFIX = "[" + SCRIPT_NAME + "] ";
+const DEFAULT_COOLING_RATE = 1.0;
 
-// Defaults (will be overwritten by KV if present)
-var INTERNAL_THERMOMETER_URL = 'http://<INTERNAL_SHELLY_IP>/status';
-var EXTERNAL_THERMOMETER_URL = 'http://<EXTERNAL_SHELLY_IP>/status';
-var SETPOINT = 21.0; // Desired indoor temperature in Celsius
-var MIN_INTERNAL_TEMP = 15.0; // If filtered internal temp drops below this, always heat
-var CHEAP_START_HOUR = 23; // 23:00
-var CHEAP_END_HOUR = 7;    // 7:00
-var POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-var ACCUWEATHER_API_KEY = '<YOUR_ACCUWEATHER_API_KEY>';
-var ACCUWEATHER_LOCATION_KEY = '<YOUR_LOCATION_KEY>';
-var ACCUWEATHER_FORECAST_URL = 'http://dataservice.accuweather.com/forecasts/v1/hourly/1hour/' + ACCUWEATHER_LOCATION_KEY + '?apikey=' + ACCUWEATHER_API_KEY + '&metric=true';
-var METEOFRANCE_API_KEY = '<YOUR_METEOFRANCE_API_KEY>';
-var METEOFRANCE_LAT = '<YOUR_LATITUDE>';
-var METEOFRANCE_LON = '<YOUR_LONGITUDE>';
-var METEOFRANCE_FORECAST_URL = 'https://api.meteofrance.com/public/forecast?lat=' + METEOFRANCE_LAT + '&lon=' + METEOFRANCE_LON;
-var PREHEAT_HOURS = 2;
+var OCCUPANCY_URL = null;
 
-function loadHeaterConfigFromKV() {
-  if (typeof Shelly !== 'undefined' && Shelly.getKV) {
-    Shelly.getKV(CONFIG_KV_KEY, function(val) {
-      if (val) {
-        try {
-          var cfg = JSON.parse(val);
-          if (cfg.internal_url) INTERNAL_THERMOMETER_URL = cfg.internal_url;
-          if (cfg.external_url) EXTERNAL_THERMOMETER_URL = cfg.external_url;
-          if (cfg.setpoint !== undefined) SETPOINT = cfg.setpoint;
-          if (cfg.min_temp !== undefined) MIN_INTERNAL_TEMP = cfg.min_temp;
-          if (cfg.cheap_start !== undefined) CHEAP_START_HOUR = cfg.cheap_start;
-          if (cfg.cheap_end !== undefined) CHEAP_END_HOUR = cfg.cheap_end;
-          if (cfg.poll_interval_ms !== undefined) POLL_INTERVAL_MS = cfg.poll_interval_ms;
-          if (cfg.accuweather_api_key) ACCUWEATHER_API_KEY = cfg.accuweather_api_key;
-          if (cfg.accuweather_location_key) ACCUWEATHER_LOCATION_KEY = cfg.accuweather_location_key;
-          if (cfg.meteofrance_api_key) METEOFRANCE_API_KEY = cfg.meteofrance_api_key;
-          if (cfg.meteofrance_lat) METEOFRANCE_LAT = cfg.meteofrance_lat;
-          if (cfg.meteofrance_lon) METEOFRANCE_LON = cfg.meteofrance_lon;
-          if (cfg.preheat_hours !== undefined) PREHEAT_HOURS = cfg.preheat_hours;
-          // Update forecast URLs if any of the above changed
-          ACCUWEATHER_FORECAST_URL = 'http://dataservice.accuweather.com/forecasts/v1/hourly/1hour/' + ACCUWEATHER_LOCATION_KEY + '?apikey=' + ACCUWEATHER_API_KEY + '&metric=true;';
-          METEOFRANCE_FORECAST_URL = 'https://api.meteofrance.com/public/forecast?lat=' + METEOFRANCE_LAT + '&lon=' + METEOFRANCE_LON;
-          print('Loaded heater config from KV:', val);
-        } catch (e) {
-          print('Error parsing heater config KV:', e);
-        }
-      } else {
-        print('No heater config in KV, using defaults');
-      }
-    });
-  } else {
-    print('Shelly.getKV not available, using default config');
+var CONFIG = {
+  // Configuration values (loaded from KVS or defaults)
+  log: true,
+  setpoint: 19.0,
+  minInternalTemp: 15.0,
+  cheapStartHour: 23,
+  cheapEndHour: 7,
+  pollIntervalMs: 5 * 60 * 1000,
+  preheatHours: 2,
+};
+
+var CONFIG_KEY = {
+  // Configuration keys (to load from KVS)
+  log: "log",
+  setpoint: "set-point",
+  minInternalTemp: "min-internal-temp",
+  cheapStartHour: "cheap-start-hour",
+  cheapEndHour: "cheap-end-hour",
+  pollIntervalMs: "poll-interval-ms",
+  preheatHours: "preheat-hours",
+};
+
+// Script.storage keys for continuously evolving values
+var STORAGE_KEYS = {
+  coolingRate: "cooling-rate",
+  forecastUrl: "forecast-url"
+};
+
+function getCoolingRate() {
+  var v = Script.storage.get(STORAGE_KEYS.coolingRate);
+  return (typeof v === "number") ? v : DEFAULT_COOLING_RATE;
+}
+
+function setCoolingRate(v) {
+  if (typeof v === "number") {
+    Script.storage.set(STORAGE_KEYS.coolingRate, v);
   }
 }
 
-// Call this once at script start
-loadHeaterConfigFromKV();
+/**
+ * Script.storage key: "cooling-rate"
+ * Stores the continuously learned cooling coefficient as a number.
+ */
 
-// === SAFETY MINIMUM TEMPERATURE ===
+/**
+ * Script.storage key: "forecast-url"
+ * Stores the Open-Meteo forecast URL string built from detected device location.
+ */
 
-// === OCCUPANCY CONFIGURATION ===
-var OCCUPANCY_URL = 'http://<OCCUPANCY_SENSOR_IP>/status'; // Should return JSON with { "occupied": true/false }
+function log() {
+  if (!CONFIG.log) return;
+  var s = "";
+  for (var i = 0; i < arguments.length; i++) {
+    try {
+      var a = arguments[i];
+      if (typeof a === "object") {
+        s += JSON.stringify(a);
+      } else {
+        s += String(a);
+      }
+    } catch (e) {
+      s += String(arguments[i]);
+      // Ensure 'e' is referenced so the minifier doesn't drop it and produce `catch {}`
+      if (e && false) {}
+    }
+    if (i + 1 < arguments.length) s += " ";
+  }
+  print(SCRIPT_PREFIX, s);
+}
+
+// === STATE (DYNAMIC RUNTIME VALUES) ===
+var STATE = {
+  // MQTT topics (loaded from KV or defaults)
+  internalTopic: null,
+  externalTopic: null,
+  
+  // Forecast cache
+  forecastUrl: null,
+  cachedForecast: null,
+  cachedForecastTimes: null,
+  lastForecastFetchDate: null,
+  
+  // Heater state
+  lastHeaterState: false,
+  switchedOffValue: 'on'
+};
+
+function detectLocationAndLoadConfig() {
+  // Use stored forecast URL if available
+  var stored = getForecastUrl();
+  if (stored) {
+    STATE.forecastUrl = stored;
+    log('Using stored forecast URL');
+    loadConfig();
+    return;
+  }
+
+  log('Detecting device location...');
+  Shelly.call('Shelly.DetectLocation', {}, function(result, error_code, error_message) {
+    if (error_code === 0 && result) {
+      if (result.lat !== null && result.lon !== null) {
+        log('Auto-detected location: lat=' + result.lat + ', lon=' + result.lon + ', tz=' + result.tz);
+        updateForecastURL(result.lat, result.lon);
+      } else {
+        log('Location detection returned null coordinates');
+      }
+    } else {
+      log('Failed to detect location (error ' + error_code + '): ' + error_message);
+    }
+    // Proceed to load config after attempting to set forecast URL
+    loadConfig();
+  });
+}
+
+function getForecastUrl() {
+  var u = Script.storage.get(STORAGE_KEYS.forecastUrl);
+  return (typeof u === 'string' && u.length > 0) ? u : null;
+}
+
+function updateForecastURL(lat, lon) {
+  if (lat !== null && lon !== null) {
+    var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&hourly=temperature_2m&forecast_days=1&timezone=auto';
+    STATE.forecastUrl = url;
+    Script.storage.set(STORAGE_KEYS.forecastUrl, url);
+  }
+}
+
+function loadConfigValue(key, defaultValue, callback) {
+  Shelly.call('KVS.Get', { key: CONFIG_KEY_PREFIX + key }, function(result, error_code, error_message) {
+    if (!error_code && result && typeof result.value !== 'undefined') {
+      // Found value in KVS (stored as string)
+      callback(result.value);
+    } else {
+      // No value in KVS, save default in KVS and return default as string
+      saveConfigValue(key, defaultValue);
+      try {
+        callback(JSON.stringify(defaultValue));
+      } catch (e) {
+        // Fallback to string coercion if JSON stringify fails
+        callback(String(defaultValue));
+      }
+    }
+  });
+}
+
+function saveConfigValue(key, value) {
+  var valueStr = JSON.stringify(value);
+  Shelly.call('KVS.Set', { key: CONFIG_KEY_PREFIX + key, value: valueStr }, function(result, error_code, error_msg) {
+    if (error_code) {
+      log('Error saving config', key, ':', error_msg);
+    } else {
+      log('Saved config', key, ':', valueStr);
+    }
+  });
+}
+
+function loadConfig() {
+  for (var key in CONFIG) {
+    if (CONFIG.hasOwnProperty(key)) {
+      loadConfigValue(key, CONFIG[key], function(valueStr) {
+        var value;
+        try {
+          value = JSON.parse(valueStr);
+        } catch (e) {
+          try {
+            value = parseFloat(valueStr);
+          } catch (e) {
+            try {
+              value = parseInt(valueStr);
+            } catch (e) {
+              try {
+                value = parseBoolean(valueStr);
+              } catch (e) {
+                value = valueStr;
+              }
+            }
+          }
+        }
+        CONFIG[key] = value;
+      });
+    }
+  }
+}
+
+// Call this once at script start - detect location first, then load config
+detectLocationAndLoadConfig();
 
 // === TIME WINDOW FOR HEATING ===
-// Set your cheap electricity window here (24h format)
-
 function isCheapHour() {
   var now = new Date();
   var hour = now.getHours();
-  return (hour >= CHEAP_START_HOUR || hour < CHEAP_END_HOUR);
+  return (hour >= CONFIG.cheapStartHour || hour < CONFIG.cheapEndHour);
 }
-
-// === COOLING RATE LEARNING (AUTOMATIC) ===
-var COOLING_RATE_KEY = "cooling_rate";
-var LAST_CHEAP_END_KEY = "last_cheap_end";
-var COOLING_RATE_DEFAULT = 1.0;
 
 function getFilteredTemp() {
   return kalman.lastMeasurement ? kalman.lastMeasurement() : null;
@@ -86,79 +211,96 @@ function onCheapWindowEnd() {
   var temp = getFilteredTemp();
   if (temp !== null) {
     var now = (new Date()).getTime();
-    Shelly.setKV(LAST_CHEAP_END_KEY, JSON.stringify({ temp: temp, time: now }));
-    print("Stored end-of-cheap-window temp:", temp);
+    Shelly.setKV(CONFIG_KEY.lastCheapestEnd, JSON.stringify({ temp: temp, time: now }));
+    log("Stored end-of-cheap-window temp:", temp);
   }
 }
 
 function onCheapWindowStart() {
-  Shelly.getKV(LAST_CHEAP_END_KEY, function(val) {
-    if (!val) return;
-    var data = JSON.parse(val);
-    var prevTemp = data.temp;
-    var prevTime = data.time;
-    var now = (new Date()).getTime();
-    var hours = (now - prevTime) / (3600 * 1000);
-    var currTemp = getFilteredTemp();
-    if (currTemp !== null && hours > 0) {
-      var rate = (prevTemp - currTemp) / hours;
-      // Update moving average
-      Shelly.getKV(COOLING_RATE_KEY, function(oldVal) {
-        var oldRate = oldVal ? parseFloat(oldVal) : COOLING_RATE_DEFAULT;
-        var newRate = 0.7 * oldRate + 0.3 * rate; // EMA
-        Shelly.setKV(COOLING_RATE_KEY, newRate);
-        print("Updated cooling rate:", newRate);
-      });
-    }
-  });
-}
-
-function getCoolingRate(cb) {
-  Shelly.getKV(COOLING_RATE_KEY, function(val) {
-    cb(val ? parseFloat(val) : COOLING_RATE_DEFAULT);
-  });
+  var data = CONFIG.lastCheapestEnd;
+  var prevTemp = data.temp;
+  var prevTime = data.time;
+  var now = (new Date()).getTime();
+  var hours = (now - prevTime) / (3600 * 1000);
+  var currTemp = getFilteredTemp();
+  if (currTemp !== null && hours > 0) {
+    var rate = (prevTemp - currTemp) / hours;
+    // Update moving average
+    var oldRate = getCoolingRate();
+    var newRate = 0.7 * oldRate + 0.3 * rate; // EMA
+    setCoolingRate(newRate);
+    log("Updated cooling rate:", newRate);
+  }
 }
 
 // Schedule learning events at CHEAP_START_HOUR and CHEAP_END_HOUR
 function scheduleLearningTimers() {
   var now = new Date();
   var hour = now.getHours();
-  var minute = now.getMinutes();
-  var second = now.getSeconds();
-  var msNow = hour * 3600000 + minute * 60000 + second * 1000;
   var scheduleAt = function(targetHour, cb) {
-    var msTarget = targetHour * 3600000;
-    if (msTarget <= msNow) msTarget += 24 * 3600000; // next day
-    var delay = msTarget - msNow;
+    var delay = (targetHour - hour) * 3600000;
+    if (delay < 0) delay += 24 * 3600000;
     Timer.set(delay, false, function() {
       cb();
-      // Reschedule for next day
+      // Re-schedule for next day
       Timer.set(24 * 3600000, true, cb);
     });
   };
-  scheduleAt(CHEAP_END_HOUR, onCheapWindowEnd);
-  scheduleAt(CHEAP_START_HOUR, onCheapWindowStart);
+  scheduleAt(CONFIG.cheapEndHour, onCheapWindowEnd);
+  scheduleAt(CONFIG.cheapStartHour, onCheapWindowStart);
 }
 
 // Call this once at script start
 scheduleLearningTimers();
 
-// === PRE-HEATING CONFIGURATION ===
-// How many hours before the end of the cheap window to start pre-heating (if needed)
-var PREHEAT_HOURS = 2;
+function initOccupancyUrl(cb) {
+  function setFromHost(h) {
+    if (h && typeof h === 'string' && h.length > 0) {
+      var host = h;
+      var i = host.indexOf('://');
+      if (i >= 0) host = host.substring(i + 3);
+      var j = host.indexOf(':');
+      if (j >= 0) host = host.substring(0, j);
+      OCCUPANCY_URL = 'http://' + host + ':8889/status';
+      log('Occupancy URL set to', OCCUPANCY_URL);
+      return true;
+    }
+    return false;
+  }
+  Shelly.getComponentStatus('mqtt', function(st) {
+    var done = false;
+    if (st && typeof st === 'object') {
+      if (!done && ("address" in st) && typeof st.address === 'string') {
+        done = setFromHost(st.address);
+      }
+      if (!done && ("remote_addr" in st) && typeof st.remote_addr === 'string') {
+        done = setFromHost(st.remote_addr);
+      }
+      if (!done && ("server" in st) && typeof st.server === 'string') {
+        done = setFromHost(st.server);
+      }
+    }
+    if (done) { if (cb) cb(); return; }
+    Shelly.call('Sys.GetConfig', {}, function(result, error_code, error_message) {
+      if (!error_code && result && result.mqtt && ("server" in result.mqtt)) {
+        setFromHost(result.mqtt.server);
+      } else {
+        log('Unable to detect MQTT server for occupancy URL');
+      }
+      if (cb) cb();
+    });
+  });
+}
 
-// Estimate how fast your home cools down (degC/hour)
-// (will be learned, but keep a default fallback)
-var COOLING_RATE = COOLING_RATE_DEFAULT;
-
-function getMinutesToEndOfCheapWindow() {
+// === PRE-HEATING LOGIC ===
+function minutesUntilCheapEnd() {
   var now = new Date();
   var hour = now.getHours();
   var minute = now.getMinutes();
-  var end = CHEAP_END_HOUR;
+  var end = CONFIG.cheapEndHour;
   var minutesNow = hour * 60 + minute;
   var minutesEnd = end * 60;
-  if (end <= CHEAP_START_HOUR) minutesEnd += 24 * 60; // handle overnight windows
+  if (end <= CONFIG.cheapStartHour) minutesEnd += 24 * 60; // handle overnight windows
   if (minutesNow > minutesEnd) minutesEnd += 24 * 60; // handle wrap-around
   return minutesEnd - minutesNow;
 }
@@ -168,27 +310,25 @@ function getMinutesToEndOfCheapWindow() {
 // COOLING_COEFF is learned as before (from data)
 
 function shouldPreheat(filteredTemp, forecastTemp, mfTemp, cb) {
-  getCoolingRate(function(k) { // k is now a cooling coefficient (per hour)
-    var minutesToEnd = getMinutesToEndOfCheapWindow();
-    var hoursToEnd = minutesToEnd / 60.0;
-    // Use the lowest forecast for the next N hours for external temp
-    var futureExternal = null;
-    if (forecastTemp !== null && mfTemp !== null) futureExternal = Math.min(forecastTemp, mfTemp);
-    else if (forecastTemp !== null) futureExternal = forecastTemp;
-    else if (mfTemp !== null) futureExternal = mfTemp;
-    // Fallback to current external temp if no forecast
-    if (futureExternal === null && typeof EXTERNAL_THERMOMETER_URL !== 'undefined') {
-      // Use last measured external temp if available
-      if (typeof lastExternalTemp !== 'undefined') futureExternal = lastExternalTemp;
-    }
-    // If still null, fallback to 0
-    if (futureExternal === null) futureExternal = 0;
-    // Predict indoor temp at end of cheap window using exponential model
-    // T_end = T_start - k * (T_start - T_ext) * hours
-    var predictedDrop = k * (filteredTemp - futureExternal) * hoursToEnd;
-    var predictedTemp = filteredTemp - predictedDrop;
-    cb((hoursToEnd <= PREHEAT_HOURS) && (predictedTemp < SETPOINT));
-  });
+  k = getCoolingRate(); // k is now a cooling coefficient (per hour)
+  var minutesToEnd = getMinutesToEndOfCheapWindow();
+  var hoursToEnd = minutesToEnd / 60.0;
+  // Use the lowest forecast for the next N hours for external temp
+  var futureExternal = null;
+  if (forecastTemp !== null && mfTemp !== null) futureExternal = Math.min(forecastTemp, mfTemp);
+  else if (forecastTemp !== null) futureExternal = forecastTemp;
+  else if (mfTemp !== null) futureExternal = mfTemp;
+  // Fallback to current external temp if no forecast
+  if (futureExternal === null && typeof lastExternalTemp !== 'undefined') {
+    futureExternal = lastExternalTemp;
+  }
+  // If still null, fallback to 0
+  if (futureExternal === null) futureExternal = 0;
+  // Predict indoor temp at end of cheap window using exponential model
+  // T_end = T_start - k * (T_start - T_ext) * hours
+  var predictedDrop = k * (filteredTemp - futureExternal) * hoursToEnd;
+  var predictedTemp = filteredTemp - predictedDrop;
+  cb((hoursToEnd <= CONFIG.preheatHours) && (predictedTemp < CONFIG.setpoint));
 }
 
 // Store last measured external temp for fallback in shouldPreheat
@@ -199,11 +339,13 @@ var origFetchAll = fetchAllControlInputs;
 fetchAllControlInputs = function(cb) {
   origFetchAll(function(results) {
     if (results.external !== null) lastExternalTemp = results.external;
+    log('Fetched all control inputs:', results);
     cb(results);
   });
 };
 
 function getOccupancy(cb) {
+  if (!OCCUPANCY_URL) { cb(false); return; }
   HTTP.request({
     url: OCCUPANCY_URL,
     method: 'GET',
@@ -214,7 +356,7 @@ function getOccupancy(cb) {
       cb(data && data.occupied === true);
     },
     error: function(err) {
-      print('Error fetching occupancy status:', err);
+      log('Error fetching occupancy status:', err);
       cb(false); // Default: not occupied
     }
   });
@@ -248,94 +390,209 @@ KalmanFilter.prototype.lastMeasurement = function() {
   return this.x;
 };
 
+// === MQTT TEMPERATURE HANDLING ===
+// Detect if topic is Gen1 or Gen2 format and extract temperature
+function parseTemperatureFromMqtt(topic, message) {
+  var temp = null;
+  try {
+    // Gen1 format: shellies/<id>/sensor/temperature with plain number payload
+    if (topic.indexOf('shellies/') === 0 && topic.indexOf('/sensor/temperature') > 0) {
+      temp = parseFloat(message);
+      if (!isNaN(temp)) {
+        log('Parsed Gen1 temperature:', temp, 'from topic:', topic);
+        return temp;
+      }
+    }
+    // Gen2 format: <id>/events/rpc with JSON payload
+    else if (topic.indexOf('/events/rpc') > 0) {
+      var data = JSON.parse(message);
+      // Look for temperature in NotifyStatus params
+      if (data.method === 'NotifyStatus' && data.params) {
+        // Check various temperature component formats
+        if (data.params['temperature:0'] && typeof data.params['temperature:0'].tC !== 'undefined') {
+          temp = data.params['temperature:0'].tC;
+        } else if (data.params['temperature:1'] && typeof data.params['temperature:1'].tC !== 'undefined') {
+          temp = data.params['temperature:1'].tC;
+        } else if (data.params['temperature:2'] && typeof data.params['temperature:2'].tC !== 'undefined') {
+          temp = data.params['temperature:2'].tC;
+        }
+        if (temp !== null) {
+          log('Parsed Gen2 temperature:', temp, 'from topic:', topic);
+          return temp;
+        }
+      }
+    }
+  } catch (e) {
+    log('Error parsing temperature from MQTT:', e);
+  }
+  return null;
+}
+
+// Subscribe to MQTT topics for temperature sources
+function subscribeMqttTemperatures() {
+  if (STATE.internalTopic) {
+    log('Subscribing to internal temperature topic:', STATE.internalTopic);
+    MQTT.subscribe(STATE.internalTopic, onInternalTemperature, null);
+  }
+  if (STATE.externalTopic) {
+    log('Subscribing to external temperature topic:', STATE.externalTopic);
+    MQTT.subscribe(STATE.externalTopic, onExternalTemperature, null);
+  }
+}
+
+// Callback for internal temperature MQTT messages
+function onInternalTemperature(topic, message, userdata) {
+  var temp = parseTemperatureFromMqtt(topic, message);
+  if (temp !== null) {
+    // Store in KVS
+    Shelly.call('KVS.Set', { key: 'script/heater/internal', value: JSON.stringify(temp) }, function(result, error_code, error_msg) {
+      if (error_code) {
+        log('Error storing internal temperature in KVS:', error_msg);
+      } else {
+        log('Stored internal temperature in KVS:', temp);
+      }
+    });
+  }
+}
+
+// Callback for external temperature MQTT messages
+function onExternalTemperature(topic, message, userdata) {
+  var temp = parseTemperatureFromMqtt(topic, message);
+  if (temp !== null) {
+    // Store in KVS
+    Shelly.call('KVS.Set', { key: 'script/heater/external', value: JSON.stringify(temp) }, function(result, error_code, error_msg) {
+      if (error_code) {
+        log('Error storing external temperature in KVS:', error_msg);
+      } else {
+        log('Stored external temperature in KVS:', temp);
+      }
+    });
+  }
+}
+
 // === DATA FETCHING FUNCTIONS ===
-function getShellyTemperature(url, cb) {
+// Read temperature from KVS (stored by MQTT callbacks)
+function getShellyTemperature(location, cb) {
+  var key = 'script/heater/' + location;
+  Shelly.call('KVS.Get', { key: key }, function(result, error_code, error_msg) {
+    if (error_code) {
+      log('Error reading temperature from KVS:', location, error_msg);
+      cb(null);
+    } else if (result && result.value !== undefined) {
+      try {
+        var temp = JSON.parse(result.value);
+        cb(temp);
+      } catch (e) {
+        log('Error parsing temperature from KVS:', location, e);
+        cb(null);
+      }
+    } else {
+      cb(null);
+    }
+  });
+}
+
+function shouldRefreshForecast() {
+  var now = new Date();
+  var today = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+  
+  // Refresh if never fetched or if it's a new day
+  if (STATE.lastForecastFetchDate === null || STATE.lastForecastFetchDate !== today) {
+    return true;
+  }
+  return false;
+}
+
+function fetchAndCacheForecast(cb) {
+  var url = STATE.forecastUrl || getForecastUrl();
+  if (!url) {
+    log('Open-Meteo forecast URL not configured. Skipping forecast.');
+    cb(null);
+    return;
+  }
+  
+  log('Fetching fresh forecast from Open-Meteo...');
   HTTP.request({
     url: url,
     method: 'GET',
-    timeout: 5,
-    success: function(resp) {
-      var data = null;
-      try { data = JSON.parse(resp.body); } catch (e) {}
-      var temp = null;
-      if (data && typeof data.temperature !== 'undefined') temp = data.temperature;
-      else if (data && typeof data.ext_temperature !== 'undefined') temp = data.ext_temperature;
-      cb(temp);
-    },
-    error: function(err) {
-      print('Error fetching Shelly temperature:', url, err);
-      cb(null);
-    }
-  });
-}
-
-function getAccuWeatherForecast(cb) {
-  if (!ACCUWEATHER_API_KEY || !ACCUWEATHER_LOCATION_KEY) {
-    print('AccuWeather API key or location key missing. Skipping forecast.');
-    cb(null);
-    return;
-  }
-  HTTP.request({
-    url: ACCUWEATHER_FORECAST_URL,
-    method: 'GET',
     timeout: 10,
     success: function(resp) {
       var data = null;
       try { data = JSON.parse(resp.body); } catch (e) {}
-      var temp = null;
-      if (data && data.length > 0 && data[0].Temperature && typeof data[0].Temperature.Value !== 'undefined') {
-        temp = data[0].Temperature.Value;
+      
+      if (data && data.hourly && data.hourly.temperature_2m && data.hourly.temperature_2m.length > 0) {
+        // Cache the full forecast arrays
+        STATE.cachedForecast = data.hourly.temperature_2m;
+        STATE.cachedForecastTimes = data.hourly.time;
+        var now = new Date();
+        STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+        log('Cached forecast with ' + STATE.cachedForecast.length + ' hourly values for date: ' + STATE.lastForecastFetchDate);
+        cb(true);
+      } else {
+        log('Failed to parse forecast data');
+        cb(false);
       }
-      cb(temp);
     },
     error: function(err) {
-      print('Error fetching AccuWeather forecast:', err);
-      cb(null);
+      log('Error fetching Open-Meteo forecast:', err);
+      cb(false);
     }
   });
 }
 
-function getMeteoFranceForecast(cb) {
-  if (!METEOFRANCE_API_KEY || !METEOFRANCE_LAT || !METEOFRANCE_LON) {
-    print('MeteoFrance API key or location missing. Skipping forecast.');
-    cb(null);
-    return;
+function getCurrentForecastTemp() {
+  if (!STATE.cachedForecast || STATE.cachedForecast.length === 0) {
+    return null;
   }
-  HTTP.request({
-    url: METEOFRANCE_FORECAST_URL,
-    method: 'GET',
-    timeout: 10,
-    headers: { 'apikey': METEOFRANCE_API_KEY },
-    success: function(resp) {
-      var data = null;
-      try { data = JSON.parse(resp.body); } catch (e) {}
-      var temp = null;
-      // Try to get the next planned temperature (1 hour ahead)
-      if (data && data.forecast && data.forecast.length > 0 && typeof data.forecast[0].T !== 'undefined') {
-        temp = data.forecast[0].T;
-      }
-      cb(temp);
-    },
-    error: function(err) {
-      print('Error fetching MeteoFrance forecast:', err);
-      cb(null);
-    }
-  });
+  
+  var now = new Date();
+  var currentHour = now.getHours();
+  
+  // Use current hour as index (Open-Meteo returns data starting from 00:00 today)
+  var idx = currentHour < STATE.cachedForecast.length ? currentHour : 0;
+  var temp = STATE.cachedForecast[idx];
+  
+  return temp;
 }
 
 // === PARALLEL DATA FETCH HELPERS (reduce callback nesting) ===
 function fetchAllControlInputs(cb) {
-  var results = { internal: null, external: null, forecast: null, mf: null, occupied: null };
+  // Check if we need to refresh the forecast (once per day)
+  if (shouldRefreshForecast()) {
+    fetchAndCacheForecast(function(success) {
+      if (success) {
+        log('Forecast cache refreshed successfully');
+      } else {
+        log('Forecast cache refresh failed, will use stale data if available');
+      }
+      // Continue with control inputs regardless of fetch success
+      fetchControlInputsWithCachedForecast(cb);
+    });
+  } else {
+    // Use cached forecast
+    fetchControlInputsWithCachedForecast(cb);
+  }
+}
+
+function fetchControlInputsWithCachedForecast(cb) {
+  var results = { internal: null, external: null, forecast: null, occupied: null };
   var done = 0;
-  var total = 5;
+  var total = 3; // Only 3 now: internal, external, occupancy (forecast is from cache)
+  
   function check() {
     done++;
-    if (done === total) cb(results);
+    if (done === total) {
+      // Get forecast from cache
+      results.forecast = getCurrentForecastTemp();
+      if (results.forecast !== null) {
+        log('Using cached forecast: ' + results.forecast + '°C');
+      }
+      cb(results);
+    }
   }
-  getShellyTemperature(INTERNAL_THERMOMETER_URL, function(val) { results.internal = val; check(); });
-  getShellyTemperature(EXTERNAL_THERMOMETER_URL, function(val) { results.external = val; check(); });
-  getAccuWeatherForecast(function(val) { results.forecast = val; check(); });
-  getMeteoFranceForecast(function(val) { results.mf = val; check(); });
+  
+  getShellyTemperature('internal', function(val) { results.internal = val; check(); });
+  getShellyTemperature('external', function(val) { results.external = val; check(); });
   getOccupancy(function(val) { results.occupied = val; check(); });
 }
 
@@ -343,37 +600,36 @@ function controlHeaterWithInputs(results) {
   var internalTemp = results.internal;
   var externalTemp = results.external;
   var forecastTemp = results.forecast;
-  var mfTemp = results.mf;
   var isOccupied = results.occupied;
-  print('Internal:', internalTemp, 'External:', externalTemp, 'AccuWeather:', forecastTemp, 'MeteoFrance:', mfTemp, 'Occupied:', isOccupied);
+  log('Internal:', internalTemp, 'External:', externalTemp, 'Forecast:', forecastTemp, 'Occupied:', isOccupied);
   if (internalTemp === null) {
-    print('Skipping control cycle due to missing internal temperature');
+    log('Skipping control cycle due to missing internal temperature');
     return;
   }
   var controlInput = 0;
   var count = 0;
   if (externalTemp !== null) { controlInput += externalTemp; count++; }
   if (forecastTemp !== null) { controlInput += forecastTemp; count++; }
-  if (mfTemp !== null) { controlInput += mfTemp; count++; }
   if (count > 0) controlInput = controlInput / count;
   var filteredTemp = kalman.filter(internalTemp, controlInput);
-  print('Filtered temperature:', filteredTemp);
-  var heaterShouldBeOn = filteredTemp < SETPOINT;
-  // SAFETY: If filtered temperature is below MIN_INTERNAL_TEMP, always heat IF occupied
-  if (isOccupied && filteredTemp < MIN_INTERNAL_TEMP) {
-    print('Heater ON (safety minimum temp, occupied)');
+  log('Filtered temperature:', filteredTemp);
+  var heaterShouldBeOn = filteredTemp < CONFIG.setpoint;
+  // SAFETY: If filtered temperature is below minInternalTemp, always heat IF occupied
+  if (isOccupied && filteredTemp < CONFIG.minInternalTemp) {
+    log('Safety override: internal temp', filteredTemp, 'below minInternalTemp', CONFIG.minInternalTemp, '=> HEAT');
     setHeaterState(true);
-    lastHeaterState = true;
+    STATE.lastHeaterState = true;
     return;
   }
   shouldPreheat(filteredTemp, forecastTemp, mfTemp, function(preheat) {
     if ((heaterShouldBeOn && isCheapHour()) || preheat) {
-      print('Heater ON (normal or preheat mode)', 'preheat:', preheat);
+      log('Heater ON (normal or preheat mode)', 'preheat:', preheat);
       setHeaterState(true);
-      lastHeaterState = true;
+      STATE.lastHeaterState = true;
     } else {
+      log('Outside cheap window => no heating');
       setHeaterState(false);
-      lastHeaterState = false;
+      STATE.lastHeaterState = false;
     }
   });
 }
@@ -384,21 +640,18 @@ function pollAndControl() {
 }
 
 // === SWITCHED-OFF VALUE SUPPORT ===
-// If a group/device KV contains a "switched-off" key, use its value for relay OFF
-var SWITCHED_OFF_VALUE = 'on'; // Default value when Shelly Plus 1 one/freeze cabling
-
 function loadSwitchedOffValue() {
   if (typeof Shelly !== 'undefined' && Shelly.getComponentConfig) {
     Shelly.getComponentConfig('Switch', function(cfg) {
       if (cfg && cfg.kvs && cfg.kvs['switched-off']) {
-        SWITCHED_OFF_VALUE = cfg.kvs['switched-off'];
-        print('Loaded switched-off value from KV:', SWITCHED_OFF_VALUE);
+        STATE.switchedOffValue = cfg.kvs['switched-off'];
+        log('Loaded switched-off value from KV:', STATE.switchedOffValue);
       } else {
-        print('No switched-off value in KV, using default:', SWITCHED_OFF_VALUE);
+        log('No switched-off value in KV, using default:', STATE.switchedOffValue);
       }
     });
   } else {
-    print('Shelly.getComponentConfig not available, using default switched-off value:', SWITCHED_OFF_VALUE);
+    log('Shelly.getComponentConfig not available, using default switched-off value:', STATE.switchedOffValue);
   }
 }
 
@@ -410,25 +663,63 @@ function setHeaterState(on) {
   if (on) {
     Shelly.call("Switch.Set", { id: 0, on: true }, function(result, error_code, error_msg) {
       if (error_code) {
-        print('Error setting heater state:', error_msg);
+        log('Error setting heater state:', error_msg);
       } else {
-        print('Heater relay set to ON');
+        log('Heater relay set to ON');
       }
     });
   } else {
     // Use the cached switched-off value
-    Shelly.call("Switch.Set", { id: 0, on: false, value: SWITCHED_OFF_VALUE }, function(result, error_code, error_msg) {
+    Shelly.call("Switch.Set", { id: 0, on: false, value: STATE.switchedOffValue }, function(result, error_code, error_msg) {
       if (error_code) {
-        print('Error setting heater state:', error_msg);
+        log('Error setting heater state:', error_msg);
       } else {
-        print('Heater relay set to OFF (value:', SWITCHED_OFF_VALUE, ')');
+        log('Heater relay set to OFF (value:', STATE.switchedOffValue, ')');
       }
     });
   }
 }
 
 // === SCHEDULED EXECUTION ===
-Timer.set(POLL_INTERVAL_MS, true, pollAndControl);
+log("Script starting...");
 
-// Initial run
-pollAndControl();
+// Fetch initial forecast on startup
+log('Fetching initial forecast on startup...');
+initOccupancyUrl(function() {
+  fetchAndCacheForecast(function(success) {
+    if (success) {
+      log('Initial forecast cached successfully');
+    } else {
+      log('Initial forecast fetch failed');
+    }
+    
+    // Start the control loop
+    Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
+    
+    // Initial run
+    pollAndControl();
+    
+    log("Script initialization complete");
+  });
+});
+
+// Schedule daily forecast refresh at midnight
+Timer.set(60 * 60 * 1000, true, function() {
+  if (shouldRefreshForecast()) {
+    log('Daily forecast refresh triggered');
+    fetchAndCacheForecast(function(success) {
+      if (success) {
+        log('Daily forecast refresh successful');
+      }
+    });
+  }
+});
+
+// Handle script stop event
+Shelly.addEventHandler(function(eventData) {
+  log('Script event:', eventData);
+  if (eventData && eventData.info && eventData.info.event === "script_stop") {
+    log("Script stopping");
+    log('Forecast cache stats: ' + (STATE.cachedForecast ? STATE.cachedForecast.length + ' values' : 'empty') + ', last fetch: ' + STATE.lastForecastFetchDate);
+  }
+});

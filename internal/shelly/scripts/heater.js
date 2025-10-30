@@ -38,13 +38,13 @@ var STORAGE_KEYS = {
 };
 
 function getCoolingRate() {
-  var v = Script.storage.get(STORAGE_KEYS.coolingRate);
+  var v = Script.storage.getItem(STORAGE_KEYS.coolingRate);
   return (typeof v === "number") ? v : DEFAULT_COOLING_RATE;
 }
 
 function setCoolingRate(v) {
   if (typeof v === "number") {
-    Script.storage.set(STORAGE_KEYS.coolingRate, v);
+    Script.storage.setItem(STORAGE_KEYS.coolingRate, v);
   }
 }
 
@@ -93,7 +93,7 @@ var STATE = {
   
   // Heater state
   lastHeaterState: false,
-  switchedOffValue: 'on'
+  normallyClosed: true,
 };
 
 function detectLocationAndLoadConfig() {
@@ -124,7 +124,7 @@ function detectLocationAndLoadConfig() {
 }
 
 function getForecastUrl() {
-  var u = Script.storage.get(STORAGE_KEYS.forecastUrl);
+  var u = Script.storage.getItem(STORAGE_KEYS.forecastUrl);
   return (typeof u === 'string' && u.length > 0) ? u : null;
 }
 
@@ -132,7 +132,7 @@ function updateForecastURL(lat, lon) {
   if (lat !== null && lon !== null) {
     var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&hourly=temperature_2m&forecast_days=1&timezone=auto';
     STATE.forecastUrl = url;
-    Script.storage.set(STORAGE_KEYS.forecastUrl, url);
+    Script.storage.setItem(STORAGE_KEYS.forecastUrl, url);
   }
 }
 
@@ -311,7 +311,7 @@ function minutesUntilCheapEnd() {
 
 function shouldPreheat(filteredTemp, forecastTemp, mfTemp, cb) {
   k = getCoolingRate(); // k is now a cooling coefficient (per hour)
-  var minutesToEnd = getMinutesToEndOfCheapWindow();
+  var minutesToEnd = minutesUntilCheapEnd();
   var hoursToEnd = minutesToEnd / 60.0;
   // Use the lowest forecast for the next N hours for external temp
   var futureExternal = null;
@@ -333,6 +333,48 @@ function shouldPreheat(filteredTemp, forecastTemp, mfTemp, cb) {
 
 // Store last measured external temp for fallback in shouldPreheat
 var lastExternalTemp = null;
+
+// === PARALLEL DATA FETCH HELPERS (reduce callback nesting) ===
+// Note: Must be defined BEFORE being patched below (no hoisting in Shelly JS)
+function fetchAllControlInputs(cb) {
+  // Check if we need to refresh the forecast (once per day)
+  if (shouldRefreshForecast()) {
+    fetchAndCacheForecast(function(success) {
+      if (success) {
+        log('Forecast cache refreshed successfully');
+      } else {
+        log('Forecast cache refresh failed, will use stale data if available');
+      }
+      // Continue with control inputs regardless of fetch success
+      fetchControlInputsWithCachedForecast(cb);
+    });
+  } else {
+    // Use cached forecast
+    fetchControlInputsWithCachedForecast(cb);
+  }
+}
+
+function fetchControlInputsWithCachedForecast(cb) {
+  var results = { internal: null, external: null, forecast: null, occupied: null };
+  var done = 0;
+  var total = 3; // Only 3 now: internal, external, occupancy (forecast is from cache)
+  
+  function check() {
+    done++;
+    if (done === total) {
+      // Get forecast from cache
+      results.forecast = getCurrentForecastTemp();
+      if (results.forecast !== null) {
+        log('Using cached forecast: ' + results.forecast + '°C');
+      }
+      cb(results);
+    }
+  }
+  
+  getShellyTemperature('internal', function(val) { results.internal = val; check(); });
+  getShellyTemperature('external', function(val) { results.external = val; check(); });
+  getOccupancy(function(val) { results.occupied = val; check(); });
+}
 
 // Patch fetchAllControlInputs to store last external temp
 var origFetchAll = fetchAllControlInputs;
@@ -389,6 +431,9 @@ KalmanFilter.prototype.filter = function(z, u) {
 KalmanFilter.prototype.lastMeasurement = function() {
   return this.x;
 };
+
+// Initialize Kalman filter instance
+var kalman = new KalmanFilter();
 
 // === MQTT TEMPERATURE HANDLING ===
 // Detect if topic is Gen1 or Gen2 format and extract temperature
@@ -555,47 +600,6 @@ function getCurrentForecastTemp() {
   return temp;
 }
 
-// === PARALLEL DATA FETCH HELPERS (reduce callback nesting) ===
-function fetchAllControlInputs(cb) {
-  // Check if we need to refresh the forecast (once per day)
-  if (shouldRefreshForecast()) {
-    fetchAndCacheForecast(function(success) {
-      if (success) {
-        log('Forecast cache refreshed successfully');
-      } else {
-        log('Forecast cache refresh failed, will use stale data if available');
-      }
-      // Continue with control inputs regardless of fetch success
-      fetchControlInputsWithCachedForecast(cb);
-    });
-  } else {
-    // Use cached forecast
-    fetchControlInputsWithCachedForecast(cb);
-  }
-}
-
-function fetchControlInputsWithCachedForecast(cb) {
-  var results = { internal: null, external: null, forecast: null, occupied: null };
-  var done = 0;
-  var total = 3; // Only 3 now: internal, external, occupancy (forecast is from cache)
-  
-  function check() {
-    done++;
-    if (done === total) {
-      // Get forecast from cache
-      results.forecast = getCurrentForecastTemp();
-      if (results.forecast !== null) {
-        log('Using cached forecast: ' + results.forecast + '°C');
-      }
-      cb(results);
-    }
-  }
-  
-  getShellyTemperature('internal', function(val) { results.internal = val; check(); });
-  getShellyTemperature('external', function(val) { results.external = val; check(); });
-  getOccupancy(function(val) { results.occupied = val; check(); });
-}
-
 function controlHeaterWithInputs(results) {
   var internalTemp = results.internal;
   var externalTemp = results.external;
@@ -639,45 +643,26 @@ function pollAndControl() {
   fetchAllControlInputs(controlHeaterWithInputs);
 }
 
-// === SWITCHED-OFF VALUE SUPPORT ===
-function loadSwitchedOffValue() {
-  if (typeof Shelly !== 'undefined' && Shelly.getComponentConfig) {
-    Shelly.getComponentConfig('Switch', function(cfg) {
-      if (cfg && cfg.kvs && cfg.kvs['switched-off']) {
-        STATE.switchedOffValue = cfg.kvs['switched-off'];
-        log('Loaded switched-off value from KV:', STATE.switchedOffValue);
-      } else {
-        log('No switched-off value in KV, using default:', STATE.switchedOffValue);
-      }
-    });
-  } else {
-    log('Shelly.getComponentConfig not available, using default switched-off value:', STATE.switchedOffValue);
-  }
+// === NORMALLY CLOSED VALUE SUPPORT ===
+function loadNormallyClosed() {
+  cfg = Shelly.getComponentConfig('switch', 0);
+  STATE.normallyClosed = cfg && cfg.kvs && cfg.kvs['normally-closed'] === 'true';
+  log('Loaded normally-closed value from KVS:', STATE.normallyClosed);
 }
 
 // Call this once at script start
-loadSwitchedOffValue();
+loadNormallyClosed();
 
-// === HEATER CONTROL (LOCAL SHELLY CALL, SUPPORTS switched-off VALUE) ===
+// === HEATER CONTROL (LOCAL SHELLY CALL, SUPPORTS normally-closed VALUE) ===
 function setHeaterState(on) {
-  if (on) {
-    Shelly.call("Switch.Set", { id: 0, on: true }, function(result, error_code, error_msg) {
-      if (error_code) {
-        log('Error setting heater state:', error_msg);
-      } else {
-        log('Heater relay set to ON');
-      }
-    });
-  } else {
-    // Use the cached switched-off value
-    Shelly.call("Switch.Set", { id: 0, on: false, value: STATE.switchedOffValue }, function(result, error_code, error_msg) {
-      if (error_code) {
-        log('Error setting heater state:', error_msg);
-      } else {
-        log('Heater relay set to OFF (value:', STATE.switchedOffValue, ')');
-      }
-    });
-  }
+  var newState = on !== CONFIG.normallyClosed
+  Shelly.call("Switch.Set", { id: 0, on: newState }, function(result, error_code, error_msg) {
+    if (error_code) {
+      log('Error setting heater switch state:', error_msg);
+    } else {
+      log('Heater switch set to', on, "(result:", result, ")");
+    }
+  });
 }
 
 // === SCHEDULED EXECUTION ===

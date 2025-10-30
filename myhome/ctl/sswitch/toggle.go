@@ -98,19 +98,19 @@ func offValue(ctx context.Context, log logr.Logger, via types.Channel, device de
 	if !ok {
 		return false
 	}
-	out, err := sd.CallE(ctx, via, kvs.Get.String(), sswitch.SwitchedOffKey)
+	out, err := sd.CallE(ctx, via, kvs.Get.String(), sswitch.NormallyClosedKey)
 	if err != nil {
-		log.Info("Unable to get value", "key", sswitch.SwitchedOffKey, "reason", err)
+		log.Info("Unable to get value", "key", sswitch.NormallyClosedKey, "reason", err)
 		return false
 	}
 	kv, ok := out.(*kvs.Value)
 	if !ok {
-		log.Error(err, "Invalid value", "key", sswitch.SwitchedOffKey, "value", out)
+		log.Error(err, "Invalid value", "key", sswitch.NormallyClosedKey, "value", out)
 		return false
 	}
 	off, err := strconv.ParseBool(kv.Value)
 	if err != nil {
-		log.Error(err, "Invalid value", "key", sswitch.SwitchedOffKey, "value", kv.Value)
+		log.Error(err, "Invalid value", "key", sswitch.NormallyClosedKey, "value", kv.Value)
 		return false
 	}
 	return off

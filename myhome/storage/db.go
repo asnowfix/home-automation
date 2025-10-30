@@ -309,6 +309,8 @@ func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (*myhome.Groups
 }
 
 // AddGroup adds a new group to the database.
+// If the group already exists and the provided KVS is empty, the existing KVS is preserved.
+// If the group already exists and the provided KVS is non-empty, it will be updated.
 func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (*myhome.GroupInfo, error) {
 
 	// Insert or update group atomically to avoid race conditions
@@ -316,8 +318,19 @@ func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (*myhome.GroupInfo, er
 	var id int64
 	var err error
 
-	query := `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)
-		ON CONFLICT(name) DO UPDATE SET kvs = excluded.kvs`
+	// Only update kvs if it's explicitly provided (non-empty)
+	// This prevents device refresh/discovery from clearing group KVS
+	var query string
+	if group.KVS != "" {
+		// Explicit KVS provided - insert or update
+		query = `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)
+			ON CONFLICT(name) DO UPDATE SET kvs = excluded.kvs`
+	} else {
+		// No KVS provided - insert only, don't update existing
+		query = `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)
+			ON CONFLICT(name) DO NOTHING`
+	}
+	
 	result, err = s.db.NamedExec(query, map[string]interface{}{
 		"name": group.Name,
 		"kvs":  group.KVS,
@@ -325,6 +338,15 @@ func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (*myhome.GroupInfo, er
 	if err != nil {
 		return nil, err
 	}
+	
+	// If group already existed, fetch it to get the ID and existing KVS
+	if group.KVS == "" {
+		existing, err := s.GetGroupInfo(group.Name)
+		if err == nil && existing != nil {
+			return existing, nil
+		}
+	}
+	
 	id, err = result.LastInsertId()
 	if err != nil {
 		return nil, err

@@ -264,7 +264,7 @@ func (d *Device) IsHttpReady() bool {
 	}
 
 	if ip == nil {
-		d.log.Error(nil, "Device has no IP address")
+		d.log.Info("Device has no IP address", "device", d)
 		return false
 	}
 	d.UpdateHost(ip.String())

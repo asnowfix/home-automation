@@ -220,10 +220,23 @@ Groups are collections of devices that can be controlled together.
 ### Create a group
 
 ```shell
-group create radiateurs switched-off=on
+group create <group-name> [key1=val1] [key2=val2] ...
 ```
 
-The optional key-value pair `switched-off=on` indicates that Shelly switch devices controlling the _radiateurs_ need to be turned `on` for the _radiateurs_ to be turned `off`.
+**Examples:**
+
+```shell
+# Create a simple group
+group create radiateurs
+
+# Create a group with normally-closed relays
+group create radiateurs normally-closed=true
+
+# Create a group with multiple KVS pairs
+group create lights auto-off=300 brightness=80
+```
+
+The optional key-value pairs (e.g., `normally-closed=true`) are stored in the group's KVS and automatically applied to all devices when they are added to the group. For example, `normally-closed=true` indicates that Shelly switch/relay devices controlling the _radiateurs_ need to be turned on (`true`) for the _radiateurs_ to be turned off (`false`).
 
 ### Add a devices to a group
 
@@ -254,7 +267,7 @@ group list
 groups:
     - id: 2
       name: radiateurs
-      kvs: '{"switched-off":"on"}'
+      kvs: '{"normally-closed":"true"}'
 ```
 
 ### Show a group
@@ -266,7 +279,7 @@ group show radiateurs
 groupinfo:
     id: 2
     name: radiateurs
-    kvs: '{"switched-off":"on"}'
+    kvs: '{"normally-closed":"true"}'
 devices:
     - deviceidentifier:
         manufacturer: Shelly

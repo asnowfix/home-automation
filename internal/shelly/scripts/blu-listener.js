@@ -47,25 +47,29 @@ var CONFIG = {
 var STATE = {
   // switchIndex => timerId
   offTimers: {},
+  
   // mac (lowercase) => { dailyData: [{ date: "YYYY-MM-DD", min: number, max: number }], currentMin: number, currentMax: number, lastSaveDate: "YYYY-MM-DD" }
   illuminanceTracking: {},
+
   // Timer ID for daily save
-  dailySaveTimer: null
+  dailySaveTimer: null,
+
+  // In-memory cache of follows loaded from KVS by loadFollowsFromKVS()
+  // KVS keys are set externally via "myhome ctl follow blu" command
+  // Each followed MAC has its own KVS key: follow/shelly-blu/<mac>
+  follows: {}
 };
 
-var STORAGE_KEYS = { follows: "follows" };
-
 function getFollows() {
-  var v = Script.storage.get(STORAGE_KEYS.follows);
-  return (v && typeof v === "object") ? v : {};
+  return STATE.follows;
 }
 
 function setFollows(map) {
-  Script.storage.set(STORAGE_KEYS.follows, map || {});
+  STATE.follows = map || {};
 }
 
 /**
- * Script.storage key: "follows"
+ * In-memory follows cache populated from KVS
  * Stores a map of followed BLE MACs to local action and bounds info.
  *
  * @typedef {Object.<string, FollowEntry>} FollowsMap

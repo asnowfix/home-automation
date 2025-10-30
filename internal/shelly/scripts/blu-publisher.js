@@ -44,19 +44,23 @@ const CONFIG = {
   log: true
 };
 
-var STORAGE_KEYS = { follows: "follows" };
+var STATE = {
+  // In-memory cache of follows loaded from KVS by loadFollowsFromKVS()
+  // KVS keys are set externally via "myhome ctl follow blu" command
+  // Each followed MAC has its own KVS key: follow/shelly-blu/<mac>
+  follows: {}
+};
 
 function getFollows() {
-  var v = Script.storage.get(STORAGE_KEYS.follows);
-  return (v && typeof v === "object") ? v : {};
+  return STATE.follows;
 }
 
 function setFollows(map) {
-  Script.storage.set(STORAGE_KEYS.follows, map || {});
+  STATE.follows = map || {};
 }
 
 /**
- * Script.storage key: "follows"
+ * In-memory follows cache populated from KVS
  * Stores a map of followed BLE MACs to local switch control info.
  *
  * @typedef {Object.<string, FollowEntry>} FollowsMap

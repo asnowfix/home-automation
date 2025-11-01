@@ -601,11 +601,11 @@ func (mh *mqttHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte)
 		return err
 	}
 	// Call: callback(result, error_code, error_message)
-	ret, err := mh.callable(goja.Undefined(), vm.ToValue(string(msg)), goja.Null(), goja.Null())
+	log.Info("MQTT callback", "topic", mh.topic, "msg", string(msg))
+	_, err = mh.callable(goja.Undefined(), vm.ToValue(mh.topic), vm.ToValue(string(msg)))
 	if err != nil {
 		log.Error(err, "MQTT callback", "topic", mh.topic, "error", err)
 		return err
 	}
-	log.Info("MQTT callback", "topic", mh.topic, "result", ret)
 	return nil
 }

@@ -459,6 +459,7 @@ var kalman = new KalmanFilter();
 // Detect if topic is Gen1 or Gen2 format and extract temperature
 function parseTemperatureFromMqtt(topic, message) {
   var temp = null;
+  log("parseTemperatureFromMqtt", topic, message);
   try {
     // Gen1 format: shellies/<id>/sensor/temperature with plain number payload
     if (topic.indexOf('shellies/') === 0 && topic.indexOf('/sensor/temperature') > 0) {
@@ -486,6 +487,9 @@ function parseTemperatureFromMqtt(topic, message) {
           return temp;
         }
       }
+    }
+    else {
+      log('Unknown topic format:', topic);
     }
   } catch (e) {
     log('Error parsing temperature from MQTT:', e);
@@ -517,13 +521,13 @@ function subscribeMqttTemperatures() {
   log('Subscribing to MQTT topics for temperature sources...');
   if (CONFIG.internalTemperatureTopic) {
     log('Subscribing to internal temperature topic & /request:', CONFIG.internalTemperatureTopic);
-    MQTT.subscribe(CONFIG.internalTemperatureTopic, onTemperature.bind(STORAGE_KEYS.internalTemp), null);
-    MQTT.subscribe(CONFIG.internalTemperatureTopic + '/request', onTemperatureRequest.bind(STORAGE_KEYS.internalTemp), null);
+    MQTT.subscribe(CONFIG.internalTemperatureTopic, onTemperature.bind(null, STORAGE_KEYS.internalTemp), null);
+    MQTT.subscribe(CONFIG.internalTemperatureTopic + '/request', onTemperatureRequest.bind(null, STORAGE_KEYS.internalTemp), null);
   }
   if (CONFIG.externalTemperatureTopic) {
     log('Subscribing to external temperature topic & /request:', CONFIG.externalTemperatureTopic);
-    MQTT.subscribe(CONFIG.externalTemperatureTopic, onTemperature.bind(STORAGE_KEYS.externalTemp), null);
-    MQTT.subscribe(CONFIG.externalTemperatureTopic + '/request', onTemperatureRequest.bind(STORAGE_KEYS.externalTemp), null);
+    MQTT.subscribe(CONFIG.externalTemperatureTopic, onTemperature.bind(null, STORAGE_KEYS.externalTemp), null);
+    MQTT.subscribe(CONFIG.externalTemperatureTopic + '/request', onTemperatureRequest.bind(null, STORAGE_KEYS.externalTemp), null);
   }
 }
 

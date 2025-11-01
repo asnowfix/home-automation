@@ -21,7 +21,7 @@ const MQTT_DEFAULT_TIMEOUT time.Duration = 14 * time.Second
 
 const MQTT_DEFAULT_GRACE time.Duration = 2 * time.Second
 
-const COMMAND_DEFAULT_TIMEOUT time.Duration = 15 * time.Second
+const COMMAND_DEFAULT_TIMEOUT time.Duration = 0 // No timeout by default (wait indefinitely)
 
 const DEVICE_REFRESH_INTERVAL time.Duration = 1 * time.Minute
 

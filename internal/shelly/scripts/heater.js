@@ -17,6 +17,8 @@ var CONFIG = {
   pollIntervalMs: 5 * 60 * 1000,
   preheatHours: 2,
   normallyClosed: true,
+  internalTemperatureTopic: null,
+  externalTemperatureTopic: null,
 };
 
 var CONFIG_KEY = {
@@ -29,6 +31,8 @@ var CONFIG_KEY = {
   pollIntervalMs: "poll-interval-ms",
   preheatHours: "preheat-hours",
   normallyClosed: "normally-closed",
+  internalTemperatureTopic: "internal-temperature-topic",
+  externalTemperatureTopic: "external-temperature-topic",
 };
 
 // Script.storage keys for continuously evolving values
@@ -84,11 +88,7 @@ function log() {
 
 // === STATE (DYNAMIC RUNTIME VALUES) ===
 var STATE = {
-  // MQTT topics (loaded from KV or defaults)
-  internalTopic: null,
-  externalTopic: null,
-
-  // Occupancy URL (loaded from KV or defaults)
+  // Occupancy URL (built from MQTT server IP + /status)
   occupancyUrl: null,
   
   // Forecast cache
@@ -160,20 +160,22 @@ function loadConfig() {
               var valueStr = item.value;
               var value;
               
+              // Try JSON parse first (handles objects, arrays, booleans, numbers, strings)
               try {
                 value = JSON.parse(valueStr);
               } catch (e) {
-                try {
-                  value = parseFloat(valueStr);
-                } catch (e) {
-                  try {
-                    value = parseInt(valueStr);
-                  } catch (e) {
-                    try {
-                      value = parseBoolean(valueStr);
-                    } catch (e) {
-                      value = valueStr;
-                    }
+                // Not valid JSON, try parsing as primitive types
+                if (valueStr === "true" || valueStr === "false") {
+                  // Boolean string
+                  value = valueStr === "true";
+                } else {
+                  // Try as number (parseFloat handles both integers and floats)
+                  var numValue = parseFloat(valueStr);
+                  if (!isNaN(numValue)) {
+                    value = numValue;
+                  } else {
+                    // Keep as string
+                    value = valueStr;
                   }
                 }
               }
@@ -491,35 +493,37 @@ function parseTemperatureFromMqtt(topic, message) {
   return null;
 }
 
+function onTemperature(key, topic, message, userdata) {
+  var temp = parseTemperatureFromMqtt(topic, message);
+  if (temp !== null) {
+    // Store in Script.storage (synchronous, internal data)
+    Script.storage.setItem(key, temp);
+    log('Stored ' + key + ' temperature:', temp);
+  }
+}
+
+function onTemperatureRequest(key, topic, message, userdata) {
+  var temp = Script.storage.getItem(key);
+  if (temp !== null && temp !== undefined) {
+    log('Read ' + key + ' temperature:', temp);
+    MQTT.publish(topic, temp);
+  } else {
+    log('No ' + key + ' temperature available yet');
+  }
+}
+
 // Subscribe to MQTT topics for temperature sources
 function subscribeMqttTemperatures() {
-  if (STATE.internalTopic) {
-    log('Subscribing to internal temperature topic:', STATE.internalTopic);
-    MQTT.subscribe(STATE.internalTopic, onInternalTemperature, null);
+  log('Subscribing to MQTT topics for temperature sources...');
+  if (CONFIG.internalTemperatureTopic) {
+    log('Subscribing to internal temperature topic & /request:', CONFIG.internalTemperatureTopic);
+    MQTT.subscribe(CONFIG.internalTemperatureTopic, onTemperature.bind(STORAGE_KEYS.internalTemp), null);
+    MQTT.subscribe(CONFIG.internalTemperatureTopic + '/request', onTemperatureRequest.bind(STORAGE_KEYS.internalTemp), null);
   }
-  if (STATE.externalTopic) {
-    log('Subscribing to external temperature topic:', STATE.externalTopic);
-    MQTT.subscribe(STATE.externalTopic, onExternalTemperature, null);
-  }
-}
-
-// Callback for internal temperature MQTT messages
-function onInternalTemperature(topic, message, userdata) {
-  var temp = parseTemperatureFromMqtt(topic, message);
-  if (temp !== null) {
-    // Store in Script.storage (synchronous, internal data)
-    Script.storage.setItem(STORAGE_KEYS.internalTemp, temp);
-    log('Stored internal temperature:', temp);
-  }
-}
-
-// Callback for external temperature MQTT messages
-function onExternalTemperature(topic, message, userdata) {
-  var temp = parseTemperatureFromMqtt(topic, message);
-  if (temp !== null) {
-    // Store in Script.storage (synchronous, internal data)
-    Script.storage.setItem(STORAGE_KEYS.externalTemp, temp);
-    log('Stored external temperature:', temp);
+  if (CONFIG.externalTemperatureTopic) {
+    log('Subscribing to external temperature topic & /request:', CONFIG.externalTemperatureTopic);
+    MQTT.subscribe(CONFIG.externalTemperatureTopic, onTemperature.bind(STORAGE_KEYS.externalTemp), null);
+    MQTT.subscribe(CONFIG.externalTemperatureTopic + '/request', onTemperatureRequest.bind(STORAGE_KEYS.externalTemp), null);
   }
 }
 
@@ -687,6 +691,9 @@ Timer.set(60 * 60 * 1000, true, function() {
     });
   }
 });
+
+// Subscribe to MQTT topics for temperature sources
+subscribeMqttTemperatures();
 
 // Handle script stop event
 Shelly.addEventHandler(function(eventData) {

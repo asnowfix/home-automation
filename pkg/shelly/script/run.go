@@ -28,7 +28,9 @@ func Run(ctx context.Context, name string, buf []byte, minify bool) error {
 		}
 	}
 	handlers := make([]handler, 0)
-	vm, err := createShellyRuntime(ctx, &handlers)
+	storage := make(map[string]interface{}) // In-memory storage for testing
+
+	vm, err := createShellyRuntime(ctx, &handlers, &storage)
 	if err != nil {
 		log.Error(err, "Failed to create Shelly runtime", "name", name)
 		return err
@@ -104,7 +106,7 @@ type handler interface {
 }
 
 // createShellyRuntime creates a goja VM with Shelly API placeholders
-func createShellyRuntime(ctx context.Context, handlers *[]handler) (*goja.Runtime, error) {
+func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[string]interface{}) (*goja.Runtime, error) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -369,10 +371,9 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler) (*goja.Runtim
 
 	// Script.storage object
 	storageObj := vm.NewObject()
-	storage := make(map[string]interface{}) // In-memory storage for testing
 	storageObj.Set("getItem", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()
-		if val, ok := storage[key]; ok {
+		if val, ok := (*storage)[key]; ok {
 			return vm.ToValue(val)
 		}
 		return goja.Null()
@@ -380,8 +381,9 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler) (*goja.Runtim
 	storageObj.Set("setItem", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()
 		value := call.Argument(1).Export()
-		storage[key] = value
-		log.V(1).Info("Script.storage.setItem", "key", key, "value", value)
+		(*storage)[key] = value
+		log.Info("Script.storage.setItem", "key", key, "value", value)
+		log.V(1).Info("Script.storage.setItem", "storage", *storage)
 		return goja.Undefined()
 	})
 	scriptObj.Set("storage", storageObj)

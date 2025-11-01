@@ -12,7 +12,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"global"
 	"hlog"
 	mhscript "internal/myhome/shelly/script"
 	"myhome"
@@ -61,24 +60,20 @@ func isTimeoutError(err error) bool {
 		return false
 	}
 	errStr := err.Error()
-	return strings.Contains(errStr, "timeout") || 
-	       strings.Contains(errStr, "Timeout") ||
-	       strings.Contains(errStr, "deadline exceeded")
+	return strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "Timeout") ||
+		strings.Contains(errStr, "deadline exceeded")
 }
 
 // setupDeviceByIP sets up a device using its IP address (initial setup mode)
-func setupDeviceByIP(cmdCtx context.Context, name string, ip net.IP) error {
-	// Setup includes firmware updates and script uploads which can take a long time
-	longCtx := global.ContextWithoutTimeout(cmdCtx, hlog.Logger)
-	_, err := myhome.Foreach(longCtx, hlog.Logger, ip.String(), types.ChannelHttp, doSetup, []string{name})
+func setupDeviceByIP(ctx context.Context, name string, ip net.IP) error {
+	_, err := myhome.Foreach(ctx, hlog.Logger, ip.String(), types.ChannelHttp, doSetup, []string{name})
 	return err
 }
 
 // setupDevicesByName sets up devices by looking them up by name pattern
-func setupDevicesByName(cmdCtx context.Context, pattern string) error {
-	// Setup includes firmware updates and script uploads which can take a long time
-	longCtx := global.ContextWithoutTimeout(cmdCtx, hlog.Logger)
-	_, err := myhome.Foreach(longCtx, hlog.Logger, pattern, types.ChannelHttp, doSetup, []string{})
+func setupDevicesByName(ctx context.Context, pattern string) error {
+	_, err := myhome.Foreach(ctx, hlog.Logger, pattern, types.ChannelHttp, doSetup, []string{})
 	return err
 }
 
@@ -154,9 +149,7 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	// Check for and apply firmware updates BEFORE configuring MQTT and scripts
 	// This ensures we're working with the latest firmware
 	fmt.Printf("  . Checking for firmware updates on %s...\n", deviceId)
-	// Create a context without timeout for potentially long update process
-	updateCtx := global.ContextWithoutTimeout(ctx, log)
-	err = checkAndApplyUpdates(updateCtx, log, via, sd, deviceId)
+	err = checkAndApplyUpdates(ctx, log, via, sd, deviceId)
 	if err != nil {
 		fmt.Printf("  ✗ Failed to check/apply updates on %s: %v\n", deviceId, err)
 		return nil, err
@@ -260,12 +253,9 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	if status.RestartRequired {
 		fmt.Printf("  . Rebooting %s (required after configuration changes)...\n", deviceId)
 		hlog.Logger.Info("Device rebooting", "device", sd.Id())
-		
-		// Use timeout-free context for reboot since device won't respond (it reboots immediately)
-		rebootCtx := global.ContextWithoutTimeout(ctx, log)
-		err = shelly.DoReboot(rebootCtx, sd)
-		// Ignore timeout errors for reboot - they're expected since device reboots immediately
-		if err != nil && !isTimeoutError(err) {
+
+		err = shelly.DoReboot(ctx, sd)
+		if err != nil {
 			fmt.Printf("  ✗ Failed to reboot %s: %v\n", deviceId, err)
 			return nil, err
 		}
@@ -291,7 +281,7 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 				return nil, fmt.Errorf("device did not come back online after reboot")
 			}
 		}
-		
+
 		// Wait additional time for all services to fully initialize
 		// The device may respond to status checks but internal services (like script engine) need more time
 		fmt.Printf("  . Waiting for %s services to fully initialize...\n", deviceId)
@@ -377,19 +367,19 @@ func setupAutoUpdateJob(ctx context.Context, log logr.Logger, via types.Channel,
 	if err != nil {
 		return fmt.Errorf("failed to list jobs: %w", err)
 	}
-	
+
 	scheduled := out.(*schedule.Scheduled)
-	
+
 	// Generate random time between 03:00 and 05:00
 	// Random hour: 3 or 4
 	// Random minute: 0-59
-	randomHour := 3 + rand.Intn(2)  // 3 or 4
-	randomMinute := rand.Intn(60)    // 0-59
-	
+	randomHour := 3 + rand.Intn(2) // 3 or 4
+	randomMinute := rand.Intn(60)  // 0-59
+
 	// Cron format: second minute hour day month weekday
 	// 0 <minute> <hour> * * SUN,MON,TUE,WED,THU,FRI,SAT
 	timespec := fmt.Sprintf("0 %d %d * * SUN,MON,TUE,WED,THU,FRI,SAT", randomMinute, randomHour)
-	
+
 	// Look for existing Shelly.Update job
 	var existingJobId *uint32
 	for _, job := range scheduled.Jobs {
@@ -404,7 +394,7 @@ func setupAutoUpdateJob(ctx context.Context, log logr.Logger, via types.Channel,
 			break
 		}
 	}
-	
+
 	// Create the job spec
 	jobSpec := schedule.JobSpec{
 		Enable:   true,
@@ -418,7 +408,7 @@ func setupAutoUpdateJob(ctx context.Context, log logr.Logger, via types.Channel,
 			},
 		},
 	}
-	
+
 	if existingJobId != nil {
 		// Update existing job
 		job := schedule.Job{
@@ -439,7 +429,7 @@ func setupAutoUpdateJob(ctx context.Context, log logr.Logger, via types.Channel,
 		jobId := result.(*schedule.JobId)
 		fmt.Printf("    ✓ Created auto-update job on %s (id: %d, time: %02d:%02d daily)\n", deviceId, jobId.Id, randomHour, randomMinute)
 	}
-	
+
 	return nil
 }
 
@@ -447,16 +437,16 @@ func setupAutoUpdateJob(ctx context.Context, log logr.Logger, via types.Channel,
 func checkAndApplyUpdates(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device, deviceId string) error {
 	maxIterations := 5 // Safety limit to prevent infinite loops
 	iteration := 0
-	
+
 	for iteration < maxIterations {
 		iteration++
-		
+
 		// Check for available updates
 		updateInfo, err := shelly.DoCheckForUpdate(ctx, via, sd)
 		if err != nil {
 			return fmt.Errorf("failed to check for updates: %w", err)
 		}
-		
+
 		// Check if stable update is available
 		if updateInfo.Stable == nil || updateInfo.Stable.Version == "" {
 			if iteration == 1 {
@@ -466,27 +456,27 @@ func checkAndApplyUpdates(ctx context.Context, log logr.Logger, via types.Channe
 			}
 			return nil
 		}
-		
+
 		// Update available
-		fmt.Printf("    → Stable firmware %s (build %s) available on %s\n", 
+		fmt.Printf("    → Stable firmware %s (build %s) available on %s\n",
 			updateInfo.Stable.Version, updateInfo.Stable.BuildId, deviceId)
 		fmt.Printf("    - Applying update on %s...\n", deviceId)
-		
+
 		// Apply the update
 		err = shelly.DoUpdate(ctx, via, sd, "stable")
 		if err != nil {
 			return fmt.Errorf("failed to initiate update: %w", err)
 		}
-		
+
 		// Wait for update to complete
 		// The device will reboot during the update process
 		fmt.Printf("    - Waiting for %s to update and reboot (this may take 2-3 minutes)...\n", deviceId)
 		time.Sleep(10 * time.Second) // Initial wait for update to start
-		
+
 		// Wait for device to go offline (update started)
 		fmt.Printf("    - Waiting for %s to go offline for update...\n", deviceId)
 		time.Sleep(30 * time.Second)
-		
+
 		// Wait for device to come back online after update
 		fmt.Printf("    - Waiting for %s to come back online...\n", deviceId)
 		maxRetries := 40 // 40 * 5 seconds = 200 seconds (3+ minutes)
@@ -505,15 +495,15 @@ func checkAndApplyUpdates(ctx context.Context, log logr.Logger, via types.Channe
 				return fmt.Errorf("device did not come back online after update (waited %d seconds)", maxRetries*5)
 			}
 		}
-		
+
 		if !deviceOnline {
 			return fmt.Errorf("device did not come back online after update")
 		}
-		
+
 		// Check if more updates are available
 		fmt.Printf("    - Checking for additional updates on %s...\n", deviceId)
 	}
-	
+
 	// If we hit the max iterations, warn but don't fail
 	fmt.Printf("    ⚠ Reached maximum update iterations (%d) on %s\n", maxIterations, deviceId)
 	log.Info("Reached maximum update iterations", "device", sd.Id(), "iterations", maxIterations)

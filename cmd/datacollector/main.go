@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"internal/global"
 	"internal/myhome"
 	"pkg/shelly"
 	"pkg/shelly/ethernet"
@@ -62,15 +61,8 @@ func main() {
 	hlog.Init(false) // not verbose
 	logger = hlog.Logger
 
-	ctx := context.Background()
-	ctx = options.CommandLineContext(ctx, logger, 30*time.Second, Version)
-
-	// Debug: Check if logger is in context
-	if logFromCtx, ok := ctx.Value(global.LogKey).(logr.Logger); ok {
-		fmt.Printf("Logger successfully added to context: %T\n", logFromCtx)
-	} else {
-		fmt.Printf("Failed to add logger to context\n")
-	}
+	ctx := logr.NewContext(context.Background(), logger)
+	ctx = options.CommandLineContext(ctx, Version)
 
 	// Initialize the home automation client
 	client, err := myhome.NewClientE(ctx, logger, 30*time.Second)

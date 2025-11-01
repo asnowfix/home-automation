@@ -83,7 +83,7 @@ func (d *daemon) Run() error {
 	}
 
 	// Connect to the network's MQTT broker or use the embedded broker
-	err = mqttclient.NewClientE(d.ctx, log.WithName("mqttclient.Client"), options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+	err = mqttclient.NewClientE(d.ctx, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 	if err != nil {
 		log.Error(err, "Failed to initialize MQTT client")
 		return err

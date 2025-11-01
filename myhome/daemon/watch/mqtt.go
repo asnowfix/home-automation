@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"global"
 	"myhome"
 	"myhome/ctl/options"
 	"myhome/devices"
@@ -20,8 +19,10 @@ import (
 )
 
 func StartMqttWatcher(ctx context.Context, mc *mqttclient.Client, dm devices.Manager, dr devices.DeviceRegistry) error {
-	log := ctx.Value(global.LogKey).(logr.Logger)
-
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
 	topic := "+/events/rpc"
 	ch, err := mc.Subscriber(ctx, topic, 16)
 	if err != nil {
@@ -120,7 +121,10 @@ func mqttWatcher(ctx context.Context, topic string, dm devices.Manager, dr devic
 }
 
 func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqtt.Event) error {
-	log := ctx.Value(global.LogKey).(logr.Logger)
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
 
 	// Events like:
 	// - '{"src":"shelly1minig3-54320464a1d0","dst":"shelly1minig3-54320464a1d0/events","method":"NotifyStatus","params":{"ts":1736603810.49,"switch:0":{"id":0,"output":false,"source":"HTTP_in"}}}'

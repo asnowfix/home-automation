@@ -3,7 +3,6 @@ package impl
 import (
 	"context"
 	"fmt"
-	"global"
 	"myhome"
 	"myhome/ctl/options"
 	"myhome/daemon/watch"
@@ -39,7 +38,10 @@ type DeviceManager struct {
 }
 
 func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient *mqtt.Client) *DeviceManager {
-	log := ctx.Value(global.LogKey).(logr.Logger)
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
 	return &DeviceManager{
 		dr:         mhd.NewCache(ctx, s),
 		gr:         s,

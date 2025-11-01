@@ -3,7 +3,6 @@ package mqtt
 import (
 	"context"
 	"fmt"
-	"global"
 	"myhome/ctl/options"
 	"mynet"
 	"net"
@@ -52,9 +51,9 @@ var client *Client
 var mutex sync.Mutex
 
 func GetClientE(ctx context.Context) (*Client, error) {
-	log, ok := ctx.Value(global.LogKey).(logr.Logger)
-	if !ok {
-		panic("no logger initialized")
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	mutex.Lock()
@@ -97,7 +96,13 @@ func GetClientE(ctx context.Context) (*Client, error) {
 	return client, nil
 }
 
-func NewClientE(ctx context.Context, log logr.Logger, broker string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration) error {
+func NewClientE(ctx context.Context, broker string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration) error {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return err
+	}
+	log = log.WithName("mqtt.Client")
+
 	defer mutex.Unlock()
 	mutex.Lock()
 

@@ -15,6 +15,7 @@ import (
 
 	"debug"
 
+	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
@@ -37,12 +38,24 @@ var Cmd = &cobra.Command{
 		}
 
 		log := hlog.Logger
-		ctx := cmd.Context()
+		ctx := logr.NewContext(cmd.Context(), log)
+
+		if options.Flags.CpuProfile != "" {
+			if options.Flags.CpuProfile != "" {
+				f, err := os.Create(options.Flags.CpuProfile)
+				if err != nil {
+					log.Error(err, "Failed to create CPU profile")
+					return err
+				}
+				pprof.StartCPUProfile(f)
+				ctx = context.WithValue(ctx, global.CpuProfileKey, f)
+			}
+		}
 
 		if debug.IsDebuggerAttached() {
 			log.Info("Running under debugger (will wait forever)")
 			// You can set different timeouts or behavior here
-			options.Flags.CommandTimeout = 0
+			options.Flags.Wait = 0
 		}
 
 		if options.Flags.CpuProfile != "" {
@@ -58,12 +71,11 @@ var Cmd = &cobra.Command{
 		}
 
 		// Daemon commands should run indefinitely, no timeout
-		timeout := options.Flags.CommandTimeout
 		if isDaemon {
-			timeout = 0
+			options.Flags.Wait = 0
 		}
 
-		ctx = options.CommandLineContext(ctx, log, timeout, Version)
+		ctx = options.CommandLineContext(ctx, Version)
 		cmd.SetContext(ctx)
 
 		return nil

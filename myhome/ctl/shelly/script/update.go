@@ -3,7 +3,6 @@ package script
 import (
 	"context"
 	"fmt"
-	"global"
 	"hlog"
 	mhscript "internal/myhome/shelly/script"
 	"myhome"
@@ -39,9 +38,7 @@ var updateCtl = &cobra.Command{
 		if len(args) > 1 {
 			scriptArgs = []string{args[1]}
 		}
-		// Script updates can be long: Use a context without timeout
-		longCtx := global.ContextWithoutTimeout(cmd.Context(), log)
-		_, err := myhome.Foreach(longCtx, log, device, options.Via, doUpdate, scriptArgs)
+		_, err := myhome.Foreach(cmd.Context(), log, device, options.Via, doUpdate, scriptArgs)
 		return err
 	},
 }
@@ -100,7 +97,7 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 			})
 			continue
 		}
-		
+
 		id, err := mhscript.UploadWithVersion(ctx, log, via, sd, scriptName, buf, !updateNoMinify, updateForce)
 		if err != nil {
 			fmt.Printf("  ✗ Failed to update %s: %v\n", scriptName, err)

@@ -15,16 +15,16 @@ import (
 
 // UploadWithVersion uploads a script and tracks its version in KVS
 // This is MyHome-specific business logic that combines script upload with version tracking
-func UploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, name string, content []byte, minify bool, force bool) (uint32, error) {
+func UploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, name string, code []byte, minify bool, force bool) (uint32, error) {
 	// Calculate version hash
 	h := sha1.New()
-	h.Write(content)
+	h.Write(code)
 	version := hex.EncodeToString(h.Sum(nil))
 
 	// Use basename to get just the filename without any directory path
 	basename := filepath.Base(name)
 	kvsKey := fmt.Sprintf("script/%s", basename)
-	
+
 	// Read the script version from the KVS
 	kvsVersion := ""
 	res, err := kvs.GetValue(ctx, log, via, device, kvsKey)
@@ -44,13 +44,13 @@ func UploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, 
 		} else {
 			log.Info("Script version is different, uploading new one", "name", name, "version", version)
 		}
-		
+
 		// Upload the script using the generic pkg/shelly/script package
-		id, err = script.UploadAndStart(ctx, via, device, name, content, minify)
+		id, err = script.Upload(ctx, via, device, name, code, minify)
 		if err != nil {
 			return 0, err
 		}
-		
+
 		// Create/update KVS entry with script version
 		_, err = kvs.SetKeyValue(ctx, log, via, device, kvsKey, version)
 		if err != nil {
@@ -61,14 +61,15 @@ func UploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, 
 		}
 	} else {
 		log.Info("Script version is the same, skipping upload", "name", name, "version", version)
-		// Still need to start the script
-		_, err = script.StartStopDelete(ctx, via, device, name, script.Start)
-		if err != nil {
-			log.Error(err, "Unable to start script", "name", name, "device", device.Name())
-			return 0, err
-		}
 	}
-	
+
+	// Now start the script
+	_, err = script.StartStopDelete(ctx, via, device, name, script.Start)
+	if err != nil {
+		log.Error(err, "Unable to start script", "name", name, "device", device.Name())
+		return 0, err
+	}
+
 	return id, nil
 }
 

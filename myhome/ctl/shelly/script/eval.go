@@ -22,8 +22,24 @@ func init() {
 }
 
 var evalCtl = &cobra.Command{
-	Use:   "eval",
-	Short: "Evaluate the given JavaScript code on the given SHelly device(s)",
+	Use:   "eval <device-name-or-ip> <script-name> <javascript-code>",
+	Short: "Evaluate the given JavaScript code on the given Shelly device(s)",
+	Long: `Evaluate JavaScript code in the context of a running script on a Shelly device.
+
+This uses Script.Eval to execute code within the script's context, allowing you to:
+- Inspect script variables and state
+- Call script functions
+- Debug script behavior
+
+Examples:
+  # Check a variable value in heater.js
+  myhome ctl shelly script eval radiateur-salon-hiver heater.js "CONFIG.setpoint"
+  
+  # Call a function
+  myhome ctl shelly script eval radiateur-salon-hiver heater.js "getFilteredTemp()"
+  
+  # Inspect state
+  myhome ctl shelly script eval radiateur-salon-hiver heater.js "STATE"`,
 	Args:  cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEval, args[1:])

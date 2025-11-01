@@ -32,6 +32,7 @@ const MQTT_WATCHDOG_MAX_FAILURES int = 3
 var Flags struct {
 	CpuProfile              string
 	Verbose                 bool
+	Debug                   bool
 	Quiet                   bool
 	Json                    bool
 	MqttBroker              string

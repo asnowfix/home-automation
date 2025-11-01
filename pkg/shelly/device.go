@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"myhome/mqtt"
 	"mynet"
 	"net"
 	"pkg/devices"
 	"pkg/shelly/ethernet"
+	"pkg/shelly/mqtt"
 	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -449,7 +449,7 @@ func (d *Device) initMqtt(ctx context.Context) error {
 		// return fmt.Errorf("device id is empty: no channel to communicate")
 	}
 
-	mc, err := mqtt.GetClientE(ctx)
+	mc, err := mqtt.FromContext(ctx)
 	if err != nil {
 		d.log.Error(err, "Unable to get MQTT client")
 		return err

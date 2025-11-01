@@ -51,14 +51,6 @@ var client *Client
 
 var mutex sync.Mutex
 
-func GetClient(ctx context.Context) *Client {
-	c, err := GetClientE(ctx)
-	if err != nil {
-		panic(err)
-	}
-	return c
-}
-
 func GetClientE(ctx context.Context) (*Client, error) {
 	log, ok := ctx.Value(global.LogKey).(logr.Logger)
 	if !ok {
@@ -142,6 +134,11 @@ func NewClientE(ctx context.Context, log logr.Logger, broker string, mdnsTimeout
 	return nil
 }
 
+func (c *Client) GetServer() string {
+	// Host == <hostname>:<port>
+	return c.brokerUrl.Host
+}
+
 func (c *Client) Id() string {
 	opts := c.mqtt.OptionsReader()
 	return opts.ClientID()
@@ -171,33 +168,33 @@ func (c *Client) connect() error {
 		return err
 	}
 	c.log.Info("Successfully connected as MQTT client", "client_id", c.Id())
-	
+
 	// Start watchdog on first successful connection
 	c.startWatchdogOnce()
-	
+
 	return nil
 }
 
 func (c *Client) startWatchdogOnce() {
 	c.watchdogMutex.Lock()
 	defer c.watchdogMutex.Unlock()
-	
+
 	if c.watchdogStarted {
 		return
 	}
 	c.watchdogStarted = true
-	
+
 	go c.watchdog()
 }
 
 func (c *Client) watchdog() {
 	consecutiveFailures := 0
-	
+
 	c.log.Info("Starting MQTT connection watchdog", "check_interval", c.watchdogInterval, "max_failures", c.watchdogMaxFailures)
-	
+
 	ticker := time.NewTicker(c.watchdogInterval)
 	defer ticker.Stop()
-	
+
 	for range ticker.C {
 		if c.mqtt.IsConnected() {
 			if consecutiveFailures > 0 {
@@ -207,13 +204,13 @@ func (c *Client) watchdog() {
 		} else {
 			consecutiveFailures++
 			c.log.Error(nil, "MQTT connection lost", "consecutive_failures", consecutiveFailures, "max_failures", c.watchdogMaxFailures)
-			
+
 			// Note: Paho MQTT client has AutoReconnect=true and ResumeSubs=true,
 			// so it will automatically reconnect and re-subscribe to all topics.
 			// We just monitor if reconnection is taking too long.
-			
+
 			if consecutiveFailures >= c.watchdogMaxFailures {
-				c.log.Error(nil, "MQTT connection failed too many times, daemon needs restart", 
+				c.log.Error(nil, "MQTT connection failed too many times, daemon needs restart",
 					"consecutive_failures", consecutiveFailures)
 				panic("MQTT connection permanently lost")
 			}
@@ -344,7 +341,7 @@ type MqttMessage struct {
 // 	}
 // }
 
-func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan []byte, error) {
+func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan<- []byte, error) {
 	err := c.connect()
 	if err != nil {
 		c.log.Error(err, "Unable to connect to create publisher channel", "topic", topic)
@@ -364,7 +361,7 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan [
 					log.Info("Channel closed", "topic", topic)
 					return
 				}
-				c.Publish(topic, msg)
+				c.Publish(ctx, topic, msg)
 			}
 		}
 	}(c.log.WithName("Client#Publisher:" + topic))
@@ -373,7 +370,7 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan [
 	return mch, nil
 }
 
-func (c *Client) Publish(topic string, msg []byte) error {
+func (c *Client) Publish(ctx context.Context, topic string, msg []byte) error {
 	err := c.connect()
 	if err != nil {
 		c.log.Error(err, "Unable to connect to publish", "topic", topic)
@@ -390,7 +387,7 @@ func (c *Client) Publish(topic string, msg []byte) error {
 	}
 }
 
-func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (chan []byte, error) {
+func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (<-chan []byte, error) {
 	err := c.connect()
 	if err != nil {
 		c.log.Error(err, "Unable to connect to create subscriber channel", "topic", topic)

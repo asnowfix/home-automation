@@ -13,6 +13,7 @@ import (
 	"mynet"
 	"pkg/shelly"
 	"pkg/shelly/gen1"
+	"pkg/shelly/mqtt"
 	"time"
 
 	"myhome"
@@ -93,6 +94,9 @@ func (d *daemon) Run() error {
 		return err
 	}
 	defer mc.Close()
+
+	// Add Shelly MQTT client to context
+	d.ctx = mqtt.NewContext(d.ctx, mc)
 
 	// Start Gen1 (HTTP->MQTT) proxy (auto-enabled with embedded MQTT broker)
 	if options.Flags.EnableGen1Proxy {

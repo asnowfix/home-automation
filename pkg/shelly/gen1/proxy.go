@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	mqttclient "myhome/mqtt"
 	"net"
 	"net/http"
 	"net/url"
+	"pkg/shelly/mqtt"
 	"regexp"
 
 	"github.com/go-logr/logr"
@@ -22,11 +22,11 @@ var uaRe = regexp.MustCompile(`^\[?Shelly/(?P<fw_date>[0-9-]+)/(?P<fw_id>[a-z0-9
 type http2MqttProxy struct {
 	ctx     context.Context
 	log     logr.Logger
-	mc      *mqttclient.Client
+	mc      mqtt.Client
 	decoder *schema.Decoder
 }
 
-func StartHttp2MqttProxy(ctx context.Context, port int, mc *mqttclient.Client) {
+func StartHttp2MqttProxy(ctx context.Context, port int, mc mqtt.Client) {
 	hp := http2MqttProxy{
 		ctx:     ctx,
 		log:     logr.FromContextOrDiscard(ctx).WithName("Http2MqttProxy"),
@@ -100,7 +100,7 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal temperature: %w", err)
 	}
-	hp.mc.Publish(tempTopic, tempMsg)
+	hp.mc.Publish(hp.ctx, tempTopic, tempMsg)
 	hp.log.Info("Published Gen1 MQTT", "topic", tempTopic, "value", device.Temperature)
 
 	if device.IsHTSensor() {
@@ -110,7 +110,7 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal humidity: %w", err)
 		}
-		hp.mc.Publish(humTopic, humMsg)
+		hp.mc.Publish(hp.ctx, humTopic, humMsg)
 		hp.log.Info("Published Gen1 MQTT", "topic", humTopic, "value", *device.Humidity)
 	}
 
@@ -121,7 +121,7 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal flood: %w", err)
 		}
-		hp.mc.Publish(floodTopic, floodMsg)
+		hp.mc.Publish(hp.ctx, floodTopic, floodMsg)
 		hp.log.Info("Published Gen1 MQTT", "topic", floodTopic, "value", *device.Flood)
 
 		// Publish battery voltage
@@ -130,7 +130,7 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal battery: %w", err)
 		}
-		hp.mc.Publish(batTopic, batMsg)
+		hp.mc.Publish(hp.ctx, batTopic, batMsg)
 		hp.log.Info("Published Gen1 MQTT", "topic", batTopic, "value", *device.BatteryVoltage)
 	}
 

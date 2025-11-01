@@ -19,6 +19,7 @@ import (
 	mqttclient "myhome/mqtt"
 	"os"
 	shellyPkg "pkg/shelly"
+	shellyMqtt "pkg/shelly/mqtt"
 	"pkg/shelly/types"
 	"runtime/pprof"
 
@@ -56,13 +57,21 @@ var Cmd = &cobra.Command{
 		}
 
 		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout, Version)
-		cmd.SetContext(ctx)
 
 		err := mqttclient.NewClientE(ctx, log, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
 		}
+
+		mc, err := mqttclient.GetClientE(ctx)
+		if err != nil {
+			log.Error(err, "Failed to get MQTT client")
+			return err
+		}
+
+		// Add Shelly MQTT client to context
+		ctx = shellyMqtt.NewContext(ctx, mc)
 
 		myhome.TheClient, err = myhome.NewClientE(ctx, log, options.Flags.MqttTimeout)
 		if err != nil {
@@ -78,6 +87,8 @@ var Cmd = &cobra.Command{
 				break
 			}
 		}
+
+		cmd.SetContext(ctx)
 
 		return nil
 	},

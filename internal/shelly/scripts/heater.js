@@ -7,34 +7,37 @@ const CONFIG_KEY_PREFIX = 'script/' + SCRIPT_NAME + '/';
 const SCRIPT_PREFIX = "[" + SCRIPT_NAME + "] ";
 const DEFAULT_COOLING_RATE = 1.0;
 
-var OCCUPANCY_URL = null;
-
 var CONFIG = {
   // Configuration values (loaded from KVS or defaults)
-  log: true,
+  enableLogging: true,
   setpoint: 19.0,
   minInternalTemp: 15.0,
   cheapStartHour: 23,
   cheapEndHour: 7,
   pollIntervalMs: 5 * 60 * 1000,
   preheatHours: 2,
+  normallyClosed: true,
 };
 
 var CONFIG_KEY = {
   // Configuration keys (to load from KVS)
-  log: "log",
+  enableLogging: "enable-logging",
   setpoint: "set-point",
   minInternalTemp: "min-internal-temp",
   cheapStartHour: "cheap-start-hour",
   cheapEndHour: "cheap-end-hour",
   pollIntervalMs: "poll-interval-ms",
   preheatHours: "preheat-hours",
+  normallyClosed: "normally-closed",
 };
 
 // Script.storage keys for continuously evolving values
 var STORAGE_KEYS = {
   coolingRate: "cooling-rate",
-  forecastUrl: "forecast-url"
+  forecastUrl: "forecast-url",
+  lastCheapEnd: "last-cheap-end",
+  internalTemp: "internal-temp",
+  externalTemp: "external-temp"
 };
 
 function getCoolingRate() {
@@ -59,7 +62,7 @@ function setCoolingRate(v) {
  */
 
 function log() {
-  if (!CONFIG.log) return;
+  if (!CONFIG.enableLogging) return;
   var s = "";
   for (var i = 0; i < arguments.length; i++) {
     try {
@@ -84,6 +87,9 @@ var STATE = {
   // MQTT topics (loaded from KV or defaults)
   internalTopic: null,
   externalTopic: null,
+
+  // Occupancy URL (loaded from KV or defaults)
+  occupancyUrl: null,
   
   // Forecast cache
   forecastUrl: null,
@@ -136,20 +142,59 @@ function updateForecastURL(lat, lon) {
   }
 }
 
-function loadConfigValue(key, defaultValue, callback) {
-  Shelly.call('KVS.Get', { key: CONFIG_KEY_PREFIX + key }, function(result, error_code, error_message) {
-    if (!error_code && result && typeof result.value !== 'undefined') {
-      // Found value in KVS (stored as string)
-      callback(result.value);
-    } else {
-      // No value in KVS, save default in KVS and return default as string
-      saveConfigValue(key, defaultValue);
+function loadConfig() {
+  Shelly.call('KVS.GetMany', {}, function(result, error_code, error_message) {
+    if (error_code === 0 && result && result.items) {
+      log('KVS config loaded, processing', result.items.length, 'items');
       try {
-        callback(JSON.stringify(defaultValue));
+        // Loop through all KVS items
+        for (var i = 0; i < result.items.length; i++) {
+          var item = result.items[i];
+          var itemKey = item.key;
+          
+          // Check if this key matches any of our config keys
+          for (var configName in CONFIG_KEY) {
+            var fullKey = CONFIG_KEY_PREFIX + CONFIG_KEY[configName];
+            
+            if (itemKey === fullKey) {
+              var valueStr = item.value;
+              var value;
+              
+              try {
+                value = JSON.parse(valueStr);
+              } catch (e) {
+                try {
+                  value = parseFloat(valueStr);
+                } catch (e) {
+                  try {
+                    value = parseInt(valueStr);
+                  } catch (e) {
+                    try {
+                      value = parseBoolean(valueStr);
+                    } catch (e) {
+                      value = valueStr;
+                    }
+                  }
+                }
+              }
+              
+              CONFIG[configName] = value;
+              log('Loaded config', configName, '=', value, 'from key', itemKey);
+              break;
+            }
+          }
+          
+          // Also check for normally-closed in switch component KVS
+          if (itemKey === 'normally-closed') {
+            CONFIG.normallyClosed = item.value === 'true';
+            log('Loaded normally-closed =', CONFIG.normallyClosed);
+          }
+        }
       } catch (e) {
-        // Fallback to string coercion if JSON stringify fails
-        callback(String(defaultValue));
+        log('Error loading KVS config:', e);
       }
+    } else {
+      log('Failed to load KVS config (error ' + error_code + '): ' + error_message);
     }
   });
 }
@@ -163,34 +208,6 @@ function saveConfigValue(key, value) {
       log('Saved config', key, ':', valueStr);
     }
   });
-}
-
-function loadConfig() {
-  for (var key in CONFIG) {
-    if (CONFIG.hasOwnProperty(key)) {
-      loadConfigValue(key, CONFIG[key], function(valueStr) {
-        var value;
-        try {
-          value = JSON.parse(valueStr);
-        } catch (e) {
-          try {
-            value = parseFloat(valueStr);
-          } catch (e) {
-            try {
-              value = parseInt(valueStr);
-            } catch (e) {
-              try {
-                value = parseBoolean(valueStr);
-              } catch (e) {
-                value = valueStr;
-              }
-            }
-          }
-        }
-        CONFIG[key] = value;
-      });
-    }
-  }
 }
 
 // Call this once at script start - detect location first, then load config
@@ -211,13 +228,32 @@ function onCheapWindowEnd() {
   var temp = getFilteredTemp();
   if (temp !== null) {
     var now = (new Date()).getTime();
-    Shelly.setKV(CONFIG_KEY.lastCheapestEnd, JSON.stringify({ temp: temp, time: now }));
+    var data = { temp: temp, time: now };
+    Script.storage.setItem(STORAGE_KEYS.lastCheapEnd, JSON.stringify(data));
     log("Stored end-of-cheap-window temp:", temp);
   }
 }
 
 function onCheapWindowStart() {
-  var data = CONFIG.lastCheapestEnd;
+  var storedData = Script.storage.getItem(STORAGE_KEYS.lastCheapEnd);
+  if (!storedData) {
+    log("No previous cheap window end data available for learning");
+    return;
+  }
+  
+  var data = null;
+  try {
+    data = JSON.parse(storedData);
+  } catch (e) {
+    log("Failed to parse last cheap end data");
+    return;
+  }
+  
+  if (!data || !data.temp || !data.time) {
+    log("Invalid last cheap end data");
+    return;
+  }
+  
   var prevTemp = data.temp;
   var prevTime = data.time;
   var now = (new Date()).getTime();
@@ -229,7 +265,7 @@ function onCheapWindowStart() {
     var oldRate = getCoolingRate();
     var newRate = 0.7 * oldRate + 0.3 * rate; // EMA
     setCoolingRate(newRate);
-    log("Updated cooling rate:", newRate);
+    log("Updated cooling rate:", newRate, "from", oldRate);
   }
 }
 
@@ -254,42 +290,20 @@ function scheduleLearningTimers() {
 scheduleLearningTimers();
 
 function initOccupancyUrl(cb) {
-  function setFromHost(h) {
-    if (h && typeof h === 'string' && h.length > 0) {
-      var host = h;
-      var i = host.indexOf('://');
-      if (i >= 0) host = host.substring(i + 3);
-      var j = host.indexOf(':');
-      if (j >= 0) host = host.substring(0, j);
-      OCCUPANCY_URL = 'http://' + host + ':8889/status';
-      log('Occupancy URL set to', OCCUPANCY_URL);
-      return true;
+  log('initOccupancyUrl');
+  // Try to get MQTT status synchronously
+  var cfg = Shelly.getComponentConfig('mqtt');
+  if (cfg && typeof cfg === 'object') {
+    if ("server" in cfg && typeof cfg.server === 'string') {
+      // server = "192.168.1.2:1883"
+      var host = cfg.server;
+      var i = host.indexOf(':');
+      if (i >= 0) host = host.substring(0, i);
+      STATE.occupancyUrl = 'http://' + host + ':8889/status';
+      log('Occupancy URL set to', STATE.occupancyUrl);
+      if (cb) cb(STATE.occupancyUrl);
     }
-    return false;
   }
-  Shelly.getComponentStatus('mqtt', function(st) {
-    var done = false;
-    if (st && typeof st === 'object') {
-      if (!done && ("address" in st) && typeof st.address === 'string') {
-        done = setFromHost(st.address);
-      }
-      if (!done && ("remote_addr" in st) && typeof st.remote_addr === 'string') {
-        done = setFromHost(st.remote_addr);
-      }
-      if (!done && ("server" in st) && typeof st.server === 'string') {
-        done = setFromHost(st.server);
-      }
-    }
-    if (done) { if (cb) cb(); return; }
-    Shelly.call('Sys.GetConfig', {}, function(result, error_code, error_message) {
-      if (!error_code && result && result.mqtt && ("server" in result.mqtt)) {
-        setFromHost(result.mqtt.server);
-      } else {
-        log('Unable to detect MQTT server for occupancy URL');
-      }
-      if (cb) cb();
-    });
-  });
 }
 
 // === PRE-HEATING LOGIC ===
@@ -387,18 +401,22 @@ fetchAllControlInputs = function(cb) {
 };
 
 function getOccupancy(cb) {
-  if (!OCCUPANCY_URL) { cb(false); return; }
-  HTTP.request({
-    url: OCCUPANCY_URL,
-    method: 'GET',
-    timeout: 5,
-    success: function(resp) {
+  if (!STATE.occupancyUrl) {
+    log('Occupancy URL not configured, assuming not occupied');
+    cb(false);
+    return;
+  }
+  
+  Shelly.call("HTTP.GET", {
+    url: STATE.occupancyUrl,
+    timeout: 5
+  }, function(result, error_code, error_message) {
+    if (error_code === 0 && result && result.body) {
       var data = null;
-      try { data = JSON.parse(resp.body); } catch (e) {}
+      try { data = JSON.parse(result.body); } catch (e) {}
       cb(data && data.occupied === true);
-    },
-    error: function(err) {
-      log('Error fetching occupancy status:', err);
+    } else {
+      log('Error fetching occupancy status:', error_message);
       cb(false); // Default: not occupied
     }
   });
@@ -489,14 +507,9 @@ function subscribeMqttTemperatures() {
 function onInternalTemperature(topic, message, userdata) {
   var temp = parseTemperatureFromMqtt(topic, message);
   if (temp !== null) {
-    // Store in KVS
-    Shelly.call('KVS.Set', { key: 'script/heater/internal', value: JSON.stringify(temp) }, function(result, error_code, error_msg) {
-      if (error_code) {
-        log('Error storing internal temperature in KVS:', error_msg);
-      } else {
-        log('Stored internal temperature in KVS:', temp);
-      }
-    });
+    // Store in Script.storage (synchronous, internal data)
+    Script.storage.setItem(STORAGE_KEYS.internalTemp, temp);
+    log('Stored internal temperature:', temp);
   }
 }
 
@@ -504,37 +517,25 @@ function onInternalTemperature(topic, message, userdata) {
 function onExternalTemperature(topic, message, userdata) {
   var temp = parseTemperatureFromMqtt(topic, message);
   if (temp !== null) {
-    // Store in KVS
-    Shelly.call('KVS.Set', { key: 'script/heater/external', value: JSON.stringify(temp) }, function(result, error_code, error_msg) {
-      if (error_code) {
-        log('Error storing external temperature in KVS:', error_msg);
-      } else {
-        log('Stored external temperature in KVS:', temp);
-      }
-    });
+    // Store in Script.storage (synchronous, internal data)
+    Script.storage.setItem(STORAGE_KEYS.externalTemp, temp);
+    log('Stored external temperature:', temp);
   }
 }
 
 // === DATA FETCHING FUNCTIONS ===
-// Read temperature from KVS (stored by MQTT callbacks)
+// Read temperature from Script.storage (stored by MQTT callbacks)
 function getShellyTemperature(location, cb) {
-  var key = 'script/heater/' + location;
-  Shelly.call('KVS.Get', { key: key }, function(result, error_code, error_msg) {
-    if (error_code) {
-      log('Error reading temperature from KVS:', location, error_msg);
-      cb(null);
-    } else if (result && result.value !== undefined) {
-      try {
-        var temp = JSON.parse(result.value);
-        cb(temp);
-      } catch (e) {
-        log('Error parsing temperature from KVS:', location, e);
-        cb(null);
-      }
-    } else {
-      cb(null);
-    }
-  });
+  var key = location === 'internal' ? STORAGE_KEYS.internalTemp : STORAGE_KEYS.externalTemp;
+  var temp = Script.storage.getItem(key);
+  
+  if (temp !== null && temp !== undefined) {
+    log('Read', location, 'temperature:', temp);
+    cb(temp);
+  } else {
+    log('No', location, 'temperature available yet');
+    cb(null);
+  }
 }
 
 function shouldRefreshForecast() {
@@ -557,13 +558,13 @@ function fetchAndCacheForecast(cb) {
   }
   
   log('Fetching fresh forecast from Open-Meteo...');
-  HTTP.request({
+  Shelly.call("HTTP.GET", {
     url: url,
-    method: 'GET',
-    timeout: 10,
-    success: function(resp) {
+    timeout: 10
+  }, function(result, error_code, error_message) {
+    if (error_code === 0 && result && result.body) {
       var data = null;
-      try { data = JSON.parse(resp.body); } catch (e) {}
+      try { data = JSON.parse(result.body); } catch (e) {}
       
       if (data && data.hourly && data.hourly.temperature_2m && data.hourly.temperature_2m.length > 0) {
         // Cache the full forecast arrays
@@ -577,9 +578,8 @@ function fetchAndCacheForecast(cb) {
         log('Failed to parse forecast data');
         cb(false);
       }
-    },
-    error: function(err) {
-      log('Error fetching Open-Meteo forecast:', err);
+    } else {
+      log('Error fetching Open-Meteo forecast:', error_message);
       cb(false);
     }
   });
@@ -622,18 +622,15 @@ function controlHeaterWithInputs(results) {
   if (isOccupied && filteredTemp < CONFIG.minInternalTemp) {
     log('Safety override: internal temp', filteredTemp, 'below minInternalTemp', CONFIG.minInternalTemp, '=> HEAT');
     setHeaterState(true);
-    STATE.lastHeaterState = true;
     return;
   }
   shouldPreheat(filteredTemp, forecastTemp, mfTemp, function(preheat) {
     if ((heaterShouldBeOn && isCheapHour()) || preheat) {
       log('Heater ON (normal or preheat mode)', 'preheat:', preheat);
       setHeaterState(true);
-      STATE.lastHeaterState = true;
     } else {
       log('Outside cheap window => no heating');
       setHeaterState(false);
-      STATE.lastHeaterState = false;
     }
   });
 }
@@ -643,18 +640,9 @@ function pollAndControl() {
   fetchAllControlInputs(controlHeaterWithInputs);
 }
 
-// === NORMALLY CLOSED VALUE SUPPORT ===
-function loadNormallyClosed() {
-  cfg = Shelly.getComponentConfig('switch', 0);
-  STATE.normallyClosed = cfg && cfg.kvs && cfg.kvs['normally-closed'] === 'true';
-  log('Loaded normally-closed value from KVS:', STATE.normallyClosed);
-}
-
-// Call this once at script start
-loadNormallyClosed();
-
 // === HEATER CONTROL (LOCAL SHELLY CALL, SUPPORTS normally-closed VALUE) ===
 function setHeaterState(on) {
+  STATE.lastHeaterState = on;
   var newState = on !== CONFIG.normallyClosed
   Shelly.call("Switch.Set", { id: 0, on: newState }, function(result, error_code, error_msg) {
     if (error_code) {

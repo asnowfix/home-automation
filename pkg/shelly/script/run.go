@@ -2,7 +2,12 @@ package script
 
 import (
 	"context"
+	"io"
 	"io/fs"
+	"net/http"
+	"reflect"
+	"strings"
+	"time"
 
 	"pkg/shelly/mqtt"
 
@@ -22,7 +27,8 @@ func Run(ctx context.Context, name string, buf []byte, minify bool) error {
 			return err
 		}
 	}
-	vm, err := createShellyRuntime(ctx)
+	handlers := make([]handler, 0)
+	vm, err := createShellyRuntime(ctx, &handlers)
 	if err != nil {
 		log.Error(err, "Failed to create Shelly runtime", "name", name)
 		return err
@@ -33,11 +39,72 @@ func Run(ctx context.Context, name string, buf []byte, minify bool) error {
 		return err
 	}
 	log.Info("Script evaluated", "name", name, "out", out)
-	return nil
+
+	// If no handlers, just wait for context cancellation
+	if len(handlers) == 0 {
+		log.Info("No handlers registered, exiting")
+		return nil
+	}
+
+	log.Info("Starting event loop", "handlers", len(handlers))
+
+	// Build select cases for all handlers + context done
+	cases := make([]reflect.SelectCase, len(handlers)+1)
+
+	// First case: context cancellation
+	cases[0] = reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ctx.Done()),
+	}
+
+	// Remaining cases: handler channels
+	for i, h := range handlers {
+		cases[i+1] = reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(h.Wait()),
+		}
+	}
+
+	// Event loop: wait on all channels simultaneously
+	for {
+		chosen, value, ok := reflect.Select(cases)
+
+		if chosen == 0 {
+			// Context cancelled
+			log.Info("Context cancelled, exiting event loop")
+			return ctx.Err()
+		}
+
+		// Message received from a handler
+		if ok {
+			handlerIdx := chosen - 1
+			msg := value.Bytes()
+			if err := handlers[handlerIdx].Handle(ctx, vm, msg); err != nil {
+				log.Error(err, "Handler failed", "handler", handlerIdx)
+			}
+		} else {
+			// Channel closed, remove it from cases
+			log.Info("Handler channel closed", "handler", chosen-1)
+			// Remove the closed channel by replacing it with the last one
+			cases = append(cases[:chosen], cases[chosen+1:]...)
+			handlers = append(handlers[:chosen-1], handlers[chosen:]...)
+
+			// If no handlers left, exit
+			if len(handlers) == 0 {
+				log.Info("All handlers closed, exiting event loop")
+				return nil
+			}
+		}
+	}
+}
+
+type handler interface {
+	Wait() <-chan []byte
+	Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error
 }
 
 // createShellyRuntime creates a goja VM with Shelly API placeholders
-func createShellyRuntime(ctx context.Context) (*goja.Runtime, error) {
+func createShellyRuntime(ctx context.Context, handlers *[]handler) (*goja.Runtime, error) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -56,7 +123,7 @@ func createShellyRuntime(ctx context.Context) (*goja.Runtime, error) {
 
 	// Shelly.call(method, params, callback, userdata)
 	shellyObj.Set("call", func(call goja.FunctionCall) goja.Value {
-		method := call.Argument(0).String()
+		method := strings.ToLower(call.Argument(0).String())
 		params := call.Argument(1)
 		callback := call.Argument(2)
 
@@ -70,6 +137,7 @@ func createShellyRuntime(ctx context.Context) (*goja.Runtime, error) {
 			}
 			return vm.ToValue(result)
 		} else {
+			log.Error(err, "Shelly.call() unknown method", "method", method)
 			// Call the callback with null result if provided
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
@@ -266,8 +334,18 @@ func createShellyRuntime(ctx context.Context) (*goja.Runtime, error) {
 	// MQTT object
 	mqttObj := vm.NewObject()
 	mqttObj.Set("subscribe", func(call goja.FunctionCall) goja.Value {
+
 		topic := call.Argument(0).String()
-		log.V(1).Info("MQTT.subscribe placeholder", "topic", topic)
+		callback := call.Argument(1)
+
+		log.Info("MQTT.subscribe()", "topic", topic)
+
+		handler, err := mqttSubscribe(ctx, vm, topic, callback)
+		if err != nil {
+			log.Error(err, "MQTT.subscribe() failed", "topic", topic)
+			return vm.ToValue(err)
+		}
+		*handlers = append(*handlers, handler)
 		return vm.ToValue(true)
 	})
 	mqttObj.Set("unsubscribe", func(call goja.FunctionCall) goja.Value {
@@ -348,7 +426,7 @@ func createShellyRuntime(ctx context.Context) (*goja.Runtime, error) {
 type methodFunc func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error)
 
 var methods = map[string]methodFunc{
-	"Shelly.DetectLocation": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
+	"shelly.detectlocation": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
 		// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellydetectlocation
 		if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 			if callable, ok := goja.AssertFunction(callback); ok {
@@ -367,7 +445,7 @@ var methods = map[string]methodFunc{
 		}
 		return nil, nil
 	},
-	"KVS.GetMany": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
+	"kvs.getmany": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
 		// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/KVS#kvsgetmany
 		if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 			if callable, ok := goja.AssertFunction(callback); ok {
@@ -393,6 +471,16 @@ var methods = map[string]methodFunc{
 							"etag":  "0DXyU0CpLjyvZAV8GjRb2VzA==",
 							"value": "true",
 						},
+						map[string]interface{}{
+							"key":   "script/heater/internal-temperature-topic",
+							"etag":  "0DXyU0CpLjyvZAV8GjRb2VzA==",
+							"value": "shellies/shellyht-208500/sensor/temperature",
+						},
+						map[string]interface{}{
+							"key":   "script/heater/external-temperature-topic",
+							"etag":  "0DXyU0CpLjyvZAV8GjRb2VzA==",
+							"value": "shellies/shellyht-EE45E9/sensor/temperature",
+						},
 					},
 					"offset": 0,
 					"total":  26,
@@ -407,4 +495,117 @@ var methods = map[string]methodFunc{
 		}
 		return nil, nil
 	},
+	"http.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
+		// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/HTTP#httpget
+		// params: { url: string, timeout: number }
+		paramsObj := params.ToObject(vm)
+		url := paramsObj.Get("url").String()
+		timeout := int(paramsObj.Get("timeout").ToInteger())
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
+				}
+			}
+			return nil, err
+		}
+
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
+				}
+			}
+			return nil, err
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
+				}
+			}
+			return nil, err
+		}
+
+		headers := make(map[string]string)
+		for k, v := range resp.Header {
+			if len(v) > 0 {
+				headers[k] = v[0]
+			}
+		}
+
+		if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+			if callable, ok := goja.AssertFunction(callback); ok {
+				result := map[string]interface{}{
+					"body":    string(body),
+					"headers": headers,
+					"status":  resp.StatusCode,
+				}
+				// Call: callback(result, error_code, error_message)
+				ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
+				if err != nil {
+					return nil, err
+				}
+				return ret.Export(), nil
+			}
+		}
+		return nil, nil
+	},
+}
+
+// Actual implementation for MQTT.subscribe <https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#mqttsubscribe>
+
+func mqttSubscribe(ctx context.Context, vm *goja.Runtime, topic string, callback goja.Value) (handler, error) {
+	if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+		if callable, ok := goja.AssertFunction(callback); ok {
+			mc, err := mqtt.FromContext(ctx)
+			if err != nil {
+				return nil, err
+			}
+			in, err := mc.Subscriber(ctx, topic, 0)
+			if err != nil {
+				return nil, err
+			}
+			return &mqttHandler{
+				topic:    topic,
+				input:    in,
+				callable: callable,
+			}, nil
+		}
+	}
+	return nil, nil
+}
+
+type mqttHandler struct {
+	topic    string
+	input    <-chan []byte
+	callable goja.Callable
+}
+
+func (mh *mqttHandler) Wait() <-chan []byte {
+	return mh.input
+}
+
+func (mh *mqttHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return err
+	}
+	// Call: callback(result, error_code, error_message)
+	ret, err := mh.callable(goja.Undefined(), vm.ToValue(string(msg)), goja.Null(), goja.Null())
+	if err != nil {
+		log.Error(err, "MQTT callback", "topic", mh.topic, "error", err)
+		return err
+	}
+	log.Info("MQTT callback", "topic", mh.topic, "result", ret)
+	return nil
 }

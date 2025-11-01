@@ -48,6 +48,7 @@ replace pkg/shelly/shttp => ./pkg/shelly/shttp
 require (
 	cloud.google.com/go/compute v1.24.0 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
+	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/dop251/goja v0.0.0-20251008123653-cf18d89f3cf6 // indirect

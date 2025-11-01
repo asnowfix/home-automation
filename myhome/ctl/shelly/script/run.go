@@ -1,6 +1,7 @@
 package script
 
 import (
+	"context"
 	"fmt"
 	"pkg/shelly/script"
 
@@ -22,31 +23,40 @@ var runCmd = &cobra.Command{
 This is useful for:
 - Testing script syntax before uploading
 - Debugging script logic locally
+- Testing MQTT subscriptions and event handlers
 - Validating script changes
 
-Note: The local execution environment differs from Shelly devices:
-- Shelly-specific APIs (Shelly.call, MQTT, etc.) will not be available
-- This only validates basic JavaScript syntax and execution
-- Use this for quick validation, not as a replacement for device testing
+The script will run until interrupted with Ctrl+C.
+
+Note: The local execution environment provides:
+- Shelly API placeholders (Shelly.call, MQTT.subscribe, etc.)
+- Real MQTT connectivity for testing subscriptions
+- Event loop for handling async operations
+- Use --verbose flag to see detailed execution logs
 
 Examples:
   # Run heater.js locally
   myhome ctl shelly script run heater.js
   
+  # Run with verbose logging
+  myhome ctl shelly script run heater.js --verbose
+  
   # Run with minification (to test minifier)
   myhome ctl shelly script run heater.js --minify`,
-	Args:  cobra.ExactArgs(1),
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		scriptName := args[0]
-		
+
+		fmt.Printf("Running script %s locally (press Ctrl+C to stop)...\n", scriptName)
+
 		// Run locally without device
 		err := script.Run(cmd.Context(), scriptName, nil, runMinify)
-		if err != nil {
-			fmt.Printf("✗ Script execution failed: %v\n", err)
+		if err != nil && err != context.Canceled {
+			fmt.Printf("\n✗ Script execution failed: %v\n", err)
 			return err
 		}
-		
-		fmt.Printf("✓ Script %s executed successfully\n", scriptName)
+
+		fmt.Printf("\n✓ Script %s stopped\n", scriptName)
 		return nil
 	},
 }

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"pkg/shelly/mqtt"
 	"regexp"
+	"sync"
 
 	"github.com/go-logr/logr"
 	"github.com/gorilla/schema"
@@ -24,6 +25,10 @@ type http2MqttProxy struct {
 	log     logr.Logger
 	mc      mqtt.Client
 	decoder *schema.Decoder
+	// Cache for latest sensor values: key = "deviceId:sensor" (e.g., "shellyht-208500:temperature")
+	cache sync.Map
+	// Track subscribed devices to avoid duplicate subscriptions
+	subscribedDevices sync.Map
 }
 
 func StartHttp2MqttProxy(ctx context.Context, port int, mc mqtt.Client) {
@@ -102,6 +107,12 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 	}
 	hp.mc.Publish(hp.ctx, tempTopic, tempMsg)
 	hp.log.Info("Published Gen1 MQTT", "topic", tempTopic, "value", device.Temperature)
+	
+	// Cache temperature value for request/response
+	hp.cache.Store(fmt.Sprintf("%s:temperature", device.Id), device.Temperature)
+	
+	// Subscribe to temperature requests for this device (if not already subscribed)
+	hp.subscribeToRequests(device.Id, "temperature")
 
 	if device.IsHTSensor() {
 		// Publish humidity (H&T sensor only)
@@ -112,6 +123,12 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		}
 		hp.mc.Publish(hp.ctx, humTopic, humMsg)
 		hp.log.Info("Published Gen1 MQTT", "topic", humTopic, "value", *device.Humidity)
+		
+		// Cache humidity value for request/response
+		hp.cache.Store(fmt.Sprintf("%s:humidity", device.Id), *device.Humidity)
+		
+		// Subscribe to humidity requests for this device (if not already subscribed)
+		hp.subscribeToRequests(device.Id, "humidity")
 	}
 
 	if device.IsFloodSensor() {
@@ -135,4 +152,45 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 	}
 
 	return nil
+}
+
+// subscribeToRequests subscribes to request topic for a specific device and sensor type
+// This is called when a device first publishes data to cache the subscription
+func (hp *http2MqttProxy) subscribeToRequests(deviceId string, sensorType string) {
+	// Check if already subscribed
+	subscriptionKey := fmt.Sprintf("%s:%s", deviceId, sensorType)
+	if _, loaded := hp.subscribedDevices.LoadOrStore(subscriptionKey, true); loaded {
+		// Already subscribed
+		return
+	}
+	
+	requestTopic := fmt.Sprintf("shellies/%s/sensor/%s/request", deviceId, sensorType)
+	reqChan, err := hp.mc.Subscriber(hp.ctx, requestTopic, 0)
+	if err != nil {
+		hp.log.Error(err, "Failed to subscribe to request topic", "topic", requestTopic)
+		return
+	}
+	
+	hp.log.Info("Subscribed to request topic", "topic", requestTopic)
+	
+	// Start goroutine to handle requests for this device/sensor
+	go func() {
+		for {
+			select {
+			case <-hp.ctx.Done():
+				return
+			case <-reqChan:
+				// Request received - respond with cached value
+				cacheKey := fmt.Sprintf("%s:%s", deviceId, sensorType)
+				if value, ok := hp.cache.Load(cacheKey); ok {
+					responseTopic := fmt.Sprintf("shellies/%s/sensor/%s", deviceId, sensorType)
+					responseMsg, _ := json.Marshal(value)
+					hp.mc.Publish(hp.ctx, responseTopic, responseMsg)
+					hp.log.Info("Responded to request", "device", deviceId, "sensor", sensorType, "value", value)
+				} else {
+					hp.log.Info("No cached value for request", "device", deviceId, "sensor", sensorType)
+				}
+			}
+		}
+	}()
 }

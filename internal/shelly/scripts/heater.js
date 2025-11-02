@@ -100,6 +100,12 @@ var STATE = {
   // Heater state
   lastHeaterState: false,
   normallyClosed: true,
+  
+  // Readiness tracking
+  forecastUrlReady: false,
+  forecastDataReady: false,
+  internalTempReady: false,
+  externalTempReady: false,
 };
 
 function detectLocationAndLoadConfig() {
@@ -107,7 +113,9 @@ function detectLocationAndLoadConfig() {
   var stored = getForecastUrl();
   if (stored) {
     STATE.forecastUrl = stored;
+    STATE.forecastUrlReady = true;
     log('Using stored forecast URL');
+    checkAndStartControlLoop();
     loadConfig();
     return;
   }
@@ -138,7 +146,10 @@ function updateForecastURL(lat, lon) {
   if (lat !== null && lon !== null) {
     var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&hourly=temperature_2m&forecast_days=1&timezone=auto';
     STATE.forecastUrl = url;
+    STATE.forecastUrlReady = true;
     Script.storage.setItem(STORAGE_KEYS.forecastUrl, url);
+    log('Forecast URL ready');
+    checkAndStartControlLoop();
   }
 }
 
@@ -394,6 +405,7 @@ function fetchControlInputsWithCachedForecast(cb) {
 
 // Patch fetchAllControlInputs to store last external temp
 var origFetchAll = fetchAllControlInputs;
+
 fetchAllControlInputs = function(cb) {
   origFetchAll(function(results) {
     if (results.external !== null) lastExternalTemp = results.external;
@@ -503,6 +515,9 @@ function onTemperature(key, topic, message, userdata) {
     // Store in Script.storage (synchronous, internal data)
     Script.storage.setItem(key, temp);
     log('Stored ' + key + ' temperature:', temp);
+    
+    // Check if we now have all required temperatures
+    checkTemperaturesReady();
   }
 }
 
@@ -549,6 +564,9 @@ function onDeviceShowResponse(deviceName, storageKey, requestId, topic, message,
   if (temp !== null && temp !== undefined) {
     log('Fetched initial temperature from', deviceName, ':', temp);
     Script.storage.setItem(storageKey, temp);
+    
+    // Check if we now have all required temperatures
+    checkTemperaturesReady();
   } else {
     log('No temperature value in device status for', deviceName);
   }
@@ -590,8 +608,8 @@ function fetchTemperatureFromDevice(deviceName, storageKey) {
   var requestId = generateRequestId();
   log('Generated request ID:', requestId);
   
-  // Subscribe to response topic first: <client-id>/rpc
-  var responseTopic = clientId + '/rpc';
+  // Subscribe to unique response topic per request: <client-id>/rpc/<request-id>
+  var responseTopic = clientId + '/rpc/' + requestId;
   MQTT.subscribe(responseTopic, onDeviceShowResponse.bind(null, deviceName, storageKey, requestId), null);
   
   // Publish request to myhome/rpc topic
@@ -604,6 +622,27 @@ function fetchTemperatureFromDevice(deviceName, storageKey) {
   });
   
   MQTT.publish('myhome/rpc', request, 0, false);
+}
+
+// Check if we have all required temperatures
+function checkTemperaturesReady() {
+  var internalTemp = Script.storage.getItem(STORAGE_KEYS.internalTemp);
+  var externalTemp = Script.storage.getItem(STORAGE_KEYS.externalTemp);
+  
+  var hasInternal = (internalTemp !== null && internalTemp !== undefined);
+  var hasExternal = (externalTemp !== null && externalTemp !== undefined);
+  
+  if (hasInternal && !STATE.internalTempReady) {
+    STATE.internalTempReady = true;
+    log('Internal temperature ready:', internalTemp);
+    checkAndStartControlLoop();
+  }
+  
+  if (hasExternal && !STATE.externalTempReady) {
+    STATE.externalTempReady = true;
+    log('External temperature ready:', externalTemp);
+    checkAndStartControlLoop();
+  }
 }
 
 // Fetch initial temperatures at startup if missing
@@ -619,6 +658,7 @@ function fetchInitialTemperatures() {
     }
   } else if (internalTemp !== null && internalTemp !== undefined) {
     log('Internal temperature already available:', internalTemp);
+    checkTemperaturesReady();
   }
   
   // Check external temperature
@@ -703,7 +743,9 @@ function fetchAndCacheForecast(cb) {
         STATE.cachedForecastTimes = data.hourly.time;
         var now = new Date();
         STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+        STATE.forecastDataReady = true;
         log('Cached forecast with ' + STATE.cachedForecast.length + ' hourly values for date: ' + STATE.lastForecastFetchDate);
+        checkAndStartControlLoop();
         cb(true);
       } else {
         log('Failed to parse forecast data');
@@ -767,8 +809,33 @@ function controlHeaterWithInputs(results) {
 }
 
 // === MAIN CONTROL LOOP (flattened) ===
+var controlLoopStarted = false;
+
 function pollAndControl() {
+  // Only run control if we have all necessary inputs
+  if (!STATE.forecastUrlReady || !STATE.forecastDataReady || !STATE.internalTempReady || !STATE.externalTempReady) {
+    log('Skipping control cycle - waiting for initialization (url:', STATE.forecastUrlReady, 'forecast:', STATE.forecastDataReady, 'internal:', STATE.internalTempReady, 'external:', STATE.externalTempReady, ')');
+    return;
+  }
+  
   fetchAllControlInputs(controlHeaterWithInputs);
+}
+
+// Check if ready and start control loop
+function checkAndStartControlLoop() {
+  log('Checking wether we can start control loop')
+  log('  - Forecast URL ready:' + STATE.forecastUrlReady);
+  log('  - Forecast data ready:' + STATE.forecastDataReady);
+  log('  - Internal temp ready:' + STATE.internalTempReady);
+  log('  - External temp ready:' + STATE.externalTempReady);
+  if (STATE.forecastUrlReady && STATE.forecastDataReady && STATE.internalTempReady && STATE.externalTempReady) {
+    if (!controlLoopStarted) {
+      controlLoopStarted = true;
+      log('All inputs ready - starting control loop');
+      // Run initial control cycle
+      pollAndControl();
+    }
+  }
 }
 
 // === HEATER CONTROL (LOCAL SHELLY CALL, SUPPORTS normally-closed VALUE) ===
@@ -797,11 +864,11 @@ initOccupancyUrl(function() {
       log('Initial forecast fetch failed');
     }
     
-    // Start the control loop
+    // Start the periodic control loop timer (will skip if not ready)
     Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
     
-    // Initial run
-    pollAndControl();
+    // Try to start control loop if ready
+    checkAndStartControlLoop();
     
     log("Script initialization complete");
   });

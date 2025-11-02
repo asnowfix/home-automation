@@ -72,6 +72,7 @@ type Device struct {
 	ConfigRevision uint32             `db:"config_revision" json:"config_revision"`
 	Info           *shelly.DeviceInfo `db:"-" json:"info"`
 	Config         *shelly.Config     `db:"-" json:"config"`
+	Status         *shelly.Status     `db:"-" json:"status"`
 	impl           any                `db:"-" json:"-"` // Reference to the inner implementation
 	log            logr.Logger        `db:"-" json:"-"`
 }
@@ -124,8 +125,61 @@ func (d *Device) WithName(name string) *Device {
 	return d
 }
 
-func (d *Device) Update(status any) {
-	// TODO: update status & save
+func (d *Device) WithStatus(status *shelly.Status) *Device {
+	if status != nil {
+		if d.Status == nil {
+			d.Status = &shelly.Status{}
+		}
+
+		if status.Gen1 != nil {
+			d.Status.Gen1 = status.Gen1
+		}
+
+		if status.Wifi != nil {
+			d.Status.Wifi = status.Wifi
+		}
+		if status.Ethernet != nil {
+			d.Status.Ethernet = status.Ethernet
+		}
+		if status.System != nil {
+			d.Status.System = status.System
+		}
+		if status.Cloud != nil {
+			d.Status.Cloud = status.Cloud
+		}
+		if status.Mqtt != nil {
+			d.Status.Mqtt = status.Mqtt
+		}
+
+		if status.Switch0 != nil {
+			d.Status.Switch0 = status.Switch0
+		}
+		if status.Switch1 != nil {
+			d.Status.Switch1 = status.Switch1
+		}
+		if status.Switch2 != nil {
+			d.Status.Switch2 = status.Switch2
+		}
+		if status.Switch3 != nil {
+			d.Status.Switch3 = status.Switch3
+		}
+
+		if status.Input0 != nil {
+			d.Status.Input0 = status.Input0
+		}
+		if status.Input1 != nil {
+			d.Status.Input1 = status.Input1
+		}
+		if status.Input2 != nil {
+			d.Status.Input2 = status.Input2
+		}
+		if status.Input3 != nil {
+			d.Status.Input3 = status.Input3
+		}
+	}
+
+	d.Status = status
+	return d
 }
 
 type GroupInfo struct {

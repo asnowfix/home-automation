@@ -50,6 +50,7 @@ func (s *DeviceStorage) createTable() error {
         info TEXT,
         config_revision INTEGER,  -- New column for config revision
         config TEXT,
+        status TEXT,  -- JSON status data (especially for Gen1 devices)
         PRIMARY KEY (manufacturer, id)
     );
 
@@ -104,17 +105,28 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 	}
 	d.Config_ = string(b)
 
+	// Marshal status if present
+	if device.Status != nil {
+		b, err = json.Marshal(device.Status)
+		if err != nil {
+			s.log.Error(err, "Failed to marshal device status", "device", device)
+			return err
+		}
+		d.Status_ = string(b)
+	}
+
 	// First, try to insert or update based on manufacturer and id
 	query := `
-    INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config) 
-    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config)
+    INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config, status) 
+    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config, :status)
     ON CONFLICT(manufacturer, id) DO UPDATE SET 
         mac = excluded.mac, 
         name = excluded.name, 
         host = excluded.host, 
         info = excluded.info, 
         config_revision = excluded.config_revision, 
-        config = excluded.config`
+        config = excluded.config,
+        status = excluded.status`
 	_, err = s.db.NamedExec(query, d)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device by manufacturer and id", "device", device)
@@ -131,7 +143,8 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
         host = :host, 
         info = :info, 
         config_revision = :config_revision, 
-        config = :config
+        config = :config,
+        status = :status
     WHERE mac = :mac`
 
 		_, err = s.db.NamedExec(macQuery, d)
@@ -139,6 +152,24 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 			s.log.Error(err, "Failed to update device by MAC address", "device", device)
 			return err
 		}
+	}
+
+	return nil
+}
+
+// UpdateStatus updates only the status field for a device
+func (s *DeviceStorage) UpdateStatus(ctx context.Context, manufacturer, id string, status map[string]any) error {
+	statusJSON, err := json.Marshal(status)
+	if err != nil {
+		s.log.Error(err, "Failed to marshal status", "manufacturer", manufacturer, "id", id)
+		return err
+	}
+
+	query := `UPDATE devices SET status = $1 WHERE manufacturer = $2 AND id = $3`
+	_, err = s.db.Exec(query, string(statusJSON), manufacturer, id)
+	if err != nil {
+		s.log.Error(err, "Failed to update device status", "manufacturer", manufacturer, "id", id)
+		return err
 	}
 
 	return nil
@@ -330,7 +361,7 @@ func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (*myhome.GroupInfo, er
 		query = `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)
 			ON CONFLICT(name) DO NOTHING`
 	}
-	
+
 	result, err = s.db.NamedExec(query, map[string]interface{}{
 		"name": group.Name,
 		"kvs":  group.KVS,
@@ -338,7 +369,7 @@ func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (*myhome.GroupInfo, er
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// If group already existed, fetch it to get the ID and existing KVS
 	if group.KVS == "" {
 		existing, err := s.GetGroupInfo(group.Name)
@@ -346,7 +377,7 @@ func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (*myhome.GroupInfo, er
 			return existing, nil
 		}
 	}
-	
+
 	id, err = result.LastInsertId()
 	if err != nil {
 		return nil, err
@@ -406,6 +437,13 @@ func unmarshallDevice(log logr.Logger, device Device) (*myhome.Device, error) {
 	if err != nil {
 		log.Error(err, "Failed to unmarshal storage config", "device_id", device.Id, "config", device.Config_)
 		// return myhome.Device{}, err
+	}
+	if device.Status_ != "" {
+		var status map[string]any
+		err = json.Unmarshal([]byte(device.Status_), &status)
+		if err != nil {
+			log.Error(err, "Failed to unmarshal storage status", "device_id", device.Id, "status", device.Status_)
+		}
 	}
 	return &device.Device, nil
 }

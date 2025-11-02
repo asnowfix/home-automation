@@ -506,13 +506,130 @@ function onTemperature(key, topic, message, userdata) {
   }
 }
 
-function onTemperatureRequest(key, topic, message, userdata) {
-  var temp = Script.storage.getItem(key);
+// Extract device name from MQTT topic (e.g., "shellies/device-name/sensor/temperature" -> "device-name")
+function extractDeviceNameFromTopic(topic) {
+  if (!topic) return null;
+  var parts = topic.split('/');
+  if (parts.length >= 2) {
+    return parts[1];
+  }
+  return null;
+}
+
+// Callback to handle device.show response
+function onDeviceShowResponse(deviceName, storageKey, requestId, topic, message, userdata) {
+  var response = JSON.parse(message);
+  if (!response) {
+    log('Failed to parse device.show response');
+    return;
+  }
+  
+  // Check if this response is for our request
+  if (response.id !== requestId) {
+    return; // Not our response, ignore
+  }
+  
+  log('Received device.show response for', deviceName);
+  
+  // Unsubscribe after receiving the response
+  MQTT.unsubscribe(topic);
+  
+  // Check for error in response
+  if (response.error) {
+    log('Error in device.show response:', response.error.message);
+    return;
+  }
+  
+  if (!response.result || !response.result.status || !response.result.status.gen1) {
+    log('No Gen1 status data available for', deviceName);
+    return;
+  }
+  
+  var temp = response.result.status.gen1.temperature;
   if (temp !== null && temp !== undefined) {
-    log('Read ' + key + ' temperature:', temp);
-    MQTT.publish(topic, temp);
+    log('Fetched initial temperature from', deviceName, ':', temp);
+    Script.storage.setItem(storageKey, temp);
   } else {
-    log('No ' + key + ' temperature available yet');
+    log('No temperature value in device status for', deviceName);
+  }
+}
+
+// Generate a simple random request ID
+function generateRequestId() {
+  var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  var id = '';
+  for (var i = 0; i < 16; i++) {
+    id += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return id;
+}
+
+// Fetch temperature from device.show via MQTT request/response
+function fetchTemperatureFromDevice(deviceName, storageKey) {
+  log('fetchTemperatureFromDevice called with deviceName:', deviceName, 'storageKey:', storageKey);
+  
+  if (!deviceName) {
+    log('No device name provided for temperature fetch');
+    return;
+  }
+  
+  log('Fetching initial temperature from device:', deviceName);
+  
+  // Get our device ID to use as client ID
+  log('Getting sys config for client ID...');
+  var cfg = Shelly.getComponentConfig('sys');
+  log('Got sys config:', JSON.stringify(cfg));
+  
+  if (!cfg || !cfg.device || !cfg.device.name) {
+    log('Failed to get device name for RPC client ID - cfg:', cfg);
+    return;
+  }
+  var clientId = cfg.device.name;
+  log('Using client ID:', clientId);
+  
+  var requestId = generateRequestId();
+  log('Generated request ID:', requestId);
+  
+  // Subscribe to response topic first: <client-id>/rpc
+  var responseTopic = clientId + '/rpc';
+  MQTT.subscribe(responseTopic, onDeviceShowResponse.bind(null, deviceName, storageKey, requestId), null);
+  
+  // Publish request to myhome/rpc topic
+  var request = JSON.stringify({
+    id: requestId,
+    src: clientId,
+    dst: 'myhome',
+    method: 'device.show',
+    params: deviceName
+  });
+  
+  MQTT.publish('myhome/rpc', request, 0, false);
+}
+
+// Fetch initial temperatures at startup if missing
+function fetchInitialTemperatures() {
+  log('Checking for missing temperatures at startup...');
+  
+  // Check internal temperature
+  var internalTemp = Script.storage.getItem(STORAGE_KEYS.internalTemp);
+  if ((internalTemp === null || internalTemp === undefined) && CONFIG.internalTemperatureTopic) {
+    var internalDevice = extractDeviceNameFromTopic(CONFIG.internalTemperatureTopic);
+    if (internalDevice) {
+      fetchTemperatureFromDevice(internalDevice, STORAGE_KEYS.internalTemp);
+    }
+  } else if (internalTemp !== null && internalTemp !== undefined) {
+    log('Internal temperature already available:', internalTemp);
+  }
+  
+  // Check external temperature
+  var externalTemp = Script.storage.getItem(STORAGE_KEYS.externalTemp);
+  if ((externalTemp === null || externalTemp === undefined) && CONFIG.externalTemperatureTopic) {
+    var externalDevice = extractDeviceNameFromTopic(CONFIG.externalTemperatureTopic);
+    if (externalDevice) {
+      fetchTemperatureFromDevice(externalDevice, STORAGE_KEYS.externalTemp);
+    }
+  } else if (externalTemp !== null && externalTemp !== undefined) {
+    log('External temperature already available:', externalTemp);
   }
 }
 
@@ -520,14 +637,20 @@ function onTemperatureRequest(key, topic, message, userdata) {
 function subscribeMqttTemperatures() {
   log('Subscribing to MQTT topics for temperature sources...');
   if (CONFIG.internalTemperatureTopic) {
-    log('Subscribing to internal temperature topic & /request:', CONFIG.internalTemperatureTopic);
+    log('Subscribing to internal temperature topic:', CONFIG.internalTemperatureTopic);
     MQTT.subscribe(CONFIG.internalTemperatureTopic, onTemperature.bind(null, STORAGE_KEYS.internalTemp), null);
-    MQTT.subscribe(CONFIG.internalTemperatureTopic + '/request', onTemperatureRequest.bind(null, STORAGE_KEYS.internalTemp), null);
   }
   if (CONFIG.externalTemperatureTopic) {
-    log('Subscribing to external temperature topic & /request:', CONFIG.externalTemperatureTopic);
+    log('Subscribing to external temperature topic:', CONFIG.externalTemperatureTopic);
     MQTT.subscribe(CONFIG.externalTemperatureTopic, onTemperature.bind(null, STORAGE_KEYS.externalTemp), null);
-    MQTT.subscribe(CONFIG.externalTemperatureTopic + '/request', onTemperatureRequest.bind(null, STORAGE_KEYS.externalTemp), null);
+  }
+  
+  // Fetch initial temperatures if missing
+  log('About to call fetchInitialTemperatures...');
+  try {
+    fetchInitialTemperatures();
+  } catch (e) {
+    log('Error calling fetchInitialTemperatures:', e);
   }
 }
 

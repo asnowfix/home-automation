@@ -45,6 +45,12 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	d.mutex.Lock(ctx)
 	defer d.mutex.Unlock(ctx)
 
+	// Gen1 devices (like shellyht-*) cannot be refreshed via RPC
+	if strings.HasPrefix(d.Id(), "shellyht-") {
+		d.log.V(1).Info("Skipping refresh for Gen1 device", "device_id", d.Id())
+		return false, nil
+	}
+
 	if !d.IsMqttReady() && d.Id() != "" {
 		err := d.initMqtt(ctx)
 		if err != nil {

@@ -59,6 +59,10 @@ type Config struct {
 }
 
 type Status struct {
+	// gen1 only
+	Gen1 *map[string]float32 `json:"gen1,omitempty"`
+
+	// gen2+
 	BLE       *any                 `json:"ble,omitempty"`
 	BtHome    *any                 `json:"bthome,omitempty"`
 	Cloud     *any                 `json:"cloud,omitempty"`

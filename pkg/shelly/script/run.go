@@ -2,9 +2,11 @@ package script
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -118,6 +120,20 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 		return nil, err
 	}
 
+	// Generate unique device identifier (hostname-program-pid)
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "unknown"
+	}
+	programName := os.Args[0]
+	if i := strings.LastIndex(programName, string(os.PathSeparator)); i != -1 {
+		programName = programName[i+1:]
+	}
+	deviceId := fmt.Sprintf("%s-%s-%d", programName, hostname, os.Getpid())
+
+	// Track MQTT subscriptions by topic for unsubscribe
+	mqttSubscriptions := make(map[string]int)
+
 	vm := goja.New()
 
 	// Shelly object with all APIs from https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shelly-apis
@@ -219,9 +235,9 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 		case "sys":
 			config = map[string]interface{}{
 				"device": map[string]interface{}{
-					"name":         "My Shelly Device",
+					"name":         deviceId,
 					"mac":          "AABBCCDDEEFF",
-					"fw_id":        "20231107-164738/v1.14.1-gcb84623",
+					"fw_id":        "1.0.0-test",
 					"discoverable": true,
 					"eco_mode":     false,
 				},
@@ -255,9 +271,9 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 			config = map[string]interface{}{
 				"enable":          true,
 				"server":          mqttBroker.GetServer(),
-				"client_id":       "shelly1minig3-aabbccddeeff",
+				"client_id":       deviceId,
 				"user":            nil,
-				"topic_prefix":    "shelly1minig3-aabbccddeeff",
+				"topic_prefix":    deviceId,
 				"rpc_ntf":         true,
 				"status_ntf":      false,
 				"use_client_cert": false,
@@ -347,17 +363,42 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 			log.Error(err, "MQTT.subscribe() failed", "topic", topic)
 			return vm.ToValue(err)
 		}
+		// Track the handler index by topic
+		handlerIdx := len(*handlers)
 		*handlers = append(*handlers, handler)
+		mqttSubscriptions[topic] = handlerIdx
 		return vm.ToValue(true)
 	})
 	mqttObj.Set("unsubscribe", func(call goja.FunctionCall) goja.Value {
 		topic := call.Argument(0).String()
-		log.V(1).Info("MQTT.unsubscribe placeholder", "topic", topic)
-		return vm.ToValue(true)
+		log.Info("MQTT.unsubscribe()", "topic", topic)
+		
+		// Find the handler for this topic
+		if handlerIdx, ok := mqttSubscriptions[topic]; ok {
+			if handlerIdx < len(*handlers) {
+				if mh, ok := (*handlers)[handlerIdx].(*mqttHandler); ok {
+					mh.Close()
+					delete(mqttSubscriptions, topic)
+					log.Info("Unsubscribed from topic", "topic", topic)
+					return vm.ToValue(true)
+				}
+			}
+		}
+		
+		log.V(1).Info("Topic not found in subscriptions", "topic", topic)
+		return vm.ToValue(false)
 	})
 	mqttObj.Set("publish", func(call goja.FunctionCall) goja.Value {
 		topic := call.Argument(0).String()
-		log.V(1).Info("MQTT.publish placeholder", "topic", topic)
+		message := call.Argument(1).String()
+
+		log.Info("MQTT.publish()", "topic", topic, "message", message)
+
+		err := mqttBroker.Publish(ctx, topic, []byte(message))
+		if err != nil {
+			log.Error(err, "MQTT.publish() failed", "topic", topic)
+			return vm.ToValue(false)
+		}
 		return vm.ToValue(true)
 	})
 	mqttObj.Set("setStatusHandler", func(call goja.FunctionCall) goja.Value {
@@ -581,6 +622,7 @@ func mqttSubscribe(ctx context.Context, vm *goja.Runtime, topic string, callback
 				topic:    topic,
 				input:    in,
 				callable: callable,
+				closed:   make(chan struct{}),
 			}, nil
 		}
 	}
@@ -591,10 +633,30 @@ type mqttHandler struct {
 	topic    string
 	input    <-chan []byte
 	callable goja.Callable
+	closed   chan struct{}
 }
 
 func (mh *mqttHandler) Wait() <-chan []byte {
-	return mh.input
+	// Return the closed channel if handler is closed, otherwise return input
+	select {
+	case <-mh.closed:
+		// Return a closed channel
+		ch := make(chan []byte)
+		close(ch)
+		return ch
+	default:
+		return mh.input
+	}
+}
+
+func (mh *mqttHandler) Close() {
+	select {
+	case <-mh.closed:
+		// Already closed
+		return
+	default:
+		close(mh.closed)
+	}
 }
 
 func (mh *mqttHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {

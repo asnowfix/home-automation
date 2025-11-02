@@ -144,7 +144,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqt
 				log.Error(err, "Failed to unmarshal status", "event", event)
 				return err
 			}
-			d.Update(status)
+			d.WithStatus(status)
 		}
 	}
 

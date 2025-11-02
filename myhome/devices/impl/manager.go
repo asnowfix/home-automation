@@ -15,6 +15,7 @@ import (
 	"net"
 	"pkg/devices"
 	"pkg/shelly"
+	"pkg/shelly/gen1"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 	"reflect"
@@ -217,6 +218,13 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	err = watch.ZeroConf(ctx, dm, dm.dr, dm.resolver)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch ZeroConf devices")
+		return err
+	}
+
+	// Start Gen1 MQTT listener for sensor data
+	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.dr)
+	if err != nil {
+		dm.log.Error(err, "Failed to start Gen1 MQTT listener")
 		return err
 	}
 

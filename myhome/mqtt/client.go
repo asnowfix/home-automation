@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	smqtt "pkg/shelly/mqtt"
+
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/go-logr/logr"
 )
@@ -305,8 +307,18 @@ var MqttPassword string = ""
 const ZEROCONF_SERVICE = "_mqtt._tcp."
 
 type MqttMessage struct {
-	Topic   string `json:"topic"`
-	Payload []byte `json:"payload"`
+	topic   string
+	payload []byte
+}
+
+// Topic returns the MQTT topic
+func (m *MqttMessage) Topic() string {
+	return m.topic
+}
+
+// Payload returns the MQTT message payload
+func (m *MqttMessage) Payload() []byte {
+	return m.payload
 }
 
 // func (c *Client) Subscribe(topic string, qlen uint) (chan []byte, error) {
@@ -427,4 +439,46 @@ func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (<-cha
 	}(ctx, c.log.WithName("Subscriber#Monitor"))
 
 	return mch, nil
+}
+
+// SubscriberWithTopic returns a channel that receives MQTT messages with topic information
+// This is useful for wildcard subscriptions where you need to know the actual topic
+// Returns a channel of mqtt.Message interface - concrete type is *MqttMessage
+func (c *Client) SubscriberWithTopic(ctx context.Context, topic string, qlen uint) (<-chan smqtt.Message, error) {
+	err := c.connect()
+	if err != nil {
+		c.log.Error(err, "Unable to connect to create subscriber channel", "topic", topic)
+		return nil, err
+	}
+	mch := make(chan smqtt.Message, qlen)
+
+	token := c.mqtt.Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
+		go func() {
+			mch <- &MqttMessage{ // Send pointer to satisfy interface
+				topic:   msg.Topic(),
+				payload: msg.Payload(),
+			}
+		}()
+	})
+	for !token.WaitTimeout(c.timeout) {
+		c.log.Info("Retrying to subscribe", "to topic", topic, "as client_id", c.Id(), "timeout", c.timeout)
+	}
+	if err := token.Error(); err != nil {
+		c.log.Error(token.Error(), "Subscription failed", "topic", topic, "as client_id", c.Id())
+		return nil, err
+	}
+	c.log.Info("Subscribed", "to topic", topic, "as client_id", c.Id())
+
+	go func(ctx context.Context, log logr.Logger) {
+		<-ctx.Done()
+		// Don't log context cancellation as an error
+		token := c.mqtt.Unsubscribe(topic)
+		if token.WaitTimeout(c.timeout) {
+			log.Info("Unsubscribed", "from topic", topic)
+		} else {
+			log.Error(token.Error(), "Failed to unsubscribe", "from topic", topic)
+		}
+	}(ctx, c.log.WithName("SubscriberWithTopic#Monitor"))
+
+	return (<-chan smqtt.Message)(mch), nil
 }

@@ -773,6 +773,38 @@ function getCurrentForecastTemp() {
   return temp;
 }
 
+// Get minimum forecast temperature for the next N hours
+function getMinForecastTemp(hours) {
+  if (!STATE.cachedForecast || STATE.cachedForecast.length === 0) {
+    return null;
+  }
+  
+  var now = new Date();
+  var currentHour = now.getHours();
+  
+  // Calculate how many hours to look ahead (capped by available forecast data)
+  var hoursToCheck = Math.min(Math.ceil(hours), STATE.cachedForecast.length - currentHour);
+  if (hoursToCheck <= 0) {
+    return getCurrentForecastTemp();
+  }
+  
+  // Find minimum temperature in the next N hours
+  var minTemp = null;
+  for (var i = 0; i < hoursToCheck; i++) {
+    var idx = currentHour + i;
+    if (idx < STATE.cachedForecast.length) {
+      var temp = STATE.cachedForecast[idx];
+      if (temp !== null && temp !== undefined) {
+        if (minTemp === null || temp < minTemp) {
+          minTemp = temp;
+        }
+      }
+    }
+  }
+  
+  return minTemp;
+}
+
 function controlHeaterWithInputs(results) {
   var internalTemp = results.internal;
   var externalTemp = results.external;
@@ -797,6 +829,9 @@ function controlHeaterWithInputs(results) {
     setHeaterState(true);
     return;
   }
+  // Calculate minimum forecast temperature for preheat window
+  var mfTemp = getMinForecastTemp(CONFIG.preheatHours);
+  log('Minimum forecast temp for next', CONFIG.preheatHours, 'hours:', mfTemp);
   shouldPreheat(filteredTemp, forecastTemp, mfTemp, function(preheat) {
     if ((heaterShouldBeOn && isCheapHour()) || preheat) {
       log('Heater ON (normal or preheat mode)', 'preheat:', preheat);

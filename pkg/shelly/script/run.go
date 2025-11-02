@@ -134,6 +134,10 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 	// Track MQTT subscriptions by topic for unsubscribe
 	mqttSubscriptions := make(map[string]int)
 
+	// Track timers by handle
+	timers := make(map[int]*timerHandler)
+	nextTimerHandle := 1
+
 	vm := goja.New()
 
 	// Shelly object with all APIs from https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shelly-apis
@@ -340,12 +344,89 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 	// Timer object
 	timerObj := vm.NewObject()
 	timerObj.Set("set", func(call goja.FunctionCall) goja.Value {
-		log.V(1).Info("Timer.set placeholder")
-		return vm.ToValue(1) // Return timer handle
+		// Timer.set(period, repeat, callback[, userdata]) -> timer_handle
+		if len(call.Arguments) < 3 {
+			log.Error(nil, "Timer.set requires at least 3 arguments")
+			panic("Timer.set requires at least 3 arguments")
+		}
+
+		period := int64(call.Argument(0).ToInteger())
+		repeat := call.Argument(1).ToBoolean()
+		callback := call.Argument(2)
+		var userdata goja.Value
+		if len(call.Arguments) > 3 {
+			userdata = call.Argument(3)
+		} else {
+			userdata = goja.Undefined()
+		}
+
+		if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+			if callable, ok := goja.AssertFunction(callback); ok {
+				handle := nextTimerHandle
+				nextTimerHandle++
+
+				timer := &timerHandler{
+					handle:   handle,
+					period:   time.Duration(period) * time.Millisecond,
+					repeat:   repeat,
+					callable: callable,
+					userdata: userdata,
+					vm:       vm,
+					startTime: time.Now(),
+				}
+
+				timers[handle] = timer
+				*handlers = append(*handlers, timer)
+
+				log.Info("Timer.set()", "handle", handle, "period", period, "repeat", repeat)
+				return vm.ToValue(handle)
+			}
+		}
+
+		log.Error(nil, "Timer.set callback is not a function")
+		panic("Timer.set callback is not a function")
 	})
 	timerObj.Set("clear", func(call goja.FunctionCall) goja.Value {
-		log.V(1).Info("Timer.clear placeholder")
-		return vm.ToValue(true)
+		// Timer.clear(timer_handle) -> boolean or undefined
+		if len(call.Arguments) < 1 {
+			return goja.Undefined()
+		}
+
+		handle := int(call.Argument(0).ToInteger())
+		log.Info("Timer.clear()", "handle", handle)
+
+		if timer, ok := timers[handle]; ok {
+			timer.Stop()
+			delete(timers, handle)
+			return vm.ToValue(true)
+		}
+
+		return vm.ToValue(false)
+	})
+	timerObj.Set("getInfo", func(call goja.FunctionCall) goja.Value {
+		// Timer.getInfo(timer_handle) -> object or undefined
+		if len(call.Arguments) < 1 {
+			return goja.Undefined()
+		}
+
+		handle := int(call.Argument(0).ToInteger())
+
+		if timer, ok := timers[handle]; ok {
+			info := vm.NewObject()
+			if timer.repeat {
+				info.Set("interval", timer.period.Milliseconds())
+			} else {
+				info.Set("interval", 0)
+			}
+			// Calculate next invocation time in milliseconds uptime
+			uptime := time.Since(timer.startTime).Milliseconds()
+			next := timer.nextFire.Sub(timer.startTime).Milliseconds()
+			info.Set("next", next)
+			log.V(1).Info("Timer.getInfo()", "handle", handle, "interval", timer.period.Milliseconds(), "next", next, "uptime", uptime)
+			return info
+		}
+
+		return goja.Undefined()
 	})
 	vm.Set("Timer", timerObj)
 
@@ -672,4 +753,80 @@ func (mh *mqttHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte)
 		return err
 	}
 	return nil
+}
+
+// Timer handler implementation
+type timerHandler struct {
+	handle    int
+	period    time.Duration
+	repeat    bool
+	callable  goja.Callable
+	userdata  goja.Value
+	vm        *goja.Runtime
+	ticker    *time.Ticker
+	timer     *time.Timer
+	startTime time.Time
+	nextFire  time.Time
+	stopped   bool
+}
+
+func (th *timerHandler) Wait() <-chan []byte {
+	ch := make(chan []byte)
+	
+	if th.repeat {
+		// Periodic timer
+		th.ticker = time.NewTicker(th.period)
+		th.nextFire = time.Now().Add(th.period)
+		go func() {
+			for range th.ticker.C {
+				if th.stopped {
+					break
+				}
+				th.nextFire = time.Now().Add(th.period)
+				ch <- []byte{} // Signal to fire callback
+			}
+			close(ch)
+		}()
+	} else {
+		// One-shot timer
+		th.timer = time.NewTimer(th.period)
+		th.nextFire = time.Now().Add(th.period)
+		go func() {
+			<-th.timer.C
+			if !th.stopped {
+				ch <- []byte{} // Signal to fire callback
+			}
+			close(ch)
+		}()
+	}
+	
+	return ch
+}
+
+func (th *timerHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return err
+	}
+	
+	log.Info("Timer callback", "handle", th.handle, "repeat", th.repeat)
+	
+	// Call the callback with userdata
+	_, err = th.callable(goja.Undefined(), th.userdata)
+	if err != nil {
+		log.Error(err, "Timer callback failed", "handle", th.handle)
+		return err
+	}
+	
+	return nil
+}
+
+func (th *timerHandler) Stop() {
+	th.stopped = true
+	if th.ticker != nil {
+		th.ticker.Stop()
+	}
+	if th.timer != nil {
+		th.timer.Stop()
+	}
 }

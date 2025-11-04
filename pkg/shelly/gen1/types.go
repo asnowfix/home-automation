@@ -31,10 +31,10 @@ type Device struct {
 
 // IsHTSensor returns true if this is a Humidity & Temperature sensor
 func (d *Device) IsHTSensor() bool {
-	return d.Sensor.Humidity != nil
+	return d.Sensor != nil && d.Sensor.Humidity != nil
 }
 
 // IsFloodSensor returns true if this is a Flood sensor
 func (d *Device) IsFloodSensor() bool {
-	return d.Sensor.Flood != nil
+	return d.Sensor != nil && d.Sensor.Flood != nil
 }

@@ -175,6 +175,12 @@ func logWriter() (io.Writer, error) {
 		return os.Stderr, nil
 	}
 
+	// Check if running under systemd (JOURNAL_STREAM or INVOCATION_ID are set)
+	if os.Getenv("JOURNAL_STREAM") != "" || os.Getenv("INVOCATION_ID") != "" {
+		debugInit("Running under systemd, using stderr for journald")
+		return os.Stderr, nil
+	}
+
 	logDir := getLogDir()
 	debugInit(fmt.Sprintf("Creating log directory: %s", logDir))
 

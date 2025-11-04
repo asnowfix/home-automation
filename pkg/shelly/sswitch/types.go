@@ -125,4 +125,4 @@ type SetRequest struct {
 	ToggleAfter int  `json:"toggle_after,omitempty"` // Optional flip-back timer in seconds. Optional
 }
 
-var SwitchedOffKey map[string]any = map[string]any{"key": "switched-off"}
+var NormallyClosedKey map[string]any = map[string]any{"key": "normally-closed"}

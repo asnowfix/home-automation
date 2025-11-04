@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"global"
 	"io"
 	"net"
 	"net/http"
@@ -27,7 +26,12 @@ var httpChannel HttpChannel
 func (ch *HttpChannel) callE(ctx context.Context, device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
 	var res *http.Response
 	var err error
-	log := ctx.Value(global.LogKey).(logr.Logger)
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	log = log.WithName("shelly.HttpChannel")
+	ctx = logr.NewContext(ctx, log)
 
 	switch verb.HttpMethod {
 	case http.MethodGet:
@@ -52,7 +56,12 @@ func (ch *HttpChannel) callE(ctx context.Context, device types.Device, verb type
 }
 
 func (ch *HttpChannel) getE(ctx context.Context, host string, cmd string, params any) (*http.Response, error) {
-	log := ctx.Value(global.LogKey).(logr.Logger)
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	log = log.WithName("shelly.HttpChannel")
+	ctx = logr.NewContext(ctx, log)
 
 	values := url.Values{}
 
@@ -106,11 +115,15 @@ func (ch *HttpChannel) getE(ctx context.Context, host string, cmd string, params
 }
 
 func (ch *HttpChannel) postE(ctx context.Context, host string, hm string, cmd string, params any) (*http.Response, error) {
-	log := ctx.Value(global.LogKey).(logr.Logger)
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	log = log.WithName("shelly.HttpChannel")
+	ctx = logr.NewContext(ctx, log)
 
 	var requestURL string
 	var jsonData []byte
-	var err error
 
 	if false {
 		var payload struct {

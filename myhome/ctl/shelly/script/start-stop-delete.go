@@ -3,7 +3,6 @@ package script
 import (
 	"context"
 	"fmt"
-	"global"
 	"hlog"
 	mhscript "internal/myhome/shelly/script"
 	"myhome"
@@ -33,9 +32,7 @@ var uploadCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		// Script upload can be long: Use a context without timeout
-		longCtx := global.ContextWithoutTimeout(cmd.Context(), hlog.Logger)
-		_, err := myhome.Foreach(longCtx, hlog.Logger, device, options.Via, doUpload, []string{scriptName})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doUpload, []string{scriptName})
 		return err
 	},
 }
@@ -50,14 +47,14 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 	}
 	scriptName := args[0]
 	fmt.Printf(". Uploading %s to %s...\n", scriptName, sd.Name())
-	
+
 	// Read the embedded script file
 	buf, err := pkgscript.ReadEmbeddedFile(scriptName)
 	if err != nil {
 		fmt.Printf("✗ Failed to read script %s: %v\n", scriptName, err)
 		return nil, err
 	}
-	
+
 	// Upload with version tracking
 	id, err := mhscript.UploadWithVersion(ctx, log, via, sd, scriptName, buf, !noMinify, forceUpload)
 	if err != nil {
@@ -123,7 +120,7 @@ func doStartStopDelete(ctx context.Context, log logr.Logger, via types.Channel, 
 	}
 	operation := args[0]
 	scriptName := args[1]
-	
+
 	// Handle delete operation with KVS cleanup
 	if operation == pkgscript.Delete.String() {
 		fmt.Printf("Deleting %s from %s...\n", scriptName, sd.Name())
@@ -137,14 +134,14 @@ func doStartStopDelete(ctx context.Context, log logr.Logger, via types.Channel, 
 		options.PrintResult(out)
 		return out, nil
 	}
-	
+
 	// Handle start/stop operations
 	out, err := pkgscript.StartStopDelete(ctx, via, sd, scriptName, pkgscript.Verb(operation))
 	if err != nil {
 		log.Error(err, "Unable to start/stop script")
 		return nil, err
 	}
-	
+
 	options.PrintResult(out)
 	return out, nil
 }

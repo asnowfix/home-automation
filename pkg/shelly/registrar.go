@@ -65,7 +65,7 @@ func (r *Registrar) RegisterMethodHandler(verb string, mh types.MethodHandler) {
 }
 
 func (r *Registrar) RegisterDeviceCaller(ch types.Channel, dc types.DeviceCaller) {
-	r.log.Info("Registering", "channel", ch, "caller", dc)
+	r.log.Info("Registering device caller", "channel", ch, "caller_type", fmt.Sprintf("%T", dc))
 
 	// err := errors.Wrap(fmt.Errorf("stack registering %v for channel %s", dc, ch), "registering")
 	// r.log.Error(err, "Registering", "channel", ch, "caller", dc)

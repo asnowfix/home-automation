@@ -25,16 +25,20 @@ func LogToStderr() bool {
 }
 
 func Init(verbose bool) {
-	InitWithLevel(verbose, zerolog.ErrorLevel)
+	InitWithLevel(verbose, false, zerolog.ErrorLevel)
+}
+
+func InitWithDebug(verbose bool, debug bool) {
+	InitWithLevel(verbose, debug, zerolog.ErrorLevel)
 }
 
 // InitForDaemon initializes logging for daemon processes with info level as default (verbose by default)
 func InitForDaemon(verbose bool) {
-	InitWithLevel(verbose, zerolog.InfoLevel)
+	InitWithLevel(verbose, false, zerolog.InfoLevel)
 }
 
 // InitWithLevel initializes logging with a specific default level
-func InitWithLevel(verbose bool, defaultLevel zerolog.Level) {
+func InitWithLevel(verbose bool, debug bool, defaultLevel zerolog.Level) {
 	debugInit("Initializing logger")
 
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMs
@@ -70,22 +74,27 @@ func InitWithLevel(verbose bool, defaultLevel zerolog.Level) {
 	}
 
 	// Determine log level
-	level := parseLogLevel(verbose, defaultLevel)
+	level := parseLogLevel(verbose, debug, defaultLevel)
 	zerolog.SetGlobalLevel(level)
 	zl = zl.Level(level)
 
 	zl = zl.With().Caller().Timestamp().Logger()
 	Logger = zerologr.New(&zl)
-	Logger.Info("Initialized", "level", level.String(), "verbose", verbose)
+	Logger.Info("Initialized", "level", level.String(), "verbose", verbose, "debug", debug)
 
 	debugInit("Logger initialization complete")
 }
 
-// parseLogLevel converts verbose flag to zerolog level
-func parseLogLevel(verbose bool, defaultLevel zerolog.Level) zerolog.Level {
+// parseLogLevel converts verbose and debug flags to zerolog level
+func parseLogLevel(verbose bool, debug bool, defaultLevel zerolog.Level) zerolog.Level {
 	// Auto-detect VSCode debugger and force debug level
 	if isRunningUnderDebugger() {
 		debugInit("VSCode debugger detected, forcing debug log level")
+		return zerolog.DebugLevel
+	}
+	
+	// Handle debug flag (--debug = debug level, shows V(1) logs)
+	if debug {
 		return zerolog.DebugLevel
 	}
 	

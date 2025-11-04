@@ -11,7 +11,7 @@ import (
 type server struct {
 	// mc      *mymqtt.Client
 	handler Server
-	from    chan []byte
+	from    <-chan []byte
 	// to      chan []byte
 }
 
@@ -57,20 +57,20 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 				err = json.Unmarshal(inMsg, &req)
 				if err != nil {
 					log.Error(err, "Failed to unmarshal request from payload", "payload", string(inMsg))
-					s.fail(1, err, &req, mc)
+					s.fail(ctx, 1, err, &req, mc)
 					continue
 				}
 
 				err = ValidateDialog(req.Dialog)
 				if err != nil {
-					s.fail(1, err, &req, mc)
+					s.fail(ctx, 1, err, &req, mc)
 					continue
 				}
 
 				method, err := handler.MethodE(req.Method)
 				if err != nil {
 					log.Error(err, "Failed to get action for method", "method", req.Method)
-					s.fail(1, err, &req, mc)
+					s.fail(ctx, 1, err, &req, mc)
 					continue
 				}
 
@@ -79,7 +79,7 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 				err = json.Unmarshal(inMsg, &req)
 				if err != nil {
 					log.Error(err, "Failed to unmarshal request from payload", "payload", string(inMsg))
-					s.fail(1, err, &req, mc)
+					s.fail(ctx, 1, err, &req, mc)
 					continue
 				}
 
@@ -95,7 +95,7 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 				out, err := method.ActionE(req.Params)
 				if err != nil {
 					log.Error(err, "Failed to call action")
-					s.fail(1, err, &req, mc)
+					s.fail(ctx, 1, err, &req, mc)
 					continue
 				}
 
@@ -109,11 +109,11 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 				outMsg, err := json.Marshal(res)
 				if err != nil {
 					log.Error(err, "Failed to marshal response")
-					s.fail(1, err, &req, mc)
+					s.fail(ctx, 1, err, &req, mc)
 					continue
 				}
 				// to <- outMsg
-				mc.Publish(ClientTopic(req.Src), outMsg)
+				mc.Publish(ctx, ClientTopic(req.Src), outMsg)
 			}
 		}
 	}(ctx, log.WithName("Server#Subscriber"))
@@ -122,7 +122,7 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 	return &s, nil
 }
 
-func (sp *server) fail(code int, err error, req *request, mc *mqtt.Client) {
+func (sp *server) fail(ctx context.Context, code int, err error, req *request, mc *mqtt.Client) {
 	var res response = response{
 		Dialog: Dialog{
 			Id:  req.Id,
@@ -134,7 +134,7 @@ func (sp *server) fail(code int, err error, req *request, mc *mqtt.Client) {
 	}
 	outMsg, _ := json.Marshal(res)
 	// sp.to <- outMsg
-	mc.Publish(ClientTopic(res.Dst), outMsg)
+	mc.Publish(ctx, ClientTopic(res.Dst), outMsg)
 }
 
 func (sp *server) MethodE(method Verb) (*Method, error) {

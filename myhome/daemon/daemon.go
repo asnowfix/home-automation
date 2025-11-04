@@ -13,6 +13,7 @@ import (
 	"mynet"
 	"pkg/shelly"
 	"pkg/shelly/gen1"
+	"pkg/shelly/mqtt"
 	"time"
 
 	"myhome"
@@ -82,7 +83,7 @@ func (d *daemon) Run() error {
 	}
 
 	// Connect to the network's MQTT broker or use the embedded broker
-	err = mqttclient.NewClientE(d.ctx, log.WithName("mqttclient.Client"), options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+	err = mqttclient.NewClientE(d.ctx, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 	if err != nil {
 		log.Error(err, "Failed to initialize MQTT client")
 		return err
@@ -93,6 +94,9 @@ func (d *daemon) Run() error {
 		return err
 	}
 	defer mc.Close()
+
+	// Add Shelly MQTT client to context
+	d.ctx = mqtt.NewContext(d.ctx, mc)
 
 	// Start Gen1 (HTTP->MQTT) proxy (auto-enabled with embedded MQTT broker)
 	if options.Flags.EnableGen1Proxy {

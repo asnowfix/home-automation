@@ -5,24 +5,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"pkg/shelly/types"
+	"reflect"
 
 	"github.com/go-logr/logr"
 )
 
 func ListKeys(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, match string) (*ListResponse, error) {
-	out, err := device.CallE(ctx, via, string(List), &GetManyRequest{
+	out, err := device.CallE(ctx, via, string(List), &ListOrGetManyRequest{
 		Match: match,
 	})
 	if err != nil {
 		log.Error(err, "Unable to List keys")
 		return nil, err
 	}
-	keys := out.(*ListResponse)
+	keys, ok := out.(*ListResponse)
+	if !ok {
+		return nil, fmt.Errorf("expected %T, got %T", reflect.TypeOf(&ListResponse{}), out)
+	}
 	return keys, nil
 }
 
 func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, match string) (*GetManyResponse, error) {
-	out, err := device.CallE(ctx, via, string(GetMany), &GetManyRequest{
+	out, err := device.CallE(ctx, via, string(GetMany), &ListOrGetManyRequest{
 		Match: match,
 	})
 	if err != nil {
@@ -31,7 +35,7 @@ func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, devi
 	}
 	kvs, ok := out.(*GetManyResponse)
 	if !ok {
-		return nil, fmt.Errorf("expected *GetManyResponse, got %T", out)
+		return nil, fmt.Errorf("expected %T, got %T", reflect.TypeOf(&GetManyResponse{}), out)
 	}
 	s, err := json.Marshal(kvs)
 	if err != nil {
@@ -52,7 +56,7 @@ func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device ty
 	}
 	res, ok := out.(*GetResponse)
 	if !ok {
-		return nil, fmt.Errorf("expected *GetResponse, got %T", out)
+		return nil, fmt.Errorf("expected %T, got %T", reflect.TypeOf(&GetResponse{}), out)
 	}
 	// s, err := json.Marshal(res)
 	// if err != nil {
@@ -74,7 +78,7 @@ func SetKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device
 	}
 	status, ok := out.(*Status)
 	if !ok {
-		return nil, fmt.Errorf("expected *Status, got %T", out)
+		return nil, fmt.Errorf("expected %T, got %T", reflect.TypeOf(&Status{}), out)
 	}
 	return status, nil
 }
@@ -89,7 +93,7 @@ func DeleteKey(ctx context.Context, log logr.Logger, via types.Channel, device t
 	}
 	status, ok := out.(*Status)
 	if !ok {
-		return nil, fmt.Errorf("expected *Status, got %T", out)
+		return nil, fmt.Errorf("expected %T, got %T", reflect.TypeOf(&Status{}), out)
 	}
 	s, err := json.Marshal(status)
 	if err != nil {

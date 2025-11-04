@@ -13,9 +13,23 @@ func init() {
 }
 
 var createCmd = &cobra.Command{
-	Use:   "create",
-	Short: "Create group of devices",
-	Args:  cobra.RangeArgs(1, 2),
+	Use:   "create <group-name> [key1=val1] [key2=val2] ...",
+	Short: "Create group of devices with optional KVS key-value pairs",
+	Long: `Create a new device group with an optional set of KVS key-value pairs.
+
+When devices are added to the group, all KVS key-value pairs will be automatically
+set on each device. This allows you to configure common settings across all group members.
+
+Examples:
+  # Create a simple group
+  myhome ctl group create radiateurs
+
+  # Create a group with normally-closed relays
+  myhome ctl group create radiateurs normally-closed=true
+
+  # Create a group with multiple KVS pairs
+  myhome ctl group create lights auto-off=300 brightness=80`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		gi := &myhome.GroupInfo{Name: name}

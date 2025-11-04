@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"hlog"
 	"pkg/shelly/types"
+
+	"github.com/go-logr/logr"
 )
 
 func EvalInDevice(ctx context.Context, via types.Channel, device types.Device, name string, code string) (any, error) {
-	log := hlog.Logger
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic(err)
+	}
 	id, err := isLoaded(ctx, via, device, name)
 	if err != nil {
 		log.Error(err, "Did not find loaded script", "name", name)
@@ -20,7 +24,7 @@ func EvalInDevice(ctx context.Context, via types.Channel, device types.Device, n
 		Code: code,
 	})
 	if err != nil {
-		log.Error(err, "Unable to eval script", "id", id)
+		log.Error(err, "Script eval failed", "id", id)
 		return nil, err
 	}
 	response := out.(*EvalResponse)

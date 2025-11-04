@@ -24,19 +24,23 @@ var CONFIG = {
   log: true
 };
 
-var STORAGE_KEYS = { follows: "follows" };
+var STATE = {
+  // In-memory cache of follows loaded from KVS by loadFollowsFromKVS()
+  // KVS keys are set externally via "myhome ctl follow shelly" command
+  // Each followed device has its own KVS key: follow/status/<device-id>
+  follows: {}
+};
 
 function getFollows() {
-  var v = Script.storage.get(STORAGE_KEYS.follows);
-  return (v && typeof v === "object") ? v : {};
+  return STATE.follows;
 }
 
 function setFollows(map) {
-  Script.storage.set(STORAGE_KEYS.follows, map || {});
+  STATE.follows = map || {};
 }
 
 /**
- * Script.storage key: "follows"
+ * In-memory follows cache populated from KVS
  * Stores a map of followed devices and local action info.
  *
  * @typedef {Object.<string, FollowEntry>} FollowsMap

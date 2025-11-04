@@ -37,7 +37,7 @@ type GetResponse struct {
 	Status
 }
 
-type GetManyRequest struct {
+type ListOrGetManyRequest struct {
 	Match  string `json:"match"`
 	Offset uint32 `json:"offset,omitempty"`
 }

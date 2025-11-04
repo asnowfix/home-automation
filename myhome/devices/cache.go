@@ -3,7 +3,6 @@ package devices
 import (
 	"context"
 	"fmt"
-	"global"
 	"myhome"
 	"sync"
 
@@ -22,8 +21,13 @@ type Cache struct {
 }
 
 func NewCache(ctx context.Context, db DeviceRegistry) *Cache {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
+
 	c := &Cache{
-		log: ctx.Value(global.LogKey).(logr.Logger).WithName("Cache"),
+		log: log.WithName("Cache"),
 		db:  db,
 	}
 	c.Flush()

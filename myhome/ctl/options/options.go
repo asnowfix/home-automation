@@ -21,7 +21,7 @@ const MQTT_DEFAULT_TIMEOUT time.Duration = 14 * time.Second
 
 const MQTT_DEFAULT_GRACE time.Duration = 2 * time.Second
 
-const COMMAND_DEFAULT_TIMEOUT time.Duration = 15 * time.Second
+const COMMAND_DEFAULT_TIMEOUT time.Duration = 0 // No timeout by default (wait indefinitely)
 
 const DEVICE_REFRESH_INTERVAL time.Duration = 1 * time.Minute
 
@@ -32,13 +32,14 @@ const MQTT_WATCHDOG_MAX_FAILURES int = 3
 var Flags struct {
 	CpuProfile              string
 	Verbose                 bool
+	Debug                   bool
 	Quiet                   bool
 	Json                    bool
 	MqttBroker              string
 	MqttTimeout             time.Duration // the value taken by --mqtt-timeout / -T
 	MqttGrace               time.Duration // the value taken by --mqtt-grace / -G
 	MdnsTimeout             time.Duration // the value taken by --mdns-timeout / -M
-	CommandTimeout          time.Duration // the value taken by --command-timeout / -C
+	Wait                    time.Duration // the value taken by --command-timeout / -C
 	RefreshInterval         time.Duration // the value taken by --refresh-interval / -R
 	MqttWatchdogInterval    time.Duration // the value taken by --mqtt-watchdog-interval
 	MqttWatchdogMaxFailures int           // the value taken by --mqtt-watchdog-max-failures
@@ -52,13 +53,11 @@ var Flags struct {
 
 var Via types.Channel
 
-func CommandLineContext(ctx context.Context, log logr.Logger, timeout time.Duration, version string) context.Context {
-	ctx = context.WithValue(ctx, global.LogKey, log)
-	ctx = logr.NewContext(ctx, log)
-
+func CommandLineContext(ctx context.Context, version string) context.Context {
 	var cancel context.CancelFunc
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, timeout)
+
+	if Flags.Wait > 0 {
+		ctx, cancel = context.WithTimeout(ctx, Flags.Wait)
 		ctx = context.WithValue(ctx, global.CancelKey, cancel)
 	} else {
 		ctx, cancel = context.WithCancel(ctx)
@@ -68,6 +67,7 @@ func CommandLineContext(ctx context.Context, log logr.Logger, timeout time.Durat
 	ctx = context.WithValue(ctx, global.VersionKey, version)
 
 	go func() {
+		log := logr.FromContextOrDiscard(ctx)
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, os.Interrupt)
 		signal.Notify(signals, syscall.SIGTERM)

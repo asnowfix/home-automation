@@ -17,13 +17,12 @@ import (
 	"myhome/ctl/show"
 	"myhome/ctl/sswitch"
 	mqttclient "myhome/mqtt"
-	"os"
 	shellyPkg "pkg/shelly"
+	shellyMqtt "pkg/shelly/mqtt"
 	"pkg/shelly/types"
 	"runtime/pprof"
 
-	"debug"
-
+	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
@@ -32,37 +31,29 @@ var Cmd = &cobra.Command{
 	Short: "Control and manage home automation devices",
 	Args:  cobra.NoArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// For ctl commands, default to quiet (error level) unless --verbose is specified
-		verbose := options.Flags.Verbose && !options.Flags.Quiet
-		hlog.Init(verbose)
+		// Initialize logging based on flags
+		verbose := options.Flags.Verbose
+		debug := options.Flags.Debug
+		hlog.InitWithDebug(verbose, debug)
 		log := hlog.Logger
-		ctx := cmd.Context()
+		ctx := logr.NewContext(cmd.Context(), log)
 
-		if debug.IsDebuggerAttached() {
-			hlog.Logger.Info("Running under debugger (will wait forever)")
-			options.Flags.CommandTimeout = 0
-		}
+		ctx = options.CommandLineContext(ctx, Version)
 
-		if options.Flags.CpuProfile != "" {
-			if options.Flags.CpuProfile != "" {
-				f, err := os.Create(options.Flags.CpuProfile)
-				if err != nil {
-					log.Error(err, "Failed to create CPU profile")
-					return err
-				}
-				pprof.StartCPUProfile(f)
-				ctx = context.WithValue(ctx, global.CpuProfileKey, f)
-			}
-		}
-
-		ctx = options.CommandLineContext(ctx, log, options.Flags.CommandTimeout, Version)
-		cmd.SetContext(ctx)
-
-		err := mqttclient.NewClientE(ctx, log, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+		err := mqttclient.NewClientE(ctx, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
 		}
+
+		mc, err := mqttclient.GetClientE(ctx)
+		if err != nil {
+			log.Error(err, "Failed to get MQTT client")
+			return err
+		}
+
+		// Add Shelly MQTT client to context
+		ctx = shellyMqtt.NewContext(ctx, mc)
 
 		myhome.TheClient, err = myhome.NewClientE(ctx, log, options.Flags.MqttTimeout)
 		if err != nil {
@@ -78,6 +69,8 @@ var Cmd = &cobra.Command{
 				break
 			}
 		}
+
+		cmd.SetContext(ctx)
 
 		return nil
 	},
@@ -104,15 +97,19 @@ var Cmd = &cobra.Command{
 
 func init() {
 	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "P", "", "write CPU profile to `file`")
-	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
-	Cmd.PersistentFlags().BoolVarP(&options.Flags.Quiet, "quiet", "q", false, "quiet output (suppress info logs)")
-	Cmd.PersistentFlags().DurationVarP(&options.Flags.CommandTimeout, "timeout", "", options.COMMAND_DEFAULT_TIMEOUT, "Timeout for overall command")
+	Cmd.PersistentFlags().DurationVarP(&options.Flags.Wait, "wait", "w", options.COMMAND_DEFAULT_TIMEOUT, "Maximum time to wait for command to finish (0 = wait indefinitely)")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output (info level, mutually exclusive with --debug and --quiet)")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Debug, "debug", "d", false, "debug output (debug level, shows V(1) logs, mutually exclusive with --verbose and --quiet)")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Quiet, "quiet", "q", false, "quiet output (error level only, mutually exclusive with --verbose and --debug)")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.MqttBroker, "mqtt-broker", "B", "", "Use given MQTT broker URL to communicate with Shelly devices (default is to discover it from the network)")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttTimeout, "mqtt-timeout", "T", options.MQTT_DEFAULT_TIMEOUT, "Timeout for MQTT operations")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MqttGrace, "mqtt-grace", "G", options.MQTT_DEFAULT_GRACE, "MQTT disconnection grace period")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Json, "json", "j", false, "output in json format")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns-timeout", "M", options.MDNS_LOOKUP_DEFAULT_TIMEOUT, "Timeout for mDNS lookups")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.Via, "via", "V", types.ChannelDefault.String(), "Use given channel to communicate with Shelly devices (default is to discover it from the network)")
+
+	// Make log level flags mutually exclusive
+	Cmd.MarkFlagsMutuallyExclusive("verbose", "debug", "quiet")
 
 	Cmd.AddCommand(list.Cmd)
 	Cmd.AddCommand(show.Cmd)

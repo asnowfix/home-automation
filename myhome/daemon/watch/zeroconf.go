@@ -3,7 +3,6 @@ package watch
 import (
 	"context"
 	"fmt"
-	"global"
 	"myhome"
 	"myhome/devices"
 	"mynet"
@@ -15,7 +14,11 @@ import (
 )
 
 func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry, dr mynet.Resolver) error {
-	log := ctx.Value(global.LogKey).(logr.Logger)
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
+
 	go func(ctx context.Context, log logr.Logger) error {
 		stopped := make(chan struct{}, 1)
 		scan := make(chan *zeroconf.ServiceEntry, 1)
@@ -71,7 +74,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 								}
 								device = device.WithImpl(sd)
 							}
-							device = device.WithZeroConfEntry(entry)
+							device = device.WithZeroConfEntry(ctx, entry)
 						}
 						dm.UpdateChannel() <- device
 					}

@@ -23,9 +23,17 @@ func init() {
 }
 
 var deviceAddCmd = &cobra.Command{
-	Use:   "add",
-	Short: "Add device to group",
-	Args:  cobra.ExactArgs(2),
+	Use:   "add <group-name> <device>",
+	Short: "Add device to group and apply group KVS settings",
+	Long: `Add a device to a group.
+
+When a device is added to a group, all KVS key-value pairs defined in the group
+are automatically set on the device. Additionally, a group membership marker
+(group/<group-name>=true) is added to the device's KVS.
+
+Example:
+  myhome ctl group add radiateurs radiateur-salon-hiver`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group := args[0]
 		dp := args[1]
@@ -47,9 +55,17 @@ var deviceAddCmd = &cobra.Command{
 }
 
 var deviceRemoveCmd = &cobra.Command{
-	Use:   "remove",
+	Use:   "remove <group-name> <device>",
 	Short: "Remove device from group",
-	Args:  cobra.ExactArgs(2),
+	Long: `Remove a device from a group.
+
+When a device is removed from a group, only the group membership marker
+(group/<group-name>) is deleted from the device's KVS. The group's KVS
+key-value pairs are NOT automatically removed from the device.
+
+Example:
+  myhome ctl group remove radiateurs radiateur-salon-hiver`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		group := args[0]
 		dp := args[1]

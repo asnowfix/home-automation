@@ -9,7 +9,6 @@ import (
 	"mynet"
 	"net"
 	"os"
-	"os/signal"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
 	shellyscript "pkg/shelly/script"
@@ -19,7 +18,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"syscall"
 	"tools"
 
 	"github.com/go-logr/logr"
@@ -109,10 +107,11 @@ var debugCtl = &cobra.Command{
 
 		active, _ := strconv.ParseBool(args[1])
 
-		log := hlog.Logger
-
-		var udpContext context.Context
-		var udpCancel context.CancelFunc
+		ctx := cmd.Context()
+		log, err := logr.FromContext(ctx)
+		if err != nil {
+			return err
+		}
 
 		if len(args) == 3 {
 			// Script-level debug via Script.Eval (no UDP needed)
@@ -144,9 +143,6 @@ var debugCtl = &cobra.Command{
 			port = localAddr.Port
 			log.Info("Listening on UDP", "ip", ip.String(), "port", port)
 
-			// Create a context for the UDP server only: others (MQTT ...etc) will timeout on their own
-			udpContext, udpCancel = context.WithCancel(context.Background())
-			defer udpCancel()
 			udpChan := make(chan []byte)
 
 			// Start a goroutine to read from UDP and send to channel
@@ -172,7 +168,7 @@ var debugCtl = &cobra.Command{
 						return
 					}
 				}
-			}(udpContext, log.WithName("UDP-logger"), udpChan)
+			}(ctx, log.WithName("UDP-logger"), udpChan)
 
 			go func(ctx context.Context, ch chan []byte) {
 				ctx = tools.WithToken(ctx)
@@ -187,7 +183,7 @@ var debugCtl = &cobra.Command{
 						parseMessage(data)
 					}
 				}
-			}(udpContext, udpChan)
+			}(ctx, udpChan)
 
 			addr := fmt.Sprintf("%s:%d", ip.String(), port)
 			args = []string{addr}
@@ -195,24 +191,12 @@ var debugCtl = &cobra.Command{
 			args = []string{}
 		}
 
-		// FIXME: use udpContext
-		_, err := myhome.Foreach(tools.WithToken(cmd.Context()), hlog.Logger, device, options.Via, doDebug, args)
+		_, err = myhome.Foreach(tools.WithToken(ctx), log, device, options.Via, doDebug, args)
 		if err != nil {
 			return err
 		}
 
-		if active {
-			// Wait for ctrl-c signal to cancel the UDP context
-			go func(log logr.Logger, cancel context.CancelFunc) {
-				signals := make(chan os.Signal, 1)
-				signal.Notify(signals, os.Interrupt)
-				signal.Notify(signals, syscall.SIGTERM)
-				<-signals
-				log.Info("Received signal")
-				cancel()
-			}(log, udpCancel)
-			<-udpContext.Done()
-		}
+		<-ctx.Done()
 		return nil
 	},
 }

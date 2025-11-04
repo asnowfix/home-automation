@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"myhome/mqtt"
 	"mynet"
 	"net"
 	"pkg/devices"
 	"pkg/shelly/ethernet"
+	"pkg/shelly/mqtt"
 	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -44,6 +44,12 @@ type Device struct {
 func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	d.mutex.Lock(ctx)
 	defer d.mutex.Unlock(ctx)
+
+	// Gen1 devices (like shellyht-*) cannot be refreshed via RPC
+	if strings.HasPrefix(d.Id(), "shellyht-") {
+		d.log.V(1).Info("Skipping refresh for Gen1 device", "device_id", d.Id())
+		return false, nil
+	}
 
 	if !d.IsMqttReady() && d.Id() != "" {
 		err := d.initMqtt(ctx)
@@ -217,6 +223,10 @@ func (d *Device) Config() *shelly.Config {
 	return d.config
 }
 
+func (d *Device) Status() *shelly.Status {
+	return d.status
+}
+
 func (d *Device) ConfigRevision() uint32 {
 	if d.config == nil {
 		return 0
@@ -264,7 +274,7 @@ func (d *Device) IsHttpReady() bool {
 	}
 
 	if ip == nil {
-		d.log.Error(nil, "Device has no IP address")
+		d.log.Info("Device has no IP address", "device", d)
 		return false
 	}
 	d.UpdateHost(ip.String())
@@ -449,7 +459,7 @@ func (d *Device) initMqtt(ctx context.Context) error {
 		// return fmt.Errorf("device id is empty: no channel to communicate")
 	}
 
-	mc, err := mqtt.GetClientE(ctx)
+	mc, err := mqtt.FromContext(ctx)
 	if err != nil {
 		d.log.Error(err, "Unable to get MQTT client")
 		return err

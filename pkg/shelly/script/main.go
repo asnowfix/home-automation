@@ -13,22 +13,22 @@ import (
 	mjs "github.com/tdewolff/minify/v2/js"
 )
 
-var content fs.FS
+var scripts fs.FS
 
 // Package logger is declared in ops.go
 
 // setFS sets the filesystem to use for reading script files
 func setFS(scriptsFS fs.FS) {
-	content = scriptsFS
+	scripts = scriptsFS
 }
 
 // ReadEmbeddedFile reads an embedded script file by name
 func ReadEmbeddedFile(name string) ([]byte, error) {
-	return fs.ReadFile(content, name)
+	return fs.ReadFile(scripts, name)
 }
 
 func ListAvailable() ([]string, error) {
-	dir, err := fs.ReadDir(content, ".")
+	dir, err := fs.ReadDir(scripts, ".")
 	if err != nil {
 		log.Error(err, "Unable to list embedded scripts")
 		return nil, err
@@ -314,31 +314,23 @@ func Download(ctx context.Context, via types.Channel, device types.Device, name 
 	return res.Data, nil
 }
 
-// UploadAndStart uploads script content to a device and starts it
-// This is a generic function without MyHome-specific version tracking
-func UploadAndStart(ctx context.Context, via types.Channel, device types.Device, name string, buf []byte, minify bool) (uint32, error) {
-	id, err := doUpload(ctx, via, device, name, buf, minify)
-	if err != nil {
-		return 0, err
+// For MyHome-specific version tracking, use internal/myhome/shelly/script.UploadWithVersionAndStart instead
+func Upload(ctx context.Context, via types.Channel, device types.Device, name string, code []byte, minify bool) (uint32, error) {
+	var err error
+
+	if len(code) == 0 {
+		code, err = fs.ReadFile(scripts, name)
+		if err != nil {
+			log.Error(err, "Unknown script", "name", name, "device", device.Name())
+			return 0, err
+		}
 	}
-	
-	_, err = StartStopDelete(ctx, via, device, name, Start)
+
+	id, err := doUpload(ctx, via, device, name, code, minify)
 	if err != nil {
-		log.Error(err, "Unable to start script", "name", name, "device", device.Name())
 		return 0, err
 	}
 	return id, nil
-}
-
-// Upload reads an embedded script file and uploads it
-// For MyHome-specific version tracking, use internal/myhome/shelly/script.UploadWithVersion instead
-func Upload(ctx context.Context, via types.Channel, device types.Device, name string, minify bool) (uint32, error) {
-	buf, err := fs.ReadFile(content, name)
-	if err != nil {
-		log.Error(err, "Unknown script", "name", name, "device", device.Name())
-		return 0, err
-	}
-	return UploadAndStart(ctx, via, device, name, buf, minify)
 }
 
 func doUpload(ctx context.Context, via types.Channel, device types.Device, name string, buf []byte, minify bool) (uint32, error) {

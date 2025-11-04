@@ -103,49 +103,45 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 	hp.mc.Publish(hp.ctx, infoTopic, infoMsg)
 	hp.log.Info("Published Gen1 MQTT", "topic", infoTopic, "value", device)
 
-	// Check if sensor data is present
-	if device.Sensor == nil {
-		hp.log.Info("No sensor data in request", "device", device.Id)
-		return nil
-	}
-
 	// Publish temperature (common to both H&T and Flood sensors)
-	tempTopic := fmt.Sprintf("shellies/%s/sensor/temperature", device.Id)
-	tempMsg, err := json.Marshal(device.Sensor.Temperature)
-	if err != nil {
-		return fmt.Errorf("failed to marshal temperature: %w", err)
+	if device.Temperature != nil {
+		tempTopic := fmt.Sprintf("shellies/%s/sensor/temperature", device.Id)
+		tempMsg, err := json.Marshal(device.Temperature)
+		if err != nil {
+			return fmt.Errorf("failed to marshal temperature: %w", err)
+		}
+		hp.mc.Publish(hp.ctx, tempTopic, tempMsg)
+		hp.log.Info("Published Gen1 MQTT", "topic", tempTopic, "value", device.Temperature)
 	}
-	hp.mc.Publish(hp.ctx, tempTopic, tempMsg)
-	hp.log.Info("Published Gen1 MQTT", "topic", tempTopic, "value", device.Sensor.Temperature)
 
-	if device.IsHTSensor() {
+	if device.Humidity != nil {
 		// Publish humidity (H&T sensor only)
 		humTopic := fmt.Sprintf("shellies/%s/sensor/humidity", device.Id)
-		humMsg, err := json.Marshal(device.Sensor.Humidity)
+		humMsg, err := json.Marshal(device.Humidity)
 		if err != nil {
 			return fmt.Errorf("failed to marshal humidity: %w", err)
 		}
 		hp.mc.Publish(hp.ctx, humTopic, humMsg)
-		hp.log.Info("Published Gen1 MQTT", "topic", humTopic, "value", device.Sensor.Humidity)
+		hp.log.Info("Published Gen1 MQTT", "topic", humTopic, "value", device.Humidity)
 	}
-	if device.IsFloodSensor() {
+	if device.Flood != nil {
 		// Publish flood status
 		floodTopic := fmt.Sprintf("shellies/%s/sensor/flood", device.Id)
-		floodMsg, err := json.Marshal(device.Sensor.Flood)
+		floodMsg, err := json.Marshal(device.Flood)
 		if err != nil {
 			return fmt.Errorf("failed to marshal flood: %w", err)
 		}
 		hp.mc.Publish(hp.ctx, floodTopic, floodMsg)
-		hp.log.Info("Published Gen1 MQTT", "topic", floodTopic, "value", device.Sensor.Flood)
+		hp.log.Info("Published Gen1 MQTT", "topic", floodTopic, "value", device.Flood)
 
 		// Publish battery voltage
 		batTopic := fmt.Sprintf("shellies/%s/sensor/battery", device.Id)
-		batMsg, err := json.Marshal(device.Sensor.BatteryVoltage)
+		batMsg, err := json.Marshal(device.BatV)
 		if err != nil {
 			return fmt.Errorf("failed to marshal battery: %w", err)
 		}
 		hp.mc.Publish(hp.ctx, batTopic, batMsg)
-		hp.log.Info("Published Gen1 MQTT", "topic", batTopic, "value", device.Sensor.BatteryVoltage)
+		hp.log.Info("Published Gen1 MQTT", "topic", batTopic, "value", device.BatV)
 	}
 
 	return nil

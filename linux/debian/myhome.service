@@ -25,6 +25,7 @@ StartLimitBurst=5
 
 # Environment variables
 Environment=HOME=/var/lib/myhome
+Environment=MYHOME_LOG=stderr
 
 [Install]
 # multi-user.target normally defines a system state where all network services

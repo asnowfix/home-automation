@@ -103,6 +103,12 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 	hp.mc.Publish(hp.ctx, infoTopic, infoMsg)
 	hp.log.Info("Published Gen1 MQTT", "topic", infoTopic, "value", device)
 
+	// Check if sensor data is present
+	if device.Sensor == nil {
+		hp.log.Info("No sensor data in request", "device", device.Id)
+		return nil
+	}
+
 	// Publish temperature (common to both H&T and Flood sensors)
 	tempTopic := fmt.Sprintf("shellies/%s/sensor/temperature", device.Id)
 	tempMsg, err := json.Marshal(device.Sensor.Temperature)

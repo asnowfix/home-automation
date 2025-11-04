@@ -3,9 +3,9 @@ package sfr
 import (
 	"context"
 	"fmt"
-	"myhome"
+	"myhome/model"
 	"net"
-	pkgsfr "pkg/sfr"
+	"pkg/sfr"
 	"sync"
 	"time"
 
@@ -13,11 +13,24 @@ import (
 )
 
 type Router struct {
-	hosts sync.Map
+	macs  sync.Map
+	ips   sync.Map
+	names sync.Map
 }
 
+var router *Router
+
+var routerLock sync.Mutex
+
 // Refreshes the IP address of the known devices every minute
-func StartRouter(ctx context.Context) myhome.Router {
+func GetRouter(ctx context.Context) model.Router {
+	routerLock.Lock()
+	defer routerLock.Unlock()
+
+	if router != nil {
+		return router
+	}
+
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic(" BUG: No logger initialized")
@@ -52,17 +65,18 @@ func StartRouter(ctx context.Context) myhome.Router {
 			}
 		}
 	}(logr.NewContext(ctx, log.WithName("SfrRouter")))
+	router = r
 	return r
 }
 
 func (r *Router) refresh(log logr.Logger) error {
-	devices, err := pkgsfr.ListDevices(log)
+	devices, err := sfr.ListDevices(log)
 	if err != nil {
 		return err
 	}
 
 	// Remove hosts that are not in the devices list
-	r.hosts.Range(func(key, value any) bool {
+	r.macs.Range(func(key, value any) bool {
 		found := false
 		for _, device := range devices {
 			if device.Mac().String() == key {
@@ -71,34 +85,63 @@ func (r *Router) refresh(log logr.Logger) error {
 			}
 		}
 		if !found {
-			r.hosts.Delete(key)
+			r.macs.Delete(key)
+			r.ips.Delete(key)
+			r.names.Delete(key)
 		}
 		return true
 	})
 
 	// Add listed devices
 	for _, device := range devices {
-		r.hosts.Store(device.Mac().String(), device)
+		r.macs.Store(device.Mac().String(), device)
+		r.ips.Store(device.Ip().String(), device)
+		r.names.Store(device.Name(), device)
 	}
 
 	// Count the number of stored devices
 	var count int
-	r.hosts.Range(func(key, value any) bool {
+	r.macs.Range(func(key, value any) bool {
 		count++
 		return true
 	})
 	log.Info("Number of devices stored", "count", count)
+
 	return nil
 }
 
-func (r *Router) GetHostByMac(ctx context.Context, mac net.HardwareAddr) (myhome.Host, error) {
-	out, ok := r.hosts.Load(mac.String())
+func (r *Router) GetHostByMac(ctx context.Context, mac net.HardwareAddr) (model.Host, error) {
+	out, ok := r.macs.Load(mac.String())
 	if !ok {
 		return nil, fmt.Errorf("device with MAC %s not found", mac)
 	}
-	host, ok := out.(myhome.Host)
+	host, ok := out.(model.Host)
 	if !ok {
 		return nil, fmt.Errorf("device with MAC %s is not a host %v", mac, out)
+	}
+	return host, nil
+}
+
+func (r *Router) GetHostByIp(ctx context.Context, ip net.IP) (model.Host, error) {
+	out, ok := r.ips.Load(ip.String())
+	if !ok {
+		return nil, fmt.Errorf("device with IP %s not found", ip)
+	}
+	host, ok := out.(model.Host)
+	if !ok {
+		return nil, fmt.Errorf("device with IP %s is not a host %v", ip, out)
+	}
+	return host, nil
+}
+
+func (r *Router) GetHostByName(ctx context.Context, name string) (model.Host, error) {
+	out, ok := r.names.Load(name)
+	if !ok {
+		return nil, fmt.Errorf("device with name %s not found", name)
+	}
+	host, ok := out.(model.Host)
+	if !ok {
+		return nil, fmt.Errorf("device with name %s is not a host %v", name, out)
 	}
 	return host, nil
 }

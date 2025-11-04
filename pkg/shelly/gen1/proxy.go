@@ -94,6 +94,15 @@ func (hp *http2MqttProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // Format: shellies/<device-id>/sensor/<sensor-type> with JSON payload
 // See: https://shelly-api-docs.shelly.cloud/gen1/#shelly-h-amp-t-mqtt
 func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
+	// Publish on device info topic (not used by real Gen1 devices)
+	infoTopic := fmt.Sprintf("shellies/%s/info", device.Id)
+	infoMsg, err := json.Marshal(device)
+	if err != nil {
+		return fmt.Errorf("failed to marshal device info: %w", err)
+	}
+	hp.mc.Publish(hp.ctx, infoTopic, infoMsg)
+	hp.log.Info("Published Gen1 MQTT", "topic", infoTopic, "value", device)
+
 	// Publish temperature (common to both H&T and Flood sensors)
 	tempTopic := fmt.Sprintf("shellies/%s/sensor/temperature", device.Id)
 	tempMsg, err := json.Marshal(device.Sensor.Temperature)

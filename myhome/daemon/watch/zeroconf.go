@@ -74,7 +74,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 								}
 								device = device.WithImpl(sd)
 							}
-							device = device.WithZeroConfEntry(entry)
+							device = device.WithZeroConfEntry(ctx, entry)
 						}
 						dm.UpdateChannel() <- device
 					}

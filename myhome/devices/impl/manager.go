@@ -8,6 +8,7 @@ import (
 	"myhome/daemon/watch"
 	mhd "myhome/devices"
 	"myhome/groups"
+	"myhome/model"
 	"myhome/mqtt"
 	"myhome/sfr"
 	"myhome/storage"
@@ -35,7 +36,7 @@ type DeviceManager struct {
 	log        logr.Logger
 	mqttClient *mqtt.Client
 	resolver   mynet.Resolver
-	router     myhome.Router
+	router     model.Router
 }
 
 func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient *mqtt.Client) *DeviceManager {
@@ -63,7 +64,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	dm.log.Info("Starting device manager")
 
-	dm.router = sfr.StartRouter(ctx)
+	dm.router = sfr.GetRouter(ctx)
 
 	myhome.RegisterMethodHandler(myhome.DevicesMatch, func(in any) (any, error) {
 		name := in.(string)
@@ -222,7 +223,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	}
 
 	// Start Gen1 MQTT listener for sensor data
-	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.dr)
+	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.dr, dm.router)
 	if err != nil {
 		dm.log.Error(err, "Failed to start Gen1 MQTT listener")
 		return err
@@ -231,7 +232,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	return nil
 }
 
-func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, gr mhd.GroupRegistry, router myhome.Router, refreshed chan<- *myhome.Device) {
+func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, gr mhd.GroupRegistry, router model.Router, refreshed chan<- *myhome.Device) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
@@ -250,7 +251,7 @@ func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, gr mhd
 	}
 }
 
-func refreshOneDevice(ctx context.Context, device *myhome.Device, gr mhd.GroupRegistry, router myhome.Router, refreshed chan<- *myhome.Device) {
+func refreshOneDevice(ctx context.Context, device *myhome.Device, gr mhd.GroupRegistry, router model.Router, refreshed chan<- *myhome.Device) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")

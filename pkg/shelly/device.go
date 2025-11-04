@@ -223,6 +223,10 @@ func (d *Device) Config() *shelly.Config {
 	return d.config
 }
 
+func (d *Device) Status() *shelly.Status {
+	return d.status
+}
+
 func (d *Device) ConfigRevision() uint32 {
 	if d.config == nil {
 		return 0

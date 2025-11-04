@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"myhome/sfr"
 	"mynet"
 	"net"
 	"pkg/devices"
@@ -72,7 +73,6 @@ type Device struct {
 	ConfigRevision uint32             `db:"config_revision" json:"config_revision"`
 	Info           *shelly.DeviceInfo `db:"-" json:"info"`
 	Config         *shelly.Config     `db:"-" json:"config"`
-	Status         *shelly.Status     `db:"-" json:"status"`
 	impl           any                `db:"-" json:"-"` // Reference to the inner implementation
 	log            logr.Logger        `db:"-" json:"-"`
 }
@@ -122,63 +122,6 @@ func (d *Device) WithHost(host string) *Device {
 
 func (d *Device) WithName(name string) *Device {
 	d.Name_ = name
-	return d
-}
-
-func (d *Device) WithStatus(status *shelly.Status) *Device {
-	if status != nil {
-		if d.Status == nil {
-			d.Status = &shelly.Status{}
-		}
-
-		if status.Gen1 != nil {
-			d.Status.Gen1 = status.Gen1
-		}
-
-		if status.Wifi != nil {
-			d.Status.Wifi = status.Wifi
-		}
-		if status.Ethernet != nil {
-			d.Status.Ethernet = status.Ethernet
-		}
-		if status.System != nil {
-			d.Status.System = status.System
-		}
-		if status.Cloud != nil {
-			d.Status.Cloud = status.Cloud
-		}
-		if status.Mqtt != nil {
-			d.Status.Mqtt = status.Mqtt
-		}
-
-		if status.Switch0 != nil {
-			d.Status.Switch0 = status.Switch0
-		}
-		if status.Switch1 != nil {
-			d.Status.Switch1 = status.Switch1
-		}
-		if status.Switch2 != nil {
-			d.Status.Switch2 = status.Switch2
-		}
-		if status.Switch3 != nil {
-			d.Status.Switch3 = status.Switch3
-		}
-
-		if status.Input0 != nil {
-			d.Status.Input0 = status.Input0
-		}
-		if status.Input1 != nil {
-			d.Status.Input1 = status.Input1
-		}
-		if status.Input2 != nil {
-			d.Status.Input2 = status.Input2
-		}
-		if status.Input3 != nil {
-			d.Status.Input3 = status.Input3
-		}
-	}
-
-	d.Status = status
 	return d
 }
 
@@ -295,28 +238,43 @@ func (d *Device) Refresh(ctx context.Context) (bool, error) {
 			d.log.Info("Device is up to date", "device", d.DeviceSummary)
 			return false, nil
 		}
-		d.DeviceSummary.Id_ = sd.Id()
-		d.DeviceSummary.Host_ = sd.Host()
-		d.DeviceSummary.Name_ = sd.Name()
-		d.DeviceSummary.MAC = sd.Mac().String()
+		d.WithId(sd.Id())
+		d.WithHost(sd.Host())
+		d.WithName(sd.Name())
+		d.WithMAC(sd.Mac())
+
 		d.ConfigRevision = sd.ConfigRevision()
 		d.Info = sd.Info()
 		d.Config = sd.Config()
+
 		sd.ResetModified()
 	}
 
 	return true, nil
 }
 
-func (d *Device) WithZeroConfEntry(entry *zeroconf.ServiceEntry) *Device {
+func (d *Device) WithZeroConfEntry(ctx context.Context, entry *zeroconf.ServiceEntry) *Device {
 	d.log.Info("Updating device", "id", d.Id, "zeroconf entry", entry)
+
 	if len(entry.AddrIPv4) > 0 {
-		d.Host_ = entry.AddrIPv4[0].String()
+		d.WithHost(entry.AddrIPv4[0].String())
 	} else if len(entry.AddrIPv6) > 0 {
-		d.Host_ = entry.AddrIPv6[0].String()
+		d.WithHost(entry.AddrIPv6[0].String())
 	}
-	if entry.Instance != "" && entry.Instance != d.Id_ {
-		d.Name_ = entry.Instance
+
+	if entry.Instance != "" && entry.Instance != d.Id() {
+		d.WithName(entry.Instance)
 	}
+
+	ip := net.ParseIP(d.Host())
+	if ip != nil {
+		host, err := sfr.GetRouter(ctx).GetHostByIp(ctx, ip)
+		if err != nil {
+			d.log.Error(err, "Failed to get host by IP", "ip", d.Host())
+			return d
+		}
+		d.WithMAC(host.Mac())
+	}
+
 	return d
 }

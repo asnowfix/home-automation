@@ -274,6 +274,12 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, gr mhd.GroupRe
 		panic("BUG: No logger initialized")
 	}
 
+	// Skip Gen1 devices - they are updated via MQTT messages only
+	if gen1.IsGen1Device(device.Id()) {
+		log.V(1).Info("Skipping Gen1 device refresh (updated via MQTT)", "device", device.DeviceSummary)
+		return
+	}
+
 	var modified bool = false
 	mac, err := net.ParseMAC(device.MAC)
 	if err == nil {
@@ -381,21 +387,32 @@ func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, interval time.
 			log.Info("Exiting known devices refresh loop")
 			return
 		case <-ticker.C:
-			log.Info("Refreshing one device", "index", i)
 			devices, err := dm.GetAllDevices(ctx)
 			if err != nil {
 				log.Error(err, "Failed to get all devices")
 				return
 			}
 
-			if i < len(devices) {
-				log.Info("Refreshing device", "device", devices[i].DeviceSummary)
-				dm.UpdateChannel() <- devices[i]
-				i++
+			// Filter out Gen1 devices (they are updated via MQTT only)
+			gen2Devices := make([]*myhome.Device, 0)
+			for _, d := range devices {
+				if !gen1.IsGen1Device(d.Id()) {
+					gen2Devices = append(gen2Devices, d)
+				}
 			}
-			if i >= len(devices) {
+
+			if len(gen2Devices) == 0 {
+				log.V(1).Info("No Gen2+ devices to refresh")
+				continue
+			}
+
+			if i >= len(gen2Devices) {
 				i = 0
 			}
+
+			log.Info("Refreshing device", "index", i, "total_gen2_devices", len(gen2Devices), "device", gen2Devices[i].DeviceSummary)
+			dm.UpdateChannel() <- gen2Devices[i]
+			i++
 		}
 	}
 }

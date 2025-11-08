@@ -35,6 +35,7 @@ type DeviceManager struct {
 	cancel     context.CancelFunc
 	log        logr.Logger
 	mqttClient *mqtt.Client
+	mqttCache  *mqtt.Cache
 	resolver   mynet.Resolver
 	router     model.Router
 }
@@ -204,6 +205,22 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	})
 
 	ctx, dm.cancel = context.WithCancel(ctx)
+
+	// Start MQTT message cache
+	dm.log.Info("Starting MQTT message cache")
+	dm.mqttCache, err = mqtt.NewCache(ctx, dm.log, mqtt.DefaultCacheConfig())
+	if err != nil {
+		dm.log.Error(err, "Failed to initialize MQTT cache")
+		return err
+	}
+
+	// Start caching all MQTT messages (subscribe to all topics with "#")
+	if err := dm.mqttCache.StartCaching(dm.mqttClient, "#"); err != nil {
+		dm.log.Error(err, "Failed to start MQTT message caching")
+		return err
+	}
+	dm.log.Info("MQTT message cache started")
+
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
 	go deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")), dm.update, dm.gr, dm.router, dm.refreshed)
 	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)

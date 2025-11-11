@@ -232,18 +232,18 @@ function updateIlluminanceTracking(mac, illuminance) {
       log("Saved daily illuminance for", mac, "date:", tracking.lastSaveDate, "min:", tracking.currentMin, "max:", tracking.currentMax);
     }
     
-    // Reset for new day
-    tracking.currentMin = illuminance;
-    tracking.currentMax = illuminance;
+    // Reset for new day - initialize to null so first value sets both min and max
+    tracking.currentMin = null;
+    tracking.currentMax = null;
     tracking.lastSaveDate = currentDate;
-  } else {
-    // Update current day's min/max
-    if (tracking.currentMin === null || illuminance < tracking.currentMin) {
-      tracking.currentMin = illuminance;
-    }
-    if (tracking.currentMax === null || illuminance > tracking.currentMax) {
-      tracking.currentMax = illuminance;
-    }
+  }
+  
+  // Update current day's min/max (handles both new day and same day updates)
+  if (tracking.currentMin === null || illuminance < tracking.currentMin) {
+    tracking.currentMin = illuminance;
+  }
+  if (tracking.currentMax === null || illuminance > tracking.currentMax) {
+    tracking.currentMax = illuminance;
   }
 }
 

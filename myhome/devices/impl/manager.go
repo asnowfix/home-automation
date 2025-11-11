@@ -275,7 +275,7 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, gr mhd.GroupRe
 	}
 
 	// Skip Gen1 devices - they are updated via MQTT messages only
-	if gen1.IsGen1Device(device.Id()) {
+	if shelly.IsGen1Device(device.Id()) {
 		log.V(1).Info("Skipping Gen1 device refresh (updated via MQTT)", "device", device.DeviceSummary)
 		return
 	}
@@ -396,7 +396,7 @@ func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, interval time.
 			// Filter out Gen1 devices (they are updated via MQTT only)
 			gen2Devices := make([]*myhome.Device, 0)
 			for _, d := range devices {
-				if !gen1.IsGen1Device(d.Id()) {
+				if !shelly.IsGen1Device(d.Id()) {
 					gen2Devices = append(gen2Devices, d)
 				}
 			}

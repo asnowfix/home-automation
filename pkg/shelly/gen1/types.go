@@ -2,7 +2,6 @@ package gen1
 
 import (
 	"net"
-	"strings"
 )
 
 // Sensor contains sensor data from Gen1 devices
@@ -27,30 +26,5 @@ type Device struct {
 	Sensor       `json:"sensor,omitempty"`
 }
 
-// Gen1 device ID prefixes that identify Gen1 devices
-var gen1Prefixes = []string{
-	"shellyht-",      // Shelly H&T (Humidity & Temperature)
-	"shellyflood-",   // Shelly Flood
-	"shelly1-",       // Shelly 1
-	"shelly1pm-",     // Shelly 1PM
-	"shelly25-",      // Shelly 2.5
-	"shellyplug-",    // Shelly Plug
-	"shellydimmer-",  // Shelly Dimmer
-	"shellyrgbw2-",   // Shelly RGBW2
-	"shellybulb-",    // Shelly Bulb
-	"shellydw-",      // Shelly Door/Window
-	"shellyem-",      // Shelly EM
-	"shelly3em-",     // Shelly 3EM
-	"shellyuni-",     // Shelly UNI
-}
-
-// IsGen1Device returns true if the device ID indicates a Gen1 device
-// Gen1 devices are identified by their ID prefix (e.g., "shellyht-", "shellyflood-")
-func IsGen1Device(deviceId string) bool {
-	for _, prefix := range gen1Prefixes {
-		if strings.HasPrefix(deviceId, prefix) {
-			return true
-		}
-	}
-	return false
-}
+// Note: IsGen1Device function has been moved to pkg/shelly package
+// to avoid import cycles. Use shelly.IsGen1Device(deviceId) instead.

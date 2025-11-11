@@ -330,6 +330,34 @@ var versionRe = regexp.MustCompile("^ver=(?P<version>[.0-9]+)$")
 
 var deviceIdRe = regexp.MustCompile("^shelly[a-zA-Z0-9]+-[a-f0-9]{12}$")
 
+// Gen1 device ID prefixes that identify Gen1 devices
+var gen1Prefixes = []string{
+	"shellyht-",      // Shelly H&T (Humidity & Temperature)
+	"shellyflood-",   // Shelly Flood
+	"shelly1-",       // Shelly 1
+	"shelly1pm-",     // Shelly 1PM
+	"shelly25-",      // Shelly 2.5
+	"shellyplug-",    // Shelly Plug
+	"shellydimmer-",  // Shelly Dimmer
+	"shellyrgbw2-",   // Shelly RGBW2
+	"shellybulb-",    // Shelly Bulb
+	"shellydw-",      // Shelly Door/Window
+	"shellyem-",      // Shelly EM
+	"shelly3em-",     // Shelly 3EM
+	"shellyuni-",     // Shelly UNI
+}
+
+// IsGen1Device returns true if the device ID indicates a Gen1 device
+// Gen1 devices are identified by their ID prefix (e.g., "shellyht-", "shellyflood-")
+func IsGen1Device(deviceId string) bool {
+	for _, prefix := range gen1Prefixes {
+		if strings.HasPrefix(deviceId, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *Device) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
 	var mh types.MethodHandler
 	var err error
@@ -563,6 +591,13 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 		wg.Add(1)
 		go func(devSummary devices.Device) {
 			defer wg.Done()
+
+			// Skip Gen1 devices - they cannot receive commands or run scripts
+			if IsGen1Device(devSummary.Id()) {
+				log.V(1).Info("Skipping Gen1 device (no command/script support)", "device_id", devSummary.Id())
+				results <- DeviceResult{Device: devSummary, Error: nil}
+				return
+			}
 
 			// Create device from summary
 			device, err := NewDeviceFromSummary(ctx, log, devSummary)

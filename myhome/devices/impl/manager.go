@@ -171,6 +171,22 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		return nil, nil
 	})
+	myhome.RegisterMethodHandler(myhome.MqttRepeat, func(in any) (any, error) {
+		topic := in.(string)
+		dm.log.Info("RPC: mqtt.repeat", "topic", topic)
+		
+		if dm.mqttCache == nil {
+			return nil, fmt.Errorf("MQTT cache not initialized")
+		}
+		
+		// Replay the cached message for the topic
+		err := dm.mqttCache.Replay(ctx, dm.mqttClient, topic)
+		if err != nil {
+			return nil, fmt.Errorf("failed to replay MQTT message: %w", err)
+		}
+		
+		return nil, nil
+	})
 	myhome.RegisterMethodHandler(myhome.GroupList, func(in any) (any, error) {
 		return dm.gr.GetAllGroups()
 	})

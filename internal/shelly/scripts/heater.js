@@ -517,7 +517,7 @@ function onTemperature(key, topic, message, userdata) {
     log('Stored ' + key + ' temperature:', temp);
     
     // Check if we now have all required temperatures
-    checkTemperaturesReady();
+    checkTemperaturesReady(checkAndStartControlLoop);
   }
 }
 
@@ -543,7 +543,7 @@ function generateRequestId() {
 }
 
 // Check if we have all required temperatures
-function checkTemperaturesReady() {
+function checkTemperaturesReady(onReady) {
   var internalTemp = Script.storage.getItem(STORAGE_KEYS.internalTemp);
   var externalTemp = Script.storage.getItem(STORAGE_KEYS.externalTemp);
   
@@ -553,13 +553,15 @@ function checkTemperaturesReady() {
   if (hasInternal && !STATE.internalTempReady) {
     STATE.internalTempReady = true;
     log('Internal temperature ready:', internalTemp);
-    checkAndStartControlLoop();
   }
   
   if (hasExternal && !STATE.externalTempReady) {
     STATE.externalTempReady = true;
     log('External temperature ready:', externalTemp);
-    checkAndStartControlLoop();
+  }
+
+  if (STATE.externalTempReady && STATE.internalTempReady) {
+    onReady();
   }
 }
 
@@ -583,24 +585,23 @@ function requestMqttRepeat(topic) {
 }
 
 // Fetch initial temperatures at startup if missing
-function fetchInitialTemperatures() {
+function fetchInitialTemperatures(onReady) {
   log('Checking for missing temperatures at startup...');
   
   // Check internal temperature
   var internalTemp = Script.storage.getItem(STORAGE_KEYS.internalTemp);
   if ((internalTemp === null || internalTemp === undefined) && CONFIG.internalTemperatureTopic) {
     requestMqttRepeat(CONFIG.internalTemperatureTopic)
-    // Give a chance of the temperature to be republished on the topic
-    Timer.setTimer(1000, checkTemperaturesReady)
   }
   
   // Check external temperature
   var externalTemp = Script.storage.getItem(STORAGE_KEYS.externalTemp);
   if ((externalTemp === null || externalTemp === undefined) && CONFIG.externalTemperatureTopic) {
     requestMqttRepeat(CONFIG.externalTemperatureTopic)
-    // Give a chance of the temperature to be republished on the topic
-    Timer.setTimer(1000, checkTemperaturesReady)
   }
+
+  // Give a chance of the temperature to be republished on the topic
+  Timer.setTimer(1000, checkTemperaturesReady.bind(null, onReady))
 }
 
 // Subscribe to MQTT topics for temperature sources
@@ -618,7 +619,7 @@ function subscribeMqttTemperatures() {
   // Fetch initial temperatures if missing
   log('About to call fetchInitialTemperatures...');
   try {
-    fetchInitialTemperatures();
+    fetchInitialTemperatures(checkAndStartControlLoop);
   } catch (e) {
     log('Error calling fetchInitialTemperatures:', e);
   }
@@ -650,6 +651,32 @@ function shouldRefreshForecast() {
   return false;
 }
 
+function onForecast(cb, result, error_code, error_message) {
+  log('onForecast', result, error_code, error_message)
+  if (error_code === 0 && result && result.body) {
+    var data = null;
+    try { data = JSON.parse(result.body); } catch (e) {}
+    
+    if (data && data.hourly && data.hourly.temperature_2m && data.hourly.temperature_2m.length > 0) {
+      // Cache the full forecast arrays
+      STATE.cachedForecast = data.hourly.temperature_2m;
+      STATE.cachedForecastTimes = data.hourly.time;
+      var now = new Date();
+      STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+      STATE.forecastDataReady = true;
+      log('Cached forecast with ' + STATE.cachedForecast.length + ' hourly values for date: ' + STATE.lastForecastFetchDate);
+      checkAndStartControlLoop();
+      cb(true);
+    } else {
+      log('Failed to parse forecast data');
+      cb(false);
+    }
+  } else {
+    log('Error fetching Open-Meteo forecast:', error_message);
+    cb(false);
+  }
+}
+
 function fetchAndCacheForecast(cb) {
   var url = STATE.forecastUrl || getForecastUrl();
   if (!url) {
@@ -662,30 +689,7 @@ function fetchAndCacheForecast(cb) {
   Shelly.call("HTTP.GET", {
     url: url,
     timeout: 10
-  }, function(result, error_code, error_message) {
-    if (error_code === 0 && result && result.body) {
-      var data = null;
-      try { data = JSON.parse(result.body); } catch (e) {}
-      
-      if (data && data.hourly && data.hourly.temperature_2m && data.hourly.temperature_2m.length > 0) {
-        // Cache the full forecast arrays
-        STATE.cachedForecast = data.hourly.temperature_2m;
-        STATE.cachedForecastTimes = data.hourly.time;
-        var now = new Date();
-        STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
-        STATE.forecastDataReady = true;
-        log('Cached forecast with ' + STATE.cachedForecast.length + ' hourly values for date: ' + STATE.lastForecastFetchDate);
-        checkAndStartControlLoop();
-        cb(true);
-      } else {
-        log('Failed to parse forecast data');
-        cb(false);
-      }
-    } else {
-      log('Error fetching Open-Meteo forecast:', error_message);
-      cb(false);
-    }
-  });
+  }, onForecast.bind(null, cb));
 }
 
 function getCurrentForecastTemp() {
@@ -788,7 +792,7 @@ function pollAndControl() {
 
 // Check if ready and start control loop
 function checkAndStartControlLoop() {
-  log('Checking wether we can start control loop')
+  log('Checking whether we can start control loop')
   log('  - Forecast URL ready:' + STATE.forecastUrlReady);
   log('  - Forecast data ready:' + STATE.forecastDataReady);
   log('  - Internal temp ready:' + STATE.internalTempReady);

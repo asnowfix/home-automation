@@ -19,6 +19,7 @@ const (
 	DeviceShow        Verb = "device.show"
 	DeviceForget      Verb = "device.forget"
 	DeviceRefresh     Verb = "device.refresh"
+	DeviceUpdate      Verb = "device.update"
 	GroupList         Verb = "group.list"
 	GroupCreate       Verb = "group.create"
 	GroupDelete       Verb = "group.delete"

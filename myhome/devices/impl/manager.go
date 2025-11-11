@@ -163,6 +163,14 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		return nil, nil
 	})
+	myhome.RegisterMethodHandler(myhome.DeviceUpdate, func(in any) (any, error) {
+		device := in.(*myhome.Device)
+		dm.log.Info("RPC: device.update", "id", device.Id(), "name", device.Name())
+		if err := dm.dr.SetDevice(ctx, device, true); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
 	myhome.RegisterMethodHandler(myhome.GroupList, func(in any) (any, error) {
 		return dm.gr.GetAllGroups()
 	})

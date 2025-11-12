@@ -63,6 +63,7 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 
 				err = ValidateDialog(req.Dialog)
 				if err != nil {
+					log.Error(err, "Invalid dialog:"+req.Dialog.String())
 					s.fail(ctx, 1, err, &req, mc)
 					continue
 				}

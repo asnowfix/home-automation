@@ -7,6 +7,7 @@ import (
 	"mynet"
 	"net"
 	"os"
+	"time"
 
 	"github.com/go-logr/logr"
 
@@ -16,7 +17,7 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
-func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string) error {
+func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string, clientLogInterval time.Duration) error {
 	log.Info("Starting MyHome", "program", program)
 
 	// Create the new MQTT Server.
@@ -87,6 +88,34 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 	}
 
 	log.Info("Started new MQTT broker", "mdns_server", mdnsServer, "mdns_service", ZEROCONF_SERVICE)
+
+	// Start periodic client monitoring if enabled
+	if clientLogInterval > 0 {
+		go func(ctx context.Context) {
+			ticker := time.NewTicker(clientLogInterval)
+			defer ticker.Stop()
+
+			log.Info("Starting MQTT broker client monitoring", "interval", clientLogInterval)
+
+			for {
+				select {
+				case <-ctx.Done():
+					log.Info("Stopping MQTT broker client monitoring")
+					return
+				case <-ticker.C:
+					// Log connected clients
+					clients := mqttServer.Clients.GetAll()
+					clientIds := make([]string, 0, len(clients))
+					for id := range clients {
+						clientIds = append(clientIds, id)
+					}
+					log.Info("MQTT broker connected clients", "count", len(clients), "client_ids", clientIds)
+				}
+			}
+		}(ctx)
+	} else {
+		log.Info("MQTT broker client monitoring disabled")
+	}
 
 	go func(ctx context.Context) {
 		<-ctx.Done()

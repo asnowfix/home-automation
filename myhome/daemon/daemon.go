@@ -73,7 +73,7 @@ func (d *daemon) Run() error {
 	// Conditionally start the embedded MQTT broker
 	if !disableEmbeddedMqttBroker {
 		log.Info("Starting embedded MQTT broker")
-		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil)
+		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome")
 			return err

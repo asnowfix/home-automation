@@ -199,7 +199,7 @@ function loadConfig() {
           
           // Also check for normally-closed in switch component KVS
           if (itemKey === 'normally-closed') {
-            CONFIG.normallyClosed = item.value === 'true';
+            CONFIG.normallyClosed = item.value === true || item.value === 'true';
             log('Loaded normally-closed =', CONFIG.normallyClosed);
           }
         }
@@ -302,11 +302,21 @@ function scheduleLearningTimers() {
 // Call this once at script start
 scheduleLearningTimers();
 
-function initOccupancyUrl(cb) {
-  log('initOccupancyUrl');
+function initUrls() {
+  log('initUrls');
   // Try to get MQTT status synchronously
   var cfg = Shelly.getComponentConfig('mqtt');
   if (cfg && typeof cfg === 'object') {
+    if ("client_id" in cfg && typeof cfg.client_id === 'string') {
+      if (cfg.client_id.length > 0) {
+        log("client_id:", cfg.client_id);
+        STATE.clientId = cfg.client_id;
+      } else {
+        var info = Shelly.getDeviceInfo();
+        log("client_id(device_id):", info.id);
+        STATE.clientId = info.id;
+      }
+    }
     if ("server" in cfg && typeof cfg.server === 'string') {
       // server = "192.168.1.2:1883"
       var host = cfg.server;
@@ -314,7 +324,6 @@ function initOccupancyUrl(cb) {
       if (i >= 0) host = host.substring(0, i);
       STATE.occupancyUrl = 'http://' + host + ':8889/status';
       log('Occupancy URL set to', STATE.occupancyUrl);
-      if (cb) cb(STATE.occupancyUrl);
     }
   }
 }
@@ -572,8 +581,7 @@ function checkTemperaturesReady(onReady) {
 function requestMqttRepeat(topic) {
   var request = JSON.stringify({
     id: generateRequestId(),
-    src: clientId,
-    replyTo: responseTopic,
+    src: STATE.clientId,
     dst: 'myhome',
     method: 'mqtt.repeat',
     params: topic
@@ -590,18 +598,18 @@ function fetchInitialTemperatures(onReady) {
   
   // Check internal temperature
   var internalTemp = Script.storage.getItem(STORAGE_KEYS.internalTemp);
-  if ((internalTemp === null || internalTemp === undefined) && CONFIG.internalTemperatureTopic) {
+  if (!internalTemp && CONFIG.internalTemperatureTopic) {
     requestMqttRepeat(CONFIG.internalTemperatureTopic)
   }
   
   // Check external temperature
   var externalTemp = Script.storage.getItem(STORAGE_KEYS.externalTemp);
-  if ((externalTemp === null || externalTemp === undefined) && CONFIG.externalTemperatureTopic) {
+  if (!externalTemp && CONFIG.externalTemperatureTopic) {
     requestMqttRepeat(CONFIG.externalTemperatureTopic)
   }
 
   // Give a chance of the temperature to be republished on the topic
-  Timer.setTimer(1000, checkTemperaturesReady.bind(null, onReady))
+  Timer.set(2000, false, checkTemperaturesReady.bind(null, onReady))
 }
 
 // Subscribe to MQTT topics for temperature sources
@@ -618,11 +626,12 @@ function subscribeMqttTemperatures() {
   
   // Fetch initial temperatures if missing
   log('About to call fetchInitialTemperatures...');
-  try {
-    fetchInitialTemperatures(checkAndStartControlLoop);
-  } catch (e) {
-    log('Error calling fetchInitialTemperatures:', e);
-  }
+  fetchInitialTemperatures(checkAndStartControlLoop);
+  // try {
+  //   fetchInitialTemperatures(checkAndStartControlLoop);
+  // } catch (e) {
+  //   log('Error calling fetchInitialTemperatures:', e);
+  // }
 }
 
 // === DATA FETCHING FUNCTIONS ===
@@ -825,22 +834,22 @@ log("Script starting...");
 
 // Fetch initial forecast on startup
 log('Fetching initial forecast on startup...');
-initOccupancyUrl(function() {
-  fetchAndCacheForecast(function(success) {
-    if (success) {
-      log('Initial forecast cached successfully');
-    } else {
-      log('Initial forecast fetch failed');
-    }
-    
-    // Start the periodic control loop timer (will skip if not ready)
-    Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
-    
-    // Try to start control loop if ready
-    checkAndStartControlLoop();
-    
-    log("Script initialization complete");
-  });
+initUrls();
+
+fetchAndCacheForecast(function(success) {
+  if (success) {
+    log('Initial forecast cached successfully');
+  } else {
+    log('Initial forecast fetch failed');
+  }
+  
+  // Start the periodic control loop timer (will skip if not ready)
+  Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
+  
+  // Try to start control loop if ready
+  checkAndStartControlLoop();
+  
+  log("Script initialization complete");
 });
 
 // Schedule daily forecast refresh at midnight

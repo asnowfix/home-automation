@@ -47,3 +47,4 @@ SECRETS.md
 /wix.build.json
 /myhome/ctl/shelly*/*.js
 /myhome/events/*
+/myhome/device.json

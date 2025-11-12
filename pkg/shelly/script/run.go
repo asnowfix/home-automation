@@ -18,6 +18,15 @@ import (
 )
 
 func Run(ctx context.Context, name string, buf []byte, minify bool) error {
+	emptyState := &DeviceState{
+		KVS:     make(map[string]interface{}),
+		Storage: make(map[string]interface{}),
+	}
+	return RunWithDeviceState(ctx, name, buf, minify, emptyState)
+}
+
+// RunWithDeviceState runs a script with a provided device state for testing
+func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify bool, deviceState *DeviceState) error {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic(err)
@@ -29,10 +38,10 @@ func Run(ctx context.Context, name string, buf []byte, minify bool) error {
 			return err
 		}
 	}
-	handlers := make([]handler, 0)
-	storage := make(map[string]interface{}) // In-memory storage for testing
 
-	vm, err := createShellyRuntime(ctx, &handlers, &storage)
+	handlers := make([]handler, 0)
+
+	vm, err := createShellyRuntime(ctx, &handlers, deviceState)
 	if err != nil {
 		log.Error(err, "Failed to create Shelly runtime", "name", name)
 		return err
@@ -108,7 +117,7 @@ type handler interface {
 }
 
 // createShellyRuntime creates a goja VM with Shelly API placeholders
-func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[string]interface{}) (*goja.Runtime, error) {
+func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *DeviceState) (*goja.Runtime, error) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -139,6 +148,9 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 	nextTimerHandle := 1
 
 	vm := goja.New()
+
+	// Define methods map with access to deviceState
+	methods := createMethodsMap(deviceState)
 
 	// Shelly object with all APIs from https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shelly-apis
 	shellyObj := vm.NewObject()
@@ -366,12 +378,12 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 				nextTimerHandle++
 
 				timer := &timerHandler{
-					handle:   handle,
-					period:   time.Duration(period) * time.Millisecond,
-					repeat:   repeat,
-					callable: callable,
-					userdata: userdata,
-					vm:       vm,
+					handle:    handle,
+					period:    time.Duration(period) * time.Millisecond,
+					repeat:    repeat,
+					callable:  callable,
+					userdata:  userdata,
+					vm:        vm,
 					startTime: time.Now(),
 				}
 
@@ -453,7 +465,7 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 	mqttObj.Set("unsubscribe", func(call goja.FunctionCall) goja.Value {
 		topic := call.Argument(0).String()
 		log.Info("MQTT.unsubscribe()", "topic", topic)
-		
+
 		// Find the handler for this topic
 		if handlerIdx, ok := mqttSubscriptions[topic]; ok {
 			if handlerIdx < len(*handlers) {
@@ -465,7 +477,7 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 				}
 			}
 		}
-		
+
 		log.V(1).Info("Topic not found in subscriptions", "topic", topic)
 		return vm.ToValue(false)
 	})
@@ -495,21 +507,27 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 	storageObj := vm.NewObject()
 	storageObj.Set("getItem", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()
-		if val, ok := (*storage)[key]; ok {
+		log.V(1).Info("Script.storage.getItem", "key", key)
+		storage := deviceState.GetStorage()
+		if val, ok := storage[key]; ok {
+			log.V(1).Info("Script.storage.getItem", "key", key, "value", val)
 			return vm.ToValue(val)
 		}
+		// Add key with null value if not found
+		storage[key] = nil
+		log.V(1).Info("Script.storage.getItem", "key", key, "value", "null (added)")
 		return goja.Null()
 	})
 	storageObj.Set("setItem", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()
 		value := call.Argument(1).Export()
-		(*storage)[key] = value
+		storage := deviceState.GetStorage()
+		storage[key] = value
 		log.Info("Script.storage.setItem", "key", key, "value", value)
-		log.V(1).Info("Script.storage.setItem", "storage", *storage)
+		log.V(1).Info("Script.storage.setItem", "storage", storage)
 		return goja.Undefined()
 	})
 	scriptObj.Set("storage", storageObj)
-
 	vm.Set("Script", scriptObj)
 
 	// Global print function
@@ -549,141 +567,153 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, storage *map[
 
 type methodFunc func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error)
 
-var methods = map[string]methodFunc{
-	"shelly.detectlocation": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
-		// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellydetectlocation
-		if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-			if callable, ok := goja.AssertFunction(callback); ok {
-				result := map[string]interface{}{
-					"lat": 52.5200,
-					"lon": 13.4050,
-					"tz":  "Europe/Berlin",
+func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
+	return map[string]methodFunc{
+		"shelly.detectlocation": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
+			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellydetectlocation
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					result := map[string]interface{}{
+						"lat": 52.5200,
+						"lon": 13.4050,
+						"tz":  "Europe/Berlin",
+					}
+					// Call: callback(result, error_code, error_message)
+					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
+					if err != nil {
+						return nil, err
+					}
+					return ret.Export(), nil
 				}
-				// Call: callback(result, error_code, error_message)
-				ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
-				if err != nil {
-					return nil, err
-				}
-				return ret.Export(), nil
 			}
-		}
-		return nil, nil
-	},
-	"kvs.getmany": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
-		// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/KVS#kvsgetmany
-		if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-			if callable, ok := goja.AssertFunction(callback); ok {
-				result := map[string]interface{}{
-					"items": []interface{}{
-						map[string]interface{}{
-							"key":   "item1",
+			return nil, nil
+		},
+		"kvs.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
+			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/KVS#kvsget
+			paramsObj := params.ToObject(vm)
+			key := paramsObj.Get("key").String()
+
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					kvs := deviceState.GetKVS()
+					if val, ok := kvs[key]; ok {
+						result := map[string]interface{}{
+							"key":   key,
 							"etag":  "0DhkTpVgJk9zc2soEXlpoLrw==",
-							"value": "value item1",
-						},
-						map[string]interface{}{
-							"key":   "normally-closed",
-							"etag":  "0DXyU0CpLjyvZAV8GjRb2VzA==",
-							"value": "true",
-						},
-						map[string]interface{}{
-							"key":   "script/heater/set-point",
-							"etag":  "0DXyU0CpLjyvZAV8GjRb2VzA==",
-							"value": "19.0",
-						},
-						map[string]interface{}{
-							"key":   "script/heater/enable-logging",
-							"etag":  "0DXyU0CpLjyvZAV8GjRb2VzA==",
-							"value": "true",
-						},
-						map[string]interface{}{
-							"key":   "script/heater/internal-temperature-topic",
-							"etag":  "0DXyU0CpLjyvZAV8GjRb2VzA==",
-							"value": "shellies/shellyht-208500/sensor/temperature",
-						},
-						map[string]interface{}{
-							"key":   "script/heater/external-temperature-topic",
-							"etag":  "0DXyU0CpLjyvZAV8GjRb2VzA==",
-							"value": "shellies/shellyht-EE45E9/sensor/temperature",
-						},
-					},
-					"offset": 0,
-					"total":  26,
+							"value": val,
+						}
+						// Call: callback(result, error_code, error_message)
+						ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
+						if err != nil {
+							return nil, err
+						}
+						return ret.Export(), nil
+					} else {
+						// Key not found - add it with null value
+						kvs[key] = nil
+						// Call callback with error code -114 (key not found)
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(-114), vm.ToValue("Key not found"))
+						return nil, nil
+					}
 				}
-				// Call: callback(result, error_code, error_message)
-				ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
-				if err != nil {
-					return nil, err
-				}
-				return ret.Export(), nil
 			}
-		}
-		return nil, nil
-	},
-	"http.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
-		// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/HTTP#httpget
-		// params: { url: string, timeout: number }
-		paramsObj := params.ToObject(vm)
-		url := paramsObj.Get("url").String()
-		timeout := int(paramsObj.Get("timeout").ToInteger())
-
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-		defer cancel()
-
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
+			return nil, nil
+		},
+		"kvs.getmany": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
+			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/KVS#kvsgetmany
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
-					callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
+					kvs := deviceState.GetKVS()
+					items := make([]interface{}, 0, len(kvs))
+					for key, value := range kvs {
+						items = append(items, map[string]interface{}{
+							"key":   key,
+							"etag":  "0DhkTpVgJk9zc2soEXlpoLrw==",
+							"value": value,
+						})
+					}
+
+					result := map[string]interface{}{
+						"items":  items,
+						"offset": 0,
+						"total":  len(items),
+					}
+					// Call: callback(result, error_code, error_message)
+					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
+					if err != nil {
+						return nil, err
+					}
+					return ret.Export(), nil
 				}
 			}
-			return nil, err
-		}
+			return nil, nil
+		},
+		"http.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
+			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/HTTP#httpget
+			// params: { url: string, timeout: number }
+			paramsObj := params.ToObject(vm)
+			url := paramsObj.Get("url").String()
+			timeout := int(paramsObj.Get("timeout").ToInteger())
 
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+			defer cancel()
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if err != nil {
+				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+					if callable, ok := goja.AssertFunction(callback); ok {
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
+					}
+				}
+				return nil, err
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+					if callable, ok := goja.AssertFunction(callback); ok {
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
+					}
+				}
+				return nil, err
+			}
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+					if callable, ok := goja.AssertFunction(callback); ok {
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
+					}
+				}
+				return nil, err
+			}
+
+			headers := make(map[string]string)
+			for k, v := range resp.Header {
+				if len(v) > 0 {
+					headers[k] = v[0]
+				}
+			}
+
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
-					callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
+					result := map[string]interface{}{
+						"body":    string(body),
+						"headers": headers,
+						"status":  resp.StatusCode,
+					}
+					// Call: callback(result, error_code, error_message)
+					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
+					if err != nil {
+						return nil, err
+					}
+					return ret.Export(), nil
 				}
 			}
-			return nil, err
-		}
-		defer resp.Body.Close()
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
-					callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
-				}
-			}
-			return nil, err
-		}
-
-		headers := make(map[string]string)
-		for k, v := range resp.Header {
-			if len(v) > 0 {
-				headers[k] = v[0]
-			}
-		}
-
-		if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-			if callable, ok := goja.AssertFunction(callback); ok {
-				result := map[string]interface{}{
-					"body":    string(body),
-					"headers": headers,
-					"status":  resp.StatusCode,
-				}
-				// Call: callback(result, error_code, error_message)
-				ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
-				if err != nil {
-					return nil, err
-				}
-				return ret.Export(), nil
-			}
-		}
-		return nil, nil
-	},
+			return nil, nil
+		},
+	}
 }
 
 // Actual implementation for MQTT.subscribe <https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#mqttsubscribe>
@@ -772,7 +802,7 @@ type timerHandler struct {
 
 func (th *timerHandler) Wait() <-chan []byte {
 	ch := make(chan []byte)
-	
+
 	if th.repeat {
 		// Periodic timer
 		th.ticker = time.NewTicker(th.period)
@@ -799,7 +829,7 @@ func (th *timerHandler) Wait() <-chan []byte {
 			close(ch)
 		}()
 	}
-	
+
 	return ch
 }
 
@@ -808,16 +838,16 @@ func (th *timerHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte
 	if err != nil {
 		return err
 	}
-	
+
 	log.Info("Timer callback", "handle", th.handle, "repeat", th.repeat)
-	
+
 	// Call the callback with userdata
 	_, err = th.callable(goja.Undefined(), th.userdata)
 	if err != nil {
 		log.Error(err, "Timer callback failed", "handle", th.handle)
 		return err
 	}
-	
+
 	return nil
 }
 

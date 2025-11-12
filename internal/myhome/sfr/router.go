@@ -33,7 +33,7 @@ func GetRouter(ctx context.Context) model.Router {
 
 	log, err := logr.FromContext(ctx)
 	if err != nil {
-		panic(" BUG: No logger initialized")
+		panic(" BUG: No logger initialized: " + err.Error())
 	}
 
 	r := &Router{}
@@ -43,7 +43,7 @@ func GetRouter(ctx context.Context) model.Router {
 	go func(ctx context.Context) {
 		log, err = logr.FromContext(ctx)
 		if err != nil {
-			panic("BUG: No logger initialized")
+			panic("BUG: No logger initialized: " + err.Error())
 		}
 		log.Info("Started connected devices refresh loop")
 

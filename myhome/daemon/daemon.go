@@ -155,6 +155,33 @@ func (d *daemon) Run() error {
 
 	log.Info("Running")
 
+	// Start periodic MQTT connection status monitoring if enabled
+	if options.Flags.MqttBrokerClientLogInterval > 0 {
+		go func(ctx context.Context) {
+			log := logr.FromContextOrDiscard(ctx)
+			ticker := time.NewTicker(options.Flags.MqttBrokerClientLogInterval)
+			defer ticker.Stop()
+
+			log.Info("Starting MQTT connection status monitoring", "interval", options.Flags.MqttBrokerClientLogInterval)
+
+			for {
+				select {
+				case <-ctx.Done():
+					log.Info("Stopping MQTT connection status monitoring")
+					return
+				case <-ticker.C:
+					// Log MQTT connection status
+					if mc != nil {
+						connected := mc.IsConnected()
+						log.Info("MQTT client connection status", "connected", connected, "client_id", mc.Id())
+					}
+				}
+			}
+		}(logr.NewContext(d.ctx, log.WithName("Mqtt.ClientMonitor")))
+	} else {
+		log.Info("MQTT connection status monitoring disabled")
+	}
+
 	// Create a channel to handle OS signals
 	done := make(chan struct{})
 	go func() {

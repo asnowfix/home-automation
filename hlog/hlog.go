@@ -37,6 +37,12 @@ func InitForDaemon(verbose bool) {
 	InitWithLevel(verbose, false, zerolog.InfoLevel)
 }
 
+// InitForDaemonWithDebug initializes logging for daemon processes with support for debug flag
+// Daemon default level is info, but --debug raises it to debug level
+func InitForDaemonWithDebug(verbose bool, debug bool) {
+	InitWithLevel(verbose, debug, zerolog.InfoLevel)
+}
+
 // InitWithLevel initializes logging with a specific default level
 func InitWithLevel(verbose bool, debug bool, defaultLevel zerolog.Level) {
 	debugInit("Initializing logger")
@@ -92,17 +98,17 @@ func parseLogLevel(verbose bool, debug bool, defaultLevel zerolog.Level) zerolog
 		debugInit("VSCode debugger detected, forcing debug log level")
 		return zerolog.DebugLevel
 	}
-	
+
 	// Handle debug flag (--debug = debug level, shows V(1) logs)
 	if debug {
 		return zerolog.DebugLevel
 	}
-	
+
 	// Handle verbose flag (--verbose = info level)
 	if verbose {
 		return zerolog.InfoLevel
 	}
-	
+
 	// Use the provided default level if nothing specified
 	return defaultLevel
 }
@@ -113,17 +119,17 @@ func isRunningUnderDebugger() bool {
 	if os.Getenv("DELVE_DEBUGGER") != "" {
 		return true
 	}
-	
+
 	// Check if MYHOME_LOG is set to stderr (common in VSCode launch configs)
 	if LogToStderr() {
 		return true
 	}
-	
+
 	// Check for VSCode-specific environment variables
 	if os.Getenv("VSCODE_PID") != "" || os.Getenv("VSCODE_IPC_HOOK") != "" {
 		return true
 	}
-	
+
 	return false
 }
 
@@ -218,7 +224,7 @@ func GetCallerLogger() logr.Logger {
 	if !ok {
 		return Logger.WithName("unknown")
 	}
-	
+
 	// Extract package name from file path
 	// e.g., "/path/to/pkg/shelly/script/main.go" -> "pkg/shelly/script"
 	packageName := extractPackageName(file)
@@ -229,7 +235,7 @@ func GetCallerLogger() logr.Logger {
 func extractPackageName(filePath string) string {
 	// Find the last occurrence of a known root (like "pkg/", "internal/", "cmd/")
 	parts := strings.Split(filePath, "/")
-	
+
 	// Look for common Go project structure markers
 	for i, part := range parts {
 		if part == "pkg" || part == "internal" || part == "cmd" || part == "myhome" {
@@ -241,7 +247,7 @@ func extractPackageName(filePath string) string {
 			}
 		}
 	}
-	
+
 	// Fallback: use the directory name
 	dir := filepath.Dir(filePath)
 	return filepath.Base(dir)

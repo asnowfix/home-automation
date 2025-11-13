@@ -26,15 +26,17 @@ var Cmd = &cobra.Command{
 		// For daemon commands, default to verbose unless --quiet is specified
 		isDaemon := cmd.Name() == "daemon" || cmd.Parent() != nil && cmd.Parent().Name() == "daemon"
 		verbose := options.Flags.Verbose
+		debugFlag := options.Flags.Debug
 		if isDaemon {
-			verbose = !options.Flags.Quiet // daemon is verbose by default unless --quiet
+			// Daemon is verbose (info level) by default unless --quiet is specified
+			verbose = !options.Flags.Quiet
 		}
 
-		// Use InitForDaemon for daemon commands to default to info level
+		// Initialize logging with debug support
 		if isDaemon {
-			hlog.InitForDaemon(verbose)
+			hlog.InitForDaemonWithDebug(verbose, debugFlag)
 		} else {
-			hlog.Init(verbose)
+			hlog.InitWithDebug(verbose, debugFlag)
 		}
 
 		log := hlog.Logger
@@ -100,8 +102,10 @@ var Cmd = &cobra.Command{
 
 func init() {
 	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "P", "", "write CPU profile to `file`")
-	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output")
-	Cmd.PersistentFlags().BoolVarP(&options.Flags.Quiet, "quiet", "q", false, "quiet output (suppress info logs)")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output (info level, mutually exclusive with --debug and --quiet)")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Debug, "debug", "d", false, "debug output (debug level, one level higher than --verbose, mutually exclusive with --verbose and --quiet)")
+	Cmd.PersistentFlags().BoolVarP(&options.Flags.Quiet, "quiet", "q", false, "quiet output (error level only, mutually exclusive with --verbose and --debug)")
+	Cmd.MarkFlagsMutuallyExclusive("verbose", "debug", "quiet")
 	Cmd.AddCommand(daemon.Cmd)
 	Cmd.AddCommand(ctl.Cmd)
 }

@@ -11,7 +11,7 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "-B", "192.168.1.2", "shelly", "-H", "jobs", "show", "192.168.1.66"],
+            "args": ["--debug", "ctl", "-B", "192.168.1.2", "shelly", "-H", "jobs", "show", "192.168.1.66"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -22,7 +22,7 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "-v", "-B", "192.168.1.2", "shelly", "jobs", "show", "shellyplus1-08b61fd9d708"],
+            "args": ["--debug", "ctl", "-v", "-B", "192.168.1.2", "shelly", "jobs", "show", "shellyplus1-08b61fd9d708"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -33,7 +33,7 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "-B", "192.168.1.2" ,"group", "create", "radiateurs", "Tous les radiateurs"],
+            "args": ["--debug", "ctl", "-B", "192.168.1.2" ,"group", "create", "radiateurs", "Tous les radiateurs"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -44,7 +44,7 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "-B", "192.168.1.2" ,"group", "show", "radiateurs"],
+            "args": ["--debug", "ctl", "-B", "192.168.1.2" ,"group", "show", "radiateurs"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -55,7 +55,7 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "-B", "192.168.1.2" ,"group", "delete", "radiateurs"],
+            "args": ["--debug", "ctl", "-B", "192.168.1.2" ,"group", "delete", "radiateurs"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -65,7 +65,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["-v", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2"],
+            "args": ["--debug", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -75,7 +75,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["-v", "daemon", "run", "-v",
+            "args": ["--debug", "daemon", "run",
                 "-P", "myhome-wo-broker.prof",
                 "-B", "192.168.1.2",
                 "--enable-gen1-proxy",
@@ -89,7 +89,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["-v", "daemon", "run", "-B", "192.168.1.2", "--enable-occupancy-service", "--disable-device-manager", "--disable-gen1-proxy"],
+            "args": ["--debug", "daemon", "run", "-B", "192.168.1.2", "--enable-occupancy-service", "--disable-device-manager", "--disable-gen1-proxy"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -99,7 +99,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["-v", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2", "-E", "events"],
+            "args": ["--debug", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2", "-E", "events"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -109,7 +109,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["-v", "daemon", "run", "-P", "myhome-wo-broker.prof", "-D"],
+            "args": ["--debug", "daemon", "run", "-P", "myhome-wo-broker.prof", "-D"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -120,7 +120,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "group", "list"],
+            "args": ["--debug", "ctl", "group", "list"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -131,7 +131,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "-B" ,"192.168.1.2" ,"switch" ,"radiateur-bureau" ,"off"],
+            "args": ["--debug", "ctl", "-B" ,"192.168.1.2" ,"switch" ,"radiateur-bureau" ,"off"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -142,7 +142,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "-B" ,"192.168.1.2" ,"forget" ,"light-outside-steps"],
+            "args": ["--debug", "ctl", "-B" ,"192.168.1.2" ,"forget" ,"light-outside-steps"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -153,7 +153,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "set" ,"shelly", "-N", "prise-routeurs", "shellyplugsg3-b08184a53f24"],
+            "args": ["--debug", "ctl", "set" ,"shelly", "-N", "prise-routeurs", "shellyplugsg3-b08184a53f24"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -164,7 +164,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "shelly", "script", "list", "shelly1minig3-54320464074c"],
+            "args": ["--debug", "ctl", "shelly", "script", "list", "shelly1minig3-54320464074c"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -175,7 +175,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "shelly", "script", "fetch", "shelly1minig3-54320464074c"],
+            "args": ["--debug", "ctl", "shelly", "script", "fetch", "shelly1minig3-54320464074c"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -186,7 +186,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "shelly", "script", "eval", "shelly1minig3-54320464074c", "2", "print(CONFIG.allowedMacAddresses)"],
+            "args": ["--debug", "ctl", "shelly", "script", "eval", "shelly1minig3-54320464074c", "2", "print(CONFIG.allowedMacAddresses)"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -197,7 +197,7 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/myhome",
-            "args": ["ctl", "--verbose", "shelly", "script", "upload", "--no-minify", "lampadaire-salon", "watchdog.js"],
+            "args": ["ctl", "--debug", "shelly", "script", "upload", "--no-minify", "lampadaire-salon", "watchdog.js"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }

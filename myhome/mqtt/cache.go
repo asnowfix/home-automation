@@ -44,8 +44,11 @@ func DefaultCacheConfig() CacheConfig {
 }
 
 // NewCache creates a new MQTT message cache
-func NewCache(ctx context.Context, log logr.Logger, config CacheConfig) (*Cache, error) {
-	log = log.WithName("mqtt.Cache")
+func NewCache(ctx context.Context, config CacheConfig) (*Cache, error) {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	cache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: config.NumCounters,
@@ -114,7 +117,9 @@ func (c *Cache) cacheMessage(topic string, payload []byte) {
 
 	// Store in cache (topic is the key)
 	if !c.cache.Set(topic, cachedMsg, cost) {
-		c.log.V(1).Info("Failed to cache message (buffer full, will retry)", "topic", topic)
+		c.log.Info("Failed to cache message (buffer full, will retry)", "topic", topic)
+	} else {
+		c.log.V(1).Info("Cached message", "topic", topic, "age", time.Since(cachedMsg.Timestamp), "msg", string(payload), "cost", cost)
 	}
 }
 
@@ -168,17 +173,17 @@ func (c *Cache) Close() {
 func (c *Cache) Stats() map[string]interface{} {
 	metrics := c.cache.Metrics
 	return map[string]interface{}{
-		"hits":             metrics.Hits(),
-		"misses":           metrics.Misses(),
-		"keys_added":       metrics.KeysAdded(),
-		"keys_updated":     metrics.KeysUpdated(),
-		"keys_evicted":     metrics.KeysEvicted(),
-		"cost_added":       metrics.CostAdded(),
-		"cost_evicted":     metrics.CostEvicted(),
-		"sets_dropped":     metrics.SetsDropped(),
-		"sets_rejected":    metrics.SetsRejected(),
-		"gets_kept":        metrics.GetsKept(),
-		"gets_dropped":     metrics.GetsDropped(),
-		"hit_ratio":        metrics.Ratio(),
+		"hits":          metrics.Hits(),
+		"misses":        metrics.Misses(),
+		"keys_added":    metrics.KeysAdded(),
+		"keys_updated":  metrics.KeysUpdated(),
+		"keys_evicted":  metrics.KeysEvicted(),
+		"cost_added":    metrics.CostAdded(),
+		"cost_evicted":  metrics.CostEvicted(),
+		"sets_dropped":  metrics.SetsDropped(),
+		"sets_rejected": metrics.SetsRejected(),
+		"gets_kept":     metrics.GetsKept(),
+		"gets_dropped":  metrics.GetsDropped(),
+		"hit_ratio":     metrics.Ratio(),
 	}
 }

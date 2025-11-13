@@ -174,17 +174,17 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	myhome.RegisterMethodHandler(myhome.MqttRepeat, func(in any) (any, error) {
 		topic := in.(string)
 		dm.log.Info("RPC: mqtt.repeat", "topic", topic)
-		
+
 		if dm.mqttCache == nil {
 			return nil, fmt.Errorf("MQTT cache not initialized")
 		}
-		
+
 		// Replay the cached message for the topic
 		err := dm.mqttCache.Replay(ctx, dm.mqttClient, topic)
 		if err != nil {
 			return nil, fmt.Errorf("failed to replay MQTT message: %w", err)
 		}
-		
+
 		return nil, nil
 	})
 	myhome.RegisterMethodHandler(myhome.GroupList, func(in any) (any, error) {
@@ -232,7 +232,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	// Start MQTT message cache
 	dm.log.Info("Starting MQTT message cache")
-	dm.mqttCache, err = mqtt.NewCache(ctx, dm.log, mqtt.DefaultCacheConfig())
+	dm.mqttCache, err = mqtt.NewCache(logr.NewContext(ctx, dm.log.WithName("mqtt.Cache")), mqtt.DefaultCacheConfig())
 	if err != nil {
 		dm.log.Error(err, "Failed to initialize MQTT cache")
 		return err

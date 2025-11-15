@@ -26,6 +26,7 @@ type daemon struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	dm     *impl.DeviceManager
+	rpc    myhome.Server
 }
 
 type Config struct {
@@ -141,9 +142,9 @@ func (d *daemon) Run() error {
 
 		log.Info("Started device manager", "manager", d.dm)
 
-		_, err = myhome.NewServerE(d.ctx, log, d.dm)
+		d.rpc, err = myhome.NewServerE(d.ctx, d.dm)
 		if err != nil {
-			log.Error(err, "Failed to start MyHome service")
+			log.Error(err, "Failed to start MyHome RPC service")
 			return err
 		}
 

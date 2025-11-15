@@ -21,8 +21,11 @@ var CONFIG = {
   externalTemperatureTopic: null,
 };
 
+// Configuration Key-Values loaded from KVS, shared across every scripts
 var CONFIG_KEY = {
-  // Configuration keys (to load from KVS)
+  // Unprefixed configuration keys
+  normallyClosed: "normally-closed",
+  // Prefixed configuration keys
   enableLogging: "enable-logging",
   setpoint: "set-point",
   minInternalTemp: "min-internal-temp",
@@ -30,12 +33,11 @@ var CONFIG_KEY = {
   cheapEndHour: "cheap-end-hour",
   pollIntervalMs: "poll-interval-ms",
   preheatHours: "preheat-hours",
-  normallyClosed: "normally-closed",
   internalTemperatureTopic: "internal-temperature-topic",
   externalTemperatureTopic: "external-temperature-topic",
 };
 
-// Script.storage keys for continuously evolving values
+// State Script.storage keys for continuously evolving values, automatically saved per script
 var STORAGE_KEYS = {
   coolingRate: "cooling-rate",
   forecastUrl: "forecast-url",
@@ -45,13 +47,13 @@ var STORAGE_KEYS = {
 };
 
 function getCoolingRate() {
-  var v = Script.storage.getItem(STORAGE_KEYS.coolingRate);
+  var v = loadValue(STORAGE_KEYS.coolingRate);
   return (typeof v === "number") ? v : DEFAULT_COOLING_RATE;
 }
 
 function setCoolingRate(v) {
   if (typeof v === "number") {
-    Script.storage.setItem(STORAGE_KEYS.coolingRate, v);
+    storeValue(STORAGE_KEYS.coolingRate, v);
   }
 }
 
@@ -110,7 +112,7 @@ var STATE = {
 
 function detectLocationAndLoadConfig() {
   // Use stored forecast URL if available
-  var stored = getForecastUrl();
+  var stored = loadValue(STORAGE_KEYS.forecastUrl);
   if (stored) {
     STATE.forecastUrl = stored;
     STATE.forecastUrlReady = true;
@@ -137,9 +139,67 @@ function detectLocationAndLoadConfig() {
   });
 }
 
-function getForecastUrl() {
-  var u = Script.storage.getItem(STORAGE_KEYS.forecastUrl);
-  return (typeof u === 'string' && u.length > 0) ? u : null;
+function parseValue(valueStr) {
+  var value;
+  // Try JSON parse first (handles objects, arrays, booleans, numbers, strings)
+  try {
+    value = JSON.parse(valueStr);
+  } catch (e) {
+    // Not valid JSON, try parsing as primitive types
+    if (valueStr === "true" || valueStr === "false") {
+      // Boolean string
+      value = valueStr === "true";
+    } else {
+      // Try as Date string
+      var dateValue = Date.parse(valueStr);
+      if (!isNaN(dateValue)) {
+        value = new Date(dateValue);
+      } else {
+        // Try as number (parseFloat handles both integers and floats)
+        var numValue = parseFloat(valueStr);
+        if (!isNaN(numValue)) {
+          value = numValue;
+        } else {
+          // Keep as string
+          if (valueStr.length > 0) {
+            value = valueStr;
+          } else {
+            value = null;
+          }
+        }
+      }
+    }
+  }
+  return value;
+}
+
+function storeValue(key, value) {
+  var valueStr;
+  // Use "null" as a sentinel for JS null/undefined so we can round-trip
+  // through Script.storage, which only stores strings.
+  if (typeof value === 'undefined' || value === null) {
+    valueStr = "null";
+  } else if (typeof value === 'number' || typeof value === 'boolean') {
+    valueStr = value.toString();
+  } else if (typeof value === 'string') {
+    valueStr = value;
+  } else if (value instanceof Date) {
+    valueStr = value.toISOString();
+  } else if (typeof value === 'object') {
+    valueStr = JSON.stringify(value);
+  } else {
+    valueStr = String(value);
+  }
+  Script.storage.setItem(key, valueStr);
+}
+
+function loadValue(key) {
+  var v = Script.storage.getItem(key);
+  // Missing key or explicit "null" sentinel both map to JS null
+  if (v === null || typeof v === 'undefined' || v === "null") {
+    return null;
+  }
+  return parseValue(v);
 }
 
 function updateForecastURL(lat, lon) {
@@ -147,7 +207,7 @@ function updateForecastURL(lat, lon) {
     var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&hourly=temperature_2m&forecast_days=1&timezone=auto';
     STATE.forecastUrl = url;
     STATE.forecastUrlReady = true;
-    Script.storage.setItem(STORAGE_KEYS.forecastUrl, url);
+    storeValue(STORAGE_KEYS.forecastUrl, url);
     log('Forecast URL ready');
     checkAndStartControlLoop();
   }
@@ -168,29 +228,7 @@ function loadConfig() {
             var fullKey = CONFIG_KEY_PREFIX + CONFIG_KEY[configName];
             
             if (itemKey === fullKey) {
-              var valueStr = item.value;
-              var value;
-              
-              // Try JSON parse first (handles objects, arrays, booleans, numbers, strings)
-              try {
-                value = JSON.parse(valueStr);
-              } catch (e) {
-                // Not valid JSON, try parsing as primitive types
-                if (valueStr === "true" || valueStr === "false") {
-                  // Boolean string
-                  value = valueStr === "true";
-                } else {
-                  // Try as number (parseFloat handles both integers and floats)
-                  var numValue = parseFloat(valueStr);
-                  if (!isNaN(numValue)) {
-                    value = numValue;
-                  } else {
-                    // Keep as string
-                    value = valueStr;
-                  }
-                }
-              }
-              
+              var value = parseValue(item.value);
               CONFIG[configName] = value;
               log('Loaded config', configName, '=', value, 'from key', itemKey);
               break;
@@ -199,7 +237,7 @@ function loadConfig() {
           
           // Also check for normally-closed in switch component KVS
           if (itemKey === 'normally-closed') {
-            CONFIG.normallyClosed = item.value === 'true';
+            CONFIG.normallyClosed = item.value === true || item.value === 'true';
             log('Loaded normally-closed =', CONFIG.normallyClosed);
           }
         }
@@ -242,28 +280,25 @@ function onCheapWindowEnd() {
   if (temp !== null) {
     var now = (new Date()).getTime();
     var data = { temp: temp, time: now };
-    Script.storage.setItem(STORAGE_KEYS.lastCheapEnd, JSON.stringify(data));
+    storeValue(STORAGE_KEYS.lastCheapEnd, data);
     log("Stored end-of-cheap-window temp:", temp);
   }
 }
 
 function onCheapWindowStart() {
-  var storedData = Script.storage.getItem(STORAGE_KEYS.lastCheapEnd);
-  if (!storedData) {
+  var data = loadValue(STORAGE_KEYS.lastCheapEnd);
+  if (!data) {
     log("No previous cheap window end data available for learning");
     return;
   }
-  
-  var data = null;
-  try {
-    data = JSON.parse(storedData);
-  } catch (e) {
-    log("Failed to parse last cheap end data");
+  // loadValue already returns a parsed object when we stored one with storeValue.
+  // Be defensive in case of older/corrupted data.
+  if (typeof data !== 'object') {
+    log("Invalid last cheap end data (not an object)");
     return;
   }
-  
-  if (!data || !data.temp || !data.time) {
-    log("Invalid last cheap end data");
+  if (!("temp" in data) || !("time" in data)) {
+    log("Invalid last cheap end data (missing fields)");
     return;
   }
   
@@ -302,11 +337,21 @@ function scheduleLearningTimers() {
 // Call this once at script start
 scheduleLearningTimers();
 
-function initOccupancyUrl(cb) {
-  log('initOccupancyUrl');
+function initUrls() {
+  log('initUrls');
   // Try to get MQTT status synchronously
   var cfg = Shelly.getComponentConfig('mqtt');
   if (cfg && typeof cfg === 'object') {
+    if ("client_id" in cfg && typeof cfg.client_id === 'string') {
+      if (cfg.client_id.length > 0) {
+        log("client_id:", cfg.client_id);
+        STATE.clientId = cfg.client_id;
+      } else {
+        var info = Shelly.getDeviceInfo();
+        log("client_id(device_id):", info.id);
+        STATE.clientId = info.id;
+      }
+    }
     if ("server" in cfg && typeof cfg.server === 'string') {
       // server = "192.168.1.2:1883"
       var host = cfg.server;
@@ -314,7 +359,6 @@ function initOccupancyUrl(cb) {
       if (i >= 0) host = host.substring(0, i);
       STATE.occupancyUrl = 'http://' + host + ':8889/status';
       log('Occupancy URL set to', STATE.occupancyUrl);
-      if (cb) cb(STATE.occupancyUrl);
     }
   }
 }
@@ -513,11 +557,11 @@ function onTemperature(key, topic, message, userdata) {
   var temp = parseTemperatureFromMqtt(topic, message);
   if (temp !== null) {
     // Store in Script.storage (synchronous, internal data)
-    Script.storage.setItem(key, temp);
+    storeValue(key, temp);
     log('Stored ' + key + ' temperature:', temp);
     
     // Check if we now have all required temperatures
-    checkTemperaturesReady();
+    checkTemperaturesReady(checkAndStartControlLoop);
   }
 }
 
@@ -543,23 +587,27 @@ function generateRequestId() {
 }
 
 // Check if we have all required temperatures
-function checkTemperaturesReady() {
-  var internalTemp = Script.storage.getItem(STORAGE_KEYS.internalTemp);
-  var externalTemp = Script.storage.getItem(STORAGE_KEYS.externalTemp);
+function checkTemperaturesReady(onReady) {
+  log('Checking temperatures ready...');
+
+  var internalTemp = loadValue(STORAGE_KEYS.internalTemp);
+  var externalTemp = loadValue(STORAGE_KEYS.externalTemp);
   
-  var hasInternal = (internalTemp !== null && internalTemp !== undefined);
-  var hasExternal = (externalTemp !== null && externalTemp !== undefined);
+  var hasInternal = !!internalTemp;
+  var hasExternal = !!externalTemp;
   
   if (hasInternal && !STATE.internalTempReady) {
     STATE.internalTempReady = true;
     log('Internal temperature ready:', internalTemp);
-    checkAndStartControlLoop();
   }
   
   if (hasExternal && !STATE.externalTempReady) {
     STATE.externalTempReady = true;
     log('External temperature ready:', externalTemp);
-    checkAndStartControlLoop();
+  }
+
+  if (STATE.externalTempReady && STATE.internalTempReady) {
+    onReady();
   }
 }
 
@@ -570,8 +618,7 @@ function checkTemperaturesReady() {
 function requestMqttRepeat(topic) {
   var request = JSON.stringify({
     id: generateRequestId(),
-    src: clientId,
-    replyTo: responseTopic,
+    src: STATE.clientId,
     dst: 'myhome',
     method: 'mqtt.repeat',
     params: topic
@@ -583,24 +630,21 @@ function requestMqttRepeat(topic) {
 }
 
 // Fetch initial temperatures at startup if missing
-function fetchInitialTemperatures() {
+function fetchInitialTemperatures(onReady) {
   log('Checking for missing temperatures at startup...');
   
   // Check internal temperature
-  var internalTemp = Script.storage.getItem(STORAGE_KEYS.internalTemp);
-  if ((internalTemp === null || internalTemp === undefined) && CONFIG.internalTemperatureTopic) {
+  if (CONFIG.internalTemperatureTopic) {
     requestMqttRepeat(CONFIG.internalTemperatureTopic)
-    // Give a chance of the temperature to be republished on the topic
-    Timer.setTimer(1000, checkTemperaturesReady)
   }
   
   // Check external temperature
-  var externalTemp = Script.storage.getItem(STORAGE_KEYS.externalTemp);
-  if ((externalTemp === null || externalTemp === undefined) && CONFIG.externalTemperatureTopic) {
+  if (CONFIG.externalTemperatureTopic) {
     requestMqttRepeat(CONFIG.externalTemperatureTopic)
-    // Give a chance of the temperature to be republished on the topic
-    Timer.setTimer(1000, checkTemperaturesReady)
   }
+
+  // Give a chance of the temperature to be republished on the topic
+  Timer.set(2000, false, checkTemperaturesReady.bind(null, onReady))
 }
 
 // Subscribe to MQTT topics for temperature sources
@@ -617,18 +661,19 @@ function subscribeMqttTemperatures() {
   
   // Fetch initial temperatures if missing
   log('About to call fetchInitialTemperatures...');
-  try {
-    fetchInitialTemperatures();
-  } catch (e) {
-    log('Error calling fetchInitialTemperatures:', e);
-  }
+  fetchInitialTemperatures(checkAndStartControlLoop);
+  // try {
+  //   fetchInitialTemperatures(checkAndStartControlLoop);
+  // } catch (e) {
+  //   log('Error calling fetchInitialTemperatures:', e);
+  // }
 }
 
 // === DATA FETCHING FUNCTIONS ===
 // Read temperature from Script.storage (stored by MQTT callbacks)
 function getShellyTemperature(location, cb) {
   var key = location === 'internal' ? STORAGE_KEYS.internalTemp : STORAGE_KEYS.externalTemp;
-  var temp = Script.storage.getItem(key);
+  var temp = loadValue(key);
   
   if (temp !== null && temp !== undefined) {
     log('Read', location, 'temperature:', temp);
@@ -650,8 +695,34 @@ function shouldRefreshForecast() {
   return false;
 }
 
+function onForecast(cb, result, error_code, error_message) {
+  log('onForecast', result, error_code, error_message)
+  if (error_code === 0 && result && result.body) {
+    var data = null;
+    try { data = JSON.parse(result.body); } catch (e) {}
+    
+    if (data && data.hourly && data.hourly.temperature_2m && data.hourly.temperature_2m.length > 0) {
+      // Cache the full forecast arrays
+      STATE.cachedForecast = data.hourly.temperature_2m;
+      STATE.cachedForecastTimes = data.hourly.time;
+      var now = new Date();
+      STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+      STATE.forecastDataReady = true;
+      log('Cached forecast with ' + STATE.cachedForecast.length + ' hourly values for date: ' + STATE.lastForecastFetchDate);
+      checkAndStartControlLoop();
+      cb(true);
+    } else {
+      log('Failed to parse forecast data');
+      cb(false);
+    }
+  } else {
+    log('Error fetching Open-Meteo forecast:', error_message);
+    cb(false);
+  }
+}
+
 function fetchAndCacheForecast(cb) {
-  var url = STATE.forecastUrl || getForecastUrl();
+  var url = STATE.forecastUrl || loadValue(STORAGE_KEYS.forecastUrl);
   if (!url) {
     log('Open-Meteo forecast URL not configured. Skipping forecast.');
     cb(null);
@@ -662,30 +733,7 @@ function fetchAndCacheForecast(cb) {
   Shelly.call("HTTP.GET", {
     url: url,
     timeout: 10
-  }, function(result, error_code, error_message) {
-    if (error_code === 0 && result && result.body) {
-      var data = null;
-      try { data = JSON.parse(result.body); } catch (e) {}
-      
-      if (data && data.hourly && data.hourly.temperature_2m && data.hourly.temperature_2m.length > 0) {
-        // Cache the full forecast arrays
-        STATE.cachedForecast = data.hourly.temperature_2m;
-        STATE.cachedForecastTimes = data.hourly.time;
-        var now = new Date();
-        STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
-        STATE.forecastDataReady = true;
-        log('Cached forecast with ' + STATE.cachedForecast.length + ' hourly values for date: ' + STATE.lastForecastFetchDate);
-        checkAndStartControlLoop();
-        cb(true);
-      } else {
-        log('Failed to parse forecast data');
-        cb(false);
-      }
-    } else {
-      log('Error fetching Open-Meteo forecast:', error_message);
-      cb(false);
-    }
-  });
+  }, onForecast.bind(null, cb));
 }
 
 function getCurrentForecastTemp() {
@@ -788,7 +836,7 @@ function pollAndControl() {
 
 // Check if ready and start control loop
 function checkAndStartControlLoop() {
-  log('Checking wether we can start control loop')
+  log('Checking whether we can start control loop')
   log('  - Forecast URL ready:' + STATE.forecastUrlReady);
   log('  - Forecast data ready:' + STATE.forecastDataReady);
   log('  - Internal temp ready:' + STATE.internalTempReady);
@@ -821,22 +869,22 @@ log("Script starting...");
 
 // Fetch initial forecast on startup
 log('Fetching initial forecast on startup...');
-initOccupancyUrl(function() {
-  fetchAndCacheForecast(function(success) {
-    if (success) {
-      log('Initial forecast cached successfully');
-    } else {
-      log('Initial forecast fetch failed');
-    }
-    
-    // Start the periodic control loop timer (will skip if not ready)
-    Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
-    
-    // Try to start control loop if ready
-    checkAndStartControlLoop();
-    
-    log("Script initialization complete");
-  });
+initUrls();
+
+fetchAndCacheForecast(function(success) {
+  if (success) {
+    log('Initial forecast cached successfully');
+  } else {
+    log('Initial forecast fetch failed');
+  }
+  
+  // Start the periodic control loop timer (will skip if not ready)
+  Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
+  
+  // Try to start control loop if ready
+  checkAndStartControlLoop();
+  
+  log("Script initialization complete");
 });
 
 // Schedule daily forecast refresh at midnight

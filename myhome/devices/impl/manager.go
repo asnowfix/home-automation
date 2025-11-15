@@ -163,6 +163,30 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		return nil, nil
 	})
+	myhome.RegisterMethodHandler(myhome.DeviceUpdate, func(in any) (any, error) {
+		device := in.(*myhome.Device)
+		dm.log.Info("RPC: device.update", "id", device.Id(), "name", device.Name())
+		if err := dm.dr.SetDevice(ctx, device, true); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
+	myhome.RegisterMethodHandler(myhome.MqttRepeat, func(in any) (any, error) {
+		topic := in.(string)
+		dm.log.Info("RPC: mqtt.repeat", "topic", topic)
+
+		if dm.mqttCache == nil {
+			return nil, fmt.Errorf("MQTT cache not initialized")
+		}
+
+		// Replay the cached message for the topic
+		err := dm.mqttCache.Replay(ctx, dm.mqttClient, topic)
+		if err != nil {
+			return nil, fmt.Errorf("failed to replay MQTT message: %w", err)
+		}
+
+		return nil, nil
+	})
 	myhome.RegisterMethodHandler(myhome.GroupList, func(in any) (any, error) {
 		return dm.gr.GetAllGroups()
 	})
@@ -208,17 +232,18 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	// Start MQTT message cache
 	dm.log.Info("Starting MQTT message cache")
-	dm.mqttCache, err = mqtt.NewCache(ctx, dm.log, mqtt.DefaultCacheConfig())
+	dm.mqttCache, err = mqtt.NewCache(ctx, mqtt.DefaultCacheConfig())
 	if err != nil {
 		dm.log.Error(err, "Failed to initialize MQTT cache")
 		return err
 	}
 
-	// Start caching all MQTT messages (subscribe to all topics with "#")
-	if err := dm.mqttCache.StartCaching(dm.mqttClient, "#"); err != nil {
+	// Start caching MQTT messages from device types that are not always online (subscribe to all topics with "#")
+	if err := dm.mqttCache.StartCaching(dm.mqttClient, "shelly-blu/#"); err != nil {
 		dm.log.Error(err, "Failed to start MQTT message caching")
 		return err
 	}
+
 	dm.log.Info("MQTT message cache started")
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
@@ -240,7 +265,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	}
 
 	// Start Gen1 MQTT listener for sensor data
-	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.dr, dm.router)
+	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.mqttCache, dm.dr, dm.router)
 	if err != nil {
 		dm.log.Error(err, "Failed to start Gen1 MQTT listener")
 		return err
@@ -272,6 +297,12 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, gr mhd.GroupRe
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
+	}
+
+	// Skip Gen1 devices - they are updated via MQTT messages only
+	if shelly.IsGen1Device(device.Id()) {
+		log.V(1).Info("Skipping Gen1 device refresh (updated via MQTT)", "device", device.DeviceSummary)
+		return
 	}
 
 	var modified bool = false
@@ -381,21 +412,32 @@ func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, interval time.
 			log.Info("Exiting known devices refresh loop")
 			return
 		case <-ticker.C:
-			log.Info("Refreshing one device", "index", i)
 			devices, err := dm.GetAllDevices(ctx)
 			if err != nil {
 				log.Error(err, "Failed to get all devices")
 				return
 			}
 
-			if i < len(devices) {
-				log.Info("Refreshing device", "device", devices[i].DeviceSummary)
-				dm.UpdateChannel() <- devices[i]
-				i++
+			// Filter out Gen1 devices (they are updated via MQTT only)
+			gen2Devices := make([]*myhome.Device, 0)
+			for _, d := range devices {
+				if !shelly.IsGen1Device(d.Id()) {
+					gen2Devices = append(gen2Devices, d)
+				}
 			}
-			if i >= len(devices) {
+
+			if len(gen2Devices) == 0 {
+				log.V(1).Info("No Gen2+ devices to refresh")
+				continue
+			}
+
+			if i >= len(gen2Devices) {
 				i = 0
 			}
+
+			log.Info("Refreshing device", "index", i, "total_gen2_devices", len(gen2Devices), "device", gen2Devices[i].DeviceSummary)
+			dm.UpdateChannel() <- gen2Devices[i]
+			i++
 		}
 	}
 }

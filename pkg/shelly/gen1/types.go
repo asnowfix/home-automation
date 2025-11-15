@@ -25,3 +25,6 @@ type Device struct {
 	Model        string `json:"model,omitempty"`
 	Sensor       `json:"sensor,omitempty"`
 }
+
+// Note: IsGen1Device function has been moved to pkg/shelly package
+// to avoid import cycles. Use shelly.IsGen1Device(deviceId) instead.

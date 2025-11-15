@@ -44,8 +44,13 @@ func DefaultCacheConfig() CacheConfig {
 }
 
 // NewCache creates a new MQTT message cache
-func NewCache(ctx context.Context, log logr.Logger, config CacheConfig) (*Cache, error) {
+func NewCache(ctx context.Context, config CacheConfig) (*Cache, error) {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
 	log = log.WithName("mqtt.Cache")
+	ctx = logr.NewContext(ctx, log)
 
 	cache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: config.NumCounters,
@@ -72,7 +77,7 @@ func NewCache(ctx context.Context, log logr.Logger, config CacheConfig) (*Cache,
 // StartCaching starts a background goroutine that caches all messages from a subscription
 // The topic parameter can include wildcards (e.g., "#" for all topics)
 func (c *Cache) StartCaching(client *Client, topic string) error {
-	c.log.Info("Starting MQTT message caching", "topic", topic)
+	c.log.V(1).Info("Starting MQTT message caching", "topic", topic)
 
 	// Subscribe to all topics (or specified topic pattern)
 	msgChan, err := client.SubscriberWithTopic(c.ctx, topic, 100)
@@ -81,28 +86,32 @@ func (c *Cache) StartCaching(client *Client, topic string) error {
 	}
 
 	// Start background goroutine to cache messages
-	go func() {
+	go func(log logr.Logger) {
 		for {
 			select {
 			case <-c.ctx.Done():
-				c.log.Info("Stopping MQTT message caching")
+				log.Info("Stopping MQTT message caching")
 				return
 			case msg, ok := <-msgChan:
 				if !ok {
-					c.log.Info("Message channel closed, stopping caching")
+					log.Info("Message channel closed, stopping caching")
 					return
 				}
-				c.cacheMessage(msg.Topic(), msg.Payload())
+				log.V(1).Info("Caching MQTT message", "topic", msg.Topic(), "payload", string(msg.Payload()))
+				err := c.Insert(msg.Topic(), msg.Payload())
+				if err != nil {
+					log.Error(err, "Failed to cache message", "topic", msg.Topic())
+				}
 			}
 		}
-	}()
+	}(c.log.WithValues("topic", topic))
 
 	c.log.Info("MQTT message caching started", "topic", topic)
 	return nil
 }
 
-// cacheMessage stores a message in the cache
-func (c *Cache) cacheMessage(topic string, payload []byte) {
+// CacheMessage stores a message in the cache
+func (c *Cache) Insert(topic string, payload []byte) error {
 	cachedMsg := &CachedMessage{
 		Topic:     topic,
 		Payload:   payload,
@@ -114,7 +123,11 @@ func (c *Cache) cacheMessage(topic string, payload []byte) {
 
 	// Store in cache (topic is the key)
 	if !c.cache.Set(topic, cachedMsg, cost) {
-		c.log.V(1).Info("Failed to cache message (buffer full, will retry)", "topic", topic)
+		err := fmt.Errorf("failed to cache message (buffer full, will retry) topic: %s", topic)
+		return err
+	} else {
+		c.log.V(1).Info("Cached message", "topic", topic, "age", time.Since(cachedMsg.Timestamp), "msg", string(payload), "cost", cost)
+		return nil
 	}
 }
 
@@ -168,17 +181,17 @@ func (c *Cache) Close() {
 func (c *Cache) Stats() map[string]interface{} {
 	metrics := c.cache.Metrics
 	return map[string]interface{}{
-		"hits":             metrics.Hits(),
-		"misses":           metrics.Misses(),
-		"keys_added":       metrics.KeysAdded(),
-		"keys_updated":     metrics.KeysUpdated(),
-		"keys_evicted":     metrics.KeysEvicted(),
-		"cost_added":       metrics.CostAdded(),
-		"cost_evicted":     metrics.CostEvicted(),
-		"sets_dropped":     metrics.SetsDropped(),
-		"sets_rejected":    metrics.SetsRejected(),
-		"gets_kept":        metrics.GetsKept(),
-		"gets_dropped":     metrics.GetsDropped(),
-		"hit_ratio":        metrics.Ratio(),
+		"hits":          metrics.Hits(),
+		"misses":        metrics.Misses(),
+		"keys_added":    metrics.KeysAdded(),
+		"keys_updated":  metrics.KeysUpdated(),
+		"keys_evicted":  metrics.KeysEvicted(),
+		"cost_added":    metrics.CostAdded(),
+		"cost_evicted":  metrics.CostEvicted(),
+		"sets_dropped":  metrics.SetsDropped(),
+		"sets_rejected": metrics.SetsRejected(),
+		"gets_kept":     metrics.GetsKept(),
+		"gets_dropped":  metrics.GetsDropped(),
+		"hit_ratio":     metrics.Ratio(),
 	}
 }

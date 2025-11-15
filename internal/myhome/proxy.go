@@ -57,3 +57,7 @@ func ValidateDialog(d Dialog) error {
 	}
 	return nil
 }
+
+func (d Dialog) String() string {
+	return fmt.Sprintf("{id=%s, src=%s, dst=%s}", d.Id, d.Src, d.Dst)
+}

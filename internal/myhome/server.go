@@ -19,7 +19,12 @@ type Server interface {
 	MethodE(method Verb) (*Method, error)
 }
 
-func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, error) {
+func NewServerE(ctx context.Context, handler Server) (Server, error) {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic(err)
+	}
+	log = log.WithName("myhome.rpc")
 	mc, err := mqtt.GetClientE(ctx)
 	if err != nil {
 		return nil, err
@@ -41,7 +46,11 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 		// to:      to,
 	}
 
-	go func(ctx context.Context, log logr.Logger) {
+	go func(ctx context.Context) {
+		log, err := logr.FromContext(ctx)
+		if err != nil {
+			panic(err)
+		}
 		log.Info("Server message loop started")
 		for {
 			select {
@@ -63,6 +72,7 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 
 				err = ValidateDialog(req.Dialog)
 				if err != nil {
+					log.Error(err, "Invalid dialog:"+req.Dialog.String())
 					s.fail(ctx, 1, err, &req, mc)
 					continue
 				}
@@ -99,8 +109,9 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 					continue
 				}
 
+				// FIXME: produces errors like: `Error: unexpected type returned from action: got *[]devices.Device, want *interface {} (code:1)`
 				// if reflect.TypeOf(out) != reflect.TypeOf(res.Result) {
-				// 	fail(1, fmt.Errorf("unexpected type returned from action: got %v, want %v", reflect.TypeOf(out), reflect.TypeOf(res.Result)), &req, mc)
+				// 	s.fail(ctx, 1, fmt.Errorf("unexpected type returned from action: got %v, want %v", reflect.TypeOf(out), reflect.TypeOf(res.Result)), &req, mc)
 				// 	continue
 				// }
 
@@ -113,12 +124,13 @@ func NewServerE(ctx context.Context, log logr.Logger, handler Server) (Server, e
 					continue
 				}
 				// to <- outMsg
+				log.Info("Publishing response", "dst", res.Dst, "topic", ClientTopic(req.Src), "request_id", res.Id)
 				mc.Publish(ctx, ClientTopic(req.Src), outMsg)
 			}
 		}
-	}(ctx, log.WithName("Server#Subscriber"))
+	}(logr.NewContext(ctx, log.WithName("Server")))
 
-	log.Info("Server running")
+	log.Info("Server started")
 	return &s, nil
 }
 

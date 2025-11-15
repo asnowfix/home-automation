@@ -9,10 +9,12 @@ import (
 )
 
 var runMinify bool
+var runDeviceFile string
 
 func init() {
 	Cmd.AddCommand(runCmd)
 	runCmd.Flags().BoolVar(&runMinify, "minify", false, "Minify script before running (default: false)")
+	runCmd.Flags().StringVarP(&runDeviceFile, "device-file", "D", "device.json", "Device state file (KVS and Script.storage)")
 }
 
 var runCmd = &cobra.Command{
@@ -49,8 +51,8 @@ Examples:
 
 		fmt.Printf("Running script %s locally (press Ctrl+C to stop)...\n", scriptName)
 
-		// Run locally without device
-		err := script.Run(cmd.Context(), scriptName, nil, runMinify)
+		// Run locally without device, with device state file
+		err := script.RunWithDeviceFile(cmd.Context(), scriptName, nil, runMinify, runDeviceFile)
 		if err != nil && err != context.Canceled {
 			fmt.Printf("\n✗ Script execution failed: %v\n", err)
 			return err

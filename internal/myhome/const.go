@@ -19,6 +19,8 @@ const (
 	DeviceShow        Verb = "device.show"
 	DeviceForget      Verb = "device.forget"
 	DeviceRefresh     Verb = "device.refresh"
+	DeviceUpdate      Verb = "device.update"
+	MqttRepeat        Verb = "mqtt.repeat"
 	GroupList         Verb = "group.list"
 	GroupCreate       Verb = "group.create"
 	GroupDelete       Verb = "group.delete"

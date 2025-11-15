@@ -5,6 +5,7 @@ import (
 	"global"
 	"hlog"
 	"myhome"
+	"myhome/ctl/config"
 	"myhome/ctl/follow"
 	"myhome/ctl/forget"
 	"myhome/ctl/group"
@@ -115,6 +116,7 @@ func init() {
 	Cmd.AddCommand(show.Cmd)
 	Cmd.AddCommand(open.Cmd)
 	Cmd.AddCommand(forget.Cmd)
+	Cmd.AddCommand(config.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(sswitch.Cmd)
 	Cmd.AddCommand(sfr.Cmd)

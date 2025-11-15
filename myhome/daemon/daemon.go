@@ -26,6 +26,7 @@ type daemon struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	dm     *impl.DeviceManager
+	rpc    myhome.Server
 }
 
 type Config struct {
@@ -73,7 +74,7 @@ func (d *daemon) Run() error {
 	// Conditionally start the embedded MQTT broker
 	if !disableEmbeddedMqttBroker {
 		log.Info("Starting embedded MQTT broker")
-		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil)
+		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome")
 			return err
@@ -141,9 +142,9 @@ func (d *daemon) Run() error {
 
 		log.Info("Started device manager", "manager", d.dm)
 
-		_, err = myhome.NewServerE(d.ctx, log, d.dm)
+		d.rpc, err = myhome.NewServerE(d.ctx, d.dm)
 		if err != nil {
-			log.Error(err, "Failed to start MyHome service")
+			log.Error(err, "Failed to start MyHome RPC service")
 			return err
 		}
 
@@ -154,6 +155,33 @@ func (d *daemon) Run() error {
 	}
 
 	log.Info("Running")
+
+	// Start periodic MQTT connection status monitoring if enabled
+	if options.Flags.MqttBrokerClientLogInterval > 0 {
+		go func(ctx context.Context) {
+			log := logr.FromContextOrDiscard(ctx)
+			ticker := time.NewTicker(options.Flags.MqttBrokerClientLogInterval)
+			defer ticker.Stop()
+
+			log.Info("Starting MQTT connection status monitoring", "interval", options.Flags.MqttBrokerClientLogInterval)
+
+			for {
+				select {
+				case <-ctx.Done():
+					log.Info("Stopping MQTT connection status monitoring")
+					return
+				case <-ticker.C:
+					// Log MQTT connection status
+					if mc != nil {
+						connected := mc.IsConnected()
+						log.Info("MQTT client connection status", "connected", connected, "client_id", mc.Id())
+					}
+				}
+			}
+		}(logr.NewContext(d.ctx, log.WithName("Mqtt.ClientMonitor")))
+	} else {
+		log.Info("MQTT connection status monitoring disabled")
+	}
 
 	// Create a channel to handle OS signals
 	done := make(chan struct{})

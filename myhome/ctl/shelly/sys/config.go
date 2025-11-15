@@ -31,9 +31,35 @@ func init() {
 }
 
 var configCmd = &cobra.Command{
-	Use:   "config",
-	Short: "Get or set Shelly device configuration",
-	Args:  cobra.ExactArgs(1),
+	Use:   "config <device_name_or_pattern>",
+	Short: "Get or set Shelly device system configuration",
+	Long: `Get or set Shelly device system configuration.
+
+Without flags, displays the current system configuration in YAML format (or JSON with --json).
+
+With flags, updates the specified configuration values on the device itself.
+
+Note: This command queries/modifies the device's own configuration, not the local database.
+Currently, the --name and --ecomode flags are not yet implemented (code is commented out).
+
+To view the local database entry for a device, use: myhome ctl show <device_id>
+
+Examples:
+  # Get system configuration for a device
+  myhome ctl shelly sys config shelly1minig3-abc123
+
+  # Get configuration in JSON format
+  myhome ctl shelly sys config shelly1minig3-abc123 --json
+
+  # Get configuration for all devices matching pattern
+  myhome ctl shelly sys config 'shelly*'
+
+  # Set device name on the device (not yet implemented)
+  # myhome ctl shelly sys config shelly1minig3-abc123 --name "Living Room Light"
+
+  # Set eco mode (not yet implemented)
+  # myhome ctl shelly sys config shelly1minig3-abc123 --ecomode`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, oneDeviceConfig, options.Args(args))
 		return err

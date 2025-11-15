@@ -140,32 +140,40 @@ function detectLocationAndLoadConfig() {
 }
 
 function parseValue(valueStr) {
+  // Handle special string literals from KVS
+  if (valueStr === "null") {
+    return null;
+  }
+  if (valueStr === "undefined") {
+    return undefined;
+  }
+  if (valueStr === "true") {
+    return true;
+  }
+  if (valueStr === "false") {
+    return false;
+  }
+  
   var value;
-  // Try JSON parse first (handles objects, arrays, booleans, numbers, strings)
+  // Try JSON parse first (handles objects, arrays, numbers, quoted strings)
   try {
     value = JSON.parse(valueStr);
   } catch (e) {
-    // Not valid JSON, try parsing as primitive types
-    if (valueStr === "true" || valueStr === "false") {
-      // Boolean string
-      value = valueStr === "true";
+    // Not valid JSON, try parsing as Date or keep as string
+    var dateValue = Date.parse(valueStr);
+    if (!isNaN(dateValue)) {
+      value = new Date(dateValue);
     } else {
-      // Try as Date string
-      var dateValue = Date.parse(valueStr);
-      if (!isNaN(dateValue)) {
-        value = new Date(dateValue);
+      // Try as number (parseFloat handles both integers and floats)
+      var numValue = parseFloat(valueStr);
+      if (!isNaN(numValue)) {
+        value = numValue;
       } else {
-        // Try as number (parseFloat handles both integers and floats)
-        var numValue = parseFloat(valueStr);
-        if (!isNaN(numValue)) {
-          value = numValue;
+        // Keep as string
+        if (valueStr.length > 0) {
+          value = valueStr;
         } else {
-          // Keep as string
-          if (valueStr.length > 0) {
-            value = valueStr;
-          } else {
-            value = null;
-          }
+          value = null;
         }
       }
     }
@@ -471,7 +479,7 @@ function getOccupancy(cb) {
   }, function(result, error_code, error_message) {
     if (error_code === 0 && result && result.body) {
       var data = null;
-      try { data = JSON.parse(result.body); } catch (e) {}
+      try { data = JSON.parse(result.body); } catch (e) { if (e && false) {} }
       cb(data && data.occupied === true);
     } else {
       log('Error fetching occupancy status:', error_message);
@@ -699,7 +707,7 @@ function onForecast(cb, result, error_code, error_message) {
   log('onForecast', result, error_code, error_message)
   if (error_code === 0 && result && result.body) {
     var data = null;
-    try { data = JSON.parse(result.body); } catch (e) {}
+    try { data = JSON.parse(result.body); } catch (e) { if (e && false) {} }
     
     if (data && data.hourly && data.hourly.temperature_2m && data.hourly.temperature_2m.length > 0) {
       // Cache the full forecast arrays

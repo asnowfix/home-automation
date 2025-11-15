@@ -113,6 +113,33 @@ Shelly devices run a **modified version of Espruino** JavaScript interpreter. Es
    var value = ("prop" in obj) ? obj.prop : null;
    ```
 
+5. **Catch Blocks - CRITICAL**
+   - ⚠️ **NEVER write empty catch blocks**: `catch (e) {}` - the minifier converts this to `catch {}` (ES2019 optional catch binding) which causes syntax errors
+   - ✅ **ALWAYS reference the error parameter**: `catch (e) { if (e && false) {} }`
+   - This pattern prevents the minifier from removing the parameter while keeping the catch block functional
+   - Apply this to **ALL** catch blocks, even if you don't use the error
+   
+   ```javascript
+   // BROKEN - minifier converts to catch {} which fails
+   try {
+     data = JSON.parse(str);
+   } catch (e) {}
+   
+   // WORKING - error parameter is referenced
+   try {
+     data = JSON.parse(str);
+   } catch (e) {
+     if (e && false) {}  // Prevents minifier from removing parameter
+   }
+   
+   // ALSO WORKING - if you actually use the error
+   try {
+     data = JSON.parse(str);
+   } catch (e) {
+     log('Parse error:', e);
+   }
+   ```
+
 #### Minification Issues
 
 **Issue**: The JavaScript minifier can convert modern syntax (like `catch (e)` to `catch {}` - ES2019 optional catch binding) which may not be supported by Shelly's JavaScript engine.

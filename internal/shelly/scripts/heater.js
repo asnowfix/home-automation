@@ -7,35 +7,82 @@ const CONFIG_KEY_PREFIX = 'script/' + SCRIPT_NAME + '/';
 const SCRIPT_PREFIX = "[" + SCRIPT_NAME + "] ";
 const DEFAULT_COOLING_RATE = 1.0;
 
-var CONFIG = {
-  // Configuration values (loaded from KVS or defaults)
-  enableLogging: true,
-  setpoint: 19.0,
-  minInternalTemp: 15.0,
-  cheapStartHour: 23,
-  cheapEndHour: 7,
-  pollIntervalMs: 5 * 60 * 1000,
-  preheatHours: 2,
-  normallyClosed: true,
-  internalTemperatureTopic: null,
-  externalTemperatureTopic: null,
+// Configuration schema with type information
+var CONFIG_SCHEMA = {
+  enableLogging: {
+    description: "Enable logging when true",
+    key: "enable-logging",
+    default: true,
+    type: "boolean"
+  },
+  setpoint: {
+    description: "Target temperature",
+    key: "set-point",
+    default: 19.0,
+    type: "number"
+  },
+  minInternalTemp: {
+    description: "Minimum internal temperature threshold",
+    key: "min-internal-temp",
+    default: 15.0,
+    type: "number"
+  },
+  cheapStartHour: {
+    description: "Start hour of cheap electricity window",
+    key: "cheap-start-hour",
+    default: 23,
+    type: "number"
+  },
+  cheapEndHour: {
+    description: "End hour of cheap electricity window",
+    key: "cheap-end-hour",
+    default: 7,
+    type: "number"
+  },
+  pollIntervalMs: {
+    description: "Polling interval in milliseconds",
+    key: "poll-interval-ms",
+    default: 5 * 60 * 1000,
+    type: "number"
+  },
+  preheatHours: {
+    description: "Hours before cheap window end to start preheating",
+    key: "preheat-hours",
+    default: 2,
+    type: "number"
+  },
+  normallyClosed: {
+    description: "Whether the switch is normally closed",
+    key: "normally-closed",
+    default: true,
+    type: "boolean",
+    unprefixed: true
+  },
+  internalTemperatureTopic: {
+    description: "MQTT topic for internal temperature sensor",
+    key: "internal-temperature-topic",
+    default: null,
+    type: "string"
+  },
+  externalTemperatureTopic: {
+    description: "MQTT topic for external temperature sensor",
+    key: "external-temperature-topic",
+    default: null,
+    type: "string"
+  }
 };
 
-// Configuration Key-Values loaded from KVS, shared across every scripts
-var CONFIG_KEY = {
-  // Unprefixed configuration keys
-  normallyClosed: "normally-closed",
-  // Prefixed configuration keys
-  enableLogging: "enable-logging",
-  setpoint: "set-point",
-  minInternalTemp: "min-internal-temp",
-  cheapStartHour: "cheap-start-hour",
-  cheapEndHour: "cheap-end-hour",
-  pollIntervalMs: "poll-interval-ms",
-  preheatHours: "preheat-hours",
-  internalTemperatureTopic: "internal-temperature-topic",
-  externalTemperatureTopic: "external-temperature-topic",
-};
+// Runtime configuration values (initialized from defaults)
+var CONFIG = {};
+
+// Initialize CONFIG with default values
+function initConfig() {
+  for (var key in CONFIG_SCHEMA) {
+    CONFIG[key] = CONFIG_SCHEMA[key].default;
+  }
+}
+
+initConfig();
 
 // State Script.storage keys for continuously evolving values, automatically saved per script
 var STORAGE_KEYS = {
@@ -114,7 +161,24 @@ var STATE = {
   subscribedExternalTopic: null,
 };
 
-function detectLocationAndLoadConfig() {
+function onDeviceLocation(cb, result, error_code, error_message) {
+  log('onDeviceLocation')
+  if (error_code === 0 && result) {
+    if (result.lat !== null && result.lon !== null) {
+      log('Auto-detected location: lat=' + result.lat + ', lon=' + result.lon + ', tz=' + result.tz);
+      updateForecastURL(result.lat, result.lon);
+    } else {
+      log('Location detection returned null coordinates');
+    }
+  } else {
+    log('Failed to detect location (error ' + error_code + '): ' + error_message);
+  }
+  // Proceed to load config after attempting to set forecast URL
+  loadConfig(cb);
+}
+
+function detectLocationAndLoadConfig(cb) {
+  log('detectLocationAndLoadConfig')
   // Use stored forecast URL if available
   var stored = loadValue(STORAGE_KEYS.forecastUrl);
   if (stored) {
@@ -130,65 +194,51 @@ function detectLocationAndLoadConfig() {
       }
       checkAndStartControlLoop();
     });
-    loadConfig();
+    loadConfig(cb);
     return;
   }
 
   log('Detecting device location...');
-  Shelly.call('Shelly.DetectLocation', {}, function(result, error_code, error_message) {
-    if (error_code === 0 && result) {
-      if (result.lat !== null && result.lon !== null) {
-        log('Auto-detected location: lat=' + result.lat + ', lon=' + result.lon + ', tz=' + result.tz);
-        updateForecastURL(result.lat, result.lon);
-      } else {
-        log('Location detection returned null coordinates');
-      }
-    } else {
-      log('Failed to detect location (error ' + error_code + '): ' + error_message);
-    }
-    // Proceed to load config after attempting to set forecast URL
-    loadConfig();
-  });
+  Shelly.call('Shelly.DetectLocation', {}, onDeviceLocation.bind(null, cb));
 }
 
-function parseValue(valueStr) {
-  // Handle special string literals from KVS
-  if (valueStr === "null") {
+// Parse a value from KVS based on its expected type
+function parseValueWithType(valueStr, type) {
+  // Handle null/undefined
+  if (valueStr === null || valueStr === undefined || valueStr === "null" || valueStr === "undefined") {
     return null;
   }
-  if (valueStr === "undefined") {
-    return undefined;
-  }
-  if (valueStr === "true") {
-    return true;
-  }
-  if (valueStr === "false") {
-    return false;
+  
+  // Parse based on type
+  if (type === "boolean") {
+    if (valueStr === "true" || valueStr === true) return true;
+    if (valueStr === "false" || valueStr === false) return false;
+    return null;
   }
   
-  var value;
-  // Try JSON parse first (handles objects, arrays, numbers, quoted strings)
-  try {
-    value = JSON.parse(valueStr);
-  } catch (e) {
-    if (e && false) {}  // Prevent minifier from removing parameter
-    // Not valid JSON - keep as string or try parsing as number
-    // Note: We don't try to parse as Date because Date.parse() is too permissive
-    // and will incorrectly parse strings like "shellies/device/sensor/temperature"
-    var numValue = parseFloat(valueStr);
-    if (!isNaN(numValue) && valueStr === numValue.toString()) {
-      // Only treat as number if the string representation matches (avoids partial parses)
-      value = numValue;
-    } else {
-      // Keep as string
-      if (valueStr.length > 0) {
-        value = valueStr;
-      } else {
-        value = null;
-      }
+  if (type === "number") {
+    var num = parseFloat(valueStr);
+    if (!isNaN(num)) return num;
+    return null;
+  }
+  
+  if (type === "string") {
+    if (typeof valueStr === "string") return valueStr;
+    return String(valueStr);
+  }
+  
+  if (type === "object") {
+    // Try JSON parse for objects/arrays
+    try {
+      return JSON.parse(valueStr);
+    } catch (e) {
+      if (e && false) {}  // Prevent minifier from removing parameter
+      return null;
     }
   }
-  return value;
+  
+  // Unknown type - return as-is
+  return valueStr;
 }
 
 function storeValue(key, value) {
@@ -211,16 +261,44 @@ function storeValue(key, value) {
   Script.storage.setItem(key, valueStr);
 }
 
+// Simple parse for Script.storage values (we control what we store)
+function parseStorageValue(valueStr) {
+  if (valueStr === "null" || valueStr === null || valueStr === undefined) {
+    return null;
+  }
+  if (valueStr === "true") return true;
+  if (valueStr === "false") return false;
+  
+  // Try as number
+  var num = parseFloat(valueStr);
+  if (!isNaN(num) && valueStr === num.toString()) {
+    return num;
+  }
+  
+  // Try as JSON (for objects/arrays)
+  if (valueStr.charAt(0) === '{' || valueStr.charAt(0) === '[') {
+    try {
+      return JSON.parse(valueStr);
+    } catch (e) {
+      if (e && false) {}  // Prevent minifier from removing parameter
+    }
+  }
+  
+  // Return as string
+  return valueStr;
+}
+
 function loadValue(key) {
   var v = Script.storage.getItem(key);
   // Missing key or explicit "null" sentinel both map to JS null
   if (v === null || typeof v === 'undefined' || v === "null") {
     return null;
   }
-  return parseValue(v);
+  return parseStorageValue(v);
 }
 
 function updateForecastURL(lat, lon) {
+  log('updateForecastURL', lat, lon);
   if (lat !== null && lon !== null) {
     var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&hourly=temperature_2m&forecast_days=1&timezone=auto';
     STATE.forecastUrl = url;
@@ -239,45 +317,57 @@ function updateForecastURL(lat, lon) {
   }
 }
 
-function loadConfig() {
-  Shelly.call('KVS.GetMany', {}, function(result, error_code, error_message) {
-    if (error_code === 0 && result && result.items) {
-      log('KVS config loaded, processing', result.items.length, 'items');
-      try {
-        // Loop through all KVS items
-        for (var i = 0; i < result.items.length; i++) {
-          var item = result.items[i];
-          var itemKey = item.key;
+function onKvsLoaded(cb, result, error_code, error_message) {
+  log('onKvsLoaded');
+  var updated = [];
+  if (error_code === 0 && result && result.items) {
+    log('KVS config loaded, processing', result.items.length, 'items');
+    try {
+      // Loop through all KVS items
+      for (var i = 0; i < result.items.length; i++) {
+        var item = result.items[i];
+        var itemKey = item.key;
+        
+        // Check if this key matches any of our config schema
+        for (var configName in CONFIG_SCHEMA) {
+          var schema = CONFIG_SCHEMA[configName];
+          var fullKey = schema.unprefixed ? schema.key : (CONFIG_KEY_PREFIX + schema.key);
           
-          // Check if this key matches any of our config keys
-          for (var configName in CONFIG_KEY) {
-            var fullKey = CONFIG_KEY_PREFIX + CONFIG_KEY[configName];
-            
-            if (itemKey === fullKey) {
-              var value = parseValue(item.value);
-              CONFIG[configName] = value;
-              log('Loaded config', configName, '=', value, 'from key', itemKey);
-              break;
+          if (itemKey === fullKey) {
+            var value = parseValueWithType(item.value, schema.type);
+            if (value !== null) {
+              if (CONFIG[configName] !== value) {
+                CONFIG[configName] = value;
+                log('Loaded config', configName, '=', value, 'from key', itemKey);
+                updated.push(configName);
+              }
             }
-          }
-          
-          // Also check for normally-closed in switch component KVS
-          if (itemKey === 'normally-closed') {
-            CONFIG.normallyClosed = item.value === true || item.value === 'true';
-            log('Loaded normally-closed =', CONFIG.normallyClosed);
+            break;
           }
         }
-      } catch (e) {
-        log('Error loading KVS config:', e);
       }
-    } else {
-      log('Failed to load KVS config (error ' + error_code + '): ' + error_message);
+    } catch (e) {
+      log('Error loading KVS config:', e);
     }
-  });
+  } else {
+    log('Failed to load KVS config (error ' + error_code + '): ' + error_message);
+  }
+  try {
+    if (cb && typeof cb === 'function') {
+      cb(updated);
+    } else {
+      throw new Error('cb is not a function: ' + typeof cb);
+    }
+  } catch (e) {
+    log('Error calling callback:', e.message);
+    log('Stack:', e.stack);
+  }
 }
 
-// Call this once at script start - detect location first, then load config
-detectLocationAndLoadConfig();
+function loadConfig(cb) {
+  log('loadConfig');
+  Shelly.call('KVS.GetMany', { match: CONFIG_KEY_PREFIX + "*" }, onKvsLoaded.bind(null, cb));
+}
 
 // === TIME WINDOW FOR HEATING ===
 function isCheapHour() {
@@ -348,9 +438,6 @@ function scheduleLearningTimers() {
   scheduleAt(CONFIG.cheapEndHour, onCheapWindowEnd);
   scheduleAt(CONFIG.cheapStartHour, onCheapWindowStart);
 }
-
-// Call this once at script start
-scheduleLearningTimers();
 
 function initUrls() {
   log('initUrls');
@@ -604,7 +691,7 @@ function generateRequestId() {
 }
 
 // Check if we have all required temperatures
-function checkTemperaturesReady(onReady) {
+function checkTemperaturesReady(cb) {
   log('Checking temperatures ready...');
 
   var internalTemp = loadValue(STORAGE_KEYS.internalTemp);
@@ -624,7 +711,7 @@ function checkTemperaturesReady(onReady) {
   }
 
   if (STATE.externalTempReady && STATE.internalTempReady) {
-    onReady();
+    cb();
   }
 }
 
@@ -649,7 +736,7 @@ function requestMqttRepeat(topic) {
 // Fetch initial temperatures at startup if missing
 function fetchInitialTemperatures(onReady) {
   log('Checking for missing temperatures at startup...');
-  
+
   // Check internal temperature
   if (CONFIG.internalTemperatureTopic) {
     requestMqttRepeat(CONFIG.internalTemperatureTopic)
@@ -699,11 +786,6 @@ function subscribeMqttTemperatures() {
   // Fetch initial temperatures if missing
   log('About to call fetchInitialTemperatures...');
   fetchInitialTemperatures(checkAndStartControlLoop);
-  // try {
-  //   fetchInitialTemperatures(checkAndStartControlLoop);
-  // } catch (e) {
-  //   log('Error calling fetchInitialTemperatures:', e);
-  // }
 }
 
 // === DATA FETCHING FUNCTIONS ===
@@ -902,52 +984,65 @@ function setHeaterState(on) {
   });
 }
 
+function onConfigLoaded(updated) {
+  log('onConfigLoaded', updated);
+  // Re-subscribe to MQTT topics with updated config (old subscriptions remain but new ones take precedence)
+  subscribeMqttTemperatures();
+  
+  // Re-trigger control loop with updated config and fresh temperatures
+  if (controlLoopStarted) {
+    log('Re-triggering control loop with updated configuration');
+    pollAndControl();
+  }
+}
+
 // === SCHEDULED EXECUTION ===
 log("Script starting...");
 
 // Initialize URLs (occupancy service)
 initUrls();
 
-// Start the periodic control loop timer (will skip if not ready)
-Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
+// Call this once at script start - detect location first, then load config
+detectLocationAndLoadConfig(function(updated) {
+  log("Script initialization");
 
-log("Script initialization complete");
+  // Call this once at script start
+  scheduleLearningTimers();
 
-// Schedule daily forecast refresh at midnight
-Timer.set(60 * 60 * 1000, true, function() {
-  if (shouldRefreshForecast()) {
-    log('Daily forecast refresh triggered');
-    fetchAndCacheForecast(function(success) {
-      if (success) {
-        log('Daily forecast refresh successful');
-      }
-    });
-  }
-});
+  // Start the periodic control loop timer (will skip if not ready)
+  Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
 
-// Subscribe to MQTT topics for temperature sources
-subscribeMqttTemperatures();
-
-// Handle script stop event
-Shelly.addEventHandler(function(eventData) {
-  log('Script event:', JSON.stringify(eventData));
-});
-
-Shelly.addStatusHandler(function(status) {
-  // Detect KVS updates and reload configuration
-  if (status && status.component === "sys" && status.delta && ("kvs_rev" in status.delta)) {
-    log('KVS updated (rev ' + status.delta.kvs_rev + '), reloading configuration and re-fetching temperatures');
-    loadConfig();
-    
-    // Re-subscribe to MQTT topics with updated config (old subscriptions remain but new ones take precedence)
-    subscribeMqttTemperatures();
-    
-    // Re-trigger control loop with updated config and fresh temperatures
-    if (controlLoopStarted) {
-      log('Re-triggering control loop with updated configuration');
-      pollAndControl();
+  // Schedule daily forecast refresh at midnight
+  Timer.set(60 * 60 * 1000, true, function() {
+    if (shouldRefreshForecast()) {
+      log('Daily forecast refresh triggered');
+      fetchAndCacheForecast(function(success) {
+        if (success) {
+          log('Daily forecast refresh successful');
+        }
+      });
     }
-  } else {
-    log('Script status:', JSON.stringify(status));
-  }
+  });
+
+  // Handle script stop event
+  Shelly.addEventHandler(function(eventData) {
+    log('Script event:', JSON.stringify(eventData));
+  });
+
+  Shelly.addStatusHandler(function(status) {
+    // Detect KVS updates and reload configuration
+    if (status && status.component === "sys" && status.delta && ("kvs_rev" in status.delta)) {
+      log('KVS updated (rev ' + status.delta.kvs_rev + '), reloading configuration and re-fetching temperatures');
+      loadConfig(onConfigLoaded);
+    } else {
+      log('Script status:', JSON.stringify(status));
+    }
+  });
+
+  onConfigLoaded(updated);
+
+  log("Script initialization complete");
 });
+
+log("Script started");
+

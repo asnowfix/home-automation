@@ -175,16 +175,18 @@ function parseValue(valueStr) {
 
 function storeValue(key, value) {
   var valueStr;
+  // Use "null" as a sentinel for JS null/undefined so we can round-trip
+  // through Script.storage, which only stores strings.
   if (typeof value === 'undefined' || value === null) {
-    valueStr = undefined;
+    valueStr = "null";
   } else if (typeof value === 'number' || typeof value === 'boolean') {
     valueStr = value.toString();
-  } else if (typeof value === 'object') {
-    valueStr = JSON.stringify(value);
   } else if (typeof value === 'string') {
     valueStr = value;
-  } else if (typeof value === 'Date') {
+  } else if (value instanceof Date) {
     valueStr = value.toISOString();
+  } else if (typeof value === 'object') {
+    valueStr = JSON.stringify(value);
   } else {
     valueStr = String(value);
   }
@@ -193,6 +195,10 @@ function storeValue(key, value) {
 
 function loadValue(key) {
   var v = Script.storage.getItem(key);
+  // Missing key or explicit "null" sentinel both map to JS null
+  if (v === null || typeof v === 'undefined' || v === "null") {
+    return null;
+  }
   return parseValue(v);
 }
 
@@ -280,22 +286,19 @@ function onCheapWindowEnd() {
 }
 
 function onCheapWindowStart() {
-  var storedData = loadValue(STORAGE_KEYS.lastCheapEnd);
-  if (!storedData) {
+  var data = loadValue(STORAGE_KEYS.lastCheapEnd);
+  if (!data) {
     log("No previous cheap window end data available for learning");
     return;
   }
-  
-  var data = null;
-  try {
-    data = JSON.parse(storedData);
-  } catch (e) {
-    log("Failed to parse last cheap end data");
+  // loadValue already returns a parsed object when we stored one with storeValue.
+  // Be defensive in case of older/corrupted data.
+  if (typeof data !== 'object') {
+    log("Invalid last cheap end data (not an object)");
     return;
   }
-  
-  if (!data || !data.temp || !data.time) {
-    log("Invalid last cheap end data");
+  if (!("temp" in data) || !("time" in data)) {
+    log("Invalid last cheap end data (missing fields)");
     return;
   }
   

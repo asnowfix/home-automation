@@ -37,11 +37,6 @@ func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, devi
 	if !ok {
 		return nil, fmt.Errorf("expected %T, got %T", reflect.TypeOf(&GetManyResponse{}), out)
 	}
-	s, err := json.Marshal(kvs)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Print(string(s))
 
 	return kvs, nil
 }

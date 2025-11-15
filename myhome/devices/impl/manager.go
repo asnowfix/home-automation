@@ -232,17 +232,18 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	// Start MQTT message cache
 	dm.log.Info("Starting MQTT message cache")
-	dm.mqttCache, err = mqtt.NewCache(logr.NewContext(ctx, dm.log.WithName("mqtt.Cache")), mqtt.DefaultCacheConfig())
+	dm.mqttCache, err = mqtt.NewCache(ctx, mqtt.DefaultCacheConfig())
 	if err != nil {
 		dm.log.Error(err, "Failed to initialize MQTT cache")
 		return err
 	}
 
-	// Start caching all MQTT messages (subscribe to all topics with "#")
-	if err := dm.mqttCache.StartCaching(dm.mqttClient, "#"); err != nil {
+	// Start caching MQTT messages from device types that are not always online (subscribe to all topics with "#")
+	if err := dm.mqttCache.StartCaching(dm.mqttClient, "shelly-blu/#"); err != nil {
 		dm.log.Error(err, "Failed to start MQTT message caching")
 		return err
 	}
+
 	dm.log.Info("MQTT message cache started")
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
@@ -264,7 +265,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	}
 
 	// Start Gen1 MQTT listener for sensor data
-	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.dr, dm.router)
+	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.mqttCache, dm.dr, dm.router)
 	if err != nil {
 		dm.log.Error(err, "Failed to start Gen1 MQTT listener")
 		return err

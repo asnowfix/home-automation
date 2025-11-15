@@ -20,6 +20,10 @@ type Client interface {
 	Publish(ctx context.Context, topic string, msg []byte) error
 }
 
+type Cache interface {
+	Insert(topic string, msg []byte) error
+}
+
 // SubscriberWithTopic is a capability interface for clients that support topic-aware subscriptions
 // Note: This is intentionally NOT part of the base Client interface due to Go's lack of
 // channel covariance. Implementations return channels of their own concrete Message types.

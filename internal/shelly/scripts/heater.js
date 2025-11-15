@@ -21,8 +21,11 @@ var CONFIG = {
   externalTemperatureTopic: null,
 };
 
+// Configuration Key-Values loaded from KVS, shared across every scripts
 var CONFIG_KEY = {
-  // Configuration keys (to load from KVS)
+  // Unprefixed configuration keys
+  normallyClosed: "normally-closed",
+  // Prefixed configuration keys
   enableLogging: "enable-logging",
   setpoint: "set-point",
   minInternalTemp: "min-internal-temp",
@@ -30,12 +33,11 @@ var CONFIG_KEY = {
   cheapEndHour: "cheap-end-hour",
   pollIntervalMs: "poll-interval-ms",
   preheatHours: "preheat-hours",
-  normallyClosed: "normally-closed",
   internalTemperatureTopic: "internal-temperature-topic",
   externalTemperatureTopic: "external-temperature-topic",
 };
 
-// Script.storage keys for continuously evolving values
+// State Script.storage keys for continuously evolving values, automatically saved per script
 var STORAGE_KEYS = {
   coolingRate: "cooling-rate",
   forecastUrl: "forecast-url",
@@ -45,13 +47,13 @@ var STORAGE_KEYS = {
 };
 
 function getCoolingRate() {
-  var v = Script.storage.getItem(STORAGE_KEYS.coolingRate);
+  var v = loadValue(STORAGE_KEYS.coolingRate);
   return (typeof v === "number") ? v : DEFAULT_COOLING_RATE;
 }
 
 function setCoolingRate(v) {
   if (typeof v === "number") {
-    Script.storage.setItem(STORAGE_KEYS.coolingRate, v);
+    storeValue(STORAGE_KEYS.coolingRate, v);
   }
 }
 
@@ -110,7 +112,7 @@ var STATE = {
 
 function detectLocationAndLoadConfig() {
   // Use stored forecast URL if available
-  var stored = getForecastUrl();
+  var stored = loadValue(STORAGE_KEYS.forecastUrl);
   if (stored) {
     STATE.forecastUrl = stored;
     STATE.forecastUrlReady = true;
@@ -137,9 +139,61 @@ function detectLocationAndLoadConfig() {
   });
 }
 
-function getForecastUrl() {
-  var u = Script.storage.getItem(STORAGE_KEYS.forecastUrl);
-  return (typeof u === 'string' && u.length > 0) ? u : null;
+function parseValue(valueStr) {
+  var value;
+  // Try JSON parse first (handles objects, arrays, booleans, numbers, strings)
+  try {
+    value = JSON.parse(valueStr);
+  } catch (e) {
+    // Not valid JSON, try parsing as primitive types
+    if (valueStr === "true" || valueStr === "false") {
+      // Boolean string
+      value = valueStr === "true";
+    } else {
+      // Try as Date string
+      var dateValue = Date.parse(valueStr);
+      if (!isNaN(dateValue)) {
+        value = new Date(dateValue);
+      } else {
+        // Try as number (parseFloat handles both integers and floats)
+        var numValue = parseFloat(valueStr);
+        if (!isNaN(numValue)) {
+          value = numValue;
+        } else {
+          // Keep as string
+          if (valueStr.length > 0) {
+            value = valueStr;
+          } else {
+            value = null;
+          }
+        }
+      }
+    }
+  }
+  return value;
+}
+
+function storeValue(key, value) {
+  var valueStr;
+  if (typeof value === 'undefined' || value === null) {
+    valueStr = undefined;
+  } else if (typeof value === 'number' || typeof value === 'boolean') {
+    valueStr = value.toString();
+  } else if (typeof value === 'object') {
+    valueStr = JSON.stringify(value);
+  } else if (typeof value === 'string') {
+    valueStr = value;
+  } else if (typeof value === 'Date') {
+    valueStr = value.toISOString();
+  } else {
+    valueStr = String(value);
+  }
+  Script.storage.setItem(key, valueStr);
+}
+
+function loadValue(key) {
+  var v = Script.storage.getItem(key);
+  return parseValue(v);
 }
 
 function updateForecastURL(lat, lon) {
@@ -147,7 +201,7 @@ function updateForecastURL(lat, lon) {
     var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&hourly=temperature_2m&forecast_days=1&timezone=auto';
     STATE.forecastUrl = url;
     STATE.forecastUrlReady = true;
-    Script.storage.setItem(STORAGE_KEYS.forecastUrl, url);
+    storeValue(STORAGE_KEYS.forecastUrl, url);
     log('Forecast URL ready');
     checkAndStartControlLoop();
   }
@@ -168,29 +222,7 @@ function loadConfig() {
             var fullKey = CONFIG_KEY_PREFIX + CONFIG_KEY[configName];
             
             if (itemKey === fullKey) {
-              var valueStr = item.value;
-              var value;
-              
-              // Try JSON parse first (handles objects, arrays, booleans, numbers, strings)
-              try {
-                value = JSON.parse(valueStr);
-              } catch (e) {
-                // Not valid JSON, try parsing as primitive types
-                if (valueStr === "true" || valueStr === "false") {
-                  // Boolean string
-                  value = valueStr === "true";
-                } else {
-                  // Try as number (parseFloat handles both integers and floats)
-                  var numValue = parseFloat(valueStr);
-                  if (!isNaN(numValue)) {
-                    value = numValue;
-                  } else {
-                    // Keep as string
-                    value = valueStr;
-                  }
-                }
-              }
-              
+              var value = parseValue(item.value);
               CONFIG[configName] = value;
               log('Loaded config', configName, '=', value, 'from key', itemKey);
               break;
@@ -242,13 +274,13 @@ function onCheapWindowEnd() {
   if (temp !== null) {
     var now = (new Date()).getTime();
     var data = { temp: temp, time: now };
-    Script.storage.setItem(STORAGE_KEYS.lastCheapEnd, JSON.stringify(data));
+    storeValue(STORAGE_KEYS.lastCheapEnd, data);
     log("Stored end-of-cheap-window temp:", temp);
   }
 }
 
 function onCheapWindowStart() {
-  var storedData = Script.storage.getItem(STORAGE_KEYS.lastCheapEnd);
+  var storedData = loadValue(STORAGE_KEYS.lastCheapEnd);
   if (!storedData) {
     log("No previous cheap window end data available for learning");
     return;
@@ -522,7 +554,7 @@ function onTemperature(key, topic, message, userdata) {
   var temp = parseTemperatureFromMqtt(topic, message);
   if (temp !== null) {
     // Store in Script.storage (synchronous, internal data)
-    Script.storage.setItem(key, temp);
+    storeValue(key, temp);
     log('Stored ' + key + ' temperature:', temp);
     
     // Check if we now have all required temperatures
@@ -553,11 +585,13 @@ function generateRequestId() {
 
 // Check if we have all required temperatures
 function checkTemperaturesReady(onReady) {
-  var internalTemp = Script.storage.getItem(STORAGE_KEYS.internalTemp);
-  var externalTemp = Script.storage.getItem(STORAGE_KEYS.externalTemp);
+  log('Checking temperatures ready...');
+
+  var internalTemp = loadValue(STORAGE_KEYS.internalTemp);
+  var externalTemp = loadValue(STORAGE_KEYS.externalTemp);
   
-  var hasInternal = (internalTemp !== null && internalTemp !== undefined);
-  var hasExternal = (externalTemp !== null && externalTemp !== undefined);
+  var hasInternal = !!internalTemp;
+  var hasExternal = !!externalTemp;
   
   if (hasInternal && !STATE.internalTempReady) {
     STATE.internalTempReady = true;
@@ -597,14 +631,12 @@ function fetchInitialTemperatures(onReady) {
   log('Checking for missing temperatures at startup...');
   
   // Check internal temperature
-  var internalTemp = Script.storage.getItem(STORAGE_KEYS.internalTemp);
-  if (!internalTemp && CONFIG.internalTemperatureTopic) {
+  if (CONFIG.internalTemperatureTopic) {
     requestMqttRepeat(CONFIG.internalTemperatureTopic)
   }
   
   // Check external temperature
-  var externalTemp = Script.storage.getItem(STORAGE_KEYS.externalTemp);
-  if (!externalTemp && CONFIG.externalTemperatureTopic) {
+  if (CONFIG.externalTemperatureTopic) {
     requestMqttRepeat(CONFIG.externalTemperatureTopic)
   }
 
@@ -638,7 +670,7 @@ function subscribeMqttTemperatures() {
 // Read temperature from Script.storage (stored by MQTT callbacks)
 function getShellyTemperature(location, cb) {
   var key = location === 'internal' ? STORAGE_KEYS.internalTemp : STORAGE_KEYS.externalTemp;
-  var temp = Script.storage.getItem(key);
+  var temp = loadValue(key);
   
   if (temp !== null && temp !== undefined) {
     log('Read', location, 'temperature:', temp);
@@ -687,7 +719,7 @@ function onForecast(cb, result, error_code, error_message) {
 }
 
 function fetchAndCacheForecast(cb) {
-  var url = STATE.forecastUrl || getForecastUrl();
+  var url = STATE.forecastUrl || loadValue(STORAGE_KEYS.forecastUrl);
   if (!url) {
     log('Open-Meteo forecast URL not configured. Skipping forecast.');
     cb(null);

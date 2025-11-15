@@ -510,22 +510,58 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 		log.V(1).Info("Script.storage.getItem", "key", key)
 		storage := deviceState.GetStorage()
 		if val, ok := storage[key]; ok {
-			log.V(1).Info("Script.storage.getItem", "key", key, "value", val)
-			return vm.ToValue(val)
+			// If the stored value is nil, treat it as missing/NULL and return null
+			// without changing the underlying storage. This preserves "cooling-rate": null
+			// and similar entries in device.json instead of turning them into "<nil>".
+			if val == nil {
+				log.V(1).Info("Script.storage.getItem", "key", key, "value", "null (stored nil)")
+				return goja.Null()
+			}
+			// Storage only supports string values, but be defensive in case
+			// older state files contain non-string, non-nil types.
+			strVal, ok := val.(string)
+			if !ok {
+				strVal = fmt.Sprint(val)
+				storage[key] = strVal
+			}
+			log.V(1).Info("Script.storage.getItem", "key", key, "value", strVal)
+			return vm.ToValue(strVal)
 		}
-		// Add key with null value if not found
-		storage[key] = nil
-		log.V(1).Info("Script.storage.getItem", "key", key, "value", "null (added)")
+		// Missing key: return null, do not create it (matches Web Storage API semantics).
+		log.V(1).Info("Script.storage.getItem", "key", key, "value", "null (missing)")
 		return goja.Null()
 	})
 	storageObj.Set("setItem", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()
-		value := call.Argument(1).Export()
+		// Script.storage follows the Web Storage API semantics and supports
+		// only string values. Coerce the value to string using JS semantics.
+		valueStr := call.Argument(1).String()
 		storage := deviceState.GetStorage()
-		storage[key] = value
-		log.Info("Script.storage.setItem", "key", key, "value", value)
+		storage[key] = valueStr
+		// Keep length property roughly in sync with the underlying map.
+		storageObj.Set("length", len(storage))
+		log.Info("Script.storage.setItem", "key", key, "value", valueStr)
 		log.V(1).Info("Script.storage.setItem", "storage", storage)
 		return goja.Undefined()
+	})
+	// Initialize length property to reflect existing storage contents.
+	storage := deviceState.GetStorage()
+	storageObj.Set("length", len(storage))
+	// Provide key(index) to enumerate stored keys, similar to the Web Storage API.
+	storageObj.Set("key", func(call goja.FunctionCall) goja.Value {
+		idx := int(call.Argument(0).ToInteger())
+		if idx < 0 {
+			return goja.Null()
+		}
+		storage := deviceState.GetStorage()
+		i := 0
+		for k := range storage {
+			if i == idx {
+				return vm.ToValue(k)
+			}
+			i++
+		}
+		return goja.Null()
 	})
 	scriptObj.Set("storage", storageObj)
 	vm.Set("Script", scriptObj)

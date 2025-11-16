@@ -149,6 +149,9 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 
 	vm := goja.New()
 
+	// Shelly event handler system
+	eh := NewEventsHandler(ctx, vm)
+
 	// Define methods map with access to deviceState
 	methods := createMethodsMap(deviceState)
 
@@ -160,7 +163,10 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 		method := strings.ToLower(call.Argument(0).String())
 		params := call.Argument(1)
 		callback := call.Argument(2)
-		userdata := call.Argument(3)
+		userdata := goja.Undefined()
+		if len(call.Arguments) > 3 {
+			userdata = call.Argument(3)
+		}
 
 		log.Info("Shelly.call()", "method", method, "params", params.Export())
 
@@ -190,9 +196,53 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 		return goja.Undefined()
 	})
 
-	// Shelly.addEventHandler(callback, userdata)
+	// [Shelly.addEventHandler(callback, userdata)](https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shellyaddeventhandler-and-shellyaddstatushandler)
 	shellyObj.Set("addEventHandler", func(call goja.FunctionCall) goja.Value {
-		log.V(1).Info("Shelly.addEventHandler placeholder")
+		callback := call.Argument(0)
+		userdata := goja.Undefined()
+		if len(call.Arguments) > 1 {
+			userdata = call.Argument(1)
+		}
+		log.Info("Shelly.addEventHandler", "userdata", userdata.Export())
+
+		if goja.IsUndefined(callback) || goja.IsNull(callback) {
+			log.Error(nil, "Shelly.addEventHandler called without callback")
+			return goja.Undefined()
+		}
+
+		if callable, ok := goja.AssertFunction(callback); ok {
+			eh.AddHandler(callable, userdata)
+			log.V(1).Info("Shelly.addEventHandler registered", "handlers", len(eh.handlers))
+		} else {
+			log.Error(nil, "Shelly.addEventHandler callback is not a function")
+		}
+		return goja.Undefined()
+	})
+
+	// [Shelly.emitEvent(name, data)](https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shellyemitevent)
+	shellyObj.Set("emitEvent", func(call goja.FunctionCall) goja.Value {
+		var event struct {
+			Component string    `json:"component"`
+			Id        int       `json:"id"`
+			Event     string    `json:"event"`
+			Data      any       `json:"data,omitempty"`
+			Timestamp time.Time `json:"timestamp"`
+		}
+		event.Component = "script:1"
+		event.Id = eh.NextId()
+		event.Event = call.Argument(0).String()
+		event.Data = call.Argument(1).Export()
+		event.Timestamp = time.Now()
+
+		log.V(1).Info("Shelly.emitEvent", "event", event)
+
+		// Send event to channel (non-blocking)
+		select {
+		case eh.Broadcaster() <- vm.ToValue(event):
+		default:
+			log.Error(nil, "Event channel full, dropping event", "event", event)
+		}
+
 		return goja.Undefined()
 	})
 
@@ -343,13 +393,6 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 	// Shelly.getCurrentScriptId()
 	shellyObj.Set("getCurrentScriptId", func(call goja.FunctionCall) goja.Value {
 		return vm.ToValue(1)
-	})
-
-	// Shelly.emitEvent(name, data)
-	shellyObj.Set("emitEvent", func(call goja.FunctionCall) goja.Value {
-		name := call.Argument(0).String()
-		log.V(1).Info("Shelly.emitEvent placeholder", "name", name)
-		return goja.Undefined()
 	})
 
 	vm.Set("Shelly", shellyObj)
@@ -599,6 +642,9 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 			};
 		}
 	`)
+
+	// Add device's events handler to process emitted events
+	*handlers = append(*handlers, eh)
 
 	return vm, nil
 }
@@ -899,4 +945,29 @@ func (th *timerHandler) Stop() {
 	if th.timer != nil {
 		th.timer.Stop()
 	}
+}
+
+type shellyEventHandler struct {
+	callback goja.Callable
+	userdata goja.Value
+}
+
+func (seh *shellyEventHandler) Wait() <-chan []byte {
+	ch := make(chan []byte)
+	return ch
+}
+
+func (seh *shellyEventHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return err
+	}
+	// Call: callback(result, error_code, error_message)
+	log.Info("Event callback", "msg", string(msg))
+	_, err = seh.callback(goja.Undefined(), vm.ToValue(string(msg)), vm.ToValue(0), goja.Null(), seh.userdata)
+	if err != nil {
+		log.Error(err, "Event callback", "error", err)
+		return err
+	}
+	return nil
 }

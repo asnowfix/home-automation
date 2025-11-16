@@ -133,6 +133,175 @@ function log() {
   print(SCRIPT_PREFIX, s);
 }
 
+// === POLYFILLS FOR MISSING ARRAY METHODS ===
+// Shelly's JavaScript engine (modified Espruino) doesn't support concat()
+if (!Array.prototype.concat) {
+  Array.prototype.concat = function() {
+    var result = [];
+    var i, j, k, arg;
+    
+    // Add elements from this array
+    for (i = 0; i < this.length; i++) {
+      result[result.length] = this[i];
+    }
+    
+    // Add elements from each argument
+    for (j = 0; j < arguments.length; j++) {
+      arg = arguments[j];
+      if (Array.isArray(arg)) {
+        for (k = 0; k < arg.length; k++) {
+          result[result.length] = arg[k];
+        }
+      } else {
+        result[result.length] = arg;
+      }
+    }
+    
+    return result;
+  };
+}
+
+// === TIMER LIST SYSTEM ===
+// Custom timer management to stay within Shelly's 5-timer limit
+// Uses a single 5-second polling timer to manage multiple virtual timers
+// stored in a sorted array by fire date.
+//
+// API:
+//   addTimer(delayMs, recurring, callback) -> id
+//   removeTimer(id) -> boolean
+//
+// This allows the script to have many logical timers while only using
+// 1 actual Shelly Timer.set() for the poller.
+var TIMER_LIST = [];
+var TIMER_LIST_POLLER = null;
+var TIMER_LIST_POLL_INTERVAL = 5000; // 5 seconds
+
+// Generate random ID for timer
+function generateTimerId() {
+  var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  var id = '';
+  for (var i = 0; i < 8; i++) {
+    id += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return id;
+}
+
+// Add timer to sorted list
+function addTimer(delayMs, recurring, callback) {
+  var id = generateTimerId();
+  var fireDate = new Date(Date.now() + delayMs);
+  var period = recurring ? delayMs : 0;
+  
+  var timer = {
+    date: fireDate,
+    id: id,
+    recurring: recurring,
+    period: period,
+    cb: callback
+  };
+  
+  // Insert in sorted position
+  var inserted = false;
+  for (var i = 0; i < TIMER_LIST.length; i++) {
+    if (timer.date.getTime() < TIMER_LIST[i].date.getTime()) {
+      // Insert before this element
+      var before = TIMER_LIST.slice(0, i);
+      var after = TIMER_LIST.slice(i);
+      TIMER_LIST = before.concat([timer]).concat(after);
+      inserted = true;
+      break;
+    }
+  }
+  
+  if (!inserted) {
+    TIMER_LIST.push(timer);
+  }
+  
+  // Start poller if not running
+  if (!TIMER_LIST_POLLER && TIMER_LIST.length > 0) {
+    startTimerPoller();
+  }
+  
+  return id;
+}
+
+// Remove timer by ID
+function removeTimer(id) {
+  var newList = [];
+  var found = false;
+  for (var i = 0; i < TIMER_LIST.length; i++) {
+    if (TIMER_LIST[i].id === id) {
+      found = true;
+    } else {
+      newList.push(TIMER_LIST[i]);
+    }
+  }
+  TIMER_LIST = newList;
+  
+  // Stop poller if list is empty
+  if (TIMER_LIST.length === 0 && TIMER_LIST_POLLER) {
+    Timer.clear(TIMER_LIST_POLLER);
+    TIMER_LIST_POLLER = null;
+  }
+  
+  return found;
+}
+
+// Process timers (called every 5 seconds)
+function processTimers() {
+  var now = Date.now();
+  var processed = 0;
+  
+  // Process all timers at head of list that are due
+  while (TIMER_LIST.length > 0 && TIMER_LIST[0].date.getTime() <= now) {
+    var timer = TIMER_LIST[0];
+    TIMER_LIST = TIMER_LIST.slice(1); // Remove from head
+    
+    // Execute callback
+    try {
+      timer.cb();
+    } catch (e) {
+      log('Timer error:', e);
+      if (e && false) {}
+    }
+    
+    // Re-add if recurring
+    if (timer.recurring && timer.period > 0) {
+      timer.date = new Date(now + timer.period);
+      
+      // Re-insert in sorted position
+      var inserted = false;
+      for (var i = 0; i < TIMER_LIST.length; i++) {
+        if (timer.date.getTime() < TIMER_LIST[i].date.getTime()) {
+          var before = TIMER_LIST.slice(0, i);
+          var after = TIMER_LIST.slice(i);
+          TIMER_LIST = before.concat([timer]).concat(after);
+          inserted = true;
+          break;
+        }
+      }
+      if (!inserted) {
+        TIMER_LIST.push(timer);
+      }
+    }
+    
+    processed++;
+  }
+  
+  // Stop poller if no more timers
+  if (TIMER_LIST.length === 0 && TIMER_LIST_POLLER) {
+    Timer.clear(TIMER_LIST_POLLER);
+    TIMER_LIST_POLLER = null;
+  }
+}
+
+// Start the timer poller
+function startTimerPoller() {
+  if (!TIMER_LIST_POLLER) {
+    TIMER_LIST_POLLER = Timer.set(TIMER_LIST_POLL_INTERVAL, true, processTimers);
+  }
+}
+
 // === STATE (DYNAMIC RUNTIME VALUES) ===
 var STATE = {
   // Occupancy URL (built from MQTT server IP + /status)
@@ -166,8 +335,11 @@ var STATE = {
     external: null
   },
   
-  // Control loop timer ID
-  controlLoopTimerId: null
+  // Timer IDs for cleanup
+  learningTimerIds: [],
+  controlLoopTimerId: null,
+  mqttRepeatTimerId: null,
+  checkTimerId: null
 };
 
 function onDeviceLocation(result, error_code, error_message, cb) {
@@ -428,17 +600,29 @@ function onCheapWindowStart() {
 
 // Schedule learning events at CHEAP_START_HOUR and CHEAP_END_HOUR
 function scheduleLearningTimers() {
+  // Clear old timers if any
+  for (var i = 0; i < STATE.learningTimerIds.length; i++) {
+    removeTimer(STATE.learningTimerIds[i]);
+  }
+  STATE.learningTimerIds = [];
+  
   var now = new Date();
   var hour = now.getHours();
+  
   var scheduleAt = function(targetHour, cb) {
     var delay = (targetHour - hour) * 3600000;
     if (delay < 0) delay += 24 * 3600000;
-    Timer.set(delay, false, function() {
+    
+    // Schedule initial one-shot timer
+    var id = addTimer(delay, false, function() {
       cb();
-      // Re-schedule for next day
-      Timer.set(24 * 3600000, true, cb);
+      // After first fire, schedule recurring daily timer
+      var recurringId = addTimer(24 * 3600000, true, cb);
+      STATE.learningTimerIds.push(recurringId);
     });
+    STATE.learningTimerIds.push(id);
   };
+  
   scheduleAt(CONFIG.cheapEndHour, onCheapWindowEnd);
   scheduleAt(CONFIG.cheapStartHour, onCheapWindowStart);
 }
@@ -651,8 +835,8 @@ function onTemperature(topic, message, location) {
     STATE.temperatureReady[location] = true;
     log('Temperature', temp, 'location:', location, 'is ready:', STATE.temperatureReady[location]);
     
-    // Emit event to check control loop readiness (breaks callback chain)
-    Shelly.emitEvent('user.check_control_loop', { reason: "temperature_ready" });
+    // Schedule check if not already scheduled
+    scheduleControlLoopCheck();
   }
 }
 
@@ -719,10 +903,16 @@ function subscribeMqttTemperature(location, topic) {
     MQTT.subscribe(newTopic, onTemperature, location);
     STATE.subscribedTemperatureTopic[location] = newTopic;
     
+    // Clear old MQTT repeat timer if any
+    if (STATE.mqttRepeatTimerId) {
+      removeTimer(STATE.mqttRepeatTimerId);
+    }
+    
     // Delay the repeat request to ensure subscription is active
     // MQTT.subscribe() may not be synchronous on the device
-    Timer.set(100, false, function() {
+    STATE.mqttRepeatTimerId = addTimer(100, false, function() {
       requestMqttRepeat(newTopic);
+      STATE.mqttRepeatTimerId = null;
     });
   }
 }
@@ -754,27 +944,41 @@ function shouldRefreshForecast() {
 }
 
 function onForecast(result, error_code, error_message) {
-  log('onForecast callback invoked, error_code:', error_code);
-  
-  if (error_code === 0 && result && result.body) {
-    var data = null;
-    try { data = JSON.parse(result.body); } catch (e) { if (e && false) {} }
-    
-    if (data && data.hourly && data.hourly.temperature_2m && data.hourly.temperature_2m.length > 0) {
-      // Cache the full forecast arrays
-      STATE.cachedForecast = data.hourly.temperature_2m;
-      STATE.cachedForecastTimes = data.hourly.time;
-      var now = new Date();
-      STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
-      log('Cached forecast with ' + STATE.cachedForecast.length + ' hourly values for date: ' + STATE.lastForecastFetchDate);
-      // Emit event to check control loop readiness (breaks callback chain)
-      Shelly.emitEvent('user.check_control_loop', { reason: "forecast_ready" });
-    } else {
-      log('Failed to parse forecast data - missing or invalid structure');
-    }
-  } else {
-    log('Error fetching Open-Meteo forecast (code ' + error_code + '):', error_message);
+  if (error_code !== 0) {
+    log('Forecast fetch error:', error_code);
+    return;
   }
+  
+  if (!result || !result.body) {
+    log('No forecast data in response');
+    return;
+  }
+  
+  var data = null;
+  try { 
+    data = JSON.parse(result.body);
+  } catch (e) { 
+    log('JSON parse error');
+    if (e && false) {}
+    return;
+  }
+  
+  if (!data || !data.hourly || !data.hourly.temperature_2m || data.hourly.temperature_2m.length === 0) {
+    log('Invalid forecast structure');
+    return;
+  }
+  
+  // Cache only the arrays we need, let GC clean up the rest
+  STATE.cachedForecast = data.hourly.temperature_2m;
+  STATE.cachedForecastTimes = data.hourly.time;
+  data = null; // Help GC
+  
+  var now = new Date();
+  STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+  log('Forecast cached:', STATE.cachedForecast.length, 'values');
+  
+  // Schedule check if not already scheduled
+  scheduleControlLoopCheck();
 }
 
 function fetchAndCacheForecast(cb) {
@@ -893,6 +1097,16 @@ function pollAndControl() {
   fetchAllControlInputs(controlHeaterWithInputs);
 }
 
+// Schedule a deferred check (breaks call stack without creating multiple timers)
+function scheduleControlLoopCheck() {
+  if (!STATE.checkTimerId) {
+    STATE.checkTimerId = addTimer(0, false, function() {
+      STATE.checkTimerId = null;
+      checkAndStartControlLoop();
+    });
+  }
+}
+
 // Check if ready and start control loop timer
 function checkAndStartControlLoop() {
   log('Checking whether we can start control loop')
@@ -904,7 +1118,7 @@ function checkAndStartControlLoop() {
     if (!STATE.controlLoopTimerId) {
       log('All inputs ready - starting control loop timer');
       // Start the control loop timer now that all inputs are ready
-      STATE.controlLoopTimerId = Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
+      STATE.controlLoopTimerId = addTimer(CONFIG.pollIntervalMs, true, pollAndControl);
       // Run first cycle immediately
       pollAndControl();
     }
@@ -941,16 +1155,6 @@ log("Script starting...");
 
 // Initialize URLs (occupancy service)
 initUrls();
-
-// Handle script events
-Shelly.addEventHandler(function(eventData) {
-  if (eventData && eventData.event === 'user.check_control_loop') {
-    log('Check if all inputs are ready and start control loop');
-    checkAndStartControlLoop();
-  } else {
-    log('Script event:', JSON.stringify(eventData));
-  }
-}, {purpose: "user.check_control_loop"});
 
 scheduleLearningTimers();
 loadConfig(onConfigLoaded);

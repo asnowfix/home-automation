@@ -161,6 +161,16 @@ if (!Array.prototype.concat) {
   };
 }
 
+// Generate a simple random ID
+function randomId(n) {
+  var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  var id = '';
+  for (var i = 0; i < n; i++) {
+    id += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return id;
+}
+
 // === TIMER LIST SYSTEM ===
 // Custom timer management to stay within Shelly's 5-timer limit
 // Uses a single 5-second polling timer to manage multiple virtual timers
@@ -176,19 +186,9 @@ var TIMER_LIST = [];
 var TIMER_LIST_POLLER = null;
 var TIMER_LIST_POLL_INTERVAL = 5000; // 5 seconds
 
-// Generate random ID for timer
-function generateTimerId() {
-  var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  var id = '';
-  for (var i = 0; i < 8; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return id;
-}
-
 // Add timer to sorted list
 function addTimer(delayMs, recurring, callback) {
-  var id = generateTimerId();
+  var id = randomId(8);
   var fireDate = new Date(Date.now() + delayMs);
   var period = recurring ? delayMs : 0;
   
@@ -222,6 +222,7 @@ function addTimer(delayMs, recurring, callback) {
     startTimerPoller();
   }
   
+  log("Timers:", TIMER_LIST.length);
   return id;
 }
 
@@ -850,23 +851,13 @@ function extractDeviceNameFromTopic(topic) {
   return null;
 }
 
-// Generate a simple random request ID
-function generateRequestId() {
-  var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  var id = '';
-  for (var i = 0; i < 16; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return id;
-}
-
 /**
  * Request `myhome` to republish its last cached value for the given topic.
  * @param {Request} topic 
  */
 function requestMqttRepeat(topic) {
   var request = JSON.stringify({
-    id: generateRequestId(),
+    id: randomId(8),
     src: STATE.clientId,
     dst: 'myhome',
     method: 'mqtt.repeat',

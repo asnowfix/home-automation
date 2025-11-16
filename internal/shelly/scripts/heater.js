@@ -149,8 +149,6 @@ var STATE = {
   normallyClosed: true,
   
   // Readiness tracking
-  forecastUrlReady: false,
-  forecastDataReady: false,
   temperatureReady: {
     internal: false,
     external: false
@@ -166,7 +164,10 @@ var STATE = {
   subscribedTemperatureTopic: {
     internal: null,
     external: null
-  }
+  },
+  
+  // Control loop timer ID
+  controlLoopTimerId: null
 };
 
 function onDeviceLocation(result, error_code, error_message, cb) {
@@ -174,8 +175,8 @@ function onDeviceLocation(result, error_code, error_message, cb) {
   if (error_code === 0 && result) {
     if (result.lat !== null && result.lon !== null) {
       log('Auto-detected location: lat=' + result.lat + ', lon=' + result.lon + ', tz=' + result.tz);
-      updateForecastURL(result.lat, result.lon);
-      loadConfig(cb);
+      setForecastURL(result.lat, result.lon);
+      if (typeof cb === 'function') cb();
     } else {
       log('Location detection returned null coordinates');
     }
@@ -184,29 +185,40 @@ function onDeviceLocation(result, error_code, error_message, cb) {
   }
 }
 
-function detectLocationAndLoadConfig(cb) {
-  log('detectLocationAndLoadConfig')
-  // Use stored forecast URL if available
-  var stored = loadValue(STORAGE_KEYS.forecastUrl);
-  if (stored) {
-    STATE.forecastUrl = stored;
-    STATE.forecastUrlReady = true;
-    log('Using stored forecast URL');
-    // Fetch forecast with stored URL
-    fetchAndCacheForecast(function(success) {
-      if (success) {
-        log('Initial forecast cached successfully with stored URL');
-      } else {
-        log('Failed to cache initial forecast with stored URL');
-      }
-      checkAndStartControlLoop();
-    });
-    loadConfig(cb);
-    return;
+function onForecastUrlReady(cb) {
+  log('onForecastUrlReady')
+  fetchAndCacheForecast(loadConfig.bind(null, cb));
+}
+
+function fetchForecast(cb) {
+  log('fetchForecast')
+
+  if (!STATE.forecastUrl) {
+    STATE.forecastUrl = loadValue(STORAGE_KEYS.forecastUrl);
   }
 
-  log('Detecting device location...');
-  Shelly.call('Shelly.DetectLocation', {}, onDeviceLocation, cb);
+  if (!STATE.forecastUrl) {
+    log('Forecast URL not loaded/cached, detecting location...');
+    Shelly.call('Shelly.DetectLocation', {}, onDeviceLocation, onForecastUrlReady.bind(null, cb));
+  } else {
+    onForecastUrlReady(cb);
+  }
+}
+
+function onDeviceLocation(result, error_code, error_message, cb) {
+  log('onDeviceLocation')
+  if (error_code === 0 && result) {
+    if (result.lat !== null && result.lon !== null) {
+      log('Auto-detected location: lat=' + result.lat + ', lon=' + result.lon + ', tz=' + result.tz);
+      setForecastURL(result.lat, result.lon);
+      if (typeof cb === 'function') cb();
+    } else {
+      log('result: ' + JSON.stringify(result));
+    }
+  } else {
+    log('error_code: ' + error_code + ', error_message: ' + error_message);
+    onForecastUrlReady(cb);
+  }
 }
 
 // Parse a value from KVS based on its expected type
@@ -304,23 +316,13 @@ function loadValue(key) {
   return parseStorageValue(v);
 }
 
-function updateForecastURL(lat, lon) {
-  log('updateForecastURL', lat, lon);
+function setForecastURL(lat, lon) {
+  log('setForecastURL', lat, lon);
   if (lat !== null && lon !== null) {
     var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&hourly=temperature_2m&forecast_days=1&timezone=auto';
     STATE.forecastUrl = url;
-    STATE.forecastUrlReady = true;
     storeValue(STORAGE_KEYS.forecastUrl, url);
     log('Forecast URL ready');
-    // Fetch forecast immediately after URL is set
-    fetchAndCacheForecast(function(success) {
-      if (success) {
-        log('Initial forecast cached successfully after URL detection');
-      } else {
-        log('Failed to cache initial forecast after URL detection');
-      }
-      checkAndStartControlLoop();
-    });
   }
 }
 
@@ -362,7 +364,7 @@ function onKvsLoaded(result, error_code, error_message, cb) {
   if (typeof cb === 'function') {
     cb(updated);
   } else {
-    log('No callback provided for onKvsLoaded', JSON.stringify(cb));
+    log('BUG: No callback provided for onKvsLoaded', JSON.stringify(cb));
   }
 }
 
@@ -514,42 +516,24 @@ var lastExternalTemp = null;
 function fetchAllControlInputs(cb) {
   // Check if we need to refresh the forecast (once per day)
   if (shouldRefreshForecast()) {
-    fetchAndCacheForecast(function(success) {
-      if (success) {
-        log('Forecast cache refreshed successfully');
-      } else {
-        log('Forecast cache refresh failed, will use stale data if available');
-      }
-      // Continue with control inputs regardless of fetch success
-      fetchControlInputsWithCachedForecast(cb);
-    });
+    log('Fetching fresh forecast from Open-Meteo...');
+    fetchAndCacheForecast(fetchControlInputsWithCachedForecast.bind(null, cb));
   } else {
     // Use cached forecast
+    log('Using cached forecast');
     fetchControlInputsWithCachedForecast(cb);
   }
 }
 
 function fetchControlInputsWithCachedForecast(cb) {
   log('fetchControlInputsWithCachedForecast')
-  var results = { internal: null, external: null, forecast: null, occupied: null };
-  var done = 0;
-  var total = 3; // Only 3 now: internal, external, occupancy (forecast is from cache)
-  
-  function check() {
-    done++;
-    if (done === total) {
-      // Get forecast from cache
-      results.forecast = getCurrentForecastTemp();
-      if (results.forecast !== null) {
-        log('Using cached forecast: ' + results.forecast + '°C');
-      }
-      cb(results);
-    }
-  }
-  
-  getShellyTemperature('internal', function(val) { results.internal = val; check(); });
-  getShellyTemperature('external', function(val) { results.external = val; check(); });
-  getOccupancy(function(val) { results.occupied = val; check(); });
+  var results = {
+    internal: STATE.temperature['internal'],
+    external: STATE.temperature['external'],
+    forecast: getCurrentForecastTemp(),
+    occupied: STATE.occupied
+  };
+  cb(results);
 }
 
 // Patch fetchAllControlInputs to store last external temp
@@ -664,11 +648,11 @@ function onTemperature(topic, message, location) {
   if (temp !== null) {
     // Store in STATE (in-memory cache)
     STATE.temperature[location] = temp;
-    log('Stored', location, 'temperature:', temp);
     STATE.temperatureReady[location] = true;
-    log('Temperature ready:', location, 'is', STATE.temperatureReady[location]);
+    log('Temperature', temp, 'location:', location, 'is ready:', STATE.temperatureReady[location]);
     
-    checkAndStartControlLoop();
+    // Emit event to check control loop readiness (breaks callback chain)
+    Shelly.emitEvent('user.check_control_loop', { reason: "temperature_ready" });
   }
 }
 
@@ -681,7 +665,6 @@ function extractDeviceNameFromTopic(topic) {
   }
   return null;
 }
-
 
 // Generate a simple random request ID
 function generateRequestId() {
@@ -770,9 +753,8 @@ function shouldRefreshForecast() {
   return false;
 }
 
-function onForecast(result, error_code, error_message, cb) {
+function onForecast(result, error_code, error_message) {
   log('onForecast callback invoked, error_code:', error_code);
-  var success = false;
   
   if (error_code === 0 && result && result.body) {
     var data = null;
@@ -784,20 +766,14 @@ function onForecast(result, error_code, error_message, cb) {
       STATE.cachedForecastTimes = data.hourly.time;
       var now = new Date();
       STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
-      STATE.forecastDataReady = true;
       log('Cached forecast with ' + STATE.cachedForecast.length + ' hourly values for date: ' + STATE.lastForecastFetchDate);
-      checkAndStartControlLoop();
-      success = true;
+      // Emit event to check control loop readiness (breaks callback chain)
+      Shelly.emitEvent('user.check_control_loop', { reason: "forecast_ready" });
     } else {
       log('Failed to parse forecast data - missing or invalid structure');
     }
   } else {
     log('Error fetching Open-Meteo forecast (code ' + error_code + '):', error_message);
-  }
-  
-  // Always call the callback
-  if (typeof cb === 'function') {
-    cb(success);
   }
 }
 
@@ -805,7 +781,6 @@ function fetchAndCacheForecast(cb) {
   var url = STATE.forecastUrl || loadValue(STORAGE_KEYS.forecastUrl);
   if (!url) {
     log('Open-Meteo forecast URL not configured. Skipping forecast.');
-    cb(null);
     return;
   }
   
@@ -902,40 +877,35 @@ function controlHeaterWithInputs(results) {
 }
 
 // === MAIN CONTROL LOOP (flattened) ===
-var controlLoopStarted = false;
-
 function pollAndControl() {
   // Check if we need to refresh the forecast (once per day)
   if (shouldRefreshForecast()) {
     log('Daily forecast refresh triggered from poll');
-    fetchAndCacheForecast(function(success) {
-      if (success) {
-        log('Daily forecast refresh successful');
-      }
-    });
+    fetchAndCacheForecast();
   }
   
   // Only run control if we have all necessary inputs
-  if (!STATE.forecastUrlReady || !STATE.forecastDataReady || !STATE.temperatureReady.internal || !STATE.temperatureReady.external) {
-    log('Skipping control cycle - waiting for initialization (url:', STATE.forecastUrlReady, 'forecast:', STATE.forecastDataReady, 'internal:', STATE.temperatureReady.internal, 'external:', STATE.temperatureReady.external, ')');
+  if (!STATE.forecastUrl || !STATE.cachedForecast || !STATE.temperatureReady.internal || !STATE.temperatureReady.external) {
+    log('Skipping control cycle - waiting for initialization (url:', !!STATE.forecastUrl, 'forecast:', !!STATE.cachedForecast, 'internal:', STATE.temperatureReady.internal, 'external:', STATE.temperatureReady.external, ')');
     return;
   }
   
   fetchAllControlInputs(controlHeaterWithInputs);
 }
 
-// Check if ready and start control loop
+// Check if ready and start control loop timer
 function checkAndStartControlLoop() {
   log('Checking whether we can start control loop')
-  log('  - Forecast URL ready:' + STATE.forecastUrlReady);
-  log('  - Forecast data ready:' + STATE.forecastDataReady);
+  log('  - Forecast URL ready:' + !!STATE.forecastUrl);
+  log('  - Forecast data ready:' + !!STATE.cachedForecast);
   log('  - Internal temp ready:' + STATE.temperatureReady.internal);
   log('  - External temp ready:' + STATE.temperatureReady.external);
-  if (STATE.forecastUrlReady && STATE.forecastDataReady && STATE.temperatureReady.internal && STATE.temperatureReady.external) {
-    if (!controlLoopStarted) {
-      controlLoopStarted = true;
-      log('All inputs ready - starting control loop');
-      // Run initial control cycle
+  if (STATE.forecastUrl && STATE.cachedForecast && STATE.temperatureReady.internal && STATE.temperatureReady.external) {
+    if (!STATE.controlLoopTimerId) {
+      log('All inputs ready - starting control loop timer');
+      // Start the control loop timer now that all inputs are ready
+      STATE.controlLoopTimerId = Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
+      // Run first cycle immediately
       pollAndControl();
     }
   }
@@ -964,8 +934,6 @@ function onConfigLoaded(updated) {
   if (updated.indexOf('internalTemperatureTopic') !== -1) {
     subscribeMqttTemperature("internal", CONFIG.internalTemperatureTopic);
   }
-  
-  checkAndStartControlLoop();
 }
 
 // === SCHEDULED EXECUTION ===
@@ -974,35 +942,28 @@ log("Script starting...");
 // Initialize URLs (occupancy service)
 initUrls();
 
-// Call this once at script start - detect location first, then load config
-detectLocationAndLoadConfig(function(updated) {
-  log("Script initialization");
-
-  // Call this once at script start
-  scheduleLearningTimers();
-
-  // Start the periodic control loop timer (will skip if not ready)
-  // This also handles daily forecast refresh checks
-  Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
-
-  // Handle script stop event
-  Shelly.addEventHandler(function(eventData) {
+// Handle script events
+Shelly.addEventHandler(function(eventData) {
+  if (eventData && eventData.event === 'user.check_control_loop') {
+    log('Check if all inputs are ready and start control loop');
+    checkAndStartControlLoop();
+  } else {
     log('Script event:', JSON.stringify(eventData));
-  });
+  }
+}, {purpose: "user.check_control_loop"});
 
-  Shelly.addStatusHandler(function(status) {
-    // Detect KVS updates and reload configuration
-    if (status && status.component === "sys" && status.delta && ("kvs_rev" in status.delta)) {
-      log('KVS updated (rev ' + status.delta.kvs_rev + '), reloading configuration and re-fetching temperatures');
-      loadConfig(onConfigLoaded);
-    } else {
-      log('Script status:', JSON.stringify(status));
-    }
-  });
+scheduleLearningTimers();
+loadConfig(onConfigLoaded);
+fetchForecast();
 
-  onConfigLoaded(updated);
-
-  log("Script initialization complete");
+Shelly.addStatusHandler(function(status) {
+  // Detect KVS updates and reload configuration
+  if (status && status.component === "sys" && status.delta && ("kvs_rev" in status.delta)) {
+    log('KVS updated (rev ' + status.delta.kvs_rev + '), reloading configuration and re-fetching temperatures');
+    loadConfig(onConfigLoaded);
+  } else {
+    log('Script status:', JSON.stringify(status));
+  }
 });
 
 log("Script started");

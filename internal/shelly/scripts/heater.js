@@ -324,7 +324,7 @@ function updateForecastURL(lat, lon) {
   }
 }
 
-function onKvsLoaded(cb, result, error_code, error_message) {
+function onKvsLoaded(result, error_code, error_message, cb) {
   log('onKvsLoaded');
   var updated = [];
   if (error_code === 0 && result && result.items) {
@@ -359,21 +359,16 @@ function onKvsLoaded(cb, result, error_code, error_message) {
   } else {
     log('Failed to load KVS config (error ' + error_code + '): ' + error_message);
   }
-  try {
-    if (cb && typeof cb === 'function') {
-      cb(updated);
-    } else {
-      throw new Error('cb is not a function: ' + typeof cb);
-    }
-  } catch (e) {
-    log('Error calling callback:', e.message);
-    log('Stack:', e.stack);
+  if (typeof cb === 'function') {
+    cb(updated);
+  } else {
+    log('No callback provided for onKvsLoaded', JSON.stringify(cb));
   }
 }
 
 function loadConfig(cb) {
   log('loadConfig');
-  Shelly.call('KVS.GetMany', { match: CONFIG_KEY_PREFIX + "*" }, onKvsLoaded.bind(null, cb));
+  Shelly.call('KVS.GetMany', { match: CONFIG_KEY_PREFIX + "*" }, onKvsLoaded, cb);
 }
 
 // === TIME WINDOW FOR HEATING ===
@@ -782,7 +777,11 @@ function onForecast(result, error_code, error_message, cb) {
       STATE.forecastDataReady = true;
       log('Cached forecast with ' + STATE.cachedForecast.length + ' hourly values for date: ' + STATE.lastForecastFetchDate);
       checkAndStartControlLoop();
-      cb();
+      if (typeof cb === 'function') {
+        cb();
+      } else {
+        log('ERROR: No callback provided for onForecast', JSON.stringify(cb));
+      }
     } else {
       log('Failed to parse forecast data');
     }
@@ -925,12 +924,12 @@ function checkAndStartControlLoop() {
 function setHeaterState(on, cb) {
   STATE.lastHeaterState = on;
   var newState = on !== CONFIG.normallyClosed
-  Shelly.call("Switch.Set", { id: 0, on: newState }, function(result, error_code, error_msg, cb) {
+  Shelly.call("Switch.Set", { id: 0, on: newState }, function(result, error_code, error_msg, userdata) {
     if (error_code) {
       log('Error setting heater switch state:', error_msg);
     } else {
       log('Heater switch set to', on, "(result:", result, ")");
-      if (typeof cb === 'function') cb();
+      if (typeof userdata === 'function') userdata();
     }
   }, cb);
 }

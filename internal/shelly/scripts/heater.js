@@ -88,14 +88,8 @@ initConfig();
 var STORAGE_KEYS = {
   coolingRate: "cooling-rate",
   forecastUrl: "forecast-url",
-  lastCheapEnd: "last-cheap-end",
-  internalTemp: "internal-temperature",
-  externalTemp: "external-temperature"
+  lastCheapEnd: "last-cheap-end"
 };
-
-function getTemperatureStorageKey(location) {
-  return location + "-temperature";
-}
 
 function getCoolingRate() {
   var v = loadValue(STORAGE_KEYS.coolingRate);
@@ -160,6 +154,12 @@ var STATE = {
   temperatureReady: {
     internal: false,
     external: false
+  },
+  
+  // Temperature values (in-memory cache from MQTT)
+  temperature: {
+    internal: null,
+    external: null
   },
   
   // Track subscribed MQTT topics for cleanup
@@ -662,9 +662,8 @@ function parseTemperatureFromMqtt(topic, message) {
 function onTemperature(topic, message, location) {
   var temp = parseTemperatureFromMqtt(topic, message);
   if (temp !== null) {
-    // Store in Script.storage (synchronous, internal data)
-    var key = getTemperatureStorageKey(location);
-    storeValue(key, temp);
+    // Store in STATE (in-memory cache)
+    STATE.temperature[location] = temp;
     log('Stored', location, 'temperature:', temp);
     STATE.temperatureReady[location] = true;
     log('Temperature ready:', location, 'is', STATE.temperatureReady[location]);
@@ -718,29 +717,38 @@ function subscribeMqttTemperature(location, topic) {
   var oldTopic = STATE.subscribedTemperatureTopic[location];
   var newTopic = topic;
   
-  // Unsubscribe from old topic if it changed
-    if (oldTopic && oldTopic !== newTopic) {
-      log('Unsubscribing from old', location, 'topic:', oldTopic);
-      MQTT.unsubscribe(oldTopic);
-      STATE.subscribedTemperatureTopic[location] = null;
+  // Skip if already subscribed to this topic
+  if (oldTopic === newTopic && newTopic) {
+    log('Already subscribed to', location, 'topic:', newTopic);
+    return;
   }
   
-    // Subscribe to new topic & request last value
-    if (newTopic) {
-      log('Subscribing to', location, 'temperature topic:', newTopic);
-      MQTT.subscribe(newTopic, onTemperature, location);
-      STATE.subscribedTemperatureTopic[location] = newTopic;
-
+  // Unsubscribe from old topic if it changed
+  if (oldTopic && oldTopic !== newTopic) {
+    log('Unsubscribing from old', location, 'topic:', oldTopic);
+    MQTT.unsubscribe(oldTopic);
+    STATE.subscribedTemperatureTopic[location] = null;
+  }
+  
+  // Subscribe to new topic & request last value
+  if (newTopic) {
+    log('Subscribing to', location, 'temperature topic:', newTopic);
+    MQTT.subscribe(newTopic, onTemperature, location);
+    STATE.subscribedTemperatureTopic[location] = newTopic;
+    
+    // Delay the repeat request to ensure subscription is active
+    // MQTT.subscribe() may not be synchronous on the device
+    Timer.set(100, false, function() {
       requestMqttRepeat(newTopic);
-    }
+    });
+  }
 }
 
 // === DATA FETCHING FUNCTIONS ===
-// Read temperature from Script.storage (stored by MQTT callbacks)
+// Read temperature from STATE (in-memory cache)
 function getShellyTemperature(location, cb) {
   log('getShellyTemperature', location);
-  var key = getTemperatureStorageKey(location);
-  var temp = loadValue(key);
+  var temp = STATE.temperature[location];
   
   if (temp !== null && temp !== undefined) {
     log('Read', location, 'temperature:', temp);
@@ -763,7 +771,9 @@ function shouldRefreshForecast() {
 }
 
 function onForecast(result, error_code, error_message, cb) {
-  log('onForecast', result, error_code, error_message)
+  log('onForecast callback invoked, error_code:', error_code);
+  var success = false;
+  
   if (error_code === 0 && result && result.body) {
     var data = null;
     try { data = JSON.parse(result.body); } catch (e) { if (e && false) {} }
@@ -777,16 +787,17 @@ function onForecast(result, error_code, error_message, cb) {
       STATE.forecastDataReady = true;
       log('Cached forecast with ' + STATE.cachedForecast.length + ' hourly values for date: ' + STATE.lastForecastFetchDate);
       checkAndStartControlLoop();
-      if (typeof cb === 'function') {
-        cb();
-      } else {
-        log('ERROR: No callback provided for onForecast', JSON.stringify(cb));
-      }
+      success = true;
     } else {
-      log('Failed to parse forecast data');
+      log('Failed to parse forecast data - missing or invalid structure');
     }
   } else {
-    log('Error fetching Open-Meteo forecast:', error_message);
+    log('Error fetching Open-Meteo forecast (code ' + error_code + '):', error_message);
+  }
+  
+  // Always call the callback
+  if (typeof cb === 'function') {
+    cb(success);
   }
 }
 
@@ -894,6 +905,16 @@ function controlHeaterWithInputs(results) {
 var controlLoopStarted = false;
 
 function pollAndControl() {
+  // Check if we need to refresh the forecast (once per day)
+  if (shouldRefreshForecast()) {
+    log('Daily forecast refresh triggered from poll');
+    fetchAndCacheForecast(function(success) {
+      if (success) {
+        log('Daily forecast refresh successful');
+      }
+    });
+  }
+  
   // Only run control if we have all necessary inputs
   if (!STATE.forecastUrlReady || !STATE.forecastDataReady || !STATE.temperatureReady.internal || !STATE.temperatureReady.external) {
     log('Skipping control cycle - waiting for initialization (url:', STATE.forecastUrlReady, 'forecast:', STATE.forecastDataReady, 'internal:', STATE.temperatureReady.internal, 'external:', STATE.temperatureReady.external, ')');
@@ -961,19 +982,8 @@ detectLocationAndLoadConfig(function(updated) {
   scheduleLearningTimers();
 
   // Start the periodic control loop timer (will skip if not ready)
+  // This also handles daily forecast refresh checks
   Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
-
-  // Schedule daily forecast refresh at midnight
-  Timer.set(60 * 60 * 1000, true, function() {
-    if (shouldRefreshForecast()) {
-      log('Daily forecast refresh triggered');
-      fetchAndCacheForecast(function(success) {
-        if (success) {
-          log('Daily forecast refresh successful');
-        }
-      });
-    }
-  });
 
   // Handle script stop event
   Shelly.addEventHandler(function(eventData) {

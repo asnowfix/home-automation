@@ -221,18 +221,42 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 
 	// [Shelly.emitEvent(name, data)](https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shellyemitevent)
 	shellyObj.Set("emitEvent", func(call goja.FunctionCall) goja.Value {
+		// event received Shell.addEventHandler() after Shelly.emitEvent() looks like:
+		// {
+		//   "component":"script:2",
+		//   "name":"script",
+		//   "id":2,
+		//   "now":1763316548.15808582305,
+		//   "info":{
+		//     "component":"script:2",
+		//     "id":2,
+		//     "event":"user.check_control_loop",
+		//     "data":{"reason":"forecast_ready"},
+		//     "ts":1763316548.15999984741
+		//   }
+		// }
 		var event struct {
-			Component string    `json:"component"`
-			Id        int       `json:"id"`
-			Event     string    `json:"event"`
-			Data      any       `json:"data,omitempty"`
-			Timestamp time.Time `json:"timestamp"`
+			Component string  `json:"component"`
+			Name      string  `json:"name"`
+			Id        int     `json:"id"`
+			Now       float64 `json:"now"`
+			Info      struct {
+				Component string    `json:"component"`
+				Id        int       `json:"id"`
+				Event     string    `json:"event"`
+				Data      any       `json:"data,omitempty"`
+				Timestamp time.Time `json:"timestamp"`
+			} `json:"info"`
 		}
 		event.Component = "script:1"
+		event.Name = "script"
 		event.Id = eh.NextId()
-		event.Event = call.Argument(0).String()
-		event.Data = call.Argument(1).Export()
-		event.Timestamp = time.Now()
+		event.Now = float64(time.Now().UnixNano()) / 1e6
+		event.Info.Component = event.Component
+		event.Info.Id = event.Id
+		event.Info.Event = call.Argument(0).String()
+		event.Info.Data = call.Argument(1).Export()
+		event.Info.Timestamp = time.Unix(0, int64(event.Now*1e6))
 
 		log.V(1).Info("Shelly.emitEvent", "event", event)
 
@@ -905,8 +929,13 @@ func (th *timerHandler) Wait() <-chan []byte {
 		}()
 	} else {
 		// One-shot timer
-		th.timer = time.NewTimer(th.period)
-		th.nextFire = time.Now().Add(th.period)
+		// Treat 0ms as 1ms to ensure event loop is ready
+		period := th.period
+		if period == 0 {
+			period = 1 * time.Millisecond
+		}
+		th.timer = time.NewTimer(period)
+		th.nextFire = time.Now().Add(period)
 		go func() {
 			<-th.timer.C
 			if !th.stopped {
@@ -925,7 +954,7 @@ func (th *timerHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte
 		return err
 	}
 
-	log.Info("Timer callback", "handle", th.handle, "repeat", th.repeat)
+	log.V(2).Info("Timer callback", "handle", th.handle, "repeat", th.repeat)
 
 	// Call the callback with userdata
 	_, err = th.callable(goja.Undefined(), th.userdata)

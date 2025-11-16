@@ -133,34 +133,6 @@ function log() {
   print(SCRIPT_PREFIX, s);
 }
 
-// === POLYFILLS FOR MISSING ARRAY METHODS ===
-// Shelly's JavaScript engine (modified Espruino) doesn't support concat()
-if (!Array.prototype.concat) {
-  Array.prototype.concat = function() {
-    var result = [];
-    var i, j, k, arg;
-    
-    // Add elements from this array
-    for (i = 0; i < this.length; i++) {
-      result[result.length] = this[i];
-    }
-    
-    // Add elements from each argument
-    for (j = 0; j < arguments.length; j++) {
-      arg = arguments[j];
-      if (Array.isArray(arg)) {
-        for (k = 0; k < arg.length; k++) {
-          result[result.length] = arg[k];
-        }
-      } else {
-        result[result.length] = arg;
-      }
-    }
-    
-    return result;
-  };
-}
-
 // Generate a simple random ID
 function randomId(n) {
   var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -169,138 +141,6 @@ function randomId(n) {
     id += chars[Math.floor(Math.random() * chars.length)];
   }
   return id;
-}
-
-// === TIMER LIST SYSTEM ===
-// Custom timer management to stay within Shelly's 5-timer limit
-// Uses a single 5-second polling timer to manage multiple virtual timers
-// stored in a sorted array by fire date.
-//
-// API:
-//   addTimer(delayMs, recurring, callback) -> id
-//   removeTimer(id) -> boolean
-//
-// This allows the script to have many logical timers while only using
-// 1 actual Shelly Timer.set() for the poller.
-var TIMER_LIST = [];
-var TIMER_LIST_POLLER = null;
-var TIMER_LIST_POLL_INTERVAL = 5000; // 5 seconds
-
-// Add timer to sorted list
-function addTimer(delayMs, recurring, callback) {
-  var id = randomId(8);
-  var fireDate = new Date(Date.now() + delayMs);
-  var period = recurring ? delayMs : 0;
-  
-  var timer = {
-    date: fireDate,
-    id: id,
-    recurring: recurring,
-    period: period,
-    cb: callback
-  };
-  
-  // Insert in sorted position
-  var inserted = false;
-  for (var i = 0; i < TIMER_LIST.length; i++) {
-    if (timer.date.getTime() < TIMER_LIST[i].date.getTime()) {
-      // Insert before this element
-      var before = TIMER_LIST.slice(0, i);
-      var after = TIMER_LIST.slice(i);
-      TIMER_LIST = before.concat([timer]).concat(after);
-      inserted = true;
-      break;
-    }
-  }
-  
-  if (!inserted) {
-    TIMER_LIST.push(timer);
-  }
-  
-  // Start poller if not running
-  if (!TIMER_LIST_POLLER && TIMER_LIST.length > 0) {
-    startTimerPoller();
-  }
-  
-  log("Timers:", TIMER_LIST.length);
-  return id;
-}
-
-// Remove timer by ID
-function removeTimer(id) {
-  var newList = [];
-  var found = false;
-  for (var i = 0; i < TIMER_LIST.length; i++) {
-    if (TIMER_LIST[i].id === id) {
-      found = true;
-    } else {
-      newList.push(TIMER_LIST[i]);
-    }
-  }
-  TIMER_LIST = newList;
-  
-  // Stop poller if list is empty
-  if (TIMER_LIST.length === 0 && TIMER_LIST_POLLER) {
-    Timer.clear(TIMER_LIST_POLLER);
-    TIMER_LIST_POLLER = null;
-  }
-  
-  return found;
-}
-
-// Process timers (called every 5 seconds)
-function processTimers() {
-  var now = Date.now();
-  var processed = 0;
-  
-  // Process all timers at head of list that are due
-  while (TIMER_LIST.length > 0 && TIMER_LIST[0].date.getTime() <= now) {
-    var timer = TIMER_LIST[0];
-    TIMER_LIST = TIMER_LIST.slice(1); // Remove from head
-    
-    // Execute callback
-    try {
-      timer.cb();
-    } catch (e) {
-      log('Timer error:', e);
-      if (e && false) {}
-    }
-    
-    // Re-add if recurring
-    if (timer.recurring && timer.period > 0) {
-      timer.date = new Date(now + timer.period);
-      
-      // Re-insert in sorted position
-      var inserted = false;
-      for (var i = 0; i < TIMER_LIST.length; i++) {
-        if (timer.date.getTime() < TIMER_LIST[i].date.getTime()) {
-          var before = TIMER_LIST.slice(0, i);
-          var after = TIMER_LIST.slice(i);
-          TIMER_LIST = before.concat([timer]).concat(after);
-          inserted = true;
-          break;
-        }
-      }
-      if (!inserted) {
-        TIMER_LIST.push(timer);
-      }
-    }
-    
-    processed++;
-  }
-  
-  // Stop poller if no more timers
-  if (TIMER_LIST.length === 0 && TIMER_LIST_POLLER) {
-    Timer.clear(TIMER_LIST_POLLER);
-    TIMER_LIST_POLLER = null;
-  }
-}
-
-// Start the timer poller
-function startTimerPoller() {
-  if (!TIMER_LIST_POLLER) {
-    TIMER_LIST_POLLER = Timer.set(TIMER_LIST_POLL_INTERVAL, true, processTimers);
-  }
 }
 
 // === STATE (DYNAMIC RUNTIME VALUES) ===
@@ -336,11 +176,8 @@ var STATE = {
     external: null
   },
   
-  // Timer IDs for cleanup
-  learningTimerIds: [],
-  controlLoopTimerId: null,
-  mqttRepeatTimerId: null,
-  checkTimerId: null
+  // Control loop timer handle
+  controlLoopTimerId: null
 };
 
 function onDeviceLocation(result, error_code, error_message, cb) {
@@ -601,12 +438,6 @@ function onCheapWindowStart() {
 
 // Schedule learning events at CHEAP_START_HOUR and CHEAP_END_HOUR
 function scheduleLearningTimers() {
-  // Clear old timers if any
-  for (var i = 0; i < STATE.learningTimerIds.length; i++) {
-    removeTimer(STATE.learningTimerIds[i]);
-  }
-  STATE.learningTimerIds = [];
-  
   var now = new Date();
   var hour = now.getHours();
   
@@ -615,13 +446,11 @@ function scheduleLearningTimers() {
     if (delay < 0) delay += 24 * 3600000;
     
     // Schedule initial one-shot timer
-    var id = addTimer(delay, false, function() {
+    Timer.set(delay, false, function() {
       cb();
       // After first fire, schedule recurring daily timer
-      var recurringId = addTimer(24 * 3600000, true, cb);
-      STATE.learningTimerIds.push(recurringId);
+      Timer.set(24 * 3600000, true, cb);
     });
-    STATE.learningTimerIds.push(id);
   };
   
   scheduleAt(CONFIG.cheapEndHour, onCheapWindowEnd);
@@ -894,16 +723,9 @@ function subscribeMqttTemperature(location, topic) {
     MQTT.subscribe(newTopic, onTemperature, location);
     STATE.subscribedTemperatureTopic[location] = newTopic;
     
-    // Clear old MQTT repeat timer if any
-    if (STATE.mqttRepeatTimerId) {
-      removeTimer(STATE.mqttRepeatTimerId);
-    }
-    
     // Delay the repeat request to ensure subscription is active
-    // MQTT.subscribe() may not be synchronous on the device
-    STATE.mqttRepeatTimerId = addTimer(100, false, function() {
+    Timer.set(100, false, function() {
       requestMqttRepeat(newTopic);
-      STATE.mqttRepeatTimerId = null;
     });
   }
 }
@@ -1088,14 +910,9 @@ function pollAndControl() {
   fetchAllControlInputs(controlHeaterWithInputs);
 }
 
-// Schedule a deferred check (breaks call stack without creating multiple timers)
+// Schedule a deferred check (breaks call stack)
 function scheduleControlLoopCheck() {
-  if (!STATE.checkTimerId) {
-    STATE.checkTimerId = addTimer(0, false, function() {
-      STATE.checkTimerId = null;
-      checkAndStartControlLoop();
-    });
-  }
+  Timer.set(100, false, checkAndStartControlLoop);
 }
 
 // Check if ready and start control loop timer
@@ -1109,7 +926,7 @@ function checkAndStartControlLoop() {
     if (!STATE.controlLoopTimerId) {
       log('All inputs ready - starting control loop timer');
       // Start the control loop timer now that all inputs are ready
-      STATE.controlLoopTimerId = addTimer(CONFIG.pollIntervalMs, true, pollAndControl);
+      STATE.controlLoopTimerId = Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
       // Run first cycle immediately
       pollAndControl();
     }

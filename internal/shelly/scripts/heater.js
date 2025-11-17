@@ -519,7 +519,11 @@ function shouldPreheat(filteredTemp, forecastTemp, mfTemp, cb) {
   // T_end = T_start - k * (T_start - T_ext) * hours
   var predictedDrop = k * (filteredTemp - futureExternal) * hoursToEnd;
   var predictedTemp = filteredTemp - predictedDrop;
-  cb((hoursToEnd <= CONFIG.preheatHours) && (predictedTemp < CONFIG.setpoint));
+  var result = (hoursToEnd <= CONFIG.preheatHours) && (predictedTemp < CONFIG.setpoint);
+  // Break call stack to avoid recursion
+  Timer.set(100, false, function() {
+    cb(result);
+  });
 }
 
 // Store last measured external temp for fallback in shouldPreheat
@@ -547,7 +551,10 @@ function fetchControlInputsWithCachedForecast(cb) {
     forecast: getCurrentForecastTemp(),
     occupied: STATE.occupied
   };
-  cb(results);
+  // Break call stack to avoid recursion
+  Timer.set(100, false, function() {
+    cb(results);
+  });
 }
 
 // Patch fetchAllControlInputs to store last external temp

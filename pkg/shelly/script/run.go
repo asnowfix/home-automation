@@ -61,22 +61,24 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 
 	log.Info("Starting event loop", "handlers", len(handlers))
 
-	// Build select cases for all handlers + context done
-	cases := make([]reflect.SelectCase, len(handlers)+1)
-
-	// First case: context cancellation
-	cases[0] = reflect.SelectCase{
-		Dir:  reflect.SelectRecv,
-		Chan: reflect.ValueOf(ctx.Done()),
-	}
-
-	// Remaining cases: handler channels
-	for i, h := range handlers {
-		cases[i+1] = reflect.SelectCase{
+	// Build select cases: context.Done() + all handler channels
+	// This function rebuilds the cases array from current handlers
+	buildCases := func() []reflect.SelectCase {
+		cases := make([]reflect.SelectCase, len(handlers)+1)
+		cases[0] = reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(h.Wait()),
+			Chan: reflect.ValueOf(ctx.Done()),
 		}
+		for i, h := range handlers {
+			cases[i+1] = reflect.SelectCase{
+				Dir:  reflect.SelectRecv,
+				Chan: reflect.ValueOf(h.Wait()),
+			}
+		}
+		return cases
 	}
+
+	cases := buildCases()
 
 	// Event loop: wait on all channels simultaneously
 	for {
@@ -92,14 +94,19 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 		if ok {
 			handlerIdx := chosen - 1
 			msg := value.Bytes()
+			handlerCountBefore := len(handlers)
 			if err := handlers[handlerIdx].Handle(ctx, vm, msg); err != nil {
 				log.Error(err, "Handler failed", "handler", handlerIdx)
+			}
+			// Check if new handlers were added during Handle()
+			if len(handlers) != handlerCountBefore {
+				log.Info("Handlers changed, rebuilding cases", "before", handlerCountBefore, "after", len(handlers))
+				cases = buildCases()
 			}
 		} else {
 			// Channel closed, remove it from cases
 			log.Info("Handler channel closed", "handler", chosen-1)
-			// Remove the closed channel by replacing it with the last one
-			cases = append(cases[:chosen], cases[chosen+1:]...)
+			// Remove the closed handler
 			handlers = append(handlers[:chosen-1], handlers[chosen:]...)
 
 			// If no handlers left, exit
@@ -107,6 +114,9 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 				log.Info("All handlers closed, exiting event loop")
 				return nil
 			}
+
+			// Rebuild cases after removing handler
+			cases = buildCases()
 		}
 	}
 }

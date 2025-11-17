@@ -40,6 +40,12 @@
   - [PowerShell](#powershell)
 - [macOS TBC](#macos-tbc)
 - [Profiling](#profiling)
+  - [CPU Profiling with --cpuprofile Flag](#cpu-profiling-with---cpuprofile-flag)
+  - [Runtime Profiling with pprof HTTP Server](#runtime-profiling-with-pprof-http-server)
+    - [Available Endpoints](#available-endpoints)
+    - [Command-Line Tools](#command-line-tools)
+    - [Common pprof Commands](#common-pprof-commands)
+    - [Tips](#tips)
 - [VSCode](#vscode)
 
 ## Release Workflow
@@ -687,7 +693,9 @@ brew install git go sqlite sqlite3 graphviz
 
 See <https://go.dev/blog/pprof> for details.
 
-To profile myhome:
+### CPU Profiling with --cpuprofile Flag
+
+To profile myhome with the CPU profiling flag:
 
 ```bash
 myhome --cpuprofile 0.prof
@@ -724,6 +732,110 @@ To see the graph of dependencies:
 $go tool pprof 0.prof
 (pprof) web
 ```
+
+### Runtime Profiling with pprof HTTP Server
+
+The MyHome daemon automatically starts a pprof HTTP server on port **6060** when running. This allows you to profile the running daemon without restarting it.
+
+#### Available Endpoints
+
+Once the daemon is running, access profiling data at:
+
+- **http://localhost:6060/debug/pprof/** - Index page with all available profiles
+- **http://localhost:6060/debug/pprof/heap** - Memory heap profile
+- **http://localhost:6060/debug/pprof/goroutine** - Goroutine profile
+- **http://localhost:6060/debug/pprof/threadcreate** - Thread creation profile
+- **http://localhost:6060/debug/pprof/block** - Block profile
+- **http://localhost:6060/debug/pprof/mutex** - Mutex contention profile
+- **http://localhost:6060/debug/pprof/profile** - CPU profile (30 seconds by default)
+- **http://localhost:6060/debug/pprof/trace** - Execution trace
+
+#### Command-Line Tools
+
+**CPU Profiling** (captures 30 seconds of CPU activity):
+```bash
+# Capture and analyze CPU profile
+go tool pprof http://localhost:6060/debug/pprof/profile
+
+# Capture with custom duration (60 seconds)
+go tool pprof http://localhost:6060/debug/pprof/profile?seconds=60
+
+# Save to file for later analysis
+curl http://localhost:6060/debug/pprof/profile?seconds=30 > cpu.prof
+go tool pprof cpu.prof
+```
+
+**Heap Profiling** (memory allocations):
+```bash
+# Analyze current heap
+go tool pprof http://localhost:6060/debug/pprof/heap
+
+# Save heap snapshot
+curl http://localhost:6060/debug/pprof/heap > heap.prof
+go tool pprof heap.prof
+```
+
+**Goroutine Profiling** (active goroutines):
+```bash
+# Analyze goroutines
+go tool pprof http://localhost:6060/debug/pprof/goroutine
+
+# View as text
+curl http://localhost:6060/debug/pprof/goroutine?debug=1
+```
+
+**Interactive Web UI**:
+```bash
+# Open interactive web interface for heap analysis
+go tool pprof -http=:8080 http://localhost:6060/debug/pprof/heap
+
+# Open interactive web interface for CPU profile
+go tool pprof -http=:8080 http://localhost:6060/debug/pprof/profile
+```
+
+**Comparing Profiles** (useful for detecting memory leaks):
+```bash
+# Take baseline heap snapshot
+curl http://localhost:6060/debug/pprof/heap > heap1.prof
+
+# Wait for some time or perform operations...
+sleep 300
+
+# Take second snapshot
+curl http://localhost:6060/debug/pprof/heap > heap2.prof
+
+# Compare to see what changed
+go tool pprof -base heap1.prof heap2.prof
+```
+
+**Execution Trace** (detailed runtime events):
+```bash
+# Capture 5-second trace
+curl http://localhost:6060/debug/pprof/trace?seconds=5 > trace.out
+
+# View trace in browser
+go tool trace trace.out
+```
+
+#### Common pprof Commands
+
+Once in the pprof interactive mode:
+```
+(pprof) top 10          # Show top 10 functions by resource usage
+(pprof) list funcName   # Show source code for a function
+(pprof) web             # Open graph in browser (requires graphviz)
+(pprof) pdf             # Generate PDF report
+(pprof) png             # Generate PNG image
+(pprof) help            # Show all commands
+```
+
+#### Tips
+
+- **CPU profiling**: Use when investigating performance issues or high CPU usage
+- **Heap profiling**: Use when investigating memory leaks or high memory usage
+- **Goroutine profiling**: Use when investigating goroutine leaks or concurrency issues
+- **Comparing profiles**: Essential for detecting memory leaks over time
+- **Web UI**: Provides flame graphs and interactive exploration (`-http` flag)
 
 ## VSCode
 

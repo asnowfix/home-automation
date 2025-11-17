@@ -61,22 +61,24 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 
 	log.Info("Starting event loop", "handlers", len(handlers))
 
-	// Build select cases for all handlers + context done
-	cases := make([]reflect.SelectCase, len(handlers)+1)
-
-	// First case: context cancellation
-	cases[0] = reflect.SelectCase{
-		Dir:  reflect.SelectRecv,
-		Chan: reflect.ValueOf(ctx.Done()),
-	}
-
-	// Remaining cases: handler channels
-	for i, h := range handlers {
-		cases[i+1] = reflect.SelectCase{
+	// Build select cases: context.Done() + all handler channels
+	// This function rebuilds the cases array from current handlers
+	buildCases := func() []reflect.SelectCase {
+		cases := make([]reflect.SelectCase, len(handlers)+1)
+		cases[0] = reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
-			Chan: reflect.ValueOf(h.Wait()),
+			Chan: reflect.ValueOf(ctx.Done()),
 		}
+		for i, h := range handlers {
+			cases[i+1] = reflect.SelectCase{
+				Dir:  reflect.SelectRecv,
+				Chan: reflect.ValueOf(h.Wait()),
+			}
+		}
+		return cases
 	}
+
+	cases := buildCases()
 
 	// Event loop: wait on all channels simultaneously
 	for {
@@ -92,14 +94,19 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 		if ok {
 			handlerIdx := chosen - 1
 			msg := value.Bytes()
+			handlerCountBefore := len(handlers)
 			if err := handlers[handlerIdx].Handle(ctx, vm, msg); err != nil {
 				log.Error(err, "Handler failed", "handler", handlerIdx)
+			}
+			// Check if new handlers were added during Handle()
+			if len(handlers) != handlerCountBefore {
+				log.Info("Handlers changed, rebuilding cases", "before", handlerCountBefore, "after", len(handlers))
+				cases = buildCases()
 			}
 		} else {
 			// Channel closed, remove it from cases
 			log.Info("Handler channel closed", "handler", chosen-1)
-			// Remove the closed channel by replacing it with the last one
-			cases = append(cases[:chosen], cases[chosen+1:]...)
+			// Remove the closed handler
 			handlers = append(handlers[:chosen-1], handlers[chosen:]...)
 
 			// If no handlers left, exit
@@ -107,6 +114,9 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 				log.Info("All handlers closed, exiting event loop")
 				return nil
 			}
+
+			// Rebuild cases after removing handler
+			cases = buildCases()
 		}
 	}
 }
@@ -149,6 +159,9 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 
 	vm := goja.New()
 
+	// Shelly event handler system
+	eh := NewEventsHandler(ctx, vm)
+
 	// Define methods map with access to deviceState
 	methods := createMethodsMap(deviceState)
 
@@ -160,11 +173,15 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 		method := strings.ToLower(call.Argument(0).String())
 		params := call.Argument(1)
 		callback := call.Argument(2)
+		userdata := goja.Undefined()
+		if len(call.Arguments) > 3 {
+			userdata = call.Argument(3)
+		}
 
 		log.Info("Shelly.call()", "method", method, "params", params.Export())
 
 		if fn, ok := methods[method]; ok {
-			result, err := fn(vm, method, params, callback)
+			result, err := fn(vm, method, params, callback, userdata)
 			if err != nil {
 				log.Error(err, "Shelly.call() failed", "method", method)
 				return vm.ToValue(err)
@@ -176,7 +193,7 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
 					// Call: callback(result, error_code, error_message, userdata)
-					callable(goja.Undefined(), goja.Null(), vm.ToValue(0), goja.Null())
+					callable(goja.Undefined(), goja.Null(), vm.ToValue(0), goja.Null(), userdata)
 				}
 			}
 			return goja.Undefined()
@@ -189,9 +206,77 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 		return goja.Undefined()
 	})
 
-	// Shelly.addEventHandler(callback, userdata)
+	// [Shelly.addEventHandler(callback, userdata)](https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shellyaddeventhandler-and-shellyaddstatushandler)
 	shellyObj.Set("addEventHandler", func(call goja.FunctionCall) goja.Value {
-		log.V(1).Info("Shelly.addEventHandler placeholder")
+		callback := call.Argument(0)
+		userdata := goja.Undefined()
+		if len(call.Arguments) > 1 {
+			userdata = call.Argument(1)
+		}
+		log.Info("Shelly.addEventHandler", "userdata", userdata.Export())
+
+		if goja.IsUndefined(callback) || goja.IsNull(callback) {
+			log.Error(nil, "Shelly.addEventHandler called without callback")
+			return goja.Undefined()
+		}
+
+		if callable, ok := goja.AssertFunction(callback); ok {
+			eh.AddHandler(callable, userdata)
+			log.V(1).Info("Shelly.addEventHandler registered", "handlers", len(eh.handlers))
+		} else {
+			log.Error(nil, "Shelly.addEventHandler callback is not a function")
+		}
+		return goja.Undefined()
+	})
+
+	// [Shelly.emitEvent(name, data)](https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shellyemitevent)
+	shellyObj.Set("emitEvent", func(call goja.FunctionCall) goja.Value {
+		// event received Shell.addEventHandler() after Shelly.emitEvent() looks like:
+		// {
+		//   "component":"script:2",
+		//   "name":"script",
+		//   "id":2,
+		//   "now":1763316548.15808582305,
+		//   "info":{
+		//     "component":"script:2",
+		//     "id":2,
+		//     "event":"user.check_control_loop",
+		//     "data":{"reason":"forecast_ready"},
+		//     "ts":1763316548.15999984741
+		//   }
+		// }
+		var event struct {
+			Component string  `json:"component"`
+			Name      string  `json:"name"`
+			Id        int     `json:"id"`
+			Now       float64 `json:"now"`
+			Info      struct {
+				Component string    `json:"component"`
+				Id        int       `json:"id"`
+				Event     string    `json:"event"`
+				Data      any       `json:"data,omitempty"`
+				Timestamp time.Time `json:"timestamp"`
+			} `json:"info"`
+		}
+		event.Component = "script:1"
+		event.Name = "script"
+		event.Id = eh.NextId()
+		event.Now = float64(time.Now().UnixNano()) / 1e6
+		event.Info.Component = event.Component
+		event.Info.Id = event.Id
+		event.Info.Event = call.Argument(0).String()
+		event.Info.Data = call.Argument(1).Export()
+		event.Info.Timestamp = time.Unix(0, int64(event.Now*1e6))
+
+		log.V(1).Info("Shelly.emitEvent", "event", event)
+
+		// Send event to channel (non-blocking)
+		select {
+		case eh.Broadcaster() <- vm.ToValue(event):
+		default:
+			log.Error(nil, "Event channel full, dropping event", "event", event)
+		}
+
 		return goja.Undefined()
 	})
 
@@ -344,13 +429,6 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 		return vm.ToValue(1)
 	})
 
-	// Shelly.emitEvent(name, data)
-	shellyObj.Set("emitEvent", func(call goja.FunctionCall) goja.Value {
-		name := call.Argument(0).String()
-		log.V(1).Info("Shelly.emitEvent placeholder", "name", name)
-		return goja.Undefined()
-	})
-
 	vm.Set("Shelly", shellyObj)
 
 	// Timer object
@@ -448,10 +526,11 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 
 		topic := call.Argument(0).String()
 		callback := call.Argument(1)
+		userdata := call.Argument(2)
 
 		log.Info("MQTT.subscribe()", "topic", topic)
 
-		handler, err := mqttSubscribe(ctx, vm, topic, callback)
+		handler, err := mqttSubscribe(ctx, vm, topic, callback, userdata)
 		if err != nil {
 			log.Error(err, "MQTT.subscribe() failed", "topic", topic)
 			return vm.ToValue(err)
@@ -598,14 +677,17 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 		}
 	`)
 
+	// Add device's events handler to process emitted events
+	*handlers = append(*handlers, eh)
+
 	return vm, nil
 }
 
-type methodFunc func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error)
+type methodFunc func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error)
 
 func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 	return map[string]methodFunc{
-		"shelly.detectlocation": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
+		"shelly.detectlocation": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellydetectlocation
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
@@ -615,7 +697,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 						"tz":  "Europe/Berlin",
 					}
 					// Call: callback(result, error_code, error_message)
-					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
+					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 					if err != nil {
 						return nil, err
 					}
@@ -624,7 +706,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			}
 			return nil, nil
 		},
-		"kvs.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
+		"kvs.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/KVS#kvsget
 			paramsObj := params.ToObject(vm)
 			key := paramsObj.Get("key").String()
@@ -639,7 +721,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 							"value": val,
 						}
 						// Call: callback(result, error_code, error_message)
-						ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
+						ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 						if err != nil {
 							return nil, err
 						}
@@ -648,14 +730,14 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 						// Key not found - add it with null value
 						kvs[key] = nil
 						// Call callback with error code -114 (key not found)
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(-114), vm.ToValue("Key not found"))
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(-114), vm.ToValue("Key not found"), userdata)
 						return nil, nil
 					}
 				}
 			}
 			return nil, nil
 		},
-		"kvs.getmany": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
+		"kvs.getmany": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/KVS#kvsgetmany
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
@@ -675,7 +757,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 						"total":  len(items),
 					}
 					// Call: callback(result, error_code, error_message)
-					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
+					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 					if err != nil {
 						return nil, err
 					}
@@ -684,7 +766,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			}
 			return nil, nil
 		},
-		"http.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value) (interface{}, error) {
+		"http.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/HTTP#httpget
 			// params: { url: string, timeout: number }
 			paramsObj := params.ToObject(vm)
@@ -698,7 +780,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			if err != nil {
 				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 					if callable, ok := goja.AssertFunction(callback); ok {
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()), userdata)
 					}
 				}
 				return nil, err
@@ -708,7 +790,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			if err != nil {
 				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 					if callable, ok := goja.AssertFunction(callback); ok {
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()), userdata)
 					}
 				}
 				return nil, err
@@ -719,7 +801,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			if err != nil {
 				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 					if callable, ok := goja.AssertFunction(callback); ok {
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()))
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()), userdata)
 					}
 				}
 				return nil, err
@@ -740,7 +822,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 						"status":  resp.StatusCode,
 					}
 					// Call: callback(result, error_code, error_message)
-					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null())
+					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 					if err != nil {
 						return nil, err
 					}
@@ -754,7 +836,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 
 // Actual implementation for MQTT.subscribe <https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#mqttsubscribe>
 
-func mqttSubscribe(ctx context.Context, vm *goja.Runtime, topic string, callback goja.Value) (handler, error) {
+func mqttSubscribe(ctx context.Context, vm *goja.Runtime, topic string, callback goja.Value, userdata goja.Value) (handler, error) {
 	if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 		if callable, ok := goja.AssertFunction(callback); ok {
 			mc, err := mqtt.FromContext(ctx)
@@ -770,6 +852,7 @@ func mqttSubscribe(ctx context.Context, vm *goja.Runtime, topic string, callback
 				input:    in,
 				callable: callable,
 				closed:   make(chan struct{}),
+				userdata: userdata,
 			}, nil
 		}
 	}
@@ -781,6 +864,7 @@ type mqttHandler struct {
 	input    <-chan []byte
 	callable goja.Callable
 	closed   chan struct{}
+	userdata goja.Value
 }
 
 func (mh *mqttHandler) Wait() <-chan []byte {
@@ -813,7 +897,7 @@ func (mh *mqttHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte)
 	}
 	// Call: callback(result, error_code, error_message)
 	log.Info("MQTT callback", "topic", mh.topic, "msg", string(msg))
-	_, err = mh.callable(goja.Undefined(), vm.ToValue(mh.topic), vm.ToValue(string(msg)))
+	_, err = mh.callable(goja.Undefined(), vm.ToValue(mh.topic), vm.ToValue(string(msg)), mh.userdata)
 	if err != nil {
 		log.Error(err, "MQTT callback", "topic", mh.topic, "error", err)
 		return err
@@ -855,8 +939,13 @@ func (th *timerHandler) Wait() <-chan []byte {
 		}()
 	} else {
 		// One-shot timer
-		th.timer = time.NewTimer(th.period)
-		th.nextFire = time.Now().Add(th.period)
+		// Treat 0ms as 1ms to ensure event loop is ready
+		period := th.period
+		if period == 0 {
+			period = 1 * time.Millisecond
+		}
+		th.timer = time.NewTimer(period)
+		th.nextFire = time.Now().Add(period)
 		go func() {
 			<-th.timer.C
 			if !th.stopped {
@@ -875,7 +964,7 @@ func (th *timerHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte
 		return err
 	}
 
-	log.Info("Timer callback", "handle", th.handle, "repeat", th.repeat)
+	log.V(2).Info("Timer callback", "handle", th.handle, "repeat", th.repeat)
 
 	// Call the callback with userdata
 	_, err = th.callable(goja.Undefined(), th.userdata)
@@ -895,4 +984,29 @@ func (th *timerHandler) Stop() {
 	if th.timer != nil {
 		th.timer.Stop()
 	}
+}
+
+type shellyEventHandler struct {
+	callback goja.Callable
+	userdata goja.Value
+}
+
+func (seh *shellyEventHandler) Wait() <-chan []byte {
+	ch := make(chan []byte)
+	return ch
+}
+
+func (seh *shellyEventHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return err
+	}
+	// Call: callback(result, error_code, error_message)
+	log.Info("Event callback", "msg", string(msg))
+	_, err = seh.callback(goja.Undefined(), vm.ToValue(string(msg)), vm.ToValue(0), goja.Null(), seh.userdata)
+	if err != nil {
+		log.Error(err, "Event callback", "error", err)
+		return err
+	}
+	return nil
 }

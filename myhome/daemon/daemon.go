@@ -11,6 +11,8 @@ import (
 	"myhome/proxy"
 	"myhome/storage"
 	"mynet"
+	"net/http"
+	_ "net/http/pprof"
 	"pkg/shelly"
 	"pkg/shelly/gen1"
 	"pkg/shelly/mqtt"
@@ -61,6 +63,14 @@ func (d *daemon) Run() error {
 		return err
 	}
 	log.Info("Starting MyHome daemon")
+
+	// Start pprof HTTP server for profiling
+	go func() {
+		log.Info("Starting pprof server on :6060")
+		if err := http.ListenAndServe(":6060", nil); err != nil {
+			log.Error(err, "pprof server failed")
+		}
+	}()
 
 	var disableEmbeddedMqttBroker bool = len(options.Flags.MqttBroker) != 0
 

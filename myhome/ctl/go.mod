@@ -21,6 +21,7 @@ require (
 	myhome/ctl/shelly v0.0.0-00010101000000-000000000000
 	myhome/ctl/show v0.0.0-00010101000000-000000000000
 	myhome/ctl/sswitch v0.0.0-00010101000000-000000000000
+	myhome/ctl/temperature v0.0.0-00010101000000-000000000000
 	myhome/mqtt v0.0.0-00010101000000-000000000000
 	pkg/shelly v0.0.0-00010101000000-000000000000
 	pkg/shelly/types v0.0.0-00010101000000-000000000000
@@ -73,6 +74,8 @@ replace myhome/ctl/shelly => ./shelly
 replace myhome/ctl/show => ./show
 
 replace myhome/ctl/sswitch => ./sswitch
+
+replace myhome/ctl/temperature => ./temperature
 
 replace global => ../../internal/global
 

@@ -10,6 +10,7 @@ import (
 	"myhome/occupancy"
 	"myhome/proxy"
 	"myhome/storage"
+	"myhome/temperature"
 	"mynet"
 	"net/http"
 	_ "net/http/pprof"
@@ -25,10 +26,11 @@ import (
 )
 
 type daemon struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	dm     *impl.DeviceManager
-	rpc    myhome.Server
+	ctx              context.Context
+	cancel           context.CancelFunc
+	dm               *impl.DeviceManager
+	rpc              myhome.Server
+	occupancyService *occupancy.Service
 }
 
 type Config struct {
@@ -117,15 +119,41 @@ func (d *daemon) Run() error {
 		log.Info("Gen1 (HTTP->MQTT) proxy disabled")
 	}
 
-	// Start Occupancy HTTP service (auto-enabled with embedded MQTT broker)
+	// Start Occupancy service (HTTP + RPC)
 	if options.Flags.EnableOccupancyService {
-		log.Info("Starting occupancy HTTP service")
-		if err := occupancy.Start(logr.NewContext(d.ctx, log.WithName("occupancy")), 8889, mc, 12*time.Hour, 5*time.Minute, []string{"iPhone"}); err != nil {
-			log.Error(err, "Failed to start occupancy service")
+		log.Info("Starting occupancy service")
+
+		// Create occupancy service
+		d.occupancyService = occupancy.NewService(
+			d.ctx,
+			log.WithName("occupancy"),
+			mc,
+			12*time.Hour,
+			5*time.Minute,
+			[]string{"iPhone"},
+		)
+
+		// Start HTTP server
+		if err := d.occupancyService.Start(8889); err != nil {
+			log.Error(err, "Failed to start occupancy HTTP service")
 			return err
 		}
+
+		log.Info("Occupancy service started (HTTP on :8889, RPC will be registered with device manager)")
 	} else {
-		log.Info("Occupancy HTTP service disabled")
+		log.Info("Occupancy service disabled")
+	}
+
+	// Start Temperature RPC service (auto-enabled with embedded MQTT broker)
+	if options.Flags.EnableTemperatureService {
+		log.Info("Starting temperature RPC service")
+
+		// Temperature service uses the same database as device manager
+		// It will be initialized when device manager starts
+		// For now, just log that it's enabled - actual initialization happens below
+		log.Info("Temperature RPC service will be initialized with device manager")
+	} else {
+		log.Info("Temperature RPC service disabled")
 	}
 
 	if !disableDeviceManager {
@@ -156,6 +184,35 @@ func (d *daemon) Run() error {
 		if err != nil {
 			log.Error(err, "Failed to start MyHome RPC service")
 			return err
+		}
+
+		// Register Temperature RPC methods if enabled
+		if options.Flags.EnableTemperatureService {
+			log.Info("Initializing temperature RPC methods")
+
+			// Create temperature storage using the same database
+			tempStorage, err := temperature.NewStorage(log, storage.DB())
+			if err != nil {
+				log.Error(err, "Failed to initialize temperature storage")
+				return err
+			}
+
+			// Create and register temperature method handlers
+			tempHandlers := temperature.NewMethodHandlers(log, tempStorage)
+			tempHandlers.RegisterHandlers()
+
+			log.Info("Temperature RPC methods registered")
+		}
+
+		// Register Occupancy RPC methods if enabled
+		if options.Flags.EnableOccupancyService && d.occupancyService != nil {
+			log.Info("Registering occupancy RPC methods")
+
+			// Create and register occupancy RPC handler
+			occupancyHandler := occupancy.NewRPCHandler(log, d.occupancyService)
+			occupancyHandler.RegisterHandlers()
+
+			log.Info("Occupancy RPC methods registered")
 		}
 
 		// Publish a hostname for the DeviceManager host: myhome.local

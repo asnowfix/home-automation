@@ -32,6 +32,14 @@ MyHome Penates is the home automation system I develop & use to control my house
     - [List groups](#list-groups)
     - [Show a group](#show-a-group)
     - [Delete a group](#delete-a-group)
+  - [Temperature Management](#temperature-management)
+    - [Set Room Temperature Configuration](#set-room-temperature-configuration)
+    - [Get Room Configuration](#get-room-configuration)
+    - [List All Rooms](#list-all-rooms)
+    - [Get Current Setpoint](#get-current-setpoint)
+    - [Delete Room Configuration](#delete-room-configuration)
+    - [Configure Heater to Use Room](#configure-heater-to-use-room)
+    - [Service Auto-Enablement](#service-auto-enablement)
   - [Device Control](#device-control)
     - [Switch Command](#switch-command)
   - [Device Following](#device-following)
@@ -293,6 +301,138 @@ devices:
 
 ```shell
 group delete radiateurs
+```
+
+## Temperature Management
+
+The temperature service provides centralized temperature setpoint management for heater devices via MQTT RPC. Configurations are stored in SQLite and accessed via CLI commands.
+
+### Set Room Temperature Configuration
+
+Create or update a room's temperature settings with comfort/eco temperatures and schedules:
+
+```shell
+# Basic configuration
+myhome ctl temperature set living-room \
+  --name "Living Room" \
+  --comfort 21 \
+  --eco 17 \
+  --weekday "06:00-23:00" \
+  --weekend "08:00-23:00"
+
+# Multiple time ranges (morning and evening comfort)
+myhome ctl temperature set bedroom \
+  --name "Bedroom" \
+  --comfort 19 \
+  --eco 16 \
+  --weekday "06:00-08:00,20:00-23:00" \
+  --weekend "08:00-23:00"
+
+# Office (work hours only, always eco on weekends)
+myhome ctl temperature set office \
+  --name "Home Office" \
+  --comfort 20 \
+  --eco 17 \
+  --weekday "08:00-18:00" \
+  --weekend ""
+```
+
+**Schedule Philosophy**: Eco is the default - only define comfort hours. Any time not in the comfort schedule uses eco temperature.
+
+### Get Room Configuration
+
+```shell
+myhome ctl temperature get living-room
+```
+
+**Output:**
+```
+Room: Living Room (living-room)
+Comfort Temperature: 21.0°C
+Eco Temperature: 17.0°C
+
+Weekday Schedule (Comfort Hours):
+  06:00 - 23:00
+
+Weekend Schedule (Comfort Hours):
+  08:00 - 23:00
+```
+
+### List All Rooms
+
+```shell
+myhome ctl temperature list
+```
+
+**Output:**
+```
+ROOM ID       NAME          COMFORT  ECO    WEEKDAY SCHEDULE    WEEKEND SCHEDULE
+-------       ----          -------  ---    ----------------    ----------------
+living-room   Living Room   21.0°C   17.0°C 06:00-23:00         08:00-23:00
+bedroom       Bedroom       19.0°C   16.0°C 06:00-08:00, 20:00-23:00  08:00-23:00
+office        Office        20.0°C   17.0°C 08:00-18:00         (always eco)
+```
+
+### Get Current Setpoint
+
+Get the active temperature setpoint based on current time and schedule:
+
+```shell
+myhome ctl temperature setpoint living-room
+```
+
+**Output:**
+```
+Room: living-room
+Current Time: 14:30
+
+Active Setpoint: 21.0°C (comfort_hours)
+Comfort Setpoint: 21.0°C
+Eco Setpoint: 17.0°C
+```
+
+### Delete Room Configuration
+
+```shell
+myhome ctl temperature delete living-room
+```
+
+### Configure Heater to Use Room
+
+Link a heater device to a room configuration:
+
+```shell
+# Set room ID in heater's KVS
+myhome ctl shelly kvs set heater-living script/heater/room-id living-room
+```
+
+The heater script will automatically call `temperature.getsetpoint` via MQTT RPC to get the current target temperature.
+
+### Service Auto-Enablement
+
+**The temperature and occupancy services are automatically enabled when the device manager is running** (default behavior). You only need explicit flags if you want to:
+
+- **Disable** a service: `--disable-temperature-service` or `--disable-occupancy-service`
+- **Force enable** when device manager is disabled: `--enable-temperature-service` or `--enable-occupancy-service`
+
+**Default behavior:**
+```shell
+# Both services auto-enabled
+myhome daemon run
+
+# Disable temperature service
+myhome daemon run --disable-temperature-service
+
+# Disable device manager (also disables temperature/occupancy)
+myhome daemon run --disable-device-manager
+```
+
+**Configuration file:**
+```yaml
+daemon:
+  # Optional - services auto-enable by default
+  enable_temperature_service: true
+  enable_occupancy_service: true
 ```
 
 ## Device Control

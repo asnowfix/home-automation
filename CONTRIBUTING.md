@@ -46,6 +46,14 @@
     - [Command-Line Tools](#command-line-tools)
     - [Common pprof Commands](#common-pprof-commands)
     - [Tips](#tips)
+- [Architecture](#architecture)
+  - [MyHome RPC Service Architecture](#myhome-rpc-service-architecture)
+    - [Adding New RPC Methods](#adding-new-rpc-methods)
+    - [Why This Pattern?](#why-this-pattern)
+    - [Anti-Pattern: DON'T Do This](#anti-pattern-dont-do-this)
+  - [Configuration Management](#configuration-management)
+    - [Configuration Hierarchy (highest to lowest priority):](#configuration-hierarchy-highest-to-lowest-priority)
+  - [Database Schema](#database-schema)
 - [VSCode](#vscode)
 
 ## Release Workflow
@@ -836,6 +844,162 @@ Once in the pprof interactive mode:
 - **Goroutine profiling**: Use when investigating goroutine leaks or concurrency issues
 - **Comparing profiles**: Essential for detecting memory leaks over time
 - **Web UI**: Provides flame graphs and interactive exploration (`-http` flag)
+
+## Architecture
+
+### MyHome RPC Service Architecture
+
+**CRITICAL**: All new RPC methods MUST be added to the existing MyHome RPC service, NOT as separate RPC services.
+
+#### Adding New RPC Methods
+
+Follow this pattern (see temperature and occupancy services as examples):
+
+1. **Add verb to `internal/myhome/const.go`:**
+   ```go
+   const (
+       // ... existing verbs
+       TemperatureGet      Verb = "temperature.get"
+       OccupancyGetStatus  Verb = "occupancy.getstatus"
+       YourNewMethod       Verb = "yourservice.method"  // Add here
+   )
+   ```
+
+2. **Add types to `internal/myhome/yourservice.go` (create new file for each service):**
+   ```go
+   package myhome
+   
+   // YourService RPC types
+   
+   // YourServiceParams represents parameters for yourservice.method
+   type YourServiceParams struct {
+       Field string `json:"field"`
+   }
+   
+   // YourServiceResult represents the result
+   type YourServiceResult struct {
+       Data string `json:"data"`
+   }
+   ```
+
+3. **Add method signature to `internal/myhome/methods.go`:**
+   ```go
+   var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
+       // ... existing methods
+       YourNewMethod: {
+           NewParams: func() any {
+               return &YourServiceParams{}
+           },
+           NewResult: func() any {
+               return &YourServiceResult{}
+           },
+       },
+   }
+   ```
+
+4. **Create handler in your service package (e.g., `myhome/yourservice/methods.go`):**
+   ```go
+   type MethodHandlers struct {
+       service *Service
+       log     logr.Logger
+   }
+   
+   func NewMethodHandlers(log logr.Logger, service *Service) *MethodHandlers {
+       return &MethodHandlers{
+           service: service,
+           log:     log.WithName("yourservice.methods"),
+       }
+   }
+   
+   func (h *MethodHandlers) RegisterHandlers() {
+       myhome.RegisterMethodHandler(myhome.YourNewMethod, h.handleMethod)
+       h.log.Info("Your service RPC handlers registered")
+   }
+   
+   func (h *MethodHandlers) handleMethod(params any) (any, error) {
+       p, ok := params.(*myhome.YourServiceParams)
+       if !ok {
+           return nil, fmt.Errorf("invalid params type")
+       }
+       
+       // Your logic here
+       return &myhome.YourServiceResult{Data: "result"}, nil
+   }
+   ```
+
+5. **Register in `myhome/daemon/daemon.go` after device manager starts:**
+   ```go
+   // Register Your Service RPC methods if enabled
+   if options.Flags.EnableYourService {
+       log.Info("Registering your service RPC methods")
+       
+       yourHandlers := yourservice.NewMethodHandlers(log, yourServiceInstance)
+       yourHandlers.RegisterHandlers()
+       
+       log.Info("Your service RPC methods registered")
+   }
+   ```
+
+#### Why This Pattern?
+
+✅ **Single RPC server** - All methods use the same MQTT topic (`myhome/rpc`)  
+✅ **Unified lifecycle** - Methods registered when device manager starts  
+✅ **Consistent patterns** - Same request/response structure  
+✅ **Easy discovery** - All methods in one place (`internal/myhome/const.go`)  
+✅ **Type safety** - Centralized type definitions  
+
+#### Anti-Pattern: DON'T Do This
+
+❌ **Don't create separate RPC servers:**
+```go
+// WRONG - Don't do this!
+func NewRPCService(ctx context.Context) (*RPCService, error) {
+    // Subscribing to a different topic
+    from, err := mc.Subscriber(ctx, "yourservice/rpc", 1)
+    // This creates a separate RPC service!
+}
+```
+
+✅ **Instead, register handlers with the main RPC system:**
+```go
+// CORRECT - Do this!
+func (h *MethodHandlers) RegisterHandlers() {
+    myhome.RegisterMethodHandler(myhome.YourMethod, h.handleMethod)
+}
+```
+
+### Configuration Management
+
+The project uses **Viper** for unified configuration management:
+
+- **Config files**: `./myhome.yaml`, `/etc/myhome/myhome.yaml`, `$HOME/.myhome/myhome.yaml`
+- **Environment variables**: `MYHOME_` prefix (e.g., `MYHOME_DAEMON_MQTT_BROKER`)
+- **Command-line flags**: Take precedence over config file and env vars
+
+#### Configuration Hierarchy (highest to lowest priority):
+1. Command-line flags
+2. Environment variables
+3. Configuration file
+4. Default values
+
+### Database Schema
+
+Temperature configurations use SQLite with this schema:
+
+```sql
+CREATE TABLE temperature_rooms (
+    room_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    comfort_temp REAL NOT NULL,
+    eco_temp REAL NOT NULL,
+    weekday_schedule TEXT NOT NULL,  -- JSON array: ["06:00-23:00"]
+    weekend_schedule TEXT NOT NULL,  -- JSON array: ["08:00-23:00"]
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_temperature_rooms_updated 
+    ON temperature_rooms(updated_at);
+```
 
 ## VSCode
 

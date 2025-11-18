@@ -69,6 +69,12 @@ var CONFIG_SCHEMA = {
     key: "external-temperature-topic",
     default: null,
     type: "string"
+  },
+  roomId: {
+    description: "Room identifier for temperature API",
+    key: "room-id",
+    default: null,
+    type: "string"
   }
 };
 
@@ -145,9 +151,6 @@ function randomId(n) {
 
 // === STATE (DYNAMIC RUNTIME VALUES) ===
 var STATE = {
-  // Occupancy URL (built from MQTT server IP + /status)
-  occupancyUrl: null,
-  
   // Forecast cache
   forecastUrl: null,
   cachedForecast: null,
@@ -477,8 +480,8 @@ function initUrls() {
       var host = cfg.server;
       var i = host.indexOf(':');
       if (i >= 0) host = host.substring(0, i);
-      STATE.occupancyUrl = 'http://' + host + ':8889/status';
-      log('Occupancy URL set to', STATE.occupancyUrl);
+      
+      log('MQTT server host:', host);
     }
   }
 }
@@ -500,7 +503,7 @@ function minutesUntilCheapEnd() {
 // We now use: predictedDrop = COOLING_COEFF * (filteredTemp - externalTemp) * hoursToEnd
 // COOLING_COEFF is learned as before (from data)
 
-function shouldPreheat(filteredTemp, forecastTemp, mfTemp, cb) {
+function shouldPreheat(filteredTemp, forecastTemp, mfTemp, targetTemp, cb) {
   k = getCoolingRate(); // k is now a cooling coefficient (per hour)
   var minutesToEnd = minutesUntilCheapEnd();
   var hoursToEnd = minutesToEnd / 60.0;
@@ -519,7 +522,7 @@ function shouldPreheat(filteredTemp, forecastTemp, mfTemp, cb) {
   // T_end = T_start - k * (T_start - T_ext) * hours
   var predictedDrop = k * (filteredTemp - futureExternal) * hoursToEnd;
   var predictedTemp = filteredTemp - predictedDrop;
-  var result = (hoursToEnd <= CONFIG.preheatHours) && (predictedTemp < CONFIG.setpoint);
+  var result = (hoursToEnd <= CONFIG.preheatHours) && (predictedTemp < targetTemp);
   // Break call stack to avoid recursion
   Timer.set(100, false, function() {
     cb(result);
@@ -568,27 +571,171 @@ fetchAllControlInputs = function(cb) {
   });
 };
 
-function getOccupancy(cb) {
-  log('getOccupancy')
-  if (!STATE.occupancyUrl) {
-    log('Occupancy URL not configured, assuming not occupied');
+function getOccupancyStatus(cb) {
+  // Generate unique request ID
+  var requestId = 'heater-occ-' + Date.now();
+  var replyTopic = 'myhome/rpc/reply/' + requestId;
+  var requestSent = false;
+  
+  // Subscribe to reply topic
+  MQTT.subscribe(replyTopic, function(topic, message) {
+    if (requestSent) {
+      log('Received occupancy RPC reply');
+      
+      var response = null;
+      try {
+        response = JSON.parse(message);
+      } catch (e) {
+        if (e && false) {}
+        log('Failed to parse occupancy RPC response');
+      }
+      
+      if (response && response.error) {
+        log('Occupancy RPC error:', response.error.message);
+        cb(false); // Default: not occupied
+      } else if (response && response.result) {
+        log('Occupancy status from RPC:', JSON.stringify(response.result));
+        cb(response.result.occupied === true);
+      } else {
+        log('Invalid occupancy RPC response');
+        cb(false);
+      }
+      
+      // Unsubscribe from reply topic
+      MQTT.unsubscribe(replyTopic);
+    }
+  });
+  
+  // Publish RPC request
+  var request = {
+    id: requestId,
+    method: 'occupancy.getstatus',
+    params: null
+  };
+  
+  var requestJson = JSON.stringify(request);
+  var published = MQTT.publish('myhome/rpc', requestJson);
+  
+  if (published) {
+    requestSent = true;
+    log('Occupancy RPC request sent');
+    
+    // Set timeout for response
+    Timer.set(5000, false, function() {
+      if (requestSent) {
+        log('Occupancy RPC timeout, assuming not occupied');
+        MQTT.unsubscribe(replyTopic);
+        cb(false);
+      }
+    });
+  } else {
+    log('Failed to publish occupancy RPC request');
+    MQTT.unsubscribe(replyTopic);
     cb(false);
+  }
+}
+
+
+// Fetch temperature setpoints from daemon via MQTT RPC
+function getTemperatureSetpoints(cb) {
+  log('getTemperatureSetpoints');
+  
+  // If no room ID configured, use static setpoint
+  if (!CONFIG.roomId) {
+    log('Room ID not configured, using static setpoint');
+    cb({
+      setpoint_comfort: CONFIG.setpoint,
+      setpoint_eco: CONFIG.setpoint,
+      active_setpoint: CONFIG.setpoint,
+      reason: "no_room_id"
+    });
     return;
   }
   
-  Shelly.call("HTTP.GET", {
-    url: STATE.occupancyUrl,
-    timeout: 5
-  }, function(result, error_code, error_message) {
-    if (error_code === 0 && result && result.body) {
-      var data = null;
-      try { data = JSON.parse(result.body); } catch (e) { if (e && false) {} }
-      cb(data && data.occupied === true);
-    } else {
-      log('Error fetching occupancy status:', error_message);
-      cb(false); // Default: not occupied
+  // Generate unique request ID
+  var requestId = 'heater-' + Date.now();
+  var replyTopic = 'myhome/rpc/reply/' + requestId;
+  var requestSent = false;
+  
+  // Subscribe to reply topic
+  MQTT.subscribe(replyTopic, function(topic, message) {
+    if (requestSent) {
+      log('Received temperature RPC reply');
+      
+      var response = null;
+      try {
+        response = JSON.parse(message);
+      } catch (e) {
+        if (e && false) {}
+        log('Failed to parse RPC response');
+      }
+      
+      if (response && response.error) {
+        log('RPC error:', response.error.message);
+        // Fallback to static setpoint
+        cb({
+          setpoint_comfort: CONFIG.setpoint,
+          setpoint_eco: CONFIG.setpoint,
+          active_setpoint: CONFIG.setpoint,
+          reason: "rpc_error"
+        });
+      } else if (response && response.result) {
+        log('Temperature setpoints from RPC:', JSON.stringify(response.result));
+        cb(response.result);
+      } else {
+        log('Invalid RPC response');
+        cb({
+          setpoint_comfort: CONFIG.setpoint,
+          setpoint_eco: CONFIG.setpoint,
+          active_setpoint: CONFIG.setpoint,
+          reason: "invalid_response"
+        });
+      }
+      
+      // Unsubscribe from reply topic
+      MQTT.unsubscribe(replyTopic);
     }
   });
+  
+  // Publish RPC request
+  var request = {
+    id: requestId,
+    method: 'temperature.getsetpoint',
+    params: {
+      room_id: CONFIG.roomId
+    }
+  };
+  
+  var requestJson = JSON.stringify(request);
+  var published = MQTT.publish('myhome/rpc', requestJson);
+  
+  if (published) {
+    requestSent = true;
+    log('Temperature RPC request sent for room:', CONFIG.roomId);
+    
+    // Set timeout for response
+    Timer.set(5000, false, function() {
+      if (requestSent) {
+        log('Temperature RPC timeout, using static setpoint');
+        MQTT.unsubscribe(replyTopic);
+        cb({
+          setpoint_comfort: CONFIG.setpoint,
+          setpoint_eco: CONFIG.setpoint,
+          active_setpoint: CONFIG.setpoint,
+          reason: "rpc_timeout"
+        });
+      }
+    });
+  } else {
+    log('Failed to publish temperature RPC request');
+    MQTT.unsubscribe(replyTopic);
+    cb({
+      setpoint_comfort: CONFIG.setpoint,
+      setpoint_eco: CONFIG.setpoint,
+      active_setpoint: CONFIG.setpoint,
+      reason: "publish_failed"
+    });
+  }
 }
 
 // === KALMAN FILTER IMPLEMENTATION (ES5) ===
@@ -867,36 +1014,53 @@ function controlHeaterWithInputs(results) {
   var externalTemp = results.external;
   var forecastTemp = results.forecast;
   var isOccupied = results.occupied;
+  
   log('Internal:', internalTemp, 'External:', externalTemp, 'Forecast:', forecastTemp, 'Occupied:', isOccupied);
+  
   if (internalTemp === null) {
     log('Skipping control cycle due to missing internal temperature');
     return;
   }
-  var controlInput = 0;
-  var count = 0;
-  if (externalTemp !== null) { controlInput += externalTemp; count++; }
-  if (forecastTemp !== null) { controlInput += forecastTemp; count++; }
-  if (count > 0) controlInput = controlInput / count;
-  var filteredTemp = kalman.filter(internalTemp, controlInput);
-  log('Filtered temperature:', filteredTemp);
-  var heaterShouldBeOn = filteredTemp < CONFIG.setpoint;
-  // SAFETY: If filtered temperature is below minInternalTemp, always heat IF occupied
-  if (isOccupied && filteredTemp < CONFIG.minInternalTemp) {
-    log('Safety override: internal temp', filteredTemp, 'below minInternalTemp', CONFIG.minInternalTemp, '=> HEAT');
-    setHeaterState(true);
-    return;
-  }
-  // Calculate minimum forecast temperature for preheat window
-  var mfTemp = getMinForecastTemp(CONFIG.preheatHours);
-  log('Minimum forecast temp for next', CONFIG.preheatHours, 'hours:', mfTemp);
-  shouldPreheat(filteredTemp, forecastTemp, mfTemp, function(preheat) {
-    if ((heaterShouldBeOn && isCheapHour()) || preheat) {
-      log('Heater ON (normal or preheat mode)', 'preheat:', preheat);
+  
+  // Fetch temperature setpoints from API (with fallback to static config)
+  getTemperatureSetpoints(function(setpoints) {
+    log('Using setpoints:', JSON.stringify(setpoints));
+    
+    var targetTemp = setpoints.active_setpoint;
+    var ecoTemp = setpoints.setpoint_eco;
+    
+    var controlInput = 0;
+    var count = 0;
+    if (externalTemp !== null) { controlInput += externalTemp; count++; }
+    if (forecastTemp !== null) { controlInput += forecastTemp; count++; }
+    if (count > 0) controlInput = controlInput / count;
+    
+    var filteredTemp = kalman.filter(internalTemp, controlInput);
+    log('Filtered temperature:', filteredTemp, 'Target:', targetTemp);
+    
+    var heaterShouldBeOn = filteredTemp < targetTemp;
+    
+    // SAFETY: If filtered temperature is below eco setpoint, always heat IF occupied
+    if (isOccupied && filteredTemp < ecoTemp) {
+      log('Safety override: internal temp', filteredTemp, 'below eco setpoint', ecoTemp, '=> HEAT');
       setHeaterState(true);
-    } else {
-      log('Outside cheap window => no heating');
-      setHeaterState(false);
+      return;
     }
+    
+    // Calculate minimum forecast temperature for preheat window
+    var mfTemp = getMinForecastTemp(CONFIG.preheatHours);
+    log('Minimum forecast temp for next', CONFIG.preheatHours, 'hours:', mfTemp);
+    
+    // Update shouldPreheat to use targetTemp instead of CONFIG.setpoint
+    shouldPreheat(filteredTemp, forecastTemp, mfTemp, targetTemp, function(preheat) {
+      if ((heaterShouldBeOn && isCheapHour()) || preheat) {
+        log('Heater ON (normal or preheat mode)', 'preheat:', preheat);
+        setHeaterState(true);
+      } else {
+        log('Outside cheap window => no heating');
+        setHeaterState(false);
+      }
+    });
   });
 }
 

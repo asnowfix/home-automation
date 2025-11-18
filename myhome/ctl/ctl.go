@@ -17,6 +17,7 @@ import (
 	"myhome/ctl/shelly"
 	"myhome/ctl/show"
 	"myhome/ctl/sswitch"
+	"myhome/ctl/temperature"
 	mqttclient "myhome/mqtt"
 	shellyPkg "pkg/shelly"
 	shellyMqtt "pkg/shelly/mqtt"
@@ -124,6 +125,7 @@ func init() {
 	Cmd.AddCommand(group.Cmd)
 	Cmd.AddCommand(follow.FollowCmd)
 	Cmd.AddCommand(follow.UnfollowCmd)
+	Cmd.AddCommand(temperature.Cmd)
 }
 
 var Commit string

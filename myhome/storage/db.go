@@ -76,6 +76,11 @@ func (s *DeviceStorage) createTable() error {
 	return nil
 }
 
+// DB returns the underlying database connection for use by other services
+func (s *DeviceStorage) DB() *sqlx.DB {
+	return s.db
+}
+
 // Close closes the database connection & syncs it to persistent storage.
 func (s *DeviceStorage) Close() {
 	s.log.Info("Closing database connection")

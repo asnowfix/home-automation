@@ -144,4 +144,52 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return nil
 		},
 	},
+	TemperatureGet: {
+		NewParams: func() any {
+			return &TemperatureGetParams{}
+		},
+		NewResult: func() any {
+			return &TemperatureRoomConfig{}
+		},
+	},
+	TemperatureSet: {
+		NewParams: func() any {
+			return &TemperatureSetParams{}
+		},
+		NewResult: func() any {
+			return &TemperatureSetResult{}
+		},
+	},
+	TemperatureList: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &TemperatureRoomList{}
+		},
+	},
+	TemperatureDelete: {
+		NewParams: func() any {
+			return &TemperatureDeleteParams{}
+		},
+		NewResult: func() any {
+			return &TemperatureDeleteResult{}
+		},
+	},
+	TemperatureSetpoint: {
+		NewParams: func() any {
+			return &TemperatureGetSetpointParams{}
+		},
+		NewResult: func() any {
+			return &TemperatureSetpointResult{}
+		},
+	},
+	OccupancyGetStatus: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &OccupancyStatusResult{}
+		},
+	},
 }

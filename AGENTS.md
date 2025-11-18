@@ -349,6 +349,132 @@ log.Info("message", "key", value)
 - `--verbose` or `-v`: Equivalent to `--log-level debug`
 - `MYHOME_DEBUG_INIT=1`: Show hlog initialization messages
 
+### MyHome RPC Service Architecture
+
+**CRITICAL**: All new RPC methods MUST be added to the existing MyHome RPC service, NOT as separate RPC services.
+
+#### Adding New RPC Methods
+
+Follow this pattern (see temperature and occupancy services as examples):
+
+1. **Add verb to `internal/myhome/const.go`:**
+   ```go
+   const (
+       // ... existing verbs
+       TemperatureGet      Verb = "temperature.get"
+       OccupancyGetStatus  Verb = "occupancy.getstatus"
+       YourNewMethod       Verb = "yourservice.method"  // Add here
+   )
+   ```
+
+2. **Add types to `internal/myhome/yourservice.go` (create new file for each service):**
+   ```go
+   package myhome
+   
+   // YourService RPC types
+   
+   // YourServiceParams represents parameters for yourservice.method
+   type YourServiceParams struct {
+       Field string `json:"field"`
+   }
+   
+   // YourServiceResult represents the result
+   type YourServiceResult struct {
+       Data string `json:"data"`
+   }
+   ```
+   
+   **Note**: Each service should have its own types file:
+   - `internal/myhome/temperature.go` - Temperature RPC types
+   - `internal/myhome/occupancy.go` - Occupancy RPC types
+   - `internal/myhome/yourservice.go` - Your service RPC types
+
+3. **Add method signature to `internal/myhome/methods.go`:**
+   ```go
+   var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
+       // ... existing methods
+       YourNewMethod: {
+           NewParams: func() any {
+               return &YourServiceParams{}
+           },
+           NewResult: func() any {
+               return &YourServiceResult{}
+           },
+       },
+   }
+   ```
+
+4. **Create handler in your service package (e.g., `myhome/yourservice/methods.go`):**
+   ```go
+   type MethodHandlers struct {
+       service *Service
+       log     logr.Logger
+   }
+   
+   func NewMethodHandlers(log logr.Logger, service *Service) *MethodHandlers {
+       return &MethodHandlers{
+           service: service,
+           log:     log.WithName("yourservice.methods"),
+       }
+   }
+   
+   func (h *MethodHandlers) RegisterHandlers() {
+       myhome.RegisterMethodHandler(myhome.YourNewMethod, h.handleMethod)
+       h.log.Info("Your service RPC handlers registered")
+   }
+   
+   func (h *MethodHandlers) handleMethod(params any) (any, error) {
+       p, ok := params.(*myhome.YourServiceParams)
+       if !ok {
+           return nil, fmt.Errorf("invalid params type")
+       }
+       
+       // Your logic here
+       return &myhome.YourServiceResult{Data: "result"}, nil
+   }
+   ```
+
+5. **Register in `myhome/daemon/daemon.go` after device manager starts:**
+   ```go
+   // Register Your Service RPC methods if enabled
+   if options.Flags.EnableYourService {
+       log.Info("Registering your service RPC methods")
+       
+       yourHandlers := yourservice.NewMethodHandlers(log, yourServiceInstance)
+       yourHandlers.RegisterHandlers()
+       
+       log.Info("Your service RPC methods registered")
+   }
+   ```
+
+#### Why This Pattern?
+
+✅ **Single RPC server** - All methods use the same MQTT topic (`myhome/rpc`)  
+✅ **Unified lifecycle** - Methods registered when device manager starts  
+✅ **Consistent patterns** - Same request/response structure  
+✅ **Easy discovery** - All methods in one place (`internal/myhome/const.go`)  
+✅ **Type safety** - Centralized type definitions  
+
+#### Anti-Pattern: DON'T Do This
+
+❌ **Don't create separate RPC servers:**
+```go
+// WRONG - Don't do this!
+func NewRPCService(ctx context.Context) (*RPCService, error) {
+    // Subscribing to a different topic
+    from, err := mc.Subscriber(ctx, "yourservice/rpc", 1)
+    // This creates a separate RPC service!
+}
+```
+
+✅ **Instead, register handlers with the main RPC system:**
+```go
+// CORRECT - Do this!
+func (h *MethodHandlers) RegisterHandlers() {
+    myhome.RegisterMethodHandler(myhome.YourMethod, h.handleMethod)
+}
+```
+
 ### Command Output
 
 **Important**: For user-facing commands (like `script upload`, `script update`, `script debug`), print progress and results to **stdout** using `fmt.Printf()`, not `log.Info()`.

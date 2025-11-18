@@ -5,10 +5,12 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 var disableGen1Proxy bool
 var disableOccupancyService bool
+var disableTemperatureService bool
 
 func init() {
 	Cmd.AddCommand(runCmd)
@@ -26,10 +28,13 @@ func init() {
 	runCmd.PersistentFlags().IntVarP(&options.Flags.ProxyPort, "proxy-port", "p", 6080, "Reverse proxy listen port (default 6080)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableGen1Proxy, "enable-gen1-proxy", false, "Enable the Gen1 HTTP->MQTT proxy (requires embedded broker)")
 	runCmd.PersistentFlags().BoolVar(&disableGen1Proxy, "disable-gen1-proxy", false, "Disable the Gen1 HTTP->MQTT proxy (mutually exclusive with --enable-gen1-proxy)")
-	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableOccupancyService, "enable-occupancy-service", false, "Enable the occupancy HTTP service on port 8889")
-	runCmd.PersistentFlags().BoolVar(&disableOccupancyService, "disable-occupancy-service", false, "Disable the occupancy HTTP service (mutually exclusive with --enable-occupancy-service)")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableOccupancyService, "enable-occupancy-service", false, "Enable the occupancy service (auto-enabled with device manager)")
+	runCmd.PersistentFlags().BoolVar(&disableOccupancyService, "disable-occupancy-service", false, "Disable the occupancy service (mutually exclusive with --enable-occupancy-service)")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableTemperatureService, "enable-temperature-service", false, "Enable the temperature service (auto-enabled with device manager)")
+	runCmd.PersistentFlags().BoolVar(&disableTemperatureService, "disable-temperature-service", false, "Disable the temperature service (mutually exclusive with --enable-temperature-service)")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
+	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
 }
 
 var runCmd = &cobra.Command{
@@ -43,6 +48,77 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
+		// Initialize Viper and bind to flags
+		v := viper.New()
+		v.SetConfigName("myhome")
+		v.SetConfigType("yaml")
+		v.AddConfigPath(".")
+		v.AddConfigPath("/etc/myhome/")
+		v.AddConfigPath("$HOME/.myhome/")
+
+		// Enable environment variable support
+		v.SetEnvPrefix("MYHOME")
+		v.AutomaticEnv()
+
+		// Try to read config file (optional)
+		if err := v.ReadInConfig(); err == nil {
+			log.Info("Loaded config from", "file", v.ConfigFileUsed())
+		} else {
+			log.Info("No config file found, using defaults and flags")
+		}
+
+		// Bind flags to viper (flags take precedence over config file)
+		if err := v.BindPFlags(cmd.Flags()); err != nil {
+			log.Error(err, "Failed to bind flags to viper")
+		}
+		if err := v.BindPFlags(cmd.PersistentFlags()); err != nil {
+			log.Error(err, "Failed to bind persistent flags to viper")
+		}
+
+		// Read configuration values (prefer flags, then config file, then defaults)
+		if v.IsSet("daemon.mqtt_broker") && !cmd.Flags().Changed("mqtt-broker") {
+			options.Flags.MqttBroker = v.GetString("daemon.mqtt_broker")
+		}
+		if v.IsSet("daemon.mdns_timeout") && !cmd.Flags().Changed("mdns-timeout") {
+			options.Flags.MdnsTimeout = v.GetDuration("daemon.mdns_timeout")
+		}
+		if v.IsSet("daemon.mqtt_timeout") && !cmd.Flags().Changed("mqtt-timeout") {
+			options.Flags.MqttTimeout = v.GetDuration("daemon.mqtt_timeout")
+		}
+		if v.IsSet("daemon.mqtt_grace") && !cmd.Flags().Changed("mqtt-grace") {
+			options.Flags.MqttGrace = v.GetDuration("daemon.mqtt_grace")
+		}
+		if v.IsSet("daemon.refresh_interval") && !cmd.Flags().Changed("refresh-interval") {
+			options.Flags.RefreshInterval = v.GetDuration("daemon.refresh_interval")
+		}
+		if v.IsSet("daemon.mqtt_watchdog_interval") && !cmd.Flags().Changed("mqtt-watchdog-interval") {
+			options.Flags.MqttWatchdogInterval = v.GetDuration("daemon.mqtt_watchdog_interval")
+		}
+		if v.IsSet("daemon.mqtt_watchdog_max_failures") && !cmd.Flags().Changed("mqtt-watchdog-max-failures") {
+			options.Flags.MqttWatchdogMaxFailures = v.GetInt("daemon.mqtt_watchdog_max_failures")
+		}
+		if v.IsSet("daemon.mqtt_broker_client_log_interval") && !cmd.Flags().Changed("mqtt-broker-client-log-interval") {
+			options.Flags.MqttBrokerClientLogInterval = v.GetDuration("daemon.mqtt_broker_client_log_interval")
+		}
+		if v.IsSet("daemon.events_dir") && !cmd.Flags().Changed("events-dir") {
+			options.Flags.EventsDir = v.GetString("daemon.events_dir")
+		}
+		if v.IsSet("daemon.proxy_port") && !cmd.Flags().Changed("proxy-port") {
+			options.Flags.ProxyPort = v.GetInt("daemon.proxy_port")
+		}
+		if v.IsSet("daemon.enable_gen1_proxy") && !cmd.Flags().Changed("enable-gen1-proxy") {
+			options.Flags.EnableGen1Proxy = v.GetBool("daemon.enable_gen1_proxy")
+		}
+		if v.IsSet("daemon.enable_occupancy_service") && !cmd.Flags().Changed("enable-occupancy-service") {
+			options.Flags.EnableOccupancyService = v.GetBool("daemon.enable_occupancy_service")
+		}
+		if v.IsSet("daemon.enable_temperature_service") && !cmd.Flags().Changed("enable-temperature-service") {
+			options.Flags.EnableTemperatureService = v.GetBool("daemon.enable_temperature_service")
+		}
+		if v.IsSet("daemon.disable_device_manager") && !cmd.Flags().Changed("disable-device-manager") {
+			disableDeviceManager = v.GetBool("daemon.disable_device_manager")
+		}
+
 		// Handle Gen1 proxy flags with mutual exclusivity
 		if cmd.Flags().Changed("disable-gen1-proxy") && disableGen1Proxy {
 			options.Flags.EnableGen1Proxy = false
@@ -52,11 +128,27 @@ var runCmd = &cobra.Command{
 		}
 
 		// Handle occupancy service flags with mutual exclusivity
+		// Auto-enable if device manager is enabled and not explicitly disabled
 		if cmd.Flags().Changed("disable-occupancy-service") && disableOccupancyService {
 			options.Flags.EnableOccupancyService = false
 		} else if !cmd.Flags().Changed("enable-occupancy-service") && !cmd.Flags().Changed("disable-occupancy-service") {
-			log.Info("Setting enable-occupancy-service based on mqtt-broker flag")
-			options.Flags.EnableOccupancyService = options.Flags.MqttBroker == ""
+			// Auto-enable with device manager
+			options.Flags.EnableOccupancyService = !disableDeviceManager
+			if options.Flags.EnableOccupancyService {
+				log.Info("Auto-enabling occupancy service (device manager enabled)")
+			}
+		}
+
+		// Handle temperature service flags with mutual exclusivity
+		// Auto-enable if device manager is enabled and not explicitly disabled
+		if cmd.Flags().Changed("disable-temperature-service") && disableTemperatureService {
+			options.Flags.EnableTemperatureService = false
+		} else if !cmd.Flags().Changed("enable-temperature-service") && !cmd.Flags().Changed("disable-temperature-service") {
+			// Auto-enable with device manager
+			options.Flags.EnableTemperatureService = !disableDeviceManager
+			if options.Flags.EnableTemperatureService {
+				log.Info("Auto-enabling temperature service (device manager enabled)")
+			}
 		}
 
 		daemon := NewDaemon(ctx)

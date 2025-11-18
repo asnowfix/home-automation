@@ -1,0 +1,69 @@
+# MyHome Configuration File
+# Place this file in one of:
+# - . (current directory)
+# - /etc/myhome/
+# - $HOME/.myhome/
+#
+# All settings can be overridden by:
+# 1. Command-line flags (highest priority)
+# 2. Environment variables (prefix with MYHOME_, e.g., MYHOME_DAEMON_MQTT_BROKER)
+# 3. This config file (lowest priority)
+
+# Daemon Configuration
+daemon:
+  # MQTT Broker Configuration
+  # Leave empty to use embedded broker (auto-discovered on network)
+  mqtt_broker: ""  # e.g., "mqtt://192.168.1.100:1883"
+  
+  # Timeouts and Intervals
+  mdns_timeout: 7s              # mDNS lookup timeout
+  mqtt_timeout: 14s             # MQTT operation timeout
+  mqtt_grace: 2s                # MQTT disconnection grace period
+  refresh_interval: 1m          # Device refresh interval
+  mqtt_watchdog_interval: 30s   # MQTT watchdog check interval
+  mqtt_watchdog_max_failures: 3 # Max consecutive failures before restart
+  mqtt_broker_client_log_interval: 2m  # Client logging interval (0 to disable)
+  
+  # Service Ports
+  proxy_port: 6080  # Reverse proxy listen port
+  
+  # Service Enablement
+  # These are auto-enabled when using embedded broker (mqtt_broker: "")
+  enable_gen1_proxy: false         # Gen1 HTTP->MQTT proxy
+  enable_occupancy_service: false  # Occupancy detection service (port 8889)
+  enable_temperature_service: false # Temperature scheduling service (port 8890)
+  
+  # Device Manager
+  disable_device_manager: false  # Set to true to disable device management
+  
+  # Event Logging
+  events_dir: ""  # Directory to write MQTT events as JSON (empty to disable)
+
+# Temperature Service Configuration
+# Eco is the default - only define comfort hours
+temperatures:
+  port: 8890
+  rooms:
+    living-room:
+      name: "Living Room"
+      comfort_temp: 21.0
+      eco_temp: 17.0
+      schedule:
+        weekday: ["06:00-23:00"]
+        weekend: ["08:00-23:00"]
+    
+    bedroom:
+      name: "Bedroom"
+      comfort_temp: 19.0
+      eco_temp: 16.0
+      schedule:
+        weekday: ["06:00-08:00", "20:00-23:00"]
+        weekend: ["08:00-23:00"]
+    
+    office:
+      name: "Office"
+      comfort_temp: 20.0
+      eco_temp: 17.0
+      schedule:
+        weekday: ["08:00-18:00"]
+        weekend: []  # Always eco on weekends

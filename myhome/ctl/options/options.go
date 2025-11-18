@@ -32,26 +32,27 @@ const MQTT_WATCHDOG_MAX_FAILURES int = 3
 const MQTT_BROKER_CLIENT_LOG_INTERVAL time.Duration = 2 * time.Minute
 
 var Flags struct {
-	CpuProfile                 string
-	Verbose                    bool
-	Debug                      bool
-	Quiet                      bool
-	Json                       bool
-	MqttBroker                 string
-	MqttTimeout                time.Duration // the value taken by --mqtt-timeout / -T
-	MqttGrace                  time.Duration // the value taken by --mqtt-grace / -G
-	MdnsTimeout                time.Duration // the value taken by --mdns-timeout / -M
-	Wait                       time.Duration // the value taken by --command-timeout / -C
-	RefreshInterval            time.Duration // the value taken by --refresh-interval / -R
-	MqttWatchdogInterval       time.Duration // the value taken by --mqtt-watchdog-interval
-	MqttWatchdogMaxFailures    int           // the value taken by --mqtt-watchdog-max-failures
+	CpuProfile                  string
+	Verbose                     bool
+	Debug                       bool
+	Quiet                       bool
+	Json                        bool
+	MqttBroker                  string
+	MqttTimeout                 time.Duration // the value taken by --mqtt-timeout / -T
+	MqttGrace                   time.Duration // the value taken by --mqtt-grace / -G
+	MdnsTimeout                 time.Duration // the value taken by --mdns-timeout / -M
+	Wait                        time.Duration // the value taken by --command-timeout / -C
+	RefreshInterval             time.Duration // the value taken by --refresh-interval / -R
+	MqttWatchdogInterval        time.Duration // the value taken by --mqtt-watchdog-interval
+	MqttWatchdogMaxFailures     int           // the value taken by --mqtt-watchdog-max-failures
 	MqttBrokerClientLogInterval time.Duration // the value taken by --mqtt-broker-client-log-interval
-	Via                        string
-	SwitchId                   uint32
-	EventsDir                  string
-	ProxyPort                  int
-	EnableGen1Proxy            bool
-	EnableOccupancyService     bool
+	Via                         string
+	SwitchId                    uint32
+	EventsDir                   string
+	ProxyPort                   int
+	EnableGen1Proxy             bool
+	EnableOccupancyService      bool
+	EnableTemperatureService    bool
 }
 
 var Via types.Channel

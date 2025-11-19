@@ -180,7 +180,19 @@ var STATE = {
   },
   
   // Control loop timer handle
-  controlLoopTimerId: null
+  controlLoopTimerId: null,
+  
+  // Pending control loop check timer handle
+  controlLoopCheckTimerId: null,
+  
+  // Single temperature retry timer handle
+  temperatureRetryTimerId: null,
+  
+  // Track which temperatures need retry
+  temperatureRetryNeeded: {
+    internal: false,
+    external: false
+  }
 };
 
 function onDeviceLocation(result, error_code, error_message, cb) {
@@ -237,7 +249,7 @@ function onDeviceLocation(result, error_code, error_message, cb) {
 // Parse a value from KVS based on its expected type
 function parseValueWithType(valueStr, type) {
   // Handle null/undefined
-  if (valueStr === null || valueStr === undefined || valueStr === "null" || valueStr === "undefined") {
+  if (valueStr === null || valueStr === void 0 || valueStr === "null" || valueStr === "undefined") {
     return null;
   }
   
@@ -295,7 +307,7 @@ function storeValue(key, value) {
 
 // Simple parse for Script.storage values (we control what we store)
 function parseStorageValue(valueStr) {
-  if (valueStr === "null" || valueStr === null || valueStr === undefined) {
+  if (valueStr === "null" || valueStr === null || valueStr === void 0) {
     return null;
   }
   if (valueStr === "true") return true;
@@ -819,6 +831,19 @@ function onTemperature(topic, message, location) {
     STATE.temperatureReady[location] = true;
     log('Temperature', temp, 'location:', location, 'is ready:', STATE.temperatureReady[location]);
     
+    // Clear retry flag for this location since we got data
+    if (STATE.temperatureRetryNeeded[location]) {
+      STATE.temperatureRetryNeeded[location] = false;
+      log('Cleared temperature retry flag for', location);
+      
+      // If no more retries needed, clear the timer
+      if (!STATE.temperatureRetryNeeded.internal && !STATE.temperatureRetryNeeded.external && STATE.temperatureRetryTimerId !== null) {
+        Timer.clear(STATE.temperatureRetryTimerId);
+        STATE.temperatureRetryTimerId = null;
+        log('Cleared combined temperature retry timer - no more retries needed');
+      }
+    }
+    
     // Schedule check if not already scheduled
     scheduleControlLoopCheck();
   }
@@ -884,13 +909,52 @@ function subscribeMqttTemperature(location, topic) {
   }
 }
 
+// Schedule a retry request for temperature data if not ready
+function scheduleTemperatureRetry(location) {
+  var topic = STATE.subscribedTemperatureTopic[location];
+  if (topic) {
+    log('Marking', location, 'temperature for retry');
+    STATE.temperatureRetryNeeded[location] = true;
+    
+    // Start the combined retry timer if not already running
+    if (STATE.temperatureRetryTimerId === null) {
+      log('Starting combined temperature retry timer (10 seconds)');
+      STATE.temperatureRetryTimerId = Timer.set(10000, false, function() {
+        // Clear the timer ID when it fires
+        STATE.temperatureRetryTimerId = null;
+        
+        // Retry all temperatures that need it
+        if (STATE.temperatureRetryNeeded.internal) {
+          var internalTopic = STATE.subscribedTemperatureTopic.internal;
+          if (internalTopic) {
+            log('Retrying temperature request for internal topic:', internalTopic);
+            requestMqttRepeat(internalTopic);
+          }
+          STATE.temperatureRetryNeeded.internal = false;
+        }
+        
+        if (STATE.temperatureRetryNeeded.external) {
+          var externalTopic = STATE.subscribedTemperatureTopic.external;
+          if (externalTopic) {
+            log('Retrying temperature request for external topic:', externalTopic);
+            requestMqttRepeat(externalTopic);
+          }
+          STATE.temperatureRetryNeeded.external = false;
+        }
+      });
+    }
+  } else {
+    log('No topic configured for', location, 'temperature - cannot retry');
+  }
+}
+
 // === DATA FETCHING FUNCTIONS ===
 // Read temperature from STATE (in-memory cache)
 function getShellyTemperature(location, cb) {
   log('getShellyTemperature', location);
   var temp = STATE.temperature[location];
   
-  if (temp !== null && temp !== undefined) {
+  if (temp !== null && temp !== void 0) {
     log('Read', location, 'temperature:', temp);
     cb(temp);
   } else {
@@ -998,7 +1062,7 @@ function getMinForecastTemp(hours) {
     var idx = currentHour + i;
     if (idx < STATE.cachedForecast.length) {
       var temp = STATE.cachedForecast[idx];
-      if (temp !== null && temp !== undefined) {
+      if (temp !== null && temp !== void 0) {
         if (minTemp === null || temp < minTemp) {
           minTemp = temp;
         }
@@ -1083,7 +1147,14 @@ function pollAndControl() {
 
 // Schedule a deferred check (breaks call stack)
 function scheduleControlLoopCheck() {
-  Timer.set(100, false, checkAndStartControlLoop);
+  // Prevent duplicate timers - only schedule if no check is already pending
+  if (STATE.controlLoopCheckTimerId === null) {
+    STATE.controlLoopCheckTimerId = Timer.set(100, false, function() {
+      // Clear the timer ID when the timer fires
+      STATE.controlLoopCheckTimerId = null;
+      checkAndStartControlLoop();
+    });
+  }
 }
 
 // Check if ready and start control loop timer
@@ -1093,6 +1164,15 @@ function checkAndStartControlLoop() {
   log('  - Forecast data ready:' + !!STATE.cachedForecast);
   log('  - Internal temp ready:' + STATE.temperatureReady.internal);
   log('  - External temp ready:' + STATE.temperatureReady.external);
+  
+  // Schedule retry requests for any missing temperatures
+  if (!STATE.temperatureReady.internal) {
+    scheduleTemperatureRetry('internal');
+  }
+  if (!STATE.temperatureReady.external) {
+    scheduleTemperatureRetry('external');
+  }
+  
   if (STATE.forecastUrl && STATE.cachedForecast && STATE.temperatureReady.internal && STATE.temperatureReady.external) {
     if (!STATE.controlLoopTimerId) {
       log('All inputs ready - starting control loop timer');
@@ -1127,6 +1207,9 @@ function onConfigLoaded(updated) {
   if (updated.indexOf('internalTemperatureTopic') !== -1) {
     subscribeMqttTemperature("internal", CONFIG.internalTemperatureTopic);
   }
+  
+  // Re-evaluate control loop when configuration changes
+  scheduleControlLoopCheck();
 }
 
 // === SCHEDULED EXECUTION ===

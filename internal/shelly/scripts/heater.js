@@ -249,7 +249,7 @@ function onDeviceLocation(result, error_code, error_message, cb) {
 // Parse a value from KVS based on its expected type
 function parseValueWithType(valueStr, type) {
   // Handle null/undefined
-  if (valueStr === null || valueStr === void 0 || valueStr === "null" || valueStr === "undefined") {
+  if (!valueStr || valueStr === "null" || valueStr === "undefined") {
     return null;
   }
   
@@ -307,9 +307,15 @@ function storeValue(key, value) {
 
 // Simple parse for Script.storage values (we control what we store)
 function parseStorageValue(valueStr) {
-  if (valueStr === "null" || valueStr === null || valueStr === void 0) {
+  if (valueStr === "null" || !valueStr) {
     return null;
   }
+  
+  // Convert to string if it's not already a string
+  if (typeof valueStr !== "string") {
+    valueStr = String(valueStr);
+  }
+  
   if (valueStr === "true") return true;
   if (valueStr === "false") return false;
   
@@ -918,19 +924,21 @@ function scheduleTemperatureRetry(location) {
     
     // Start the combined retry timer if not already running
     if (STATE.temperatureRetryTimerId === null) {
-      log('Starting combined temperature retry timer (10 seconds)');
-      STATE.temperatureRetryTimerId = Timer.set(10000, false, function() {
-        // Clear the timer ID when it fires
-        STATE.temperatureRetryTimerId = null;
-        
+      log('Starting recurring temperature retry timer (10 seconds)');
+      STATE.temperatureRetryTimerId = Timer.set(10000, true, function() {
         // Retry all temperatures that need it
+        var anyRetryNeeded = false;
+        
         if (STATE.temperatureRetryNeeded.internal) {
           var internalTopic = STATE.subscribedTemperatureTopic.internal;
           if (internalTopic) {
             log('Retrying temperature request for internal topic:', internalTopic);
             requestMqttRepeat(internalTopic);
+            anyRetryNeeded = true;
+          } else {
+            // No topic configured, stop retrying for this location
+            STATE.temperatureRetryNeeded.internal = false;
           }
-          STATE.temperatureRetryNeeded.internal = false;
         }
         
         if (STATE.temperatureRetryNeeded.external) {
@@ -938,8 +946,18 @@ function scheduleTemperatureRetry(location) {
           if (externalTopic) {
             log('Retrying temperature request for external topic:', externalTopic);
             requestMqttRepeat(externalTopic);
+            anyRetryNeeded = true;
+          } else {
+            // No topic configured, stop retrying for this location
+            STATE.temperatureRetryNeeded.external = false;
           }
-          STATE.temperatureRetryNeeded.external = false;
+        }
+        
+        // If no more retries needed, stop the recurring timer
+        if (!anyRetryNeeded) {
+          Timer.clear(STATE.temperatureRetryTimerId);
+          STATE.temperatureRetryTimerId = null;
+          log('All temperatures retrieved - stopped retry timer');
         }
       });
     }
@@ -954,7 +972,7 @@ function getShellyTemperature(location, cb) {
   log('getShellyTemperature', location);
   var temp = STATE.temperature[location];
   
-  if (temp !== null && temp !== void 0) {
+  if (!temp) {
     log('Read', location, 'temperature:', temp);
     cb(temp);
   } else {
@@ -1062,7 +1080,7 @@ function getMinForecastTemp(hours) {
     var idx = currentHour + i;
     if (idx < STATE.cachedForecast.length) {
       var temp = STATE.cachedForecast[idx];
-      if (temp !== null && temp !== void 0) {
+      if (!!temp) {
         if (minTemp === null || temp < minTemp) {
           minTemp = temp;
         }

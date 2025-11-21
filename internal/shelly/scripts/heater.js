@@ -192,7 +192,10 @@ var STATE = {
   temperatureRetryNeeded: {
     internal: false,
     external: false
-  }
+  },
+  
+  // Last successful temperature setpoints from RPC
+  lastSuccessfulSetpoints: null
 };
 
 function onDeviceLocation(result, error_code, error_message, cb) {
@@ -654,6 +657,27 @@ function getOccupancyStatus(cb) {
 }
 
 
+// Helper function to get fallback setpoints (last successful or static)
+function getFallbackSetpoints(reason) {
+  if (STATE.lastSuccessfulSetpoints) {
+    log('Using last successful setpoints as fallback');
+    return {
+      setpoint_comfort: STATE.lastSuccessfulSetpoints.setpoint_comfort,
+      setpoint_eco: STATE.lastSuccessfulSetpoints.setpoint_eco,
+      active_setpoint: STATE.lastSuccessfulSetpoints.active_setpoint,
+      reason: reason + "_using_last_successful"
+    };
+  } else {
+    log('No last successful setpoints, using static setpoint');
+    return {
+      setpoint_comfort: CONFIG.setpoint,
+      setpoint_eco: CONFIG.setpoint,
+      active_setpoint: CONFIG.setpoint,
+      reason: reason + "_using_static"
+    };
+  }
+}
+
 // Fetch temperature setpoints from daemon via MQTT RPC
 function getTemperatureSetpoints(cb) {
   log('getTemperatureSetpoints');
@@ -690,24 +714,15 @@ function getTemperatureSetpoints(cb) {
       
       if (response && response.error) {
         log('RPC error:', response.error.message);
-        // Fallback to static setpoint
-        cb({
-          setpoint_comfort: CONFIG.setpoint,
-          setpoint_eco: CONFIG.setpoint,
-          active_setpoint: CONFIG.setpoint,
-          reason: "rpc_error"
-        });
+        cb(getFallbackSetpoints("rpc_error"));
       } else if (response && response.result) {
         log('Temperature setpoints from RPC:', JSON.stringify(response.result));
+        // Store successful setpoints for future fallback
+        STATE.lastSuccessfulSetpoints = response.result;
         cb(response.result);
       } else {
         log('Invalid RPC response');
-        cb({
-          setpoint_comfort: CONFIG.setpoint,
-          setpoint_eco: CONFIG.setpoint,
-          active_setpoint: CONFIG.setpoint,
-          reason: "invalid_response"
-        });
+        cb(getFallbackSetpoints("invalid_response"));
       }
       
       // Unsubscribe from reply topic
@@ -734,25 +749,15 @@ function getTemperatureSetpoints(cb) {
     // Set timeout for response
     Timer.set(5000, false, function() {
       if (requestSent) {
-        log('Temperature RPC timeout, using static setpoint');
+        log('Temperature RPC timeout, using fallback setpoint');
         MQTT.unsubscribe(replyTopic);
-        cb({
-          setpoint_comfort: CONFIG.setpoint,
-          setpoint_eco: CONFIG.setpoint,
-          active_setpoint: CONFIG.setpoint,
-          reason: "rpc_timeout"
-        });
+        cb(getFallbackSetpoints("rpc_timeout"));
       }
     });
   } else {
     log('Failed to publish temperature RPC request');
     MQTT.unsubscribe(replyTopic);
-    cb({
-      setpoint_comfort: CONFIG.setpoint,
-      setpoint_eco: CONFIG.setpoint,
-      active_setpoint: CONFIG.setpoint,
-      reason: "publish_failed"
-    });
+    cb(getFallbackSetpoints("publish_failed"));
   }
 }
 

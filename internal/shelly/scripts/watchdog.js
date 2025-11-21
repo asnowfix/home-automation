@@ -260,12 +260,8 @@ var IpAssignmentWatchdog = {
             // Is it turned on
             if (!status.delta || status.delta.output !== true) return;
             
-            Timer.clear(self.pingTimer);
-            
-            // Start the loop to ping the endpoints again
-            self.pingTimer = Timer.set(CONFIG.ipAssignment.retryIntervalSeconds * 1000, true, function() {
-                self.checkForIp();
-            });
+            // The recurring timer is already running from init()
+            self.checkForIp();
         });
     },
     
@@ -359,11 +355,11 @@ var FirmwareUpdater = {
             Timer.clear(this.updateTimer);
         }
         
-        // Schedule the next check
+        // Use recurring timer instead of recursive callback to prevent closure chain buildup
         var self = this;
-        this.updateTimer = Timer.set(checkIntervalMs, false, function() {
+        this.updateTimer = Timer.set(checkIntervalMs, true, function() {
             self.checkForUpdate();
-            self.scheduleNextCheck(); // Schedule the next check after this one completes
+            // Don't call scheduleNextCheck() here - recurring timer handles it
         });
         
         this.log("Next firmware check scheduled in " + CONFIG.firmwareUpdate.checkIntervalDays + " days");
@@ -607,8 +603,10 @@ var PrometheusMetrics = {
     
     // HTTP handler for metrics endpoint
     httpServerHandler: function(request, response) {
-        // Reset meta registry so HELP/TYPE are emitted once per scrape
+        // Always reset meta registry to prevent unbounded growth
+        // This ensures HELP/TYPE are emitted once per scrape
         this.emittedMeta = {};
+        
         response.body = [
             this.generateMetricsForSystem(),
             this.generateMetricsForSwitches()

@@ -60,14 +60,19 @@ var Via types.Channel
 func CommandLineContext(ctx context.Context, version string) context.Context {
 	var cancel context.CancelFunc
 
+	// Create the process-wide context that background services can use
+	processCtx, processCancel := context.WithCancel(ctx)
+
 	if Flags.Wait > 0 {
-		ctx, cancel = context.WithTimeout(ctx, Flags.Wait)
+		ctx, cancel = context.WithTimeout(processCtx, Flags.Wait)
 		ctx = context.WithValue(ctx, global.CancelKey, cancel)
 	} else {
-		ctx, cancel = context.WithCancel(ctx)
+		ctx, cancel = context.WithCancel(processCtx)
 		ctx = context.WithValue(ctx, global.CancelKey, cancel)
 	}
 
+	// Store the process-wide context so lazy-started services can access it
+	ctx = context.WithValue(ctx, global.ProcessContextKey, processCtx)
 	ctx = context.WithValue(ctx, global.VersionKey, version)
 
 	go func() {
@@ -77,7 +82,9 @@ func CommandLineContext(ctx context.Context, version string) context.Context {
 		signal.Notify(signals, syscall.SIGTERM)
 		<-signals
 		log.Info("Received signal")
+		// Cancel both the operation context and the process context
 		cancel()
+		processCancel()
 	}()
 	return ctx
 }

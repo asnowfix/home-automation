@@ -307,6 +307,12 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 
 func (c *Client) Close() {
 	c.log.Info("Closing MQTT client", "client_id", c.Id())
+
+	// Cancel watchdog if it's running
+	if c.watchdogCancel != nil {
+		c.watchdogCancel()
+	}
+
 	if c.mqtt.IsConnected() {
 		c.log.Info("Disconnecting MQTT client", "client_id", c.Id())
 		c.mqtt.Disconnect(uint(c.grace.Milliseconds()))

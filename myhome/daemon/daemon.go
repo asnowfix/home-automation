@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"global"
 	"myhome/ctl/options"
 	"myhome/devices/impl"
@@ -21,6 +22,7 @@ import (
 
 	"myhome"
 
+	"github.com/asnowfix/home-automation/myhome/metrics"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
 )
@@ -154,6 +156,31 @@ func (d *daemon) Run() error {
 		log.Info("Temperature RPC service will be initialized with device manager")
 	} else {
 		log.Info("Temperature RPC service disabled")
+	}
+
+	// Start Prometheus Metrics Exporter (auto-enabled with device manager)
+	if options.Flags.EnableMetricsExporter {
+		log.Info("Starting Prometheus metrics exporter")
+
+		httpAddr := fmt.Sprintf(":%d", options.Flags.MetricsExporterPort)
+		exporter := metrics.NewExporter(
+			d.ctx,
+			log.WithName("metrics"),
+			mc,
+			options.Flags.MetricsExporterTopic,
+			httpAddr,
+		)
+
+		if err := exporter.Start(); err != nil {
+			log.Error(err, "Failed to start metrics exporter")
+			return err
+		}
+
+		log.Info("Prometheus metrics exporter started",
+			"http_addr", httpAddr,
+			"mqtt_topic", options.Flags.MetricsExporterTopic)
+	} else {
+		log.Info("Prometheus metrics exporter disabled")
 	}
 
 	if !disableDeviceManager {

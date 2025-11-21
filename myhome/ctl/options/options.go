@@ -53,6 +53,9 @@ var Flags struct {
 	EnableGen1Proxy             bool
 	EnableOccupancyService      bool
 	EnableTemperatureService    bool
+	EnableMetricsExporter       bool
+	MetricsExporterPort         int
+	MetricsExporterTopic        string
 }
 
 var Via types.Channel

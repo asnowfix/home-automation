@@ -40,8 +40,8 @@ func init() {
 	FollowCmd.PersistentFlags().BoolVarP(&flags.BleShellyMotion, BLE_SHELLY_MOTION, "b", false, "MAC address of BLE Shelly Motion device")
 	UnfollowCmd.PersistentFlags().BoolVarP(&flags.BleShellyMotion, BLE_SHELLY_MOTION, "b", false, "MAC address of BLE Shelly Motion device")
 
-	FollowCmd.PersistentFlags().BoolVarP(&flags.Device, DEVICE, "d", false, "Device name / IP address / ID")
-	UnfollowCmd.PersistentFlags().BoolVarP(&flags.Device, DEVICE, "d", false, "Device name / IP address / ID")
+	FollowCmd.PersistentFlags().BoolVar(&flags.Device, DEVICE, false, "Device name / IP address / ID")
+	UnfollowCmd.PersistentFlags().BoolVar(&flags.Device, DEVICE, false, "Device name / IP address / ID")
 }
 
 var FollowCmd = &cobra.Command{

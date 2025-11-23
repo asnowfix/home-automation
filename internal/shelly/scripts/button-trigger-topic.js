@@ -3,7 +3,7 @@
 print("Loading button-trigger-topic.js")
 
 let CONFIG = {
-    topic: "groups/pool-house-lights",
+    topic: "some-listen-to-topic",
     longPushThreshold: 1500,
     detectLongPush: false,
     down_event: "btn_down",

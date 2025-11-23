@@ -18,18 +18,6 @@ type DeviceRegistry interface {
 	GetAllDevices(ctx context.Context) ([]*myhome.Device, error)
 }
 
-type GroupRegistry interface {
-	Flush() error
-	GetAllGroups() (*myhome.Groups, error)
-	GetGroupInfo(name string) (*myhome.GroupInfo, error)
-	GetDevicesByGroupName(name string) ([]*myhome.Device, error)
-	GetDeviceGroups(manufacturer, id string) (*myhome.Groups, error)
-	AddGroup(group *myhome.GroupInfo) (*myhome.GroupInfo, error)
-	RemoveGroup(name string) error
-	AddDeviceToGroup(groupDevice *myhome.GroupDevice) error
-	RemoveDeviceFromGroup(groupDevice *myhome.GroupDevice) error
-}
-
 type Manager interface {
 	UpdateChannel() chan<- *myhome.Device
 }

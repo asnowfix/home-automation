@@ -2,12 +2,13 @@
 
 ## Abstract
 
-MyHome Penates is the home automation system I develop & use to control my house.  This is a hobby project to learn Go.  I use mostly using (very cool) Shelly devices, from Alterco Robotics.
+MyHome Penates is the home automation system I develop & use to control my own house (and learn Go).  I use mostly (very cool) Shelly devices, from Alterco Robotics.
 
 ## Table of Contents <!-- omit in toc -->
 
 - [MyHome - Penates](#myhome---penates)
   - [Abstract](#abstract)
+  - [Design Philosophy](#design-philosophy)
   - [Releases](#releases)
   - [Development Tools](#development-tools)
     - [Shelly Device Data Collector](#shelly-device-data-collector)
@@ -26,12 +27,6 @@ MyHome Penates is the home automation system I develop & use to control my house
     - [Issue Labels](#issue-labels)
       - [Standard GitHub Labels](#standard-github-labels)
       - [Project-Specific Labels](#project-specific-labels)
-  - [Groups of devices](#groups-of-devices)
-    - [Create a group](#create-a-group)
-    - [Add a devices to a group](#add-a-devices-to-a-group)
-    - [List groups](#list-groups)
-    - [Show a group](#show-a-group)
-    - [Delete a group](#delete-a-group)
   - [Temperature Management](#temperature-management)
     - [Set Room Temperature Configuration](#set-room-temperature-configuration)
     - [Get Room Configuration](#get-room-configuration)
@@ -73,12 +68,25 @@ MyHome Penates is the home automation system I develop & use to control my house
     - [Gen 2](#gen-2)
       - [Pro1 - Gen 2](#pro1---gen-2)
       - [Plus1 - Gen2](#plus1---gen2)
+    - [Gen 1](#gen-1)
       - [HT - Gen1](#ht---gen1)
   - [Red-by-SFR Box Notes](#red-by-sfr-box-notes)
     - [Main API](#main-api)
     - [UPnP](#upnp)
     - [Port reserved by SFR-Box](#port-reserved-by-sfr-box)
   - [References](#references)
+
+## Design Philosophy
+
+MyHome is designed with the following core principles:
+
+- **Cloud-Independent**: The system operates entirely on your local network without requiring cloud connectivity or external services.
+- **Decentralized Architecture**: There is no central device manager or controller that maintains persistent state about your devices. The system relies entirely on discovering and interacting with devices that are currently present on the network.
+- **Minimal Infrastructure**: The only required central component is an MQTT broker, which serves as a lightweight message bus for device communication.
+- **Ephemeral Discovery**: Device management has no "stickiness" - devices are discovered dynamically when needed, and the system adapts to devices joining or leaving the network without maintaining a persistent registry.
+- **Local Control**: All automation logic runs locally, ensuring your home continues to function even without internet access.
+
+This architecture ensures resilience, privacy, and independence from third-party services while keeping the system simple and maintainable.  At the same time, it does not disable any device features that require cloud connectivity & hence can be used along with the device manufacturers application (such as Shelly app & Cloud Services).
 
 ## Releases
 
@@ -230,88 +238,6 @@ When reporting issues, please use the appropriate label from the following categ
 | `device-feature` | Device-specific features and improvements |
 | `monitoring` | Monitoring and metrics features |
 | `networking` | Networking and device discovery features |
-
-## Groups of devices
-
-Groups are collections of devices that can be controlled together.
-
-### Create a group
-
-```shell
-group create <group-name> [key1=val1] [key2=val2] ...
-```
-
-**Examples:**
-
-```shell
-# Create a simple group
-group create radiateurs
-
-# Create a group with normally-closed relays
-group create radiateurs normally-closed=true
-
-# Create a group with multiple KVS pairs
-group create lights auto-off=300 brightness=80
-```
-
-The optional key-value pairs (e.g., `normally-closed=true`) are stored in the group's KVS and automatically applied to all devices when they are added to the group. For example, `normally-closed=true` indicates that Shelly switch/relay devices controlling the _radiateurs_ need to be turned on (`true`) for the _radiateurs_ to be turned off (`false`).
-
-### Add a devices to a group
-
-By device name:
-
-```shell
-group add radiateurs radiateur-bureau
-```
-
-...or by IP:
-
-```shell
-group add radiateurs 192.168.1.37
-```
-
-...or by device Id:
-
-```shell
-group add radiateurs shelly1minig3-84fce63bf464
-```
-
-### List groups
-
-```shell
-group list
-```
-```yaml
-groups:
-    - id: 2
-      name: radiateurs
-      kvs: '{"normally-closed":"true"}'
-```
-
-### Show a group
-
-```shell
-group show radiateurs
-```
-```yaml
-groupinfo:
-    id: 2
-    name: radiateurs
-    kvs: '{"normally-closed":"true"}'
-devices:
-    - deviceidentifier:
-        manufacturer: Shelly
-        id_: shellyplus1-b8d61a85a970
-      mac: 07:c0:fa:d4:0f:39:03:de:f4
-      host: 192.168.1.78
-      name_: radiateur-bureau
-```
-
-### Delete a group
-
-```shell
-group delete radiateurs
-```
 
 ## Temperature Management
 
@@ -1122,6 +1048,8 @@ $ curl -s http://ShellyPlus1-4855199C9888.local/rpc/Switch.GetConfig?id=0 | jq
   "auto_off_delay": 1
 }
 ```
+
+### Gen 1
 
 #### HT - Gen1
 

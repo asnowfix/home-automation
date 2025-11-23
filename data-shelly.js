@@ -1046,7 +1046,6 @@ var debug_log = {}
 // onStatusUpdate eventData \"address\": \"e8:e0:7e:a6:0c:6f\"" script=1 ts=99481.287
 // onStatusUpdate eventData script=1 ts=99481.288
 // onStatusUpdate eventData Info: \"New status update\"" script=1 ts=99481.288
-// onStatusUpdate eventData Received message on topic:  groups/pool-house-lights message:  {\"op\":\"on\",\"keep\":false}" script=2 ts=99481.362
 // onStatusUpdate eventData shelly_ejs_rpc.cpp:41   Shelly.call Switch.Set {\"id\":0,\"on\":true}" ts=99481.363
 // onStatusUpdate eventData shelly_ejs_timer.cpp:43 Timer 0 handle not found" ts=99481.364
 // onStatusUpdate eventData Turn on & auto-off" script=2 ts=99481.364

@@ -12,7 +12,6 @@ require (
 	myhome v0.0.0-00010101000000-000000000000
 	myhome/ctl/follow v0.0.0-00010101000000-000000000000
 	myhome/ctl/forget v0.0.0-00010101000000-000000000000
-	myhome/ctl/group v0.0.0-00010101000000-000000000000
 	myhome/ctl/list v0.0.0-00010101000000-000000000000
 	myhome/ctl/mqtt v0.0.0-00010101000000-000000000000
 	myhome/ctl/open v0.0.0-00010101000000-000000000000
@@ -56,8 +55,6 @@ require (
 replace myhome/ctl/follow => ./follow
 
 replace myhome/ctl/forget => ./forget
-
-replace myhome/ctl/group => ./group
 
 replace myhome/ctl/list => ./list
 

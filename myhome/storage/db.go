@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"myhome"
@@ -51,21 +50,6 @@ func (s *DeviceStorage) createTable() error {
         config_revision INTEGER,  -- New column for config revision
         config TEXT,
         PRIMARY KEY (manufacturer, id)
-    );
-
-    CREATE TABLE IF NOT EXISTS groups (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT UNIQUE NOT NULL,
-        kvs TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS groupsMember (
-        manufacturer TEXT NOT NULL,
-        id TEXT NOT NULL,
-        group_id INTEGER NOT NULL,
-        FOREIGN KEY (manufacturer, id) REFERENCES devices(manufacturer, id) ON DELETE CASCADE,
-        FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE RESTRICT,
-        PRIMARY KEY (manufacturer, id, group_id)
     );`
 
 	_, err := s.db.Exec(schema)
@@ -73,6 +57,18 @@ func (s *DeviceStorage) createTable() error {
 		s.log.Error(err, "Failed to create database schema")
 		return err
 	}
+
+	// Drop group tables if they exist (migration from previous version)
+	migrationSchema := `
+    DROP TABLE IF EXISTS groupsMember;
+    DROP TABLE IF EXISTS groups;`
+
+	_, err = s.db.Exec(migrationSchema)
+	if err != nil {
+		s.log.Error(err, "Failed to drop group tables during migration")
+		// Don't return error - tables might not exist
+	}
+
 	return nil
 }
 
@@ -244,159 +240,6 @@ func (s *DeviceStorage) ForgetDevice(ctx context.Context, identifier string) err
 		s.log.Error(err, "Failed to delete device", "identifier", identifier)
 	}
 	s.log.Info("Device deleted", "identifier", identifier)
-	return err
-}
-
-// GetAllGroups retrieves all groups from the database.
-func (s *DeviceStorage) GetAllGroups() (*myhome.Groups, error) {
-	s.log.Info("Retrieving all groups")
-	var groups myhome.Groups
-	query := "SELECT id, name, kvs FROM groups"
-	err := s.db.Select(&groups.Groups, query)
-	if err != nil {
-		s.log.Error(err, "Failed to retrieve groups")
-		return nil, err
-	}
-	return &groups, nil
-}
-
-// GetGroupInfo retrieves information about a specific group.
-func (s *DeviceStorage) GetGroupInfo(name string) (*myhome.GroupInfo, error) {
-	log := s.log.WithValues("group", name)
-	log.Info("Retrieving group info")
-	var gi myhome.GroupInfo
-
-	query := "SELECT id, name, kvs FROM groups WHERE name = $1"
-	err := s.db.Get(&gi, query, name)
-	if err != nil {
-		log.Error(err, "Failed to get group info")
-		return nil, err
-	}
-
-	return &gi, nil
-}
-
-// GetDevicesByGroupName retrieves the devices for a specific group.
-func (s *DeviceStorage) GetDevicesByGroupName(name string) ([]*myhome.Device, error) {
-	log := s.log.WithValues("group", name)
-	log.Info("Retrieving devices for group")
-	devices := make([]Device, 0)
-
-	// First, get the group ID for the given group name
-	var groupID int
-	err := s.db.Get(&groupID, "SELECT id FROM groups WHERE name = $1", name)
-	if err != nil {
-		log.Error(err, "Did not find a group with", "name", name)
-		return nil, err
-	}
-
-	// Now, query devices that have this group ID
-	query := "SELECT d.* FROM devices d INNER JOIN groupsMember gm ON d.manufacturer = gm.manufacturer AND d.id = gm.id WHERE gm.group_id = $1"
-	err = s.db.Select(&devices, query, groupID)
-	if err != nil {
-		log.Error(err, "Failed to retrieve devices for group", "name", name)
-		return nil, err
-	}
-
-	return unmarshallDevices(log, devices)
-}
-
-// GetDeviceGroups retrieves the groups for a specific device.
-func (s *DeviceStorage) GetDeviceGroups(manufacturer, id string) (*myhome.Groups, error) {
-	var groups myhome.Groups
-	query := "SELECT g.* FROM groups g INNER JOIN groupsMember gm ON g.id = gm.group_id WHERE gm.manufacturer = $1 AND gm.id = $2"
-	err := s.db.Select(&groups.Groups, query, manufacturer, id)
-	if err != nil {
-		s.log.Error(err, "Failed to retrieve groups for device", "manufacturer", manufacturer, "id", id)
-		return nil, err
-	}
-	return &groups, nil
-}
-
-// AddGroup adds a new group to the database.
-// If the group already exists and the provided KVS is empty, the existing KVS is preserved.
-// If the group already exists and the provided KVS is non-empty, it will be updated.
-func (s *DeviceStorage) AddGroup(group *myhome.GroupInfo) (*myhome.GroupInfo, error) {
-
-	// Insert or update group atomically to avoid race conditions
-	var result sql.Result
-	var id int64
-	var err error
-
-	// Only update kvs if it's explicitly provided (non-empty)
-	// This prevents device refresh/discovery from clearing group KVS
-	var query string
-	if group.KVS != "" {
-		// Explicit KVS provided - insert or update
-		query = `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)
-			ON CONFLICT(name) DO UPDATE SET kvs = excluded.kvs`
-	} else {
-		// No KVS provided - insert only, don't update existing
-		query = `INSERT INTO groups (name, kvs) VALUES (:name, :kvs)
-			ON CONFLICT(name) DO NOTHING`
-	}
-
-	result, err = s.db.NamedExec(query, map[string]interface{}{
-		"name": group.Name,
-		"kvs":  group.KVS,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	// If group already existed, fetch it to get the ID and existing KVS
-	if group.KVS == "" {
-		existing, err := s.GetGroupInfo(group.Name)
-		if err == nil && existing != nil {
-			return existing, nil
-		}
-	}
-
-	id, err = result.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-	group.ID = int(id)
-	return group, nil
-}
-
-// RemoveGroup removes a group from the database by its name.
-// RemoveGroup removes a group from the database by its name.
-func (s *DeviceStorage) RemoveGroup(name string) error {
-	log := s.log.WithValues("name", name)
-	log.Info("Removing group", "name", name)
-
-	// Check if the group exists
-	var exists bool
-	err := s.db.Get(&exists, "SELECT EXISTS(SELECT 1 FROM groups WHERE name = $1)", name)
-	if err != nil {
-		log.Error(err, "Failed to check if group exists", "name", name)
-		return err
-	}
-	if !exists {
-		log.Info("Group does not exist", "name", name)
-		return errors.New("group does not exist")
-	}
-
-	// Proceed to delete the group
-	query := `DELETE FROM groups WHERE name = :name`
-	_, err = s.db.NamedExec(query, map[string]interface{}{
-		"name": name,
-	})
-	return err
-}
-
-// AddDeviceToGroup adds a device to a group.
-func (s *DeviceStorage) AddDeviceToGroup(groupDevice *myhome.GroupDevice) error {
-	query := `INSERT INTO groupsMember (manufacturer, id, group_id) VALUES (:manufacturer, :id, (SELECT id FROM groups WHERE name = :group))`
-	_, err := s.db.NamedExec(query, groupDevice)
-	return err
-}
-
-// RemoveDeviceFromGroup removes a device from a group.
-func (s *DeviceStorage) RemoveDeviceFromGroup(groupDevice *myhome.GroupDevice) error {
-	query := `DELETE FROM groupsMember WHERE manufacturer = $1 AND id = $2 AND group_id = (SELECT id FROM groups WHERE name = $3)`
-	_, err := s.db.Exec(query, groupDevice.Manufacturer, groupDevice.Id, groupDevice.Group)
 	return err
 }
 

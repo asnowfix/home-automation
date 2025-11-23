@@ -14,7 +14,6 @@ use (
 	./myhome/ctl
 	./myhome/ctl/follow
 	./myhome/ctl/forget
-	./myhome/ctl/group
 	./myhome/ctl/list
 	./myhome/ctl/mqtt
 	./myhome/ctl/open
@@ -27,7 +26,6 @@ use (
 	./myhome/daemon/watch
 	./myhome/devices
 	./myhome/devices/impl
-	./myhome/groups
 	./myhome/occupancy
 	./myhome/mqtt
 	./myhome/storage

@@ -460,7 +460,7 @@ Some useful SQLite 3 commands:
 
 ```bash
 sqlite3 myhome/myhome.db .dump
-sqlite3 myhome.db "DROP TABLE IF EXISTS groups;"
+sqlite3 myhome.db "DROP TABLE IF EXISTS devices;"
 ```
 
 ```bashrc

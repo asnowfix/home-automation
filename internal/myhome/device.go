@@ -2,7 +2,6 @@ package myhome
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"myhome/sfr"
 	"mynet"
@@ -123,56 +122,6 @@ func (d *Device) WithHost(host string) *Device {
 func (d *Device) WithName(name string) *Device {
 	d.Name_ = name
 	return d
-}
-
-type GroupInfo struct {
-	ID   int               `db:"id" json:"id"`
-	Name string            `db:"name" json:"name"`
-	KVS  string            `db:"kvs" json:"kvs"`
-	kvs  map[string]string `db:"-" json:"-"`
-}
-
-func (g *GroupInfo) WithKeyValue(key, value string) *GroupInfo {
-	if len(key) == 0 {
-		return g
-	}
-	if len(g.kvs) == 0 {
-		g.kvs = make(map[string]string)
-		json.Unmarshal([]byte(g.KVS), &g.kvs)
-	}
-	if len(value) == 0 {
-		delete(g.kvs, key)
-	} else {
-		g.kvs[key] = value
-	}
-	buf, err := json.Marshal(g.kvs)
-	if err == nil {
-		g.KVS = string(buf)
-	}
-	return g
-}
-
-func (g *GroupInfo) KeyValues() map[string]string {
-	if len(g.kvs) == 0 {
-		g.kvs = make(map[string]string)
-		json.Unmarshal([]byte(g.KVS), &g.kvs)
-	}
-	return g.kvs
-}
-
-type Groups struct {
-	Groups []GroupInfo `json:"groups"`
-}
-
-type Group struct {
-	GroupInfo
-	Devices []DeviceSummary `json:"devices"`
-}
-
-type GroupDevice struct {
-	Manufacturer string `db:"manufacturer" json:"manufacturer"`
-	Id           string `db:"id" json:"id"`
-	Group        string `db:"group" json:"group"`
 }
 
 func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Device) (*Device, error) {

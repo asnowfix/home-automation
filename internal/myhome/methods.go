@@ -96,54 +96,6 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return nil
 		},
 	},
-	GroupList: {
-		NewParams: func() any {
-			return nil
-		},
-		NewResult: func() any {
-			return &Groups{}
-		},
-	},
-	GroupCreate: {
-		NewParams: func() any {
-			return &GroupInfo{}
-		},
-		NewResult: func() any {
-			return nil
-		},
-	},
-	GroupDelete: {
-		NewParams: func() any {
-			return ""
-		},
-		NewResult: func() any {
-			return nil
-		},
-	},
-	GroupShow: {
-		NewParams: func() any {
-			return ""
-		},
-		NewResult: func() any {
-			return &Group{}
-		},
-	},
-	GroupAddDevice: {
-		NewParams: func() any {
-			return &GroupDevice{}
-		},
-		NewResult: func() any {
-			return nil
-		},
-	},
-	GroupRemoveDevice: {
-		NewParams: func() any {
-			return &GroupDevice{}
-		},
-		NewResult: func() any {
-			return nil
-		},
-	},
 	TemperatureGet: {
 		NewParams: func() any {
 			return &TemperatureGetParams{}

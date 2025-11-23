@@ -7,7 +7,6 @@ import (
 	"myhome/ctl/options"
 	"myhome/daemon/watch"
 	mhd "myhome/devices"
-	"myhome/groups"
 	"myhome/model"
 	"myhome/mqtt"
 	"myhome/sfr"
@@ -17,8 +16,6 @@ import (
 	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/gen1"
-	"pkg/shelly/kvs"
-	"pkg/shelly/types"
 	"reflect"
 	"strings"
 	"time"
@@ -29,7 +26,6 @@ import (
 
 type DeviceManager struct {
 	dr         mhd.DeviceRegistry
-	gr         mhd.GroupRegistry
 	update     chan *myhome.Device
 	refreshed  chan *myhome.Device
 	cancel     context.CancelFunc
@@ -47,7 +43,6 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 	}
 	return &DeviceManager{
 		dr:         mhd.NewCache(ctx, s),
-		gr:         s,
 		log:        log.WithName("DeviceManager"),
 		update:     make(chan *myhome.Device, 64), // TODO configurable buffer size
 		refreshed:  make(chan *myhome.Device, 64), // TODO configurable buffer size
@@ -102,18 +97,8 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			devices = append(devices, device.DeviceSummary)
 			return &devices, nil
 		}
-		dm.log.Info("Failed to get device by any identifier: trying group", "identifier", name)
 
-		gd, err := dm.gr.GetDevicesByGroupName(name)
-		if err == nil {
-			dm.log.Info("Found devices by group name", "group", name)
-			for _, d := range gd {
-				devices = append(devices, d)
-			}
-			return &devices, nil
-		}
-
-		return nil, fmt.Errorf("failed to get device by group or any identifier: %v", err)
+		return nil, fmt.Errorf("failed to get device by identifier: %v", err)
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceShow, func(in any) (any, error) {
 		return dm.GetDeviceByAny(ctx, in.(string))
@@ -140,20 +125,6 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		modified, err := device.Refresh(ctx)
 		if err != nil {
 			return nil, err
-		}
-
-		// Sync groups like refreshOneDevice
-		grps, err := groups.GetDeviceGroups(ctx, device.Impl().(*shelly.Device))
-		if err == nil && len(grps) > 0 {
-			for _, group := range grps {
-				gi, gerr := dm.gr.AddGroup(&myhome.GroupInfo{Name: group})
-				if gerr == nil {
-					_ = dm.gr.AddDeviceToGroup(&myhome.GroupDevice{Group: gi.Name, Manufacturer: device.Manufacturer(), Id: device.Id()})
-					for k, v := range gi.KeyValues() {
-						kvs.SetKeyValue(ctx, dm.log, types.ChannelDefault, device.Impl().(*shelly.Device), k, v)
-					}
-				}
-			}
 		}
 
 		if modified {
@@ -187,46 +158,6 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.GroupList, func(in any) (any, error) {
-		return dm.gr.GetAllGroups()
-	})
-	myhome.RegisterMethodHandler(myhome.GroupCreate, func(in any) (any, error) {
-		return dm.gr.AddGroup(in.(*myhome.GroupInfo))
-	})
-	myhome.RegisterMethodHandler(myhome.GroupDelete, func(in any) (any, error) {
-		return nil, dm.gr.RemoveGroup(in.(string))
-	})
-	myhome.RegisterMethodHandler(myhome.GroupShow, func(in any) (any, error) {
-		name := in.(string)
-
-		gi, err := dm.gr.GetGroupInfo(in.(string))
-		if err != nil {
-			dm.log.Error(err, "Failed to get group info", "group", name)
-			return nil, err
-		}
-
-		gd, err := dm.gr.GetDevicesByGroupName(name)
-		if err != nil {
-			dm.log.Error(err, "Failed to get devices for group", "group", name)
-			return nil, err
-		}
-
-		g := myhome.Group{
-			GroupInfo: *gi,
-			Devices:   make([]myhome.DeviceSummary, 0),
-		}
-		for _, d := range gd {
-			g.Devices = append(g.Devices, d.DeviceSummary)
-		}
-
-		return &g, nil
-	})
-	myhome.RegisterMethodHandler(myhome.GroupAddDevice, func(in any) (any, error) {
-		return nil, dm.gr.AddDeviceToGroup(in.(*myhome.GroupDevice))
-	})
-	myhome.RegisterMethodHandler(myhome.GroupRemoveDevice, func(in any) (any, error) {
-		return nil, dm.gr.RemoveDeviceFromGroup(in.(*myhome.GroupDevice))
-	})
 
 	ctx, dm.cancel = context.WithCancel(ctx)
 
@@ -247,7 +178,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	dm.log.Info("MQTT message cache started")
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
-	go deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")), dm.update, dm.gr, dm.router, dm.refreshed)
+	go deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")), dm.update, dm.router, dm.refreshed)
 	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
@@ -274,7 +205,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	return nil
 }
 
-func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, gr mhd.GroupRegistry, router model.Router, refreshed chan<- *myhome.Device) {
+func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, router model.Router, refreshed chan<- *myhome.Device) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
@@ -288,12 +219,12 @@ func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, gr mhd
 
 		case device := <-update:
 			log.Info("Updater loop: processing", "device", device.DeviceSummary)
-			go refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(device.Name())), device, gr, router, refreshed)
+			go refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(device.Name())), device, router, refreshed)
 		}
 	}
 }
 
-func refreshOneDevice(ctx context.Context, device *myhome.Device, gr mhd.GroupRegistry, router model.Router, refreshed chan<- *myhome.Device) {
+func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.Router, refreshed chan<- *myhome.Device) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
@@ -331,37 +262,6 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, gr mhd.GroupRe
 
 	if updated {
 		modified = true
-	}
-
-	groups, err := groups.GetDeviceGroups(ctx, device.Impl().(*shelly.Device))
-	if err != nil {
-		log.Error(err, "Failed to get device groups", "device", device.DeviceSummary)
-		return
-	}
-	if len(groups) > 0 {
-		log.Info("Device claims to be in groups", "device", device.DeviceSummary, "groups", groups)
-
-		for _, group := range groups {
-			gi, err := gr.AddGroup(&myhome.GroupInfo{
-				Name: group,
-			})
-			if err != nil {
-				log.Error(err, "Failed to add group", "group", group)
-			}
-			err = gr.AddDeviceToGroup(&myhome.GroupDevice{
-				Group:        gi.Name,
-				Manufacturer: device.Manufacturer(),
-				Id:           device.Id(),
-			})
-			if err != nil {
-				log.Error(err, "Failed to add device to group", "device", device.DeviceSummary, "group", group)
-				continue
-			}
-			// Add GroupInfo Key/Values to device
-			for k, v := range gi.KeyValues() {
-				kvs.SetKeyValue(ctx, log, types.ChannelDefault, device.Impl().(*shelly.Device), k, v)
-			}
-		}
 	}
 
 	if !modified {
@@ -448,11 +348,6 @@ func (dm *DeviceManager) Flush() error {
 		dm.log.Error(err, "Failed to flush device storage")
 		return err
 	}
-	err = dm.gr.Flush()
-	if err != nil {
-		dm.log.Error(err, "Failed to flush group storage")
-		return err
-	}
 	return nil
 }
 
@@ -493,16 +388,6 @@ func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwr
 		sd, ok := d.Impl().(*shelly.Device)
 		if !ok {
 			return fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(d.Impl()), d)
-		}
-		groups, err := dm.gr.GetDeviceGroups(d.Manufacturer(), d.Id())
-		if err != nil {
-			return err
-		}
-		for _, group := range groups.Groups {
-			_, err := kvs.SetKeyValue(ctx, dm.log, types.ChannelMqtt, sd, fmt.Sprintf("group/%s", group.Name), "true")
-			if err != nil {
-				return err
-			}
 		}
 		d.WithImpl(sd)
 	}

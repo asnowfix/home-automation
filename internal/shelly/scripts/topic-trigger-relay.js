@@ -1,9 +1,9 @@
 // topic-trigger-relay.js
-// Wait for MQTT messages on the topic 'groups/pool-house-lights' and acts on the relay accordingly.
+// Wait for MQTT messages on the configured topic and acts on the relay accordingly.
 
 let CONFIG = {
     autoOffTimeout: 300,
-    topic: "groups/pool-house-lights",
+    topic: "some-listen-to-topic",
 }
 
 let VARS = {

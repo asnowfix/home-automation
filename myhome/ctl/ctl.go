@@ -8,7 +8,6 @@ import (
 	"myhome/ctl/config"
 	"myhome/ctl/follow"
 	"myhome/ctl/forget"
-	"myhome/ctl/group"
 	"myhome/ctl/heater"
 	"myhome/ctl/list"
 	"myhome/ctl/mqtt"
@@ -123,7 +122,6 @@ func init() {
 	Cmd.AddCommand(sswitch.Cmd)
 	Cmd.AddCommand(sfr.Cmd)
 	Cmd.AddCommand(shelly.Cmd)
-	Cmd.AddCommand(group.Cmd)
 	Cmd.AddCommand(follow.FollowCmd)
 	Cmd.AddCommand(follow.UnfollowCmd)
 	Cmd.AddCommand(temperature.Cmd)

@@ -8,6 +8,8 @@ const SCRIPT_PREFIX = "[" + SCRIPT_NAME + "] ";
 const DEFAULT_COOLING_RATE = 1.0;
 
 // Configuration schema with type information
+// IMPORTANT: This schema is synchronized with heaterKVSKeys in myhome/ctl/heater/main.go
+// Any changes here must be reflected in the Go code and validated by TestHeaterKVSKeysMatchJSSchema
 var CONFIG_SCHEMA = {
   enableLogging: {
     description: "Enable logging when true",
@@ -1254,24 +1256,28 @@ function onConfigLoaded(updated) {
 }
 
 // === SCHEDULED EXECUTION ===
-log("Script starting...");
+// Only run initialization code when running on a Shelly device
+// This allows the script to be parsed in other contexts (e.g., tests) without executing
+if (typeof Shelly !== "undefined") {
+  log("Script starting...");
 
-// Initialize URLs (occupancy service)
-initUrls();
+  // Initialize URLs (occupancy service)
+  initUrls();
 
-scheduleLearningTimers();
-loadConfig(onConfigLoaded);
-fetchForecast();
+  scheduleLearningTimers();
+  loadConfig(onConfigLoaded);
+  fetchForecast();
 
-Shelly.addStatusHandler(function(status) {
-  // Detect KVS updates and reload configuration
-  if (status && status.component === "sys" && status.delta && ("kvs_rev" in status.delta)) {
-    log('KVS updated (rev ' + status.delta.kvs_rev + '), reloading configuration and re-fetching temperatures');
-    loadConfig(onConfigLoaded);
-  } else {
-    log('Script status:', JSON.stringify(status));
-  }
-});
+  Shelly.addStatusHandler(function(status) {
+    // Detect KVS updates and reload configuration
+    if (status && status.component === "sys" && status.delta && ("kvs_rev" in status.delta)) {
+      log('KVS updated (rev ' + status.delta.kvs_rev + '), reloading configuration and re-fetching temperatures');
+      loadConfig(onConfigLoaded);
+    } else {
+      log('Script status:', JSON.stringify(status));
+    }
+  });
 
-log("Script started");
+  log("Script started");
+}
 

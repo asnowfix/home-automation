@@ -792,13 +792,19 @@ KalmanFilter.prototype.lastMeasurement = function() {
 // Initialize Kalman filter instance
 var kalman = new KalmanFilter();
 
-// === MQTT TEMPERATURE HANDLING ===
-// Detect if topic is Gen1 or Gen2 format and extract temperature
+/**
+ * Parse temperature from MQTT message
+ * @param {string} topic - MQTT topic
+ * @param {string} message - MQTT message payload
+ * @returns {number|null} Parsed temperature or null if not found
+ */
 function parseTemperatureFromMqtt(topic, message) {
   var temp = null;
   log("parseTemperatureFromMqtt", topic, message);
   try {
-    // Gen1 format: shellies/<id>/sensor/temperature with plain number payload
+    // H&T Gen1 format, via gen1 HTTP-to-MQTT proxy
+    // topic: shellies/<id>/sensor/temperature
+    // message: plain number payload
     if (topic.indexOf('shellies/') === 0 && topic.indexOf('/sensor/temperature') > 0) {
       temp = parseFloat(message);
       if (!isNaN(temp)) {
@@ -806,7 +812,19 @@ function parseTemperatureFromMqtt(topic, message) {
         return temp;
       }
     }
+    // H&T BLU Gen3 format, via `blu-publisher.js` script
+    // topic: shelly-blu/events/7c:c6:b6:7f:48:ed
+    // message: {"encryption":false,"BTHome_version":2,"pid":149,"battery":100,"humidity":52,"temperature":17,"rssi":-92,"address":"7c:c6:b6:7f:48:ed"}
+    if (topic.indexOf('shelly-blu/events/') === 0) {
+      var data = JSON.parse(message);
+      if (data.temperature) {
+        log('Parsed BLU Gen3 temperature:', data.temperature, 'from topic:', topic);
+        return data.temperature;
+      }
+    }
     // Gen2 format: <id>/events/rpc with JSON payload
+    // topic: <id>/events/rpc
+    // message: {"method":"NotifyStatus","params":{"temperature:0":{"tC":22.5}}}
     else if (topic.indexOf('/events/rpc') > 0) {
       var data = JSON.parse(message);
       // Look for temperature in NotifyStatus params

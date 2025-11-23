@@ -153,6 +153,11 @@ function randomId(n) {
 
 // === STATE (DYNAMIC RUNTIME VALUES) ===
 var STATE = {
+  // Device info (cached at startup)
+  deviceInfo: null,
+  deviceId: null,
+  deviceName: null,
+  
   // Forecast cache
   forecastUrl: null,
   cachedForecast: null,
@@ -483,9 +488,13 @@ function scheduleLearningTimers() {
   scheduleAt(CONFIG.cheapStartHour, onCheapWindowStart);
 }
 
-function initUrls() {
-  log('initUrls');
-  // Try to get MQTT status synchronously
+function initDeviceInfo() {
+  log('initDeviceInfo');
+  
+  // Cache device info at startup (call getDeviceInfo only once)
+  STATE.deviceInfo = Shelly.getDeviceInfo();
+  
+  // Get MQTT status synchronously
   var cfg = Shelly.getComponentConfig('mqtt');
   if (cfg && typeof cfg === 'object') {
     if ("client_id" in cfg && typeof cfg.client_id === 'string') {
@@ -493,9 +502,8 @@ function initUrls() {
         log("client_id:", cfg.client_id);
         STATE.clientId = cfg.client_id;
       } else {
-        var info = Shelly.getDeviceInfo();
-        log("client_id(device_id):", info.id);
-        STATE.clientId = info.id;
+        log("client_id(device_id):", STATE.deviceInfo.id);
+        STATE.clientId = STATE.deviceInfo.id;
       }
     }
     if ("server" in cfg && typeof cfg.server === 'string') {
@@ -507,6 +515,11 @@ function initUrls() {
       log('MQTT server host:', host);
     }
   }
+  
+  STATE.deviceName = STATE.deviceInfo.name || STATE.deviceInfo.id || 'unknown';
+  STATE.deviceId = STATE.deviceInfo.id || 'unknown';
+  
+  log('Device ID:', STATE.deviceId, 'Device Name:', STATE.deviceName);
 }
 
 // === PRE-HEATING LOGIC ===
@@ -1261,8 +1274,8 @@ function onConfigLoaded(updated) {
 if (typeof Shelly !== "undefined") {
   log("Script starting...");
 
-  // Initialize URLs (occupancy service)
-  initUrls();
+  // Initialize device info (cache device info at startup)
+  initDeviceInfo();
 
   scheduleLearningTimers();
   loadConfig(onConfigLoaded);
@@ -1276,6 +1289,67 @@ if (typeof Shelly !== "undefined") {
     } else {
       log('Script status:', JSON.stringify(status));
     }
+  });
+
+  // Subscribe to discovery queries
+  MQTT.subscribe('myhome/heater/discovery/query', function(topic, message) {
+    log('Received discovery query');
+    
+    // Parse the query message
+    var query = null;
+    try {
+      query = JSON.parse(message);
+    } catch (e) {
+      log('Failed to parse discovery query:', message);
+      if (e && false) {}
+      return;
+    }
+    
+    // Check for replyTo property - drop query if missing
+    if (!query || !("replyTo" in query) || typeof query.replyTo !== 'string') {
+      log('Discovery query missing replyTo property, dropping query');
+      return;
+    }
+    
+    var replyToTopic = query.replyTo;
+    log('Will reply to:', replyToTopic);
+    
+    // Use cached device info (no need to call getDeviceInfo again)
+    var deviceId = STATE.deviceId || 'unknown';
+    var deviceName = STATE.deviceName || 'unknown';
+    
+    // Build response with current configuration and state
+    var response = {
+      device_id: deviceId,
+      device_name: deviceName,
+      script_name: SCRIPT_NAME,
+      config: {
+        enableLogging: CONFIG.enableLogging,
+        setpoint: CONFIG.setpoint,
+        minInternalTemp: CONFIG.minInternalTemp,
+        cheapStartHour: CONFIG.cheapStartHour,
+        cheapEndHour: CONFIG.cheapEndHour,
+        pollIntervalMs: CONFIG.pollIntervalMs,
+        preheatHours: CONFIG.preheatHours,
+        normallyClosed: CONFIG.normallyClosed,
+        internalTemperatureTopic: CONFIG.internalTemperatureTopic,
+        externalTemperatureTopic: CONFIG.externalTemperatureTopic,
+        roomId: CONFIG.roomId
+      },
+      state: {
+        heaterOn: STATE.heaterOn,
+        internalTemp: STATE.internalTemp,
+        externalTemp: STATE.externalTemp,
+        currentSetpoint: STATE.currentSetpoint,
+        coolingRate: getCoolingRate(),
+        lastUpdate: new Date().getTime()
+      },
+      timestamp: new Date().getTime() / 1000
+    };
+    
+    // Publish response to the topic specified in replyTo
+    MQTT.publish(replyToTopic, JSON.stringify(response), 0, false);
+    log('Sent discovery response to', replyToTopic, 'with payload:', response);
   });
 
   log("Script started");

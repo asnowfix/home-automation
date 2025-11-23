@@ -23,18 +23,28 @@ type State uint32
 
 type DeviceInfo struct {
 	Product
-	Name                  *string `json:"name,omitempty"`
-	Id                    string  `json:"id"`
-	FirmwareId            string  `json:"fw_id"`
-	Profile               string  `json:"profile,omitempty"`
-	AuthenticationEnabled bool    `json:"auth_en"`
-	AuthenticationDomain  string  `json:"auth_domain,omitempty"`
-	Discoverable          bool    `json:"discoverable,omitempty"`
-	CloudKey              string  `json:"key,omitempty"`
-	Batch                 string  `json:"batch,omitempty"`
-	FirmwareSBits         string  `json:"fw_sbits,omitempty"`
-	Slot                  int     `json:"slot,omitempty"` // Pro2,  PlugSG3, not documented
-	Matter                bool    `json:"matter,omitempty"`
+	Name                  *string     `json:"name,omitempty"`
+	Id                    string      `json:"id"`
+	FirmwareId            string      `json:"fw_id"`
+	Profile               string      `json:"profile,omitempty"`
+	AuthenticationEnabled bool        `json:"auth_en"`
+	AuthenticationDomain  string      `json:"auth_domain,omitempty"`
+	Discoverable          bool        `json:"discoverable,omitempty"`
+	CloudKey              string      `json:"key,omitempty"`
+	Batch                 string      `json:"batch,omitempty"`
+	FirmwareSBits         string      `json:"fw_sbits,omitempty"`
+	Slot                  int         `json:"slot,omitempty"` // Pro2,  PlugSG3, not documented
+	Matter                bool        `json:"matter,omitempty"`
+	BTHome                *BTHomeInfo `json:"bthome,omitempty"` // BTHome BLE Protocol information (for BLU devices)
+}
+
+// BTHomeInfo contains BTHome BLE protocol information for BLU devices
+type BTHomeInfo struct {
+	Version          int               `json:"version"`                     // BTHome protocol version (e.g., 2)
+	Encryption       bool              `json:"encryption"`                  // Whether device uses encryption
+	Capabilities     []string          `json:"capabilities,omitempty"`      // Sensor capabilities (temperature, humidity, motion, etc.)
+	ServiceData      map[string]string `json:"service_data,omitempty"`      // Raw service data (UUID: hex string)
+	ManufacturerData map[string]string `json:"manufacturer_data,omitempty"` // Raw manufacturer data (if present)
 }
 
 type Config struct {

@@ -118,8 +118,13 @@ function setCoolingRate(v) {
 /**
  * Script.storage key: "forecast-url"
  * Stores the Open-Meteo forecast URL string built from detected device location.
+ * @params
  */
 
+/**
+ * Logs a message if logging is enabled.
+ * @returns void
+ */
 function log() {
   if (!CONFIG.enableLogging) return;
   var s = "";

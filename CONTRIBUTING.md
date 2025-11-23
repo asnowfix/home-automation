@@ -1001,6 +1001,202 @@ CREATE INDEX idx_temperature_rooms_updated
     ON temperature_rooms(updated_at);
 ```
 
+## BTHome BLE Protocol
+
+BTHome is an open standard for broadcasting sensor data over Bluetooth Low Energy (BLE), sponsored by Allterco Robotics (manufacturer of Shelly devices). Shelly BLU devices use this protocol to broadcast sensor data.
+
+### Protocol Overview
+
+**UUID**: `0xFCD2` (free to use under BTHome license)  
+**Version**: BTHome v2 (current)  
+**Official Spec**: https://bthome.io/format/
+
+### BLE Advertising Payload Structure
+
+A complete BTHome advertisement consists of three parts:
+
+```
+020106 0B094449592D73656E736F72 0A16D2FC4002C40903BF13
+```
+
+#### 1. Flags (Required)
+
+```
+020106
+```
+
+- `0x02` = Length (2 bytes)
+- `0x01` = AD Type: Flags
+- `0x06` = Flags value (bits: 00000110)
+  - Bit 1: LE General Discoverable Mode
+  - Bit 2: BR/EDR Not Supported
+
+**Always the same for BTHome**: `0x020106`
+
+#### 2. Local Name (Optional)
+
+```
+0B094449592D73656E736F72
+```
+
+- `0x0B` = Length (11 bytes)
+- `0x09` = AD Type: Complete Local Name
+- `0x4449592D73656E736F72` = "DIY-sensor" in ASCII
+
+#### 3. Service Data (Required)
+
+```
+0A16D2FC4002C40903BF13
+```
+
+- `0x0A` = Length (10 bytes)
+- `0x16` = AD Type: Service Data - 16-bit UUID
+- `0xD2FC4002C40903BF13` = BTHome data (see below)
+
+### BTHome Data Format
+
+The service data contains the UUID, device info byte, and measurements:
+
+```
+D2FC 40 02C409 03BF13
+```
+
+#### UUID (2 bytes)
+
+```
+D2FC
+```
+
+- **Reversed byte order**: `0xFCD2` (little-endian)
+- Used by receivers to recognize BTHome messages
+- Free to use for everyone
+
+#### Device Info Byte (1 byte)
+
+```
+40 = 01000000 (binary)
+```
+
+| Bits | Purpose | Values |
+|------|---------|--------|
+| 0 | Encryption flag | 0=No encryption, 1=Encrypted |
+| 1 | Reserved | - |
+| 2 | Trigger-based flag | 0=Regular updates, 1=Event-based |
+| 3-4 | Reserved | - |
+| 5-7 | BTHome version | 010=Version 2 |
+
+**Example**: `0x40` = No encryption, regular updates, BTHome v2
+
+#### Measurements (Variable Length)
+
+Each measurement consists of:
+1. **Object ID** (1 byte): Defines the measurement type
+2. **Value** (variable bytes): Little-endian encoded value
+
+**Example - Temperature**: `02C409`
+- `0x02` = Temperature object ID
+- `0xC409` = 2500 (little-endian sint16) × 0.01 = **25.00°C**
+
+**Example - Humidity**: `03BF13`
+- `0x03` = Humidity object ID
+- `0xBF13` = 5055 (little-endian uint16) × 0.01 = **50.55%**
+
+### Sensor Object IDs
+
+#### Environmental Sensors
+
+| ID | Sensor | Type | Factor | Unit | Bytes |
+|----|--------|------|--------|------|-------|
+| `0x02` | Temperature | sint16 | 0.01 | °C | 2 |
+| `0x03` | Humidity | uint16 | 0.01 | % | 2 |
+| `0x04` | Pressure | uint24 | 0.01 | hPa | 3 |
+| `0x05` | Illuminance | uint24 | 0.01 | lux | 3 |
+| `0x08` | Dew Point | sint16 | 0.01 | °C | 2 |
+
+#### Motion & Position
+
+| ID | Sensor | Type | Factor | Unit | Bytes |
+|----|--------|------|--------|------|-------|
+| `0x21` | Motion | uint8 | 1 | binary | 1 |
+| `0x2D` | Window | uint8 | 1 | binary | 1 |
+| `0x3A` | Button | uint8 | 1 | event | 1 |
+| `0x3F` | Rotation | uint16 | 0.1 | ° | 2 |
+| `0x51` | Acceleration | uint16 | 0.001 | m/s² | 2 |
+
+#### Power & Energy
+
+| ID | Sensor | Type | Factor | Unit | Bytes |
+|----|--------|------|--------|------|-------|
+| `0x01` | Battery | uint8 | 1 | % | 1 |
+| `0x0A` | Energy | uint24 | 0.001 | kWh | 3 |
+| `0x0B` | Power | uint24 | 0.01 | W | 3 |
+| `0x0C` | Voltage | uint16 | 0.001 | V | 2 |
+| `0x43` | Current | uint16 | 0.001 | A | 2 |
+
+#### Other Sensors
+
+| ID | Sensor | Type | Factor | Unit | Bytes |
+|----|--------|------|--------|------|-------|
+| `0x06` | Mass | uint16 | 0.01 | kg | 2 |
+| `0x40` | Distance (mm) | uint16 | 1 | mm | 2 |
+| `0x41` | Distance (m) | uint16 | 0.1 | m | 2 |
+| `0x50` | Timestamp | uint32 | 1 | seconds | 4 |
+| `0x53` | Text | variable | - | UTF-8 | var |
+| `0x54` | Raw | variable | - | hex | var |
+
+### Variable Length Sensors
+
+Text and raw sensors require a length byte:
+
+```
+530C48656C6C6F20576F726C6421
+```
+
+- `0x53` = Text object ID
+- `0x0C` = Length (12 bytes)
+- `0x48656C6C6F20576F726C6421` = "Hello World!" in UTF-8
+
+### Multiple Measurements
+
+You can include multiple measurements of the same type. Receivers will add postfixes (e.g., `temperature_2`, `temperature_3`) in the order they appear.
+
+**Important**: Always use the same order in each advertisement to prevent measurements being assigned to the wrong entity.
+
+### Decoding Example
+
+Full payload: `020106 0B094449592D73656E736F72 0A16D2FC4002C40903BF13`
+
+1. **Flags**: `020106` → Standard BTHome flags
+2. **Name**: `0B094449592D73656E736F72` → "DIY-sensor"
+3. **Service Data**: `0A16D2FC4002C40903BF13`
+   - Length: `0x0A` (10 bytes)
+   - AD Type: `0x16` (Service Data)
+   - UUID: `D2FC` → `0xFCD2` (BTHome)
+   - Device Info: `40` → v2, no encryption, regular updates
+   - Temperature: `02C409` → 25.00°C
+   - Humidity: `03BF13` → 50.55%
+
+### Implementation Notes
+
+**For Shelly Scripts**:
+- Service data is available in `BLE.Scanner` events
+- Parse manufacturer data and service data as hex strings
+- Convert little-endian values correctly
+- Handle variable-length sensors (text/raw) with length byte
+
+**For Go/Backend**:
+- Parse BLE advertisement data from MQTT events
+- Decode little-endian values using `binary.LittleEndian`
+- Apply scaling factors from the object ID table
+- Store decoded values with appropriate units
+
+### Resources
+
+- **Official Specification**: https://bthome.io/format/
+- **GitHub Repository**: https://github.com/Bluetooth-Devices/bthome-ble
+- **Home Assistant Integration**: Native support via BTHome integration
+- **License**: Free to use (Allterco Robotics sponsored UUID)
+
 ## VSCode
 
 `launch.json`:

@@ -10,26 +10,68 @@
  * Represents data provided by each device.
  * Every value illustrating a sensor reading (e.g., button) may be a singular sensor value or
  * an array of values if the object has multiple instances.
+ * 
+ * Supports all BTHome v2 object IDs as defined in https://bthome.io/format/
+ * 
  * @typedef {Object} DeviceData
- * @property {number} pid - Packet ID.
- * @property {number} battery - The battery level of the device in percentage (%).
- * @property {number} rssi - The signal strength in decibels (dB).
- * @property {string} address - The MAC address of the Shelly BLU device.
- * @property {number | number[]} [temperature] - The temperature value in degrees Celsius if the device has a temperature sensor. (Can be an array if has multiple instances)
- * @property {number | number[]} [humidity] - The humidity value in percentage (%) if the device has a humidity sensor. (Can be an array if has multiple instances)
- * @property {number | number[]} [illuminance] - The illuminance value in lux if the device has a light sensor. (Can be an array if has multiple instances)
- * @property {number | number[]} [motion] - Motion status: 0 for clear, 1 for motion (if the device has a motion sensor). (Can be an array if has multiple instances)
- * @property {number | number[]} [window] - Window status: 0 for closed, 1 for open (if the device has a reed switch). (Can be an array if has multiple instances)
- * @property {number | number[]} [button] - The number of presses if the device has a button. (Can be an array if has multiple instances)
- * @property {number | number[]} [rotation] - The angle of rotation in degrees if the device has a gyroscope. (Can be an array if has multiple instances)
+ * @property {boolean} encryption - Whether the device uses encryption
+ * @property {number} BTHome_version - BTHome protocol version (should be 2)
+ * @property {number} pid - Packet ID (0x00)
+ * @property {number} rssi - The signal strength in decibels (dB)
+ * @property {string} address - The MAC address of the Shelly BLU device
+ * 
+ * Power & Energy:
+ * @property {number | number[]} [battery] - Battery level in % (0x01)
+ * @property {number | number[]} [energy] - Energy in kWh (0x0a)
+ * @property {number | number[]} [power] - Power in W (0x0b)
+ * @property {number | number[]} [voltage] - Voltage in V (0x0c)
+ * @property {number | number[]} [current] - Current in A (0x43)
+ * 
+ * Environmental Sensors:
+ * @property {number | number[]} [temperature] - Temperature in °C (0x02/0x45)
+ * @property {number | number[]} [humidity] - Humidity in % (0x03/0x2e)
+ * @property {number | number[]} [pressure] - Pressure in hPa (0x04)
+ * @property {number | number[]} [illuminance] - Illuminance in lux (0x05)
+ * @property {number | number[]} [mass] - Mass in kg (0x06)
+ * @property {number | number[]} [dew_point] - Dew point in °C (0x08)
+ * 
+ * Motion & Position:
+ * @property {number | number[]} [motion] - Motion (0=clear, 1=detected) (0x21)
+ * @property {number | number[]} [window] - Window (0=closed, 1=open) (0x2d)
+ * @property {number | number[]} [button] - Button press count (0x3a)
+ * @property {number | number[]} [rotation] - Rotation in degrees (0x3f)
+ * 
+ * Distance:
+ * @property {number | number[]} [distance_mm] - Distance in mm (0x40)
+ * @property {number | number[]} [distance_m] - Distance in m (0x41)
+ * 
+ * Timestamp:
+ * @property {number | number[]} [timestamp] - Unix timestamp in seconds (0x50)
+ * 
+ * Acceleration:
+ * @property {number | number[]} [acceleration] - Acceleration in m/s² (0x51)
+ * 
+ * Variable-length data:
+ * @property {string | string[]} [text] - Text data (0x53)
+ * @property {string | string[]} [raw] - Raw data as hex string (0x54)
+ * 
+ * Raw BTHome frame:
+ * @property {Object} [bthome] - Raw BTHome frame data from BLE advertisement
+ * @property {Object} [bthome.service_data] - Service data from BLE advertisement (UUID: service data hex string)
+ * @property {Object} [bthome.manufacturer_data] - Manufacturer data from BLE advertisement (if present)
+ * @property {string} [bthome.local_name] - Local name from BLE advertisement (if present)
  *
  * @example
- * {"component":"script:*","name":"script","id":*,"now":*,"info":{"component":"script:*","id":*,"event":"shelly-blu","data":{"encryption":false,"BTHome_version":2,"pid":118,"battery":100,"button":1,"rssi":-76,"address":*},"ts":*}}
+ * {"component":"script:*","name":"script","id":*,"now":*,"info":{"component":"script:*","id":*,"event":"shelly-blu","data":{"encryption":false,"BTHome_version":2,"pid":118,"battery":100,"button":1,"rssi":-76,"address":*,"bthome":{"service_data":{"fcd2":"40..."},"local_name":"SBBT-002C"}},"ts":*}}
  */
 
-/******************* START CHANGE HERE *******************/
+// === STATIC CONSTANTS ===
+const SCRIPT_NAME = "blu-publisher";
+const CONFIG_KEY_PREFIX = 'script/' + SCRIPT_NAME + '/';
+const SCRIPT_PREFIX = "[" + SCRIPT_NAME + "] ";
+
 const CONFIG = {
-  script: "[blu-publisher] ",
+  enableLogging: true,
 
   // Specify the destination event where the decoded BLE data will be emitted. It allows for easy identification by other applications/scripts
   eventName: "shelly-blu",
@@ -40,8 +82,6 @@ const CONFIG = {
   // If the script does not own the scanner, it may remain passive even when set to true.
   // Active scan means the scanner will ping back the Bluetooth device to receive all its data, but it will drain the battery faster
   active: false,
-
-  log: true
 };
 
 var STATE = {
@@ -50,6 +90,36 @@ var STATE = {
   // Each followed MAC has its own KVS key: follow/shelly-blu/<mac>
   follows: {}
 };
+
+// Polyfill for print function
+if (typeof print !== "function") {
+  print = console.log;
+}
+
+/**
+ * Logs a message if logging is enabled.
+ * @returns void
+ */
+function log() {
+  if (!CONFIG.enableLogging) return;
+  var s = "";
+  for (var i = 0; i < arguments.length; i++) {
+    try {
+      var a = arguments[i];
+      if (typeof a === "object") {
+        s += JSON.stringify(a);
+      } else {
+        s += String(a);
+      }
+    } catch (e) {
+      s += String(arguments[i]);
+      // Ensure 'e' is referenced so the minifier doesn't drop it and produce `catch {}`
+      if (e && false) {}
+    }
+    if (i + 1 < arguments.length) s += " ";
+  }
+  print(SCRIPT_PREFIX, s);
+}
 
 function getFollows() {
   return STATE.follows;
@@ -68,27 +138,6 @@ function setFollows(map) {
  * @property {string} switchIdStr // e.g. "switch:0"
  * @property {number} switchIndex // numeric index parsed from switchIdStr
  */
-
-function log() {
-  if (!CONFIG.log) return;
-  var s = "";
-  for (var i = 0; i < arguments.length; i++) {
-    try {
-      var a = arguments[i];
-      if (typeof a === "object") {
-        s += JSON.stringify(a);
-      } else {
-        s += String(a);
-      }
-    } catch (e) {
-      s += String(arguments[i]);
-      // Ensure 'e' is referenced so the minifier doesn't drop it and produce `catch {}`
-      if (e && false) {}
-    }
-    if (i + 1 < arguments.length) s += " ";
-  }
-  print(CONFIG.script, s);
-}
 
 function normalizeMac(mac) {
   if (!mac) return "";
@@ -225,26 +274,60 @@ const uint16 = 2;
 const int16 = 3;
 const uint24 = 4;
 const int24 = 5;
+const uint32 = 6;
+const int32 = 7;
 
 // The BTH object defines the structure of the BTHome data
+// Based on BTHome v2 specification documented in <https://bthome.io/format/>
+// All object IDs are included for complete BTHome v2 support
 const BTH = {
+  // Packet ID
   0x00: { n: "pid", t: uint8 },
+  
+  // Power & Energy
   0x01: { n: "battery", t: uint8, u: "%" },
+  0x0a: { n: "energy", t: uint24, f: 0.001, u: "kWh" },
+  0x0b: { n: "power", t: uint24, f: 0.01, u: "W" },
+  0x0c: { n: "voltage", t: uint16, f: 0.001, u: "V" },
+  0x43: { n: "current", t: uint16, f: 0.001, u: "A" },
+  
+  // Environmental Sensors
   0x02: { n: "temperature", t: int16, f: 0.01, u: "tC" },
   0x03: { n: "humidity", t: uint16, f: 0.01, u: "%" },
-  0x05: { n: "illuminance", t: uint24, f: 0.01 },
+  0x04: { n: "pressure", t: uint24, f: 0.01, u: "hPa" },
+  0x05: { n: "illuminance", t: uint24, f: 0.01, u: "lux" },
+  0x06: { n: "mass", t: uint16, f: 0.01, u: "kg" },
+  0x08: { n: "dew_point", t: int16, f: 0.01, u: "tC" },
+  0x2e: { n: "humidity", t: uint8, u: "%" },
+  0x45: { n: "temperature", t: int16, f: 0.1, u: "tC" },
+  
+  // Motion & Position
   0x21: { n: "motion", t: uint8 },
   0x2d: { n: "window", t: uint8 },
-  0x2e: { n: "humidity", t: uint8, u: "%" },
   0x3a: { n: "button", t: uint8 },
-  0x3f: { n: "rotation", t: int16, f: 0.1 },
-  0x45: { n: "temperature", t: int16, f: 0.1, u: "tC" },
+  0x3f: { n: "rotation", t: uint16, f: 0.1, u: "degrees" },
+  
+  // Distance
+  0x40: { n: "distance_mm", t: uint16, u: "mm" },
+  0x41: { n: "distance_m", t: uint16, f: 0.1, u: "m" },
+  
+  // Timestamp
+  0x50: { n: "timestamp", t: uint32, u: "s" },
+  
+  // Acceleration
+  0x51: { n: "acceleration", t: uint16, f: 0.001, u: "m/s2" },
+  
+  // Variable length sensors (text and raw) are not included here
+  // as they require special handling with length byte
+  // 0x53: text (variable length)
+  // 0x54: raw (variable length)
 };
 
 function getByteSize(type) {
   if (type === uint8 || type === int8) return 1;
   if (type === uint16 || type === int16) return 2;
   if (type === uint24 || type === int24) return 3;
+  if (type === uint32 || type === int32) return 4;
   //impossible as advertisements are much smaller;
   return 255;
 }
@@ -275,6 +358,14 @@ const BTHomeDecoder = {
   getInt24LE: function (buffer) {
     return this.utoi(this.getUInt24LE(buffer), 24);
   },
+  getUInt32LE: function (buffer) {
+    return (
+      0xffffffff & ((buffer.at(3) << 24) | (buffer.at(2) << 16) | (buffer.at(1) << 8) | buffer.at(0))
+    );
+  },
+  getInt32LE: function (buffer) {
+    return this.utoi(this.getUInt32LE(buffer), 32);
+  },
   getBufValue: function (type, buffer) {
     if (buffer.length < getByteSize(type)) return null;
     let res = null;
@@ -284,7 +375,49 @@ const BTHomeDecoder = {
     if (type === int16) res = this.getInt16LE(buffer);
     if (type === uint24) res = this.getUInt24LE(buffer);
     if (type === int24) res = this.getInt24LE(buffer);
+    if (type === uint32) res = this.getUInt32LE(buffer);
+    if (type === int32) res = this.getInt32LE(buffer);
     return res;
+  },
+
+  // Decode variable-length text data (0x53)
+  // Format: [length_byte][utf8_text_bytes]
+  getTextValue: function (buffer) {
+    if (buffer.length < 1) return null;
+    var length = buffer.at(0);
+    if (buffer.length < 1 + length) return null;
+    
+    // Extract text bytes and convert to string
+    var text = "";
+    for (var i = 1; i <= length; i++) {
+      text += String.fromCharCode(buffer.at(i));
+    }
+    return text;
+  },
+
+  // Decode variable-length raw data (0x54)
+  // Format: [length_byte][raw_bytes]
+  // Returns hex string representation
+  getRawValue: function (buffer) {
+    if (buffer.length < 1) return null;
+    var length = buffer.at(0);
+    if (buffer.length < 1 + length) return null;
+    
+    // Convert raw bytes to hex string
+    var hex = "";
+    for (var i = 1; i <= length; i++) {
+      var byte = buffer.at(i);
+      var h = byte.toString(16);
+      if (h.length < 2) h = "0" + h;
+      hex += h;
+    }
+    return hex;
+  },
+
+  // Get the size of variable-length data (including length byte)
+  getVariableLengthSize: function (buffer) {
+    if (buffer.length < 1) return 0;
+    return 1 + buffer.at(0); // length byte + data bytes
   },
 
   // Unpacks the service data buffer from a Shelly BLU device
@@ -295,17 +428,68 @@ const BTHomeDecoder = {
     let _dib = buffer.at(0);
     result["encryption"] = _dib & 0x1 ? true : false;
     result["BTHome_version"] = _dib >> 5;
-    if (result["BTHome_version"] !== 2) return null;
-    //can not handle encrypted data
-    if (result["encryption"]) return result;
+    if (result["BTHome_version"] !== 2) {
+      log("BTHome: unknown version", result["BTHome_version"]);
+      return null;
+    }
+    if (result["encryption"]) {
+      log("BTHome: return only skipping encrypted data");
+      return result;
+    }
     buffer = buffer.slice(1);
 
     let _bth;
     let _value;
+    let _objectId;
+    let _bytesToSkip;
     while (buffer.length > 0) {
-      _bth = BTH[buffer.at(0)];
+      _objectId = buffer.at(0);
+      _bth = BTH[_objectId];
+      
+      // Handle variable-length sensors (text and raw)
+      if (_objectId === 0x53) {
+        // Text sensor
+        buffer = buffer.slice(1);
+        _value = this.getTextValue(buffer);
+        if (_value === null) break;
+        _bytesToSkip = this.getVariableLengthSize(buffer);
+        
+        if (typeof result["text"] === "undefined") {
+          result["text"] = _value;
+        } else {
+          if (Array.isArray(result["text"])) {
+            result["text"].push(_value);
+          } else {
+            result["text"] = [result["text"], _value];
+          }
+        }
+        buffer = buffer.slice(_bytesToSkip);
+        continue;
+      }
+      
+      if (_objectId === 0x54) {
+        // Raw sensor
+        buffer = buffer.slice(1);
+        _value = this.getRawValue(buffer);
+        if (_value === null) break;
+        _bytesToSkip = this.getVariableLengthSize(buffer);
+        
+        if (typeof result["raw"] === "undefined") {
+          result["raw"] = _value;
+        } else {
+          if (Array.isArray(result["raw"])) {
+            result["raw"].push(_value);
+          } else {
+            result["raw"] = [result["raw"], _value];
+          }
+        }
+        buffer = buffer.slice(_bytesToSkip);
+        continue;
+      }
+      
+      // Handle fixed-length sensors
       if (typeof _bth === "undefined") {
-        log("BTH: Unknown type");
+        log("BTH: Unknown type", _objectId);
         break;
       }
       buffer = buffer.slice(1);
@@ -335,6 +519,47 @@ const BTHomeDecoder = {
 };
 
 /**
+ * Sanitizes BTHome frame data to ensure JSON.stringify won't fail
+ * Uses btoa() to encode binary strings as base64 for safe JSON transport
+ * @param {Object} bthome - BTHome frame object
+ * @returns {Object} Sanitized BTHome frame object
+ */
+function sanitizeBTHomeFrame(bthome) {
+  if (!bthome || typeof bthome !== "object") return bthome;
+  
+  var sanitized = {};
+  
+  // Sanitize service_data - use btoa() to encode binary strings as base64
+  if (bthome.service_data && typeof bthome.service_data === "object") {
+    sanitized.service_data = {};
+    for (var key in bthome.service_data) {
+      if (bthome.service_data.hasOwnProperty(key)) {
+        var value = bthome.service_data[key];
+        sanitized.service_data[key] = typeof value === "string" ? btoa(value) : value;
+      }
+    }
+  }
+  
+  // Sanitize manufacturer_data - use btoa() to encode binary strings as base64
+  if (bthome.manufacturer_data && typeof bthome.manufacturer_data === "object") {
+    sanitized.manufacturer_data = {};
+    for (var key in bthome.manufacturer_data) {
+      if (bthome.manufacturer_data.hasOwnProperty(key)) {
+        var value = bthome.manufacturer_data[key];
+        sanitized.manufacturer_data[key] = typeof value === "string" ? btoa(value) : value;
+      }
+    }
+  }
+  
+  // local_name should be safe as it's typically ASCII
+  if (bthome.local_name) {
+    sanitized.local_name = bthome.local_name;
+  }
+  
+  return sanitized;
+}
+
+/**
  * Еmitting the decoded BLE data to a specified event. It allows other scripts to receive and process the emitted data
  * @param {DeviceData} data
  */
@@ -345,8 +570,28 @@ function emitData(data) {
 
   if (MQTT.isConnected()) {
     topic = CONFIG.eventName + "/events/" + data.address;
-    log("Publishing event via MQTT on topic: ", topic, "data:", data);
-    MQTT.publish(topic, JSON.stringify(data), 1, false);
+    
+    // Sanitize BTHome frame data before JSON.stringify to avoid UTF-8 errors
+    var publishData = {};
+    for (var key in data) {
+      if (data.hasOwnProperty(key)) {
+        if (key === "bthome") {
+          publishData[key] = sanitizeBTHomeFrame(data[key]);
+        } else {
+          publishData[key] = data[key];
+        }
+      }
+    }
+    
+    try {
+      var payload = JSON.stringify(publishData);
+      log("Publishing event via MQTT on topic: ", topic, "payload: ", payload);
+      MQTT.publish(topic, payload, 1, false);
+    } catch (e) {
+      log("Error stringifying data for MQTT publish:", e);
+      // Ensure 'e' is referenced so the minifier doesn't drop it and produce `catch {}`
+      if (e && false) {}
+    }
   }
 
   try {
@@ -358,6 +603,8 @@ function emitData(data) {
     Shelly.emitEvent(CONFIG.eventName, data);
   } catch (e) {
     log("Error emitting local event: ", e);
+    // Ensure 'e' is referenced so the minifier doesn't drop it and produce `catch {}`
+    if (e && false) {}
   }
 }
 
@@ -402,6 +649,24 @@ function BLEScanCallback(event, result) {
 
   unpackedData.rssi = result.rssi;
   unpackedData.address = result.addr;
+
+  // Add raw BTHome frame data for complete protocol information
+  unpackedData.bthome = {};
+  
+  // Include service_data (contains BTHome UUID and data)
+  if (result.service_data) {
+    unpackedData.bthome.service_data = result.service_data;
+  }
+  
+  // Include manufacturer_data if present
+  if (result.manufacturer_data) {
+    unpackedData.bthome.manufacturer_data = result.manufacturer_data;
+  }
+  
+  // Include local_name if present
+  if (result.local_name) {
+    unpackedData.bthome.local_name = result.local_name;
+  }
 
   emitData(unpackedData);
 }
@@ -465,9 +730,11 @@ function subscribeKvsEvents() {
   log("Subscribed to KVS change events");
 }
 
-// Init
-log("Script starting...");
-loadFollowsFromKVS();
-initBLEScanner();
-subscribeKvsEvents();
-log("Script initialization complete");
+// Init, only if the Shelly object is available
+if (typeof Shelly !== "undefined") {
+  log("Script starting...");
+  loadFollowsFromKVS();
+  initBLEScanner();
+  subscribeKvsEvents();
+  log("Script initialization complete");
+}

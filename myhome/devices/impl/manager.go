@@ -15,6 +15,7 @@ import (
 	"net"
 	"pkg/devices"
 	"pkg/shelly"
+	"pkg/shelly/blu"
 	"pkg/shelly/gen1"
 	"reflect"
 	"strings"
@@ -202,6 +203,13 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return err
 	}
 
+	// Start BLU listener for Shelly BLU device discovery
+	err = blu.StartBLUListener(ctx, dm.mqttClient, dm.dr)
+	if err != nil {
+		dm.log.Error(err, "Failed to start BLU listener")
+		return err
+	}
+
 	return nil
 }
 
@@ -233,6 +241,12 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.R
 	// Skip Gen1 devices - they are updated via MQTT messages only
 	if shelly.IsGen1Device(device.Id()) {
 		log.V(1).Info("Skipping Gen1 device refresh (updated via MQTT)", "device", device.DeviceSummary)
+		return
+	}
+
+	// Skip BLU devices (Generation 0) - they are updated via MQTT events only
+	if shelly.IsBluDevice(device.Id()) {
+		log.V(1).Info("Skipping BLU device refresh (updated via BLE+MQTT events)", "device", device.DeviceSummary)
 		return
 	}
 
@@ -318,16 +332,16 @@ func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, interval time.
 				return
 			}
 
-			// Filter out Gen1 devices (they are updated via MQTT only)
+			// Filter out Gen1 and BLU devices (they are updated via MQTT only)
 			gen2Devices := make([]*myhome.Device, 0)
 			for _, d := range devices {
-				if !shelly.IsGen1Device(d.Id()) {
+				if !shelly.IsGen1Device(d.Id()) && !strings.HasPrefix(d.Id(), "shellyblu-") {
 					gen2Devices = append(gen2Devices, d)
 				}
 			}
 
 			if len(gen2Devices) == 0 {
-				log.V(1).Info("No Gen2+ devices to refresh")
+				log.V(1).Info("No Gen2+ devices to refresh (Gen1 and BLU devices are updated via MQTT)")
 				continue
 			}
 

@@ -6,7 +6,6 @@ import (
 	"hlog"
 	"myhome"
 	shellyapi "pkg/shelly"
-	"reflect"
 
 	"myhome/ctl/options"
 
@@ -27,28 +26,45 @@ var showShellyCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		shellyapi.Init(hlog.Logger, options.Flags.MqttTimeout)
 
-		var out any
 		var err error
-		var device *myhome.Device
-
 		identifier := args[0]
 		log := hlog.Logger
 		ctx := cmd.Context()
 
-		out, err = myhome.TheClient.CallE(ctx, myhome.DeviceShow, identifier)
+		// Use LookupDevices to support glob patterns
+		devices, err := myhome.TheClient.LookupDevices(ctx, identifier)
 		if err != nil {
 			return err
 		}
-		var ok bool
-		device, ok = out.(*myhome.Device)
-		if !ok {
-			return fmt.Errorf("expected myhome.Device, got %T", out)
-		}
-		log.Info("result", "out", out, "type", reflect.TypeOf(out))
 
-		var show any = device
-		if !long {
-			show = device.DeviceSummary
+		if devices == nil || len(*devices) == 0 {
+			return fmt.Errorf("no devices found matching pattern: %s", identifier)
+		}
+
+		log.Info("found devices", "count", len(*devices), "pattern", identifier)
+
+		// For long output, fetch full device details for each matched device
+		var show any
+		if long {
+			// Fetch full device info for each matched device
+			fullDevices := make([]*myhome.Device, 0, len(*devices))
+			for _, dev := range *devices {
+				out, err := myhome.TheClient.CallE(ctx, myhome.DeviceShow, dev.Id())
+				if err != nil {
+					log.Error(err, "failed to fetch device details", "id", dev.Id())
+					continue
+				}
+				device, ok := out.(*myhome.Device)
+				if !ok {
+					log.Error(fmt.Errorf("unexpected type: expected *myhome.Device"), "id", dev.Id())
+					continue
+				}
+				fullDevices = append(fullDevices, device)
+			}
+			show = fullDevices
+		} else {
+			// Show device summaries (default)
+			show = *devices
 		}
 
 		var s []byte

@@ -8,6 +8,8 @@ const SCRIPT_PREFIX = "[" + SCRIPT_NAME + "] ";
 const DEFAULT_COOLING_RATE = 1.0;
 
 // Configuration schema with type information
+// IMPORTANT: This schema is synchronized with heaterKVSKeys in myhome/ctl/heater/main.go
+// Any changes here must be reflected in the Go code and validated by TestHeaterKVSKeysMatchJSSchema
 var CONFIG_SCHEMA = {
   enableLogging: {
     description: "Enable logging when true",
@@ -151,6 +153,11 @@ function randomId(n) {
 
 // === STATE (DYNAMIC RUNTIME VALUES) ===
 var STATE = {
+  // Device info (cached at startup)
+  deviceInfo: null,
+  deviceId: null,
+  deviceName: null,
+  
   // Forecast cache
   forecastUrl: null,
   cachedForecast: null,
@@ -180,7 +187,22 @@ var STATE = {
   },
   
   // Control loop timer handle
-  controlLoopTimerId: null
+  controlLoopTimerId: null,
+  
+  // Pending control loop check timer handle
+  controlLoopCheckTimerId: null,
+  
+  // Single temperature retry timer handle
+  temperatureRetryTimerId: null,
+  
+  // Track which temperatures need retry
+  temperatureRetryNeeded: {
+    internal: false,
+    external: false
+  },
+  
+  // Last successful temperature setpoints from RPC
+  lastSuccessfulSetpoints: null
 };
 
 function onDeviceLocation(result, error_code, error_message, cb) {
@@ -237,7 +259,7 @@ function onDeviceLocation(result, error_code, error_message, cb) {
 // Parse a value from KVS based on its expected type
 function parseValueWithType(valueStr, type) {
   // Handle null/undefined
-  if (valueStr === null || valueStr === undefined || valueStr === "null" || valueStr === "undefined") {
+  if (!valueStr || valueStr === "null" || valueStr === "undefined") {
     return null;
   }
   
@@ -295,9 +317,15 @@ function storeValue(key, value) {
 
 // Simple parse for Script.storage values (we control what we store)
 function parseStorageValue(valueStr) {
-  if (valueStr === "null" || valueStr === null || valueStr === undefined) {
+  if (valueStr === "null" || !valueStr) {
     return null;
   }
+  
+  // Convert to string if it's not already a string
+  if (typeof valueStr !== "string") {
+    valueStr = String(valueStr);
+  }
+  
   if (valueStr === "true") return true;
   if (valueStr === "false") return false;
   
@@ -460,9 +488,13 @@ function scheduleLearningTimers() {
   scheduleAt(CONFIG.cheapStartHour, onCheapWindowStart);
 }
 
-function initUrls() {
-  log('initUrls');
-  // Try to get MQTT status synchronously
+function initDeviceInfo() {
+  log('initDeviceInfo');
+  
+  // Cache device info at startup (call getDeviceInfo only once)
+  STATE.deviceInfo = Shelly.getDeviceInfo();
+  
+  // Get MQTT status synchronously
   var cfg = Shelly.getComponentConfig('mqtt');
   if (cfg && typeof cfg === 'object') {
     if ("client_id" in cfg && typeof cfg.client_id === 'string') {
@@ -470,9 +502,8 @@ function initUrls() {
         log("client_id:", cfg.client_id);
         STATE.clientId = cfg.client_id;
       } else {
-        var info = Shelly.getDeviceInfo();
-        log("client_id(device_id):", info.id);
-        STATE.clientId = info.id;
+        log("client_id(device_id):", STATE.deviceInfo.id);
+        STATE.clientId = STATE.deviceInfo.id;
       }
     }
     if ("server" in cfg && typeof cfg.server === 'string') {
@@ -484,6 +515,11 @@ function initUrls() {
       log('MQTT server host:', host);
     }
   }
+  
+  STATE.deviceName = STATE.deviceInfo.name || STATE.deviceInfo.id || 'unknown';
+  STATE.deviceId = STATE.deviceInfo.id || 'unknown';
+  
+  log('Device ID:', STATE.deviceId, 'Device Name:', STATE.deviceName);
 }
 
 // === PRE-HEATING LOGIC ===
@@ -636,6 +672,27 @@ function getOccupancyStatus(cb) {
 }
 
 
+// Helper function to get fallback setpoints (last successful or static)
+function getFallbackSetpoints(reason) {
+  if (STATE.lastSuccessfulSetpoints) {
+    log('Using last successful setpoints as fallback');
+    return {
+      setpoint_comfort: STATE.lastSuccessfulSetpoints.setpoint_comfort,
+      setpoint_eco: STATE.lastSuccessfulSetpoints.setpoint_eco,
+      active_setpoint: STATE.lastSuccessfulSetpoints.active_setpoint,
+      reason: reason + "_using_last_successful"
+    };
+  } else {
+    log('No last successful setpoints, using static setpoint');
+    return {
+      setpoint_comfort: CONFIG.setpoint,
+      setpoint_eco: CONFIG.setpoint,
+      active_setpoint: CONFIG.setpoint,
+      reason: reason + "_using_static"
+    };
+  }
+}
+
 // Fetch temperature setpoints from daemon via MQTT RPC
 function getTemperatureSetpoints(cb) {
   log('getTemperatureSetpoints');
@@ -672,24 +729,15 @@ function getTemperatureSetpoints(cb) {
       
       if (response && response.error) {
         log('RPC error:', response.error.message);
-        // Fallback to static setpoint
-        cb({
-          setpoint_comfort: CONFIG.setpoint,
-          setpoint_eco: CONFIG.setpoint,
-          active_setpoint: CONFIG.setpoint,
-          reason: "rpc_error"
-        });
+        cb(getFallbackSetpoints("rpc_error"));
       } else if (response && response.result) {
         log('Temperature setpoints from RPC:', JSON.stringify(response.result));
+        // Store successful setpoints for future fallback
+        STATE.lastSuccessfulSetpoints = response.result;
         cb(response.result);
       } else {
         log('Invalid RPC response');
-        cb({
-          setpoint_comfort: CONFIG.setpoint,
-          setpoint_eco: CONFIG.setpoint,
-          active_setpoint: CONFIG.setpoint,
-          reason: "invalid_response"
-        });
+        cb(getFallbackSetpoints("invalid_response"));
       }
       
       // Unsubscribe from reply topic
@@ -716,25 +764,15 @@ function getTemperatureSetpoints(cb) {
     // Set timeout for response
     Timer.set(5000, false, function() {
       if (requestSent) {
-        log('Temperature RPC timeout, using static setpoint');
+        log('Temperature RPC timeout, using fallback setpoint');
         MQTT.unsubscribe(replyTopic);
-        cb({
-          setpoint_comfort: CONFIG.setpoint,
-          setpoint_eco: CONFIG.setpoint,
-          active_setpoint: CONFIG.setpoint,
-          reason: "rpc_timeout"
-        });
+        cb(getFallbackSetpoints("rpc_timeout"));
       }
     });
   } else {
     log('Failed to publish temperature RPC request');
     MQTT.unsubscribe(replyTopic);
-    cb({
-      setpoint_comfort: CONFIG.setpoint,
-      setpoint_eco: CONFIG.setpoint,
-      active_setpoint: CONFIG.setpoint,
-      reason: "publish_failed"
-    });
+    cb(getFallbackSetpoints("publish_failed"));
   }
 }
 
@@ -769,13 +807,19 @@ KalmanFilter.prototype.lastMeasurement = function() {
 // Initialize Kalman filter instance
 var kalman = new KalmanFilter();
 
-// === MQTT TEMPERATURE HANDLING ===
-// Detect if topic is Gen1 or Gen2 format and extract temperature
+/**
+ * Parse temperature from MQTT message
+ * @param {string} topic - MQTT topic
+ * @param {string} message - MQTT message payload
+ * @returns {number|null} Parsed temperature or null if not found
+ */
 function parseTemperatureFromMqtt(topic, message) {
   var temp = null;
   log("parseTemperatureFromMqtt", topic, message);
   try {
-    // Gen1 format: shellies/<id>/sensor/temperature with plain number payload
+    // H&T Gen1 format, via gen1 HTTP-to-MQTT proxy
+    // topic: shellies/<id>/sensor/temperature
+    // message: plain number payload
     if (topic.indexOf('shellies/') === 0 && topic.indexOf('/sensor/temperature') > 0) {
       temp = parseFloat(message);
       if (!isNaN(temp)) {
@@ -783,7 +827,19 @@ function parseTemperatureFromMqtt(topic, message) {
         return temp;
       }
     }
+    // H&T BLU Gen3 format, via `blu-publisher.js` script
+    // topic: shelly-blu/events/7c:c6:b6:7f:48:ed
+    // message: {"encryption":false,"BTHome_version":2,"pid":149,"battery":100,"humidity":52,"temperature":17,"rssi":-92,"address":"7c:c6:b6:7f:48:ed"}
+    if (topic.indexOf('shelly-blu/events/') === 0) {
+      var data = JSON.parse(message);
+      if (data.temperature) {
+        log('Parsed BLU Gen3 temperature:', data.temperature, 'from topic:', topic);
+        return data.temperature;
+      }
+    }
     // Gen2 format: <id>/events/rpc with JSON payload
+    // topic: <id>/events/rpc
+    // message: {"method":"NotifyStatus","params":{"temperature:0":{"tC":22.5}}}
     else if (topic.indexOf('/events/rpc') > 0) {
       var data = JSON.parse(message);
       // Look for temperature in NotifyStatus params
@@ -818,6 +874,19 @@ function onTemperature(topic, message, location) {
     STATE.temperature[location] = temp;
     STATE.temperatureReady[location] = true;
     log('Temperature', temp, 'location:', location, 'is ready:', STATE.temperatureReady[location]);
+    
+    // Clear retry flag for this location since we got data
+    if (STATE.temperatureRetryNeeded[location]) {
+      STATE.temperatureRetryNeeded[location] = false;
+      log('Cleared temperature retry flag for', location);
+      
+      // If no more retries needed, clear the timer
+      if (!STATE.temperatureRetryNeeded.internal && !STATE.temperatureRetryNeeded.external && STATE.temperatureRetryTimerId !== null) {
+        Timer.clear(STATE.temperatureRetryTimerId);
+        STATE.temperatureRetryTimerId = null;
+        log('Cleared combined temperature retry timer - no more retries needed');
+      }
+    }
     
     // Schedule check if not already scheduled
     scheduleControlLoopCheck();
@@ -884,13 +953,64 @@ function subscribeMqttTemperature(location, topic) {
   }
 }
 
+// Schedule a retry request for temperature data if not ready
+function scheduleTemperatureRetry(location) {
+  var topic = STATE.subscribedTemperatureTopic[location];
+  if (topic) {
+    log('Marking', location, 'temperature for retry');
+    STATE.temperatureRetryNeeded[location] = true;
+    
+    // Start the combined retry timer if not already running
+    if (STATE.temperatureRetryTimerId === null) {
+      log('Starting recurring temperature retry timer (10 seconds)');
+      STATE.temperatureRetryTimerId = Timer.set(10000, true, function() {
+        // Retry all temperatures that need it
+        var anyRetryNeeded = false;
+        
+        if (STATE.temperatureRetryNeeded.internal) {
+          var internalTopic = STATE.subscribedTemperatureTopic.internal;
+          if (internalTopic) {
+            log('Retrying temperature request for internal topic:', internalTopic);
+            requestMqttRepeat(internalTopic);
+            anyRetryNeeded = true;
+          } else {
+            // No topic configured, stop retrying for this location
+            STATE.temperatureRetryNeeded.internal = false;
+          }
+        }
+        
+        if (STATE.temperatureRetryNeeded.external) {
+          var externalTopic = STATE.subscribedTemperatureTopic.external;
+          if (externalTopic) {
+            log('Retrying temperature request for external topic:', externalTopic);
+            requestMqttRepeat(externalTopic);
+            anyRetryNeeded = true;
+          } else {
+            // No topic configured, stop retrying for this location
+            STATE.temperatureRetryNeeded.external = false;
+          }
+        }
+        
+        // If no more retries needed, stop the recurring timer
+        if (!anyRetryNeeded) {
+          Timer.clear(STATE.temperatureRetryTimerId);
+          STATE.temperatureRetryTimerId = null;
+          log('All temperatures retrieved - stopped retry timer');
+        }
+      });
+    }
+  } else {
+    log('No topic configured for', location, 'temperature - cannot retry');
+  }
+}
+
 // === DATA FETCHING FUNCTIONS ===
 // Read temperature from STATE (in-memory cache)
 function getShellyTemperature(location, cb) {
   log('getShellyTemperature', location);
   var temp = STATE.temperature[location];
   
-  if (temp !== null && temp !== undefined) {
+  if (!temp) {
     log('Read', location, 'temperature:', temp);
     cb(temp);
   } else {
@@ -998,7 +1118,7 @@ function getMinForecastTemp(hours) {
     var idx = currentHour + i;
     if (idx < STATE.cachedForecast.length) {
       var temp = STATE.cachedForecast[idx];
-      if (temp !== null && temp !== undefined) {
+      if (!!temp) {
         if (minTemp === null || temp < minTemp) {
           minTemp = temp;
         }
@@ -1083,7 +1203,14 @@ function pollAndControl() {
 
 // Schedule a deferred check (breaks call stack)
 function scheduleControlLoopCheck() {
-  Timer.set(100, false, checkAndStartControlLoop);
+  // Prevent duplicate timers - only schedule if no check is already pending
+  if (STATE.controlLoopCheckTimerId === null) {
+    STATE.controlLoopCheckTimerId = Timer.set(100, false, function() {
+      // Clear the timer ID when the timer fires
+      STATE.controlLoopCheckTimerId = null;
+      checkAndStartControlLoop();
+    });
+  }
 }
 
 // Check if ready and start control loop timer
@@ -1093,6 +1220,15 @@ function checkAndStartControlLoop() {
   log('  - Forecast data ready:' + !!STATE.cachedForecast);
   log('  - Internal temp ready:' + STATE.temperatureReady.internal);
   log('  - External temp ready:' + STATE.temperatureReady.external);
+  
+  // Schedule retry requests for any missing temperatures
+  if (!STATE.temperatureReady.internal) {
+    scheduleTemperatureRetry('internal');
+  }
+  if (!STATE.temperatureReady.external) {
+    scheduleTemperatureRetry('external');
+  }
+  
   if (STATE.forecastUrl && STATE.cachedForecast && STATE.temperatureReady.internal && STATE.temperatureReady.external) {
     if (!STATE.controlLoopTimerId) {
       log('All inputs ready - starting control loop timer');
@@ -1127,27 +1263,99 @@ function onConfigLoaded(updated) {
   if (updated.indexOf('internalTemperatureTopic') !== -1) {
     subscribeMqttTemperature("internal", CONFIG.internalTemperatureTopic);
   }
+  
+  // Re-evaluate control loop when configuration changes
+  scheduleControlLoopCheck();
 }
 
 // === SCHEDULED EXECUTION ===
-log("Script starting...");
+// Only run initialization code when running on a Shelly device
+// This allows the script to be parsed in other contexts (e.g., tests) without executing
+if (typeof Shelly !== "undefined") {
+  log("Script starting...");
 
-// Initialize URLs (occupancy service)
-initUrls();
+  // Initialize device info (cache device info at startup)
+  initDeviceInfo();
 
-scheduleLearningTimers();
-loadConfig(onConfigLoaded);
-fetchForecast();
+  scheduleLearningTimers();
+  loadConfig(onConfigLoaded);
+  fetchForecast();
 
-Shelly.addStatusHandler(function(status) {
-  // Detect KVS updates and reload configuration
-  if (status && status.component === "sys" && status.delta && ("kvs_rev" in status.delta)) {
-    log('KVS updated (rev ' + status.delta.kvs_rev + '), reloading configuration and re-fetching temperatures');
-    loadConfig(onConfigLoaded);
-  } else {
-    log('Script status:', JSON.stringify(status));
-  }
-});
+  Shelly.addStatusHandler(function(status) {
+    // Detect KVS updates and reload configuration
+    if (status && status.component === "sys" && status.delta && ("kvs_rev" in status.delta)) {
+      log('KVS updated (rev ' + status.delta.kvs_rev + '), reloading configuration and re-fetching temperatures');
+      loadConfig(onConfigLoaded);
+    } else {
+      log('Script status:', JSON.stringify(status));
+    }
+  });
 
-log("Script started");
+  // Subscribe to all heater commands using wildcard
+  MQTT.subscribe('myhome/heater/#', function(topic, message) {
+    log('Received message on topic:', topic);
+    
+    // Parse the message
+    var request = null;
+    try {
+      request = JSON.parse(message);
+    } catch (e) {
+      log('Failed to parse message:', message);
+      if (e && false) {}
+      return;
+    }
+    
+    // Check for replyTo property - required for all commands
+    if (!request || !("replyTo" in request) || typeof request.replyTo !== 'string') {
+      log('Message missing replyTo property, dropping request');
+      return;
+    }
+    
+    var replyToTopic = request.replyTo;
+    var deviceId = STATE.deviceId || 'unknown';
+    var deviceName = STATE.deviceName || 'unknown';
+    
+    // Handle different command topics
+    if (topic === 'myhome/heater/list' || topic === 'myhome/heater/show/' + deviceId) {
+      log('Handling show/list request, will reply to:', replyToTopic);
+      
+      // Build response with current configuration and state
+      var response = {
+        device_id: deviceId,
+        device_name: deviceName,
+        script_name: SCRIPT_NAME,
+        config: {
+          enableLogging: CONFIG.enableLogging,
+          setpoint: CONFIG.setpoint,
+          minInternalTemp: CONFIG.minInternalTemp,
+          cheapStartHour: CONFIG.cheapStartHour,
+          cheapEndHour: CONFIG.cheapEndHour,
+          pollIntervalMs: CONFIG.pollIntervalMs,
+          preheatHours: CONFIG.preheatHours,
+          normallyClosed: CONFIG.normallyClosed,
+          internalTemperatureTopic: CONFIG.internalTemperatureTopic,
+          externalTemperatureTopic: CONFIG.externalTemperatureTopic,
+          roomId: CONFIG.roomId
+        },
+        state: {
+          heaterOn: STATE.heaterOn,
+          internalTemp: STATE.internalTemp,
+          externalTemp: STATE.externalTemp,
+          currentSetpoint: STATE.currentSetpoint,
+          coolingRate: getCoolingRate(),
+          lastUpdate: new Date().getTime()
+        },
+        timestamp: new Date().getTime() / 1000
+      };
+      
+      // Publish response to the topic specified in replyTo
+      MQTT.publish(replyToTopic, JSON.stringify(response), 0, false);
+      log('Sent response to', replyToTopic);
+    } else {
+      // Log other heater commands but don't respond
+      log('Received unhandled heater command on topic:', topic, 'request:', JSON.stringify(request));
+    }
+  });
 
+  log("Script started");
+}

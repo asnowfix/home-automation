@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"myhome/mqtt"
+	"mynet"
 	"net"
 	"pkg/devices"
 	"pkg/shelly"
@@ -78,6 +79,14 @@ func (hc *client) start(ctx context.Context) {
 // }
 
 func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.Device, error) {
+	if strings.HasSuffix(name, ".local") {
+		ips, err := mynet.MyResolver(hc.log).LookupHost(ctx, strings.TrimSuffix(name, ".local"))
+		if err != nil {
+			return nil, err
+		}
+		name = ips[0].String()
+	}
+
 	ip := net.ParseIP(name)
 	if ip != nil {
 		device, err := shelly.NewDeviceFromIp(ctx, hc.log, ip)
@@ -179,7 +188,7 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 		hc.log.Info("Response received", "payload", string(resStr), "request_id", requestId)
 		break
 	case <-time.After(hc.timeout):
-		return nil, fmt.Errorf("timeout waiting for response to method %s after %v (request_id: %s, dst: %s, topic: %s)", 
+		return nil, fmt.Errorf("timeout waiting for response to method %s after %v (request_id: %s, dst: %s, topic: %s)",
 			method, hc.timeout, requestId, req.Dst, ClientTopic(hc.me))
 	}
 

@@ -1,60 +1,36 @@
 package script
 
 import (
-	"context"
 	"fmt"
-	"hlog"
-	"myhome"
-	"myhome/ctl/options"
-	"pkg/devices"
-	"pkg/shelly"
-	"pkg/shelly/script"
-	"pkg/shelly/types"
 
-	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
 func init() {
 	Cmd.AddCommand(prometheusScrapeConfigCmd)
+	prometheusScrapeConfigCmd.Flags().StringVar(&metricsExporterHost, "host", "myhome.local", "Metrics exporter hostname (use mDNS name or IP)")
+	prometheusScrapeConfigCmd.Flags().IntVar(&metricsExporterPort, "port", 9100, "Metrics exporter port")
 }
+
+var metricsExporterHost string
+var metricsExporterPort int
 
 var prometheusScrapeConfigCmd = &cobra.Command{
 	Use:     "prometheus-scrape-config",
-	Short:   "Generate Prometheus scrape_configs: for Shelly devices running watchdog.js, which exposes Prometheus metrics via /script/<id>/metrics",
+	Short:   "Generate Prometheus scrape_configs: for the MyHome metrics exporter (centralized MQTT-based metrics collection)",
 	Aliases: []string{"prom-config", "pc"},
-	Args:    cobra.RangeArgs(0, 1),
+	Args:    cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := hlog.Logger
-		if len(args) == 0 {
-			return fmt.Errorf("device glob or identifier required")
-		}
-		_, err := myhome.Foreach(cmd.Context(), log, args[0], options.Via, generatePrometheusScrapeConfig, options.Args(args))
-		return err
+		generatePrometheusScrapeConfig()
+		return nil
 	},
 }
 
-func generatePrometheusScrapeConfig(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
-	sd, ok := device.(*shelly.Device)
-	if !ok {
-		return nil, fmt.Errorf("device is not a Shelly: %s %v", device.Id(), device)
-	}
-
-	loaded, err := script.ListLoaded(ctx, via, sd)
-	if err != nil {
-		log.Error(err, "Unable to list scripts", "device", sd.Id())
-		return nil, nil
-	}
-
-	for _, s := range loaded {
-		if s.Name == "watchdog.js" && s.Running {
-			fmt.Printf(`
-- job_name: 'shelly_%s'
-  metrics_path: /script/%d/metrics
-  static_configs:
-    - targets: ['%s']
-`, sd.Id(), s.Id, sd.Ip())
-		}
-	}
-	return nil, nil
+func generatePrometheusScrapeConfig() {
+	fmt.Printf(`scrape_configs:
+  - job_name: 'shelly'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['%s:%d']
+`, metricsExporterHost, metricsExporterPort)
 }

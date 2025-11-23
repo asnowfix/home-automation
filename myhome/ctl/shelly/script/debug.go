@@ -196,7 +196,10 @@ var debugCtl = &cobra.Command{
 			return err
 		}
 
-		<-ctx.Done()
+		// Only wait for UDP messages if debug is being enabled
+		if active {
+			<-ctx.Done()
+		}
 		return nil
 	},
 }

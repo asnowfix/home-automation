@@ -3,6 +3,7 @@ package mqtt
 import (
 	"context"
 	"fmt"
+	"global"
 	"myhome/ctl/options"
 	"mynet"
 	"net"
@@ -26,16 +27,18 @@ const PUBLIC_PORT = 8883
 
 type Client struct {
 	// clientId  string      // MQTT client_id (this client)
-	mqtt                mqtt.Client   // MQTT stack
-	brokerUrl           *url.URL      // MQTT broker to connect to
-	log                 logr.Logger   // Logger to use
-	resolutionTimeout   time.Duration // MQTT broker (mDNS) lookup resolution timeout
-	timeout             time.Duration // MQTT operations timeout
-	grace               time.Duration // MQTT disconnection grace period
-	watchdogStarted     bool          // Whether watchdog has been started
-	watchdogMutex       sync.Mutex    // Protects watchdogStarted
-	watchdogInterval    time.Duration // Watchdog check interval
-	watchdogMaxFailures int           // Watchdog max consecutive failures
+	mqtt                mqtt.Client        // MQTT stack
+	brokerUrl           *url.URL           // MQTT broker to connect to
+	log                 logr.Logger        // Logger to use
+	resolutionTimeout   time.Duration      // MQTT broker (mDNS) lookup resolution timeout
+	timeout             time.Duration      // MQTT operations timeout
+	grace               time.Duration      // MQTT disconnection grace period
+	watchdogStarted     bool               // Whether watchdog has been started
+	watchdogMutex       sync.Mutex         // Protects watchdogStarted
+	watchdogInterval    time.Duration      // Watchdog check interval
+	watchdogMaxFailures int                // Watchdog max consecutive failures
+	ctx                 context.Context    // Process-wide context for background services
+	watchdogCancel      context.CancelFunc // Cancel function for watchdog
 }
 
 const BROKER_DEFAULT_NAME = "mqtt"
@@ -87,6 +90,7 @@ func GetClientE(ctx context.Context) (*Client, error) {
 		grace:               options.Flags.MqttGrace,
 		watchdogInterval:    options.Flags.MqttWatchdogInterval,
 		watchdogMaxFailures: options.Flags.MqttWatchdogMaxFailures,
+		ctx:                 global.ProcessContext(ctx),
 	}
 
 	// FIXME: get MQTT logging right
@@ -191,10 +195,14 @@ func (c *Client) startWatchdogOnce() {
 	}
 	c.watchdogStarted = true
 
-	go c.watchdog()
+	// Create a cancellable context from the process context
+	watchdogCtx, cancel := context.WithCancel(c.ctx)
+	c.watchdogCancel = cancel
+
+	go c.watchdog(watchdogCtx)
 }
 
-func (c *Client) watchdog() {
+func (c *Client) watchdog(ctx context.Context) {
 	consecutiveFailures := 0
 
 	c.log.Info("Starting MQTT connection watchdog", "check_interval", c.watchdogInterval, "max_failures", c.watchdogMaxFailures)
@@ -202,24 +210,30 @@ func (c *Client) watchdog() {
 	ticker := time.NewTicker(c.watchdogInterval)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		if c.mqtt.IsConnected() {
-			if consecutiveFailures > 0 {
-				c.log.Info("MQTT connection recovered", "previous_failures", consecutiveFailures)
-				consecutiveFailures = 0
-			}
-		} else {
-			consecutiveFailures++
-			c.log.Error(nil, "MQTT connection lost", "consecutive_failures", consecutiveFailures, "max_failures", c.watchdogMaxFailures)
+	for {
+		select {
+		case <-ctx.Done():
+			c.log.Info("Process terminating, stopping MQTT watchdog")
+			return
+		case <-ticker.C:
+			if c.mqtt.IsConnected() {
+				if consecutiveFailures > 0 {
+					c.log.Info("MQTT connection recovered", "previous_failures", consecutiveFailures)
+					consecutiveFailures = 0
+				}
+			} else {
+				consecutiveFailures++
+				c.log.Error(nil, "MQTT connection lost", "consecutive_failures", consecutiveFailures, "max_failures", c.watchdogMaxFailures)
 
-			// Note: Paho MQTT client has AutoReconnect=true and ResumeSubs=true,
-			// so it will automatically reconnect and re-subscribe to all topics.
-			// We just monitor if reconnection is taking too long.
+				// Note: Paho MQTT client has AutoReconnect=true and ResumeSubs=true,
+				// so it will automatically reconnect and re-subscribe to all topics.
+				// We just monitor if reconnection is taking too long.
 
-			if consecutiveFailures >= c.watchdogMaxFailures {
-				c.log.Error(nil, "MQTT connection failed too many times, daemon needs restart",
-					"consecutive_failures", consecutiveFailures)
-				panic("MQTT connection permanently lost")
+				if consecutiveFailures >= c.watchdogMaxFailures {
+					c.log.Error(nil, "MQTT connection failed too many times, daemon needs restart",
+						"consecutive_failures", consecutiveFailures)
+					panic("MQTT connection permanently lost")
+				}
 			}
 		}
 	}
@@ -293,6 +307,12 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 
 func (c *Client) Close() {
 	c.log.Info("Closing MQTT client", "client_id", c.Id())
+
+	// Cancel watchdog if it's running
+	if c.watchdogCancel != nil {
+		c.watchdogCancel()
+	}
+
 	if c.mqtt.IsConnected() {
 		c.log.Info("Disconnecting MQTT client", "client_id", c.Id())
 		c.mqtt.Disconnect(uint(c.grace.Milliseconds()))

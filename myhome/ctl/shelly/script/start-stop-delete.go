@@ -52,6 +52,16 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 	buf, err := pkgscript.ReadEmbeddedFile(scriptName)
 	if err != nil {
 		fmt.Printf("✗ Failed to read script %s: %v\n", scriptName, err)
+
+		// List available scripts to help the user
+		availableScripts, listErr := pkgscript.ListAvailable()
+		if listErr == nil && len(availableScripts) > 0 {
+			fmt.Printf("\nAvailable scripts:\n")
+			for _, s := range availableScripts {
+				fmt.Printf("  - %s\n", s)
+			}
+		}
+
 		return nil, err
 	}
 

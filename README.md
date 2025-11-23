@@ -46,6 +46,16 @@ MyHome Penates is the home automation system I develop & use to control my house
     - [Follow Shelly Device Status](#follow-shelly-device-status)
     - [Follow Shelly BLU Device](#follow-shelly-blu-device)
     - [How It Works](#how-it-works)
+  - [Prometheus Metrics Exporter](#prometheus-metrics-exporter)
+    - [Architecture](#architecture)
+    - [Benefits](#benefits)
+    - [Configuration](#configuration)
+      - [Enable the Service](#enable-the-service)
+      - [Shelly Device Setup](#shelly-device-setup)
+      - [Prometheus Configuration](#prometheus-configuration)
+    - [Available Metrics](#available-metrics)
+    - [Testing](#testing)
+    - [Troubleshooting](#troubleshooting)
   - [Heaters adaptative control](#heaters-adaptative-control)
     - [Kalman Filter Heater Control Script](#kalman-filter-heater-control-script)
   - [Shelly Notes](#shelly-notes)
@@ -540,6 +550,119 @@ The follow commands configure the follower device with a script that:
 The action is automatically inferred from the input type:
 - **switch:X inputs**: Mirror the exact state (on/off)
 - **input:X inputs**: Toggle the follower's switch when the button is released (`state: false`)
+
+## Prometheus Metrics Exporter
+
+The Prometheus Metrics Exporter is an integrated service that collects metrics from Shelly devices via MQTT and exposes them via HTTP for Prometheus scraping. This eliminates the need for HTTP endpoints on each device, saving ~4-5KB memory per device.
+
+### Architecture
+
+```
+Shelly Device → MQTT Broker → MyHome Daemon → Prometheus
+(watchdog.js)   (publish)     (metrics exporter)  (scrape)
+```
+
+### Benefits
+
+- **Memory efficient**: Saves 4-5KB per Shelly device (no HTTP endpoint overhead)
+- **Centralized**: One endpoint for all devices
+- **mDNS support**: Can scrape from `myhome.local:9100`
+- **NAT/firewall friendly**: Devices push to MQTT
+- **Dynamic IP support**: Devices identified by ID, not IP
+
+### Configuration
+
+#### Enable the Service
+
+The metrics exporter is **automatically enabled** when the device manager is running (default):
+
+```bash
+# Auto-enabled with device manager
+myhome run
+
+# Customize settings
+myhome run --metrics-exporter-port 9100 --metrics-exporter-topic shelly/metrics
+
+# Standalone (without device manager)
+myhome run --disable-device-manager --enable-metrics-exporter --mqtt-broker tcp://broker:1883
+```
+
+#### Shelly Device Setup
+
+Deploy the updated `watchdog.js` script to your devices:
+
+```bash
+myhome ctl shelly script update device-name watchdog.js
+```
+
+The script publishes metrics to MQTT every 30 seconds:
+
+```javascript
+prometheus: {
+    enabled: true,
+    publishIntervalSeconds: 30,
+    mqttTopic: "shelly/metrics",
+    monitoredSwitches: ["switch:0"]
+}
+```
+
+#### Prometheus Configuration
+
+```yaml
+scrape_configs:
+  - job_name: 'shelly'
+    scrape_interval: 30s
+    static_configs:
+      - targets: ['myhome.local:9100']  # If mDNS supported
+      # OR
+      - targets: ['192.168.1.2:9100']   # IP address
+```
+
+### Available Metrics
+
+**System Metrics:**
+- `shelly_uptime_seconds` (counter) - System uptime
+- `shelly_ram_size_bytes` (gauge) - Total RAM
+- `shelly_ram_free_bytes` (gauge) - Free RAM
+
+**Switch Metrics** (per monitored switch):
+- `shelly_switch_power_watts` (gauge) - Power consumption
+- `shelly_switch_voltage_volts` (gauge) - Voltage
+- `shelly_switch_current_amperes` (gauge) - Current
+- `shelly_switch_temperature_celsius` (gauge) - Temperature
+- `shelly_switch_power_total` (counter) - Total energy consumed
+- `shelly_switch_output` (gauge) - Switch state (1=on, 0=off)
+
+All metrics include labels: `name`, `id`, `mac`, `app`, `switch`
+
+### Testing
+
+```bash
+# View metrics
+curl http://localhost:9100/metrics
+
+# Check health
+curl http://localhost:9100/health
+
+# Monitor MQTT messages
+mosquitto_sub -h mqtt-broker -t 'shelly/metrics/#' -v
+```
+
+### Troubleshooting
+
+**Metrics not appearing:**
+1. Check MQTT: `mosquitto_sub -h broker -t 'shelly/metrics/#' -v`
+2. Check device script: `myhome ctl shelly script status device-name watchdog.js`
+3. Verify MQTT connection on device
+
+**Port already in use:**
+```bash
+lsof -i :9100
+# Use different port
+myhome run --metrics-exporter-port 9101
+```
+
+For detailed documentation, see [`docs/metrics-exporter.md`](docs/metrics-exporter.md).
 
 ## Heaters adaptative control
 

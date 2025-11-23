@@ -10,13 +10,36 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sync"
 
 	"github.com/jackpal/gateway"
 )
 
-func boxIp() string {
-	ip, _ := gateway.DiscoverGateway()
-	return ip.String()
+var (
+	boxIp         string
+	boxIpMutex    sync.Mutex
+	boxIpInitOnce sync.Once
+)
+
+func getBoxIp() string {
+	boxIpMutex.Lock()
+	defer boxIpMutex.Unlock()
+
+	if boxIp != "" {
+		return boxIp
+	}
+
+	boxIpInitOnce.Do(func() {
+		ip, err := gateway.DiscoverGateway()
+		if err != nil {
+			log.Error(err, "Failed to discover gateway")
+			return
+		}
+		boxIp = ip.String()
+		log.Info("Discovered gateway IP", "ip", boxIp)
+	})
+
+	return boxIp
 }
 
 var username string = os.Getenv("SFR_USERNAME")
@@ -133,7 +156,7 @@ func queryBox(method string, params *map[string]string) (any, error) {
 
 	u := &url.URL{
 		Scheme:   "http",
-		Host:     boxIp(),
+		Host:     getBoxIp(),
 		Path:     "/api/1.0/",
 		RawQuery: values.Encode(),
 	}

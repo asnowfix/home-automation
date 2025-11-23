@@ -3,6 +3,7 @@ package mynet
 import (
 	"context"
 	"fmt"
+	"global"
 	"net"
 	"net/url"
 	"strings"
@@ -122,7 +123,13 @@ func (r *resolver) start(ctx context.Context) Resolver {
 		}
 		r.log.Info("Published over mDNS", "hostnames", r.localNames, "ip", ip.String())
 		r.started = true
-		<-ctx.Done()
+
+		// Use process-wide context for background service lifecycle
+		processCtx := global.ProcessContext(ctx)
+		<-processCtx.Done()
+
+		// Clean up when process terminates
+		r.log.Info("Process terminating, closing mDNS resolver")
 		r.mdns.Close()
 		l4.Close()
 		l6.Close()
@@ -160,8 +167,10 @@ func (r *resolver) LookupHost(ctx context.Context, host string) ([]net.IP, error
 		}
 		return ips, nil
 	}
-	_, addr, err := r.mdns.QueryAddr(ctx, fmt.Sprintf("%s.local", host))
+	localHost := host + ".local"
+	_, addr, err := r.mdns.QueryAddr(ctx, localHost)
 	if err != nil {
+		r.log.Error(err, "Failed to query mDNS", "host", localHost)
 		return nil, err
 	}
 

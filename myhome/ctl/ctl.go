@@ -9,6 +9,7 @@ import (
 	"myhome/ctl/follow"
 	"myhome/ctl/forget"
 	"myhome/ctl/group"
+	"myhome/ctl/heater"
 	"myhome/ctl/list"
 	"myhome/ctl/mqtt"
 	"myhome/ctl/open"
@@ -126,6 +127,7 @@ func init() {
 	Cmd.AddCommand(follow.FollowCmd)
 	Cmd.AddCommand(follow.UnfollowCmd)
 	Cmd.AddCommand(temperature.Cmd)
+	Cmd.AddCommand(heater.Cmd)
 }
 
 var Commit string

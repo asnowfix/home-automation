@@ -8,6 +8,7 @@ require (
 	github.com/eclipse/paho.mqtt.golang v1.5.0
 	github.com/go-logr/logr v1.4.3
 	github.com/mochi-mqtt/server/v2 v2.6.6
+	global v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -27,3 +28,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace global => ../../internal/global

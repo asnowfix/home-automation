@@ -60,10 +60,11 @@ func doList(ctx context.Context) error {
 		return fmt.Errorf("failed to get MQTT client: %w", err)
 	}
 
-	// Subscribe to discovery responses
-	responseTopic := "myhome/heater/discovery/response"
+	// Build response topic with CLI client ID
+	clientId := mc.Id()
+	responseTopic := fmt.Sprintf("myhome/heater/list/response/%s", clientId)
 
-	log.Info("Subscribing to discovery responses", "topic", responseTopic)
+	log.Info("Subscribing to list responses", "topic", responseTopic)
 
 	responsesChan, err := mc.Subscriber(ctx, responseTopic, 10)
 	if err != nil {
@@ -73,9 +74,9 @@ func doList(ctx context.Context) error {
 	// Wait a bit for subscription to be established
 	time.Sleep(100 * time.Millisecond)
 
-	// Publish discovery query
-	queryTopic := "myhome/heater/discovery/query"
-	log.Info("Publishing discovery query", "topic", queryTopic)
+	// Publish list query
+	queryTopic := "myhome/heater/list"
+	log.Info("Publishing list query", "topic", queryTopic)
 
 	queryPayload := map[string]interface{}{
 		"timestamp": time.Now().Unix(),

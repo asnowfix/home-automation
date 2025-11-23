@@ -1291,67 +1291,71 @@ if (typeof Shelly !== "undefined") {
     }
   });
 
-  // Subscribe to discovery queries
-  MQTT.subscribe('myhome/heater/discovery/query', function(topic, message) {
-    log('Received discovery query');
+  // Subscribe to all heater commands using wildcard
+  MQTT.subscribe('myhome/heater/#', function(topic, message) {
+    log('Received message on topic:', topic);
     
-    // Parse the query message
-    var query = null;
+    // Parse the message
+    var request = null;
     try {
-      query = JSON.parse(message);
+      request = JSON.parse(message);
     } catch (e) {
-      log('Failed to parse discovery query:', message);
+      log('Failed to parse message:', message);
       if (e && false) {}
       return;
     }
     
-    // Check for replyTo property - drop query if missing
-    if (!query || !("replyTo" in query) || typeof query.replyTo !== 'string') {
-      log('Discovery query missing replyTo property, dropping query');
+    // Check for replyTo property - required for all commands
+    if (!request || !("replyTo" in request) || typeof request.replyTo !== 'string') {
+      log('Message missing replyTo property, dropping request');
       return;
     }
     
-    var replyToTopic = query.replyTo;
-    log('Will reply to:', replyToTopic);
-    
-    // Use cached device info (no need to call getDeviceInfo again)
+    var replyToTopic = request.replyTo;
     var deviceId = STATE.deviceId || 'unknown';
     var deviceName = STATE.deviceName || 'unknown';
     
-    // Build response with current configuration and state
-    var response = {
-      device_id: deviceId,
-      device_name: deviceName,
-      script_name: SCRIPT_NAME,
-      config: {
-        enableLogging: CONFIG.enableLogging,
-        setpoint: CONFIG.setpoint,
-        minInternalTemp: CONFIG.minInternalTemp,
-        cheapStartHour: CONFIG.cheapStartHour,
-        cheapEndHour: CONFIG.cheapEndHour,
-        pollIntervalMs: CONFIG.pollIntervalMs,
-        preheatHours: CONFIG.preheatHours,
-        normallyClosed: CONFIG.normallyClosed,
-        internalTemperatureTopic: CONFIG.internalTemperatureTopic,
-        externalTemperatureTopic: CONFIG.externalTemperatureTopic,
-        roomId: CONFIG.roomId
-      },
-      state: {
-        heaterOn: STATE.heaterOn,
-        internalTemp: STATE.internalTemp,
-        externalTemp: STATE.externalTemp,
-        currentSetpoint: STATE.currentSetpoint,
-        coolingRate: getCoolingRate(),
-        lastUpdate: new Date().getTime()
-      },
-      timestamp: new Date().getTime() / 1000
-    };
-    
-    // Publish response to the topic specified in replyTo
-    MQTT.publish(replyToTopic, JSON.stringify(response), 0, false);
-    log('Sent discovery response to', replyToTopic, 'with payload:', response);
+    // Handle different command topics
+    if (topic === 'myhome/heater/list' || topic === 'myhome/heater/show/' + deviceId) {
+      log('Handling show/list request, will reply to:', replyToTopic);
+      
+      // Build response with current configuration and state
+      var response = {
+        device_id: deviceId,
+        device_name: deviceName,
+        script_name: SCRIPT_NAME,
+        config: {
+          enableLogging: CONFIG.enableLogging,
+          setpoint: CONFIG.setpoint,
+          minInternalTemp: CONFIG.minInternalTemp,
+          cheapStartHour: CONFIG.cheapStartHour,
+          cheapEndHour: CONFIG.cheapEndHour,
+          pollIntervalMs: CONFIG.pollIntervalMs,
+          preheatHours: CONFIG.preheatHours,
+          normallyClosed: CONFIG.normallyClosed,
+          internalTemperatureTopic: CONFIG.internalTemperatureTopic,
+          externalTemperatureTopic: CONFIG.externalTemperatureTopic,
+          roomId: CONFIG.roomId
+        },
+        state: {
+          heaterOn: STATE.heaterOn,
+          internalTemp: STATE.internalTemp,
+          externalTemp: STATE.externalTemp,
+          currentSetpoint: STATE.currentSetpoint,
+          coolingRate: getCoolingRate(),
+          lastUpdate: new Date().getTime()
+        },
+        timestamp: new Date().getTime() / 1000
+      };
+      
+      // Publish response to the topic specified in replyTo
+      MQTT.publish(replyToTopic, JSON.stringify(response), 0, false);
+      log('Sent response to', replyToTopic);
+    } else {
+      // Log other heater commands but don't respond
+      log('Received unhandled heater command on topic:', topic, 'request:', JSON.stringify(request));
+    }
   });
 
   log("Script started");
 }
-

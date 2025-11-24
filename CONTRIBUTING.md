@@ -955,7 +955,7 @@ Follow this pattern (see temperature and occupancy services as examples):
 // WRONG - Don't do this!
 func NewRPCService(ctx context.Context) (*RPCService, error) {
     // Subscribing to a different topic
-    from, err := mc.Subscriber(ctx, "yourservice/rpc", 1)
+    from, err := mc.Subscribe(ctx, "atopic/rpc", 1, "package/yourservice")
     // This creates a separate RPC service!
 }
 ```

@@ -296,7 +296,7 @@ func callRPC(ctx context.Context, log logr.Logger, method myhome.Verb, params an
 
 	// Subscribe to response topic
 	replyTopic := fmt.Sprintf("myhome/rpc/reply/%s", req.ID)
-	replyChan, err := mc.Subscriber(ctx, replyTopic, 1)
+	replyChan, err := mc.Subscribe(ctx, replyTopic, 8, "ctl/temperature")
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to reply topic: %w", err)
 	}

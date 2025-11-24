@@ -83,7 +83,11 @@ else
 endif
 
 tidy:
+	$(GO) get -u ./...
+	$(GO) mod tidy
 	$(foreach m,$(mods),$(GO) work use $(dir $(m)) &&) echo
+	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) list -m -u all) &&) echo
+	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) get -u ./...) &&) echo
 	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) mod tidy) &&) echo
 
 build run:

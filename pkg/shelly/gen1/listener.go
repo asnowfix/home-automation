@@ -19,17 +19,16 @@ func StartMqttListener(ctx context.Context, mc mqtt.Client, mcc mqtt.Cache, sc d
 	log := logr.FromContextOrDiscard(ctx).WithName("Gen1MqttListener")
 
 	log.Info("Starting Gen1 MQTT listener")
-
-	// Check if the client supports SubscriberWithTopic
-	subscriber, ok := mc.(mqtt.SubscriberWithTopic)
+	// Check if the client supports Subscribe with topic wildcards
+	subscriber, ok := mc.(mqtt.MultiSubscriber)
 	if !ok {
-		return fmt.Errorf("MQTT client does not support SubscriberWithTopic")
+		return fmt.Errorf("MQTT client does not support MultiSubscribe")
 	}
 
 	// Subscribe to all Gen1 topics: (not just sensors like `shellies/+/sensor/#`)
 	// This will match: shellies/<device-id>/info, shellies/<device-id>/sensor/temperature, shellies/<device-id>/sensor/humidity, etc.
 	topic := "shellies/#"
-	ch, err := subscriber.SubscriberWithTopic(ctx, topic, 16)
+	ch, err := subscriber.MultiSubscribe(ctx, topic, 16, "shelly/gen1")
 	if err != nil {
 		log.Error(err, "Failed to subscribe to Gen1 sensor topics", "topic", topic)
 		return err

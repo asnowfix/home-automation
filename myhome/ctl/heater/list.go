@@ -66,7 +66,7 @@ func doList(ctx context.Context) error {
 
 	log.Info("Subscribing to list responses", "topic", responseTopic)
 
-	responsesChan, err := mc.Subscriber(ctx, responseTopic, 10)
+	responsesChan, err := mc.Subscribe(ctx, responseTopic, 8, "myhome/ctl/heater/list")
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to %s: %w", responseTopic, err)
 	}

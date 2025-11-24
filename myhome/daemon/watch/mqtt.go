@@ -7,6 +7,7 @@ import (
 	"myhome"
 	"myhome/ctl/options"
 	"myhome/devices"
+	"myhome/mqtt"
 	mqttclient "myhome/mqtt"
 	"os"
 	"path/filepath"
@@ -24,7 +25,7 @@ func StartMqttWatcher(ctx context.Context, mc *mqttclient.Client, dm devices.Man
 		panic("BUG: No logger initialized")
 	}
 	topic := "+/events/rpc"
-	ch, err := mc.Subscriber(ctx, topic, 16)
+	ch, err := mc.MultiSubscribe(ctx, topic, 16, "daemon/watch")
 	if err != nil {
 		log.Error(err, "Failed to subscribe to shelly gen2+ devices events")
 		return err
@@ -36,7 +37,7 @@ func StartMqttWatcher(ctx context.Context, mc *mqttclient.Client, dm devices.Man
 	return nil
 }
 
-func mqttWatcher(ctx context.Context, topic string, dm devices.Manager, dr devices.DeviceRegistry, ch <-chan []byte) {
+func mqttWatcher(ctx context.Context, topic string, dm devices.Manager, dr devices.DeviceRegistry, ch <-chan mqtt.Message) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
@@ -49,9 +50,9 @@ func mqttWatcher(ctx context.Context, topic string, dm devices.Manager, dr devic
 			return
 
 		case msg := <-ch:
-			log.Info("Received RPC event", "topic", topic, "payload", string(msg))
-			if len(msg) < 2 {
-				log.Info("Skipping RPC event with invalid payload", "payload", string(msg))
+			log.Info("Received RPC event", "topic", topic, "payload", string(msg.Payload()))
+			if len(msg.Payload()) < 2 {
+				log.Info("Skipping RPC event with invalid payload", "payload", string(msg.Payload()))
 				continue
 			}
 
@@ -63,7 +64,7 @@ func mqttWatcher(ctx context.Context, topic string, dm devices.Manager, dr devic
 					// Use RFC3339 timestamp for filename
 					ts := time.Now().UTC().Format(time.RFC3339)
 					filename := filepath.Join(dir, fmt.Sprintf("%s.json", ts))
-					if werr := os.WriteFile(filename, msg, 0o644); werr != nil {
+					if werr := os.WriteFile(filename, msg.Payload(), 0o644); werr != nil {
 						log.Error(werr, "Failed to write event payload", "file", filename)
 					} else {
 						log.Info("Wrote event", "file", filename)
@@ -72,9 +73,9 @@ func mqttWatcher(ctx context.Context, topic string, dm devices.Manager, dr devic
 			}
 
 			event := &shellymqtt.Event{}
-			err := json.Unmarshal(msg, &event)
+			err := json.Unmarshal(msg.Payload(), &event)
 			if err != nil {
-				log.Error(err, "Failed to unmarshal RPC event from payload", "payload", string(msg))
+				log.Error(err, "Failed to unmarshal RPC event from payload", "payload", string(msg.Payload()))
 				continue
 			}
 			if event.Src[:6] != "shelly" {

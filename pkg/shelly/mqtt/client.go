@@ -15,8 +15,8 @@ type Message interface {
 type Client interface {
 	GetServer() string
 	Id() string
-	Subscriber(ctx context.Context, topic string, qlen uint) (<-chan []byte, error)
-	Publisher(ctx context.Context, topic string, qlen uint) (chan<- []byte, error)
+	Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error)
+	Publisher(ctx context.Context, topic string, qlen uint, publisher string) (chan<- []byte, error)
 	Publish(ctx context.Context, topic string, msg []byte) error
 }
 
@@ -24,14 +24,14 @@ type Cache interface {
 	Insert(topic string, msg []byte) error
 }
 
-// SubscriberWithTopic is a capability interface for clients that support topic-aware subscriptions
+// Subscriber is a capability interface for clients that support topic-aware subscriptions
 // Note: This is intentionally NOT part of the base Client interface due to Go's lack of
 // channel covariance. Implementations return channels of their own concrete Message types.
 // Consumers should use type assertions to access this capability.
-type SubscriberWithTopic interface {
-	// SubscriberWithTopic returns a channel of messages that implement the Message interface
+type MultiSubscriber interface {
+	// MultiSubscriber returns a channel of messages that implement the Message interface
 	// The actual channel type is implementation-specific
-	SubscriberWithTopic(ctx context.Context, topic string, qlen uint) (<-chan Message, error)
+	MultiSubscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan Message, error)
 }
 
 func FromContext(ctx context.Context) (Client, error) {

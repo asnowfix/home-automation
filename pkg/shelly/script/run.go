@@ -843,7 +843,7 @@ func mqttSubscribe(ctx context.Context, vm *goja.Runtime, topic string, callback
 			if err != nil {
 				return nil, err
 			}
-			in, err := mc.Subscriber(ctx, topic, 0)
+			in, err := mc.Subscribe(ctx, topic, 8, "shelly/script")
 			if err != nil {
 				return nil, err
 			}

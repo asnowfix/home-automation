@@ -50,7 +50,7 @@ func doShow(ctx context.Context, log logr.Logger, via types.Channel, device devi
 
 	log.Info("Subscribing to response", "topic", responseTopic)
 
-	responsesChan, err := mc.Subscriber(ctx, responseTopic, 1)
+	responsesChan, err := mc.Subscribe(ctx, responseTopic, 1, "myhome/ctl/heater/show")
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to %s: %w", responseTopic, err)
 	}

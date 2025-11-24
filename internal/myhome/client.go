@@ -48,7 +48,7 @@ func (hc *client) start(ctx context.Context) {
 	}
 	hc.me = mc.Id()
 
-	hc.from, err = mc.Subscriber(ctx, ClientTopic(mc.Id()), 1)
+	hc.from, err = mc.Subscribe(ctx, ClientTopic(mc.Id()), 8, "myhome/client")
 	if err != nil {
 		hc.log.Error(err, "Failed to subscribe to client topic", "topic", ClientTopic(mc.Id()))
 		return
@@ -56,7 +56,7 @@ func (hc *client) start(ctx context.Context) {
 	// Note: Subscriber() waits for MQTT subscription ACK via token.WaitTimeout()
 	// so the subscription is guaranteed to be active when it returns successfully
 
-	hc.to, err = mc.Publisher(ctx, ServerTopic(), 1)
+	hc.to, err = mc.Publisher(ctx, ServerTopic(), 8, "myhome/client")
 	if err != nil {
 		hc.log.Error(err, "Failed to prepare publishing to server topic", "topic", ServerTopic())
 		return

@@ -89,7 +89,7 @@ func StartBLUListener(ctx context.Context, mqttClient *mqtt.Client, registry Dev
 
 	// Subscribe to all shelly-blu events
 	topic := "shelly-blu/events/#"
-	msgChan, err := mqttClient.SubscriberWithTopic(ctx, topic, 100)
+	msgChan, err := mqttClient.MultiSubscribe(ctx, topic, 8, "myhome/blu")
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to %s: %w", topic, err)
 	}
@@ -102,12 +102,7 @@ func StartBLUListener(ctx context.Context, mqttClient *mqtt.Client, registry Dev
 				log.Info("BLU listener stopped")
 				return
 			case msg := <-msgChan:
-				if msg == nil {
-					continue
-				}
-				if mqttMsg, ok := msg.(*mqtt.MqttMessage); ok {
-					handleBLUEvent(ctx, log, mqttMsg.Topic(), mqttMsg.Payload(), registry)
-				}
+				handleBLUEvent(ctx, log, msg.Topic(), msg.Payload(), registry)
 			}
 		}
 	}()

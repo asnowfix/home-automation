@@ -8,8 +8,7 @@ import (
 	"sync"
 	"time"
 
-	mqttclient "myhome/mqtt"
-	smqtt "pkg/shelly/mqtt"
+	"myhome/mqtt"
 
 	"github.com/go-logr/logr"
 )
@@ -45,18 +44,18 @@ func (mc *MetricsCache) GetAll() string {
 
 // Exporter handles MQTT subscription and HTTP serving for Prometheus metrics
 type Exporter struct {
-	mqttClient   *mqttclient.Client
+	mqttClient   *mqtt.Client
 	cache        *MetricsCache
 	httpServer   *http.Server
 	mqttTopic    string
 	httpAddr     string
 	log          logr.Logger
 	ctx          context.Context
-	subscription <-chan smqtt.Message
+	subscription <-chan mqtt.Message
 }
 
 // NewExporter creates a new metrics exporter
-func NewExporter(ctx context.Context, log logr.Logger, mqttClient *mqttclient.Client, mqttTopic, httpAddr string) *Exporter {
+func NewExporter(ctx context.Context, log logr.Logger, mqttClient *mqtt.Client, mqttTopic, httpAddr string) *Exporter {
 	return &Exporter{
 		ctx:        ctx,
 		mqttClient: mqttClient,
@@ -73,7 +72,7 @@ func (e *Exporter) Start() error {
 	topic := e.mqttTopic + "/#"
 	e.log.Info("Subscribing to MQTT topic", "topic", topic)
 
-	sub, err := e.mqttClient.SubscriberWithTopic(e.ctx, topic, 100)
+	sub, err := e.mqttClient.MultiSubscribe(e.ctx, topic, 8, "myhome/metrics")
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to MQTT topic %s: %w", topic, err)
 	}
@@ -122,7 +121,7 @@ func (e *Exporter) processMessages() {
 }
 
 // handleMessage processes a single MQTT message
-func (e *Exporter) handleMessage(msg smqtt.Message) {
+func (e *Exporter) handleMessage(msg mqtt.Message) {
 	// Extract device ID from topic: shelly/metrics/<device-id>
 	topic := msg.Topic()
 	prefix := e.mqttTopic + "/"

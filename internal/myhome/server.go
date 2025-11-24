@@ -29,7 +29,7 @@ func NewServerE(ctx context.Context, handler Server) (Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	from, err := mc.Subscriber(ctx, ServerTopic(), 1)
+	from, err := mc.Subscribe(ctx, ServerTopic(), 8, "myhome/server")
 	if err != nil {
 		log.Error(err, "Failed to subscribe to server", "topic", ServerTopic())
 		return nil, err

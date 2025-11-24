@@ -519,7 +519,7 @@ func (d *Device) initMqtt(ctx context.Context) error {
 
 	if d.from == nil && mc != nil {
 		var err error
-		d.from, err = mc.Subscriber(ctx, fmt.Sprintf("%s/rpc", d.replyTo), 1 /*qlen*/)
+		d.from, err = mc.Subscribe(ctx, fmt.Sprintf("%s/rpc", d.replyTo), 8 /*qlen*/, "shelly/device/"+d.Id())
 		if err != nil {
 			d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
 			return err
@@ -529,7 +529,7 @@ func (d *Device) initMqtt(ctx context.Context) error {
 	if d.to == nil && mc != nil {
 		topic := fmt.Sprintf("%s/rpc", d.Id_)
 		var err error
-		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/)
+		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/, "shelly/device/"+d.Id())
 		if err != nil {
 			d.log.Error(err, "Unable to publish to device's RPC topic", "device_id", d.Id_)
 			return err

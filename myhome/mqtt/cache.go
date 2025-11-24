@@ -80,7 +80,7 @@ func (c *Cache) StartCaching(client *Client, topic string) error {
 	c.log.V(1).Info("Starting MQTT message caching", "topic", topic)
 
 	// Subscribe to all topics (or specified topic pattern)
-	msgChan, err := client.SubscriberWithTopic(c.ctx, topic, 100)
+	msgChan, err := client.MultiSubscribe(c.ctx, topic, 8, "myhome/cache")
 	if err != nil {
 		return fmt.Errorf("failed to subscribe for caching: %w", err)
 	}

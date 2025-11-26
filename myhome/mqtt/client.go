@@ -325,20 +325,31 @@ var MqttPassword string = ""
 
 const ZEROCONF_SERVICE = "_mqtt._tcp."
 
-type Message struct {
+type Message interface {
+	Topic() string
+	Payload() []byte
+	Subscriber() string
+}
+
+type message struct {
 	topic      string
 	subscriber string
 	payload    []byte
 }
 
 // Topic returns the MQTT topic
-func (m *Message) Topic() string {
+func (m *message) Topic() string {
 	return m.topic
 }
 
 // Payload returns the MQTT message payload
-func (m *Message) Payload() []byte {
+func (m *message) Payload() []byte {
 	return m.payload
+}
+
+// Payload returns the MQTT message named subscriber
+func (m *message) Subscriber() string {
+	return m.subscriber
 }
 
 func (c *Client) Publisher(ctx context.Context, topic string, qlen uint, publisher string) (chan<- []byte, error) {
@@ -404,7 +415,7 @@ func (c *Client) MultiSubscribe(ctx context.Context, topic string, qlen uint, su
 	}
 
 	return subscribe(c, ctx, topic, qlen, subscriber, func(msg mqtt.Message) Message {
-		return Message{
+		return &message{
 			subscriber: subscriber,
 			topic:      msg.Topic(),
 			payload:    msg.Payload(),

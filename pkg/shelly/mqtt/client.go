@@ -6,13 +6,11 @@ import (
 
 type contextKey struct{}
 
-type Subscriber func(topic string, payload []byte) error
-
 type Client interface {
 	GetServer() string
 	Id() string
 	Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error)
-	SubscribeAll(ctx context.Context, topic string, qlen uint, subscriber string, handle Subscriber) error
+	SubscribeWithHandler(ctx context.Context, topic string, qlen uint, subscriber string, handle func(topic string, payload []byte, subcriber string) error) error
 	Publisher(ctx context.Context, topic string, qlen uint, publisher string) (chan<- []byte, error)
 	Publish(ctx context.Context, topic string, msg []byte) error
 }

@@ -400,20 +400,13 @@ func (c *Client) Publish(ctx context.Context, topic string, msg []byte) error {
 
 func (c *Client) Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error) {
 	c.log.Info("Subscribe", "topic", topic, "qlen", qlen, "subscriber", subscriber)
-	if hasWildcards(topic) {
-		return nil, fmt.Errorf("topic must contain wildcards ('+' or '#'): %s", topic)
-	}
 	return subscribe(c, ctx, topic, qlen, subscriber, func(msg mqtt.Message) []byte {
 		return msg.Payload()
 	})
 }
 
-func (c *Client) MultiSubscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan Message, error) {
-	c.log.Info("MultiSubscribe", "topic", topic, "qlen", qlen, "subscriber", subscriber)
-	if !hasWildcards(topic) {
-		return nil, fmt.Errorf("topic must contain wildcards ('+' or '#'): %s", topic)
-	}
-
+func (c *Client) SubscribeWithTopic(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan Message, error) {
+	c.log.Info("SubscribeWithTopic", "topic", topic, "qlen", qlen, "subscriber", subscriber)
 	return subscribe(c, ctx, topic, qlen, subscriber, func(msg mqtt.Message) Message {
 		return &message{
 			subscriber: subscriber,
@@ -423,8 +416,17 @@ func (c *Client) MultiSubscribe(ctx context.Context, topic string, qlen uint, su
 	})
 }
 
-func hasWildcards(topic string) bool {
-	return strings.Contains(topic, "+") || strings.Contains(topic, "#")
+func (c *Client) SubscribeWithHandler(ctx context.Context, topic string, qlen uint, subscriber string, handler func(topic string, payload []byte, subscriber string) error) error {
+	mch, err := c.SubscribeWithTopic(ctx, topic, qlen, subscriber)
+	if err != nil {
+		return err
+	}
+	go func() {
+		for msg := range mch {
+			handler(msg.Topic(), msg.Payload(), msg.Subscriber())
+		}
+	}()
+	return nil
 }
 
 func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, subscriber string, transform func(mqtt.Message) T) (<-chan T, error) {

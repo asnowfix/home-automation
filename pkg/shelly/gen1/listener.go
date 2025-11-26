@@ -23,7 +23,7 @@ func StartMqttListener(ctx context.Context, mc mqtt.Client, mcc mqtt.Cache, sc d
 	// Subscribe to all Gen1 topics: (not just sensors like `shellies/+/sensor/#`)
 	// This will match: shellies/<device-id>/info, shellies/<device-id>/sensor/temperature, shellies/<device-id>/sensor/humidity, etc.
 	topic := "shellies/#"
-	err := mc.SubscribeAll(ctx, topic, 16, "shelly/gen1", func(topic string, payload []byte) error {
+	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/gen1", func(topic string, payload []byte, subscriber string) error {
 		mcc.Insert(topic, payload)
 		return handleMessage(ctx, log, sc, router, topic, payload)
 	})
@@ -106,6 +106,7 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 
 	default:
 		log.V(1).Info("Dropping unknown Gen1 message", "topic", topic)
-		return nil
 	}
+
+	return nil
 }

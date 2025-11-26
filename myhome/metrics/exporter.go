@@ -72,7 +72,7 @@ func (e *Exporter) Start() error {
 	topic := e.mqttTopic + "/#"
 	e.log.Info("Subscribing to MQTT topic", "topic", topic)
 
-	sub, err := e.mqttClient.MultiSubscribe(e.ctx, topic, 8, "myhome/metrics")
+	sub, err := e.mqttClient.SubscribeWithTopic(e.ctx, topic, 8, "myhome/metrics")
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to MQTT topic %s: %w", topic, err)
 	}

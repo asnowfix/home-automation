@@ -146,7 +146,7 @@ func (s *Service) isOccupied(window time.Duration) (bool, string) {
 func (s *Service) subscribeInputs() {
 	// Gen2 events/rpc for NotifyStatus with input activity
 	topic := "+/events/rpc"
-	ch, err := s.mc.MultiSubscribe(s.ctx, topic, 8, "myhome/occupancy")
+	ch, err := s.mc.SubscribeWithTopic(s.ctx, topic, 8, "myhome/occupancy")
 	if err != nil {
 		s.log.Error(err, "Failed to subscribe to events", "topic", topic)
 		return

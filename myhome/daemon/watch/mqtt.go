@@ -25,7 +25,7 @@ func StartMqttWatcher(ctx context.Context, mc *mqttclient.Client, dm devices.Man
 		panic("BUG: No logger initialized")
 	}
 	topic := "+/events/rpc"
-	ch, err := mc.MultiSubscribe(ctx, topic, 16, "daemon/watch")
+	ch, err := mc.SubscribeWithTopic(ctx, topic, 16, "daemon/watch")
 	if err != nil {
 		log.Error(err, "Failed to subscribe to shelly gen2+ devices events")
 		return err

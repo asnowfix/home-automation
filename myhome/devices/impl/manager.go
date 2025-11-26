@@ -226,7 +226,7 @@ func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, router
 			return
 
 		case device := <-update:
-			log.Info("Updater loop: processing", "device", device.DeviceSummary)
+			log.V(1).Info("Updater loop: processing", "device", device.DeviceSummary)
 			go refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(device.Name())), device, router, refreshed)
 		}
 	}
@@ -257,12 +257,12 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.R
 		if err == nil {
 			ip := host.Ip().String()
 			if ip != device.Host() {
-				log.Info("Changing IP", "device", device.DeviceSummary, "old_ip", device.Host(), "new_ip", ip)
+				log.V(1).Info("Changing IP", "device", device.DeviceSummary, "old_ip", device.Host(), "new_ip", ip)
 				device.WithHost(ip)
 				modified = true
 			}
 		} else {
-			log.Info("Dropping IP", "device", device.DeviceSummary, "old_ip", device.Host())
+			log.V(1).Info("Dropping IP", "device", device.DeviceSummary, "old_ip", device.Host())
 			device.WithHost("")
 			modified = true
 		}
@@ -279,11 +279,11 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.R
 	}
 
 	if !modified {
-		log.Info("Device is up to date", "device", device.DeviceSummary)
+		log.V(1).Info("Device is up to date", "device", device.DeviceSummary)
 		return
 	}
 
-	log.Info("Updated: preparing to store", "device", device.DeviceSummary)
+	log.V(1).Info("Updated: preparing to store", "device", device.DeviceSummary)
 	refreshed <- device
 }
 

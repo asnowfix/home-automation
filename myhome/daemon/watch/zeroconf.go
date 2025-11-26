@@ -137,7 +137,7 @@ func completeEntry(ctx context.Context, log logr.Logger, resolver mynet.Resolver
 		return nil, err
 	}
 
-	log.Info("Resolved from mDNS entry", "entry", entry, "ipv4", entry.AddrIPv4, "ipv6", entry.AddrIPv6)
+	log.V(1).Info("Resolved from mDNS entry", "entry", entry, "ipv4", entry.AddrIPv4, "ipv6", entry.AddrIPv6)
 	return entry, nil
 }
 

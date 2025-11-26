@@ -61,11 +61,21 @@
             }
         },
         {
-            "name": "myhome daemon (w/o MQTT broker)",
+            "name": "myhome daemon (w/o MQTT broker) DEBUG",
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
             "args": ["--debug", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "myhome daemon (w/o MQTT broker) VERBOSE",
+            "type": "go",
+            "request": "launch",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["--verbose", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }

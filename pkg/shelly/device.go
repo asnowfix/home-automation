@@ -284,7 +284,7 @@ func (d *Device) IsHttpReady() bool {
 		return false
 	}
 	d.UpdateHost(ip.String())
-	return mynet.IsSameNetwork(d.log, ip) == nil
+	return mynet.IsSameNetwork(d.log.V(1), ip) == nil
 }
 
 func (d *Device) StartDialog(ctx context.Context) uint32 {

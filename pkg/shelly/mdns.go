@@ -17,7 +17,7 @@ const MDNS_SHELLIES string = "_shelly._tcp."
 
 func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver devices.Resolver, entry *zeroconf.ServiceEntry) (devices.Device, error) {
 	s, _ := json.Marshal(entry)
-	log.Info("Found", "entry", s)
+	log.V(1).Info("Found", "entry", s)
 
 	// deviceId is the ZeroConf instance name, e.g. "shelly1minig3-54320464074c" if matching deviceIdRe
 	deviceId := ""
@@ -30,7 +30,7 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 	var version string
 
 	for _, txt := range entry.Text {
-		log.Info("Found", "TXT", txt)
+		log.V(1).Info("Found", "TXT", txt)
 		if generationRe.Match([]byte(txt)) {
 			generation, _ = strconv.Atoi(generationRe.ReplaceAllString(txt, "${generation}"))
 		}
@@ -66,6 +66,6 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 	}
 	d.UpdateName(entry.Instance)
 
-	log.Info("Zeroconf-discovered", "device", d)
+	log.V(1).Info("Zeroconf-discovered", "device", d)
 	return d, nil
 }

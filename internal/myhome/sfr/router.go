@@ -105,7 +105,7 @@ func (r *Router) refresh(log logr.Logger) error {
 		count++
 		return true
 	})
-	log.Info("Number of devices stored", "count", count)
+	log.V(1).Info("Number of devices stored", "count", count)
 
 	return nil
 }

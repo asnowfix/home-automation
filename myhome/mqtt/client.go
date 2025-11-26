@@ -390,7 +390,7 @@ func (c *Client) Publish(ctx context.Context, topic string, msg []byte) error {
 
 	token := c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, false /*retain*/, msg)
 	if token.WaitTimeout(c.timeout) {
-		// c.log.Info("Published", "to topic", topic, "payload", string(msg))
+		c.log.V(1).Info("Published", "to topic", topic, "payload", string(msg))
 		return nil
 	} else {
 		c.log.Error(token.Error(), "Failed to publish", "to topic", topic, "payload", string(msg))

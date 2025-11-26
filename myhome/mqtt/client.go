@@ -198,13 +198,13 @@ func (c *Client) startWatchdogOnce() {
 	watchdogCtx, cancel := context.WithCancel(c.ctx)
 	c.watchdogCancel = cancel
 
-	go c.watchdog(watchdogCtx)
+	go c.watchdog(watchdogCtx, c.log.WithName("watchdog"))
 }
 
-func (c *Client) watchdog(ctx context.Context) {
+func (c *Client) watchdog(ctx context.Context, log logr.Logger) {
 	consecutiveFailures := 0
 
-	c.log.Info("Starting MQTT connection watchdog", "check_interval", c.watchdogInterval, "max_failures", c.watchdogMaxFailures)
+	log.Info("Starting MQTT connection watchdog", "check_interval", c.watchdogInterval, "max_failures", c.watchdogMaxFailures)
 
 	ticker := time.NewTicker(c.watchdogInterval)
 	defer ticker.Stop()
@@ -212,24 +212,24 @@ func (c *Client) watchdog(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			c.log.Info("Process terminating, stopping MQTT watchdog")
+			log.Info("Process terminating, stopping MQTT watchdog")
 			return
 		case <-ticker.C:
 			if c.mqtt.IsConnected() {
 				if consecutiveFailures > 0 {
-					c.log.Info("MQTT connection recovered", "previous_failures", consecutiveFailures)
+					log.Info("MQTT connection recovered", "previous_failures", consecutiveFailures)
 					consecutiveFailures = 0
 				}
 			} else {
 				consecutiveFailures++
-				c.log.Error(nil, "MQTT connection lost", "consecutive_failures", consecutiveFailures, "max_failures", c.watchdogMaxFailures)
+				log.Error(nil, "MQTT connection lost", "consecutive_failures", consecutiveFailures, "max_failures", c.watchdogMaxFailures)
 
 				// Note: Paho MQTT client has AutoReconnect=true and ResumeSubs=true,
 				// so it will automatically reconnect and re-subscribe to all topics.
 				// We just monitor if reconnection is taking too long.
 
 				if consecutiveFailures >= c.watchdogMaxFailures {
-					c.log.Error(nil, "MQTT connection failed too many times, daemon needs restart",
+					log.Error(nil, "MQTT connection failed too many times, daemon needs restart",
 						"consecutive_failures", consecutiveFailures)
 					panic("MQTT connection permanently lost")
 				}
@@ -421,11 +421,12 @@ func (c *Client) SubscribeWithHandler(ctx context.Context, topic string, qlen ui
 	if err != nil {
 		return err
 	}
-	go func() {
+	go func(log logr.Logger) {
 		for msg := range mch {
+			log.V(1).Info("Received message", "topic", msg.Topic(), "subscriber", msg.Subscriber())
 			handler(msg.Topic(), msg.Payload(), msg.Subscriber())
 		}
-	}()
+	}(c.log.WithName(subscriber))
 	return nil
 }
 
@@ -449,7 +450,7 @@ func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, s
 	if !loaded {
 		// Not yet subscribed at MQTT level: do it
 		distribute := func(client mqtt.Client, msg mqtt.Message) {
-			go func() {
+			go func(log logr.Logger) {
 				// Load current subscribers
 				value, ok := c.subscribers.Load(topic)
 				if !ok {
@@ -463,6 +464,9 @@ func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, s
 				transformed := transform(msg)
 				for i, ch := range subscribers {
 					select {
+					case <-ctx.Done():
+						c.log.Info("Subscriber context done", "topic", topic, "index", i)
+						return
 					case ch <- transformed:
 						// Successfully sent
 					default:
@@ -481,7 +485,7 @@ func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, s
 					}
 					c.subscribers.Store(topic, subscribers)
 				}
-			}()
+			}(c.log.WithName("distribute"))
 		}
 
 		token := c.mqtt.Subscribe(topic, 1 /*at-least-once*/, distribute)
@@ -495,7 +499,7 @@ func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, s
 		c.log.Info("Subscribed", "to topic", topic, "as client_id", c.Id())
 	}
 
-	go func(ctx context.Context, log logr.Logger) {
+	go func(log logr.Logger) {
 		<-ctx.Done()
 		// Don't log context cancellation as an error
 		token := c.mqtt.Unsubscribe(topic)
@@ -504,7 +508,7 @@ func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, s
 		} else {
 			log.Error(token.Error(), "Failed to unsubscribe", "from topic", topic)
 		}
-	}(ctx, c.log.WithName(subscriber))
+	}(c.log.WithName(subscriber))
 
 	return mch, nil
 }

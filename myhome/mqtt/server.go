@@ -91,7 +91,7 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 
 	// Start periodic client monitoring if enabled
 	if clientLogInterval > 0 {
-		go func(ctx context.Context) {
+		go func(log logr.Logger) {
 			ticker := time.NewTicker(clientLogInterval)
 			defer ticker.Stop()
 
@@ -112,16 +112,17 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 					log.Info("MQTT broker connected clients", "count", len(clients), "client_ids", clientIds)
 				}
 			}
-		}(ctx)
+		}(log.WithName("monitor"))
 	} else {
 		log.Info("MQTT broker client monitoring disabled")
 	}
 
-	go func(ctx context.Context) {
+	go func(log logr.Logger) {
 		<-ctx.Done()
+		log.Info("Shutting down MQTT broker")
 		mdnsServer.Shutdown()
 		mqttServer.Close()
-	}(ctx)
+	}(log.WithName("cleanup"))
 
 	log.Info("Started embedded MQTT broker & published it over mDNS/Zeroconf", "server", mdnsServer)
 

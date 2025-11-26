@@ -19,7 +19,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 		panic("BUG: No logger initialized")
 	}
 
-	go func(ctx context.Context, log logr.Logger) error {
+	go func(log logr.Logger) error {
 		stopped := make(chan struct{}, 1)
 		scan := make(chan *zeroconf.ServiceEntry, 1)
 		for {
@@ -30,7 +30,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 			}
 			log.Info("(Re)Started ZeroConf browser")
 
-			go func(ctx context.Context, log logr.Logger, scan <-chan *zeroconf.ServiceEntry, stopped chan<- struct{}) error {
+			go func(log logr.Logger, scan <-chan *zeroconf.ServiceEntry, stopped chan<- struct{}) error {
 				for {
 					select {
 					case <-ctx.Done():
@@ -79,7 +79,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 						dm.UpdateChannel() <- device
 					}
 				}
-			}(ctx, log.WithName("DeviceManager#WatchZeroConf"), scan, stopped)
+			}(log.WithName("DeviceManager#WatchZeroConf"), scan, stopped)
 
 			select {
 			case <-ctx.Done():
@@ -89,7 +89,7 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 				log.Info("Restarting ZeroConf browser")
 			}
 		}
-	}(ctx, log)
+	}(log.WithName("watch.ZeroConf"))
 
 	return nil
 }

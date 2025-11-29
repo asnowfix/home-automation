@@ -510,7 +510,7 @@ func (d *Device) initMqtt(ctx context.Context) error {
 
 	mc, err := mqtt.FromContext(ctx)
 	if err != nil {
-		d.log.Error(err, "Unable to get MQTT client")
+		d.log.Error(err, "Unable to get MQTT client from context", "device_id", d.Id_)
 		return err
 	}
 
@@ -526,10 +526,16 @@ func (d *Device) initMqtt(ctx context.Context) error {
 		}
 	}
 
+	mc, err = mqtt.FromContext(ctx)
+	if err != nil {
+		d.log.Error(err, "Unable to get MQTT client from context", "device_id", d.Id_)
+		return err
+	}
+
 	if d.to == nil && mc != nil {
 		topic := fmt.Sprintf("%s/rpc", d.Id_)
 		var err error
-		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/, "shelly/device/"+d.Id())
+		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/, mqtt.ExactlyOnce, false /*retain*/, "shelly/device/"+d.Id())
 		if err != nil {
 			d.log.Error(err, "Unable to publish to device's RPC topic", "device_id", d.Id_)
 			return err

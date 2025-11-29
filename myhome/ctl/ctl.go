@@ -20,7 +20,6 @@ import (
 	"myhome/ctl/temperature"
 	mqttclient "myhome/mqtt"
 	shellyPkg "pkg/shelly"
-	shellyMqtt "pkg/shelly/mqtt"
 	"pkg/shelly/types"
 	"runtime/pprof"
 
@@ -54,10 +53,7 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		// Add Shelly MQTT client to context
-		ctx = shellyMqtt.NewContext(ctx, mc)
-
-		myhome.TheClient, err = myhome.NewClientE(ctx, log, options.Flags.MqttTimeout)
+		myhome.TheClient, err = myhome.NewClientE(ctx, log, mc, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome client")
 			return err

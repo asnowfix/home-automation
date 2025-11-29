@@ -78,7 +78,7 @@ type DeviceRegistry interface {
 
 // StartBLUListener starts listening for Shelly BLU device events on MQTT
 // and registers discovered devices with their sensor capabilities
-func StartBLUListener(ctx context.Context, mqttClient *mqtt.Client, registry DeviceRegistry) error {
+func StartBLUListener(ctx context.Context, mqttClient mqtt.Client, registry DeviceRegistry) error {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		return fmt.Errorf("no logger in context: %w", err)

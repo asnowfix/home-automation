@@ -33,7 +33,7 @@ import (
 type Service struct {
 	ctx              context.Context
 	log              logr.Logger
-	mc               *mqttclient.Client
+	mc               mqttclient.Client
 	httpSrv          *http.Server
 	lastEvent        atomic.Int64 // unix nano of last relevant input event
 	lastMobileSeen   atomic.Int64 // unix nano of last mobile device presence
@@ -42,7 +42,7 @@ type Service struct {
 	mobileDevices    []string // list of device name patterns to check for (case-insensitive substring match)
 }
 
-func NewService(ctx context.Context, log logr.Logger, mc *mqttclient.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) *Service {
+func NewService(ctx context.Context, log logr.Logger, mc mqttclient.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) *Service {
 	s := &Service{
 		ctx:              ctx,
 		log:              log.WithName("occupancy.Service"),
@@ -217,7 +217,7 @@ func (s *Service) checkMobilePresence() {
 }
 
 // Start launches the occupancy HTTP service listening on port with the given MQTT client.
-func Start(ctx context.Context, port int, mc *mqttclient.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) error {
+func Start(ctx context.Context, port int, mc mqttclient.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) error {
 	log := logr.FromContextOrDiscard(ctx)
 	svc := NewService(ctx, log, mc, window, mobilePollPeriod, mobileDevices)
 	if mobileDevices != nil {

@@ -44,7 +44,7 @@ func (mc *MetricsCache) GetAll() string {
 
 // Exporter handles MQTT subscription and HTTP serving for Prometheus metrics
 type Exporter struct {
-	mqttClient   *mqtt.Client
+	mqttClient   mqtt.Client
 	cache        *MetricsCache
 	httpServer   *http.Server
 	mqttTopic    string
@@ -55,7 +55,7 @@ type Exporter struct {
 }
 
 // NewExporter creates a new metrics exporter
-func NewExporter(ctx context.Context, log logr.Logger, mqttClient *mqtt.Client, mqttTopic, httpAddr string) *Exporter {
+func NewExporter(ctx context.Context, log logr.Logger, mqttClient mqtt.Client, mqttTopic, httpAddr string) *Exporter {
 	return &Exporter{
 		ctx:        ctx,
 		mqttClient: mqttClient,

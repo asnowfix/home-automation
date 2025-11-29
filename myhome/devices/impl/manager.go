@@ -31,13 +31,13 @@ type DeviceManager struct {
 	refreshed  chan *myhome.Device
 	cancel     context.CancelFunc
 	log        logr.Logger
-	mqttClient *mqtt.Client
+	mqttClient mqtt.Client
 	mqttCache  *mqtt.Cache
 	resolver   mynet.Resolver
 	router     model.Router
 }
 
-func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient *mqtt.Client) *DeviceManager {
+func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient mqtt.Client) *DeviceManager {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")

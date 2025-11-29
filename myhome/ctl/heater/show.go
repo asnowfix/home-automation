@@ -68,7 +68,7 @@ func doShow(ctx context.Context, log logr.Logger, via types.Channel, device devi
 	}
 	queryBytes, _ := json.Marshal(queryPayload)
 
-	if err := mc.Publish(ctx, queryTopic, queryBytes, "myhome/ctl/heater/show"); err != nil {
+	if err := mc.Publish(ctx, queryTopic, queryBytes, mqtt.ExactlyOnce, false, "myhome/ctl/heater/show"); err != nil {
 		return nil, fmt.Errorf("failed to publish show query: %w", err)
 	}
 

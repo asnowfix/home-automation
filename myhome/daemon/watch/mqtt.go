@@ -19,7 +19,7 @@ import (
 	"github.com/go-logr/logr"
 )
 
-func StartMqttWatcher(ctx context.Context, mc *mqttclient.Client, dm devices.Manager, dr devices.DeviceRegistry) error {
+func StartMqttWatcher(ctx context.Context, mc mqttclient.Client, dm devices.Manager, dr devices.DeviceRegistry) error {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")

@@ -24,45 +24,44 @@ type client struct {
 	from    <-chan []byte
 	me      string
 	timeout time.Duration
+	mc      mqtt.Client
 }
 
-func NewClientE(ctx context.Context, log logr.Logger, timeout time.Duration) (Client, error) {
+func NewClientE(ctx context.Context, log logr.Logger, mc mqtt.Client, timeout time.Duration) (Client, error) {
 	c := &client{
 		log:     log,
 		timeout: timeout,
+		mc:      mc,
 	}
 	return c, nil
 }
 
 func (hc *client) start(ctx context.Context) {
+	var err error
+
 	hc.lock.Lock()
 	defer hc.lock.Unlock()
 	if hc.me != "" {
 		hc.log.Info("Client already started", "me", hc.me)
 		return
 	}
-	mc, err := mqtt.GetClientE(ctx)
-	if err != nil {
-		hc.log.Error(err, "Failed to get MQTT client")
-		return
-	}
-	hc.me = mc.Id()
+	hc.me = hc.mc.Id()
 
-	hc.from, err = mc.Subscribe(ctx, ClientTopic(mc.Id()), 8, "myhome/client")
+	hc.from, err = hc.mc.Subscribe(ctx, ClientTopic(hc.mc.Id()), 8, "myhome/client")
 	if err != nil {
-		hc.log.Error(err, "Failed to subscribe to client topic", "topic", ClientTopic(mc.Id()))
+		hc.log.Error(err, "Failed to subscribe to client topic", "topic", ClientTopic(hc.mc.Id()))
 		return
 	}
 	// Note: Subscriber() waits for MQTT subscription ACK via token.WaitTimeout()
 	// so the subscription is guaranteed to be active when it returns successfully
 
-	hc.to, err = mc.Publisher(ctx, ServerTopic(), 8, "myhome/client")
+	hc.to, err = hc.mc.Publisher(ctx, ServerTopic(), 8, mqtt.AtLeastOnce, false, "myhome/client")
 	if err != nil {
 		hc.log.Error(err, "Failed to prepare publishing to server topic", "topic", ServerTopic())
 		return
 	}
 
-	hc.log.Info("Started client", "me", mc.Id())
+	hc.log.Info("Started client", "me", hc.mc.Id())
 }
 
 // func (hc *client) Shutdown() {

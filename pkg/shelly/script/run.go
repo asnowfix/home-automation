@@ -41,7 +41,13 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 
 	handlers := make([]handler, 0)
 
-	vm, err := createShellyRuntime(ctx, &handlers, deviceState)
+	mc, err := mqtt.FromContext(ctx)
+	if err != nil {
+		log.Error(err, "Failed to get MQTT client", "name", name)
+		return err
+	}
+
+	vm, err := createShellyRuntime(ctx, mc, &handlers, deviceState)
 	if err != nil {
 		log.Error(err, "Failed to create Shelly runtime", "name", name)
 		return err
@@ -127,15 +133,9 @@ type handler interface {
 }
 
 // createShellyRuntime creates a goja VM with Shelly API placeholders
-func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *DeviceState) (*goja.Runtime, error) {
+func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handler, deviceState *DeviceState) (*goja.Runtime, error) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
-		return nil, err
-	}
-
-	mqttBroker, err := mqtt.FromContext(ctx)
-	if err != nil {
-		log.Error(err, "MQTT broker not found")
 		return nil, err
 	}
 
@@ -371,7 +371,7 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 		case "mqtt":
 			config = map[string]interface{}{
 				"enable":          true,
-				"server":          mqttBroker.GetServer(),
+				"server":          mc.GetServer(),
 				"client_id":       deviceId,
 				"user":            nil,
 				"topic_prefix":    deviceId,
@@ -530,7 +530,7 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 
 		log.Info("MQTT.subscribe()", "topic", topic)
 
-		handler, err := mqttSubscribe(ctx, vm, topic, callback, userdata)
+		handler, err := mqttSubscribe(ctx, mc, vm, topic, callback, userdata)
 		if err != nil {
 			log.Error(err, "MQTT.subscribe() failed", "topic", topic)
 			return vm.ToValue(err)
@@ -566,7 +566,7 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 
 		log.Info("MQTT.publish()", "topic", topic, "message", message)
 
-		err := mqttBroker.Publish(ctx, topic, []byte(message), "shelly/script/run")
+		err := mc.Publish(ctx, topic, []byte(message), mqtt.AtLeastOnce, false /*retain*/, "shelly/script/run")
 		if err != nil {
 			log.Error(err, "MQTT.publish() failed", "topic", topic)
 			return vm.ToValue(false)
@@ -836,13 +836,9 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 
 // Actual implementation for MQTT.subscribe <https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#mqttsubscribe>
 
-func mqttSubscribe(ctx context.Context, vm *goja.Runtime, topic string, callback goja.Value, userdata goja.Value) (handler, error) {
+func mqttSubscribe(ctx context.Context, mc mqtt.Client, vm *goja.Runtime, topic string, callback goja.Value, userdata goja.Value) (handler, error) {
 	if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 		if callable, ok := goja.AssertFunction(callback); ok {
-			mc, err := mqtt.FromContext(ctx)
-			if err != nil {
-				return nil, err
-			}
 			in, err := mc.Subscribe(ctx, topic, 8, "shelly/script")
 			if err != nil {
 				return nil, err

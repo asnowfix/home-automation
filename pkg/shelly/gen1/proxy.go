@@ -100,7 +100,7 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal device info: %w", err)
 	}
-	hp.mc.Publish(hp.ctx, infoTopic, infoMsg, "shelly/gen1/proxy")
+	hp.mc.Publish(hp.ctx, infoTopic, infoMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy")
 	hp.log.Info("Published Gen1 MQTT", "topic", infoTopic, "value", device)
 
 	// Publish temperature (common to both H&T and Flood sensors)
@@ -110,7 +110,7 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal temperature: %w", err)
 		}
-		hp.mc.Publish(hp.ctx, tempTopic, tempMsg, "shelly/gen1/proxy")
+		hp.mc.Publish(hp.ctx, tempTopic, tempMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy")
 		hp.log.Info("Published Gen1 MQTT", "topic", tempTopic, "value", device.Temperature)
 	}
 
@@ -121,7 +121,7 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal humidity: %w", err)
 		}
-		hp.mc.Publish(hp.ctx, humTopic, humMsg, "shelly/gen1/proxy")
+		hp.mc.Publish(hp.ctx, humTopic, humMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy")
 		hp.log.Info("Published Gen1 MQTT", "topic", humTopic, "value", device.Humidity)
 	}
 	if device.Flood != nil {
@@ -131,7 +131,7 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal flood: %w", err)
 		}
-		hp.mc.Publish(hp.ctx, floodTopic, floodMsg, "shelly/gen1/proxy")
+		hp.mc.Publish(hp.ctx, floodTopic, floodMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy")
 		hp.log.Info("Published Gen1 MQTT", "topic", floodTopic, "value", device.Flood)
 
 		// Publish battery voltage
@@ -140,7 +140,7 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal battery: %w", err)
 		}
-		hp.mc.Publish(hp.ctx, batTopic, batMsg, "shelly/gen1/proxy")
+		hp.mc.Publish(hp.ctx, batTopic, batMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy")
 		hp.log.Info("Published Gen1 MQTT", "topic", batTopic, "value", device.BatV)
 	}
 

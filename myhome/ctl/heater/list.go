@@ -84,7 +84,7 @@ func doList(ctx context.Context) error {
 	}
 	queryBytes, _ := json.Marshal(queryPayload)
 
-	if err := mc.Publish(ctx, queryTopic, queryBytes, "myhome/ctl/heater/list"); err != nil {
+	if err := mc.Publish(ctx, queryTopic, queryBytes, mqtt.ExactlyOnce, false, "myhome/ctl/heater/list"); err != nil {
 		return fmt.Errorf("failed to publish discovery query: %w", err)
 	}
 

@@ -125,7 +125,7 @@ func NewServerE(ctx context.Context, handler Server) (Server, error) {
 				}
 				// to <- outMsg
 				log.Info("Publishing response", "dst", res.Dst, "topic", ClientTopic(req.Src), "request_id", res.Id)
-				mc.Publish(ctx, ClientTopic(req.Src), outMsg)
+				mc.Publish(ctx, ClientTopic(req.Src), outMsg, "myhome.rpc/Server")
 			}
 		}
 	}(logr.NewContext(ctx, log.WithName("Server")))
@@ -146,7 +146,7 @@ func (sp *server) fail(ctx context.Context, code int, err error, req *request, m
 	}
 	outMsg, _ := json.Marshal(res)
 	// sp.to <- outMsg
-	mc.Publish(ctx, ClientTopic(res.Dst), outMsg)
+	mc.Publish(ctx, ClientTopic(res.Dst), outMsg, "myhome.rpc/Server")
 }
 
 func (sp *server) MethodE(method Verb) (*Method, error) {

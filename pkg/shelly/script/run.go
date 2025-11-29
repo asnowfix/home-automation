@@ -566,7 +566,7 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 
 		log.Info("MQTT.publish()", "topic", topic, "message", message)
 
-		err := mqttBroker.Publish(ctx, topic, []byte(message))
+		err := mqttBroker.Publish(ctx, topic, []byte(message), "shelly/script/run")
 		if err != nil {
 			log.Error(err, "MQTT.publish() failed", "topic", topic)
 			return vm.ToValue(false)

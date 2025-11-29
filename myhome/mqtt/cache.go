@@ -156,7 +156,7 @@ func (c *Cache) Replay(ctx context.Context, client *Client, topic string) error 
 
 	c.log.Info("Replaying cached message", "topic", topic, "age", time.Since(cachedMsg.Timestamp))
 
-	err := client.Publish(ctx, topic, cachedMsg.Payload)
+	err := client.Publish(ctx, topic, cachedMsg.Payload, "myhome/mqtt/cache")
 	if err != nil {
 		return fmt.Errorf("failed to replay message: %w", err)
 	}

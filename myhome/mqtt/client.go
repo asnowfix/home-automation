@@ -352,10 +352,10 @@ func (m *message) Subscriber() string {
 	return m.subscriber
 }
 
-func (c *Client) Publisher(ctx context.Context, topic string, qlen uint, publisher string) (chan<- []byte, error) {
+func (c *Client) Publisher(ctx context.Context, topic string, qlen uint, publisherName string) (chan<- []byte, error) {
 	err := c.connect()
 	if err != nil {
-		c.log.Error(err, "Unable to connect to create publisher channel", "topic", topic)
+		c.log.Error(err, "Unable to connect to create publisher channel", "topic", topic, "publisher", publisherName)
 		return nil, err
 	}
 	mch := make(chan []byte, qlen)
@@ -369,28 +369,28 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint, publish
 				return
 			case msg, ok := <-mch:
 				if !ok {
-					log.Info("Channel closed", "topic", topic)
+					log.Info("Channel closed", "topic", topic, "publisher", publisherName)
 					return
 				}
-				c.Publish(ctx, topic, msg)
+				c.Publish(ctx, topic, msg, publisherName)
 			}
 		}
-	}(c.log.WithName(publisher))
+	}(c.log.WithName(publisherName))
 
 	c.log.Info("Publisher running:", "topic", topic)
 	return mch, nil
 }
 
-func (c *Client) Publish(ctx context.Context, topic string, msg []byte) error {
+func (c *Client) Publish(ctx context.Context, topic string, msg []byte, publisherName string) error {
 	err := c.connect()
 	if err != nil {
-		c.log.Error(err, "Unable to connect to publish", "topic", topic)
+		c.log.Error(err, "Unable to connect to publish", "topic", topic, "publisher", publisherName)
 		return err
 	}
 
 	token := c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, false /*retain*/, msg)
 	if token.WaitTimeout(c.timeout) {
-		c.log.V(1).Info("Published", "to topic", topic, "payload", string(msg))
+		c.log.Info("Published", "to topic", topic, "payload", string(msg))
 		return nil
 	} else {
 		c.log.Error(token.Error(), "Failed to publish", "to topic", topic, "payload", string(msg))
@@ -398,26 +398,26 @@ func (c *Client) Publish(ctx context.Context, topic string, msg []byte) error {
 	}
 }
 
-func (c *Client) Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error) {
-	c.log.Info("Subscribe", "topic", topic, "qlen", qlen, "subscriber", subscriber)
-	return subscribe(c, ctx, topic, qlen, subscriber, func(msg mqtt.Message) []byte {
+func (c *Client) Subscribe(ctx context.Context, topic string, qlen uint, subscriberName string) (<-chan []byte, error) {
+	c.log.Info("Subscribe", "topic", topic, "qlen", qlen, "subscriber", subscriberName)
+	return subscribe(c, ctx, topic, qlen, subscriberName, func(msg mqtt.Message) []byte {
 		return msg.Payload()
 	})
 }
 
-func (c *Client) SubscribeWithTopic(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan Message, error) {
-	c.log.Info("SubscribeWithTopic", "topic", topic, "qlen", qlen, "subscriber", subscriber)
-	return subscribe(c, ctx, topic, qlen, subscriber, func(msg mqtt.Message) Message {
+func (c *Client) SubscribeWithTopic(ctx context.Context, topic string, qlen uint, subscriberName string) (<-chan Message, error) {
+	c.log.Info("SubscribeWithTopic", "topic", topic, "qlen", qlen, "subscriber", subscriberName)
+	return subscribe(c, ctx, topic, qlen, subscriberName, func(msg mqtt.Message) Message {
 		return &message{
-			subscriber: subscriber,
+			subscriber: subscriberName,
 			topic:      msg.Topic(),
 			payload:    msg.Payload(),
 		}
 	})
 }
 
-func (c *Client) SubscribeWithHandler(ctx context.Context, topic string, qlen uint, subscriber string, handler func(topic string, payload []byte, subscriber string) error) error {
-	mch, err := c.SubscribeWithTopic(ctx, topic, qlen, subscriber)
+func (c *Client) SubscribeWithHandler(ctx context.Context, topic string, qlen uint, subscriberName string, handler func(topic string, payload []byte, subscriber string) error) error {
+	mch, err := c.SubscribeWithTopic(ctx, topic, qlen, subscriberName)
 	if err != nil {
 		return err
 	}
@@ -426,26 +426,34 @@ func (c *Client) SubscribeWithHandler(ctx context.Context, topic string, qlen ui
 			log.V(1).Info("Received message", "topic", msg.Topic(), "subscriber", msg.Subscriber())
 			handler(msg.Topic(), msg.Payload(), msg.Subscriber())
 		}
-	}(c.log.WithName(subscriber))
+	}(c.log.WithName(subscriberName))
 	return nil
 }
 
-func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, subscriber string, transform func(mqtt.Message) T) (<-chan T, error) {
+func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, subscriberName string, transform func(mqtt.Message) T) (<-chan T, error) {
 	err := c.connect()
 	if err != nil {
 		c.log.Error(err, "Unable to connect to create subscriber channel", "topic", topic)
 		return nil, err
 	}
 
+	type subscriber struct {
+		name  string
+		queue chan T
+	}
+
 	// Create a channel for this subscriber
-	mch := make(chan T, qlen)
+	s := &subscriber{
+		name:  subscriberName,
+		queue: make(chan T, qlen),
+	}
 
 	// Load or create subscriber list for this topic
-	value, loaded := c.subscribers.LoadOrStore(topic, make([]chan T, 0))
-	subscribers := value.([]chan T)
-	subscribers = append(subscribers, mch)
+	value, loaded := c.subscribers.LoadOrStore(topic, make([]*subscriber, 0))
+	subscribers := value.([]*subscriber)
+	subscribers = append(subscribers, s)
 	c.subscribers.Store(topic, subscribers)
-	c.log.Info("Subscriber added", "topic", topic, "subscriber", subscriber, "count", len(subscribers), "qlen", qlen)
+	c.log.Info("Subscriber added", "topic", topic, "subscriber", s.name, "count", len(subscribers), "qlen", qlen)
 
 	if !loaded {
 		// Not yet subscribed at MQTT level: do it
@@ -457,7 +465,7 @@ func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, s
 					return
 				}
 
-				subscribers := value.([]chan T)
+				subscribers := value.([]*subscriber)
 				dropping := make([]int, 0)
 
 				// Transform and distribute to all subscribers
@@ -467,11 +475,11 @@ func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, s
 					case <-ctx.Done():
 						c.log.Info("Subscriber context done", "topic", topic, "index", i)
 						return
-					case ch <- transformed:
+					case ch.queue <- transformed:
 						// Successfully sent
 					default:
 						// Channel full or closed, mark for removal
-						c.log.Error(nil, "Subscriber channel full or closed", "topic", topic, "index", i)
+						c.log.Error(nil, "Subscriber channel full or closed", "topic", topic, "index", i, "subscriber", ch.name)
 						dropping = append(dropping, i)
 					}
 				}
@@ -480,7 +488,7 @@ func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, s
 				if len(dropping) > 0 {
 					for i := len(dropping) - 1; i >= 0; i-- {
 						idx := dropping[i]
-						c.log.Info("Dropping subscriber", "topic", topic, "index", idx)
+						c.log.Info("Dropping subscriber", "topic", topic, "index", idx, "subscriber", subscribers[idx].name)
 						subscribers = append(subscribers[:idx], subscribers[idx+1:]...)
 					}
 					c.subscribers.Store(topic, subscribers)
@@ -508,7 +516,7 @@ func subscribe[T any](c *Client, ctx context.Context, topic string, qlen uint, s
 		} else {
 			log.Error(token.Error(), "Failed to unsubscribe", "from topic", topic)
 		}
-	}(c.log.WithName(subscriber))
+	}(c.log.WithName(s.name))
 
-	return mch, nil
+	return s.queue, nil
 }

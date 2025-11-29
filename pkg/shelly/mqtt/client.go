@@ -11,8 +11,8 @@ type Client interface {
 	Id() string
 	Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error)
 	SubscribeWithHandler(ctx context.Context, topic string, qlen uint, subscriber string, handle func(topic string, payload []byte, subcriber string) error) error
-	Publisher(ctx context.Context, topic string, qlen uint, publisher string) (chan<- []byte, error)
-	Publish(ctx context.Context, topic string, msg []byte) error
+	Publisher(ctx context.Context, topic string, qlen uint, publisherName string) (chan<- []byte, error)
+	Publish(ctx context.Context, topic string, msg []byte, publisherName string) error
 }
 
 type Cache interface {

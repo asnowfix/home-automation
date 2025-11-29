@@ -1,17 +1,12 @@
 package temperature
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"myhome"
-	"myhome/ctl/options"
-	"myhome/mqtt"
 	"os"
 	"text/tabwriter"
 	"time"
 
-	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
@@ -35,11 +30,6 @@ var getCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		log, err := logr.FromContext(ctx)
-		if err != nil {
-			return err
-		}
-
 		roomID := args[0]
 
 		// Call RPC method
@@ -47,7 +37,7 @@ var getCmd = &cobra.Command{
 			RoomID: roomID,
 		}
 
-		result, err := callRPC(ctx, log, myhome.TemperatureGet, params)
+		result, err := myhome.TheClient.CallE(ctx, myhome.TemperatureGet, params)
 		if err != nil {
 			return err
 		}
@@ -93,11 +83,6 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		log, err := logr.FromContext(ctx)
-		if err != nil {
-			return err
-		}
-
 		roomID := args[0]
 		name, _ := cmd.Flags().GetString("name")
 		comfort, _ := cmd.Flags().GetFloat64("comfort")
@@ -130,7 +115,7 @@ Examples:
 			Weekend:     weekendRanges,
 		}
 
-		result, err := callRPC(ctx, log, myhome.TemperatureSet, params)
+		result, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSet, params)
 		if err != nil {
 			return err
 		}
@@ -150,13 +135,9 @@ var listCmd = &cobra.Command{
 	Short: "List all temperature configurations",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		log, err := logr.FromContext(ctx)
-		if err != nil {
-			return err
-		}
 
 		// Call RPC method
-		result, err := callRPC(ctx, log, myhome.TemperatureList, nil)
+		result, err := myhome.TheClient.CallE(ctx, myhome.TemperatureList, nil)
 		if err != nil {
 			return err
 		}
@@ -195,11 +176,6 @@ var deleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		log, err := logr.FromContext(ctx)
-		if err != nil {
-			return err
-		}
-
 		roomID := args[0]
 
 		// Call RPC method
@@ -207,7 +183,7 @@ var deleteCmd = &cobra.Command{
 			RoomID: roomID,
 		}
 
-		result, err := callRPC(ctx, log, myhome.TemperatureDelete, params)
+		result, err := myhome.TheClient.CallE(ctx, myhome.TemperatureDelete, params)
 		if err != nil {
 			return err
 		}
@@ -229,11 +205,6 @@ var setpointCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		log, err := logr.FromContext(ctx)
-		if err != nil {
-			return err
-		}
-
 		roomID := args[0]
 
 		// Call RPC method
@@ -241,7 +212,7 @@ var setpointCmd = &cobra.Command{
 			RoomID: roomID,
 		}
 
-		result, err := callRPC(ctx, log, myhome.TemperatureSetpoint, params)
+		result, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSetpoint, params)
 		if err != nil {
 			return err
 		}
@@ -269,85 +240,6 @@ func init() {
 	setCmd.Flags().Float64("eco", 0, "Eco temperature in °C (required)")
 	setCmd.Flags().String("weekday", "", "Weekday comfort hours (e.g., '06:00-23:00' or '06:00-08:00,20:00-23:00')")
 	setCmd.Flags().String("weekend", "", "Weekend comfort hours (e.g., '08:00-23:00')")
-}
-
-// callRPC calls a MyHome RPC method
-func callRPC(ctx context.Context, log logr.Logger, method myhome.Verb, params any) (any, error) {
-	mc, err := mqtt.GetClientE(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get MQTT client: %w", err)
-	}
-
-	// Create RPC request
-	req := struct {
-		ID     string `json:"id"`
-		Method string `json:"method"`
-		Params any    `json:"params"`
-	}{
-		ID:     fmt.Sprintf("cli-%d", time.Now().UnixNano()),
-		Method: string(method),
-		Params: params,
-	}
-
-	reqBytes, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// Subscribe to response topic
-	replyTopic := fmt.Sprintf("myhome/rpc/reply/%s", req.ID)
-	replyChan, err := mc.Subscribe(ctx, replyTopic, 8, "ctl/temperature")
-	if err != nil {
-		return nil, fmt.Errorf("failed to subscribe to reply topic: %w", err)
-	}
-
-	// Publish request
-	if err := mc.Publish(ctx, "myhome/rpc", reqBytes); err != nil {
-		return nil, fmt.Errorf("failed to publish request: %w", err)
-	}
-
-	log.Info("RPC request sent", "method", method, "id", req.ID)
-
-	// Wait for response with timeout
-	timeout := time.After(options.Flags.MqttTimeout)
-	select {
-	case respBytes := <-replyChan:
-		var resp struct {
-			ID     string          `json:"id"`
-			Result json.RawMessage `json:"result"`
-			Error  *struct {
-				Code    int    `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-
-		if err := json.Unmarshal(respBytes, &resp); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-
-		if resp.Error != nil {
-			return nil, fmt.Errorf("RPC error %d: %s", resp.Error.Code, resp.Error.Message)
-		}
-
-		// Get method signature to unmarshal result
-		methodDef, err := myhome.Methods(method)
-		if err != nil {
-			return nil, err
-		}
-
-		result := methodDef.Signature.NewResult()
-		if err := json.Unmarshal(resp.Result, &result); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal result: %w", err)
-		}
-
-		return result, nil
-
-	case <-timeout:
-		return nil, fmt.Errorf("RPC timeout waiting for response")
-
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 }
 
 // parseScheduleString parses a schedule string like "06:00-23:00" or "06:00-08:00,20:00-23:00"

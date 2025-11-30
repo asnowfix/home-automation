@@ -85,9 +85,16 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 	}
 
 	cases := buildCases()
+	needsRebuild := false
 
 	// Event loop: wait on all channels simultaneously
 	for {
+		// Rebuild cases if needed (deferred from previous iteration)
+		if needsRebuild {
+			cases = buildCases()
+			needsRebuild = false
+		}
+
 		chosen, value, ok := reflect.Select(cases)
 
 		if chosen == 0 {
@@ -106,8 +113,8 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 			}
 			// Check if new handlers were added during Handle()
 			if len(handlers) != handlerCountBefore {
-				log.Info("Handlers changed, rebuilding cases", "before", handlerCountBefore, "after", len(handlers))
-				cases = buildCases()
+				log.Info("Handlers changed, will rebuild cases", "before", handlerCountBefore, "after", len(handlers))
+				needsRebuild = true
 			}
 		} else {
 			// Channel closed, remove it from cases
@@ -121,8 +128,8 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 				return nil
 			}
 
-			// Rebuild cases after removing handler
-			cases = buildCases()
+			// Mark for rebuild at start of next iteration
+			needsRebuild = true
 		}
 	}
 }
@@ -945,10 +952,16 @@ type timerHandler struct {
 	startTime time.Time
 	nextFire  time.Time
 	stopped   bool
+	ch        chan []byte // cached channel, created once in Wait()
 }
 
 func (th *timerHandler) Wait() <-chan []byte {
-	ch := make(chan []byte)
+	// Return cached channel if already started
+	if th.ch != nil {
+		return th.ch
+	}
+
+	th.ch = make(chan []byte)
 
 	if th.repeat {
 		// Periodic timer
@@ -960,9 +973,9 @@ func (th *timerHandler) Wait() <-chan []byte {
 					break
 				}
 				th.nextFire = time.Now().Add(th.period)
-				ch <- []byte{} // Signal to fire callback
+				th.ch <- []byte{} // Signal to fire callback
 			}
-			close(ch)
+			close(th.ch)
 		}()
 	} else {
 		// One-shot timer
@@ -976,13 +989,13 @@ func (th *timerHandler) Wait() <-chan []byte {
 		go func() {
 			<-th.timer.C
 			if !th.stopped {
-				ch <- []byte{} // Signal to fire callback
+				th.ch <- []byte{} // Signal to fire callback
 			}
-			close(ch)
+			close(th.ch)
 		}()
 	}
 
-	return ch
+	return th.ch
 }
 
 func (th *timerHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {

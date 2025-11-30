@@ -132,8 +132,8 @@ func (d *daemon) Run() error {
 			[]string{"iPhone"},
 		)
 
-		// Start HTTP server
-		if err := d.occupancyService.Start(8889); err != nil {
+		// Start Occupancy service
+		if err := d.occupancyService.Start(); err != nil {
 			log.Error(err, "Failed to start occupancy HTTP service")
 			return err
 		}

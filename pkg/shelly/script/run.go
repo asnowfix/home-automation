@@ -429,6 +429,37 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		return vm.ToValue(1)
 	})
 
+	// Shelly.getDeviceInfo()
+	// <https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shellygetdeviceinfo>
+	// {
+	// "name": "radiateur-bureau",
+	// "id": "shellyplus1-b8d61a85a970",
+	// "mac": "B8D61A85A970",
+	// "slot": 0,
+	// "model": "SNSW-001X16EU",
+	// "gen": 2,
+	// "fw_id": "20250924-062720/1.7.1-gd336f31",
+	// "ver": "1.7.1",
+	// "app": "Plus1",
+	// "auth_en": false,
+	// "auth_domain": null
+	// }
+	shellyObj.Set("getDeviceInfo", func(call goja.FunctionCall) goja.Value {
+		return vm.ToValue(map[string]interface{}{
+			"name":        "radiateur-bureau",
+			"id":          "shellyplus1-b8d61a85a970",
+			"mac":         "B8D61A85A970",
+			"slot":        0,
+			"model":       "SNSW-001X16EU",
+			"gen":         2,
+			"fw_id":       "20250924-062720/1.7.1-gd336f31",
+			"ver":         "1.7.1",
+			"app":         "Plus1",
+			"auth_en":     false,
+			"auth_domain": nil,
+		})
+	})
+
 	vm.Set("Shelly", shellyObj)
 
 	// Timer object

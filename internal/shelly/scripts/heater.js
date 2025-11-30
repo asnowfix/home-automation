@@ -495,7 +495,7 @@ function scheduleLearningTimers() {
   
   var scheduleAt = function(targetHour, cb) {
     var delay = (targetHour - hour) * 3600000;
-    if (delay < 0) delay += 24 * 3600000;
+    if (delay <= 0) delay += 24 * 3600000;
     
     // Schedule initial one-shot timer
     Timer.set(delay, false, function() {
@@ -819,7 +819,7 @@ function isComfortTime() {
 
 function subscribeToOccupancy() {
   MQTT.subscribe("myhome/occupancy", function(topic, message) {
-    log('Received occupancy update');
+    log('Received occupancy message:', message);
       
     var response = null;
     try {
@@ -828,7 +828,7 @@ function subscribeToOccupancy() {
       STATE.occupied = response.occupied;
     } catch (e) {
       if (e && false) {}
-      log('Failed to parse occupancy message', message);
+      log('Failed to JSON-parse occupancy message:', message);
     }
   });
 }
@@ -1103,8 +1103,8 @@ function checkAndStartControlLoop() {
       log('All inputs ready - starting control loop timer');
       // Start the control loop timer now that all inputs are ready
       STATE.controlLoopTimerId = Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
-      // Run first cycle immediately
-      pollAndControl();
+      // // Run first cycle immediately
+      // pollAndControl();
     }
   }
 }

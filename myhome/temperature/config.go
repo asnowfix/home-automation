@@ -2,6 +2,7 @@ package temperature
 
 import (
 	"fmt"
+	"myhome"
 
 	"github.com/spf13/viper"
 )
@@ -14,17 +15,9 @@ type Config struct {
 
 // RoomYAML represents a room configuration in YAML format
 type RoomYAML struct {
-	Name        string       `yaml:"name"`
-	ComfortTemp float64      `yaml:"comfort_temp"`
-	EcoTemp     float64      `yaml:"eco_temp"`
-	Schedule    ScheduleYAML `yaml:"schedule"`
-}
-
-// ScheduleYAML represents schedule configuration in YAML format
-// Only comfort hours are defined - eco is the default
-type ScheduleYAML struct {
-	Weekday []string `yaml:"weekday"` // Comfort hours, e.g., ["06:00-23:00"]
-	Weekend []string `yaml:"weekend"` // Comfort hours, e.g., ["08:00-23:00"]
+	Name   string             `yaml:"name"`
+	Kinds  []string           `yaml:"kinds"`  // Room kinds, e.g., ["bedroom", "office"]
+	Levels map[string]float64 `yaml:"levels"` // Temperature levels: {"eco": 17.0, "comfort": 21.0, "away": 15.0}
 }
 
 // LoadConfigFromViper loads temperature service configuration from Viper
@@ -54,12 +47,16 @@ func LoadConfigFromViper(v *viper.Viper) (*Config, error) {
 		roomKey := fmt.Sprintf("temperatures.rooms.%s", roomID)
 
 		room.Name = v.GetString(roomKey + ".name")
-		room.ComfortTemp = v.GetFloat64(roomKey + ".comfort_temp")
-		room.EcoTemp = v.GetFloat64(roomKey + ".eco_temp")
+		room.Kinds = v.GetStringSlice(roomKey + ".kinds")
 
-		// Get schedule
-		room.Schedule.Weekday = v.GetStringSlice(roomKey + ".schedule.weekday")
-		room.Schedule.Weekend = v.GetStringSlice(roomKey + ".schedule.weekend")
+		// Load levels as a map
+		levelsMap := v.GetStringMap(roomKey + ".levels")
+		room.Levels = make(map[string]float64)
+		for level, value := range levelsMap {
+			if floatVal, ok := value.(float64); ok {
+				room.Levels[level] = floatVal
+			}
+		}
 
 		cfg.Rooms[roomID] = room
 	}
@@ -72,50 +69,34 @@ func (c *Config) ToRoomConfigs() (map[string]*RoomConfig, error) {
 	rooms := make(map[string]*RoomConfig)
 
 	for id, roomYAML := range c.Rooms {
-		// Parse weekday comfort hours
-		weekdayComfort, err := parseTimeRangeStrings(roomYAML.Schedule.Weekday)
-		if err != nil {
-			return nil, fmt.Errorf("invalid weekday schedule for room %s: %w", id, err)
-		}
-
-		// Parse weekend comfort hours
-		weekendComfort, err := parseTimeRangeStrings(roomYAML.Schedule.Weekend)
-		if err != nil {
-			return nil, fmt.Errorf("invalid weekend schedule for room %s: %w", id, err)
+		// Parse kinds
+		kinds := make([]myhome.RoomKind, 0, len(roomYAML.Kinds))
+		for _, kindStr := range roomYAML.Kinds {
+			kinds = append(kinds, myhome.RoomKind(kindStr))
 		}
 
 		rooms[id] = &RoomConfig{
-			ID:          id,
-			Name:        roomYAML.Name,
-			ComfortTemp: roomYAML.ComfortTemp,
-			EcoTemp:     roomYAML.EcoTemp,
-			Schedule: &Schedule{
-				Weekday: weekdayComfort,
-				Weekend: weekendComfort,
-			},
+			ID:     id,
+			Name:   roomYAML.Name,
+			Kinds:  kinds,
+			Levels: roomYAML.Levels,
 		}
 	}
 
 	return rooms, nil
 }
 
-// parseTimeRangeStrings converts strings like "06:00-23:00" to TimeRange structs
-func parseTimeRangeStrings(ranges []string) ([]TimeRange, error) {
-	var result []TimeRange
-
-	for _, rangeStr := range ranges {
-		parts := splitTimeRange(rangeStr)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid time range format: %s (expected HH:MM-HH:MM)", rangeStr)
-		}
-
-		result = append(result, TimeRange{
-			Start: parts[0],
-			End:   parts[1],
-		})
+// parseTimeString converts "HH:MM" to minutes since midnight
+func parseTimeString(timeStr string) (int, error) {
+	var hours, mins int
+	_, err := fmt.Sscanf(timeStr, "%d:%d", &hours, &mins)
+	if err != nil {
+		return 0, fmt.Errorf("invalid time format: %s (expected HH:MM)", timeStr)
 	}
-
-	return result, nil
+	if hours < 0 || hours > 23 || mins < 0 || mins > 59 {
+		return 0, fmt.Errorf("invalid time values: %s", timeStr)
+	}
+	return hours*60 + mins, nil
 }
 
 // splitTimeRange splits "06:00-23:00" into ["06:00", "23:00"]

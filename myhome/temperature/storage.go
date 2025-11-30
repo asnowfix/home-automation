@@ -25,12 +25,11 @@ type Storage struct {
 
 // RoomConfigDB represents a room's temperature configuration in the database
 type RoomConfigDB struct {
-	RoomID      string    `db:"room_id"`
-	Name        string    `db:"name"`
-	KindsJSON   string    `db:"kinds"` // JSON array of room kinds
-	ComfortTemp float64   `db:"comfort_temp"`
-	EcoTemp     float64   `db:"eco_temp"`
-	UpdatedAt   time.Time `db:"updated_at"`
+	RoomID     string    `db:"room_id"`
+	Name       string    `db:"name"`
+	KindsJSON  string    `db:"kinds"`  // JSON array of room kinds
+	LevelsJSON string    `db:"levels"` // JSON map of temperature levels
+	UpdatedAt  time.Time `db:"updated_at"`
 }
 
 // KindScheduleDB represents a kind schedule in the database
@@ -41,9 +40,8 @@ type KindScheduleDB struct {
 	UpdatedAt  time.Time `db:"updated_at"`
 }
 
-// WeekdayDefaultDB represents a weekday default in the database
+// WeekdayDefaultDB represents a global weekday default in the database
 type WeekdayDefaultDB struct {
-	RoomID    string    `db:"room_id"`
 	Weekday   int       `db:"weekday"`  // 0=Sunday, 1=Monday, ..., 6=Saturday
 	DayType   string    `db:"day_type"` // work-day, day-off
 	UpdatedAt time.Time `db:"updated_at"`
@@ -69,9 +67,8 @@ func (s *Storage) createTables() error {
 	CREATE TABLE IF NOT EXISTS temperature_rooms (
 		room_id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
-		kinds TEXT NOT NULL,  -- JSON array of room kinds
-		comfort_temp REAL NOT NULL,
-		eco_temp REAL NOT NULL,
+		kinds TEXT NOT NULL,   -- JSON array of room kinds
+		levels TEXT NOT NULL,  -- JSON map of temperature levels {"eco": 17.0, "comfort": 21.0, "away": 15.0}
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	
@@ -84,12 +81,9 @@ func (s *Storage) createTables() error {
 	);
 	
 	CREATE TABLE IF NOT EXISTS temperature_weekday_defaults (
-		room_id TEXT NOT NULL,
-		weekday INTEGER NOT NULL,  -- 0=Sunday, 1=Monday, ..., 6=Saturday
-		day_type TEXT NOT NULL,    -- work-day, day-off
-		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-		PRIMARY KEY (room_id, weekday),
-		FOREIGN KEY (room_id) REFERENCES temperature_rooms(room_id) ON DELETE CASCADE
+		weekday INTEGER PRIMARY KEY,  -- 0=Sunday, 1=Monday, ..., 6=Saturday
+		day_type TEXT NOT NULL,       -- work-day, day-off
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	
 	CREATE INDEX IF NOT EXISTS idx_temperature_rooms_updated 
@@ -105,32 +99,37 @@ func (s *Storage) createTables() error {
 	return nil
 }
 
-// SetRoom creates or updates a room configuration
-func (s *Storage) SetRoom(roomID string, config *RoomConfig) error {
-	// Marshal kinds to JSON
+// SaveRoom creates or updates a room configuration
+func (s *Storage) SaveRoom(config *RoomConfig) error {
+	roomID := config.ID
+	// Marshal kinds and levels to JSON
 	kindsJSON, err := json.Marshal(config.Kinds)
 	if err != nil {
 		return fmt.Errorf("failed to marshal kinds: %w", err)
 	}
 
+	levelsJSON, err := json.Marshal(config.Levels)
+	if err != nil {
+		return fmt.Errorf("failed to marshal levels: %w", err)
+	}
+
 	query := `
-	INSERT INTO temperature_rooms (room_id, name, kinds, comfort_temp, eco_temp, updated_at)
-	VALUES (?, ?, ?, ?, ?, ?)
+	INSERT INTO temperature_rooms (room_id, name, kinds, levels, updated_at)
+	VALUES (?, ?, ?, ?, ?)
 	ON CONFLICT(room_id) DO UPDATE SET
 		name = excluded.name,
 		kinds = excluded.kinds,
-		comfort_temp = excluded.comfort_temp,
-		eco_temp = excluded.eco_temp,
+		levels = excluded.levels,
 		updated_at = excluded.updated_at
 	`
 
-	_, err = s.db.Exec(query, roomID, config.Name, string(kindsJSON), config.ComfortTemp, config.EcoTemp, time.Now())
+	_, err = s.db.Exec(query, config.ID, config.Name, string(kindsJSON), string(levelsJSON), time.Now())
 	if err != nil {
 		s.log.Error(err, "Failed to set room config", "room_id", roomID)
 		return err
 	}
 
-	s.log.Info("Room config saved", "room_id", roomID, "name", config.Name, "kinds", config.Kinds)
+	s.log.Info("Room config saved", "room_id", config.ID, "name", config.Name, "kinds", config.Kinds)
 	return nil
 }
 
@@ -138,7 +137,7 @@ func (s *Storage) SetRoom(roomID string, config *RoomConfig) error {
 func (s *Storage) GetRoom(roomID string) (*RoomConfig, error) {
 	var dbConfig RoomConfigDB
 
-	query := `SELECT room_id, name, kinds, comfort_temp, eco_temp, updated_at
+	query := `SELECT room_id, name, kinds, levels, updated_at
 	          FROM temperature_rooms WHERE room_id = ?`
 
 	err := s.db.Get(&dbConfig, query, roomID)
@@ -150,18 +149,22 @@ func (s *Storage) GetRoom(roomID string) (*RoomConfig, error) {
 		return nil, err
 	}
 
-	// Unmarshal kinds from JSON
+	// Unmarshal kinds and levels from JSON
 	var kinds []myhome.RoomKind
 	if err := json.Unmarshal([]byte(dbConfig.KindsJSON), &kinds); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal kinds: %w", err)
 	}
 
+	var levels map[string]float64
+	if err := json.Unmarshal([]byte(dbConfig.LevelsJSON), &levels); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal levels: %w", err)
+	}
+
 	config := &RoomConfig{
-		ID:          dbConfig.RoomID,
-		Name:        dbConfig.Name,
-		Kinds:       kinds,
-		ComfortTemp: dbConfig.ComfortTemp,
-		EcoTemp:     dbConfig.EcoTemp,
+		ID:     dbConfig.RoomID,
+		Name:   dbConfig.Name,
+		Kinds:  kinds,
+		Levels: levels,
 	}
 
 	return config, nil
@@ -171,7 +174,7 @@ func (s *Storage) GetRoom(roomID string) (*RoomConfig, error) {
 func (s *Storage) ListRooms() (map[string]*RoomConfig, error) {
 	var dbConfigs []RoomConfigDB
 
-	query := `SELECT room_id, name, kinds, comfort_temp, eco_temp, updated_at
+	query := `SELECT room_id, name, kinds, levels, updated_at
 	          FROM temperature_rooms ORDER BY room_id`
 
 	err := s.db.Select(&dbConfigs, query)
@@ -188,12 +191,17 @@ func (s *Storage) ListRooms() (map[string]*RoomConfig, error) {
 			continue
 		}
 
+		var levels map[string]float64
+		if err := json.Unmarshal([]byte(dbConfig.LevelsJSON), &levels); err != nil {
+			s.log.Error(err, "Failed to unmarshal levels", "room_id", dbConfig.RoomID)
+			continue
+		}
+
 		rooms[dbConfig.RoomID] = &RoomConfig{
-			ID:          dbConfig.RoomID,
-			Name:        dbConfig.Name,
-			Kinds:       kinds,
-			ComfortTemp: dbConfig.ComfortTemp,
-			EcoTemp:     dbConfig.EcoTemp,
+			ID:     dbConfig.RoomID,
+			Name:   dbConfig.Name,
+			Kinds:  kinds,
+			Levels: levels,
 		}
 	}
 
@@ -224,9 +232,9 @@ func (s *Storage) DeleteRoom(roomID string) error {
 }
 
 // SetKindSchedule creates or updates a kind schedule
-func (s *Storage) SetKindSchedule(sched *KindSchedule) error {
+func (s *Storage) SetKindSchedule(kind myhome.RoomKind, dayType myhome.DayType, ranges []myhome.TemperatureTimeRange) error {
 	// Marshal ranges to JSON
-	rangesJSON, err := json.Marshal(sched.Ranges)
+	rangesJSON, err := json.Marshal(ranges)
 	if err != nil {
 		return fmt.Errorf("failed to marshal ranges: %w", err)
 	}
@@ -239,37 +247,51 @@ func (s *Storage) SetKindSchedule(sched *KindSchedule) error {
 		updated_at = excluded.updated_at
 	`
 
-	_, err = s.db.Exec(query, string(sched.Kind), string(sched.DayType), string(rangesJSON), time.Now())
+	_, err = s.db.Exec(query, string(kind), string(dayType), string(rangesJSON), time.Now())
 	if err != nil {
-		s.log.Error(err, "Failed to set kind schedule", "kind", sched.Kind, "day_type", sched.DayType)
+		s.log.Error(err, "Failed to set kind schedule", "kind", kind, "day_type", dayType)
 		return err
 	}
 
-	s.log.Info("Kind schedule saved", "kind", sched.Kind, "day_type", sched.DayType)
+	s.log.Info("Kind schedule saved", "kind", kind, "day_type", dayType)
 	return nil
 }
 
-// GetKindSchedules retrieves all kind schedules
-func (s *Storage) GetKindSchedules() ([]KindSchedule, error) {
+// GetKindSchedules retrieves kind schedules with optional filters
+func (s *Storage) GetKindSchedules(kind *myhome.RoomKind, dayType *myhome.DayType) ([]myhome.TemperatureKindSchedule, error) {
 	var dbScheds []KindScheduleDB
 
-	query := `SELECT kind, day_type, ranges, updated_at FROM temperature_kind_schedules ORDER BY kind, day_type`
+	// Build query with optional filters
+	query := `SELECT kind, day_type, ranges, updated_at FROM temperature_kind_schedules WHERE 1=1`
+	args := []interface{}{}
 
-	err := s.db.Select(&dbScheds, query)
+	if kind != nil {
+		query += ` AND kind = ?`
+		args = append(args, string(*kind))
+	}
+
+	if dayType != nil {
+		query += ` AND day_type = ?`
+		args = append(args, string(*dayType))
+	}
+
+	query += ` ORDER BY kind, day_type`
+
+	err := s.db.Select(&dbScheds, query, args...)
 	if err != nil {
 		s.log.Error(err, "Failed to list kind schedules")
 		return nil, err
 	}
 
-	var schedules []KindSchedule
+	var schedules []myhome.TemperatureKindSchedule
 	for _, dbSched := range dbScheds {
-		var ranges []TimeRange
+		var ranges []myhome.TemperatureTimeRange
 		if err := json.Unmarshal([]byte(dbSched.RangesJSON), &ranges); err != nil {
 			s.log.Error(err, "Failed to unmarshal ranges", "kind", dbSched.Kind, "day_type", dbSched.DayType)
 			continue
 		}
 
-		schedules = append(schedules, KindSchedule{
+		schedules = append(schedules, myhome.TemperatureKindSchedule{
 			Kind:    myhome.RoomKind(dbSched.Kind),
 			DayType: myhome.DayType(dbSched.DayType),
 			Ranges:  ranges,
@@ -279,36 +301,54 @@ func (s *Storage) GetKindSchedules() ([]KindSchedule, error) {
 	return schedules, nil
 }
 
-// SetWeekdayDefault sets the day type for a specific weekday
-func (s *Storage) SetWeekdayDefault(roomID string, weekday int, dayType myhome.DayType) error {
+// SetWeekdayDefault sets the global day type for a specific weekday
+func (s *Storage) SetWeekdayDefault(weekday int, dayType myhome.DayType) error {
 	query := `
-	INSERT INTO temperature_weekday_defaults (room_id, weekday, day_type, updated_at)
-	VALUES (?, ?, ?, ?)
-	ON CONFLICT(room_id, weekday) DO UPDATE SET
+	INSERT INTO temperature_weekday_defaults (weekday, day_type, updated_at)
+	VALUES (?, ?, ?)
+	ON CONFLICT(weekday) DO UPDATE SET
 		day_type = excluded.day_type,
 		updated_at = excluded.updated_at
 	`
 
-	_, err := s.db.Exec(query, roomID, weekday, string(dayType), time.Now())
+	_, err := s.db.Exec(query, weekday, string(dayType), time.Now())
 	if err != nil {
-		s.log.Error(err, "Failed to set weekday default", "room_id", roomID, "weekday", weekday)
+		s.log.Error(err, "Failed to set global weekday default", "weekday", weekday)
 		return err
 	}
 
-	s.log.Info("Weekday default saved", "room_id", roomID, "weekday", weekday, "day_type", dayType)
+	s.log.Info("Global weekday default saved", "weekday", weekday, "day_type", dayType)
 	return nil
 }
 
-// GetWeekdayDefaults retrieves all weekday defaults for a specific room
+// GetWeekdayDefault retrieves the global day type for a specific weekday
+func (s *Storage) GetWeekdayDefault(weekday int) (myhome.DayType, error) {
+	var dbEntry WeekdayDefaultDB
+
+	query := `SELECT weekday, day_type, updated_at FROM temperature_weekday_defaults WHERE weekday = ?`
+
+	err := s.db.Get(&dbEntry, query, weekday)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("weekday default not found for weekday %d", weekday)
+	}
+	if err != nil {
+		s.log.Error(err, "Failed to get weekday default", "weekday", weekday)
+		return "", err
+	}
+
+	return myhome.DayType(dbEntry.DayType), nil
+}
+
+// GetWeekdayDefaults retrieves all global weekday defaults
 // Returns map of weekday (0-6) -> day-type
-func (s *Storage) GetWeekdayDefaults(roomID string) (map[int]myhome.DayType, error) {
+func (s *Storage) GetWeekdayDefaults() (map[int]myhome.DayType, error) {
 	var dbEntries []WeekdayDefaultDB
 
-	query := `SELECT room_id, weekday, day_type, updated_at FROM temperature_weekday_defaults WHERE room_id = ? ORDER BY weekday`
+	query := `SELECT weekday, day_type, updated_at FROM temperature_weekday_defaults ORDER BY weekday`
 
-	err := s.db.Select(&dbEntries, query, roomID)
+	err := s.db.Select(&dbEntries, query)
 	if err != nil {
-		s.log.Error(err, "Failed to get weekday defaults", "room_id", roomID)
+		s.log.Error(err, "Failed to get global weekday defaults")
 		return nil, err
 	}
 

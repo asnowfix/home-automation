@@ -221,8 +221,8 @@ func (d *daemon) Run() error {
 				return err
 			}
 
-			// Create and register temperature method handlers
-			tempHandlers := temperature.NewMethodHandlers(log, tempStorage)
+			// Create and register temperature method handlers, republishing temperature ranges at startup
+			tempHandlers := temperature.NewService(d.ctx, log, mc, tempStorage)
 			tempHandlers.RegisterHandlers()
 
 			log.Info("Temperature RPC methods registered")

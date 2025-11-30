@@ -28,11 +28,10 @@ type TemperatureGetParams struct {
 
 // TemperatureSetParams represents parameters for temperature.set
 type TemperatureSetParams struct {
-	RoomID      string     `json:"room_id"`
-	Name        string     `json:"name"`
-	Kinds       []RoomKind `json:"kinds"` // Room kinds (can be multiple)
-	ComfortTemp float64    `json:"comfort_temp"`
-	EcoTemp     float64    `json:"eco_temp"`
+	RoomID string             `json:"room_id"`
+	Name   string             `json:"name"`
+	Kinds  []RoomKind         `json:"kinds"`  // Room kinds (can be multiple)
+	Levels map[string]float64 `json:"levels"` // Temperature levels: "eco", "comfort", "away", etc.
 }
 
 // TemperatureDeleteParams represents parameters for temperature.delete
@@ -47,24 +46,24 @@ type TemperatureGetScheduleParams struct {
 }
 
 // TemperatureGetWeekdayDefaultsParams represents parameters for temperature.getweekdaydefaults
+// Weekday defaults are global and apply to all rooms
 type TemperatureGetWeekdayDefaultsParams struct {
-	RoomID string `json:"room_id"`
+	// No parameters - weekday defaults are global
 }
 
 // TemperatureSetWeekdayDefaultParams represents parameters for temperature.setweekdaydefault
+// Weekday defaults are global and apply to all rooms
 type TemperatureSetWeekdayDefaultParams struct {
-	RoomID  string  `json:"room_id"`
 	Weekday int     `json:"weekday"`  // 0=Sunday, 1=Monday, ..., 6=Saturday
 	DayType DayType `json:"day_type"` // work-day or day-off
 }
 
 // TemperatureRoomConfig represents a room's temperature configuration
 type TemperatureRoomConfig struct {
-	RoomID      string     `json:"room_id"`
-	Name        string     `json:"name"`
-	Kinds       []RoomKind `json:"kinds"` // Room kinds (can be multiple)
-	ComfortTemp float64    `json:"comfort_temp"`
-	EcoTemp     float64    `json:"eco_temp"`
+	RoomID string             `json:"room_id"`
+	Name   string             `json:"name"`
+	Kinds  []RoomKind         `json:"kinds"`  // Room kinds (can be multiple)
+	Levels map[string]float64 `json:"levels"` // Temperature levels: "eco" (default), "comfort", "away", etc.
 }
 
 // TemperatureKindSchedule represents comfort time ranges for a room kind and day type
@@ -89,8 +88,8 @@ type TemperatureSetKindScheduleParams struct {
 
 // TemperatureTimeRange represents a time period
 type TemperatureTimeRange struct {
-	Start string `json:"start"` // "HH:MM" format
-	End   string `json:"end"`   // "HH:MM" format
+	Start int `json:"start"` // Minutes since midnight (0-1439)
+	End   int `json:"end"`   // Minutes since midnight (0-1439)
 }
 
 // TemperatureScheduleResult represents the result of temperature.getschedule
@@ -100,21 +99,17 @@ type TemperatureScheduleResult struct {
 	Date          string                 `json:"date"`           // YYYY-MM-DD format
 	Weekday       int                    `json:"weekday"`        // 0=Sunday, 1=Monday, ..., 6=Saturday
 	DayType       DayType                `json:"day_type"`       // Day type for this date (from weekday default or external API)
-	ComfortTemp   float64                `json:"comfort_temp"`   // Comfort temperature
-	EcoTemp       float64                `json:"eco_temp"`       // Eco temperature
+	Levels        map[string]float64     `json:"levels"`         // Temperature levels: "eco" (default), "comfort", "away", etc.
 	ComfortRanges []TemperatureTimeRange `json:"comfort_ranges"` // Union of all comfort ranges for room's kinds
 }
 
-// TemperatureWeekdayDefaults represents weekday defaults for a room
+// TemperatureWeekdayDefaults represents global weekday defaults (applies to all rooms)
 type TemperatureWeekdayDefaults struct {
-	RoomID   string          `json:"room_id"`
 	Defaults map[int]DayType `json:"defaults"` // weekday (0-6) -> day-type
 }
 
 // TemperatureSetWeekdayDefaultResult represents the result of temperature.setweekdaydefault
 type TemperatureSetWeekdayDefaultResult struct {
-	Status  string  `json:"status"`
-	RoomID  string  `json:"room_id"`
 	Weekday int     `json:"weekday"`
 	DayType DayType `json:"day_type"`
 }

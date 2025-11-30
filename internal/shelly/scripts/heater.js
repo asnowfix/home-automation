@@ -1103,8 +1103,8 @@ function checkAndStartControlLoop() {
       log('All inputs ready - starting control loop timer');
       // Start the control loop timer now that all inputs are ready
       STATE.controlLoopTimerId = Timer.set(CONFIG.pollIntervalMs, true, pollAndControl);
-      // // Run first cycle immediately
-      // pollAndControl();
+      // Run first cycle immediately
+      pollAndControl();
     }
   }
 }

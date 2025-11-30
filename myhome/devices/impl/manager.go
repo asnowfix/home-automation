@@ -17,6 +17,7 @@ import (
 	"pkg/shelly"
 	"pkg/shelly/blu"
 	"pkg/shelly/gen1"
+	shellymqtt "pkg/shelly/mqtt"
 	"reflect"
 	"strings"
 	"time"
@@ -161,6 +162,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	})
 
 	ctx, dm.cancel = context.WithCancel(ctx)
+	ctx = shellymqtt.NewContext(ctx, dm.mqttClient)
 
 	// Start MQTT message cache
 	dm.log.Info("Starting MQTT message cache")

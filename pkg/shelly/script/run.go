@@ -560,15 +560,16 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 
 	// MQTT object
 	mqttObj := vm.NewObject()
+	// MQTT.subscribe(topic, callback) - 2 parameters per Shelly API docs
+	// https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#mqttsubscribe
 	mqttObj.Set("subscribe", func(call goja.FunctionCall) goja.Value {
 
 		topic := call.Argument(0).String()
 		callback := call.Argument(1)
-		userdata := call.Argument(2)
 
 		log.Info("MQTT.subscribe()", "topic", topic)
 
-		handler, err := mqttSubscribe(ctx, mc, vm, topic, callback, userdata)
+		handler, err := mqttSubscribe(ctx, mc, vm, topic, callback)
 		if err != nil {
 			log.Error(err, "MQTT.subscribe() failed", "topic", topic)
 			return vm.ToValue(err)
@@ -873,8 +874,9 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 }
 
 // Actual implementation for MQTT.subscribe <https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#mqttsubscribe>
+// MQTT.subscribe(topic, callback) - callback receives (topic, message)
 
-func mqttSubscribe(ctx context.Context, mc mqtt.Client, vm *goja.Runtime, topic string, callback goja.Value, userdata goja.Value) (handler, error) {
+func mqttSubscribe(ctx context.Context, mc mqtt.Client, vm *goja.Runtime, topic string, callback goja.Value) (handler, error) {
 	if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 		if callable, ok := goja.AssertFunction(callback); ok {
 			in, err := mc.Subscribe(ctx, topic, 8, "shelly/script")
@@ -886,7 +888,6 @@ func mqttSubscribe(ctx context.Context, mc mqtt.Client, vm *goja.Runtime, topic 
 				input:    in,
 				callable: callable,
 				closed:   make(chan struct{}),
-				userdata: userdata,
 			}, nil
 		}
 	}
@@ -898,7 +899,6 @@ type mqttHandler struct {
 	input    <-chan []byte
 	callable goja.Callable
 	closed   chan struct{}
-	userdata goja.Value
 }
 
 func (mh *mqttHandler) Wait() <-chan []byte {
@@ -929,9 +929,9 @@ func (mh *mqttHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte)
 	if err != nil {
 		return err
 	}
-	// Call: callback(result, error_code, error_message)
+	// Call: callback(topic, message) - 2 parameters per Shelly API docs
 	log.Info("MQTT callback", "topic", mh.topic, "msg", string(msg))
-	_, err = mh.callable(goja.Undefined(), vm.ToValue(mh.topic), vm.ToValue(string(msg)), mh.userdata)
+	_, err = mh.callable(goja.Undefined(), vm.ToValue(mh.topic), vm.ToValue(string(msg)))
 	if err != nil {
 		log.Error(err, "MQTT callback", "topic", mh.topic, "error", err)
 		return err

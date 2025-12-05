@@ -55,7 +55,6 @@ func (r *resolver) WithLocalName(ctx context.Context, hostname string) Resolver 
 	defer r.Unlock()
 
 	if r.started {
-		r.log.Error(nil, "Resolver already started")
 		return theResolver
 	}
 

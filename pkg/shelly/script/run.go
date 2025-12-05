@@ -41,7 +41,13 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 
 	handlers := make([]handler, 0)
 
-	vm, err := createShellyRuntime(ctx, &handlers, deviceState)
+	mc, err := mqtt.FromContext(ctx)
+	if err != nil {
+		log.Error(err, "Failed to get MQTT client", "name", name)
+		return err
+	}
+
+	vm, err := createShellyRuntime(ctx, mc, &handlers, deviceState)
 	if err != nil {
 		log.Error(err, "Failed to create Shelly runtime", "name", name)
 		return err
@@ -79,9 +85,16 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 	}
 
 	cases := buildCases()
+	needsRebuild := false
 
 	// Event loop: wait on all channels simultaneously
 	for {
+		// Rebuild cases if needed (deferred from previous iteration)
+		if needsRebuild {
+			cases = buildCases()
+			needsRebuild = false
+		}
+
 		chosen, value, ok := reflect.Select(cases)
 
 		if chosen == 0 {
@@ -100,8 +113,8 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 			}
 			// Check if new handlers were added during Handle()
 			if len(handlers) != handlerCountBefore {
-				log.Info("Handlers changed, rebuilding cases", "before", handlerCountBefore, "after", len(handlers))
-				cases = buildCases()
+				log.Info("Handlers changed, will rebuild cases", "before", handlerCountBefore, "after", len(handlers))
+				needsRebuild = true
 			}
 		} else {
 			// Channel closed, remove it from cases
@@ -115,8 +128,8 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 				return nil
 			}
 
-			// Rebuild cases after removing handler
-			cases = buildCases()
+			// Mark for rebuild at start of next iteration
+			needsRebuild = true
 		}
 	}
 }
@@ -127,15 +140,9 @@ type handler interface {
 }
 
 // createShellyRuntime creates a goja VM with Shelly API placeholders
-func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *DeviceState) (*goja.Runtime, error) {
+func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handler, deviceState *DeviceState) (*goja.Runtime, error) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
-		return nil, err
-	}
-
-	mqttBroker, err := mqtt.FromContext(ctx)
-	if err != nil {
-		log.Error(err, "MQTT broker not found")
 		return nil, err
 	}
 
@@ -371,7 +378,7 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 		case "mqtt":
 			config = map[string]interface{}{
 				"enable":          true,
-				"server":          mqttBroker.GetServer(),
+				"server":          mc.GetServer(),
 				"client_id":       deviceId,
 				"user":            nil,
 				"topic_prefix":    deviceId,
@@ -427,6 +434,37 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 	// Shelly.getCurrentScriptId()
 	shellyObj.Set("getCurrentScriptId", func(call goja.FunctionCall) goja.Value {
 		return vm.ToValue(1)
+	})
+
+	// Shelly.getDeviceInfo()
+	// <https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shellygetdeviceinfo>
+	// {
+	// "name": "radiateur-bureau",
+	// "id": "shellyplus1-b8d61a85a970",
+	// "mac": "B8D61A85A970",
+	// "slot": 0,
+	// "model": "SNSW-001X16EU",
+	// "gen": 2,
+	// "fw_id": "20250924-062720/1.7.1-gd336f31",
+	// "ver": "1.7.1",
+	// "app": "Plus1",
+	// "auth_en": false,
+	// "auth_domain": null
+	// }
+	shellyObj.Set("getDeviceInfo", func(call goja.FunctionCall) goja.Value {
+		return vm.ToValue(map[string]interface{}{
+			"name":        "radiateur-bureau",
+			"id":          "shellyplus1-b8d61a85a970",
+			"mac":         "B8D61A85A970",
+			"slot":        0,
+			"model":       "SNSW-001X16EU",
+			"gen":         2,
+			"fw_id":       "20250924-062720/1.7.1-gd336f31",
+			"ver":         "1.7.1",
+			"app":         "Plus1",
+			"auth_en":     false,
+			"auth_domain": nil,
+		})
 	})
 
 	vm.Set("Shelly", shellyObj)
@@ -522,15 +560,16 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 
 	// MQTT object
 	mqttObj := vm.NewObject()
+	// MQTT.subscribe(topic, callback) - 2 parameters per Shelly API docs
+	// https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#mqttsubscribe
 	mqttObj.Set("subscribe", func(call goja.FunctionCall) goja.Value {
 
 		topic := call.Argument(0).String()
 		callback := call.Argument(1)
-		userdata := call.Argument(2)
 
 		log.Info("MQTT.subscribe()", "topic", topic)
 
-		handler, err := mqttSubscribe(ctx, vm, topic, callback, userdata)
+		handler, err := mqttSubscribe(ctx, mc, vm, topic, callback)
 		if err != nil {
 			log.Error(err, "MQTT.subscribe() failed", "topic", topic)
 			return vm.ToValue(err)
@@ -566,7 +605,7 @@ func createShellyRuntime(ctx context.Context, handlers *[]handler, deviceState *
 
 		log.Info("MQTT.publish()", "topic", topic, "message", message)
 
-		err := mqttBroker.Publish(ctx, topic, []byte(message))
+		err := mc.Publish(ctx, topic, []byte(message), mqtt.AtLeastOnce, false /*retain*/, "shelly/script/run")
 		if err != nil {
 			log.Error(err, "MQTT.publish() failed", "topic", topic)
 			return vm.ToValue(false)
@@ -835,15 +874,12 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 }
 
 // Actual implementation for MQTT.subscribe <https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#mqttsubscribe>
+// MQTT.subscribe(topic, callback) - callback receives (topic, message)
 
-func mqttSubscribe(ctx context.Context, vm *goja.Runtime, topic string, callback goja.Value, userdata goja.Value) (handler, error) {
+func mqttSubscribe(ctx context.Context, mc mqtt.Client, vm *goja.Runtime, topic string, callback goja.Value) (handler, error) {
 	if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 		if callable, ok := goja.AssertFunction(callback); ok {
-			mc, err := mqtt.FromContext(ctx)
-			if err != nil {
-				return nil, err
-			}
-			in, err := mc.Subscriber(ctx, topic, 0)
+			in, err := mc.Subscribe(ctx, topic, 8, "shelly/script")
 			if err != nil {
 				return nil, err
 			}
@@ -852,7 +888,6 @@ func mqttSubscribe(ctx context.Context, vm *goja.Runtime, topic string, callback
 				input:    in,
 				callable: callable,
 				closed:   make(chan struct{}),
-				userdata: userdata,
 			}, nil
 		}
 	}
@@ -864,7 +899,6 @@ type mqttHandler struct {
 	input    <-chan []byte
 	callable goja.Callable
 	closed   chan struct{}
-	userdata goja.Value
 }
 
 func (mh *mqttHandler) Wait() <-chan []byte {
@@ -895,9 +929,9 @@ func (mh *mqttHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte)
 	if err != nil {
 		return err
 	}
-	// Call: callback(result, error_code, error_message)
+	// Call: callback(topic, message) - 2 parameters per Shelly API docs
 	log.Info("MQTT callback", "topic", mh.topic, "msg", string(msg))
-	_, err = mh.callable(goja.Undefined(), vm.ToValue(mh.topic), vm.ToValue(string(msg)), mh.userdata)
+	_, err = mh.callable(goja.Undefined(), vm.ToValue(mh.topic), vm.ToValue(string(msg)))
 	if err != nil {
 		log.Error(err, "MQTT callback", "topic", mh.topic, "error", err)
 		return err
@@ -918,10 +952,16 @@ type timerHandler struct {
 	startTime time.Time
 	nextFire  time.Time
 	stopped   bool
+	ch        chan []byte // cached channel, created once in Wait()
 }
 
 func (th *timerHandler) Wait() <-chan []byte {
-	ch := make(chan []byte)
+	// Return cached channel if already started
+	if th.ch != nil {
+		return th.ch
+	}
+
+	th.ch = make(chan []byte)
 
 	if th.repeat {
 		// Periodic timer
@@ -933,9 +973,9 @@ func (th *timerHandler) Wait() <-chan []byte {
 					break
 				}
 				th.nextFire = time.Now().Add(th.period)
-				ch <- []byte{} // Signal to fire callback
+				th.ch <- []byte{} // Signal to fire callback
 			}
-			close(ch)
+			close(th.ch)
 		}()
 	} else {
 		// One-shot timer
@@ -949,13 +989,13 @@ func (th *timerHandler) Wait() <-chan []byte {
 		go func() {
 			<-th.timer.C
 			if !th.stopped {
-				ch <- []byte{} // Signal to fire callback
+				th.ch <- []byte{} // Signal to fire callback
 			}
-			close(ch)
+			close(th.ch)
 		}()
 	}
 
-	return ch
+	return th.ch
 }
 
 func (th *timerHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {

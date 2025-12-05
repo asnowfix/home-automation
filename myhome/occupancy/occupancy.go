@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"myhome/mqtt"
 	mqttclient "myhome/mqtt"
-	"net/http"
 	"pkg/sfr"
 	"strings"
 	"sync/atomic"
@@ -33,21 +33,22 @@ import (
 type Service struct {
 	ctx              context.Context
 	log              logr.Logger
-	mc               *mqttclient.Client
-	httpSrv          *http.Server
+	mc               mqttclient.Client
 	lastEvent        atomic.Int64 // unix nano of last relevant input event
 	lastMobileSeen   atomic.Int64 // unix nano of last mobile device presence
-	window           time.Duration
+	lastSeenTime     atomic.Int64 // unix nano of last seen event (for timer expiry message)
+	lastSeenTimer    *time.Timer  // timer for publishing false occupancy
+	lastSeenWindow   time.Duration
 	mobilePollPeriod time.Duration
 	mobileDevices    []string // list of device name patterns to check for (case-insensitive substring match)
 }
 
-func NewService(ctx context.Context, log logr.Logger, mc *mqttclient.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) *Service {
+func NewService(ctx context.Context, log logr.Logger, mc mqttclient.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) *Service {
 	s := &Service{
 		ctx:              ctx,
 		log:              log.WithName("occupancy.Service"),
 		mc:               mc,
-		window:           window,
+		lastSeenWindow:   window,
 		mobilePollPeriod: mobilePollPeriod,
 		mobileDevices:    mobileDevices,
 	}
@@ -57,7 +58,7 @@ func NewService(ctx context.Context, log logr.Logger, mc *mqttclient.Client, win
 // SetWindow configures the time window for input devices & mobile device presence detection.
 // If a mobile device was seen online within this window, the home is considered occupied.
 func (s *Service) SetWindow(window time.Duration) *Service {
-	s.window = window
+	s.lastSeenWindow = window
 	return s
 }
 
@@ -75,78 +76,84 @@ func (s *Service) SetMobileDevices(devices []string) *Service {
 	return s
 }
 
-// Start runs the MQTT subscriptions, mobile device polling, and the HTTP server on the given port.
-func (s *Service) Start(port int) error {
+// Start runs the MQTT subscriptions, mobile device polling
+func (s *Service) Start() error {
 	// Subscribe to Shelly Gen2 input status topics
 	go s.subscribeInputs()
 
 	// Start mobile device presence polling
 	go s.pollMobilePresence()
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/status", s.handleStatus)
-
-	s.httpSrv = &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
-	}
-
 	go func() {
 		<-s.ctx.Done()
-		_ = s.httpSrv.Close()
-	}()
-
-	go func() {
-		if err := s.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.log.Error(err, "occupancy HTTP server crashed")
+		if s.lastSeenTimer != nil {
+			s.lastSeenTimer.Stop()
 		}
 	}()
 
-	s.log.Info("Occupancy HTTP service started", "port", port, "window", s.window, "mobilePollPeriod", s.mobilePollPeriod, "mobileDevices", s.mobileDevices)
+	s.log.Info("Occupancy service started", "lastSeenWindow", s.lastSeenWindow, "mobilePollPeriod", s.mobilePollPeriod, "mobileDevices", s.mobileDevices)
 	return nil
 }
 
-func (s *Service) handleStatus(w http.ResponseWriter, r *http.Request) {
-	// Optional per-request window override
-	win := s.window
-	if v := r.URL.Query().Get("window"); v != "" {
-		if secs, err := time.ParseDuration(v + "s"); err == nil {
-			win = secs
-		}
-	}
-	occupied, reason := s.isOccupied(win)
-	resp := map[string]any{
-		"occupied": occupied,
-		"reason":   reason,
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+type occupancy struct {
+	Occupied bool   `json:"occupied"`
+	Reason   string `json:"reason,omitempty"`
 }
 
-func (s *Service) isOccupied(window time.Duration) (bool, string) {
-	// Check both conditions
-	last := time.Unix(0, s.lastEvent.Load())
-	hasInput := !last.IsZero() && time.Since(last) <= window
-
-	lastMobile := time.Unix(0, s.lastMobileSeen.Load())
-	hasMobile := !lastMobile.IsZero() && time.Since(lastMobile) <= s.window
-
-	// Return appropriate reason
-	if hasInput && hasMobile {
-		return true, "mobile+input"
-	} else if hasInput {
-		return true, "input"
-	} else if hasMobile {
-		return true, "mobile"
+func (s *Service) occupied(reason string) {
+	// Stop existing timer if any
+	if s.lastSeenTimer != nil {
+		s.lastSeenTimer.Stop()
+		s.lastSeenTimer = nil
 	}
 
-	return false, "none"
+	status := occupancy{
+		Occupied: true,
+		Reason:   reason,
+	}
+	b, err := json.Marshal(status)
+	if err != nil {
+		s.log.Error(err, "Failed to marshal occupancy")
+		return
+	}
+	s.mc.Publish(s.ctx, "myhome/occupancy", b, mqtt.AtLeastOnce, true /*retain*/, "myhome/occupancy")
+
+	s.lastSeenTime.Store(time.Now().UnixNano())
+	s.lastSeenTimer = time.AfterFunc(s.lastSeenWindow, func() {
+		// Timer expired - publish false occupancy with elapsed time
+		lastSeen := time.Unix(0, s.lastSeenTime.Load())
+		elapsed := time.Since(lastSeen)
+		hours := int(elapsed.Hours())
+		minutes := int(elapsed.Minutes()) % 60
+		seconds := int(elapsed.Seconds()) % 60
+
+		var elapsedStr string
+		if hours > 0 {
+			elapsedStr = fmt.Sprintf("%dh %dm %ds ago", hours, minutes, seconds)
+		} else if minutes > 0 {
+			elapsedStr = fmt.Sprintf("%dm %ds ago", minutes, seconds)
+		} else {
+			elapsedStr = fmt.Sprintf("%ds ago", seconds)
+		}
+
+		status := occupancy{
+			Occupied: false,
+			Reason:   fmt.Sprintf("last seen %s", elapsedStr),
+		}
+		b, err := json.Marshal(status)
+		if err != nil {
+			s.log.Error(err, "Failed to marshal occupancy on timer expiry")
+			return
+		}
+		s.mc.Publish(s.ctx, "myhome/occupancy", b, mqtt.AtLeastOnce, true /*retain*/, "myhome/occupancy")
+		s.log.Info("Published false occupancy after timer expiry", "elapsed", elapsedStr)
+	})
 }
 
 func (s *Service) subscribeInputs() {
 	// Gen2 events/rpc for NotifyStatus with input activity
 	topic := "+/events/rpc"
-	ch, err := s.mc.Subscriber(s.ctx, topic, 16)
+	ch, err := s.mc.SubscribeWithTopic(s.ctx, topic, 8, "myhome/occupancy")
 	if err != nil {
 		s.log.Error(err, "Failed to subscribe to events", "topic", topic)
 		return
@@ -164,11 +171,12 @@ func (s *Service) subscribeInputs() {
 				return
 			}
 			// Filter for NotifyStatus events with input state changes
-			payload := string(msg)
+			payload := string(msg.Payload())
 			// s.log.Info("Received event", "payload", payload)
 			if strings.Contains(payload, "\"NotifyStatus\"") && strings.Contains(payload, "\"input:") {
 				s.log.Info("Received event with input state change", "payload", payload)
 				s.lastEvent.Store(time.Now().UnixNano())
+				s.occupied(fmt.Sprintf("input change: %s", payload))
 			}
 		}
 	}
@@ -207,6 +215,7 @@ func (s *Service) checkMobilePresence() {
 				if strings.ToLower(host.Status) == "online" || host.Alive > 0 {
 					s.log.Info("Mobile device detected online", "name", host.Name, "pattern", devicePattern, "ip", host.Ip, "mac", host.Mac, "status", host.Status, "alive", host.Alive)
 					s.lastMobileSeen.Store(time.Now().UnixNano())
+					s.occupied(fmt.Sprintf("seen mobile: %s (%s) on %s", host.Name, host.Mac, time.Now().Format("2006-01-02 15:04:05")))
 					return
 				}
 			}
@@ -217,11 +226,11 @@ func (s *Service) checkMobilePresence() {
 }
 
 // Start launches the occupancy HTTP service listening on port with the given MQTT client.
-func Start(ctx context.Context, port int, mc *mqttclient.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) error {
+func Start(ctx context.Context, port int, mc mqttclient.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) error {
 	log := logr.FromContextOrDiscard(ctx)
 	svc := NewService(ctx, log, mc, window, mobilePollPeriod, mobileDevices)
 	if mobileDevices != nil {
 		svc.SetMobileDevices(mobileDevices)
 	}
-	return svc.Start(port)
+	return svc.Start()
 }

@@ -4,195 +4,318 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
+	"myhome"
+	"myhome/mqtt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
 )
 
-// Service implements an HTTP server that computes temperature set-points for rooms
-// based on time-based scheduling rules (day/night, weekday/weekend).
-//
-// Future: Will integrate with Google Calendar for room occupancy detection.
-//
-// HTTP:
-// - GET /temperature/<room-id> -> {"setpoint_comfort":21.0,"setpoint_eco":17.0,"active_setpoint":21.0,"reason":"comfort_hours"}
-
+// Service provides temperature management via RPC
 type Service struct {
-	ctx     context.Context
-	log     logr.Logger
-	httpSrv *http.Server
-	rooms   map[string]*RoomConfig
+	mu                 sync.RWMutex
+	log                logr.Logger
+	mqttClient         mqtt.Client                                                                      // MyHome MQTT client for publishing updates
+	storage            *Storage                                                                         // Persistent storage
+	rooms              map[string]*RoomConfig                                                           // room-id -> config
+	weekdayDefaults    map[string]map[int]myhome.DayType                                                // room-id -> weekday -> day-type
+	kindSchedules      map[myhome.RoomKind]map[myhome.DayType][]TimeRange                               // kind -> day-type -> ranges
+	externalDayTypeAPI func(ctx context.Context, roomID string, date time.Time) (myhome.DayType, error) // PLACEHOLDER: external API for day-type
 }
 
-// RoomConfig defines temperature settings and schedule for a room
+// RoomConfig defines temperature settings for a room
 type RoomConfig struct {
-	ID          string
-	Name        string
-	ComfortTemp float64
-	EcoTemp     float64
-	Schedule    *Schedule
+	ID     string
+	Name   string
+	Kinds  []myhome.RoomKind
+	Levels map[string]float64 // Temperature levels: "eco" (default), "comfort", "away", etc.
 }
 
-// Schedule defines time-based rules for comfort mode
-// Eco mode is the default - comfort hours are explicitly defined
-type Schedule struct {
-	Weekday []TimeRange // Comfort hours on weekdays
-	Weekend []TimeRange // Comfort hours on weekends
+// KindSchedule stores comfort time ranges for a room kind and day type
+type KindSchedule struct {
+	Kind    myhome.RoomKind
+	DayType myhome.DayType
+	Ranges  []TimeRange
 }
+
+// DayTypeCalendar stores the day-type for each date for a room
+type DayTypeCalendar map[string]myhome.DayType // key: YYYY-MM-DD, value: DayType
+
+// WeekdayDefaults stores day types for weekdays (0=Sunday, 6=Saturday)
+type WeekdayDefaults map[int]myhome.DayType
 
 // TimeRange represents a time period with start and end times
 type TimeRange struct {
-	Start string // "HH:MM" format (24-hour)
-	End   string // "HH:MM" format (24-hour)
+	Start int `json:"start"` // Minutes since midnight (0-1439)
+	End   int `json:"end"`   // Minutes since midnight (0-1439)
 }
 
-// Response is the JSON response for temperature queries
-type Response struct {
-	SetpointComfort float64 `json:"setpoint_comfort"`
-	SetpointEco     float64 `json:"setpoint_eco"`
-	ActiveSetpoint  float64 `json:"active_setpoint"`
-	Reason          string  `json:"reason"`
-}
-
-// NewService creates a new temperature service
-func NewService(ctx context.Context, log logr.Logger, rooms map[string]*RoomConfig) *Service {
+// NewService creates a new temperature service (RPC-only)
+func NewService(ctx context.Context, log logr.Logger, mqttClient mqtt.Client, storage *Storage) *Service {
 	s := &Service{
-		ctx:   ctx,
-		log:   log.WithName("temperature.Service"),
-		rooms: rooms,
+		log:             log.WithName("temperature.Service"),
+		mqttClient:      mqttClient,
+		storage:         storage,
+		rooms:           make(map[string]*RoomConfig),
+		weekdayDefaults: make(map[string]map[int]myhome.DayType),
+		kindSchedules:   make(map[myhome.RoomKind]map[myhome.DayType][]TimeRange),
+		// PLACEHOLDER: Set external day-type API function here
+		externalDayTypeAPI: nil,
 	}
+
+	// Load initial data from storage
+	if err := s.loadFromStorage(ctx); err != nil {
+		s.log.Error(err, "Failed to load initial data from storage")
+	}
+
+	s.log.Info("Temperature service initialized", "rooms", len(s.rooms))
 	return s
 }
 
-// Start runs the HTTP server on the given port
-func Start(ctx context.Context, port int, rooms map[string]*RoomConfig) error {
-	log := logr.FromContextOrDiscard(ctx)
-	svc := NewService(ctx, log, rooms)
-	return svc.Start(port)
+// RegisterHandlers registers all temperature RPC method handlers
+func (s *Service) RegisterHandlers() {
+	myhome.RegisterMethodHandler(myhome.TemperatureGet, func(params any) (any, error) {
+		return s.HandleGet(context.Background(), params.(*myhome.TemperatureGetParams))
+	})
+	myhome.RegisterMethodHandler(myhome.TemperatureSet, func(params any) (any, error) {
+		return s.HandleSet(context.Background(), params.(*myhome.TemperatureSetParams))
+	})
+	myhome.RegisterMethodHandler(myhome.TemperatureList, func(params any) (any, error) {
+		return s.HandleList(context.Background())
+	})
+	myhome.RegisterMethodHandler(myhome.TemperatureDelete, func(params any) (any, error) {
+		return s.HandleDelete(context.Background(), params.(*myhome.TemperatureDeleteParams))
+	})
+	myhome.RegisterMethodHandler(myhome.TemperatureGetSchedule, func(params any) (any, error) {
+		return s.HandleGetSchedule(context.Background(), params.(*myhome.TemperatureGetScheduleParams))
+	})
+	myhome.RegisterMethodHandler(myhome.TemperatureGetWeekdayDefaults, func(params any) (any, error) {
+		return s.HandleGetWeekdayDefaults(context.Background(), params.(*myhome.TemperatureGetWeekdayDefaultsParams))
+	})
+	myhome.RegisterMethodHandler(myhome.TemperatureSetWeekdayDefault, func(params any) (any, error) {
+		return s.HandleSetWeekdayDefault(context.Background(), params.(*myhome.TemperatureSetWeekdayDefaultParams))
+	})
+	myhome.RegisterMethodHandler(myhome.TemperatureGetKindSchedules, func(params any) (any, error) {
+		return s.HandleGetKindSchedules(context.Background(), params.(*myhome.TemperatureGetKindSchedulesParams))
+	})
+	myhome.RegisterMethodHandler(myhome.TemperatureSetKindSchedule, func(params any) (any, error) {
+		return s.HandleSetKindSchedule(context.Background(), params.(*myhome.TemperatureSetKindScheduleParams))
+	})
 }
 
-// Start runs the HTTP server
-func (s *Service) Start(port int) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/temperature/", s.handleTemperature)
+// loadFromStorage loads all data from persistent storage into memory
+func (s *Service) loadFromStorage(ctx context.Context) error {
+	// Load rooms
+	rooms, err := s.storage.ListRooms()
+	if err != nil {
+		return fmt.Errorf("failed to load rooms: %w", err)
+	}
+	s.rooms = rooms
 
-	s.httpSrv = &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
+	// Load kind schedules
+	schedules, err := s.storage.GetKindSchedules(nil, nil)
+	if err != nil {
+		return fmt.Errorf("failed to load kind schedules: %w", err)
 	}
 
-	go func() {
-		<-s.ctx.Done()
-		_ = s.httpSrv.Close()
-	}()
-
-	go func() {
-		if err := s.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			s.log.Error(err, "temperature HTTP server crashed")
+	// Convert to internal format
+	s.kindSchedules = make(map[myhome.RoomKind]map[myhome.DayType][]TimeRange)
+	for _, sched := range schedules {
+		if _, exists := s.kindSchedules[sched.Kind]; !exists {
+			s.kindSchedules[sched.Kind] = make(map[myhome.DayType][]TimeRange)
 		}
-	}()
 
-	s.log.Info("Temperature HTTP service started", "port", port, "rooms", len(s.rooms))
+		// Convert TemperatureTimeRange to TimeRange
+		ranges := make([]TimeRange, len(sched.Ranges))
+		for i, r := range sched.Ranges {
+			ranges[i] = TimeRange{Start: r.Start, End: r.End}
+		}
+		s.kindSchedules[sched.Kind][sched.DayType] = ranges
+	}
+
+	// Load global weekday defaults (apply to all rooms)
+	globalDefaults, err := s.storage.GetWeekdayDefaults()
+	if err != nil {
+		s.log.Error(err, "Failed to load global weekday defaults")
+	} else {
+		// Apply global defaults to all rooms
+		s.weekdayDefaults = make(map[string]map[int]myhome.DayType)
+		for roomID := range s.rooms {
+			s.weekdayDefaults[roomID] = globalDefaults
+		}
+	}
+
+	// Publish ranges for all rooms at startup
+	s.log.Info("Publishing temperature ranges for all rooms at startup")
+	for roomID := range s.rooms {
+		if err := s.PublishRangesUpdate(ctx, roomID); err != nil {
+			s.log.Error(err, "Failed to publish ranges at startup", "room_id", roomID)
+		} else {
+			s.log.V(1).Info("Published ranges at startup", "room_id", roomID)
+		}
+	}
+
 	return nil
 }
 
-// handleTemperature handles GET /temperature/<room-id>
-func (s *Service) handleTemperature(w http.ResponseWriter, r *http.Request) {
-	// Extract room ID from path: /temperature/<room-id>
-	path := strings.TrimPrefix(r.URL.Path, "/temperature/")
-	roomID := strings.TrimSuffix(path, "/")
-
-	if roomID == "" {
-		http.Error(w, "room ID required", http.StatusBadRequest)
-		return
+// PublishRangesUpdate publishes temperature ranges for a room to MQTT
+// Topic: myhome/rooms/<room-id>/temperature/ranges
+func (s *Service) PublishRangesUpdate(ctx context.Context, roomID string) error {
+	// Get today's ranges
+	ranges, dayType, err := s.GetComfortRanges(ctx, roomID, time.Now())
+	if err != nil {
+		return err
 	}
 
-	room, ok := s.rooms[roomID]
-	if !ok {
-		http.Error(w, "room not found", http.StatusNotFound)
-		return
+	room, exists := s.rooms[roomID]
+	if !exists {
+		return fmt.Errorf("room not found: %s", roomID)
 	}
 
-	// Determine active set-point based on time-based schedule
-	now := time.Now()
-	inComfortHours := room.Schedule.IsComfortTime(now)
-
-	var active float64
-	var reason string
-
-	if inComfortHours {
-		active = room.ComfortTemp
-		reason = "comfort_hours"
-	} else {
-		active = room.EcoTemp
-		reason = "eco_hours"
+	// Prepare MQTT payload
+	payload := struct {
+		RoomID  string             `json:"room_id"`
+		Date    string             `json:"date"`
+		DayType string             `json:"day_type"`
+		Levels  map[string]float64 `json:"levels"`
+		Ranges  []TimeRange        `json:"ranges"`
+	}{
+		RoomID:  roomID,
+		Date:    time.Now().Format("2006-01-02"),
+		DayType: string(dayType),
+		Levels:  room.Levels,
+		Ranges:  ranges,
 	}
 
-	resp := Response{
-		SetpointComfort: room.ComfortTemp,
-		SetpointEco:     room.EcoTemp,
-		ActiveSetpoint:  active,
-		Reason:          reason,
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal ranges: %w", err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		s.log.Error(err, "Failed to encode response", "room", roomID)
+	topic := fmt.Sprintf("myhome/rooms/%s/temperature/ranges", roomID)
+	err = s.mqttClient.Publish(ctx, topic, payloadBytes, mqtt.AtLeastOnce, true /*retain*/, "temperature.service")
+	if err != nil {
+		s.log.Error(err, "Failed to publish temperature ranges", "room_id", roomID, "topic", topic)
+		return err
 	}
+
+	s.log.Info("Published temperature ranges", "room_id", roomID, "topic", topic, "day_type", dayType, "range_count", len(ranges))
+	return nil
 }
 
-// IsComfortTime checks if the given time falls within comfort hours
-// Returns true if within comfort hours, false otherwise (eco mode)
-func (s *Schedule) IsComfortTime(t time.Time) bool {
+// GetComfortRanges returns the union of comfort time ranges for a room on a given date
+// This is the main method used by RPC handlers to provide schedule data to heaters
+func (s *Service) GetComfortRanges(ctx context.Context, roomID string, date time.Time) ([]TimeRange, myhome.DayType, error) {
+	room, exists := s.rooms[roomID]
+	if !exists {
+		return nil, "", fmt.Errorf("room not found: %s", roomID)
+	}
+
+	// Get day type for this date
+	dayType := s.getDayType(ctx, roomID, date)
+
+	// Collect all comfort ranges from all kinds
+	rangeMap := make(map[string]TimeRange) // Use map to deduplicate
+	for _, kind := range room.Kinds {
+		kindScheds, exists := s.kindSchedules[kind]
+		if !exists {
+			continue
+		}
+
+		ranges, exists := kindScheds[dayType]
+		if !exists {
+			continue
+		}
+
+		// Add ranges to map (using Start-End as key for deduplication)
+		for _, tr := range ranges {
+			key := fmt.Sprintf("%d-%d", tr.Start, tr.End)
+			rangeMap[key] = tr
+		}
+	}
+
+	// Convert map to slice
+	var comfortRanges []TimeRange
+	for _, tr := range rangeMap {
+		comfortRanges = append(comfortRanges, tr)
+	}
+
+	return comfortRanges, dayType, nil
+}
+
+// getDayType returns the day type for a given room and date
+// Priority: 1) External API (if configured), 2) Weekday defaults, 3) Built-in defaults (Sat/Sun = day-off)
+func (s *Service) getDayType(ctx context.Context, roomID string, date time.Time) myhome.DayType {
+	// PLACEHOLDER: Try external API first if configured
+	if s.externalDayTypeAPI != nil {
+		dayType, err := s.externalDayTypeAPI(ctx, roomID, date)
+		if err == nil {
+			return dayType
+		}
+		// If external API fails, fall through to defaults
+		s.log.Error(err, "External day-type API failed, using defaults", "room_id", roomID, "date", date.Format("2006-01-02"))
+	}
+
+	// Check weekday defaults for this room
+	weekday := int(date.Weekday()) // 0=Sunday, 1=Monday, ..., 6=Saturday
+	if defaults, exists := s.weekdayDefaults[roomID]; exists {
+		if dayType, exists := defaults[weekday]; exists {
+			return dayType
+		}
+	}
+
+	// Built-in default: Saturday & Sunday = day-off, others = work-day
+	if weekday == 0 || weekday == 6 { // Sunday or Saturday
+		return myhome.DayTypeDayOff
+	}
+	return myhome.DayTypeWorkDay
+}
+
+// isComfortTime checks if the given time falls within comfort hours for any of the room kinds and day type
+// Returns true if the time is comfort for ANY of the room's kinds (union of all comfort ranges)
+func (s *Service) isComfortTime(kinds []myhome.RoomKind, dayType myhome.DayType, t time.Time) bool {
 	hour := t.Hour()
 	minute := t.Minute()
 	currentMinutes := hour*60 + minute
 
-	// Determine if it's a weekend (Saturday=6, Sunday=0)
-	weekday := t.Weekday()
-	isWeekend := weekday == time.Saturday || weekday == time.Sunday
+	// Check each kind - if comfort in ANY kind, it's comfort for the room
+	for _, kind := range kinds {
+		// Get schedules for this kind
+		kindScheds, exists := s.kindSchedules[kind]
+		if !exists {
+			continue
+		}
 
-	// Select appropriate day's comfort hours
-	var comfortRanges []TimeRange
-	if isWeekend {
-		comfortRanges = s.Weekend
-	} else {
-		comfortRanges = s.Weekday
-	}
+		// Get comfort ranges for this day type
+		comfortRanges, exists := kindScheds[dayType]
+		if !exists {
+			continue
+		}
 
-	// Check if current time is within any comfort range
-	for _, tr := range comfortRanges {
-		if isInTimeRange(currentMinutes, tr) {
-			return true
+		// Check if current time is within any comfort range for this kind
+		for _, tr := range comfortRanges {
+			if isInTimeRange(currentMinutes, tr) {
+				return true // Comfort in at least one kind
+			}
 		}
 	}
 
-	// Default to eco mode if not in any comfort range
+	// Default to eco mode if not in any comfort range for any kind
 	return false
 }
 
 // isInTimeRange checks if currentMinutes falls within the given time range
 func isInTimeRange(currentMinutes int, tr TimeRange) bool {
-	startMinutes, err := parseTime(tr.Start)
-	if err != nil {
-		return false
-	}
-
-	endMinutes, err := parseTime(tr.End)
-	if err != nil {
-		return false
-	}
-
 	// Handle ranges that cross midnight
-	if endMinutes < startMinutes {
-		// Range crosses midnight (e.g., 23:00-06:00)
-		return currentMinutes >= startMinutes || currentMinutes < endMinutes
+	if tr.End < tr.Start {
+		// Range crosses midnight (e.g., 1380-360 = 23:00-06:00)
+		return currentMinutes >= tr.Start || currentMinutes < tr.End
 	}
 
-	// Normal range (e.g., 06:00-23:00)
-	return currentMinutes >= startMinutes && currentMinutes < endMinutes
+	// Normal range (e.g., 360-1380 = 06:00-23:00)
+	return currentMinutes >= tr.Start && currentMinutes < tr.End
 }
 
 // parseTime converts "HH:MM" to minutes since midnight

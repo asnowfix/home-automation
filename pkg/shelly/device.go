@@ -45,9 +45,15 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	d.mutex.Lock(ctx)
 	defer d.mutex.Unlock(ctx)
 
-	// Gen1 devices (like shellyht-*) cannot be refreshed via RPC
-	if strings.HasPrefix(d.Id(), "shellyht-") {
+	// Gen1 devices cannot be refreshed via RPC
+	if IsGen1Device(d.Id()) {
 		d.log.V(1).Info("Skipping refresh for Gen1 device", "device_id", d.Id())
+		return false, nil
+	}
+
+	// BLU devices (Generation 0) cannot be refreshed via RPC - they are updated via MQTT events only
+	if strings.HasPrefix(d.Id(), "shellyblu-") {
+		d.log.V(1).Info("Skipping refresh for BLU device (updated via MQTT events)", "device_id", d.Id())
 		return false, nil
 	}
 
@@ -278,7 +284,7 @@ func (d *Device) IsHttpReady() bool {
 		return false
 	}
 	d.UpdateHost(ip.String())
-	return mynet.IsSameNetwork(d.log, ip) == nil
+	return mynet.IsSameNetwork(d.log.V(1), ip) == nil
 }
 
 func (d *Device) StartDialog(ctx context.Context) uint32 {
@@ -332,25 +338,40 @@ var deviceIdRe = regexp.MustCompile("^shelly[a-zA-Z0-9]+-[a-f0-9]{12}$")
 
 // Gen1 device ID prefixes that identify Gen1 devices
 var gen1Prefixes = []string{
-	"shellyht-",      // Shelly H&T (Humidity & Temperature)
-	"shellyflood-",   // Shelly Flood
-	"shelly1-",       // Shelly 1
-	"shelly1pm-",     // Shelly 1PM
-	"shelly25-",      // Shelly 2.5
-	"shellyplug-",    // Shelly Plug
-	"shellydimmer-",  // Shelly Dimmer
-	"shellyrgbw2-",   // Shelly RGBW2
-	"shellybulb-",    // Shelly Bulb
-	"shellydw-",      // Shelly Door/Window
-	"shellyem-",      // Shelly EM
-	"shelly3em-",     // Shelly 3EM
-	"shellyuni-",     // Shelly UNI
+	"shellyht-",     // Shelly H&T (Humidity & Temperature)
+	"shellyflood-",  // Shelly Flood
+	"shelly1-",      // Shelly 1
+	"shelly1pm-",    // Shelly 1PM
+	"shelly25-",     // Shelly 2.5
+	"shellyplug-",   // Shelly Plug
+	"shellydimmer-", // Shelly Dimmer
+	"shellyrgbw2-",  // Shelly RGBW2
+	"shellybulb-",   // Shelly Bulb
+	"shellydw-",     // Shelly Door/Window
+	"shellyem-",     // Shelly EM
+	"shelly3em-",    // Shelly 3EM
+	"shellyuni-",    // Shelly UNI
 }
 
 // IsGen1Device returns true if the device ID indicates a Gen1 device
 // Gen1 devices are identified by their ID prefix (e.g., "shellyht-", "shellyflood-")
 func IsGen1Device(deviceId string) bool {
 	for _, prefix := range gen1Prefixes {
+		if strings.HasPrefix(deviceId, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// BLU device ID prefixes that identify BLU devices
+var bluPrefixes = []string{
+	"shellyblu-", // Shelly BLU (generic, if unknown)
+	"sbht-",      // Shelly BLU H&T (Humidity & Temperature)
+}
+
+func IsBluDevice(deviceId string) bool {
+	for _, prefix := range bluPrefixes {
 		if strings.HasPrefix(deviceId, prefix) {
 			return true
 		}
@@ -489,7 +510,7 @@ func (d *Device) initMqtt(ctx context.Context) error {
 
 	mc, err := mqtt.FromContext(ctx)
 	if err != nil {
-		d.log.Error(err, "Unable to get MQTT client")
+		d.log.Error(err, "Unable to get MQTT client from context", "device_id", d.Id_)
 		return err
 	}
 
@@ -498,17 +519,23 @@ func (d *Device) initMqtt(ctx context.Context) error {
 
 	if d.from == nil && mc != nil {
 		var err error
-		d.from, err = mc.Subscriber(ctx, fmt.Sprintf("%s/rpc", d.replyTo), 1 /*qlen*/)
+		d.from, err = mc.Subscribe(ctx, fmt.Sprintf("%s/rpc", d.replyTo), 8 /*qlen*/, "shelly/device/"+d.Id())
 		if err != nil {
 			d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
 			return err
 		}
 	}
 
+	mc, err = mqtt.FromContext(ctx)
+	if err != nil {
+		d.log.Error(err, "Unable to get MQTT client from context", "device_id", d.Id_)
+		return err
+	}
+
 	if d.to == nil && mc != nil {
 		topic := fmt.Sprintf("%s/rpc", d.Id_)
 		var err error
-		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/)
+		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/, mqtt.ExactlyOnce, false /*retain*/, "shelly/device/"+d.Id())
 		if err != nil {
 			d.log.Error(err, "Unable to publish to device's RPC topic", "device_id", d.Id_)
 			return err
@@ -595,6 +622,13 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 			// Skip Gen1 devices - they cannot receive commands or run scripts
 			if IsGen1Device(devSummary.Id()) {
 				log.V(1).Info("Skipping Gen1 device (no command/script support)", "device_id", devSummary.Id())
+				results <- DeviceResult{Device: devSummary, Error: nil}
+				return
+			}
+
+			// Skip BLU devices (Generation 0) - they cannot receive commands or run scripts
+			if strings.HasPrefix(devSummary.Id(), "shellyblu-") {
+				log.V(1).Info("Skipping BLU device (no command/script support)", "device_id", devSummary.Id())
 				results <- DeviceResult{Device: devSummary, Error: nil}
 				return
 			}

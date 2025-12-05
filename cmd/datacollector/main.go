@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"internal/myhome"
+	"myhome/mqtt"
 	"pkg/shelly"
 	"pkg/shelly/ethernet"
 	"pkg/shelly/kvs"
@@ -64,8 +65,13 @@ func main() {
 	ctx := logr.NewContext(context.Background(), logger)
 	ctx = options.CommandLineContext(ctx, Version)
 
+	mc, err := mqtt.GetClientE(ctx)
+	if err != nil {
+		log.Fatalf("Failed to get MQTT client: %v", err)
+	}
+
 	// Initialize the home automation client
-	client, err := myhome.NewClientE(ctx, logger, 30*time.Second)
+	client, err := myhome.NewClientE(ctx, logger, mc, 30*time.Second)
 	if err != nil {
 		log.Fatalf("Failed to create myhome client: %v", err)
 	}

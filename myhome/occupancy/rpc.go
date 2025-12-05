@@ -2,6 +2,7 @@ package occupancy
 
 import (
 	"myhome"
+	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -28,8 +29,8 @@ func (h *RPCHandler) RegisterHandlers() {
 
 // handleGetStatus returns the current occupancy status
 func (h *RPCHandler) handleGetStatus(params any) (any, error) {
-	// Get occupancy status using the service's default window
-	occupied, _ := h.service.isOccupied(h.service.window)
+	// Get occupancy status using the service's IsOccupied method
+	occupied := h.service.IsOccupied()
 
 	return &myhome.OccupancyStatusResult{
 		Occupied: occupied,
@@ -42,8 +43,16 @@ func (s *Service) GetOccupancyService() *Service {
 	return s
 }
 
-// IsOccupied is a public wrapper around isOccupied for RPC handler
+// IsOccupied returns whether the home is currently occupied
 func (s *Service) IsOccupied() bool {
-	occupied, _ := s.isOccupied(s.window)
-	return occupied
+	now := time.Now().UnixNano()
+	lastEvent := s.lastEvent.Load()
+	lastMobile := s.lastMobileSeen.Load()
+
+	windowNano := s.lastSeenWindow.Nanoseconds()
+
+	hasRecentEvent := (now - lastEvent) <= windowNano
+	hasRecentMobile := (now - lastMobile) <= windowNano
+
+	return hasRecentEvent || hasRecentMobile
 }

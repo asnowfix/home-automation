@@ -128,12 +128,44 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &TemperatureDeleteResult{}
 		},
 	},
-	TemperatureSetpoint: {
+	TemperatureGetSchedule: {
 		NewParams: func() any {
-			return &TemperatureGetSetpointParams{}
+			return &TemperatureGetScheduleParams{}
 		},
 		NewResult: func() any {
-			return &TemperatureSetpointResult{}
+			return &TemperatureScheduleResult{}
+		},
+	},
+	TemperatureGetWeekdayDefaults: {
+		NewParams: func() any {
+			return &TemperatureGetWeekdayDefaultsParams{}
+		},
+		NewResult: func() any {
+			return &TemperatureWeekdayDefaults{}
+		},
+	},
+	TemperatureSetWeekdayDefault: {
+		NewParams: func() any {
+			return &TemperatureSetWeekdayDefaultParams{}
+		},
+		NewResult: func() any {
+			return &TemperatureSetWeekdayDefaultResult{}
+		},
+	},
+	TemperatureGetKindSchedules: {
+		NewParams: func() any {
+			return &TemperatureGetKindSchedulesParams{}
+		},
+		NewResult: func() any {
+			return &TemperatureKindScheduleList{}
+		},
+	},
+	TemperatureSetKindSchedule: {
+		NewParams: func() any {
+			return &TemperatureSetKindScheduleParams{}
+		},
+		NewResult: func() any {
+			return &TemperatureSetKindScheduleResult{}
 		},
 	},
 	OccupancyGetStatus: {

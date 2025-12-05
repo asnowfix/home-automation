@@ -18,8 +18,6 @@ var Cmd = &cobra.Command{
 // Changes to CONFIG_SCHEMA must be reflected here and validated by TestHeaterKVSKeysMatchJSSchema.
 var heaterKVSKeys = []string{
 	"script/heater/enable-logging",             // CONFIG_SCHEMA.enableLogging
-	"script/heater/set-point",                  // CONFIG_SCHEMA.setpoint
-	"script/heater/min-internal-temp",          // CONFIG_SCHEMA.minInternalTemp
 	"script/heater/cheap-start-hour",           // CONFIG_SCHEMA.cheapStartHour
 	"script/heater/cheap-end-hour",             // CONFIG_SCHEMA.cheapEndHour
 	"script/heater/poll-interval-ms",           // CONFIG_SCHEMA.pollIntervalMs

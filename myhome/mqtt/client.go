@@ -14,8 +14,6 @@ import (
 	"sync"
 	"time"
 
-	smqtt "pkg/shelly/mqtt"
-
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/go-logr/logr"
 )
@@ -25,7 +23,54 @@ const BROKER_SERVICE = "_mqtt._tcp."
 const PRIVATE_PORT = 1883
 const PUBLIC_PORT = 8883
 
-type Client struct {
+type Message interface {
+	Topic() string
+	Payload() []byte
+	Subscriber() string
+}
+
+type message struct {
+	topic      string
+	subscriber string
+	payload    []byte
+}
+
+// Topic returns the MQTT topic
+func (m *message) Topic() string {
+	return m.topic
+}
+
+// Payload returns the MQTT message payload
+func (m *message) Payload() []byte {
+	return m.payload
+}
+
+// Payload returns the MQTT message named subscriber
+func (m *message) Subscriber() string {
+	return m.subscriber
+}
+
+// MQTT QoS levels
+const (
+	AtMostOnce  byte = 0 // QoS 0 - At most once delivery
+	AtLeastOnce byte = 1 // QoS 1 - At least once delivery
+	ExactlyOnce byte = 2 // QoS 2 - Exactly once delivery
+)
+
+type Client interface {
+	GetServer() string
+	BrokerUrl() *url.URL
+	Id() string
+	Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error)
+	SubscribeWithHandler(ctx context.Context, topic string, qlen uint, subscriber string, handle func(topic string, payload []byte, subcriber string) error) error
+	SubscribeWithTopic(ctx context.Context, topic string, qlen uint, subscriberName string) (<-chan Message, error)
+	Publish(ctx context.Context, topic string, payload []byte, qos byte, retained bool, publisherName string) error
+	Publisher(ctx context.Context, topic string, qlen uint, qos byte, retained bool, publisherName string) (chan<- []byte, error)
+	IsConnected() bool
+	Close()
+}
+
+type client struct {
 	// clientId  string      // MQTT client_id (this client)
 	mqtt                mqtt.Client        // MQTT stack
 	brokerUrl           *url.URL           // MQTT broker to connect to
@@ -39,6 +84,7 @@ type Client struct {
 	watchdogMaxFailures int                // Watchdog max consecutive failures
 	ctx                 context.Context    // Process-wide context for background services
 	watchdogCancel      context.CancelFunc // Cancel function for watchdog
+	subscribers         sync.Map           // Map topic => []subscribers channels
 }
 
 const BROKER_DEFAULT_NAME = "mqtt"
@@ -51,11 +97,11 @@ func init() {
 	mqttOps = mqtt.NewClientOptions()
 }
 
-var client *Client
+var theClient *client
 
 var mutex sync.Mutex
 
-func GetClientE(ctx context.Context) (*Client, error) {
+func GetClientE(ctx context.Context) (Client, error) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		return nil, err
@@ -64,8 +110,8 @@ func GetClientE(ctx context.Context) (*Client, error) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	if client != nil {
-		return client, nil
+	if theClient != nil {
+		return theClient, nil
 	}
 
 	mdnsCtx, mdnsCancel := context.WithTimeout(ctx, options.Flags.MdnsTimeout)
@@ -80,7 +126,7 @@ func GetClientE(ctx context.Context) (*Client, error) {
 	mqttOps.AddBroker(brokerUrl.String())
 	mqttOps.Servers = []*url.URL{brokerUrl}
 
-	client = &Client{
+	theClient = &client{
 		// clientId:  clientId,
 		mqtt:                mqtt.NewClient(mqttOps),
 		brokerUrl:           brokerUrl,
@@ -98,8 +144,8 @@ func GetClientE(ctx context.Context) (*Client, error) {
 	// 	Printf:  log.I,
 	// }
 
-	log.Info("MQTT client initialized", "client_id", client.Id(), "timeout", client.timeout, "grace", client.grace)
-	return client, nil
+	log.Info("MQTT client initialized", "client_id", theClient.Id(), "timeout", theClient.timeout, "grace", theClient.grace)
+	return theClient, nil
 }
 
 func NewClientE(ctx context.Context, broker string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration) error {
@@ -112,7 +158,7 @@ func NewClientE(ctx context.Context, broker string, mdnsTimeout time.Duration, m
 	defer mutex.Unlock()
 	mutex.Lock()
 
-	if client != nil {
+	if theClient != nil {
 		return nil
 	}
 
@@ -145,25 +191,25 @@ func NewClientE(ctx context.Context, broker string, mdnsTimeout time.Duration, m
 	return nil
 }
 
-func (c *Client) GetServer() string {
+func (c *client) GetServer() string {
 	// Host == <hostname>:<port>
 	return c.brokerUrl.Host
 }
 
-func (c *Client) Id() string {
+func (c *client) Id() string {
 	opts := c.mqtt.OptionsReader()
 	return opts.ClientID()
 }
 
-func (c *Client) BrokerUrl() *url.URL {
+func (c *client) BrokerUrl() *url.URL {
 	return c.brokerUrl
 }
 
-func (c *Client) IsConnected() bool {
+func (c *client) IsConnected() bool {
 	return c.mqtt.IsConnected()
 }
 
-func (c *Client) connect() error {
+func (c *client) connect() error {
 	defer mutex.Unlock()
 	mutex.Lock()
 	if c.mqtt.IsConnected() {
@@ -186,7 +232,7 @@ func (c *Client) connect() error {
 	return nil
 }
 
-func (c *Client) startWatchdogOnce() {
+func (c *client) startWatchdogOnce() {
 	c.watchdogMutex.Lock()
 	defer c.watchdogMutex.Unlock()
 
@@ -199,13 +245,13 @@ func (c *Client) startWatchdogOnce() {
 	watchdogCtx, cancel := context.WithCancel(c.ctx)
 	c.watchdogCancel = cancel
 
-	go c.watchdog(watchdogCtx)
+	go c.watchdog(watchdogCtx, c.log.WithName("watchdog"))
 }
 
-func (c *Client) watchdog(ctx context.Context) {
+func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 	consecutiveFailures := 0
 
-	c.log.Info("Starting MQTT connection watchdog", "check_interval", c.watchdogInterval, "max_failures", c.watchdogMaxFailures)
+	log.Info("Starting MQTT connection watchdog", "check_interval", c.watchdogInterval, "max_failures", c.watchdogMaxFailures)
 
 	ticker := time.NewTicker(c.watchdogInterval)
 	defer ticker.Stop()
@@ -213,24 +259,24 @@ func (c *Client) watchdog(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			c.log.Info("Process terminating, stopping MQTT watchdog")
+			log.Info("Process terminating, stopping MQTT watchdog")
 			return
 		case <-ticker.C:
 			if c.mqtt.IsConnected() {
 				if consecutiveFailures > 0 {
-					c.log.Info("MQTT connection recovered", "previous_failures", consecutiveFailures)
+					log.Info("MQTT connection recovered", "previous_failures", consecutiveFailures)
 					consecutiveFailures = 0
 				}
 			} else {
 				consecutiveFailures++
-				c.log.Error(nil, "MQTT connection lost", "consecutive_failures", consecutiveFailures, "max_failures", c.watchdogMaxFailures)
+				log.Error(nil, "MQTT connection lost", "consecutive_failures", consecutiveFailures, "max_failures", c.watchdogMaxFailures)
 
 				// Note: Paho MQTT client has AutoReconnect=true and ResumeSubs=true,
 				// so it will automatically reconnect and re-subscribe to all topics.
 				// We just monitor if reconnection is taking too long.
 
 				if consecutiveFailures >= c.watchdogMaxFailures {
-					c.log.Error(nil, "MQTT connection failed too many times, daemon needs restart",
+					log.Error(nil, "MQTT connection failed too many times, daemon needs restart",
 						"consecutive_failures", consecutiveFailures)
 					panic("MQTT connection permanently lost")
 				}
@@ -305,7 +351,7 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 	return url, nil
 }
 
-func (c *Client) Close() {
+func (c *client) Close() {
 	c.log.Info("Closing MQTT client", "client_id", c.Id())
 
 	// Cancel watchdog if it's running
@@ -326,62 +372,10 @@ var MqttPassword string = ""
 
 const ZEROCONF_SERVICE = "_mqtt._tcp."
 
-type MqttMessage struct {
-	topic   string
-	payload []byte
-}
-
-// Topic returns the MQTT topic
-func (m *MqttMessage) Topic() string {
-	return m.topic
-}
-
-// Payload returns the MQTT message payload
-func (m *MqttMessage) Payload() []byte {
-	return m.payload
-}
-
-// func (c *Client) Subscribe(topic string, qlen uint) (chan []byte, error) {
-// 	err := c.connect()
-// 	if err != nil {
-// 		c.log.Error(err, "Unable to connect to subscribe to", "topic", topic)
-// 		return nil, err
-// 	}
-
-// 	mch := make(chan []byte, qlen)
-
-// 	c.log.Info("Subscribing to:", "topic", topic)
-// 	token := c.mqtt.Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
-// 		go func() {
-// 			c.log.Info("Received from MQTT:", "topic", msg.Topic(), "payload", string(msg.Payload()))
-// 			mch <- msg.Payload()
-// 		}()
-// 	})
-// 	for !token.WaitTimeout(c.timeout) {
-// 		c.log.Info("Trying to subscribe", "topic", topic, "as client_id", c.Id(), "timeout", c.timeout)
-// 	}
-// 	if err := token.Error(); err != nil {
-// 		c.log.Error(token.Error(), "Subscription failed", "topic", topic, "as client_id", c.Id())
-// 		return nil, err
-// 	}
-// 	c.log.Info("Subscribed", "topic", topic, "asclient_id", c.Id())
-// 	return mch, nil
-// }
-
-// func (c *Client) Unsubscribe(topic string) {
-// 	c.log.Info("Unsubscribing:", "topic", topic)
-// 	token := c.mqtt.Unsubscribe(topic)
-// 	if token.WaitTimeout(c.timeout) {
-// 		c.log.Info("Unsubscribed:", "topic", topic)
-// 	} else {
-// 		c.log.Error(token.Error(), "Failed to unsubscribe from", "topic", topic)
-// 	}
-// }
-
-func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan<- []byte, error) {
+func (c *client) Publisher(ctx context.Context, topic string, qlen uint, qos byte, retained bool, publisherName string) (chan<- []byte, error) {
 	err := c.connect()
 	if err != nil {
-		c.log.Error(err, "Unable to connect to create publisher channel", "topic", topic)
+		c.log.Error(err, "Unable to connect to create publisher channel", "topic", topic, "publisher", publisherName)
 		return nil, err
 	}
 	mch := make(chan []byte, qlen)
@@ -395,28 +389,28 @@ func (c *Client) Publisher(ctx context.Context, topic string, qlen uint) (chan<-
 				return
 			case msg, ok := <-mch:
 				if !ok {
-					log.Info("Channel closed", "topic", topic)
+					log.Info("Channel closed", "topic", topic, "publisher", publisherName)
 					return
 				}
-				c.Publish(ctx, topic, msg)
+				c.Publish(ctx, topic, msg, qos, retained, publisherName)
 			}
 		}
-	}(c.log.WithName("Client#Publisher:" + topic))
+	}(c.log.WithName(publisherName))
 
 	c.log.Info("Publisher running:", "topic", topic)
 	return mch, nil
 }
 
-func (c *Client) Publish(ctx context.Context, topic string, msg []byte) error {
+func (c *client) Publish(ctx context.Context, topic string, msg []byte, qos byte, retained bool, publisherName string) error {
 	err := c.connect()
 	if err != nil {
-		c.log.Error(err, "Unable to connect to publish", "topic", topic)
+		c.log.Error(err, "Unable to connect to publish", "topic", topic, "publisher", publisherName)
 		return err
 	}
 
-	token := c.mqtt.Publish(topic, 1 /*qos:at-least-once*/, false /*retain*/, msg)
+	token := c.mqtt.Publish(topic, byte(qos), retained, msg)
 	if token.WaitTimeout(c.timeout) {
-		// c.log.Info("Published", "to topic", topic, "payload", string(msg))
+		c.log.Info("Published", "to topic", topic, "payload", string(msg))
 		return nil
 	} else {
 		c.log.Error(token.Error(), "Failed to publish", "to topic", topic, "payload", string(msg))
@@ -424,72 +418,116 @@ func (c *Client) Publish(ctx context.Context, topic string, msg []byte) error {
 	}
 }
 
-func (c *Client) Subscriber(ctx context.Context, topic string, qlen uint) (<-chan []byte, error) {
-	err := c.connect()
-	if err != nil {
-		c.log.Error(err, "Unable to connect to create subscriber channel", "topic", topic)
-		return nil, err
-	}
-	mch := make(chan []byte, qlen)
-
-	token := c.mqtt.Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
-		go func() {
-			// c.log.Info("Received", "from topic", msg.Topic(), "payload", string(msg.Payload()))
-			mch <- msg.Payload()
-		}()
+func (c *client) Subscribe(ctx context.Context, topic string, qlen uint, subscriberName string) (<-chan []byte, error) {
+	c.log.Info("Subscribe", "topic", topic, "qlen", qlen, "subscriber", subscriberName)
+	return subscribe(c, ctx, topic, qlen, subscriberName, func(msg mqtt.Message) []byte {
+		return msg.Payload()
 	})
-	for !token.WaitTimeout(c.timeout) {
-		c.log.Info("Retrying to subscribe", "to topic", topic, "as client_id", c.Id(), "timeout", c.timeout)
-	}
-	if err := token.Error(); err != nil {
-		c.log.Error(token.Error(), "Subscription failed", "topic", topic, "as client_id", c.Id())
-		return nil, err
-	}
-	c.log.Info("Subscribed", "to topic", topic, "as client_id", c.Id())
-
-	go func(ctx context.Context, log logr.Logger) {
-		<-ctx.Done()
-		// Don't log context cancellation as an error
-		token := c.mqtt.Unsubscribe(topic)
-		if token.WaitTimeout(c.timeout) {
-			log.Info("Unsubscribed", "from topic", topic)
-		} else {
-			log.Error(token.Error(), "Failed to unsubscribe", "from topic", topic)
-		}
-	}(ctx, c.log.WithName("Subscriber#Monitor"))
-
-	return mch, nil
 }
 
-// SubscriberWithTopic returns a channel that receives MQTT messages with topic information
-// This is useful for wildcard subscriptions where you need to know the actual topic
-// Returns a channel of mqtt.Message interface - concrete type is *MqttMessage
-func (c *Client) SubscriberWithTopic(ctx context.Context, topic string, qlen uint) (<-chan smqtt.Message, error) {
+func (c *client) SubscribeWithTopic(ctx context.Context, topic string, qlen uint, subscriberName string) (<-chan Message, error) {
+	c.log.Info("SubscribeWithTopic", "topic", topic, "qlen", qlen, "subscriber", subscriberName)
+	return subscribe(c, ctx, topic, qlen, subscriberName, func(msg mqtt.Message) Message {
+		return &message{
+			subscriber: subscriberName,
+			topic:      msg.Topic(),
+			payload:    msg.Payload(),
+		}
+	})
+}
+
+func (c *client) SubscribeWithHandler(ctx context.Context, topic string, qlen uint, subscriberName string, handler func(topic string, payload []byte, subscriber string) error) error {
+	mch, err := c.SubscribeWithTopic(ctx, topic, qlen, subscriberName)
+	if err != nil {
+		return err
+	}
+	go func(log logr.Logger) {
+		for msg := range mch {
+			log.V(1).Info("Received message", "topic", msg.Topic(), "subscriber", msg.Subscriber())
+			handler(msg.Topic(), msg.Payload(), msg.Subscriber())
+		}
+	}(c.log.WithName(subscriberName))
+	return nil
+}
+
+func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, subscriberName string, transform func(mqtt.Message) T) (<-chan T, error) {
 	err := c.connect()
 	if err != nil {
 		c.log.Error(err, "Unable to connect to create subscriber channel", "topic", topic)
 		return nil, err
 	}
-	mch := make(chan smqtt.Message, qlen)
 
-	token := c.mqtt.Subscribe(topic, 1 /*at-least-once*/, func(client mqtt.Client, msg mqtt.Message) {
-		go func() {
-			mch <- &MqttMessage{ // Send pointer to satisfy interface
-				topic:   msg.Topic(),
-				payload: msg.Payload(),
-			}
-		}()
-	})
-	for !token.WaitTimeout(c.timeout) {
-		c.log.Info("Retrying to subscribe", "to topic", topic, "as client_id", c.Id(), "timeout", c.timeout)
+	type subscriber struct {
+		name  string
+		queue chan T
 	}
-	if err := token.Error(); err != nil {
-		c.log.Error(token.Error(), "Subscription failed", "topic", topic, "as client_id", c.Id())
-		return nil, err
-	}
-	c.log.Info("Subscribed", "to topic", topic, "as client_id", c.Id())
 
-	go func(ctx context.Context, log logr.Logger) {
+	// Create a channel for this subscriber
+	s := &subscriber{
+		name:  subscriberName,
+		queue: make(chan T, qlen),
+	}
+
+	// Load or create subscriber list for this topic
+	value, loaded := c.subscribers.LoadOrStore(topic, make([]*subscriber, 0))
+	subscribers := value.([]*subscriber)
+	subscribers = append(subscribers, s)
+	c.subscribers.Store(topic, subscribers)
+	c.log.Info("Subscriber added", "topic", topic, "subscriber", s.name, "count", len(subscribers), "qlen", qlen)
+
+	if !loaded {
+		// Not yet subscribed at MQTT level: do it
+		distribute := func(client mqtt.Client, msg mqtt.Message) {
+			go func(log logr.Logger) {
+				// Load current subscribers
+				value, ok := c.subscribers.Load(topic)
+				if !ok {
+					return
+				}
+
+				subscribers := value.([]*subscriber)
+				dropping := make([]int, 0)
+
+				// Transform and distribute to all subscribers
+				transformed := transform(msg)
+				for i, ch := range subscribers {
+					select {
+					case <-ctx.Done():
+						c.log.Info("Subscriber context done", "topic", topic, "index", i)
+						return
+					case ch.queue <- transformed:
+						// Successfully sent
+					default:
+						// Channel full or closed, mark for removal
+						c.log.Error(nil, "Subscriber channel full or closed", "topic", topic, "index", i, "subscriber", ch.name)
+						dropping = append(dropping, i)
+					}
+				}
+
+				// Remove dropped subscribers (iterate in reverse to maintain indices)
+				if len(dropping) > 0 {
+					for i := len(dropping) - 1; i >= 0; i-- {
+						idx := dropping[i]
+						c.log.Info("Dropping subscriber", "topic", topic, "index", idx, "subscriber", subscribers[idx].name)
+						subscribers = append(subscribers[:idx], subscribers[idx+1:]...)
+					}
+					c.subscribers.Store(topic, subscribers)
+				}
+			}(c.log.WithName("distribute"))
+		}
+
+		token := c.mqtt.Subscribe(topic, 1 /*at-least-once*/, distribute)
+		for !token.WaitTimeout(c.timeout) {
+			c.log.Info("Retrying to subscribe", "to topic", topic, "as client_id", c.Id(), "timeout", c.timeout)
+		}
+		if err := token.Error(); err != nil {
+			c.log.Error(token.Error(), "Subscription failed", "topic", topic, "as client_id", c.Id())
+			return nil, err
+		}
+		c.log.Info("Subscribed", "to topic", topic, "as client_id", c.Id())
+	}
+
+	go func(log logr.Logger) {
 		<-ctx.Done()
 		// Don't log context cancellation as an error
 		token := c.mqtt.Unsubscribe(topic)
@@ -498,7 +536,7 @@ func (c *Client) SubscriberWithTopic(ctx context.Context, topic string, qlen uin
 		} else {
 			log.Error(token.Error(), "Failed to unsubscribe", "from topic", topic)
 		}
-	}(ctx, c.log.WithName("SubscriberWithTopic#Monitor"))
+	}(c.log.WithName(s.name))
 
-	return (<-chan smqtt.Message)(mch), nil
+	return s.queue, nil
 }

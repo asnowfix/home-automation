@@ -76,11 +76,11 @@ func NewCache(ctx context.Context, config CacheConfig) (*Cache, error) {
 
 // StartCaching starts a background goroutine that caches all messages from a subscription
 // The topic parameter can include wildcards (e.g., "#" for all topics)
-func (c *Cache) StartCaching(client *Client, topic string) error {
+func (c *Cache) StartCaching(client Client, topic string) error {
 	c.log.V(1).Info("Starting MQTT message caching", "topic", topic)
 
 	// Subscribe to all topics (or specified topic pattern)
-	msgChan, err := client.SubscriberWithTopic(c.ctx, topic, 100)
+	msgChan, err := client.SubscribeWithTopic(c.ctx, topic, 8, "myhome/cache")
 	if err != nil {
 		return fmt.Errorf("failed to subscribe for caching: %w", err)
 	}
@@ -148,7 +148,7 @@ func (c *Cache) Get(topic string) (*CachedMessage, bool) {
 }
 
 // Replay republishes the last cached message for a given topic
-func (c *Cache) Replay(ctx context.Context, client *Client, topic string) error {
+func (c *Cache) Replay(ctx context.Context, client Client, topic string) error {
 	cachedMsg, found := c.Get(topic)
 	if !found {
 		return fmt.Errorf("no cached message found for topic: %s", topic)
@@ -156,7 +156,7 @@ func (c *Cache) Replay(ctx context.Context, client *Client, topic string) error 
 
 	c.log.Info("Replaying cached message", "topic", topic, "age", time.Since(cachedMsg.Timestamp))
 
-	err := client.Publish(ctx, topic, cachedMsg.Payload)
+	err := client.Publish(ctx, topic, cachedMsg.Payload, AtLeastOnce, true, "myhome/mqtt/cache")
 	if err != nil {
 		return fmt.Errorf("failed to replay message: %w", err)
 	}

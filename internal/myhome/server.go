@@ -29,7 +29,7 @@ func NewServerE(ctx context.Context, handler Server) (Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	from, err := mc.Subscriber(ctx, ServerTopic(), 1)
+	from, err := mc.Subscribe(ctx, ServerTopic(), 8, "myhome/server")
 	if err != nil {
 		log.Error(err, "Failed to subscribe to server", "topic", ServerTopic())
 		return nil, err
@@ -125,7 +125,7 @@ func NewServerE(ctx context.Context, handler Server) (Server, error) {
 				}
 				// to <- outMsg
 				log.Info("Publishing response", "dst", res.Dst, "topic", ClientTopic(req.Src), "request_id", res.Id)
-				mc.Publish(ctx, ClientTopic(req.Src), outMsg)
+				mc.Publish(ctx, ClientTopic(req.Src), outMsg, mqtt.AtLeastOnce, false, "myhome.rpc/Server")
 			}
 		}
 	}(logr.NewContext(ctx, log.WithName("Server")))
@@ -134,7 +134,7 @@ func NewServerE(ctx context.Context, handler Server) (Server, error) {
 	return &s, nil
 }
 
-func (sp *server) fail(ctx context.Context, code int, err error, req *request, mc *mqtt.Client) {
+func (sp *server) fail(ctx context.Context, code int, err error, req *request, mc mqtt.Client) {
 	var res response = response{
 		Dialog: Dialog{
 			Id:  req.Id,
@@ -146,7 +146,7 @@ func (sp *server) fail(ctx context.Context, code int, err error, req *request, m
 	}
 	outMsg, _ := json.Marshal(res)
 	// sp.to <- outMsg
-	mc.Publish(ctx, ClientTopic(res.Dst), outMsg)
+	mc.Publish(ctx, ClientTopic(res.Dst), outMsg, mqtt.AtLeastOnce, false, "myhome.rpc/Server")
 }
 
 func (sp *server) MethodE(method Verb) (*Method, error) {

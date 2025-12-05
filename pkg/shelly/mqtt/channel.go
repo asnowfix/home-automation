@@ -56,6 +56,11 @@ func (ch *MqttChannel) receiveResponse(ctx context.Context, device types.Device,
 	select {
 	case resMsg = <-device.From():
 		// ch.log.Info("Got response", "to verb", verb.Method, "from device", device.Id(), "response", string(resMsg))
+	case <-ctx.Done():
+		err := fmt.Errorf("context cancelled while waiting for response from %s (%s): %w", device.Id(), device.Name(), ctx.Err())
+		ch.log.Error(err, "Context cancelled waiting for device response", "to method", method, "id", device.Id(), "name", device.Name())
+		device.StopDialog(ctx, reqId)
+		return nil, err
 	case <-time.After(ch.timeout):
 		err := fmt.Errorf("timeout waiting for response from %s (%s)", device.Id(), device.Name())
 		ch.log.Error(err, "Timeout waiting for device response", "to method", method, "id", device.Id(), "name", device.Name(), "timeout", ch.timeout)

@@ -66,7 +66,7 @@ func doList(ctx context.Context) error {
 
 	log.Info("Subscribing to list responses", "topic", responseTopic)
 
-	responsesChan, err := mc.Subscriber(ctx, responseTopic, 10)
+	responsesChan, err := mc.Subscribe(ctx, responseTopic, 8, "myhome/ctl/heater/list")
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to %s: %w", responseTopic, err)
 	}
@@ -84,7 +84,7 @@ func doList(ctx context.Context) error {
 	}
 	queryBytes, _ := json.Marshal(queryPayload)
 
-	if err := mc.Publish(ctx, queryTopic, queryBytes); err != nil {
+	if err := mc.Publish(ctx, queryTopic, queryBytes, mqtt.ExactlyOnce, false, "myhome/ctl/heater/list"); err != nil {
 		return fmt.Errorf("failed to publish discovery query: %w", err)
 	}
 

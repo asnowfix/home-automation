@@ -2,37 +2,31 @@ package mqtt
 
 import (
 	"context"
+	"net/url"
 )
 
-type contextKey struct{}
-
-// Message represents an MQTT message with topic and payload
-type Message interface {
-	Topic() string
-	Payload() []byte
-}
+// MQTT QoS levels
+const (
+	AtMostOnce  byte = 0 // QoS 0 - At most once delivery
+	AtLeastOnce byte = 1 // QoS 1 - At least once delivery
+	ExactlyOnce byte = 2 // QoS 2 - Exactly once delivery
+)
 
 type Client interface {
 	GetServer() string
+	BrokerUrl() *url.URL
 	Id() string
-	Subscriber(ctx context.Context, topic string, qlen uint) (<-chan []byte, error)
-	Publisher(ctx context.Context, topic string, qlen uint) (chan<- []byte, error)
-	Publish(ctx context.Context, topic string, msg []byte) error
+	Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error)
+	SubscribeWithHandler(ctx context.Context, topic string, qlen uint, subscriber string, handle func(topic string, payload []byte, subcriber string) error) error
+	Publisher(ctx context.Context, topic string, qlen uint, qos byte, retained bool, publisherName string) (chan<- []byte, error)
+	Publish(ctx context.Context, topic string, msg []byte, qos byte, retained bool, publisherName string) error
 }
 
 type Cache interface {
 	Insert(topic string, msg []byte) error
 }
 
-// SubscriberWithTopic is a capability interface for clients that support topic-aware subscriptions
-// Note: This is intentionally NOT part of the base Client interface due to Go's lack of
-// channel covariance. Implementations return channels of their own concrete Message types.
-// Consumers should use type assertions to access this capability.
-type SubscriberWithTopic interface {
-	// SubscriberWithTopic returns a channel of messages that implement the Message interface
-	// The actual channel type is implementation-specific
-	SubscriberWithTopic(ctx context.Context, topic string, qlen uint) (<-chan Message, error)
-}
+type contextKey struct{}
 
 func FromContext(ctx context.Context) (Client, error) {
 	out, ok := ctx.Value(contextKey{}).(Client)

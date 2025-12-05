@@ -2,22 +2,6 @@ package mqtt
 
 // <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt>
 
-type Qos uint32
-
-const (
-	AtMostOnce Qos = iota
-	AtLeastOnce
-	ExactlyOnce
-)
-
-func (qos Qos) String() string {
-	return [...]string{
-		"AtMostOnce",
-		"AtLeastOnce",
-		"ExactlyOnce",
-	}[qos]
-}
-
 type Event struct {
 	Src    string `json:"src"`    // Source of the event (Device Id)
 	Dst    string `json:"dst"`    // Destination of the event (MQTT topic)

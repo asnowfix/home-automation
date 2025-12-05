@@ -23,8 +23,6 @@ import (
 var setupFlags struct {
 	// KVS configuration flags
 	EnableLogging            bool
-	SetPoint                 float64
-	MinInternalTemp          float64
 	CheapStartHour           int
 	CheapEndHour             int
 	PollIntervalMs           int
@@ -66,8 +64,6 @@ All other configuration values have defaults.`,
 func init() {
 	// KVS configuration flags with defaults from heater.js CONFIG_SCHEMA
 	setupCmd.Flags().BoolVar(&setupFlags.EnableLogging, "enable-logging", true, "Enable logging")
-	setupCmd.Flags().Float64Var(&setupFlags.SetPoint, "set-point", 19.0, "Target temperature")
-	setupCmd.Flags().Float64Var(&setupFlags.MinInternalTemp, "min-internal-temp", 15.0, "Minimum internal temperature threshold")
 	setupCmd.Flags().IntVar(&setupFlags.CheapStartHour, "cheap-start-hour", 23, "Start hour of cheap electricity window")
 	setupCmd.Flags().IntVar(&setupFlags.CheapEndHour, "cheap-end-hour", 7, "End hour of cheap electricity window")
 	setupCmd.Flags().IntVar(&setupFlags.PollIntervalMs, "poll-interval-ms", 300000, "Polling interval in milliseconds (default: 5 minutes)")
@@ -97,8 +93,6 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	// Build KVS configuration map
 	kvsConfig := map[string]interface{}{
 		"script/heater/enable-logging":             setupFlags.EnableLogging,
-		"script/heater/set-point":                  setupFlags.SetPoint,
-		"script/heater/min-internal-temp":          setupFlags.MinInternalTemp,
 		"script/heater/cheap-start-hour":           setupFlags.CheapStartHour,
 		"script/heater/cheap-end-hour":             setupFlags.CheapEndHour,
 		"script/heater/poll-interval-ms":           setupFlags.PollIntervalMs,

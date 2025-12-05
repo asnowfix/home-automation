@@ -229,7 +229,7 @@ var STATE = {
   // Control loop timer handle
   controlLoopTimerId: null,
 
-  // Pending control loop check timer handle
+  // Pending control loop check timer handle (for deferred checks)
   controlLoopCheckTimerId: null,
 
   // Last successful temperature ranges from RPC
@@ -632,20 +632,12 @@ function fetchControlInputsWithCachedForecast(cb) {
     comfort: isComfortTime(),
     occupied: STATE.occupied
   };
+  // Store last external temp for fallback in shouldPreheat
+  if (results.external !== null) lastExternalTemp = results.external;
+  log('Fetched all control inputs:', JSON.stringify(results));
   // Call callback directly - no async operation here
   cb(results);
 }
-
-// Patch fetchAllControlInputs to store last external temp
-var origFetchAll = fetchAllControlInputs;
-
-fetchAllControlInputs = function (cb) {
-  origFetchAll(function (results) {
-    if (results.external !== null) lastExternalTemp = results.external;
-    log('Fetched all control inputs:', results);
-    cb(results);
-  });
-};
 
 // === KALMAN FILTER IMPLEMENTATION (ES5) ===
 function KalmanFilter(R, Q, A, B, C) {
@@ -1129,7 +1121,7 @@ function pollAndControl() {
   fetchAllControlInputs(controlHeaterWithInputs);
 }
 
-// Schedule a deferred check (breaks call stack)
+// Schedule a deferred check (breaks call stack to prevent recursion)
 function scheduleControlLoopCheck() {
   log('scheduleControlLoopCheck called, existing timer:', STATE.controlLoopCheckTimerId);
   // Prevent duplicate timers - only schedule if no check is already pending

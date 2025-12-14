@@ -78,7 +78,7 @@ func (d *daemon) Run() error {
 	var disableEmbeddedMqttBroker bool = len(options.Flags.MqttBroker) != 0
 
 	// Initialize Shelly devices handler
-	shelly.Init(log, options.Flags.MqttTimeout)
+	shelly.Init(log, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 
 	var mc mqttclient.Client
 

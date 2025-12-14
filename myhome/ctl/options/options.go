@@ -31,6 +31,8 @@ const MQTT_WATCHDOG_MAX_FAILURES int = 3
 
 const MQTT_BROKER_CLIENT_LOG_INTERVAL time.Duration = 2 * time.Minute
 
+const SHELLY_DEFAULT_RATE_LIMIT time.Duration = 500 * time.Millisecond
+
 var Flags struct {
 	CpuProfile                  string
 	Verbose                     bool
@@ -56,6 +58,7 @@ var Flags struct {
 	EnableMetricsExporter       bool
 	MetricsExporterPort         int
 	MetricsExporterTopic        string
+	ShellyRateLimit             time.Duration // the value taken by --shelly-rate-limit
 }
 
 var Via types.Channel

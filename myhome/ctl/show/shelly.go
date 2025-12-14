@@ -24,7 +24,7 @@ var showShellyCmd = &cobra.Command{
 	Short: "Show Shelly devices",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		shellyapi.Init(hlog.Logger, options.Flags.MqttTimeout)
+		shellyapi.Init(hlog.Logger, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 
 		var err error
 		identifier := args[0]

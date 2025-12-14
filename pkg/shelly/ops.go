@@ -7,6 +7,7 @@ import (
 	"pkg/shelly/kvs"
 	"pkg/shelly/matter"
 	"pkg/shelly/mqtt"
+	"pkg/shelly/ratelimit"
 	"pkg/shelly/script"
 	"pkg/shelly/shelly"
 	shttp "pkg/shelly/shttp"
@@ -24,9 +25,12 @@ import (
 
 type empty struct{}
 
-func Init(log logr.Logger, timeout time.Duration) {
-	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
+func Init(log logr.Logger, timeout time.Duration, rateLimitInterval time.Duration) {
+	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath(), "rateLimit", rateLimitInterval)
 	registrar.Init(log)
+
+	// Initialize rate limiter
+	ratelimit.Init(rateLimitInterval)
 
 	// Keep in lexical order
 	// gen1.Init(log, &registrar)

@@ -9,6 +9,7 @@ import (
 	"pkg/devices"
 	"pkg/shelly/ethernet"
 	"pkg/shelly/mqtt"
+	"pkg/shelly/ratelimit"
 	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -17,7 +18,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 	"tools"
 
 	"github.com/go-logr/logr"
@@ -395,10 +395,23 @@ func (d *Device) CallE(ctx context.Context, via types.Channel, method string, pa
 		d.log.Error(err, "Unable to find method handler", "method", method)
 		return nil, err
 	}
-	// FIXME: rather use per-device flow-controlled Channel
-	time.Sleep(200 * time.Millisecond)
 
-	return GetRegistrar().CallE(ctx, d, via, mh, params)
+	// Per-device rate limiting with queuing
+	rl := ratelimit.GetLimiter()
+	if rl != nil {
+		if err := rl.Wait(ctx, d.Id()); err != nil {
+			return nil, err
+		}
+	}
+
+	result, err := GetRegistrar().CallE(ctx, d, via, mh, params)
+
+	// Mark command completion for rate limiting (interval measured from response to next request)
+	if rl != nil {
+		rl.Done(d.Id())
+	}
+
+	return result, err
 }
 
 func (d *Device) MethodHandlerE(v any) (types.MethodHandler, error) {

@@ -623,20 +623,42 @@ function fetchAllControlInputs(cb) {
   }
 }
 
+// Guard against recursive calls
+var _fetchingControlInputs = false;
+
 function fetchControlInputsWithCachedForecast(cb) {
+  // Prevent recursion
+  if (_fetchingControlInputs) {
+    log('WARNING: fetchControlInputsWithCachedForecast called recursively, skipping');
+    return;
+  }
+  _fetchingControlInputs = true;
+
   log('fetchControlInputsWithCachedForecast')
   var results = {
     internal: STATE.temperature['internal'],
     external: STATE.temperature['external'],
     forecast: getCurrentForecastTemp(),
-    comfort: isComfortTime(),
+    isComfortTime: isComfortTime(),
     occupied: STATE.occupied
   };
   // Store last external temp for fallback in shouldPreheat
   if (results.external !== null) lastExternalTemp = results.external;
   log('Fetched all control inputs:', JSON.stringify(results));
-  // Call callback directly - no async operation here
-  cb(results);
+
+  // Clear guard before calling callback
+  _fetchingControlInputs = false;
+
+  // Validate callback is the expected function
+  if (typeof cb !== 'function') {
+    log('ERROR: cb is not a function:', typeof cb);
+    return;
+  }
+
+  // Call callback - defer to break call stack and prevent recursion
+  Timer.set(0, false, function() {
+    cb(results);
+  });
 }
 
 // === KALMAN FILTER IMPLEMENTATION (ES5) ===
@@ -935,16 +957,18 @@ function scheduleForecastRetry() {
   }
 }
 
-function onForecast(result, error_code, error_message) {
+function onForecast(result, error_code, error_message, cb) {
   if (error_code !== 0) {
     log('Forecast fetch error code:', error_code, 'message:', error_message);
     scheduleForecastRetry();
+    if (typeof cb === 'function') cb();
     return;
   }
 
   if (!result || !result.body) {
     log('No forecast data in response');
     scheduleForecastRetry();
+    if (typeof cb === 'function') cb();
     return;
   }
 
@@ -955,12 +979,14 @@ function onForecast(result, error_code, error_message) {
     log('JSON parse error:', result.body);
     if (e && false) { }
     scheduleForecastRetry();
+    if (typeof cb === 'function') cb();
     return;
   }
 
   if (!data || !data.hourly || !data.hourly.temperature_2m || data.hourly.temperature_2m.length === 0) {
     log('Invalid forecast structure data:', data);
     scheduleForecastRetry();
+    if (typeof cb === 'function') cb();
     return;
   }
 
@@ -973,8 +999,11 @@ function onForecast(result, error_code, error_message) {
   STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
   log('Forecast cached:', STATE.cachedForecast.length, 'values');
 
-  // Schedule check if not already scheduled
-  scheduleControlLoopCheck();
+  // Call the callback if provided, but defer it to break the call stack
+  // This prevents "Too much recursion" errors from deep callback nesting
+  if (typeof cb === 'function') {
+    Timer.set(0, false, cb);
+  }
 }
 
 function fetchAndCacheForecast(cb) {

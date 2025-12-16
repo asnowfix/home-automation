@@ -23,6 +23,9 @@ TimeoutStopSec=30
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
+# Restart the service every 6 hours (21600 seconds)
+RuntimeMaxSec=21600
+
 # Environment variables
 Environment=HOME=/var/lib/myhome
 Environment=MYHOME_LOG=stderr

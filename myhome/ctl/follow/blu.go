@@ -86,6 +86,7 @@ var BluCmd = &cobra.Command{
 	Long: `Configure Shelly device to follow a Shelly BLU device with illuminance-based triggering.
 
 When called with only <follower-device>, lists the currently followed BLU devices.
+When called with "-" as the first argument and a <blu-mac>, lists all Shelly devices following that BLU MAC.
 When called with both <follower-device> and <blu-mac>, configures the follow relationship.
 
 Illuminance values can be specified as:
@@ -103,6 +104,15 @@ Default illuminance_max is "10%" if not specified.`,
 		// If only follower device is provided, list followed BLU devices
 		if len(args) == 1 {
 			return listFollowedBluDevices(cmd.Context(), followerDevice)
+		}
+
+		// If first arg is "-", list all devices following the given BLU MAC
+		if followerDevice == "-" {
+			mac := tools.NormalizeMac(args[1])
+			if mac == "" {
+				return fmt.Errorf("invalid BLU MAC address: %q", args[1])
+			}
+			return listDevicesFollowingBlu(cmd.Context(), mac)
 		}
 
 		mac := tools.NormalizeMac(args[1])
@@ -169,6 +179,31 @@ func init() {
 	BluCmd.Flags().StringVar(&bluFlagIllumMax, "illuminance-max", "", "Maximum illuminance to trigger (numeric lux value or percentage like '80%', default '10%')")
 	BluCmd.Flags().StringVar(&bluFlagSwitchID, "switch-id", "switch:0", "Switch ID to operate, e.g. switch:0")
 	BluCmd.Flags().StringVar(&bluFlagNextSwitch, "next-switch", "", "Optional next switch ID to turn on after auto-off (unset by default)")
+}
+
+// listDevicesFollowingBlu lists all Shelly devices that follow the given BLU MAC address
+func listDevicesFollowingBlu(ctx context.Context, mac string) error {
+	log := hlog.Logger
+	kvKey := "follow/shelly-blu/" + mac
+
+	// Query all known Shelly devices using "*" wildcard
+	_, err := myhome.Foreach(ctx, log, "*", options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+		sd, ok := device.(*shelly.Device)
+		if !ok {
+			return nil, nil // Skip non-Shelly devices
+		}
+
+		// Check if this device has the specific BLU MAC in KVS
+		resp, err := kvs.GetValue(ctx, log, via, sd, kvKey)
+		if err != nil {
+			// Key not found means this device doesn't follow the BLU MAC
+			return nil, nil
+		}
+
+		fmt.Printf("%s: %s\n", sd.Name(), resp.Value)
+		return nil, nil
+	}, []string{})
+	return err
 }
 
 // listFollowedBluDevices lists the BLU devices followed by the specified follower device

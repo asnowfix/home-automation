@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"global"
+	"myhome/ctl/options"
 	"net"
 	"net/url"
 	"strings"
@@ -31,7 +32,8 @@ func MyResolver(log logr.Logger) Resolver {
 
 	if theResolver == nil {
 		theResolver = &resolver{
-			log: log,
+			log:         log,
+			mdnsTimeout: options.Flags.MdnsTimeout,
 		}
 	}
 	return theResolver
@@ -39,11 +41,12 @@ func MyResolver(log logr.Logger) Resolver {
 
 type resolver struct {
 	sync.Mutex
-	localNames []string
-	log        logr.Logger
-	started    bool
-	mdns       *mdns.Conn
-	zeroconf   *zeroconf.Resolver
+	localNames  []string
+	log         logr.Logger
+	started     bool
+	mdns        *mdns.Conn
+	zeroconf    *zeroconf.Resolver
+	mdnsTimeout time.Duration
 }
 
 var theResolver *resolver
@@ -167,7 +170,12 @@ func (r *resolver) LookupHost(ctx context.Context, host string) ([]net.IP, error
 		return ips, nil
 	}
 	localHost := host + ".local"
-	_, addr, err := r.mdns.QueryAddr(ctx, localHost)
+
+	// Use configured mDNS timeout to prevent goroutine leaks
+	queryCtx, cancel := context.WithTimeout(ctx, r.mdnsTimeout)
+	defer cancel()
+
+	_, addr, err := r.mdns.QueryAddr(queryCtx, localHost)
 	if err != nil {
 		r.log.Error(err, "Failed to query mDNS", "host", localHost)
 		return nil, err

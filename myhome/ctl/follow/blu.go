@@ -99,15 +99,13 @@ Illuminance values can be specified as:
 Default illuminance_max is "10%" if not specified.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		followerDevice := args[0]
-
-		// If only follower device is provided, list followed BLU devices
+		// Scenario 1: List followed BLU devices on a specific device
 		if len(args) == 1 {
-			return listFollowedBluDevices(cmd.Context(), followerDevice)
+			return listFollowedBluDevices(cmd.Context(), args[0])
 		}
 
-		// If first arg is "-", list all devices following the given BLU MAC
-		if followerDevice == "-" {
+		// Scenario 2: List all devices following a given BLU MAC
+		if args[0] == "-" || args[0] == "*" {
 			mac := tools.NormalizeMac(args[1])
 			if mac == "" {
 				return fmt.Errorf("invalid BLU MAC address: %q", args[1])
@@ -115,60 +113,8 @@ Default illuminance_max is "10%" if not specified.`,
 			return listDevicesFollowingBlu(cmd.Context(), mac)
 		}
 
-		mac := tools.NormalizeMac(args[1])
-		if mac == "" {
-			return fmt.Errorf("invalid BLU MAC address: %q", args[1])
-		}
-
-		// Validate illuminance values
-		if err := validateIlluminanceValue(bluFlagIllumMin); err != nil {
-			return fmt.Errorf("invalid illuminance-min: %w", err)
-		}
-		if err := validateIlluminanceValue(bluFlagIllumMax); err != nil {
-			return fmt.Errorf("invalid illuminance-max: %w", err)
-		}
-
-		// Build JSON payload with defaults and optional fields
-		payload := make(map[string]any)
-		payload["switch_id"] = bluFlagSwitchID
-		payload["auto_off"] = bluFlagAutoOff
-
-		if cmd.Flags().Changed("illuminance-min") && strings.TrimSpace(bluFlagIllumMin) != "" {
-			payload["illuminance_min"] = parseIlluminanceValue(bluFlagIllumMin)
-		}
-		if cmd.Flags().Changed("illuminance-max") && strings.TrimSpace(bluFlagIllumMax) != "" {
-			payload["illuminance_max"] = parseIlluminanceValue(bluFlagIllumMax)
-		} else if !cmd.Flags().Changed("illuminance-max") {
-			// Set default max to 10% if not explicitly provided
-			payload["illuminance_max"] = "10%"
-		}
-
-		if cmd.Flags().Changed("next-switch") && strings.TrimSpace(bluFlagNextSwitch) != "" {
-			payload["next_switch"] = bluFlagNextSwitch
-		}
-
-		valueBytes, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("failed to marshal payload: %w", err)
-		}
-		kvKey := "follow/shelly-blu/" + mac
-
-		// Set KVS configuration
-		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
-		if err != nil {
-			return err
-		}
-
-		// Upload and start the blu-listener.js script
-		fmt.Printf("\nUploading blu-listener.js script...\n")
-		longCtx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
-		defer cancel()
-		_, err = myhome.Foreach(longCtx, hlog.Logger, followerDevice, options.Via, uploadScript, []string{"blu-listener.js"})
-		if err != nil {
-			return fmt.Errorf("failed to upload script: %w", err)
-		}
-
-		return nil
+		// Scenario 3: Configure a device to follow a BLU MAC
+		return configureBluFollow(cmd, args[0], args[1])
 	},
 }
 
@@ -179,6 +125,64 @@ func init() {
 	BluCmd.Flags().StringVar(&bluFlagIllumMax, "illuminance-max", "", "Maximum illuminance to trigger (numeric lux value or percentage like '80%', default '10%')")
 	BluCmd.Flags().StringVar(&bluFlagSwitchID, "switch-id", "switch:0", "Switch ID to operate, e.g. switch:0")
 	BluCmd.Flags().StringVar(&bluFlagNextSwitch, "next-switch", "", "Optional next switch ID to turn on after auto-off (unset by default)")
+}
+
+// configureBluFollow configures a Shelly device to follow a BLU device
+func configureBluFollow(cmd *cobra.Command, followerDevice, bluMac string) error {
+	mac := tools.NormalizeMac(bluMac)
+	if mac == "" {
+		return fmt.Errorf("invalid BLU MAC address: %q", bluMac)
+	}
+
+	// Validate illuminance values
+	if err := validateIlluminanceValue(bluFlagIllumMin); err != nil {
+		return fmt.Errorf("invalid illuminance-min: %w", err)
+	}
+	if err := validateIlluminanceValue(bluFlagIllumMax); err != nil {
+		return fmt.Errorf("invalid illuminance-max: %w", err)
+	}
+
+	// Build JSON payload with defaults and optional fields
+	payload := make(map[string]any)
+	payload["switch_id"] = bluFlagSwitchID
+	payload["auto_off"] = bluFlagAutoOff
+
+	if cmd.Flags().Changed("illuminance-min") && strings.TrimSpace(bluFlagIllumMin) != "" {
+		payload["illuminance_min"] = parseIlluminanceValue(bluFlagIllumMin)
+	}
+	if cmd.Flags().Changed("illuminance-max") && strings.TrimSpace(bluFlagIllumMax) != "" {
+		payload["illuminance_max"] = parseIlluminanceValue(bluFlagIllumMax)
+	} else if !cmd.Flags().Changed("illuminance-max") {
+		// Set default max to 10% if not explicitly provided
+		payload["illuminance_max"] = "10%"
+	}
+
+	if cmd.Flags().Changed("next-switch") && strings.TrimSpace(bluFlagNextSwitch) != "" {
+		payload["next_switch"] = bluFlagNextSwitch
+	}
+
+	valueBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+	kvKey := "follow/shelly-blu/" + mac
+
+	// Set KVS configuration
+	_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
+	if err != nil {
+		return err
+	}
+
+	// Upload and start the blu-listener.js script
+	fmt.Printf("\nUploading blu-listener.js script...\n")
+	longCtx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
+	defer cancel()
+	_, err = myhome.Foreach(longCtx, hlog.Logger, followerDevice, options.Via, uploadScript, []string{"blu-listener.js"})
+	if err != nil {
+		return fmt.Errorf("failed to upload script: %w", err)
+	}
+
+	return nil
 }
 
 // listDevicesFollowingBlu lists all Shelly devices that follow the given BLU MAC address

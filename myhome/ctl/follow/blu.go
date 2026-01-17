@@ -10,6 +10,7 @@ import (
 	"myhome/ctl/options"
 	"pkg/devices"
 	"pkg/shelly"
+	"pkg/shelly/kvs"
 	pkgscript "pkg/shelly/script"
 	"pkg/shelly/types"
 	"strconv"
@@ -34,7 +35,7 @@ func validateIlluminanceValue(value string) error {
 	if value == "" {
 		return nil // empty is valid (means not set)
 	}
-	
+
 	// Check if it's a percentage
 	if strings.HasSuffix(value, "%") {
 		percentStr := strings.TrimSuffix(value, "%")
@@ -47,7 +48,7 @@ func validateIlluminanceValue(value string) error {
 		}
 		return nil
 	}
-	
+
 	// Check if it's a numeric value
 	_, err := strconv.ParseFloat(value, 64)
 	if err != nil {
@@ -61,12 +62,12 @@ func parseIlluminanceValue(value string) interface{} {
 	if value == "" {
 		return nil
 	}
-	
+
 	// If it's a percentage, keep as string
 	if strings.HasSuffix(value, "%") {
 		return value
 	}
-	
+
 	// Try to parse as integer first, then float
 	if intVal, err := strconv.Atoi(value); err == nil {
 		return intVal
@@ -74,15 +75,18 @@ func parseIlluminanceValue(value string) interface{} {
 	if floatVal, err := strconv.ParseFloat(value, 64); err == nil {
 		return floatVal
 	}
-	
+
 	// Fallback to string (should not happen after validation)
 	return value
 }
 
 var BluCmd = &cobra.Command{
-	Use:   "blu <follower-device> <blu-mac>",
-	Short: "Configure Shelly device to follow a Shelly BLU device",
+	Use:   "blu <follower-device> [blu-mac]",
+	Short: "Configure Shelly device to follow a Shelly BLU device, or list followed BLU devices",
 	Long: `Configure Shelly device to follow a Shelly BLU device with illuminance-based triggering.
+
+When called with only <follower-device>, lists the currently followed BLU devices.
+When called with both <follower-device> and <blu-mac>, configures the follow relationship.
 
 Illuminance values can be specified as:
 - Numeric values (e.g., 10, 50.5) representing lux
@@ -92,9 +96,15 @@ Illuminance values can be specified as:
   - "30%" = 30% between observed min and max values
 
 Default illuminance_max is "10%" if not specified.`,
-	Args: cobra.ExactArgs(2),
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		followerDevice := args[0]
+
+		// If only follower device is provided, list followed BLU devices
+		if len(args) == 1 {
+			return listFollowedBluDevices(cmd.Context(), followerDevice)
+		}
+
 		mac := tools.NormalizeMac(args[1])
 		if mac == "" {
 			return fmt.Errorf("invalid BLU MAC address: %q", args[1])
@@ -112,7 +122,7 @@ Default illuminance_max is "10%" if not specified.`,
 		payload := make(map[string]any)
 		payload["switch_id"] = bluFlagSwitchID
 		payload["auto_off"] = bluFlagAutoOff
-		
+
 		if cmd.Flags().Changed("illuminance-min") && strings.TrimSpace(bluFlagIllumMin) != "" {
 			payload["illuminance_min"] = parseIlluminanceValue(bluFlagIllumMin)
 		}
@@ -122,7 +132,7 @@ Default illuminance_max is "10%" if not specified.`,
 			// Set default max to 10% if not explicitly provided
 			payload["illuminance_max"] = "10%"
 		}
-		
+
 		if cmd.Flags().Changed("next-switch") && strings.TrimSpace(bluFlagNextSwitch) != "" {
 			payload["next_switch"] = bluFlagNextSwitch
 		}
@@ -161,6 +171,37 @@ func init() {
 	BluCmd.Flags().StringVar(&bluFlagNextSwitch, "next-switch", "", "Optional next switch ID to turn on after auto-off (unset by default)")
 }
 
+// listFollowedBluDevices lists the BLU devices followed by the specified follower device
+func listFollowedBluDevices(ctx context.Context, followerDevice string) error {
+	log := hlog.Logger
+	_, err := myhome.Foreach(ctx, log, followerDevice, options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+		sd, ok := device.(*shelly.Device)
+		if !ok {
+			return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
+		}
+
+		// List all KVS keys matching follow/shelly-blu/*
+		resp, err := kvs.GetManyValues(ctx, log, via, sd, "follow/shelly-blu/*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to list followed BLU devices: %w", err)
+		}
+
+		if len(resp.Items) == 0 {
+			fmt.Printf("No followed BLU devices on %s\n", sd.Name())
+			return nil, nil
+		}
+
+		fmt.Printf("Followed BLU devices on %s:\n", sd.Name())
+		for key, value := range resp.Items {
+			// Extract MAC from key (follow/shelly-blu/<mac>)
+			mac := strings.TrimPrefix(key, "follow/shelly-blu/")
+			fmt.Printf("  %s: %v\n", mac, value)
+		}
+		return nil, nil
+	}, []string{})
+	return err
+}
+
 // uploadScript is a helper function to upload and start scripts on Shelly devices
 func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
@@ -169,14 +210,14 @@ func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, devic
 	}
 	scriptName := args[0]
 	fmt.Printf(". Uploading %s to %s...\n", scriptName, sd.Name())
-	
+
 	// Read the embedded script file
 	buf, err := pkgscript.ReadEmbeddedFile(scriptName)
 	if err != nil {
 		fmt.Printf("✗ Failed to read script %s: %v\n", scriptName, err)
 		return nil, err
 	}
-	
+
 	// Upload with version tracking (minify=true, force=false)
 	id, err := mhscript.UploadWithVersion(ctx, log, via, sd, scriptName, buf, true, false)
 	if err != nil {

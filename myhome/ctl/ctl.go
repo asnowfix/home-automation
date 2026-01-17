@@ -6,6 +6,7 @@ import (
 	"hlog"
 	"myhome"
 	"myhome/ctl/config"
+	"myhome/ctl/db"
 	"myhome/ctl/follow"
 	"myhome/ctl/forget"
 	"myhome/ctl/heater"
@@ -118,6 +119,7 @@ func init() {
 	Cmd.AddCommand(open.Cmd)
 	Cmd.AddCommand(forget.Cmd)
 	Cmd.AddCommand(config.Cmd)
+	Cmd.AddCommand(db.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(sswitch.Cmd)
 	Cmd.AddCommand(sfr.Cmd)

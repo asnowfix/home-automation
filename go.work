@@ -12,6 +12,7 @@ use (
 	./internal/shelly/scripts
 	./internal/tools
 	./myhome/ctl
+	./myhome/ctl/db
 	./myhome/ctl/follow
 	./myhome/ctl/forget
 	./myhome/ctl/list

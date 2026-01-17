@@ -38,6 +38,10 @@ type DeviceManager struct {
 	router     model.Router
 }
 
+// maxConcurrentRefreshes limits the number of concurrent device refresh goroutines
+// to prevent goroutine leaks when mDNS or network operations are slow/blocked
+const maxConcurrentRefreshes = 10
+
 func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient mqtt.Client) *DeviceManager {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
@@ -220,7 +224,11 @@ func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, router
 	if err != nil {
 		panic("BUG: No logger initialized")
 	}
-	log.Info("Starting updater loop")
+	log.Info("Starting updater loop", "max_concurrent_refreshes", maxConcurrentRefreshes)
+
+	// Semaphore to limit concurrent refresh goroutines
+	sem := make(chan struct{}, maxConcurrentRefreshes)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -228,8 +236,13 @@ func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, router
 			return
 
 		case device := <-update:
+			// Acquire semaphore slot (blocks if all slots busy)
+			sem <- struct{}{}
 			log.V(1).Info("Updater loop: processing", "device", device.DeviceSummary)
-			go refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(device.Name())), device, router, refreshed)
+			go func(d *myhome.Device) {
+				defer func() { <-sem }() // Release slot when done
+				refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(d.Name())), d, router, refreshed)
+			}(device)
 		}
 	}
 }

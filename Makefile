@@ -34,6 +34,7 @@ help:
 	@echo "  status                - Show service status"
 	@echo "  logs                  - Show service logs"
 	@echo "  tidy                  - Tidy Go modules"
+	@echo "  debpkg                - Build Debian package (Linux only, VERSION=X.Y.Z optional)"
 	@echo "  upload-release-notes  - Upload release notes to GitHub (VERSION=vX.Y.Z optional)"
 
 ifneq ($(MODULE),)
@@ -92,6 +93,61 @@ tidy:
 
 build run:
 	$(MAKE) -C myhome $(@)
+
+# Build Debian package for current OS/ARCH (Linux only)
+# Usage: make debpkg [VERSION=X.Y.Z]
+# If VERSION is not specified, uses git describe
+ifeq ($(OS),Linux)
+ARCH := $(shell dpkg --print-architecture 2>/dev/null || uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
+VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
+DEBPKG_DIR := .debpkg
+DEB_FILE := myhome_$(VERSION)_$(ARCH).deb
+
+debpkg: build
+	@echo "Building Debian package for $(ARCH), version $(VERSION)..."
+	@# Clean previous build
+	rm -rf $(DEBPKG_DIR)
+	@# Main program
+	mkdir -p $(DEBPKG_DIR)/usr/bin
+	cp myhome/myhome $(DEBPKG_DIR)/usr/bin/myhome
+	@# Systemd units
+	mkdir -p $(DEBPKG_DIR)/lib/systemd/system
+	cp linux/systemd/myhome.service $(DEBPKG_DIR)/lib/systemd/system/
+	cp linux/systemd/myhome-update.service $(DEBPKG_DIR)/lib/systemd/system/
+	cp linux/systemd/myhome-update.timer $(DEBPKG_DIR)/lib/systemd/system/
+	cp linux/systemd/myhome-db-backup.service $(DEBPKG_DIR)/lib/systemd/system/
+	cp linux/systemd/myhome-db-backup.timer $(DEBPKG_DIR)/lib/systemd/system/
+	@# Helper scripts
+	mkdir -p $(DEBPKG_DIR)/usr/share/myhome
+	cp linux/systemd/update.sh $(DEBPKG_DIR)/usr/share/myhome/update.sh
+	cp linux/systemd/myhome-db-backup.sh $(DEBPKG_DIR)/usr/share/myhome/myhome-db-backup.sh
+	chmod +x $(DEBPKG_DIR)/usr/share/myhome/*.sh
+	@# DEBIAN maintainer scripts
+	mkdir -p $(DEBPKG_DIR)/DEBIAN
+	cp linux/debian/postinst.sh $(DEBPKG_DIR)/DEBIAN/postinst
+	cp linux/debian/prerm.sh $(DEBPKG_DIR)/DEBIAN/prerm
+	cp linux/debian/postrm.sh $(DEBPKG_DIR)/DEBIAN/postrm
+	chmod +x $(DEBPKG_DIR)/DEBIAN/postinst $(DEBPKG_DIR)/DEBIAN/prerm $(DEBPKG_DIR)/DEBIAN/postrm
+	@# Create control file
+	@echo "Package: myhome" > $(DEBPKG_DIR)/DEBIAN/control
+	@echo "Version: $(VERSION)" >> $(DEBPKG_DIR)/DEBIAN/control
+	@echo "Section: utils" >> $(DEBPKG_DIR)/DEBIAN/control
+	@echo "Priority: optional" >> $(DEBPKG_DIR)/DEBIAN/control
+	@echo "Architecture: $(ARCH)" >> $(DEBPKG_DIR)/DEBIAN/control
+	@echo "Depends: libc6 (>= 2.2.1), systemd, jq, curl" >> $(DEBPKG_DIR)/DEBIAN/control
+	@echo "Maintainer: Francois-Xavier 'FiX' KOWALSKI <fix.kowalski@gmail.com>" >> $(DEBPKG_DIR)/DEBIAN/control
+	@echo "Description: MyHome Automation" >> $(DEBPKG_DIR)/DEBIAN/control
+	@echo " Home automation daemon and CLI tools." >> $(DEBPKG_DIR)/DEBIAN/control
+	@echo "Homepage: https://github.com/asnowfix/home-automation" >> $(DEBPKG_DIR)/DEBIAN/control
+	@# Build the package
+	dpkg-deb --build --root-owner-group $(DEBPKG_DIR) $(DEB_FILE)
+	@echo "✓ Built $(DEB_FILE)"
+	@# Cleanup
+	rm -rf $(DEBPKG_DIR)
+else
+debpkg:
+	$(error debpkg target is only available on Linux)
+endif
 
 push:
 	$(GIT) push

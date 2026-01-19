@@ -97,21 +97,26 @@ jobs:
           mkdir -p .debpkg/usr/bin
           cp ${{ steps.shape-artifacts.outputs.binary }} .debpkg/usr/bin/myhome
 
-          # systemd scripts
+          # systemd units
           mkdir -p .debpkg/lib/systemd/system/
-          cp linux/debian/myhome.service .debpkg/lib/systemd/system/
-          cp linux/debian/myhome-update.service .debpkg/lib/systemd/system/
-          cp linux/debian/myhome-update.timer .debpkg/lib/systemd/system/
+          cp linux/systemd/myhome.service .debpkg/lib/systemd/system/
+          cp linux/systemd/myhome-update.service .debpkg/lib/systemd/system/
+          cp linux/systemd/myhome-update.timer .debpkg/lib/systemd/system/
+          cp linux/systemd/myhome-db-backup.service .debpkg/lib/systemd/system/
+          cp linux/systemd/myhome-db-backup.timer .debpkg/lib/systemd/system/
 
-          # auto-update script as a shared file
-          mkdir -p .debpkg/usr/share/myhome/update
-          cp linux/debian/update.sh .debpkg/usr/share/myhome/update.sh
-          chmod +x .debpkg/usr/share/myhome/update.sh
+          # helper scripts
+          mkdir -p .debpkg/usr/share/myhome
+          cp linux/systemd/update.sh .debpkg/usr/share/myhome/update.sh
+          cp linux/systemd/myhome-db-backup.sh .debpkg/usr/share/myhome/myhome-db-backup.sh
+          chmod +x .debpkg/usr/share/myhome/*.sh
 
-          # create DEBIAN directory if you want to add other pre/post scripts
+          # DEBIAN maintainer scripts
           mkdir -p .debpkg/DEBIAN
           cp linux/debian/postinst.sh .debpkg/DEBIAN/postinst
-          chmod +x .debpkg/DEBIAN/postinst
+          cp linux/debian/prerm.sh .debpkg/DEBIAN/prerm
+          cp linux/debian/postrm.sh .debpkg/DEBIAN/postrm
+          chmod +x .debpkg/DEBIAN/postinst .debpkg/DEBIAN/prerm .debpkg/DEBIAN/postrm
       - id: build-deb
         name: Build Debian Package
         uses: jiro4989/build-deb-action@v4

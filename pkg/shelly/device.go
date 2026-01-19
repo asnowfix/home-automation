@@ -23,6 +23,81 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// DeviceMqttChannels holds MQTT channels for each device ID to prevent goroutine leaks.
+// When Device structs are recreated (e.g., loaded from database), they reuse existing channels
+// instead of creating new subscriptions/publishers that would leak goroutines.
+type DeviceMqttChannels struct {
+	ReplyTo string
+	To      chan<- []byte
+	From    <-chan []byte
+}
+
+func (m *DeviceMqttChannels) IsReady() bool {
+	if m == nil {
+		return false
+	}
+	if m.To == nil {
+		return false
+	}
+	if m.From == nil {
+		return false
+	}
+	if m.ReplyTo == "" {
+		return false
+	}
+	return true
+}
+
+// Init initializes MQTT channels for a device. Returns an existing instance from the registry
+// if available, or creates new channels and registers them.
+func (m *DeviceMqttChannels) Init(ctx context.Context, mc mqtt.Client, deviceId string) (*DeviceMqttChannels, error) {
+	// Check if we already have MQTT channels for this device (prevents goroutine leaks)
+	deviceMqttRegistryMutex.RLock()
+	existing, exists := deviceMqttRegistry[deviceId]
+	deviceMqttRegistryMutex.RUnlock()
+
+	if exists {
+		return existing, nil
+	}
+
+	// Create new channels (first time for this device)
+	deviceMqttRegistryMutex.Lock()
+	defer deviceMqttRegistryMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if existing, exists = deviceMqttRegistry[deviceId]; exists {
+		return existing, nil
+	}
+
+	replyTo := fmt.Sprintf("%s_%s", mc.Id(), deviceId)
+
+	from, err := mc.Subscribe(ctx, fmt.Sprintf("%s/rpc", replyTo), 8 /*qlen*/, "shelly/device/"+deviceId)
+	if err != nil {
+		return nil, fmt.Errorf("unable to subscribe to device's RPC topic: %w", err)
+	}
+
+	topic := fmt.Sprintf("%s/rpc", deviceId)
+	to, err := mc.Publisher(ctx, topic, 1 /*qlen*/, mqtt.ExactlyOnce, false /*retain*/, "shelly/device/"+deviceId)
+	if err != nil {
+		return nil, fmt.Errorf("unable to publish to device's RPC topic: %w", err)
+	}
+
+	// Store in registry for future reuse
+	channels := &DeviceMqttChannels{
+		ReplyTo: replyTo,
+		To:      to,
+		From:    from,
+	}
+	deviceMqttRegistry[deviceId] = channels
+	return channels, nil
+}
+
+var (
+	// Global registry of MQTT channels per device ID
+	deviceMqttRegistry      = make(map[string]*DeviceMqttChannels)
+	deviceMqttRegistryMutex sync.RWMutex
+)
+
 type Device struct {
 	Id_         string               `json:"id"`
 	MacAddress_ net.HardwareAddr     `json:"-"`
@@ -31,9 +106,7 @@ type Device struct {
 	info        *shelly.DeviceInfo   `json:"-"`
 	config      *shelly.Config       `json:"-"`
 	status      *shelly.Status       `json:"-"`
-	replyTo     string               `json:"-"`
-	to          chan<- []byte        `json:"-"` // channel to send messages to
-	from        <-chan []byte        `json:"-"` // channel to receive messages from
+	mqtt        *DeviceMqttChannels  `json:"-"` // MQTT channels (shared via registry)
 	dialogId    uint32               `json:"-"`
 	dialogs     sync.Map             `json:"-"` // map[uint32]bool
 	log         logr.Logger          `json:"-"`
@@ -252,19 +325,7 @@ func (d *Device) ResetModified() {
 }
 
 func (d *Device) IsMqttReady() bool {
-	if d.to == nil {
-		return false
-	}
-	if d.from == nil {
-		return false
-	}
-	if d.Id() == "" {
-		return false
-	}
-	if d.replyTo == "" {
-		return false
-	}
-	return true
+	return d.Id() != "" && d.mqtt.IsReady()
 }
 
 func (d *Device) IsHttpReady() bool {
@@ -436,15 +497,24 @@ func (d *Device) String() string {
 }
 
 func (d *Device) To() chan<- []byte {
-	return d.to
+	if d.mqtt == nil {
+		return nil
+	}
+	return d.mqtt.To
 }
 
 func (d *Device) From() <-chan []byte {
-	return d.from
+	if d.mqtt == nil {
+		return nil
+	}
+	return d.mqtt.From
 }
 
 func (d *Device) ReplyTo() string {
-	return d.replyTo
+	if d.mqtt == nil {
+		return ""
+	}
+	return d.mqtt.ReplyTo
 }
 
 func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) (devices.Device, error) {
@@ -518,7 +588,6 @@ func (d *Device) initMqtt(ctx context.Context) error {
 
 	if d.Id() == "" {
 		panic("device id is empty: no channel to communicate")
-		// return fmt.Errorf("device id is empty: no channel to communicate")
 	}
 
 	mc, err := mqtt.FromContext(ctx)
@@ -527,34 +596,13 @@ func (d *Device) initMqtt(ctx context.Context) error {
 		return err
 	}
 
-	d.replyTo = fmt.Sprintf("%s_%s", mc.Id(), d.Id())
-	// dialogs sync.Map doesn't need initialization
-
-	if d.from == nil && mc != nil {
-		var err error
-		d.from, err = mc.Subscribe(ctx, fmt.Sprintf("%s/rpc", d.replyTo), 8 /*qlen*/, "shelly/device/"+d.Id())
-		if err != nil {
-			d.log.Error(err, "Unable to subscribe to device's RPC topic", "device_id", d.Id_)
-			return err
-		}
-	}
-
-	mc, err = mqtt.FromContext(ctx)
+	d.mqtt, err = d.mqtt.Init(ctx, mc, d.Id())
 	if err != nil {
-		d.log.Error(err, "Unable to get MQTT client from context", "device_id", d.Id_)
+		d.log.Error(err, "Unable to init MQTT channels", "device_id", d.Id_)
 		return err
 	}
 
-	if d.to == nil && mc != nil {
-		topic := fmt.Sprintf("%s/rpc", d.Id_)
-		var err error
-		d.to, err = mc.Publisher(ctx, topic, 1 /*qlen*/, mqtt.ExactlyOnce, false /*retain*/, "shelly/device/"+d.Id())
-		if err != nil {
-			d.log.Error(err, "Unable to publish to device's RPC topic", "device_id", d.Id_)
-			return err
-		}
-	}
-
+	d.log.V(1).Info("MQTT channels ready", "device_id", d.Id())
 	d.initDeviceInfo(ctx, types.ChannelMqtt)
 	return nil
 }

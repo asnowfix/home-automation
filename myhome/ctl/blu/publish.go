@@ -25,6 +25,8 @@ var PublishCmd = &cobra.Command{
 	Long: `Enable BLE gateway on a Shelly device and upload blu-publisher.js script
 to publish events from the specified BLU MAC address over MQTT.
 
+When called with "-" as <gateway-device>, lists all devices that publish the given BLU MAC.
+
 This command:
 1. Enables the BLE observer/gateway on the device
 2. Configures the device to follow the specified BLU MAC
@@ -39,43 +41,78 @@ This command:
 			return fmt.Errorf("invalid BLU MAC address: %q", bluMac)
 		}
 
-		log := hlog.Logger
-
-		// Enable BLE observer/gateway
-		fmt.Printf("Enabling BLE gateway on %s...\n", gatewayDevice)
-		_, err := myhome.Foreach(cmd.Context(), log, gatewayDevice, options.Via, enableBleGateway, []string{})
-		if err != nil {
-			return fmt.Errorf("failed to enable BLE gateway: %w", err)
+		// If gateway-device is "-", list all devices publishing this BLU MAC
+		if gatewayDevice == "-" {
+			return listDevicesPublishingBlu(cmd.Context(), mac)
 		}
 
-		// Set KVS configuration for the BLU MAC
-		payload := map[string]any{
-			"switch_id": "switch:0", // default, not used by publisher but keeps format consistent
-		}
-		valueBytes, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("failed to marshal payload: %w", err)
-		}
-		kvKey := "follow/shelly-blu/" + mac
-
-		fmt.Printf("Configuring follow for BLU MAC %s...\n", mac)
-		_, err = myhome.Foreach(cmd.Context(), log, gatewayDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
-		if err != nil {
-			return err
-		}
-
-		// Upload blu-publisher.js script
-		fmt.Printf("Uploading blu-publisher.js script...\n")
-		longCtx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
-		defer cancel()
-		_, err = myhome.Foreach(longCtx, log, gatewayDevice, options.Via, uploadScript, []string{"blu-publisher.js"})
-		if err != nil {
-			return fmt.Errorf("failed to upload script: %w", err)
-		}
-
-		fmt.Printf("✓ BLE gateway enabled and blu-publisher.js uploaded for MAC %s\n", mac)
-		return nil
+		return addDevicePublishingBlu(cmd.Context(), gatewayDevice, mac)
 	},
+}
+
+// addDevicePublishingBlu configures a Shelly device to publish events from a BLU MAC address
+func addDevicePublishingBlu(ctx context.Context, gatewayDevice, mac string) error {
+	log := hlog.Logger
+
+	// Enable BLE observer/gateway
+	fmt.Printf("Enabling BLE gateway on %s...\n", gatewayDevice)
+	_, err := myhome.Foreach(ctx, log, gatewayDevice, options.Via, enableBleGateway, []string{})
+	if err != nil {
+		return fmt.Errorf("failed to enable BLE gateway: %w", err)
+	}
+
+	// Set KVS configuration for the BLU MAC
+	payload := map[string]any{
+		"switch_id": "switch:0", // default, not used by publisher but keeps format consistent
+	}
+	valueBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+	kvKey := "follow/shelly-blu/" + mac
+
+	fmt.Printf("Configuring follow for BLU MAC %s...\n", mac)
+	_, err = myhome.Foreach(ctx, log, gatewayDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
+	if err != nil {
+		return err
+	}
+
+	// Upload blu-publisher.js script
+	fmt.Printf("Uploading blu-publisher.js script...\n")
+	longCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	_, err = myhome.Foreach(longCtx, log, gatewayDevice, options.Via, uploadScript, []string{"blu-publisher.js"})
+	if err != nil {
+		return fmt.Errorf("failed to upload script: %w", err)
+	}
+
+	fmt.Printf("✓ BLE gateway enabled and blu-publisher.js uploaded for MAC %s\n", mac)
+	return nil
+}
+
+// listDevicesPublishingBlu lists all Shelly devices that publish the given BLU MAC address
+func listDevicesPublishingBlu(ctx context.Context, mac string) error {
+	log := hlog.Logger
+	kvKey := "follow/shelly-blu/" + mac
+
+	// Query all known Shelly devices using "*" wildcard
+	_, err := myhome.Foreach(ctx, log, "*", options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+		sd, ok := device.(*shelly.Device)
+		if !ok {
+			return nil, nil // Skip non-Shelly devices
+		}
+
+		// Check if this device has the specific BLU MAC in KVS
+		resp, err := kvs.GetValue(ctx, log, via, sd, kvKey)
+		if err != nil {
+			// Key not found means this device doesn't publish the BLU MAC
+			return nil, nil
+		}
+
+		fmt.Printf("%s: %s\n", sd.Name(), resp.Value)
+		return nil, nil
+	}, []string{})
+	return err
 }
 
 // enableBleGateway enables the BLE observer/gateway on a Shelly device

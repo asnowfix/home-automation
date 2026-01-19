@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
+	mhblu "internal/myhome/blu"
 	mhscript "internal/myhome/shelly/script"
 	"myhome"
 	"myhome/ctl/options"
@@ -13,19 +14,23 @@ import (
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 	"time"
-	"tools"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
 var PublishCmd = &cobra.Command{
-	Use:   "publish <gateway-device> <blu-mac>",
+	Use:   "publish <gateway-device> <blu-device>",
 	Short: "Enable BLE gateway and upload blu-publisher.js to publish BLU device events",
 	Long: `Enable BLE gateway on a Shelly device and upload blu-publisher.js script
-to publish events from the specified BLU MAC address over MQTT.
+to publish events from the specified BLU device over MQTT.
 
-When called with "-" as <gateway-device>, lists all devices that publish the given BLU MAC.
+The <blu-device> can be specified as:
+- MAC address: "e8:e0:7e:a6:0c:6f", "E8E07EA60C6F", "e8-e0-7e-a6-0c-6f"
+- Device ID: "shellyblu-e8e07ea60c6f"
+- Device name: "motion-sensor-hallway"
+
+When called with "-" as <gateway-device>, lists all devices that publish the given BLU device.
 
 This command:
 1. Enables the BLE observer/gateway on the device
@@ -34,11 +39,12 @@ This command:
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		gatewayDevice := args[0]
-		bluMac := args[1]
+		bluDevice := args[1]
 
-		mac := tools.NormalizeMac(bluMac)
-		if mac == "" {
-			return fmt.Errorf("invalid BLU MAC address: %q", bluMac)
+		// Resolve BLU device identifier to MAC address
+		mac, err := mhblu.ResolveMac(cmd.Context(), bluDevice)
+		if err != nil {
+			return fmt.Errorf("failed to resolve BLU device %q: %w", bluDevice, err)
 		}
 
 		// If gateway-device is "-", list all devices publishing this BLU MAC

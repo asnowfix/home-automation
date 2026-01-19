@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
+	mhblu "internal/myhome/blu"
 	mhscript "internal/myhome/shelly/script"
 	"myhome"
 	"myhome/ctl/options"
@@ -15,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"tools"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -80,13 +80,18 @@ func parseIlluminanceValue(value string) interface{} {
 }
 
 var Cmd = &cobra.Command{
-	Use:   "follow <follower-device> [blu-mac]",
+	Use:   "follow <follower-device> [blu-device]",
 	Short: "Configure Shelly device to follow a Shelly BLU device, or list followed BLU devices",
 	Long: `Configure Shelly device to follow a Shelly BLU device with illuminance-based triggering.
 
 When called with only <follower-device>, lists the currently followed BLU devices.
-When called with "-" as the first argument and a <blu-mac>, lists all Shelly devices following that BLU MAC.
-When called with both <follower-device> and <blu-mac>, configures the follow relationship.
+When called with "-" as the first argument and a <blu-device>, lists all Shelly devices following that BLU device.
+When called with both <follower-device> and <blu-device>, configures the follow relationship.
+
+The <blu-device> can be specified as:
+- MAC address: "e8:e0:7e:a6:0c:6f", "E8E07EA60C6F", "e8-e0-7e-a6-0c-6f"
+- Device ID: "shellyblu-e8e07ea60c6f"
+- Device name: "motion-sensor-hallway"
 
 Illuminance values can be specified as:
 - Numeric values (e.g., 10, 50.5) representing lux
@@ -103,11 +108,11 @@ Default illuminance_max is "10%" if not specified.`,
 			return listFollowedBluDevices(cmd.Context(), args[0])
 		}
 
-		// Scenario 2: List all devices following a given BLU MAC
+		// Scenario 2: List all devices following a given BLU device
 		if args[0] == "-" || args[0] == "*" {
-			mac := tools.NormalizeMac(args[1])
-			if mac == "" {
-				return fmt.Errorf("invalid BLU MAC address: %q", args[1])
+			mac, err := mhblu.ResolveMac(cmd.Context(), args[1])
+			if err != nil {
+				return fmt.Errorf("failed to resolve BLU device %q: %w", args[1], err)
 			}
 			return listDevicesFollowingBlu(cmd.Context(), mac)
 		}
@@ -127,10 +132,10 @@ func init() {
 }
 
 // configureBluFollow configures a Shelly device to follow a BLU device
-func configureBluFollow(cmd *cobra.Command, followerDevice, bluMac string) error {
-	mac := tools.NormalizeMac(bluMac)
-	if mac == "" {
-		return fmt.Errorf("invalid BLU MAC address: %q", bluMac)
+func configureBluFollow(cmd *cobra.Command, followerDevice, bluDevice string) error {
+	mac, err := mhblu.ResolveMac(cmd.Context(), bluDevice)
+	if err != nil {
+		return fmt.Errorf("failed to resolve BLU device %q: %w", bluDevice, err)
 	}
 
 	// Validate illuminance values

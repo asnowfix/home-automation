@@ -31,6 +31,8 @@ const MQTT_WATCHDOG_MAX_FAILURES int = 3
 
 const MQTT_BROKER_CLIENT_LOG_INTERVAL time.Duration = 2 * time.Minute
 
+const SHELLY_DEFAULT_RATE_LIMIT time.Duration = 500 * time.Millisecond
+
 var Flags struct {
 	CpuProfile                  string
 	Verbose                     bool
@@ -56,6 +58,7 @@ var Flags struct {
 	EnableMetricsExporter       bool
 	MetricsExporterPort         int
 	MetricsExporterTopic        string
+	ShellyRateLimit             time.Duration // the value taken by --shelly-rate-limit
 }
 
 var Via types.Channel
@@ -99,19 +102,38 @@ func Args(args []string) []string {
 	return make([]string, 0)
 }
 
-func PrintResult(out any) error {
+// PrintResult prints a result, optionally with a device name header.
+// If deviceName is provided (non-empty), it prints a header before the result.
+func PrintResult(out any, deviceName ...string) error {
+	name := ""
+	if len(deviceName) > 0 {
+		name = deviceName[0]
+	}
+
 	if Flags.Json {
-		s, err := json.Marshal(out)
+		var toMarshal any
+		if name != "" {
+			toMarshal = map[string]any{
+				"device": name,
+				"result": out,
+			}
+		} else {
+			toMarshal = out
+		}
+		s, err := json.Marshal(toMarshal)
 		if err != nil {
 			return err
 		}
 		fmt.Println(string(s))
 	} else {
+		if name != "" {
+			fmt.Printf("--- %s ---\n", name)
+		}
 		s, err := yaml.Marshal(out)
 		if err != nil {
 			return err
 		}
-		fmt.Println(string(s))
+		fmt.Print(string(s))
 	}
 	return nil
 }

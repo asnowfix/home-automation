@@ -45,7 +45,7 @@ func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device de
 			hlog.Logger.Error(err, "Unable to get script status")
 			return nil, err
 		}
-		options.PrintResult(out)
+		options.PrintResult(out, sd.Name())
 		return out, nil
 	}
 
@@ -56,6 +56,6 @@ func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device de
 		return nil, err
 	}
 
-	options.PrintResult(enhancedStatuses)
+	options.PrintResult(enhancedStatuses, sd.Name())
 	return enhancedStatuses, nil
 }

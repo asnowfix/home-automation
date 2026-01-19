@@ -484,7 +484,8 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
             <span class="subtitle is-6 ml-3">Known devices ({{len .Devices}})</span>
           </div>
           <div class="level-right">
-            <a class="button is-info" href="https://control.shelly.cloud" target="_blank" rel="noopener noreferrer">Open Shelly Control</a>
+            <a class="button is-info" href="https://control.shelly.cloud" target="_blank" rel="noopener noreferrer">Shelly Control</a>
+            <a class="button is-link ml-2" href="https://community.shelly.cloud/" target="_blank" rel="noopener noreferrer">Community Forum</a>
           </div>
         </div>
       </div>

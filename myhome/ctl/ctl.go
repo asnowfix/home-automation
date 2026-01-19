@@ -6,6 +6,7 @@ import (
 	"hlog"
 	"myhome"
 	"myhome/ctl/config"
+	"myhome/ctl/db"
 	"myhome/ctl/follow"
 	"myhome/ctl/forget"
 	"myhome/ctl/heater"
@@ -62,7 +63,7 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		shellyPkg.Init(log, options.Flags.MqttTimeout)
+		shellyPkg.Init(log, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 
 		for i, c := range types.Channels {
 			if options.Flags.Via == c {
@@ -108,6 +109,7 @@ func init() {
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Json, "json", "j", false, "output in json format")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns-timeout", "M", options.MDNS_LOOKUP_DEFAULT_TIMEOUT, "Timeout for mDNS lookups")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.Via, "via", "V", types.ChannelDefault.String(), "Use given channel to communicate with Shelly devices (default is to discover it from the network)")
+	Cmd.PersistentFlags().DurationVar(&options.Flags.ShellyRateLimit, "shelly-rate-limit", options.SHELLY_DEFAULT_RATE_LIMIT, "Minimum interval between commands to the same Shelly device (0 to disable)")
 
 	// Make log level flags mutually exclusive
 	Cmd.MarkFlagsMutuallyExclusive("verbose", "debug", "quiet")
@@ -117,6 +119,7 @@ func init() {
 	Cmd.AddCommand(open.Cmd)
 	Cmd.AddCommand(forget.Cmd)
 	Cmd.AddCommand(config.Cmd)
+	Cmd.AddCommand(db.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(sswitch.Cmd)
 	Cmd.AddCommand(sfr.Cmd)

@@ -3,6 +3,7 @@ package shelly
 import (
 	"myhome/ctl/shelly/call"
 	"myhome/ctl/shelly/components"
+	"myhome/ctl/shelly/follow"
 	"myhome/ctl/shelly/jobs"
 	"myhome/ctl/shelly/kvs"
 	"myhome/ctl/shelly/mqtt"
@@ -23,6 +24,7 @@ var Cmd = &cobra.Command{
 
 func init() {
 	Cmd.AddCommand(call.Cmd)
+	Cmd.AddCommand(follow.Cmd)
 	Cmd.AddCommand(jobs.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(kvs.Cmd)

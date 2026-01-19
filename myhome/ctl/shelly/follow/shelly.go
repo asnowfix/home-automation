@@ -5,10 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
+	mhscript "internal/myhome/shelly/script"
 	"myhome"
 	"myhome/ctl/options"
+	"pkg/devices"
+	"pkg/shelly"
+	"pkg/shelly/kvs"
+	"pkg/shelly/types"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
 
@@ -17,8 +23,8 @@ var (
 	shellyFlagFollowID string
 )
 
-var ShellyCmd = &cobra.Command{
-	Use:   "shelly <follower-device> <followed-device>",
+var Cmd = &cobra.Command{
+	Use:   "follow <follower-device> <followed-device>",
 	Short: "Configure Shelly device to follow another Shelly device status",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -70,6 +76,37 @@ var ShellyCmd = &cobra.Command{
 }
 
 func init() {
-	ShellyCmd.Flags().StringVar(&shellyFlagSwitchID, "switch-id", "switch:0", "Local switch ID to control, e.g. switch:0")
-	ShellyCmd.Flags().StringVar(&shellyFlagFollowID, "follow-id", "switch:0", "Remote input ID to monitor: switch:X (mirror state) or input:X (toggle on button press)")
+	Cmd.Flags().StringVar(&shellyFlagSwitchID, "switch-id", "switch:0", "Local switch ID to control, e.g. switch:0")
+	Cmd.Flags().StringVar(&shellyFlagFollowID, "follow-id", "switch:0", "Remote input ID to monitor: switch:X (mirror state) or input:X (toggle on button press)")
+}
+
+// doSetKVS is a helper function for setting KVS entries on Shelly devices
+func doSetKVS(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
+	}
+	key := args[0]
+	value := args[1]
+	log.Info("Setting follow config", "key", key, "value", value, "device", sd.Id())
+	return kvs.SetKeyValue(ctx, log, via, sd, key, value)
+}
+
+// uploadScript is a helper function to upload and start scripts on Shelly devices
+func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
+	}
+	scriptName := args[0]
+	fmt.Printf(". Uploading %s to %s...\n", scriptName, sd.Name())
+
+	// Upload with version tracking using shared function (minify=true, force=false)
+	id, err := mhscript.UploadNamedScript(ctx, log, via, sd, scriptName, true, false)
+	if err != nil {
+		fmt.Printf("✗ %v\n", err)
+		return nil, err
+	}
+	fmt.Printf("✓ Successfully uploaded %s to %s (id: %d)\n", scriptName, sd.Name(), id)
+	return id, nil
 }

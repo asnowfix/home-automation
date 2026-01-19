@@ -13,7 +13,8 @@ use (
 	./internal/tools
 	./myhome/ctl
 	./myhome/ctl/db
-	./myhome/ctl/follow
+	./myhome/ctl/blu
+	./myhome/ctl/blu/follow
 	./myhome/ctl/forget
 	./myhome/ctl/list
 	./myhome/ctl/mqtt
@@ -21,6 +22,7 @@ use (
 	./myhome/ctl/options
 	./myhome/ctl/sfr
 	./myhome/ctl/shelly
+	./myhome/ctl/shelly/follow
 	./myhome/ctl/show
 	./myhome/ctl/sswitch
 	./myhome/daemon

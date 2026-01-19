@@ -13,6 +13,26 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// UploadNamedScript reads an embedded script file by name and uploads it with version tracking.
+// This is the primary entry point for uploading scripts from the CLI commands.
+// It reads the script from the embedded filesystem, uploads it with version tracking,
+// and starts the script on the device.
+func UploadNamedScript(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, scriptName string, minify bool, force bool) (uint32, error) {
+	// Read the embedded script file
+	buf, err := script.ReadEmbeddedFile(scriptName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read script %s: %w", scriptName, err)
+	}
+
+	// Upload with version tracking
+	id, err := UploadWithVersion(ctx, log, via, device, scriptName, buf, minify, force)
+	if err != nil {
+		return 0, fmt.Errorf("failed to upload %s to %s: %w", scriptName, device.Name(), err)
+	}
+
+	return id, nil
+}
+
 // UploadWithVersion uploads a script and tracks its version in KVS
 // This is MyHome-specific business logic that combines script upload with version tracking
 func UploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, name string, code []byte, minify bool, force bool) (uint32, error) {

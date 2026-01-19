@@ -5,9 +5,9 @@ import (
 	"global"
 	"hlog"
 	"myhome"
+	"myhome/ctl/blu"
 	"myhome/ctl/config"
 	"myhome/ctl/db"
-	"myhome/ctl/follow"
 	"myhome/ctl/forget"
 	"myhome/ctl/heater"
 	"myhome/ctl/list"
@@ -124,8 +124,7 @@ func init() {
 	Cmd.AddCommand(sswitch.Cmd)
 	Cmd.AddCommand(sfr.Cmd)
 	Cmd.AddCommand(shelly.Cmd)
-	Cmd.AddCommand(follow.FollowCmd)
-	Cmd.AddCommand(follow.UnfollowCmd)
+	Cmd.AddCommand(blu.Cmd)
 	Cmd.AddCommand(temperature.Cmd)
 	Cmd.AddCommand(heater.Cmd)
 }

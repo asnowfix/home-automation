@@ -6,14 +6,16 @@ use (
 	./internal/debug
 	./internal/global
 	./internal/myhome
+	./internal/myhome/blu
 	./internal/myip
 	./internal/mynet
 	./internal/myzone
 	./internal/shelly/scripts
 	./internal/tools
 	./myhome/ctl
+	./myhome/ctl/blu
+	./myhome/ctl/blu/follow
 	./myhome/ctl/db
-	./myhome/ctl/follow
 	./myhome/ctl/forget
 	./myhome/ctl/list
 	./myhome/ctl/mqtt
@@ -21,14 +23,15 @@ use (
 	./myhome/ctl/options
 	./myhome/ctl/sfr
 	./myhome/ctl/shelly
+	./myhome/ctl/shelly/follow
 	./myhome/ctl/show
 	./myhome/ctl/sswitch
 	./myhome/daemon
 	./myhome/daemon/watch
 	./myhome/devices
 	./myhome/devices/impl
-	./myhome/occupancy
 	./myhome/mqtt
+	./myhome/occupancy
 	./myhome/storage
 	./pkg/devices
 	./pkg/sfr

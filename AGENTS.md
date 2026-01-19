@@ -661,6 +661,40 @@ Shelly Device
    - Uploads code chunks
    - Starts script
 
+### Utility Package Structure
+
+**Rule**: Any utility function specific to MyHome should be placed under the `internal/myhome/` package structure, NOT under `myhome/ctl/`.
+
+#### Why?
+
+- `internal/myhome/` contains shared business logic and utilities that can be used across the application
+- `myhome/ctl/` is strictly for CLI commands and user interface code
+- Placing utilities under `myhome/ctl/` creates import cycles when multiple CLI packages need the same utility
+
+#### Package Organization
+
+| Location | Purpose | Examples |
+|----------|---------|----------|
+| `internal/myhome/` | Core MyHome types, client, RPC definitions | `client.go`, `device.go`, `temperature.go` |
+| `internal/myhome/blu/` | BLU device utilities | `resolve.go` (MAC address resolution) |
+| `internal/myhome/shelly/` | Shelly-specific business logic | `script/ops.go` (version-tracked uploads) |
+| `internal/tools/` | Generic utilities (not MyHome-specific) | `normalize.go` (MAC normalization) |
+| `myhome/ctl/` | CLI commands only | Command definitions, flag parsing |
+
+#### Example: BLU MAC Resolution
+
+```go
+// CORRECT: Utility in internal/myhome/blu/
+package blu
+
+import "internal/myhome/blu"
+
+mac, err := blu.ResolveMac(ctx, identifier)
+
+// WRONG: Utility in myhome/ctl/blu/resolve/
+// This creates import cycles when myhome/ctl/blu/follow needs it
+```
+
 ### Script Organization
 
 - `pkg/shelly/script/*.js`: Embedded Shelly scripts
@@ -799,3 +833,4 @@ When creating memories during AI interactions:
 - **2025-10-01**: Initial creation with Shelly scripting, Go development, and GitHub workflow guidelines
 - **2025-10-01**: Added callback depth limits and refactoring patterns
 - **2025-10-01**: Added command output guidelines and tag propagation fixes
+- **2026-01-19**: Added utility package structure guidelines (internal/myhome/ for utilities)

@@ -10,7 +10,7 @@ require (
 	global v0.0.0-00010101000000-000000000000
 	hlog v0.0.0-00010101000000-000000000000
 	myhome v0.0.0-00010101000000-000000000000
-	myhome/ctl/follow v0.0.0-00010101000000-000000000000
+	myhome/ctl/blu v0.0.0-00010101000000-000000000000
 	myhome/ctl/forget v0.0.0-00010101000000-000000000000
 	myhome/ctl/list v0.0.0-00010101000000-000000000000
 	myhome/ctl/mqtt v0.0.0-00010101000000-000000000000
@@ -52,7 +52,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace myhome/ctl/follow => ./follow
+replace myhome/ctl/blu => ./blu
 
 replace myhome/ctl/forget => ./forget
 

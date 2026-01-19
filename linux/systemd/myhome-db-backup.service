@@ -1,0 +1,18 @@
+# https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html
+
+[Unit]
+Description=MyHome Database Backup
+After=local-fs.target network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/share/myhome/myhome-db-backup.sh
+WorkingDirectory=/var/lib/myhome
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables
+Environment=HOME=/var/lib/myhome
+
+[Install]
+WantedBy=multi-user.target

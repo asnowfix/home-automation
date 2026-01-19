@@ -41,3 +41,56 @@
 [ ] Setup mDNS
 [ ] Setup systemd service
 [ ] Disable LXD graphical UI (login from console or ssh only)
+
+## Directory Structure
+
+```
+linux/
+├── debian/           # Debian package scripts
+│   ├── postinst.sh   # Post-installation (enable & start services)
+│   ├── prerm.sh      # Pre-removal (stop services)
+│   └── postrm.sh     # Post-removal (disable services)
+├── systemd/          # Systemd units and helper scripts
+│   ├── myhome.service
+│   ├── myhome-update.service
+│   ├── myhome-update.timer
+│   ├── myhome-db-backup.service
+│   ├── myhome-db-backup.timer
+│   ├── myhome-db-backup.sh
+│   └── update.sh
+└── README.md
+```
+
+## Systemd Services
+
+### myhome.service
+Main MyHome daemon service.
+
+```bash
+sudo systemctl enable myhome
+sudo systemctl start myhome
+```
+
+### myhome-update.timer
+Daily automatic update from GitHub releases.
+
+```bash
+sudo systemctl enable myhome-update.timer
+sudo systemctl start myhome-update.timer
+```
+
+### myhome-db-backup.timer
+Daily database backup to `/var/lib/myhome/backups/`.
+
+```bash
+sudo systemctl enable myhome-db-backup.timer
+sudo systemctl start myhome-db-backup.timer
+```
+
+Backups are stored as timestamped JSON files with automatic rotation (keeps last 30 backups).
+A symlink `devices-latest.json` always points to the most recent backup.
+
+To manually trigger a backup:
+```bash
+sudo systemctl start myhome-db-backup.service
+```

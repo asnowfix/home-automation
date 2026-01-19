@@ -5,18 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"hlog"
+	mhblu "internal/myhome/blu"
 	mhscript "internal/myhome/shelly/script"
 	"myhome"
 	"myhome/ctl/options"
 	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
-	pkgscript "pkg/shelly/script"
 	"pkg/shelly/types"
 	"strconv"
 	"strings"
 	"time"
-	"tools"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -80,14 +79,19 @@ func parseIlluminanceValue(value string) interface{} {
 	return value
 }
 
-var BluCmd = &cobra.Command{
-	Use:   "blu <follower-device> [blu-mac]",
+var Cmd = &cobra.Command{
+	Use:   "follow <follower-device> [blu-device]",
 	Short: "Configure Shelly device to follow a Shelly BLU device, or list followed BLU devices",
 	Long: `Configure Shelly device to follow a Shelly BLU device with illuminance-based triggering.
 
 When called with only <follower-device>, lists the currently followed BLU devices.
-When called with "-" as the first argument and a <blu-mac>, lists all Shelly devices following that BLU MAC.
-When called with both <follower-device> and <blu-mac>, configures the follow relationship.
+When called with "-" as the first argument and a <blu-device>, lists all Shelly devices following that BLU device.
+When called with both <follower-device> and <blu-device>, configures the follow relationship.
+
+The <blu-device> can be specified as:
+- MAC address: "e8:e0:7e:a6:0c:6f", "E8E07EA60C6F", "e8-e0-7e-a6-0c-6f"
+- Device ID: "shellyblu-e8e07ea60c6f"
+- Device name: "motion-sensor-hallway"
 
 Illuminance values can be specified as:
 - Numeric values (e.g., 10, 50.5) representing lux
@@ -104,11 +108,11 @@ Default illuminance_max is "10%" if not specified.`,
 			return listFollowedBluDevices(cmd.Context(), args[0])
 		}
 
-		// Scenario 2: List all devices following a given BLU MAC
+		// Scenario 2: List all devices following a given BLU device
 		if args[0] == "-" || args[0] == "*" {
-			mac := tools.NormalizeMac(args[1])
-			if mac == "" {
-				return fmt.Errorf("invalid BLU MAC address: %q", args[1])
+			mac, err := mhblu.ResolveMac(cmd.Context(), args[1])
+			if err != nil {
+				return fmt.Errorf("failed to resolve BLU device %q: %w", args[1], err)
 			}
 			return listDevicesFollowingBlu(cmd.Context(), mac)
 		}
@@ -120,18 +124,18 @@ Default illuminance_max is "10%" if not specified.`,
 
 func init() {
 	// Defaults: auto_off=300s, illuminance_max=10% (percentage-based), switch_id=switch:0
-	BluCmd.Flags().IntVar(&bluFlagAutoOff, "auto-off", 300, "Seconds before auto turning off (default 300)")
-	BluCmd.Flags().StringVar(&bluFlagIllumMin, "illuminance-min", "", "Minimum illuminance to trigger (numeric lux value or percentage like '20%')")
-	BluCmd.Flags().StringVar(&bluFlagIllumMax, "illuminance-max", "", "Maximum illuminance to trigger (numeric lux value or percentage like '80%', default '10%')")
-	BluCmd.Flags().StringVar(&bluFlagSwitchID, "switch-id", "switch:0", "Switch ID to operate, e.g. switch:0")
-	BluCmd.Flags().StringVar(&bluFlagNextSwitch, "next-switch", "", "Optional next switch ID to turn on after auto-off (unset by default)")
+	Cmd.Flags().IntVar(&bluFlagAutoOff, "auto-off", 300, "Seconds before auto turning off (default 300)")
+	Cmd.Flags().StringVar(&bluFlagIllumMin, "illuminance-min", "", "Minimum illuminance to trigger (numeric lux value or percentage like '20%')")
+	Cmd.Flags().StringVar(&bluFlagIllumMax, "illuminance-max", "", "Maximum illuminance to trigger (numeric lux value or percentage like '80%', default '10%')")
+	Cmd.Flags().StringVar(&bluFlagSwitchID, "switch-id", "switch:0", "Switch ID to operate, e.g. switch:0")
+	Cmd.Flags().StringVar(&bluFlagNextSwitch, "next-switch", "", "Optional next switch ID to turn on after auto-off (unset by default)")
 }
 
 // configureBluFollow configures a Shelly device to follow a BLU device
-func configureBluFollow(cmd *cobra.Command, followerDevice, bluMac string) error {
-	mac := tools.NormalizeMac(bluMac)
-	if mac == "" {
-		return fmt.Errorf("invalid BLU MAC address: %q", bluMac)
+func configureBluFollow(cmd *cobra.Command, followerDevice, bluDevice string) error {
+	mac, err := mhblu.ResolveMac(cmd.Context(), bluDevice)
+	if err != nil {
+		return fmt.Errorf("failed to resolve BLU device %q: %w", bluDevice, err)
 	}
 
 	// Validate illuminance values
@@ -210,6 +214,37 @@ func listDevicesFollowingBlu(ctx context.Context, mac string) error {
 	return err
 }
 
+// doSetKVS is a helper function for setting KVS entries on Shelly devices
+func doSetKVS(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
+	}
+	key := args[0]
+	value := args[1]
+	log.Info("Setting follow config", "key", key, "value", value, "device", sd.Id())
+	return kvs.SetKeyValue(ctx, log, via, sd, key, value)
+}
+
+// uploadScript is a helper function to upload and start scripts on Shelly devices
+func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
+	}
+	scriptName := args[0]
+	fmt.Printf(". Uploading %s to %s...\n", scriptName, sd.Name())
+
+	// Upload with version tracking using shared function (minify=true, force=false)
+	id, err := mhscript.UploadNamedScript(ctx, log, via, sd, scriptName, true, false)
+	if err != nil {
+		fmt.Printf("✗ %v\n", err)
+		return nil, err
+	}
+	fmt.Printf("✓ Successfully uploaded %s to %s (id: %d)\n", scriptName, sd.Name(), id)
+	return id, nil
+}
+
 // listFollowedBluDevices lists the BLU devices followed by the specified follower device
 func listFollowedBluDevices(ctx context.Context, followerDevice string) error {
 	log := hlog.Logger
@@ -239,30 +274,4 @@ func listFollowedBluDevices(ctx context.Context, followerDevice string) error {
 		return nil, nil
 	}, []string{})
 	return err
-}
-
-// uploadScript is a helper function to upload and start scripts on Shelly devices
-func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
-	sd, ok := device.(*shelly.Device)
-	if !ok {
-		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
-	}
-	scriptName := args[0]
-	fmt.Printf(". Uploading %s to %s...\n", scriptName, sd.Name())
-
-	// Read the embedded script file
-	buf, err := pkgscript.ReadEmbeddedFile(scriptName)
-	if err != nil {
-		fmt.Printf("✗ Failed to read script %s: %v\n", scriptName, err)
-		return nil, err
-	}
-
-	// Upload with version tracking (minify=true, force=false)
-	id, err := mhscript.UploadWithVersion(ctx, log, via, sd, scriptName, buf, true, false)
-	if err != nil {
-		fmt.Printf("✗ Failed to upload %s to %s: %v\n", scriptName, sd.Name(), err)
-		return nil, err
-	}
-	fmt.Printf("✓ Successfully uploaded %s to %s (id: %d)\n", scriptName, sd.Name(), id)
-	return id, nil
 }

@@ -2,22 +2,32 @@
 set -e
 
 SERVICE="myhome"
-SERVICE_FILES="${SERVICE}.service ${SERVICE}-update.service ${SERVICE}-update.timer"
+
+# All systemd units to manage
+SERVICES="${SERVICE}.service"
+TIMERS="${SERVICE}-update.timer ${SERVICE}-db-backup.timer"
 
 mkdir -p /var/lib/$SERVICE
+mkdir -p /var/lib/$SERVICE/backups
 
 # Check if the script is being run during package installation
 if [ "$1" = "configure" ]; then
-    # Reload systemd to recognize the new service
+    # Reload systemd to recognize the new services
     systemctl daemon-reload
 
-    # Enable the service to start on boot
-    systemctl reenable $SERVICE.service
-    systemctl reenable $SERVICE-update.timer
+    # Enable and start services
+    for svc in $SERVICES; do
+        echo "Enabling and starting $svc..."
+        systemctl reenable "$svc"
+        systemctl restart "$svc"
+    done
 
-    # (Re)Start the service immediately
-    systemctl restart $SERVICE.service
-    systemctl restart $SERVICE-update.timer
+    # Enable and start timers
+    for timer in $TIMERS; do
+        echo "Enabling and starting $timer..."
+        systemctl reenable "$timer"
+        systemctl restart "$timer"
+    done
 fi
 
 # Exit successfully

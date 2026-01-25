@@ -145,6 +145,67 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		return nil, nil
 	})
+	myhome.RegisterMethodHandler(myhome.DeviceSetup, func(in any) (any, error) {
+		params := in.(*myhome.DeviceSetupParams)
+		dm.log.Info("RPC: device.setup", "identifier", params.Identifier, "name", params.Name)
+		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
+		if err != nil {
+			return nil, err
+		}
+
+		// Skip Gen1 devices
+		if shelly.IsGen1Device(device.Id()) {
+			return nil, fmt.Errorf("Gen1 devices are not supported for setup")
+		}
+
+		// Skip BLU devices
+		if shelly.IsBluDevice(device.Id()) {
+			return nil, fmt.Errorf("BLU devices are not supported for setup")
+		}
+
+		// Ensure implementation is loaded
+		sd, ok := device.Impl().(*shelly.Device)
+		if !ok || sd == nil {
+			impl, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+			if err != nil {
+				return nil, err
+			}
+			sd, ok = impl.(*shelly.Device)
+			if !ok {
+				return nil, fmt.Errorf("unexpected device implementation type: %T", impl)
+			}
+		}
+
+		// Build setup config, merging RPC params with default config
+		cfg := dm.setupConfig
+		if params.MqttBroker != "" {
+			cfg.MqttBroker = params.MqttBroker
+		}
+
+		// Build WiFi config from params
+		wifiCfg := shellysetup.WifiConfig{
+			StaEssid:   params.StaEssid,
+			StaPasswd:  params.StaPasswd,
+			Sta1Essid:  params.Sta1Essid,
+			Sta1Passwd: params.Sta1Passwd,
+			ApPasswd:   params.ApPasswd,
+		}
+
+		// Use provided name or fall back to device's current name
+		targetName := params.Name
+		if targetName == "" {
+			targetName = sd.Name()
+		}
+
+		// Run setup
+		setupLog := dm.log.WithName("setup").WithName(device.Id())
+		err = shellysetup.SetupDeviceWithWifi(ctx, setupLog, sd, targetName, cfg, wifiCfg)
+		if err != nil {
+			return nil, fmt.Errorf("setup failed: %w", err)
+		}
+
+		return nil, nil
+	})
 	myhome.RegisterMethodHandler(myhome.DeviceUpdate, func(in any) (any, error) {
 		device := in.(*myhome.Device)
 		dm.log.Info("RPC: device.update", "id", device.Id(), "name", device.Name())

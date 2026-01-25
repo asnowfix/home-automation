@@ -227,3 +227,15 @@ func (d *Device) WithZeroConfEntry(ctx context.Context, entry *zeroconf.ServiceE
 
 	return d
 }
+
+// DeviceSetupParams represents parameters for device.setup RPC
+type DeviceSetupParams struct {
+	Identifier string `json:"identifier"`            // Device identifier (id/name/host/MAC/IP)
+	Name       string `json:"name,omitempty"`        // Device name (overrides auto-derivation)
+	MqttBroker string `json:"mqtt_broker,omitempty"` // MQTT broker address
+	StaEssid   string `json:"sta_essid,omitempty"`   // WiFi STA ESSID
+	StaPasswd  string `json:"sta_passwd,omitempty"`  // WiFi STA password
+	Sta1Essid  string `json:"sta1_essid,omitempty"`  // WiFi STA1 ESSID
+	Sta1Passwd string `json:"sta1_passwd,omitempty"` // WiFi STA1 password
+	ApPasswd   string `json:"ap_passwd,omitempty"`   // WiFi AP password
+}

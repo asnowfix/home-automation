@@ -34,6 +34,9 @@ var sta1Passwd string
 // options for MQTT (override)
 var mqttBrokerOverride string
 
+// options for device name
+var deviceNameOverride string
+
 func init() {
 	Cmd.Flags().StringVar(&staEssid, "sta-essid", "", "STA ESSID")
 	Cmd.Flags().StringVar(&staPasswd, "sta-passwd", "", "STA Password")
@@ -41,7 +44,7 @@ func init() {
 	Cmd.Flags().StringVar(&sta1Passwd, "sta1-passwd", "", "STA1 Password")
 	Cmd.Flags().StringVar(&apPasswd, "ap-passwd", "", "AP Password")
 	Cmd.Flags().StringVar(&mqttBrokerOverride, "mqtt-broker", "", "Override MQTT broker address (default: use current process broker)")
-	// No subcommands for setup
+	Cmd.Flags().StringVar(&deviceNameOverride, "name", "", "Set device name (overrides auto-derivation)")
 }
 
 // isTimeoutError checks if an error is a timeout error
@@ -102,9 +105,11 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		return nil, fmt.Errorf("expected *shellyapi.Device, got %T", device)
 	}
 
-	// Get device name from args if provided (initial setup), otherwise use existing name
+	// Get device name: --name flag takes priority, then args, then existing name
 	var targetName string
-	if len(args) > 0 && args[0] != "" {
+	if deviceNameOverride != "" {
+		targetName = deviceNameOverride
+	} else if len(args) > 0 && args[0] != "" {
 		targetName = args[0]
 	} else {
 		targetName = sd.Name()
@@ -196,29 +201,28 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 }
 
 var Cmd = &cobra.Command{
-	Use:   `setup <device_name> [device_ip]`,
+	Use:   `setup <device_identifier>`,
 	Short: "Setup Shelly device(s) with the specified settings",
 	Long: `Setup one or more Shelly devices with the specified settings.
 
 Arguments:
-  <device_name>    Name or pattern to match device(s) (e.g., 'my-device' or '*radiateur*')
-  [device_ip]      Optional IP address for initial setup of a new device`,
-	Args: cobra.RangeArgs(1, 2),
+  <device_identifier>  Device identifier: device ID, MAC address, hostname, IP address, or name pattern (e.g., 'shellyplus1-08b61fd9d708', '08:b6:1f:d9:d7:08', '192.168.1.58', '*radiateur*')
+
+Flags:
+  --name             Set device name (overrides auto-derivation from output/input names)
+  --mqtt-broker      Override MQTT broker address
+  --sta-essid        Configure WiFi STA ESSID
+  --sta-passwd       Configure WiFi STA password`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		devicePattern := args[0]
+		deviceIdentifier := args[0]
 
-		// If IP address is provided, use it directly (initial setup mode)
-		if len(args) > 1 {
-			ip := net.ParseIP(args[1])
-			if ip == nil {
-				return fmt.Errorf("invalid IP address: %s", args[1])
-			}
-
-			// For initial setup with IP, use the IP directly
-			return setupDeviceByIP(cmd.Context(), devicePattern, ip)
+		// Check if identifier is an IP address - use it directly
+		if ip := net.ParseIP(deviceIdentifier); ip != nil {
+			return setupDeviceByIP(cmd.Context(), deviceNameOverride, ip)
 		}
 
-		// No IP provided - lookup devices by name pattern
-		return setupDevicesByName(cmd.Context(), devicePattern)
+		// Otherwise, lookup device by any identifier (id, MAC, hostname, name pattern)
+		return setupDevicesByName(cmd.Context(), deviceIdentifier)
 	},
 }

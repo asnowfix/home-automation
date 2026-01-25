@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -13,13 +15,16 @@ import (
 	"mynet"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
+	"pkg/shelly/input"
 	"pkg/shelly/kvs"
 	"pkg/shelly/matter"
 	"pkg/shelly/mqtt"
 	pkgscript "pkg/shelly/script"
 	"pkg/shelly/shelly"
+	"pkg/shelly/sswitch"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
+	"pkg/shelly/wifi"
 	"schedule"
 )
 
@@ -33,12 +38,94 @@ type Config struct {
 	Resolver mynet.Resolver
 }
 
+// WifiConfig holds WiFi configuration options for device setup
+type WifiConfig struct {
+	StaEssid   string // WiFi STA ESSID
+	StaPasswd  string // WiFi STA password
+	Sta1Essid  string // WiFi STA1 ESSID
+	Sta1Passwd string // WiFi STA1 password
+	ApPasswd   string // WiFi AP password
+}
+
 // DefaultConfig returns a Config with default values
 func DefaultConfig() Config {
 	return Config{
 		MqttBroker: "mqtt.local",
 		MqttPort:   1883,
 	}
+}
+
+// SetupDeviceWithWifi performs the full setup of a Shelly device with optional WiFi configuration.
+// See SetupDevice for details on what setup includes.
+func SetupDeviceWithWifi(ctx context.Context, log logr.Logger, sd *shellyapi.Device, targetName string, cfg Config, wifiCfg WifiConfig) error {
+	via := types.ChannelHttp
+
+	// Configure WiFi if any WiFi options are specified
+	if wifiCfg.StaEssid != "" || wifiCfg.Sta1Essid != "" || wifiCfg.ApPasswd != "" {
+		deviceId := fmt.Sprintf("%s (%s)", targetName, sd.Id())
+		fmt.Printf("  . Configuring WiFi settings on %s...\n", deviceId)
+		wc, err := wifi.DoGetConfig(ctx, via, sd)
+		if err != nil {
+			fmt.Printf("  ✗ Failed to get WiFi config on %s: %v\n", deviceId, err)
+			return err
+		}
+
+		wifiModified := false
+
+		// Set WiFi STA ESSID & passwd
+		if wifiCfg.StaEssid != "" {
+			wc.STA.SSID = wifiCfg.StaEssid
+			wc.STA.Enable = true
+			if wifiCfg.StaPasswd != "" {
+				wc.STA.IsOpen = false
+				wc.STA.Password = &wifiCfg.StaPasswd
+			} else {
+				wc.STA.IsOpen = true
+			}
+			wifiModified = true
+		} else {
+			wc.STA = nil
+		}
+
+		// Set WiFi STA1 ESSID & passwd
+		if wifiCfg.Sta1Essid != "" {
+			wc.STA1.SSID = wifiCfg.Sta1Essid
+			wc.STA1.Enable = true
+			if wifiCfg.Sta1Passwd != "" {
+				wc.STA1.IsOpen = false
+				wc.STA1.Password = &wifiCfg.Sta1Passwd
+			} else {
+				wc.STA1.IsOpen = true
+			}
+			wifiModified = true
+		} else {
+			wc.STA1 = nil
+		}
+
+		// Set WiFi AP password
+		if wifiCfg.ApPasswd != "" {
+			wc.AP.SSID = sd.Id() // Factory default SSID
+			wc.AP.Password = &wifiCfg.ApPasswd
+			wc.AP.Enable = true
+			wc.AP.IsOpen = false
+			wc.AP.RangeExtender = &wifi.RangeExtender{Enable: true}
+			wifiModified = true
+		} else {
+			wc.AP = nil
+		}
+
+		if wifiModified {
+			_, err = wifi.DoSetConfig(ctx, via, sd, wc)
+			if err != nil {
+				fmt.Printf("  ✗ Failed to set WiFi config on %s: %v\n", deviceId, err)
+				return err
+			}
+			fmt.Printf("  ✓ WiFi settings configured on %s\n", deviceId)
+		}
+	}
+
+	// Delegate to the main setup function
+	return SetupDevice(ctx, log, sd, targetName, cfg)
 }
 
 // SetupDevice performs the full setup of a Shelly device:
@@ -73,14 +160,27 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 		return fmt.Errorf("failed to get system config: %w", err)
 	}
 
-	// Only set the device name if:
-	// 1. A target name is provided, AND
-	// 2. The device doesn't already have a name set (empty name means factory default)
-	if targetName != "" && config.Device.Name == "" {
+	// Device name priority:
+	// 1. If targetName is explicitly provided (via --name flag), use it
+	// 2. If device name equals device ID, try to derive from output/input names
+	// 3. Otherwise, preserve existing device name
+	if targetName != "" && targetName != sd.Name() && targetName != config.Device.Name {
 		configModified = true
 		config.Device.Name = targetName
-		log.Info("Setting device name (was empty)", "device", deviceId, "name", targetName)
-	} else if config.Device.Name != "" {
+		fmt.Printf("  ✓ Setting device name: %s\n", targetName)
+		log.Info("Setting device name", "device", deviceId, "name", targetName)
+	} else if config.Device.Name == "" || config.Device.Name == sd.Id() {
+		// Try to derive a better name from output or input
+		derivedName := deriveDeviceName(ctx, log, via, sd)
+		if derivedName != "" {
+			configModified = true
+			config.Device.Name = derivedName
+			fmt.Printf("  ✓ Derived device name: %s\n", derivedName)
+			log.Info("Derived device name from output/input", "device", deviceId, "derived_name", derivedName)
+		} else {
+			log.V(1).Info("Could not derive device name from output/input", "device", deviceId)
+		}
+	} else {
 		log.Info("Preserving existing device name", "device", deviceId, "name", config.Device.Name)
 	}
 
@@ -295,6 +395,99 @@ func IsDeviceSetUp(ctx context.Context, log logr.Logger, sd *shellyapi.Device) b
 func markDeviceSetUp(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device) error {
 	_, err := kvs.SetKeyValue(ctx, log, via, sd, setupDoneKey, "1")
 	return err
+}
+
+// nonAlphanumericRegex matches any non-alphanumeric character
+var nonAlphanumericRegex = regexp.MustCompile(`[^a-z0-9]+`)
+
+// deriveDeviceName tries to derive a device name from switch:0's name (output) or input:0's name.
+// First checks output name, then input name if output is not suitable.
+// Returns empty string if no suitable name can be derived.
+// A name is suitable if:
+// - It's not empty
+// - It doesn't start with "Shelly" (case insensitive)
+// Name transformation: lowercase, non-alphanumeric replaced by dash, multiple dashes collapsed, leading/trailing dashes removed.
+func deriveDeviceName(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device) string {
+	// First try switch:0 output name
+	name := getOutputName(ctx, log, via, sd)
+	if name != "" {
+		log.V(1).Info("Derived device name from output", "device", sd.Id(), "derived_name", name)
+		return name
+	}
+
+	// Fall back to input:0 name
+	name = getInputName(ctx, log, via, sd)
+	if name != "" {
+		log.V(1).Info("Derived device name from input", "device", sd.Id(), "derived_name", name)
+		return name
+	}
+
+	log.V(1).Info("No suitable name found from output or input", "device", sd.Id())
+	return ""
+}
+
+// getOutputName gets and transforms the first non-empty switch output name.
+// Iterates through switch:0, switch:1, etc. until it finds a valid name or gets an error.
+func getOutputName(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device) string {
+	// Try up to 4 outputs (covers most Shelly devices: 1, 2, or 4 outputs)
+	for id := 0; id < 4; id++ {
+		out, err := sd.CallE(ctx, via, sswitch.GetConfig.String(), map[string]int{"id": id})
+		if err != nil {
+			// No more outputs available
+			if id == 0 {
+				log.V(1).Info("Cannot get switch:0 config for name derivation", "device", sd.Id(), "error", err)
+			}
+			break
+		}
+
+		switchCfg, ok := out.(*sswitch.Config)
+		if !ok || switchCfg == nil {
+			continue
+		}
+
+		name := transformName(switchCfg.Name)
+		if name != "" {
+			log.V(1).Info("Found output name", "device", sd.Id(), "switch_id", id, "name", switchCfg.Name)
+			return name
+		}
+	}
+	return ""
+}
+
+// getInputName gets and transforms the input:0 name
+func getInputName(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device) string {
+	out, err := sd.CallE(ctx, via, input.GetConfig.String(), map[string]int{"id": 0})
+	if err != nil {
+		log.V(1).Info("Cannot get input:0 config for name derivation", "device", sd.Id(), "error", err)
+		return ""
+	}
+
+	inputCfg, ok := out.(*input.Configuration)
+	if !ok || inputCfg == nil {
+		return ""
+	}
+
+	return transformName(inputCfg.Name)
+}
+
+// transformName transforms a raw name into a valid device name.
+// Returns empty string if name is empty or starts with "Shelly" (case insensitive).
+func transformName(rawName string) string {
+	if rawName == "" {
+		return ""
+	}
+
+	// Skip if name starts with "Shelly" (case insensitive)
+	if strings.HasPrefix(strings.ToLower(rawName), "shelly") {
+		return ""
+	}
+
+	// Transform: lowercase, replace non-alphanumeric with dash, collapse multiple dashes, trim dashes
+	name := strings.ToLower(rawName)
+	name = nonAlphanumericRegex.ReplaceAllString(name, "-")
+	name = strings.Trim(name, "-")
+
+	return name
 }
 
 // setupAutoUpdateJob creates or updates a scheduled job for Shelly.Update

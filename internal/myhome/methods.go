@@ -80,6 +80,14 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return nil
 		},
 	},
+	DeviceSetup: {
+		NewParams: func() any {
+			return &DeviceSetupParams{}
+		},
+		NewResult: func() any {
+			return nil
+		},
+	},
 	DeviceUpdate: {
 		NewParams: func() any {
 			return &Device{}

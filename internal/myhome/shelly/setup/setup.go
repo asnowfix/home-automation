@@ -13,6 +13,7 @@ import (
 	"mynet"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
+	"pkg/shelly/kvs"
 	"pkg/shelly/matter"
 	"pkg/shelly/mqtt"
 	pkgscript "pkg/shelly/script"
@@ -72,9 +73,15 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 		return fmt.Errorf("failed to get system config: %w", err)
 	}
 
-	if targetName != "" && config.Device.Name != targetName {
+	// Only set the device name if:
+	// 1. A target name is provided, AND
+	// 2. The device doesn't already have a name set (empty name means factory default)
+	if targetName != "" && config.Device.Name == "" {
 		configModified = true
 		config.Device.Name = targetName
+		log.Info("Setting device name (was empty)", "device", deviceId, "name", targetName)
+	} else if config.Device.Name != "" {
+		log.Info("Preserving existing device name", "device", deviceId, "name", config.Device.Name)
 	}
 
 	// NTP Pool Project (recommended)
@@ -251,6 +258,13 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 		return fmt.Errorf("failed to setup auto-update job: %w", err)
 	}
 
+	// Mark device as set up in KVS
+	err = markDeviceSetUp(ctx, log, via, sd)
+	if err != nil {
+		log.Error(err, "Failed to mark device as set up", "device", deviceId)
+		// Don't fail setup for this, just log the error
+	}
+
 	log.Info("Setup complete", "device", deviceId)
 	return nil
 }
@@ -263,6 +277,24 @@ func SetupDeviceFromDevicesDevice(ctx context.Context, log logr.Logger, device d
 		return fmt.Errorf("expected *shellyapi.Device, got %T", device)
 	}
 	return SetupDevice(ctx, log, sd, "", cfg)
+}
+
+// setupDoneKey is the KVS key used to mark a device as set up
+const setupDoneKey = "script/setup/done"
+
+// IsDeviceSetUp checks if a device has already been set up by looking for the setup marker in KVS.
+// This is cheaper than listing scripts.
+func IsDeviceSetUp(ctx context.Context, log logr.Logger, sd *shellyapi.Device) bool {
+	via := types.ChannelHttp
+
+	_, err := kvs.GetValue(ctx, log, via, sd, setupDoneKey)
+	return err == nil
+}
+
+// markDeviceSetUp stores a marker in KVS to indicate the device has been set up
+func markDeviceSetUp(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device) error {
+	_, err := kvs.SetKeyValue(ctx, log, via, sd, setupDoneKey, "1")
+	return err
 }
 
 // setupAutoUpdateJob creates or updates a scheduled job for Shelly.Update

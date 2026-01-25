@@ -311,6 +311,13 @@ func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, 
 		return
 	}
 
+	// Check if device is already set up (has watchdog script running)
+	if shellysetup.IsDeviceSetUp(ctx, log, sd) {
+		log.V(1).Info("Skipping auto-setup: device already set up", "device_id", deviceId)
+		dm.setupInFlight.Delete(deviceId)
+		return
+	}
+
 	log.Info("Starting auto-setup for new device", "device_id", deviceId, "mqtt_broker", dm.setupConfig.MqttBroker)
 
 	go func() {

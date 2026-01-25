@@ -11,6 +11,7 @@ import (
 var disableGen1Proxy bool
 var disableOccupancyService bool
 var disableTemperatureService bool
+var disableAutoSetup bool
 
 func init() {
 	Cmd.AddCommand(runCmd)
@@ -35,6 +36,7 @@ func init() {
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableMetricsExporter, "enable-metrics-exporter", false, "Enable the Prometheus metrics exporter (auto-enabled with device manager)")
 	runCmd.PersistentFlags().IntVar(&options.Flags.MetricsExporterPort, "metrics-exporter-port", 9100, "Prometheus metrics exporter HTTP port")
 	runCmd.PersistentFlags().StringVar(&options.Flags.MetricsExporterTopic, "metrics-exporter-topic", "shelly/metrics", "MQTT topic for Shelly device metrics")
+	runCmd.PersistentFlags().BoolVar(&disableAutoSetup, "disable-auto-setup", false, "Disable automatic configuration of newly discovered unknown devices")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
@@ -120,6 +122,16 @@ var runCmd = &cobra.Command{
 		}
 		if v.IsSet("daemon.disable_device_manager") && !cmd.Flags().Changed("disable-device-manager") {
 			disableDeviceManager = v.GetBool("daemon.disable_device_manager")
+		}
+		// Handle auto-setup flag (default is enabled, --disable-auto-setup disables it)
+		// Config file can also disable it via daemon.disable_auto_setup: true
+		if cmd.Flags().Changed("disable-auto-setup") && disableAutoSetup {
+			options.Flags.AutoSetup = false
+		} else if v.IsSet("daemon.disable_auto_setup") && v.GetBool("daemon.disable_auto_setup") {
+			options.Flags.AutoSetup = false
+		} else {
+			// Default: auto-setup is enabled
+			options.Flags.AutoSetup = true
 		}
 
 		// Handle Gen1 proxy flags with mutual exclusivity

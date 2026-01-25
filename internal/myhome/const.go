@@ -19,6 +19,7 @@ const (
 	DeviceShow                    Verb = "device.show"
 	DeviceForget                  Verb = "device.forget"
 	DeviceRefresh                 Verb = "device.refresh"
+	DeviceSetup                   Verb = "device.setup"
 	DeviceUpdate                  Verb = "device.update"
 	MqttRepeat                    Verb = "mqtt.repeat"
 	TemperatureGet                Verb = "temperature.get"

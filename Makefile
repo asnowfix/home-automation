@@ -49,7 +49,13 @@ ifeq ($(OS),Linux)
 	cd linux && sudo install -m 644 -o root -g root myhome@.service /etc/systemd/system/myhome@.service
 	sudo systemctl daemon-reload
 	sudo systemctl enable myhome@$(ME).service
-	-systemctl status myhome@$(ME).service
+else
+	$(error unsupported $(@) for OS:$(OS))
+endif
+
+status:
+ifeq ($(OS),Linux)
+	systemctl status myhome@$(ME).service
 else
 	$(error unsupported $(@) for OS:$(OS))
 endif

@@ -148,18 +148,17 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 			return d.IsModified(), fmt.Errorf("unable to init device (%v)", err)
 		}
 	}
-	if d.Name() == "" {
-		config, err := system.GetConfig(ctx, via, d)
-		if err != nil {
-			return d.IsModified(), fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
-		}
-		if d.config == nil {
-			d.config = &shelly.Config{}
-		}
-		d.config.System = config
-		if config.Device.Name != "" {
-			d.UpdateName(config.Device.Name)
-		}
+	// Always fetch system config to get current device name
+	config, err := system.GetConfig(ctx, via, d)
+	if err != nil {
+		return d.IsModified(), fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
+	}
+	if d.config == nil {
+		d.config = &shelly.Config{}
+	}
+	d.config.System = config
+	if config.Device.Name != "" && config.Device.Name != d.Name() {
+		d.UpdateName(config.Device.Name)
 	}
 	if !d.IsHttpReady() {
 		if d.status == nil {
@@ -568,6 +567,12 @@ func (d *Device) init(ctx context.Context) error {
 		}
 	}
 	return d.initMqtt(ctx)
+}
+
+// Init initializes the device, setting up HTTP and MQTT channels as needed.
+// This is the exported version of init() for use by external packages.
+func (d *Device) Init(ctx context.Context) error {
+	return d.init(ctx)
 }
 
 func (d *Device) initHttp(ctx context.Context) error {

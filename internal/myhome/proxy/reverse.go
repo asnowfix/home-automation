@@ -124,8 +124,8 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 		// RPC endpoint to call device manager methods (e.g., device.refresh)
 		if path == "rpc" && r.Method == http.MethodPost {
 			var req struct {
-				Method myhome.Verb `json:"method"`
-				Params any         `json:"params"`
+				Method myhome.Verb     `json:"method"`
+				Params json.RawMessage `json:"params"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				http.Error(w, "invalid JSON", http.StatusBadRequest)
@@ -136,7 +136,15 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
-			res, err := mh.ActionE(req.Params)
+			// Decode params into the expected type for this method
+			params := mh.Signature.NewParams()
+			if len(req.Params) > 0 {
+				if err := json.Unmarshal(req.Params, &params); err != nil {
+					http.Error(w, "invalid params: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+			res, err := mh.ActionE(params)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
@@ -144,7 +152,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 			}
 			// Successful call: if it's a device.refresh with string id, notify SSE listeners
 			if req.Method == myhome.DeviceRefresh {
-				if id, ok := req.Params.(string); ok && id != "" {
+				if id, ok := params.(string); ok && id != "" {
 					notifyRefresh(id)
 				}
 			}
@@ -510,7 +518,8 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
                 {{if .Host}}
                   <a class="button is-link" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer">Open</a>
                 {{end}}
-                <button class="button is-warning" id="btn-{{.Id}}" onclick="refreshDevice('{{.Id}}')">Refresh</button>
+                <button class="button is-warning" id="btn-refresh-{{.Id}}" onclick="refreshDevice('{{.Id}}')">Refresh</button>
+                <button class="button is-success" id="btn-setup-{{.Id}}" onclick="setupDevice('{{.Id}}')">Setup</button>
               </div>
             </div>
           </div>
@@ -522,6 +531,70 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       {{end}}
     </div>
   </section>
+  <!-- Setup Modal -->
+  <div class="modal" id="setup-modal">
+    <div class="modal-background" onclick="closeSetupModal()"></div>
+    <div class="modal-card">
+      <header class="modal-card-head">
+        <p class="modal-card-title">Setup Device</p>
+        <button class="delete" aria-label="close" onclick="closeSetupModal()"></button>
+      </header>
+      <section class="modal-card-body">
+        <input type="hidden" id="setup-device-id">
+        <div class="field">
+          <label class="label">Device Name</label>
+          <div class="control">
+            <input class="input" type="text" id="setup-name" placeholder="Leave empty for auto-derivation">
+          </div>
+          <p class="help">Overrides automatic name derivation from output/input names</p>
+        </div>
+        <div class="field">
+          <label class="label">MQTT Broker</label>
+          <div class="control">
+            <input class="input" type="text" id="setup-mqtt-broker" placeholder="Leave empty for default">
+          </div>
+          <p class="help">e.g., 192.168.1.100:1883 or mqtt.local</p>
+        </div>
+        <hr>
+        <p class="has-text-weight-semibold mb-2">WiFi Settings (optional)</p>
+        <div class="field">
+          <label class="label">STA ESSID</label>
+          <div class="control">
+            <input class="input" type="text" id="setup-sta-essid" placeholder="Primary WiFi network name">
+          </div>
+        </div>
+        <div class="field">
+          <label class="label">STA Password</label>
+          <div class="control">
+            <input class="input" type="password" id="setup-sta-passwd" placeholder="Primary WiFi password">
+          </div>
+        </div>
+        <div class="field">
+          <label class="label">STA1 ESSID</label>
+          <div class="control">
+            <input class="input" type="text" id="setup-sta1-essid" placeholder="Backup WiFi network name">
+          </div>
+        </div>
+        <div class="field">
+          <label class="label">STA1 Password</label>
+          <div class="control">
+            <input class="input" type="password" id="setup-sta1-passwd" placeholder="Backup WiFi password">
+          </div>
+        </div>
+        <div class="field">
+          <label class="label">AP Password</label>
+          <div class="control">
+            <input class="input" type="password" id="setup-ap-passwd" placeholder="Access Point password">
+          </div>
+        </div>
+      </section>
+      <footer class="modal-card-foot">
+        <button class="button is-success" id="setup-submit-btn" onclick="submitSetup()">Setup</button>
+        <button class="button" onclick="closeSetupModal()">Cancel</button>
+      </footer>
+    </div>
+  </div>
+
   <footer class="footer">
     <div class="content has-text-centered has-text-grey-light is-size-7">
       Served by MyHome reverse proxy
@@ -529,7 +602,7 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
   </footer>
   <script>
     async function refreshDevice(id) {
-      const btn = document.getElementById('btn-' + id);
+      const btn = document.getElementById('btn-refresh-' + id);
       if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
       let es;
       try {
@@ -559,6 +632,76 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
         if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
         if (es) try { es.close(); } catch {}
         alert('Refresh error: ' + e);
+      }
+    }
+
+    function setupDevice(id) {
+      // Open modal and store device ID
+      document.getElementById('setup-device-id').value = id;
+      // Clear all fields
+      document.getElementById('setup-name').value = '';
+      document.getElementById('setup-mqtt-broker').value = '';
+      document.getElementById('setup-sta-essid').value = '';
+      document.getElementById('setup-sta-passwd').value = '';
+      document.getElementById('setup-sta1-essid').value = '';
+      document.getElementById('setup-sta1-passwd').value = '';
+      document.getElementById('setup-ap-passwd').value = '';
+      // Show modal
+      document.getElementById('setup-modal').classList.add('is-active');
+    }
+
+    function closeSetupModal() {
+      document.getElementById('setup-modal').classList.remove('is-active');
+    }
+
+    async function submitSetup() {
+      const id = document.getElementById('setup-device-id').value;
+      const btn = document.getElementById('setup-submit-btn');
+      const deviceBtn = document.getElementById('btn-setup-' + id);
+      
+      // Build params object, only including non-empty values
+      const params = { identifier: id };
+      const name = document.getElementById('setup-name').value.trim();
+      const mqttBroker = document.getElementById('setup-mqtt-broker').value.trim();
+      const staEssid = document.getElementById('setup-sta-essid').value.trim();
+      const staPasswd = document.getElementById('setup-sta-passwd').value;
+      const sta1Essid = document.getElementById('setup-sta1-essid').value.trim();
+      const sta1Passwd = document.getElementById('setup-sta1-passwd').value;
+      const apPasswd = document.getElementById('setup-ap-passwd').value;
+      
+      if (name) params.name = name;
+      if (mqttBroker) params.mqtt_broker = mqttBroker;
+      if (staEssid) params.sta_essid = staEssid;
+      if (staPasswd) params.sta_passwd = staPasswd;
+      if (sta1Essid) params.sta1_essid = sta1Essid;
+      if (sta1Passwd) params.sta1_passwd = sta1Passwd;
+      if (apPasswd) params.ap_passwd = apPasswd;
+
+      if (btn) { btn.disabled = true; btn.textContent = 'Setting up…'; }
+      if (deviceBtn) { deviceBtn.disabled = true; deviceBtn.textContent = 'Setting up…'; }
+      
+      try {
+        const res = await fetch('/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: 'device.setup', params: params })
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          if (btn) { btn.disabled = false; btn.textContent = 'Setup'; }
+          if (deviceBtn) { deviceBtn.disabled = false; deviceBtn.textContent = 'Setup'; }
+          alert('Setup failed: ' + t);
+          return;
+        }
+        if (btn) { btn.textContent = 'Done'; }
+        if (deviceBtn) { deviceBtn.textContent = 'Done'; }
+        closeSetupModal();
+        // Reload to show updated device info
+        setTimeout(() => location.reload(), 500);
+      } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Setup'; }
+        if (deviceBtn) { deviceBtn.disabled = false; deviceBtn.textContent = 'Setup'; }
+        alert('Setup error: ' + e);
       }
     }
   </script>

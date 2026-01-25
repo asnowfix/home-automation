@@ -18,24 +18,30 @@ import (
 	"pkg/shelly/blu"
 	"pkg/shelly/gen1"
 	shellymqtt "pkg/shelly/mqtt"
+	"pkg/shelly/types"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 	"tools"
+
+	shellysetup "internal/myhome/shelly/setup"
 
 	"github.com/go-logr/logr"
 )
 
 type DeviceManager struct {
-	dr         mhd.DeviceRegistry
-	update     chan *myhome.Device
-	refreshed  chan *myhome.Device
-	cancel     context.CancelFunc
-	log        logr.Logger
-	mqttClient mqtt.Client
-	mqttCache  *mqtt.Cache
-	resolver   mynet.Resolver
-	router     model.Router
+	dr            mhd.DeviceRegistry
+	update        chan *myhome.Device
+	refreshed     chan *myhome.Device
+	cancel        context.CancelFunc
+	log           logr.Logger
+	mqttClient    mqtt.Client
+	mqttCache     *mqtt.Cache
+	resolver      mynet.Resolver
+	router        model.Router
+	setupConfig   shellysetup.Config // Configuration for auto-setup of new devices
+	setupInFlight sync.Map           // Track devices currently being set up (device_id -> bool)
 }
 
 // maxConcurrentRefreshes limits the number of concurrent device refresh goroutines
@@ -140,6 +146,83 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		return nil, nil
 	})
+	myhome.RegisterMethodHandler(myhome.DeviceSetup, func(in any) (any, error) {
+		params := in.(*myhome.DeviceSetupParams)
+		dm.log.Info("RPC: device.setup", "identifier", params.Identifier, "name", params.Name)
+		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
+		if err != nil {
+			return nil, err
+		}
+
+		// Skip Gen1 devices
+		if shelly.IsGen1Device(device.Id()) {
+			return nil, fmt.Errorf("Gen1 devices are not supported for setup")
+		}
+
+		// Skip BLU devices
+		if shelly.IsBluDevice(device.Id()) {
+			return nil, fmt.Errorf("BLU devices are not supported for setup")
+		}
+
+		// Ensure implementation is loaded and initialized
+		sd, ok := device.Impl().(*shelly.Device)
+		if !ok || sd == nil {
+			impl, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+			if err != nil {
+				return nil, err
+			}
+			sd, ok = impl.(*shelly.Device)
+			if !ok {
+				return nil, fmt.Errorf("unexpected device implementation type: %T", impl)
+			}
+		}
+		// Initialize device (sets up MQTT channels if needed)
+		if err := sd.Init(ctx); err != nil {
+			dm.log.Error(err, "Failed to initialize device", "device", device.Id())
+			// Continue anyway - setup may still work via HTTP
+		}
+
+		// Build setup config, merging RPC params with default config
+		cfg := dm.setupConfig
+		if params.MqttBroker != "" {
+			cfg.MqttBroker = params.MqttBroker
+		}
+
+		// Build WiFi config from params
+		wifiCfg := shellysetup.WifiConfig{
+			StaEssid:   params.StaEssid,
+			StaPasswd:  params.StaPasswd,
+			Sta1Essid:  params.Sta1Essid,
+			Sta1Passwd: params.Sta1Passwd,
+			ApPasswd:   params.ApPasswd,
+		}
+
+		// Use provided name or fall back to device's current name
+		targetName := params.Name
+		if targetName == "" {
+			targetName = sd.Name()
+		}
+
+		// Run setup
+		setupLog := dm.log.WithName("setup").WithName(device.Id())
+		err = shellysetup.SetupDeviceWithWifi(ctx, setupLog, sd, targetName, cfg, wifiCfg)
+		if err != nil {
+			return nil, fmt.Errorf("setup failed: %w", err)
+		}
+
+		// Refresh device info from Shelly and update DB with new name
+		if _, err := sd.Refresh(ctx, types.ChannelHttp); err != nil {
+			dm.log.Error(err, "Failed to refresh device after setup", "device", device.Id())
+		} else {
+			// Update device name in DB from refreshed Shelly info
+			device.WithName(sd.Name())
+			if err := dm.dr.SetDevice(ctx, device, true); err != nil {
+				dm.log.Error(err, "Failed to update device in DB after setup", "device", device.Id())
+			}
+		}
+
+		return nil, nil
+	})
 	myhome.RegisterMethodHandler(myhome.DeviceUpdate, func(in any) (any, error) {
 		device := in.(*myhome.Device)
 		dm.log.Info("RPC: device.update", "id", device.Id(), "name", device.Name())
@@ -185,7 +268,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	dm.log.Info("MQTT message cache started")
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
-	go deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")), dm.update, dm.router, dm.refreshed)
+	go dm.deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")))
 	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
@@ -194,6 +277,24 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		dm.log.Error(err, "Failed to watch MQTT events")
 		return err
 	}
+
+	// Configure auto-setup for new devices (used by device updater loop)
+	dm.setupConfig = shellysetup.Config{
+		Resolver: dm.resolver,
+	}
+	// Use the current process MQTT broker for auto-setup
+	if dm.mqttClient != nil {
+		// GetServer returns host:port, use it directly
+		dm.setupConfig.MqttBroker = dm.mqttClient.GetServer()
+		dm.setupConfig.MqttPort = 0 // Signal that broker already includes port
+	} else if options.Flags.MqttBroker != "" {
+		dm.setupConfig.MqttBroker = options.Flags.MqttBroker
+		dm.setupConfig.MqttPort = 1883
+	} else {
+		dm.setupConfig.MqttBroker = "mqtt.local"
+		dm.setupConfig.MqttPort = 1883
+	}
+	dm.log.Info("Auto-setup configuration", "enabled", options.Flags.AutoSetup, "mqtt_broker", dm.setupConfig.MqttBroker)
 
 	// Loop on ZeroConf devices discovery
 	err = watch.ZeroConf(ctx, dm, dm.dr, dm.resolver)
@@ -219,12 +320,12 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	return nil
 }
 
-func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, router model.Router, refreshed chan<- *myhome.Device) {
+func (dm *DeviceManager) deviceUpdaterLoop(ctx context.Context) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
 	}
-	log.Info("Starting updater loop", "max_concurrent_refreshes", maxConcurrentRefreshes)
+	log.Info("Starting updater loop", "max_concurrent_refreshes", maxConcurrentRefreshes, "auto_setup", options.Flags.AutoSetup)
 
 	// Semaphore to limit concurrent refresh goroutines
 	sem := make(chan struct{}, maxConcurrentRefreshes)
@@ -235,16 +336,79 @@ func deviceUpdaterLoop(ctx context.Context, update <-chan *myhome.Device, router
 			log.Info("Exiting updater loop")
 			return
 
-		case device := <-update:
+		case device := <-dm.update:
+			// Check if this is a new device that needs auto-setup
+			isNewDevice := device.Info == nil
+			deviceId := device.Id()
+
 			// Acquire semaphore slot (blocks if all slots busy)
 			sem <- struct{}{}
-			log.V(1).Info("Updater loop: processing", "device", device.DeviceSummary)
-			go func(d *myhome.Device) {
+			log.V(1).Info("Updater loop: processing", "device", device.DeviceSummary, "is_new", isNewDevice)
+
+			go func(d *myhome.Device, isNew bool, devId string) {
 				defer func() { <-sem }() // Release slot when done
-				refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(d.Name())), d, router, refreshed)
-			}(device)
+
+				// Trigger auto-setup for new devices if enabled
+				if isNew && options.Flags.AutoSetup {
+					dm.triggerAutoSetup(ctx, log, d, devId)
+				}
+
+				refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(d.Name())), d, dm.router, dm.refreshed)
+			}(device, isNewDevice, deviceId)
 		}
 	}
+}
+
+// triggerAutoSetup runs auto-setup for a new device in a goroutine
+func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, device *myhome.Device, deviceId string) {
+	// Check if setup is already in progress for this device
+	if _, loaded := dm.setupInFlight.LoadOrStore(deviceId, true); loaded {
+		log.Info("Auto-setup already in progress for device", "device_id", deviceId)
+		return
+	}
+
+	// Skip Gen1 devices - they don't support the same setup process
+	if shelly.IsGen1Device(deviceId) {
+		log.Info("Skipping auto-setup for Gen1 device", "device_id", deviceId)
+		dm.setupInFlight.Delete(deviceId)
+		return
+	}
+
+	// Skip BLU devices - they are passive sensors
+	if shelly.IsBluDevice(deviceId) {
+		log.Info("Skipping auto-setup for BLU device", "device_id", deviceId)
+		dm.setupInFlight.Delete(deviceId)
+		return
+	}
+
+	// Get the Shelly device implementation
+	sd, ok := device.Impl().(*shelly.Device)
+	if !ok {
+		log.Error(nil, "Cannot auto-setup: device implementation is not a Shelly device", "device_id", deviceId, "impl_type", reflect.TypeOf(device.Impl()))
+		dm.setupInFlight.Delete(deviceId)
+		return
+	}
+
+	// Check if device is already set up (has watchdog script running)
+	if shellysetup.IsDeviceSetUp(ctx, log, sd) {
+		log.V(1).Info("Skipping auto-setup: device already set up", "device_id", deviceId)
+		dm.setupInFlight.Delete(deviceId)
+		return
+	}
+
+	log.Info("Starting auto-setup for new device", "device_id", deviceId, "mqtt_broker", dm.setupConfig.MqttBroker)
+
+	go func() {
+		defer dm.setupInFlight.Delete(deviceId)
+
+		setupLog := log.WithName("autoSetup").WithName(deviceId)
+		err := shellysetup.SetupDevice(ctx, setupLog, sd, sd.Name(), dm.setupConfig)
+		if err != nil {
+			setupLog.Error(err, "Auto-setup failed for device", "device_id", deviceId)
+			return
+		}
+		setupLog.Info("Auto-setup completed successfully", "device_id", deviceId)
+	}()
 }
 
 func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.Router, refreshed chan<- *myhome.Device) {

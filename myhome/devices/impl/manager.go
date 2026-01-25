@@ -154,14 +154,23 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			return nil, err
 		}
 
-		// Skip Gen1 devices
-		if shelly.IsGen1Device(device.Id()) {
-			return nil, fmt.Errorf("Gen1 devices are not supported for setup")
-		}
+		// For Gen1 and BLU devices: skip device communication, but save name to DB if provided
+		if shelly.IsGen1Device(device.Id()) || shelly.IsBluDevice(device.Id()) {
+			deviceType := "Gen1"
+			if shelly.IsBluDevice(device.Id()) {
+				deviceType = "BLU"
+			}
+			dm.log.Info("Skipping device communication for "+deviceType+" device", "device", device.Id())
 
-		// Skip BLU devices
-		if shelly.IsBluDevice(device.Id()) {
-			return nil, fmt.Errorf("BLU devices are not supported for setup")
+			// Save name to DB if provided
+			if params.Name != "" && params.Name != device.Name() {
+				dm.log.Info("Updating device name in DB", "device", device.Id(), "name", params.Name)
+				device.WithName(params.Name)
+				if err := dm.dr.SetDevice(ctx, device, true); err != nil {
+					return nil, fmt.Errorf("failed to update device name in DB: %w", err)
+				}
+			}
+			return nil, nil
 		}
 
 		// Ensure implementation is loaded and initialized

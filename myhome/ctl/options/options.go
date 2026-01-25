@@ -59,6 +59,7 @@ var Flags struct {
 	MetricsExporterPort         int
 	MetricsExporterTopic        string
 	ShellyRateLimit             time.Duration // the value taken by --shelly-rate-limit
+	AutoSetup                   bool          // the value taken by --auto-setup / -A
 }
 
 var Via types.Channel

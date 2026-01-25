@@ -118,6 +118,31 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	// Device identifier for all output lines
 	deviceId := fmt.Sprintf("%s (%s)", targetName, sd.Id())
 
+	// For Gen1 and BLU devices: skip device communication, but save name to DB if provided
+	if shellyapi.IsGen1Device(sd.Id()) || shellyapi.IsBluDevice(sd.Id()) {
+		deviceType := "Gen1"
+		if shellyapi.IsBluDevice(sd.Id()) {
+			deviceType = "BLU"
+		}
+		fmt.Printf("Skipping device communication for %s device %s\n", deviceType, deviceId)
+
+		// Save name to DB if provided (via RPC to daemon)
+		if targetName != "" && targetName != sd.Name() && myhome.TheClient != nil {
+			fmt.Printf("  . Updating device name in DB: %s\n", targetName)
+			_, err := myhome.TheClient.CallE(ctx, myhome.DeviceSetup, &myhome.DeviceSetupParams{
+				Identifier: sd.Id(),
+				Name:       targetName,
+			})
+			if err != nil {
+				fmt.Printf("  ✗ Failed to update device name: %v\n", err)
+				return nil, err
+			}
+			fmt.Printf("  ✓ Device name updated\n")
+		}
+		fmt.Printf("\n✓ Setup complete for %s (no device communication)\n", deviceId)
+		return nil, nil
+	}
+
 	fmt.Printf("Setting up device %s\n", deviceId)
 
 	// Configure WiFi if any WiFi options are specified (CLI-specific feature)

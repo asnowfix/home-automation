@@ -196,6 +196,15 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		return nil, err
 	}
 
+	// Trigger device refresh via myhome RPC to sync DB (if client is available)
+	if myhome.TheClient != nil {
+		if _, refreshErr := myhome.TheClient.CallE(ctx, myhome.DeviceRefresh, sd.Id()); refreshErr != nil {
+			log.V(1).Info("Could not trigger device refresh via RPC", "error", refreshErr)
+		} else {
+			fmt.Printf("  ✓ Device refresh triggered\n")
+		}
+	}
+
 	fmt.Printf("\n✓ Setup complete for %s\n", deviceId)
 	return nil, nil
 }

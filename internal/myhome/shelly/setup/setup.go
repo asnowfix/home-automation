@@ -58,7 +58,8 @@ func DefaultConfig() Config {
 // SetupDeviceWithWifi performs the full setup of a Shelly device with optional WiFi configuration.
 // See SetupDevice for details on what setup includes.
 func SetupDeviceWithWifi(ctx context.Context, log logr.Logger, sd *shellyapi.Device, targetName string, cfg Config, wifiCfg WifiConfig) error {
-	via := types.ChannelHttp
+	// Auto-detect best available channel: prefer HTTP, fall back to MQTT
+	via := selectChannel(sd)
 
 	// Configure WiFi if any WiFi options are specified
 	if wifiCfg.StaEssid != "" || wifiCfg.Sta1Essid != "" || wifiCfg.ApPasswd != "" {
@@ -128,6 +129,19 @@ func SetupDeviceWithWifi(ctx context.Context, log logr.Logger, sd *shellyapi.Dev
 	return SetupDevice(ctx, log, sd, targetName, cfg)
 }
 
+// selectChannel returns the best available channel for communicating with the device.
+// Prefers HTTP if available, falls back to MQTT.
+func selectChannel(sd *shellyapi.Device) types.Channel {
+	if sd.IsHttpReady() {
+		return types.ChannelHttp
+	}
+	if sd.IsMqttReady() {
+		return types.ChannelMqtt
+	}
+	// Default to HTTP (will fail if not available, but that's expected)
+	return types.ChannelHttp
+}
+
 // SetupDevice performs the full setup of a Shelly device:
 // - Configures system settings (name, NTP)
 // - Checks and applies firmware updates
@@ -139,7 +153,8 @@ func SetupDeviceWithWifi(ctx context.Context, log logr.Logger, sd *shellyapi.Dev
 // This function can be called from both CLI and daemon contexts.
 // The targetName parameter is optional - if empty, the device's current name is used.
 func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, targetName string, cfg Config) error {
-	via := types.ChannelHttp
+	// Auto-detect best available channel: prefer HTTP, fall back to MQTT
+	via := selectChannel(sd)
 
 	// Use device's current name if no target name specified
 	if targetName == "" {

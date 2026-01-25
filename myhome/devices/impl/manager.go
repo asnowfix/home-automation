@@ -18,6 +18,7 @@ import (
 	"pkg/shelly/blu"
 	"pkg/shelly/gen1"
 	shellymqtt "pkg/shelly/mqtt"
+	"pkg/shelly/types"
 	"reflect"
 	"strings"
 	"sync"
@@ -163,7 +164,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			return nil, fmt.Errorf("BLU devices are not supported for setup")
 		}
 
-		// Ensure implementation is loaded
+		// Ensure implementation is loaded and initialized
 		sd, ok := device.Impl().(*shelly.Device)
 		if !ok || sd == nil {
 			impl, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
@@ -174,6 +175,11 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			if !ok {
 				return nil, fmt.Errorf("unexpected device implementation type: %T", impl)
 			}
+		}
+		// Initialize device (sets up MQTT channels if needed)
+		if err := sd.Init(ctx); err != nil {
+			dm.log.Error(err, "Failed to initialize device", "device", device.Id())
+			// Continue anyway - setup may still work via HTTP
 		}
 
 		// Build setup config, merging RPC params with default config
@@ -202,6 +208,17 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		err = shellysetup.SetupDeviceWithWifi(ctx, setupLog, sd, targetName, cfg, wifiCfg)
 		if err != nil {
 			return nil, fmt.Errorf("setup failed: %w", err)
+		}
+
+		// Refresh device info from Shelly and update DB with new name
+		if _, err := sd.Refresh(ctx, types.ChannelHttp); err != nil {
+			dm.log.Error(err, "Failed to refresh device after setup", "device", device.Id())
+		} else {
+			// Update device name in DB from refreshed Shelly info
+			device.WithName(sd.Name())
+			if err := dm.dr.SetDevice(ctx, device, true); err != nil {
+				dm.log.Error(err, "Failed to update device in DB after setup", "device", device.Id())
+			}
 		}
 
 		return nil, nil

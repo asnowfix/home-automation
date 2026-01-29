@@ -10,6 +10,7 @@ import (
 	"pkg/shelly/ethernet"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/ratelimit"
+	"pkg/shelly/script"
 	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
@@ -159,6 +160,11 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	d.config.System = config
 	if config.Device.Name != "" && config.Device.Name != d.Name() {
 		d.UpdateName(config.Device.Name)
+	}
+
+	// Fetch scripts list and store in config
+	if err := d.refreshScripts(ctx, via); err != nil {
+		d.log.V(1).Info("Failed to refresh scripts (continuing)", "error", err)
 	}
 	if !d.IsHttpReady() {
 		if d.status == nil {
@@ -628,6 +634,38 @@ func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
 			d.UpdateName(*info.Name)
 		}
 	}
+	return nil
+}
+
+// refreshScripts fetches the list of scripts from the device and stores them in config
+func (d *Device) refreshScripts(ctx context.Context, via types.Channel) error {
+	out, err := d.CallE(ctx, via, "Script.List", nil)
+	if err != nil {
+		return err
+	}
+
+	// Use the existing script.ListResponse type
+	resp, ok := out.(*script.ListResponse)
+	if !ok {
+		d.log.V(1).Info("Script.List response type mismatch", "type", fmt.Sprintf("%T", out))
+		return nil
+	}
+
+	if d.config == nil {
+		d.config = &shelly.Config{}
+	}
+
+	d.config.Scripts = make([]shelly.ScriptInfo, len(resp.Scripts))
+	for i, s := range resp.Scripts {
+		d.config.Scripts[i] = shelly.ScriptInfo{
+			Id:      s.Id,
+			Name:    s.Name,
+			Running: s.Running,
+			// Note: script.Status doesn't have Enable field, it's in Configuration
+		}
+	}
+	d.modified = true
+	d.log.V(1).Info("Refreshed scripts", "count", len(d.config.Scripts))
 	return nil
 }
 

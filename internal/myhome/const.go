@@ -32,4 +32,11 @@ const (
 	TemperatureGetKindSchedules   Verb = "temperature.getkindschedules"
 	TemperatureSetKindSchedule    Verb = "temperature.setkindschedule"
 	OccupancyGetStatus            Verb = "occupancy.getstatus"
+	HeaterGetConfig               Verb = "heater.getconfig"
+	HeaterSetConfig               Verb = "heater.setconfig"
+	ThermometerList               Verb = "thermometer.list"
+	RoomList                      Verb = "room.list"
+	RoomCreate                    Verb = "room.create"
+	RoomEdit                      Verb = "room.edit"
+	RoomDelete                    Verb = "room.delete"
 )

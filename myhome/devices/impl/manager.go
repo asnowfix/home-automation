@@ -25,6 +25,7 @@ import (
 	"time"
 	"tools"
 
+	shellyscript "internal/myhome/shelly/script"
 	shellysetup "internal/myhome/shelly/setup"
 
 	"github.com/go-logr/logr"
@@ -256,8 +257,14 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 		return nil, nil
 	})
+	myhome.RegisterMethodHandler(myhome.ThermometerList, func(in any) (any, error) {
+		return dm.HandleThermometerList(ctx)
+	})
 
-	ctx, dm.cancel = context.WithCancel(ctx)
+	// Register heater service handlers
+	heaterService := shellyscript.NewHeaterService(dm.log, dm)
+	heaterService.RegisterHandlers()
+
 	ctx = shellymqtt.NewContext(ctx, dm.mqttClient)
 
 	// Start MQTT message cache
@@ -596,7 +603,7 @@ func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwr
 	return dm.dr.SetDevice(ctx, d, overwrite)
 }
 
-func (dm *DeviceManager) CallE(method myhome.Verb, params any) (any, error) {
+func (dm *DeviceManager) CallE(ctx context.Context, method myhome.Verb, params any) (any, error) {
 	dm.log.Info("Calling method", "method", method, "params", params)
 	var err error
 	mh, err := myhome.Methods(method)
@@ -622,4 +629,61 @@ func (dm *DeviceManager) MethodE(method myhome.Verb) (*myhome.Method, error) {
 		return nil, err
 	}
 	return mh, nil
+}
+
+// HandleThermometerList returns a list of devices with temperature sensing capability
+func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.ThermometerListResult, error) {
+	devices, err := dm.GetAllDevices(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get devices: %w", err)
+	}
+
+	thermometers := make([]myhome.ThermometerInfo, 0)
+
+	for _, d := range devices {
+		// Check for Gen1 H&T devices by Info.Application (if populated) and fallback to device ID prefix (e.g., "shellyht-208500")
+		if (d.Info != nil && d.Info.Application == "shellyht") || strings.HasPrefix(d.Id(), "shellyht-") {
+			thermometers = append(thermometers, myhome.ThermometerInfo{
+				ID:        d.Id(),
+				Name:      d.Name(),
+				Type:      "Gen1",
+				MqttTopic: fmt.Sprintf("shellies/%s/sensor/temperature", d.Id()),
+			})
+			continue
+		}
+
+		// Check for BLU devices with temperature capability
+		if d.Info != nil && d.Info.BTHome != nil {
+			for _, cap := range d.Info.BTHome.Capabilities {
+				if cap == "temperature" {
+					// BLU devices use MAC address in topic (with colons)
+					thermometers = append(thermometers, myhome.ThermometerInfo{
+						ID:        d.Id(),
+						Name:      d.Name(),
+						Type:      "BLU",
+						MqttTopic: fmt.Sprintf("shelly-blu/events/%s", d.MAC),
+					})
+					break
+				}
+			}
+		}
+	}
+
+	return &myhome.ThermometerListResult{Thermometers: thermometers}, nil
+}
+
+// GetShellyDevice returns a Shelly device for RPC calls (implements script.DeviceProvider)
+func (dm *DeviceManager) GetShellyDevice(ctx context.Context, device *myhome.Device) (*shelly.Device, error) {
+	sd, ok := device.Impl().(*shelly.Device)
+	if !ok || sd == nil {
+		impl, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+		if err != nil {
+			return nil, err
+		}
+		sd, ok = impl.(*shelly.Device)
+		if !ok {
+			return nil, fmt.Errorf("unexpected device implementation type: %T", impl)
+		}
+	}
+	return sd, nil
 }

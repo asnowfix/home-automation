@@ -48,7 +48,7 @@ func GetLimiter() *RateLimiter {
 // Wait blocks until it's safe to send a command to the specified device.
 // It respects the minimum interval between commands and queues requests
 // if they arrive too quickly. The interval is measured from when the previous
-// command completed (via Done()) to when the next command starts.
+// command started to when the next command starts.
 // Returns immediately if rate limiting is disabled (interval <= 0).
 func (rl *RateLimiter) Wait(ctx context.Context, deviceId string) error {
 	if rl == nil || rl.minInterval <= 0 {
@@ -62,7 +62,7 @@ func (rl *RateLimiter) Wait(ctx context.Context, deviceId string) error {
 	dl.mu.Lock()
 	defer dl.mu.Unlock()
 
-	// Calculate how long to wait since the last command completed
+	// Calculate how long to wait since the last command started
 	elapsed := time.Since(dl.lastCall)
 	if elapsed < rl.minInterval {
 		waitDuration := rl.minInterval - elapsed
@@ -78,21 +78,21 @@ func (rl *RateLimiter) Wait(ctx context.Context, deviceId string) error {
 		}
 	}
 
+	// Update lastCall NOW, before releasing the mutex, so concurrent calls
+	// see the correct timing and wait appropriately
+	dl.lastCall = time.Now()
+
 	return nil
 }
 
 // Done marks the completion of a command to the specified device.
-// This should be called after the command response is received.
-// The rate limit interval is measured from this point to the next Wait().
+// This is called after the command response is received.
+// Note: The primary rate limiting is done in Wait() which updates lastCall
+// before the command starts. This Done() call is kept for potential future use
+// but currently does nothing since timing is measured from command start.
 func (rl *RateLimiter) Done(deviceId string) {
-	if rl == nil || rl.minInterval <= 0 {
-		return
-	}
-
-	dl := rl.getDeviceLimiter(deviceId)
-	dl.mu.Lock()
-	defer dl.mu.Unlock()
-	dl.lastCall = time.Now()
+	// Rate limiting is now measured from command start (in Wait()),
+	// so Done() is a no-op. Kept for API compatibility.
 }
 
 // getDeviceLimiter returns the limiter for a specific device, creating one if needed

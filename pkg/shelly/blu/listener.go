@@ -216,29 +216,19 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 		model = strings.ToLower(eventData.BTHome.LocalName)
 	}
 
-	// Build device info with sensor capabilities and BTHome frame data (static device characteristics only)
-	deviceInfo := &shelly.DeviceInfo{
-		Product: shelly.Product{
-			Model:      model,
-			MacAddress: eventData.Address,
-			Generation: 0, // BLU devices don't have a generation
-		},
-		Id: deviceID,
-	}
-
-	// Add BTHome protocol information if available
-	if eventData.BTHome != nil {
-		deviceInfo.BTHome = &shelly.BTHomeInfo{
-			Version:          eventData.BTHomeVersion,
-			Encryption:       eventData.Encryption,
-			Capabilities:     capabilities,
-			ServiceData:      eventData.BTHome.ServiceData,
-			ManufacturerData: eventData.BTHome.ManufacturerData,
+	// Build new BTHome info with capabilities
+	var newBTHome *shelly.BTHomeInfo
+	if len(capabilities) > 0 || eventData.BTHome != nil {
+		newBTHome = &shelly.BTHomeInfo{
+			Version:      eventData.BTHomeVersion,
+			Encryption:   eventData.Encryption,
+			Capabilities: capabilities,
+		}
+		if eventData.BTHome != nil {
+			newBTHome.ServiceData = eventData.BTHome.ServiceData
+			newBTHome.ManufacturerData = eventData.BTHome.ManufacturerData
 		}
 	}
-
-	// Note: Battery level is dynamic data and should not be stored in DeviceInfo
-	// It should be retrieved from real-time status/events instead
 
 	// Parse MAC address
 	macAddr, parseErr := net.ParseMAC(eventData.Address)
@@ -247,17 +237,92 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 		return
 	}
 
-	// Create device entry
+	// Try to get existing device from DB
+	existingDevice, err := registry.GetDeviceById(ctx, deviceID)
+	if err == nil && existingDevice != nil {
+		// Device exists - check if anything changed
+		changed := false
+
+		// Check if BTHome info changed
+		if existingDevice.Info == nil {
+			// No info at all - need to update
+			existingDevice.Info = &shelly.DeviceInfo{
+				Product: shelly.Product{
+					Model:      model,
+					MacAddress: eventData.Address,
+					Generation: 0,
+				},
+				Id: deviceID,
+			}
+			changed = true
+		}
+
+		// Check if BTHome capabilities changed
+		if !btHomeInfoEqual(existingDevice.Info.BTHome, newBTHome) {
+			existingDevice.Info.BTHome = newBTHome
+			changed = true
+		}
+
+		// Update model if it changed (but not if it's just the default)
+		if model != "shellyblu" && existingDevice.Info.Model != model {
+			existingDevice.Info.Model = model
+			changed = true
+		}
+
+		// Only save if something changed
+		if changed {
+			if err := registry.SetDevice(ctx, existingDevice, true); err != nil {
+				log.Error(err, "Failed to update BLU device", "device_id", deviceID)
+				return
+			}
+			log.V(1).Info("Updated BLU device", "device_id", deviceID, "capabilities", capabilities)
+		}
+		return
+	}
+
+	// Device doesn't exist - create new entry
+	deviceInfo := &shelly.DeviceInfo{
+		Product: shelly.Product{
+			Model:      model,
+			MacAddress: eventData.Address,
+			Generation: 0, // BLU devices don't have a generation
+		},
+		Id: deviceID,
+	}
+	deviceInfo.BTHome = newBTHome
+
 	device := myhome.NewDevice(log, myhome.SHELLY, deviceID)
 	device = device.WithMAC(macAddr)
-	device = device.WithName(deviceID) // Use device ID as default name
+	device = device.WithName(deviceID) // Use device ID as default name for new devices
 	device.Info = deviceInfo
 
-	// Register or update the device (overwrite=true to update capabilities if they change)
 	if err := registry.SetDevice(ctx, device, true); err != nil {
 		log.Error(err, "Failed to register BLU device", "device_id", deviceID)
 		return
 	}
 
-	log.V(1).Info("Registered/updated BLU device", "device_id", deviceID, "mac", eventData.Address, "capabilities", capabilities)
+	log.Info("Registered new BLU device", "device_id", deviceID, "mac", eventData.Address, "capabilities", capabilities)
+}
+
+// btHomeInfoEqual compares two BTHomeInfo structs for equality
+func btHomeInfoEqual(a, b *shelly.BTHomeInfo) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if a.Version != b.Version || a.Encryption != b.Encryption {
+		return false
+	}
+	if len(a.Capabilities) != len(b.Capabilities) {
+		return false
+	}
+	// Compare capabilities (order matters for simplicity)
+	for i, cap := range a.Capabilities {
+		if cap != b.Capabilities[i] {
+			return false
+		}
+	}
+	return true
 }

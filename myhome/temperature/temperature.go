@@ -103,6 +103,18 @@ func (s *Service) RegisterHandlers() {
 	myhome.RegisterMethodHandler(myhome.TemperatureSetKindSchedule, func(params any) (any, error) {
 		return s.HandleSetKindSchedule(context.Background(), params.(*myhome.TemperatureSetKindScheduleParams))
 	})
+	myhome.RegisterMethodHandler(myhome.RoomList, func(params any) (any, error) {
+		return s.HandleRoomList(context.Background())
+	})
+	myhome.RegisterMethodHandler(myhome.RoomCreate, func(params any) (any, error) {
+		return s.HandleRoomCreate(context.Background(), params.(*myhome.RoomCreateParams))
+	})
+	myhome.RegisterMethodHandler(myhome.RoomEdit, func(params any) (any, error) {
+		return s.HandleRoomEdit(context.Background(), params.(*myhome.RoomEditParams))
+	})
+	myhome.RegisterMethodHandler(myhome.RoomDelete, func(params any) (any, error) {
+		return s.HandleRoomDelete(context.Background(), params.(*myhome.RoomDeleteParams))
+	})
 }
 
 // loadFromStorage loads all data from persistent storage into memory

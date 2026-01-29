@@ -184,4 +184,60 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &OccupancyStatusResult{}
 		},
 	},
+	HeaterGetConfig: {
+		NewParams: func() any {
+			return &HeaterGetConfigParams{}
+		},
+		NewResult: func() any {
+			return &HeaterGetConfigResult{}
+		},
+	},
+	HeaterSetConfig: {
+		NewParams: func() any {
+			return &HeaterSetConfigParams{}
+		},
+		NewResult: func() any {
+			return &HeaterSetConfigResult{}
+		},
+	},
+	ThermometerList: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &ThermometerListResult{}
+		},
+	},
+	RoomList: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &RoomListResult{}
+		},
+	},
+	RoomCreate: {
+		NewParams: func() any {
+			return &RoomCreateParams{}
+		},
+		NewResult: func() any {
+			return &RoomCreateResult{}
+		},
+	},
+	RoomEdit: {
+		NewParams: func() any {
+			return &RoomEditParams{}
+		},
+		NewResult: func() any {
+			return &RoomEditResult{}
+		},
+	},
+	RoomDelete: {
+		NewParams: func() any {
+			return &RoomDeleteParams{}
+		},
+		NewResult: func() any {
+			return &RoomDeleteResult{}
+		},
+	},
 }

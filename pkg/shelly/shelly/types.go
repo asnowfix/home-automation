@@ -47,6 +47,13 @@ type BTHomeInfo struct {
 	ManufacturerData map[string]string `json:"manufacturer_data,omitempty"` // Raw manufacturer data (if present)
 }
 
+// ScriptInfo contains basic script information for storage
+type ScriptInfo struct {
+	Id      uint32 `json:"id"`
+	Name    string `json:"name"`
+	Running bool   `json:"running"`
+}
+
 type Config struct {
 	BLE       *any                 `json:"ble,omitempty"`
 	BtHome    *any                 `json:"bthome,omitempty"`
@@ -59,6 +66,7 @@ type Config struct {
 	Knx       *any                 `json:"knx,omitempty"`
 	Mqtt      *mqtt.Config         `json:"mqtt,omitempty"`
 	Schedule  *schedule.Scheduled  `json:"schedule,omitempty"`
+	Scripts   []ScriptInfo         `json:"scripts,omitempty"`
 	Switch0   *sswitch.Config      `json:"switch:0,omitempty"`
 	Switch1   *sswitch.Config      `json:"switch:1,omitempty"`
 	Switch2   *sswitch.Config      `json:"switch:2,omitempty"`

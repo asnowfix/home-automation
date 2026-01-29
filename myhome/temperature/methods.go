@@ -347,6 +347,165 @@ func parseTimeRanges(rangeStrs []string) ([]myhome.TemperatureTimeRange, error) 
 	return ranges, nil
 }
 
+// HandleRoomList handles room.list RPC method - returns simplified room list for UI
+func (s *Service) HandleRoomList(ctx context.Context) (*myhome.RoomListResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rooms := make([]myhome.RoomInfo, 0, len(s.rooms))
+	for _, config := range s.rooms {
+		rooms = append(rooms, myhome.RoomInfo{
+			ID:   config.ID,
+			Name: config.Name,
+		})
+	}
+
+	return &myhome.RoomListResult{Rooms: rooms}, nil
+}
+
+// HandleRoomEdit handles room.edit RPC method - updates an existing room
+func (s *Service) HandleRoomEdit(ctx context.Context, params *myhome.RoomEditParams) (*myhome.RoomEditResult, error) {
+	if params.ID == "" {
+		return nil, fmt.Errorf("room id is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	config, exists := s.rooms[params.ID]
+	if !exists {
+		return &myhome.RoomEditResult{
+			Success: false,
+			Message: "room not found",
+		}, nil
+	}
+
+	// Update fields if provided
+	if params.Name != nil {
+		config.Name = *params.Name
+	}
+	if len(params.Kinds) > 0 {
+		config.Kinds = params.Kinds
+	}
+	if len(params.Levels) > 0 {
+		// Ensure "eco" level exists
+		if _, hasEco := params.Levels["eco"]; !hasEco {
+			return &myhome.RoomEditResult{
+				Success: false,
+				Message: "'eco' temperature level is required",
+			}, nil
+		}
+		config.Levels = params.Levels
+	}
+
+	// Save to storage
+	if err := s.storage.SaveRoom(config); err != nil {
+		return nil, fmt.Errorf("failed to save room: %w", err)
+	}
+
+	s.log.Info("Room updated", "room_id", params.ID)
+
+	// Publish updated ranges
+	if err := s.PublishRangesUpdate(ctx, params.ID); err != nil {
+		s.log.Error(err, "Failed to publish ranges update after room edit", "room_id", params.ID)
+	}
+
+	return &myhome.RoomEditResult{
+		Success: true,
+		Message: "room updated",
+	}, nil
+}
+
+// HandleRoomDelete handles room.delete RPC method - deletes a room if not in use
+func (s *Service) HandleRoomDelete(ctx context.Context, params *myhome.RoomDeleteParams) (*myhome.RoomDeleteResult, error) {
+	if params.ID == "" {
+		return nil, fmt.Errorf("room id is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, exists := s.rooms[params.ID]
+	if !exists {
+		return &myhome.RoomDeleteResult{
+			Success: false,
+			Message: "room not found",
+		}, nil
+	}
+
+	// TODO: Check if room is assigned to any heaters before deletion
+	// This requires querying all devices with heater.js script and checking their KVS
+	// For now, we allow deletion but log a warning
+	s.log.Info("Deleting room (heater assignment check not implemented)", "room_id", params.ID)
+
+	// Delete from memory
+	delete(s.rooms, params.ID)
+
+	// Delete from storage
+	if err := s.storage.DeleteRoom(params.ID); err != nil {
+		return nil, fmt.Errorf("failed to delete room: %w", err)
+	}
+
+	s.log.Info("Room deleted", "room_id", params.ID)
+
+	return &myhome.RoomDeleteResult{
+		Success: true,
+		Message: "room deleted",
+	}, nil
+}
+
+// HandleRoomCreate handles room.create RPC method - creates a new room with defaults
+func (s *Service) HandleRoomCreate(ctx context.Context, params *myhome.RoomCreateParams) (*myhome.RoomCreateResult, error) {
+	if params.ID == "" {
+		return nil, fmt.Errorf("room id is required")
+	}
+
+	// Check if room already exists
+	s.mu.RLock()
+	_, exists := s.rooms[params.ID]
+	s.mu.RUnlock()
+
+	if exists {
+		return &myhome.RoomCreateResult{
+			Success: false,
+			Message: "room already exists",
+		}, nil
+	}
+
+	// Create room with default values
+	name := params.Name
+	if name == "" {
+		name = params.ID
+	}
+
+	config := &RoomConfig{
+		ID:    params.ID,
+		Name:  name,
+		Kinds: []myhome.RoomKind{myhome.RoomKindOther},
+		Levels: map[string]float64{
+			"eco":     18.0,
+			"comfort": 20.0,
+			"away":    15.0,
+		},
+	}
+
+	s.mu.Lock()
+	s.rooms[params.ID] = config
+	s.mu.Unlock()
+
+	// Save to storage
+	if err := s.storage.SaveRoom(config); err != nil {
+		return nil, fmt.Errorf("failed to save room: %w", err)
+	}
+
+	s.log.Info("Room created", "room_id", params.ID, "name", name)
+
+	return &myhome.RoomCreateResult{
+		Success: true,
+		Message: "room created",
+	}, nil
+}
+
 // publishKindScheduleUpdate publishes MQTT updates for all rooms with the given kind
 func (s *Service) publishKindScheduleUpdate(kind myhome.RoomKind, dayType myhome.DayType) error {
 	s.mu.RLock()

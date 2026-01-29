@@ -31,7 +31,7 @@ const MQTT_WATCHDOG_MAX_FAILURES int = 3
 
 const MQTT_BROKER_CLIENT_LOG_INTERVAL time.Duration = 2 * time.Minute
 
-const SHELLY_DEFAULT_RATE_LIMIT time.Duration = 500 * time.Millisecond
+const SHELLY_DEFAULT_RATE_LIMIT time.Duration = 200 * time.Millisecond
 
 var Flags struct {
 	CpuProfile                  string

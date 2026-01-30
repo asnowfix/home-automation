@@ -87,7 +87,7 @@ func (d *daemon) Run() error {
 	// Conditionally start the embedded MQTT broker
 	if !disableEmbeddedMqttBroker {
 		log.Info("Starting embedded MQTT broker")
-		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval)
+		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval, options.Flags.NoMdnsPublish)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome")
 			return err
@@ -240,7 +240,11 @@ func (d *daemon) Run() error {
 		}
 
 		// Publish a hostname for the DeviceManager host: myhome.local
-		resolver.WithLocalName(d.ctx, myhome.MYHOME_HOSTNAME)
+		if !options.Flags.NoMdnsPublish {
+			resolver.WithLocalName(d.ctx, myhome.MYHOME_HOSTNAME)
+		} else {
+			log.Info("Skipping mDNS hostname publishing (--no-mdns-publish)")
+		}
 	} else {
 		log.Info("Device manager disabled")
 	}

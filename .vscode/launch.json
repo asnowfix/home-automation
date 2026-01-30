@@ -65,7 +65,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2"],
+            "args": ["--debug", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2", "--no-mdns-publish"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -75,7 +75,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--verbose", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2"],
+            "args": ["--verbose", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2", "--no-mdns-publish"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -89,7 +89,8 @@
                 "-P", "myhome-wo-broker.prof",
                 "-B", "192.168.1.2",
                 "--enable-gen1-proxy",
-                "--disable-device-manager"],
+                "--disable-device-manager",
+                "--no-mdns-publish"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -99,7 +100,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "daemon", "run", "-B", "192.168.1.2", "--enable-occupancy-service", "--disable-device-manager", "--disable-gen1-proxy"],
+            "args": ["--debug", "daemon", "run", "-B", "192.168.1.2", "--enable-occupancy-service", "--disable-device-manager", "--disable-gen1-proxy", "--no-mdns-publish"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -109,7 +110,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2", "-E", "events"],
+            "args": ["--debug", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2", "-E", "events", "--no-mdns-publish"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }

@@ -60,6 +60,7 @@ var Flags struct {
 	MetricsExporterTopic        string
 	ShellyRateLimit             time.Duration // the value taken by --shelly-rate-limit
 	AutoSetup                   bool          // the value taken by --auto-setup / -A
+	NoMdnsPublish               bool          // the value taken by --no-mdns-publish
 }
 
 var Via types.Channel

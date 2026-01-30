@@ -160,7 +160,7 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 		Dialog: Dialog{
 			Id:  requestId,
 			Src: hc.me,
-			Dst: MYHOME,
+			Dst: InstanceName,
 		},
 		Method: method,
 		Params: params,

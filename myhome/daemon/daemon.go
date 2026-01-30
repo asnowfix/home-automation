@@ -65,7 +65,12 @@ func (d *daemon) Run() error {
 	if err != nil {
 		return err
 	}
-	log.Info("Starting MyHome daemon")
+
+	// Set the instance name for RPC topics
+	if options.Flags.InstanceName != "" {
+		myhome.InstanceName = options.Flags.InstanceName
+	}
+	log.Info("Starting MyHome daemon", "instance", myhome.InstanceName)
 
 	// Start pprof HTTP server for profiling
 	go func() {

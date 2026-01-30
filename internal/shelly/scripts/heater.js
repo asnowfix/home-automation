@@ -1107,13 +1107,17 @@ function controlHeaterWithInputs(results) {
 
   var heaterShouldBeOn = filteredTemp < targetTemp;
 
-  // SAFETY: If filtered temperature is below eco setpoint, always heat IF occupied
-  if (isOccupied && filteredTemp < levels.eco) {
-    log('Safety: internal temp', filteredTemp, 'below eco setpoint', levels.eco, '=> HEAT');
+  // SAFETY: Always heat if below away setpoint (frost protection)
+  if (filteredTemp < levels.away) {
+    log('Safety: internal temp', filteredTemp, 'below away setpoint', levels.away, '=> HEAT');
     setHeaterState(true);
     return;
-  } else if (filteredTemp < levels.away) {
-    log('Safety: internal temp', filteredTemp, 'below away setpoint', levels.away, '=> HEAT');
+  }
+
+  // ECO FLOOR: If occupied and below eco level, always heat regardless of cheap time
+  // This ensures minimum comfort when inhabitants are home
+  if (isOccupied && filteredTemp < levels.eco) {
+    log('Eco floor: internal temp', filteredTemp, 'below eco setpoint', levels.eco, 'and occupied => HEAT');
     setHeaterState(true);
     return;
   }
@@ -1124,11 +1128,13 @@ function controlHeaterWithInputs(results) {
 
   var preheat = shouldPreheat(filteredTemp, forecastTemp, mfTemp, targetTemp)
   log('Preheat:', preheat)
+
+  // Normal heating: only during cheap hours or preheat mode
   if ((heaterShouldBeOn && isCheapHour()) || preheat) {
-    log('Heater ON (normal or preheat mode)', 'preheat:', preheat);
+    log('Heater ON (cheap hour or preheat mode)', 'preheat:', preheat);
     setHeaterState(true);
   } else {
-    log('Outside cheap window => no heating');
+    log('Outside cheap window and above eco floor => no heating');
     setHeaterState(false);
   }
 }

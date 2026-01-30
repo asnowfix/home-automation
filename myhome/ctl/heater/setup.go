@@ -42,18 +42,21 @@ var setupCmd = &cobra.Command{
 	Short: "Setup heater script configuration on a Shelly device",
 	Long: `Configure KVS entries for the heater script and upload/update the heater.js script.
 
-The internal-temperature-topic and external-temperature-topic are mandatory and must be provided.
+The internal-temperature-topic, external-temperature-topic, and room-id are mandatory and must be provided.
 All other configuration values have defaults.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 
-		// Validate mandatory topics
+		// Validate mandatory flags
 		if setupFlags.InternalTemperatureTopic == "" {
 			return fmt.Errorf("--internal-temperature-topic is required")
 		}
 		if setupFlags.ExternalTemperatureTopic == "" {
 			return fmt.Errorf("--external-temperature-topic is required")
+		}
+		if setupFlags.RoomId == "" {
+			return fmt.Errorf("--room-id is required")
 		}
 
 		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doSetup, nil)
@@ -71,7 +74,7 @@ func init() {
 	setupCmd.Flags().BoolVar(&setupFlags.NormallyClosed, "normally-closed", true, "Whether the switch is normally closed")
 	setupCmd.Flags().StringVar(&setupFlags.InternalTemperatureTopic, "internal-temperature-topic", "", "MQTT topic for internal temperature sensor (required)")
 	setupCmd.Flags().StringVar(&setupFlags.ExternalTemperatureTopic, "external-temperature-topic", "", "MQTT topic for external temperature sensor (required)")
-	setupCmd.Flags().StringVar(&setupFlags.RoomId, "room-id", "", "Room identifier for temperature API")
+	setupCmd.Flags().StringVar(&setupFlags.RoomId, "room-id", "", "Room identifier for temperature API (required)")
 
 	// Script upload flags
 	setupCmd.Flags().BoolVar(&setupFlags.NoMinify, "no-minify", false, "Do not minify script before upload")
@@ -80,6 +83,7 @@ func init() {
 	// Mark mandatory flags
 	setupCmd.MarkFlagRequired("internal-temperature-topic")
 	setupCmd.MarkFlagRequired("external-temperature-topic")
+	setupCmd.MarkFlagRequired("room-id")
 }
 
 func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
@@ -102,10 +106,7 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		"script/heater/external-temperature-topic": setupFlags.ExternalTemperatureTopic,
 	}
 
-	// Add room-id only if provided
-	if setupFlags.RoomId != "" {
-		kvsConfig["script/heater/room-id"] = setupFlags.RoomId
-	}
+	kvsConfig["script/heater/room-id"] = setupFlags.RoomId
 
 	// Set each KVS entry
 	fmt.Printf("\nConfiguring KVS entries:\n")

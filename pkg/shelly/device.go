@@ -137,6 +137,11 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 			return false, fmt.Errorf("unable to init MQTT (%v)", err)
 		}
 	}
+
+	// Resolve the channel after MQTT initialization - this ensures MQTT-only devices
+	// (no known host) use MQTT instead of the discard caller for ChannelDefault
+	via = d.Channel(via)
+
 	if d.Id() == "" {
 		err := d.initDeviceInfo(ctx, via)
 		if err != nil {

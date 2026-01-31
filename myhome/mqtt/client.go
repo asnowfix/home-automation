@@ -511,7 +511,13 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 						c.log.Info("Dropping subscriber", "topic", topic, "index", idx, "subscriber", subscribers[idx].name)
 						subscribers = append(subscribers[:idx], subscribers[idx+1:]...)
 					}
-					c.subscribers.Store(topic, subscribers)
+					if len(subscribers) == 0 {
+						// All subscribers dropped - delete topic entry so next Subscribe() will re-register at MQTT level
+						c.log.Info("All subscribers dropped, resetting topic subscription state", "topic", topic)
+						c.subscribers.Delete(topic)
+					} else {
+						c.subscribers.Store(topic, subscribers)
+					}
 				}
 			}(c.log.WithName("distribute"))
 		}

@@ -254,6 +254,14 @@ func (d *Device) UpdateHost(host string) {
 	}
 }
 
+func (d *Device) ClearHost() {
+	if d.Host_ != nil {
+		d.modified = true
+		d.Host_ = nil
+		d.log.Info("Cleared device host (HTTP channel will become not ready)", "device_id", d.Id())
+	}
+}
+
 func (d *Device) Ip() net.IP {
 	if d.status != nil {
 		if d.status.Ethernet != nil {

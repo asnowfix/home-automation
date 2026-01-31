@@ -147,15 +147,22 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 
 		modified, err := device.Refresh(ctx)
+
+		// Even if refresh failed, save the device if it was modified
+		// This handles cases where HTTP fails and clears the host
+		if modified {
+			if saveErr := dm.dr.SetDevice(ctx, device, true); saveErr != nil {
+				dm.log.Error(saveErr, "Failed to save modified device after refresh", "device_id", device.Id())
+			} else {
+				dm.log.V(1).Info("Saved modified device after refresh", "device_id", device.Id(), "refresh_error", err != nil)
+			}
+		}
+
+		// Return the original refresh error if any
 		if err != nil {
 			return nil, err
 		}
 
-		if modified {
-			if err := dm.dr.SetDevice(ctx, device, true); err != nil {
-				return nil, err
-			}
-		}
 		return nil, nil
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceSetup, func(in any) (any, error) {

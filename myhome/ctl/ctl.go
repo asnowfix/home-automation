@@ -70,6 +70,14 @@ var Cmd = &cobra.Command{
 
 		shellyPkg.Init(log, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 
+		// Start cleanup goroutine that closes MQTT client when context is cancelled
+		// This ensures cleanup happens even when command returns an error
+		// (Cobra skips PersistentPostRunE when RunE returns an error)
+		go func() {
+			<-ctx.Done()
+			mc.Close()
+		}()
+
 		for i, c := range types.Channels {
 			if options.Flags.Via == c {
 				options.Via = types.Channel(i)
@@ -97,7 +105,6 @@ var Cmd = &cobra.Command{
 		cancel := ctx.Value(global.CancelKey).(context.CancelFunc)
 		cancel()
 		mc.Close()
-		<-ctx.Done()
 		return nil
 	},
 }

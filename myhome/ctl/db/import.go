@@ -97,8 +97,16 @@ Examples:
 		// Import devices
 		if len(dbImport.Devices) > 0 {
 			for _, device := range dbImport.Devices {
+				// Check if context was cancelled (e.g., Ctrl-C)
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 				_, err := myhome.TheClient.CallE(ctx, myhome.DeviceUpdate, &device)
 				if err != nil {
+					// Check if this is a context cancellation error
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
 					fmt.Fprintf(os.Stderr, "⚠ Failed to import device %s: %v\n", device.Id(), err)
 					continue
 				}

@@ -2,6 +2,7 @@ package shelly
 
 import (
 	"context"
+	"pkg/shelly/ble"
 	"pkg/shelly/ethernet"
 	"pkg/shelly/input"
 	"pkg/shelly/kvs"
@@ -35,6 +36,7 @@ func Init(log logr.Logger, timeout time.Duration, rateLimitInterval time.Duratio
 	// Keep in lexical order
 	// gen1.Init(log, &registrar)
 	shelly.Init(log, &registrar, timeout)
+	ble.Init(log, &registrar)
 	ethernet.Init(log, &registrar)
 	input.Init(log, &registrar)
 	kvs.Init(log, &registrar)

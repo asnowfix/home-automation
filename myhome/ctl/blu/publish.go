@@ -11,6 +11,7 @@ import (
 	"myhome/ctl/options"
 	"pkg/devices"
 	"pkg/shelly"
+	"pkg/shelly/ble"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 	"time"
@@ -19,26 +20,42 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	clearFollows bool
+)
+
 var PublishCmd = &cobra.Command{
-	Use:   "publish <gateway-device> <blu-device>",
+	Use:   "publish <gateway-device> [blu-device]",
 	Short: "Enable BLE gateway and upload blu-publisher.js to publish BLU device events",
 	Long: `Enable BLE gateway on a Shelly device and upload blu-publisher.js script
-to publish events from the specified BLU device over MQTT.
+to publish events from BLU devices over MQTT.
 
-The <blu-device> can be specified as:
+When [blu-device] is provided, the script will only publish events from that specific device.
+When [blu-device] is omitted, the script will publish ALL BLU events without filtering.
+
+The [blu-device] can be specified as:
 - MAC address: "e8:e0:7e:a6:0c:6f", "E8E07EA60C6F", "e8-e0-7e-a6-0c-6f"
 - Device ID: "shellyblu-e8e07ea60c6f"
 - Device name: "motion-sensor-hallway"
 
 When called with "-" as <gateway-device>, lists all devices that publish the given BLU device.
 
+Use --clear to remove all existing BLU follow entries before configuring.
+
 This command:
 1. Enables the BLE observer/gateway on the device
-2. Configures the device to follow the specified BLU MAC
-3. Uploads blu-publisher.js script with version tracking`,
-	Args: cobra.ExactArgs(2),
+2. Optionally clears existing BLU follow entries (with --clear)
+3. Configures the device to follow the specified BLU MAC (if provided)
+4. Uploads blu-publisher.js script with version tracking`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		gatewayDevice := args[0]
+
+		// If no blu-device provided, enable "publish all" mode
+		if len(args) == 1 {
+			return enablePublishAll(cmd.Context(), gatewayDevice, clearFollows)
+		}
+
 		bluDevice := args[1]
 
 		// Resolve BLU device identifier to MAC address
@@ -52,12 +69,17 @@ This command:
 			return listDevicesPublishingBlu(cmd.Context(), mac)
 		}
 
-		return addDevicePublishingBlu(cmd.Context(), gatewayDevice, mac)
+		return addDevicePublishingBlu(cmd.Context(), gatewayDevice, mac, clearFollows)
 	},
 }
 
-// addDevicePublishingBlu configures a Shelly device to publish events from a BLU MAC address
-func addDevicePublishingBlu(ctx context.Context, gatewayDevice, mac string) error {
+func init() {
+	PublishCmd.Flags().BoolVar(&clearFollows, "clear", false, "Clear all existing BLU follow entries before configuring")
+}
+
+// enablePublishAll configures a Shelly device to publish ALL BLU events without filtering
+// An empty follows map in KVS means "publish all"
+func enablePublishAll(ctx context.Context, gatewayDevice string, clear bool) error {
 	log := hlog.Logger
 
 	// Enable BLE observer/gateway
@@ -65,6 +87,49 @@ func addDevicePublishingBlu(ctx context.Context, gatewayDevice, mac string) erro
 	_, err := myhome.Foreach(ctx, log, gatewayDevice, options.Via, enableBleGateway, []string{})
 	if err != nil {
 		return fmt.Errorf("failed to enable BLE gateway: %w", err)
+	}
+
+	// Clear all existing follow/shelly-blu/* KVS entries if --clear flag is set
+	if clear {
+		fmt.Printf("Clearing existing BLU follow entries...\n")
+		_, err = myhome.Foreach(ctx, log, gatewayDevice, options.Via, clearBluFollows, []string{})
+		if err != nil {
+			return fmt.Errorf("failed to clear BLU follows: %w", err)
+		}
+	}
+
+	// Upload blu-publisher.js script
+	// Empty follows map = publish all BLU events
+	fmt.Printf("Uploading blu-publisher.js script...\n")
+	longCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	_, err = myhome.Foreach(longCtx, log, gatewayDevice, options.Via, uploadScript, []string{"blu-publisher.js"})
+	if err != nil {
+		return fmt.Errorf("failed to upload script: %w", err)
+	}
+
+	fmt.Printf("✓ BLE gateway enabled and blu-publisher.js uploaded (publish-all mode)\n")
+	return nil
+}
+
+// addDevicePublishingBlu configures a Shelly device to publish events from a BLU MAC address
+func addDevicePublishingBlu(ctx context.Context, gatewayDevice, mac string, clear bool) error {
+	log := hlog.Logger
+
+	// Enable BLE observer/gateway
+	fmt.Printf("Enabling BLE gateway on %s...\n", gatewayDevice)
+	_, err := myhome.Foreach(ctx, log, gatewayDevice, options.Via, enableBleGateway, []string{})
+	if err != nil {
+		return fmt.Errorf("failed to enable BLE gateway: %w", err)
+	}
+
+	// Clear all existing follow/shelly-blu/* KVS entries if --clear flag is set
+	if clear {
+		fmt.Printf("Clearing existing BLU follow entries...\n")
+		_, err = myhome.Foreach(ctx, log, gatewayDevice, options.Via, clearBluFollows, []string{})
+		if err != nil {
+			return fmt.Errorf("failed to clear BLU follows: %w", err)
+		}
 	}
 
 	// Set KVS configuration for the BLU MAC
@@ -128,30 +193,60 @@ func enableBleGateway(ctx context.Context, log logr.Logger, via types.Channel, d
 		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
 	}
 
-	// Enable BLE with observer using RPC call
-	params := map[string]any{
-		"config": map[string]any{
-			"enable": true,
-			"observer": map[string]any{
-				"enable": true,
-			},
+	// Enable BLE with observer using the ble module
+	config := &ble.Config{
+		Enable: true,
+		Observer: &ble.Observer{
+			Enable: true,
 		},
 	}
 
-	resp, err := sd.CallE(ctx, via, "BLE.SetConfig", params)
+	resp, err := ble.DoSetConfig(ctx, via, sd, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to enable BLE observer: %w", err)
 	}
 
 	// Check if restart is required
-	if respMap, ok := resp.(map[string]any); ok {
-		if restartRequired, ok := respMap["restart_required"].(bool); ok && restartRequired {
-			fmt.Printf("  Note: Device restart required for BLE changes to take effect\n")
-		}
+	if resp.RestartRequired {
+		fmt.Printf("  Note: Device restart required for BLE changes to take effect\n")
 	}
 
 	fmt.Printf("✓ BLE gateway enabled on %s\n", sd.Name())
 	return resp, nil
+}
+
+// clearBluFollows deletes all follow/shelly-blu/* KVS entries to enable publish-all mode
+func clearBluFollows(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
+	}
+
+	// List all keys with the follow/shelly-blu/ prefix
+	kvsPrefix := "follow/shelly-blu/"
+	keys, err := kvs.ListKeys(ctx, log, via, sd, kvsPrefix+"*")
+	if err != nil {
+		log.Info("No existing BLU follow entries to clear", "device", sd.Id())
+		return nil, nil // Not an error if no keys exist
+	}
+
+	if keys == nil || len(keys.Keys) == 0 {
+		fmt.Printf("  No existing BLU follow entries on %s\n", sd.Name())
+		return nil, nil
+	}
+
+	// Delete each key
+	for key := range keys.Keys {
+		log.Info("Deleting BLU follow entry", "key", key, "device", sd.Id())
+		_, err := kvs.DeleteKey(ctx, log, via, sd, key)
+		if err != nil {
+			log.Error(err, "Failed to delete key", "key", key)
+			// Continue deleting other keys
+		}
+	}
+
+	fmt.Printf("  Cleared %d BLU follow entries on %s\n", len(keys.Keys), sd.Name())
+	return nil, nil
 }
 
 // doSetKVS is a helper function for setting KVS entries on Shelly devices

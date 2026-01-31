@@ -260,6 +260,9 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	myhome.RegisterMethodHandler(myhome.ThermometerList, func(in any) (any, error) {
 		return dm.HandleThermometerList(ctx)
 	})
+	myhome.RegisterMethodHandler(myhome.DoorList, func(in any) (any, error) {
+		return dm.HandleDoorList(ctx)
+	})
 
 	// Register heater service handlers
 	heaterService := shellyscript.NewHeaterService(dm.log, dm)
@@ -670,6 +673,36 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 	}
 
 	return &myhome.ThermometerListResult{Thermometers: thermometers}, nil
+}
+
+// HandleDoorList returns a list of devices with window/door sensing capability
+func (dm *DeviceManager) HandleDoorList(ctx context.Context) (*myhome.DoorListResult, error) {
+	devices, err := dm.GetAllDevices(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get devices: %w", err)
+	}
+
+	doors := make([]myhome.DoorInfo, 0)
+
+	for _, d := range devices {
+		// Check for BLU devices with window capability
+		if d.Info != nil && d.Info.BTHome != nil {
+			for _, cap := range d.Info.BTHome.Capabilities {
+				if cap == "window" {
+					// BLU devices use MAC address in topic (with colons)
+					doors = append(doors, myhome.DoorInfo{
+						ID:        d.Id(),
+						Name:      d.Name(),
+						Type:      "BLU",
+						MqttTopic: fmt.Sprintf("shelly-blu/events/%s", d.MAC),
+					})
+					break
+				}
+			}
+		}
+	}
+
+	return &myhome.DoorListResult{Doors: doors}, nil
 }
 
 // GetShellyDevice returns a Shelly device for RPC calls (implements script.DeviceProvider)

@@ -959,7 +959,7 @@ func getDeviceTypeEmoji(d *myhome.Device) string {
 		return "🚶"
 	}
 	if hasWindow {
-		return "🪟"
+		return "🚪"
 	}
 	if hasButton {
 		return "🔘"

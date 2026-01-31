@@ -35,6 +35,7 @@ const (
 	HeaterGetConfig               Verb = "heater.getconfig"
 	HeaterSetConfig               Verb = "heater.setconfig"
 	ThermometerList               Verb = "thermometer.list"
+	DoorList                      Verb = "door.list"
 	RoomList                      Verb = "room.list"
 	RoomCreate                    Verb = "room.create"
 	RoomEdit                      Verb = "room.edit"

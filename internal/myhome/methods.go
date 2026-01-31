@@ -208,6 +208,14 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &ThermometerListResult{}
 		},
 	},
+	DoorList: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &DoorListResult{}
+		},
+	},
 	RoomList: {
 		NewParams: func() any {
 			return nil

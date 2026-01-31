@@ -38,7 +38,6 @@ type DeviceManager struct {
 	cancel        context.CancelFunc
 	log           logr.Logger
 	mqttClient    mqtt.Client
-	mqttCache     *mqtt.Cache
 	resolver      mynet.Resolver
 	router        model.Router
 	setupConfig   shellysetup.Config // Configuration for auto-setup of new devices
@@ -241,22 +240,6 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.MqttRepeat, func(in any) (any, error) {
-		topic := in.(string)
-		dm.log.Info("RPC: mqtt.repeat", "topic", topic)
-
-		if dm.mqttCache == nil {
-			return nil, fmt.Errorf("MQTT cache not initialized")
-		}
-
-		// Replay the cached message for the topic
-		err := dm.mqttCache.Replay(ctx, dm.mqttClient, topic)
-		if err != nil {
-			return nil, fmt.Errorf("failed to replay MQTT message: %w", err)
-		}
-
-		return nil, nil
-	})
 	myhome.RegisterMethodHandler(myhome.ThermometerList, func(in any) (any, error) {
 		return dm.HandleThermometerList(ctx)
 	})
@@ -269,22 +252,6 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	heaterService.RegisterHandlers()
 
 	ctx = shellymqtt.NewContext(ctx, dm.mqttClient)
-
-	// Start MQTT message cache
-	dm.log.Info("Starting MQTT message cache")
-	dm.mqttCache, err = mqtt.NewCache(ctx, mqtt.DefaultCacheConfig())
-	if err != nil {
-		dm.log.Error(err, "Failed to initialize MQTT cache")
-		return err
-	}
-
-	// Start caching MQTT messages from device types that are not always online (subscribe to all topics with "#")
-	if err := dm.mqttCache.StartCaching(dm.mqttClient, "shelly-blu/#"); err != nil {
-		dm.log.Error(err, "Failed to start MQTT message caching")
-		return err
-	}
-
-	dm.log.Info("MQTT message cache started")
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
 	go dm.deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")))
@@ -323,7 +290,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	}
 
 	// Start Gen1 MQTT listener for sensor data
-	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.mqttCache, dm.dr, dm.router)
+	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.dr, dm.router)
 	if err != nil {
 		dm.log.Error(err, "Failed to start Gen1 MQTT listener")
 		return err

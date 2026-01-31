@@ -15,7 +15,7 @@ import (
 
 // StartMqttListener listens to Gen1 MQTT topics and updates device status
 // It subscribes to shellies/# and auto-registers devices as they publish data
-func StartMqttListener(ctx context.Context, mc mqtt.Client, mcc mqtt.Cache, sc devices.DeviceRegistry, router model.Router) error {
+func StartMqttListener(ctx context.Context, mc mqtt.Client, sc devices.DeviceRegistry, router model.Router) error {
 	log := logr.FromContextOrDiscard(ctx).WithName("Gen1MqttListener")
 
 	log.Info("Starting Gen1 MQTT listener using MQTT client type", "type", fmt.Sprintf("%T", mc))
@@ -24,7 +24,6 @@ func StartMqttListener(ctx context.Context, mc mqtt.Client, mcc mqtt.Cache, sc d
 	// This will match: shellies/<device-id>/info, shellies/<device-id>/sensor/temperature, shellies/<device-id>/sensor/humidity, etc.
 	topic := "shellies/#"
 	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/gen1", func(topic string, payload []byte, subscriber string) error {
-		mcc.Insert(topic, payload)
 		return handleMessage(ctx, log, sc, router, topic, payload)
 	})
 	if err != nil {

@@ -21,7 +21,6 @@ const (
 	DeviceRefresh                 Verb = "device.refresh"
 	DeviceSetup                   Verb = "device.setup"
 	DeviceUpdate                  Verb = "device.update"
-	MqttRepeat                    Verb = "mqtt.repeat"
 	TemperatureGet                Verb = "temperature.get"
 	TemperatureSet                Verb = "temperature.set"
 	TemperatureList               Verb = "temperature.list"

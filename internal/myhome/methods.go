@@ -96,14 +96,6 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return nil
 		},
 	},
-	MqttRepeat: {
-		NewParams: func() any {
-			return "" // topic string
-		},
-		NewResult: func() any {
-			return nil
-		},
-	},
 	TemperatureGet: {
 		NewParams: func() any {
 			return &TemperatureGetParams{}

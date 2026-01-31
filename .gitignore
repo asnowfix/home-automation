@@ -49,4 +49,4 @@ SECRETS.md
 /myhome/events/*
 /myhome/device*.json
 myhome_*.deb
-myhome/database-export.json
+database-export.json

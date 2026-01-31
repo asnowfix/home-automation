@@ -3,15 +3,14 @@ package ui
 import (
 	"context"
 	"embed"
-	"html/template"
 	"io"
 	"io/fs"
 	"myhome"
+	"myhome/storage"
 	"net/http"
 	"sort"
 	"strings"
-
-	"myhome/storage"
+	"text/template"
 )
 
 // Embed static assets under this package
@@ -35,13 +34,17 @@ func StaticFileServer() (http.Handler, error) {
 
 // DeviceView represents a device for rendering in the UI
 type DeviceView struct {
-	Name            string
-	Id              string
-	Manufacturer    string
-	Host            string
-	LinkToken       string
-	HasHeaterScript bool
-	DeviceTypeEmoji string // Emoji indicating device type (e.g., 🌡️ for thermometer, 🚶 for motion)
+	Name                 string
+	Id                   string
+	Manufacturer         string
+	Host                 string
+	LinkToken            string
+	HasHeaterScript      bool
+	HasDoorSensor        bool     // true if device has door/window sensing capability
+	HasTemperatureSensor bool     // true if device has temperature sensing capability
+	DeviceTypeEmoji      string   // Emoji indicating device type (e.g., 🌡️ for thermometer, 🚶 for motion)
+	Temperature          *float64 // Current temperature in Celsius (nil if not a thermometer)
+	DoorOpened           *bool    // true if door/window is open, false if closed (nil if not a door/window sensor)
 }
 
 // IndexData holds the data for rendering the index page
@@ -58,6 +61,15 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
   <title>MyHome Devices</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css"/>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🏠</text></svg>"/>
+  <style>
+    .door-icon {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+  </style>
   </head>
 <body>
   <section class="hero is-light is-small">
@@ -84,7 +96,42 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
         <div class="column is-4-desktop is-6-tablet">
           <div class="card">
             <div class="card-content">
-              <p class="title is-5">{{if .DeviceTypeEmoji}}{{.DeviceTypeEmoji}} {{end}}{{.Name}}</p>
+              <p class="title is-5">
+                {{if .DeviceTypeEmoji}}{{.DeviceTypeEmoji}} {{end}}{{.Name}}
+                {{if .HasTemperatureSensor}}
+                  {{if .Temperature}}
+                    <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{printf "%.1f" .Temperature}}°C</span>
+                  {{else}}
+                    <span class="tag is-light ml-2" id="sensor-{{.Id}}-temperature">--°C</span>
+                  {{end}}
+                {{end}}
+                {{if .HasDoorSensor}}
+                  {{if ne .DoorOpened nil}}
+                    {{if .DoorOpened}}
+                      <span class="tag is-warning ml-2" id="door-{{.Id}}">
+                        <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z"/>
+                        </svg>
+                        Open
+                      </span>
+                    {{else}}
+                      <span class="tag is-success ml-2" id="door-{{.Id}}">
+                        <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
+                        </svg>
+                        Closed
+                      </span>
+                    {{end}}
+                  {{else}}
+                    <span class="tag is-light ml-2" id="door-{{.Id}}">
+                      <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
+                      </svg>
+                      Unknown
+                    </span>
+                  {{end}}
+                {{end}}
+              </p>
               <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
               {{if .Host}}
                 <p class="has-text-grey">Host: {{.Host}}</p>
@@ -901,6 +948,56 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
 
     // Load rooms on page load
     document.addEventListener('DOMContentLoaded', loadRooms);
+
+    // SSE client for live sensor updates
+    const eventSource = new EventSource('/events');
+
+    eventSource.addEventListener('connected', (e) => {
+      console.log('SSE connected');
+    });
+
+    eventSource.addEventListener('sensor-update', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        updateDeviceSensor(data.device_id, data.sensor, data.value);
+      } catch (err) {
+        console.error('Failed to parse sensor-update:', err);
+      }
+    });
+
+    eventSource.addEventListener('door-update', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        updateDeviceDoorStatus(data.device_id, data.opened);
+      } catch (err) {
+        console.error('Failed to parse door-update:', err);
+      }
+    });
+
+    eventSource.onerror = (e) => {
+      console.error('SSE error:', e);
+      // Browser will automatically reconnect
+    };
+
+    function updateDeviceSensor(deviceId, sensor, value) {
+      const el = document.getElementById('sensor-' + deviceId + '-' + sensor);
+      if (el) {
+        el.textContent = value.toFixed(1) + '°C';
+      }
+    }
+
+    function updateDeviceDoorStatus(deviceId, opened) {
+      const el = document.getElementById('door-' + deviceId);
+      if (el) {
+        if (opened) {
+          el.innerHTML = '<svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z"/></svg>Open';
+          el.className = 'tag is-warning ml-2';
+        } else {
+          el.innerHTML = '<svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/></svg>Closed';
+          el.className = 'tag is-success ml-2';
+        }
+      }
+    }
   </script>
 </body>
 </html>`))
@@ -971,7 +1068,35 @@ func getDeviceTypeEmoji(d *myhome.Device) string {
 	return ""
 }
 
+// hasTemperatureCapability checks if a device has temperature sensing capability
+func hasTemperatureCapability(d *myhome.Device) bool {
+	if strings.HasPrefix(d.Id(), "shellyht-") {
+		return true
+	}
+	if d.Info != nil && d.Info.BTHome != nil {
+		for _, cap := range d.Info.BTHome.Capabilities {
+			if cap == "temperature" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasWindowCapability checks if a device has window/door sensing capability
+func hasWindowCapability(d *myhome.Device) bool {
+	if d.Info != nil && d.Info.BTHome != nil {
+		for _, cap := range d.Info.BTHome.Capabilities {
+			if cap == "window" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // RenderIndex renders the index page with device list
+// Sensor values are populated via SSE after page load
 func RenderIndex(ctx context.Context, db *storage.DeviceStorage, w io.Writer) error {
 	data := IndexData{Devices: []DeviceView{}}
 	if db != nil {
@@ -992,15 +1117,19 @@ func RenderIndex(ctx context.Context, db *storage.DeviceStorage, w io.Writer) er
 					token = d.Id()
 				}
 			}
-			data.Devices = append(data.Devices, DeviceView{
-				Name:            name,
-				Id:              d.Id(),
-				Manufacturer:    d.Manufacturer(),
-				Host:            host,
-				LinkToken:       token,
-				HasHeaterScript: hasHeaterScript(d),
-				DeviceTypeEmoji: getDeviceTypeEmoji(d),
-			})
+			view := DeviceView{
+				Name:                 name,
+				Id:                   d.Id(),
+				Manufacturer:         d.Manufacturer(),
+				Host:                 host,
+				LinkToken:            token,
+				HasHeaterScript:      hasHeaterScript(d),
+				HasDoorSensor:        hasWindowCapability(d),
+				HasTemperatureSensor: hasTemperatureCapability(d),
+				DeviceTypeEmoji:      getDeviceTypeEmoji(d),
+			}
+
+			data.Devices = append(data.Devices, view)
 		}
 		sort.Slice(data.Devices, func(i, j int) bool {
 			return strings.ToLower(data.Devices[i].Name) < strings.ToLower(data.Devices[j].Name)

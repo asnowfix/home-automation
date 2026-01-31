@@ -13,9 +13,51 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// SensorUpdate represents a parsed sensor update in a common format
+type SensorUpdate struct {
+	DeviceID    string
+	Temperature *float64
+	DoorOpened  *bool // true if door/window is open, false if closed (Gen1 doesn't have door sensors)
+}
+
+// SSEBroadcaster interface for broadcasting sensor updates to UI
+type SSEBroadcaster interface {
+	BroadcastSensorUpdate(deviceID string, sensor string, value float64)
+	BroadcastDoorStatus(deviceID string, opened bool)
+}
+
+// ParseSensorEvent parses a Gen1 MQTT sensor event and extracts sensor data
+// Returns nil if the event doesn't contain sensor data
+func ParseSensorEvent(topic string, payload []byte) *SensorUpdate {
+	// Parse Gen1 sensor topic: shellies/<device-id>/sensor/<sensor-type>
+	parts := strings.Split(topic, "/")
+	if len(parts) != 4 || parts[2] != "sensor" {
+		return nil
+	}
+
+	deviceID := parts[1]
+	sensorType := parts[3]
+
+	// Only handle temperature for now
+	if sensorType != "temperature" {
+		return nil
+	}
+
+	// Parse sensor value
+	var value float64
+	if err := json.Unmarshal(payload, &value); err != nil {
+		return nil
+	}
+
+	return &SensorUpdate{
+		DeviceID:    deviceID,
+		Temperature: &value,
+	}
+}
+
 // StartMqttListener listens to Gen1 MQTT topics and updates device status
 // It subscribes to shellies/# and auto-registers devices as they publish data
-func StartMqttListener(ctx context.Context, mc mqtt.Client, sc devices.DeviceRegistry, router model.Router) error {
+func StartMqttListener(ctx context.Context, mc mqtt.Client, sc devices.DeviceRegistry, router model.Router, sseBroadcaster SSEBroadcaster) error {
 	log := logr.FromContextOrDiscard(ctx).WithName("Gen1MqttListener")
 
 	log.Info("Starting Gen1 MQTT listener using MQTT client type", "type", fmt.Sprintf("%T", mc))
@@ -24,14 +66,28 @@ func StartMqttListener(ctx context.Context, mc mqtt.Client, sc devices.DeviceReg
 	// This will match: shellies/<device-id>/info, shellies/<device-id>/sensor/temperature, shellies/<device-id>/sensor/humidity, etc.
 	topic := "shellies/#"
 	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/gen1", func(topic string, payload []byte, subscriber string) error {
-		return handleMessage(ctx, log, sc, router, topic, payload)
+		// Handle device registration
+		err := handleMessage(ctx, log, sc, router, topic, payload)
+
+		// Broadcast sensor updates via SSE if broadcaster is available
+		if sseBroadcaster != nil {
+			if update := ParseSensorEvent(topic, payload); update != nil {
+				if update.Temperature != nil {
+					sseBroadcaster.BroadcastSensorUpdate(update.DeviceID, "temperature", *update.Temperature)
+				}
+				if update.DoorOpened != nil {
+					sseBroadcaster.BroadcastDoorStatus(update.DeviceID, *update.DoorOpened)
+				}
+			}
+		}
+
+		return err
 	})
 	if err != nil {
-		log.Error(err, "Failed to subscribe to Gen1 sensor topics", "topic", topic)
-		return err
+		return fmt.Errorf("failed to subscribe to Gen1 topics: %w", err)
 	}
 
-	log.Info("Subscribed to Gen1 topics", "topic", topic)
+	log.Info("Gen1 MQTT listener started", "topic", topic)
 	return nil
 }
 
@@ -55,7 +111,6 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 		}
 
 		log.V(1).Info("Received Gen1 sensor data", "device_id", deviceId, "sensor", sensorType, "value", number)
-		// TODO: Store sensor value in device status
 
 	case 3:
 		// Info topic: shellies/<device-id>/info

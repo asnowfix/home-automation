@@ -32,16 +32,23 @@ import (
 )
 
 type DeviceManager struct {
-	dr            mhd.DeviceRegistry
-	update        chan *myhome.Device
-	refreshed     chan *myhome.Device
-	cancel        context.CancelFunc
-	log           logr.Logger
-	mqttClient    mqtt.Client
-	resolver      mynet.Resolver
-	router        model.Router
-	setupConfig   shellysetup.Config // Configuration for auto-setup of new devices
-	setupInFlight sync.Map           // Track devices currently being set up (device_id -> bool)
+	dr             mhd.DeviceRegistry
+	update         chan *myhome.Device
+	refreshed      chan *myhome.Device
+	cancel         context.CancelFunc
+	log            logr.Logger
+	mqttClient     mqtt.Client
+	sseBroadcaster SSEBroadcaster // For broadcasting sensor updates to UI
+	resolver       mynet.Resolver
+	router         model.Router
+	setupConfig    shellysetup.Config // Configuration for auto-setup of new devices
+	setupInFlight  sync.Map           // Track devices currently being set up (device_id -> bool)
+}
+
+// SSEBroadcaster interface for broadcasting sensor updates to UI
+type SSEBroadcaster interface {
+	BroadcastSensorUpdate(deviceID string, sensor string, value float64)
+	BroadcastDoorStatus(deviceID string, opened bool)
 }
 
 // maxConcurrentRefreshes limits the number of concurrent device refresh goroutines
@@ -61,6 +68,11 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		mqttClient: mqttClient,
 		resolver:   resolver,
 	}
+}
+
+// SetSSEBroadcaster sets the SSE broadcaster for live sensor updates
+func (dm *DeviceManager) SetSSEBroadcaster(broadcaster SSEBroadcaster) {
+	dm.sseBroadcaster = broadcaster
 }
 
 func (dm *DeviceManager) UpdateChannel() chan<- *myhome.Device {
@@ -289,15 +301,15 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Start Gen1 MQTT listener for sensor data
-	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.dr, dm.router)
+	// Start Gen1 MQTT listener for sensor data (with SSE broadcaster)
+	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.dr, dm.router, dm.sseBroadcaster)
 	if err != nil {
 		dm.log.Error(err, "Failed to start Gen1 MQTT listener")
 		return err
 	}
 
-	// Start BLU listener for Shelly BLU device discovery
-	err = blu.StartBLUListener(ctx, dm.mqttClient, dm.dr)
+	// Start BLU listener for Shelly BLU device discovery (with SSE broadcaster)
+	err = blu.StartBLUListener(ctx, dm.mqttClient, dm.dr, dm.sseBroadcaster)
 	if err != nil {
 		dm.log.Error(err, "Failed to start BLU listener")
 		return err

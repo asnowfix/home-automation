@@ -13,6 +13,54 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// SensorUpdate represents a parsed sensor update in a common format
+type SensorUpdate struct {
+	DeviceID    string
+	Temperature *float64
+	DoorOpened  *bool // true if door/window is open, false if closed
+}
+
+// ParseSensorEvent parses a BLU MQTT event and extracts sensor data
+// Returns nil if the event doesn't contain sensor data
+func ParseSensorEvent(topic string, payload []byte) *SensorUpdate {
+	// Parse BLU event: shelly-blu/events/<MAC>
+	parts := strings.Split(topic, "/")
+	if len(parts) != 3 {
+		return nil
+	}
+
+	mac := parts[2] // MAC address with colons
+	deviceID := "shellyblu-" + strings.ToLower(strings.ReplaceAll(mac, ":", ""))
+
+	// Parse JSON payload
+	var data map[string]interface{}
+	if err := json.Unmarshal(payload, &data); err != nil {
+		return nil
+	}
+
+	update := &SensorUpdate{DeviceID: deviceID}
+	hasSensorData := false
+
+	// Extract temperature
+	if temp, ok := data["temperature"].(float64); ok {
+		update.Temperature = &temp
+		hasSensorData = true
+	}
+
+	// Extract door/window status
+	if window, ok := data["window"].(float64); ok {
+		opened := window == 1
+		update.DoorOpened = &opened
+		hasSensorData = true
+	}
+
+	if !hasSensorData {
+		return nil
+	}
+
+	return update
+}
+
 // BLUEventData represents the data from a Shelly BLU device event
 // Supports all BTHome v2 object IDs as defined in https://bthome.io/format/
 type BLUEventData struct {
@@ -76,37 +124,42 @@ type DeviceRegistry interface {
 	GetDeviceById(ctx context.Context, id string) (*myhome.Device, error)
 }
 
-// StartBLUListener starts listening for Shelly BLU device events on MQTT
-// and registers discovered devices with their sensor capabilities
-func StartBLUListener(ctx context.Context, mqttClient mqtt.Client, registry DeviceRegistry) error {
-	log, err := logr.FromContext(ctx)
-	if err != nil {
-		return fmt.Errorf("no logger in context: %w", err)
-	}
-	log = log.WithName("BLUListener")
+// SSEBroadcaster interface for broadcasting sensor updates to UI
+type SSEBroadcaster interface {
+	BroadcastSensorUpdate(deviceID string, sensor string, value float64)
+	BroadcastDoorStatus(deviceID string, opened bool)
+}
 
-	log.Info("Starting Shelly BLU listener")
+// StartBLUListener starts listening to BLU device MQTT events and registers them
+func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegistry, sseBroadcaster SSEBroadcaster) error {
+	log := logr.FromContextOrDiscard(ctx).WithName("BLUListener")
 
-	// Subscribe to all shelly-blu events
+	log.Info("Starting BLU listener")
+
+	// Subscribe to BLU events topic
 	topic := "shelly-blu/events/#"
-	msgChan, err := mqttClient.SubscribeWithTopic(ctx, topic, 8, "myhome/blu")
-	if err != nil {
-		return fmt.Errorf("failed to subscribe to %s: %w", topic, err)
-	}
+	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/blu", func(topic string, payload []byte, subscriber string) error {
+		handleBLUEvent(ctx, log, topic, payload, registry)
 
-	go func() {
-		log.Info("BLU listener started", "topic", topic)
-		for {
-			select {
-			case <-ctx.Done():
-				log.Info("BLU listener stopped")
-				return
-			case msg := <-msgChan:
-				handleBLUEvent(ctx, log, msg.Topic(), msg.Payload(), registry)
+		// Broadcast sensor updates via SSE if broadcaster is available
+		if sseBroadcaster != nil {
+			if update := ParseSensorEvent(topic, payload); update != nil {
+				if update.Temperature != nil {
+					sseBroadcaster.BroadcastSensorUpdate(update.DeviceID, "temperature", *update.Temperature)
+				}
+				if update.DoorOpened != nil {
+					sseBroadcaster.BroadcastDoorStatus(update.DeviceID, *update.DoorOpened)
+				}
 			}
 		}
-	}()
 
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to BLU events: %w", err)
+	}
+
+	log.Info("BLU listener started", "topic", topic)
 	return nil
 }
 

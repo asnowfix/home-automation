@@ -194,13 +194,17 @@ func (d *daemon) Run() error {
 		}
 		defer storage.Close()
 
+		// Create SSE broadcaster for live sensor updates
+		sseBroadcaster := proxy.NewSSEBroadcaster(log.WithName("sse"))
+
 		// Start UI reverse HTTP proxy
-		if err := proxy.Start(d.ctx, log.WithName("proxy"), options.Flags.ProxyPort, resolver, storage); err != nil {
+		if err := proxy.Start(d.ctx, log.WithName("proxy"), options.Flags.ProxyPort, resolver, storage, mc, sseBroadcaster); err != nil {
 			log.Error(err, "Failed to start reverse proxy")
 			return err
 		}
 
 		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc)
+		d.dm.SetSSEBroadcaster(sseBroadcaster)
 		err = d.dm.Start(d.ctx)
 		if err != nil {
 			log.Error(err, "Failed to start device manager")

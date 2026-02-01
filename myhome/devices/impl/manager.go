@@ -2,7 +2,6 @@ package impl
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"myhome"
 	"myhome/ctl/options"
@@ -501,12 +500,10 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.R
 			device = device.WithHost(ip)
 			modified = true
 		}
-	} else if errors.Is(err, ErrNotFound) { // Only drop IP if explicitly not found
+	} else {
 		log.V(1).Info("Dropping IP", "device", device.DeviceSummary, "old_ip", device.Host())
 		device = device.WithHost("")
 		modified = true
-	} else {
-		log.V(1).Info("Router lookup failed, keeping current IP", "device", device.DeviceSummary, "error", err)
 	}
 
 	updated, err := device.Refresh(ctx)

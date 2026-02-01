@@ -14,6 +14,7 @@ import (
 	pkgscript "pkg/shelly/script"
 	"pkg/shelly/types"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -31,10 +32,12 @@ var setupFlags struct {
 	InternalTemperatureTopic string
 	ExternalTemperatureTopic string
 	RoomId                   string
+	DoorSensorTopics         string
 
 	// Script upload flags
-	NoMinify    bool
-	ForceUpload bool
+	NoMinify     bool
+	ForceUpload  bool
+	AutoDiscover bool
 }
 
 var setupCmd = &cobra.Command{
@@ -75,10 +78,12 @@ func init() {
 	setupCmd.Flags().StringVar(&setupFlags.InternalTemperatureTopic, "internal-temperature-topic", "", "MQTT topic for internal temperature sensor (required)")
 	setupCmd.Flags().StringVar(&setupFlags.ExternalTemperatureTopic, "external-temperature-topic", "", "MQTT topic for external temperature sensor (required)")
 	setupCmd.Flags().StringVar(&setupFlags.RoomId, "room-id", "", "Room identifier for temperature API (required)")
+	setupCmd.Flags().StringVar(&setupFlags.DoorSensorTopics, "door-sensor-topics", "", "Comma-separated list of MQTT topics for door/window sensors")
 
 	// Script upload flags
 	setupCmd.Flags().BoolVar(&setupFlags.NoMinify, "no-minify", false, "Do not minify script before upload")
 	setupCmd.Flags().BoolVar(&setupFlags.ForceUpload, "force", false, "Force re-upload even if version hash matches")
+	setupCmd.Flags().BoolVar(&setupFlags.AutoDiscover, "auto-discover", false, "Auto-discover sensors in the same room")
 
 	// Mark mandatory flags
 	setupCmd.MarkFlagRequired("internal-temperature-topic")
@@ -123,6 +128,21 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		}
 	}
 
+	// Add door sensor topics if provided or auto-discovered
+	doorSensorTopics := setupFlags.DoorSensorTopics
+	if setupFlags.AutoDiscover && doorSensorTopics == "" {
+		// Auto-discover door sensors in the same room
+		discoveredTopics, err := discoverDoorSensorsInRoom(ctx, setupFlags.RoomId)
+		if err != nil {
+			fmt.Printf("  ⚠ Failed to auto-discover door sensors: %v\n", err)
+		} else if len(discoveredTopics) > 0 {
+			doorSensorTopics = strings.Join(discoveredTopics, ",")
+			fmt.Printf("  ✓ Auto-discovered door sensors: %s\n", doorSensorTopics)
+		}
+	}
+	if doorSensorTopics != "" {
+		kvsConfig["script/heater/door-sensor-topics"] = doorSensorTopics
+	}
 
 	// Set each KVS entry
 	fmt.Printf("\nConfiguring KVS entries:\n")
@@ -174,4 +194,36 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		"script_id":  id,
 		"kvs_config": kvsConfig,
 	}, nil
+}
+
+// discoverDoorSensorsInRoom queries the myhome server for door/window sensors in the given room
+// and returns their MQTT topics
+func discoverDoorSensorsInRoom(ctx context.Context, roomId string) ([]string, error) {
+	// Get devices in the room
+	params := &myhome.DeviceListByRoomParams{
+		RoomId: roomId,
+	}
+	result, err := myhome.TheClient.CallE(ctx, myhome.DeviceListByRoom, params)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list devices in room: %w", err)
+	}
+
+	devices := result.(*myhome.DeviceListByRoomResult).Devices
+	var topics []string
+
+	for _, d := range devices {
+		// Check if device is a door/window sensor (BLU Door/Window)
+		if d.Info != nil && d.Info.Model != "" {
+			model := strings.ToLower(d.Info.Model)
+			if strings.Contains(model, "door") || strings.Contains(model, "window") {
+				// Build MQTT topic for BLU device
+				if d.MAC != "" {
+					topic := "shelly-blu/events/" + strings.ToLower(d.MAC)
+					topics = append(topics, topic)
+				}
+			}
+		}
+	}
+
+	return topics, nil
 }

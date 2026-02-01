@@ -372,6 +372,13 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
             </div>
             <p class="help">Sensor outside (for weather compensation)</p>
           </div>
+          <div class="field">
+            <label class="label">Door/Window Sensors</label>
+            <div class="control">
+              <input class="input" type="text" id="heater-door-sensors" placeholder="Auto-discovered from room">
+            </div>
+            <p class="help">Comma-separated MQTT topics (auto-discovered from devices in same room)</p>
+          </div>
           <hr>
           <p class="has-text-weight-semibold mb-2">Cheap Electricity Window</p>
           <div class="columns">
@@ -612,7 +619,8 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       'script/heater/preheat-hours': 'heater-preheat-hours',
       'normally-closed': 'heater-normally-closed',
       'script/heater/internal-temperature-topic': 'heater-internal-temp',
-      'script/heater/external-temperature-topic': 'heater-external-temp'
+      'script/heater/external-temperature-topic': 'heater-external-temp',
+      'script/heater/door-sensor-topics': 'heater-door-sensors'
     };
 
     async function openHeaterConfig(deviceId) {
@@ -676,22 +684,22 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
         }
 
         // Populate thermometer dropdowns
-          const intSelect = document.getElementById('heater-internal-temp');
-          const extSelect = document.getElementById('heater-external-temp');
-          intSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
-          extSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
+        const intSelect = document.getElementById('heater-internal-temp');
+        const extSelect = document.getElementById('heater-external-temp');
+        intSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
+        extSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
         allThermometers.forEach(t => {
-              const opt1 = document.createElement('option');
-              opt1.value = t.mqtt_topic;
-              opt1.textContent = t.name + ' (' + t.type + ')';
+          const opt1 = document.createElement('option');
+          opt1.value = t.mqtt_topic;
+          opt1.textContent = t.name + ' (' + t.type + ')';
           // Mark thermometers in the same room
           if (deviceRoomId && t.room_id === deviceRoomId) {
             opt1.textContent = '★ ' + opt1.textContent;
           }
-              intSelect.appendChild(opt1);
-              const opt2 = opt1.cloneNode(true);
-              extSelect.appendChild(opt2);
-            });
+          intSelect.appendChild(opt1);
+          const opt2 = opt1.cloneNode(true);
+          extSelect.appendChild(opt2);
+        });
 
         // Load current heater config via server-side RPC (uses MQTT)
         const configRes = await fetch('/rpc', {

@@ -16,6 +16,8 @@ type DeviceRegistry interface {
 	GetDeviceByName(ctx context.Context, name string) (*myhome.Device, error)
 	ForgetDevice(ctx context.Context, id string) error
 	GetAllDevices(ctx context.Context) ([]*myhome.Device, error)
+	SetDeviceRoom(ctx context.Context, identifier string, roomId string) error
+	GetDevicesByRoom(ctx context.Context, roomId string) ([]*myhome.Device, error)
 }
 
 type Manager interface {

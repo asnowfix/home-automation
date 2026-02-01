@@ -240,4 +240,20 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &RoomDeleteResult{}
 		},
 	},
+	DeviceSetRoom: {
+		NewParams: func() any {
+			return &DeviceSetRoomParams{}
+		},
+		NewResult: func() any {
+			return nil
+		},
+	},
+	DeviceListByRoom: {
+		NewParams: func() any {
+			return &DeviceListByRoomParams{}
+		},
+		NewResult: func() any {
+			return &DeviceListByRoomResult{}
+		},
+	},
 }

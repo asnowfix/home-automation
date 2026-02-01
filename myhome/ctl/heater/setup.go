@@ -106,7 +106,23 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		"script/heater/external-temperature-topic": setupFlags.ExternalTemperatureTopic,
 	}
 
-	kvsConfig["script/heater/room-id"] = setupFlags.RoomId
+	// room-id is now a device-level KVS key (unprefixed), not script-specific
+	kvsConfig["room-id"] = setupFlags.RoomId
+
+	// Also update the device's room in the database
+	if setupFlags.RoomId != "" {
+		params := &myhome.DeviceSetRoomParams{
+			Identifier: sd.Id(),
+			RoomId:     setupFlags.RoomId,
+		}
+		_, err := myhome.TheClient.CallE(ctx, myhome.DeviceSetRoom, params)
+		if err != nil {
+			fmt.Printf("  ⚠ Failed to set device room in DB: %v\n", err)
+		} else {
+			fmt.Printf("  ✓ Set device room in DB: %s\n", setupFlags.RoomId)
+		}
+	}
+
 
 	// Set each KVS entry
 	fmt.Printf("\nConfiguring KVS entries:\n")

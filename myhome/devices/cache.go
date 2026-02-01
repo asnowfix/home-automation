@@ -177,3 +177,29 @@ func (c *Cache) ForgetDevice(ctx context.Context, id string) error {
 	// TODO: use cache content
 	return c.db.ForgetDevice(ctx, id)
 }
+
+func (c *Cache) SetDeviceRoom(ctx context.Context, identifier string, roomId string) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	// Update cache if device exists
+	if d, exists := c.devicesById[identifier]; exists {
+		d.RoomId = roomId
+	} else if d, exists := c.devicesByName[identifier]; exists {
+		d.RoomId = roomId
+	} else if d, exists := c.devicesByMAC[identifier]; exists {
+		d.RoomId = roomId
+	} else if d, exists := c.devicesByHost[identifier]; exists {
+		d.RoomId = roomId
+	}
+
+	return c.db.SetDeviceRoom(ctx, identifier, roomId)
+}
+
+func (c *Cache) GetDevicesByRoom(ctx context.Context, roomId string) ([]*myhome.Device, error) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	// TODO: use cache content
+	return c.db.GetDevicesByRoom(ctx, roomId)
+}

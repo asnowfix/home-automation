@@ -17,6 +17,7 @@ import (
 	"pkg/shelly"
 	"pkg/shelly/blu"
 	"pkg/shelly/gen1"
+	"pkg/shelly/kvs"
 	shellymqtt "pkg/shelly/mqtt"
 	"pkg/shelly/types"
 	"reflect"
@@ -259,6 +260,61 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			return nil, err
 		}
 		return nil, nil
+	})
+	myhome.RegisterMethodHandler(myhome.DeviceSetRoom, func(in any) (any, error) {
+		params := in.(*myhome.DeviceSetRoomParams)
+		dm.log.Info("RPC: device.setroom", "identifier", params.Identifier, "room_id", params.RoomId)
+
+		// Save room to database
+		if err := dm.dr.SetDeviceRoom(ctx, params.Identifier, params.RoomId); err != nil {
+			return nil, err
+		}
+
+		// Also set room-id in device KVS (for Gen2+ Shelly devices)
+		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
+		if err != nil {
+			dm.log.Error(err, "Failed to get device for KVS update", "identifier", params.Identifier)
+			return nil, nil // DB update succeeded, KVS is best-effort
+		}
+
+		// Skip KVS for Gen1 and BLU devices (they don't support KVS)
+		if shelly.IsGen1Device(device.Id()) || shelly.IsBluDevice(device.Id()) {
+			return nil, nil
+		}
+
+		// Get or create Shelly device implementation
+		sd, ok := device.Impl().(*shelly.Device)
+		if !ok || sd == nil {
+			impl, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+			if err != nil {
+				dm.log.Error(err, "Failed to create device for KVS update", "identifier", params.Identifier)
+				return nil, nil // DB update succeeded, KVS is best-effort
+			}
+			sd, ok = impl.(*shelly.Device)
+			if !ok {
+				return nil, nil
+			}
+		}
+
+		// Set room-id in device KVS
+		_, err = kvs.SetKeyValue(ctx, dm.log, types.ChannelDefault, sd, "room-id", params.RoomId)
+		if err != nil {
+			dm.log.Error(err, "Failed to set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
+			// Don't return error - DB update succeeded
+		} else {
+			dm.log.Info("Set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
+		}
+
+		return nil, nil
+	})
+	myhome.RegisterMethodHandler(myhome.DeviceListByRoom, func(in any) (any, error) {
+		params := in.(*myhome.DeviceListByRoomParams)
+		dm.log.Info("RPC: device.listbyroom", "room_id", params.RoomId)
+		devices, err := dm.dr.GetDevicesByRoom(ctx, params.RoomId)
+		if err != nil {
+			return nil, err
+		}
+		return &myhome.DeviceListByRoomResult{Devices: devices}, nil
 	})
 	myhome.RegisterMethodHandler(myhome.ThermometerList, func(in any) (any, error) {
 		return dm.HandleThermometerList(ctx)
@@ -580,6 +636,14 @@ func (dm *DeviceManager) GetDeviceByName(ctx context.Context, name string) (*myh
 
 func (dm *DeviceManager) ForgetDevice(ctx context.Context, id string) error {
 	return dm.dr.ForgetDevice(ctx, id)
+}
+
+func (dm *DeviceManager) SetDeviceRoom(ctx context.Context, identifier string, roomId string) error {
+	return dm.dr.SetDeviceRoom(ctx, identifier, roomId)
+}
+
+func (dm *DeviceManager) GetDevicesByRoom(ctx context.Context, roomId string) ([]*myhome.Device, error) {
+	return dm.dr.GetDevicesByRoom(ctx, roomId)
 }
 
 func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) error {

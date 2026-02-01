@@ -14,6 +14,7 @@ import (
 	"myhome/ctl/mqtt"
 	"myhome/ctl/open"
 	"myhome/ctl/options"
+	"myhome/ctl/room"
 	"myhome/ctl/sfr"
 	"myhome/ctl/shelly"
 	"myhome/ctl/show"
@@ -140,6 +141,7 @@ func init() {
 	Cmd.AddCommand(blu.Cmd)
 	Cmd.AddCommand(temperature.Cmd)
 	Cmd.AddCommand(heater.Cmd)
+	Cmd.AddCommand(room.Cmd)
 }
 
 var Commit string

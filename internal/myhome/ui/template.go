@@ -261,6 +261,17 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
           <p class="help">Overrides automatic name derivation from output/input names</p>
         </div>
         <div class="field">
+          <label class="label">Room</label>
+          <div class="control">
+            <div class="select is-fullwidth">
+              <select id="setup-room-id">
+                <option value="">-- No room --</option>
+              </select>
+            </div>
+          </div>
+          <p class="help">Assign this device to a room for sensor auto-discovery</p>
+        </div>
+        <div class="field">
           <label class="label">MQTT Broker</label>
           <div class="control">
             <input class="input" type="text" id="setup-mqtt-broker" placeholder="Leave empty for default">
@@ -424,6 +435,34 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
     </div>
   </footer>
   <script>
+    // Fetch available rooms and populate a dropdown
+    async function populateRoomDropdown(selectId) {
+      const select = document.getElementById(selectId);
+      if (!select) return;
+      // Keep the first option (-- No room --)
+      while (select.options.length > 1) {
+        select.remove(1);
+      }
+      try {
+        const res = await fetch('/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: 'room.list', params: null })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.result && data.result.rooms) {
+            for (const room of data.result.rooms) {
+              const opt = document.createElement('option');
+              opt.value = room.id;
+              opt.textContent = room.name || room.id;
+              select.appendChild(opt);
+            }
+          }
+        }
+      } catch (e) { console.log('Could not fetch rooms:', e); }
+    }
+
     async function refreshDevice(id) {
       const btn = document.getElementById('btn-refresh-' + id);
       if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
@@ -458,11 +497,12 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       }
     }
 
-    function setupDevice(id) {
+    async function setupDevice(id) {
       // Open modal and store device ID
       document.getElementById('setup-device-id').value = id;
       // Clear all fields
       document.getElementById('setup-name').value = '';
+      document.getElementById('setup-room-id').value = '';
       document.getElementById('setup-mqtt-broker').value = '';
       document.getElementById('setup-sta-essid').value = '';
       document.getElementById('setup-sta-passwd').value = '';
@@ -474,6 +514,27 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       if (btn) { btn.disabled = false; btn.textContent = 'Setup'; }
       // Show modal
       document.getElementById('setup-modal').classList.add('is-active');
+      // Fetch available rooms and populate dropdown
+      await populateRoomDropdown('setup-room-id');
+      // Try to get current device room and select it
+      try {
+        const res = await fetch('/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: 'device.show', params: { identifier: id } })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.result) {
+            if (data.result.room_id) {
+              document.getElementById('setup-room-id').value = data.result.room_id;
+            }
+            if (data.result.name) {
+              document.getElementById('setup-name').value = data.result.name;
+            }
+          }
+        }
+      } catch (e) { console.log('Could not fetch device info:', e); }
     }
 
     function closeSetupModal() {
@@ -488,6 +549,7 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       // Build params object, only including non-empty values
       const params = { identifier: id };
       const name = document.getElementById('setup-name').value.trim();
+      const roomId = document.getElementById('setup-room-id').value;
       const mqttBroker = document.getElementById('setup-mqtt-broker').value.trim();
       const staEssid = document.getElementById('setup-sta-essid').value.trim();
       const staPasswd = document.getElementById('setup-sta-passwd').value;
@@ -507,6 +569,15 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       if (deviceBtn) { deviceBtn.disabled = true; deviceBtn.textContent = 'Setting up…'; }
       
       try {
+        // First, save room assignment to database
+        if (roomId !== undefined) {
+          await fetch('/rpc', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ method: 'device.setroom', params: { identifier: id, room_id: roomId } })
+          });
+        }
+
         const res = await fetch('/rpc', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -534,7 +605,7 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
     // Heater configuration functions
     const heaterKVSKeys = {
       'script/heater/enable-logging': 'heater-enable-logging',
-      'script/heater/room-id': 'heater-room-id',
+      'room-id': 'heater-room-id',
       'script/heater/cheap-start-hour': 'heater-cheap-start',
       'script/heater/cheap-end-hour': 'heater-cheap-end',
       'script/heater/poll-interval-ms': 'heater-poll-interval',
@@ -554,6 +625,20 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       document.getElementById('heater-modal').classList.add('is-active');
 
       try {
+        // First, get device info to retrieve its room_id
+        let deviceRoomId = '';
+        const deviceRes = await fetch('/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: 'device.show', params: { identifier: deviceId } })
+        });
+        if (deviceRes.ok) {
+          const deviceData = await deviceRes.json();
+          if (deviceData.result && deviceData.result.room_id) {
+            deviceRoomId = deviceData.result.room_id;
+          }
+        }
+
         // Load rooms list
         const roomsRes = await fetch('/rpc', {
           method: 'POST',
@@ -576,6 +661,7 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
         }
 
         // Load thermometers list
+        let allThermometers = [];
         const thermRes = await fetch('/rpc', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -584,21 +670,28 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
         if (thermRes.ok) {
           const thermData = await thermRes.json();
           const therms = thermData.result || thermData;
+          if (therms && therms.thermometers) {
+            allThermometers = therms.thermometers;
+          }
+        }
+
+        // Populate thermometer dropdowns
           const intSelect = document.getElementById('heater-internal-temp');
           const extSelect = document.getElementById('heater-external-temp');
           intSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
           extSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
-          if (therms && therms.thermometers) {
-            therms.thermometers.forEach(t => {
+        allThermometers.forEach(t => {
               const opt1 = document.createElement('option');
               opt1.value = t.mqtt_topic;
               opt1.textContent = t.name + ' (' + t.type + ')';
+          // Mark thermometers in the same room
+          if (deviceRoomId && t.room_id === deviceRoomId) {
+            opt1.textContent = '★ ' + opt1.textContent;
+          }
               intSelect.appendChild(opt1);
               const opt2 = opt1.cloneNode(true);
               extSelect.appendChild(opt2);
             });
-          }
-        }
 
         // Load current heater config via server-side RPC (uses MQTT)
         const configRes = await fetch('/rpc', {
@@ -606,22 +699,45 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ method: 'heater.getconfig', params: { identifier: deviceId } })
         });
+        
+        let configRoomId = '';
+        let configInternalTemp = '';
+        let configExternalTemp = '';
+        
         if (configRes.ok) {
           const data = await configRes.json();
           const result = data.result || data;
           if (result.config) {
             const cfg = result.config;
             document.getElementById('heater-enable-logging').checked = cfg.enable_logging || false;
-            document.getElementById('heater-room-id').value = cfg.room_id || '';
+            configRoomId = cfg.room_id || '';
             document.getElementById('heater-cheap-start').value = cfg.cheap_start_hour || 23;
             document.getElementById('heater-cheap-end').value = cfg.cheap_end_hour || 7;
             document.getElementById('heater-poll-interval').value = cfg.poll_interval_ms || 60000;
             document.getElementById('heater-preheat-hours').value = cfg.preheat_hours || 2;
             document.getElementById('heater-normally-closed').checked = cfg.normally_closed || false;
-            document.getElementById('heater-internal-temp').value = cfg.internal_temperature_topic || '';
-            document.getElementById('heater-external-temp').value = cfg.external_temperature_topic || '';
+            configInternalTemp = cfg.internal_temperature_topic || '';
+            configExternalTemp = cfg.external_temperature_topic || '';
           }
         }
+
+        // Set room: prefer config value, fall back to device's room_id
+        const finalRoomId = configRoomId || deviceRoomId;
+        document.getElementById('heater-room-id').value = finalRoomId;
+
+        // Set internal temp: prefer config value, or auto-select first thermometer in room
+        if (configInternalTemp) {
+          document.getElementById('heater-internal-temp').value = configInternalTemp;
+        } else if (finalRoomId) {
+          // Auto-select first thermometer in the same room
+          const roomTherm = allThermometers.find(t => t.room_id === finalRoomId);
+          if (roomTherm) {
+            document.getElementById('heater-internal-temp').value = roomTherm.mqtt_topic;
+          }
+        }
+
+        // Set external temp from config
+        document.getElementById('heater-external-temp').value = configExternalTemp;
 
         document.getElementById('heater-loading').style.display = 'none';
         document.getElementById('heater-config-form').style.display = 'block';

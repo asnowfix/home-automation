@@ -70,6 +70,7 @@ func (d DeviceSummary) Mac() net.HardwareAddr {
 type Device struct {
 	DeviceSummary
 	ConfigRevision uint32             `db:"config_revision" json:"config_revision"`
+	RoomId         string             `db:"room_id" json:"room_id,omitempty"` // Room this device belongs to (optional, max one room)
 	Info           *shelly.DeviceInfo `db:"-" json:"info"`
 	Config         *shelly.Config     `db:"-" json:"config"`
 	impl           any                `db:"-" json:"-"` // Reference to the inner implementation
@@ -228,6 +229,11 @@ func (d *Device) WithZeroConfEntry(ctx context.Context, entry *zeroconf.ServiceE
 	return d
 }
 
+// DeviceShowParams represents parameters for device.show RPC
+type DeviceShowParams struct {
+	Identifier string `json:"identifier"` // Device identifier (id/name/host/MAC/IP)
+}
+
 // DeviceSetupParams represents parameters for device.setup RPC
 type DeviceSetupParams struct {
 	Identifier string `json:"identifier"`            // Device identifier (id/name/host/MAC/IP)
@@ -238,4 +244,20 @@ type DeviceSetupParams struct {
 	Sta1Essid  string `json:"sta1_essid,omitempty"`  // WiFi STA1 ESSID
 	Sta1Passwd string `json:"sta1_passwd,omitempty"` // WiFi STA1 password
 	ApPasswd   string `json:"ap_passwd,omitempty"`   // WiFi AP password
+}
+
+// DeviceSetRoomParams represents parameters for device.setroom RPC
+type DeviceSetRoomParams struct {
+	Identifier string `json:"identifier"` // Device identifier (id/name/host/MAC/IP)
+	RoomId     string `json:"room_id"`    // Room ID to assign (empty string to clear)
+}
+
+// DeviceListByRoomParams represents parameters for device.listbyroom RPC
+type DeviceListByRoomParams struct {
+	RoomId string `json:"room_id"` // Room ID to list devices for
+}
+
+// DeviceListByRoomResult represents the result of device.listbyroom RPC
+type DeviceListByRoomResult struct {
+	Devices []*Device `json:"devices"`
 }

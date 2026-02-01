@@ -17,6 +17,7 @@ import (
 	"pkg/shelly"
 	"pkg/shelly/blu"
 	"pkg/shelly/gen1"
+	"pkg/shelly/kvs"
 	shellymqtt "pkg/shelly/mqtt"
 	"pkg/shelly/types"
 	"reflect"
@@ -32,17 +33,23 @@ import (
 )
 
 type DeviceManager struct {
-	dr            mhd.DeviceRegistry
-	update        chan *myhome.Device
-	refreshed     chan *myhome.Device
-	cancel        context.CancelFunc
-	log           logr.Logger
-	mqttClient    mqtt.Client
-	mqttCache     *mqtt.Cache
-	resolver      mynet.Resolver
-	router        model.Router
-	setupConfig   shellysetup.Config // Configuration for auto-setup of new devices
-	setupInFlight sync.Map           // Track devices currently being set up (device_id -> bool)
+	dr             mhd.DeviceRegistry
+	update         chan *myhome.Device
+	refreshed      chan *myhome.Device
+	cancel         context.CancelFunc
+	log            logr.Logger
+	mqttClient     mqtt.Client
+	sseBroadcaster SSEBroadcaster // For broadcasting sensor updates to UI
+	resolver       mynet.Resolver
+	router         model.Router
+	setupConfig    shellysetup.Config // Configuration for auto-setup of new devices
+	setupInFlight  sync.Map           // Track devices currently being set up (device_id -> bool)
+}
+
+// SSEBroadcaster interface for broadcasting sensor updates to UI
+type SSEBroadcaster interface {
+	BroadcastSensorUpdate(deviceID string, sensor string, value float64)
+	BroadcastDoorStatus(deviceID string, opened bool)
 }
 
 // maxConcurrentRefreshes limits the number of concurrent device refresh goroutines
@@ -62,6 +69,11 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		mqttClient: mqttClient,
 		resolver:   resolver,
 	}
+}
+
+// SetSSEBroadcaster sets the SSE broadcaster for live sensor updates
+func (dm *DeviceManager) SetSSEBroadcaster(broadcaster SSEBroadcaster) {
+	dm.sseBroadcaster = broadcaster
 }
 
 func (dm *DeviceManager) UpdateChannel() chan<- *myhome.Device {
@@ -114,7 +126,8 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return nil, fmt.Errorf("failed to get device by identifier: %v", err)
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceShow, func(in any) (any, error) {
-		return dm.GetDeviceByAny(ctx, in.(string))
+		params := in.(*myhome.DeviceShowParams)
+		return dm.GetDeviceByAny(ctx, params.Identifier)
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceForget, func(in any) (any, error) {
 		return nil, dm.ForgetDevice(ctx, in.(string))
@@ -136,15 +149,22 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 
 		modified, err := device.Refresh(ctx)
+
+		// Even if refresh failed, save the device if it was modified
+		// This handles cases where HTTP fails and clears the host
+		if modified {
+			if saveErr := dm.dr.SetDevice(ctx, device, true); saveErr != nil {
+				dm.log.Error(saveErr, "Failed to save modified device after refresh", "device_id", device.Id())
+			} else {
+				dm.log.V(1).Info("Saved modified device after refresh", "device_id", device.Id(), "refresh_error", err != nil)
+			}
+		}
+
+		// Return the original refresh error if any
 		if err != nil {
 			return nil, err
 		}
 
-		if modified {
-			if err := dm.dr.SetDevice(ctx, device, true); err != nil {
-				return nil, err
-			}
-		}
 		return nil, nil
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceSetup, func(in any) (any, error) {
@@ -241,24 +261,66 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.MqttRepeat, func(in any) (any, error) {
-		topic := in.(string)
-		dm.log.Info("RPC: mqtt.repeat", "topic", topic)
+	myhome.RegisterMethodHandler(myhome.DeviceSetRoom, func(in any) (any, error) {
+		params := in.(*myhome.DeviceSetRoomParams)
+		dm.log.Info("RPC: device.setroom", "identifier", params.Identifier, "room_id", params.RoomId)
 
-		if dm.mqttCache == nil {
-			return nil, fmt.Errorf("MQTT cache not initialized")
+		// Save room to database
+		if err := dm.dr.SetDeviceRoom(ctx, params.Identifier, params.RoomId); err != nil {
+			return nil, err
 		}
 
-		// Replay the cached message for the topic
-		err := dm.mqttCache.Replay(ctx, dm.mqttClient, topic)
+		// Also set room-id in device KVS (for Gen2+ Shelly devices)
+		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
 		if err != nil {
-			return nil, fmt.Errorf("failed to replay MQTT message: %w", err)
+			dm.log.Error(err, "Failed to get device for KVS update", "identifier", params.Identifier)
+			return nil, nil // DB update succeeded, KVS is best-effort
+		}
+
+		// Skip KVS for Gen1 and BLU devices (they don't support KVS)
+		if shelly.IsGen1Device(device.Id()) || shelly.IsBluDevice(device.Id()) {
+			return nil, nil
+		}
+
+		// Get or create Shelly device implementation
+		sd, ok := device.Impl().(*shelly.Device)
+		if !ok || sd == nil {
+			impl, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+			if err != nil {
+				dm.log.Error(err, "Failed to create device for KVS update", "identifier", params.Identifier)
+				return nil, nil // DB update succeeded, KVS is best-effort
+			}
+			sd, ok = impl.(*shelly.Device)
+			if !ok {
+				return nil, nil
+			}
+		}
+
+		// Set room-id in device KVS
+		_, err = kvs.SetKeyValue(ctx, dm.log, types.ChannelDefault, sd, "room-id", params.RoomId)
+		if err != nil {
+			dm.log.Error(err, "Failed to set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
+			// Don't return error - DB update succeeded
+		} else {
+			dm.log.Info("Set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
 		}
 
 		return nil, nil
 	})
+	myhome.RegisterMethodHandler(myhome.DeviceListByRoom, func(in any) (any, error) {
+		params := in.(*myhome.DeviceListByRoomParams)
+		dm.log.Info("RPC: device.listbyroom", "room_id", params.RoomId)
+		devices, err := dm.dr.GetDevicesByRoom(ctx, params.RoomId)
+		if err != nil {
+			return nil, err
+		}
+		return &myhome.DeviceListByRoomResult{Devices: devices}, nil
+	})
 	myhome.RegisterMethodHandler(myhome.ThermometerList, func(in any) (any, error) {
 		return dm.HandleThermometerList(ctx)
+	})
+	myhome.RegisterMethodHandler(myhome.DoorList, func(in any) (any, error) {
+		return dm.HandleDoorList(ctx)
 	})
 
 	// Register heater service handlers
@@ -266,22 +328,6 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	heaterService.RegisterHandlers()
 
 	ctx = shellymqtt.NewContext(ctx, dm.mqttClient)
-
-	// Start MQTT message cache
-	dm.log.Info("Starting MQTT message cache")
-	dm.mqttCache, err = mqtt.NewCache(ctx, mqtt.DefaultCacheConfig())
-	if err != nil {
-		dm.log.Error(err, "Failed to initialize MQTT cache")
-		return err
-	}
-
-	// Start caching MQTT messages from device types that are not always online (subscribe to all topics with "#")
-	if err := dm.mqttCache.StartCaching(dm.mqttClient, "shelly-blu/#"); err != nil {
-		dm.log.Error(err, "Failed to start MQTT message caching")
-		return err
-	}
-
-	dm.log.Info("MQTT message cache started")
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
 	go dm.deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")))
@@ -319,15 +365,15 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Start Gen1 MQTT listener for sensor data
-	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.mqttCache, dm.dr, dm.router)
+	// Start Gen1 MQTT listener for sensor data (with SSE broadcaster)
+	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.dr, dm.router, dm.sseBroadcaster)
 	if err != nil {
 		dm.log.Error(err, "Failed to start Gen1 MQTT listener")
 		return err
 	}
 
-	// Start BLU listener for Shelly BLU device discovery
-	err = blu.StartBLUListener(ctx, dm.mqttClient, dm.dr)
+	// Start BLU listener for Shelly BLU device discovery (with SSE broadcaster)
+	err = blu.StartBLUListener(ctx, dm.mqttClient, dm.dr, dm.sseBroadcaster)
 	if err != nil {
 		dm.log.Error(err, "Failed to start BLU listener")
 		return err
@@ -592,6 +638,14 @@ func (dm *DeviceManager) ForgetDevice(ctx context.Context, id string) error {
 	return dm.dr.ForgetDevice(ctx, id)
 }
 
+func (dm *DeviceManager) SetDeviceRoom(ctx context.Context, identifier string, roomId string) error {
+	return dm.dr.SetDeviceRoom(ctx, identifier, roomId)
+}
+
+func (dm *DeviceManager) GetDevicesByRoom(ctx context.Context, roomId string) ([]*myhome.Device, error) {
+	return dm.dr.GetDevicesByRoom(ctx, roomId)
+}
+
 func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) error {
 	if d.Manufacturer_ == string(myhome.SHELLY) {
 		sd, ok := d.Impl().(*shelly.Device)
@@ -670,6 +724,36 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 	}
 
 	return &myhome.ThermometerListResult{Thermometers: thermometers}, nil
+}
+
+// HandleDoorList returns a list of devices with window/door sensing capability
+func (dm *DeviceManager) HandleDoorList(ctx context.Context) (*myhome.DoorListResult, error) {
+	devices, err := dm.GetAllDevices(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get devices: %w", err)
+	}
+
+	doors := make([]myhome.DoorInfo, 0)
+
+	for _, d := range devices {
+		// Check for BLU devices with window capability
+		if d.Info != nil && d.Info.BTHome != nil {
+			for _, cap := range d.Info.BTHome.Capabilities {
+				if cap == "window" {
+					// BLU devices use MAC address in topic (with colons)
+					doors = append(doors, myhome.DoorInfo{
+						ID:        d.Id(),
+						Name:      d.Name(),
+						Type:      "BLU",
+						MqttTopic: fmt.Sprintf("shelly-blu/events/%s", d.MAC),
+					})
+					break
+				}
+			}
+		}
+	}
+
+	return &myhome.DoorListResult{Doors: doors}, nil
 }
 
 // GetShellyDevice returns a Shelly device for RPC calls (implements script.DeviceProvider)

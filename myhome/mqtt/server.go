@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/grandcat/zeroconf"
 
 	mochimmqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
@@ -17,7 +18,7 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
-func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string, clientLogInterval time.Duration) error {
+func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string, clientLogInterval time.Duration, noMdns bool) error {
 	log.Info("Starting MyHome", "program", program)
 
 	// Create the new MQTT Server.
@@ -70,24 +71,29 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 		instance = host
 	}
 
-	resolver.WithLocalName(ctx, HOSTNAME)
+	var mdnsServer *zeroconf.Server
+	if !noMdns {
+		resolver.WithLocalName(ctx, HOSTNAME)
 
-	// Register the MQTT broker service with mDNS.
-	iface, _, err := mynet.MainInterface(log)
-	if err != nil {
-		log.Error(err, "Unable to get main local IP interface")
-		return err
+		// Register the MQTT broker service with mDNS.
+		iface, _, err := mynet.MainInterface(log)
+		if err != nil {
+			log.Error(err, "Unable to get main local IP interface")
+			return err
+		}
+		ifaces := make([]net.Interface, 1)
+		ifaces[0] = *iface
+
+		mdnsServer, err = resolver.PublishService(ctx, instance, ZEROCONF_SERVICE, "local.", PRIVATE_PORT, info, ifaces)
+		if err != nil {
+			log.Error(err, "Unable to register new ZeroConf service")
+			return err
+		}
+
+		log.Info("Started new MQTT broker", "mdns_server", mdnsServer, "mdns_service", ZEROCONF_SERVICE)
+	} else {
+		log.Info("Started new MQTT broker (mDNS disabled)")
 	}
-	ifaces := make([]net.Interface, 1)
-	ifaces[0] = *iface
-
-	mdnsServer, err := resolver.PublishService(ctx, instance, ZEROCONF_SERVICE, "local.", PRIVATE_PORT, info, ifaces)
-	if err != nil {
-		log.Error(err, "Unable to register new ZeroConf service")
-		return err
-	}
-
-	log.Info("Started new MQTT broker", "mdns_server", mdnsServer, "mdns_service", ZEROCONF_SERVICE)
 
 	// Start periodic client monitoring if enabled
 	if clientLogInterval > 0 {
@@ -120,11 +126,15 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 	go func(log logr.Logger) {
 		<-ctx.Done()
 		log.Info("Shutting down MQTT broker")
-		mdnsServer.Shutdown()
+		if mdnsServer != nil {
+			mdnsServer.Shutdown()
+		}
 		mqttServer.Close()
 	}(log.WithName("cleanup"))
 
-	log.Info("Started embedded MQTT broker & published it over mDNS/Zeroconf", "server", mdnsServer)
+	if !noMdns {
+		log.Info("Started embedded MQTT broker & published it over mDNS/Zeroconf", "server", mdnsServer)
+	}
 
 	return nil
 }

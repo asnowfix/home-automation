@@ -58,7 +58,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 	},
 	DeviceShow: {
 		NewParams: func() any {
-			return ""
+			return &DeviceShowParams{}
 		},
 		NewResult: func() any {
 			return &Device{}
@@ -91,14 +91,6 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 	DeviceUpdate: {
 		NewParams: func() any {
 			return &Device{}
-		},
-		NewResult: func() any {
-			return nil
-		},
-	},
-	MqttRepeat: {
-		NewParams: func() any {
-			return "" // topic string
 		},
 		NewResult: func() any {
 			return nil
@@ -208,6 +200,14 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &ThermometerListResult{}
 		},
 	},
+	DoorList: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &DoorListResult{}
+		},
+	},
 	RoomList: {
 		NewParams: func() any {
 			return nil
@@ -238,6 +238,22 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 		},
 		NewResult: func() any {
 			return &RoomDeleteResult{}
+		},
+	},
+	DeviceSetRoom: {
+		NewParams: func() any {
+			return &DeviceSetRoomParams{}
+		},
+		NewResult: func() any {
+			return nil
+		},
+	},
+	DeviceListByRoom: {
+		NewParams: func() any {
+			return &DeviceListByRoomParams{}
+		},
+		NewResult: func() any {
+			return &DeviceListByRoomResult{}
 		},
 	},
 }

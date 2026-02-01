@@ -6,7 +6,9 @@ import (
 	"myhome"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
+	pkgscript "pkg/shelly/script"
 	"pkg/shelly/types"
+	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -14,7 +16,7 @@ import (
 // HeaterKVSKeys maps config field names to KVS keys
 var HeaterKVSKeys = map[string]string{
 	"enable_logging":             "script/heater/enable-logging",
-	"room_id":                    "script/heater/room-id",
+	"room_id":                    "room-id",
 	"cheap_start_hour":           "script/heater/cheap-start-hour",
 	"cheap_end_hour":             "script/heater/cheap-end-hour",
 	"poll_interval_ms":           "script/heater/poll-interval-ms",
@@ -92,52 +94,66 @@ func (s *HeaterService) HandleGetConfig(ctx context.Context, params *myhome.Heat
 		return result, nil
 	}
 
-	// Get KVS values via MQTT channel (rate limiting ensures proper spacing)
+	// Use ChannelDefault to let the device dynamically select the best available channel
 	config := &myhome.HeaterConfig{}
-	via := types.ChannelHttp
-	if !sd.IsHttpReady() {
-		via = types.ChannelMqtt
+	via := types.ChannelDefault
+
+	// Batch fetch prefixed keys with KVS.GetMany (reduces 7 calls to 1)
+	prefixedValues, err := kvs.GetManyValues(ctx, s.log, via, sd, "script/heater/*")
+	if err != nil {
+		s.log.V(1).Info("Failed to get prefixed KVS values", "error", err)
 	}
 
-	// Fetch each KVS key
-	for field, kvsKey := range HeaterKVSKeys {
-		val, err := kvs.GetValue(ctx, s.log, via, sd, kvsKey)
-		if err != nil {
-			continue // Key doesn't exist
+	// Helper to get value from GetMany response
+	getValue := func(key string) string {
+		if prefixedValues == nil || prefixedValues.Items == nil {
+			return ""
 		}
-		if val == nil || val.Value == "" {
-			continue
+		if v, ok := prefixedValues.Items[key]; ok {
+			if s, ok := v.(string); ok {
+				return s
+			}
 		}
+		return ""
+	}
 
-		// Parse value based on field type
-		switch field {
-		case "enable_logging":
-			config.EnableLogging = val.Value == "true"
-		case "room_id":
-			config.RoomID = val.Value
-		case "cheap_start_hour":
-			if v, err := parseIntValue(val.Value); err == nil {
-				config.CheapStartHour = v
-			}
-		case "cheap_end_hour":
-			if v, err := parseIntValue(val.Value); err == nil {
-				config.CheapEndHour = v
-			}
-		case "poll_interval_ms":
-			if v, err := parseIntValue(val.Value); err == nil {
-				config.PollIntervalMs = v
-			}
-		case "preheat_hours":
-			if v, err := parseIntValue(val.Value); err == nil {
-				config.PreheatHours = v
-			}
-		case "normally_closed":
-			config.NormallyClosed = val.Value == "true"
-		case "internal_temperature_topic":
-			config.InternalTemperatureTopic = val.Value
-		case "external_temperature_topic":
-			config.ExternalTemperatureTopic = val.Value
+	// Parse prefixed values
+	if v := getValue("script/heater/enable-logging"); v != "" {
+		config.EnableLogging = v == "true"
+	}
+	if v := getValue("script/heater/cheap-start-hour"); v != "" {
+		if i, err := parseIntValue(v); err == nil {
+			config.CheapStartHour = i
 		}
+	}
+	if v := getValue("script/heater/cheap-end-hour"); v != "" {
+		if i, err := parseIntValue(v); err == nil {
+			config.CheapEndHour = i
+		}
+	}
+	if v := getValue("script/heater/poll-interval-ms"); v != "" {
+		if i, err := parseIntValue(v); err == nil {
+			config.PollIntervalMs = i
+		}
+	}
+	if v := getValue("script/heater/preheat-hours"); v != "" {
+		if i, err := parseIntValue(v); err == nil {
+			config.PreheatHours = i
+		}
+	}
+	if v := getValue("script/heater/internal-temperature-topic"); v != "" {
+		config.InternalTemperatureTopic = v
+	}
+	if v := getValue("script/heater/external-temperature-topic"); v != "" {
+		config.ExternalTemperatureTopic = v
+	}
+
+	// Fetch unprefixed keys individually (only 2 calls)
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, "room-id"); err == nil && val != nil {
+		config.RoomID = val.Value
+	}
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, "normally-closed"); err == nil && val != nil {
+		config.NormallyClosed = val.Value == "true"
 	}
 
 	result.Config = config
@@ -158,11 +174,9 @@ func (s *HeaterService) HandleSetConfig(ctx context.Context, params *myhome.Heat
 		return nil, fmt.Errorf("failed to get shelly device: %w", err)
 	}
 
-	// Prefer HTTP channel for config operations when available, otherwise MQTT has proper rate limiting
-	via := types.ChannelHttp
-	if !sd.IsHttpReady() {
-		via = types.ChannelMqtt
-	}
+	// Use ChannelDefault to let the device dynamically select the best available channel
+	// This allows automatic fallback to MQTT if HTTP fails mid-operation
+	via := types.ChannelDefault
 
 	// Set each provided value
 	if params.EnableLogging != nil {
@@ -227,6 +241,23 @@ func (s *HeaterService) HandleSetConfig(ctx context.Context, params *myhome.Heat
 		}
 	}
 
+	// Upload and start heater.js script
+	scriptName := "heater.js"
+	buf, err := pkgscript.ReadEmbeddedFile(scriptName)
+	if err != nil {
+		return &myhome.HeaterSetConfigResult{Success: false, Message: "failed to read heater.js: " + err.Error()}, nil
+	}
+
+	// Use a longer timeout for script upload
+	uploadCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
+	_, err = UploadWithVersion(uploadCtx, s.log, via, sd, scriptName, buf, true, false)
+	if err != nil {
+		return &myhome.HeaterSetConfigResult{Success: false, Message: "failed to upload/start heater.js: " + err.Error()}, nil
+	}
+
+	s.log.Info("Heater script uploaded and started", "device", device.Name())
 	return &myhome.HeaterSetConfigResult{Success: true}, nil
 }
 

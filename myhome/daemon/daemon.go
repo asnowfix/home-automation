@@ -65,7 +65,12 @@ func (d *daemon) Run() error {
 	if err != nil {
 		return err
 	}
-	log.Info("Starting MyHome daemon")
+
+	// Set the instance name for RPC topics
+	if options.Flags.InstanceName != "" {
+		myhome.InstanceName = options.Flags.InstanceName
+	}
+	log.Info("Starting MyHome daemon", "instance", myhome.InstanceName)
 
 	// Start pprof HTTP server for profiling
 	go func() {
@@ -87,7 +92,7 @@ func (d *daemon) Run() error {
 	// Conditionally start the embedded MQTT broker
 	if !disableEmbeddedMqttBroker {
 		log.Info("Starting embedded MQTT broker")
-		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval)
+		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval, options.Flags.NoMdnsPublish)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome")
 			return err
@@ -189,13 +194,17 @@ func (d *daemon) Run() error {
 		}
 		defer storage.Close()
 
+		// Create SSE broadcaster for live sensor updates
+		sseBroadcaster := proxy.NewSSEBroadcaster(log.WithName("sse"))
+
 		// Start UI reverse HTTP proxy
-		if err := proxy.Start(d.ctx, log.WithName("proxy"), options.Flags.ProxyPort, resolver, storage); err != nil {
+		if err := proxy.Start(d.ctx, log.WithName("proxy"), options.Flags.ProxyPort, resolver, storage, mc, sseBroadcaster); err != nil {
 			log.Error(err, "Failed to start reverse proxy")
 			return err
 		}
 
 		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc)
+		d.dm.SetSSEBroadcaster(sseBroadcaster)
 		err = d.dm.Start(d.ctx)
 		if err != nil {
 			log.Error(err, "Failed to start device manager")
@@ -240,7 +249,11 @@ func (d *daemon) Run() error {
 		}
 
 		// Publish a hostname for the DeviceManager host: myhome.local
-		resolver.WithLocalName(d.ctx, myhome.MYHOME_HOSTNAME)
+		if !options.Flags.NoMdnsPublish {
+			resolver.WithLocalName(d.ctx, myhome.MYHOME_HOSTNAME)
+		} else {
+			log.Info("Skipping mDNS hostname publishing (--no-mdns-publish)")
+		}
 	} else {
 		log.Info("Device manager disabled")
 	}

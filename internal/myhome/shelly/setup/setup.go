@@ -59,7 +59,10 @@ func DefaultConfig() Config {
 // See SetupDevice for details on what setup includes.
 func SetupDeviceWithWifi(ctx context.Context, log logr.Logger, sd *shellyapi.Device, targetName string, cfg Config, wifiCfg WifiConfig) error {
 	// Auto-detect best available channel: prefer HTTP, fall back to MQTT
-	via := selectChannel(sd)
+	via, err := selectChannel(sd)
+	if err != nil {
+		return fmt.Errorf("cannot setup device: %w", err)
+	}
 
 	// Configure WiFi if any WiFi options are specified
 	if wifiCfg.StaEssid != "" || wifiCfg.Sta1Essid != "" || wifiCfg.ApPasswd != "" {
@@ -130,16 +133,21 @@ func SetupDeviceWithWifi(ctx context.Context, log logr.Logger, sd *shellyapi.Dev
 }
 
 // selectChannel returns the best available channel for communicating with the device.
-// Prefers HTTP if available, falls back to MQTT.
-func selectChannel(sd *shellyapi.Device) types.Channel {
-	if sd.IsHttpReady() {
-		return types.ChannelHttp
+// Prefers MQTT if available (more reliable for devices discovered via MQTT), falls back to HTTP.
+func selectChannel(sd *shellyapi.Device) (types.Channel, error) {
+	httpReady := sd.IsHttpReady()
+	mqttReady := sd.IsMqttReady()
+
+	// Prefer MQTT - it's more reliable for devices that may have intermittent HTTP connectivity
+	if mqttReady {
+		return types.ChannelMqtt, nil
 	}
-	if sd.IsMqttReady() {
-		return types.ChannelMqtt
+	if httpReady {
+		return types.ChannelHttp, nil
 	}
-	// Default to HTTP (will fail if not available, but that's expected)
-	return types.ChannelHttp
+	// Neither channel is ready
+	return types.ChannelDefault, fmt.Errorf("device %s (%s) has no available communication channel (HTTP ready: %v, MQTT ready: %v, IP: %v)",
+		sd.Name(), sd.Id(), httpReady, mqttReady, sd.Ip())
 }
 
 // SetupDevice performs the full setup of a Shelly device:
@@ -154,7 +162,10 @@ func selectChannel(sd *shellyapi.Device) types.Channel {
 // The targetName parameter is optional - if empty, the device's current name is used.
 func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, targetName string, cfg Config) error {
 	// Auto-detect best available channel: prefer HTTP, fall back to MQTT
-	via := selectChannel(sd)
+	via, err := selectChannel(sd)
+	if err != nil {
+		return fmt.Errorf("cannot setup device: %w", err)
+	}
 
 	// Use device's current name if no target name specified
 	if targetName == "" {
@@ -220,8 +231,9 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 	log.Info("Checking for firmware updates", "device", deviceId)
 	err = checkAndApplyUpdates(ctx, log, via, sd, deviceId)
 	if err != nil {
-		log.Error(err, "Failed to check/apply updates", "device", deviceId)
-		return fmt.Errorf("failed to check/apply updates: %w", err)
+		// Update check failure is non-fatal - it depends on Shelly cloud availability
+		// The watchdog.js script will handle updates later
+		log.Info("Skipping firmware update check (non-fatal)", "device", deviceId, "reason", err.Error())
 	}
 
 	// Disable Matter component immediately after firmware update
@@ -259,9 +271,10 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 			mqttServer = mqttServer + ":" + strconv.Itoa(cfg.MqttPort)
 		}
 
+		log.Info("Setting MQTT broker", "device", deviceId, "server", mqttServer, "via", via, "http_ready", sd.IsHttpReady(), "mqtt_ready", sd.IsMqttReady())
 		_, err = mqtt.SetServer(ctx, via, sd, mqttServer)
 		if err != nil {
-			log.Error(err, "Failed to set MQTT broker", "device", deviceId)
+			log.Error(err, "Failed to set MQTT broker", "device", deviceId, "via", via, "http_ready", sd.IsHttpReady(), "mqtt_ready", sd.IsMqttReady())
 			return fmt.Errorf("failed to set MQTT broker: %w", err)
 		}
 		log.Info("MQTT broker configured", "device", deviceId, "server", mqttServer)

@@ -59,6 +59,19 @@ type ThermometerListResult struct {
 	Thermometers []ThermometerInfo `json:"thermometers"`
 }
 
+// DoorInfo represents a door/window sensor device
+type DoorInfo struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Type      string `json:"type"`
+	MqttTopic string `json:"mqtt_topic"`
+}
+
+// DoorListResult represents the result of door.list RPC
+type DoorListResult struct {
+	Doors []DoorInfo `json:"doors"`
+}
+
 // RoomInfo represents a room for temperature management
 type RoomInfo struct {
 	ID   string `json:"id"`

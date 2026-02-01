@@ -14,6 +14,7 @@ import (
 	"myhome/ctl/mqtt"
 	"myhome/ctl/open"
 	"myhome/ctl/options"
+	"myhome/ctl/room"
 	"myhome/ctl/sfr"
 	"myhome/ctl/shelly"
 	"myhome/ctl/show"
@@ -43,6 +44,11 @@ var Cmd = &cobra.Command{
 
 		ctx = options.CommandLineContext(ctx, Version)
 
+		// Set the target instance name for RPC topics
+		if options.Flags.InstanceName != "" {
+			myhome.InstanceName = options.Flags.InstanceName
+		}
+
 		err := mqttclient.NewClientE(ctx, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
@@ -64,6 +70,14 @@ var Cmd = &cobra.Command{
 		}
 
 		shellyPkg.Init(log, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
+
+		// Start cleanup goroutine that closes MQTT client when context is cancelled
+		// This ensures cleanup happens even when command returns an error
+		// (Cobra skips PersistentPostRunE when RunE returns an error)
+		go func() {
+			<-ctx.Done()
+			mc.Close()
+		}()
 
 		for i, c := range types.Channels {
 			if options.Flags.Via == c {
@@ -92,7 +106,6 @@ var Cmd = &cobra.Command{
 		cancel := ctx.Value(global.CancelKey).(context.CancelFunc)
 		cancel()
 		mc.Close()
-		<-ctx.Done()
 		return nil
 	},
 }
@@ -110,6 +123,7 @@ func init() {
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.MdnsTimeout, "mdns-timeout", "M", options.MDNS_LOOKUP_DEFAULT_TIMEOUT, "Timeout for mDNS lookups")
 	Cmd.PersistentFlags().StringVarP(&options.Flags.Via, "via", "V", types.ChannelDefault.String(), "Use given channel to communicate with Shelly devices (default is to discover it from the network)")
 	Cmd.PersistentFlags().DurationVar(&options.Flags.ShellyRateLimit, "shelly-rate-limit", options.SHELLY_DEFAULT_RATE_LIMIT, "Minimum interval between commands to the same Shelly device (0 to disable)")
+	Cmd.PersistentFlags().StringVarP(&options.Flags.InstanceName, "instance", "I", "myhome", "Target myhome server instance name for RPC (default: myhome)")
 
 	// Make log level flags mutually exclusive
 	Cmd.MarkFlagsMutuallyExclusive("verbose", "debug", "quiet")
@@ -127,6 +141,7 @@ func init() {
 	Cmd.AddCommand(blu.Cmd)
 	Cmd.AddCommand(temperature.Cmd)
 	Cmd.AddCommand(heater.Cmd)
+	Cmd.AddCommand(room.Cmd)
 }
 
 var Commit string

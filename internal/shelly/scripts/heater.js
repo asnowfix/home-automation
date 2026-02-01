@@ -38,7 +38,8 @@ var CONFIG_SCHEMA = {
     description: "Room identifier for temperature API",
     key: "room-id",
     default: null,
-    type: "string"
+    type: "string",
+    unprefixed: true
   },
   cheapStartHour: {
     description: "Start hour of cheap electricity window",
@@ -81,6 +82,12 @@ var CONFIG_SCHEMA = {
     description: "MQTT topic for external temperature sensor",
     key: "external-temperature-topic",
     default: null,
+    type: "string"
+  },
+  doorSensorTopics: {
+    description: "Comma-separated list of MQTT topics for door/window sensors",
+    key: "door-sensor-topics",
+    default: "",
     type: "string"
   }
 };
@@ -233,7 +240,13 @@ var STATE = {
   controlLoopCheckTimerId: null,
 
   // Last successful temperature ranges from RPC
-  lastSuccessfulRanges: null
+  lastSuccessfulRanges: null,
+
+  // Door/window sensor states: { topic: { open: boolean, lastUpdate: timestamp } }
+  doorSensors: {},
+
+  // Track subscribed door sensor topics
+  subscribedDoorSensorTopics: []
 };
 
 function onDeviceLocation(result, error_code, error_message, cb) {
@@ -398,7 +411,7 @@ function setForecastURL(lat, lon) {
   }
 }
 
-function onKvsLoaded(result, error_code, error_message, cb) {
+function onKvsLoaded(result, error_code, error_message, userdata) {
   log('onKvsLoaded');
   var updated = [];
   if (error_code === 0 && result && result.items) {
@@ -433,16 +446,17 @@ function onKvsLoaded(result, error_code, error_message, cb) {
   } else {
     log('Failed to load KVS config (error ' + error_code + '): ' + error_message);
   }
-  if (typeof cb === 'function') {
-    cb(updated);
+  if (typeof userdata === 'function') {
+    userdata(updated);
   } else {
-    log('BUG: No callback provided for onKvsLoaded', JSON.stringify(cb));
+    log('BUG: onKvsLoaded: type:', typeof userdata, 'value:', JSON.stringify(userdata));
   }
 }
 
 function loadConfig(cb) {
   log('loadConfig');
-  Shelly.call('KVS.GetMany', { match: CONFIG_KEY_PREFIX + "*" }, onKvsLoaded, cb);
+  // Load every KVS, filter-out later
+  Shelly.call('KVS.GetMany', { match: "*" }, onKvsLoaded, cb);
 }
 
 // === TIME WINDOW FOR HEATING ===
@@ -876,6 +890,101 @@ function subscribeToOccupancy() {
   });
 }
 
+// Parse door/window sensor state from MQTT message
+// Returns { open: boolean } or null if parsing fails
+function parseDoorSensorFromMqtt(topic, message) {
+  log("parseDoorSensorFromMqtt", topic, message);
+  try {
+    // Shelly BLU Door/Window sensor format via blu-publisher.js
+    // topic: shelly-blu/events/<mac>
+    // message: {"encryption":false,"BTHome_version":2,"pid":149,"battery":100,"window":1,"rssi":-92,"address":"..."}
+    if (topic.indexOf('shelly-blu/events/') === 0) {
+      var data = JSON.parse(message);
+      // window: 1 = open, 0 = closed
+      if ("window" in data) {
+        log('Parsed BLU door/window sensor: open=', data.window === 1, 'from topic:', topic);
+        return { open: data.window === 1 };
+      }
+    }
+  } catch (e) {
+    log('Error parsing door sensor from MQTT:', e);
+    if (e && false) { }
+  }
+  return null;
+}
+
+// Handle door/window sensor update
+function onDoorSensorUpdate(topic, message) {
+  var state = parseDoorSensorFromMqtt(topic, message);
+  if (state !== null) {
+    STATE.doorSensors[topic] = {
+      open: state.open,
+      lastUpdate: (new Date()).getTime()
+    };
+    log('Door sensor', topic, 'updated: open=', state.open);
+
+    // If a door just opened, immediately turn off heater
+    if (state.open) {
+      log('Door/window opened - triggering control loop check');
+      scheduleControlLoopCheck();
+    }
+  }
+}
+
+// Check if any door/window sensor is open
+function isAnyDoorOpen() {
+  for (var topic in STATE.doorSensors) {
+    if (STATE.doorSensors[topic] && STATE.doorSensors[topic].open) {
+      log('Door/window open:', topic);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Subscribe to door/window sensor topics
+function subscribeToDoorSensors() {
+  var topicsStr = CONFIG.doorSensorTopics;
+  if (!topicsStr) {
+    log('No door sensor topics configured');
+    return;
+  }
+
+  // Parse comma-separated list of topics
+  var topics = topicsStr.split(',');
+  for (var i = 0; i < topics.length; i++) {
+    var topic = topics[i];
+    // Trim whitespace
+    while (topic.length > 0 && topic.charAt(0) === ' ') {
+      topic = topic.substring(1);
+    }
+    while (topic.length > 0 && topic.charAt(topic.length - 1) === ' ') {
+      topic = topic.substring(0, topic.length - 1);
+    }
+
+    if (topic.length === 0) {
+      continue;
+    }
+
+    // Check if already subscribed
+    var alreadySubscribed = false;
+    for (var j = 0; j < STATE.subscribedDoorSensorTopics.length; j++) {
+      if (STATE.subscribedDoorSensorTopics[j] === topic) {
+        alreadySubscribed = true;
+        break;
+      }
+    }
+
+    if (!alreadySubscribed) {
+      log('Subscribing to door sensor topic:', topic);
+      MQTT.subscribe(topic, onDoorSensorUpdate);
+      STATE.subscribedDoorSensorTopics.push(topic);
+      // Initialize state as unknown (not open)
+      STATE.doorSensors[topic] = { open: false, lastUpdate: null };
+    }
+  }
+}
+
 // Extract device name from MQTT topic (e.g., "shellies/device-name/sensor/temperature" -> "device-name")
 function extractDeviceNameFromTopic(topic) {
   if (!topic) return null;
@@ -894,7 +1003,7 @@ function subscribeMqttTemperature(location, topic) {
 
   // Skip if already subscribed to this topic
   if (oldTopic === newTopic && newTopic) {
-    log('Already subscribed to', location, 'topic:', newTopic);
+    log('Already subscribed to', location, ' (or invalid) topic:', newTopic);
     return;
   }
 
@@ -1082,6 +1191,13 @@ function controlHeaterWithInputs(results) {
     return;
   }
 
+  // DOOR/WINDOW CHECK: If any door/window is open, turn off heater immediately
+  if (isAnyDoorOpen()) {
+    log('Door/window is open - turning heater OFF');
+    setHeaterState(false);
+    return;
+  }
+
   levels = getTemperatureLevels()
   log('Levels:', levels)
 
@@ -1107,13 +1223,17 @@ function controlHeaterWithInputs(results) {
 
   var heaterShouldBeOn = filteredTemp < targetTemp;
 
-  // SAFETY: If filtered temperature is below eco setpoint, always heat IF occupied
-  if (isOccupied && filteredTemp < levels.eco) {
-    log('Safety: internal temp', filteredTemp, 'below eco setpoint', levels.eco, '=> HEAT');
+  // SAFETY: Always heat if below away setpoint (frost protection)
+  if (filteredTemp < levels.away) {
+    log('Safety: internal temp', filteredTemp, 'below away setpoint', levels.away, '=> HEAT');
     setHeaterState(true);
     return;
-  } else if (filteredTemp < levels.away) {
-    log('Safety: internal temp', filteredTemp, 'below away setpoint', levels.away, '=> HEAT');
+  }
+
+  // ECO FLOOR: If occupied and below eco level, always heat regardless of cheap time
+  // This ensures minimum comfort when inhabitants are home
+  if (isOccupied && filteredTemp < levels.eco) {
+    log('Eco floor: internal temp', filteredTemp, 'below eco setpoint', levels.eco, 'and occupied => HEAT');
     setHeaterState(true);
     return;
   }
@@ -1124,11 +1244,13 @@ function controlHeaterWithInputs(results) {
 
   var preheat = shouldPreheat(filteredTemp, forecastTemp, mfTemp, targetTemp)
   log('Preheat:', preheat)
+
+  // Normal heating: only during cheap hours or preheat mode
   if ((heaterShouldBeOn && isCheapHour()) || preheat) {
-    log('Heater ON (normal or preheat mode)', 'preheat:', preheat);
+    log('Heater ON (cheap hour or preheat mode)', 'preheat:', preheat);
     setHeaterState(true);
   } else {
-    log('Outside cheap window => no heating');
+    log('Outside cheap window and above eco floor => no heating');
     setHeaterState(false);
   }
 }
@@ -1171,12 +1293,13 @@ function scheduleControlLoopCheck() {
 function checkAndStartControlLoop() {
   logMemory('checkAndStartControlLoop:start');
   log('Checking whether we can start control loop')
-  log('  - Room ID configured:' + !!CONFIG.roomId);
-  log('  - Forecast URL ready:' + !!STATE.forecastUrl);
-  log('  - Forecast data ready:' + !!STATE.cachedForecast);
-  log('  - Temperature ranges ready:' + !!STATE.cachedTemperatureRanges, "topic:", STATE.temperatureRangesTopic);
-  log('  - Internal temperature ready:' + !!STATE.temperature.internal, "topic:", CONFIG.internalTemperatureTopic);
-  log('  - External temperature ready:' + !!STATE.temperature.external, "topic:", CONFIG.externalTemperatureTopic);
+  log('  - Room ID configured:', !!CONFIG.roomId, "room-id:", CONFIG.roomId);
+  log('  - Forecast URL ready:', !!STATE.forecastUrl);
+  log('  - Forecast data ready:', !!STATE.cachedForecast);
+  log('  - Temperature ranges ready:', !!STATE.cachedTemperatureRanges, "topic:", STATE.temperatureRangesTopic);
+  log('  - Internal temperature ready:', !!STATE.temperature.internal, "topic:", CONFIG.internalTemperatureTopic);
+  log('  - External temperature ready:', !!STATE.temperature.external, "topic:", CONFIG.externalTemperatureTopic);
+  log('  - Doors/Windows sensors:', CONFIG.doorSensorTopics.length, "topic:", CONFIG.doorSensorTopics);
 
   // Fail if roomId is not configured - required for temperature ranges
   if (!CONFIG.roomId) {
@@ -1222,6 +1345,9 @@ function onConfigLoaded(updated) {
   if (updated.indexOf('roomId') !== -1) {
     STATE.temperatureRangesTopic = "myhome/rooms/" + CONFIG.roomId + "/temperature/ranges";
     subscribeToTemperatureRanges();
+  }
+  if (updated.indexOf('doorSensorTopics') !== -1) {
+    subscribeToDoorSensors();
   }
 
   subscribeToOccupancy();

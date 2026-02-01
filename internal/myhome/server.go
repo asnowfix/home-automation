@@ -29,7 +29,7 @@ func NewServerE(ctx context.Context, handler Server) (Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	from, err := mc.Subscribe(ctx, ServerTopic(), 8, "myhome/server")
+	from, err := mc.Subscribe(ctx, ServerTopic(), 16, InstanceName+"/server")
 	if err != nil {
 		log.Error(err, "Failed to subscribe to server", "topic", ServerTopic())
 		return nil, err
@@ -125,7 +125,7 @@ func NewServerE(ctx context.Context, handler Server) (Server, error) {
 				}
 				// to <- outMsg
 				log.Info("Publishing response", "dst", res.Dst, "topic", ClientTopic(req.Src), "request_id", res.Id)
-				mc.Publish(ctx, ClientTopic(req.Src), outMsg, mqtt.AtLeastOnce, false, "myhome.rpc/Server")
+				mc.Publish(ctx, ClientTopic(req.Src), outMsg, mqtt.AtLeastOnce, false, InstanceName+".rpc/Server")
 			}
 		}
 	}(logr.NewContext(ctx, log.WithName("Server")))
@@ -146,7 +146,7 @@ func (sp *server) fail(ctx context.Context, code int, err error, req *request, m
 	}
 	outMsg, _ := json.Marshal(res)
 	// sp.to <- outMsg
-	mc.Publish(ctx, ClientTopic(res.Dst), outMsg, mqtt.AtLeastOnce, false, "myhome.rpc/Server")
+	mc.Publish(ctx, ClientTopic(res.Dst), outMsg, mqtt.AtLeastOnce, false, InstanceName+".rpc/Server")
 }
 
 func (sp *server) MethodE(method Verb) (*Method, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"myhome"
 
 	"github.com/go-logr/logr"
@@ -49,6 +50,7 @@ func (s *DeviceStorage) createTable() error {
         info TEXT,
         config_revision INTEGER,  -- New column for config revision
         config TEXT,
+        room_id TEXT DEFAULT '',  -- Room this device belongs to (optional)
         PRIMARY KEY (manufacturer, id)
     );`
 
@@ -67,6 +69,24 @@ func (s *DeviceStorage) createTable() error {
 	if err != nil {
 		s.log.Error(err, "Failed to drop group tables during migration")
 		// Don't return error - tables might not exist
+	}
+
+	// Migration: Add room_id column if it doesn't exist
+	var count int
+	query := `SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name='room_id'`
+	err = s.db.Get(&count, query)
+	if err != nil {
+		s.log.Error(err, "Failed to check for room_id column")
+		return err
+	}
+	if count == 0 {
+		s.log.Info("Adding room_id column to devices table")
+		alterQuery := `ALTER TABLE devices ADD COLUMN room_id TEXT DEFAULT ''`
+		_, err = s.db.Exec(alterQuery)
+		if err != nil {
+			s.log.Error(err, "Failed to add room_id column")
+			return err
+		}
 	}
 
 	return nil
@@ -107,15 +127,16 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 
 	// First, try to insert or update based on manufacturer and id
 	query := `
-    INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config) 
-    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config)
+    INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config, room_id) 
+    VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config, :room_id)
     ON CONFLICT(manufacturer, id) DO UPDATE SET 
         mac = excluded.mac, 
         name = excluded.name, 
         host = excluded.host, 
         info = excluded.info, 
         config_revision = excluded.config_revision, 
-        config = excluded.config`
+        config = excluded.config,
+        room_id = excluded.room_id`
 	_, err = s.db.NamedExec(query, d)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device by manufacturer and id", "device", device)
@@ -241,6 +262,34 @@ func (s *DeviceStorage) ForgetDevice(ctx context.Context, identifier string) err
 	}
 	s.log.Info("Device deleted", "identifier", identifier)
 	return err
+}
+
+// GetDevicesByRoom retrieves all devices in a specific room
+func (s *DeviceStorage) GetDevicesByRoom(ctx context.Context, roomId string) ([]*myhome.Device, error) {
+	devices := make([]Device, 0)
+	query := `SELECT * FROM devices WHERE room_id = $1`
+	err := s.db.Select(&devices, query, roomId)
+	if err != nil {
+		s.log.Error(err, "Failed to get devices by room", "room_id", roomId)
+		return nil, err
+	}
+	return unmarshallDevices(s.log, devices)
+}
+
+// SetDeviceRoom updates the room assignment for a device
+func (s *DeviceStorage) SetDeviceRoom(ctx context.Context, identifier string, roomId string) error {
+	query := `UPDATE devices SET room_id = $1 WHERE id = $2 OR mac = $2 OR name = $2 OR host = $2`
+	result, err := s.db.Exec(query, roomId, identifier)
+	if err != nil {
+		s.log.Error(err, "Failed to set device room", "identifier", identifier, "room_id", roomId)
+		return err
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("device not found: %s", identifier)
+	}
+	s.log.Info("Device room updated", "identifier", identifier, "room_id", roomId)
+	return nil
 }
 
 // unmarshallDevice takes a Device struct and unmarshals the Info and Config fields

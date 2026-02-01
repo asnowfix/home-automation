@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"myhome"
+	"myhome/mqtt"
 	"myhome/storage"
 	"myhome/ui"
 	"mynet"
@@ -37,7 +38,7 @@ import (
 // - an IPv4/IPv6 address
 // - a .local hostname
 // - any known identifier in the myhome database (name, id, mac, host)
-func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db *storage.DeviceStorage) error {
+func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db *storage.DeviceStorage, mc mqtt.Client, sseBroadcaster *SSEBroadcaster) error {
 	addr := fmt.Sprintf(":%d", listenPort)
 	srv := &http.Server{Addr: addr}
 
@@ -94,6 +95,33 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 			}
 			log.Info("served index", "dur", time.Since(start))
 			return
+		}
+
+		// SSE endpoint for live sensor updates
+		if path == "events" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+
+			ch := sseBroadcaster.Subscribe()
+			defer sseBroadcaster.Unsubscribe(ch)
+
+			// Send initial connection message
+			fmt.Fprintf(w, "event: connected\ndata: {}\n\n")
+			w.(http.Flusher).Flush()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-r.Context().Done():
+					return
+				case msg := <-ch:
+					fmt.Fprintf(w, "%s", msg)
+					w.(http.Flusher).Flush()
+				}
+			}
 		}
 
 		// health endpoint for quick checks

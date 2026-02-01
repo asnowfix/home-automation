@@ -19,7 +19,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"tools"
 
 	"github.com/go-logr/logr"
 )
@@ -31,6 +30,7 @@ type DeviceMqttChannels struct {
 	ReplyTo string
 	To      chan<- []byte
 	From    <-chan []byte
+	mu      sync.Mutex // Serializes MQTT request-response cycles to prevent ID mismatch
 }
 
 func (m *DeviceMqttChannels) IsReady() bool {
@@ -47,6 +47,20 @@ func (m *DeviceMqttChannels) IsReady() bool {
 		return false
 	}
 	return true
+}
+
+// Lock acquires the mutex to serialize MQTT request-response cycles
+func (m *DeviceMqttChannels) Lock() {
+	if m != nil {
+		m.mu.Lock()
+	}
+}
+
+// Unlock releases the mutex
+func (m *DeviceMqttChannels) Unlock() {
+	if m != nil {
+		m.mu.Unlock()
+	}
 }
 
 // Init initializes MQTT channels for a device. Returns an existing instance from the registry
@@ -100,25 +114,21 @@ var (
 )
 
 type Device struct {
-	Id_         string               `json:"id"`
-	MacAddress_ net.HardwareAddr     `json:"-"`
-	Name_       string               `json:"name"`
-	Host_       net.IP               `json:"host"`
-	info        *shelly.DeviceInfo   `json:"-"`
-	config      *shelly.Config       `json:"-"`
-	status      *shelly.Status       `json:"-"`
-	mqtt        *DeviceMqttChannels  `json:"-"` // MQTT channels (shared via registry)
-	dialogId    uint32               `json:"-"`
-	dialogs     sync.Map             `json:"-"` // map[uint32]bool
-	log         logr.Logger          `json:"-"`
-	modified    bool                 `json:"-"`
-	mutex       tools.ReentrantMutex `json:"-"`
+	Id_         string              `json:"id"`
+	MacAddress_ net.HardwareAddr    `json:"-"`
+	Name_       string              `json:"name"`
+	Host_       net.IP              `json:"host"`
+	info        *shelly.DeviceInfo  `json:"-"`
+	config      *shelly.Config      `json:"-"`
+	status      *shelly.Status      `json:"-"`
+	mqtt        *DeviceMqttChannels `json:"-"` // MQTT channels (shared via registry, includes mutex for serialization)
+	dialogId    uint32              `json:"-"`
+	dialogs     sync.Map            `json:"-"` // map[uint32]bool
+	log         logr.Logger         `json:"-"`
+	modified    bool                `json:"-"`
 }
 
 func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
-	d.mutex.Lock(ctx)
-	defer d.mutex.Unlock(ctx)
-
 	// Gen1 devices cannot be refreshed via RPC
 	if IsGen1Device(d.Id()) {
 		d.log.V(1).Info("Skipping refresh for Gen1 device", "device_id", d.Id())
@@ -137,6 +147,11 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 			return false, fmt.Errorf("unable to init MQTT (%v)", err)
 		}
 	}
+
+	// Resolve the channel after MQTT initialization - this ensures MQTT-only devices
+	// (no known host) use MQTT instead of the discard caller for ChannelDefault
+	via = d.Channel(via)
+
 	if d.Id() == "" {
 		err := d.initDeviceInfo(ctx, via)
 		if err != nil {
@@ -249,6 +264,14 @@ func (d *Device) UpdateHost(host string) {
 	}
 }
 
+func (d *Device) ClearHost() {
+	if d.Host_ != nil {
+		d.modified = true
+		d.Host_ = nil
+		d.log.Info("Cleared device host (HTTP channel will become not ready)", "device_id", d.Id())
+	}
+}
+
 func (d *Device) Ip() net.IP {
 	if d.status != nil {
 		if d.status.Ethernet != nil {
@@ -354,8 +377,8 @@ func (d *Device) IsHttpReady() bool {
 }
 
 func (d *Device) StartDialog(ctx context.Context) uint32 {
-	d.mutex.Lock(ctx)
-	defer d.mutex.Unlock(ctx)
+	// Lock the MQTT channel to serialize request-response cycles
+	d.mqtt.Lock()
 
 	d.dialogId++
 	d.dialogs.Store(d.dialogId, true)
@@ -363,9 +386,9 @@ func (d *Device) StartDialog(ctx context.Context) uint32 {
 }
 
 func (d *Device) StopDialog(ctx context.Context, id uint32) {
-	d.mutex.Lock(ctx)
-	defer d.mutex.Unlock(ctx)
 	d.dialogs.Delete(id)
+	// Unlock the MQTT channel after the response is received
+	d.mqtt.Unlock()
 }
 
 func (d *Device) Channel(via types.Channel) types.Channel {
@@ -448,9 +471,6 @@ func IsBluDevice(deviceId string) bool {
 func (d *Device) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
 	var mh types.MethodHandler
 	var err error
-
-	d.mutex.Lock(ctx)
-	defer d.mutex.Unlock(ctx)
 
 	if strings.HasPrefix(method, "Shelly.") {
 		mh, err = GetRegistrar().MethodHandlerE(method)

@@ -3,15 +3,14 @@ package ui
 import (
 	"context"
 	"embed"
-	"html/template"
 	"io"
 	"io/fs"
 	"myhome"
+	"myhome/storage"
 	"net/http"
 	"sort"
 	"strings"
-
-	"myhome/storage"
+	"text/template"
 )
 
 // Embed static assets under this package
@@ -35,13 +34,17 @@ func StaticFileServer() (http.Handler, error) {
 
 // DeviceView represents a device for rendering in the UI
 type DeviceView struct {
-	Name            string
-	Id              string
-	Manufacturer    string
-	Host            string
-	LinkToken       string
-	HasHeaterScript bool
-	DeviceTypeEmoji string // Emoji indicating device type (e.g., 🌡️ for thermometer, 🚶 for motion)
+	Name                 string
+	Id                   string
+	Manufacturer         string
+	Host                 string
+	LinkToken            string
+	HasHeaterScript      bool
+	HasDoorSensor        bool     // true if device has door/window sensing capability
+	HasTemperatureSensor bool     // true if device has temperature sensing capability
+	DeviceTypeEmoji      string   // Emoji indicating device type (e.g., 🌡️ for thermometer, 🚶 for motion)
+	Temperature          *float64 // Current temperature in Celsius (nil if not a thermometer)
+	DoorOpened           *bool    // true if door/window is open, false if closed (nil if not a door/window sensor)
 }
 
 // IndexData holds the data for rendering the index page
@@ -58,6 +61,15 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
   <title>MyHome Devices</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css"/>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🏠</text></svg>"/>
+  <style>
+    .door-icon {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+  </style>
   </head>
 <body>
   <section class="hero is-light is-small">
@@ -84,7 +96,42 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
         <div class="column is-4-desktop is-6-tablet">
           <div class="card">
             <div class="card-content">
-              <p class="title is-5">{{if .DeviceTypeEmoji}}{{.DeviceTypeEmoji}} {{end}}{{.Name}}</p>
+              <p class="title is-5">
+                {{if .DeviceTypeEmoji}}{{.DeviceTypeEmoji}} {{end}}{{.Name}}
+                {{if .HasTemperatureSensor}}
+                  {{if .Temperature}}
+                    <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{printf "%.1f" .Temperature}}°C</span>
+                  {{else}}
+                    <span class="tag is-light ml-2" id="sensor-{{.Id}}-temperature">--°C</span>
+                  {{end}}
+                {{end}}
+                {{if .HasDoorSensor}}
+                  {{if ne .DoorOpened nil}}
+                    {{if .DoorOpened}}
+                      <span class="tag is-warning ml-2" id="door-{{.Id}}">
+                        <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z"/>
+                        </svg>
+                        Open
+                      </span>
+                    {{else}}
+                      <span class="tag is-success ml-2" id="door-{{.Id}}">
+                        <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
+                        </svg>
+                        Closed
+                      </span>
+                    {{end}}
+                  {{else}}
+                    <span class="tag is-light ml-2" id="door-{{.Id}}">
+                      <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
+                      </svg>
+                      Unknown
+                    </span>
+                  {{end}}
+                {{end}}
+              </p>
               <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
               {{if .Host}}
                 <p class="has-text-grey">Host: {{.Host}}</p>
@@ -214,6 +261,17 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
           <p class="help">Overrides automatic name derivation from output/input names</p>
         </div>
         <div class="field">
+          <label class="label">Room</label>
+          <div class="control">
+            <div class="select is-fullwidth">
+              <select id="setup-room-id">
+                <option value="">-- No room --</option>
+              </select>
+            </div>
+          </div>
+          <p class="help">Assign this device to a room for sensor auto-discovery</p>
+        </div>
+        <div class="field">
           <label class="label">MQTT Broker</label>
           <div class="control">
             <input class="input" type="text" id="setup-mqtt-broker" placeholder="Leave empty for default">
@@ -314,6 +372,13 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
             </div>
             <p class="help">Sensor outside (for weather compensation)</p>
           </div>
+          <div class="field">
+            <label class="label">Door/Window Sensors</label>
+            <div class="control">
+              <input class="input" type="text" id="heater-door-sensors" placeholder="Auto-discovered from room">
+            </div>
+            <p class="help">Comma-separated MQTT topics (auto-discovered from devices in same room)</p>
+          </div>
           <hr>
           <p class="has-text-weight-semibold mb-2">Cheap Electricity Window</p>
           <div class="columns">
@@ -377,6 +442,34 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
     </div>
   </footer>
   <script>
+    // Fetch available rooms and populate a dropdown
+    async function populateRoomDropdown(selectId) {
+      const select = document.getElementById(selectId);
+      if (!select) return;
+      // Keep the first option (-- No room --)
+      while (select.options.length > 1) {
+        select.remove(1);
+      }
+      try {
+        const res = await fetch('/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: 'room.list', params: null })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.result && data.result.rooms) {
+            for (const room of data.result.rooms) {
+              const opt = document.createElement('option');
+              opt.value = room.id;
+              opt.textContent = room.name || room.id;
+              select.appendChild(opt);
+            }
+          }
+        }
+      } catch (e) { console.log('Could not fetch rooms:', e); }
+    }
+
     async function refreshDevice(id) {
       const btn = document.getElementById('btn-refresh-' + id);
       if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
@@ -411,11 +504,12 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       }
     }
 
-    function setupDevice(id) {
+    async function setupDevice(id) {
       // Open modal and store device ID
       document.getElementById('setup-device-id').value = id;
       // Clear all fields
       document.getElementById('setup-name').value = '';
+      document.getElementById('setup-room-id').value = '';
       document.getElementById('setup-mqtt-broker').value = '';
       document.getElementById('setup-sta-essid').value = '';
       document.getElementById('setup-sta-passwd').value = '';
@@ -427,6 +521,27 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       if (btn) { btn.disabled = false; btn.textContent = 'Setup'; }
       // Show modal
       document.getElementById('setup-modal').classList.add('is-active');
+      // Fetch available rooms and populate dropdown
+      await populateRoomDropdown('setup-room-id');
+      // Try to get current device room and select it
+      try {
+        const res = await fetch('/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: 'device.show', params: { identifier: id } })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.result) {
+            if (data.result.room_id) {
+              document.getElementById('setup-room-id').value = data.result.room_id;
+            }
+            if (data.result.name) {
+              document.getElementById('setup-name').value = data.result.name;
+            }
+          }
+        }
+      } catch (e) { console.log('Could not fetch device info:', e); }
     }
 
     function closeSetupModal() {
@@ -441,6 +556,7 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       // Build params object, only including non-empty values
       const params = { identifier: id };
       const name = document.getElementById('setup-name').value.trim();
+      const roomId = document.getElementById('setup-room-id').value;
       const mqttBroker = document.getElementById('setup-mqtt-broker').value.trim();
       const staEssid = document.getElementById('setup-sta-essid').value.trim();
       const staPasswd = document.getElementById('setup-sta-passwd').value;
@@ -460,6 +576,15 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       if (deviceBtn) { deviceBtn.disabled = true; deviceBtn.textContent = 'Setting up…'; }
       
       try {
+        // First, save room assignment to database
+        if (roomId !== undefined) {
+          await fetch('/rpc', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ method: 'device.setroom', params: { identifier: id, room_id: roomId } })
+          });
+        }
+
         const res = await fetch('/rpc', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -487,14 +612,15 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
     // Heater configuration functions
     const heaterKVSKeys = {
       'script/heater/enable-logging': 'heater-enable-logging',
-      'script/heater/room-id': 'heater-room-id',
+      'room-id': 'heater-room-id',
       'script/heater/cheap-start-hour': 'heater-cheap-start',
       'script/heater/cheap-end-hour': 'heater-cheap-end',
       'script/heater/poll-interval-ms': 'heater-poll-interval',
       'script/heater/preheat-hours': 'heater-preheat-hours',
       'normally-closed': 'heater-normally-closed',
       'script/heater/internal-temperature-topic': 'heater-internal-temp',
-      'script/heater/external-temperature-topic': 'heater-external-temp'
+      'script/heater/external-temperature-topic': 'heater-external-temp',
+      'script/heater/door-sensor-topics': 'heater-door-sensors'
     };
 
     async function openHeaterConfig(deviceId) {
@@ -507,6 +633,20 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
       document.getElementById('heater-modal').classList.add('is-active');
 
       try {
+        // First, get device info to retrieve its room_id
+        let deviceRoomId = '';
+        const deviceRes = await fetch('/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: 'device.show', params: { identifier: deviceId } })
+        });
+        if (deviceRes.ok) {
+          const deviceData = await deviceRes.json();
+          if (deviceData.result && deviceData.result.room_id) {
+            deviceRoomId = deviceData.result.room_id;
+          }
+        }
+
         // Load rooms list
         const roomsRes = await fetch('/rpc', {
           method: 'POST',
@@ -529,6 +669,7 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
         }
 
         // Load thermometers list
+        let allThermometers = [];
         const thermRes = await fetch('/rpc', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -537,21 +678,28 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
         if (thermRes.ok) {
           const thermData = await thermRes.json();
           const therms = thermData.result || thermData;
-          const intSelect = document.getElementById('heater-internal-temp');
-          const extSelect = document.getElementById('heater-external-temp');
-          intSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
-          extSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
           if (therms && therms.thermometers) {
-            therms.thermometers.forEach(t => {
-              const opt1 = document.createElement('option');
-              opt1.value = t.mqtt_topic;
-              opt1.textContent = t.name + ' (' + t.type + ')';
-              intSelect.appendChild(opt1);
-              const opt2 = opt1.cloneNode(true);
-              extSelect.appendChild(opt2);
-            });
+            allThermometers = therms.thermometers;
           }
         }
+
+        // Populate thermometer dropdowns
+        const intSelect = document.getElementById('heater-internal-temp');
+        const extSelect = document.getElementById('heater-external-temp');
+        intSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
+        extSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
+        allThermometers.forEach(t => {
+          const opt1 = document.createElement('option');
+          opt1.value = t.mqtt_topic;
+          opt1.textContent = t.name + ' (' + t.type + ')';
+          // Mark thermometers in the same room
+          if (deviceRoomId && t.room_id === deviceRoomId) {
+            opt1.textContent = '★ ' + opt1.textContent;
+          }
+          intSelect.appendChild(opt1);
+          const opt2 = opt1.cloneNode(true);
+          extSelect.appendChild(opt2);
+        });
 
         // Load current heater config via server-side RPC (uses MQTT)
         const configRes = await fetch('/rpc', {
@@ -559,22 +707,45 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ method: 'heater.getconfig', params: { identifier: deviceId } })
         });
+        
+        let configRoomId = '';
+        let configInternalTemp = '';
+        let configExternalTemp = '';
+        
         if (configRes.ok) {
           const data = await configRes.json();
           const result = data.result || data;
           if (result.config) {
             const cfg = result.config;
             document.getElementById('heater-enable-logging').checked = cfg.enable_logging || false;
-            document.getElementById('heater-room-id').value = cfg.room_id || '';
+            configRoomId = cfg.room_id || '';
             document.getElementById('heater-cheap-start').value = cfg.cheap_start_hour || 23;
             document.getElementById('heater-cheap-end').value = cfg.cheap_end_hour || 7;
             document.getElementById('heater-poll-interval').value = cfg.poll_interval_ms || 60000;
             document.getElementById('heater-preheat-hours').value = cfg.preheat_hours || 2;
             document.getElementById('heater-normally-closed').checked = cfg.normally_closed || false;
-            document.getElementById('heater-internal-temp').value = cfg.internal_temperature_topic || '';
-            document.getElementById('heater-external-temp').value = cfg.external_temperature_topic || '';
+            configInternalTemp = cfg.internal_temperature_topic || '';
+            configExternalTemp = cfg.external_temperature_topic || '';
           }
         }
+
+        // Set room: prefer config value, fall back to device's room_id
+        const finalRoomId = configRoomId || deviceRoomId;
+        document.getElementById('heater-room-id').value = finalRoomId;
+
+        // Set internal temp: prefer config value, or auto-select first thermometer in room
+        if (configInternalTemp) {
+          document.getElementById('heater-internal-temp').value = configInternalTemp;
+        } else if (finalRoomId) {
+          // Auto-select first thermometer in the same room
+          const roomTherm = allThermometers.find(t => t.room_id === finalRoomId);
+          if (roomTherm) {
+            document.getElementById('heater-internal-temp').value = roomTherm.mqtt_topic;
+          }
+        }
+
+        // Set external temp from config
+        document.getElementById('heater-external-temp').value = configExternalTemp;
 
         document.getElementById('heater-loading').style.display = 'none';
         document.getElementById('heater-config-form').style.display = 'block';
@@ -901,6 +1072,56 @@ var indexTmpl = template.Must(template.New("index").Parse(`<!doctype html>
 
     // Load rooms on page load
     document.addEventListener('DOMContentLoaded', loadRooms);
+
+    // SSE client for live sensor updates
+    const eventSource = new EventSource('/events');
+
+    eventSource.addEventListener('connected', (e) => {
+      console.log('SSE connected');
+    });
+
+    eventSource.addEventListener('sensor-update', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        updateDeviceSensor(data.device_id, data.sensor, data.value);
+      } catch (err) {
+        console.error('Failed to parse sensor-update:', err);
+      }
+    });
+
+    eventSource.addEventListener('door-update', (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        updateDeviceDoorStatus(data.device_id, data.opened);
+      } catch (err) {
+        console.error('Failed to parse door-update:', err);
+      }
+    });
+
+    eventSource.onerror = (e) => {
+      console.error('SSE error:', e);
+      // Browser will automatically reconnect
+    };
+
+    function updateDeviceSensor(deviceId, sensor, value) {
+      const el = document.getElementById('sensor-' + deviceId + '-' + sensor);
+      if (el) {
+        el.textContent = value.toFixed(1) + '°C';
+      }
+    }
+
+    function updateDeviceDoorStatus(deviceId, opened) {
+      const el = document.getElementById('door-' + deviceId);
+      if (el) {
+        if (opened) {
+          el.innerHTML = '<svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z"/></svg>Open';
+          el.className = 'tag is-warning ml-2';
+        } else {
+          el.innerHTML = '<svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/></svg>Closed';
+          el.className = 'tag is-success ml-2';
+        }
+      }
+    }
   </script>
 </body>
 </html>`))
@@ -959,7 +1180,7 @@ func getDeviceTypeEmoji(d *myhome.Device) string {
 		return "🚶"
 	}
 	if hasWindow {
-		return "🪟"
+		return "🚪"
 	}
 	if hasButton {
 		return "🔘"
@@ -971,7 +1192,35 @@ func getDeviceTypeEmoji(d *myhome.Device) string {
 	return ""
 }
 
+// hasTemperatureCapability checks if a device has temperature sensing capability
+func hasTemperatureCapability(d *myhome.Device) bool {
+	if strings.HasPrefix(d.Id(), "shellyht-") {
+		return true
+	}
+	if d.Info != nil && d.Info.BTHome != nil {
+		for _, cap := range d.Info.BTHome.Capabilities {
+			if cap == "temperature" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasWindowCapability checks if a device has window/door sensing capability
+func hasWindowCapability(d *myhome.Device) bool {
+	if d.Info != nil && d.Info.BTHome != nil {
+		for _, cap := range d.Info.BTHome.Capabilities {
+			if cap == "window" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // RenderIndex renders the index page with device list
+// Sensor values are populated via SSE after page load
 func RenderIndex(ctx context.Context, db *storage.DeviceStorage, w io.Writer) error {
 	data := IndexData{Devices: []DeviceView{}}
 	if db != nil {
@@ -992,15 +1241,19 @@ func RenderIndex(ctx context.Context, db *storage.DeviceStorage, w io.Writer) er
 					token = d.Id()
 				}
 			}
-			data.Devices = append(data.Devices, DeviceView{
-				Name:            name,
-				Id:              d.Id(),
-				Manufacturer:    d.Manufacturer(),
-				Host:            host,
-				LinkToken:       token,
-				HasHeaterScript: hasHeaterScript(d),
-				DeviceTypeEmoji: getDeviceTypeEmoji(d),
-			})
+			view := DeviceView{
+				Name:                 name,
+				Id:                   d.Id(),
+				Manufacturer:         d.Manufacturer(),
+				Host:                 host,
+				LinkToken:            token,
+				HasHeaterScript:      hasHeaterScript(d),
+				HasDoorSensor:        hasWindowCapability(d),
+				HasTemperatureSensor: hasTemperatureCapability(d),
+				DeviceTypeEmoji:      getDeviceTypeEmoji(d),
+			}
+
+			data.Devices = append(data.Devices, view)
 		}
 		sort.Slice(data.Devices, func(i, j int) bool {
 			return strings.ToLower(data.Devices[i].Name) < strings.ToLower(data.Devices[j].Name)

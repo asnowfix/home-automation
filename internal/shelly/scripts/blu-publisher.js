@@ -88,6 +88,7 @@ var STATE = {
   // In-memory cache of follows loaded from KVS by loadFollowsFromKVS()
   // KVS keys are set externally via "myhome ctl follow blu" command
   // Each followed MAC has its own KVS key: follow/shelly-blu/<mac>
+  // Empty map = publish ALL BLU events (no filtering)
   follows: {}
 };
 
@@ -203,7 +204,12 @@ function processKvsKey(k, newMap, onComplete) {
 
 function onAllKeysProcessed(newMap, callback) {
   setFollows(newMap);
-  log("Loaded follows:", newMap);
+  var followCount = Object.keys(newMap).length;
+  if (followCount === 0) {
+    log("Loaded follows: empty - publish-all mode enabled");
+  } else {
+    log("Loaded follows:", followCount, "MACs - filtering mode enabled");
+  }
   if (callback) callback(true);
 }
 
@@ -249,7 +255,7 @@ function onKvsListResponse(callback, resp, err) {
   
   if (!list || !list.length) {
     setFollows(newMap);
-    log("No followed MACs.");
+    log("No followed MACs - publish-all mode enabled");
     if (callback) callback(true);
     return;
   }
@@ -568,6 +574,18 @@ function emitData(data) {
     return;
   }
 
+  // Check if we should publish this event
+  // Empty follows map = publish all; otherwise check if MAC is in follows
+  var follows = getFollows();
+  var followKeys = Object.keys(follows);
+  var publishAll = followKeys.length === 0;
+  var mac = normalizeMac(data.address);
+  var follow = follows[mac];
+  
+  if (!publishAll && !follow) {
+    return; // not followed and not in publish-all mode
+  }
+
   if (MQTT.isConnected()) {
     topic = CONFIG.eventName + "/events/" + data.address;
     
@@ -594,17 +612,16 @@ function emitData(data) {
     }
   }
 
-  try {
-    var follows = getFollows();
-    var follow = follows[data.mac];
-    if (!follow) return; // not followed
-
-    log("Emitting local event data: ", data);
-    Shelly.emitEvent(CONFIG.eventName, data);
-  } catch (e) {
-    log("Error emitting local event: ", e);
-    // Ensure 'e' is referenced so the minifier doesn't drop it and produce `catch {}`
-    if (e && false) {}
+  // Only emit local event if this MAC is specifically followed (not just publish-all)
+  if (follow) {
+    try {
+      log("Emitting local event data: ", data);
+      Shelly.emitEvent(CONFIG.eventName, data);
+    } catch (e) {
+      log("Error emitting local event: ", e);
+      // Ensure 'e' is referenced so the minifier doesn't drop it and produce `catch {}`
+      if (e && false) {}
+    }
   }
 }
 

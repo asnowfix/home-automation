@@ -41,13 +41,15 @@ func (ch *HttpChannel) callE(ctx context.Context, device types.Device, verb type
 	}
 
 	if err != nil {
-		log.Error(err, "HTTP error")
+		log.Error(err, "HTTP error - clearing device host to fallback to MQTT", "device_id", device.Id())
+		device.ClearHost()
 		return nil, err
 	}
 
 	err = json.NewDecoder(res.Body).Decode(&out)
 	if err != nil {
-		log.Error(err, "HTTP error decoding response")
+		log.Error(err, "HTTP error decoding response - clearing device host to fallback to MQTT", "device_id", device.Id())
+		device.ClearHost()
 		return nil, err
 	}
 

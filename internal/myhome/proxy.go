@@ -8,6 +8,10 @@ import (
 
 var TheClient Client
 
+// InstanceName is the myhome server instance name used for RPC topics.
+// Default is "myhome". Can be changed to target a different server instance.
+var InstanceName string = MYHOME
+
 type Client interface {
 	LookupDevices(ctx context.Context, name string) (*[]devices.Device, error)
 	ForgetDevices(ctx context.Context, name string) error
@@ -15,7 +19,7 @@ type Client interface {
 }
 
 func ServerTopic() string {
-	return fmt.Sprintf("%s/rpc", MYHOME)
+	return fmt.Sprintf("%s/rpc", InstanceName)
 }
 
 func ClientTopic(clientId string) string {

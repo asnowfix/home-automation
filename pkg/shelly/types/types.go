@@ -34,6 +34,7 @@ type Device interface {
 
 	UpdateName(name string)
 	UpdateHost(host string)
+	ClearHost()
 	UpdateMac(mac string)
 	UpdateId(id string)
 	IsModified() bool

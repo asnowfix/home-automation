@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"myhome/ui"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -98,4 +99,10 @@ func (b *SSEBroadcaster) BroadcastSensorUpdate(deviceID string, sensor string, v
 		Sensor:   sensor,
 		Value:    value,
 	})
+}
+
+// BroadcastDeviceUpdate broadcasts a device update to all SSE clients
+func (b *SSEBroadcaster) BroadcastDeviceUpdate(deviceData ui.DeviceView) {
+	b.log.Info("Broadcasting device update", "device_id", deviceData.Id, "name", deviceData.Name)
+	b.broadcast("device-update", deviceData)
 }

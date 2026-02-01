@@ -34,17 +34,17 @@ func StaticFileServer() (http.Handler, error) {
 
 // DeviceView represents a device for rendering in the UI
 type DeviceView struct {
-	Name                 string
-	Id                   string
-	Manufacturer         string
-	Host                 string
-	LinkToken            string
-	HasHeaterScript      bool
-	HasDoorSensor        bool     // true if device has door/window sensing capability
-	HasTemperatureSensor bool     // true if device has temperature sensing capability
-	DeviceTypeEmoji      string   // Emoji indicating device type (e.g., 🌡️ for thermometer, 🚶 for motion)
-	Temperature          *float64 // Current temperature in Celsius (nil if not a thermometer)
-	DoorOpened           *bool    // true if door/window is open, false if closed (nil if not a door/window sensor)
+	Name                 string   `json:"name"`
+	Id                   string   `json:"id"`
+	Manufacturer         string   `json:"manufacturer"`
+	Host                 string   `json:"host"`
+	LinkToken            string   `json:"link_token"`
+	HasHeaterScript      bool     `json:"has_heater_script"`
+	HasDoorSensor        bool     `json:"has_door_sensor"`        // true if device has door/window sensing capability
+	HasTemperatureSensor bool     `json:"has_temperature_sensor"` // true if device has temperature sensing capability
+	DeviceTypeEmoji      string   `json:"device_type_emoji"`      // Emoji indicating device type (e.g., 🌡️ for thermometer, 🚶 for motion)
+	Temperature          *float64 `json:"temperature,omitempty"`  // Current temperature in Celsius (nil if not a thermometer)
+	DoorOpened           *bool    `json:"door_opened,omitempty"`  // true if door/window is open, false if closed (nil if not a door/window sensor)
 }
 
 // IndexData holds the data for rendering the index page
@@ -60,100 +60,104 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	indexTmpl = template.Must(template.New("index").Parse(string(indexContent)))
+
+	// Create template with custom functions
+	tmpl := template.New("index").Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	})
+	indexTmpl = template.Must(tmpl.Parse(string(indexContent)))
 }
 
-// hasHeaterScript checks if a device has the heater.js script installed
-func hasHeaterScript(d *myhome.Device) bool {
-	if d.Config == nil {
-		return false
+// DeviceToView converts a myhome.Device to ui.DeviceView for SSE broadcasting and UI rendering
+// This is the canonical conversion function used by both initial page rendering and SSE updates
+func DeviceToView(d *myhome.Device) DeviceView {
+	name := d.Name()
+	if name == "" {
+		name = d.Id()
 	}
-	for _, s := range d.Config.Scripts {
-		if s.Name == "heater.js" {
-			return true
-		}
-	}
-	return false
-}
-
-// getDeviceTypeEmoji returns an emoji indicating the device type based on capabilities
-func getDeviceTypeEmoji(d *myhome.Device) string {
-	// Check for Gen1 H&T devices by ID pattern
-	if strings.HasPrefix(d.Id(), "shellyht-") {
-		return "🌡️"
-	}
-
-	// Check BLU device capabilities
-	if d.Info == nil || d.Info.BTHome == nil {
-		return ""
-	}
-
-	caps := d.Info.BTHome.Capabilities
-	if len(caps) == 0 {
-		return ""
-	}
-
-	// Check for specific capabilities and return appropriate emoji
-	hasMotion := false
-	hasTemperature := false
-	hasButton := false
-	hasWindow := false
-
-	for _, cap := range caps {
-		switch cap {
-		case "motion":
-			hasMotion = true
-		case "temperature":
-			hasTemperature = true
-		case "button":
-			hasButton = true
-		case "window":
-			hasWindow = true
+	host := d.Host()
+	token := host
+	if token == "" {
+		token = d.Name()
+		if token == "" {
+			token = d.Id()
 		}
 	}
 
-	// Priority: motion > window > button > temperature
-	if hasMotion {
-		return "🚶"
-	}
-	if hasWindow {
-		return "🚪"
-	}
-	if hasButton {
-		return "🔘"
-	}
-	if hasTemperature {
-		return "🌡️"
-	}
-
-	return ""
-}
-
-// hasTemperatureCapability checks if a device has temperature sensing capability
-func hasTemperatureCapability(d *myhome.Device) bool {
-	if strings.HasPrefix(d.Id(), "shellyht-") {
-		return true
-	}
-	if d.Info != nil && d.Info.BTHome != nil {
-		for _, cap := range d.Info.BTHome.Capabilities {
-			if cap == "temperature" {
-				return true
+	// Check for heater script
+	hasHeater := false
+	if d.Config != nil {
+		for _, s := range d.Config.Scripts {
+			if s.Name == "heater.js" {
+				hasHeater = true
+				break
 			}
 		}
 	}
-	return false
-}
 
-// hasWindowCapability checks if a device has window/door sensing capability
-func hasWindowCapability(d *myhome.Device) bool {
+	// Check for temperature capability
+	hasTemp := strings.HasPrefix(d.Id(), "shellyht-")
+	if !hasTemp && d.Info != nil && d.Info.BTHome != nil {
+		for _, cap := range d.Info.BTHome.Capabilities {
+			if cap == "temperature" {
+				hasTemp = true
+				break
+			}
+		}
+	}
+
+	// Check for window/door capability
+	hasDoor := false
 	if d.Info != nil && d.Info.BTHome != nil {
 		for _, cap := range d.Info.BTHome.Capabilities {
 			if cap == "window" {
-				return true
+				hasDoor = true
+				break
 			}
 		}
 	}
-	return false
+
+	// Get device type emoji
+	emoji := ""
+	if strings.HasPrefix(d.Id(), "shellyht-") {
+		emoji = "🌡️"
+	} else if d.Info != nil && d.Info.BTHome != nil {
+		caps := d.Info.BTHome.Capabilities
+		hasMotion := false
+		hasButton := false
+		for _, cap := range caps {
+			switch cap {
+			case "motion":
+				hasMotion = true
+			case "button":
+				hasButton = true
+			}
+		}
+		// Priority: motion > window > button > temperature
+		if hasMotion {
+			emoji = "🚶"
+		} else if hasDoor {
+			emoji = "🚪"
+		} else if hasButton {
+			emoji = "🔘"
+		} else if hasTemp {
+			emoji = "🌡️"
+		}
+	}
+
+	return DeviceView{
+		Id:                   d.Id(),
+		Name:                 name,
+		Manufacturer:         d.Manufacturer(),
+		Host:                 host,
+		LinkToken:            token,
+		HasHeaterScript:      hasHeater,
+		HasDoorSensor:        hasDoor,
+		HasTemperatureSensor: hasTemp,
+		DeviceTypeEmoji:      emoji,
+		Temperature:          nil, // Sensor values are updated separately via SSE
+		DoorOpened:           nil,
+	}
 }
 
 // RenderIndex renders the index page with device list
@@ -166,31 +170,7 @@ func RenderIndex(ctx context.Context, db *storage.DeviceStorage, w io.Writer) er
 			return indexTmpl.Execute(w, data)
 		}
 		for _, d := range devices {
-			name := d.Name()
-			if name == "" {
-				name = d.Id()
-			}
-			host := d.Host()
-			token := host
-			if token == "" {
-				token = d.Name()
-				if token == "" {
-					token = d.Id()
-				}
-			}
-			view := DeviceView{
-				Name:                 name,
-				Id:                   d.Id(),
-				Manufacturer:         d.Manufacturer(),
-				Host:                 host,
-				LinkToken:            token,
-				HasHeaterScript:      hasHeaterScript(d),
-				HasDoorSensor:        hasWindowCapability(d),
-				HasTemperatureSensor: hasTemperatureCapability(d),
-				DeviceTypeEmoji:      getDeviceTypeEmoji(d),
-			}
-
-			data.Devices = append(data.Devices, view)
+			data.Devices = append(data.Devices, DeviceToView(d))
 		}
 		sort.Slice(data.Devices, func(i, j int) bool {
 			return strings.ToLower(data.Devices[i].Name) < strings.ToLower(data.Devices[j].Name)

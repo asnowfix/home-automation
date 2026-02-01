@@ -38,11 +38,12 @@
       {{if .Devices}}
       <div class="columns is-multiline">
         {{range .Devices}}
-        <div class="column is-4-desktop is-6-tablet">
-          <div class="card">
+        <div class="column is-4-desktop is-6-tablet" data-device-name="{{.Name | lower}}">
+          <div class="card" id="device-{{.Id}}">
             <div class="card-content">
               <p class="title is-5">
-                {{if .DeviceTypeEmoji}}{{.DeviceTypeEmoji}} {{end}}{{.Name}}
+                {{if .DeviceTypeEmoji}}{{.DeviceTypeEmoji}} {{end}}
+                <span id="device-{{.Id}}-name">{{.Name}}</span>
                 {{if .HasTemperatureSensor}}
                   {{if .Temperature}}
                     <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{printf "%.1f" .Temperature}}°C</span>
@@ -79,9 +80,9 @@
               </p>
               <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
               {{if .Host}}
-                <p class="has-text-grey">Host: {{.Host}}</p>
+                <p class="has-text-grey" id="device-{{.Id}}-host">Host: {{.Host}}</p>
               {{else}}
-                <p class="has-text-grey">No host known</p>
+                <p class="has-text-grey" id="device-{{.Id}}-host">No host known</p>
               {{end}}
               <div class="buttons mt-3">
                 {{if .Host}}
@@ -1034,6 +1035,20 @@
       }
     });
 
+    eventSource.addEventListener('device-update', (e) => {
+      try {
+        const deviceView = JSON.parse(e.data);
+        // Validate deviceView has required id field
+        if (!deviceView || !deviceView.id) {
+          console.error('Invalid device update: missing id', deviceView);
+          return;
+        }
+        updateDeviceCard(deviceView.id, deviceView);
+      } catch (err) {
+        console.error('Failed to parse device-update:', err, "data", e.data);
+      }
+    });
+
     eventSource.onerror = (e) => {
       console.error('SSE error:', e);
       // Browser will automatically reconnect
@@ -1052,6 +1067,172 @@
           el.innerHTML = '<svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/></svg>Closed';
           el.className = 'tag is-success ml-2';
         }
+      }
+    }
+
+    function updateDeviceCard(deviceId, deviceView) {
+      const el = document.getElementById('device-' + deviceId);
+      if (el) {
+        // Update existing device card - update all fields that might change
+        const nameEl = document.getElementById('device-' + deviceId + '-name');
+        if (nameEl) {
+          nameEl.textContent = deviceView.name;
+        }
+        
+        // Update host (including when it becomes empty)
+        const hostEl = document.getElementById('device-' + deviceId + '-host');
+        if (hostEl) {
+          if (deviceView.host) {
+            hostEl.textContent = 'Host: ' + deviceView.host;
+          } else {
+            hostEl.textContent = 'No host known';
+          }
+        }
+
+        // Update emoji in title if it changed
+        const titleEl = el.querySelector('.title.is-5');
+        if (titleEl) {
+          const emoji = deviceView.device_type_emoji || '';
+          const tempSensorHtml = deviceView.has_temperature_sensor ? `<span class="tag is-light ml-2" id="sensor-${deviceId}-temperature">--°C</span>` : '';
+          const doorSensorHtml = deviceView.has_door_sensor ? `<span class="tag is-light ml-2" id="door-${deviceId}">
+            <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
+            </svg>
+            Unknown
+          </span>` : '';
+          titleEl.innerHTML = `${emoji ? emoji + ' ' : ''}<span id="device-${deviceId}-name">${escapeHtml(deviceView.name)}</span>${tempSensorHtml}${doorSensorHtml}`;
+        }
+
+        // Update manufacturer in subtitle
+        const subtitleEl = el.querySelector('.subtitle.is-7');
+        if (subtitleEl) {
+          subtitleEl.textContent = `${deviceView.manufacturer || 'Unknown'} · ${deviceId}`;
+        }
+
+        // Update buttons container (Open button, heater button)
+        const buttonsEl = el.querySelector('.buttons');
+        if (buttonsEl) {
+          const hasOpenBtn = buttonsEl.querySelector('.button.is-link');
+          const shouldHaveOpenBtn = deviceView.host && deviceView.link_token;
+          
+          // Add or remove Open button
+          if (shouldHaveOpenBtn && !hasOpenBtn) {
+            const openBtn = `<a class="button is-link" href="/devices/${escapeHtml(deviceView.link_token)}/" target="_blank" rel="noopener noreferrer">Open</a>`;
+            buttonsEl.insertAdjacentHTML('afterbegin', openBtn);
+          } else if (!shouldHaveOpenBtn && hasOpenBtn) {
+            hasOpenBtn.remove();
+          } else if (hasOpenBtn && deviceView.link_token) {
+            hasOpenBtn.href = `/devices/${escapeHtml(deviceView.link_token)}/`;
+          }
+
+          // Add or remove heater button
+          const hasHeaterBtn = document.getElementById('btn-heater-' + deviceId);
+          if (deviceView.has_heater_script && !hasHeaterBtn) {
+            const heaterBtn = `<button class="button is-danger" id="btn-heater-${deviceId}" onclick="openHeaterConfig('${escapeJs(deviceId)}')" title="Heater Configuration">🔥</button>`;
+            buttonsEl.insertAdjacentHTML('beforeend', heaterBtn);
+          } else if (!deviceView.has_heater_script && hasHeaterBtn) {
+            hasHeaterBtn.remove();
+          }
+        }
+
+        // Update data-device-name attribute for sorting
+        const columnEl = el.closest('.column');
+        if (columnEl) {
+          columnEl.setAttribute('data-device-name', deviceView.name.toLowerCase());
+        }
+      } else {
+        // Device not found - insert new device card
+        console.log('Inserting new device card for:', deviceId);
+        insertDeviceCard(deviceView);
+      }
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function escapeJs(text) {
+      return text.replace(/\\/g, '\\\\')
+                 .replace(/'/g, "\\'")
+                 .replace(/"/g, '\\"')
+                 .replace(/\n/g, '\\n')
+                 .replace(/\r/g, '\\r');
+    }
+
+    function insertDeviceCard(deviceView) {
+      // Check if card already exists to prevent duplicates
+      if (document.getElementById('device-' + deviceView.id)) {
+        console.log('Device card already exists:', deviceView.id);
+        return;
+      }
+
+      // Find the devices container
+      const container = document.querySelector('.section .container .columns.is-multiline');
+      if (!container) {
+        console.error('Could not find device container');
+        return;
+      }
+
+      // Create device card HTML - escape all user-controlled data
+      const deviceId = escapeHtml(deviceView.id || '');
+      const deviceIdJs = escapeJs(deviceView.id || ''); // For use in onclick handlers
+      const deviceName = escapeHtml(deviceView.name || deviceView.id || '');
+      const manufacturer = escapeHtml(deviceView.manufacturer || 'Unknown');
+      const host = escapeHtml(deviceView.host || '');
+      const emoji = escapeHtml(deviceView.device_type_emoji || '');
+      const linkToken = escapeHtml(deviceView.link_token || '');
+      
+      const cardHtml = `
+        <div class="column is-4-desktop is-6-tablet" data-device-name="${deviceName.toLowerCase()}">
+          <div class="card" id="device-${deviceId}">
+            <div class="card-content">
+              <p class="title is-5">
+                ${emoji ? emoji + ' ' : ''}
+                <span id="device-${deviceId}-name">${deviceName}</span>
+                ${deviceView.has_temperature_sensor ? `<span class="tag is-light ml-2" id="sensor-${deviceId}-temperature">--°C</span>` : ''}
+                ${deviceView.has_door_sensor ? `<span class="tag is-light ml-2" id="door-${deviceId}">
+                  <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
+                  </svg>
+                  Unknown
+                </span>` : ''}
+              </p>
+              <p class="subtitle is-7 has-text-grey">${manufacturer} · ${deviceId}</p>
+              ${host ? `<p class="has-text-grey" id="device-${deviceId}-host">Host: ${host}</p>` : `<p class="has-text-grey" id="device-${deviceId}-host">No host known</p>`}
+              <div class="buttons mt-3">
+                ${host && linkToken ? `<a class="button is-link" href="/devices/${linkToken}/" target="_blank" rel="noopener noreferrer">Open</a>` : ''}
+                <button class="button is-warning" id="btn-refresh-${deviceId}" onclick="refreshDevice('${deviceIdJs}')">Refresh</button>
+                <button class="button is-success" id="btn-setup-${deviceId}" onclick="setupDevice('${deviceIdJs}')">Setup</button>
+                ${deviceView.has_heater_script ? `<button class="button is-danger" id="btn-heater-${deviceId}" onclick="openHeaterConfig('${deviceIdJs}')" title="Heater Configuration">🔥</button>` : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // Find the correct position to insert in alphabetical order
+      const newDeviceNameLower = deviceName.toLowerCase();
+      const existingCards = container.querySelectorAll('.column');
+      let insertBeforeElement = null;
+
+      for (const card of existingCards) {
+        const cardDeviceName = card.getAttribute('data-device-name');
+        if (cardDeviceName && cardDeviceName.localeCompare(newDeviceNameLower) > 0) {
+          insertBeforeElement = card;
+          break;
+        }
+      }
+
+      // Insert the card in the correct position
+      if (insertBeforeElement) {
+        insertBeforeElement.insertAdjacentHTML('beforebegin', cardHtml);
+        console.log('Inserted device card for:', deviceId, 'before', insertBeforeElement.getAttribute('data-device-name'));
+      } else {
+        // Insert at the end if no element comes after it alphabetically
+        container.insertAdjacentHTML('beforeend', cardHtml);
+        console.log('Inserted device card for:', deviceId, 'at end');
       }
     }
   </script>

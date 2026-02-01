@@ -11,6 +11,7 @@ import (
 	"myhome/mqtt"
 	"myhome/sfr"
 	"myhome/storage"
+	"myhome/ui"
 	"mynet"
 	"net"
 	"pkg/devices"
@@ -49,6 +50,7 @@ type DeviceManager struct {
 // SSEBroadcaster interface for broadcasting sensor updates to UI
 type SSEBroadcaster interface {
 	BroadcastSensorUpdate(deviceID string, sensor string, value string)
+	BroadcastDeviceUpdate(deviceData ui.DeviceView)
 }
 
 // maxConcurrentRefreshes limits the number of concurrent device refresh goroutines
@@ -540,9 +542,15 @@ func (dm *DeviceManager) storeDeviceLoop(ctx context.Context, refreshed <-chan *
 			err := dm.dr.SetDevice(ctx, device, true)
 			if err != nil {
 				log.Error(err, "Failed to upsert", "device", device.DeviceSummary)
-				return
+				continue
 			}
 			log.Info("Stored device", "device", device.DeviceSummary)
+
+			// Broadcast device update via SSE if broadcaster is available (only when a UI is connected)
+			if dm.sseBroadcaster != nil {
+				deviceView := ui.DeviceToView(device)
+				dm.sseBroadcaster.BroadcastDeviceUpdate(deviceView)
+			}
 		}
 	}
 }

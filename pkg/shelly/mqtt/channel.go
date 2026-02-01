@@ -79,13 +79,10 @@ func (ch *MqttChannel) receiveResponse(ctx context.Context, device types.Device,
 
 	device.StopDialog(ctx, reqId)
 	if res.Id != reqId {
-		err = fmt.Errorf("response.id (%v) does not match request.id (%v)", res.Id, reqId)
-		ch.log.Error(err, "Dropping response", "out", out, "device", device.Id(), "method", method)
+		// Response ID doesn't match - this happens when responses arrive out of order
+		err := fmt.Errorf("response ID mismatch (expected %d, received %d)", reqId, res.Id)
+		ch.log.Error(err, "Response ID mismatch", "device", device.Id(), "method", method)
 		return nil, err
-		// out, err = ch.receiveResponse(ctx, device, method, reqId, out)
-		// if err != nil {
-		// 	return nil, err
-		// }
 	}
 
 	if res.Error != nil {

@@ -22,7 +22,7 @@ func ConfigureDevice(ctx context.Context, log logr.Logger, identifier string, na
 	log = log.WithName("ConfigureDevice")
 
 	// Get the device from the database using RPC
-	result, err := TheClient.CallE(ctx, DeviceShow, identifier)
+	result, err := TheClient.CallE(ctx, DeviceShow, &DeviceShowParams{Identifier: identifier})
 	if err != nil {
 		return fmt.Errorf("device not found: %w", err)
 	}

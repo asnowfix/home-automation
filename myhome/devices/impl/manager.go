@@ -125,7 +125,8 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return nil, fmt.Errorf("failed to get device by identifier: %v", err)
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceShow, func(in any) (any, error) {
-		return dm.GetDeviceByAny(ctx, in.(string))
+		params := in.(*myhome.DeviceShowParams)
+		return dm.GetDeviceByAny(ctx, params.Identifier)
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceForget, func(in any) (any, error) {
 		return nil, dm.ForgetDevice(ctx, in.(string))

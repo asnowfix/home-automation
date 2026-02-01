@@ -25,7 +25,7 @@ var Cmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 
-		out, err := myhome.TheClient.CallE(cmd.Context(), myhome.DeviceShow, args[0])
+		out, err := myhome.TheClient.CallE(cmd.Context(), myhome.DeviceShow, &myhome.DeviceShowParams{Identifier: args[0]})
 		if err != nil {
 			return err
 		}

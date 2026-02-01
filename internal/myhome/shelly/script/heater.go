@@ -94,11 +94,13 @@ func (s *HeaterService) HandleGetConfig(ctx context.Context, params *myhome.Heat
 		return result, nil
 	}
 
-	// Get KVS values via MQTT channel (rate limiting ensures proper spacing)
+	// Use ChannelDefault to let the device dynamically select the best available channel
 	config := &myhome.HeaterConfig{}
+	via := types.ChannelDefault
+
 	// Batch fetch prefixed keys with KVS.GetMany (reduces 7 calls to 1)
 	prefixedValues, err := kvs.GetManyValues(ctx, s.log, via, sd, "script/heater/*")
-		if err != nil {
+	if err != nil {
 		s.log.V(1).Info("Failed to get prefixed KVS values", "error", err)
 	}
 
@@ -113,7 +115,7 @@ func (s *HeaterService) HandleGetConfig(ctx context.Context, params *myhome.Heat
 			}
 		}
 		return ""
-		}
+	}
 
 	// Parse prefixed values
 	if v := getValue("script/heater/enable-logging"); v != "" {
@@ -122,22 +124,22 @@ func (s *HeaterService) HandleGetConfig(ctx context.Context, params *myhome.Heat
 	if v := getValue("script/heater/cheap-start-hour"); v != "" {
 		if i, err := parseIntValue(v); err == nil {
 			config.CheapStartHour = i
-			}
+		}
 	}
 	if v := getValue("script/heater/cheap-end-hour"); v != "" {
 		if i, err := parseIntValue(v); err == nil {
 			config.CheapEndHour = i
-			}
+		}
 	}
 	if v := getValue("script/heater/poll-interval-ms"); v != "" {
 		if i, err := parseIntValue(v); err == nil {
 			config.PollIntervalMs = i
-			}
+		}
 	}
 	if v := getValue("script/heater/preheat-hours"); v != "" {
 		if i, err := parseIntValue(v); err == nil {
 			config.PreheatHours = i
-			}
+		}
 	}
 	if v := getValue("script/heater/internal-temperature-topic"); v != "" {
 		config.InternalTemperatureTopic = v
@@ -149,7 +151,7 @@ func (s *HeaterService) HandleGetConfig(ctx context.Context, params *myhome.Heat
 	// Fetch unprefixed keys individually (only 2 calls)
 	if val, err := kvs.GetValue(ctx, s.log, via, sd, "room-id"); err == nil && val != nil {
 		config.RoomID = val.Value
-		}
+	}
 	if val, err := kvs.GetValue(ctx, s.log, via, sd, "normally-closed"); err == nil && val != nil {
 		config.NormallyClosed = val.Value == "true"
 	}
@@ -172,11 +174,9 @@ func (s *HeaterService) HandleSetConfig(ctx context.Context, params *myhome.Heat
 		return nil, fmt.Errorf("failed to get shelly device: %w", err)
 	}
 
-	// Prefer HTTP channel for config operations when available, otherwise MQTT has proper rate limiting
-	via := types.ChannelHttp
-	if !sd.IsHttpReady() {
-		via = types.ChannelMqtt
-	}
+	// Use ChannelDefault to let the device dynamically select the best available channel
+	// This allows automatic fallback to MQTT if HTTP fails mid-operation
+	via := types.ChannelDefault
 
 	// Set each provided value
 	if params.EnableLogging != nil {

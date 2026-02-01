@@ -38,7 +38,8 @@ var CONFIG_SCHEMA = {
     description: "Room identifier for temperature API",
     key: "room-id",
     default: null,
-    type: "string"
+    type: "string",
+    unprefixed: true
   },
   cheapStartHour: {
     description: "Start hour of cheap electricity window",
@@ -398,7 +399,7 @@ function setForecastURL(lat, lon) {
   }
 }
 
-function onKvsLoaded(result, error_code, error_message, cb) {
+function onKvsLoaded(result, error_code, error_message, userdata) {
   log('onKvsLoaded');
   var updated = [];
   if (error_code === 0 && result && result.items) {
@@ -433,16 +434,17 @@ function onKvsLoaded(result, error_code, error_message, cb) {
   } else {
     log('Failed to load KVS config (error ' + error_code + '): ' + error_message);
   }
-  if (typeof cb === 'function') {
-    cb(updated);
+  if (typeof userdata === 'function') {
+    userdata(updated);
   } else {
-    log('BUG: No callback provided for onKvsLoaded', JSON.stringify(cb));
+    log('BUG: onKvsLoaded: type:', typeof userdata, 'value:', JSON.stringify(userdata));
   }
 }
 
 function loadConfig(cb) {
   log('loadConfig');
-  Shelly.call('KVS.GetMany', { match: CONFIG_KEY_PREFIX + "*" }, onKvsLoaded, cb);
+  // Load every KVS, filter-out later
+  Shelly.call('KVS.GetMany', { match: "*" }, onKvsLoaded, cb);
 }
 
 // === TIME WINDOW FOR HEATING ===
@@ -894,7 +896,7 @@ function subscribeMqttTemperature(location, topic) {
 
   // Skip if already subscribed to this topic
   if (oldTopic === newTopic && newTopic) {
-    log('Already subscribed to', location, 'topic:', newTopic);
+    log('Already subscribed to', location, ' (or invalid) topic:', newTopic);
     return;
   }
 
@@ -1177,12 +1179,12 @@ function scheduleControlLoopCheck() {
 function checkAndStartControlLoop() {
   logMemory('checkAndStartControlLoop:start');
   log('Checking whether we can start control loop')
-  log('  - Room ID configured:' + !!CONFIG.roomId);
-  log('  - Forecast URL ready:' + !!STATE.forecastUrl);
-  log('  - Forecast data ready:' + !!STATE.cachedForecast);
-  log('  - Temperature ranges ready:' + !!STATE.cachedTemperatureRanges, "topic:", STATE.temperatureRangesTopic);
-  log('  - Internal temperature ready:' + !!STATE.temperature.internal, "topic:", CONFIG.internalTemperatureTopic);
-  log('  - External temperature ready:' + !!STATE.temperature.external, "topic:", CONFIG.externalTemperatureTopic);
+  log('  - Room ID configured:', !!CONFIG.roomId, "room-id:", CONFIG.roomId);
+  log('  - Forecast URL ready:', !!STATE.forecastUrl);
+  log('  - Forecast data ready:', !!STATE.cachedForecast);
+  log('  - Temperature ranges ready:', !!STATE.cachedTemperatureRanges, "topic:", STATE.temperatureRangesTopic);
+  log('  - Internal temperature ready:', !!STATE.temperature.internal, "topic:", CONFIG.internalTemperatureTopic);
+  log('  - External temperature ready:', !!STATE.temperature.external, "topic:", CONFIG.externalTemperatureTopic);
 
   // Fail if roomId is not configured - required for temperature ranges
   if (!CONFIG.roomId) {

@@ -231,8 +231,9 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 	log.Info("Checking for firmware updates", "device", deviceId)
 	err = checkAndApplyUpdates(ctx, log, via, sd, deviceId)
 	if err != nil {
-		log.Error(err, "Failed to check/apply updates", "device", deviceId)
-		return fmt.Errorf("failed to check/apply updates: %w", err)
+		// Update check failure is non-fatal - it depends on Shelly cloud availability
+		// The watchdog.js script will handle updates later
+		log.Info("Skipping firmware update check (non-fatal)", "device", deviceId, "reason", err.Error())
 	}
 
 	// Disable Matter component immediately after firmware update

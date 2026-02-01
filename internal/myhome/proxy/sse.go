@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"myhome/ui"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -35,7 +36,7 @@ type SSEBroadcaster struct {
 func NewSSEBroadcaster(log logr.Logger) *SSEBroadcaster {
 	return &SSEBroadcaster{
 		clients: make(map[chan string]struct{}),
-		log:     log.WithName("SSEBroadcaster"),
+		log:     log.WithName("SSEBroadcaster").V(1),
 	}
 }
 
@@ -45,17 +46,18 @@ func (b *SSEBroadcaster) Subscribe() chan string {
 	b.mu.Lock()
 	b.clients[ch] = struct{}{}
 	b.mu.Unlock()
-	b.log.V(1).Info("SSE client subscribed", "total_clients", len(b.clients))
+	b.log.Info("SSE client subscribed")
 	return ch
 }
 
 // Unsubscribe removes an SSE client
 func (b *SSEBroadcaster) Unsubscribe(ch chan string) {
 	b.mu.Lock()
+	clientCount := len(b.clients)
 	delete(b.clients, ch)
 	close(ch)
 	b.mu.Unlock()
-	b.log.V(1).Info("SSE client unsubscribed", "total_clients", len(b.clients))
+	b.log.Info("SSE client unsubscribed", "former clients", clientCount)
 }
 
 // broadcast sends a message to all connected clients
@@ -77,27 +79,21 @@ func (b *SSEBroadcaster) broadcast(event string, data interface{}) {
 			// Successfully sent
 		default:
 			// Channel full, skip this client to avoid blocking
-			b.log.V(1).Info("SSE client channel full, skipping message")
+			b.log.Info("SSE client channel full, skipping message")
 		}
 	}
 }
 
 // SensorUpdateData represents a sensor value update
 type SensorUpdateData struct {
-	DeviceID string  `json:"device_id"`
-	Sensor   string  `json:"sensor"`
-	Value    float64 `json:"value"`
-}
-
-// DoorUpdateData represents a door/window status update
-type DoorUpdateData struct {
 	DeviceID string `json:"device_id"`
-	Opened   bool   `json:"opened"` // true if open, false if closed
+	Sensor   string `json:"sensor"`
+	Value    string `json:"value"`
 }
 
 // BroadcastSensorUpdate broadcasts a sensor value update to all SSE clients
-func (b *SSEBroadcaster) BroadcastSensorUpdate(deviceID string, sensor string, value float64) {
-	b.log.V(1).Info("Broadcasting sensor update", "device_id", deviceID, "sensor", sensor, "value", value)
+func (b *SSEBroadcaster) BroadcastSensorUpdate(deviceID string, sensor string, value string) {
+	b.log.Info("Broadcasting sensor update", "device_id", deviceID, "sensor", sensor, "value", value)
 	b.broadcast("sensor-update", SensorUpdateData{
 		DeviceID: deviceID,
 		Sensor:   sensor,
@@ -105,11 +101,8 @@ func (b *SSEBroadcaster) BroadcastSensorUpdate(deviceID string, sensor string, v
 	})
 }
 
-// BroadcastDoorStatus broadcasts a door/window status update to all SSE clients
-func (b *SSEBroadcaster) BroadcastDoorStatus(deviceID string, opened bool) {
-	b.log.V(1).Info("Broadcasting door status", "device_id", deviceID, "opened", opened)
-	b.broadcast("door-update", DoorUpdateData{
-		DeviceID: deviceID,
-		Opened:   opened,
-	})
+// BroadcastDeviceUpdate broadcasts a device update to all SSE clients
+func (b *SSEBroadcaster) BroadcastDeviceUpdate(deviceData ui.DeviceView) {
+	b.log.Info("Broadcasting device update", "device_id", deviceData.Id, "name", deviceData.Name)
+	b.broadcast("device-update", deviceData)
 }

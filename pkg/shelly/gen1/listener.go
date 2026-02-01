@@ -15,19 +15,19 @@ import (
 
 // SensorUpdate represents a parsed sensor update in a common format
 type SensorUpdate struct {
-	DeviceID    string
-	Temperature *float64
-	DoorOpened  *bool // true if door/window is open, false if closed (Gen1 doesn't have door sensors)
+	DeviceID string
+	Type     string
+	Value    string
 }
 
 // SSEBroadcaster interface for broadcasting sensor updates to UI
 type SSEBroadcaster interface {
-	BroadcastSensorUpdate(deviceID string, sensor string, value float64)
-	BroadcastDoorStatus(deviceID string, opened bool)
+	BroadcastSensorUpdate(deviceID string, sensor string, value string)
 }
 
 // ParseSensorEvent parses a Gen1 MQTT sensor event and extracts sensor data
 // Returns nil if the event doesn't contain sensor data
+// <https://shelly-api-docs.shelly.cloud/gen1/#shelly-sense-mqtt>
 func ParseSensorEvent(topic string, payload []byte) *SensorUpdate {
 	// Parse Gen1 sensor topic: shellies/<device-id>/sensor/<sensor-type>
 	parts := strings.Split(topic, "/")
@@ -37,21 +37,12 @@ func ParseSensorEvent(topic string, payload []byte) *SensorUpdate {
 
 	deviceID := parts[1]
 	sensorType := parts[3]
-
-	// Only handle temperature for now
-	if sensorType != "temperature" {
-		return nil
-	}
-
-	// Parse sensor value
-	var value float64
-	if err := json.Unmarshal(payload, &value); err != nil {
-		return nil
-	}
+	value := string(payload)
 
 	return &SensorUpdate{
-		DeviceID:    deviceID,
-		Temperature: &value,
+		DeviceID: deviceID,
+		Type:     sensorType,
+		Value:    value,
 	}
 }
 
@@ -72,15 +63,9 @@ func StartMqttListener(ctx context.Context, mc mqtt.Client, sc devices.DeviceReg
 		// Broadcast sensor updates via SSE if broadcaster is available
 		if sseBroadcaster != nil {
 			if update := ParseSensorEvent(topic, payload); update != nil {
-				if update.Temperature != nil {
-					sseBroadcaster.BroadcastSensorUpdate(update.DeviceID, "temperature", *update.Temperature)
-				}
-				if update.DoorOpened != nil {
-					sseBroadcaster.BroadcastDoorStatus(update.DeviceID, *update.DoorOpened)
-				}
+				sseBroadcaster.BroadcastSensorUpdate(update.DeviceID, update.Type, update.Value)
 			}
 		}
-
 		return err
 	})
 	if err != nil {
@@ -102,20 +87,13 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 		// Sensor value topic: shellies/<device-id>/sensor/<sensor-type>
 		deviceId := parts[1]
 		sensorType := parts[3]
-
-		// Parse the sensor value as a number
-		var number float64
-		if err := json.Unmarshal(payload, &number); err != nil {
-			log.Error(err, "Failed to parse sensor value", "device_id", deviceId, "sensor", sensorType, "payload", string(payload))
-			return err
-		}
-
-		log.V(1).Info("Received Gen1 sensor data", "device_id", deviceId, "sensor", sensorType, "value", number)
+		value := string(payload)
+		log.V(1).Info("Received Gen1 sensor data", "device_id", deviceId, "sensor", sensorType, "value", value)
 
 	case 3:
 		// Info topic: shellies/<device-id>/info
 		if parts[2] != "info" {
-			log.V(1).Info("Dropping Gen1 unknown message", "topic", topic)
+			log.V(1).Info("Dropping Gen1 unknown message", "topic", topic, "payload", string(payload))
 			return nil
 		}
 
@@ -127,7 +105,8 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 		}
 
 		if device.Id != parts[1] {
-			log.Error(nil, "Gen1 device ID mismatch", "topic", topic, "expected", parts[1], "got", device.Id)
+			err := fmt.Errorf("Gen1 device ID mismatch: expected %s, got %s", parts[1], device.Id)
+			log.Error(err, "Gen1 device ID mismatch", "topic", topic, "expected", parts[1], "got", device.Id)
 			return err
 		}
 
@@ -139,15 +118,15 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 			// Device doesn't exist - create it as a Gen1 device
 			log.Info("Auto-registering Gen1 device", "device_id", device.Id)
 			mhd = &myhome.Device{}
-			mhd.WithId(device.Id)
-			mhd.WithName(device.Id)
+			mhd = mhd.WithId(device.Id)
+			mhd = mhd.WithName(device.Id)
 
 			host, err := router.GetHostByIp(ctx, device.Ip)
 			if err != nil {
 				log.Error(err, "Failed to get host", "ip", device.Ip)
 				return err
 			}
-			mhd.WithMAC(host.Mac())
+			mhd = mhd.WithMAC(host.Mac())
 		}
 
 		// Save the device (will create or update)

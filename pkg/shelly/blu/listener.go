@@ -13,54 +13,6 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// SensorUpdate represents a parsed sensor update in a common format
-type SensorUpdate struct {
-	DeviceID    string
-	Temperature *float64
-	DoorOpened  *bool // true if door/window is open, false if closed
-}
-
-// ParseSensorEvent parses a BLU MQTT event and extracts sensor data
-// Returns nil if the event doesn't contain sensor data
-func ParseSensorEvent(topic string, payload []byte) *SensorUpdate {
-	// Parse BLU event: shelly-blu/events/<MAC>
-	parts := strings.Split(topic, "/")
-	if len(parts) != 3 {
-		return nil
-	}
-
-	mac := parts[2] // MAC address with colons
-	deviceID := "shellyblu-" + strings.ToLower(strings.ReplaceAll(mac, ":", ""))
-
-	// Parse JSON payload
-	var data map[string]interface{}
-	if err := json.Unmarshal(payload, &data); err != nil {
-		return nil
-	}
-
-	update := &SensorUpdate{DeviceID: deviceID}
-	hasSensorData := false
-
-	// Extract temperature
-	if temp, ok := data["temperature"].(float64); ok {
-		update.Temperature = &temp
-		hasSensorData = true
-	}
-
-	// Extract door/window status
-	if window, ok := data["window"].(float64); ok {
-		opened := window == 1
-		update.DoorOpened = &opened
-		hasSensorData = true
-	}
-
-	if !hasSensorData {
-		return nil
-	}
-
-	return update
-}
-
 // BLUEventData represents the data from a Shelly BLU device event
 // Supports all BTHome v2 object IDs as defined in https://bthome.io/format/
 type BLUEventData struct {
@@ -126,8 +78,7 @@ type DeviceRegistry interface {
 
 // SSEBroadcaster interface for broadcasting sensor updates to UI
 type SSEBroadcaster interface {
-	BroadcastSensorUpdate(deviceID string, sensor string, value float64)
-	BroadcastDoorStatus(deviceID string, opened bool)
+	BroadcastSensorUpdate(deviceID string, sensor string, value string)
 }
 
 // StartBLUListener starts listening to BLU device MQTT events and registers them
@@ -139,17 +90,25 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 	// Subscribe to BLU events topic
 	topic := "shelly-blu/events/#"
 	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/blu", func(topic string, payload []byte, subscriber string) error {
-		handleBLUEvent(ctx, log, topic, payload, registry)
+		sensors, err := handleBLUEvent(ctx, log, topic, payload, registry)
+		if err != nil {
+			return err
+		}
+
+		// Parse BLU event: shelly-blu/events/<MAC>
+		parts := strings.Split(topic, "/")
+		if len(parts) != 3 {
+			err := fmt.Errorf("invalid BLU event topic: %s", topic)
+			log.Error(err, "invalid BLU event topic", "topic", topic)
+			return err
+		}
+		mac := parts[2] // MAC address with colons
+		deviceID := "shellyblu-" + strings.ToLower(strings.ReplaceAll(mac, ":", ""))
 
 		// Broadcast sensor updates via SSE if broadcaster is available
 		if sseBroadcaster != nil {
-			if update := ParseSensorEvent(topic, payload); update != nil {
-				if update.Temperature != nil {
-					sseBroadcaster.BroadcastSensorUpdate(update.DeviceID, "temperature", *update.Temperature)
-				}
-				if update.DoorOpened != nil {
-					sseBroadcaster.BroadcastDoorStatus(update.DeviceID, *update.DoorOpened)
-				}
+			for sensor, value := range *sensors {
+				sseBroadcaster.BroadcastSensorUpdate(deviceID, sensor, value)
 			}
 		}
 
@@ -163,18 +122,19 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 	return nil
 }
 
-func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload []byte, registry DeviceRegistry) {
+func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload []byte, registry DeviceRegistry) (*map[string]string, error) {
 	// Parse the event data
 	var eventData BLUEventData
 	if err := json.Unmarshal(payload, &eventData); err != nil {
 		log.V(1).Info("Failed to parse BLU event", "topic", topic, "error", err)
-		return
+		return nil, err
 	}
 
 	// Validate MAC address
 	if eventData.Address == "" {
-		log.V(1).Info("BLU event missing MAC address", "topic", topic)
-		return
+		err := fmt.Errorf("BLU event missing MAC address")
+		log.Error(err, "BLU event missing MAC address", "event", eventData)
+		return nil, err
 	}
 
 	// Normalize MAC address: lowercase, remove colons
@@ -185,36 +145,46 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 
 	// Determine sensor capabilities from the event data
 	capabilities := []string{}
+	sensors := map[string]string{}
 
 	// Power & Energy
 	if eventData.Battery != nil {
 		capabilities = append(capabilities, "battery")
+		sensors["battery"] = fmt.Sprintf("%d", *eventData.Battery)
 	}
 	if eventData.Energy != nil {
 		capabilities = append(capabilities, "energy")
+		sensors["energy"] = fmt.Sprintf("%.1f", *eventData.Energy)
 	}
 	if eventData.Power != nil {
 		capabilities = append(capabilities, "power")
+		sensors["power"] = fmt.Sprintf("%.1f", *eventData.Power)
 	}
 	if eventData.Voltage != nil {
 		capabilities = append(capabilities, "voltage")
+		sensors["voltage"] = fmt.Sprintf("%.1f", *eventData.Voltage)
 	}
 	if eventData.Current != nil {
 		capabilities = append(capabilities, "current")
+		sensors["current"] = fmt.Sprintf("%.1f", *eventData.Current)
 	}
 
 	// Environmental Sensors
 	if eventData.Temperature != nil {
 		capabilities = append(capabilities, "temperature")
+		sensors["temperature"] = fmt.Sprintf("%.1f", *eventData.Temperature)
 	}
 	if eventData.Humidity != nil {
 		capabilities = append(capabilities, "humidity")
+		sensors["humidity"] = fmt.Sprintf("%.1f", *eventData.Humidity)
 	}
 	if eventData.Pressure != nil {
 		capabilities = append(capabilities, "pressure")
+		sensors["pressure"] = fmt.Sprintf("%.1f", *eventData.Pressure)
 	}
 	if eventData.Illuminance != nil {
 		capabilities = append(capabilities, "illuminance")
+		sensors["illuminance"] = fmt.Sprintf("%.1f", *eventData.Illuminance)
 	}
 	if eventData.Mass != nil {
 		capabilities = append(capabilities, "mass")
@@ -226,23 +196,29 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 	// Motion & Position
 	if eventData.Motion != nil {
 		capabilities = append(capabilities, "motion")
+		sensors["motion"] = fmt.Sprintf("%d", *eventData.Motion)
 	}
 	if eventData.Window != nil {
 		capabilities = append(capabilities, "window")
+		sensors["window"] = fmt.Sprintf("%d", *eventData.Window)
 	}
 	if eventData.Button != nil {
 		capabilities = append(capabilities, "button")
+		sensors["button"] = fmt.Sprintf("%d", *eventData.Button)
 	}
 	if eventData.Rotation != nil {
 		capabilities = append(capabilities, "rotation")
+		sensors["rotation"] = fmt.Sprintf("%.1f", *eventData.Rotation)
 	}
 
 	// Distance
 	if eventData.DistanceMM != nil {
 		capabilities = append(capabilities, "distance_mm")
+		sensors["distance_mm"] = fmt.Sprintf("%d", *eventData.DistanceMM)
 	}
 	if eventData.DistanceM != nil {
 		capabilities = append(capabilities, "distance_m")
+		sensors["distance_m"] = fmt.Sprintf("%.1f", *eventData.DistanceM)
 	}
 
 	// Timestamp
@@ -253,14 +229,21 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 	// Acceleration
 	if eventData.Acceleration != nil {
 		capabilities = append(capabilities, "acceleration")
+		sensors["acceleration"] = fmt.Sprintf("%.1f", *eventData.Acceleration)
 	}
 
 	// Variable-length data
 	if eventData.Text != nil {
 		capabilities = append(capabilities, "text")
+		if str, ok := eventData.Text.(string); ok {
+			sensors["text"] = str
+		}
 	}
 	if eventData.Raw != nil {
 		capabilities = append(capabilities, "raw")
+		if str, ok := eventData.Raw.(string); ok {
+			sensors["raw"] = str
+		}
 	}
 
 	// Extract model from local_name (lowercased)
@@ -287,7 +270,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 	macAddr, parseErr := net.ParseMAC(eventData.Address)
 	if parseErr != nil {
 		log.Error(parseErr, "Failed to parse MAC address", "device_id", deviceID, "mac", eventData.Address)
-		return
+		return nil, parseErr
 	}
 
 	// Try to get existing device from DB
@@ -326,11 +309,11 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 		if changed {
 			if err := registry.SetDevice(ctx, existingDevice, true); err != nil {
 				log.Error(err, "Failed to update BLU device", "device_id", deviceID)
-				return
+				return nil, err
 			}
 			log.V(1).Info("Updated BLU device", "device_id", deviceID, "capabilities", capabilities)
 		}
-		return
+		return &sensors, nil
 	}
 
 	// Device doesn't exist - create new entry
@@ -351,10 +334,11 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 
 	if err := registry.SetDevice(ctx, device, true); err != nil {
 		log.Error(err, "Failed to register BLU device", "device_id", deviceID)
-		return
+		return nil, err
 	}
 
 	log.Info("Registered new BLU device", "device_id", deviceID, "mac", eventData.Address, "capabilities", capabilities)
+	return &sensors, nil
 }
 
 // btHomeInfoEqual compares two BTHomeInfo structs for equality

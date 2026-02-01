@@ -2,6 +2,7 @@ package impl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"myhome"
 	"myhome/ctl/options"
@@ -48,8 +49,7 @@ type DeviceManager struct {
 
 // SSEBroadcaster interface for broadcasting sensor updates to UI
 type SSEBroadcaster interface {
-	BroadcastSensorUpdate(deviceID string, sensor string, value float64)
-	BroadcastDoorStatus(deviceID string, opened bool)
+	BroadcastSensorUpdate(deviceID string, sensor string, value string)
 }
 
 // maxConcurrentRefreshes limits the number of concurrent device refresh goroutines
@@ -186,7 +186,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			// Save name to DB if provided
 			if params.Name != "" && params.Name != device.Name() {
 				dm.log.Info("Updating device name in DB", "device", device.Id(), "name", params.Name)
-				device.WithName(params.Name)
+				device = device.WithName(params.Name)
 				if err := dm.dr.SetDevice(ctx, device, true); err != nil {
 					return nil, fmt.Errorf("failed to update device name in DB: %w", err)
 				}
@@ -245,7 +245,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			dm.log.Error(err, "Failed to refresh device after setup", "device", device.Id())
 		} else {
 			// Update device name in DB from refreshed Shelly info
-			device.WithName(sd.Name())
+			device = device.WithName(sd.Name())
 			if err := dm.dr.SetDevice(ctx, device, true); err != nil {
 				dm.log.Error(err, "Failed to update device in DB after setup", "device", device.Id())
 			}
@@ -493,20 +493,20 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.R
 
 	var modified bool = false
 	mac, err := net.ParseMAC(device.MAC)
+	host, err := router.GetHostByMac(ctx, mac)
 	if err == nil {
-		host, err := router.GetHostByMac(ctx, mac)
-		if err == nil {
-			ip := host.Ip().String()
-			if ip != device.Host() {
-				log.V(1).Info("Changing IP", "device", device.DeviceSummary, "old_ip", device.Host(), "new_ip", ip)
-				device.WithHost(ip)
-				modified = true
-			}
-		} else {
-			log.V(1).Info("Dropping IP", "device", device.DeviceSummary, "old_ip", device.Host())
-			device.WithHost("")
+		ip := host.Ip().String()
+		if ip != device.Host() {
+			log.V(1).Info("Changing IP", "device", device.DeviceSummary, "old_ip", device.Host(), "new_ip", ip)
+			device = device.WithHost(ip)
 			modified = true
 		}
+	} else if errors.Is(err, ErrNotFound) { // Only drop IP if explicitly not found
+		log.V(1).Info("Dropping IP", "device", device.DeviceSummary, "old_ip", device.Host())
+		device = device.WithHost("")
+		modified = true
+	} else {
+		log.V(1).Info("Router lookup failed, keeping current IP", "device", device.DeviceSummary, "error", err)
 	}
 
 	updated, err := device.Refresh(ctx)
@@ -702,6 +702,8 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 				Name:      d.Name(),
 				Type:      "Gen1",
 				MqttTopic: fmt.Sprintf("shellies/%s/sensor/temperature", d.Id()),
+				RoomId:    d.RoomId, // Add this field
+
 			})
 			continue
 		}
@@ -716,6 +718,7 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 						Name:      d.Name(),
 						Type:      "BLU",
 						MqttTopic: fmt.Sprintf("shelly-blu/events/%s", d.MAC),
+						RoomId:    d.RoomId, // Add this field
 					})
 					break
 				}
@@ -746,6 +749,7 @@ func (dm *DeviceManager) HandleDoorList(ctx context.Context) (*myhome.DoorListRe
 						Name:      d.Name(),
 						Type:      "BLU",
 						MqttTopic: fmt.Sprintf("shelly-blu/events/%s", d.MAC),
+						RoomId:    d.RoomId,
 					})
 					break
 				}

@@ -52,6 +52,7 @@ type ThermometerInfo struct {
 	Name      string `json:"name"`
 	Type      string `json:"type"`
 	MqttTopic string `json:"mqtt_topic"`
+	RoomId    string `json:"room_id"`
 }
 
 // ThermometerListResult represents the result of thermometer.list RPC
@@ -65,6 +66,7 @@ type DoorInfo struct {
 	Name      string `json:"name"`
 	Type      string `json:"type"`
 	MqttTopic string `json:"mqtt_topic"`
+	RoomId    string `json:"room_id"`
 }
 
 // DoorListResult represents the result of door.list RPC

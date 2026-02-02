@@ -14,6 +14,9 @@
       vertical-align: middle;
       margin-right: 4px;
     }
+    .button.is-loading svg {
+      opacity: 0.5;
+    }
   </style>
   </head>
 <body>
@@ -429,12 +432,15 @@
 
     async function refreshDevice(id) {
       const btn = document.getElementById('btn-refresh-' + id);
-      if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('is-loading');
+      }
       let es;
       try {
         es = new EventSource('/events?device=' + encodeURIComponent(id));
         es.addEventListener('device-refresh', function(ev) {
-          if (btn) { btn.textContent = 'Done'; }
+          if (btn) btn.classList.remove('is-loading');
           try { es.close(); } catch {}
           location.reload();
         });
@@ -447,15 +453,24 @@
         });
         if (!res.ok) {
           const t = await res.text();
-          if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
+          if (btn) {
+            btn.disabled = false;
+            btn.classList.remove('is-loading');
+          }
           alert('Refresh failed: ' + t);
           if (es) try { es.close(); } catch {}
           return;
         }
         // If backend completed before SSE connected, fallback: reload soon
-        setTimeout(() => { if (btn) { btn.textContent = 'Done'; } location.reload(); }, 1500);
+        setTimeout(() => {
+          if (btn) btn.classList.remove('is-loading');
+          location.reload();
+        }, 1500);
       } catch (e) {
-        if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('is-loading');
+        }
         if (es) try { es.close(); } catch {}
         alert('Refresh error: ' + e);
       }

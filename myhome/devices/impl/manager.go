@@ -260,6 +260,13 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		if err := dm.dr.SetDevice(ctx, device, true); err != nil {
 			return nil, err
 		}
+
+		// Broadcast device update via SSE if broadcaster is available (only when a UI is connected)
+		if dm.sseBroadcaster != nil {
+			deviceView := ui.DeviceToView(device)
+			dm.sseBroadcaster.BroadcastDeviceUpdate(deviceView)
+		}
+
 		return nil, nil
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceSetRoom, func(in any) (any, error) {

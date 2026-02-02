@@ -140,7 +140,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 			return
 		}
 
-		// RPC endpoint to call device manager methods (e.g., device.refresh)
+		// RPC endpoint to call device manager methods (e.g., device.update)
 		if path == "rpc" && r.Method == http.MethodPost {
 			var req struct {
 				Method myhome.Verb     `json:"method"`
@@ -163,20 +163,26 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 					return
 				}
 			}
-			res, err := mh.ActionE(params)
+			// Lookup method
+			result, err := myhome.Methods(req.Method)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
 				_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
 				return
 			}
-			// Successful call: if it's a device.refresh with string id, notify SSE listeners
-			if req.Method == myhome.DeviceRefresh {
-				if id, ok := params.(string); ok && id != "" {
-					notifyRefresh(id)
-				}
+			// Call method
+			res, err := result.ActionE(params)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+				return
 			}
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": res})
+
+			if req.Method == myhome.DeviceRefresh {
+				notifyRefresh(params.(string))
+			}
 			return
 		}
 

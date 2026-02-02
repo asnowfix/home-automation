@@ -79,17 +79,28 @@
                 {{end}}
               </p>
               <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
-              {{if .Host}}
-                <p class="has-text-grey" id="device-{{.Id}}-host">Host: {{.Host}}</p>
-              {{else}}
-                <p class="has-text-grey" id="device-{{.Id}}-host">No host known</p>
-              {{end}}
               <div class="buttons mt-3">
                 {{if .Host}}
-                  <a class="button is-link" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer">Open</a>
+                  <a class="button is-link" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="2" y1="12" x2="22" y2="12"></line>
+                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                    </svg>
+                  </a>
                 {{end}}
-                <button class="button is-warning" id="btn-refresh-{{.Id}}" onclick="refreshDevice('{{.Id}}')">Refresh</button>
-                <button class="button is-success" id="btn-setup-{{.Id}}" onclick="setupDevice('{{.Id}}')">Setup</button>
+                <button class="button is-warning" id="btn-refresh-{{.Id}}" onclick="refreshDevice('{{.Id}}')" title="Refresh device">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                  </svg>
+                </button>
+                <button class="button is-success" id="btn-setup-{{.Id}}" onclick="setupDevice('{{.Id}}')" title="Setup device">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+                  </svg>
+                </button>
                 {{if .HasHeaterScript}}
                 <button class="button is-danger" id="btn-heater-{{.Id}}" onclick="openHeaterConfig('{{.Id}}')" title="Heater Configuration">🔥</button>
                 {{end}}
@@ -1117,7 +1128,13 @@
           
           // Add or remove Open button
           if (shouldHaveOpenBtn && !hasOpenBtn) {
-            const openBtn = `<a class="button is-link" href="/devices/${escapeHtml(deviceView.link_token)}/" target="_blank" rel="noopener noreferrer">Open</a>`;
+            const openBtn = `<a class="button is-link" href="/devices/${escapeHtml(deviceView.link_token)}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              </svg>
+            </a>`;
             buttonsEl.insertAdjacentHTML('afterbegin', openBtn);
           } else if (!shouldHaveOpenBtn && hasOpenBtn) {
             hasOpenBtn.remove();
@@ -1200,11 +1217,26 @@
                 </span>` : ''}
               </p>
               <p class="subtitle is-7 has-text-grey">${manufacturer} · ${deviceId}</p>
-              ${host ? `<p class="has-text-grey" id="device-${deviceId}-host">Host: ${host}</p>` : `<p class="has-text-grey" id="device-${deviceId}-host">No host known</p>`}
               <div class="buttons mt-3">
-                ${host && linkToken ? `<a class="button is-link" href="/devices/${linkToken}/" target="_blank" rel="noopener noreferrer">Open</a>` : ''}
-                <button class="button is-warning" id="btn-refresh-${deviceId}" onclick="refreshDevice('${deviceIdJs}')">Refresh</button>
-                <button class="button is-success" id="btn-setup-${deviceId}" onclick="setupDevice('${deviceIdJs}')">Setup</button>
+                ${host && linkToken ? `<a class="button is-link" href="/devices/${linkToken}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                  </svg>
+                </a>` : ''}
+                <button class="button is-warning" id="btn-refresh-${deviceId}" onclick="refreshDevice('${deviceIdJs}')" title="Refresh device">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                  </svg>
+                </button>
+                <button class="button is-success" id="btn-setup-${deviceId}" onclick="setupDevice('${deviceIdJs}')" title="Setup device">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+                  </svg>
+                </button>
                 ${deviceView.has_heater_script ? `<button class="button is-danger" id="btn-heater-${deviceId}" onclick="openHeaterConfig('${deviceIdJs}')" title="Heater Configuration">🔥</button>` : ''}
               </div>
             </div>

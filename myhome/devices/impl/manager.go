@@ -222,8 +222,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		}
 
 		// Run setup
-		setupLog := dm.log.WithName("setup").WithName(device.Id())
-		err = shellysetup.SetupDeviceWithWifi(ctx, setupLog, sd, targetName, cfg, wifiCfg)
+		err = shellysetup.SetupDeviceWithWifi(ctx, log.WithName(device.Id()), sd, targetName, cfg, wifiCfg)
 		if err != nil {
 			log.Error(err, "Failed to setup device", "device", device.Id())
 			return nil, fmt.Errorf("setup failed: %w", err)

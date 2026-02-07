@@ -469,7 +469,7 @@ func TestTimerSetWithShellyRuntime(t *testing.T) {
 
 	// Add mock MQTT client to context
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
 
 	// Create a test script that uses Timer.set
 	script := `
@@ -524,7 +524,7 @@ func TestTimerSetOneShotWithRuntime(t *testing.T) {
 
 	// Add mock MQTT client to context
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
 
 	script := `
 		var callCount = 0;
@@ -567,7 +567,7 @@ func TestTimerSetRecurringWithRuntime(t *testing.T) {
 
 	// Add mock MQTT client to context
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
 
 	script := `
 		var callCount = 0;
@@ -610,7 +610,7 @@ func TestTimerClearWithRuntime(t *testing.T) {
 
 	// Add mock MQTT client to context
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
 
 	script := `
 		var callCount = 0;
@@ -658,7 +658,7 @@ func TestTimerMultipleWithRuntime(t *testing.T) {
 
 	// Add mock MQTT client to context
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
 
 	script := `
 		var timer1Count = 0;
@@ -709,7 +709,7 @@ func TestTimerTimingWithRuntime(t *testing.T) {
 
 	// Add mock MQTT client to context
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
 
 	// Record start time in Go
 	startTime := time.Now()
@@ -768,7 +768,7 @@ func TestTimerRecurringIntervalAccuracyWithRuntime(t *testing.T) {
 
 	// Add mock MQTT client to context
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
 
 	script := `
 		var startTime = Date.now();

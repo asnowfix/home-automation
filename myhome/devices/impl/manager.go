@@ -19,7 +19,6 @@ import (
 	"pkg/shelly/blu"
 	"pkg/shelly/gen1"
 	"pkg/shelly/kvs"
-	shellymqtt "pkg/shelly/mqtt"
 	"pkg/shelly/types"
 	"reflect"
 	"strings"
@@ -62,7 +61,8 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 	if err != nil {
 		panic("BUG: No logger initialized")
 	}
-	return &DeviceManager{
+
+	dm := &DeviceManager{
 		dr:         mhd.NewCache(ctx, s),
 		log:        log.WithName("DeviceManager"),
 		update:     make(chan *myhome.Device, 64), // TODO configurable buffer size
@@ -70,25 +70,8 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		mqttClient: mqttClient,
 		resolver:   resolver,
 	}
-}
 
-// SetSSEBroadcaster sets the SSE broadcaster for live sensor updates
-func (dm *DeviceManager) SetSSEBroadcaster(broadcaster SSEBroadcaster) {
-	dm.sseBroadcaster = broadcaster
-}
-
-func (dm *DeviceManager) UpdateChannel() chan<- *myhome.Device {
-	return dm.update
-}
-
-func (dm *DeviceManager) Start(ctx context.Context) error {
-	var err error
-
-	dm.log.Info("Starting device manager")
-
-	dm.router = sfr.GetRouter(ctx)
-
-	myhome.RegisterMethodHandler(myhome.DevicesMatch, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DevicesMatch, func(ctx context.Context, in any) (any, error) {
 		name := in.(string)
 		devices := make([]devices.Device, 0)
 
@@ -113,7 +96,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		return &devices, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceLookup, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DeviceLookup, func(ctx context.Context, in any) (any, error) {
 		name := in.(string)
 
 		devices := make([]devices.Device, 0)
@@ -126,23 +109,25 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 		return nil, fmt.Errorf("failed to get device by identifier: %v", err)
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceShow, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DeviceShow, func(ctx context.Context, in any) (any, error) {
 		params := in.(*myhome.DeviceShowParams)
 		return dm.GetDeviceByAny(ctx, params.Identifier)
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceForget, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DeviceForget, func(ctx context.Context, in any) (any, error) {
 		return nil, dm.ForgetDevice(ctx, in.(string))
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceRefresh, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DeviceRefresh, func(ctx context.Context, in any) (any, error) {
+		log := dm.log.WithName("rpc/device.refresh")
 		ident := in.(string)
-		dm.log.Info("RPC: device.refresh", "ident", ident)
+		log.V(1).Info("New", "ident", ident)
 		device, err := dm.GetDeviceByAny(ctx, ident)
 		if err != nil {
+			log.Error(err, "Failed to get device by identifier", "identifier", ident)
 			return nil, err
 		}
 		// Ensure implementation is loaded
 		if device.Impl() == nil {
-			sd, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+			sd, err := shelly.NewDeviceFromSummary(ctx, log, device)
 			if err != nil {
 				return nil, err
 			}
@@ -155,9 +140,9 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		// This handles cases where HTTP fails and clears the host
 		if modified {
 			if saveErr := dm.dr.SetDevice(ctx, device, true); saveErr != nil {
-				dm.log.Error(saveErr, "Failed to save modified device after refresh", "device_id", device.Id())
+				log.Error(saveErr, "Failed to save modified device after refresh", "device_id", device.Id())
 			} else {
-				dm.log.V(1).Info("Saved modified device after refresh", "device_id", device.Id(), "refresh_error", err != nil)
+				log.V(1).Info("Saved modified device after refresh", "device_id", device.Id(), "refresh_error", err != nil)
 			}
 		}
 
@@ -166,13 +151,15 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			return nil, err
 		}
 
-		return nil, nil
+		return device, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceSetup, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DeviceSetup, func(ctx context.Context, in any) (any, error) {
 		params := in.(*myhome.DeviceSetupParams)
-		dm.log.Info("RPC: device.setup", "identifier", params.Identifier, "name", params.Name)
+		log := dm.log.WithName("rpc/device.setup")
+		log.V(1).Info("New", "params", params)
 		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
 		if err != nil {
+			log.Error(err, "Failed to get device by identifier", "identifier", params.Identifier)
 			return nil, err
 		}
 
@@ -182,11 +169,11 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 			if shelly.IsBluDevice(device.Id()) {
 				deviceType = "BLU"
 			}
-			dm.log.Info("Skipping device communication for "+deviceType+" device", "device", device.Id())
+			log.V(1).Info("Skipping device communication for "+deviceType+" device", "device", device.Id())
 
 			// Save name to DB if provided
 			if params.Name != "" && params.Name != device.Name() {
-				dm.log.Info("Updating device name in DB", "device", device.Id(), "name", params.Name)
+				log.V(1).Info("Updating device name in DB", "device", device.Id(), "name", params.Name)
 				device = device.WithName(params.Name)
 				if err := dm.dr.SetDevice(ctx, device, true); err != nil {
 					return nil, fmt.Errorf("failed to update device name in DB: %w", err)
@@ -198,7 +185,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		// Ensure implementation is loaded and initialized
 		sd, ok := device.Impl().(*shelly.Device)
 		if !ok || sd == nil {
-			impl, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+			impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
 			if err != nil {
 				return nil, err
 			}
@@ -209,7 +196,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 		// Initialize device (sets up MQTT channels if needed)
 		if err := sd.Init(ctx); err != nil {
-			dm.log.Error(err, "Failed to initialize device", "device", device.Id())
+			log.Error(err, "Failed to initialize device", "device", device.Id())
 			// Continue anyway - setup may still work via HTTP
 		}
 
@@ -238,26 +225,30 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		setupLog := dm.log.WithName("setup").WithName(device.Id())
 		err = shellysetup.SetupDeviceWithWifi(ctx, setupLog, sd, targetName, cfg, wifiCfg)
 		if err != nil {
+			log.Error(err, "Failed to setup device", "device", device.Id())
 			return nil, fmt.Errorf("setup failed: %w", err)
 		}
 
 		// Refresh device info from Shelly and update DB with new name
 		if _, err := sd.Refresh(ctx, types.ChannelHttp); err != nil {
-			dm.log.Error(err, "Failed to refresh device after setup", "device", device.Id())
+			log.Error(err, "Failed to refresh device after setup", "device", device.Id())
 		} else {
 			// Update device name in DB from refreshed Shelly info
 			device = device.WithName(sd.Name())
 			if err := dm.dr.SetDevice(ctx, device, true); err != nil {
-				dm.log.Error(err, "Failed to update device in DB after setup", "device", device.Id())
+				log.Error(err, "Failed to update device in DB after setup", "device", device.Id())
 			}
 		}
 
+		log.V(1).Info("Setup complete", "device", device.Id())
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceUpdate, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DeviceUpdate, func(ctx context.Context, in any) (any, error) {
 		device := in.(*myhome.Device)
-		dm.log.Info("RPC: device.update", "id", device.Id(), "name", device.Name())
+		log := dm.log.WithName("rpc/device.update")
+		log.V(1).Info("New", "id", device.Id(), "name", device.Name())
 		if err := dm.dr.SetDevice(ctx, device, true); err != nil {
+			log.Error(err, "Failed to update device in DB", "device", device.Id())
 			return nil, err
 		}
 
@@ -269,19 +260,20 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceSetRoom, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DeviceSetRoom, func(ctx context.Context, in any) (any, error) {
 		params := in.(*myhome.DeviceSetRoomParams)
-		dm.log.Info("RPC: device.setroom", "identifier", params.Identifier, "room_id", params.RoomId)
-
+		log := dm.log.WithName("rpc/device.setroom")
+		log.V(1).Info("New", "identifier", params.Identifier, "room_id", params.RoomId)
 		// Save room to database
 		if err := dm.dr.SetDeviceRoom(ctx, params.Identifier, params.RoomId); err != nil {
+			log.Error(err, "Failed to update device room in DB", "identifier", params.Identifier)
 			return nil, err
 		}
 
 		// Also set room-id in device KVS (for Gen2+ Shelly devices)
 		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
 		if err != nil {
-			dm.log.Error(err, "Failed to get device for KVS update", "identifier", params.Identifier)
+			log.Error(err, "Failed to get device for KVS update", "identifier", params.Identifier)
 			return nil, nil // DB update succeeded, KVS is best-effort
 		}
 
@@ -293,9 +285,9 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		// Get or create Shelly device implementation
 		sd, ok := device.Impl().(*shelly.Device)
 		if !ok || sd == nil {
-			impl, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+			impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
 			if err != nil {
-				dm.log.Error(err, "Failed to create device for KVS update", "identifier", params.Identifier)
+				log.Error(err, "Failed to create device for KVS update", "identifier", params.Identifier)
 				return nil, nil // DB update succeeded, KVS is best-effort
 			}
 			sd, ok = impl.(*shelly.Device)
@@ -305,37 +297,56 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		}
 
 		// Set room-id in device KVS
-		_, err = kvs.SetKeyValue(ctx, dm.log, types.ChannelDefault, sd, "room-id", params.RoomId)
+		_, err = kvs.SetKeyValue(ctx, log, types.ChannelDefault, sd, "room-id", params.RoomId)
 		if err != nil {
-			dm.log.Error(err, "Failed to set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
+			log.Error(err, "Failed to set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
 			// Don't return error - DB update succeeded
 		} else {
-			dm.log.Info("Set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
+			log.Info("Set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
 		}
 
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceListByRoom, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DeviceListByRoom, func(ctx context.Context, in any) (any, error) {
 		params := in.(*myhome.DeviceListByRoomParams)
-		dm.log.Info("RPC: device.listbyroom", "room_id", params.RoomId)
+		log := dm.log.WithName("rpc/device.listbyroom")
+		log.V(1).Info("New", "room_id", params.RoomId)
 		devices, err := dm.dr.GetDevicesByRoom(ctx, params.RoomId)
 		if err != nil {
+			log.Error(err, "Failed to get devices by room", "room_id", params.RoomId)
 			return nil, err
 		}
 		return &myhome.DeviceListByRoomResult{Devices: devices}, nil
 	})
-	myhome.RegisterMethodHandler(myhome.ThermometerList, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.ThermometerList, func(ctx context.Context, in any) (any, error) {
 		return dm.HandleThermometerList(ctx)
 	})
-	myhome.RegisterMethodHandler(myhome.DoorList, func(in any) (any, error) {
+	myhome.RegisterMethodHandler(myhome.DoorList, func(ctx context.Context, in any) (any, error) {
 		return dm.HandleDoorList(ctx)
 	})
+
+	return dm
+}
+
+// SetSSEBroadcaster sets the SSE broadcaster for live sensor updates
+func (dm *DeviceManager) SetSSEBroadcaster(broadcaster SSEBroadcaster) {
+	dm.sseBroadcaster = broadcaster
+}
+
+func (dm *DeviceManager) UpdateChannel() chan<- *myhome.Device {
+	return dm.update
+}
+
+func (dm *DeviceManager) Start(ctx context.Context) error {
+	var err error
+
+	dm.log.Info("Starting device manager")
+
+	dm.router = sfr.GetRouter(ctx)
 
 	// Register heater service handlers
 	heaterService := shellyscript.NewHeaterService(dm.log, dm)
 	heaterService.RegisterHandlers()
-
-	ctx = shellymqtt.NewContext(ctx, dm.mqttClient)
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
 	go dm.deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")))
@@ -679,7 +690,7 @@ func (dm *DeviceManager) CallE(ctx context.Context, method myhome.Verb, params a
 	// if mh.InType != reflect.TypeOf(params) {
 	// 	return nil, fmt.Errorf("invalid parameters for method %s: got %v, want %v", method, reflect.TypeOf(params), mh.InType)
 	// }
-	result, err := mh.ActionE(params)
+	result, err := mh.ActionE(ctx, params)
 	if err != nil {
 		return nil, err
 	}

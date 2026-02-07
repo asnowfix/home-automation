@@ -26,7 +26,7 @@ func init() {
 	runCmd.PersistentFlags().IntVarP(&options.Flags.MqttWatchdogMaxFailures, "mqtt-watchdog-max-failures", "F", options.MQTT_WATCHDOG_MAX_FAILURES, "MQTT watchdog max consecutive failures before restart")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.MqttBrokerClientLogInterval, "mqtt-broker-client-log-interval", options.MQTT_BROKER_CLIENT_LOG_INTERVAL, "Interval for logging MQTT broker connected clients (0 to disable)")
 	runCmd.PersistentFlags().StringVarP(&options.Flags.EventsDir, "events-dir", "E", "", "Directory to write received MQTT events as JSON files")
-	runCmd.PersistentFlags().IntVarP(&options.Flags.ProxyPort, "proxy-port", "p", 6080, "Reverse proxy listen port (default 6080)")
+	runCmd.PersistentFlags().IntVarP(&options.Flags.UiPort, "ui-port", "p", 6080, "UI listen port (default 6080)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableGen1Proxy, "enable-gen1-proxy", false, "Enable the Gen1 HTTP->MQTT proxy (requires embedded broker)")
 	runCmd.PersistentFlags().BoolVar(&disableGen1Proxy, "disable-gen1-proxy", false, "Disable the Gen1 HTTP->MQTT proxy (mutually exclusive with --enable-gen1-proxy)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableOccupancyService, "enable-occupancy-service", false, "Enable the occupancy service (auto-enabled with device manager)")
@@ -110,8 +110,8 @@ var runCmd = &cobra.Command{
 		if v.IsSet("daemon.events_dir") && !cmd.Flags().Changed("events-dir") {
 			options.Flags.EventsDir = v.GetString("daemon.events_dir")
 		}
-		if v.IsSet("daemon.proxy_port") && !cmd.Flags().Changed("proxy-port") {
-			options.Flags.ProxyPort = v.GetInt("daemon.proxy_port")
+		if v.IsSet("daemon.ui_port") && !cmd.Flags().Changed("ui-port") {
+			options.Flags.UiPort = v.GetInt("daemon.ui_port")
 		}
 		if v.IsSet("daemon.enable_gen1_proxy") && !cmd.Flags().Changed("enable-gen1-proxy") {
 			options.Flags.EnableGen1Proxy = v.GetBool("daemon.enable_gen1_proxy")

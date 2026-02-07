@@ -1,10 +1,11 @@
 package myhome
 
 import (
+	"context"
 	"fmt"
 )
 
-type MethodHandler func(in any) (any, error)
+type MethodHandler func(ctx context.Context, in any) (any, error)
 
 type MethodSignature struct {
 	NewParams func() any

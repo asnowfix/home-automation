@@ -1,10 +1,10 @@
-package proxy
+package ui
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"myhome/ui"
+	"net/http"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -102,7 +102,40 @@ func (b *SSEBroadcaster) BroadcastSensorUpdate(deviceID string, sensor string, v
 }
 
 // BroadcastDeviceUpdate broadcasts a device update to all SSE clients
-func (b *SSEBroadcaster) BroadcastDeviceUpdate(deviceData ui.DeviceView) {
+func (b *SSEBroadcaster) BroadcastDeviceUpdate(deviceData DeviceView) {
 	b.log.Info("Broadcasting device update", "device_id", deviceData.Id, "name", deviceData.Name)
 	b.broadcast("device-update", deviceData)
+}
+
+// ServeHTTP handles SSE client connections using the broadcaster's client list
+func (b *SSEBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "stream unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	ch := b.Subscribe()
+	defer b.Unsubscribe(ch)
+
+	// Send initial event to confirm connection
+	_, _ = w.Write([]byte("event: connected\ndata: ok\n\n"))
+	flusher.Flush()
+
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			_, _ = w.Write([]byte(msg))
+			flusher.Flush()
+		}
+	}
 }

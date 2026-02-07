@@ -3,6 +3,7 @@ package mqtt
 import (
 	"context"
 	"net/url"
+	"sync"
 )
 
 // MQTT QoS levels
@@ -26,17 +27,33 @@ type Cache interface {
 	Insert(topic string, msg []byte) error
 }
 
-type contextKey struct{}
+var (
+	client    Client
+	clientMu  sync.RWMutex
+	clientSet chan struct{}
+)
 
-func FromContext(ctx context.Context) (Client, error) {
-	out, ok := ctx.Value(contextKey{}).(Client)
-	if !ok {
-		panic("MQTT client not started")
-		// return nil, fmt.Errorf("MQTT client not started")
-	}
-	return out, nil
+func init() {
+	clientSet = make(chan struct{})
 }
 
-func NewContext(ctx context.Context, client Client) context.Context {
-	return context.WithValue(ctx, contextKey{}, client)
+func SetClient(c Client) {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	if client != nil && c != client {
+		panic("MQTT client already set with different value")
+	}
+	client = c
+	close(clientSet)
+}
+
+func GetClient(ctx context.Context) Client {
+	select {
+	case <-clientSet:
+		clientMu.RLock()
+		defer clientMu.RUnlock()
+		return client
+	case <-ctx.Done():
+		return nil
+	}
 }

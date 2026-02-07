@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"internal/myhome"
+	"myhome"
 	"myhome/mqtt"
 	"pkg/shelly"
 	"pkg/shelly/ethernet"

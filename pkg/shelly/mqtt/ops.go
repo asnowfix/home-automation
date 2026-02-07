@@ -31,7 +31,7 @@ const (
 
 var registrar types.MethodsRegistrar
 
-func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
+func Init(log logr.Logger, r types.MethodsRegistrar, mc Client, timeout time.Duration) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	registrar = r
 	r.RegisterMethodHandler(GetStatus.String(), types.MethodHandler{
@@ -48,6 +48,7 @@ func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
 		HttpMethod: http.MethodPost,
 	})
 
+	SetClient(mc)
 	mqttChannel.Init(log, timeout)
 	registrar.RegisterDeviceCaller(types.ChannelMqtt, types.DeviceCaller(mqttChannel.CallDevice))
 }

@@ -13,6 +13,10 @@ const (
 	ProcessContextKey
 )
 
+// PanicOnBugs controls whether programming errors (e.g. missing context values)
+// should panic instead of returning errors. Enabled by --panic-on-bugs or --debug.
+var PanicOnBugs bool
+
 func Version(ctx context.Context) string {
 	return ctx.Value(VersionKey).(string)
 }

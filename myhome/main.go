@@ -32,6 +32,11 @@ var Cmd = &cobra.Command{
 			verbose = !options.Flags.Quiet
 		}
 
+		// Activate PanicOnBugs if --panic-on-bugs is specified or --debug is specified
+		if options.Flags.Debug {
+			global.PanicOnBugs = true
+		}
+
 		// Initialize logging with debug support
 		if isDaemon {
 			hlog.InitForDaemonWithDebug(verbose, debugFlag)

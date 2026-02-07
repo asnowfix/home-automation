@@ -182,6 +182,7 @@ func NewClientE(ctx context.Context, broker string, mdnsTimeout time.Duration, m
 	mqttOps.SetAutoReconnect(true) // automatically reconnect in case of disconnection
 	mqttOps.SetResumeSubs(true)    // automatically re-subscribe in case or disconnection/reconnection
 	mqttOps.SetCleanSession(false) // do not save messages to be re-sent in case of disconnection
+	mqttOps.SetOrderMatters(false) // required for wildcard subscriptions to route messages to correct handlers
 
 	if broker != "" {
 		mqttBroker = broker
@@ -473,7 +474,7 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 	subscribers := value.([]*subscriber)
 	subscribers = append(subscribers, s)
 	c.subscribers.Store(topic, subscribers)
-	c.log.Info("Subscriber added", "topic", topic, "subscriber", s.name, "count", len(subscribers), "qlen", qlen)
+	c.log.Info("Subscriber added", "topic", topic, "subscriber", s.name, "count", len(subscribers), "qlen", qlen, "mqtt_subscribe_needed", !loaded)
 
 	if !loaded {
 		// Not yet subscribed at MQTT level: do it

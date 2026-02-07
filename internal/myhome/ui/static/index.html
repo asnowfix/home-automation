@@ -436,43 +436,43 @@
         btn.disabled = true;
         btn.classList.add('is-loading');
       }
-      let es;
       try {
-        es = new EventSource('/events?device=' + encodeURIComponent(id));
-        es.addEventListener('device-refresh', function(ev) {
-          if (btn) btn.classList.remove('is-loading');
-          try { es.close(); } catch {}
-          location.reload();
-        });
-        es.onerror = function() { /* keep open or close silently */ };
-
-        const res = await fetch('/rpc', {
+        console.log('refreshDevice: POST /rpc device.refresh for', id);
+        res = await fetch('/rpc', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ method: 'device.refresh', params: id })
         });
+        console.log('refreshDevice: device.refresh response status', res.status);
         if (!res.ok) {
-          const t = await res.text();
-          if (btn) {
-            btn.disabled = false;
-            btn.classList.remove('is-loading');
-          }
-          alert('Refresh failed: ' + t);
-          if (es) try { es.close(); } catch {}
+          console.error('refreshDevice: device.refresh response error', await res.text());
           return;
         }
-        // If backend completed before SSE connected, fallback: reload soon
-        setTimeout(() => {
-          if (btn) btn.classList.remove('is-loading');
-          location.reload();
-        }, 1500);
+
+        console.log('refreshDevice: GET /rpc device.lookup for', id);
+        res = await fetch('/rpc', {
+          method: 'GET',
+          headers: { 'Content-Type': 'application/json' },
+          params: { method: 'device.lookup', params: id },
+        });
+        console.log('refreshDevice: device.lookup response status', res.status);
+        if (!res.ok) {
+          console.error('refreshDevice: device.lookup response error', await res.text());
+          return;
+        }
+
+        const data = await res.json();
+        console.log('refreshDevice: device.lookup response data', data);
+        if (data.result && Array.isArray(data.result) && data.result.length > 0) {
+          updateDeviceCard(id, data.result[0]);
+        }
       } catch (e) {
+        console.error('refreshDevice: error', e.name, e.message, e);
+      } finally {
         if (btn) {
           btn.disabled = false;
           btn.classList.remove('is-loading');
         }
-        if (es) try { es.close(); } catch {}
-        alert('Refresh error: ' + e);
       }
     }
 
@@ -1049,34 +1049,35 @@
     const eventSource = new EventSource('/events');
 
     eventSource.addEventListener('connected', (e) => {
-      console.log('SSE connected');
+      console.log('SSE: connected');
     });
 
     eventSource.addEventListener('sensor-update', (e) => {
       try {
+        console.log('SSE sensor-update', e.data);
         const data = JSON.parse(e.data);
         updateDeviceSensor(data.device_id, data.sensor, data.value);
       } catch (err) {
-        console.error('Failed to parse sensor-update:', err);
+        console.error('SSE: Failed to parse sensor-update:', err, "data", e.data);
       }
     });
 
     eventSource.addEventListener('device-update', (e) => {
       try {
+        console.log("SSE: device-update", e.data);
         const deviceView = JSON.parse(e.data);
-        // Validate deviceView has required id field
         if (!deviceView || !deviceView.id) {
           console.error('Invalid device update: missing id', deviceView);
           return;
         }
         updateDeviceCard(deviceView.id, deviceView);
       } catch (err) {
-        console.error('Failed to parse device-update:', err, "data", e.data);
+        console.error('SSE: Failed to parse device-update:', err, "data", e.data);
       }
     });
 
     eventSource.onerror = (e) => {
-      console.error('SSE error:', e);
+      console.error('SSE: error:', e);
       // Browser will automatically reconnect
     };
 

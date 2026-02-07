@@ -48,14 +48,10 @@ func NewHeaterService(log logr.Logger, provider DeviceProvider) *HeaterService {
 
 // RegisterHandlers registers the heater RPC handlers
 func (s *HeaterService) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.HeaterGetConfig, func(in any) (any, error) {
-		// FIXME: rather implement a per-request context
-		ctx := logr.NewContext(context.Background(), s.log)
+	myhome.RegisterMethodHandler(myhome.HeaterGetConfig, func(ctx context.Context, in any) (any, error) {
 		return s.HandleGetConfig(ctx, in.(*myhome.HeaterGetConfigParams))
 	})
-	myhome.RegisterMethodHandler(myhome.HeaterSetConfig, func(in any) (any, error) {
-		// FIXME: rather implement a per-request context
-		ctx := logr.NewContext(context.Background(), s.log)
+	myhome.RegisterMethodHandler(myhome.HeaterSetConfig, func(ctx context.Context, in any) (any, error) {
 		return s.HandleSetConfig(ctx, in.(*myhome.HeaterSetConfigParams))
 	})
 }

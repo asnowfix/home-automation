@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"myhome"
 
 	"github.com/go-logr/logr"
@@ -54,10 +53,18 @@ func (s *DeviceStorage) createTable() error {
         PRIMARY KEY (manufacturer, id)
     );`
 
-	_, err := s.db.Exec(schema)
+	res, err := s.db.Exec(schema)
 	if err != nil {
 		s.log.Error(err, "Failed to create database schema")
 		return err
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		s.log.Error(err, "Failed to get rows affected")
+		return err
+	}
+	if rowsAffected > 0 {
+		s.log.Info("Created database schema")
 	}
 
 	// Drop group tables if they exist (migration from previous version)
@@ -65,10 +72,18 @@ func (s *DeviceStorage) createTable() error {
     DROP TABLE IF EXISTS groupsMember;
     DROP TABLE IF EXISTS groups;`
 
-	_, err = s.db.Exec(migrationSchema)
+	res, err = s.db.Exec(migrationSchema)
 	if err != nil {
 		s.log.Error(err, "Failed to drop group tables during migration")
 		// Don't return error - tables might not exist
+	}
+	rowsAffected, err = res.RowsAffected()
+	if err != nil {
+		s.log.Error(err, "Failed to get rows affected")
+		// Don't return error - tables might not exist
+	}
+	if rowsAffected > 0 {
+		s.log.Info("Dropped group tables during migration")
 	}
 
 	// Migration: Add room_id column if it doesn't exist
@@ -82,10 +97,15 @@ func (s *DeviceStorage) createTable() error {
 	if count == 0 {
 		s.log.Info("Adding room_id column to devices table")
 		alterQuery := `ALTER TABLE devices ADD COLUMN room_id TEXT DEFAULT ''`
-		_, err = s.db.Exec(alterQuery)
+		res, err = s.db.Exec(alterQuery)
 		if err != nil {
 			s.log.Error(err, "Failed to add room_id column")
 			return err
+		}
+		rowsAffected, err = res.RowsAffected()
+		if err != nil {
+			s.log.Error(err, "Failed to get rows affected")
+			// Don't return error - tables might not exist
 		}
 	}
 
@@ -108,22 +128,25 @@ func (s *DeviceStorage) Flush() error {
 }
 
 // UpsertDevice update a device into the database, creating it on the fly if necessary
-func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) error {
+func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) (error, bool) {
 	d := Device{
 		Device: *device,
 	}
 	b, err := json.Marshal(device.Info)
 	if err != nil {
 		s.log.Error(err, "Failed to marshal device info", "device", device)
-		return err
+		return err, false
 	}
 	d.Info_ = string(b)
 	b, err = json.Marshal(device.Config)
 	if err != nil {
 		s.log.Error(err, "Failed to marshal device config", "device", device)
-		return err
+		return err, false
 	}
 	d.Config_ = string(b)
+
+	// Number of rows affected by the SQL
+	var count int64
 
 	// First, try to insert or update based on manufacturer and id
 	query := `
@@ -137,10 +160,18 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
         config_revision = excluded.config_revision, 
         config = excluded.config,
         room_id = excluded.room_id`
-	_, err = s.db.NamedExec(query, d)
+	rows, err := s.db.NamedExec(query, d)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device by manufacturer and id", "device", device)
-		return err
+		return err, false
+	}
+	count, err = rows.RowsAffected()
+	if err != nil {
+		s.log.Error(err, "Failed to upsert device by manufacturer and id", "device", device)
+		return err, false
+	}
+	if count > 0 {
+		return nil, true
 	}
 
 	// If MAC address is provided, also handle conflicts based on MAC address
@@ -156,14 +187,22 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
         config = :config
     WHERE mac = :mac`
 
-		_, err = s.db.NamedExec(macQuery, d)
+		rows, err := s.db.NamedExec(macQuery, d)
 		if err != nil {
 			s.log.Error(err, "Failed to update device by MAC address", "device", device)
-			return err
+			return err, false
+		}
+		count, err = rows.RowsAffected()
+		if err != nil {
+			s.log.Error(err, "Failed to update device by MAC address", "device", device)
+			return err, false
+		}
+		if count > 0 {
+			return nil, true
 		}
 	}
 
-	return nil
+	return nil, false
 }
 
 // GetAllDevices retrieves all devices from the database.
@@ -256,11 +295,16 @@ func (s *DeviceStorage) GetDeviceByHost(ctx context.Context, host string) (*myho
 // ForgetDevice deletes a device from the database by any of its identifiers (Id, MAC address, name, host)
 func (s *DeviceStorage) ForgetDevice(ctx context.Context, identifier string) error {
 	query := `DELETE FROM devices WHERE id = $1 OR mac = $1 OR name = $1 OR host = $1`
-	_, err := s.db.Exec(query, identifier)
+	res, err := s.db.Exec(query, identifier)
 	if err != nil {
 		s.log.Error(err, "Failed to delete device", "identifier", identifier)
 	}
-	s.log.Info("Device deleted", "identifier", identifier)
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		s.log.Error(err, "Failed to get rows affected")
+	} else {
+		s.log.Info("Device deleted", "identifier", identifier, "nb_deleted", rowsAffected)
+	}
 	return err
 }
 
@@ -277,19 +321,19 @@ func (s *DeviceStorage) GetDevicesByRoom(ctx context.Context, roomId string) ([]
 }
 
 // SetDeviceRoom updates the room assignment for a device
-func (s *DeviceStorage) SetDeviceRoom(ctx context.Context, identifier string, roomId string) error {
+func (s *DeviceStorage) SetDeviceRoom(ctx context.Context, identifier string, roomId string) (error, bool) {
 	query := `UPDATE devices SET room_id = $1 WHERE id = $2 OR mac = $2 OR name = $2 OR host = $2`
-	result, err := s.db.Exec(query, roomId, identifier)
+	res, err := s.db.Exec(query, roomId, identifier)
 	if err != nil {
 		s.log.Error(err, "Failed to set device room", "identifier", identifier, "room_id", roomId)
-		return err
+		return err, false
 	}
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return fmt.Errorf("device not found: %s", identifier)
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		s.log.Error(err, "Failed to set device room", "identifier", identifier, "room_id", roomId)
+		return err, false
 	}
-	s.log.Info("Device room updated", "identifier", identifier, "room_id", roomId)
-	return nil
+	return nil, rowsAffected > 0
 }
 
 // unmarshallDevice takes a Device struct and unmarshals the Info and Config fields

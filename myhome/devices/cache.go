@@ -46,14 +46,14 @@ func (c *Cache) Flush() error {
 	return nil
 }
 
-func (c *Cache) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) error {
+func (c *Cache) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) (error, bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
 	for i, existing := range c.devices {
 		if existing.Id() == d.Id() || existing.MAC == d.MAC || existing.Host_ == d.Host_ || existing.Name() == d.Name() {
 			if !overwrite {
-				return fmt.Errorf("device already exists: %v", *d)
+				return fmt.Errorf("device already exists: %v", *d), false
 			}
 			c.devices = append(c.devices[:i], c.devices[i+1:]...)
 			break
@@ -61,7 +61,7 @@ func (c *Cache) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool)
 	}
 	d, err := c.insert(d)
 	if err != nil {
-		return err
+		return err, true
 	}
 	return c.db.SetDevice(ctx, d, overwrite)
 }
@@ -178,7 +178,7 @@ func (c *Cache) ForgetDevice(ctx context.Context, id string) error {
 	return c.db.ForgetDevice(ctx, id)
 }
 
-func (c *Cache) SetDeviceRoom(ctx context.Context, identifier string, roomId string) error {
+func (c *Cache) SetDeviceRoom(ctx context.Context, identifier string, roomId string) (error, bool) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 

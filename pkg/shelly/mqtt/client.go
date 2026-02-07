@@ -47,6 +47,15 @@ func SetClient(c Client) {
 	close(clientSet)
 }
 
+// ResetClient clears the global MQTT client so it can be set again.
+// This is intended for use in tests only.
+func ResetClient() {
+	clientMu.Lock()
+	defer clientMu.Unlock()
+	client = nil
+	clientSet = make(chan struct{})
+}
+
 func GetClient(ctx context.Context) Client {
 	select {
 	case <-clientSet:

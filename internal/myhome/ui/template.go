@@ -42,8 +42,10 @@ type DeviceView struct {
 	HasHeaterScript      bool     `json:"has_heater_script"`
 	HasDoorSensor        bool     `json:"has_door_sensor"`        // true if device has door/window sensing capability
 	HasTemperatureSensor bool     `json:"has_temperature_sensor"` // true if device has temperature sensing capability
+	HasHumiditySensor    bool     `json:"has_humidity_sensor"`    // true if device has humidity sensing capability
 	DeviceTypeEmoji      string   `json:"device_type_emoji"`      // Emoji indicating device type (e.g., 🌡️ for thermometer, 🚶 for motion)
 	Temperature          *float64 `json:"temperature,omitempty"`  // Current temperature in Celsius (nil if not a thermometer)
+	Humidity             *float64 `json:"humidity,omitempty"`     // Current humidity in percentage (nil if not a humidity sensor)
 	DoorOpened           *bool    `json:"door_opened,omitempty"`  // true if door/window is open, false if closed (nil if not a door/window sensor)
 }
 
@@ -106,6 +108,16 @@ func DeviceToView(d *myhome.Device) DeviceView {
 		}
 	}
 
+	hasHumidity := strings.HasPrefix(d.Id(), "shellyht-")
+	if !hasHumidity && d.Info != nil && d.Info.BTHome != nil {
+		for _, cap := range d.Info.BTHome.Capabilities {
+			if cap == "humidity" {
+				hasHumidity = true
+				break
+			}
+		}
+	}
+
 	// Check for window/door capability
 	hasDoor := false
 	if d.Info != nil && d.Info.BTHome != nil {
@@ -154,6 +166,7 @@ func DeviceToView(d *myhome.Device) DeviceView {
 		HasHeaterScript:      hasHeater,
 		HasDoorSensor:        hasDoor,
 		HasTemperatureSensor: hasTemp,
+		HasHumiditySensor:    hasHumidity,
 		DeviceTypeEmoji:      emoji,
 		Temperature:          nil, // Sensor values are updated separately via SSE
 		DoorOpened:           nil,

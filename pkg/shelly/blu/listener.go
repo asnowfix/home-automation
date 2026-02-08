@@ -85,10 +85,11 @@ type SSEBroadcaster interface {
 func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegistry, sseBroadcaster SSEBroadcaster) error {
 	log := logr.FromContextOrDiscard(ctx).WithName("BLUListener")
 
-	log.Info("Starting BLU listener")
+	log.Info("Starting BLU listener", "mqtt_client", fmt.Sprintf("%T", mc), "registry", fmt.Sprintf("%T", registry))
 
 	// Subscribe to BLU events topic
 	topic := "shelly-blu/events/#"
+	log.Info("Subscribing to BLU events", "topic", topic)
 	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/blu", func(topic string, payload []byte, subscriber string) error {
 		sensors, err := handleBLUEvent(ctx, log, topic, payload, registry)
 		if err != nil {

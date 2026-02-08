@@ -383,7 +383,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	dm.log.Info("Auto-setup configuration", "enabled", options.Flags.AutoSetup, "mqtt_broker", dm.setupConfig.MqttBroker)
 
 	// Loop on ZeroConf devices discovery
-	err = watch.ZeroConf(ctx, dm, dm.dr, dm.resolver)
+	err = watch.ZeroConf(ctx, options.Flags.MdnsTimeout, dm, dm.dr, dm.resolver)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch ZeroConf devices")
 		return err

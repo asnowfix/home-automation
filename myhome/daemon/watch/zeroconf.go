@@ -8,12 +8,13 @@ import (
 	"mynet"
 	"net"
 	"pkg/shelly"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
 )
 
-func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry, dr mynet.Resolver) error {
+func ZeroConf(ctx context.Context, restartAfter time.Duration, dm devices.Manager, db devices.DeviceRegistry, dr mynet.Resolver) error {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
@@ -25,8 +26,13 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 		for {
 			err := dr.BrowseService(ctx, shelly.MDNS_SHELLIES, "local.", scan)
 			if err != nil {
-				log.Error(err, "Failed to start ZeroConf browser")
-				return err
+				log.Error(err, "Failed to start ZeroConf browser, will retry after delay")
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(restartAfter):
+					continue
+				}
 			}
 			log.Info("(Re)Started ZeroConf browser")
 
@@ -39,9 +45,14 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 						return ctx.Err()
 
 					case entry, ok := <-scan:
-						if !ok || entry == nil {
-							log.Error(fmt.Errorf("entry=%v, ok=%v", entry, ok), "Failed to browse ZeroConf : terminating browser")
+						if !ok {
+							log.Info("ZeroConf scan channel closed, will restart browser")
+							stopped <- struct{}{}
 							return nil
+						}
+						if entry == nil {
+							log.V(1).Info("Received nil entry, skipping")
+							continue
 						}
 						log.Info("Browsed", "entry", entry)
 
@@ -86,7 +97,8 @@ func ZeroConf(ctx context.Context, dm devices.Manager, db devices.DeviceRegistry
 				// Don't log context cancellation as an error
 				return ctx.Err()
 			case <-stopped:
-				log.Info("Restarting ZeroConf browser")
+				log.Info("Restarting ZeroConf browser after delay")
+				time.Sleep(restartAfter)
 			}
 		}
 	}(log.WithName("watch.ZeroConf"))

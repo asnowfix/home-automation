@@ -471,12 +471,40 @@ fi
 
 ## Windows - WSL
 
-In addition to the native Linux instructions above, you need to run the following command on the Windows host.
-
-Route intress MQTT traffic to the WSL guest:
+MyHome requires working ZeroConf/mDNS to discover some devices.  By default, WSL networking does not relay multicast messages: you need to turn on **mirroring** in the WSL settings.
 
 ```cmd
-netsh interface portproxy add v4tov4 listenport=1883 listenaddress=0.0.0.0 connectport=1883 connectaddress=<WSL-Addr>
+edit %UserProfile%\.wslconfig
+```
+
+```ini
+[wsl2]
+networkingMode=mirrored
+# optional knobs you may try if name resolution gets weird:
+# dnsTunneling=false
+# firewall=true
+```
+
+```cmd
+wsl --shutdown
+wsl
+```
+
+```bash
+sudo apt update
+sudo apt install -y avahi-daemon avahi-utils dbus
+sudo systemctl enable --now dbus avahi-daemon
+```
+
+Check it works:
+
+```bash
+$ avahi-browse -a
++   eth1 IPv4 myhome                                        _mqtt._tcp           local
++   eth1 IPv4 shelly1minig3-543204522cb4                    _shelly._tcp         local
++   eth1 IPv4 lumiere-porte-entree                          _shelly._tcp         local
++   eth1 IPv4 shelly1minig3-543204522cb4                    Web Site             local
+[...]
 ```
 
 ## Windows - Native

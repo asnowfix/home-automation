@@ -187,8 +187,7 @@ func (d *daemon) Run() error {
 		sseBroadcaster := ui.NewSSEBroadcaster(log.WithName("sse"))
 
 		// Start device manager
-		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc)
-		d.dm.SetSSEBroadcaster(sseBroadcaster)
+		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc, sseBroadcaster)
 		err = d.dm.Start(d.ctx)
 		if err != nil {
 			log.Error(err, "Failed to start device manager")

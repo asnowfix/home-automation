@@ -132,7 +132,7 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 		}
 
 		// Save the device (will create or update)
-		if err, modified = sc.SetDevice(ctx, mhd, true); err != nil {
+		if modified, err = sc.SetDevice(ctx, mhd, true); err != nil {
 			log.Error(err, "Failed to save Gen1 device", "device", mhd)
 			return err
 		}

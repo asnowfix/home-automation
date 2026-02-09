@@ -41,7 +41,7 @@ func SetClient(c Client) {
 	clientMu.Lock()
 	defer clientMu.Unlock()
 	if client != nil && c != client {
-		panic("MQTT client already set with different value")
+		panic("BUG: MQTT client already set with different value")
 	}
 	client = c
 	close(clientSet)

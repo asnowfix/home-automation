@@ -128,20 +128,20 @@ func (s *DeviceStorage) Flush() error {
 }
 
 // UpsertDevice update a device into the database, creating it on the fly if necessary
-func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) (error, bool) {
+func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) (bool, error) {
 	d := Device{
 		Device: *device,
 	}
 	b, err := json.Marshal(device.Info)
 	if err != nil {
 		s.log.Error(err, "Failed to marshal device info", "device", device)
-		return err, false
+		return false, err
 	}
 	d.Info_ = string(b)
 	b, err = json.Marshal(device.Config)
 	if err != nil {
 		s.log.Error(err, "Failed to marshal device config", "device", device)
-		return err, false
+		return false, err
 	}
 	d.Config_ = string(b)
 
@@ -163,15 +163,15 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 	rows, err := s.db.NamedExec(query, d)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device by manufacturer and id", "device", device)
-		return err, false
+		return false, err
 	}
 	count, err = rows.RowsAffected()
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device by manufacturer and id", "device", device)
-		return err, false
+		return false, err
 	}
 	if count > 0 {
-		return nil, true
+		return true, nil
 	}
 
 	// If MAC address is provided, also handle conflicts based on MAC address
@@ -190,19 +190,19 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 		rows, err := s.db.NamedExec(macQuery, d)
 		if err != nil {
 			s.log.Error(err, "Failed to update device by MAC address", "device", device)
-			return err, false
+			return false, err
 		}
 		count, err = rows.RowsAffected()
 		if err != nil {
 			s.log.Error(err, "Failed to update device by MAC address", "device", device)
-			return err, false
+			return false, err
 		}
 		if count > 0 {
-			return nil, true
+			return true, nil
 		}
 	}
 
-	return nil, false
+	return false, nil
 }
 
 // GetAllDevices retrieves all devices from the database.
@@ -321,19 +321,19 @@ func (s *DeviceStorage) GetDevicesByRoom(ctx context.Context, roomId string) ([]
 }
 
 // SetDeviceRoom updates the room assignment for a device
-func (s *DeviceStorage) SetDeviceRoom(ctx context.Context, identifier string, roomId string) (error, bool) {
+func (s *DeviceStorage) SetDeviceRoom(ctx context.Context, identifier string, roomId string) (bool, error) {
 	query := `UPDATE devices SET room_id = $1 WHERE id = $2 OR mac = $2 OR name = $2 OR host = $2`
 	res, err := s.db.Exec(query, roomId, identifier)
 	if err != nil {
 		s.log.Error(err, "Failed to set device room", "identifier", identifier, "room_id", roomId)
-		return err, false
+		return false, err
 	}
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
 		s.log.Error(err, "Failed to set device room", "identifier", identifier, "room_id", roomId)
-		return err, false
+		return false, err
 	}
-	return nil, rowsAffected > 0
+	return rowsAffected > 0, nil
 }
 
 // unmarshallDevice takes a Device struct and unmarshals the Info and Config fields

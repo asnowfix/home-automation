@@ -72,7 +72,7 @@ type BTHomeFrame struct {
 
 // DeviceRegistry interface for registering discovered BLU devices
 type DeviceRegistry interface {
-	SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) (error, bool)
+	SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) (bool, error)
 	GetDeviceById(ctx context.Context, id string) (*myhome.Device, error)
 }
 
@@ -308,7 +308,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 
 		// Only save if something changed
 		if changed {
-			if err, _ := registry.SetDevice(ctx, existingDevice, true); err != nil {
+			if _, err := registry.SetDevice(ctx, existingDevice, true); err != nil {
 				log.Error(err, "Failed to update BLU device", "device_id", deviceID)
 				return nil, err
 			}
@@ -333,7 +333,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 	device = device.WithName(deviceID) // Use device ID as default name for new devices
 	device.Info = deviceInfo
 
-	if err, _ := registry.SetDevice(ctx, device, true); err != nil {
+	if _, err := registry.SetDevice(ctx, device, true); err != nil {
 		log.Error(err, "Failed to register BLU device", "device_id", deviceID)
 		return nil, err
 	}

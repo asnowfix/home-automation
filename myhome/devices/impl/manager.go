@@ -56,19 +56,20 @@ type SSEBroadcaster interface {
 // to prevent goroutine leaks when mDNS or network operations are slow/blocked
 const maxConcurrentRefreshes = 10
 
-func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient mqtt.Client) *DeviceManager {
+func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient mqtt.Client, sseBroadcaster SSEBroadcaster) *DeviceManager {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
 	}
 
 	dm := &DeviceManager{
-		dr:         mhd.NewCache(ctx, s),
-		log:        log.WithName("DeviceManager"),
-		update:     make(chan *myhome.Device, 64), // TODO configurable buffer size
-		refreshed:  make(chan *myhome.Device, 64), // TODO configurable buffer size
-		mqttClient: mqttClient,
-		resolver:   resolver,
+		dr:             mhd.NewCache(ctx, s),
+		log:            log.WithName("DeviceManager"),
+		update:         make(chan *myhome.Device, 64), // TODO configurable buffer size
+		refreshed:      make(chan *myhome.Device, 64), // TODO configurable buffer size
+		mqttClient:     mqttClient,
+		resolver:       resolver,
+		sseBroadcaster: sseBroadcaster,
 	}
 
 	myhome.RegisterMethodHandler(myhome.DevicesMatch, func(ctx context.Context, in any) (any, error) {
@@ -139,7 +140,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		// Even if refresh failed, save the device if it was modified
 		// This handles cases where HTTP fails and clears the host
 		if modified {
-			if saveErr, _ := dm.dr.SetDevice(ctx, device, true); saveErr != nil {
+			if _, saveErr := dm.dr.SetDevice(ctx, device, true); saveErr != nil {
 				log.Error(saveErr, "Failed to save modified device after refresh", "device_id", device.Id())
 			} else {
 				log.V(1).Info("Saved modified device after refresh", "device_id", device.Id(), "refresh_error", err != nil)
@@ -176,7 +177,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 			if params.Name != "" && params.Name != device.Name() {
 				log.V(1).Info("Updating device name in DB", "device", device.Id(), "name", params.Name)
 				device = device.WithName(params.Name)
-				if err, _ := dm.dr.SetDevice(ctx, device, true); err != nil {
+				if _, err := dm.dr.SetDevice(ctx, device, true); err != nil {
 					return nil, fmt.Errorf("failed to update device name in DB: %w", err)
 				}
 			}
@@ -235,7 +236,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		} else {
 			// Update device name in DB from refreshed Shelly info
 			device = device.WithName(sd.Name())
-			if err, _ := dm.dr.SetDevice(ctx, device, true); err != nil {
+			if _, err := dm.dr.SetDevice(ctx, device, true); err != nil {
 				log.Error(err, "Failed to update device in DB after setup", "device", device.Id())
 			}
 		}
@@ -249,7 +250,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		log.V(1).Info("New", "id", device.Id(), "name", device.Name())
 
 		var modified bool
-		if err, modified = dm.dr.SetDevice(ctx, device, true); err != nil {
+		if modified, err = dm.dr.SetDevice(ctx, device, true); err != nil {
 			log.Error(err, "Failed to update device in DB", "device", device.Id())
 			return nil, err
 		}
@@ -270,7 +271,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		log := dm.log.WithName("rpc/device.setroom")
 		log.V(1).Info("New", "identifier", params.Identifier, "room_id", params.RoomId)
 		// Save room to database
-		if err, _ = dm.dr.SetDeviceRoom(ctx, params.Identifier, params.RoomId); err != nil {
+		if _, err = dm.dr.SetDeviceRoom(ctx, params.Identifier, params.RoomId); err != nil {
 			log.Error(err, "Failed to update device room in DB", "identifier", params.Identifier)
 			return nil, err
 		}
@@ -331,11 +332,6 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 	})
 
 	return dm
-}
-
-// SetSSEBroadcaster sets the SSE broadcaster for live sensor updates
-func (dm *DeviceManager) SetSSEBroadcaster(broadcaster SSEBroadcaster) {
-	dm.sseBroadcaster = broadcaster
 }
 
 func (dm *DeviceManager) UpdateChannel() chan<- *myhome.Device {
@@ -563,7 +559,7 @@ func (dm *DeviceManager) storeDeviceLoop(ctx context.Context, refreshed <-chan *
 			return
 		case device := <-refreshed:
 			var modified bool = false
-			err, modified := dm.dr.SetDevice(ctx, device, true)
+			modified, err = dm.dr.SetDevice(ctx, device, true)
 			if err != nil {
 				log.Error(err, "Failed to upsert", "device", device.DeviceSummary)
 				continue
@@ -668,7 +664,7 @@ func (dm *DeviceManager) ForgetDevice(ctx context.Context, id string) error {
 	return dm.dr.ForgetDevice(ctx, id)
 }
 
-func (dm *DeviceManager) SetDeviceRoom(ctx context.Context, identifier string, roomId string) (error, bool) {
+func (dm *DeviceManager) SetDeviceRoom(ctx context.Context, identifier string, roomId string) (bool, error) {
 	return dm.dr.SetDeviceRoom(ctx, identifier, roomId)
 }
 
@@ -676,11 +672,11 @@ func (dm *DeviceManager) GetDevicesByRoom(ctx context.Context, roomId string) ([
 	return dm.dr.GetDevicesByRoom(ctx, roomId)
 }
 
-func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) (error, bool) {
+func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) (bool, error) {
 	if d.Manufacturer_ == string(myhome.SHELLY) {
 		sd, ok := d.Impl().(*shelly.Device)
 		if !ok {
-			return fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(d.Impl()), d), false
+			return false, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(d.Impl()), d)
 		}
 		d.WithImpl(sd)
 	}

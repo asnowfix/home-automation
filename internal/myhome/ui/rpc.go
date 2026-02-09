@@ -41,8 +41,10 @@ func RpcHandler(ctx context.Context, log logr.Logger) func(w http.ResponseWriter
 			}
 		}
 
+		var res any
+
 		// Call method
-		res, err := mh.ActionE(ctx, params)
+		res, err = mh.ActionE(ctx, params)
 		if err != nil {
 			log.Error(err, "method failed", "method", req.Method)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -58,11 +60,12 @@ func RpcHandler(ctx context.Context, log logr.Logger) func(w http.ResponseWriter
 
 		// Convert device.lookup & device.listbyroom result to DeviceView for the UI
 		if mh.Name == myhome.DeviceLookup || mh.Name == myhome.DeviceListByRoom {
-			if devices, ok := res.([]myhome.Device); ok && devices != nil {
-				res := make([]DeviceView, len(devices))
+			if devices, ok := res.([]myhome.Device); ok {
+				views := make([]DeviceView, len(devices))
 				for i, device := range devices {
-					res[i] = DeviceToView(&device)
+					views[i] = DeviceToView(&device)
 				}
+				res = views
 			}
 		}
 

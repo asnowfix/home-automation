@@ -1,6 +1,7 @@
 package occupancy
 
 import (
+	"context"
 	"myhome"
 	"time"
 
@@ -28,9 +29,9 @@ func (h *RPCHandler) RegisterHandlers() {
 }
 
 // handleGetStatus returns the current occupancy status
-func (h *RPCHandler) handleGetStatus(params any) (any, error) {
+func (h *RPCHandler) handleGetStatus(ctx context.Context, params any) (any, error) {
 	// Get occupancy status using the service's IsOccupied method
-	occupied := h.service.IsOccupied()
+	occupied := h.service.IsOccupied(ctx)
 
 	return &myhome.OccupancyStatusResult{
 		Occupied: occupied,
@@ -44,7 +45,7 @@ func (s *Service) GetOccupancyService() *Service {
 }
 
 // IsOccupied returns whether the home is currently occupied
-func (s *Service) IsOccupied() bool {
+func (s *Service) IsOccupied(ctx context.Context) bool {
 	now := time.Now().UnixNano()
 	lastEvent := s.lastEvent.Load()
 	lastMobile := s.lastMobileSeen.Load()

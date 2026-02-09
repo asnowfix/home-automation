@@ -76,44 +76,44 @@ func NewService(ctx context.Context, log logr.Logger, mqttClient mqtt.Client, st
 
 // RegisterHandlers registers all temperature RPC method handlers
 func (s *Service) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.TemperatureGet, func(params any) (any, error) {
-		return s.HandleGet(context.Background(), params.(*myhome.TemperatureGetParams))
+	myhome.RegisterMethodHandler(myhome.TemperatureGet, func(ctx context.Context, params any) (any, error) {
+		return s.HandleGet(ctx, params.(*myhome.TemperatureGetParams))
 	})
-	myhome.RegisterMethodHandler(myhome.TemperatureSet, func(params any) (any, error) {
-		return s.HandleSet(context.Background(), params.(*myhome.TemperatureSetParams))
+	myhome.RegisterMethodHandler(myhome.TemperatureSet, func(ctx context.Context, params any) (any, error) {
+		return s.HandleSet(ctx, params.(*myhome.TemperatureSetParams))
 	})
-	myhome.RegisterMethodHandler(myhome.TemperatureList, func(params any) (any, error) {
-		return s.HandleList(context.Background())
+	myhome.RegisterMethodHandler(myhome.TemperatureList, func(ctx context.Context, params any) (any, error) {
+		return s.HandleList(ctx)
 	})
-	myhome.RegisterMethodHandler(myhome.TemperatureDelete, func(params any) (any, error) {
-		return s.HandleDelete(context.Background(), params.(*myhome.TemperatureDeleteParams))
+	myhome.RegisterMethodHandler(myhome.TemperatureDelete, func(ctx context.Context, params any) (any, error) {
+		return s.HandleDelete(ctx, params.(*myhome.TemperatureDeleteParams))
 	})
-	myhome.RegisterMethodHandler(myhome.TemperatureGetSchedule, func(params any) (any, error) {
-		return s.HandleGetSchedule(context.Background(), params.(*myhome.TemperatureGetScheduleParams))
+	myhome.RegisterMethodHandler(myhome.TemperatureGetSchedule, func(ctx context.Context, params any) (any, error) {
+		return s.HandleGetSchedule(ctx, params.(*myhome.TemperatureGetScheduleParams))
 	})
-	myhome.RegisterMethodHandler(myhome.TemperatureGetWeekdayDefaults, func(params any) (any, error) {
-		return s.HandleGetWeekdayDefaults(context.Background(), params.(*myhome.TemperatureGetWeekdayDefaultsParams))
+	myhome.RegisterMethodHandler(myhome.TemperatureGetWeekdayDefaults, func(ctx context.Context, params any) (any, error) {
+		return s.HandleGetWeekdayDefaults(ctx, params.(*myhome.TemperatureGetWeekdayDefaultsParams))
 	})
-	myhome.RegisterMethodHandler(myhome.TemperatureSetWeekdayDefault, func(params any) (any, error) {
-		return s.HandleSetWeekdayDefault(context.Background(), params.(*myhome.TemperatureSetWeekdayDefaultParams))
+	myhome.RegisterMethodHandler(myhome.TemperatureSetWeekdayDefault, func(ctx context.Context, params any) (any, error) {
+		return s.HandleSetWeekdayDefault(ctx, params.(*myhome.TemperatureSetWeekdayDefaultParams))
 	})
-	myhome.RegisterMethodHandler(myhome.TemperatureGetKindSchedules, func(params any) (any, error) {
-		return s.HandleGetKindSchedules(context.Background(), params.(*myhome.TemperatureGetKindSchedulesParams))
+	myhome.RegisterMethodHandler(myhome.TemperatureGetKindSchedules, func(ctx context.Context, params any) (any, error) {
+		return s.HandleGetKindSchedules(ctx, params.(*myhome.TemperatureGetKindSchedulesParams))
 	})
-	myhome.RegisterMethodHandler(myhome.TemperatureSetKindSchedule, func(params any) (any, error) {
-		return s.HandleSetKindSchedule(context.Background(), params.(*myhome.TemperatureSetKindScheduleParams))
+	myhome.RegisterMethodHandler(myhome.TemperatureSetKindSchedule, func(ctx context.Context, params any) (any, error) {
+		return s.HandleSetKindSchedule(ctx, params.(*myhome.TemperatureSetKindScheduleParams))
 	})
-	myhome.RegisterMethodHandler(myhome.RoomList, func(params any) (any, error) {
-		return s.HandleRoomList(context.Background())
+	myhome.RegisterMethodHandler(myhome.RoomList, func(ctx context.Context, params any) (any, error) {
+		return s.HandleRoomList(ctx)
 	})
-	myhome.RegisterMethodHandler(myhome.RoomCreate, func(params any) (any, error) {
-		return s.HandleRoomCreate(context.Background(), params.(*myhome.RoomCreateParams))
+	myhome.RegisterMethodHandler(myhome.RoomCreate, func(ctx context.Context, params any) (any, error) {
+		return s.HandleRoomCreate(ctx, params.(*myhome.RoomCreateParams))
 	})
-	myhome.RegisterMethodHandler(myhome.RoomEdit, func(params any) (any, error) {
-		return s.HandleRoomEdit(context.Background(), params.(*myhome.RoomEditParams))
+	myhome.RegisterMethodHandler(myhome.RoomEdit, func(ctx context.Context, params any) (any, error) {
+		return s.HandleRoomEdit(ctx, params.(*myhome.RoomEditParams))
 	})
-	myhome.RegisterMethodHandler(myhome.RoomDelete, func(params any) (any, error) {
-		return s.HandleRoomDelete(context.Background(), params.(*myhome.RoomDeleteParams))
+	myhome.RegisterMethodHandler(myhome.RoomDelete, func(ctx context.Context, params any) (any, error) {
+		return s.HandleRoomDelete(ctx, params.(*myhome.RoomDeleteParams))
 	})
 }
 

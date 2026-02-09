@@ -65,7 +65,7 @@ func (m *DeviceMqttChannels) Unlock() {
 
 // Init initializes MQTT channels for a device. Returns an existing instance from the registry
 // if available, or creates new channels and registers them.
-func (m *DeviceMqttChannels) Init(ctx context.Context, mc mqtt.Client, deviceId string) (*DeviceMqttChannels, error) {
+func (m *DeviceMqttChannels) Init(ctx context.Context, deviceId string) (*DeviceMqttChannels, error) {
 	// Check if we already have MQTT channels for this device (prevents goroutine leaks)
 	deviceMqttRegistryMutex.RLock()
 	existing, exists := deviceMqttRegistry[deviceId]
@@ -84,6 +84,7 @@ func (m *DeviceMqttChannels) Init(ctx context.Context, mc mqtt.Client, deviceId 
 		return existing, nil
 	}
 
+	mc := mqtt.GetClient(ctx)
 	replyTo := fmt.Sprintf("%s_%s", mc.Id(), deviceId)
 
 	from, err := mc.Subscribe(ctx, fmt.Sprintf("%s/rpc", replyTo), 8 /*qlen*/, "shelly/device/"+deviceId)
@@ -621,13 +622,8 @@ func (d *Device) initMqtt(ctx context.Context) error {
 		panic("device id is empty: no channel to communicate")
 	}
 
-	mc, err := mqtt.FromContext(ctx)
-	if err != nil {
-		d.log.Error(err, "Unable to get MQTT client from context", "device_id", d.Id_)
-		return err
-	}
-
-	d.mqtt, err = d.mqtt.Init(ctx, mc, d.Id())
+	var err error
+	d.mqtt, err = d.mqtt.Init(ctx, d.Id())
 	if err != nil {
 		d.log.Error(err, "Unable to init MQTT channels", "device_id", d.Id_)
 		return err

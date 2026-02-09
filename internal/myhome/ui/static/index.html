@@ -14,6 +14,9 @@
       vertical-align: middle;
       margin-right: 4px;
     }
+    .button.is-loading svg {
+      opacity: 0.5;
+    }
   </style>
   </head>
 <body>
@@ -51,6 +54,15 @@
                     <span class="tag is-light ml-2" id="sensor-{{.Id}}-temperature">--°C</span>
                   {{end}}
                 {{end}}
+
+                {{if .HasHumiditySensor}}
+                  {{if .Humidity}}
+                    <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{printf "%.1f" .Humidity}}%</span>
+                  {{else}}
+                    <span class="tag is-light ml-2" id="sensor-{{.Id}}-humidity">--%</span>
+                  {{end}}
+                {{end}}
+
                 {{if .HasDoorSensor}}
                   {{if ne .DoorOpened nil}}
                     {{if .DoorOpened}}
@@ -79,17 +91,30 @@
                 {{end}}
               </p>
               <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
-              {{if .Host}}
-                <p class="has-text-grey" id="device-{{.Id}}-host">Host: {{.Host}}</p>
-              {{else}}
-                <p class="has-text-grey" id="device-{{.Id}}-host">No host known</p>
-              {{end}}
               <div class="buttons mt-3">
                 {{if .Host}}
-                  <a class="button is-link" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer">Open</a>
+                  <a class="button is-link" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <circle cx="12" cy="12" r="10"></circle>
+                      <line x1="2" y1="12" x2="22" y2="12"></line>
+                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                    </svg>
+                  </a>
                 {{end}}
-                <button class="button is-warning" id="btn-refresh-{{.Id}}" onclick="refreshDevice('{{.Id}}')">Refresh</button>
-                <button class="button is-success" id="btn-setup-{{.Id}}" onclick="setupDevice('{{.Id}}')">Setup</button>
+                {{if .IsRefreshable}}
+                <button class="button is-warning" id="btn-refresh-{{.Id}}" onclick="refreshDevice('{{.Id}}')" title="Refresh device">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                  </svg>
+                </button>
+                {{end}}
+                <button class="button is-success" id="btn-setup-{{.Id}}" onclick="setupDevice('{{.Id}}')" title="Setup device">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+                  </svg>
+                </button>
                 {{if .HasHeaterScript}}
                 <button class="button is-danger" id="btn-heater-{{.Id}}" onclick="openHeaterConfig('{{.Id}}')" title="Heater Configuration">🔥</button>
                 {{end}}
@@ -418,35 +443,29 @@
 
     async function refreshDevice(id) {
       const btn = document.getElementById('btn-refresh-' + id);
-      if (btn) { btn.disabled = true; btn.textContent = 'Refreshing…'; }
-      let es;
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('is-loading');
+      }
       try {
-        es = new EventSource('/events?device=' + encodeURIComponent(id));
-        es.addEventListener('device-refresh', function(ev) {
-          if (btn) { btn.textContent = 'Done'; }
-          try { es.close(); } catch {}
-          location.reload();
-        });
-        es.onerror = function() { /* keep open or close silently */ };
-
-        const res = await fetch('/rpc', {
+        console.log('refreshDevice: POST /rpc device.refresh for', id);
+        res = await fetch('/rpc', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ method: 'device.refresh', params: id })
         });
+        console.log('refreshDevice: device.refresh response status', res.status);
         if (!res.ok) {
-          const t = await res.text();
-          if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
-          alert('Refresh failed: ' + t);
-          if (es) try { es.close(); } catch {}
+          console.error('refreshDevice: device.refresh response error', await res.text());
           return;
         }
-        // If backend completed before SSE connected, fallback: reload soon
-        setTimeout(() => { if (btn) { btn.textContent = 'Done'; } location.reload(); }, 1500);
       } catch (e) {
-        if (btn) { btn.disabled = false; btn.textContent = 'Refresh'; }
-        if (es) try { es.close(); } catch {}
-        alert('Refresh error: ' + e);
+        console.error('refreshDevice: error', e.name, e.message, e);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('is-loading');
+        }
       }
     }
 
@@ -1023,34 +1042,35 @@
     const eventSource = new EventSource('/events');
 
     eventSource.addEventListener('connected', (e) => {
-      console.log('SSE connected');
+      console.log('SSE: connected');
     });
 
     eventSource.addEventListener('sensor-update', (e) => {
       try {
+        console.log('SSE sensor-update', e.data);
         const data = JSON.parse(e.data);
         updateDeviceSensor(data.device_id, data.sensor, data.value);
       } catch (err) {
-        console.error('Failed to parse sensor-update:', err);
+        console.error('SSE: Failed to parse sensor-update:', err, "data", e.data);
       }
     });
 
     eventSource.addEventListener('device-update', (e) => {
       try {
+        console.log("SSE: device-update", e.data);
         const deviceView = JSON.parse(e.data);
-        // Validate deviceView has required id field
         if (!deviceView || !deviceView.id) {
           console.error('Invalid device update: missing id', deviceView);
           return;
         }
         updateDeviceCard(deviceView.id, deviceView);
       } catch (err) {
-        console.error('Failed to parse device-update:', err, "data", e.data);
+        console.error('SSE: Failed to parse device-update:', err, "data", e.data);
       }
     });
 
     eventSource.onerror = (e) => {
-      console.error('SSE error:', e);
+      console.error('SSE: error:', e);
       // Browser will automatically reconnect
     };
 
@@ -1058,6 +1078,9 @@
       const el = document.getElementById('sensor-' + deviceId + '-' + sensor);
       if (el && sensor === 'temperature') {
         el.textContent = value + '°C';
+      }
+      if (el && sensor === 'humidity') {
+        el.textContent = value + '%';
       }
       if (el && sensor === 'window') {
         if (value === "0") {
@@ -1094,6 +1117,7 @@
         if (titleEl) {
           const emoji = deviceView.device_type_emoji || '';
           const tempSensorHtml = deviceView.has_temperature_sensor ? `<span class="tag is-light ml-2" id="sensor-${deviceId}-temperature">--°C</span>` : '';
+          const humiditySensorHtml = deviceView.has_humidity_sensor ? `<span class="tag is-light ml-2" id="sensor-${deviceId}-humidity">--%</span>` : '';
           const doorSensorHtml = deviceView.has_door_sensor ? `<span class="tag is-light ml-2" id="door-${deviceId}">
             <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
               <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
@@ -1117,7 +1141,13 @@
           
           // Add or remove Open button
           if (shouldHaveOpenBtn && !hasOpenBtn) {
-            const openBtn = `<a class="button is-link" href="/devices/${escapeHtml(deviceView.link_token)}/" target="_blank" rel="noopener noreferrer">Open</a>`;
+            const openBtn = `<a class="button is-link" href="/devices/${escapeHtml(deviceView.link_token)}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="2" y1="12" x2="22" y2="12"></line>
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+              </svg>
+            </a>`;
             buttonsEl.insertAdjacentHTML('afterbegin', openBtn);
           } else if (!shouldHaveOpenBtn && hasOpenBtn) {
             hasOpenBtn.remove();
@@ -1132,6 +1162,15 @@
             buttonsEl.insertAdjacentHTML('beforeend', heaterBtn);
           } else if (!deviceView.has_heater_script && hasHeaterBtn) {
             hasHeaterBtn.remove();
+          }
+
+          // Add or remove refresh button
+          const hasRefreshBtn = document.getElementById('btn-refresh-' + deviceId);
+          if (deviceView.is_refreshable && !hasRefreshBtn) {
+            const refreshBtn = `<button class="button is-danger" id="btn-refresh-${deviceId}" onclick="refreshDevice('${escapeJs(deviceId)}')" title="Refresh device"></button>`;
+            buttonsEl.insertAdjacentHTML('beforeend', refreshBtn);
+          } else if (!deviceView.is_refreshable && hasRefreshBtn) {
+            hasRefreshBtn.remove();
           }
         }
 
@@ -1192,6 +1231,7 @@
                 ${emoji ? emoji + ' ' : ''}
                 <span id="device-${deviceId}-name">${deviceName}</span>
                 ${deviceView.has_temperature_sensor ? `<span class="tag is-light ml-2" id="sensor-${deviceId}-temperature">--°C</span>` : ''}
+                ${deviceView.has_humidity_sensor ? `<span class="tag is-light ml-2" id="sensor-${deviceId}-humidity">--%</span>` : ''}
                 ${deviceView.has_door_sensor ? `<span class="tag is-light ml-2" id="door-${deviceId}">
                   <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
                     <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
@@ -1200,11 +1240,26 @@
                 </span>` : ''}
               </p>
               <p class="subtitle is-7 has-text-grey">${manufacturer} · ${deviceId}</p>
-              ${host ? `<p class="has-text-grey" id="device-${deviceId}-host">Host: ${host}</p>` : `<p class="has-text-grey" id="device-${deviceId}-host">No host known</p>`}
               <div class="buttons mt-3">
-                ${host && linkToken ? `<a class="button is-link" href="/devices/${linkToken}/" target="_blank" rel="noopener noreferrer">Open</a>` : ''}
-                <button class="button is-warning" id="btn-refresh-${deviceId}" onclick="refreshDevice('${deviceIdJs}')">Refresh</button>
-                <button class="button is-success" id="btn-setup-${deviceId}" onclick="setupDevice('${deviceIdJs}')">Setup</button>
+                ${host && linkToken ? `<a class="button is-link" href="/devices/${linkToken}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                  </svg>
+                </a>` : ''}
+                ${deviceView.is_refreshable ? `<button class="button is-warning" id="btn-refresh-${deviceId}" onclick="refreshDevice('${deviceIdJs}')" title="Refresh device">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                  </svg>
+                </button>` : ''}
+                <button class="button is-success" id="btn-setup-${deviceId}" onclick="setupDevice('${deviceIdJs}')" title="Setup device">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
+                  </svg>
+                </button>
                 ${deviceView.has_heater_script ? `<button class="button is-danger" id="btn-heater-${deviceId}" onclick="openHeaterConfig('${deviceIdJs}')" title="Heater Configuration">🔥</button>` : ''}
               </div>
             </div>

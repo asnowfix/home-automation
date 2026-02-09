@@ -11,7 +11,12 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "ctl", "-B", "192.168.1.2", "shelly", "-H", "jobs", "show", "192.168.1.66"],
+            "args": [
+                "ctl",
+                "--debug",
+                "-B", "192.168.1.2",
+                "shelly", "-H", "jobs", "show", "192.168.1.66"
+            ],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -22,40 +27,13 @@
             "request": "launch",
             "mode": "debug",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "ctl", "-v", "-B", "192.168.1.2", "shelly", "jobs", "show", "shellyplus1-08b61fd9d708"],
-            "env": {
-                "MYHOME_LOG": "stderr"
-            }
-        },
-        {
-            "name": "myhome ctl group create (radiateurs)",
-            "type": "go",
-            "request": "launch",
-            "mode": "debug",
-            "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "ctl", "-B", "192.168.1.2" ,"group", "create", "radiateurs", "Tous les radiateurs"],
-            "env": {
-                "MYHOME_LOG": "stderr"
-            }
-        },
-        {
-            "name": "myhome ctl group show (radiateurs)",
-            "type": "go",
-            "request": "launch",
-            "mode": "debug",
-            "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "ctl", "-B", "192.168.1.2" ,"group", "show", "radiateurs"],
-            "env": {
-                "MYHOME_LOG": "stderr"
-            }
-        },
-        {
-            "name": "myhome ctl group delete (radiateurs)",
-            "type": "go",
-            "request": "launch",
-            "mode": "debug",
-            "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "ctl", "-B", "192.168.1.2" ,"group", "delete", "radiateurs"],
+            "args": [
+                "ctl",
+                "--debug",
+                "-v",
+                "-B", "192.168.1.2",
+                "shelly", "jobs", "show", "shellyplus1-08b61fd9d708"
+            ],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -65,7 +43,14 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2", "--no-mdns-publish", "-I", "myhome-local"],
+            "args": [
+                "daemon", "run",
+                "--debug",
+                "-P", "myhome-wo-broker.prof",
+                "-B", "192.168.1.2", "--ui-port", "6081",
+                "--no-mdns-publish",
+                "-I", "myhome-local"
+            ],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -75,7 +60,15 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--verbose", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2", "--no-mdns-publish", "-I", "myhome-local"],
+            "args": [
+                "daemon", "run",
+                "--verbose",
+                "-P", "myhome-wo-broker.prof",
+                "-B", "192.168.1.2",
+                "--ui-port", "6081",
+                "--no-mdns-publish",
+                "-I", "myhome-local"
+            ],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -85,13 +78,17 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "daemon", "run",
+            "args": [
+                "daemon", "run",
+                "--debug",
                 "-P", "myhome-wo-broker.prof",
                 "-B", "192.168.1.2",
+                "--ui-port", "6081",
                 "--enable-gen1-proxy",
                 "--disable-device-manager",
                 "--no-mdns-publish",
-                "-I", "myhome-local"],
+                "-I", "myhome-local"
+            ],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -101,7 +98,7 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "daemon", "run", "-B", "192.168.1.2", "--enable-occupancy-service", "--disable-device-manager", "--disable-gen1-proxy", "--no-mdns-publish", "-I", "myhome-local"],
+            "args": ["--debug", "daemon", "run", "-B", "192.168.1.2", "--ui-port", "6081", "--enable-occupancy-service", "--disable-device-manager", "--disable-gen1-proxy", "--no-mdns-publish", "-I", "myhome-local"],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -111,7 +108,15 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "daemon", "run", "-P", "myhome-wo-broker.prof", "-B", "192.168.1.2", "-E", "events", "--no-mdns-publish", "-I", "myhome-local"],
+            "args": ["--debug", "daemon", "run",
+                "-B", "192.168.1.2",
+                "--ui-port", "6081",
+                "-P", "myhome-wo-broker.prof",
+                "-B", "192.168.1.2",
+                "-E", "events",
+                "--no-mdns-publish",
+                "-I", "myhome-local"
+            ],
             "env": {
                 "MYHOME_LOG": "stderr"
             }
@@ -121,7 +126,11 @@
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
-            "args": ["--debug", "daemon", "run", "-P", "myhome-wo-broker.prof", "-D"],
+            "args": [
+                "--debug", "daemon", "run",
+                "-P", "myhome-wo-broker.prof",
+                "-D"
+            ],
             "env": {
                 "MYHOME_LOG": "stderr"
             }

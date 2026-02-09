@@ -1,3 +1,20 @@
+// Door Sensor events for the same opening -- emitted by blu-publisher.js
+// MqttPublish{topic=shelly-blu/events/7c:c6:b6:7f:bd:4b, payload=202byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
+var shelly_blu_door_event_1 = {
+  "encryption":false,
+  "BTHome_version":2,
+  "pid":158,
+  "battery":100,
+  "illuminance":7,
+  "window":1,
+  "rotation":0,
+  "rssi":-90,
+  "address":"7c:c6:b6:7f:bd:4b",
+  "bthome":{
+    "service_data":{"fcd2":"RACeAWQFvAIALQE/AAA="}
+  }
+}
+
 // Publishing as MQTT on topic:  shelly-blu/events/e8:e0:7e:a6:0c:6f
 var shelly_blu_pool_motion_event = {
   "encryption":false,

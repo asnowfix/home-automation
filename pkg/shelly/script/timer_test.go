@@ -468,8 +468,10 @@ func TestTimerSetWithShellyRuntime(t *testing.T) {
 	ctx = logr.NewContext(ctx, testr.New(t))
 
 	// Add mock MQTT client to context
+	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
+	t.Cleanup(mqtt.ResetClient)
 
 	// Create a test script that uses Timer.set
 	script := `
@@ -523,8 +525,10 @@ func TestTimerSetOneShotWithRuntime(t *testing.T) {
 	ctx = logr.NewContext(ctx, testr.New(t))
 
 	// Add mock MQTT client to context
+	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
+	t.Cleanup(mqtt.ResetClient)
 
 	script := `
 		var callCount = 0;
@@ -566,8 +570,10 @@ func TestTimerSetRecurringWithRuntime(t *testing.T) {
 	ctx = logr.NewContext(ctx, testr.New(t))
 
 	// Add mock MQTT client to context
+	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
+	t.Cleanup(mqtt.ResetClient)
 
 	script := `
 		var callCount = 0;
@@ -609,8 +615,10 @@ func TestTimerClearWithRuntime(t *testing.T) {
 	ctx = logr.NewContext(ctx, testr.New(t))
 
 	// Add mock MQTT client to context
+	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
+	t.Cleanup(mqtt.ResetClient)
 
 	script := `
 		var callCount = 0;
@@ -657,8 +665,10 @@ func TestTimerMultipleWithRuntime(t *testing.T) {
 	ctx = logr.NewContext(ctx, testr.New(t))
 
 	// Add mock MQTT client to context
+	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
+	t.Cleanup(mqtt.ResetClient)
 
 	script := `
 		var timer1Count = 0;
@@ -708,8 +718,10 @@ func TestTimerTimingWithRuntime(t *testing.T) {
 	ctx = logr.NewContext(ctx, testr.New(t))
 
 	// Add mock MQTT client to context
+	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
+	t.Cleanup(mqtt.ResetClient)
 
 	// Record start time in Go
 	startTime := time.Now()
@@ -767,8 +779,10 @@ func TestTimerRecurringIntervalAccuracyWithRuntime(t *testing.T) {
 	ctx = logr.NewContext(ctx, testr.New(t))
 
 	// Add mock MQTT client to context
+	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	ctx = mqtt.NewContext(ctx, mc)
+	mqtt.SetClient(mc)
+	t.Cleanup(mqtt.ResetClient)
 
 	script := `
 		var startTime = Date.now();

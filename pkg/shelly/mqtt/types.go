@@ -1,5 +1,7 @@
 package mqtt
 
+import "encoding/json"
+
 // <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Mqtt>
 
 type Event struct {
@@ -10,12 +12,12 @@ type Event struct {
 		Code    int    `json:"code"`    // Error code
 		Message string `json:"message"` // Error message
 	} `json:"error,omitempty"`
-	Params *map[string]any `json:"params,omitempty"` // Parameters of the event
-	// Params *struct {
-	// 	Status
-	// 	Timestamp float64           `json:"ts"`
-	// 	Events    *[]ComponentEvent `json:"events,omitempty"`
-	// } `json:"params,omitempty"` // Parameters of the event
+	Params json.RawMessage `json:"params,omitempty"` // Parameters of the event (deferred unmarshaling)
+}
+
+type NotifyEventParams struct {
+	Ts     float64          `json:"ts"`
+	Events []ComponentEvent `json:"events"`
 }
 
 type ComponentEvent struct {

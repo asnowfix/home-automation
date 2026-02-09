@@ -9,9 +9,9 @@ import (
 	mqttclient "myhome/mqtt"
 	mqttserver "myhome/mqtt"
 	"myhome/occupancy"
-	"myhome/proxy"
 	"myhome/storage"
 	"myhome/temperature"
+	"myhome/ui"
 	"mynet"
 	"net/http"
 	_ "net/http/pprof"
@@ -82,11 +82,6 @@ func (d *daemon) Run() error {
 
 	var disableEmbeddedMqttBroker bool = len(options.Flags.MqttBroker) != 0
 
-	// Initialize Shelly devices handler
-	shelly.Init(log, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
-
-	var mc mqttclient.Client
-
 	resolver := mynet.MyResolver(log.WithName("mynet.Resolver"))
 
 	// Conditionally start the embedded MQTT broker
@@ -107,13 +102,19 @@ func (d *daemon) Run() error {
 		log.Error(err, "Failed to initialize MQTT client")
 		return err
 	}
+
 	// Start the MQTT client and get the client instance
-	mc, err = mqttclient.GetClientE(d.ctx)
+	mc, err := mqttclient.GetClientE(d.ctx)
 	if err != nil {
 		log.Error(err, "Failed to start MQTT client")
 		return err
 	}
 	defer mc.Close()
+
+	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
+
+	// Start the main HTTP server (as a Mux), given to every other servers started below
+	// mux := http.NewServeMux()
 
 	// Start Gen1 (HTTP->MQTT) proxy (auto-enabled with embedded MQTT broker)
 	if options.Flags.EnableGen1Proxy {
@@ -123,7 +124,7 @@ func (d *daemon) Run() error {
 		log.Info("Gen1 (HTTP->MQTT) proxy disabled")
 	}
 
-	// Start Occupancy service (HTTP + RPC)
+	// Start Occupancy service (MQTT only)
 	if options.Flags.EnableOccupancyService {
 		log.Info("Starting occupancy service")
 
@@ -146,18 +147,6 @@ func (d *daemon) Run() error {
 		log.Info("Occupancy service started (HTTP on :8889, RPC will be registered with device manager)")
 	} else {
 		log.Info("Occupancy service disabled")
-	}
-
-	// Start Temperature RPC service (auto-enabled with embedded MQTT broker)
-	if options.Flags.EnableTemperatureService {
-		log.Info("Starting temperature RPC service")
-
-		// Temperature service uses the same database as device manager
-		// It will be initialized when device manager starts
-		// For now, just log that it's enabled - actual initialization happens below
-		log.Info("Temperature RPC service will be initialized with device manager")
-	} else {
-		log.Info("Temperature RPC service disabled")
 	}
 
 	// Start Prometheus Metrics Exporter (auto-enabled with device manager)
@@ -195,24 +184,18 @@ func (d *daemon) Run() error {
 		defer storage.Close()
 
 		// Create SSE broadcaster for live sensor updates
-		sseBroadcaster := proxy.NewSSEBroadcaster(log.WithName("sse"))
+		sseBroadcaster := ui.NewSSEBroadcaster(log.WithName("sse"))
 
-		// Start UI reverse HTTP proxy
-		if err := proxy.Start(d.ctx, log.WithName("proxy"), options.Flags.ProxyPort, resolver, storage, mc, sseBroadcaster); err != nil {
-			log.Error(err, "Failed to start reverse proxy")
-			return err
-		}
-
-		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc)
-		d.dm.SetSSEBroadcaster(sseBroadcaster)
+		// Start device manager
+		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc, sseBroadcaster)
 		err = d.dm.Start(d.ctx)
 		if err != nil {
 			log.Error(err, "Failed to start device manager")
 			return err
 		}
-
 		log.Info("Started device manager", "manager", d.dm)
 
+		// Start the main RPC server
 		d.rpc, err = myhome.NewServerE(d.ctx, d.dm)
 		if err != nil {
 			log.Error(err, "Failed to start MyHome RPC service")
@@ -254,6 +237,13 @@ func (d *daemon) Run() error {
 		} else {
 			log.Info("Skipping mDNS hostname publishing (--no-mdns-publish)")
 		}
+
+		// Start UI & reverse HTTP proxy
+		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, storage, mc, sseBroadcaster); err != nil {
+			log.Error(err, "Failed to start UI server")
+			return err
+		}
+
 	} else {
 		log.Info("Device manager disabled")
 	}

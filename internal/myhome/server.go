@@ -102,7 +102,7 @@ func NewServerE(ctx context.Context, handler Server) (Server, error) {
 					Dst: req.Src,
 				}
 
-				out, err := method.ActionE(req.Params)
+				out, err := method.ActionE(ctx, req.Params)
 				if err != nil {
 					log.Error(err, "Failed to call action")
 					s.fail(ctx, 1, err, &req, mc)

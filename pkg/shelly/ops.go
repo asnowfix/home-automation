@@ -26,7 +26,7 @@ import (
 
 type empty struct{}
 
-func Init(log logr.Logger, timeout time.Duration, rateLimitInterval time.Duration) {
+func Init(log logr.Logger, mc mqtt.Client, timeout time.Duration, rateLimitInterval time.Duration) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath(), "rateLimit", rateLimitInterval)
 	registrar.Init(log)
 
@@ -41,7 +41,7 @@ func Init(log logr.Logger, timeout time.Duration, rateLimitInterval time.Duratio
 	input.Init(log, &registrar)
 	kvs.Init(log, &registrar)
 	matter.Init(log, &registrar)
-	mqtt.Init(log, &registrar, timeout)
+	mqtt.Init(log, &registrar, mc, timeout)
 	schedule.Init(log, &registrar)
 	script.Init(log, &registrar, scripts.GetFS())
 	shttp.Init(log, &registrar)

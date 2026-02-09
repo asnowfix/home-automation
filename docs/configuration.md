@@ -47,8 +47,8 @@ daemon:
   mqtt_watchdog_max_failures: 3
   mqtt_broker_client_log_interval: 2m
   
-  # Service Ports
-  proxy_port: 6080
+  # MyHome Ports
+  ui_port: 6080
   
   # Service Enablement
   enable_gen1_proxy: false
@@ -113,10 +113,10 @@ daemon:
 
 #### Service Ports
 
-**`proxy_port`** (int, default: `6080`)
-- Reverse proxy listen port
-- Flag: `--proxy-port` or `-p`
-- Env: `MYHOME_DAEMON_PROXY_PORT`
+**`ui_port`** (int, default: `6080`)
+- UI listen port
+- Flag: `--ui-port` or `-u`
+- Env: `MYHOME_DAEMON_UI_PORT`
 
 #### Service Enablement
 

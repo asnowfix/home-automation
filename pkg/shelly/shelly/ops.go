@@ -39,8 +39,6 @@ const (
 	GetComponents    Verb = "Shelly.GetComponents"
 )
 
-type empty struct{}
-
 func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
 	r.RegisterMethodHandler(GetStatus.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Status) },

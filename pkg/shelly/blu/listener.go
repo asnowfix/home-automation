@@ -72,7 +72,7 @@ type BTHomeFrame struct {
 
 // DeviceRegistry interface for registering discovered BLU devices
 type DeviceRegistry interface {
-	SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) error
+	SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) (bool, error)
 	GetDeviceById(ctx context.Context, id string) (*myhome.Device, error)
 }
 
@@ -85,10 +85,11 @@ type SSEBroadcaster interface {
 func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegistry, sseBroadcaster SSEBroadcaster) error {
 	log := logr.FromContextOrDiscard(ctx).WithName("BLUListener")
 
-	log.Info("Starting BLU listener")
+	log.Info("Starting BLU listener", "mqtt_client", fmt.Sprintf("%T", mc), "registry", fmt.Sprintf("%T", registry))
 
 	// Subscribe to BLU events topic
 	topic := "shelly-blu/events/#"
+	log.Info("Subscribing to BLU events", "topic", topic)
 	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/blu", func(topic string, payload []byte, subscriber string) error {
 		sensors, err := handleBLUEvent(ctx, log, topic, payload, registry)
 		if err != nil {
@@ -307,7 +308,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 
 		// Only save if something changed
 		if changed {
-			if err := registry.SetDevice(ctx, existingDevice, true); err != nil {
+			if _, err := registry.SetDevice(ctx, existingDevice, true); err != nil {
 				log.Error(err, "Failed to update BLU device", "device_id", deviceID)
 				return nil, err
 			}
@@ -332,7 +333,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 	device = device.WithName(deviceID) // Use device ID as default name for new devices
 	device.Info = deviceInfo
 
-	if err := registry.SetDevice(ctx, device, true); err != nil {
+	if _, err := registry.SetDevice(ctx, device, true); err != nil {
 		log.Error(err, "Failed to register BLU device", "device_id", deviceID)
 		return nil, err
 	}

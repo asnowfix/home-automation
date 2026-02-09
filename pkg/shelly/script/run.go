@@ -41,8 +41,9 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 
 	handlers := make([]handler, 0)
 
-	mc, err := mqtt.FromContext(ctx)
-	if err != nil {
+	mc := mqtt.GetClient(ctx)
+	if mc == nil {
+		err := fmt.Errorf("MQTT client not initialized")
 		log.Error(err, "Failed to get MQTT client", "name", name)
 		return err
 	}

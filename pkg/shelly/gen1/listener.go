@@ -82,6 +82,8 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 	// Example: shellies/shellyht-208500/sensor/temperature or shellies/shellyht-208500/info
 	parts := strings.Split(topic, "/")
 
+	modified := false
+
 	switch len(parts) {
 	case 4:
 		// Sensor value topic: shellies/<device-id>/sensor/<sensor-type>
@@ -130,12 +132,12 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 		}
 
 		// Save the device (will create or update)
-		if err := sc.SetDevice(ctx, mhd, true); err != nil {
+		if modified, err = sc.SetDevice(ctx, mhd, true); err != nil {
 			log.Error(err, "Failed to save Gen1 device", "device", mhd)
 			return err
 		}
 
-		log.Info("Created/Updated Gen1 device", "device", mhd)
+		log.Info("Created/Updated Gen1 device", "device", mhd, "modified", modified)
 
 	default:
 		log.V(1).Info("Dropping unknown Gen1 message", "topic", topic)

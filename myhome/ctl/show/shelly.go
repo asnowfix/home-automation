@@ -8,6 +8,7 @@ import (
 	shellyapi "pkg/shelly"
 
 	"myhome/ctl/options"
+	"myhome/mqtt"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -24,12 +25,17 @@ var showShellyCmd = &cobra.Command{
 	Short: "Show Shelly devices",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		shellyapi.Init(hlog.Logger, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
-
 		var err error
+		ctx := cmd.Context()
+
+		mc, err := mqtt.GetClientE(ctx)
+		if err != nil {
+			return err
+		}
+		shellyapi.Init(hlog.Logger, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
+
 		identifier := args[0]
 		log := hlog.Logger
-		ctx := cmd.Context()
 
 		// Use LookupDevices to support glob patterns
 		devices, err := myhome.TheClient.LookupDevices(ctx, identifier)

@@ -24,8 +24,8 @@ daemon:
   mqtt_watchdog_max_failures: 3 # Max consecutive failures before restart
   mqtt_broker_client_log_interval: 2m  # Client logging interval (0 to disable)
   
-  # Service Ports
-  proxy_port: 6080  # Reverse proxy listen port
+  # MyHome Ports
+  ui_port: 6080  # UI listen port
   
   # Service Enablement
   # These are auto-enabled when using embedded broker (mqtt_broker: "")

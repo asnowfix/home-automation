@@ -22,7 +22,6 @@ import (
 	"myhome/ctl/temperature"
 	mqttclient "myhome/mqtt"
 	shellyPkg "pkg/shelly"
-	shellymqtt "pkg/shelly/mqtt"
 	"pkg/shelly/types"
 	"runtime/pprof"
 
@@ -61,15 +60,13 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		ctx = shellymqtt.NewContext(ctx, mc)
-
 		myhome.TheClient, err = myhome.NewClientE(ctx, log, mc, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome client")
 			return err
 		}
 
-		shellyPkg.Init(log, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
+		shellyPkg.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 
 		// Start cleanup goroutine that closes MQTT client when context is cancelled
 		// This ensures cleanup happens even when command returns an error

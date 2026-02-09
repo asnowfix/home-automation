@@ -51,7 +51,7 @@ var Flags struct {
 	Via                         string
 	SwitchId                    uint32
 	EventsDir                   string
-	ProxyPort                   int
+	UiPort                      int
 	EnableGen1Proxy             bool
 	EnableOccupancyService      bool
 	EnableTemperatureService    bool

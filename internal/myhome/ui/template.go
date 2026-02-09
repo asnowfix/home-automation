@@ -8,6 +8,7 @@ import (
 	"myhome"
 	"myhome/storage"
 	"net/http"
+	"pkg/shelly"
 	"sort"
 	"strings"
 	"text/template"
@@ -39,6 +40,7 @@ type DeviceView struct {
 	Manufacturer         string   `json:"manufacturer"`
 	Host                 string   `json:"host"`
 	LinkToken            string   `json:"link_token"`
+	IsRefreshable        bool     `json:"is_refreshable"`
 	HasHeaterScript      bool     `json:"has_heater_script"`
 	HasDoorSensor        bool     `json:"has_door_sensor"`        // true if device has door/window sensing capability
 	HasTemperatureSensor bool     `json:"has_temperature_sensor"` // true if device has temperature sensing capability
@@ -157,12 +159,16 @@ func DeviceToView(d *myhome.Device) DeviceView {
 		}
 	}
 
+	// Check if device is refreshable
+	isRefreshable := !shelly.IsBluDevice(d.Id()) && !shelly.IsGen1Device(d.Id())
+
 	return DeviceView{
 		Id:                   d.Id(),
 		Name:                 name,
 		Manufacturer:         d.Manufacturer(),
 		Host:                 host,
 		LinkToken:            token,
+		IsRefreshable:        isRefreshable,
 		HasHeaterScript:      hasHeater,
 		HasDoorSensor:        hasDoor,
 		HasTemperatureSensor: hasTemp,

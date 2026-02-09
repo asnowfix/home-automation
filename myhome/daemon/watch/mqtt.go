@@ -134,14 +134,9 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqt
 	//
 	// - '{"src":"shellyplus1-08b61fd141e8","dst":"shellyplus1-08b61fd141e8/events","method":"NotifyFullStatus","params":{"ts":1736604018.38,"ble":{},"cloud":{"connected":true},"input:0":{"id":0,"state":false},"mqtt":{"connected":true},"switch:0":{"id":0, "source":"SHC", "output":true,"temperature":{"tC":48.4, "tF":119.2}},"sys":{"mac":"08B61FD141E8","restart_required":false,"time":"15:00","unixtime":1736604018,"uptime":658773,"ram_size":268520,"ram_free":110248,"fs_size":393216,"fs_free":106496,"cfg_rev":13,"kvs_rev":0,"schedule_rev":1,"webhook_rev":0,"available_updates":{"beta":{"version":"1.5.0-beta1"}},"reset_reason":3},"wifi":{"sta_ip":"192.168.1.76","status":"got ip","ssid":"Linksys_7A50","rssi":-58,"ap_client_count":0},"ws":{"connected":false}}}'
 	if event.Method == "NotifyStatus" || event.Method == "NotifyFullStatus" {
-		if event.Params != nil {
-			statusStr, err := json.Marshal(event.Params)
-			if err != nil {
-				log.Error(err, "Failed to (re-)marshal status", "event", event)
-				return err
-			}
+		if len(event.Params) > 0 {
 			status := &shelly.Status{}
-			if err := json.Unmarshal(statusStr, status); err != nil {
+			if err := json.Unmarshal(event.Params, status); err != nil {
 				log.Error(err, "Failed to unmarshal status", "event", event)
 				return err
 			}
@@ -154,20 +149,20 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqt
 	// - '{"src":"shellypro3-34987a48c26c","dst":"shellypro3-34987a48c26c/events","method":"NotifyEvent","params":{"ts":1758144175.54,"events":[{"component":"sys","event":"sys_btn_up","ts":1758144175.54}]}}'
 	// - '{"src":"shellypro3-34987a48c26c","dst":"shellypro3-34987a48c26c/events","method":"NotifyEvent","params":{"ts":1758144175.54,"events":[{"component":"sys","event":"sys_btn_push","ts":1758144175.54}]}}'
 	if event.Method == "NotifyEvent" {
-		if event.Params != nil {
-			evs, ok := (*event.Params)["events"].([]shellymqtt.ComponentEvent)
-			if ok {
-				for _, ev := range evs {
-					log.Info("Event", "component", ev.Component, "event", ev.Event)
-					if ev.ConfigRevision != nil {
-						d.ConfigRevision = *ev.ConfigRevision
-					}
-					if ev.RestartRequired != nil {
-						log.Info("Event", "component", ev.Component, "event", ev.Event, "restart_required", *ev.RestartRequired)
-					}
+		if len(event.Params) > 0 {
+			var params shellymqtt.NotifyEventParams
+			if err := json.Unmarshal(event.Params, &params); err != nil {
+				log.Error(err, "Failed to unmarshal NotifyEvent params", "event", event)
+				return err
+			}
+			for _, ev := range params.Events {
+				log.Info("Event", "component", ev.Component, "event", ev.Event)
+				if ev.ConfigRevision != nil {
+					d.ConfigRevision = *ev.ConfigRevision
 				}
-			} else {
-				return fmt.Errorf("unable to parse event parameters: %v", *event)
+				if ev.RestartRequired != nil {
+					log.Info("Event", "component", ev.Component, "event", ev.Event, "restart_required", *ev.RestartRequired)
+				}
 			}
 		} else {
 			return fmt.Errorf("missing event parameters in event: %v", event)

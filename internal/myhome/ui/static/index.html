@@ -459,24 +459,6 @@
           console.error('refreshDevice: device.refresh response error', await res.text());
           return;
         }
-
-        console.log('refreshDevice: GET /rpc device.lookup for', id);
-        res = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'device.lookup', params: id }),
-        });
-        console.log('refreshDevice: device.lookup response status', res.status);
-        if (!res.ok) {
-          console.error('refreshDevice: device.lookup response error', await res.text());
-          return;
-        }
-
-        const data = await res.json();
-        console.log('refreshDevice: device.lookup response data', data);
-        if (data.result && Array.isArray(data.result) && data.result.length > 0) {
-          updateDeviceCard(id, data.result[0]);
-        }
       } catch (e) {
         console.error('refreshDevice: error', e.name, e.message, e);
       } finally {

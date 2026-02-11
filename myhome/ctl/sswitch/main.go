@@ -2,6 +2,7 @@ package sswitch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"hlog"
 	"myhome"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
+	"go.yaml.in/yaml/v3"
 )
 
 var switchId int
@@ -26,6 +28,7 @@ func init() {
 	Cmd.AddCommand(toggleCmd)
 	Cmd.AddCommand(onCmd)
 	Cmd.AddCommand(offCmd)
+	Cmd.AddCommand(statusCmd)
 }
 
 var Cmd = &cobra.Command{
@@ -39,7 +42,7 @@ var toggleCmd = &cobra.Command{
 	Short: "Toggle device switch",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, toggleOneDevice, []string{"toggle"})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"toggle"})
 		return err
 	},
 }
@@ -49,7 +52,7 @@ var onCmd = &cobra.Command{
 	Short: "Turn device switch on",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, toggleOneDevice, []string{"on"})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"on"})
 		return err
 	},
 }
@@ -59,12 +62,35 @@ var offCmd = &cobra.Command{
 	Short: "Turn device switch off",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, toggleOneDevice, []string{"off"})
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"off"})
 		return err
 	},
 }
 
-func toggleOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+var statusCmd = &cobra.Command{
+	Use:   "status <device-id>",
+	Short: "Display device switch status",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		out, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"status"})
+		if err != nil {
+			return err
+		}
+		var s []byte
+		if options.Flags.Json {
+			s, err = json.Marshal(out)
+		} else {
+			s, err = yaml.Marshal(out)
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(s))
+		return nil
+	},
+}
+
+func doSwitchOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
@@ -75,11 +101,13 @@ func toggleOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 
 	switch args[0] {
 	case "toggle":
-		out, err = sd.CallE(ctx, via, sswitch.Toggle.String(), &sswitch.ToggleRequest{Id: switchId})
+		out, err = sd.CallE(ctx, via, sswitch.Toggle.String(), &sswitch.ToggleStatusRequest{Id: switchId})
 	case "on":
 		out, err = sd.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: switchId, On: !offValue(ctx, log, via, device)})
 	case "off":
 		out, err = sd.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: switchId, On: offValue(ctx, log, via, device)})
+	case "status":
+		out, err = sd.CallE(ctx, via, sswitch.GetStatus.String(), &sswitch.ToggleStatusRequest{Id: switchId})
 	default:
 		return nil, fmt.Errorf("unknown operation %s", args[0])
 	}

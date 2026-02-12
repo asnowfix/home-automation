@@ -1029,6 +1029,30 @@ CREATE INDEX idx_temperature_rooms_updated
     ON temperature_rooms(updated_at);
 ```
 
+### Normally-Closed Switches
+
+XXX
+
+```
+go run ./myhome ctl -B 192.168.1.2 switch on radiateur-bureau
+2026-02-12T08:22:48+01:00 ERR myhome/ctl/sswitch/main.go:136 > Invalid value key={"key":"normally-closed"} value={"etag":"0668V2IiAgwqKuL8dpFp8dKg==","value":"true"}
+```
+
+### Broker, Server & Devices Discovery
+
+XXX
+
+PS C:\Users\fixko> ping mqtt.local
+Ping request could not find host mqtt.local. Please check the name and try again.
+
+### Web Assets
+
+XXX
+
+The MyHome local web UI is made to work with modern web frameworks, but also supposed to work when the entire household is offline. Assets like the below are fetched at build time (as static resources created by `go generate`) & served locally.
+
+<https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css>
+
 ## BTHome BLE Protocol
 
 BTHome is an open standard for broadcasting sensor data over Bluetooth Low Energy (BLE), sponsored by Allterco Robotics (manufacturer of Shelly devices). Shelly BLU devices use this protocol to broadcast sensor data.

@@ -50,3 +50,4 @@ SECRETS.md
 /myhome/device*.json
 myhome_*.deb
 database-export.json
+internal/myhome/ui/static/bulma.min.css

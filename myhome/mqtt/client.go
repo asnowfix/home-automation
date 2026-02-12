@@ -182,7 +182,12 @@ func NewClientE(ctx context.Context, broker string, mdnsTimeout time.Duration, m
 	mqttOps.SetAutoReconnect(true) // automatically reconnect in case of disconnection
 	mqttOps.SetResumeSubs(true)    // automatically re-subscribe in case or disconnection/reconnection
 	mqttOps.SetCleanSession(false) // do not save messages to be re-sent in case of disconnection
-	mqttOps.SetOrderMatters(false) // required for wildcard subscriptions to route messages to correct handlers
+	// mqttOps.SetOrderMatters(false) // required for wildcard subscriptions to route messages to correct handlers
+
+	// DEBUG: default handler to catch messages not matched by any subscription route
+	mqttOps.SetDefaultPublishHandler(func(client mqtt.Client, msg mqtt.Message) {
+		log.Info("DEFAULT HANDLER: unrouted message", "topic", msg.Topic(), "payload_len", len(msg.Payload()))
+	})
 
 	if broker != "" {
 		mqttBroker = broker
@@ -479,10 +484,12 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 	if !loaded {
 		// Not yet subscribed at MQTT level: do it
 		distribute := func(client mqtt.Client, msg mqtt.Message) {
+			c.log.Info("distribute: message received from broker", "subscription_topic", topic, "message_topic", msg.Topic(), "payload_len", len(msg.Payload()))
 			go func(log logr.Logger) {
 				// Load current subscribers
 				value, ok := c.subscribers.Load(topic)
 				if !ok {
+					log.Info("distribute: no subscribers found in map", "topic", topic)
 					return
 				}
 

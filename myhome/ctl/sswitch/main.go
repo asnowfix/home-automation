@@ -131,7 +131,7 @@ func offValue(ctx context.Context, log logr.Logger, via types.Channel, device de
 		log.Info("Unable to get value", "key", sswitch.NormallyClosedKey, "reason", err)
 		return false
 	}
-	kv, ok := out.(*kvs.Value)
+	kv, ok := out.(*kvs.GetResponse)
 	if !ok {
 		log.Error(err, "Invalid value", "key", sswitch.NormallyClosedKey, "value", out)
 		return false

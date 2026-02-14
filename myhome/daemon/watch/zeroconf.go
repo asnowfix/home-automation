@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"myhome"
 	"myhome/devices"
-	"mynet"
+	"myhome/net"
 	"net"
 	"pkg/shelly"
 	"time"

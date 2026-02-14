@@ -12,7 +12,7 @@ import (
 	"myhome/storage"
 	"myhome/temperature"
 	"myhome/ui"
-	"mynet"
+	"myhome/net"
 	"net/http"
 	_ "net/http/pprof"
 	"pkg/shelly"

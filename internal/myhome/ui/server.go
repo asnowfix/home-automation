@@ -15,7 +15,7 @@ import (
 	"myhome/mqtt"
 	"myhome/proxy"
 	"myhome/storage"
-	"mynet"
+	"myhome/net"
 
 	"github.com/go-logr/logr"
 )

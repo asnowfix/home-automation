@@ -2,7 +2,6 @@ package shelly
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"pkg/shelly/sswitch"
@@ -97,11 +96,17 @@ func DoGetComponents(ctx context.Context, d types.Device, req *ComponentsRequest
 	if err != nil {
 		return nil, err
 	}
-	components, ok := out.(*ComponentsResponse)
+	if out == nil {
+		return nil, fmt.Errorf("nil reply")
+	}
+	res, ok := out.(*ComponentsResponse)
 	if !ok {
 		return nil, fmt.Errorf("invalid components type %T (should be *ComponentsResponse)", out)
 	}
-	return components, nil
+	if res.Total == 0 {
+		return nil, fmt.Errorf("no components found")
+	}
+	return res, nil
 }
 
 // DoCheckForUpdate checks if firmware updates are available
@@ -198,25 +203,34 @@ func GetSwitchesSummary(ctx context.Context, d types.Device) (map[int]SwitchSumm
 	}
 	log.V(1).Info("GetSwitchesSummary", "components", comps)
 
-	switches := make(map[int]SwitchSummary, len(comps.Config))
-	for key, item := range comps.Config {
-		ss := SwitchSummary{
-			Key: key,
+	switches := make(map[int]SwitchSummary, comps.Total)
+
+	for id, swc := range []*sswitch.Config{comps.Config.Switch0, comps.Config.Switch1, comps.Config.Switch2, comps.Config.Switch3} {
+		if swc == nil {
+			continue
+		}
+		if id != swc.Id {
+			log.V(1).Info("GetSwitchesSummary", "id", id, "swc_id", swc.Id)
 		}
 
-		var swc sswitch.Config
-		json.Unmarshal(*item, &swc)
-		ss.Id = swc.Id
+		ss := SwitchSummary{
+			Id: swc.Id,
+		}
 		if swc.Name != "" {
 			ss.Name = swc.Name
 		} else {
-			ss.Name = key
+			ss.Name = fmt.Sprintf("switch:%d", swc.Id)
 		}
+		switches[id] = ss
+	}
 
-		var sws sswitch.Status
-		json.Unmarshal(*comps.Status[key], &sws)
+	for id, sws := range []*sswitch.Status{comps.Status.Switch0, comps.Status.Switch1, comps.Status.Switch2, comps.Status.Switch3} {
+		if sws == nil {
+			continue
+		}
+		ss := switches[id]
 		ss.On = sws.Output
-		switches[swc.Id] = ss
+		switches[id] = ss
 	}
 
 	return switches, nil

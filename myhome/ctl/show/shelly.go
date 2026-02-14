@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"hlog"
 	"myhome"
-	shellyapi "pkg/shelly"
 
 	"myhome/ctl/options"
-	"myhome/mqtt"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -27,12 +25,6 @@ var showShellyCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		ctx := cmd.Context()
-
-		mc, err := mqtt.GetClientE(ctx)
-		if err != nil {
-			return err
-		}
-		shellyapi.Init(hlog.Logger, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 
 		identifier := args[0]
 		log := hlog.Logger

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"myhome/sfr"
-	"mynet"
+	"myhome/net"
 	"net"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
@@ -227,6 +227,24 @@ func (d *Device) WithZeroConfEntry(ctx context.Context, entry *zeroconf.ServiceE
 	}
 
 	return d
+}
+
+func (d *Device) Switches(ctx context.Context) (*SwitchAllResult, error) {
+	sd, ok := d.Impl().(*shellyapi.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly device: %T", d.Impl())
+	}
+	switches, err := shelly.GetSwitchesSummary(ctx, sd)
+	if err != nil {
+		d.log.Error(err, "Failed to get switches summary")
+		return nil, err
+	}
+	res := SwitchAllResult{
+		DeviceID:   d.Id(),
+		DeviceName: d.Name(),
+		Switches:   switches,
+	}
+	return &res, nil
 }
 
 // DeviceShowParams represents parameters for device.show RPC

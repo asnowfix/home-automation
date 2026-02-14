@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"global"
 	"myhome/ctl/options"
-	"mynet"
+	"myhome/net"
 	"net"
 	"net/url"
 	"os"

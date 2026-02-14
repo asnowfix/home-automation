@@ -7,6 +7,7 @@ import (
 	"pkg/shelly"
 	"pkg/shelly/kvs"
 	pkgscript "pkg/shelly/script"
+	pkgshelly "pkg/shelly/shelly"
 	"pkg/shelly/types"
 	"time"
 
@@ -78,8 +79,8 @@ func (s *HeaterService) HandleGetConfig(ctx context.Context, params *myhome.Heat
 
 	// Check if device has heater.js script
 	if device.Config != nil {
-		for _, sc := range device.Config.Scripts {
-			if sc.Name == "heater.js" || sc.Name == "heater" {
+		for _, sc := range []*pkgshelly.ScriptInfo{device.Config.Script1, device.Config.Script2, device.Config.Script3, device.Config.Script4} {
+			if sc != nil && sc.Name == "heater.js" || sc.Name == "heater" {
 				result.HasScript = true
 				break
 			}

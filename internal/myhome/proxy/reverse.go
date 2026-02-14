@@ -22,7 +22,7 @@ import (
 	"myhome/storage"
 	"myhome/ui/assets"
 	"myhome/ui/static"
-	"mynet"
+	"myhome/net"
 
 	"github.com/go-logr/logr"
 )

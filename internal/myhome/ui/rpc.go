@@ -54,7 +54,7 @@ func RpcHandler(ctx context.Context, log logr.Logger) func(w http.ResponseWriter
 		// Convert device.show result to DeviceView for the UI
 		if mh.Name == myhome.DeviceShow {
 			if device, ok := res.(*myhome.Device); ok && device != nil {
-				res = DeviceToView(device)
+				res = DeviceToView(ctx, device)
 			}
 		}
 
@@ -63,7 +63,7 @@ func RpcHandler(ctx context.Context, log logr.Logger) func(w http.ResponseWriter
 			if devices, ok := res.([]myhome.Device); ok {
 				views := make([]DeviceView, len(devices))
 				for i, device := range devices {
-					views[i] = DeviceToView(&device)
+					views[i] = DeviceToView(ctx, &device)
 				}
 				res = views
 			}

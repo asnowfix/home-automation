@@ -20,17 +20,17 @@ var getHostsListCmd = &cobra.Command{
 	Short: "Get the list of hosts connected to the SFR Box LAN",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		hosts, err := sfr.GetHostsList()
+		hosts, err := sfr.GetHostsList(cmd.Context())
 		if err != nil {
 			return err
 		}
-		
+
 		// Apply filter if provided
 		if len(args) > 0 && args[0] != "" {
 			filtered := filterLanHosts(*hosts, args[0])
 			return options.PrintResult(&filtered)
 		}
-		
+
 		return options.PrintResult(hosts)
 	},
 }
@@ -40,17 +40,17 @@ var getDnsHostListCmd = &cobra.Command{
 	Short: "Get the list of DNS hosts configured on the SFR Box",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		hosts, err := sfr.GetDnsHostList()
+		hosts, err := sfr.GetDnsHostList(cmd.Context())
 		if err != nil {
 			return err
 		}
-		
+
 		// Apply filter if provided
 		if len(args) > 0 && args[0] != "" {
 			filtered := filterDnsHosts(*hosts, args[0])
 			return options.PrintResult(&filtered)
 		}
-		
+
 		return options.PrintResult(hosts)
 	},
 }
@@ -59,7 +59,7 @@ var getDnsHostListCmd = &cobra.Command{
 func filterLanHosts(hosts []*sfr.LanHost, pattern string) []*sfr.LanHost {
 	pattern = strings.ToLower(pattern)
 	filtered := make([]*sfr.LanHost, 0)
-	
+
 	for _, host := range hosts {
 		// Check if pattern matches any field
 		if strings.Contains(strings.ToLower(host.Name), pattern) ||
@@ -73,7 +73,7 @@ func filterLanHosts(hosts []*sfr.LanHost, pattern string) []*sfr.LanHost {
 			filtered = append(filtered, host)
 		}
 	}
-	
+
 	return filtered
 }
 
@@ -81,7 +81,7 @@ func filterLanHosts(hosts []*sfr.LanHost, pattern string) []*sfr.LanHost {
 func filterDnsHosts(hosts []*sfr.DnsHost, pattern string) []*sfr.DnsHost {
 	pattern = strings.ToLower(pattern)
 	filtered := make([]*sfr.DnsHost, 0)
-	
+
 	for _, host := range hosts {
 		// Check if pattern matches any field
 		if strings.Contains(strings.ToLower(host.Name), pattern) ||
@@ -89,7 +89,7 @@ func filterDnsHosts(hosts []*sfr.DnsHost, pattern string) []*sfr.DnsHost {
 			filtered = append(filtered, host)
 		}
 	}
-	
+
 	return filtered
 }
 

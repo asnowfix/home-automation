@@ -75,13 +75,6 @@ else
 	$(error unsupported $(@) for OS:$(OS))
 endif
 
-status:
-ifeq ($(OS),Linux)
-	systemctl status myhome@$(ME).service
-else
-	$(error unsupported $(@) for OS:$(OS))
-endif
-
 logs:
 ifeq ($(OS),Linux)
 	journalctl -u myhome@$(ME).service -f
@@ -97,8 +90,15 @@ tidy:
 	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) get -u ./...) &&) echo
 	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) mod tidy) &&) echo
 
-build run:
+run: build
 	$(MAKE) -C myhome $(@)
+
+build: generate
+	$(GO) build ./...
+
+generate:
+	$(GO) generate ./internal/myhome/ui/...
+	$(GO) generate ./...
 
 # Build Debian package for current OS/ARCH (Linux only)
 # Usage: make debpkg [VERSION=X.Y.Z]

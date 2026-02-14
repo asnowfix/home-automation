@@ -7,9 +7,9 @@ use (
 	./internal/global
 	./internal/myhome
 	./internal/myhome/blu
+	./internal/myhome/net
 	./internal/myhome/ui
 	./internal/myip
-	./internal/mynet
 	./internal/myzone
 	./internal/shelly/scripts
 	./internal/tools

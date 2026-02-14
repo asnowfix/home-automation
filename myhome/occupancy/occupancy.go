@@ -200,7 +200,7 @@ func (s *Service) pollMobilePresence() {
 }
 
 func (s *Service) checkMobilePresence() {
-	hosts, err := sfr.GetHostsList()
+	hosts, err := sfr.GetHostsList(s.ctx)
 	if err != nil {
 		s.log.Error(err, "Failed to get SFR LAN hosts")
 		return

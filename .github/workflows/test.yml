@@ -19,6 +19,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
+      - id: go-generate
+        name: Run go generate
+        run: |
+          go generate ./...
+          go generate ./internal/myhome/ui/...
       - id: go-test
         name: Run go test
         run: go test ./...

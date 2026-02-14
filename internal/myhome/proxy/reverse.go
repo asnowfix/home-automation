@@ -21,7 +21,8 @@ import (
 	"global"
 	"myhome/storage"
 	"myhome/ui/assets"
-	"mynet"
+	"myhome/ui/static"
+	"myhome/net"
 
 	"github.com/go-logr/logr"
 )
@@ -59,9 +60,21 @@ func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db *s
 
 	// Serve global static websocket patch resource for caching
 	if path == "_ws_patch.js" {
+		log.Info("_ws_patch.js", "path", "/"+path)
 		buf := assets.GetWsPatch()
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		//TODO: tune caching
+		//w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		_, _ = w.Write(buf)
+		return
+	}
+
+	if path == "bulma.min.css" {
+		log.Info("bulma.min.css", "path", "/"+path)
+		buf := static.GetBulmaCSS()
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		//TODO: tune caching
+		//w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		_, _ = w.Write(buf)
 		return
 	}

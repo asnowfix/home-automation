@@ -115,7 +115,7 @@ type ToogleSetResponse struct {
 	WasOn bool `json:"was_on"`
 }
 
-type ToggleRequest struct {
+type ToggleStatusRequest struct {
 	Id int `json:"id"`
 }
 

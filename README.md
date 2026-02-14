@@ -239,6 +239,17 @@ When reporting issues, please use the appropriate label from the following categ
 | `monitoring` | Monitoring and metrics features |
 | `networking` | Networking and device discovery features |
 
+## Base Configuration
+
+The `myhome ctl shelly setup` command setup a new device with common parameters.  It can also be used to refresh/cleanup existing configurations.
+
+1. The **Matter** protocol is disabled (as it consumes too much Javascript resource)
+2. MQTT broker address is set to the current MQTT broker in use by the configurating process.
+2. NTP servers XXX
+3. XXX
+4. WiFi AP is disabled, **unless** there are connected clients
+   1. In case clients are connected but the local device does not have an AP password, setup fails (the fix being to setup a password on both the WiFi AP & STA to avoid loss of connection).
+
 ## Temperature Management
 
 The temperature service provides centralized temperature setpoint management for heater devices via MQTT RPC. Configurations are stored in SQLite and accessed via CLI commands.
@@ -371,7 +382,29 @@ daemon:
   enable_occupancy_service: true
 ```
 
+### Weather Forecast
+
+Devices running **heater.js** will automatically fetch the weather forecast at startup & then every day for the 24 hours to come.
+
+When Internet connectivity is down, neither initial fetch (eg. at script reboot) & nor refresh of the forecast work any longer.  The server has its own copy of the forecast, that devices can fetch using usual RPC using command `myhome.weather`.
+
+## Proxy & Caching
+
+### Cloud API's
+
+The server implements the HTTP-over-MQTT `myhome.fetch` RPC verb that goes through a caching proxy to fetch public web resources & share them across devices.  Any subsequent request (from the same device or another one) to get the same resource within the cached duration specified by the server will returned the cached value.  If the remote resoruce is not available (server down or connectivity loss), the cached value will be returned instead.
+
+The cache is persisted on server side, so server restart does not flushes it.
+
+### MQTT replay
+
+When devices restart, they need to wait for sensor-emitted event before having an up-to-date view of the entire system. The RPC verbs `mqtt.cache` and `mqtt.replay` bring the last known state of any given topic subscription.
+
+## Graphical User Interface
+
 ## Device Control
+
+`normally-closed` devices.
 
 ### Switch Command
 
@@ -382,9 +415,10 @@ myhome ctl switch [toggle|on|off] <device-identifier>
 ```
 
 **Subcommands:**
-- `toggle`: Toggle the current state of the device
-- `on`: Turn the device on
-- `off`: Turn the device off
+- `toggle`: Toggle the current switch state of the device (default `switch:0`)
+- `on`: Turn the device switch on (default `switch:0`)
+- `off`: Turn the device switch off (default `switch:0`)
+- `status`:  return the partial (on/off) or full status of any given switch.  It can also return the partial status of every available switch on the device.
 
 **Examples:**
 

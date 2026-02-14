@@ -39,11 +39,12 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 		HttpMethod: http.MethodPost,
 	})
 	r.RegisterMethodHandler(GetStatus.String(), types.MethodHandler{
+		// InputType:  reflect.TypeOf(ToggleStatusRequest{}),
 		Allocate:   func() any { return new(Status) },
 		HttpMethod: http.MethodGet,
 	})
 	r.RegisterMethodHandler(Toggle.String(), types.MethodHandler{
-		// InputType:  reflect.TypeOf(ToggleRequest{}),
+		// InputType:  reflect.TypeOf(ToggleStatusRequest{}),
 		Allocate:   func() any { return new(ToogleSetResponse) },
 		HttpMethod: http.MethodPost,
 	})

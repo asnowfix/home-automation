@@ -1,3 +1,63 @@
+// $ curl http://192.168.1.20/rpc/Shelly.GetComponents?keys=$(jq -nr --arg v '["switch:0","switch:1","switch:2","switch:3"]' '$v|@uri')'&'include=$(jq -nr --arg v '["status"]' '$v|@uri') | jq
+var shelly_pro3_switch_status = {
+  "components": [
+    {
+      "key": "switch:0",
+      "status": {
+        "id": 0,
+        "source": "MQTT",
+        "output": false,
+        "temperature": {
+          "tC": 35.3,
+          "tF": 95.5
+        }
+      },
+      "attrs": {
+        "inputs": [
+          0
+        ]
+      }
+    },
+    {
+      "key": "switch:1",
+      "status": {
+        "id": 1,
+        "source": "init",
+        "output": false,
+        "temperature": {
+          "tC": 35.3,
+          "tF": 95.5
+        }
+      },
+      "attrs": {
+        "inputs": [
+          1
+        ]
+      }
+    },
+    {
+      "key": "switch:2",
+      "status": {
+        "id": 2,
+        "source": "MQTT",
+        "output": false,
+        "temperature": {
+          "tC": 35.3,
+          "tF": 95.5
+        }
+      },
+      "attrs": {
+        "inputs": [
+          2
+        ]
+      }
+    }
+  ],
+  "cfg_rev": 67,
+  "offset": 0,
+  "total": 3
+}
+
 // Door Sensor events for the same opening -- emitted by blu-publisher.js
 // MqttPublish{topic=shelly-blu/events/7c:c6:b6:7f:bd:4b, payload=202byte, qos=AT_LEAST_ONCE, retain=false, messageExpiryInterval=86400}
 var shelly_blu_door_event_1 = {

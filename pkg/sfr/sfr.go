@@ -1,13 +1,14 @@
 package sfr
 
 import (
+	"context"
 	"net"
 
 	"github.com/go-logr/logr"
 )
 
-func ListDevices(log logr.Logger) ([]Host, error) {
-	xmlHosts, err := GetHostsList()
+func ListDevices(ctx context.Context, log logr.Logger) ([]Host, error) {
+	xmlHosts, err := GetHostsList(ctx)
 	if err != nil {
 		log.Error(err, "Failed to get SFR hosts list")
 		return nil, err

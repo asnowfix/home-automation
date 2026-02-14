@@ -91,12 +91,9 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 	topic := "shelly-blu/events/#"
 	log.Info("Subscribing to BLU events", "topic", topic)
 	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/blu", func(topic string, payload []byte, subscriber string) error {
-		sensors, err := handleBLUEvent(ctx, log, topic, payload, registry)
-		if err != nil {
-			return err
-		}
+		log.Info("BLU event received", "topic", topic, "payload", string(payload))
 
-		// Parse BLU event: shelly-blu/events/<MAC>
+		// Parse BLU event topic first: shelly-blu/events/<MAC>
 		parts := strings.Split(topic, "/")
 		if len(parts) != 3 {
 			err := fmt.Errorf("invalid BLU event topic: %s", topic)
@@ -106,14 +103,20 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 		mac := parts[2] // MAC address with colons
 		deviceID := "shellyblu-" + strings.ToLower(strings.ReplaceAll(mac, ":", ""))
 
+		log.Info("Found device that emitted BLU event", "device_id", deviceID, "mac", mac)
+
+		// Handle device registration
+		sensors, err := handleBLUEvent(ctx, log, topic, payload, registry)
+
 		// Broadcast sensor updates via SSE if broadcaster is available
-		if sseBroadcaster != nil {
+		// This happens regardless of registration success, similar to Gen1 pattern
+		if sseBroadcaster != nil && sensors != nil {
 			for sensor, value := range *sensors {
 				sseBroadcaster.BroadcastSensorUpdate(deviceID, sensor, value)
 			}
 		}
 
-		return nil
+		return err
 	})
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to BLU events: %w", err)
@@ -124,6 +127,8 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 }
 
 func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload []byte, registry DeviceRegistry) (*map[string]string, error) {
+	log.Info("Handling BLU event", "topic", topic, "payload", string(payload))
+
 	// Parse the event data
 	var eventData BLUEventData
 	if err := json.Unmarshal(payload, &eventData); err != nil {

@@ -10,9 +10,10 @@ import (
 	"myhome/model"
 	"myhome/mqtt"
 	"myhome/sfr"
+	mhswitch "myhome/shelly/sswitch"
 	"myhome/storage"
 	"myhome/ui"
-	"mynet"
+	"myhome/net"
 	"net"
 	"pkg/devices"
 	"pkg/shelly"
@@ -144,7 +145,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 				log.Error(saveErr, "Failed to save modified device after refresh", "device_id", device.Id())
 			} else {
 				log.V(1).Info("Saved modified device after refresh", "device_id", device.Id(), "refresh_error", err != nil)
-				dm.sseBroadcaster.BroadcastDeviceUpdate(ui.DeviceToView(device))
+				dm.sseBroadcaster.BroadcastDeviceUpdate(ui.DeviceToView(ctx, device))
 			}
 		}
 
@@ -258,7 +259,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		// Broadcast device update via SSE if broadcaster is available (only when a UI is connected)
 		if modified {
 			log.V(1).Info("Broadcasting device update (RPC)", "device", device.Id())
-			deviceView := ui.DeviceToView(device)
+			deviceView := ui.DeviceToView(ctx, device)
 			dm.sseBroadcaster.BroadcastDeviceUpdate(deviceView)
 		}
 
@@ -348,6 +349,10 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	// Register heater service handlers
 	heaterService := shellyscript.NewHeaterService(dm.log, dm)
 	heaterService.RegisterHandlers()
+
+	// Register switch service handlers
+	switchService := mhswitch.NewService(dm.log, dm)
+	switchService.RegisterHandlers()
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
 	go dm.deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")))
@@ -522,8 +527,8 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.R
 			modified = true
 		}
 	} else {
-		log.V(1).Info("Dropping IP", "device", device.DeviceSummary, "old_ip", device.Host())
-		device = device.WithHost("")
+		log.Error(err, "Router has no IP for MAC", "device", device.DeviceSummary, "mac", device.MAC)
+		device = device.WithHost(fmt.Sprintf("%s.local", device.Id()))
 		modified = true
 	}
 
@@ -569,7 +574,7 @@ func (dm *DeviceManager) storeDeviceLoop(ctx context.Context, refreshed <-chan *
 			// Broadcast device update via SSE if broadcaster is available (only when a UI is connected)
 			if modified {
 				log.V(1).Info("Broadcasting device update (storage loop)", "device", device.DeviceSummary)
-				deviceView := ui.DeviceToView(device)
+				deviceView := ui.DeviceToView(ctx, device)
 				dm.sseBroadcaster.BroadcastDeviceUpdate(deviceView)
 			}
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"pkg/shelly/sswitch"
 	"pkg/shelly/types"
 	"time"
 
@@ -90,16 +91,22 @@ func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
 
 }
 
-func DoGetComponents(ctx context.Context, d types.Device) (*ComponentsResponse, error) {
-	out, err := d.CallE(ctx, types.ChannelDefault, string(GetComponents.String()), nil)
+func DoGetComponents(ctx context.Context, d types.Device, req *ComponentsRequest) (*ComponentsResponse, error) {
+	out, err := d.CallE(ctx, types.ChannelDefault, string(GetComponents.String()), req)
 	if err != nil {
 		return nil, err
 	}
-	components, ok := out.(*ComponentsResponse)
+	if out == nil {
+		return nil, fmt.Errorf("nil reply")
+	}
+	res, ok := out.(*ComponentsResponse)
 	if !ok {
 		return nil, fmt.Errorf("invalid components type %T (should be *ComponentsResponse)", out)
 	}
-	return components, nil
+	if res.Total == 0 {
+		return nil, fmt.Errorf("no components found")
+	}
+	return res, nil
 }
 
 // DoCheckForUpdate checks if firmware updates are available
@@ -146,4 +153,85 @@ func GetDeviceInfo(ctx context.Context, d types.Device, via types.Channel) (*Dev
 	}
 
 	return info, nil
+}
+
+// $ curl http://192.168.1.47/rpc/Shelly.GetComponents | jq '.components | .[] | select(.key | startswith("switch")) | .status'
+// {
+//   "id": 0,
+//   "source": "loopback",
+//   "output": false,
+//   "apower": 0.0,
+//   "voltage": 228.7,
+//   "freq": 49.9,
+//   "current": 0.000,
+//   "aenergy": {
+//     "total": 3413.548,
+//     "by_minute": [
+//       0.000,
+//       0.000,
+//       0.000
+//     ],
+//     "minute_ts": 1771058580
+//   },
+//   "ret_aenergy": {
+//     "total": 0.000,
+//     "by_minute": [
+//       0.000,
+//       0.000,
+//       0.000
+//     ],
+//     "minute_ts": 1771058580
+//   },
+//   "temperature": {
+//     "tC": 32.1,
+//     "tF": 89.7
+//   }
+// }
+
+func GetSwitchesSummary(ctx context.Context, d types.Device) (map[int]SwitchSummary, error) {
+	comps, err := DoGetComponents(ctx, d, &ComponentsRequest{
+		Include: []string{"config", "status"},
+		// Shelly devices have at most 4 switches (Shelly PRO 4)
+		Keys: []string{"switch:0", "switch:1", "switch:2", "switch:3"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	log.V(1).Info("GetSwitchesSummary", "components", comps)
+
+	switches := make(map[int]SwitchSummary, comps.Total)
+
+	for id, swc := range []*sswitch.Config{comps.Config.Switch0, comps.Config.Switch1, comps.Config.Switch2, comps.Config.Switch3} {
+		if swc == nil {
+			continue
+		}
+		if id != swc.Id {
+			log.V(1).Info("GetSwitchesSummary", "id", id, "swc_id", swc.Id)
+		}
+
+		ss := SwitchSummary{
+			Id: swc.Id,
+		}
+		if swc.Name != "" {
+			ss.Name = swc.Name
+		} else {
+			ss.Name = fmt.Sprintf("switch:%d", swc.Id)
+		}
+		switches[id] = ss
+	}
+
+	for id, sws := range []*sswitch.Status{comps.Status.Switch0, comps.Status.Switch1, comps.Status.Switch2, comps.Status.Switch3} {
+		if sws == nil {
+			continue
+		}
+		ss := switches[id]
+		ss.On = sws.Output
+		switches[id] = ss
+	}
+
+	return switches, nil
 }

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"gopkg.in/yaml.v2"
+	"sigs.k8s.io/yaml"
 )
 
 const MDNS_LOOKUP_DEFAULT_TIMEOUT time.Duration = 7 * time.Second

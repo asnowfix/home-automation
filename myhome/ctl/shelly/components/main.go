@@ -15,7 +15,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v2"
+	"sigs.k8s.io/yaml"
 )
 
 var Cmd = &cobra.Command{
@@ -34,7 +34,7 @@ func doList(ctx context.Context, log logr.Logger, via types.Channel, device devi
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
 
-	components, err := shelly.DoGetComponents(ctx, sd)
+	components, err := shelly.DoGetComponents(ctx, sd, nil)
 	if err != nil {
 		return nil, err
 	}

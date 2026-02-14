@@ -35,19 +35,15 @@ func GetRouter(ctx context.Context) model.Router {
 	if err != nil {
 		panic(" BUG: No logger initialized: " + err.Error())
 	}
-
+	log = log.WithName("SfrRouter")
 	r := &Router{}
 
 	log.Info("Starting connected devices refresh loop")
 
 	go func(ctx context.Context) {
-		log, err = logr.FromContext(ctx)
-		if err != nil {
-			panic("BUG: No logger initialized: " + err.Error())
-		}
 		log.Info("Started connected devices refresh loop")
 
-		r.refresh(log)
+		r.refresh(ctx, log)
 
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()
@@ -58,19 +54,19 @@ func GetRouter(ctx context.Context) model.Router {
 				log.Info("Exiting...")
 				return
 			case <-ticker.C:
-				err := r.refresh(log)
+				err := r.refresh(ctx, log)
 				if err != nil {
 					log.Error(err, "Failed to refresh devices connected to the home gateway")
 				}
 			}
 		}
-	}(logr.NewContext(ctx, log.WithName("SfrRouter")))
+	}(logr.NewContext(ctx, log.WithName("RefreshLoop")))
 	router = r
 	return r
 }
 
-func (r *Router) refresh(log logr.Logger) error {
-	devices, err := sfr.ListDevices(log)
+func (r *Router) refresh(ctx context.Context, log logr.Logger) error {
+	devices, err := sfr.ListDevices(ctx, log)
 	if err != nil {
 		return err
 	}

@@ -9,14 +9,14 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v2"
+	"sigs.k8s.io/yaml"
 )
 
 // TemperatureConfig represents the complete temperature configuration
 type TemperatureConfig struct {
-	Rooms           map[string]*myhome.TemperatureRoomConfig `json:"rooms" yaml:"rooms"`
-	WeekdayDefaults map[int]myhome.DayType                   `json:"weekday_defaults" yaml:"weekday_defaults"`
-	KindSchedules   []myhome.TemperatureKindSchedule         `json:"kind_schedules" yaml:"kind_schedules"`
+	Rooms           map[string]*myhome.TemperatureRoomConfig `json:"rooms"`
+	WeekdayDefaults map[int]myhome.DayType                   `json:"weekday_defaults"`
+	KindSchedules   []myhome.TemperatureKindSchedule         `json:"kind_schedules"`
 }
 
 var saveCmd = &cobra.Command{

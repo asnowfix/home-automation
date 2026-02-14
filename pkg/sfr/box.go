@@ -1,42 +1,63 @@
 package sfr
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"sync"
 
+	"github.com/go-logr/logr"
 	"github.com/jackpal/gateway"
 )
 
 var (
-	boxIp         string
+	boxIp         net.IP
 	boxIpMutex    sync.Mutex
 	boxIpInitOnce sync.Once
+	log           logr.Logger
 )
 
-func getBoxIp() string {
+func getBoxIp(ctx context.Context) net.IP {
 	boxIpMutex.Lock()
 	defer boxIpMutex.Unlock()
 
-	if boxIp != "" {
+	if boxIp != nil {
 		return boxIp
 	}
 
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return nil
+	}
+	log = log.WithName("sfr")
+
 	boxIpInitOnce.Do(func() {
-		ip, err := gateway.DiscoverGateway()
+		ips, err := gateway.DiscoverGateways()
 		if err != nil {
 			log.Error(err, "Failed to discover gateway")
 			return
 		}
-		boxIp = ip.String()
-		log.Info("Discovered gateway IP", "ip", boxIp)
+
+		// loop on every IP's, trying to test public API
+		for _, ip := range ips {
+			log.Info("Testing gateway IP", "ip", ip.String())
+			info, err := GetLanInfo(ctx, ip)
+			if err == nil {
+				log.Info("Discovered gateway IP", "ip", ip.String(), "info", info)
+				boxIp = ip
+				return
+			} else {
+				log.V(1).Info("Skipping potential gateway", "ip", ip, "error", err)
+			}
+		}
 	})
 
 	return boxIp
@@ -54,6 +75,7 @@ type Response struct {
 	Version  string   `xml:"version,attr"`
 	Error    *Error
 	Auth     *Auth
+	LanInfo  *LanInfo    `xml:"lan,omitempty"`
 	Hosts    *[]*LanHost `xml:"host,omitempty"`
 	DnsHosts *[]*DnsHost `xml:"dns,omitempty"`
 }
@@ -70,14 +92,15 @@ type Auth struct {
 	Method  string   `xml:"method,attr"`
 }
 
-func renewToken() error {
-	t, method, err := getToken()
+func renewToken(ip net.IP) error {
+
+	t, method, err := getToken(ip)
 	if err != nil {
 		log.Info("getToken()", err)
 		return err
 	}
 	if method == "passwd" || method == "all" {
-		err = checkToken(t)
+		err = checkToken(ip, t)
 		if err != nil {
 			log.Info("checkToken()", err)
 			return err
@@ -87,9 +110,9 @@ func renewToken() error {
 	return nil
 }
 
-func getToken() (string, string, error) {
+func getToken(ip net.IP) (string, string, error) {
 	params := map[string]string{}
-	res, err := queryBox("auth.getToken", &params)
+	res, err := queryBox(ip, "auth.getToken", &params)
 	if err != nil {
 		log.Info("auth.getToken", err)
 		return "", "", err
@@ -99,7 +122,7 @@ func getToken() (string, string, error) {
 	return auth.Token, auth.Method, nil
 }
 
-func checkToken(token string) error {
+func checkToken(ip net.IP, token string) error {
 	uh, err := doHash(username, []byte(token))
 	if err != nil {
 		log.Info("doHash()", err)
@@ -114,7 +137,7 @@ func checkToken(token string) error {
 		"token": token,
 		"hash":  uh + ph,
 	}
-	_, err = queryBox("auth.checkToken", &params)
+	_, err = queryBox(ip, "auth.checkToken", &params)
 	if err != nil {
 		log.Info("auth.checkToken", err)
 		return err
@@ -147,7 +170,7 @@ func doHash(value string, tb []byte) (string, error) {
 	return hmacHex, nil
 }
 
-func queryBox(method string, params *map[string]string) (any, error) {
+func queryBox(ip net.IP, method string, params *map[string]string) (any, error) {
 	values := url.Values{}
 	values.Add("method", method)
 	for k, v := range *params {
@@ -156,7 +179,7 @@ func queryBox(method string, params *map[string]string) (any, error) {
 
 	u := &url.URL{
 		Scheme:   "http",
-		Host:     getBoxIp(),
+		Host:     ip.String(),
 		Path:     "/api/1.0/",
 		RawQuery: values.Encode(),
 	}
@@ -178,6 +201,8 @@ func queryBox(method string, params *map[string]string) (any, error) {
 		return nil, fmt.Errorf("%v (%v)", res.Error.Message, res.Error.Code)
 	} else if res.Auth != nil {
 		return res.Auth, nil
+	} else if res.LanInfo != nil {
+		return res.LanInfo, nil
 	} else if res.Hosts != nil && len(*res.Hosts) > 0 {
 		return res.Hosts, nil
 	} else if res.DnsHosts != nil && len(*res.DnsHosts) > 0 {

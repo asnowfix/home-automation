@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>MyHome Devices</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bulma@0.9.4/css/bulma.min.css"/>
+  <link rel="stylesheet" href="./bulma.min.css"/>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🏠</text></svg>"/>
   <style>
     .door-icon {
@@ -55,6 +55,24 @@
                   {{end}}
                 {{end}}
 
+              {{ $device := . }}
+                {{range .Switches}}
+                  <div class="level" id="switch-{{$device.Id}}-{{.Id}}">
+                    <button class="button is-rounded {{if .On}}is-info is-active{{else}}is-light{{end}}" id="switch-{{$device.Id}}-{{.Id}}-btn" onclick="toggleSwitch('{{$device.Id}}', '{{.Id}}')" title="Toggle switch">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="switch-{{$device.Id}}-{{.Id}}-btn-shape">
+                        {{if .On}}
+                        <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
+                        <circle cx="16" cy="12" r="3"></circle>
+                        {{else}}
+                        <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
+                        <circle cx="8" cy="12" r="3"></circle>
+                        {{end}}
+                      </svg>
+                    </button>
+                    <span class="level-item">{{.Name}}</span>
+                  </div>
+                {{end}}
+
                 {{if .HasHumiditySensor}}
                   {{if .Humidity}}
                     <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{printf "%.1f" .Humidity}}%</span>
@@ -71,6 +89,7 @@
                           <path d="M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z"/>
                         </svg>
                         Open
+
                       </span>
                     {{else}}
                       <span class="tag is-success ml-2" id="door-{{.Id}}">
@@ -93,7 +112,7 @@
               <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
               <div class="buttons mt-3">
                 {{if .Host}}
-                  <a class="button is-link" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
+                  <a class="button is-link is-small" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                       <circle cx="12" cy="12" r="10"></circle>
                       <line x1="2" y1="12" x2="22" y2="12"></line>
@@ -102,7 +121,7 @@
                   </a>
                 {{end}}
                 {{if .IsRefreshable}}
-                <button class="button is-warning" id="btn-refresh-{{.Id}}" onclick="refreshDevice('{{.Id}}')" title="Refresh device">
+                <button class="button is-warning is-small" id="btn-refresh-{{.Id}}" onclick="refreshDevice('{{.Id}}')" title="Refresh device">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="23 4 23 10 17 10"></polyline>
                     <polyline points="1 20 1 14 7 14"></polyline>
@@ -110,13 +129,13 @@
                   </svg>
                 </button>
                 {{end}}
-                <button class="button is-success" id="btn-setup-{{.Id}}" onclick="setupDevice('{{.Id}}')" title="Setup device">
+                <button class="button is-success is-small" id="btn-setup-{{.Id}}" onclick="setupDevice('{{.Id}}')" title="Setup device">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
                   </svg>
                 </button>
                 {{if .HasHeaterScript}}
-                <button class="button is-danger" id="btn-heater-{{.Id}}" onclick="openHeaterConfig('{{.Id}}')" title="Heater Configuration">🔥</button>
+                <button class="button is-danger is-small" id="btn-heater-{{.Id}}" onclick="openHeaterConfig('{{.Id}}')" title="Heater Configuration">🔥</button>
                 {{end}}
               </div>
             </div>
@@ -439,6 +458,61 @@
           }
         }
       } catch (e) { console.log('Could not fetch rooms:', e); }
+    }
+
+    async function toggleSwitch(id, switchId) {
+      var new_state = false;
+      const btn = document.getElementById('switch-' + id + '-' + switchId + '-btn');
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('is-loading');
+      }
+      const shape = document.getElementById('switch-' + id + '-' + switchId + '-btn-shape');
+      try {
+        console.log('toggleSwitch: POST /rpc switch.toggle for', id, switchId);
+        res = await fetch('/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: 'switch.toggle', params: {
+            identifier: id,
+            switch_id: parseInt(switchId)
+          }})
+        });
+        console.log('toggleSwitch: switch.toggle response status', res.status);
+        if (!res.ok) {
+          console.error('toggleSwitch: switch.toggle response error', await res.text());
+          return;
+        } else {
+          out = await res.json();
+          console.log('toggleSwitch: switch.toggle response', out);
+          new_state = ! out.result.result.was_on;
+        }
+      } catch (e) {
+        console.error('toggleSwitch: error', e.name, e.message, e);
+      } finally {
+        if (btn) {
+          console.log('toggleSwitch: new state', new_state);
+          btn.disabled = false;
+          btn.classList.remove('is-loading');
+          if (new_state) {
+            btn.classList.remove('is-light');
+            btn.classList.add('is-info');
+            btn.classList.add('is-active');
+            shape.innerHTML = `
+              <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
+              <circle cx="16" cy="12" r="3"></circle>
+            `;
+          } else {
+            btn.classList.remove('is-info');
+            btn.classList.remove('is-active');
+            btn.classList.add('is-light');
+            shape.innerHTML = `
+              <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
+              <circle cx="8" cy="12" r="3"></circle>
+            `;
+          }
+        }
+      }
     }
 
     async function refreshDevice(id) {
@@ -1141,7 +1215,7 @@
           
           // Add or remove Open button
           if (shouldHaveOpenBtn && !hasOpenBtn) {
-            const openBtn = `<a class="button is-link" href="/devices/${escapeHtml(deviceView.link_token)}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
+            const openBtn = `<a class="button is-link is-small" href="/devices/${escapeHtml(deviceView.link_token)}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <circle cx="12" cy="12" r="10"></circle>
                 <line x1="2" y1="12" x2="22" y2="12"></line>
@@ -1158,7 +1232,7 @@
           // Add or remove heater button
           const hasHeaterBtn = document.getElementById('btn-heater-' + deviceId);
           if (deviceView.has_heater_script && !hasHeaterBtn) {
-            const heaterBtn = `<button class="button is-danger" id="btn-heater-${deviceId}" onclick="openHeaterConfig('${escapeJs(deviceId)}')" title="Heater Configuration">🔥</button>`;
+            const heaterBtn = `<button class="button is-danger is-small" id="btn-heater-${deviceId}" onclick="openHeaterConfig('${escapeJs(deviceId)}')" title="Heater Configuration">🔥</button>`;
             buttonsEl.insertAdjacentHTML('beforeend', heaterBtn);
           } else if (!deviceView.has_heater_script && hasHeaterBtn) {
             hasHeaterBtn.remove();
@@ -1167,7 +1241,7 @@
           // Add or remove refresh button
           const hasRefreshBtn = document.getElementById('btn-refresh-' + deviceId);
           if (deviceView.is_refreshable && !hasRefreshBtn) {
-            const refreshBtn = `<button class="button is-danger" id="btn-refresh-${deviceId}" onclick="refreshDevice('${escapeJs(deviceId)}')" title="Refresh device"></button>`;
+            const refreshBtn = `<button class="button is-warning is-small" id="btn-refresh-${deviceId}" onclick="refreshDevice('${escapeJs(deviceId)}')" title="Refresh device"></button>`;
             buttonsEl.insertAdjacentHTML('beforeend', refreshBtn);
           } else if (!deviceView.is_refreshable && hasRefreshBtn) {
             hasRefreshBtn.remove();
@@ -1241,26 +1315,26 @@
               </p>
               <p class="subtitle is-7 has-text-grey">${manufacturer} · ${deviceId}</p>
               <div class="buttons mt-3">
-                ${host && linkToken ? `<a class="button is-link" href="/devices/${linkToken}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
+                ${host && linkToken ? `<a class="button is-link is-small" href="/devices/${linkToken}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="10"></circle>
                     <line x1="2" y1="12" x2="22" y2="12"></line>
                     <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
                   </svg>
                 </a>` : ''}
-                ${deviceView.is_refreshable ? `<button class="button is-warning" id="btn-refresh-${deviceId}" onclick="refreshDevice('${deviceIdJs}')" title="Refresh device">
+                ${deviceView.is_refreshable ? `<button class="button is-warning is-small" id="btn-refresh-${deviceId}" onclick="refreshDevice('${deviceIdJs}')" title="Refresh device">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <polyline points="23 4 23 10 17 10"></polyline>
                     <polyline points="1 20 1 14 7 14"></polyline>
                     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
                   </svg>
                 </button>` : ''}
-                <button class="button is-success" id="btn-setup-${deviceId}" onclick="setupDevice('${deviceIdJs}')" title="Setup device">
+                <button class="button is-success is-small" id="btn-setup-${deviceId}" onclick="setupDevice('${deviceIdJs}')" title="Setup device">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
                   </svg>
                 </button>
-                ${deviceView.has_heater_script ? `<button class="button is-danger" id="btn-heater-${deviceId}" onclick="openHeaterConfig('${deviceIdJs}')" title="Heater Configuration">🔥</button>` : ''}
+                ${deviceView.has_heater_script ? `<button class="button is-danger is-small" id="btn-heater-${deviceId}" onclick="openHeaterConfig('${deviceIdJs}')" title="Heater Configuration">🔥</button>` : ''}
               </div>
             </div>
           </div>

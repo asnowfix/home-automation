@@ -10,6 +10,7 @@ import (
 	"pkg/devices"
 	"pkg/shelly"
 	"pkg/shelly/kvs"
+	shellypkg "pkg/shelly/shelly"
 	"pkg/shelly/sswitch"
 	"pkg/shelly/types"
 	"reflect"
@@ -21,9 +22,12 @@ import (
 )
 
 var switchId int
+var switchAll bool
 
 func init() {
 	Cmd.PersistentFlags().IntVarP(&switchId, "switch", "S", 0, "Use this switch ID.")
+	Cmd.PersistentFlags().BoolVarP(&switchAll, "all", "A", false, "Use all switches.")
+	Cmd.MarkFlagsMutuallyExclusive("switch", "all")
 
 	Cmd.AddCommand(toggleCmd)
 	Cmd.AddCommand(onCmd)
@@ -98,6 +102,10 @@ func doSwitchOneDevice(ctx context.Context, log logr.Logger, via types.Channel, 
 
 	var out any
 	var err error
+
+	if switchAll {
+		return shellypkg.GetSwitchStatus(ctx, sd)
+	}
 
 	switch args[0] {
 	case "toggle":

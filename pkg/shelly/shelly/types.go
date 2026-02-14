@@ -125,57 +125,67 @@ type ComponentsRequest struct {
 	DynamicOnly bool     `json:"dynamic_only,omitempty"` // If true, only dynamic components will be returned. Optional
 }
 
-type Components struct {
-	Config *Config `json:"-"`
-	Status *Status `json:"-"`
-}
-
 type ComponentsResponse struct {
-	Components
-	Response_      *[]ComponentResponse `json:"components"`
-	ConfigRevision int                  `json:"cfg_revision"` // The current config revision. See SystemGetConfig#ConfigRevision
-	Offset         int                  `json:"offset"`       // The index of the first component in the list.
-	Total          int                  `json:"total"`        // Total number of components with all filters applied.
+	ConfigRevision int     `json:"config_revision"`
+	Config         *Config `json:"config"`
+	Status         *Status `json:"status"`
+	Offset         int     `json:"offset"`
+	Total          int     `json:"total"`
 }
 
 func (cr *ComponentsResponse) UnmarshalJSON(data []byte) error {
-	type Alias ComponentsResponse
-	if err := json.Unmarshal(data, (*Alias)(cr)); err != nil {
+	var err error
+
+	// 1. Partially parse as an array of keyed raw JSON
+	type rawArray struct {
+		Components []struct {
+			Key    string           `json:"key"`
+			Status *json.RawMessage `json:"status,omitempty"`
+			Config *json.RawMessage `json:"config,omitempty"`
+		} `json:"components"`
+		ConfigRevision int `json:"cfg_revision"` // The current config revision. See SystemGetConfig#ConfigRevision
+		Offset         int `json:"offset"`       // The index of the first component in the list.
+		Total          int `json:"total"`        // Total number of components with all filters applied.
+	}
+	var ra rawArray
+	if err = json.Unmarshal(data, &ra); err != nil {
 		return err
 	}
-	if cr.Response_ == nil {
-		cr.Response_ = &[]ComponentResponse{}
-	}
-	config := make(map[string]any)
-	status := make(map[string]any)
 
-	for _, comp := range *cr.Response_ {
-		config[comp.Key] = comp.Config
-		status[comp.Key] = comp.Status
+	// 2. Turn keyed array of raw JSON into maps of raw JSON
+	type rawMap struct {
+		ConfigRevision int                         `json:"cfg_revision"` // The current config revision. See SystemGetConfig#ConfigRevision
+		Config         map[string]*json.RawMessage `json:"config"`
+		Status         map[string]*json.RawMessage `json:"status"`
+		Offset         int                         `json:"offset"` // The index of the first component in the list.
+		Total          int                         `json:"total"`  // Total number of components with all filters applied.
+	}
+	rm := rawMap{
+		ConfigRevision: ra.ConfigRevision,
+		Offset:         ra.Offset,
+		Total:          ra.Total,
+	}
+	rm.Config = make(map[string]*json.RawMessage, len(ra.Components))
+	rm.Status = make(map[string]*json.RawMessage, len(ra.Components))
+	for _, comp := range ra.Components {
+		if comp.Config != nil {
+			rm.Config[comp.Key] = comp.Config
+		}
+		if comp.Status != nil {
+			rm.Status[comp.Key] = comp.Status
+		}
 	}
 
-	configStr, err := json.Marshal(config)
+	// 3. Write back to json
+	buf, err := json.Marshal(rm)
 	if err != nil {
 		return err
 	}
-	cr.Config = &Config{}
-	if err := json.Unmarshal(configStr, cr.Config); err != nil {
-		return err
-	}
-	statusStr, err := json.Marshal(status)
-	if err != nil {
-		return err
-	}
-	cr.Status = &Status{}
-	if err := json.Unmarshal(statusStr, cr.Status); err != nil {
+
+	// 4. Unmarshal into alias type to avoid reccursion using ComponentsResponse.UnmarshalJSON
+	type noMethod ComponentsResponse
+	if err = json.Unmarshal(buf, (*noMethod)(cr)); err != nil {
 		return err
 	}
 	return nil
-}
-
-type ComponentResponse struct {
-	Key    string         `json:"key"`    // Component's key (in format <type>:<cid>, for example boolean:200)
-	Config map[string]any `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
-	Status map[string]any `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
-	// Methods map[string]types.MethodHandler `json:"-"`
 }

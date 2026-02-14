@@ -90,8 +90,8 @@ func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
 
 }
 
-func DoGetComponents(ctx context.Context, d types.Device) (*ComponentsResponse, error) {
-	out, err := d.CallE(ctx, types.ChannelDefault, string(GetComponents.String()), nil)
+func DoGetComponents(ctx context.Context, d types.Device, req *ComponentsRequest) (*ComponentsResponse, error) {
+	out, err := d.CallE(ctx, types.ChannelDefault, string(GetComponents.String()), req)
 	if err != nil {
 		return nil, err
 	}
@@ -146,4 +146,50 @@ func GetDeviceInfo(ctx context.Context, d types.Device, via types.Channel) (*Dev
 	}
 
 	return info, nil
+}
+
+// $ curl http://192.168.1.47/rpc/Shelly.GetComponents | jq '.components | .[] | select(.key | startswith("switch")) | .status'
+// {
+//   "id": 0,
+//   "source": "loopback",
+//   "output": false,
+//   "apower": 0.0,
+//   "voltage": 228.7,
+//   "freq": 49.9,
+//   "current": 0.000,
+//   "aenergy": {
+//     "total": 3413.548,
+//     "by_minute": [
+//       0.000,
+//       0.000,
+//       0.000
+//     ],
+//     "minute_ts": 1771058580
+//   },
+//   "ret_aenergy": {
+//     "total": 0.000,
+//     "by_minute": [
+//       0.000,
+//       0.000,
+//       0.000
+//     ],
+//     "minute_ts": 1771058580
+//   },
+//   "temperature": {
+//     "tC": 32.1,
+//     "tF": 89.7
+//   }
+// }
+
+func GetSwitchStatus(ctx context.Context, d types.Device) (any, error) {
+	req := ComponentsRequest{
+		Include: []string{"status"},
+		// Shelly devices have at most 4 switches (Shelly PRO 4)
+		Keys: []string{"switch:0", "switch:1", "switch:2", "switch:3"},
+	}
+	comps, err := DoGetComponents(ctx, d, &req)
+	if err != nil {
+		return nil, err
+	}
+	return comps, nil
 }

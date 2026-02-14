@@ -685,28 +685,6 @@ func (d *Device) refreshScripts(ctx context.Context, via types.Channel) error {
 	return nil
 }
 
-func (d *Device) initComponents(ctx context.Context, via types.Channel) error {
-	if !d.IsHttpReady() {
-		out, err := d.CallE(ctx, via, shelly.GetComponents.String(), &shelly.ComponentsRequest{
-			Keys: []string{"config", "status"},
-		})
-		if err != nil {
-			d.log.Error(err, "Unable to get device's components", "device_id", d.Id_)
-			return err
-		}
-		cr, ok := out.(*shelly.ComponentsResponse)
-		if !ok {
-			d.log.Error(err, "Unable to get device's components", "device_id", d.Id_)
-			return err
-		}
-		d.log.Info("Shelly.GetComponents: got", "components", *cr)
-		d.status = cr.Status
-		d.config = cr.Config
-	}
-
-	return nil
-}
-
 type Do func(context.Context, logr.Logger, types.Channel, devices.Device, []string) (any, error)
 
 func Print(log logr.Logger, d any) error {

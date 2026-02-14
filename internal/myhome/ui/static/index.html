@@ -56,9 +56,6 @@
                 {{end}}
 
               {{ $device := . }}
-                {{if .Switches}}
-                  <span class="ml-2">{{len .Switches}} Switches</span>
-                {{end}}
                 {{range .Switches}}
                   <div class="level" id="switch-{{$device.Id}}-{{.Id}}">
                     <button class="button {{if .On}}is-success{{else}}is-danger{{end}}" id="switch-{{$device.Id}}-{{.Id}}-btn" onclick="toggleSwitch('{{$device.Id}}', '{{.Id}}')" title="Toggle switch">
@@ -461,6 +458,37 @@
           }
         }
       } catch (e) { console.log('Could not fetch rooms:', e); }
+    }
+
+    async function toggleSwitch(id, switchId) {
+      const btn = document.getElementById('switch-' + id + '-' + switchId + '-btn');
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('is-loading');
+      }
+      try {
+        console.log('toggleSwitch: POST /rpc switch.toggle for', id, switchId);
+        res = await fetch('/rpc', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ method: 'switch.toggle', params: {
+            identifier: id,
+            switch_id: parseInt(switchId)
+          }})
+        });
+        console.log('toggleSwitch: switch.toggle response status', res.status, await res.json());
+        if (!res.ok) {
+          console.error('toggleSwitch: switch.toggle response error', await res.text());
+          return;
+        }
+      } catch (e) {
+        console.error('toggleSwitch: error', e.name, e.message, e);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.remove('is-loading');
+        }
+      }
     }
 
     async function refreshDevice(id) {

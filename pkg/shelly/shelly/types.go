@@ -126,11 +126,11 @@ type ComponentsRequest struct {
 }
 
 type ComponentsResponse struct {
-	ConfigRevision int     `json:"config_revision"`
-	Config         *Config `json:"config"`
-	Status         *Status `json:"status"`
-	Offset         int     `json:"offset"`
-	Total          int     `json:"total"`
+	ConfigRevision int                         `json:"config_revision"`
+	Offset         int                         `json:"offset"`
+	Total          int                         `json:"total"`
+	Config         map[string]*json.RawMessage `json:"config"`
+	Status         map[string]*json.RawMessage `json:"status"`
 }
 
 func (cr *ComponentsResponse) UnmarshalJSON(data []byte) error {
@@ -153,39 +153,27 @@ func (cr *ComponentsResponse) UnmarshalJSON(data []byte) error {
 	}
 
 	// 2. Turn keyed array of raw JSON into maps of raw JSON
-	type rawMap struct {
-		ConfigRevision int                         `json:"cfg_revision"` // The current config revision. See SystemGetConfig#ConfigRevision
-		Config         map[string]*json.RawMessage `json:"config"`
-		Status         map[string]*json.RawMessage `json:"status"`
-		Offset         int                         `json:"offset"` // The index of the first component in the list.
-		Total          int                         `json:"total"`  // Total number of components with all filters applied.
-	}
-	rm := rawMap{
-		ConfigRevision: ra.ConfigRevision,
-		Offset:         ra.Offset,
-		Total:          ra.Total,
-	}
-	rm.Config = make(map[string]*json.RawMessage, len(ra.Components))
-	rm.Status = make(map[string]*json.RawMessage, len(ra.Components))
+	cr.ConfigRevision = ra.ConfigRevision
+	cr.Offset = ra.Offset
+	cr.Total = ra.Total
+	cr.Config = make(map[string]*json.RawMessage, len(ra.Components))
+	cr.Status = make(map[string]*json.RawMessage, len(ra.Components))
+
 	for _, comp := range ra.Components {
 		if comp.Config != nil {
-			rm.Config[comp.Key] = comp.Config
+			cr.Config[comp.Key] = comp.Config
 		}
 		if comp.Status != nil {
-			rm.Status[comp.Key] = comp.Status
+			cr.Status[comp.Key] = comp.Status
 		}
 	}
 
-	// 3. Write back to json
-	buf, err := json.Marshal(rm)
-	if err != nil {
-		return err
-	}
-
-	// 4. Unmarshal into alias type to avoid reccursion using ComponentsResponse.UnmarshalJSON
-	type noMethod ComponentsResponse
-	if err = json.Unmarshal(buf, (*noMethod)(cr)); err != nil {
-		return err
-	}
 	return nil
+}
+
+type SwitchSummary struct {
+	Id   int    `json:"id"`
+	Key  string `json:"key"`
+	Name string `json:"name"`
+	On   bool   `json:"on"`
 }

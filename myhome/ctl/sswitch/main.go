@@ -104,7 +104,7 @@ func doSwitchOneDevice(ctx context.Context, log logr.Logger, via types.Channel, 
 	var err error
 
 	if switchAll {
-		return shellypkg.GetSwitchStatus(ctx, sd)
+		return shellypkg.GetSwitchesSummary(ctx, sd)
 	}
 
 	switch args[0] {

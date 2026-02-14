@@ -2,8 +2,10 @@ package shelly
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"pkg/shelly/sswitch"
 	"pkg/shelly/types"
 	"time"
 
@@ -181,15 +183,41 @@ func GetDeviceInfo(ctx context.Context, d types.Device, via types.Channel) (*Dev
 //   }
 // }
 
-func GetSwitchStatus(ctx context.Context, d types.Device) (any, error) {
-	req := ComponentsRequest{
-		Include: []string{"status"},
+func GetSwitchesSummary(ctx context.Context, d types.Device) (map[int]SwitchSummary, error) {
+	comps, err := DoGetComponents(ctx, d, &ComponentsRequest{
+		Include: []string{"config", "status"},
 		// Shelly devices have at most 4 switches (Shelly PRO 4)
 		Keys: []string{"switch:0", "switch:1", "switch:2", "switch:3"},
-	}
-	comps, err := DoGetComponents(ctx, d, &req)
+	})
 	if err != nil {
 		return nil, err
 	}
-	return comps, nil
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	log.V(1).Info("GetSwitchesSummary", "components", comps)
+
+	switches := make(map[int]SwitchSummary, len(comps.Config))
+	for key, item := range comps.Config {
+		ss := SwitchSummary{
+			Key: key,
+		}
+
+		var swc sswitch.Config
+		json.Unmarshal(*item, &swc)
+		ss.Id = swc.Id
+		if swc.Name != "" {
+			ss.Name = swc.Name
+		} else {
+			ss.Name = key
+		}
+
+		var sws sswitch.Status
+		json.Unmarshal(*comps.Status[key], &sws)
+		ss.On = sws.Output
+		switches[swc.Id] = ss
+	}
+
+	return switches, nil
 }

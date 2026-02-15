@@ -11,6 +11,8 @@ import (
 	"syscall"
 	"time"
 
+	"version"
+
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/yaml"
 )
@@ -70,7 +72,7 @@ var Flags struct {
 
 var Via types.Channel
 
-func CommandLineContext(ctx context.Context, version string) context.Context {
+func CommandLineContext(ctx context.Context) context.Context {
 	var cancel context.CancelFunc
 
 	// Create the process-wide context that background services can use
@@ -86,7 +88,7 @@ func CommandLineContext(ctx context.Context, version string) context.Context {
 
 	// Store the process-wide context so lazy-started services can access it
 	ctx = context.WithValue(ctx, global.ProcessContextKey, processCtx)
-	ctx = context.WithValue(ctx, global.VersionKey, version)
+	ctx = context.WithValue(ctx, global.VersionKey, version.GetVersion())
 
 	go func() {
 		log := logr.FromContextOrDiscard(ctx)

@@ -63,7 +63,7 @@ func main() {
 	logger = hlog.Logger
 
 	ctx := logr.NewContext(context.Background(), logger)
-	ctx = options.CommandLineContext(ctx, Version)
+	ctx = options.CommandLineContext(ctx)
 
 	mc, err := mqtt.GetClientE(ctx)
 	if err != nil {

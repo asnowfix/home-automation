@@ -8,6 +8,8 @@ import (
 	"os"
 	"runtime/pprof"
 
+	"version"
+
 	"hlog"
 
 	"myhome/ctl"
@@ -82,7 +84,7 @@ var Cmd = &cobra.Command{
 			options.Flags.Wait = 0
 		}
 
-		ctx = options.CommandLineContext(ctx, Version)
+		ctx = options.CommandLineContext(ctx)
 		cmd.SetContext(ctx)
 
 		return nil
@@ -113,6 +115,7 @@ func init() {
 	Cmd.MarkFlagsMutuallyExclusive("verbose", "debug", "quiet")
 	Cmd.AddCommand(daemon.Cmd)
 	Cmd.AddCommand(ctl.Cmd)
+	Cmd.AddCommand(version.Cmd)
 }
 
 func main() {

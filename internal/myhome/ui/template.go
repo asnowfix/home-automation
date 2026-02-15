@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+
+	"global"
 )
 
 // Embed static assets under this package
@@ -56,6 +58,7 @@ type DeviceView struct {
 
 // IndexData holds the data for rendering the index page
 type IndexData struct {
+	Version string
 	Devices []DeviceView
 }
 
@@ -199,7 +202,10 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 // RenderIndex renders the index page with device list
 // Sensor values are populated via SSE after page load
 func RenderIndex(ctx context.Context, db *storage.DeviceStorage, w io.Writer) error {
-	data := IndexData{Devices: []DeviceView{}}
+	data := IndexData{
+		Devices: []DeviceView{},
+		Version: ctx.Value(global.VersionKey).(string),
+	}
 	if db != nil {
 		devices, err := db.GetAllDevices(ctx)
 		if err != nil {

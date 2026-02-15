@@ -41,7 +41,7 @@ var Cmd = &cobra.Command{
 		log := hlog.Logger
 		ctx := logr.NewContext(cmd.Context(), log)
 
-		ctx = options.CommandLineContext(ctx, Version)
+		ctx = options.CommandLineContext(ctx)
 
 		// Set the target instance name for RPC topics
 		if options.Flags.InstanceName != "" {

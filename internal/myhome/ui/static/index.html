@@ -313,11 +313,6 @@
               const deviceCards = document.querySelectorAll('#devices-container .card');
               this.deviceCount = deviceCards.length;
               console.log('Device count updated:', this.deviceCount);
-              
-              // Reinitialize Alpine.js for the new content
-              if (window.Alpine) {
-                window.Alpine.initTree(event.detail.target);
-              }
             }
           });
         },

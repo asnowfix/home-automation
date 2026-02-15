@@ -16,6 +16,7 @@ import (
 	mynet "myhome/net"
 	"myhome/proxy"
 	"myhome/storage"
+	"myhome/ui/static"
 
 	"github.com/go-logr/logr"
 )
@@ -35,17 +36,6 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	log.V(1).Info("Starting UI server", "addr", addr, "resolver", resolver, "db", db, "mc", mc, "sseBroadcaster", sseBroadcaster)
 
 	mux := http.NewServeMux()
-
-	// Static assets with long cache
-	fileServer, err := StaticFileServer()
-	if err != nil {
-		return fmt.Errorf("ui static file server: %w", err)
-	}
-	mux.HandleFunc("/static/", func(w http.ResponseWriter, r *http.Request) {
-		// // Cache aggressively; bump version query to invalidate
-		// w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		http.StripPrefix("/static/", fileServer).ServeHTTP(w, r)
-	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if !global.PanicOnBugs {
@@ -78,6 +68,18 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 
 	mux.Handle("/events", sseBroadcaster)
 	mux.HandleFunc("/rpc", RpcHandler(ctx, log.WithName("RpcHandler")))
+
+	// Static assets (Bulma CSS, HTMX, Alpine.js)
+	mux.HandleFunc("/static/", func(w http.ResponseWriter, r *http.Request) {
+		asset, ok := static.Assets[r.URL.Path]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", asset.ContentType)
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Write(asset.Content)
+	})
 
 	// HTMX endpoints for partial HTML responses
 	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db)

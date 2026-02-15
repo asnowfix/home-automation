@@ -21,7 +21,7 @@ builds:
     dir: .
     main: ./myhome
     ldflags:
-      - -X main.Program=myhome
-      - -X main.Repo={{.GitURL}}
-      - -X main.Version={{.Tag}}
-      - -X main.Commit={{.FullCommit}}
+      - -X version.Program=myhome
+      - -X version.Repo={{.GitURL}}
+      - -X version.Version={{.Tag}}
+      - -X version.Commit={{.FullCommit}}

@@ -15,6 +15,10 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+const HTTP_DEFAULT_PORT int = 6080
+
+const PROMETHEUS_DEFAULT_PORT int = 9100
+
 const MDNS_LOOKUP_DEFAULT_TIMEOUT time.Duration = 7 * time.Second
 
 const MQTT_DEFAULT_TIMEOUT time.Duration = 14 * time.Second

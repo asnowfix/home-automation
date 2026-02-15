@@ -248,6 +248,22 @@ This project uses semantic versioning (vMAJOR.MINOR.PATCH) with automated taggin
 3. **For hotfixes**: Create PR directly to the affected `vM.m.x` branch
 4. **Always sign commits**: Use `git commit -s` for signed commits
 
+### Git Hooks and File Size Limits
+
+To prevent oversized files from entering commits, this repository includes a managed pre-commit hook.
+
+1. Install hooks once per clone:
+   ```bash
+   make install-hooks
+   ```
+2. Default size limit is **1 MiB** (`1048576` bytes).
+3. You can override limits when needed:
+   ```bash
+   MAX_BYTES=524288 git commit -m "..."
+   ```
+
+The same check runs in CI, so bypassing local hooks with `--no-verify` will still fail in pull requests.
+
 ### Automated Workflows
 
 - **create-branch-on-minor-tag.yml**: Creates `vM.m.x` branch when `vM.m.0` tag is pushed

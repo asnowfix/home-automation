@@ -137,14 +137,18 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		}
 
 		modified, err := device.Refresh(ctx)
+		if err != nil {
+			log.Error(err, "Device refresh failed", "device_id", device.Id())
+		}
 
-		// Even if refresh failed, save the device if it was modified
-		// This handles cases where HTTP fails and clears the host
-		if modified {
+		// Always save the device after refresh to persist config and info to database
+		// even if the device itself wasn't modified
 			if _, saveErr := dm.dr.SetDevice(ctx, device, true); saveErr != nil {
-				log.Error(saveErr, "Failed to save modified device after refresh", "device_id", device.Id())
+			log.Error(saveErr, "Failed to save device after refresh", "device_id", device.Id())
 			} else {
-				log.V(1).Info("Saved modified device after refresh", "device_id", device.Id(), "refresh_error", err != nil)
+			log.V(1).Info("Saved device after refresh", "device_id", device.Id(), "modified", modified, "refresh_error", err != nil)
+			// Only broadcast update if device was actually modified
+			if modified {
 				dm.sseBroadcaster.BroadcastDeviceUpdate(ui.DeviceToView(ctx, device))
 			}
 		}

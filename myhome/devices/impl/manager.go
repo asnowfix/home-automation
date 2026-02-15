@@ -143,9 +143,9 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		// Always save the device after refresh to persist config and info to database
 		// even if the device itself wasn't modified
-			if _, saveErr := dm.dr.SetDevice(ctx, device, true); saveErr != nil {
+		if _, saveErr := dm.dr.SetDevice(ctx, device, true); saveErr != nil {
 			log.Error(saveErr, "Failed to save device after refresh", "device_id", device.Id())
-			} else {
+		} else {
 			log.V(1).Info("Saved device after refresh", "device_id", device.Id(), "modified", modified, "refresh_error", err != nil)
 			// Only broadcast update if device was actually modified
 			if modified {
@@ -451,6 +451,8 @@ func (dm *DeviceManager) deviceUpdaterLoop(ctx context.Context) {
 
 // triggerAutoSetup runs auto-setup for a new device in a goroutine
 func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, device *myhome.Device, deviceId string) {
+	var err error
+
 	// Check if setup is already in progress for this device
 	if _, loaded := dm.setupInFlight.LoadOrStore(deviceId, true); loaded {
 		log.Info("Auto-setup already in progress for device", "device_id", deviceId)
@@ -474,9 +476,17 @@ func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, 
 	// Get the Shelly device implementation
 	sd, ok := device.Impl().(*shelly.Device)
 	if !ok {
-		log.Error(nil, "Cannot auto-setup: device implementation is not a Shelly device", "device_id", deviceId, "impl_type", reflect.TypeOf(device.Impl()))
-		dm.setupInFlight.Delete(deviceId)
-		return
+		d, err := shelly.NewDeviceFromSummary(ctx, log, device)
+		if err != nil || d == nil {
+			err = fmt.Errorf("Cannot auto-setup: failed to create Shelly device %s", deviceId)
+			panic(err)
+		}
+		sd, ok = d.(*shelly.Device)
+		if !ok || sd == nil {
+			err = fmt.Errorf("Cannot auto-setup: failed to create Shelly device %s", deviceId)
+			panic(err)
+		}
+		device.WithImpl(sd)
 	}
 
 	// Check if device is already set up (has watchdog script running)
@@ -492,7 +502,7 @@ func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, 
 		defer dm.setupInFlight.Delete(deviceId)
 
 		setupLog := log.WithName("autoSetup").WithName(deviceId)
-		err := shellysetup.SetupDevice(ctx, setupLog, sd, sd.Name(), dm.setupConfig)
+		err = shellysetup.SetupDevice(ctx, setupLog, sd, sd.Name(), dm.setupConfig)
 		if err != nil {
 			setupLog.Error(err, "Auto-setup failed for device", "device_id", deviceId)
 			return

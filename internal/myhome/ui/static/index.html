@@ -6,6 +6,8 @@
   <title>MyHome Devices</title>
   <link rel="stylesheet" href="./bulma.min.css"/>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='0.9em' font-size='90'>🏠</text></svg>"/>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.10"></script>
   <style>
     .door-icon {
       display: inline-block;
@@ -17,16 +19,19 @@
     .button.is-loading svg {
       opacity: 0.5;
     }
+    [x-cloak] { display: none !important; }
   </style>
-  </head>
-<body>
+</head>
+<body x-data="app()" @open-setup-modal.window="openSetupModal($event.detail)" @open-heater-modal.window="openHeaterModal($event.detail)" @edit-room.window="editRoom($event.detail)" @delete-room.window="confirmDeleteRoom($event.detail)">
+  
+  <!-- Hero Section -->
   <section class="hero is-light is-small">
     <div class="hero-body">
       <div class="container">
         <div class="level">
           <div class="level-left">
             <h1 class="title is-3">MyHome</h1>
-            <span class="subtitle is-6 ml-3">{{len .Devices}} devices / {{.Version}}</span>
+            <span class="subtitle is-6 ml-3" x-text="`${deviceCount} devices / {{.Version}}`"></span>
           </div>
           <div class="level-right">
             <a class="button is-info" href="https://control.shelly.cloud" target="_blank" rel="noopener noreferrer">Shelly Control</a>
@@ -36,116 +41,20 @@
       </div>
     </div>
   </section>
+
+  <!-- Devices Section -->
   <section class="section">
     <div class="container">
-      {{if .Devices}}
-      <div class="columns is-multiline">
-        {{range .Devices}}
-        <div class="column is-4-desktop is-6-tablet" data-device-name="{{.Name | lower}}">
-          <div class="card" id="device-{{.Id}}">
-            <div class="card-content">
-              <p class="title is-5">
-                {{if .DeviceTypeEmoji}}{{.DeviceTypeEmoji}} {{end}}
-                <span id="device-{{.Id}}-name">{{.Name}}</span>
-                {{if .HasTemperatureSensor}}
-                  {{if .Temperature}}
-                    <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{printf "%.1f" .Temperature}}°C</span>
-                  {{else}}
-                    <span class="tag is-light ml-2" id="sensor-{{.Id}}-temperature">--°C</span>
-                  {{end}}
-                {{end}}
-
-              {{ $device := . }}
-                {{range .Switches}}
-                  <div class="level" id="switch-{{$device.Id}}-{{.Id}}">
-                    <button class="button is-rounded {{if .On}}is-info is-active{{else}}is-light{{end}}" id="btn-switch-{{$device.Id}}-{{.Id}}" onclick="toggleSwitch('{{$device.Id}}', '{{.Id}}')" title="Toggle switch">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="btn-switch-{{$device.Id}}-{{.Id}}-shape">
-                        {{if .On}}
-                        <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-                        <circle cx="16" cy="12" r="3"></circle>
-                        {{else}}
-                        <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-                        <circle cx="8" cy="12" r="3"></circle>
-                        {{end}}
-                      </svg>
-                    </button>
-                    <span class="level-item">{{.Name}}</span>
-                  </div>
-                {{end}}
-
-                {{if .HasHumiditySensor}}
-                  {{if .Humidity}}
-                    <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{printf "%.1f" .Humidity}}%</span>
-                  {{else}}
-                    <span class="tag is-light ml-2" id="sensor-{{.Id}}-humidity">--%</span>
-                  {{end}}
-                {{end}}
-
-                {{if .HasDoorSensor}}
-                  {{if ne .DoorOpened nil}}
-                    {{if .DoorOpened}}
-                      <span class="tag is-warning ml-2" id="door-{{.Id}}">
-                        <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z"/>
-                        </svg>
-                        Open
-
-                      </span>
-                    {{else}}
-                      <span class="tag is-success ml-2" id="door-{{.Id}}">
-                        <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
-                        </svg>
-                        Closed
-                      </span>
-                    {{end}}
-                  {{else}}
-                    <span class="tag is-light ml-2" id="door-{{.Id}}">
-                      <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
-                      </svg>
-                      Unknown
-                    </span>
-                  {{end}}
-                {{end}}
-              </p>
-              <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
-              <div class="buttons mt-3">
-                {{if .Host}}
-                  <a class="button is-link is-small" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <line x1="2" y1="12" x2="22" y2="12"></line>
-                      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                    </svg>
-                  </a>
-                {{end}}
-                {{if .IsRefreshable}}
-                <button class="button is-warning is-small" id="btn-refresh-{{.Id}}" onclick="refreshDevice('{{.Id}}')" title="Refresh device">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="23 4 23 10 17 10"></polyline>
-                    <polyline points="1 20 1 14 7 14"></polyline>
-                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                  </svg>
-                </button>
-                {{end}}
-                <button class="button is-success is-small" id="btn-setup-{{.Id}}" onclick="setupDevice('{{.Id}}')" title="Setup device">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
-                  </svg>
-                </button>
-                {{if .HasHeaterScript}}
-                <button class="button is-danger is-small" id="btn-heater-{{.Id}}" onclick="openHeaterConfig('{{.Id}}')" title="Heater Configuration">🔥</button>
-                {{end}}
-              </div>
-            </div>
-          </div>
+      <div class="columns is-multiline" 
+           id="devices-container"
+           hx-get="/htmx/devices"
+           hx-trigger="load"
+           hx-swap="innerHTML"
+           hx-indicator="#loading-devices">
+        <div id="loading-devices" class="column is-12 has-text-centered htmx-indicator">
+          <p class="is-size-5">Loading devices...</p>
         </div>
-        {{end}}
       </div>
-      {{else}}
-        <div class="notification is-light has-text-grey is-size-6">No devices found.</div>
-      {{end}}
     </div>
   </section>
 
@@ -157,10 +66,14 @@
           <h2 class="title is-4">🏠 Rooms</h2>
         </div>
         <div class="level-right">
-          <button class="button is-primary is-small" onclick="showAddRoomModal()">+ Add Room</button>
+          <button class="button is-primary is-small" @click="showAddRoomModal()">+ Add Room</button>
         </div>
       </div>
-      <div id="rooms-list" class="columns is-multiline">
+      <div id="rooms-list" 
+           class="columns is-multiline"
+           hx-get="/htmx/rooms"
+           hx-trigger="load, roomsUpdated from:body"
+           hx-swap="innerHTML">
         <div class="column is-12">
           <p class="has-text-grey">Loading rooms...</p>
         </div>
@@ -169,37 +82,36 @@
   </section>
 
   <!-- Room Edit Modal -->
-  <div class="modal" id="room-edit-modal">
-    <div class="modal-background" onclick="closeRoomEditModal()"></div>
+  <div class="modal" :class="{'is-active': modals.room}">
+    <div class="modal-background" @click="closeRoomModal()"></div>
     <div class="modal-card" style="max-width: 500px;">
       <header class="modal-card-head">
-        <p class="modal-card-title" id="room-edit-title">Edit Room</p>
-        <button class="delete" aria-label="close" onclick="closeRoomEditModal()"></button>
+        <p class="modal-card-title" x-text="roomEditMode === 'create' ? 'Add Room' : 'Edit Room'"></p>
+        <button class="delete" aria-label="close" @click="closeRoomModal()"></button>
       </header>
       <section class="modal-card-body">
-        <input type="hidden" id="room-edit-id">
-        <input type="hidden" id="room-edit-mode" value="edit">
         <div class="field">
           <label class="label">Room ID</label>
           <div class="control">
-            <input class="input" type="text" id="room-edit-slug" placeholder="e.g., living-room">
+            <input class="input" type="text" x-model="roomForm.id" placeholder="e.g., living-room" :disabled="roomEditMode === 'edit'">
           </div>
           <p class="help">Unique identifier (lowercase, hyphens only)</p>
         </div>
         <div class="field">
           <label class="label">Room Name</label>
           <div class="control">
-            <input class="input" type="text" id="room-edit-name" placeholder="e.g., Living Room">
+            <input class="input" type="text" x-model="roomForm.name" placeholder="e.g., Living Room">
           </div>
         </div>
         <div class="field">
           <label class="label">Room Types</label>
           <div class="control">
-            <label class="checkbox mr-3"><input type="checkbox" id="room-kind-bedroom" value="bedroom"> Bedroom</label>
-            <label class="checkbox mr-3"><input type="checkbox" id="room-kind-office" value="office"> Office</label>
-            <label class="checkbox mr-3"><input type="checkbox" id="room-kind-living-room" value="living-room"> Living Room</label>
-            <label class="checkbox mr-3"><input type="checkbox" id="room-kind-kitchen" value="kitchen"> Kitchen</label>
-            <label class="checkbox"><input type="checkbox" id="room-kind-other" value="other"> Other</label>
+            <template x-for="kind in ['bedroom', 'office', 'living-room', 'kitchen', 'other']" :key="kind">
+              <label class="checkbox mr-3">
+                <input type="checkbox" :value="kind" x-model="roomForm.kinds">
+                <span x-text="kind.charAt(0).toUpperCase() + kind.slice(1).replace('-', ' ')"></span>
+              </label>
+            </template>
           </div>
         </div>
         <hr>
@@ -208,45 +120,48 @@
           <div class="column">
             <div class="field">
               <label class="label is-small">Eco</label>
-              <input class="input is-small" type="number" id="room-level-eco" step="0.5" value="18">
+              <input class="input is-small" type="number" x-model.number="roomForm.levels.eco" step="0.5">
             </div>
           </div>
           <div class="column">
             <div class="field">
               <label class="label is-small">Comfort</label>
-              <input class="input is-small" type="number" id="room-level-comfort" step="0.5" value="20">
+              <input class="input is-small" type="number" x-model.number="roomForm.levels.comfort" step="0.5">
             </div>
           </div>
           <div class="column">
             <div class="field">
               <label class="label is-small">Away</label>
-              <input class="input is-small" type="number" id="room-level-away" step="0.5" value="15">
+              <input class="input is-small" type="number" x-model.number="roomForm.levels.away" step="0.5">
             </div>
           </div>
         </div>
       </section>
       <footer class="modal-card-foot">
-        <button class="button is-success" id="room-edit-submit" onclick="submitRoomEdit()">Save</button>
-        <button class="button" onclick="closeRoomEditModal()">Cancel</button>
-        <button class="button is-danger is-outlined ml-auto" id="room-delete-btn" onclick="deleteRoom()" style="display:none;">Delete</button>
+        <button class="button is-success" @click="submitRoomEdit()" :disabled="roomForm.saving">
+          <span x-text="roomForm.saving ? 'Saving...' : 'Save'"></span>
+        </button>
+        <button class="button" @click="closeRoomModal()">Cancel</button>
+        <button class="button is-danger is-outlined ml-auto" 
+                @click="deleteRoom()" 
+                x-show="roomEditMode === 'edit'">Delete</button>
       </footer>
     </div>
   </div>
 
   <!-- Setup Modal -->
-  <div class="modal" id="setup-modal">
-    <div class="modal-background" onclick="closeSetupModal()"></div>
+  <div class="modal" :class="{'is-active': modals.setup}">
+    <div class="modal-background" @click="closeSetupModal()"></div>
     <div class="modal-card">
       <header class="modal-card-head">
         <p class="modal-card-title">Setup Device</p>
-        <button class="delete" aria-label="close" onclick="closeSetupModal()"></button>
+        <button class="delete" aria-label="close" @click="closeSetupModal()"></button>
       </header>
       <section class="modal-card-body">
-        <input type="hidden" id="setup-device-id">
         <div class="field">
           <label class="label">Device Name</label>
           <div class="control">
-            <input class="input" type="text" id="setup-name" placeholder="Leave empty for auto-derivation">
+            <input class="input" type="text" x-model="setupForm.name" placeholder="Leave empty for auto-derivation">
           </div>
           <p class="help">Overrides automatic name derivation from output/input names</p>
         </div>
@@ -254,8 +169,11 @@
           <label class="label">Room</label>
           <div class="control">
             <div class="select is-fullwidth">
-              <select id="setup-room-id">
+              <select x-model="setupForm.roomId">
                 <option value="">-- No room --</option>
+                <template x-for="room in rooms" :key="room.id">
+                  <option :value="room.id" x-text="room.name || room.id"></option>
+                </template>
               </select>
             </div>
           </div>
@@ -264,7 +182,7 @@
         <div class="field">
           <label class="label">MQTT Broker</label>
           <div class="control">
-            <input class="input" type="text" id="setup-mqtt-broker" placeholder="Leave empty for default">
+            <input class="input" type="text" x-model="setupForm.mqttBroker" placeholder="Leave empty for default">
           </div>
           <p class="help">e.g., 192.168.1.100:1883 or mqtt.local</p>
         </div>
@@ -273,1099 +191,600 @@
         <div class="field">
           <label class="label">STA ESSID</label>
           <div class="control">
-            <input class="input" type="text" id="setup-sta-essid" placeholder="Primary WiFi network name">
+            <input class="input" type="text" x-model="setupForm.staEssid" placeholder="Primary WiFi network name">
           </div>
         </div>
         <div class="field">
           <label class="label">STA Password</label>
           <div class="control">
-            <input class="input" type="password" id="setup-sta-passwd" placeholder="Primary WiFi password">
+            <input class="input" type="password" x-model="setupForm.staPasswd" placeholder="Primary WiFi password">
           </div>
         </div>
         <div class="field">
           <label class="label">STA1 ESSID</label>
           <div class="control">
-            <input class="input" type="text" id="setup-sta1-essid" placeholder="Backup WiFi network name">
+            <input class="input" type="text" x-model="setupForm.sta1Essid" placeholder="Backup WiFi network name">
           </div>
         </div>
         <div class="field">
           <label class="label">STA1 Password</label>
           <div class="control">
-            <input class="input" type="password" id="setup-sta1-passwd" placeholder="Backup WiFi password">
+            <input class="input" type="password" x-model="setupForm.sta1Passwd" placeholder="Backup WiFi password">
           </div>
         </div>
         <div class="field">
           <label class="label">AP Password</label>
           <div class="control">
-            <input class="input" type="password" id="setup-ap-passwd" placeholder="Access Point password">
+            <input class="input" type="password" x-model="setupForm.apPasswd" placeholder="Access Point password">
           </div>
         </div>
       </section>
       <footer class="modal-card-foot">
-        <button class="button is-success" id="setup-submit-btn" onclick="submitSetup()">Setup</button>
-        <button class="button" onclick="closeSetupModal()">Cancel</button>
+        <button class="button is-success" @click="submitSetup()" :disabled="setupForm.saving">
+          <span x-text="setupForm.saving ? 'Setting up...' : 'Setup'"></span>
+        </button>
+        <button class="button" @click="closeSetupModal()">Cancel</button>
       </footer>
     </div>
   </div>
 
-  <!-- Heater Configuration Modal -->
-  <div class="modal" id="heater-modal">
-    <div class="modal-background" onclick="closeHeaterModal()"></div>
+  <!-- Heater Configuration Modal (simplified for demo) -->
+  <div class="modal" :class="{'is-active': modals.heater}">
+    <div class="modal-background" @click="closeHeaterModal()"></div>
     <div class="modal-card" style="max-width: 600px;">
       <header class="modal-card-head">
         <p class="modal-card-title">🔥 Heater Configuration</p>
-        <button class="delete" aria-label="close" onclick="closeHeaterModal()"></button>
+        <button class="delete" aria-label="close" @click="closeHeaterModal()"></button>
       </header>
       <section class="modal-card-body">
-        <input type="hidden" id="heater-device-id">
-        <div id="heater-loading" class="has-text-centered py-4">
-          <span class="icon is-large"><i class="fas fa-spinner fa-spin"></i></span>
-          <p>Loading configuration...</p>
-        </div>
-        <div id="heater-config-form" style="display:none;">
-          <div class="field">
-            <label class="label">Room</label>
-            <div class="field has-addons">
-              <div class="control is-expanded">
-                <div class="select is-fullwidth">
-                  <select id="heater-room-id">
-                    <option value="">-- Select Room --</option>
-                  </select>
-                </div>
-              </div>
-              <div class="control">
-                <button class="button is-info" onclick="showAddRoomModalFromHeater()" title="Add new room">+</button>
-              </div>
-            </div>
-          </div>
-          <hr>
-          <p class="has-text-weight-semibold mb-2">Temperature Sensors</p>
-          <div class="field">
-            <label class="label">Internal Temperature Sensor</label>
-            <div class="control">
-              <div class="select is-fullwidth">
-                <select id="heater-internal-temp">
-                  <option value="">-- Select Sensor --</option>
-                </select>
-              </div>
-            </div>
-            <p class="help">Sensor inside the heated space</p>
-          </div>
-          <div class="field">
-            <label class="label">External Temperature Sensor</label>
-            <div class="control">
-              <div class="select is-fullwidth">
-                <select id="heater-external-temp">
-                  <option value="">-- Select Sensor --</option>
-                </select>
-              </div>
-            </div>
-            <p class="help">Sensor outside (for weather compensation)</p>
-          </div>
-          <div class="field">
-            <label class="label">Door/Window Sensors</label>
-            <div class="control">
-              <input class="input" type="text" id="heater-door-sensors" placeholder="Auto-discovered from room">
-            </div>
-            <p class="help">Comma-separated MQTT topics (auto-discovered from devices in same room)</p>
-          </div>
-          <hr>
-          <p class="has-text-weight-semibold mb-2">Cheap Electricity Window</p>
-          <div class="columns">
-            <div class="column">
-              <div class="field">
-                <label class="label">Start Hour</label>
-                <div class="control">
-                  <input class="input" type="number" id="heater-cheap-start" min="0" max="23" value="23">
-                </div>
-              </div>
-            </div>
-            <div class="column">
-              <div class="field">
-                <label class="label">End Hour</label>
-                <div class="control">
-                  <input class="input" type="number" id="heater-cheap-end" min="0" max="23" value="7">
-                </div>
-              </div>
-            </div>
-          </div>
-          <hr>
-          <p class="has-text-weight-semibold mb-2">Advanced Settings</p>
-          <div class="field">
-            <label class="label">Preheat Hours</label>
-            <div class="control">
-              <input class="input" type="number" id="heater-preheat-hours" min="0" max="12" value="2">
-            </div>
-            <p class="help">Hours before comfort time to start preheating</p>
-          </div>
-          <div class="field">
-            <label class="label">Poll Interval (ms)</label>
-            <div class="control">
-              <input class="input" type="number" id="heater-poll-interval" min="10000" max="300000" step="1000" value="60000">
-            </div>
-          </div>
-          <div class="field">
-            <label class="checkbox">
-              <input type="checkbox" id="heater-normally-closed">
-              Normally Closed Relay
-            </label>
-            <p class="help">Check if the relay is normally closed (heater ON when relay OFF)</p>
-          </div>
-          <div class="field">
-            <label class="checkbox">
-              <input type="checkbox" id="heater-enable-logging" checked>
-              Enable Logging
-            </label>
-          </div>
-        </div>
+        <p class="notification is-info">Heater configuration UI would go here. This is a simplified demo.</p>
+        <p>Device ID: <strong x-text="heaterForm.deviceId"></strong></p>
       </section>
       <footer class="modal-card-foot">
-        <button class="button is-success" id="heater-submit-btn" onclick="submitHeaterConfig()">Save</button>
-        <button class="button" onclick="closeHeaterModal()">Cancel</button>
+        <button class="button is-success" @click="closeHeaterModal()">Close</button>
       </footer>
     </div>
   </div>
 
   <footer class="footer">
     <div class="content has-text-centered has-text-grey-light is-size-7">
-      Served by MyHome reverse proxy
+      Served by MyHome reverse proxy · Powered by Alpine.js & HTMX
     </div>
   </footer>
+
   <script>
-    // Fetch available rooms and populate a dropdown
-    async function populateRoomDropdown(selectId) {
-      const select = document.getElementById(selectId);
-      if (!select) return;
-      // Keep the first option (-- No room --)
-      while (select.options.length > 1) {
-        select.remove(1);
-      }
-      try {
-        const res = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'room.list', params: null })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.result && data.result.rooms) {
-            for (const room of data.result.rooms) {
-              const opt = document.createElement('option');
-              opt.value = room.id;
-              opt.textContent = room.name || room.id;
-              select.appendChild(opt);
-            }
-          }
-        }
-      } catch (e) { console.log('Could not fetch rooms:', e); }
-    }
+    function app() {
+      return {
+        deviceCount: 0,
+        sensors: {},
+        doors: {},
+        switches: {},
+        rooms: [],
+        modals: {
+          room: false,
+          setup: false,
+          heater: false
+        },
+        roomEditMode: 'create',
+        roomForm: {
+          id: '',
+          name: '',
+          kinds: ['other'],
+          levels: { eco: 18, comfort: 20, away: 15 },
+          saving: false
+        },
+        setupForm: {
+          deviceId: '',
+          name: '',
+          roomId: '',
+          mqttBroker: '',
+          staEssid: '',
+          staPasswd: '',
+          sta1Essid: '',
+          sta1Passwd: '',
+          apPasswd: '',
+          saving: false
+        },
+        heaterForm: {
+          deviceId: ''
+        },
 
-    async function toggleSwitch(id, switchId) {
-      var new_state = false;
-      const btn = document.getElementById('btn-switch-' + id + '-' + switchId);
-      if (btn) {
-        btn.disabled = true;
-        btn.classList.add('is-loading');
-      }
-      const shape = document.getElementById('btn-switch-' + id + '-' + switchId + '-shape');
-      try {
-        console.log('toggleSwitch: POST /rpc switch.toggle for', id, switchId);
-        res = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'switch.toggle', params: {
-            identifier: id,
-            switch_id: parseInt(switchId)
-          }})
-        });
-        console.log('toggleSwitch: switch.toggle response status', res.status);
-        if (!res.ok) {
-          console.error('toggleSwitch: switch.toggle response error', await res.text());
-          return;
-        } else {
-          out = await res.json();
-          console.log('toggleSwitch: switch.toggle response', out);
-          new_state = ! out.result.result.was_on;
-        }
-      } catch (e) {
-        console.error('toggleSwitch: error', e.name, e.message, e);
-      } finally {
-        if (btn) {
-          console.log('toggleSwitch: new state', new_state);
-          btn.disabled = false;
-          btn.classList.remove('is-loading');
-          if (new_state) {
-            btn.classList.remove('is-light');
-            btn.classList.add('is-info');
-            btn.classList.add('is-active');
-            shape.innerHTML = `
-              <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-              <circle cx="16" cy="12" r="3"></circle>
-            `;
-          } else {
-            btn.classList.remove('is-info');
-            btn.classList.remove('is-active');
-            btn.classList.add('is-light');
-            shape.innerHTML = `
-              <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-              <circle cx="8" cy="12" r="3"></circle>
-            `;
-          }
-        }
-      }
-    }
-
-    async function refreshDevice(id) {
-      const btn = document.getElementById('btn-refresh-' + id);
-      if (btn) {
-        btn.disabled = true;
-        btn.classList.add('is-loading');
-      }
-      try {
-        console.log('refreshDevice: POST /rpc device.refresh for', id);
-        res = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'device.refresh', params: id })
-        });
-        console.log('refreshDevice: device.refresh response status', res.status);
-        if (!res.ok) {
-          console.error('refreshDevice: device.refresh response error', await res.text());
-          return;
-        }
-      } catch (e) {
-        console.error('refreshDevice: error', e.name, e.message, e);
-      } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.classList.remove('is-loading');
-        }
-      }
-    }
-
-    async function setupDevice(id) {
-      // Open modal and store device ID
-      document.getElementById('setup-device-id').value = id;
-      // Clear all fields
-      document.getElementById('setup-name').value = '';
-      document.getElementById('setup-room-id').value = '';
-      document.getElementById('setup-mqtt-broker').value = '';
-      document.getElementById('setup-sta-essid').value = '';
-      document.getElementById('setup-sta-passwd').value = '';
-      document.getElementById('setup-sta1-essid').value = '';
-      document.getElementById('setup-sta1-passwd').value = '';
-      document.getElementById('setup-ap-passwd').value = '';
-      // Reset submit button state
-      const btn = document.getElementById('setup-submit-btn');
-      if (btn) { btn.disabled = false; btn.textContent = 'Setup'; }
-      // Show modal
-      document.getElementById('setup-modal').classList.add('is-active');
-      // Fetch available rooms and populate dropdown
-      await populateRoomDropdown('setup-room-id');
-      // Try to get current device room and select it
-      try {
-        const res = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'device.show', params: { identifier: id } })
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.result) {
-            if (data.result.room_id) {
-              document.getElementById('setup-room-id').value = data.result.room_id;
-            }
-            if (data.result.name) {
-              document.getElementById('setup-name').value = data.result.name;
-            }
-          }
-        }
-      } catch (e) { console.log('Could not fetch device info:', e); }
-    }
-
-    function closeSetupModal() {
-      document.getElementById('setup-modal').classList.remove('is-active');
-    }
-
-    async function submitSetup() {
-      const id = document.getElementById('setup-device-id').value;
-      const btn = document.getElementById('setup-submit-btn');
-      const deviceBtn = document.getElementById('btn-setup-' + id);
-      
-      // Build params object, only including non-empty values
-      const params = { identifier: id };
-      const name = document.getElementById('setup-name').value.trim();
-      const roomId = document.getElementById('setup-room-id').value;
-      const mqttBroker = document.getElementById('setup-mqtt-broker').value.trim();
-      const staEssid = document.getElementById('setup-sta-essid').value.trim();
-      const staPasswd = document.getElementById('setup-sta-passwd').value;
-      const sta1Essid = document.getElementById('setup-sta1-essid').value.trim();
-      const sta1Passwd = document.getElementById('setup-sta1-passwd').value;
-      const apPasswd = document.getElementById('setup-ap-passwd').value;
-      
-      if (name) params.name = name;
-      if (mqttBroker) params.mqtt_broker = mqttBroker;
-      if (staEssid) params.sta_essid = staEssid;
-      if (staPasswd) params.sta_passwd = staPasswd;
-      if (sta1Essid) params.sta1_essid = sta1Essid;
-      if (sta1Passwd) params.sta1_passwd = sta1Passwd;
-      if (apPasswd) params.ap_passwd = apPasswd;
-
-      if (btn) { btn.disabled = true; btn.textContent = 'Setting up…'; }
-      if (deviceBtn) { deviceBtn.disabled = true; deviceBtn.textContent = 'Setting up…'; }
-      
-      try {
-        // First, save room assignment to database
-        if (roomId !== undefined) {
-          await fetch('/rpc', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ method: 'device.setroom', params: { identifier: id, room_id: roomId } })
-          });
-        }
-
-        const res = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'device.setup', params: params })
-        });
-        if (!res.ok) {
-          const t = await res.text();
-          if (btn) { btn.disabled = false; btn.textContent = 'Setup'; }
-          if (deviceBtn) { deviceBtn.disabled = false; deviceBtn.textContent = 'Setup'; }
-          alert('Setup failed: ' + t);
-          return;
-        }
-        if (btn) { btn.textContent = 'Done'; }
-        if (deviceBtn) { deviceBtn.textContent = 'Done'; }
-        closeSetupModal();
-        // Reload to show updated device info
-        setTimeout(() => location.reload(), 500);
-      } catch (e) {
-        if (btn) { btn.disabled = false; btn.textContent = 'Setup'; }
-        if (deviceBtn) { deviceBtn.disabled = false; deviceBtn.textContent = 'Setup'; }
-        alert('Setup error: ' + e);
-      }
-    }
-
-    // Heater configuration functions
-    const heaterKVSKeys = {
-      'script/heater/enable-logging': 'heater-enable-logging',
-      'room-id': 'heater-room-id',
-      'script/heater/cheap-start-hour': 'heater-cheap-start',
-      'script/heater/cheap-end-hour': 'heater-cheap-end',
-      'script/heater/poll-interval-ms': 'heater-poll-interval',
-      'script/heater/preheat-hours': 'heater-preheat-hours',
-      'normally-closed': 'heater-normally-closed',
-      'script/heater/internal-temperature-topic': 'heater-internal-temp',
-      'script/heater/external-temperature-topic': 'heater-external-temp',
-      'script/heater/door-sensor-topics': 'heater-door-sensors'
-    };
-
-    async function openHeaterConfig(deviceId) {
-      document.getElementById('heater-device-id').value = deviceId;
-      document.getElementById('heater-loading').style.display = 'block';
-      document.getElementById('heater-config-form').style.display = 'none';
-      // Reset save button state
-      const btn = document.getElementById('heater-submit-btn');
-      if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
-      document.getElementById('heater-modal').classList.add('is-active');
-
-      try {
-        // First, get device info to retrieve its room_id
-        let deviceRoomId = '';
-        const deviceRes = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'device.show', params: { identifier: deviceId } })
-        });
-        if (deviceRes.ok) {
-          const deviceData = await deviceRes.json();
-          if (deviceData.result && deviceData.result.room_id) {
-            deviceRoomId = deviceData.result.room_id;
-          }
-        }
-
-        // Load rooms list
-        const roomsRes = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'room.list' })
-        });
-        if (roomsRes.ok) {
-          const roomsData = await roomsRes.json();
-          const rooms = roomsData.result || roomsData;
-          const roomSelect = document.getElementById('heater-room-id');
-          roomSelect.innerHTML = '<option value="">-- Select Room --</option>';
-          if (rooms && rooms.rooms) {
-            rooms.rooms.forEach(r => {
-              const opt = document.createElement('option');
-              opt.value = r.id;
-              opt.textContent = r.name || r.id;
-              roomSelect.appendChild(opt);
-            });
-          }
-        }
-
-        // Load thermometers list
-        let allThermometers = [];
-        const thermRes = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'thermometer.list' })
-        });
-        if (thermRes.ok) {
-          const thermData = await thermRes.json();
-          const therms = thermData.result || thermData;
-          if (therms && therms.thermometers) {
-            allThermometers = therms.thermometers;
-          }
-        }
-
-        // Populate thermometer dropdowns
-        const intSelect = document.getElementById('heater-internal-temp');
-        const extSelect = document.getElementById('heater-external-temp');
-        intSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
-        extSelect.innerHTML = '<option value="">-- Select Sensor --</option>';
-        allThermometers.forEach(t => {
-          const opt1 = document.createElement('option');
-          opt1.value = t.mqtt_topic;
-          opt1.textContent = t.name + ' (' + t.type + ')';
-          // Mark thermometers in the same room
-          if (deviceRoomId && t.room_id === deviceRoomId) {
-            opt1.textContent = '★ ' + opt1.textContent;
-          }
-          intSelect.appendChild(opt1);
-          const opt2 = opt1.cloneNode(true);
-          extSelect.appendChild(opt2);
-        });
-
-        // Load current heater config via server-side RPC (uses MQTT)
-        const configRes = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'heater.getconfig', params: { identifier: deviceId } })
-        });
-        
-        let configRoomId = '';
-        let configInternalTemp = '';
-        let configExternalTemp = '';
-        
-        if (configRes.ok) {
-          const data = await configRes.json();
-          const result = data.result || data;
-          if (result.config) {
-            const cfg = result.config;
-            document.getElementById('heater-enable-logging').checked = cfg.enable_logging || false;
-            configRoomId = cfg.room_id || '';
-            document.getElementById('heater-cheap-start').value = cfg.cheap_start_hour || 23;
-            document.getElementById('heater-cheap-end').value = cfg.cheap_end_hour || 7;
-            document.getElementById('heater-poll-interval').value = cfg.poll_interval_ms || 60000;
-            document.getElementById('heater-preheat-hours').value = cfg.preheat_hours || 2;
-            document.getElementById('heater-normally-closed').checked = cfg.normally_closed || false;
-            configInternalTemp = cfg.internal_temperature_topic || '';
-            configExternalTemp = cfg.external_temperature_topic || '';
-          }
-        }
-
-        // Set room: prefer config value, fall back to device's room_id
-        const finalRoomId = configRoomId || deviceRoomId;
-        document.getElementById('heater-room-id').value = finalRoomId;
-
-        // Set internal temp: prefer config value, or auto-select first thermometer in room
-        if (configInternalTemp) {
-          document.getElementById('heater-internal-temp').value = configInternalTemp;
-        } else if (finalRoomId) {
-          // Auto-select first thermometer in the same room
-          const roomTherm = allThermometers.find(t => t.room_id === finalRoomId);
-          if (roomTherm) {
-            document.getElementById('heater-internal-temp').value = roomTherm.mqtt_topic;
-          }
-        }
-
-        // Set external temp from config
-        document.getElementById('heater-external-temp').value = configExternalTemp;
-
-        document.getElementById('heater-loading').style.display = 'none';
-        document.getElementById('heater-config-form').style.display = 'block';
-      } catch (e) {
-        alert('Failed to load heater configuration: ' + e);
-        closeHeaterModal();
-      }
-    }
-
-    function closeHeaterModal() {
-      document.getElementById('heater-modal').classList.remove('is-active');
-    }
-
-    // Opens the main room creation modal from the heater config dialog
-    function showAddRoomModalFromHeater() {
-      // Store that we came from heater config so we can refresh the dropdown after
-      window.heaterRoomRefreshNeeded = true;
-      showAddRoomModal();
-    }
-
-    // Refreshes the heater room dropdown and optionally selects a room
-    async function refreshHeaterRoomDropdown(selectRoomId) {
-      try {
-        const roomsRes = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'room.list' })
-        });
-        if (roomsRes.ok) {
-          const roomsData = await roomsRes.json();
-          const rooms = roomsData.result || roomsData;
-          const roomSelect = document.getElementById('heater-room-id');
-          roomSelect.innerHTML = '<option value="">-- Select Room --</option>';
-          if (rooms && rooms.rooms) {
-            rooms.rooms.forEach(r => {
-              const opt = document.createElement('option');
-              opt.value = r.id;
-              opt.textContent = r.name || r.id;
-              roomSelect.appendChild(opt);
-            });
-          }
-          if (selectRoomId) {
-            roomSelect.value = selectRoomId;
-          }
-        }
-      } catch (e) {
-        console.error('Failed to refresh room dropdown:', e);
-      }
-    }
-
-    async function submitHeaterConfig() {
-      const deviceId = document.getElementById('heater-device-id').value;
-      const btn = document.getElementById('heater-submit-btn');
-      if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
-
-      try {
-        // Build config params for heater.setconfig RPC
-        const params = { identifier: deviceId };
-        
-        const enableLogging = document.getElementById('heater-enable-logging');
-        if (enableLogging) params.enable_logging = enableLogging.checked;
-        
-        const roomId = document.getElementById('heater-room-id');
-        if (roomId && roomId.value) params.room_id = roomId.value;
-        
-        const cheapStart = document.getElementById('heater-cheap-start');
-        if (cheapStart && cheapStart.value) params.cheap_start_hour = parseInt(cheapStart.value, 10);
-        
-        const cheapEnd = document.getElementById('heater-cheap-end');
-        if (cheapEnd && cheapEnd.value) params.cheap_end_hour = parseInt(cheapEnd.value, 10);
-        
-        const pollInterval = document.getElementById('heater-poll-interval');
-        if (pollInterval && pollInterval.value) params.poll_interval_ms = parseInt(pollInterval.value, 10);
-        
-        const preheatHours = document.getElementById('heater-preheat-hours');
-        if (preheatHours && preheatHours.value) params.preheat_hours = parseInt(preheatHours.value, 10);
-        
-        const normallyClosed = document.getElementById('heater-normally-closed');
-        if (normallyClosed) params.normally_closed = normallyClosed.checked;
-        
-        const internalTemp = document.getElementById('heater-internal-temp');
-        if (internalTemp && internalTemp.value) params.internal_temperature_topic = internalTemp.value;
-        
-        const externalTemp = document.getElementById('heater-external-temp');
-        if (externalTemp && externalTemp.value) params.external_temperature_topic = externalTemp.value;
-
-        // Save via server-side RPC (uses MQTT)
-        const res = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'heater.setconfig', params: params })
-        });
-        
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error('Failed to save configuration: ' + t);
-        }
-        
-        const data = await res.json();
-        const result = data.result || data;
-        if (result.success === false) {
-          throw new Error(result.message || 'Unknown error');
-        }
-
-        if (btn) { btn.textContent = 'Saved!'; }
-        setTimeout(() => closeHeaterModal(), 500);
-      } catch (e) {
-        if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
-        alert('Error saving configuration: ' + e);
-      }
-    }
-
-    // Room management functions
-    async function loadRooms() {
-      try {
-        const res = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'temperature.list' })
-        });
-        if (!res.ok) {
-          document.getElementById('rooms-list').innerHTML = '<div class="column is-12"><p class="has-text-danger">Failed to load rooms</p></div>';
-          return;
-        }
-        const data = await res.json();
-        const container = document.getElementById('rooms-list');
-        
-        // RPC response is wrapped in {"result": ...}
-        const rooms = data.result || data;
-        
-        if (!rooms || Object.keys(rooms).length === 0) {
-          container.innerHTML = '<div class="column is-12"><p class="has-text-grey">No rooms configured yet.</p></div>';
-          return;
-        }
-
-        let html = '';
-        for (const [roomId, room] of Object.entries(rooms)) {
-          const kinds = room.kinds ? room.kinds.join(', ') : 'other';
-          const levels = room.levels ? Object.entries(room.levels).map(([k,v]) => k + ': ' + v + '°C').join(', ') : '';
-          html += '<div class="column is-4">' +
-            '<div class="box">' +
-            '<div class="level mb-2">' +
-            '<div class="level-left"><strong>' + (room.name || roomId) + '</strong></div>' +
-            '<div class="level-right">' +
-            '<button class="button is-small is-info is-outlined mr-1" onclick="editRoom(\'' + roomId + '\')" title="Edit">✏️</button>' +
-            '<button class="button is-small is-danger is-outlined" onclick="confirmDeleteRoom(\'' + roomId + '\', \'' + (room.name || roomId) + '\')" title="Delete">🗑️</button>' +
-            '</div></div>' +
-            '<p class="is-size-7 has-text-grey">ID: ' + roomId + '</p>' +
-            '<p class="is-size-7">Types: ' + kinds + '</p>' +
-            '<p class="is-size-7">Levels: ' + levels + '</p>' +
-            '</div></div>';
-        }
-        container.innerHTML = html;
-      } catch (e) {
-        document.getElementById('rooms-list').innerHTML = '<div class="column is-12"><p class="has-text-danger">Error: ' + e + '</p></div>';
-      }
-    }
-
-    function showAddRoomModal() {
-      document.getElementById('room-edit-mode').value = 'create';
-      document.getElementById('room-edit-title').textContent = 'Add Room';
-      document.getElementById('room-edit-id').value = '';
-      document.getElementById('room-edit-slug').value = '';
-      document.getElementById('room-edit-slug').disabled = false;
-      document.getElementById('room-edit-name').value = '';
-      document.querySelectorAll('[id^="room-kind-"]').forEach(cb => cb.checked = false);
-      document.getElementById('room-kind-other').checked = true;
-      document.getElementById('room-level-eco').value = '18';
-      document.getElementById('room-level-comfort').value = '20';
-      document.getElementById('room-level-away').value = '15';
-      document.getElementById('room-delete-btn').style.display = 'none';
-      // Reset save button state
-      const btn = document.getElementById('room-edit-submit');
-      btn.disabled = false;
-      btn.textContent = 'Save';
-      document.getElementById('room-edit-modal').classList.add('is-active');
-    }
-
-    async function editRoom(roomId) {
-      try {
-        const res = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'temperature.get', params: { room_id: roomId } })
-        });
-        if (!res.ok) { alert('Failed to load room'); return; }
-        const data = await res.json();
-        const room = data.result || data;
-
-        document.getElementById('room-edit-mode').value = 'edit';
-        document.getElementById('room-edit-title').textContent = 'Edit Room';
-        document.getElementById('room-edit-id').value = roomId;
-        document.getElementById('room-edit-slug').value = roomId;
-        document.getElementById('room-edit-slug').disabled = true;
-        document.getElementById('room-edit-name').value = room.name || '';
-
-        document.querySelectorAll('[id^="room-kind-"]').forEach(cb => cb.checked = false);
-        if (room.kinds) {
-          room.kinds.forEach(k => {
-            const cb = document.getElementById('room-kind-' + k);
-            if (cb) cb.checked = true;
-          });
-        }
-
-        if (room.levels) {
-          document.getElementById('room-level-eco').value = room.levels.eco || 18;
-          document.getElementById('room-level-comfort').value = room.levels.comfort || 20;
-          document.getElementById('room-level-away').value = room.levels.away || 15;
-        }
-
-        document.getElementById('room-delete-btn').style.display = 'block';
-        // Reset save button state
-        const btn = document.getElementById('room-edit-submit');
-        btn.disabled = false;
-        btn.textContent = 'Save';
-        document.getElementById('room-edit-modal').classList.add('is-active');
-      } catch (e) {
-        alert('Error loading room: ' + e);
-      }
-    }
-
-    function closeRoomEditModal() {
-      document.getElementById('room-edit-modal').classList.remove('is-active');
-    }
-
-    async function submitRoomEdit() {
-      const mode = document.getElementById('room-edit-mode').value;
-      const btn = document.getElementById('room-edit-submit');
-      btn.disabled = true;
-      btn.textContent = 'Saving...';
-
-      try {
-        const roomId = mode === 'create' ? document.getElementById('room-edit-slug').value.trim() : document.getElementById('room-edit-id').value;
-        const name = document.getElementById('room-edit-name').value.trim();
-
-        const kinds = [];
-        document.querySelectorAll('[id^="room-kind-"]:checked').forEach(cb => kinds.push(cb.value));
-        if (kinds.length === 0) kinds.push('other');
-
-        const levels = {
-          eco: parseFloat(document.getElementById('room-level-eco').value) || 18,
-          comfort: parseFloat(document.getElementById('room-level-comfort').value) || 20,
-          away: parseFloat(document.getElementById('room-level-away').value) || 15
-        };
-
-        if (!roomId) { alert('Room ID is required'); btn.disabled = false; btn.textContent = 'Save'; return; }
-
-        const method = mode === 'create' ? 'room.create' : 'room.edit';
-        const params = mode === 'create' 
-          ? { id: roomId, name: name || roomId }
-          : { id: roomId, name: name || roomId, kinds: kinds, levels: levels };
-
-        const res = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: method, params: params })
-        });
-
-        if (!res.ok) {
-          const t = await res.text();
-          alert('Failed to save room: ' + t);
-          btn.disabled = false;
-          btn.textContent = 'Save';
-          return;
-        }
-
-        // If creating, also set the full config via temperature.set
-        if (mode === 'create') {
-          await fetch('/rpc', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ method: 'temperature.set', params: { room_id: roomId, name: name || roomId, kinds: kinds, levels: levels } })
-          });
-        }
-
-        btn.textContent = 'Saved!';
-        setTimeout(async () => {
-          closeRoomEditModal();
-          loadRooms();
-          // If we came from heater config, refresh the room dropdown and select the new room
-          if (window.heaterRoomRefreshNeeded && mode === 'create') {
-            window.heaterRoomRefreshNeeded = false;
-            await refreshHeaterRoomDropdown(roomId);
-          }
-        }, 300);
-      } catch (e) {
-        alert('Error: ' + e);
-        btn.disabled = false;
-        btn.textContent = 'Save';
-      }
-    }
-
-    function confirmDeleteRoom(roomId, roomName) {
-      if (confirm('Delete room "' + roomName + '"?\n\nNote: If this room is assigned to heaters, they will need to be reconfigured.')) {
-        deleteRoomById(roomId);
-      }
-    }
-
-    async function deleteRoom() {
-      const roomId = document.getElementById('room-edit-id').value;
-      if (!roomId) return;
-      if (!confirm('Delete this room?\n\nNote: If this room is assigned to heaters, they will need to be reconfigured.')) return;
-      await deleteRoomById(roomId);
-      closeRoomEditModal();
-    }
-
-    async function deleteRoomById(roomId) {
-      try {
-        const res = await fetch('/rpc', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ method: 'room.delete', params: { id: roomId } })
-        });
-        if (!res.ok) {
-          const t = await res.text();
-          alert('Failed to delete room: ' + t);
-          return;
-        }
-        loadRooms();
-      } catch (e) {
-        alert('Error deleting room: ' + e);
-      }
-    }
-
-    // Load rooms on page load
-    document.addEventListener('DOMContentLoaded', loadRooms);
-
-    // SSE client for live sensor updates
-    const eventSource = new EventSource('/events');
-
-    eventSource.addEventListener('connected', (e) => {
-      console.log('SSE: connected');
-    });
-
-    eventSource.addEventListener('sensor-update', (e) => {
-      try {
-        console.log('SSE sensor-update', e.data);
-        const data = JSON.parse(e.data);
-        updateDeviceSensor(data.device_id, data.sensor, data.value);
-      } catch (err) {
-        console.error('SSE: Failed to parse sensor-update:', err, "data", e.data);
-      }
-    });
-
-    eventSource.addEventListener('device-update', (e) => {
-      try {
-        console.log("SSE: device-update", e.data);
-        const deviceView = JSON.parse(e.data);
-        if (!deviceView || !deviceView.id) {
-          console.error('Invalid device update: missing id', deviceView);
-          return;
-        }
-        updateDeviceCard(deviceView.id, deviceView);
-      } catch (err) {
-        console.error('SSE: Failed to parse device-update:', err, "data", e.data);
-      }
-    });
-
-    eventSource.onerror = (e) => {
-      console.error('SSE: error:', e);
-      // Browser will automatically reconnect
-    };
-
-    function updateDeviceSensor(deviceId, sensor, value) {
-      const el = document.getElementById('sensor-' + deviceId + '-' + sensor);
-      if (el && sensor === 'temperature') {
-        el.textContent = value + '°C';
-      }
-      if (el && sensor === 'humidity') {
-        el.textContent = value + '%';
-      }
-      if (el && sensor === 'window') {
-        if (value === "0") {
-          el.innerHTML = '<svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z"/></svg>Open';
-          el.className = 'tag is-warning ml-2';
-        } else {
-          el.innerHTML = '<svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/></svg>Closed';
-          el.className = 'tag is-success ml-2';
-        }
-      }
-    }
-
-    function updateDeviceCard(deviceId, deviceView) {
-      const el = document.getElementById('device-' + deviceId);
-      if (el) {
-        // Update existing device card - update all fields that might change
-        const nameEl = document.getElementById('device-' + deviceId + '-name');
-        if (nameEl) {
-          nameEl.textContent = deviceView.name;
-        }
-        
-        // Update host (including when it becomes empty)
-        const hostEl = document.getElementById('device-' + deviceId + '-host');
-        if (hostEl) {
-          if (deviceView.host) {
-            hostEl.textContent = 'Host: ' + deviceView.host;
-          } else {
-            hostEl.textContent = 'No host known';
-          }
-        }
-
-        // Update emoji in title if it changed
-        const titleEl = el.querySelector('.title.is-5');
-        if (titleEl) {
-          const emoji = deviceView.device_type_emoji || '';
-          const tempSensorHtml = deviceView.has_temperature_sensor ? `<span class="tag is-light ml-2" id="sensor-${deviceId}-temperature">--°C</span>` : '';
-          const humiditySensorHtml = deviceView.has_humidity_sensor ? `<span class="tag is-light ml-2" id="sensor-${deviceId}-humidity">--%</span>` : '';
-          const doorSensorHtml = deviceView.has_door_sensor ? `<span class="tag is-light ml-2" id="door-${deviceId}">
-            <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-              <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
-            </svg>
-            Unknown
-          </span>` : '';
-          titleEl.innerHTML = `${emoji ? emoji + ' ' : ''}<span id="device-${deviceId}-name">${escapeHtml(deviceView.name)}</span>${tempSensorHtml}${doorSensorHtml}`;
-        }
-
-        // Update manufacturer in subtitle
-        const subtitleEl = el.querySelector('.subtitle.is-7');
-        if (subtitleEl) {
-          subtitleEl.textContent = `${deviceView.manufacturer || 'Unknown'} · ${deviceId}`;
-        }
-
-        // Update buttons container (Open button, heater button)
-        const buttonsEl = el.querySelector('.buttons');
-        if (buttonsEl) {
-          const hasOpenBtn = buttonsEl.querySelector('.button.is-link');
-          const shouldHaveOpenBtn = deviceView.host && deviceView.link_token;
+        init() {
+          this.connectSSE();
+          this.loadRooms();
           
-          // Add or remove Open button
-          if (shouldHaveOpenBtn && !hasOpenBtn) {
-            const openBtn = `<a class="button is-link is-small" href="/devices/${escapeHtml(deviceView.link_token)}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="2" y1="12" x2="22" y2="12"></line>
-                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-              </svg>
-            </a>`;
-            buttonsEl.insertAdjacentHTML('afterbegin', openBtn);
-          } else if (!shouldHaveOpenBtn && hasOpenBtn) {
-            hasOpenBtn.remove();
-          } else if (hasOpenBtn && deviceView.link_token) {
-            hasOpenBtn.href = `/devices/${escapeHtml(deviceView.link_token)}/`;
+          // Debug HTMX events
+          document.body.addEventListener('htmx:beforeRequest', (event) => {
+            console.log('HTMX: beforeRequest', event.detail);
+          });
+          
+          document.body.addEventListener('htmx:afterRequest', (event) => {
+            console.log('HTMX: afterRequest', event.detail);
+          });
+          
+          document.body.addEventListener('htmx:responseError', (event) => {
+            console.error('HTMX: responseError', event.detail);
+          });
+          
+          // Update device count after HTMX loads devices
+          document.body.addEventListener('htmx:afterSwap', (event) => {
+            console.log('HTMX: afterSwap', event.detail);
+            if (event.detail.target.id === 'devices-container') {
+              const deviceCards = document.querySelectorAll('#devices-container .card');
+              this.deviceCount = deviceCards.length;
+              console.log('Device count updated:', this.deviceCount);
+              
+              // Reinitialize Alpine.js for the new content
+              if (window.Alpine) {
+                window.Alpine.initTree(event.detail.target);
+              }
+            }
+          });
+        },
+
+        async toggleSwitch(deviceId, switchId) {
+          const btn = document.getElementById('btn-switch-' + deviceId + '-' + switchId);
+          const shape = document.getElementById('btn-switch-' + deviceId + '-' + switchId + '-shape');
+          
+          if (btn) {
+            btn.disabled = true;
+            btn.classList.add('is-loading');
+          }
+          
+          try {
+            const res = await fetch('/rpc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                method: 'switch.toggle', 
+                params: {
+                  identifier: deviceId,
+                  switch_id: parseInt(switchId)
+                }
+              })
+            });
+            
+            if (!res.ok) {
+              console.error('toggleSwitch: error', await res.text());
+              return;
+            }
+            
+            const out = await res.json();
+            const newState = !out.result.result.was_on;
+            
+            if (btn) {
+              btn.disabled = false;
+              btn.classList.remove('is-loading');
+              
+              if (newState) {
+                btn.classList.remove('is-light');
+                btn.classList.add('is-info', 'is-active');
+                shape.innerHTML = `
+                  <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
+                  <circle cx="16" cy="12" r="3"></circle>
+                `;
+              } else {
+                btn.classList.remove('is-info', 'is-active');
+                btn.classList.add('is-light');
+                shape.innerHTML = `
+                  <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
+                  <circle cx="8" cy="12" r="3"></circle>
+                `;
+              }
+            }
+          } catch (e) {
+            console.error('toggleSwitch: error', e);
+            if (btn) {
+              btn.disabled = false;
+              btn.classList.remove('is-loading');
+            }
+          }
+        },
+
+        async refreshDevice(deviceId) {
+          const btn = document.getElementById('btn-refresh-' + deviceId);
+          if (btn) {
+            btn.disabled = true;
+            btn.classList.add('is-loading');
+          }
+          
+          try {
+            console.log('refreshDevice: POST /rpc device.refresh for', deviceId);
+            const res = await fetch('/rpc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method: 'device.refresh', params: deviceId })
+            });
+            
+            console.log('refreshDevice: response status', res.status);
+            if (!res.ok) {
+              console.error('refreshDevice: error', await res.text());
+              return;
+            }
+            
+            console.log('refreshDevice: success');
+          } catch (e) {
+            console.error('refreshDevice: error', e.name, e.message, e);
+          } finally {
+            if (btn) {
+              btn.disabled = false;
+              btn.classList.remove('is-loading');
+            }
+          }
+        },
+
+        connectSSE() {
+          const eventSource = new EventSource('/events');
+          
+          eventSource.addEventListener('connected', () => {
+            console.log('SSE: connected');
+          });
+
+          eventSource.addEventListener('sensor-update', (e) => {
+            try {
+              const data = JSON.parse(e.data);
+              this.updateSensor(data.device_id, data.sensor, data.value);
+            } catch (err) {
+              console.error('SSE: Failed to parse sensor-update:', err);
+            }
+          });
+
+          eventSource.addEventListener('device-update', (e) => {
+            try {
+              const deviceView = JSON.parse(e.data);
+              console.log('SSE: device-update', deviceView);
+              this.updateDeviceView(deviceView);
+            } catch (err) {
+              console.error('SSE: Failed to parse device-update:', err);
+            }
+          });
+
+          eventSource.onerror = (e) => {
+            console.error('SSE: error:', e);
+          };
+        },
+
+        updateSensor(deviceId, sensor, value) {
+          if (!this.sensors[deviceId]) {
+            this.sensors[deviceId] = {};
+          }
+          
+          if (sensor === 'temperature') {
+            this.sensors[deviceId].temperature = value + '°C';
+          } else if (sensor === 'humidity') {
+            this.sensors[deviceId].humidity = value + '%';
+          } else if (sensor === 'window') {
+            this.doors[deviceId] = value === "0" ? 'open' : 'closed';
+          }
+        },
+
+        updateDeviceView(deviceView) {
+          if (!deviceView || !deviceView.id) {
+            console.error('Invalid device update: missing id', deviceView);
+            return;
           }
 
-          // Add or remove heater button
-          const hasHeaterBtn = document.getElementById('btn-heater-' + deviceId);
-          if (deviceView.has_heater_script && !hasHeaterBtn) {
-            const heaterBtn = `<button class="button is-danger is-small" id="btn-heater-${deviceId}" onclick="openHeaterConfig('${escapeJs(deviceId)}')" title="Heater Configuration">🔥</button>`;
-            buttonsEl.insertAdjacentHTML('beforeend', heaterBtn);
-          } else if (!deviceView.has_heater_script && hasHeaterBtn) {
-            hasHeaterBtn.remove();
+          const deviceId = deviceView.id;
+
+          // Update switches if present
+          if (deviceView.switches) {
+            for (const [switchId, switchData] of Object.entries(deviceView.switches)) {
+              const btn = document.getElementById('btn-switch-' + deviceId + '-' + switchId);
+              const shape = document.getElementById('btn-switch-' + deviceId + '-' + switchId + '-shape');
+              
+              if (btn && shape) {
+                const isOn = switchData.on || false;
+                
+                if (isOn) {
+                  btn.classList.remove('is-light');
+                  btn.classList.add('is-info', 'is-active');
+                  shape.innerHTML = `
+                    <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
+                    <circle cx="16" cy="12" r="3"></circle>
+                  `;
+                } else {
+                  btn.classList.remove('is-info', 'is-active');
+                  btn.classList.add('is-light');
+                  shape.innerHTML = `
+                    <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
+                    <circle cx="8" cy="12" r="3"></circle>
+                  `;
+                }
+              }
+            }
           }
 
-          // Add or remove refresh button
-          const hasRefreshBtn = document.getElementById('btn-refresh-' + deviceId);
-          if (deviceView.is_refreshable && !hasRefreshBtn) {
-            const refreshBtn = `<button class="button is-warning is-small" id="btn-refresh-${deviceId}" onclick="refreshDevice('${escapeJs(deviceId)}')" title="Refresh device"></button>`;
-            buttonsEl.insertAdjacentHTML('beforeend', refreshBtn);
-          } else if (!deviceView.is_refreshable && hasRefreshBtn) {
-            hasRefreshBtn.remove();
+          // Update sensors if present
+          if (deviceView.temperature !== undefined && deviceView.temperature !== null) {
+            if (!this.sensors[deviceId]) this.sensors[deviceId] = {};
+            this.sensors[deviceId].temperature = deviceView.temperature.toFixed(1) + '°C';
+          }
+          if (deviceView.humidity !== undefined && deviceView.humidity !== null) {
+            if (!this.sensors[deviceId]) this.sensors[deviceId] = {};
+            this.sensors[deviceId].humidity = deviceView.humidity.toFixed(1) + '%';
           }
 
-          // Add or remove switch button
+          // Update door sensor if present
+          if (deviceView.door_opened !== undefined && deviceView.door_opened !== null) {
+            this.doors[deviceId] = deviceView.door_opened ? 'open' : 'closed';
+          }
+        },
 
+        getDoorClass(deviceId) {
+          const state = this.doors[deviceId];
+          if (state === 'open') return 'is-warning';
+          if (state === 'closed') return 'is-success';
+          return 'is-light';
+        },
+
+        getDoorText(deviceId) {
+          const state = this.doors[deviceId];
+          if (state === 'open') return 'Open';
+          if (state === 'closed') return 'Closed';
+          return 'Unknown';
+        },
+
+        getDoorPath(deviceId) {
+          const state = this.doors[deviceId];
+          if (state === 'open') {
+            return 'M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z';
+          }
+          return 'M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z';
+        },
+
+        async loadRooms() {
+          try {
+            const res = await fetch('/rpc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method: 'room.list', params: null })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.result && data.result.rooms) {
+                this.rooms = data.result.rooms;
+              }
+            }
+          } catch (e) {
+            console.error('Failed to load rooms:', e);
+          }
+        },
+
+        showAddRoomModal() {
+          this.roomEditMode = 'create';
+          this.roomForm = {
+            id: '',
+            name: '',
+            kinds: ['other'],
+            levels: { eco: 18, comfort: 20, away: 15 },
+            saving: false
+          };
+          this.modals.room = true;
+        },
+
+        async editRoom({roomId}) {
+          try {
+            const res = await fetch('/rpc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method: 'temperature.get', params: { room_id: roomId } })
+            });
+            if (!res.ok) {
+              alert('Failed to load room');
+              return;
+            }
+            const data = await res.json();
+            const room = data.result || data;
+
+            this.roomEditMode = 'edit';
+            this.roomForm = {
+              id: roomId,
+              name: room.name || '',
+              kinds: room.kinds || ['other'],
+              levels: room.levels || { eco: 18, comfort: 20, away: 15 },
+              saving: false
+            };
+            this.modals.room = true;
+          } catch (e) {
+            alert('Error loading room: ' + e);
+          }
+        },
+
+        closeRoomModal() {
+          this.modals.room = false;
+        },
+
+        async submitRoomEdit() {
+          this.roomForm.saving = true;
+          try {
+            const method = this.roomEditMode === 'create' ? 'room.create' : 'room.edit';
+            const params = {
+              id: this.roomForm.id,
+              name: this.roomForm.name || this.roomForm.id,
+              kinds: this.roomForm.kinds,
+              levels: this.roomForm.levels
+            };
+
+            const res = await fetch('/rpc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method, params })
+            });
+
+            if (!res.ok) {
+              const t = await res.text();
+              alert('Failed to save room: ' + t);
+              return;
+            }
+
+            if (this.roomEditMode === 'create') {
+              await fetch('/rpc', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  method: 'temperature.set', 
+                  params: { 
+                    room_id: this.roomForm.id, 
+                    name: this.roomForm.name || this.roomForm.id, 
+                    kinds: this.roomForm.kinds, 
+                    levels: this.roomForm.levels 
+                  } 
+                })
+              });
+            }
+
+            this.closeRoomModal();
+            this.loadRooms();
+            document.body.dispatchEvent(new CustomEvent('roomsUpdated'));
+          } catch (e) {
+            alert('Error: ' + e);
+          } finally {
+            this.roomForm.saving = false;
+          }
+        },
+
+        async deleteRoom() {
+          if (!confirm('Delete this room?\n\nNote: If this room is assigned to heaters, they will need to be reconfigured.')) {
+            return;
+          }
+          try {
+            const res = await fetch('/rpc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method: 'room.delete', params: { id: this.roomForm.id } })
+            });
+            if (!res.ok) {
+              const t = await res.text();
+              alert('Failed to delete room: ' + t);
+              return;
+            }
+            this.closeRoomModal();
+            this.loadRooms();
+            document.body.dispatchEvent(new CustomEvent('roomsUpdated'));
+          } catch (e) {
+            alert('Error deleting room: ' + e);
+          }
+        },
+
+        confirmDeleteRoom({roomId, roomName}) {
+          if (confirm(`Delete room "${roomName}"?\n\nNote: If this room is assigned to heaters, they will need to be reconfigured.`)) {
+            this.deleteRoomById(roomId);
+          }
+        },
+
+        async deleteRoomById(roomId) {
+          try {
+            const res = await fetch('/rpc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method: 'room.delete', params: { id: roomId } })
+            });
+            if (!res.ok) {
+              const t = await res.text();
+              alert('Failed to delete room: ' + t);
+              return;
+            }
+            this.loadRooms();
+            document.body.dispatchEvent(new CustomEvent('roomsUpdated'));
+          } catch (e) {
+            alert('Error deleting room: ' + e);
+          }
+        },
+
+        async openSetupModal({deviceId}) {
+          this.setupForm = {
+            deviceId,
+            name: '',
+            roomId: '',
+            mqttBroker: '',
+            staEssid: '',
+            staPasswd: '',
+            sta1Essid: '',
+            sta1Passwd: '',
+            apPasswd: '',
+            saving: false
+          };
+          
+          await this.loadRooms();
+          
+          try {
+            const res = await fetch('/rpc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method: 'device.show', params: { identifier: deviceId } })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.result) {
+                this.setupForm.roomId = data.result.room_id || '';
+                this.setupForm.name = data.result.name || '';
+              }
+            }
+          } catch (e) {
+            console.log('Could not fetch device info:', e);
+          }
+          
+          this.modals.setup = true;
+        },
+
+        closeSetupModal() {
+          this.modals.setup = false;
+        },
+
+        async submitSetup() {
+          this.setupForm.saving = true;
+          try {
+            const params = { identifier: this.setupForm.deviceId };
+            
+            if (this.setupForm.name) params.name = this.setupForm.name;
+            if (this.setupForm.mqttBroker) params.mqtt_broker = this.setupForm.mqttBroker;
+            if (this.setupForm.staEssid) params.sta_essid = this.setupForm.staEssid;
+            if (this.setupForm.staPasswd) params.sta_passwd = this.setupForm.staPasswd;
+            if (this.setupForm.sta1Essid) params.sta1_essid = this.setupForm.sta1Essid;
+            if (this.setupForm.sta1Passwd) params.sta1_passwd = this.setupForm.sta1Passwd;
+            if (this.setupForm.apPasswd) params.ap_passwd = this.setupForm.apPasswd;
+
+            if (this.setupForm.roomId !== undefined) {
+              await fetch('/rpc', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  method: 'device.setroom', 
+                  params: { identifier: this.setupForm.deviceId, room_id: this.setupForm.roomId } 
+                })
+              });
+            }
+
+            const res = await fetch('/rpc', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ method: 'device.setup', params })
+            });
+            
+            if (!res.ok) {
+              const t = await res.text();
+              alert('Setup failed: ' + t);
+              return;
+            }
+            
+            this.closeSetupModal();
+            setTimeout(() => location.reload(), 500);
+          } catch (e) {
+            alert('Setup error: ' + e);
+          } finally {
+            this.setupForm.saving = false;
+          }
+        },
+
+        openHeaterModal({deviceId}) {
+          this.heaterForm.deviceId = deviceId;
+          this.modals.heater = true;
+        },
+
+        closeHeaterModal() {
+          this.modals.heater = false;
         }
-
-        // Update data-device-name attribute for sorting
-        const columnEl = el.closest('.column');
-        if (columnEl) {
-          columnEl.setAttribute('data-device-name', deviceView.name.toLowerCase());
-        }
-      } else {
-        // Device not found - insert new device card
-        console.log('Inserting new device card for:', deviceId);
-        insertDeviceCard(deviceView);
-      }
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    function escapeJs(text) {
-      return text.replace(/\\/g, '\\\\')
-                 .replace(/'/g, "\\'")
-                 .replace(/"/g, '\\"')
-                 .replace(/\n/g, '\\n')
-                 .replace(/\r/g, '\\r');
-    }
-
-    function insertDeviceCard(deviceView) {
-      // Check if card already exists to prevent duplicates
-      if (document.getElementById('device-' + deviceView.id)) {
-        console.log('Device card already exists:', deviceView.id);
-        return;
-      }
-
-      // Find the devices container
-      const container = document.querySelector('.section .container .columns.is-multiline');
-      if (!container) {
-        console.error('Could not find device container');
-        return;
-      }
-
-      // Create device card HTML - escape all user-controlled data
-      const deviceId = escapeHtml(deviceView.id || '');
-      const deviceIdJs = escapeJs(deviceView.id || ''); // For use in onclick handlers
-      const deviceName = escapeHtml(deviceView.name || deviceView.id || '');
-      const manufacturer = escapeHtml(deviceView.manufacturer || 'Unknown');
-      const host = escapeHtml(deviceView.host || '');
-      const emoji = escapeHtml(deviceView.device_type_emoji || '');
-      const linkToken = escapeHtml(deviceView.link_token || '');
-      
-      const cardHtml = `
-        <div class="column is-4-desktop is-6-tablet" data-device-name="${deviceName.toLowerCase()}">
-          <div class="card" id="device-${deviceId}">
-            <div class="card-content">
-              <p class="title is-5">
-                ${emoji ? emoji + ' ' : ''}
-                <span id="device-${deviceId}-name">${deviceName}</span>
-                ${deviceView.has_temperature_sensor ? `<span class="tag is-light ml-2" id="sensor-${deviceId}-temperature">--°C</span>` : ''}
-                ${deviceView.has_humidity_sensor ? `<span class="tag is-light ml-2" id="sensor-${deviceId}-humidity">--%</span>` : ''}
-                ${deviceView.has_door_sensor ? `<span class="tag is-light ml-2" id="door-${deviceId}">
-                  <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
-                  </svg>
-                  Unknown
-                </span>` : ''}
-              </p>
-              <p class="subtitle is-7 has-text-grey">${manufacturer} · ${deviceId}</p>
-              <div class="buttons mt-3">
-                ${host && linkToken ? `<a class="button is-link is-small" href="/devices/${linkToken}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <line x1="2" y1="12" x2="22" y2="12"></line>
-                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-                  </svg>
-                </a>` : ''}
-                ${deviceView.is_refreshable ? `<button class="button is-warning is-small" id="btn-refresh-${deviceId}" onclick="refreshDevice('${deviceIdJs}')" title="Refresh device">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="23 4 23 10 17 10"></polyline>
-                    <polyline points="1 20 1 14 7 14"></polyline>
-                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-                  </svg>
-                </button>` : ''}
-                <button class="button is-success is-small" id="btn-setup-${deviceId}" onclick="setupDevice('${deviceIdJs}')" title="Setup device">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
-                  </svg>
-                </button>
-                ${deviceView.has_heater_script ? `<button class="button is-danger is-small" id="btn-heater-${deviceId}" onclick="openHeaterConfig('${deviceIdJs}')" title="Heater Configuration">🔥</button>` : ''}
-              </div>
-            </div>
-          </div>
-        </div>
-      `;
-
-      // Find the correct position to insert in alphabetical order
-      const newDeviceNameLower = deviceName.toLowerCase();
-      const existingCards = container.querySelectorAll('.column');
-      let insertBeforeElement = null;
-
-      for (const card of existingCards) {
-        const cardDeviceName = card.getAttribute('data-device-name');
-        if (cardDeviceName && cardDeviceName.localeCompare(newDeviceNameLower) > 0) {
-          insertBeforeElement = card;
-          break;
-        }
-      }
-
-      // Insert the card in the correct position
-      if (insertBeforeElement) {
-        insertBeforeElement.insertAdjacentHTML('beforebegin', cardHtml);
-        console.log('Inserted device card for:', deviceId, 'before', insertBeforeElement.getAttribute('data-device-name'));
-      } else {
-        // Insert at the end if no element comes after it alphabetically
-        container.insertAdjacentHTML('beforeend', cardHtml);
-        console.log('Inserted device card for:', deviceId, 'at end');
-      }
+      };
     }
   </script>
 </body>

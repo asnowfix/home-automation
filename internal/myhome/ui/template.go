@@ -175,19 +175,32 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 	// Check if device is refreshable
 	isRefreshable := !shelly.IsBluDevice(d.Id()) && !shelly.IsGen1Device(d.Id())
 
+	// Get switch information
 	switches := make(map[int]pkgshelly.SwitchSummary)
+
+	// First try to get switches from config if available
 	if d.Config != nil {
+		log.V(1).Info("Device has config", "device", d.Id(), "switch0", d.Config.Switch0 != nil, "switch1", d.Config.Switch1 != nil)
 		for _, sw := range []*sswitch.Config{d.Config.Switch0, d.Config.Switch1, d.Config.Switch2, d.Config.Switch3} {
 			if sw != nil {
 				switches[sw.Id] = pkgshelly.SwitchSummary{
 					Id:   sw.Id,
 					Name: sw.Name,
-					On:   false,
+					On:   false, // Status will be updated via SSE
 				}
 			}
 		}
-	} else {
-		log.V(1).Info("Device has no config", "device", d.Id())
+		log.V(1).Info("Loaded switches from config", "device", d.Id(), "count", len(switches))
+	} else if sd, ok := d.Impl().(*shelly.Device); ok && sd != nil {
+		// Fallback: Fetch switches directly from device if no config
+		log.V(1).Info("No config, fetching switches from device", "device", d.Id())
+		switchSummary, err := pkgshelly.GetSwitchesSummary(ctx, sd)
+		if err != nil {
+			log.V(1).Info("Failed to get switches summary", "device", d.Id(), "error", err)
+		} else {
+			switches = switchSummary
+			log.V(1).Info("Fetched switches from device", "device", d.Id(), "count", len(switches))
+		}
 	}
 
 	return DeviceView{

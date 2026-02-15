@@ -79,6 +79,13 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	mux.Handle("/events", sseBroadcaster)
 	mux.HandleFunc("/rpc", RpcHandler(ctx, log.WithName("RpcHandler")))
 
+	// HTMX endpoints for partial HTML responses
+	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db)
+	mux.HandleFunc("/htmx/devices", htmxHandler.DeviceCards)
+	mux.HandleFunc("/htmx/device/", htmxHandler.DeviceCard)
+	mux.HandleFunc("/htmx/rooms", htmxHandler.RoomsList)
+	mux.HandleFunc("/htmx/switch/toggle", htmxHandler.SwitchButton)
+
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Info("http-incoming", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "proto", r.Proto, "content-length", r.ContentLength)
 		mux.ServeHTTP(w, r)

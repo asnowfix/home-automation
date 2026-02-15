@@ -19,6 +19,9 @@ GO := go
 folder = $1
 endif
 
+GOOS := $(shell go env GOOS)
+GOARCH := $(shell go env GOARCH)
+
 mods = $(patsubst %/,%,$(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */*/*/go.mod) $(wildcard */*/*/*/go.mod))
 
 default: help
@@ -92,6 +95,7 @@ tidy:
 
 release:
 	goreleaser build --snapshot --clean --single-target
+	./dist/snapshot_$(GOOS)_$(GOARCH)_v1/myhome version
 
 run: build
 	$(MAKE) -C myhome $(@)
@@ -100,7 +104,7 @@ test: build
 	$(GO) test ./...
 
 build: generate
-	$(GO) build ./...
+	$(MAKE) -C myhome $(@)
 
 generate:
 	$(GO) generate ./internal/myhome/ui/...

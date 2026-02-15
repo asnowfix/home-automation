@@ -9,8 +9,9 @@ builds:
   - env: [CGO_ENABLED=0]
     goos:
       - linux
-      - windows
-      - darwin
+      # FIXME: goreleaser can build for windows and darwin but they are not supported in packaging
+      # - windows
+      # - darwin
     goarch:
       - amd64
       - arm64

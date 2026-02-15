@@ -100,6 +100,11 @@ generate:
 	$(GO) generate ./internal/myhome/ui/...
 	$(GO) generate ./...
 
+goreleaser:
+	$(GO) install github.com/goreleaser/goreleaser@latest
+#	$(GO) install github.com/goreleaser/goreleaser-pro@latest
+	goreleaser build --snapshot --clean --single-target
+
 # Build Debian package for current OS/ARCH (Linux only)
 # Usage: make debpkg [VERSION=X.Y.Z]
 # If VERSION is not specified, uses git describe

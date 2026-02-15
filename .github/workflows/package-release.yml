@@ -30,11 +30,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
-      - id: go-generate
-        name: Run go generate
-        run: |
-          go generate ./internal/myhome/ui/...
-          go generate ./...
       - name: Extract tag name
         id: extract-tag
         run: |
@@ -167,11 +162,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: 1.23.0
-      - id: go-generate
-        name: Run go generate
-        run: |
-          go generate ./internal/myhome/ui/...
-          go generate ./...
       - id: build
         name: Build Windows Exectutable
         run: go build -o "myhome.exe" ".\\myhome"

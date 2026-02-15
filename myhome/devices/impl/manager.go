@@ -9,11 +9,11 @@ import (
 	mhd "myhome/devices"
 	"myhome/model"
 	"myhome/mqtt"
+	mynet "myhome/net"
 	"myhome/sfr"
 	mhswitch "myhome/shelly/sswitch"
 	"myhome/storage"
 	"myhome/ui"
-	"myhome/net"
 	"net"
 	"pkg/devices"
 	"pkg/shelly"
@@ -259,8 +259,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		// Broadcast device update via SSE if broadcaster is available (only when a UI is connected)
 		if modified {
 			log.V(1).Info("Broadcasting device update (RPC)", "device", device.Id())
-			deviceView := ui.DeviceToView(ctx, device)
-			dm.sseBroadcaster.BroadcastDeviceUpdate(deviceView)
+			dm.sseBroadcaster.BroadcastDeviceUpdate(ui.DeviceToView(ctx, device))
 		}
 
 		return nil, nil
@@ -574,8 +573,7 @@ func (dm *DeviceManager) storeDeviceLoop(ctx context.Context, refreshed <-chan *
 			// Broadcast device update via SSE if broadcaster is available (only when a UI is connected)
 			if modified {
 				log.V(1).Info("Broadcasting device update (storage loop)", "device", device.DeviceSummary)
-				deviceView := ui.DeviceToView(ctx, device)
-				dm.sseBroadcaster.BroadcastDeviceUpdate(deviceView)
+				dm.sseBroadcaster.BroadcastDeviceUpdate(ui.DeviceToView(ctx, device))
 			}
 		}
 	}

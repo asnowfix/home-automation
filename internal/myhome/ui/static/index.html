@@ -58,8 +58,8 @@
               {{ $device := . }}
                 {{range .Switches}}
                   <div class="level" id="switch-{{$device.Id}}-{{.Id}}">
-                    <button class="button is-rounded {{if .On}}is-info is-active{{else}}is-light{{end}}" id="switch-{{$device.Id}}-{{.Id}}-btn" onclick="toggleSwitch('{{$device.Id}}', '{{.Id}}')" title="Toggle switch">
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="switch-{{$device.Id}}-{{.Id}}-btn-shape">
+                    <button class="button is-rounded {{if .On}}is-info is-active{{else}}is-light{{end}}" id="btn-switch-{{$device.Id}}-{{.Id}}" onclick="toggleSwitch('{{$device.Id}}', '{{.Id}}')" title="Toggle switch">
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="btn-switch-{{$device.Id}}-{{.Id}}-shape">
                         {{if .On}}
                         <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
                         <circle cx="16" cy="12" r="3"></circle>
@@ -462,12 +462,12 @@
 
     async function toggleSwitch(id, switchId) {
       var new_state = false;
-      const btn = document.getElementById('switch-' + id + '-' + switchId + '-btn');
+      const btn = document.getElementById('btn-switch-' + id + '-' + switchId);
       if (btn) {
         btn.disabled = true;
         btn.classList.add('is-loading');
       }
-      const shape = document.getElementById('switch-' + id + '-' + switchId + '-btn-shape');
+      const shape = document.getElementById('btn-switch-' + id + '-' + switchId + '-shape');
       try {
         console.log('toggleSwitch: POST /rpc switch.toggle for', id, switchId);
         res = await fetch('/rpc', {
@@ -1246,6 +1246,9 @@
           } else if (!deviceView.is_refreshable && hasRefreshBtn) {
             hasRefreshBtn.remove();
           }
+
+          // Add or remove switch button
+
         }
 
         // Update data-device-name attribute for sorting

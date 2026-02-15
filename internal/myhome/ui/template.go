@@ -16,6 +16,8 @@ import (
 	"text/template"
 
 	"global"
+
+	"github.com/go-logr/logr"
 )
 
 // Embed static assets under this package
@@ -81,6 +83,11 @@ func init() {
 // DeviceToView converts a myhome.Device to ui.DeviceView for SSE broadcasting and UI rendering
 // This is the canonical conversion function used by both initial page rendering and SSE updates
 func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
+
 	name := d.Name()
 	if name == "" {
 		name = d.Id()
@@ -179,6 +186,8 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 				}
 			}
 		}
+	} else {
+		log.V(1).Info("Device has no config", "device", d.Id())
 	}
 
 	return DeviceView{

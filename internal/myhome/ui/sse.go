@@ -102,9 +102,9 @@ func (b *SSEBroadcaster) BroadcastSensorUpdate(deviceID string, sensor string, v
 }
 
 // BroadcastDeviceUpdate broadcasts a device update to all SSE clients
-func (b *SSEBroadcaster) BroadcastDeviceUpdate(deviceData DeviceView) {
-	b.log.Info("Broadcasting device update", "device_id", deviceData.Id, "name", deviceData.Name)
-	b.broadcast("device-update", deviceData)
+func (b *SSEBroadcaster) BroadcastDeviceUpdate(dv DeviceView) {
+	b.log.Info("Broadcasting device update", "device_id", dv.Id, "name", dv.Name)
+	b.broadcast("device-update", dv)
 }
 
 // ServeHTTP handles SSE client connections using the broadcaster's client list

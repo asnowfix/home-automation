@@ -50,7 +50,7 @@ func mqttWatcher(ctx context.Context, topic string, dm devices.Manager, dr devic
 			return
 
 		case msg := <-ch:
-			log.Info("Received RPC event", "topic", topic, "payload", string(msg.Payload()))
+			log.V(1).Info("Received RPC event", "topic", topic, "payload", string(msg.Payload()))
 			if len(msg.Payload()) < 2 {
 				log.Info("Skipping RPC event with invalid payload", "payload", string(msg.Payload()))
 				continue

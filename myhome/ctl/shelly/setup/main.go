@@ -13,7 +13,7 @@ import (
 	shellysetup "internal/myhome/shelly/setup"
 	"myhome"
 	mhmqtt "myhome/mqtt"
-	"mynet"
+	"myhome/net"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/types"

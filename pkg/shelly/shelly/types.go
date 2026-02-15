@@ -64,14 +64,19 @@ type Config struct {
 	Input2    *sswitch.InputConfig `json:"input:2,omitempty"`
 	Input3    *sswitch.InputConfig `json:"input:3,omitempty"`
 	Knx       *any                 `json:"knx,omitempty"`
+	Matter    *any                 `json:"matter,omitempty"`
 	Mqtt      *mqtt.Config         `json:"mqtt,omitempty"`
+	PlugsUI   *any                 `json:"plugs_ui,omitempty"`
 	Schedule  *schedule.Scheduled  `json:"schedule,omitempty"`
-	Scripts   []ScriptInfo         `json:"scripts,omitempty"`
+	Script1   *ScriptInfo          `json:"script:1,omitempty"`
+	Script2   *ScriptInfo          `json:"script:2,omitempty"`
+	Script3   *ScriptInfo          `json:"script:3,omitempty"`
+	Script4   *ScriptInfo          `json:"script:4,omitempty"`
 	Switch0   *sswitch.Config      `json:"switch:0,omitempty"`
 	Switch1   *sswitch.Config      `json:"switch:1,omitempty"`
 	Switch2   *sswitch.Config      `json:"switch:2,omitempty"`
 	Switch3   *sswitch.Config      `json:"switch:3,omitempty"`
-	System    *system.Config       `json:"system,omitempty"`
+	System    *system.Config       `json:"sys,omitempty"`
 	Wifi      *wifi.Config         `json:"wifi,omitempty"`
 	WebSocket *any                 `json:"ws,omitempty"`
 }
@@ -90,12 +95,18 @@ type Status struct {
 	Input2    *sswitch.InputStatus `json:"input:2,omitempty"`
 	Input3    *sswitch.InputStatus `json:"input:3,omitempty"`
 	Knx       *any                 `json:"knx,omitempty"`
+	Matter    *any                 `json:"matter,omitempty"`
 	Mqtt      *mqtt.Status         `json:"mqtt,omitempty"`
+	PlugsUI   *any                 `json:"plugs_ui,omitempty"`
+	Script1   *ScriptInfo          `json:"script:1,omitempty"`
+	Script2   *ScriptInfo          `json:"script:2,omitempty"`
+	Script3   *ScriptInfo          `json:"script:3,omitempty"`
+	Script4   *ScriptInfo          `json:"script:4,omitempty"`
 	Switch0   *sswitch.Status      `json:"switch:0,omitempty"`
 	Switch1   *sswitch.Status      `json:"switch:1,omitempty"`
 	Switch2   *sswitch.Status      `json:"switch:2,omitempty"`
 	Switch3   *sswitch.Status      `json:"switch:3,omitempty"`
-	System    *system.Status       `json:"system,omitempty"`
+	System    *system.Status       `json:"sys,omitempty"`
 	Wifi      *wifi.Status         `json:"wifi,omitempty"`
 	WebSocket *any                 `json:"ws,omitempty"`
 }
@@ -125,57 +136,75 @@ type ComponentsRequest struct {
 	DynamicOnly bool     `json:"dynamic_only,omitempty"` // If true, only dynamic components will be returned. Optional
 }
 
-type Components struct {
-	Config *Config `json:"-"`
-	Status *Status `json:"-"`
-}
-
 type ComponentsResponse struct {
-	Components
-	Response_      *[]ComponentResponse `json:"components"`
-	ConfigRevision int                  `json:"cfg_revision"` // The current config revision. See SystemGetConfig#ConfigRevision
-	Offset         int                  `json:"offset"`       // The index of the first component in the list.
-	Total          int                  `json:"total"`        // Total number of components with all filters applied.
+	ConfigRevision int    `json:"cfg_rev"`
+	Offset         int    `json:"offset"`
+	Total          int    `json:"total"`
+	Config         Config `json:"config"`
+	Status         Status `json:"status"`
 }
 
 func (cr *ComponentsResponse) UnmarshalJSON(data []byte) error {
-	type Alias ComponentsResponse
-	if err := json.Unmarshal(data, (*Alias)(cr)); err != nil {
+	var err error
+
+	// 1. Partially parse as an array of keyed raw JSON
+	type rawComponent struct {
+		Key    string           `json:"key"`
+		Status *json.RawMessage `json:"status,omitempty"`
+		Config *json.RawMessage `json:"config,omitempty"`
+	}
+	type rawArray struct {
+		Components     []rawComponent `json:"components"`
+		ConfigRevision int            `json:"cfg_rev"` // The current config revision. See SystemGetConfig#ConfigRevision
+		Offset         int            `json:"offset"`  // The index of the first component in the list.
+		Total          int            `json:"total"`   // Total number of components with all filters applied.
+	}
+	var ra rawArray
+	if err = json.Unmarshal(data, &ra); err != nil {
 		return err
 	}
-	if cr.Response_ == nil {
-		cr.Response_ = &[]ComponentResponse{}
-	}
-	config := make(map[string]any)
-	status := make(map[string]any)
 
-	for _, comp := range *cr.Response_ {
-		config[comp.Key] = comp.Config
-		status[comp.Key] = comp.Status
+	// 2. Turn keyed array of raw JSON into maps of raw JSON
+	type rawMap struct {
+		ConfigRevision int                         `json:"cfg_rev"`
+		Offset         int                         `json:"offset"`
+		Total          int                         `json:"total"`
+		Config         map[string]*json.RawMessage `json:"config"`
+		Status         map[string]*json.RawMessage `json:"status"`
+	}
+	rm := rawMap{
+		ConfigRevision: ra.ConfigRevision,
+		Offset:         ra.Offset,
+		Total:          ra.Total,
+		Config:         make(map[string]*json.RawMessage, len(ra.Components)),
+		Status:         make(map[string]*json.RawMessage, len(ra.Components)),
+	}
+	for _, comp := range ra.Components {
+		if comp.Config != nil {
+			rm.Config[comp.Key] = comp.Config
+		}
+		if comp.Status != nil {
+			rm.Status[comp.Key] = comp.Status
+		}
 	}
 
-	configStr, err := json.Marshal(config)
+	// 3. Render as JSON
+	buf, err := json.Marshal(rm)
 	if err != nil {
 		return err
 	}
-	cr.Config = &Config{}
-	if err := json.Unmarshal(configStr, cr.Config); err != nil {
+
+	// 4. Unmarshal into target struct, via alias to avoid infinite recursion
+	type alias ComponentsResponse
+	if err = json.Unmarshal(buf, (*alias)(cr)); err != nil {
 		return err
 	}
-	statusStr, err := json.Marshal(status)
-	if err != nil {
-		return err
-	}
-	cr.Status = &Status{}
-	if err := json.Unmarshal(statusStr, cr.Status); err != nil {
-		return err
-	}
+
 	return nil
 }
 
-type ComponentResponse struct {
-	Key    string         `json:"key"`    // Component's key (in format <type>:<cid>, for example boolean:200)
-	Config map[string]any `json:"config"` // Component's config, will be omitted if "config" is not specified in the include property.
-	Status map[string]any `json:"status"` // Component's status, will be omitted if "status" is not specified in the include property.
-	// Methods map[string]types.MethodHandler `json:"-"`
+type SwitchSummary struct {
+	Id   int    `json:"id"`
+	Name string `json:"name"`
+	On   bool   `json:"on"`
 }

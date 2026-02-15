@@ -158,6 +158,17 @@
             }
         },
         {
+            "name": "myhome ctl switch status -A radiateur-bureau",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/myhome",
+            "args": ["--debug", "ctl", "-B" ,"192.168.1.2" ,"switch" ,"status" ,"-A" ,"radiateur-bureau"],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
             "name": "myhome ctl forget light-outside-steps",
             "type": "go",
             "request": "launch",

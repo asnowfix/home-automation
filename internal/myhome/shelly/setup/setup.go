@@ -12,7 +12,7 @@ import (
 	"github.com/go-logr/logr"
 
 	mhscript "internal/myhome/shelly/script"
-	"mynet"
+	"myhome/net"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/input"
@@ -413,10 +413,17 @@ const setupDoneKey = "script/setup/done"
 // IsDeviceSetUp checks if a device has already been set up by looking for the setup marker in KVS.
 // This is cheaper than listing scripts.
 func IsDeviceSetUp(ctx context.Context, log logr.Logger, sd *shellyapi.Device) bool {
-	via := types.ChannelHttp
-
-	_, err := kvs.GetValue(ctx, log, via, sd, setupDoneKey)
-	return err == nil
+	via, err := selectChannel(sd)
+	if err != nil {
+		log.Error(err, "Unable to determine if device is set up (Channel)", "device", sd.Id())
+		return false
+	}
+	_, err = kvs.GetValue(ctx, log, via, sd, setupDoneKey)
+	if err != nil {
+		log.Error(err, "Unable to determine if device is set up (KVS)", "device", sd.Id())
+		return false
+	}
+	return true
 }
 
 // markDeviceSetUp stores a marker in KVS to indicate the device has been set up

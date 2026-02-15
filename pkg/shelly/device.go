@@ -4,17 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"mynet"
+	_ "myhome/net"
 	"net"
 	"pkg/devices"
-	"pkg/shelly/ethernet"
 	"pkg/shelly/mqtt"
 	"pkg/shelly/ratelimit"
-	"pkg/shelly/script"
 	"pkg/shelly/shelly"
 	"pkg/shelly/system"
 	"pkg/shelly/types"
-	"pkg/shelly/wifi"
 	"reflect"
 	"regexp"
 	"strings"
@@ -165,60 +162,76 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 			return d.IsModified(), fmt.Errorf("unable to init device (%v)", err)
 		}
 	}
-	// Always fetch system config to get current device name
-	config, err := system.GetConfig(ctx, via, d)
-	if err != nil {
-		return d.IsModified(), fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
-	}
-	if d.config == nil {
-		d.config = &shelly.Config{}
-	}
-	d.config.System = config
-	if config.Device.Name != "" && config.Device.Name != d.Name() {
-		d.UpdateName(config.Device.Name)
-	}
 
-	// Fetch scripts list and store in config
-	if err := d.refreshScripts(ctx, via); err != nil {
-		d.log.V(1).Info("Failed to refresh scripts (continuing)", "error", err)
-	}
-	if !d.IsHttpReady() {
-		if d.status == nil {
-			d.status = &shelly.Status{}
-		}
-		ws, err := wifi.DoGetStatus(ctx, via, d)
-		d.log.Info("Wifi status", "device", d.Id(), "status", ws, "error", err)
-		if err == nil && ws.IP != "" {
-			d.status.Wifi = ws
-			d.Host_ = net.ParseIP(ws.IP)
-			d.UpdateHost(ws.IP)
-		}
-		es, err := ethernet.DoGetStatus(ctx, via, d)
-		d.log.Info("Ethernet status", "device", d.Id(), "status", es, "error", err)
-		if err == nil && es.IP != "" {
-			d.status.Ethernet = es
-			d.UpdateHost(es.IP)
-		}
-		d.log.Info("Will use IP", "device", d.Id(), "ip", d.Host())
-	}
-
-	// if d.components == nil {
-	// 	out, err := d.CallE(ctx, via, shelly.GetComponents.String(), &shelly.ComponentsRequest{
-	// 		Keys: []string{"config", "status"},
-	// 	})
-	// 	if err != nil {
-	// 		d.log.Error(err, "Unable to get device's components (continuing)")
-	// 	} else {
-	// 		crs, ok := out.(*shelly.ComponentsResponse)
-	// 		if ok && crs != nil {
-	// 			updated = true
-	// 		} else {
-	// 			d.log.Error(err, "Invalid response to get device's components (continuing)", "response", out)
-	// 		}
+	// // If device is not ready for HTTP, try to find IP
+	// if !d.IsHttpReady() {
+	// 	if d.status == nil {
+	// 		d.status = &shelly.Status{}
 	// 	}
+	// 	ws, err := wifi.DoGetStatus(ctx, via, d)
+	// 	d.log.Info("Wifi status", "device", d.Id(), "status", ws, "error", err)
+	// 	if err == nil && ws.IP != "" {
+	// 		d.status.Wifi = ws
+	// 		d.Host_ = net.ParseIP(ws.IP)
+	// 		d.UpdateHost(ws.IP)
+	// 	}
+	// 	es, err := ethernet.DoGetStatus(ctx, via, d)
+	// 	d.log.Info("Ethernet status", "device", d.Id(), "status", es, "error", err)
+	// 	if err == nil && es.IP != "" {
+	// 		d.status.Ethernet = es
+	// 		d.UpdateHost(es.IP)
+	// 	}
+	// 	d.log.Info("Will use IP", "device", d.Id(), "ip", d.Host())
 	// }
 
-	return d.IsModified(), nil
+	// // Always fetch system config to get current device name
+	// config, err := system.GetConfig(ctx, via, d)
+	// if err != nil {
+	// 	return d.IsModified(), fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
+	// }
+	// if d.config == nil {
+	// 	d.config = &shelly.Config{}
+	// }
+	// d.config.System = config
+	// if config.Device.Name != "" && config.Device.Name != d.Name() {
+	// 	d.UpdateName(config.Device.Name)
+	// }
+
+	// // Fetch scripts list and store in config
+	// if err := d.refreshScripts(ctx, via); err != nil {
+	// 	d.log.V(1).Info("Failed to refresh scripts (continuing)", "error", err)
+	// }
+
+	crs, err := shelly.DoGetComponents(ctx, d, &shelly.ComponentsRequest{
+		Include: []string{"config", "status"},
+	})
+	if err != nil {
+		d.log.Error(err, "Unable to get device's components configuration")
+		return false, err
+	}
+
+	d.config = &crs.Config
+	if d.config.System == nil {
+		// Some devices do not report "sys" in their components:  need to get it explicitelly
+		d.config.System, err = system.GetConfig(ctx, via, d)
+		if err != nil {
+			d.log.Error(err, "Unable to get device's system configuration")
+			return false, err
+		}
+	}
+	d.UpdateName(d.config.System.Device.Name)
+
+	d.status = &crs.Status
+	if d.status.Wifi != nil {
+		d.UpdateHost(d.status.Wifi.IP)
+	}
+	// Ethernet takes precedence over Wifi, when defined
+	if d.status.Ethernet != nil {
+		d.UpdateHost(d.status.Ethernet.IP)
+	}
+
+	d.modified = true
+	return true, nil
 }
 
 func (d *Device) Manufacturer() string {
@@ -358,23 +371,26 @@ func (d *Device) IsMqttReady() bool {
 }
 
 func (d *Device) IsHttpReady() bool {
-	var ip net.IP
-	if d.status != nil {
-		if d.status.Ethernet != nil {
-			ip = net.ParseIP(d.status.Ethernet.IP)
-		} else if d.status.Wifi != nil {
-			ip = net.ParseIP(d.status.Wifi.IP)
-		}
-	} else {
-		ip = d.Host_
-	}
+	return d.Host() != ""
 
-	if ip == nil {
-		d.log.Info("Device has no IP address", "device", d)
-		return false
-	}
-	d.UpdateHost(ip.String())
-	return mynet.IsSameNetwork(d.log.V(1), ip) == nil
+	// FIXME: check that the IP is on the same network as the Router
+	// var ip net.IP
+	// if d.status != nil {
+	// 	if d.status.Ethernet != nil {
+	// 		ip = net.ParseIP(d.status.Ethernet.IP)
+	// 	} else if d.status.Wifi != nil {
+	// 		ip = net.ParseIP(d.status.Wifi.IP)
+	// 	}
+	// } else {
+	// 	ip = d.Host_
+	// }
+
+	// if ip == nil {
+	// 	d.log.Info("Device has no IP address", "device", d)
+	// 	return false
+	// }
+	// d.UpdateHost(ip.String())
+	// return mynet.IsSameNetwork(d.log.V(1), ip) == nil
 }
 
 func (d *Device) StartDialog(ctx context.Context) uint32 {
@@ -653,59 +669,37 @@ func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
 	return nil
 }
 
-// refreshScripts fetches the list of scripts from the device and stores them in config
-func (d *Device) refreshScripts(ctx context.Context, via types.Channel) error {
-	out, err := d.CallE(ctx, via, "Script.List", nil)
-	if err != nil {
-		return err
-	}
+// // refreshScripts fetches the list of scripts from the device and stores them in config
+// func (d *Device) refreshScripts(ctx context.Context, via types.Channel) error {
+// 	out, err := d.CallE(ctx, via, "Script.List", nil)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	// Use the existing script.ListResponse type
-	resp, ok := out.(*script.ListResponse)
-	if !ok {
-		d.log.V(1).Info("Script.List response type mismatch", "type", fmt.Sprintf("%T", out))
-		return nil
-	}
+// 	// Use the existing script.ListResponse type
+// 	resp, ok := out.(*script.ListResponse)
+// 	if !ok {
+// 		d.log.V(1).Info("Script.List response type mismatch", "type", fmt.Sprintf("%T", out))
+// 		return nil
+// 	}
 
-	if d.config == nil {
-		d.config = &shelly.Config{}
-	}
+// 	if d.config == nil {
+// 		d.config = &shelly.Config{}
+// 	}
 
-	d.config.Scripts = make([]shelly.ScriptInfo, len(resp.Scripts))
-	for i, s := range resp.Scripts {
-		d.config.Scripts[i] = shelly.ScriptInfo{
-			Id:      s.Id,
-			Name:    s.Name,
-			Running: s.Running,
-			// Note: script.Status doesn't have Enable field, it's in Configuration
-		}
-	}
-	d.modified = true
-	d.log.V(1).Info("Refreshed scripts", "count", len(d.config.Scripts))
-	return nil
-}
-
-func (d *Device) initComponents(ctx context.Context, via types.Channel) error {
-	if !d.IsHttpReady() {
-		out, err := d.CallE(ctx, via, shelly.GetComponents.String(), &shelly.ComponentsRequest{
-			Keys: []string{"config", "status"},
-		})
-		if err != nil {
-			d.log.Error(err, "Unable to get device's components", "device_id", d.Id_)
-			return err
-		}
-		cr, ok := out.(*shelly.ComponentsResponse)
-		if !ok {
-			d.log.Error(err, "Unable to get device's components", "device_id", d.Id_)
-			return err
-		}
-		d.log.Info("Shelly.GetComponents: got", "components", *cr)
-		d.status = cr.Status
-		d.config = cr.Config
-	}
-
-	return nil
-}
+// 	d.config.Scripts = make([]shelly.ScriptInfo, len(resp.Scripts))
+// 	for i, s := range resp.Scripts {
+// 		d.config.Scripts[i] = shelly.ScriptInfo{
+// 			Id:      s.Id,
+// 			Name:    s.Name,
+// 			Running: s.Running,
+// 			// Note: script.Status doesn't have Enable field, it's in Configuration
+// 		}
+// 	}
+// 	d.modified = true
+// 	d.log.V(1).Info("Refreshed scripts", "count", len(d.config.Scripts))
+// 	return nil
+// }
 
 type Do func(context.Context, logr.Logger, types.Channel, devices.Device, []string) (any, error)
 

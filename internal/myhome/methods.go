@@ -257,4 +257,44 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &DeviceListByRoomResult{}
 		},
 	},
+	SwitchToggle: {
+		NewParams: func() any {
+			return &SwitchParams{}
+		},
+		NewResult: func() any {
+			return &SwitchToggleResult{}
+		},
+	},
+	SwitchOn: {
+		NewParams: func() any {
+			return &SwitchParams{}
+		},
+		NewResult: func() any {
+			return &SwitchOnOffResult{}
+		},
+	},
+	SwitchOff: {
+		NewParams: func() any {
+			return &SwitchParams{}
+		},
+		NewResult: func() any {
+			return &SwitchOnOffResult{}
+		},
+	},
+	SwitchStatus: {
+		NewParams: func() any {
+			return &SwitchParams{}
+		},
+		NewResult: func() any {
+			return &SwitchStatusResult{}
+		},
+	},
+	SwitchAll: {
+		NewParams: func() any {
+			return &SwitchAllParams{}
+		},
+		NewResult: func() any {
+			return &SwitchAllResult{}
+		},
+	},
 }

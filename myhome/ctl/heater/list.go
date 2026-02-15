@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
+	"sigs.k8s.io/yaml"
 )
 
 var listFlags struct {
@@ -36,19 +36,19 @@ func init() {
 
 // HeaterDiscoveryResponse represents the response from a heater.js instance
 type HeaterDiscoveryResponse struct {
-	DeviceID   string                 `json:"device_id" yaml:"device_id"`
-	DeviceName string                 `json:"device_name" yaml:"device_name"`
-	ScriptName string                 `json:"script_name" yaml:"script_name"`
-	Config     map[string]interface{} `json:"config,omitempty" yaml:"config,omitempty"`
-	State      map[string]interface{} `json:"state,omitempty" yaml:"state,omitempty"`
-	Timestamp  float64                `json:"timestamp,omitempty" yaml:"timestamp,omitempty"`
+	DeviceID   string                 `json:"device_id"`
+	DeviceName string                 `json:"device_name"`
+	ScriptName string                 `json:"script_name"`
+	Config     map[string]interface{} `json:"config,omitempty"`
+	State      map[string]interface{} `json:"state,omitempty"`
+	Timestamp  float64                `json:"timestamp,omitempty"`
 }
 
 // HeaterSummary is a simplified view of a heater instance
 type HeaterSummary struct {
-	DeviceID   string `json:"device_id" yaml:"device_id"`
-	DeviceName string `json:"device_name" yaml:"device_name"`
-	ScriptName string `json:"script_name" yaml:"script_name"`
+	DeviceID   string `json:"device_id"`
+	DeviceName string `json:"device_name"`
+	ScriptName string `json:"script_name"`
 }
 
 func doList(ctx context.Context) error {

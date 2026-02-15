@@ -11,9 +11,15 @@ import (
 	"syscall"
 	"time"
 
+	"version"
+
 	"github.com/go-logr/logr"
-	"gopkg.in/yaml.v2"
+	"sigs.k8s.io/yaml"
 )
+
+const HTTP_DEFAULT_PORT int = 6080
+
+const PROMETHEUS_DEFAULT_PORT int = 9100
 
 const MDNS_LOOKUP_DEFAULT_TIMEOUT time.Duration = 7 * time.Second
 
@@ -66,7 +72,7 @@ var Flags struct {
 
 var Via types.Channel
 
-func CommandLineContext(ctx context.Context, version string) context.Context {
+func CommandLineContext(ctx context.Context) context.Context {
 	var cancel context.CancelFunc
 
 	// Create the process-wide context that background services can use
@@ -82,7 +88,7 @@ func CommandLineContext(ctx context.Context, version string) context.Context {
 
 	// Store the process-wide context so lazy-started services can access it
 	ctx = context.WithValue(ctx, global.ProcessContextKey, processCtx)
-	ctx = context.WithValue(ctx, global.VersionKey, version)
+	ctx = context.WithValue(ctx, global.VersionKey, version.GetVersion())
 
 	go func() {
 		log := logr.FromContextOrDiscard(ctx)

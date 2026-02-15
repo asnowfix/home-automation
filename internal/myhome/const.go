@@ -41,4 +41,9 @@ const (
 	RoomDelete                    Verb = "room.delete"
 	DeviceSetRoom                 Verb = "device.setroom"
 	DeviceListByRoom              Verb = "device.listbyroom"
+	SwitchToggle                  Verb = "switch.toggle"
+	SwitchOn                      Verb = "switch.on"
+	SwitchOff                     Verb = "switch.off"
+	SwitchStatus                  Verb = "switch.status"
+	SwitchAll                     Verb = "switch.all"
 )

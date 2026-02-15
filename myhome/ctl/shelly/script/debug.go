@@ -6,7 +6,7 @@ import (
 	"hlog"
 	"myhome"
 	"myhome/ctl/options"
-	"mynet"
+	"myhome/net"
 	"net"
 	"os"
 	"pkg/devices"

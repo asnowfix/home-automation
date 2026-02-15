@@ -19,6 +19,9 @@ GO := go
 folder = $1
 endif
 
+GOOS := $(shell go env GOOS)
+GOARCH := $(shell go env GOARCH)
+
 mods = $(patsubst %/,%,$(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */*/*/go.mod) $(wildcard */*/*/*/go.mod))
 
 default: help
@@ -75,13 +78,6 @@ else
 	$(error unsupported $(@) for OS:$(OS))
 endif
 
-status:
-ifeq ($(OS),Linux)
-	systemctl status myhome@$(ME).service
-else
-	$(error unsupported $(@) for OS:$(OS))
-endif
-
 logs:
 ifeq ($(OS),Linux)
 	journalctl -u myhome@$(ME).service -f
@@ -97,8 +93,22 @@ tidy:
 	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) get -u ./...) &&) echo
 	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) mod tidy) &&) echo
 
-build run:
+release:
+	goreleaser build --snapshot --clean --single-target
+	./dist/snapshot_$(GOOS)_$(GOARCH)_v1/myhome version
+
+run: build
 	$(MAKE) -C myhome $(@)
+
+test: build
+	$(GO) test ./...
+
+build: generate
+	$(MAKE) -C myhome $(@)
+
+generate:
+	$(GO) generate ./internal/myhome/ui/...
+	$(GO) generate ./...
 
 # Build Debian package for current OS/ARCH (Linux only)
 # Usage: make debpkg [VERSION=X.Y.Z]

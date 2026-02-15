@@ -12,6 +12,7 @@ MyHome Penates is the home automation system I develop & use to control my own h
   - [Releases](#releases)
   - [Development Tools](#development-tools)
     - [Shelly Device Data Collector](#shelly-device-data-collector)
+  - [Ports](#ports)
   - [Logging System](#logging-system)
     - [Log Levels](#log-levels)
     - [Usage Examples](#usage-examples)
@@ -27,6 +28,7 @@ MyHome Penates is the home automation system I develop & use to control my own h
     - [Issue Labels](#issue-labels)
       - [Standard GitHub Labels](#standard-github-labels)
       - [Project-Specific Labels](#project-specific-labels)
+  - [Base Configuration](#base-configuration)
   - [Temperature Management](#temperature-management)
     - [Set Room Temperature Configuration](#set-room-temperature-configuration)
     - [Get Room Configuration](#get-room-configuration)
@@ -35,6 +37,11 @@ MyHome Penates is the home automation system I develop & use to control my own h
     - [Delete Room Configuration](#delete-room-configuration)
     - [Configure Heater to Use Room](#configure-heater-to-use-room)
     - [Service Auto-Enablement](#service-auto-enablement)
+    - [Weather Forecast](#weather-forecast)
+  - [Proxy \& Caching](#proxy--caching)
+    - [Cloud API's](#cloud-apis)
+    - [MQTT replay](#mqtt-replay)
+  - [Graphical User Interface](#graphical-user-interface)
   - [Device Control](#device-control)
     - [Switch Command](#switch-command)
   - [Device Following](#device-following)
@@ -117,6 +124,16 @@ go build -o datacollector .
 Results are saved to `test_data/shelly_api_test_data_YYYYMMDD_HHMMSS.json` for use in automated testing.
 
 For detailed documentation, see the [Data Collector README](cmd/datacollector/README.md).
+
+## Ports
+
+When started manually, MyHome will listen on port 6080 for the web UI & associated API.  When started as a privileged Linux service (using **systemd**), it will listen on port 80.
+
+Other ports:
+- 9100: Prometheus metrics exporter
+- 1883: MQTT broker
+- 6060: GoLang profiler (pprof) (XXX to be closed when privileged)
+- 8888: Temperature control (XXX to be folded into main port)
 
 ## Logging System
 

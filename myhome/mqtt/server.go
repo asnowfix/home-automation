@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"mynet"
+	"myhome/net"
 	"net"
 	"os"
 	"time"

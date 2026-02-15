@@ -9,15 +9,15 @@ import (
 
 // Config represents the temperature service configuration
 type Config struct {
-	Port  int                 `yaml:"port"`
-	Rooms map[string]RoomYAML `yaml:"rooms"`
+	Port  int                 `json:"port"`
+	Rooms map[string]RoomYAML `json:"rooms"`
 }
 
 // RoomYAML represents a room configuration in YAML format
 type RoomYAML struct {
-	Name   string             `yaml:"name"`
-	Kinds  []string           `yaml:"kinds"`  // Room kinds, e.g., ["bedroom", "office"]
-	Levels map[string]float64 `yaml:"levels"` // Temperature levels: {"eco": 17.0, "comfort": 21.0, "away": 15.0}
+	Name   string             `json:"name"`
+	Kinds  []string           `json:"kinds"`  // Room kinds, e.g., ["bedroom", "office"]
+	Levels map[string]float64 `json:"levels"` // Temperature levels: {"eco": 17.0, "comfort": 21.0, "away": 15.0}
 }
 
 // LoadConfigFromViper loads temperature service configuration from Viper

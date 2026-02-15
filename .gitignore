@@ -40,6 +40,10 @@ SECRETS.md
 *.pfx
 *.key
 
+# goreleaser
+/dist
+
+# Local files
 /myhome/ctl/homectl*
 /myhome/myhome*
 /myip/myip*
@@ -50,3 +54,7 @@ SECRETS.md
 /myhome/device*.json
 myhome_*.deb
 database-export.json
+internal/myhome/ui/static/bulma.min.css
+dist/artifacts.json
+dist/config.yaml
+dist/metadata.json

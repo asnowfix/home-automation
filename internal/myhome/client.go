@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"myhome/mqtt"
-	"mynet"
+	"myhome/net"
 	"net"
 	"pkg/devices"
 	"pkg/shelly"

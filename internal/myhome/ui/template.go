@@ -181,12 +181,42 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 	// First try to get switches from config if available
 	if d.Config != nil {
 		log.V(1).Info("Device has config", "device", d.Id(), "switch0", d.Config.Switch0 != nil, "switch1", d.Config.Switch1 != nil)
+
+		// Get device implementation to access status
+		var status *pkgshelly.Status
+		if sd, ok := d.Impl().(*shelly.Device); ok && sd != nil {
+			status = sd.Status()
+		}
+
 		for _, sw := range []*sswitch.Config{d.Config.Switch0, d.Config.Switch1, d.Config.Switch2, d.Config.Switch3} {
 			if sw != nil {
+				isOn := false
+				// Get actual switch status if available
+				if status != nil {
+					switch sw.Id {
+					case 0:
+						if status.Switch0 != nil {
+							isOn = status.Switch0.Output
+						}
+					case 1:
+						if status.Switch1 != nil {
+							isOn = status.Switch1.Output
+						}
+					case 2:
+						if status.Switch2 != nil {
+							isOn = status.Switch2.Output
+						}
+					case 3:
+						if status.Switch3 != nil {
+							isOn = status.Switch3.Output
+						}
+					}
+				}
+
 				switches[sw.Id] = pkgshelly.SwitchSummary{
 					Id:   sw.Id,
 					Name: sw.Name,
-					On:   false, // Status will be updated via SSE
+					On:   isOn,
 				}
 			}
 		}

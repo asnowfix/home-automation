@@ -1,5 +1,9 @@
 # .goreleaser.yml
 project_name: myhome
+before:
+  hooks:
+    - go generate ./internal/myhome/ui/...
+    - go generate ./...
 builds:
   - env: [CGO_ENABLED=0]
     goos:

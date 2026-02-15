@@ -21,6 +21,11 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
+      - id: go-generate
+        name: Run go generate
+        run: |
+          go generate ./internal/myhome/ui/...
+          go generate ./...
       - name: Validate version command
         run: |
           set -euo pipefail

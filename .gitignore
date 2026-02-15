@@ -40,6 +40,10 @@ SECRETS.md
 *.pfx
 *.key
 
+# goreleaser
+/dist
+
+# Local files
 /myhome/ctl/homectl*
 /myhome/myhome*
 /myip/myip*

@@ -9,8 +9,8 @@ builds:
   - env: [CGO_ENABLED=0]
     goos:
       - linux
-      # - windows
-      # - darwin
+      - windows
+      - darwin
     goarch:
       - amd64
       - arm64
@@ -21,7 +21,7 @@ builds:
     dir: .
     main: ./myhome
     ldflags:
-      - -X main.Program=myhome
-      - -X main.Repo={{.GitURL}}
-      - -X main.Version={{.Tag}}
-      - -X main.Commit={{.FullCommit}}
+      - -X version.Program=myhome
+      - -X version.Repo={{.GitURL}}
+      - -X version.Version={{if .IsSnapshot}}{{.Summary}}{{else}}{{.Version}}{{end}}
+      - -X version.Commit={{.FullCommit}}

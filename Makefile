@@ -90,8 +90,14 @@ tidy:
 	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) get -u ./...) &&) echo
 	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) mod tidy) &&) echo
 
+release:
+	goreleaser build --snapshot --clean --single-target
+
 run: build
 	$(MAKE) -C myhome $(@)
+
+test: build
+	$(GO) test ./...
 
 build: generate
 	$(GO) build ./...
@@ -99,11 +105,6 @@ build: generate
 generate:
 	$(GO) generate ./internal/myhome/ui/...
 	$(GO) generate ./...
-
-goreleaser:
-	$(GO) install github.com/goreleaser/goreleaser@latest
-#	$(GO) install github.com/goreleaser/goreleaser-pro@latest
-	goreleaser build --snapshot --clean --single-target
 
 # Build Debian package for current OS/ARCH (Linux only)
 # Usage: make debpkg [VERSION=X.Y.Z]

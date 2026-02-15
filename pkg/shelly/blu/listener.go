@@ -91,7 +91,7 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 	topic := "shelly-blu/events/#"
 	log.Info("Subscribing to BLU events", "topic", topic)
 	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/blu", func(topic string, payload []byte, subscriber string) error {
-		log.Info("BLU event received", "topic", topic, "payload", string(payload))
+		log.V(1).Info("BLU event received", "topic", topic, "payload", string(payload))
 
 		// Parse BLU event topic first: shelly-blu/events/<MAC>
 		parts := strings.Split(topic, "/")
@@ -103,7 +103,7 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 		mac := parts[2] // MAC address with colons
 		deviceID := "shellyblu-" + strings.ToLower(strings.ReplaceAll(mac, ":", ""))
 
-		log.Info("Found device that emitted BLU event", "device_id", deviceID, "mac", mac)
+		log.V(1).Info("Found device that emitted BLU event", "device_id", deviceID, "mac", mac)
 
 		// Handle device registration
 		sensors, err := handleBLUEvent(ctx, log, topic, payload, registry)
@@ -127,7 +127,7 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 }
 
 func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload []byte, registry DeviceRegistry) (*map[string]string, error) {
-	log.Info("Handling BLU event", "topic", topic, "payload", string(payload))
+	log.V(1).Info("Handling BLU event", "topic", topic, "payload", string(payload))
 
 	// Parse the event data
 	var eventData BLUEventData

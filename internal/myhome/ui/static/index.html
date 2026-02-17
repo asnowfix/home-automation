@@ -3,13 +3,33 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  
+  <!-- iOS Meta Tags -->
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="default"/>
   <meta name="apple-mobile-web-app-title" content="MyHome"/>
+  
+  <!-- Android/Chrome Meta Tags -->
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="theme-color" content="#F5EFE6"/>
+  
+  <!-- Windows Meta Tags -->
+  <meta name="msapplication-TileColor" content="#F5EFE6"/>
+  <meta name="msapplication-TileImage" content="/static/penates.svg"/>
+  <meta name="msapplication-config" content="none"/>
+  
+  <!-- General Meta Tags -->
+  <meta name="application-name" content="MyHome"/>
+  <meta name="description" content="MyHome Penates"/>
+  
   <title>MyHome Devices</title>
   <link rel="stylesheet" href="/static/bulma.min.css"/>
-  <link rel="icon" href="/static/penates.svg"/>
+  
+  <!-- Icons for all platforms -->
+  <link rel="icon" href="/static/penates.svg" type="image/svg+xml"/>
   <link rel="apple-touch-icon" href="/static/penates.svg"/>
+  <link rel="manifest" href="/static/manifest.json"/>
+  
   <script defer src="/static/alpine.min.js"></script>
   <script src="/static/htmx.min.js"></script>
   <style>

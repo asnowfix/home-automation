@@ -138,12 +138,15 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 		return false, err
 	}
 	d.Info_ = string(b)
+	s.log.Info("Marshalled device info", "device_id", device.Id(), "info_length", len(d.Info_), "info_is_null", device.Info == nil)
+
 	b, err = json.Marshal(device.Config)
 	if err != nil {
 		s.log.Error(err, "Failed to marshal device config", "device", device)
 		return false, err
 	}
 	d.Config_ = string(b)
+	s.log.Info("Marshalled device config", "device_id", device.Id(), "config_length", len(d.Config_), "config_is_null", device.Config == nil)
 
 	// Number of rows affected by the SQL
 	var count int64

@@ -58,3 +58,5 @@ internal/myhome/ui/static/bulma.min.css
 dist/artifacts.json
 dist/config.yaml
 dist/metadata.json
+internal/myhome/ui/static/alpine.min.js
+internal/myhome/ui/static/htmx.min.js

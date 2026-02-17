@@ -60,6 +60,17 @@ func (s *Service) HandleToggle(ctx context.Context, params *myhome.SwitchParams)
 		return nil, err
 	}
 
+	// Ensure device has a communication channel ready
+	// For devices without IP, MQTT must be initialized
+	if !sd.IsMqttReady() && !sd.IsHttpReady() {
+		// Refresh will initialize MQTT if needed
+		_, refreshErr := sd.Refresh(ctx, types.ChannelDefault)
+		if refreshErr != nil {
+			s.log.Error(refreshErr, "Failed to refresh device (MQTT init)", "device_id", device.Id())
+			// Continue anyway - the CallE will fail with a better error if channel is still not ready
+		}
+	}
+
 	out, err := sd.CallE(ctx, types.ChannelDefault, pkgsswitch.Toggle.String(), &pkgsswitch.ToggleStatusRequest{Id: params.SwitchId})
 	if err != nil {
 		return nil, fmt.Errorf("failed to toggle switch on device %s: %w", sd.Id(), err)

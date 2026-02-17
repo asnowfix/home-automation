@@ -141,7 +141,7 @@ func offValue(ctx context.Context, log logr.Logger, via types.Channel, device de
 	}
 	kv, ok := out.(*kvs.GetResponse)
 	if !ok {
-		log.Error(err, "Invalid value", "key", sswitch.NormallyClosedKey, "value", out)
+		log.Error(err, "Invalid value", "key", sswitch.NormallyClosedKey, "value", out, "type", reflect.TypeOf(out), "expected type", "*kvs.GetResponse")
 		return false
 	}
 	off, err := strconv.ParseBool(kv.Value)

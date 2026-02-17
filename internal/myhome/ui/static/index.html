@@ -30,6 +30,13 @@
       <div class="container">
         <div class="level">
           <div class="level-left">
+            <button class="button is-light is-small mr-3" @click="window.location.reload()" title="Reload page">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+            </button>
             <h1 class="title is-3">MyHome</h1>
             <span class="subtitle is-6 ml-3" x-text="`${deviceCount} devices / {{.Version}}`"></span>
           </div>

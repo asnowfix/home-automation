@@ -399,23 +399,23 @@ const roomsListTemplate = `
     <div class="column is-4">
       <div class="box">
         <div class="level mb-2">
-          <div class="level-left"><strong>{{if $room.name}}{{$room.name}}{{else}}{{$roomId}}{{end}}</strong></div>
+          <div class="level-left"><strong>{{if $room.Name}}{{$room.Name}}{{else}}{{$roomId}}{{end}}</strong></div>
           <div class="level-right">
             <button class="button is-small is-info is-outlined mr-1" 
                     @click="$dispatch('edit-room', {roomId: '{{$roomId}}'})"
                     title="Edit">✏️</button>
             <button class="button is-small is-danger is-outlined" 
-                    @click="$dispatch('delete-room', {roomId: '{{$roomId}}', roomName: '{{if $room.name}}{{$room.name}}{{else}}{{$roomId}}{{end}}'})"
+                    @click="$dispatch('delete-room', {roomId: '{{$roomId}}', roomName: '{{if $room.Name}}{{$room.Name}}{{else}}{{$roomId}}{{end}}'})"
                     title="Delete">🗑️</button>
           </div>
         </div>
         <p class="is-size-7 has-text-grey">ID: {{$roomId}}</p>
-        {{if $room.kinds}}
-          <p class="is-size-7">Types: {{range $i, $k := $room.kinds}}{{if $i}}, {{end}}{{$k}}{{end}}</p>
+        {{if $room.Kinds}}
+          <p class="is-size-7">Types: {{range $i, $k := $room.Kinds}}{{if $i}}, {{end}}{{$k}}{{end}}</p>
         {{end}}
-        {{if $room.levels}}
+        {{if $room.Levels}}
           <p class="is-size-7">Levels: 
-            {{range $k, $v := $room.levels}}{{$k}}: {{$v}}°C {{end}}
+            {{range $k, $v := $room.Levels}}{{$k}}: {{$v}}°C {{end}}
           </p>
         {{end}}
       </div>

@@ -25,6 +25,9 @@ var alpineJS []byte
 //go:embed myhome.css
 var myhomeCSS []byte
 
+//go:embed penates.svg
+var penatesSVG []byte
+
 // Asset represents a static asset with its content and MIME type
 type Asset struct {
 	Content     []byte
@@ -37,4 +40,5 @@ var Assets = map[string]Asset{
 	"/static/htmx.min.js":   {Content: htmxJS, ContentType: "application/javascript; charset=utf-8"},
 	"/static/alpine.min.js": {Content: alpineJS, ContentType: "application/javascript; charset=utf-8"},
 	"/static/myhome.css":    {Content: myhomeCSS, ContentType: "text/css; charset=utf-8"},
+	"/static/penates.svg":   {Content: penatesSVG, ContentType: "image/svg+xml; charset=utf-8"},
 }

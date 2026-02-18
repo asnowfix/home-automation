@@ -60,3 +60,4 @@ dist/config.yaml
 dist/metadata.json
 internal/myhome/ui/static/alpine.min.js
 internal/myhome/ui/static/htmx.min.js
+assets/penates.ico

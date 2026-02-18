@@ -110,12 +110,12 @@ generate:
 	$(GO) generate ./internal/myhome/ui/...
 	$(GO) generate ./...
 
+VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
+
 # Build Debian package for current OS/ARCH (Linux only)
 # Usage: make debpkg [VERSION=X.Y.Z]
-# If VERSION is not specified, uses git describe
 ifeq ($(OS),Linux)
 ARCH := $(shell dpkg --print-architecture 2>/dev/null || uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
-VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
 DEBPKG_DIR := .debpkg
 DEB_FILE := myhome_$(VERSION)_$(ARCH).deb
 
@@ -173,12 +173,12 @@ installer: build-windows
 	@if not exist dist mkdir dist
 	@if not exist assets mkdir assets
 	@magick convert "internal/myhome/ui/static/penates.svg" -define icon:auto-resize=256,128,64,48,32,16 "assets/penates.ico"
-	@"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" myhome.iss
+	@"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion="$(VERSION)" myhome.iss
 	@echo "Installer created in dist/ directory"
 
 build-windows:
 	@echo "Building Windows executable..."
-	@go build -o myhome.exe ./myhome
+	@go build -ldflags "-X github.com/asnowfix/home-automation/pkg/version.Version=$(VERSION)" -o myhome.exe ./myhome
 
 # Upload release notes for the latest version to GitHub
 # Usage: make upload-release-notes [VERSION=vX.Y.Z]

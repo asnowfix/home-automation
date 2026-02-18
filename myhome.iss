@@ -2,7 +2,9 @@
 ; https://jrsoftware.org/ishelp/
 
 #define MyAppName "MyHome"
-#define MyAppVersion "0.0.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "0.0.0"
+#endif
 #define MyAppPublisher "AsNowFiX"
 #define MyAppURL "https://github.com/asnowfix/home-automation"
 #define MyAppExeName "myhome.exe"
@@ -70,7 +72,7 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  ResultCode: Integer;
+  Path: String;
 begin
   if CurStep = ssPostInstall then
   begin
@@ -79,10 +81,10 @@ begin
       RegWriteStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', ExpandConstant('{app}'))
     else
     begin
-      RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', ResultCode);
-      if Pos(ExpandConstant('{app}'), IntToStr(ResultCode)) = 0 then
+      RegQueryStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', Path);
+      if Pos(ExpandConstant('{app}'), Path) = 0 then
         RegWriteStringValue(HKLM, 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment', 'Path', 
-          IntToStr(ResultCode) + ';' + ExpandConstant('{app}'));
+          Path + ';' + ExpandConstant('{app}'));
     end;
   end;
 end;

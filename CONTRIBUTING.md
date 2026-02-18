@@ -705,24 +705,15 @@ netsh advfirewall firewall add rule name="Allow MQTT" dir=in action=allow protoc
 The requested operation requires elevation (Run as administrator).
 ```
 
-Build the Windows installer:
-
+Fetch & Cache web assets (served locally):
 ```pwsh
-# Build the executable
-go build -o myhome.exe ./myhome
+go generate ./internal/myhome/ui/... 
 
-# Build the installer (requires ImageMagick for icon conversion)
-make installer
 ```
 
-Or manually:
-
+Build the Windows installer (automatically handles versioning from git, icon conversion, and compilation):
 ```pwsh
-# Convert SVG icon to ICO format
-magick convert "internal/myhome/ui/static/penates.svg" -define icon:auto-resize=256,128,64,48,32,16 "assets/penates.ico"
-
-# Compile the installer
-iscc myhome.iss
+.\scripts\build_windows.ps1
 ```
 
 The installer will be created in the `dist/` directory as `myhome-setup-<version>.exe`.

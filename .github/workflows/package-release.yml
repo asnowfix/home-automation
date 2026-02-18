@@ -145,7 +145,7 @@ jobs:
     runs-on: windows-latest
     outputs:
       release_version: ${{ steps.version.outputs.release }}
-      msi_file: ${{ steps.build-msi.outputs.msi_file }}
+      installer_file: ${{ steps.build-installer.outputs.installer_file }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -183,43 +183,25 @@ jobs:
         run: |
           if (-not (Test-Path "assets")) { New-Item -ItemType Directory -Path "assets" }
           magick convert "internal/myhome/ui/static/penates.svg" -define icon:auto-resize=256,128,64,48,32,16 "assets/penates.ico"
-      # - 
-      #     name: Install WiXToolset
-      #     id: install-wix
-      #     run: |
-      #         if (-not (Test-Path "C:\Program Files (x86)\WiX Toolset v3.14\bin\candle.exe")) {
-      #             choco install wixtoolset --version=3.14.0.6526 -y --force
-      #         } else {
-      #             Write-Host "WiX Toolset is already installed"
-      #         }
-      - name: Install Windows SDK
-        id: install-windows-sdk
+      - name: Install Inno Setup
+        id: install-innosetup
+        run: choco install innosetup -y
+      - name: Set version in Inno Setup script
+        id: inno-version
         run: |
-          choco install windows-sdk-10.1 -y
-      - id: install-go-msi
-        name: Install go-msi
-        run: choco install go-msi
-      - id: wix-version
-        name: Set version in wix.json
+          $content = Get-Content .\myhome.iss -Raw
+          $content = $content -replace '#define MyAppVersion "0.0.0"', '#define MyAppVersion "${{ steps.version.outputs.release }}"'
+          Set-Content .\myhome.iss -Value $content
+      - name: Create dist directory
         run: |
-          $json = Get-Content .\wix.json | ConvertFrom-Json
-          $json.'version' = "${{ steps.version.outputs.release }}"
-          $json.'version-major' = ${{ steps.version.outputs.version_major }}
-          $json.'version-minor' = ${{ steps.version.outputs.version_minor }}
-          $json.'version-patch' = ${{ steps.version.outputs.version_patch }}
-          $json.upgrade.'version-max' = "${{ steps.version.outputs.release }}"
-          $json | ConvertTo-Json -Depth 10 | Set-Content .\wix.build.json
-      - id: build-msi
-        name: Build Windows Installer MSI from exe file
-        env:
-          Path: "C:\\Windows\\System32;$env:Path;C:\\Program Files\\go-msi;C:\\Program Files (x86)\\WiX Toolset v3.14\\bin;C:\\Program Files (x86)\\Wix Toolset v3.14"
+          if (-not (Test-Path "dist")) { New-Item -ItemType Directory -Path "dist" }
+      - id: build-installer
+        name: Build Windows Installer with Inno Setup
         run: |
-          $out = New-Item -Type Directory -Path . -Name "msi_build"
-          $msi = "MyHome-${{ steps.version.outputs.release }}.msi"
-          go-msi make --msi "$out\$msi" --path .\wix.build.json --arch amd64 --license .\LICENSE --out $out --keep
-          Copy-Item "$out\$msi" -Destination "."
-          Get-Item $msi
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "msi_file=$msi"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" myhome.iss
+          $installer = "myhome-setup-${{ steps.version.outputs.release }}.exe"
+          Get-Item "dist\$installer"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "installer_file=$installer"
       - id: find-signtool
         name: Find SignTool.exe
         run: |
@@ -240,12 +222,12 @@ jobs:
           CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
           SIGNTOOL_PATH: ${{ steps.find-signtool.outputs.signtool_path }}
         run: "try {\n    Write-Host \"Starting certificate processing...\"\n    \n    # Validate certificate data\n    if ([string]::IsNullOrWhiteSpace($env:CERTIFICATE_BASE64)) {\n        throw \"Certificate data is empty\"\n    }\n    \n    Write-Host \"Certificate data length: $($env:CERTIFICATE_BASE64.Length) characters\"\n    \n    # Clean potential issues with base64 string\n    $cleanBase64 = $env:CERTIFICATE_BASE64 -replace '\\s+',''\n    Write-Host \"Cleaned certificate data length: $($cleanBase64.Length) characters\"\n    \n    # Set certificate path before any operations\n    $certPath = $null\n    \n    # Validate base64 format\n    try {\n        $certBytes = [Convert]::FromBase64String($cleanBase64)\n        Write-Host \"Base64 decoded successfully. Byte length: $($certBytes.Length)\"\n        \n        # Validate minimum PFX size (typically at least 1KB)\n        if ($certBytes.Length -lt 1024) {\n            throw \"Decoded certificate data is too small to be a valid PFX file\"\n        }\n        \n        # Ensure temp directory exists\n        $tempDir = [System.IO.Path]::GetTempPath()\n        if (-not (Test-Path $tempDir)) {\n            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null\n        }\n        \n        # Create certificate path\n        $certFileName = [System.Guid]::NewGuid().ToString() + \".pfx\"\n        $certPath = [System.IO.Path]::Combine($tempDir, $certFileName)\n        Write-Host \"Will write certificate to: $certPath\"\n        \n        # Write certificate to file\n        [IO.File]::WriteAllBytes($certPath, $certBytes)\n        \n        if (-not (Test-Path $certPath)) {\n            throw \"Failed to create certificate file at $certPath\"\n        }\n        \n        $fileInfo = Get-Item $certPath\n        Write-Host \"Certificate file created successfully:\"\n        Write-Host \"  Path: $certPath\"\n        Write-Host \"  Size: $($fileInfo.Length) bytes\"\n        Write-Host \"  Last Write Time: $($fileInfo.LastWriteTime)\"\n        \n        # Try loading certificate with explicit flags\n        $flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable -bor \n                [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::MachineKeySet -bor \n                [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet\n        \n        Write-Host \"Attempting to load certificate...\"\n        \n        # Try alternative loading methods if the first one fails\n        try {\n            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certPath, $env:CERTIFICATE_PASSWORD, $flags)\n        }\n        catch {\n            Write-Host \"First certificate loading attempt failed: $_\"\n            Write-Host \"Trying alternative loading method...\"\n            $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2\n            $cert.Import($certPath, $env:CERTIFICATE_PASSWORD, $flags)\n        }\n        \n        Write-Host \"Certificate loaded successfully.\"\n        Write-Host \"Certificate Subject: $($cert.Subject)\"\n        Write-Host \"Certificate Issuer: $($cert.Issuer)\"\n        Write-Host \"Certificate Valid From: $($cert.NotBefore)\"\n        Write-Host \"Certificate Valid To: $($cert.NotAfter)\"\n        Write-Host \"Has Private Key: $($cert.HasPrivateKey)\"\n        Write-Host \"Certificate Thumbprint: $($cert.Thumbprint)\"\n        \n        if (-not $cert.HasPrivateKey) {\n            throw \"Certificate does not contain a private key\"\n        }\n        \n        $cert.Dispose()\n        \n        # Sign the MSI using Windows SDK SignTool\n        Write-Host \"Starting MSI signing process...\"\n        $signtool = $env:SIGNTOOL_PATH\n        Write-Host \"SignTool path: $signtool\"\n        \n        if (-not (Test-Path $signtool)) {\n            throw \"SignTool not found at: $signtool\"\n        }\n        \n        Write-Host \"MSI file to sign: ${{ steps.build-msi.outputs.msi_file }}\"\n        \n        # Try signing with more detailed output\n        $result = & $signtool sign /v /debug /f $certPath /p $env:CERTIFICATE_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 \"${{ steps.build-msi.outputs.msi_file }}\" 2>&1\n        Write-Host \"SignTool Output: $result\"\n        \n        if ($LASTEXITCODE -ne 0) {\n            Write-Error \"SignTool failed with exit code $LASTEXITCODE\"\n            Write-Error $result\n            throw \"Signing failed\"\n        }\n        \n        Write-Host \"Package signed successfully\"\n    }\n    catch {\n        Write-Error \"Failed during certificate processing: $_\"\n        throw\n    }\n    finally {\n        # Safe cleanup\n        if (-not [string]::IsNullOrWhiteSpace($certPath) -and (Test-Path $certPath)) {\n            Write-Host \"Cleaning up certificate file...\"\n            Remove-Item -Path $certPath -Force -ErrorAction SilentlyContinue\n            Write-Host \"Cleanup completed\"\n        }\n    }\n}\ncatch {\n    Write-Error \"Error during signing process: $_\"\n    Write-Host \"Exception details: $($_.Exception.Message)\"\n    Write-Host \"Stack trace: $($_.Exception.StackTrace)\"\n    throw\n}\nfinally {\n    if (Test-Path $certPath) {\n        Remove-Item $certPath -Force\n        Write-Host \"Certificate file cleaned up\"\n    }\n}\n"
-      - name: Upload MyHome MSI as artifact
+      - name: Upload MyHome Installer as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: msi_file
+          name: installer_file
           path: |
-            ${{ steps.build-msi.outputs.msi_file }}
+            dist/${{ steps.build-installer.outputs.installer_file }}
   release:
     runs-on: ubuntu-latest
     needs:
@@ -272,10 +254,10 @@ jobs:
           base_tag: "${{ github.event.inputs.previous }}"
           head_tag: ${{ github.ref }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Download MyHome MSI from package-msi
+      - name: Download MyHome Installer from package-msi
         uses: actions/download-artifact@v4
         with:
-          name: msi_file
+          name: installer_file
       - name: Download MyHome DEB ARM64 from package-deb
         id: deb_file_arm64
         uses: actions/download-artifact@v4
@@ -295,7 +277,7 @@ jobs:
         with:
           name: Release ${{ steps.version.outputs.release }}
           artifactErrorsFailBuild: true
-          artifacts: "*.deb,${{ needs.package-msi.outputs.msi_file }}"
+          artifacts: "*.deb,${{ needs.package-msi.outputs.installer_file }}"
           tag: v${{ steps.version.outputs.release }}
           prerelease: false
           draft: true

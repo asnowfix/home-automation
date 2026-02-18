@@ -168,9 +168,17 @@ endif
 push:
 	$(GIT) push
 
-msi: build-msi
-	$msi = "$out\MyHome-0.0.18.msi"
-	go-msi make --msi $msi --version 0.0.18 --path .\wix.json --arch amd64 --license .\LICENSE --out $out
+installer: build-windows
+	@echo "Building Windows installer with Inno Setup..."
+	@if not exist dist mkdir dist
+	@if not exist assets mkdir assets
+	@magick convert "internal/myhome/ui/static/penates.svg" -define icon:auto-resize=256,128,64,48,32,16 "assets/penates.ico"
+	@"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" myhome.iss
+	@echo "Installer created in dist/ directory"
+
+build-windows:
+	@echo "Building Windows executable..."
+	@go build -o myhome.exe ./myhome
 
 # Upload release notes for the latest version to GitHub
 # Usage: make upload-release-notes [VERSION=vX.Y.Z]

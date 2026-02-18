@@ -80,7 +80,7 @@ This project uses semantic versioning (vMAJOR.MINOR.PATCH) with automated taggin
 ┌─────────────────────────────────────────────────────────────────┐
 │  package-release.yml                                            │
 │  ✓ Builds myhome binary                                         │
-│  ✓ Creates MyHome-0.5.0.msi (Windows)                           │
+│  ✓ Creates myhome-setup-0.5.0.exe (Windows)                     │
 │  ✓ Creates myhome_0.5.0_amd64.deb (Linux)                       │
 │  ✓ Creates myhome_0.5.0_arm64.deb (Linux)                       │
 │  ✓ Creates draft GitHub release                                 │
@@ -111,7 +111,7 @@ This project uses semantic versioning (vMAJOR.MINOR.PATCH) with automated taggin
 ┌─────────────────────────────────────────────────────────────────┐
 │  package-release.yml                                             │
 │  ✓ Builds myhome binary                                          │
-│  ✓ Creates MyHome-0.5.1.msi (Windows)                            │
+│  ✓ Creates myhome-setup-0.5.1.exe (Windows)                      │
 │  ✓ Creates myhome_0.5.1_amd64.deb (Linux)                        │
 │  ✓ Creates myhome_0.5.1_arm64.deb (Linux)                        │
 │  ✓ Creates draft GitHub release                                 │
@@ -130,7 +130,7 @@ This project uses semantic versioning (vMAJOR.MINOR.PATCH) with automated taggin
 - [ ] Configure GitHub Secrets:
   - [ ] `GPG_PRIVATE_KEY` - GPG private key for signing tags
   - [ ] `GPG_PASSPHRASE` - Passphrase for the GPG key
-  - [ ] `SIGNING_CERTIFICATE` - Code signing certificate for Windows MSI (optional)
+  - [ ] `SIGNING_CERTIFICATE` - Code signing certificate for Windows installer (optional)
   - [ ] `SIGNING_PASSWORD` - Certificate password (optional)
 - [ ] Verify workflows are enabled in repository settings
 - [ ] Test build locally: `go build ./myhome`
@@ -224,7 +224,7 @@ This project uses semantic versioning (vMAJOR.MINOR.PATCH) with automated taggin
 ### Post-Release
 
 - [ ] Test DEB installation on clean Ubuntu/Debian machine
-- [ ] Test MSI installation on clean Windows machine
+- [ ] Test installer installation on clean Windows machine
 - [ ] Verify services start automatically
 - [ ] Test core functionality
 - [ ] Update documentation if needed
@@ -273,7 +273,7 @@ The merge uses **fast-forward when possible**, ensuring the tag becomes a direct
 
 - `GPG_PRIVATE_KEY` - GPG private key for signing tags
 - `GPG_PASSPHRASE` - Passphrase for the GPG key
-- `SIGNING_CERTIFICATE` - Code signing certificate for Windows MSI (optional)
+- `SIGNING_CERTIFICATE` - Code signing certificate for Windows installer (optional)
 - `SIGNING_PASSWORD` - Certificate password (optional)
 
 To generate a GPG key:
@@ -313,7 +313,7 @@ Follow semantic versioning: `vMAJOR.MINOR.PATCH`
 - Check GoReleaser logs in workflow
 - Verify `.goreleaser.yml` configuration
 - Test DEB build locally with `jiro4989/build-deb-action`
-- Check MSI build logs for WiX Toolset errors
+- Check installer build logs for Inno Setup errors
 
 #### GPG signing failed
 - Check GPG key is valid and not expired (run `gpg --list-secret-keys`)
@@ -615,7 +615,7 @@ SERVICE_NAME: MyHome
         SERVICE_START_NAME : LocalSystem
 
 
-TODO: add all of the above steps in wix.json
+Note: The Inno Setup script (myhome.iss) handles service installation automatically.
 
 ### Git Bash
 
@@ -664,22 +664,10 @@ $env:Path += ";C:\Users\$env:Username\.local.bin"
 Get-Command sqlite3
 ```
 
-As administrator, install the WiX Toolset:
+As administrator, install Inno Setup:
 
 ```pwsh
-Enable-WindowsOptionalFeature -Online -FeatureName NetFx3
-winget install --id WiXToolset.WiXToolset --version 3.14.1.8722 --source winget --disable-interactivity --accept-source-agreements --force
-$env:Path += ";C:\Program Files (x86)\WiX Toolset v3.14\bin"
-Get-Command candle
-```
-
-```
-CommandType     Name        Version    Source
------------     ----        -------    ------
-Application     candle.exe  3.14.87... C:\Program Files (x86)\WiX Toolset v3.14\bin\candle.exe
-```
-
-```pwsh
+# Install Inno Setup via Chocolatey
 winget install --id Chocolatey.Chocolatey --source winget
 Get-Command choco
 ```
@@ -693,14 +681,21 @@ Application     choco.exe   0.12.1.0   C:\ProgramData\chocolatey\bin\choco.exe
 Run as administrator:
 
 ```pwsh
-choco install go-msi
-Get-Command go-msi
+choco install innosetup -y
+Get-Command iscc
 ```
 
 ```
 CommandType     Name        Version    Source
 -----------     ----        -------    ------
-Application     go-msi.exe  0.0.0.0    C:\Program Files\go-msi\go-msi.exe
+Application     iscc.exe    6.x.x      C:\Program Files (x86)\Inno Setup 6\iscc.exe
+```
+
+Install ImageMagick for icon conversion (optional, only needed for building installer):
+
+```pwsh
+choco install imagemagick.app -y
+Get-Command magick
 ```
 
 Allow ingress MQTT:
@@ -710,9 +705,27 @@ netsh advfirewall firewall add rule name="Allow MQTT" dir=in action=allow protoc
 The requested operation requires elevation (Run as administrator).
 ```
 
+Build the Windows installer:
+
 ```pwsh
-go-msi make --msi MyHome.msi --version 0.0.0 --path .\wix.json --arch amd64 --license .\LICENSE
+# Build the executable
+go build -o myhome.exe ./myhome
+
+# Build the installer (requires ImageMagick for icon conversion)
+make installer
 ```
+
+Or manually:
+
+```pwsh
+# Convert SVG icon to ICO format
+magick convert "internal/myhome/ui/static/penates.svg" -define icon:auto-resize=256,128,64,48,32,16 "assets/penates.ico"
+
+# Compile the installer
+iscc myhome.iss
+```
+
+The installer will be created in the `dist/` directory as `myhome-setup-<version>.exe`.
 
 ```pwsh
 cd myhome

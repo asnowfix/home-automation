@@ -16,8 +16,8 @@ import (
 
 // HeaterKVSKeys maps config field names to KVS keys
 var HeaterKVSKeys = map[string]string{
-	"normally_closed":            "normally-closed",
-	"room_id":                    "room-id",
+	"normally_closed":            string(myhome.NormallyClosedKey),
+	"room_id":                    string(myhome.RoomIdKey),
 	"enable_logging":             "script/heater/enable-logging",
 	"cheap_start_hour":           "script/heater/cheap-start-hour",
 	"cheap_end_hour":             "script/heater/cheap-end-hour",
@@ -146,10 +146,10 @@ func (s *HeaterService) HandleGetConfig(ctx context.Context, params *myhome.Heat
 	}
 
 	// Fetch unprefixed keys individually (only 2 calls)
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, "room-id"); err == nil && val != nil {
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, string(myhome.RoomIdKey)); err == nil && val != nil {
 		config.RoomID = val.Value
 	}
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, "normally-closed"); err == nil && val != nil {
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, string(myhome.NormallyClosedKey)); err == nil && val != nil {
 		config.NormallyClosed = val.Value == "true"
 	}
 

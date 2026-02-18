@@ -1,6 +1,8 @@
 package heater
 
 import (
+	"myhome"
+
 	"github.com/spf13/cobra"
 )
 
@@ -17,15 +19,15 @@ var Cmd = &cobra.Command{
 // The key format is either "script/heater/<key>" or unprefixed (for normallyClosed).
 // Changes to CONFIG_SCHEMA must be reflected here and validated by TestHeaterKVSKeysMatchJSSchema.
 var heaterKVSKeys = []string{
+	string(myhome.NormallyClosedKey),           // CONFIG_SCHEMA.normallyClosed (unprefixed: true)
+	string(myhome.RoomIdKey),                   // CONFIG_SCHEMA.roomId (unprefixed: true)
 	"script/heater/enable-logging",             // CONFIG_SCHEMA.enableLogging
 	"script/heater/cheap-start-hour",           // CONFIG_SCHEMA.cheapStartHour
 	"script/heater/cheap-end-hour",             // CONFIG_SCHEMA.cheapEndHour
 	"script/heater/poll-interval-ms",           // CONFIG_SCHEMA.pollIntervalMs
 	"script/heater/preheat-hours",              // CONFIG_SCHEMA.preheatHours
-	"normally-closed",                          // CONFIG_SCHEMA.normallyClosed (unprefixed: true)
 	"script/heater/internal-temperature-topic", // CONFIG_SCHEMA.internalTemperatureTopic
 	"script/heater/external-temperature-topic", // CONFIG_SCHEMA.externalTemperatureTopic
-	"script/heater/room-id",                    // CONFIG_SCHEMA.roomId
 }
 
 func init() {

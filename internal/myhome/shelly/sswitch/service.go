@@ -179,10 +179,9 @@ func (s *Service) returnStatus(_ context.Context, log logr.Logger, device *myhom
 
 // onValue checks the normally-closed KVS key to determine the "on" value for a device
 func (s *Service) onValue(ctx context.Context, sd *shelly.Device, switchId int) bool {
-	const normallyClosedKey = "normally-closed"
-	kv, err := kvs.GetValue(ctx, s.log, types.ChannelDefault, sd, normallyClosedKey)
+	kv, err := kvs.GetValue(ctx, s.log, types.ChannelDefault, sd, string(myhome.NormallyClosedKey))
 	if err != nil {
-		s.log.Info("Unable to get value", "key", normallyClosedKey, "reason", err)
+		s.log.Info("Unable to get value", "key", string(myhome.NormallyClosedKey), "reason", err)
 		return true
 	}
 

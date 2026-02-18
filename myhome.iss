@@ -57,23 +57,17 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "service stop"; Flags: runhidden 
 Filename: "{app}\{#MyAppExeName}"; Parameters: "service uninstall"; Flags: runhidden waituntilterminated
 
 [Code]
-function InitializeSetup(): Boolean;
-var
-  ResultCode: Integer;
-begin
-  Result := True;
-  
-  // Check if service is already installed and stop it
-  if FileExists(ExpandConstant('{app}\{#MyAppExeName}')) then
-  begin
-    Exec(ExpandConstant('{app}\{#MyAppExeName}'), 'service stop', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  end;
-end;
-
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Path: String;
+  ResultCode: Integer;
 begin
+  if CurStep = ssInstall then
+  begin
+    // Attempt to stop the service before installation to avoid file locking
+    Exec('net', 'stop {#MyAppServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  end;
+
   if CurStep = ssPostInstall then
   begin
     // Add to PATH environment variable

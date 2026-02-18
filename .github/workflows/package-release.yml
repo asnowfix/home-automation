@@ -181,7 +181,8 @@ jobs:
         run: choco install imagemagick.app -y
       - name: Convert SVG to ICO
         run: |
-          magick convert "assets/penates.svg" -define icon:auto-resize=256,128,64,48,32,16 "assets/penates.ico"
+          if (-not (Test-Path "assets")) { New-Item -ItemType Directory -Path "assets" }
+          magick convert "internal/myhome/ui/static/penates.svg" -define icon:auto-resize=256,128,64,48,32,16 "assets/penates.ico"
       # - 
       #     name: Install WiXToolset
       #     id: install-wix

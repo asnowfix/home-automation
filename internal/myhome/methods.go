@@ -262,7 +262,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &SwitchParams{}
 		},
 		NewResult: func() any {
-			return &SwitchToggleResult{}
+			return &SwitchResult{}
 		},
 	},
 	SwitchOn: {
@@ -270,7 +270,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &SwitchParams{}
 		},
 		NewResult: func() any {
-			return &SwitchOnOffResult{}
+			return &SwitchResult{}
 		},
 	},
 	SwitchOff: {
@@ -278,7 +278,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &SwitchParams{}
 		},
 		NewResult: func() any {
-			return &SwitchOnOffResult{}
+			return &SwitchResult{}
 		},
 	},
 	SwitchStatus: {
@@ -286,7 +286,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &SwitchParams{}
 		},
 		NewResult: func() any {
-			return &SwitchStatusResult{}
+			return &SwitchResult{}
 		},
 	},
 	SwitchAll: {

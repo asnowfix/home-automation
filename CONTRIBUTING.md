@@ -1031,7 +1031,7 @@ CREATE INDEX idx_temperature_rooms_updated
 
 ### Normally-Closed Switches
 
-XXX
+The `normally-closed` flag is used to indicate whether the switch is normally closed (true) or open (false). This is used to determine the default state of the switch when it is first powered on.
 
 ```
 go run ./myhome ctl -B 192.168.1.2 switch on radiateur-bureau

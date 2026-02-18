@@ -47,3 +47,10 @@ const (
 	SwitchStatus                  Verb = "switch.status"
 	SwitchAll                     Verb = "switch.all"
 )
+
+type Key string
+
+const (
+	NormallyClosedKey Key = "normally-closed"
+	RoomIdKey         Key = "room-id"
+)

@@ -159,13 +159,11 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	toggleResult, ok := res.(*myhome.SwitchToggleResult)
+	on, ok := res.(bool)
 	if !ok {
 		http.Error(w, "invalid response", http.StatusInternalServerError)
 		return
 	}
-
-	newState := !toggleResult.Result.WasOn
 
 	// Render switch button HTML
 	tmpl := template.Must(template.New("switch-button").Parse(switchButtonTemplate))
@@ -173,7 +171,7 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{
 		"DeviceID": deviceID,
 		"SwitchID": switchID,
-		"On":       newState,
+		"On":       on,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -69,15 +69,15 @@ All other configuration values have defaults.`,
 
 func init() {
 	// KVS configuration flags with defaults from heater.js CONFIG_SCHEMA
+	setupCmd.Flags().BoolVar(&setupFlags.NormallyClosed, string(myhome.NormallyClosedKey), true, "Whether the switch is normally closed")
+	setupCmd.Flags().StringVar(&setupFlags.RoomId, string(myhome.RoomIdKey), "", "Room identifier for temperature API (required)")
 	setupCmd.Flags().BoolVar(&setupFlags.EnableLogging, "enable-logging", true, "Enable logging")
 	setupCmd.Flags().IntVar(&setupFlags.CheapStartHour, "cheap-start-hour", 23, "Start hour of cheap electricity window")
 	setupCmd.Flags().IntVar(&setupFlags.CheapEndHour, "cheap-end-hour", 7, "End hour of cheap electricity window")
 	setupCmd.Flags().IntVar(&setupFlags.PollIntervalMs, "poll-interval-ms", 300000, "Polling interval in milliseconds (default: 5 minutes)")
 	setupCmd.Flags().IntVar(&setupFlags.PreheatHours, "preheat-hours", 2, "Hours before cheap window end to start preheating")
-	setupCmd.Flags().BoolVar(&setupFlags.NormallyClosed, "normally-closed", true, "Whether the switch is normally closed")
 	setupCmd.Flags().StringVar(&setupFlags.InternalTemperatureTopic, "internal-temperature-topic", "", "MQTT topic for internal temperature sensor (required)")
 	setupCmd.Flags().StringVar(&setupFlags.ExternalTemperatureTopic, "external-temperature-topic", "", "MQTT topic for external temperature sensor (required)")
-	setupCmd.Flags().StringVar(&setupFlags.RoomId, "room-id", "", "Room identifier for temperature API (required)")
 	setupCmd.Flags().StringVar(&setupFlags.DoorSensorTopics, "door-sensor-topics", "", "Comma-separated list of MQTT topics for door/window sensors")
 
 	// Script upload flags
@@ -101,12 +101,13 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 
 	// Build KVS configuration map
 	kvsConfig := map[string]interface{}{
+		string(myhome.NormallyClosedKey):           setupFlags.NormallyClosed,
+		string(myhome.RoomIdKey):                   setupFlags.RoomId,
 		"script/heater/enable-logging":             setupFlags.EnableLogging,
 		"script/heater/cheap-start-hour":           setupFlags.CheapStartHour,
 		"script/heater/cheap-end-hour":             setupFlags.CheapEndHour,
 		"script/heater/poll-interval-ms":           setupFlags.PollIntervalMs,
 		"script/heater/preheat-hours":              setupFlags.PreheatHours,
-		"normally-closed":                          setupFlags.NormallyClosed,
 		"script/heater/internal-temperature-topic": setupFlags.InternalTemperatureTopic,
 		"script/heater/external-temperature-topic": setupFlags.ExternalTemperatureTopic,
 	}

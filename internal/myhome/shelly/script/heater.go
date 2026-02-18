@@ -16,13 +16,13 @@ import (
 
 // HeaterKVSKeys maps config field names to KVS keys
 var HeaterKVSKeys = map[string]string{
-	"enable_logging":             "script/heater/enable-logging",
+	"normally_closed":            "normally-closed",
 	"room_id":                    "room-id",
+	"enable_logging":             "script/heater/enable-logging",
 	"cheap_start_hour":           "script/heater/cheap-start-hour",
 	"cheap_end_hour":             "script/heater/cheap-end-hour",
 	"poll_interval_ms":           "script/heater/poll-interval-ms",
 	"preheat_hours":              "script/heater/preheat-hours",
-	"normally_closed":            "normally-closed",
 	"internal_temperature_topic": "script/heater/internal-temperature-topic",
 	"external_temperature_topic": "script/heater/external-temperature-topic",
 }

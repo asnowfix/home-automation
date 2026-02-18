@@ -64,6 +64,10 @@ type ConfigurationRequest struct {
 	Configuration Config `json:"config"` // Configuration that the method takes
 }
 
+type ConfigurationResponse struct {
+	RestartRequired bool `json:"restart_required"` // True if the device needs to be restarted for the changes to take effect
+}
+
 type InputConfig struct {
 	Id                       int     `json:"id"`                                   // Id of the Switch component instance
 	Name                     *string `json:"name"`                                 // Name of the switch instance
@@ -115,7 +119,7 @@ type ToogleSetResponse struct {
 	WasOn bool `json:"was_on"`
 }
 
-type ToggleStatusRequest struct {
+type ToggleStatusConfigRequest struct {
 	Id int `json:"id"`
 }
 

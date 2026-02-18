@@ -12,7 +12,7 @@ import (
 	"github.com/go-logr/logr"
 
 	mhscript "internal/myhome/shelly/script"
-	"myhome/net"
+	mynet "myhome/net"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/input"
@@ -466,7 +466,7 @@ func deriveDeviceName(ctx context.Context, log logr.Logger, via types.Channel, s
 func getOutputName(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device) string {
 	// Try up to 4 outputs (covers most Shelly devices: 1, 2, or 4 outputs)
 	for id := 0; id < 4; id++ {
-		out, err := sd.CallE(ctx, via, sswitch.GetConfig.String(), map[string]int{"id": id})
+		cfg, err := sswitch.GetConfig(ctx, sd, id)
 		if err != nil {
 			// No more outputs available
 			if id == 0 {
@@ -475,14 +475,13 @@ func getOutputName(ctx context.Context, log logr.Logger, via types.Channel, sd *
 			break
 		}
 
-		switchCfg, ok := out.(*sswitch.Config)
-		if !ok || switchCfg == nil {
+		if cfg == nil {
 			continue
 		}
 
-		name := transformName(switchCfg.Name)
+		name := transformName(cfg.Name)
 		if name != "" {
-			log.V(1).Info("Found output name", "device", sd.Id(), "switch_id", id, "name", switchCfg.Name)
+			log.V(1).Info("Found output name", "device", sd.Id(), "switch_id", id, "name", cfg.Name)
 			return name
 		}
 	}

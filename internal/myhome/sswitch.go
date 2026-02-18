@@ -4,39 +4,25 @@ package myhome
 
 import (
 	"pkg/shelly/shelly"
-	"pkg/shelly/sswitch"
 )
 
-// SwitchParams represents parameters for switch.toggle, switch.on, switch.off, switch.status
+// SwitchParams represents parameters for switch.toggle, switch.on, switch.off and switch.status
 type SwitchParams struct {
 	Identifier string `json:"identifier"` // Device identifier (id/name/host/etc)
 	SwitchId   int    `json:"switch_id"`  // Switch component ID (default 0)
 }
 
+// SwitchResult represents the result of switch.on, switch.off, switch.toggle and switch.status
+type SwitchResult struct {
+	DeviceID   string `json:"device_id"`
+	DeviceName string `json:"device_name"`
+	SwitchId   int    `json:"switch_id"` // Switch component ID (default 0)
+	On         bool   `json:"on"`        // true if the output channel is currently on, false otherwise
+}
+
 // SwitchAllParams represents parameters for switch.all
 type SwitchAllParams struct {
 	Identifier string `json:"identifier"` // Device identifier (id/name/host/etc)
-}
-
-// SwitchStatusResult represents the result of switch.status
-type SwitchStatusResult struct {
-	DeviceID   string          `json:"device_id"`
-	DeviceName string          `json:"device_name"`
-	Status     *sswitch.Status `json:"status"`
-}
-
-// SwitchToggleResult represents the result of switch.toggle
-type SwitchToggleResult struct {
-	DeviceID   string                     `json:"device_id"`
-	DeviceName string                     `json:"device_name"`
-	Result     *sswitch.ToogleSetResponse `json:"result"`
-}
-
-// SwitchOnOffResult represents the result of switch.on and switch.off
-type SwitchOnOffResult struct {
-	DeviceID   string                     `json:"device_id"`
-	DeviceName string                     `json:"device_name"`
-	Result     *sswitch.ToogleSetResponse `json:"result"`
 }
 
 // SwitchAllResult represents the result of switch.all

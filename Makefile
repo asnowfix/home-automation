@@ -36,15 +36,9 @@ help:
 	@echo "  stop                  - Stop the service"
 	@echo "  status                - Show service status"
 	@echo "  logs                  - Show service logs"
-	@echo "  install-hooks         - Install repository git hooks"
 	@echo "  tidy                  - Tidy Go modules"
 	@echo "  debpkg                - Build Debian package (Linux only, VERSION=X.Y.Z optional)"
 	@echo "  upload-release-notes  - Upload release notes to GitHub (VERSION=vX.Y.Z optional)"
-
-install-hooks:
-	@git config core.hooksPath .githooks
-	@chmod +x .githooks/pre-commit scripts/check-file-size-limit.sh
-	@echo "Git hooks installed (core.hooksPath=.githooks)"
 
 ifneq ($(MODULE),)
 # make module MODULE=myhome/ctl/options
@@ -210,4 +204,4 @@ upload-release-notes:
 		exit 1; \
 	fi
 
-.PHONY: install-hooks upload-release-notes
+.PHONY: upload-release-notes

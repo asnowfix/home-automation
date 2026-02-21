@@ -19,9 +19,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.23.x'
-      - id: file-size-check
-        name: Enforce max file size
-        run: CHECK_ALL_TRACKED=1 bash ./scripts/check-file-size-limit.sh
       - id: go-generate
         name: Run go generate
         run: |

@@ -376,7 +376,8 @@
             }
             
             const out = await res.json();
-            const newState = !out.result.result.was_on;
+            console.log('toggleSwitch: response', out);
+            const newState = out.on;
             
             if (btn) {
               btn.disabled = false;

@@ -19,6 +19,33 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
+// WaitForBrokerReady waits for the MQTT broker to start accepting connections
+func WaitForBrokerReady(ctx context.Context, log logr.Logger, maxWait time.Duration) error {
+	deadline := time.Now().Add(maxWait)
+	attempt := 0
+
+	for time.Now().Before(deadline) {
+		attempt++
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("localhost:%d", PRIVATE_PORT), 100*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			log.Info("MQTT broker is ready", "attempts", attempt)
+			return nil
+		}
+
+		// Check if context was cancelled
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	return fmt.Errorf("broker did not become ready within %v", maxWait)
+}
+
 func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string, clientLogInterval time.Duration, noMdns bool, v *viper.Viper) error {
 	log.Info("Starting MyHome", "program", program)
 

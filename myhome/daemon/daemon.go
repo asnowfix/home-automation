@@ -93,6 +93,11 @@ func (d *daemon) Run() error {
 			log.Error(err, "Failed to initialize MyHome")
 			return err
 		}
+		// Wait for broker to be ready to accept connections
+		if err := mqttserver.WaitForBrokerReady(d.ctx, log.WithName("mqtt.Broker"), 5*time.Second); err != nil {
+			log.Error(err, "MQTT broker failed to become ready")
+			return err
+		}
 		// Connect to localhost when using embedded broker
 		mqttBrokerAddr = "localhost"
 	} else {

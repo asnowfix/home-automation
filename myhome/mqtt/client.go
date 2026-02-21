@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"global"
 	"myhome/ctl/options"
-	"myhome/net"
+	mynet "myhome/net"
 	"net"
 	"net/url"
 	"os"
@@ -56,6 +56,76 @@ const (
 	AtLeastOnce byte = 1 // QoS 1 - At least once delivery
 	ExactlyOnce byte = 2 // QoS 2 - Exactly once delivery
 )
+
+// WaitForBrokerReady waits for an MQTT broker to be ready by attempting connections with exponential backoff
+// This is useful when starting an embedded broker and needing to wait for it to be ready before connecting clients
+func WaitForBrokerReady(ctx context.Context, log logr.Logger, brokerAddr string, initialDelay time.Duration, maxWait time.Duration) error {
+	log.Info("Waiting for MQTT broker to be ready", "broker", brokerAddr, "initial_delay", initialDelay, "max_wait", maxWait)
+
+	// Give the broker a moment to complete async initialization after Serve() returns
+	// Mochi MQTT's Serve() is non-blocking and listeners start asynchronously
+	if initialDelay > 0 {
+		log.V(1).Info("Initial delay for broker async initialization", "delay", initialDelay)
+		time.Sleep(initialDelay)
+	}
+
+	deadline := time.Now().Add(maxWait)
+	attempt := 0
+	backoff := 100 * time.Millisecond
+	maxBackoff := 5 * time.Second
+
+	for time.Now().Before(deadline) {
+		attempt++
+
+		log.V(1).Info("Attempting to connect to broker", "attempt", attempt, "broker", brokerAddr)
+
+		// Create a dedicated test client (not using singleton) to avoid state issues
+		opts := mqtt.NewClientOptions()
+		opts.AddBroker(fmt.Sprintf("tcp://%s", brokerAddr))
+		opts.SetClientID(fmt.Sprintf("readiness-check-%d", time.Now().UnixNano()))
+		opts.SetConnectTimeout(1 * time.Second)
+		opts.SetAutoReconnect(false)
+		opts.SetCleanSession(true)
+		opts.SetOrderMatters(false)
+
+		testClient := mqtt.NewClient(opts)
+		token := testClient.Connect()
+
+		// Wait for connection with timeout
+		if token.WaitTimeout(1 * time.Second) {
+			if token.Error() == nil {
+				// Successfully connected - broker is ready
+				testClient.Disconnect(100)
+				log.Info("MQTT broker is ready", "broker", brokerAddr, "attempts", attempt)
+				return nil
+			}
+			log.V(1).Info("Connection failed", "attempt", attempt, "error", token.Error())
+		} else {
+			log.V(1).Info("Connection timed out", "attempt", attempt)
+		}
+
+		log.V(1).Info("Broker not ready yet, waiting", "attempt", attempt, "backoff", backoff)
+
+		// Check if we've run out of time
+		if time.Now().Add(backoff).After(deadline) {
+			break
+		}
+
+		// Exponential backoff
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+
+		backoff = backoff * 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+
+	return fmt.Errorf("MQTT broker at %s did not become ready within %v (after %d attempts)", brokerAddr, maxWait, attempt)
+}
 
 type Client interface {
 	GetServer() string
@@ -181,8 +251,8 @@ func NewClientE(ctx context.Context, broker string, mdnsTimeout time.Duration, m
 
 	mqttOps.SetAutoReconnect(true) // automatically reconnect in case of disconnection
 	mqttOps.SetResumeSubs(true)    // automatically re-subscribe in case or disconnection/reconnection
-	mqttOps.SetCleanSession(false) // do not save messages to be re-sent in case of disconnection
-	// mqttOps.SetOrderMatters(false) // required for wildcard subscriptions to route messages to correct handlers
+	mqttOps.SetCleanSession(true)  // clean session to avoid stale subscriptions from previous instances
+	mqttOps.SetOrderMatters(false) // required for wildcard subscriptions to route messages to correct handlers
 
 	// DEBUG: default handler to catch messages not matched by any subscription route
 	mqttOps.SetDefaultPublishHandler(func(client mqtt.Client, msg mqtt.Message) {
@@ -443,15 +513,20 @@ func (c *client) SubscribeWithTopic(ctx context.Context, topic string, qlen uint
 }
 
 func (c *client) SubscribeWithHandler(ctx context.Context, topic string, qlen uint, subscriberName string, handler func(topic string, payload []byte, subscriber string) error) error {
+	c.log.Info("SubscribeWithHandler", "topic", topic, "qlen", qlen, "subscriber", subscriberName)
 	mch, err := c.SubscribeWithTopic(ctx, topic, qlen, subscriberName)
 	if err != nil {
+		c.log.Error(err, "SubscribeWithHandler failed", "topic", topic, "subscriber", subscriberName)
 		return err
 	}
+	c.log.Info("SubscribeWithHandler succeeded", "topic", topic, "subscriber", subscriberName)
 	go func(log logr.Logger) {
+		log.Info("Handler goroutine started", "topic", topic, "subscriber", subscriberName)
 		for msg := range mch {
-			log.V(1).Info("Received message", "topic", msg.Topic(), "subscriber", msg.Subscriber())
+			log.Info("Handler received message from channel", "topic", msg.Topic(), "subscriber", msg.Subscriber(), "payload_len", len(msg.Payload()))
 			handler(msg.Topic(), msg.Payload(), msg.Subscriber())
 		}
+		log.Info("Handler goroutine exiting", "topic", topic, "subscriber", subscriberName)
 	}(c.log.WithName(subscriberName))
 	return nil
 }
@@ -498,13 +573,14 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 
 				// Transform and distribute to all subscribers
 				transformed := transform(msg)
+				log.Info("distribute: distributing to subscribers", "topic", topic, "subscriber_count", len(subscribers))
 				for i, ch := range subscribers {
 					select {
 					case <-ctx.Done():
 						c.log.Info("Subscriber context done", "topic", topic, "index", i)
 						return
 					case ch.queue <- transformed:
-						// Successfully sent
+						log.Info("distribute: sent to subscriber", "topic", topic, "index", i, "subscriber", ch.name)
 					default:
 						// Channel full or closed, mark for removal
 						c.log.Error(nil, "Subscriber channel full or closed", "topic", topic, "index", i, "subscriber", ch.name)

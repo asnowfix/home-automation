@@ -202,6 +202,15 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	// 	d.log.V(1).Info("Failed to refresh scripts (continuing)", "error", err)
 	// }
 
+	// Fetch device info to store in database
+	info, err := shelly.GetDeviceInfo(ctx, d, via)
+	if err != nil {
+		d.log.Error(err, "Unable to get device info")
+		// Continue anyway - info is optional
+	} else {
+		d.info = info
+	}
+
 	crs, err := shelly.DoGetComponents(ctx, d, &shelly.ComponentsRequest{
 		Include: []string{"config", "status"},
 	})
@@ -258,6 +267,7 @@ func (d *Device) UpdateId(id string) {
 }
 
 func (d *Device) Host() string {
+
 	if d.Host_ == nil {
 		return ""
 	}

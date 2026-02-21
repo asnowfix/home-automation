@@ -39,7 +39,24 @@
             }
         },
         {
-            "name": "myhome daemon (w/o MQTT broker) DEBUG",
+            "name": "myhome daemon (full, no-mDNS) DEBUG",
+            "type": "go",
+            "request": "launch",
+            "program": "${workspaceFolder}/myhome",
+            "args": [
+                "daemon", "run",
+                "--debug",
+                "-P", "myhome-no-mdns.prof",
+                "--ui-port", "6081",
+                "--no-mdns-publish",
+                "-I", "myhome-local"
+            ],
+            "env": {
+                "MYHOME_LOG": "stderr"
+            }
+        },
+        {
+            "name": "myhome daemon (w/o MQTT broker & no-mDNS publish) DEBUG",
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
@@ -56,14 +73,14 @@
             }
         },
         {
-            "name": "myhome daemon (w/o MQTT broker) VERBOSE",
+            "name": "myhome daemon (w/o MQTT broker & no-mDNS publish) VERBOSE",
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
             "args": [
                 "daemon", "run",
                 "--verbose",
-                "-P", "myhome-wo-broker.prof",
+                "-P", "myhome-wo-broker-no-mdns.prof",
                 "-B", "192.168.1.2",
                 "--ui-port", "6081",
                 "--no-mdns-publish",
@@ -74,14 +91,14 @@
             }
         },
         {
-            "name": "myhome daemon (w/ gen1 proxy only)",
+            "name": "myhome daemon (w/ gen1 proxy only) DEBUG",
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
             "args": [
                 "daemon", "run",
                 "--debug",
-                "-P", "myhome-wo-broker.prof",
+                "-P", "myhome-wo-broker-no-mdns.prof",
                 "-B", "192.168.1.2",
                 "--ui-port", "6081",
                 "--enable-gen1-proxy",
@@ -111,7 +128,7 @@
             "args": ["--debug", "daemon", "run",
                 "-B", "192.168.1.2",
                 "--ui-port", "6081",
-                "-P", "myhome-wo-broker.prof",
+                "-P", "myhome-wo-broker-no-mdns.prof",
                 "-B", "192.168.1.2",
                 "-E", "events",
                 "--no-mdns-publish",
@@ -128,7 +145,7 @@
             "program": "${workspaceFolder}/myhome",
             "args": [
                 "--debug", "daemon", "run",
-                "-P", "myhome-wo-broker.prof",
+                "-P", "myhome-wo-broker-no-mdns.prof",
                 "-D"
             ],
             "env": {

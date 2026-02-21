@@ -85,19 +85,44 @@ func (d *daemon) Run() error {
 	resolver := mynet.MyResolver(log.WithName("mynet.Resolver"))
 
 	// Conditionally start the embedded MQTT broker
+	var mqttBrokerAddr string
 	if !disableEmbeddedMqttBroker {
 		log.Info("Starting embedded MQTT broker")
-		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval, options.Flags.NoMdnsPublish)
+
+		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval, options.Flags.NoMdnsPublish, options.ViperConfig)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome")
 			return err
 		}
+		// Connect to localhost when using embedded broker
+		// Include port so GetServer() returns host:port correctly
+		mqttBrokerAddr = fmt.Sprintf("localhost:%d", mqttclient.PRIVATE_PORT)
+
+		// Get broker readiness configuration from config
+		readinessInitialDelay := 500 * time.Millisecond // default 500ms
+		readinessTimeout := 30 * time.Second            // default 30s
+
+		if options.ViperConfig != nil {
+			if options.ViperConfig.IsSet("daemon.broker_readiness_initial_delay") {
+				readinessInitialDelay = options.ViperConfig.GetDuration("daemon.broker_readiness_initial_delay")
+			}
+			if options.ViperConfig.IsSet("daemon.broker_readiness_timeout") {
+				readinessTimeout = options.ViperConfig.GetDuration("daemon.broker_readiness_timeout")
+			}
+		}
+
+		// Wait for broker to be ready by attempting MQTT client connections with exponential backoff
+		if err := mqttclient.WaitForBrokerReady(d.ctx, log, mqttBrokerAddr, readinessInitialDelay, readinessTimeout); err != nil {
+			log.Error(err, "MQTT broker failed to become ready")
+			return err
+		}
 	} else {
 		log.Info("Embedded MQTT broker disabled")
+		mqttBrokerAddr = options.Flags.MqttBroker
 	}
 
 	// Connect to the network's MQTT broker or use the embedded broker
-	err = mqttclient.NewClientE(d.ctx, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+	err = mqttclient.NewClientE(d.ctx, mqttBrokerAddr, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 	if err != nil {
 		log.Error(err, "Failed to initialize MQTT client")
 		return err

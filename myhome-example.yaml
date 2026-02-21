@@ -1,0 +1,92 @@
+#
+ MyHome Configuration Example
+# Copy this file to myhome.yaml and customize as needed
+
+# MQTT Broker Configuration
+mqtt:
+  broker:
+    # Maximum number of seconds to keep disconnected client sessions
+    # Default: 300 (5 minutes)
+    # Lower values clean up stale subscriptions faster
+    maximum_session_expiry_interval: 300
+    
+    # Maximum message expiry in seconds if message expiry is 0 or over
+    # Default: 86400 (24 hours)
+    maximum_message_expiry_interval: 86400
+    
+    # Maximum number of concurrent QoS messages per client
+    # Default: 65535
+    receive_maximum: 65535
+    
+    # Maximum QoS value available to clients (0, 1, or 2)
+    # Default: 2
+    maximum_qos: 2
+    
+    # Support of retain messages (0=disabled, 1=enabled)
+    # Default: 1
+    retain_available: 1
+    
+    # Support of wildcard subscriptions (0=disabled, 1=enabled)
+    # Default: 1
+    wildcard_sub_available: 1
+    
+    # Support of subscription identifiers (0=disabled, 1=enabled)
+    # Default: 1
+    sub_id_available: 1
+    
+    # Support of shared subscriptions (0=disabled, 1=enabled)
+    # Default: 1
+    shared_sub_available: 1
+
+# Daemon Configuration
+daemon:
+  # MQTT broker address (leave empty to use embedded broker)
+  # mqtt_broker: "192.168.1.2"
+  
+  # Initial delay before checking if embedded MQTT broker is ready
+  # Gives the broker time to complete async initialization after Serve() returns
+  # Default: 500ms
+  # broker_readiness_initial_delay: 500ms
+  
+  # Timeout for waiting for embedded MQTT broker to be ready
+  # Default: 30s
+  # broker_readiness_timeout: 30s
+  
+  # mDNS lookup timeout
+  # mdns_timeout: 7s
+  
+  # MQTT operation timeout
+  # mqtt_timeout: 14s
+  
+  # MQTT disconnection grace period
+  # mqtt_grace: 2s
+  
+  # Device refresh interval
+  # refresh_interval: 1m
+  
+  # MQTT watchdog check interval
+  # mqtt_watchdog_interval: 30s
+  
+  # MQTT watchdog max consecutive failures
+  # mqtt_watchdog_max_failures: 3
+  
+  # MQTT broker client log interval (0 to disable)
+  # mqtt_broker_client_log_interval: 2m
+  
+  # UI listen port
+  # ui_port: 6080
+  
+  # Enable Gen1 HTTP->MQTT proxy
+  # enable_gen1_proxy: false
+  
+  # Enable occupancy service
+  # enable_occupancy_service: true
+  
+  # Enable temperature service
+  # enable_temperature_service: true
+  
+  # Disable device manager
+  # disable_device_manager: false
+  
+  # Disable auto-setup
+  # disable_auto_setup: false

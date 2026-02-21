@@ -76,10 +76,10 @@ func init() {
 	updateCmd.Flags().IntVar(&cheapEndHour, "cheap-end-hour", 0, "End hour of cheap electricity window")
 	updateCmd.Flags().IntVar(&pollIntervalMs, "poll-interval-ms", 0, "Polling interval in milliseconds")
 	updateCmd.Flags().IntVar(&preheatHours, "preheat-hours", 0, "Hours before cheap window end to start preheating")
-	updateCmd.Flags().BoolVar(&normallyClosed, "normally-closed", false, "Whether the switch is normally closed")
+	updateCmd.Flags().BoolVar(&normallyClosed, string(myhome.NormallyClosedKey), false, "Whether the switch is normally closed")
 	updateCmd.Flags().StringVar(&internalTemperatureTopic, "internal-temperature-topic", "", "MQTT topic for internal temperature sensor")
 	updateCmd.Flags().StringVar(&externalTemperatureTopic, "external-temperature-topic", "", "MQTT topic for external temperature sensor")
-	updateCmd.Flags().StringVar(&roomId, "room-id", "", "Room identifier for temperature API")
+	updateCmd.Flags().StringVar(&roomId, string(myhome.RoomIdKey), "", "Room identifier for temperature API")
 
 	// Script upload flags
 	updateCmd.Flags().BoolVar(&updateFlags.NoMinify, "no-minify", false, "Do not minify script before upload")
@@ -108,7 +108,7 @@ func init() {
 		if cmd.Flags().Changed("preheat-hours") {
 			updateFlags.PreheatHours = &preheatHours
 		}
-		if cmd.Flags().Changed("normally-closed") {
+		if cmd.Flags().Changed(string(myhome.NormallyClosedKey)) {
 			updateFlags.NormallyClosed = &normallyClosed
 		}
 		if cmd.Flags().Changed("internal-temperature-topic") {
@@ -117,7 +117,7 @@ func init() {
 		if cmd.Flags().Changed("external-temperature-topic") {
 			updateFlags.ExternalTemperatureTopic = &externalTemperatureTopic
 		}
-		if cmd.Flags().Changed("room-id") {
+		if cmd.Flags().Changed(string(myhome.RoomIdKey)) {
 			updateFlags.RoomId = &roomId
 		}
 	}
@@ -166,7 +166,7 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 		updatesToApply["script/heater/preheat-hours"] = *updateFlags.PreheatHours
 	}
 	if updateFlags.NormallyClosed != nil {
-		updatesToApply["normally-closed"] = *updateFlags.NormallyClosed
+		updatesToApply[string(myhome.NormallyClosedKey)] = *updateFlags.NormallyClosed
 	}
 	if updateFlags.InternalTemperatureTopic != nil {
 		updatesToApply["script/heater/internal-temperature-topic"] = *updateFlags.InternalTemperatureTopic
@@ -175,7 +175,7 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 		updatesToApply["script/heater/external-temperature-topic"] = *updateFlags.ExternalTemperatureTopic
 	}
 	if updateFlags.RoomId != nil {
-		updatesToApply["script/heater/room-id"] = *updateFlags.RoomId
+		updatesToApply[string(myhome.RoomIdKey)] = *updateFlags.RoomId
 	}
 
 	// Apply KVS updates

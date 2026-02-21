@@ -8,6 +8,7 @@ Example of **device.json** for the script **heater.js**:
 {
   "kvs": {
     "normally-closed": true,
+    "room-id": "bureau",
     "script/heater/cheap-end-hour": 7,
     "script/heater/cheap-start-hour": 23,
     "script/heater/enable-logging": true,

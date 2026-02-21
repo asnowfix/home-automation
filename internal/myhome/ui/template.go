@@ -16,6 +16,8 @@ import (
 	"text/template"
 
 	"global"
+
+	"github.com/go-logr/logr"
 )
 
 // Embed static assets under this package
@@ -81,6 +83,11 @@ func init() {
 // DeviceToView converts a myhome.Device to ui.DeviceView for SSE broadcasting and UI rendering
 // This is the canonical conversion function used by both initial page rendering and SSE updates
 func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
+
 	name := d.Name()
 	if name == "" {
 		name = d.Id()
@@ -168,16 +175,61 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 	// Check if device is refreshable
 	isRefreshable := !shelly.IsBluDevice(d.Id()) && !shelly.IsGen1Device(d.Id())
 
+	// Get switch information
 	switches := make(map[int]pkgshelly.SwitchSummary)
+
+	// First try to get switches from config if available
 	if d.Config != nil {
+		log.V(1).Info("Device has config", "device", d.Id(), "switch0", d.Config.Switch0 != nil, "switch1", d.Config.Switch1 != nil)
+
+		// Get device implementation to access status
+		var status *pkgshelly.Status
+		if sd, ok := d.Impl().(*shelly.Device); ok && sd != nil {
+			status = sd.Status()
+		}
+
 		for _, sw := range []*sswitch.Config{d.Config.Switch0, d.Config.Switch1, d.Config.Switch2, d.Config.Switch3} {
 			if sw != nil {
+				isOn := false
+				// Get actual switch status if available
+				if status != nil {
+					switch sw.Id {
+					case 0:
+						if status.Switch0 != nil {
+							isOn = status.Switch0.Output
+						}
+					case 1:
+						if status.Switch1 != nil {
+							isOn = status.Switch1.Output
+						}
+					case 2:
+						if status.Switch2 != nil {
+							isOn = status.Switch2.Output
+						}
+					case 3:
+						if status.Switch3 != nil {
+							isOn = status.Switch3.Output
+						}
+					}
+				}
+
 				switches[sw.Id] = pkgshelly.SwitchSummary{
 					Id:   sw.Id,
 					Name: sw.Name,
-					On:   false,
+					On:   isOn,
 				}
 			}
+		}
+		log.V(1).Info("Loaded switches from config", "device", d.Id(), "count", len(switches))
+	} else if sd, ok := d.Impl().(*shelly.Device); ok && sd != nil {
+		// Fallback: Fetch switches directly from device if no config
+		log.V(1).Info("No config, fetching switches from device", "device", d.Id())
+		switchSummary, err := pkgshelly.GetSwitchesSummary(ctx, sd)
+		if err != nil {
+			log.V(1).Info("Failed to get switches summary", "device", d.Id(), "error", err)
+		} else {
+			switches = switchSummary
+			log.V(1).Info("Fetched switches from device", "device", d.Id(), "count", len(switches))
 		}
 	}
 

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"myhome/sfr"
-	"myhome/net"
 	"net"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
@@ -167,35 +166,29 @@ func (d *Device) Refresh(ctx context.Context) (bool, error) {
 		// 	continue
 		// }
 
-		if sd.Ip() == nil && sd.Id() != "" && sd.Name() != "" {
-			d.log.Info("Resolving IP of device without an IP or Id", "device", d.DeviceSummary)
-			ip, err := mynet.MyResolver(d.log).LookupHost(ctx, sd.Name())
-			if err != nil {
-				d.log.Error(err, "Failed to resolve device host", "device", d.DeviceSummary)
-				return false, err
-			}
-			sd.Host_ = ip[0]
-			d.WithHost(ip[0].String())
-			modified = true
-		}
-
+		// Let the Shelly device's Refresh() handle communication via MQTT if no IP is available
+		// Don't try to resolve via mDNS here as it may timeout and block MQTT communication
 		modified, err = sd.Refresh(ctx, types.ChannelDefault)
 		if err != nil {
 			d.log.Error(err, "Failed to update device", "device", d.DeviceSummary)
 			return false, err
 		}
-		if !modified {
-			d.log.Info("Device is up to date", "device", d.DeviceSummary)
-			return false, nil
-		}
+
+		// Always copy config and info to myhome device, even if not modified
+		// This ensures they're available for saving to database
 		d.WithId(sd.Id())
 		d.WithHost(sd.Host())
 		d.WithName(sd.Name())
 		d.WithMAC(sd.Mac())
-
 		d.ConfigRevision = sd.ConfigRevision()
 		d.Info = sd.Info()
 		d.Config = sd.Config()
+
+		if !modified {
+			d.log.Info("Device is up to date", "device", d.DeviceSummary)
+			sd.ResetModified()
+			return false, nil
+		}
 
 		sd.ResetModified()
 	}
@@ -256,7 +249,6 @@ type DeviceShowParams struct {
 type DeviceSetupParams struct {
 	Identifier string `json:"identifier"`            // Device identifier (id/name/host/MAC/IP)
 	Name       string `json:"name,omitempty"`        // Device name (overrides auto-derivation)
-	MqttBroker string `json:"mqtt_broker,omitempty"` // MQTT broker address
 	StaEssid   string `json:"sta_essid,omitempty"`   // WiFi STA ESSID
 	StaPasswd  string `json:"sta_passwd,omitempty"`  // WiFi STA password
 	Sta1Essid  string `json:"sta1_essid,omitempty"`  // WiFi STA1 ESSID

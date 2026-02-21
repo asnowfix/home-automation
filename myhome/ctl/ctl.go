@@ -30,9 +30,10 @@ import (
 )
 
 var Cmd = &cobra.Command{
-	Use:   "ctl",
-	Short: "Control and manage home automation devices",
-	Args:  cobra.NoArgs,
+	Use:              "ctl",
+	Short:            "Control and manage home automation devices",
+	Args:             cobra.NoArgs,
+	TraverseChildren: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Initialize logging based on flags
 		verbose := options.Flags.Verbose

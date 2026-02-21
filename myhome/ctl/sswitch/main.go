@@ -9,12 +9,10 @@ import (
 	"myhome/ctl/options"
 	"pkg/devices"
 	"pkg/shelly"
-	"pkg/shelly/kvs"
 	shellypkg "pkg/shelly/shelly"
 	"pkg/shelly/sswitch"
 	"pkg/shelly/types"
 	"reflect"
-	"strconv"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -109,13 +107,13 @@ func doSwitchOneDevice(ctx context.Context, log logr.Logger, via types.Channel, 
 
 	switch args[0] {
 	case "toggle":
-		out, err = sd.CallE(ctx, via, sswitch.Toggle.String(), &sswitch.ToggleStatusRequest{Id: switchId})
+		out, err = sswitch.Toggle(ctx, sd, switchId)
 	case "on":
-		out, err = sd.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: switchId, On: !offValue(ctx, log, via, device)})
+		out, err = sswitch.Set(ctx, sd, switchId, true)
 	case "off":
-		out, err = sd.CallE(ctx, via, sswitch.Set.String(), &sswitch.SetRequest{Id: switchId, On: offValue(ctx, log, via, device)})
+		out, err = sswitch.Set(ctx, sd, switchId, false)
 	case "status":
-		out, err = sd.CallE(ctx, via, sswitch.GetStatus.String(), &sswitch.ToggleStatusRequest{Id: switchId})
+		out, err = sswitch.GetStatus(ctx, sd, switchId)
 	default:
 		return nil, fmt.Errorf("unknown operation %s", args[0])
 	}
@@ -127,27 +125,4 @@ func doSwitchOneDevice(ctx context.Context, log logr.Logger, via types.Channel, 
 	}
 
 	return out, err
-}
-
-func offValue(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device) bool {
-	sd, ok := device.(*shelly.Device)
-	if !ok {
-		return false
-	}
-	out, err := sd.CallE(ctx, via, kvs.Get.String(), sswitch.NormallyClosedKey)
-	if err != nil {
-		log.Info("Unable to get value", "key", sswitch.NormallyClosedKey, "reason", err)
-		return false
-	}
-	kv, ok := out.(*kvs.GetResponse)
-	if !ok {
-		log.Error(err, "Invalid value", "key", sswitch.NormallyClosedKey, "value", out)
-		return false
-	}
-	off, err := strconv.ParseBool(kv.Value)
-	if err != nil {
-		log.Error(err, "Invalid value", "key", sswitch.NormallyClosedKey, "value", kv.Value)
-		return false
-	}
-	return off
 }

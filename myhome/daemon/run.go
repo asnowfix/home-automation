@@ -168,6 +168,9 @@ var runCmd = &cobra.Command{
 			}
 		}
 
+		// Store Viper instance in global options for daemon to use
+		options.ViperConfig = v
+
 		daemon := NewDaemon(ctx)
 		log.Info("Running in foreground")
 		return daemon.Run()

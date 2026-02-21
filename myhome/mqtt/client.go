@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"global"
 	"myhome/ctl/options"
-	"myhome/net"
+	mynet "myhome/net"
 	"net"
 	"net/url"
 	"os"
@@ -181,8 +181,8 @@ func NewClientE(ctx context.Context, broker string, mdnsTimeout time.Duration, m
 
 	mqttOps.SetAutoReconnect(true) // automatically reconnect in case of disconnection
 	mqttOps.SetResumeSubs(true)    // automatically re-subscribe in case or disconnection/reconnection
-	mqttOps.SetCleanSession(false) // do not save messages to be re-sent in case of disconnection
-	// mqttOps.SetOrderMatters(false) // required for wildcard subscriptions to route messages to correct handlers
+	mqttOps.SetCleanSession(true)  // clean session to avoid stale subscriptions from previous instances
+	mqttOps.SetOrderMatters(false) // required for wildcard subscriptions to route messages to correct handlers
 
 	// DEBUG: default handler to catch messages not matched by any subscription route
 	mqttOps.SetDefaultPublishHandler(func(client mqtt.Client, msg mqtt.Message) {

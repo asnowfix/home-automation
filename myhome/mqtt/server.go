@@ -112,6 +112,10 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 		}
 
 		log.Info("Started new MQTT broker", "mdns_server", mdnsServer, "mdns_service", ZEROCONF_SERVICE)
+
+		// Give mDNS a moment to propagate before clients try to connect
+		time.Sleep(500 * time.Millisecond)
+		log.Info("MQTT broker ready for client connections")
 	} else {
 		log.Info("Started new MQTT broker (mDNS disabled)")
 	}

@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"myhome/net"
+	mynet "myhome/net"
 	"net"
 	"os"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
+	"github.com/spf13/viper"
 
 	mochimmqtt "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
@@ -18,11 +19,31 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
-func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string, clientLogInterval time.Duration, noMdns bool) error {
+func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string, clientLogInterval time.Duration, noMdns bool, v *viper.Viper) error {
 	log.Info("Starting MyHome", "program", program)
 
-	// Create the new MQTT Server.
-	mqttServer := mochimmqtt.New(nil)
+	// Load broker configuration from Viper or use defaults
+	cfg := LoadBrokerConfig(v)
+	log.Info("MQTT broker configuration",
+		"maximum_session_expiry_interval", cfg.MaximumSessionExpiryInterval,
+		"maximum_message_expiry_interval", cfg.MaximumMessageExpiryInterval,
+		"receive_maximum", cfg.ReceiveMaximum,
+		"maximum_qos", cfg.MaximumQos)
+
+	// Create the new MQTT Server with custom options
+	opts := &mochimmqtt.Options{
+		Capabilities: &mochimmqtt.Capabilities{
+			MaximumSessionExpiryInterval: cfg.MaximumSessionExpiryInterval,
+			MaximumMessageExpiryInterval: cfg.MaximumMessageExpiryInterval,
+			ReceiveMaximum:               cfg.ReceiveMaximum,
+			MaximumQos:                   cfg.MaximumQos,
+			RetainAvailable:              cfg.RetainAvailable,
+			WildcardSubAvailable:         cfg.WildcardSubAvailable,
+			SubIDAvailable:               cfg.SubIDAvailable,
+			SharedSubAvailable:           cfg.SharedSubAvailable,
+		},
+	}
+	mqttServer := mochimmqtt.New(opts)
 
 	// Configure the MQTT server so that every message is logged.
 	mqttServer.Log = slog.New(logr.ToSlogHandler(log))

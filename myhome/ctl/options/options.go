@@ -14,6 +14,7 @@ import (
 	"version"
 
 	"github.com/go-logr/logr"
+	"github.com/spf13/viper"
 	"sigs.k8s.io/yaml"
 )
 
@@ -38,6 +39,9 @@ const MQTT_WATCHDOG_MAX_FAILURES int = 3
 const MQTT_BROKER_CLIENT_LOG_INTERVAL time.Duration = 2 * time.Minute
 
 const SHELLY_DEFAULT_RATE_LIMIT time.Duration = 200 * time.Millisecond
+
+// ViperConfig holds the Viper configuration instance
+var ViperConfig *viper.Viper
 
 var Flags struct {
 	CpuProfile                  string

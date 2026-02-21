@@ -249,7 +249,6 @@ type DeviceShowParams struct {
 type DeviceSetupParams struct {
 	Identifier string `json:"identifier"`            // Device identifier (id/name/host/MAC/IP)
 	Name       string `json:"name,omitempty"`        // Device name (overrides auto-derivation)
-	MqttBroker string `json:"mqtt_broker,omitempty"` // MQTT broker address
 	StaEssid   string `json:"sta_essid,omitempty"`   // WiFi STA ESSID
 	StaPasswd  string `json:"sta_passwd,omitempty"`  // WiFi STA password
 	Sta1Essid  string `json:"sta1_essid,omitempty"`  // WiFi STA1 ESSID

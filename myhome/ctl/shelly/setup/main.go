@@ -12,8 +12,9 @@ import (
 	"hlog"
 	shellysetup "internal/myhome/shelly/setup"
 	"myhome"
+	"myhome/ctl/options"
 	mhmqtt "myhome/mqtt"
-	"myhome/net"
+	mynet "myhome/net"
 	"pkg/devices"
 	shellyapi "pkg/shelly"
 	"pkg/shelly/types"
@@ -31,9 +32,6 @@ var apPasswd string
 var sta1Essid string
 var sta1Passwd string
 
-// options for MQTT (override)
-var mqttBrokerOverride string
-
 // options for device name
 var deviceNameOverride string
 
@@ -43,7 +41,6 @@ func init() {
 	Cmd.Flags().StringVar(&sta1Essid, "sta1-essid", "", "STA1 ESSID")
 	Cmd.Flags().StringVar(&sta1Passwd, "sta1-passwd", "", "STA1 Password")
 	Cmd.Flags().StringVar(&apPasswd, "ap-passwd", "", "AP Password")
-	Cmd.Flags().StringVar(&mqttBrokerOverride, "mqtt-broker", "", "Override MQTT broker address (default: use current process broker)")
 	Cmd.Flags().StringVar(&deviceNameOverride, "name", "", "Set device name (overrides auto-derivation)")
 }
 
@@ -78,9 +75,9 @@ func getSetupConfig(ctx context.Context) shellysetup.Config {
 		Resolver: mynet.MyResolver(hlog.Logger),
 	}
 
-	// Use override if specified, otherwise use current process MQTT broker
-	if mqttBrokerOverride != "" {
-		cfg.MqttBroker = mqttBrokerOverride
+	// Use parent's --mqtt-broker flag if specified, otherwise use current process MQTT broker
+	if options.Flags.MqttBroker != "" {
+		cfg.MqttBroker = options.Flags.MqttBroker
 	} else {
 		// Get the MQTT broker from the current process client
 		mqttClient, err := mhmqtt.GetClientE(ctx)

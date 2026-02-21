@@ -210,13 +210,6 @@
           </div>
           <p class="help">Assign this device to a room for sensor auto-discovery</p>
         </div>
-        <div class="field">
-          <label class="label">MQTT Broker</label>
-          <div class="control">
-            <input class="input" type="text" x-model="setupForm.mqttBroker" placeholder="Leave empty for default">
-          </div>
-          <p class="help">e.g., 192.168.1.100:1883 or mqtt.local</p>
-        </div>
         <hr>
         <p class="has-text-weight-semibold mb-2">WiFi Settings (optional)</p>
         <div class="field">
@@ -308,7 +301,6 @@
           deviceId: '',
           name: '',
           roomId: '',
-          mqttBroker: '',
           staEssid: '',
           staPasswd: '',
           sta1Essid: '',
@@ -723,7 +715,6 @@
             deviceId,
             name: '',
             roomId: '',
-            mqttBroker: '',
             staEssid: '',
             staPasswd: '',
             sta1Essid: '',
@@ -764,7 +755,6 @@
             const params = { identifier: this.setupForm.deviceId };
             
             if (this.setupForm.name) params.name = this.setupForm.name;
-            if (this.setupForm.mqttBroker) params.mqtt_broker = this.setupForm.mqttBroker;
             if (this.setupForm.staEssid) params.sta_essid = this.setupForm.staEssid;
             if (this.setupForm.staPasswd) params.sta_passwd = this.setupForm.staPasswd;
             if (this.setupForm.sta1Essid) params.sta1_essid = this.setupForm.sta1Essid;

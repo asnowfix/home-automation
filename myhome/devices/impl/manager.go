@@ -209,9 +209,6 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		// Build setup config, merging RPC params with default config
 		cfg := dm.setupConfig
-		if params.MqttBroker != "" {
-			cfg.MqttBroker = params.MqttBroker
-		}
 
 		// Build WiFi config from params
 		wifiCfg := shellysetup.WifiConfig{

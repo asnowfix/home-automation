@@ -56,7 +56,7 @@
             }
         },
         {
-            "name": "myhome daemon (w/o MQTT broker & no-mDNS) DEBUG",
+            "name": "myhome daemon (w/o MQTT broker & no-mDNS publish) DEBUG",
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
@@ -73,7 +73,7 @@
             }
         },
         {
-            "name": "myhome daemon (w/o MQTT broker & no-mDNS) VERBOSE",
+            "name": "myhome daemon (w/o MQTT broker & no-mDNS publish) VERBOSE",
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",
@@ -91,7 +91,7 @@
             }
         },
         {
-            "name": "myhome daemon (w/ gen1 proxy only)",
+            "name": "myhome daemon (w/ gen1 proxy only) DEBUG",
             "type": "go",
             "request": "launch",
             "program": "${workspaceFolder}/myhome",

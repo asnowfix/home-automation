@@ -91,7 +91,7 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 	topic := "shelly-blu/events/#"
 	log.Info("Subscribing to BLU events", "topic", topic)
 	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/blu", func(topic string, payload []byte, subscriber string) error {
-		log.V(1).Info("BLU event received", "topic", topic, "payload", string(payload))
+		log.Info("event received", "topic", topic, "payload", string(payload))
 
 		// Parse BLU event topic first: shelly-blu/events/<MAC>
 		parts := strings.Split(topic, "/")
@@ -103,7 +103,7 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 		mac := parts[2] // MAC address with colons
 		deviceID := "shellyblu-" + strings.ToLower(strings.ReplaceAll(mac, ":", ""))
 
-		log.V(1).Info("Found device that emitted BLU event", "device_id", deviceID, "mac", mac)
+		log.V(1).Info("event emitter", "device_id", deviceID, "mac", mac)
 
 		// Handle device registration
 		sensors, err := handleBLUEvent(ctx, log, topic, payload, registry)
@@ -116,13 +116,15 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 			}
 		}
 
+		log.V(1).Info("event processing completed", "device_id", deviceID, "mac", mac)
+
 		return err
 	})
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to BLU events: %w", err)
 	}
 
-	log.Info("BLU listener started", "topic", topic)
+	log.Info("started", "topic", topic)
 	return nil
 }
 
@@ -132,22 +134,20 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 	// Parse the event data
 	var eventData BLUEventData
 	if err := json.Unmarshal(payload, &eventData); err != nil {
-		log.V(1).Info("Failed to parse BLU event", "topic", topic, "error", err)
+		log.V(1).Info("Failed to parse event", "topic", topic, "error", err)
 		return nil, err
 	}
 
 	// Validate MAC address
 	if eventData.Address == "" {
-		err := fmt.Errorf("BLU event missing MAC address")
-		log.Error(err, "BLU event missing MAC address", "event", eventData)
+		err := fmt.Errorf("event missing MAC address")
+		log.Error(err, "Event missing MAC address", "event", eventData)
 		return nil, err
 	}
 
 	// Normalize MAC address: lowercase, remove colons
 	mac := strings.ToLower(strings.ReplaceAll(eventData.Address, ":", ""))
 	deviceID := "shellyblu-" + mac
-
-	log.V(1).Info("Received BLU event", "device_id", deviceID, "topic", topic)
 
 	// Determine sensor capabilities from the event data
 	capabilities := []string{}
@@ -343,7 +343,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 		return nil, err
 	}
 
-	log.Info("Registered new BLU device", "device_id", deviceID, "mac", eventData.Address, "capabilities", capabilities)
+	log.Info("Registered new device", "device_id", deviceID, "mac", eventData.Address, "capabilities", capabilities)
 	return &sensors, nil
 }
 

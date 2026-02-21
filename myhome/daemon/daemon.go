@@ -85,6 +85,7 @@ func (d *daemon) Run() error {
 	resolver := mynet.MyResolver(log.WithName("mynet.Resolver"))
 
 	// Conditionally start the embedded MQTT broker
+	var mqttBrokerAddr string
 	if !disableEmbeddedMqttBroker {
 		log.Info("Starting embedded MQTT broker")
 		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval, options.Flags.NoMdnsPublish, options.ViperConfig)
@@ -92,12 +93,15 @@ func (d *daemon) Run() error {
 			log.Error(err, "Failed to initialize MyHome")
 			return err
 		}
+		// Connect to localhost when using embedded broker
+		mqttBrokerAddr = "localhost"
 	} else {
 		log.Info("Embedded MQTT broker disabled")
+		mqttBrokerAddr = options.Flags.MqttBroker
 	}
 
 	// Connect to the network's MQTT broker or use the embedded broker
-	err = mqttclient.NewClientE(d.ctx, options.Flags.MqttBroker, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+	err = mqttclient.NewClientE(d.ctx, mqttBrokerAddr, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 	if err != nil {
 		log.Error(err, "Failed to initialize MQTT client")
 		return err

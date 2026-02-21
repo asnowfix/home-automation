@@ -88,18 +88,34 @@ func (d *daemon) Run() error {
 	var mqttBrokerAddr string
 	if !disableEmbeddedMqttBroker {
 		log.Info("Starting embedded MQTT broker")
+
 		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval, options.Flags.NoMdnsPublish, options.ViperConfig)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome")
 			return err
 		}
-		// Wait for broker to be ready to accept connections
-		if err := mqttserver.WaitForBrokerReady(d.ctx, log.WithName("mqtt.Broker"), 5*time.Second); err != nil {
+		// Connect to localhost when using embedded broker
+		// Include port so GetServer() returns host:port correctly
+		mqttBrokerAddr = fmt.Sprintf("localhost:%d", mqttclient.PRIVATE_PORT)
+
+		// Get broker readiness configuration from config
+		readinessInitialDelay := 500 * time.Millisecond // default 500ms
+		readinessTimeout := 30 * time.Second            // default 30s
+
+		if options.ViperConfig != nil {
+			if options.ViperConfig.IsSet("daemon.broker_readiness_initial_delay") {
+				readinessInitialDelay = options.ViperConfig.GetDuration("daemon.broker_readiness_initial_delay")
+			}
+			if options.ViperConfig.IsSet("daemon.broker_readiness_timeout") {
+				readinessTimeout = options.ViperConfig.GetDuration("daemon.broker_readiness_timeout")
+			}
+		}
+
+		// Wait for broker to be ready by attempting MQTT client connections with exponential backoff
+		if err := mqttclient.WaitForBrokerReady(d.ctx, log, mqttBrokerAddr, readinessInitialDelay, readinessTimeout); err != nil {
 			log.Error(err, "MQTT broker failed to become ready")
 			return err
 		}
-		// Connect to localhost when using embedded broker
-		mqttBrokerAddr = "localhost"
 	} else {
 		log.Info("Embedded MQTT broker disabled")
 		mqttBrokerAddr = options.Flags.MqttBroker

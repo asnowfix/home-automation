@@ -57,6 +57,76 @@ const (
 	ExactlyOnce byte = 2 // QoS 2 - Exactly once delivery
 )
 
+// WaitForBrokerReady waits for an MQTT broker to be ready by attempting connections with exponential backoff
+// This is useful when starting an embedded broker and needing to wait for it to be ready before connecting clients
+func WaitForBrokerReady(ctx context.Context, log logr.Logger, brokerAddr string, initialDelay time.Duration, maxWait time.Duration) error {
+	log.Info("Waiting for MQTT broker to be ready", "broker", brokerAddr, "initial_delay", initialDelay, "max_wait", maxWait)
+
+	// Give the broker a moment to complete async initialization after Serve() returns
+	// Mochi MQTT's Serve() is non-blocking and listeners start asynchronously
+	if initialDelay > 0 {
+		log.V(1).Info("Initial delay for broker async initialization", "delay", initialDelay)
+		time.Sleep(initialDelay)
+	}
+
+	deadline := time.Now().Add(maxWait)
+	attempt := 0
+	backoff := 100 * time.Millisecond
+	maxBackoff := 5 * time.Second
+
+	for time.Now().Before(deadline) {
+		attempt++
+
+		log.V(1).Info("Attempting to connect to broker", "attempt", attempt, "broker", brokerAddr)
+
+		// Create a dedicated test client (not using singleton) to avoid state issues
+		opts := mqtt.NewClientOptions()
+		opts.AddBroker(fmt.Sprintf("tcp://%s", brokerAddr))
+		opts.SetClientID(fmt.Sprintf("readiness-check-%d", time.Now().UnixNano()))
+		opts.SetConnectTimeout(1 * time.Second)
+		opts.SetAutoReconnect(false)
+		opts.SetCleanSession(true)
+		opts.SetOrderMatters(false)
+
+		testClient := mqtt.NewClient(opts)
+		token := testClient.Connect()
+
+		// Wait for connection with timeout
+		if token.WaitTimeout(1 * time.Second) {
+			if token.Error() == nil {
+				// Successfully connected - broker is ready
+				testClient.Disconnect(100)
+				log.Info("MQTT broker is ready", "broker", brokerAddr, "attempts", attempt)
+				return nil
+			}
+			log.V(1).Info("Connection failed", "attempt", attempt, "error", token.Error())
+		} else {
+			log.V(1).Info("Connection timed out", "attempt", attempt)
+		}
+
+		log.V(1).Info("Broker not ready yet, waiting", "attempt", attempt, "backoff", backoff)
+
+		// Check if we've run out of time
+		if time.Now().Add(backoff).After(deadline) {
+			break
+		}
+
+		// Exponential backoff
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+
+		backoff = backoff * 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+
+	return fmt.Errorf("MQTT broker at %s did not become ready within %v (after %d attempts)", brokerAddr, maxWait, attempt)
+}
+
 type Client interface {
 	GetServer() string
 	BrokerUrl() *url.URL

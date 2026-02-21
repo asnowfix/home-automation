@@ -43,6 +43,15 @@ daemon:
   # MQTT broker address (leave empty to use embedded broker)
   # mqtt_broker: "192.168.1.2"
   
+  # Initial delay before checking if embedded MQTT broker is ready
+  # Gives the broker time to complete async initialization after Serve() returns
+  # Default: 500ms
+  # broker_readiness_initial_delay: 500ms
+  
+  # Timeout for waiting for embedded MQTT broker to be ready
+  # Default: 30s
+  # broker_readiness_timeout: 30s
+  
   # mDNS lookup timeout
   # mdns_timeout: 7s
   

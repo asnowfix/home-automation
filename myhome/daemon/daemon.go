@@ -89,7 +89,7 @@ func (d *daemon) Run() error {
 	if !disableEmbeddedMqttBroker {
 		log.Info("Starting embedded MQTT broker")
 
-		err := mqttserver.Broker(d.ctx, log.WithName("mqtt.Broker"), resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval, options.Flags.NoMdnsPublish, options.ViperConfig)
+		err := mqttserver.Broker(d.ctx, log, resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval, options.Flags.NoMdnsPublish, options.ViperConfig)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome")
 			return err
@@ -122,7 +122,7 @@ func (d *daemon) Run() error {
 	}
 
 	// Connect to the network's MQTT broker or use the embedded broker
-	err = mqttclient.NewClientE(d.ctx, mqttBrokerAddr, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
+	err = mqttclient.NewClientE(d.ctx, mqttBrokerAddr, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace)
 	if err != nil {
 		log.Error(err, "Failed to initialize MQTT client")
 		return err
@@ -135,6 +135,21 @@ func (d *daemon) Run() error {
 		return err
 	}
 	defer mc.Close()
+
+	// Subscribe to $SYS topics for monitoring (this will connect the process's MQTT client)
+	// Use large buffer (256) because broker publishes 15-20+ $SYS topics in rapid bursts every 30s
+	log.Info("Subscribing to $SYS/clients/# topics for broker monitoring")
+	err = mc.SubscribeWithHandler(d.ctx, "$SYS/clients/#", 256, "MqttClient/sys/clients", func(topic string, payload []byte, subscriber string) error {
+		// Use V(1) to reduce log volume - $SYS topics are published frequently
+		log.V(1).Info("Received on $SYS/clients/#", "topic", topic, "payload", string(payload))
+		return nil
+	})
+	if err != nil {
+		log.Error(err, "Failed to subscribe to $SYS topics (broker may not be ready yet)")
+		// Don't fail initialization - $SYS subscription is optional
+	} else {
+		log.Info("Successfully subscribed to $SYS topics")
+	}
 
 	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 

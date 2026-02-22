@@ -111,10 +111,11 @@ jobs:
           cp linux/systemd/myhome-db-backup.service .debpkg/lib/systemd/system/
           cp linux/systemd/myhome-db-backup.timer .debpkg/lib/systemd/system/
 
-          # helper scripts
+          # helper scripts and configuration
           mkdir -p .debpkg/usr/share/myhome
           cp linux/systemd/update.sh .debpkg/usr/share/myhome/update.sh
           cp linux/systemd/myhome-db-backup.sh .debpkg/usr/share/myhome/myhome-db-backup.sh
+          cp myhome-example.yaml .debpkg/usr/share/myhome/myhome-example.yaml
           chmod +x .debpkg/usr/share/myhome/*.sh
 
           # DEBIAN maintainer scripts

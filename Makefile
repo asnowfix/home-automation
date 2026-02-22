@@ -133,10 +133,11 @@ debpkg: build
 	cp linux/systemd/myhome-update.timer $(DEBPKG_DIR)/lib/systemd/system/
 	cp linux/systemd/myhome-db-backup.service $(DEBPKG_DIR)/lib/systemd/system/
 	cp linux/systemd/myhome-db-backup.timer $(DEBPKG_DIR)/lib/systemd/system/
-	@# Helper scripts
+	@# Helper scripts and configuration
 	mkdir -p $(DEBPKG_DIR)/usr/share/myhome
 	cp linux/systemd/update.sh $(DEBPKG_DIR)/usr/share/myhome/update.sh
 	cp linux/systemd/myhome-db-backup.sh $(DEBPKG_DIR)/usr/share/myhome/myhome-db-backup.sh
+	cp myhome-example.yaml $(DEBPKG_DIR)/usr/share/myhome/myhome-example.yaml
 	chmod +x $(DEBPKG_DIR)/usr/share/myhome/*.sh
 	@# DEBIAN maintainer scripts
 	mkdir -p $(DEBPKG_DIR)/DEBIAN

@@ -466,7 +466,7 @@ func deriveDeviceName(ctx context.Context, log logr.Logger, via types.Channel, s
 func getOutputName(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device) string {
 	// Try up to 4 outputs (covers most Shelly devices: 1, 2, or 4 outputs)
 	for id := 0; id < 4; id++ {
-		cfg, err := sswitch.GetConfig(ctx, sd, id)
+		cfg, err := sswitch.GetConfig(ctx, sd, via, id)
 		if err != nil {
 			// No more outputs available
 			if id == 0 {

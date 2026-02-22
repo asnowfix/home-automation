@@ -63,12 +63,12 @@ func (s *Service) HandleToggle(ctx context.Context, params *myhome.SwitchParams)
 
 	on := s.onValue(ctx, sd, params.SwitchId)
 
-	result, err := pkgsswitch.Toggle(ctx, sd, params.SwitchId)
+	result, err := pkgsswitch.Toggle(ctx, sd, types.ChannelDefault, params.SwitchId)
 	if err != nil {
 		return nil, err
 	}
 
-	return s.returnStatus(ctx, s.log.WithName("Toggle"), device, sd, params.SwitchId, on, !result.WasOn)
+	return s.returnStatus(ctx, s.log.WithName("Toggle"), device, params.SwitchId, on, !result.WasOn)
 }
 
 // HandleOn handles switch.on RPC method
@@ -80,12 +80,12 @@ func (s *Service) HandleOn(ctx context.Context, params *myhome.SwitchParams) (*m
 
 	on := s.onValue(ctx, sd, params.SwitchId)
 
-	_, err = pkgsswitch.Set(ctx, sd, params.SwitchId, true)
+	_, err = pkgsswitch.Set(ctx, sd, types.ChannelDefault, params.SwitchId, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to turn on switch on device %s: %w", sd.Id(), err)
 	}
 
-	return s.returnStatus(ctx, s.log.WithName("On"), device, sd, params.SwitchId, on, true)
+	return s.returnStatus(ctx, s.log.WithName("On"), device, params.SwitchId, on, true)
 }
 
 // HandleOff handles switch.off RPC method
@@ -97,12 +97,12 @@ func (s *Service) HandleOff(ctx context.Context, params *myhome.SwitchParams) (*
 
 	on := s.onValue(ctx, sd, params.SwitchId)
 
-	_, err = pkgsswitch.Set(ctx, sd, params.SwitchId, false)
+	_, err = pkgsswitch.Set(ctx, sd, types.ChannelDefault, params.SwitchId, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to turn off switch on device %s: %w", sd.Id(), err)
 	}
 
-	return s.returnStatus(ctx, s.log.WithName("Off"), device, sd, params.SwitchId, on, false)
+	return s.returnStatus(ctx, s.log.WithName("Off"), device, params.SwitchId, on, false)
 }
 
 // HandleStatus handles switch.status RPC method
@@ -112,14 +112,14 @@ func (s *Service) HandleStatus(ctx context.Context, params *myhome.SwitchParams)
 		return nil, err
 	}
 
-	status, err := pkgsswitch.GetStatus(ctx, sd, params.SwitchId)
+	status, err := pkgsswitch.GetStatus(ctx, sd, types.ChannelDefault, params.SwitchId)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get switch status on device %s: %w", sd.Id(), err)
 	}
 
 	on := s.onValue(ctx, sd, params.SwitchId)
 
-	return s.returnStatus(ctx, s.log.WithName("Status"), device, sd, params.SwitchId, on, status.Output)
+	return s.returnStatus(ctx, s.log.WithName("Status"), device, params.SwitchId, on, status.Output)
 }
 
 // HandleAll handles switch.all RPC method
@@ -166,14 +166,14 @@ func (s *Service) getDevice(ctx context.Context, identifier string) (*myhome.Dev
 	return device, sd, nil
 }
 
-func (s *Service) returnStatus(_ context.Context, log logr.Logger, device *myhome.Device, sd *shelly.Device, switchId int, on bool, newState bool) (*myhome.SwitchResult, error) {
+func (s *Service) returnStatus(_ context.Context, log logr.Logger, device *myhome.Device, switchId int, on bool, newState bool) (*myhome.SwitchResult, error) {
 	sr := myhome.SwitchResult{
 		DeviceID:   device.Id(),
 		DeviceName: device.Name(),
 		SwitchId:   switchId,
 		On:         newState == on,
 	}
-	log.Info("New state", "switch", sr, "on_value", on)
+	log.Info("New state", "switch", sr, "on", on)
 	return &sr, nil
 }
 

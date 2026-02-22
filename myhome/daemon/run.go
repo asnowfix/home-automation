@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"myhome/ctl/options"
+	"strconv"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -26,7 +27,7 @@ func init() {
 	runCmd.PersistentFlags().IntVarP(&options.Flags.MqttWatchdogMaxFailures, "mqtt-watchdog-max-failures", "F", options.MQTT_WATCHDOG_MAX_FAILURES, "MQTT watchdog max consecutive failures before restart")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.MqttBrokerClientLogInterval, "mqtt-broker-client-log-interval", options.MQTT_BROKER_CLIENT_LOG_INTERVAL, "Interval for logging MQTT broker connected clients (0 to disable)")
 	runCmd.PersistentFlags().StringVarP(&options.Flags.EventsDir, "events-dir", "E", "", "Directory to write received MQTT events as JSON files")
-	runCmd.PersistentFlags().IntVarP(&options.Flags.UiPort, "ui-port", "p", options.HTTP_DEFAULT_PORT, "UI listen port (default "+string(options.HTTP_DEFAULT_PORT)+")")
+	runCmd.PersistentFlags().IntVarP(&options.Flags.UiPort, "ui-port", "p", options.HTTP_DEFAULT_PORT, "UI listen port (default "+strconv.Itoa(options.HTTP_DEFAULT_PORT)+")")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableGen1Proxy, "enable-gen1-proxy", false, "Enable the Gen1 HTTP->MQTT proxy (requires embedded broker)")
 	runCmd.PersistentFlags().BoolVar(&disableGen1Proxy, "disable-gen1-proxy", false, "Disable the Gen1 HTTP->MQTT proxy (mutually exclusive with --enable-gen1-proxy)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableOccupancyService, "enable-occupancy-service", false, "Enable the occupancy service (auto-enabled with device manager)")

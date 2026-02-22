@@ -60,11 +60,17 @@ func (s *Service) HandleSet(ctx context.Context, p *myhome.TemperatureSetParams)
 	s.mu.Unlock()
 
 	// Save to storage
-	if err := s.storage.SaveRoom(config); err != nil {
+	modified, err := s.storage.SaveRoom(config)
+	if err != nil {
 		return nil, fmt.Errorf("failed to save room: %w", err)
 	}
 
-	s.log.Info("Room configuration saved", "room_id", p.RoomID, "name", p.Name, "kinds", p.Kinds)
+	if modified {
+		s.log.Info("Room configuration updated", "room_id", p.RoomID, "name", p.Name, "kinds", p.Kinds)
+		// TODO: broadcase SSE event to every UI clients
+	} else {
+		s.log.Info("Room configuration unchanged", "room_id", p.RoomID, "name", p.Name, "kinds", p.Kinds)
+	}
 
 	return &myhome.TemperatureSetResult{
 		Status: "ok",
@@ -110,6 +116,7 @@ func (s *Service) HandleDelete(ctx context.Context, params *myhome.TemperatureDe
 	}
 
 	s.log.Info("Room configuration deleted", "room_id", params.RoomID)
+	// TODO: broadcase SSE event to every UI clients
 
 	return &myhome.TemperatureDeleteResult{
 		Status: "ok",
@@ -206,7 +213,8 @@ func (s *Service) HandleSetWeekdayDefault(ctx context.Context, params *myhome.Te
 	}
 
 	// Save to storage (global)
-	if err := s.storage.SetWeekdayDefault(params.Weekday, params.DayType); err != nil {
+	modified, err := s.storage.SetWeekdayDefault(params.Weekday, params.DayType)
+	if err != nil {
 		return nil, fmt.Errorf("failed to set weekday default: %w", err)
 	}
 
@@ -220,7 +228,12 @@ func (s *Service) HandleSetWeekdayDefault(ctx context.Context, params *myhome.Te
 	}
 	s.mu.Unlock()
 
-	s.log.Info("Global weekday default set", "weekday", params.Weekday, "day_type", params.DayType)
+	if modified {
+		s.log.Info("Global weekday default set", "weekday", params.Weekday, "day_type", params.DayType)
+		// TODO: broadcast an SSE to all UI clients
+	} else {
+		s.log.Info("Global weekday default unchanged", "weekday", params.Weekday, "day_type", params.DayType)
+	}
 
 	return &myhome.TemperatureSetWeekdayDefaultResult{
 		Weekday: params.Weekday,
@@ -274,7 +287,8 @@ func (s *Service) HandleSetKindSchedule(ctx context.Context, params *myhome.Temp
 	}
 
 	// Save to storage
-	if err := s.storage.SetKindSchedule(params.Kind, params.DayType, ranges); err != nil {
+	modified, err := s.storage.SetKindSchedule(params.Kind, params.DayType, ranges)
+	if err != nil {
 		return nil, fmt.Errorf("failed to set kind schedule: %w", err)
 	}
 
@@ -291,7 +305,12 @@ func (s *Service) HandleSetKindSchedule(ctx context.Context, params *myhome.Temp
 	s.kindSchedules[params.Kind][params.DayType] = internalRanges
 	s.mu.Unlock()
 
-	s.log.Info("Kind schedule set", "kind", params.Kind, "day_type", params.DayType, "ranges", len(ranges))
+	if modified {
+		s.log.Info("Kind schedule updated", "kind", params.Kind, "day_type", params.DayType, "ranges", len(ranges))
+		// TODO: broadcast an SSE to all UI clients
+	} else {
+		s.log.Info("Kind schedule unchanged", "kind", params.Kind, "day_type", params.DayType, "ranges", len(ranges))
+	}
 
 	// Publish updates for all rooms with this kind
 	if err := s.publishKindScheduleUpdate(params.Kind, params.DayType); err != nil {
@@ -399,11 +418,17 @@ func (s *Service) HandleRoomEdit(ctx context.Context, params *myhome.RoomEditPar
 	}
 
 	// Save to storage
-	if err := s.storage.SaveRoom(config); err != nil {
+	modified, err := s.storage.SaveRoom(config)
+	if err != nil {
 		return nil, fmt.Errorf("failed to save room: %w", err)
 	}
 
-	s.log.Info("Room updated", "room_id", params.ID)
+	if modified {
+		s.log.Info("Room updated", "room_id", params.ID)
+		// TODO: broadcase SSE event to every UI clients
+	} else {
+		s.log.Info("Room unchanged", "room_id", params.ID)
+	}
 
 	// Publish updated ranges
 	if err := s.PublishRangesUpdate(ctx, params.ID); err != nil {
@@ -494,7 +519,7 @@ func (s *Service) HandleRoomCreate(ctx context.Context, params *myhome.RoomCreat
 	s.mu.Unlock()
 
 	// Save to storage
-	if err := s.storage.SaveRoom(config); err != nil {
+	if _, err := s.storage.SaveRoom(config); err != nil {
 		return nil, fmt.Errorf("failed to save room: %w", err)
 	}
 

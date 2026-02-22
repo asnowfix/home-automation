@@ -51,43 +51,55 @@ func (ch *MqttChannel) CallDevice(ctx context.Context, device types.Device, verb
 }
 
 func (ch *MqttChannel) receiveResponse(ctx context.Context, device types.Device, method string, reqId uint32, out any) (any, error) {
-	// ch.log.Info("Waiting for response", "to verb", verb.Method, "from device", device.Id(), "timeout", ch.timeout)
-	var resMsg []byte
-	select {
-	case resMsg = <-device.From():
-		// ch.log.Info("Got response", "to verb", verb.Method, "from device", device.Id(), "response", string(resMsg))
-	case <-ctx.Done():
-		err := fmt.Errorf("context cancelled while waiting for response from %s (%s): %w", device.Id(), device.Name(), ctx.Err())
-		ch.log.Error(err, "Context cancelled waiting for device response", "to method", method, "id", device.Id(), "name", device.Name())
+	deadline := time.Now().Add(ch.timeout)
+
+	for {
+		timeout := time.Until(deadline)
+		if timeout <= 0 {
+			err := fmt.Errorf("timeout waiting for response from %s (%s)", device.Id(), device.Name())
+			ch.log.Error(err, "Timeout waiting for device response", "to method", method, "id", device.Id(), "name", device.Name(), "timeout", ch.timeout)
+			device.StopDialog(ctx, reqId)
+			return nil, err
+		}
+
+		// ch.log.Info("Waiting for response", "to verb", verb.Method, "from device", device.Id(), "timeout", ch.timeout)
+		var resMsg []byte
+		select {
+		case resMsg = <-device.From():
+			// ch.log.Info("Got response", "to verb", verb.Method, "from device", device.Id(), "response", string(resMsg))
+		case <-ctx.Done():
+			err := fmt.Errorf("context cancelled while waiting for response from %s (%s): %w", device.Id(), device.Name(), ctx.Err())
+			ch.log.Error(err, "Context cancelled waiting for device response", "to method", method, "id", device.Id(), "name", device.Name())
+			device.StopDialog(ctx, reqId)
+			return nil, err
+		case <-time.After(timeout):
+			err := fmt.Errorf("timeout waiting for response from %s (%s)", device.Id(), device.Name())
+			ch.log.Error(err, "Timeout waiting for device response", "to method", method, "id", device.Id(), "name", device.Name(), "timeout", ch.timeout)
+			device.StopDialog(ctx, reqId)
+			return nil, err
+		}
+
+		var res Response
+		res.Result = &out
+
+		err := json.Unmarshal(resMsg, &res)
+		if err != nil {
+			ch.log.Error(err, "Unable to unmarshal response", "payload", resMsg)
+			return nil, err
+		}
+
+		if res.Id != reqId {
+			// Response ID doesn't match - this happens when responses arrive out of order
+			// Instead of failing, we just ignore it and wait for the correct one
+			ch.log.Info("Ignoring out-of-order response", "expected", reqId, "received", res.Id, "device", device.Id(), "method", method)
+			continue
+		}
+
 		device.StopDialog(ctx, reqId)
-		return nil, err
-	case <-time.After(ch.timeout):
-		err := fmt.Errorf("timeout waiting for response from %s (%s)", device.Id(), device.Name())
-		ch.log.Error(err, "Timeout waiting for device response", "to method", method, "id", device.Id(), "name", device.Name(), "timeout", ch.timeout)
-		device.StopDialog(ctx, reqId)
-		return nil, err
+		if res.Error != nil {
+			return nil, fmt.Errorf("device replied error '%v' (code:%v) to request '%v'", res.Error.Message, res.Error.Code, string(resMsg))
+		}
+
+		return out, nil
 	}
-
-	var res Response
-	res.Result = &out
-
-	err := json.Unmarshal(resMsg, &res)
-	if err != nil {
-		ch.log.Error(err, "Unable to unmarshal response", "payload", resMsg)
-		return nil, err
-	}
-
-	device.StopDialog(ctx, reqId)
-	if res.Id != reqId {
-		// Response ID doesn't match - this happens when responses arrive out of order
-		err := fmt.Errorf("response ID mismatch (expected %d, received %d)", reqId, res.Id)
-		ch.log.Error(err, "Response ID mismatch", "device", device.Id(), "method", method)
-		return nil, err
-	}
-
-	if res.Error != nil {
-		return nil, fmt.Errorf("device replied error '%v' (code:%v) to request '%v'", res.Error.Message, res.Error.Code, string(resMsg))
-	}
-
-	return out, nil
 }

@@ -100,19 +100,21 @@ func (s *Storage) createTables() error {
 }
 
 // SaveRoom creates or updates a room configuration
-func (s *Storage) SaveRoom(config *RoomConfig) error {
+// Returns true if the room was modified (inserted or updated), false if no changes were made
+func (s *Storage) SaveRoom(config *RoomConfig) (bool, error) {
 	roomID := config.ID
 	// Marshal kinds and levels to JSON
 	kindsJSON, err := json.Marshal(config.Kinds)
 	if err != nil {
-		return fmt.Errorf("failed to marshal kinds: %w", err)
+		return false, fmt.Errorf("failed to marshal kinds: %w", err)
 	}
 
 	levelsJSON, err := json.Marshal(config.Levels)
 	if err != nil {
-		return fmt.Errorf("failed to marshal levels: %w", err)
+		return false, fmt.Errorf("failed to marshal levels: %w", err)
 	}
 
+	// Use INSERT ... ON CONFLICT with WHERE clause to only update when values actually differ
 	query := `
 	INSERT INTO temperature_rooms (room_id, name, kinds, levels, updated_at)
 	VALUES (?, ?, ?, ?, ?)
@@ -121,16 +123,29 @@ func (s *Storage) SaveRoom(config *RoomConfig) error {
 		kinds = excluded.kinds,
 		levels = excluded.levels,
 		updated_at = excluded.updated_at
+	WHERE temperature_rooms.name IS NOT excluded.name
+	   OR temperature_rooms.kinds IS NOT excluded.kinds
+	   OR temperature_rooms.levels IS NOT excluded.levels
 	`
 
-	_, err = s.db.Exec(query, config.ID, config.Name, string(kindsJSON), string(levelsJSON), time.Now())
+	result, err := s.db.Exec(query, config.ID, config.Name, string(kindsJSON), string(levelsJSON), time.Now())
 	if err != nil {
 		s.log.Error(err, "Failed to set room config", "room_id", roomID)
-		return err
+		return false, err
 	}
 
-	s.log.Info("Room config saved", "room_id", config.ID, "name", config.Name, "kinds", config.Kinds)
-	return nil
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	if rowsAffected > 0 {
+		s.log.Info("Room config saved", "room_id", config.ID, "name", config.Name, "kinds", config.Kinds)
+		return true, nil
+	}
+
+	s.log.V(1).Info("Room config unchanged", "room_id", config.ID, "name", config.Name)
+	return false, nil
 }
 
 // GetRoom retrieves a room configuration
@@ -232,29 +247,42 @@ func (s *Storage) DeleteRoom(roomID string) error {
 }
 
 // SetKindSchedule creates or updates a kind schedule
-func (s *Storage) SetKindSchedule(kind myhome.RoomKind, dayType myhome.DayType, ranges []myhome.TemperatureTimeRange) error {
+// Returns true if the schedule was modified (inserted or updated), false if no changes were made
+func (s *Storage) SetKindSchedule(kind myhome.RoomKind, dayType myhome.DayType, ranges []myhome.TemperatureTimeRange) (bool, error) {
 	// Marshal ranges to JSON
 	rangesJSON, err := json.Marshal(ranges)
 	if err != nil {
-		return fmt.Errorf("failed to marshal ranges: %w", err)
+		return false, fmt.Errorf("failed to marshal ranges: %w", err)
 	}
 
+	// Use INSERT ... ON CONFLICT with WHERE clause to only update when values actually differ
 	query := `
 	INSERT INTO temperature_kind_schedules (kind, day_type, ranges, updated_at)
 	VALUES (?, ?, ?, ?)
 	ON CONFLICT(kind, day_type) DO UPDATE SET
 		ranges = excluded.ranges,
 		updated_at = excluded.updated_at
+	WHERE temperature_kind_schedules.ranges IS NOT excluded.ranges
 	`
 
-	_, err = s.db.Exec(query, string(kind), string(dayType), string(rangesJSON), time.Now())
+	result, err := s.db.Exec(query, string(kind), string(dayType), string(rangesJSON), time.Now())
 	if err != nil {
 		s.log.Error(err, "Failed to set kind schedule", "kind", kind, "day_type", dayType)
-		return err
+		return false, err
 	}
 
-	s.log.Info("Kind schedule saved", "kind", kind, "day_type", dayType)
-	return nil
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	if rowsAffected > 0 {
+		s.log.Info("Kind schedule saved", "kind", kind, "day_type", dayType)
+		return true, nil
+	}
+
+	s.log.V(1).Info("Kind schedule unchanged", "kind", kind, "day_type", dayType)
+	return false, nil
 }
 
 // GetKindSchedules retrieves kind schedules with optional filters
@@ -302,23 +330,36 @@ func (s *Storage) GetKindSchedules(kind *myhome.RoomKind, dayType *myhome.DayTyp
 }
 
 // SetWeekdayDefault sets the global day type for a specific weekday
-func (s *Storage) SetWeekdayDefault(weekday int, dayType myhome.DayType) error {
+// Returns true if the default was modified (inserted or updated), false if no changes were made
+func (s *Storage) SetWeekdayDefault(weekday int, dayType myhome.DayType) (bool, error) {
+	// Use INSERT ... ON CONFLICT with WHERE clause to only update when values actually differ
 	query := `
 	INSERT INTO temperature_weekday_defaults (weekday, day_type, updated_at)
 	VALUES (?, ?, ?)
 	ON CONFLICT(weekday) DO UPDATE SET
 		day_type = excluded.day_type,
 		updated_at = excluded.updated_at
+	WHERE temperature_weekday_defaults.day_type IS NOT excluded.day_type
 	`
 
-	_, err := s.db.Exec(query, weekday, string(dayType), time.Now())
+	result, err := s.db.Exec(query, weekday, string(dayType), time.Now())
 	if err != nil {
 		s.log.Error(err, "Failed to set global weekday default", "weekday", weekday)
-		return err
+		return false, err
 	}
 
-	s.log.Info("Global weekday default saved", "weekday", weekday, "day_type", dayType)
-	return nil
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	if rowsAffected > 0 {
+		s.log.Info("Global weekday default saved", "weekday", weekday, "day_type", dayType)
+		return true, nil
+	}
+
+	s.log.V(1).Info("Global weekday default unchanged", "weekday", weekday, "day_type", dayType)
+	return false, nil
 }
 
 // GetWeekdayDefault retrieves the global day type for a specific weekday

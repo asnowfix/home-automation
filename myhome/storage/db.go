@@ -138,7 +138,7 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 		return false, err
 	}
 	d.Info_ = string(b)
-	s.log.Info("Marshalled device info", "device_id", device.Id(), "info_length", len(d.Info_), "info_is_null", device.Info == nil)
+	s.log.V(1).Info("Marshalled device info", "device_id", device.Id(), "info_length", len(d.Info_), "info_is_null", device.Info == nil)
 
 	b, err = json.Marshal(device.Config)
 	if err != nil {
@@ -146,12 +146,13 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
 		return false, err
 	}
 	d.Config_ = string(b)
-	s.log.Info("Marshalled device config", "device_id", device.Id(), "config_length", len(d.Config_), "config_is_null", device.Config == nil)
+	s.log.V(1).Info("Marshalled device config", "device_id", device.Id(), "config_length", len(d.Config_), "config_is_null", device.Config == nil)
 
 	// Number of rows affected by the SQL
 	var count int64
 
-	// First, try to insert or update based on manufacturer and id
+	// Use INSERT ... ON CONFLICT with WHERE clause to only update when values actually differ
+	// This is much more efficient than SELECT-then-UPDATE pattern
 	query := `
     INSERT INTO devices (manufacturer, id, mac, name, host, info, config_revision, config, room_id) 
     VALUES (:manufacturer, :id, :mac, :name, :host, :info, :config_revision, :config, :room_id)
@@ -162,7 +163,14 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
         info = excluded.info, 
         config_revision = excluded.config_revision, 
         config = excluded.config,
-        room_id = excluded.room_id`
+        room_id = excluded.room_id
+    WHERE devices.mac IS NOT excluded.mac
+       OR devices.name IS NOT excluded.name
+       OR devices.host IS NOT excluded.host
+       OR devices.info IS NOT excluded.info
+       OR devices.config_revision IS NOT excluded.config_revision
+       OR devices.config IS NOT excluded.config
+       OR devices.room_id IS NOT excluded.room_id`
 	rows, err := s.db.NamedExec(query, d)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device by manufacturer and id", "device", device)

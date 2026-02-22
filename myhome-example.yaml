@@ -2,41 +2,86 @@
  MyHome Configuration Example
 # Copy this file to myhome.yaml and customize as needed
 
-# MQTT Broker Configuration
 mqtt:
+  # MQTT Broker Configuration
+  # This section configures the embedded Mochi MQTT broker
   broker:
-    # Maximum number of seconds to keep disconnected client sessions
-    # Default: 300 (5 minutes)
-    # Lower values clean up stale subscriptions faster
-    maximum_session_expiry_interval: 300
+    # System Configuration
+    # Size of the client network write buffer in bytes
+    # Default: 0 (uses Go's default bufio.Writer size)
+    # client_net_write_buffer_size: 4096
     
-    # Maximum message expiry in seconds if message expiry is 0 or over
-    # Default: 86400 (24 hours)
-    maximum_message_expiry_interval: 86400
+    # Size of the client network read buffer in bytes
+    # Default: 0 (uses Go's default bufio.Reader size)
+    # client_net_read_buffer_size: 4096
     
-    # Maximum number of concurrent QoS messages per client
-    # Default: 65535
-    receive_maximum: 65535
+    # Interval between $SYS topic updates in seconds
+    # Default: 30
+    # sys_topic_resend_interval: 30
     
-    # Maximum QoS value available to clients (0, 1, or 2)
-    # Default: 2
-    maximum_qos: 2
+    # Enable inline client for direct pub/sub from server code
+    # Default: false (disabled to prevent confusion in statistics)
+    # inline_client: false
     
-    # Support of retain messages (0=disabled, 1=enabled)
-    # Default: 1
-    retain_available: 1
-    
-    # Support of wildcard subscriptions (0=disabled, 1=enabled)
-    # Default: 1
-    wildcard_sub_available: 1
-    
-    # Support of subscription identifiers (0=disabled, 1=enabled)
-    # Default: 1
-    sub_id_available: 1
-    
-    # Support of shared subscriptions (0=disabled, 1=enabled)
-    # Default: 1
-    shared_sub_available: 1
+    # Broker Capabilities
+    # These define the features and limits available to MQTT clients
+    capabilities:
+      # Maximum number of seconds to keep disconnected client sessions
+      # Default: 4294967295 (max uint32)
+      # Recommended: 300 (5 minutes) to clean up stale subscriptions faster
+      maximum_session_expiry_interval: 300
+      
+      # Maximum message expiry in seconds if message expiry is 0 or over
+      # Default: 86400 (24 hours)
+      maximum_message_expiry_interval: 86400
+      
+      # Maximum number of concurrent QoS 1 and 2 messages per client
+      # Default: 65535
+      receive_maximum: 65535
+      
+      # Maximum QoS value available to clients (0, 1, or 2)
+      # Default: 2 (supports QoS 0, 1, and 2)
+      maximum_qos: 2
+      
+      # Support of retain messages (0=disabled, 1=enabled)
+      # Default: 1 (enabled)
+      retain_available: 1
+      
+      # Support of wildcard subscriptions (0=disabled, 1=enabled)
+      # Default: 1 (enabled)
+      wildcard_sub_available: 1
+      
+      # Support of subscription identifiers (0=disabled, 1=enabled)
+      # Default: 1 (enabled)
+      sub_id_available: 1
+      
+      # Support of shared subscriptions (0=disabled, 1=enabled)
+      # Default: 1 (enabled)
+      shared_sub_available: 1
+      
+      # Maximum packet size in bytes (0 = no limit)
+      # Default: 0
+      # maximum_packet_size: 0
+      
+      # Maximum topic alias value (0 = no topic aliases)
+      # Default: 0
+      # topic_alias_maximum: 0
+      
+      # Minimum MQTT protocol version (3 = MQTT 3.1.1, 5 = MQTT 5.0)
+      # Default: 3
+      # minimum_protocol_version: 3
+      
+      # Maximum number of concurrent client connections (0 = unlimited)
+      # Default: 0
+      # maximum_clients: 0
+      
+      # Maximum number of inflight messages per client (0 = unlimited)
+      # Default: 0
+      # maximum_inflight: 0
+      
+      # Maximum number of pending writes per client (0 = unlimited)
+      # Default: 0
+      # maximum_client_writes_pending: 0
 
 # Daemon Configuration
 daemon:

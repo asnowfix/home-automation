@@ -13,49 +13,38 @@ import (
 	"github.com/grandcat/zeroconf"
 	"github.com/spf13/viper"
 
-	mochimmqtt "github.com/mochi-mqtt/server/v2"
+	mochiServer "github.com/mochi-mqtt/server/v2"
 	"github.com/mochi-mqtt/server/v2/hooks/auth"
 	"github.com/mochi-mqtt/server/v2/hooks/debug"
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
 func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string, clientLogInterval time.Duration, noMdns bool, v *viper.Viper) error {
-	log.Info("Starting MyHome", "program", program)
+	log = log.WithName("MqttBroker")
+	log.Info("Starting MyHome", "program", program, "info", info, "clientLogInterval", clientLogInterval, "noMdns", noMdns)
 
-	// // Load broker configuration from Viper or use defaults
-	// cfg := LoadBrokerConfig(v)
-	// log.Info("MQTT broker configuration",
-	// 	"maximum_session_expiry_interval", cfg.MaximumSessionExpiryInterval,
-	// 	"maximum_message_expiry_interval", cfg.MaximumMessageExpiryInterval,
-	// 	"receive_maximum", cfg.ReceiveMaximum,
-	// 	"maximum_qos", cfg.MaximumQos)
+	// Load broker configuration from Viper (or use defaults)
+	opts := loadBrokerConfig(ctx, log, v)
 
-	// // Create the new MQTT Server with custom options
-	// opts := &mochimmqtt.Options{
-	// 	Capabilities: &mochimmqtt.Capabilities{
-	// 		MaximumSessionExpiryInterval: cfg.MaximumSessionExpiryInterval,
-	// 		MaximumMessageExpiryInterval: cfg.MaximumMessageExpiryInterval,
-	// 		ReceiveMaximum:               cfg.ReceiveMaximum,
-	// 		MaximumQos:                   cfg.MaximumQos,
-	// 		RetainAvailable:              cfg.RetainAvailable,
-	// 		WildcardSubAvailable:         cfg.WildcardSubAvailable,
-	// 		SubIDAvailable:               cfg.SubIDAvailable,
-	// 		SharedSubAvailable:           cfg.SharedSubAvailable,
-	// 	},
-	// }
-	// mqttServer := mochimmqtt.New(opts)
+	// Logger specifies a custom configured implementation of log/slog to override
+	// the servers default logger configuration. If you wish to change the log level,
+	// of the default logger, you can do so by setting:
+	// server := mqtt.New(nil)
+	// level := new(slog.LevelVar)
+	// server.Slog = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+	//  Level: level,
+	// }))
+	// level.Set(slog.LevelDebug)
+	// Override logger to use our logr-based logger
+	opts.Logger = slog.New(logr.ToSlogHandler(log))
 
-	// Create the new MQTT Server with default options
-	// Note: Providing a partial Capabilities struct causes "server busy" errors
-	// Mochi MQTT requires either nil (use all defaults) or a fully initialized Capabilities struct
-	log.Info("Creating Mochi MQTT server instance with default options")
-	mqttServer := mochimmqtt.New(nil)
+	// Enable inline client so that we can publish & subscribe from the same process without the need for the network overhead
+	opts.InlineClient = true
+
+	log.Info("Creating Mochi MQTT server instance")
+	mqttServer := mochiServer.New(opts)
 
 	log.Info("Mochi MQTT server instance created")
-
-	// Configure the MQTT server so that every message is logged.
-	log.Info("Configuring MQTT server logger")
-	mqttServer.Log = slog.New(logr.ToSlogHandler(log))
 
 	log.Info("Adding debug hook")
 	err := mqttServer.AddHook(&debug.Hook{
@@ -83,23 +72,17 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 		ID:      "tcp",
 		Address: fmt.Sprintf("0.0.0.0:%d", PRIVATE_PORT),
 	})
-	log.Info("TCP listener created")
-
-	log.Info("Adding TCP listener to server")
 	err = mqttServer.AddListener(tcp)
 	if err != nil {
 		log.Error(err, "error adding TCP listener")
 		return err
 	}
-	log.Info("TCP listener added to server")
-
-	log.Info("Calling mqttServer.Serve()")
 	err = mqttServer.Serve()
 	if err != nil {
 		log.Error(err, "error starting MQTT server")
 		return err
 	}
-	log.Info("mqttServer.Serve() returned successfully (listeners starting in background)")
+	log.Info("Now listening for MQTT connections", "tcp", tcp)
 
 	host, err := os.Hostname()
 	if err != nil {
@@ -133,13 +116,9 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 			return err
 		}
 
-		log.Info("Started new MQTT broker", "mdns_server", mdnsServer, "mdns_service", ZEROCONF_SERVICE)
-
-		// Give mDNS a moment to propagate before clients try to connect
-		time.Sleep(500 * time.Millisecond)
-		log.Info("MQTT broker ready for client connections")
+		log.Info("Published MQTT broker over mDNS", "mdns_server", mdnsServer, "mdns_service", ZEROCONF_SERVICE)
 	} else {
-		log.Info("Started new MQTT broker (mDNS disabled)")
+		log.Info("MQTT broker has mDNS disabled")
 	}
 
 	// Start periodic client monitoring if enabled
@@ -178,10 +157,6 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 		}
 		mqttServer.Close()
 	}(log.WithName("cleanup"))
-
-	if !noMdns {
-		log.Info("Started embedded MQTT broker & published it over mDNS/Zeroconf", "server", mdnsServer)
-	}
 
 	return nil
 }

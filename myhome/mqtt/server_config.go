@@ -10,7 +10,7 @@ import (
 
 // loadBrokerConfig loads broker configuration from Viper with defaults
 // Supports loading from YAML/JSON config file using Viper's UnmarshalKey
-func loadBrokerConfig(ctx context.Context, log logr.Logger, v *viper.Viper) *mochimqtt.Options {
+func loadBrokerConfig(_ context.Context, log logr.Logger, v *viper.Viper) *mochimqtt.Options {
 	// Start with default options
 	config := &mochimqtt.Options{
 		Capabilities: mochimqtt.NewDefaultServerCapabilities(),

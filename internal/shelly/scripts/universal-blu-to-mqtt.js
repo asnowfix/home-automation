@@ -154,7 +154,7 @@ const SCAN_OPTION = {
 function pushToMQ(addr, message) {
   if (!MQTT.isConnected()) return false; // Check the MQTT status
 
-  MQTT.publish(addr, message);
+  MQTT.publish(addr, message, 1 /*at least once*/, true /*retain*/);
 
   return true
 }

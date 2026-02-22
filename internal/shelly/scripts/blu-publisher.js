@@ -604,7 +604,7 @@ function emitData(data) {
     try {
       var payload = JSON.stringify(publishData);
       log("Publishing event via MQTT on topic: ", topic, "payload: ", payload);
-      MQTT.publish(topic, payload, 1, false);
+      MQTT.publish(topic, payload, 1 /*at least once*/, true /*retain*/);
     } catch (e) {
       log("Error stringifying data for MQTT publish:", e);
       // Ensure 'e' is referenced so the minifier doesn't drop it and produce `catch {}`

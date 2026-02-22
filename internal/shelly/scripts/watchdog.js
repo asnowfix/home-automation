@@ -322,7 +322,7 @@ var PrometheusMetrics = {
             
             // Publish to MQTT topic
             var topic = CONFIG.prometheus.mqttTopic + "/" + this.deviceInfo.id;
-            MQTT.publish(topic, metrics, 0, false);
+            MQTT.publish(topic, metrics, 1 /*at least once*/, false /*retain*/);
             
             this.log("Published metrics to " + topic);
         } catch (e) {

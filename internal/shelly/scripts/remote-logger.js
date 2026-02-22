@@ -100,7 +100,7 @@ var RemoteLogger = {
                 });
             } else if (CONFIG.method === "mqtt" && MQTT.isConnected()) {
                 // Send log via MQTT
-                MQTT.publish(CONFIG.mqttTopic, logMessage, 0, false);
+                MQTT.publish(CONFIG.mqttTopic, logMessage, 1 /*at least once*/, false /*retain*/);
             }
             
             return true;

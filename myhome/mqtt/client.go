@@ -174,7 +174,7 @@ var mutex sync.Mutex
 func GetClientE(ctx context.Context) (Client, error) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
 	mutex.Lock()
@@ -209,16 +209,12 @@ func GetClientE(ctx context.Context) (Client, error) {
 		ctx:                 global.ProcessContext(ctx),
 	}
 
-	// FIXME: get MQTT logging right
-	// 	Println: log.Info,
-	// 	Printf:  log.I,
-	// }
-
 	log.Info("MQTT client initialized", "client_id", theClient.Id(), "timeout", theClient.timeout, "grace", theClient.grace)
+
 	return theClient, nil
 }
 
-func NewClientE(ctx context.Context, broker string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration) error {
+func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration) error {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		return err
@@ -241,7 +237,12 @@ func NewClientE(ctx context.Context, broker string, mdnsTimeout time.Duration, m
 	if i := strings.LastIndex(programName, string(os.PathSeparator)); i != -1 {
 		programName = programName[i+1:]
 	}
-	clientId := fmt.Sprintf("%s-%s-%d", programName, hostname, os.Getpid())
+
+	// Include instance name in client ID to ensure uniqueness across multiple daemon instances
+	if instanceName == "" {
+		instanceName = "default"
+	}
+	clientId := fmt.Sprintf("%s-%s-%s-%d", programName, instanceName, hostname, os.Getpid())
 
 	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", mqttTimeout, "grace", mqttGrace)
 
@@ -523,7 +524,7 @@ func (c *client) SubscribeWithHandler(ctx context.Context, topic string, qlen ui
 	go func(log logr.Logger) {
 		log.Info("Handler goroutine started", "topic", topic, "subscriber", subscriberName)
 		for msg := range mch {
-			log.Info("Handler received message from channel", "topic", msg.Topic(), "subscriber", msg.Subscriber(), "payload_len", len(msg.Payload()))
+			log.V(1).Info("Handler received message from channel", "topic", msg.Topic(), "subscriber", msg.Subscriber(), "payload_len", len(msg.Payload()))
 			handler(msg.Topic(), msg.Payload(), msg.Subscriber())
 		}
 		log.Info("Handler goroutine exiting", "topic", topic, "subscriber", subscriberName)
@@ -573,14 +574,14 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 
 				// Transform and distribute to all subscribers
 				transformed := transform(msg)
-				log.Info("distribute: distributing to subscribers", "topic", topic, "subscriber_count", len(subscribers))
+				log.V(1).Info("distribute: distributing to subscribers", "topic", topic, "subscriber_count", len(subscribers))
 				for i, ch := range subscribers {
 					select {
 					case <-ctx.Done():
-						c.log.Info("Subscriber context done", "topic", topic, "index", i)
+						c.log.Info("Subscriber context done", "topic", topic, "index", i, "error", ctx.Err())
 						return
 					case ch.queue <- transformed:
-						log.Info("distribute: sent to subscriber", "topic", topic, "index", i, "subscriber", ch.name)
+						log.V(1).Info("distribute: sent to subscriber", "topic", topic, "index", i, "subscriber", ch.name)
 					default:
 						// Channel full or closed, mark for removal
 						c.log.Error(nil, "Subscriber channel full or closed", "topic", topic, "index", i, "subscriber", ch.name)
@@ -592,7 +593,9 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 				if len(dropping) > 0 {
 					for i := len(dropping) - 1; i >= 0; i-- {
 						idx := dropping[i]
-						c.log.Info("Dropping subscriber", "topic", topic, "index", idx, "subscriber", subscribers[idx].name)
+						err := fmt.Errorf("subscriber channel full or closed topic %s index %d subscriber %s", topic, idx, subscribers[idx].name)
+						c.log.Error(err, "Dropping subscriber")
+						close(subscribers[idx].queue)
 						subscribers = append(subscribers[:idx], subscribers[idx+1:]...)
 					}
 					if len(subscribers) == 0 {

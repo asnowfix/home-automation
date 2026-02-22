@@ -45,7 +45,6 @@ type resolver struct {
 	log         logr.Logger
 	started     bool
 	mdns        *mdns.Conn
-	zeroconf    *zeroconf.Resolver
 	mdnsTimeout time.Duration
 }
 
@@ -76,19 +75,11 @@ func (r *resolver) start(ctx context.Context) Resolver {
 		return r
 	}
 
-	iface, ip, err := MainInterface(r.log)
+	_, ip, err := MainInterface(r.log)
 	if err != nil {
 		r.log.Error(err, "Unable to find main interface")
 		return nil
 	}
-
-	zc, err := zeroconf.NewResolver(zeroconf.SelectIPTraffic(zeroconf.IPv4AndIPv6), zeroconf.SelectIfaces([]net.Interface{*iface}))
-	if err != nil {
-		r.log.Error(err, "Failed to initialize ZeroConf resolver")
-		return nil
-	}
-
-	r.zeroconf = zc
 
 	addr4, err := net.ResolveUDPAddr("udp4", mdns.DefaultAddressIPv4)
 	if err != nil {
@@ -237,7 +228,18 @@ func (r *resolver) LookupService(ctx context.Context, service string) (*url.URL,
 func (r *resolver) BrowseService(ctx context.Context, service, domain string, entries chan<- *zeroconf.ServiceEntry) error {
 	r.start(ctx)
 	r.waitForStart(ctx)
-	return r.zeroconf.Browse(ctx, service, domain, entries)
+
+	iface, _, err := MainInterface(r.log)
+	if err != nil {
+		return err
+	}
+
+	resolver, err := zeroconf.NewResolver(zeroconf.SelectIPTraffic(zeroconf.IPv4AndIPv6), zeroconf.SelectIfaces([]net.Interface{*iface}))
+	if err != nil {
+		return err
+	}
+
+	return resolver.Browse(ctx, service, domain, entries)
 }
 
 // PublishService registers a Zeroconf/DNS-SD service and ensures the resolver is started.

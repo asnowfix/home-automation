@@ -107,13 +107,13 @@ func doSwitchOneDevice(ctx context.Context, log logr.Logger, via types.Channel, 
 
 	switch args[0] {
 	case "toggle":
-		out, err = sswitch.Toggle(ctx, sd, switchId)
+		out, err = sswitch.Toggle(ctx, sd, via, switchId)
 	case "on":
-		out, err = sswitch.Set(ctx, sd, switchId, true)
+		out, err = sswitch.Set(ctx, sd, via, switchId, true)
 	case "off":
-		out, err = sswitch.Set(ctx, sd, switchId, false)
+		out, err = sswitch.Set(ctx, sd, via, switchId, false)
 	case "status":
-		out, err = sswitch.GetStatus(ctx, sd, switchId)
+		out, err = sswitch.GetStatus(ctx, sd, via, switchId)
 	default:
 		return nil, fmt.Errorf("unknown operation %s", args[0])
 	}

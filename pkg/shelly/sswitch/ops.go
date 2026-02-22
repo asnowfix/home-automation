@@ -57,8 +57,8 @@ func Init(l logr.Logger, r types.MethodsRegistrar) {
 	})
 }
 
-func doCall[reqT any, resT any](ctx context.Context, device types.Device, verb Verb, req *reqT) (*resT, error) {
-	out, err := device.CallE(ctx, types.ChannelDefault, verb.String(), req)
+func doCall[reqT any, resT any](ctx context.Context, device types.Device, via types.Channel, verb Verb, req *reqT) (*resT, error) {
+	out, err := device.CallE(ctx, via, verb.String(), req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to call %s on device %s: %w", verb, device.Id(), err)
 	}
@@ -71,22 +71,22 @@ func doCall[reqT any, resT any](ctx context.Context, device types.Device, verb V
 	return result, nil
 }
 
-func Toggle(ctx context.Context, device types.Device, id int) (*ToogleSetResponse, error) {
-	return doCall[ToggleStatusConfigRequest, ToogleSetResponse](ctx, device, toggle, &ToggleStatusConfigRequest{Id: id})
+func Toggle(ctx context.Context, device types.Device, via types.Channel, id int) (*ToogleSetResponse, error) {
+	return doCall[ToggleStatusConfigRequest, ToogleSetResponse](ctx, device, via, toggle, &ToggleStatusConfigRequest{Id: id})
 }
 
-func Set(ctx context.Context, device types.Device, id int, on bool) (*ToogleSetResponse, error) {
-	return doCall[SetRequest, ToogleSetResponse](ctx, device, set, &SetRequest{Id: id, On: on})
+func Set(ctx context.Context, device types.Device, via types.Channel, id int, on bool) (*ToogleSetResponse, error) {
+	return doCall[SetRequest, ToogleSetResponse](ctx, device, via, set, &SetRequest{Id: id, On: on})
 }
 
-func GetStatus(ctx context.Context, device types.Device, id int) (*Status, error) {
-	return doCall[ToggleStatusConfigRequest, Status](ctx, device, getStatus, &ToggleStatusConfigRequest{Id: id})
+func GetStatus(ctx context.Context, device types.Device, via types.Channel, id int) (*Status, error) {
+	return doCall[ToggleStatusConfigRequest, Status](ctx, device, via, getStatus, &ToggleStatusConfigRequest{Id: id})
 }
 
-func GetConfig(ctx context.Context, device types.Device, id int) (*Config, error) {
-	return doCall[ToggleStatusConfigRequest, Config](ctx, device, getConfig, &ToggleStatusConfigRequest{Id: id})
+func GetConfig(ctx context.Context, device types.Device, via types.Channel, id int) (*Config, error) {
+	return doCall[ToggleStatusConfigRequest, Config](ctx, device, via, getConfig, &ToggleStatusConfigRequest{Id: id})
 }
 
-func SetConfig(ctx context.Context, device types.Device, id int, config *Config) (*ConfigurationResponse, error) {
-	return doCall[ConfigurationRequest, ConfigurationResponse](ctx, device, setConfig, &ConfigurationRequest{Id: id, Configuration: *config})
+func SetConfig(ctx context.Context, device types.Device, via types.Channel, id int, config *Config) (*ConfigurationResponse, error) {
+	return doCall[ConfigurationRequest, ConfigurationResponse](ctx, device, via, setConfig, &ConfigurationRequest{Id: id, Configuration: *config})
 }

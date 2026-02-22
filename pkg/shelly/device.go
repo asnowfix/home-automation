@@ -84,7 +84,9 @@ func (m *DeviceMqttChannels) Init(ctx context.Context, deviceId string) (*Device
 	mc := mqtt.GetClient(ctx)
 	replyTo := fmt.Sprintf("%s_%s", mc.Id(), deviceId)
 
-	from, err := mc.Subscribe(ctx, fmt.Sprintf("%s/rpc", replyTo), 8 /*qlen*/, "shelly/device/"+deviceId)
+	// Use larger buffer (64) to handle concurrent refresh operations without dropping responses
+	// With maxConcurrentRefreshes and multiple devices, responses can arrive in bursts
+	from, err := mc.Subscribe(ctx, fmt.Sprintf("%s/rpc", replyTo), 64 /*qlen*/, "shelly/device/"+deviceId)
 	if err != nil {
 		return nil, fmt.Errorf("unable to subscribe to device's RPC topic: %w", err)
 	}

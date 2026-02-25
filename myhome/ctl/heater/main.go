@@ -28,6 +28,7 @@ var heaterKVSKeys = []string{
 	"script/heater/preheat-hours",              // CONFIG_SCHEMA.preheatHours
 	"script/heater/internal-temperature-topic", // CONFIG_SCHEMA.internalTemperatureTopic
 	"script/heater/external-temperature-topic", // CONFIG_SCHEMA.externalTemperatureTopic
+	"script/heater/door-sensor-topics",         // CONFIG_SCHEMA.doorSensorTopics
 }
 
 func init() {

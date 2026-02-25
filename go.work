@@ -27,6 +27,7 @@ use (
 	./myhome/ctl/shelly/follow
 	./myhome/ctl/show
 	./myhome/ctl/sswitch
+	./myhome/ctl/temperature
 	./myhome/daemon
 	./myhome/daemon/watch
 	./myhome/devices

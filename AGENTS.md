@@ -1,14 +1,46 @@
 # Agent Guidelines for Home Automation Project
 
-This document contains coding guidelines, best practices, and important knowledge for AI coding agents (like Cascade) working on this project.
+This document contains project context, coding guidelines, best practices, and important knowledge for AI coding agents working on this project.
 
 ## Table of Contents
 
+- [Project Goals](#project-goals)
+- [Design Philosophy](#design-philosophy)
 - [Shelly Device Scripting](#shelly-device-scripting)
 - [Go Development](#go-development)
 - [GitHub Workflows](#github-workflows)
 - [Project Structure](#project-structure)
 - [Common Issues and Solutions](#common-issues-and-solutions)
+
+---
+
+## Project Goals
+
+This is a **hobby project** with three explicit, equally-important goals:
+
+1. **Learn Go** — explore Go idioms, concurrency, tooling, and best practices by building real software.
+2. **Learn Claude Code** — understand how to work effectively with an AI coding agent as a pair programmer and development collaborator.
+3. **Home automation** — build a personal, self-hosted system to control and automate the house using [Shelly devices](https://www.shelly.com/) by Alterco Robotics.
+
+**Implications for an AI agent working on this project**:
+- Prefer Go patterns that are idiomatic and educational, not just the shortest path to a working result.
+- Keep changes small and well-explained so the owner can learn from them.
+- When multiple approaches exist, briefly name the trade-offs rather than silently choosing one.
+- This is a solo hobby project — avoid over-engineering; simplicity beats generality.
+
+---
+
+## Design Philosophy
+
+MyHome is designed with the following core principles (from README):
+
+- **Cloud-Independent**: Operates entirely on the local network; no cloud connectivity required.
+- **Decentralized**: No central device manager maintaining persistent state. Devices are discovered dynamically when needed.
+- **Minimal Infrastructure**: The only required central component is an MQTT broker (lightweight message bus).
+- **Ephemeral Discovery**: No "stickiness" — devices join/leave without a persistent registry.
+- **Local Control**: All automation logic runs locally; the home works even without internet.
+
+These principles ensure resilience, privacy, and independence from third-party services, while remaining compatible with the manufacturers' own apps (e.g., Shelly app & Cloud).
 
 ---
 

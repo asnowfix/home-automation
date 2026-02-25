@@ -802,6 +802,20 @@ The project includes VS Code launch configurations in `.vscode/launch.json`:
 - Debug enable/disable
 - All commands include `--verbose` flag for detailed logging
 
+### Git Usage
+
+- **Always use `git mv`** when moving or renaming files during refactoring — never `mv` followed by `git add/rm`, and never delete-and-recreate. `git mv` preserves history and makes the rename visible as a rename (not a delete + add) in `git log --follow` and code review diffs.
+
+```bash
+# Correct
+git mv internal/myhome/old.go internal/myhome/new.go
+
+# Wrong — loses history
+mv internal/myhome/old.go internal/myhome/new.go
+git rm internal/myhome/old.go
+git add internal/myhome/new.go
+```
+
 ### Memory Management
 
 When creating memories during AI interactions:

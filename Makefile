@@ -36,6 +36,7 @@ help:
 	@echo "  stop                  - Stop the service"
 	@echo "  status                - Show service status"
 	@echo "  logs                  - Show service logs"
+	@echo "  test                  - Run tests across all workspace modules"
 	@echo "  tidy                  - Tidy Go modules"
 	@echo "  debpkg                - Build Debian package (Linux only, VERSION=X.Y.Z optional)"
 	@echo "  upload-release-notes  - Upload release notes to GitHub (VERSION=vX.Y.Z optional)"
@@ -102,6 +103,7 @@ run: build
 
 test: build
 	$(GO) test ./...
+	@rc=0; $(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) test ./...) || rc=1; )exit $$rc
 
 build: generate
 	$(MAKE) -C myhome $(@)

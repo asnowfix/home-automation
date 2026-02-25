@@ -786,6 +786,22 @@ mac, err := blu.ResolveMac(ctx, identifier)
 
 ## Development Workflow
 
+### Go Test Suite
+
+`make test` is the canonical way to run the full test suite.  It runs
+`go test ./...` on the root module and then on every sub-module listed in
+`go.work`, so no module is silently skipped.
+
+**Rule: any new test command must be wired up in both places:**
+
+| Where | What to update |
+|---|---|
+| Local | `test` target in [`Makefile`](Makefile) |
+| CI | `.github/workflows/test.yml` and `.github/workflows/auto-tag-patch.yml` |
+
+The workflows must always invoke `make test` rather than bare `go test ./...`
+so that the Makefile remains the single source of truth for how tests are run.
+
 ### Testing Shelly Scripts
 
 1. **Local testing**: Use `--no-minify` for easier debugging

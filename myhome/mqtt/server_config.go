@@ -16,6 +16,14 @@ func loadBrokerConfig(_ context.Context, log logr.Logger, v *viper.Viper) *mochi
 		Capabilities: mochimqtt.NewDefaultServerCapabilities(),
 	}
 
+	// Configure aggressive session expiry and keepalive to detect stale clients quickly
+	// This prevents leaked connections from accumulating when clients disconnect abruptly
+	config.Capabilities.MaximumSessionExpiryInterval = 60 // Expire sessions after 60 seconds
+	config.Capabilities.MaximumMessageExpiryInterval = 60 // Expire messages after 60 seconds
+	config.Capabilities.MaximumClientWritesPending = 16   // Limit pending writes per client
+	config.Capabilities.ReceiveMaximum = 1024             // Max concurrent QoS 1 and 2 messages
+	config.Capabilities.MaximumPacketSize = 0             // No limit on packet size (0 = unlimited)
+
 	if v != nil && v.IsSet("mqtt.broker") {
 		// Unmarshal the entire mqtt.broker section into the Options struct
 		// This automatically handles nested structures like Capabilities

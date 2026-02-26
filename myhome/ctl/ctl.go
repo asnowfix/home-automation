@@ -21,9 +21,12 @@ import (
 	"myhome/ctl/sswitch"
 	"myhome/ctl/temperature"
 	mqttclient "myhome/mqtt"
+	"os"
+	"os/signal"
 	shellyPkg "pkg/shelly"
 	"pkg/shelly/types"
 	"runtime/pprof"
+	"syscall"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -69,12 +72,22 @@ var Cmd = &cobra.Command{
 
 		shellyPkg.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 
-		// Start cleanup goroutine that closes MQTT client when context is cancelled
-		// This ensures cleanup happens even when command returns an error
+		// Start cleanup goroutine that closes MQTT client when context is cancelled OR on signal
+		// This ensures cleanup happens even when command returns an error or is interrupted
 		// (Cobra skips PersistentPostRunE when RunE returns an error)
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGINT)
 		go func() {
-			<-ctx.Done()
-			mc.Close()
+			select {
+			case <-ctx.Done():
+				log.V(1).Info("Context cancelled, closing MQTT client")
+				mc.Close()
+			case sig := <-sigChan:
+				log.Info("Signal received, closing MQTT client", "signal", sig)
+				mc.Close()
+				os.Exit(0)
+			}
 		}()
 
 		for i, c := range types.Channels {

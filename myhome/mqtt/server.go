@@ -149,6 +149,46 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 		log.Info("MQTT broker client monitoring disabled")
 	}
 
+	// Start periodic stale client cleanup task
+	// This forcibly disconnects clients that are already closed but still in the client list
+	go func(log logr.Logger) {
+		// Run cleanup every 2 minutes
+		ticker := time.NewTicker(2 * time.Minute)
+		defer ticker.Stop()
+
+		log.Info("Starting MQTT broker stale client cleanup", "check_interval", 2*time.Minute)
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Info("Stopping MQTT broker stale client cleanup")
+				return
+			case <-ticker.C:
+				clients := mqttServer.Clients.GetAll()
+				staleCount := 0
+
+				for id, client := range clients {
+					// Check if client connection is already closed/dead
+					// Closed() returns true if the client has been stopped
+					if client.Closed() {
+						log.Info("Removing closed client from registry",
+							"client_id", id,
+							"stop_time", time.Unix(client.StopTime(), 0))
+
+						// Delete the client from the registry
+						// The client is already stopped, we just need to clean up the registry
+						mqttServer.Clients.Delete(id)
+						staleCount++
+					}
+				}
+
+				if staleCount > 0 {
+					log.Info("Stale client cleanup completed", "removed_count", staleCount, "remaining_clients", len(clients)-staleCount)
+				}
+			}
+		}
+	}(log.WithName("cleanup-stale"))
+
 	go func(log logr.Logger) {
 		<-ctx.Done()
 		log.Info("Shutting down MQTT broker")

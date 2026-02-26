@@ -2,7 +2,7 @@
 
 > **Purpose**: Durable reference for building a comprehensive Go test suite.
 > Safe to use across context resets — written to be self-contained.
-> Last updated: 2026-02-26 — Phase 0 complete
+> Last updated: 2026-02-26 — Phase 1 complete
 
 ---
 
@@ -66,8 +66,10 @@
 | Type | Location | Implements |
 |---|---|---|
 | `mqtt.MockClient` | `pkg/shelly/mqtt/mock.go` | `pkg/shelly/mqtt.Client` — but NOT `myhome/mqtt.Client` |
+| `mqtt.RecordingMockClient` | `myhome/mqtt/mock.go` | `myhome/mqtt.Client` — records publishes, injects via Feed |
 | `fakeRegistry` | `myhome/devices/cache_test.go` | `devices.DeviceRegistry` — call counting, thread-safe |
 | `newTestStorage()` | `myhome/storage/db_test.go` | Helper — creates in-memory SQLite |
+| `newTestDB/Storage/Service()` | `myhome/temperature/testutil_test.go` | Test helpers for temperature package |
 
 ### Global state risks
 
@@ -135,9 +137,9 @@ ok  pkg/shelly/script
 
 ---
 
-## Phase 1 — Shared Test Infrastructure
+## Phase 1 — Shared Test Infrastructure ✅ DONE
 
-### 1-A  Recording MQTT mock for `myhome/mqtt.Client`
+### 1-A  Recording MQTT mock for `myhome/mqtt.Client` ✅
 
 **File**: `myhome/mqtt/mock.go`
 **Package**: `mqtt` (exported so other modules can import it)
@@ -179,9 +181,9 @@ used in tests of modules that import `myhome/mqtt`. Placing it there avoids a
 circular dependency.  If that is a concern, move it to a `myhome/mqtt/mqtttest`
 sub-package and wire the go.mod accordingly.
 
-### 1-B  `newTestDB()` helper for temperature storage
+### 1-B  `newTestDB()` helper for temperature storage ✅
 
-**File**: `myhome/temperature/storage_test.go` (or a `testutil_test.go` helper file)
+**File**: `myhome/temperature/testutil_test.go`
 
 ```go
 func newTestDB(t *testing.T) *sqlx.DB {
@@ -200,7 +202,7 @@ func newTestStorage(t *testing.T) *Storage {
 }
 ```
 
-### 1-C  `newTestService()` helper for temperature service
+### 1-C  `newTestService()` helper for temperature service ✅
 
 ```go
 func newTestService(t *testing.T) (*Service, *mqtt.RecordingMockClient) {

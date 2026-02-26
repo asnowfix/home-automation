@@ -103,7 +103,12 @@ run: build
 
 test: build
 	$(GO) test ./...
-	@rc=0; $(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) test ./...) || rc=1; )exit $$rc
+	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
+	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
+	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
+	    (cd $$dir && $(GO) test ./...) || rc=1; \
+	  fi; \
+	done; exit $$rc
 
 build: generate
 	$(MAKE) -C myhome $(@)

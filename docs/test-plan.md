@@ -2,7 +2,7 @@
 
 > **Purpose**: Durable reference for building a comprehensive Go test suite.
 > Safe to use across context resets — written to be self-contained.
-> Last updated: 2026-02-26
+> Last updated: 2026-02-26 — Phase 0 complete
 
 ---
 
@@ -87,34 +87,51 @@ because the module is **not** in `go.work` (no workspace path confusion).
 
 ---
 
-## Phase 0 — Build System Fixes
+## Phase 0 — Build System Fixes ✅ DONE
 
 **Goal**: make `make test` exit 0 when all actual tests pass.
 
-### 0-A  Skip modules with no `*_test.go` files in the Makefile loop
+### 0-A  Iterate from `go.work`, skip modules with no `*_test.go` ✅
 
-The `myhome/ctl/temperature` module has no test files and its directory is nested
-inside the `myhome/ctl/` workspace module, causing a Go workspace `./...` resolution
-error.
+The old `$(foreach m,$(mods),...)` iterated over all `go.mod` files found on disk via
+filesystem globs. Two problems:
 
-**Change in `Makefile`** — replace the current foreach line:
+1. `myhome/ctl/temperature` is a workspace module nested inside `myhome/ctl/` — running
+   `go test ./...` from it triggered a Go workspace path-resolution error.
+2. `myhome/ctl/heater` has no `go.mod` (it is a plain sub-package of `myhome/ctl`), so a
+   shallow `ls *_test.go` check on the parent skipped its tests entirely.
+
+**Implemented solution** — `Makefile` `test` target now:
 
 ```makefile
-# Current (breaks on nested modules with no tests):
-@rc=0; $(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) test ./...) || rc=1; )exit $$rc
-
-# Fixed (skip directories with no *_test.go files):
-@rc=0; $(foreach m,$(mods),\
-  if ls $(dir $(m))*_test.go >/dev/null 2>&1; then \
-    (cd $(call folder,$(dir $(m))) && $(GO) test ./...) || rc=1; \
-  fi; \
-)exit $$rc
+test: build
+    $(GO) test ./...
+    @rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
+      if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
+              -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
+        (cd $$dir && $(GO) test ./...) || rc=1; \
+      fi; \
+    done; exit $$rc
 ```
 
-This check is intentionally shallow (only the module root directory).
-Sub-packages with their own test files are discovered by `./...`.
-Nested sub-*modules* each appear in `mods` with their own `go.mod` and receive
-their own `cd … && go test ./...` invocation when they have test files.
+Key design decisions:
+- **`awk` not `grep`** to extract go.work entries — `grep '^\t\./'` fails because single-quoted
+  `\t` is a literal backslash-t in POSIX sh, not a tab.
+- **`go.work` as iteration source** — the canonical module list; sub-module entries like
+  `myhome/ctl/temperature` that have no test files are skipped cleanly.
+- **`find -exec test -f go.mod \; -prune`** — recursive test-file search that stops at
+  sub-module directory boundaries, so `myhome/ctl/heater/*_test.go` is found via
+  `myhome/ctl`'s entry without double-running the nested `myhome/ctl/temperature`.
+
+Result of `make test` after this change:
+
+```
+ok  myhome/ctl/config
+ok  myhome/ctl/heater
+ok  myhome/devices
+ok  myhome/storage
+ok  pkg/shelly/script
+```
 
 ---
 

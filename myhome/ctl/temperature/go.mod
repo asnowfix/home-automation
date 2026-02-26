@@ -1,4 +1,4 @@
-module myhome/ctl/temperature
+module github.com/asnowfix/home-automation/myhome/ctl/temperature
 
 go 1.24.2
 

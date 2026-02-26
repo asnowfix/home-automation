@@ -37,6 +37,7 @@
     - [Install the Service](#install-the-service)
     - [Service Management Commands](#service-management-commands)
     - [Troubleshooting](#troubleshooting-1)
+  - [Git Bash](#git-bash)
   - [PowerShell](#powershell)
 - [macOS TBC](#macos-tbc)
 - [Profiling](#profiling)
@@ -437,7 +438,7 @@ make upload-release-notes
 gh release view v0.5.2 --web
 ```
 
-For detailed documentation, see [docs/RELEASE_PROCESS.md](docs/RELEASE_PROCESS.md).
+For detailed documentation, see the [Release Workflow](#release-workflow) section above.
 
 ## Code signing
 
@@ -613,9 +614,9 @@ SERVICE_NAME: MyHome
         DISPLAY_NAME       : MyHome
         DEPENDENCIES       :
         SERVICE_START_NAME : LocalSystem
+```
 
-
-TODO: add all of the above steps in wix.json
+> TODO: add all of the above steps in wix.json
 
 ### Git Bash
 

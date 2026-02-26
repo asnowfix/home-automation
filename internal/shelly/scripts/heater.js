@@ -1438,7 +1438,7 @@ if (typeof Shelly !== "undefined") {
       };
 
       // Publish response to the topic specified in replyTo
-      MQTT.publish(replyToTopic, JSON.stringify(response), 0, false);
+      MQTT.publish(replyToTopic, JSON.stringify(response), 1 /*at least once*/, false /*retain*/);
       log('Sent response to', replyToTopic);
     } else {
       // Log other heater commands but don't respond

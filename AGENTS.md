@@ -1,14 +1,46 @@
 # Agent Guidelines for Home Automation Project
 
-This document contains coding guidelines, best practices, and important knowledge for AI coding agents (like Cascade) working on this project.
+This document contains project context, coding guidelines, best practices, and important knowledge for AI coding agents working on this project.
 
 ## Table of Contents
 
+- [Project Goals](#project-goals)
+- [Design Philosophy](#design-philosophy)
 - [Shelly Device Scripting](#shelly-device-scripting)
 - [Go Development](#go-development)
 - [GitHub Workflows](#github-workflows)
 - [Project Structure](#project-structure)
 - [Common Issues and Solutions](#common-issues-and-solutions)
+
+---
+
+## Project Goals
+
+This is a **hobby project** with three explicit, equally-important goals:
+
+1. **Learn Go** — explore Go idioms, concurrency, tooling, and best practices by building real software.
+2. **Learn Claude Code** — understand how to work effectively with an AI coding agent as a pair programmer and development collaborator.
+3. **Home automation** — build a personal, self-hosted system to control and automate the house using [Shelly devices](https://www.shelly.com/) by Alterco Robotics.
+
+**Implications for an AI agent working on this project**:
+- Prefer Go patterns that are idiomatic and educational, not just the shortest path to a working result.
+- Keep changes small and well-explained so the owner can learn from them.
+- When multiple approaches exist, briefly name the trade-offs rather than silently choosing one.
+- This is a solo hobby project — avoid over-engineering; simplicity beats generality.
+
+---
+
+## Design Philosophy
+
+MyHome is designed with the following core principles (from README):
+
+- **Cloud-Independent**: Operates entirely on the local network; no cloud connectivity required.
+- **Decentralized**: No central device manager maintaining persistent state. Devices are discovered dynamically when needed.
+- **Minimal Infrastructure**: The only required central component is an MQTT broker (lightweight message bus).
+- **Ephemeral Discovery**: No "stickiness" — devices join/leave without a persistent registry.
+- **Local Control**: All automation logic runs locally; the home works even without internet.
+
+These principles ensure resilience, privacy, and independence from third-party services, while remaining compatible with the manufacturers' own apps (e.g., Shelly app & Cloud).
 
 ---
 
@@ -754,6 +786,83 @@ mac, err := blu.ResolveMac(ctx, identifier)
 
 ## Development Workflow
 
+### Planning and Context Survival
+
+**Rule: every non-trivial task must be captured in a plan file before work begins,
+and updated after each step completes.**
+
+The goal is to survive context-window overflows: a new session must be able to
+read the plan file and continue exactly where the previous session left off,
+without any information loss.
+
+#### How to create a plan
+
+1. Before writing any code, create a Markdown plan file under `docs/`.
+   Name it after the task, e.g. `docs/test-plan.md`, `docs/refactor-rpc.md`.
+2. The file must be **self-contained**: include enough context for a cold start
+   (key files, interfaces, design decisions, known pitfalls).
+3. Organise work as numbered phases or steps.  Each phase has a clear,
+   verifiable completion criterion.
+
+#### How to maintain a plan
+
+- Mark each phase/step **✅ DONE** (with the commit hash if applicable)
+  the moment it is complete — before moving on to the next step.
+- After marking a step done, commit *both* the implementation and the updated
+  plan in the same commit so history stays coherent.
+- If scope changes mid-task, update the plan to reflect reality; never let the
+  plan and the code drift apart.
+
+#### What to include in a plan file
+
+| Section | Content |
+|---|---|
+| Purpose / Goal | One-paragraph summary of what the task achieves |
+| Current state | What exists today (metrics, passing tests, known failures) |
+| Phases / Steps | Numbered, each with a completion criterion |
+| Key files | Paths to the most important files and what they contain |
+| Interfaces / seams | Interfaces used as injection points for mocks / fakes |
+| Known pitfalls | Gotchas discovered during earlier sessions |
+| Prerequisite changes | Code changes needed before tests/features can be written |
+
+#### Example skeleton
+
+```
+docs/my-feature.md
+
+# My Feature Plan
+> Last updated: YYYY-MM-DD — Phase N complete
+
+## Goal
+One paragraph.
+
+## Current State
+| Metric | Value |
+
+## Phase 1 — ... ✅ DONE (commit abc1234)
+### 1-A ...
+### 1-B ...
+
+## Phase 2 — ...
+### 2-A ...
+```
+
+### Go Test Suite
+
+`make test` is the canonical way to run the full test suite.  It runs
+`go test ./...` on the root module and then on every sub-module listed in
+`go.work`, so no module is silently skipped.
+
+**Rule: any new test command must be wired up in both places:**
+
+| Where | What to update |
+|---|---|
+| Local | `test` target in [`Makefile`](Makefile) |
+| CI | `.github/workflows/test.yml` and `.github/workflows/auto-tag-patch.yml` |
+
+The workflows must always invoke `make test` rather than bare `go test ./...`
+so that the Makefile remains the single source of truth for how tests are run.
+
 ### Testing Shelly Scripts
 
 1. **Local testing**: Use `--no-minify` for easier debugging
@@ -769,6 +878,20 @@ The project includes VS Code launch configurations in `.vscode/launch.json`:
 - Script update commands
 - Debug enable/disable
 - All commands include `--verbose` flag for detailed logging
+
+### Git Usage
+
+- **Always use `git mv`** when moving or renaming files during refactoring — never `mv` followed by `git add/rm`, and never delete-and-recreate. `git mv` preserves history and makes the rename visible as a rename (not a delete + add) in `git log --follow` and code review diffs.
+
+```bash
+# Correct
+git mv internal/myhome/old.go internal/myhome/new.go
+
+# Wrong — loses history
+mv internal/myhome/old.go internal/myhome/new.go
+git rm internal/myhome/old.go
+git add internal/myhome/new.go
+```
 
 ### Memory Management
 

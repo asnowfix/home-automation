@@ -28,6 +28,7 @@ MyHome Penates is the home automation system I develop & use to control my own h
     - [Issue Labels](#issue-labels)
       - [Standard GitHub Labels](#standard-github-labels)
       - [Project-Specific Labels](#project-specific-labels)
+  - [List Devices](#list-devices)
   - [Base Configuration](#base-configuration)
   - [Temperature Management](#temperature-management)
     - [Set Room Temperature Configuration](#set-room-temperature-configuration)
@@ -61,6 +62,7 @@ MyHome Penates is the home automation system I develop & use to control my own h
   - [Heaters adaptative control](#heaters-adaptative-control)
     - [Kalman Filter Heater Control Script](#kalman-filter-heater-control-script)
   - [Shelly Notes](#shelly-notes)
+    - [Shelly Direct Calls](#shelly-direct-calls)
     - [Shelly 1 H\&T](#shelly-1-ht)
     - [Web-Sockets Logs](#web-sockets-logs)
     - [Shelly MQTT Notes](#shelly-mqtt-notes)
@@ -255,6 +257,40 @@ When reporting issues, please use the appropriate label from the following categ
 | `device-feature` | Device-specific features and improvements |
 | `monitoring` | Monitoring and metrics features |
 | `networking` | Networking and device discovery features |
+
+## List Devices
+
+The `list` command takes any device identifier as argument, including leading & trailing wildcards '*':
+
+```bash
+myhome ctl list shelly1minig3-543204641d24                                    
+```
+```yaml
+- deviceidentifier:
+    manufacturer_: Shelly
+    id_: shelly1minig3-543204641d24
+  mac: 54:32:04:64:1d:24
+  host_: 192.168.1.63
+  name_: lumiere-escalier-exterieur
+```
+
+```bash
+myhome ctl list '*escalier*'
+```
+```yaml
+- deviceidentifier:
+    manufacturer_: Shelly
+    id_: shellyplugsg3-e4b3233eb55c
+  mac: e4:b3:23:3e:b5:5c
+  host_: 192.168.1.41
+  name_: lampe-buffer-escalier
+- deviceidentifier:
+    manufacturer_: Shelly
+    id_: shelly1minig3-543204641d24
+  mac: 54:32:04:64:1d:24
+  host_: 192.168.1.63
+  name_: lumiere-escalier-exterieur
+```
 
 ## Base Configuration
 
@@ -700,6 +736,14 @@ Home occupancy is detected by polling the occupancy sensor at the specified URL.
 
 ```
 http://192.168.33.1/rpc/HTTP.GET?url="http://admin:supersecretpassword@10.33.53.21/rpc/Shelly.Reboot"
+```
+
+### Shelly Direct Calls
+
+It is possible to call directly any Shelly RPC methods using the `myhome` command line tool, using either HTTP or MQTT.
+
+```
+myhome ctl shelly call --via mqtt shelly1minig3-543204641d24 Shelly.Reboot '{}'  -B 192.168.1.2
 ```
 
 ### Shelly 1 H&T

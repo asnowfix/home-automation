@@ -255,6 +255,11 @@ func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTim
 	mqttOps.SetCleanSession(true)  // clean session to avoid stale subscriptions from previous instances
 	mqttOps.SetOrderMatters(false) // required for wildcard subscriptions to route messages to correct handlers
 
+	// Keepalive settings to detect dead connections quickly
+	mqttOps.SetKeepAlive(30 * time.Second)           // Send keepalive ping every 30 seconds
+	mqttOps.SetPingTimeout(10 * time.Second)         // Timeout after 10 seconds without pong response
+	mqttOps.SetConnectRetryInterval(5 * time.Second) // Retry connection every 5 seconds if disconnected
+
 	// DEBUG: default handler to catch messages not matched by any subscription route
 	mqttOps.SetDefaultPublishHandler(func(client mqtt.Client, msg mqtt.Message) {
 		log.Info("DEFAULT HANDLER: unrouted message", "topic", msg.Topic(), "payload_len", len(msg.Payload()))

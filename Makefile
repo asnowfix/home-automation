@@ -36,6 +36,7 @@ help:
 	@echo "  stop                  - Stop the service"
 	@echo "  status                - Show service status"
 	@echo "  logs                  - Show service logs"
+	@echo "  test                  - Run tests across all workspace modules"
 	@echo "  tidy                  - Tidy Go modules"
 	@echo "  debpkg                - Build Debian package (Linux only, VERSION=X.Y.Z optional)"
 	@echo "  upload-release-notes  - Upload release notes to GitHub (VERSION=vX.Y.Z optional)"
@@ -102,6 +103,12 @@ run: build
 
 test: build
 	$(GO) test ./...
+	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
+	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
+	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
+	    (cd $$dir && $(GO) test ./...) || rc=1; \
+	  fi; \
+	done; exit $$rc
 
 build: generate
 	$(MAKE) -C myhome $(@)

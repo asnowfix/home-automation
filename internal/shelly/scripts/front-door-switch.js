@@ -3,19 +3,19 @@ Shelly.addEventHandler(function (event) {
     try {
         if (event.id === 1 && event.info.state === true) {
             print("Toogling right door light");
-            MQTT.publish("shellyplus1-b8d61a85ed58/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0, false);
+            MQTT.publish("shellyplus1-b8d61a85ed58/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0 /*at most once*/, false /*retain*/);
             // Shelly.call("HTTP.POST", {
             //     url: "http://shellyplus1-b8d61a85ed58.local/rpc/Switch.Toggle",
             //     body: JSON.stringify({ "id": 0 })
             // });
             print("Toogling front door light");
-            MQTT.publish("shelly1minig3-543204522cb4/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0, false);
+            MQTT.publish("shelly1minig3-543204522cb4/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0 /*at most once*/, false /*retain*/);
             // Shelly.call("HTTP.POST", {
             //     url: "http://shelly1minig3-543204522cb4.local/rpc/Switch.Toggle",
             //     body: JSON.stringify({ "id": 0 })
             // });
             print("Toogling old-front door light");
-            MQTT.publish("shelly1minig3-54320464a1d0/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0, false);
+            MQTT.publish("shelly1minig3-54320464a1d0/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0 /*at most once*/, false /*retain*/);
             // Shelly.call("HTTP.POST", {
             //     url: "http://shelly1minig3-54320464a1d0.local/rpc/Switch.Toggle",
             //     body: JSON.stringify({ "id": 0 })
@@ -24,7 +24,7 @@ Shelly.addEventHandler(function (event) {
         // top-right switch
         if (event.id === 0 && event.info.state === true) {
             print("Toggle lustre light");
-            MQTT.publish("shelly1minig3-84fce63bf464/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0, false);
+            MQTT.publish("shelly1minig3-84fce63bf464/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0 /*at most once*/, false /*retain*/);
             // Shelly.call("HTTP.POST", {
             //     url: "http://shelly1minig3-84fce63bf464.local/rpc/Switch.Toggle",
             //     body: JSON.stringify({ "id": 0 })
@@ -33,7 +33,7 @@ Shelly.addEventHandler(function (event) {
         // bottom-right switch
         if (event.id === 3 && event.info.state === true) {
             print("Toggle lumiere-parking light");
-            MQTT.publish("shellypro2-2cbcbb9fb834/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":1}}), 0, false);
+            MQTT.publish("shellypro2-2cbcbb9fb834/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":1}}), 0 /*at most once*/, false /*retain*/);
             // Shelly.call("HTTP.GET", {
             //   url: 'http://shellypro2-2cbcbb9fb834.local/rpc/HTTP.GET?url="http://192.168.33.18/rpc/Switch.Toggle?id=1"'
             // });
@@ -41,7 +41,7 @@ Shelly.addEventHandler(function (event) {
             // Call "escalier-exterieur.local" via "old-front-door-light.local"
             // $ curl -X GET "http://shelly1minig3-543204641d24.local/rpc/HTTP.GET?url=\"http://192.168.33.18/rpc/Switch.Toggle?id=0\""
             // {"code":200, "message":"OK", "headers":{"Connection": "close","Content-Length": "15","Content-Type": "application/json","Server": "ShellyHTTP/1.0.0"}, "body":"{\"was_on\":true}"}
-            MQTT.publish("shelly1minig3-543204641d24/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0, false);
+            MQTT.publish("shelly1minig3-543204641d24/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0 /*at most once*/, false /*retain*/);
             // Shelly.call("HTTP.GET", {
             //   url: 'http://shelly1minig3-543204641d24.local/rpc/HTTP.GET?url="http://192.168.33.18/rpc/Switch.Toggle?id=0"'
             // });
@@ -52,7 +52,7 @@ Shelly.addEventHandler(function (event) {
             // Call "lampe-buffet-entree.local"
             // $ curl -X GET "http://shellyplugsg3-e4b323382ea4.local/rpc/HTTP.GET?url=\"http://192.168.33.18/rpc/Switch.Toggle?id=0\""
             // {"code":200, "message":"OK", "headers":{"Connection": "close","Content-Length": "15","Content-Type": "application/json","Server": "ShellyHTTP/1.0.0"}, "body":"{\"was_on\":true}"}
-            MQTT.publish("shellyplugsg3-e4b323382ea4/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0, false);
+            MQTT.publish("shellyplugsg3-e4b323382ea4/rpc", JSON.stringify({"method":"Switch.Toggle", "params":{"id":0}}), 0 /*at most once*/, false /*retain*/);
             // Shelly.call("HTTP.GET", {
             //   url: 'http://shellyplugsg3-e4b323382ea4.local/rpc/HTTP.GET?url="http://192.168.33.18/rpc/Switch.Toggle?id=0"'
             // });

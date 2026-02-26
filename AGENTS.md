@@ -786,6 +786,67 @@ mac, err := blu.ResolveMac(ctx, identifier)
 
 ## Development Workflow
 
+### Planning and Context Survival
+
+**Rule: every non-trivial task must be captured in a plan file before work begins,
+and updated after each step completes.**
+
+The goal is to survive context-window overflows: a new session must be able to
+read the plan file and continue exactly where the previous session left off,
+without any information loss.
+
+#### How to create a plan
+
+1. Before writing any code, create a Markdown plan file under `docs/`.
+   Name it after the task, e.g. `docs/test-plan.md`, `docs/refactor-rpc.md`.
+2. The file must be **self-contained**: include enough context for a cold start
+   (key files, interfaces, design decisions, known pitfalls).
+3. Organise work as numbered phases or steps.  Each phase has a clear,
+   verifiable completion criterion.
+
+#### How to maintain a plan
+
+- Mark each phase/step **✅ DONE** (with the commit hash if applicable)
+  the moment it is complete — before moving on to the next step.
+- After marking a step done, commit *both* the implementation and the updated
+  plan in the same commit so history stays coherent.
+- If scope changes mid-task, update the plan to reflect reality; never let the
+  plan and the code drift apart.
+
+#### What to include in a plan file
+
+| Section | Content |
+|---|---|
+| Purpose / Goal | One-paragraph summary of what the task achieves |
+| Current state | What exists today (metrics, passing tests, known failures) |
+| Phases / Steps | Numbered, each with a completion criterion |
+| Key files | Paths to the most important files and what they contain |
+| Interfaces / seams | Interfaces used as injection points for mocks / fakes |
+| Known pitfalls | Gotchas discovered during earlier sessions |
+| Prerequisite changes | Code changes needed before tests/features can be written |
+
+#### Example skeleton
+
+```
+docs/my-feature.md
+
+# My Feature Plan
+> Last updated: YYYY-MM-DD — Phase N complete
+
+## Goal
+One paragraph.
+
+## Current State
+| Metric | Value |
+
+## Phase 1 — ... ✅ DONE (commit abc1234)
+### 1-A ...
+### 1-B ...
+
+## Phase 2 — ...
+### 2-A ...
+```
+
 ### Go Test Suite
 
 `make test` is the canonical way to run the full test suite.  It runs

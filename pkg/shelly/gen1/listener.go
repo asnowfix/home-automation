@@ -139,6 +139,8 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 
 		log.Info("Created/Updated Gen1 device", "device", mhd, "modified", modified)
 
+		// SSEBroadcaster.BroadcastSensorUpdate(device.Id, "info", string(payload))
+
 	default:
 		log.V(1).Info("Dropping unknown Gen1 message", "topic", topic)
 	}

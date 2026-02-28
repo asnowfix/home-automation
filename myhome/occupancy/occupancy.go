@@ -14,6 +14,23 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// LanChecker abstracts LAN host polling so that production code can use the
+// real SFR Box API while tests inject a fake implementation.
+type LanChecker interface {
+	GetHostsList(ctx context.Context) ([]*sfr.LanHost, error)
+}
+
+// sfrLanChecker is the production implementation that delegates to pkg/sfr.
+type sfrLanChecker struct{}
+
+func (c *sfrLanChecker) GetHostsList(ctx context.Context) ([]*sfr.LanHost, error) {
+	hosts, err := sfr.GetHostsList(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return *hosts, nil
+}
+
 // Service implements a simple HTTP server that reports home occupancy based on
 // recent motion/input events observed on MQTT and mobile device presence on the LAN.
 //
@@ -34,6 +51,7 @@ type Service struct {
 	ctx              context.Context
 	log              logr.Logger
 	mc               mqttclient.Client
+	lanChecker       LanChecker   // abstraction over sfr.GetHostsList for testability
 	lastEvent        atomic.Int64 // unix nano of last relevant input event
 	lastMobileSeen   atomic.Int64 // unix nano of last mobile device presence
 	lastSeenTime     atomic.Int64 // unix nano of last seen event (for timer expiry message)
@@ -48,6 +66,7 @@ func NewService(ctx context.Context, log logr.Logger, mc mqttclient.Client, wind
 		ctx:              ctx,
 		log:              log.WithName("occupancy.Service"),
 		mc:               mc,
+		lanChecker:       &sfrLanChecker{},
 		lastSeenWindow:   window,
 		mobilePollPeriod: mobilePollPeriod,
 		mobileDevices:    mobileDevices,
@@ -200,14 +219,14 @@ func (s *Service) pollMobilePresence() {
 }
 
 func (s *Service) checkMobilePresence() {
-	hosts, err := sfr.GetHostsList(s.ctx)
+	hosts, err := s.lanChecker.GetHostsList(s.ctx)
 	if err != nil {
 		s.log.Error(err, "Failed to get SFR LAN hosts")
 		return
 	}
 
 	// Look for any host whose name matches one of the configured mobile devices
-	for _, host := range *hosts {
+	for _, host := range hosts {
 		hostNameLower := strings.ToLower(host.Name)
 		for _, devicePattern := range s.mobileDevices {
 			if strings.Contains(hostNameLower, strings.ToLower(devicePattern)) {

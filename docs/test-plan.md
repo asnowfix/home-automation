@@ -2,7 +2,7 @@
 
 > **Purpose**: Durable reference for building a comprehensive Go test suite.
 > Safe to use across context resets — written to be self-contained.
-> Last updated: 2026-02-28 — Phases 0–6 complete (except 4-B)
+> Last updated: 2026-02-28 — All phases complete (0–6 including 4-B)
 
 ---
 
@@ -386,28 +386,26 @@ func withHandler(t *testing.T, v Verb, h MethodHandler) {
 | `TestSignatures_AllHaveNewResult` | Every entry in `signatures` has non-nil `NewResult` (or documents the nil-result verbs) |
 | `TestMethodHandler_Dispatch` | Registered handler is called with correct params type |
 
-### 4-B  RPC server tests ⏳ DEFERRED — requires refactoring
+### 4-B  RPC server tests ✅ DONE
 
 **File**: `internal/myhome/server_test.go`
 **Package**: `myhome`
 
-The `server` struct subscribes to an MQTT topic and dispatches incoming JSON messages.
-This requires a mock MQTT client that can inject inbound messages.
+**Prerequisite refactor**: changed `NewServerE` signature from
+`(ctx, handler)` to `(ctx, mc mqtt.Client, handler)` — removed the internal
+`mqtt.GetClientE(ctx)` singleton call. One call-site updated in `myhome/daemon/daemon.go`.
 
-**Blocker**: `NewServerE` calls `mqtt.GetClientE(ctx)` which returns a package-level
-singleton (`theClient`). There is no exported injection point for a test double.
-To make this testable, `NewServerE` should be refactored to accept a `mqtt.Client`
-parameter directly — a minimal, self-contained change.
-
-Needed: a mock implementing `myhome/mqtt.Client` (Phase 1-A `RecordingMockClient`)
-AND able to feed messages into the subscribe channel.
+Uses `RecordingMockClient` from Phase 1-A; a local `stubServer` implements `Server`.
+Responses are polled via `waitPublished(t, mc, topic)` (200 ms deadline, 5 ms interval).
 
 | Test | Behaviour |
 |---|---|
-| `TestNewServerE_SubscribesToServerTopic` | After construction, MQTT client has a subscriber for `ServerTopic()` |
-| `TestServer_DispatchKnownMethod` | Inject a valid JSON-RPC message; verify the registered handler is called |
-| `TestServer_UnknownMethod_ReturnsError` | Inject unknown method; verify error response published back |
-| `TestServer_ContextCancellation` | Cancel context; server goroutine exits |
+| `TestNewServerE_SubscribesToServerTopic` | Fed message reaches server; response appears on `ClientTopic(src)` |
+| `TestServer_DispatchKnownMethod` | Handler ActionE called; response has correct dialog (Id, Src=mc.Id(), Dst=src) |
+| `TestServer_UnknownMethod_ReturnsError` | Error response with `code=1` published to `ClientTopic(src)` |
+| `TestServer_InvalidJSON_ReturnsError` | Malformed payload → error response on `ClientTopic("")` |
+| `TestServer_InvalidDialog_ReturnsError` | Empty Id field → error response on `ClientTopic(src)` |
+| `TestServer_ContextCancellation` | Feed after cancel completes without deadlock |
 
 ---
 

@@ -353,6 +353,61 @@ When a script contains errors:
 
 ## Go Development
 
+### Testing Guidelines
+
+**CRITICAL**: Every new feature MUST include incremental unit test cases.
+
+#### Testing Requirements
+
+1. **Write tests before or alongside implementation**
+   - Tests help validate the design and catch issues early
+   - Tests serve as documentation for how the feature works
+
+2. **Test coverage should include:**
+   - ✅ **Happy path**: Normal operation with valid inputs
+   - ✅ **Edge cases**: Boundary conditions, empty values, nil pointers
+   - ✅ **Error handling**: Invalid inputs, missing data, type mismatches
+   - ✅ **Concurrent access**: Thread safety when applicable (use Go's race detector)
+
+3. **Test organization:**
+   ```go
+   // Group related tests with table-driven approach
+   func TestFeature_HappyPath(t *testing.T) {
+       tests := []struct {
+           name  string
+           input string
+           want  string
+       }{
+           {"case1", "input1", "output1"},
+           {"case2", "input2", "output2"},
+       }
+       for _, tt := range tests {
+           t.Run(tt.name, func(t *testing.T) {
+               // test implementation
+           })
+       }
+   }
+   ```
+
+4. **Running tests:**
+   ```bash
+   # Run all tests
+   go test ./...
+   
+   # Run specific package tests
+   go test ./myhome/devices
+   
+   # Run with race detector
+   go test -race ./...
+   
+   # Run specific test
+   go test -v -run TestFeature_HappyPath ./package
+   ```
+
+5. **Example: Sensor update tests**
+   - See `myhome/devices/cache_test.go` for comprehensive examples
+   - Tests cover float/int sensors, error handling, edge cases, and multiple sensors
+
 ### Logging System
 
 The project uses a custom logging system (`hlog`) with the following principles:

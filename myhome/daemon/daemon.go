@@ -236,7 +236,7 @@ func (d *daemon) Run() error {
 		log.Info("Started device manager", "manager", d.dm)
 
 		// Start the main RPC server
-		d.rpc, err = myhome.NewServerE(d.ctx, d.dm)
+		d.rpc, err = myhome.NewServerE(d.ctx, mc, d.dm)
 		if err != nil {
 			log.Error(err, "Failed to start MyHome RPC service")
 			return err

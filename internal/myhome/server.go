@@ -19,16 +19,12 @@ type Server interface {
 	MethodE(method Verb) (*Method, error)
 }
 
-func NewServerE(ctx context.Context, handler Server) (Server, error) {
+func NewServerE(ctx context.Context, mc mqtt.Client, handler Server) (Server, error) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic(err)
 	}
 	log = log.WithName("myhome.rpc")
-	mc, err := mqtt.GetClientE(ctx)
-	if err != nil {
-		return nil, err
-	}
 	from, err := mc.Subscribe(ctx, ServerTopic(), 16, InstanceName+"/server")
 	if err != nil {
 		log.Error(err, "Failed to subscribe to server", "topic", ServerTopic())

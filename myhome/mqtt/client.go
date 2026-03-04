@@ -174,7 +174,7 @@ var mutex sync.Mutex
 func GetClientE(ctx context.Context) (Client, error) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	mutex.Lock()

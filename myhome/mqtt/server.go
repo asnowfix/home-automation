@@ -183,7 +183,9 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 				}
 
 				if staleCount > 0 {
-					log.Info("Stale client cleanup completed", "removed_count", staleCount, "remaining_clients", len(clients)-staleCount)
+					// Get fresh count after deletions (clients variable is a snapshot from before deletions)
+					remainingClients := len(mqttServer.Clients.GetAll())
+					log.Info("Stale client cleanup completed", "removed_count", staleCount, "remaining_clients", remainingClients)
 				}
 			}
 		}

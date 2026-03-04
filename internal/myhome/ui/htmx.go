@@ -242,6 +242,13 @@ const deviceCardsTemplate = `
                 Closed
               </span>
             {{end}}
+          {{else}}
+            <span class="tag is-light ml-2" id="door-{{.Id}}">
+              <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
+              </svg>
+              --
+            </span>
           {{end}}
         {{end}}
       </p>
@@ -346,6 +353,13 @@ const deviceCardTemplate = `
                 Closed
               </span>
             {{end}}
+          {{else}}
+            <span class="tag is-light ml-2" id="door-{{.Id}}">
+              <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
+              </svg>
+              --
+            </span>
           {{end}}
         {{end}}
       </p>

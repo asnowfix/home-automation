@@ -45,19 +45,21 @@ func (b *SSEBroadcaster) Subscribe() chan string {
 	ch := make(chan string, 10) // Buffer to prevent blocking
 	b.mu.Lock()
 	b.clients[ch] = struct{}{}
+	clientCount := len(b.clients)
 	b.mu.Unlock()
-	b.log.Info("SSE client subscribed")
+	b.log.Info("SSE client subscribed", "total_clients", clientCount)
 	return ch
 }
 
 // Unsubscribe removes an SSE client
 func (b *SSEBroadcaster) Unsubscribe(ch chan string) {
 	b.mu.Lock()
-	clientCount := len(b.clients)
+	beforeCount := len(b.clients)
 	delete(b.clients, ch)
+	afterCount := len(b.clients)
 	close(ch)
 	b.mu.Unlock()
-	b.log.Info("SSE client unsubscribed", "former clients", clientCount)
+	b.log.Info("SSE client unsubscribed", "before", beforeCount, "after", afterCount)
 }
 
 // broadcast sends a message to all connected clients
@@ -73,15 +75,21 @@ func (b *SSEBroadcaster) broadcast(event string, data interface{}) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
+	clientCount := len(b.clients)
+	b.log.Info("Broadcasting to clients", "event", event, "client_count", clientCount, "message", msg)
+
+	sentCount := 0
+	skippedCount := 0
 	for ch := range b.clients {
 		select {
 		case ch <- msg:
-			// Successfully sent
+			sentCount++
 		default:
-			// Channel full, skip this client to avoid blocking
+			skippedCount++
 			b.log.Info("SSE client channel full, skipping message")
 		}
 	}
+	b.log.Info("Broadcast complete", "event", event, "sent", sentCount, "skipped", skippedCount)
 }
 
 // SensorUpdateData represents a sensor value update
@@ -124,16 +132,20 @@ func (b *SSEBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Send initial event to confirm connection
 	_, _ = w.Write([]byte("event: connected\ndata: ok\n\n"))
 	flusher.Flush()
+	b.log.Info("SSE connection established, entering message loop")
 
 	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
+			b.log.Info("SSE client context done, disconnecting")
 			return
 		case msg, ok := <-ch:
 			if !ok {
+				b.log.Info("SSE client channel closed")
 				return
 			}
+			b.log.Info("SSE sending message to client", "message_preview", msg[:min(50, len(msg))])
 			_, _ = w.Write([]byte(msg))
 			flusher.Flush()
 		}

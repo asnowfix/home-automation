@@ -2,7 +2,7 @@
 
 > **Purpose**: Durable reference for building a comprehensive Go test suite.
 > Safe to use across context resets — written to be self-contained.
-> Last updated: 2026-02-26 — Phase 1 complete
+> Last updated: 2026-02-28 — All phases complete (0–6 including 4-B)
 
 ---
 
@@ -217,9 +217,9 @@ func newTestService(t *testing.T) (*Service, *mqtt.RecordingMockClient) {
 
 ---
 
-## Phase 2 — `myhome/temperature` Tests
+## Phase 2 — `myhome/temperature` Tests ✅ DONE
 
-### 2-A  Pure unit tests (no DB, no MQTT)
+### 2-A  Pure unit tests (no DB, no MQTT) ✅ DONE
 
 **File**: `myhome/temperature/temperature_test.go`
 **Package**: `temperature` (white-box)
@@ -264,7 +264,7 @@ white-box access). Test:
 - Currently eco time → false
 - Midnight crossing range, test at 23:30 (inside) and 04:00 (inside)
 
-### 2-B  Storage tests
+### 2-B  Storage tests ✅ DONE
 
 **File**: `myhome/temperature/storage_test.go`
 **Package**: `temperature` (white-box)
@@ -283,7 +283,7 @@ Uses `newTestStorage(t)` from 1-B.
 | `TestSaveWeekdayDefault` | Insert Monday → DayTypeWorkDay |
 | `TestGetWeekdayDefaults` | Returns full 7-day map |
 
-### 2-C  RPC handler tests
+### 2-C  RPC handler tests ✅ DONE
 
 **File**: `myhome/temperature/methods_test.go`
 **Package**: `temperature` (white-box)
@@ -312,9 +312,9 @@ For `TestPublishRangesUpdate`: use `RecordingMockClient.Published("myhome/rooms/
 
 ---
 
-## Phase 3 — `myhome/occupancy` Tests
+## Phase 3 — `myhome/occupancy` Tests ✅ DONE
 
-### 3-A  Prerequisite code change — `LanChecker` interface
+### 3-A  Prerequisite code change — `LanChecker` interface ✅ DONE
 
 `occupancy.Service` calls `sfr.Client` directly (concrete type from `pkg/sfr`).
 To enable mocking without network access, extract an interface:
@@ -331,7 +331,7 @@ type LanChecker interface {
 Change `Service` to hold `LanChecker` instead of the concrete `sfr.Client`.
 Production code passes a real `sfr.Client`; tests pass a `fakeLanChecker`.
 
-### 3-B  Occupancy unit tests
+### 3-B  Occupancy unit tests ✅ DONE
 
 **File**: `myhome/occupancy/occupancy_test.go`
 **Package**: `occupancy` (white-box)
@@ -352,7 +352,7 @@ Fake LAN checker: inline `fakeLanChecker` struct.
 
 ## Phase 4 — `internal/myhome` RPC Tests
 
-### 4-A  Method registration tests
+### 4-A  Method registration tests ✅ DONE
 
 **File**: `internal/myhome/methods_test.go`
 **Package**: `myhome` (white-box — access to `methods` map)
@@ -386,27 +386,30 @@ func withHandler(t *testing.T, v Verb, h MethodHandler) {
 | `TestSignatures_AllHaveNewResult` | Every entry in `signatures` has non-nil `NewResult` (or documents the nil-result verbs) |
 | `TestMethodHandler_Dispatch` | Registered handler is called with correct params type |
 
-### 4-B  RPC server tests
+### 4-B  RPC server tests ✅ DONE
 
 **File**: `internal/myhome/server_test.go`
 **Package**: `myhome`
 
-The `server` struct subscribes to an MQTT topic and dispatches incoming JSON messages.
-This requires a mock MQTT client that can inject inbound messages.
+**Prerequisite refactor**: changed `NewServerE` signature from
+`(ctx, handler)` to `(ctx, mc mqtt.Client, handler)` — removed the internal
+`mqtt.GetClientE(ctx)` singleton call. One call-site updated in `myhome/daemon/daemon.go`.
 
-Needed: a mock implementing `myhome/mqtt.Client` (Phase 1-A `RecordingMockClient`)
-AND able to feed messages into the subscribe channel.
+Uses `RecordingMockClient` from Phase 1-A; a local `stubServer` implements `Server`.
+Responses are polled via `waitPublished(t, mc, topic)` (200 ms deadline, 5 ms interval).
 
 | Test | Behaviour |
 |---|---|
-| `TestNewServerE_SubscribesToServerTopic` | After construction, MQTT client has a subscriber for `ServerTopic()` |
-| `TestServer_DispatchKnownMethod` | Inject a valid JSON-RPC message; verify the registered handler is called |
-| `TestServer_UnknownMethod_ReturnsError` | Inject unknown method; verify error response published back |
-| `TestServer_ContextCancellation` | Cancel context; server goroutine exits |
+| `TestNewServerE_SubscribesToServerTopic` | Fed message reaches server; response appears on `ClientTopic(src)` |
+| `TestServer_DispatchKnownMethod` | Handler ActionE called; response has correct dialog (Id, Src=mc.Id(), Dst=src) |
+| `TestServer_UnknownMethod_ReturnsError` | Error response with `code=1` published to `ClientTopic(src)` |
+| `TestServer_InvalidJSON_ReturnsError` | Malformed payload → error response on `ClientTopic("")` |
+| `TestServer_InvalidDialog_ReturnsError` | Empty Id field → error response on `ClientTopic(src)` |
+| `TestServer_ContextCancellation` | Feed after cancel completes without deadlock |
 
 ---
 
-## Phase 5 — `pkg/shelly/script` Extended Tests
+## Phase 5 — `pkg/shelly/script` Extended Tests ✅ DONE
 
 **File**: `pkg/shelly/script/compat_test.go`
 **Package**: `script`
@@ -426,7 +429,7 @@ These document Shelly JS engine constraints using goja as the test runtime.
 
 ---
 
-## Phase 6 — `pkg/shelly/mqtt` Channel Tests
+## Phase 6 — `pkg/shelly/mqtt` Channel Tests ✅ DONE
 
 **File**: `pkg/shelly/mqtt/channel_test.go`
 **Package**: `mqtt`

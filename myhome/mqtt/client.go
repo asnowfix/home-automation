@@ -545,15 +545,24 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 	}
 
 	type subscriber struct {
-		name  string
-		queue chan T
+		name   string
+		queue  chan T
+		cancel context.CancelFunc // Cancel function to signal subscriber removal
 	}
 
-	// Create a channel for this subscriber
+	// Create a channel for this subscriber with its own cancellation context
+	subCtx, cancel := context.WithCancel(ctx)
 	s := &subscriber{
-		name:  subscriberName,
-		queue: make(chan T, qlen),
+		name:   subscriberName,
+		queue:  make(chan T, qlen),
+		cancel: cancel,
 	}
+
+	// Ensure channel is closed when subscriber is cancelled
+	go func() {
+		<-subCtx.Done()
+		close(s.queue)
+	}()
 
 	// Load or create subscriber list for this topic
 	value, loaded := c.subscribers.LoadOrStore(topic, make([]*subscriber, 0))
@@ -588,8 +597,9 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 					case ch.queue <- transformed:
 						log.V(1).Info("distribute: sent to subscriber", "topic", topic, "index", i, "subscriber", ch.name)
 					default:
-						// Channel full or closed, mark for removal
-						c.log.Error(nil, "Subscriber channel full or closed", "topic", topic, "index", i, "subscriber", ch.name)
+						// Channel full - mark for removal but don't close yet
+						// The channel will be closed by the cancellation goroutine
+						c.log.Error(nil, "Subscriber channel full, dropping subscriber", "topic", topic, "index", i, "subscriber", ch.name)
 						dropping = append(dropping, i)
 					}
 				}
@@ -598,9 +608,10 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 				if len(dropping) > 0 {
 					for i := len(dropping) - 1; i >= 0; i-- {
 						idx := dropping[i]
-						err := fmt.Errorf("subscriber channel full or closed topic %s index %d subscriber %s", topic, idx, subscribers[idx].name)
+						err := fmt.Errorf("subscriber channel full topic %s index %d subscriber %s", topic, idx, subscribers[idx].name)
 						c.log.Error(err, "Dropping subscriber")
-						close(subscribers[idx].queue)
+						// Cancel the subscriber context - this will trigger channel closure
+						subscribers[idx].cancel()
 						subscribers = append(subscribers[:idx], subscribers[idx+1:]...)
 					}
 					if len(subscribers) == 0 {

@@ -313,11 +313,16 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 
 		// Only save if something changed
 		if changed {
-			if _, err := registry.SetDevice(ctx, existingDevice, true); err != nil {
+			modified, err := registry.SetDevice(ctx, existingDevice, true)
+			if err != nil {
 				log.Error(err, "Failed to update BLU device", "device_id", deviceID)
 				return nil, err
 			}
-			log.V(1).Info("Updated BLU device", "device_id", deviceID, "capabilities", capabilities)
+			if modified {
+				log.V(1).Info("Updated BLU device", "device_id", deviceID, "capabilities", capabilities)
+			} else {
+				log.V(2).Info("BLU device unchanged in database", "device_id", deviceID)
+			}
 		}
 		return &sensors, nil
 	}
@@ -338,12 +343,17 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 	device = device.WithName(deviceID) // Use device ID as default name for new devices
 	device.Info = deviceInfo
 
-	if _, err := registry.SetDevice(ctx, device, true); err != nil {
+	modified, err := registry.SetDevice(ctx, device, true)
+	if err != nil {
 		log.Error(err, "Failed to register BLU device", "device_id", deviceID)
 		return nil, err
 	}
 
-	log.Info("Registered new device", "device_id", deviceID, "mac", eventData.Address, "capabilities", capabilities)
+	if modified {
+		log.Info("Registered new BLU device", "device_id", deviceID, "mac", eventData.Address, "capabilities", capabilities)
+	} else {
+		log.V(1).Info("BLU device already exists (unchanged)", "device_id", deviceID)
+	}
 	return &sensors, nil
 }
 

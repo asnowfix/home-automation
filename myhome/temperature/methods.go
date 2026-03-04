@@ -67,7 +67,7 @@ func (s *Service) HandleSet(ctx context.Context, p *myhome.TemperatureSetParams)
 
 	if modified {
 		s.log.Info("Room configuration updated", "room_id", p.RoomID, "name", p.Name, "kinds", p.Kinds)
-		// TODO: broadcase SSE event to every UI clients
+		// TODO: broadcast SSE event to all UI clients
 	} else {
 		s.log.Info("Room configuration unchanged", "room_id", p.RoomID, "name", p.Name, "kinds", p.Kinds)
 	}
@@ -425,7 +425,7 @@ func (s *Service) HandleRoomEdit(ctx context.Context, params *myhome.RoomEditPar
 
 	if modified {
 		s.log.Info("Room updated", "room_id", params.ID)
-		// TODO: broadcase SSE event to every UI clients
+		// TODO: broadcast SSE event to all UI clients
 	} else {
 		s.log.Info("Room unchanged", "room_id", params.ID)
 	}
@@ -526,7 +526,7 @@ func (s *Service) HandleRoomCreate(ctx context.Context, params *myhome.RoomCreat
 
 	if modified {
 		s.log.Info("Room created", "room_id", params.ID, "name", name)
-		// TODO: broadcast SSE event to every UI clients
+		// TODO: broadcast SSE event to all UI clients
 	} else {
 		s.log.Info("Room already exists (unchanged)", "room_id", params.ID, "name", name)
 	}

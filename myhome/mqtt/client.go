@@ -588,11 +588,11 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 
 				// Transform and distribute to all subscribers
 				transformed := transform(msg)
-				log.V(1).Info("distribute: distributing to subscribers", "topic", topic, "subscriber_count", len(subscribers))
+				log.Info("distribute: distributing to subscribers", "topic", topic, "subscriber_count", len(subscribers))
 				for i, ch := range subscribers {
 					select {
 					case <-ctx.Done():
-						c.log.Info("Subscriber context done", "topic", topic, "index", i, "error", ctx.Err())
+						c.log.V(1).Info("Subscriber context done", "topic", topic, "index", i, "error", ctx.Err())
 						return
 					case ch.queue <- transformed:
 						log.V(1).Info("distribute: sent to subscriber", "topic", topic, "index", i, "subscriber", ch.name)

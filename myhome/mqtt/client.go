@@ -252,7 +252,7 @@ func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTim
 
 	mqttOps.SetAutoReconnect(true) // automatically reconnect in case of disconnection
 	mqttOps.SetResumeSubs(true)    // automatically re-subscribe in case or disconnection/reconnection
-	mqttOps.SetCleanSession(true)  // clean session to avoid stale subscriptions from previous instances
+	mqttOps.SetCleanSession(false) // persistent session to receive retained messages reliably
 	mqttOps.SetOrderMatters(false) // required for wildcard subscriptions to route messages to correct handlers
 
 	// Keepalive settings to detect dead connections quickly

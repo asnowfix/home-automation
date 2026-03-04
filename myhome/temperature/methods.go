@@ -519,11 +519,17 @@ func (s *Service) HandleRoomCreate(ctx context.Context, params *myhome.RoomCreat
 	s.mu.Unlock()
 
 	// Save to storage
-	if _, err := s.storage.SaveRoom(config); err != nil {
+	modified, err := s.storage.SaveRoom(config)
+	if err != nil {
 		return nil, fmt.Errorf("failed to save room: %w", err)
 	}
 
-	s.log.Info("Room created", "room_id", params.ID, "name", name)
+	if modified {
+		s.log.Info("Room created", "room_id", params.ID, "name", name)
+		// TODO: broadcast SSE event to every UI clients
+	} else {
+		s.log.Info("Room already exists (unchanged)", "room_id", params.ID, "name", name)
+	}
 
 	return &myhome.RoomCreateResult{
 		Success: true,

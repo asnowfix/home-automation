@@ -158,6 +158,7 @@ type client struct {
 	ctx                 context.Context    // Process-wide context for background services
 	watchdogCancel      context.CancelFunc // Cancel function for watchdog
 	subscribers         sync.Map           // Map topic => []subscribers channels
+	handlers            sync.Map           // Map topic => mqtt.MessageHandler for re-registration
 }
 
 const BROKER_DEFAULT_NAME = "mqtt"
@@ -364,12 +365,26 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 					if timeSinceReconnect >= c.reconnectInterval {
 						log.Info("Performing periodic MQTT reconnection to refresh retained messages", "time_since_last", timeSinceReconnect)
 
+						// Collect all subscription topics and their handlers
+						type subInfo struct {
+							topic   string
+							handler mqtt.MessageHandler
+						}
+						var subscriptions []subInfo
+						c.handlers.Range(func(key, value interface{}) bool {
+							topic := key.(string)
+							handler := value.(mqtt.MessageHandler)
+							subscriptions = append(subscriptions, subInfo{topic: topic, handler: handler})
+							return true
+						})
+
+						log.Info("Collected subscriptions for re-registration", "count", len(subscriptions))
+
 						// Disconnect gracefully
 						c.mqtt.Disconnect(uint(c.grace.Milliseconds()))
 						log.V(1).Info("Disconnected for periodic reconnection")
 
-						// Reconnect - this will trigger ResumeSubs which re-subscribes to all topics
-						// With CleanSession=false, broker will deliver all retained messages
+						// Reconnect - with CleanSession=false, broker will deliver all retained messages
 						token := c.mqtt.Connect()
 						for !token.WaitTimeout(c.timeout) {
 							log.V(1).Info("Waiting for periodic reconnection")
@@ -378,7 +393,23 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 							log.Error(err, "Failed to reconnect after periodic disconnect")
 							consecutiveFailures++
 						} else {
-							log.Info("Successfully reconnected for retained message refresh")
+							log.Info("Successfully reconnected, re-registering subscriptions", "count", len(subscriptions))
+
+							// Re-subscribe to all topics with their stored handlers
+							// This is critical because manual disconnect loses Paho's subscription handlers
+							for _, sub := range subscriptions {
+								token := c.mqtt.Subscribe(sub.topic, 1 /*at-least-once*/, sub.handler)
+								for !token.WaitTimeout(c.timeout) {
+									log.V(1).Info("Waiting for re-subscription", "topic", sub.topic)
+								}
+								if err := token.Error(); err != nil {
+									log.Error(err, "Failed to re-subscribe after reconnection", "topic", sub.topic)
+								} else {
+									log.Info("Re-subscribed successfully", "topic", sub.topic)
+								}
+							}
+
+							log.Info("Periodic reconnection complete, all subscriptions re-registered")
 							c.reconnectMutex.Lock()
 							c.lastReconnect = time.Now()
 							c.reconnectMutex.Unlock()
@@ -660,6 +691,9 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 				}
 			}(c.log.WithName("distribute"))
 		}
+
+		// Store the handler for potential re-registration during periodic reconnection
+		c.handlers.Store(topic, distribute)
 
 		token := c.mqtt.Subscribe(topic, 1 /*at-least-once*/, distribute)
 		for !token.WaitTimeout(c.timeout) {

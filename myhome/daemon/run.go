@@ -25,6 +25,7 @@ func init() {
 	runCmd.PersistentFlags().DurationVarP(&options.Flags.RefreshInterval, "refresh-interval", "R", options.DEVICE_REFRESH_INTERVAL, "Known devices refresh interval")
 	runCmd.PersistentFlags().DurationVarP(&options.Flags.MqttWatchdogInterval, "mqtt-watchdog-interval", "W", options.MQTT_WATCHDOG_CHECK_INTERVAL, "MQTT watchdog check interval")
 	runCmd.PersistentFlags().IntVarP(&options.Flags.MqttWatchdogMaxFailures, "mqtt-watchdog-max-failures", "F", options.MQTT_WATCHDOG_MAX_FAILURES, "MQTT watchdog max consecutive failures before restart")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.MqttReconnectInterval, "mqtt-reconnect-interval", options.MQTT_RECONNECT_INTERVAL, "Interval for periodic MQTT reconnection to refresh retained messages (0 to disable)")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.MqttBrokerClientLogInterval, "mqtt-broker-client-log-interval", options.MQTT_BROKER_CLIENT_LOG_INTERVAL, "Interval for logging MQTT broker connected clients (0 to disable)")
 	runCmd.PersistentFlags().StringVarP(&options.Flags.EventsDir, "events-dir", "E", "", "Directory to write received MQTT events as JSON files")
 	runCmd.PersistentFlags().IntVarP(&options.Flags.UiPort, "ui-port", "p", options.HTTP_DEFAULT_PORT, "UI listen port (default "+strconv.Itoa(options.HTTP_DEFAULT_PORT)+")")
@@ -104,6 +105,9 @@ var runCmd = &cobra.Command{
 		}
 		if v.IsSet("daemon.mqtt_watchdog_max_failures") && !cmd.Flags().Changed("mqtt-watchdog-max-failures") {
 			options.Flags.MqttWatchdogMaxFailures = v.GetInt("daemon.mqtt_watchdog_max_failures")
+		}
+		if v.IsSet("daemon.mqtt_reconnect_interval") && !cmd.Flags().Changed("mqtt-reconnect-interval") {
+			options.Flags.MqttReconnectInterval = v.GetDuration("daemon.mqtt_reconnect_interval")
 		}
 		if v.IsSet("daemon.mqtt_broker_client_log_interval") && !cmd.Flags().Changed("mqtt-broker-client-log-interval") {
 			options.Flags.MqttBrokerClientLogInterval = v.GetDuration("daemon.mqtt_broker_client_log_interval")

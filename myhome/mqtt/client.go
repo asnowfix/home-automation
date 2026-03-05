@@ -152,6 +152,9 @@ type client struct {
 	watchdogMutex       sync.Mutex         // Protects watchdogStarted
 	watchdogInterval    time.Duration      // Watchdog check interval
 	watchdogMaxFailures int                // Watchdog max consecutive failures
+	reconnectInterval   time.Duration      // Periodic reconnection interval to refresh retained messages
+	lastReconnect       time.Time          // Last time a periodic reconnection was performed
+	reconnectMutex      sync.Mutex         // Protects lastReconnect
 	ctx                 context.Context    // Process-wide context for background services
 	watchdogCancel      context.CancelFunc // Cancel function for watchdog
 	subscribers         sync.Map           // Map topic => []subscribers channels
@@ -206,6 +209,8 @@ func GetClientE(ctx context.Context) (Client, error) {
 		grace:               options.Flags.MqttGrace,
 		watchdogInterval:    options.Flags.MqttWatchdogInterval,
 		watchdogMaxFailures: options.Flags.MqttWatchdogMaxFailures,
+		reconnectInterval:   options.Flags.MqttReconnectInterval,
+		lastReconnect:       time.Now(),
 		ctx:                 global.ProcessContext(ctx),
 	}
 
@@ -214,7 +219,7 @@ func GetClientE(ctx context.Context) (Client, error) {
 	return theClient, nil
 }
 
-func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration) error {
+func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration, reconnectInterval time.Duration) error {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		return err
@@ -333,7 +338,7 @@ func (c *client) startWatchdogOnce() {
 func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 	consecutiveFailures := 0
 
-	log.Info("Starting MQTT connection watchdog", "check_interval", c.watchdogInterval, "max_failures", c.watchdogMaxFailures)
+	log.Info("Starting MQTT connection watchdog", "check_interval", c.watchdogInterval, "max_failures", c.watchdogMaxFailures, "reconnect_interval", c.reconnectInterval)
 
 	ticker := time.NewTicker(c.watchdogInterval)
 	defer ticker.Stop()
@@ -348,6 +353,37 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 				if consecutiveFailures > 0 {
 					log.Info("MQTT connection recovered", "previous_failures", consecutiveFailures)
 					consecutiveFailures = 0
+				}
+
+				// Check if periodic reconnection is needed to refresh retained messages
+				if c.reconnectInterval > 0 {
+					c.reconnectMutex.Lock()
+					timeSinceReconnect := time.Since(c.lastReconnect)
+					c.reconnectMutex.Unlock()
+
+					if timeSinceReconnect >= c.reconnectInterval {
+						log.Info("Performing periodic MQTT reconnection to refresh retained messages", "time_since_last", timeSinceReconnect)
+
+						// Disconnect gracefully
+						c.mqtt.Disconnect(uint(c.grace.Milliseconds()))
+						log.V(1).Info("Disconnected for periodic reconnection")
+
+						// Reconnect - this will trigger ResumeSubs which re-subscribes to all topics
+						// With CleanSession=false, broker will deliver all retained messages
+						token := c.mqtt.Connect()
+						for !token.WaitTimeout(c.timeout) {
+							log.V(1).Info("Waiting for periodic reconnection")
+						}
+						if err := token.Error(); err != nil {
+							log.Error(err, "Failed to reconnect after periodic disconnect")
+							consecutiveFailures++
+						} else {
+							log.Info("Successfully reconnected for retained message refresh")
+							c.reconnectMutex.Lock()
+							c.lastReconnect = time.Now()
+							c.reconnectMutex.Unlock()
+						}
+					}
 				}
 			} else {
 				consecutiveFailures++

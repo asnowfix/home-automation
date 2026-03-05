@@ -38,6 +38,8 @@ const MQTT_WATCHDOG_MAX_FAILURES int = 3
 
 const MQTT_BROKER_CLIENT_LOG_INTERVAL time.Duration = 2 * time.Minute
 
+const MQTT_RECONNECT_INTERVAL time.Duration = 2 * time.Hour
+
 const SHELLY_DEFAULT_RATE_LIMIT time.Duration = 200 * time.Millisecond
 
 // ViperConfig holds the Viper configuration instance
@@ -57,6 +59,7 @@ var Flags struct {
 	RefreshInterval             time.Duration // the value taken by --refresh-interval / -R
 	MqttWatchdogInterval        time.Duration // the value taken by --mqtt-watchdog-interval
 	MqttWatchdogMaxFailures     int           // the value taken by --mqtt-watchdog-max-failures
+	MqttReconnectInterval       time.Duration // the value taken by --mqtt-reconnect-interval
 	MqttBrokerClientLogInterval time.Duration // the value taken by --mqtt-broker-client-log-interval
 	Via                         string
 	SwitchId                    uint32

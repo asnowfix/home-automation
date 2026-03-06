@@ -88,7 +88,7 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 	log.Info("Starting BLU listener", "mqtt_client", fmt.Sprintf("%T", mc), "registry", fmt.Sprintf("%T", registry))
 
 	// Subscribe to BLU events topic
-	topic := "shelly-blu/events/#"
+	topic := "shelly-blu/events/+"
 	log.Info("Subscribing to BLU events", "topic", topic)
 	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/blu", func(topic string, payload []byte, subscriber string) error {
 		log.Info("event received", "topic", topic, "payload", string(payload))

@@ -152,9 +152,13 @@ type client struct {
 	watchdogMutex       sync.Mutex         // Protects watchdogStarted
 	watchdogInterval    time.Duration      // Watchdog check interval
 	watchdogMaxFailures int                // Watchdog max consecutive failures
+	reconnectInterval   time.Duration      // Periodic reconnection interval to refresh retained messages
+	lastReconnect       time.Time          // Last time a periodic reconnection was performed
+	reconnectMutex      sync.Mutex         // Protects lastReconnect
 	ctx                 context.Context    // Process-wide context for background services
 	watchdogCancel      context.CancelFunc // Cancel function for watchdog
 	subscribers         sync.Map           // Map topic => []subscribers channels
+	handlers            sync.Map           // Map topic => mqtt.MessageHandler for re-registration
 }
 
 const BROKER_DEFAULT_NAME = "mqtt"
@@ -174,7 +178,7 @@ var mutex sync.Mutex
 func GetClientE(ctx context.Context) (Client, error) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	mutex.Lock()
@@ -206,6 +210,8 @@ func GetClientE(ctx context.Context) (Client, error) {
 		grace:               options.Flags.MqttGrace,
 		watchdogInterval:    options.Flags.MqttWatchdogInterval,
 		watchdogMaxFailures: options.Flags.MqttWatchdogMaxFailures,
+		reconnectInterval:   options.Flags.MqttReconnectInterval,
+		lastReconnect:       time.Now(),
 		ctx:                 global.ProcessContext(ctx),
 	}
 
@@ -214,7 +220,7 @@ func GetClientE(ctx context.Context) (Client, error) {
 	return theClient, nil
 }
 
-func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration) error {
+func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration, reconnectInterval time.Duration) error {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		return err
@@ -252,7 +258,7 @@ func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTim
 
 	mqttOps.SetAutoReconnect(true) // automatically reconnect in case of disconnection
 	mqttOps.SetResumeSubs(true)    // automatically re-subscribe in case or disconnection/reconnection
-	mqttOps.SetCleanSession(true)  // clean session to avoid stale subscriptions from previous instances
+	mqttOps.SetCleanSession(false) // persistent session to receive retained messages reliably
 	mqttOps.SetOrderMatters(false) // required for wildcard subscriptions to route messages to correct handlers
 
 	// Keepalive settings to detect dead connections quickly
@@ -333,7 +339,7 @@ func (c *client) startWatchdogOnce() {
 func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 	consecutiveFailures := 0
 
-	log.Info("Starting MQTT connection watchdog", "check_interval", c.watchdogInterval, "max_failures", c.watchdogMaxFailures)
+	log.Info("Starting MQTT connection watchdog", "check_interval", c.watchdogInterval, "max_failures", c.watchdogMaxFailures, "reconnect_interval", c.reconnectInterval)
 
 	ticker := time.NewTicker(c.watchdogInterval)
 	defer ticker.Stop()
@@ -348,6 +354,67 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 				if consecutiveFailures > 0 {
 					log.Info("MQTT connection recovered", "previous_failures", consecutiveFailures)
 					consecutiveFailures = 0
+				}
+
+				// Check if periodic reconnection is needed to refresh retained messages
+				if c.reconnectInterval > 0 {
+					c.reconnectMutex.Lock()
+					timeSinceReconnect := time.Since(c.lastReconnect)
+					c.reconnectMutex.Unlock()
+
+					if timeSinceReconnect >= c.reconnectInterval {
+						log.Info("Performing periodic MQTT reconnection to refresh retained messages", "time_since_last", timeSinceReconnect)
+
+						// Collect all subscription topics and their handlers
+						type subInfo struct {
+							topic   string
+							handler mqtt.MessageHandler
+						}
+						var subscriptions []subInfo
+						c.handlers.Range(func(key, value interface{}) bool {
+							topic := key.(string)
+							handler := value.(mqtt.MessageHandler)
+							subscriptions = append(subscriptions, subInfo{topic: topic, handler: handler})
+							return true
+						})
+
+						log.Info("Collected subscriptions for re-registration", "count", len(subscriptions))
+
+						// Disconnect gracefully
+						c.mqtt.Disconnect(uint(c.grace.Milliseconds()))
+						log.V(1).Info("Disconnected for periodic reconnection")
+
+						// Reconnect - with CleanSession=false, broker will deliver all retained messages
+						token := c.mqtt.Connect()
+						for !token.WaitTimeout(c.timeout) {
+							log.V(1).Info("Waiting for periodic reconnection")
+						}
+						if err := token.Error(); err != nil {
+							log.Error(err, "Failed to reconnect after periodic disconnect")
+							consecutiveFailures++
+						} else {
+							log.Info("Successfully reconnected, re-registering subscriptions", "count", len(subscriptions))
+
+							// Re-subscribe to all topics with their stored handlers
+							// This is critical because manual disconnect loses Paho's subscription handlers
+							for _, sub := range subscriptions {
+								token := c.mqtt.Subscribe(sub.topic, 1 /*at-least-once*/, sub.handler)
+								for !token.WaitTimeout(c.timeout) {
+									log.V(1).Info("Waiting for re-subscription", "topic", sub.topic)
+								}
+								if err := token.Error(); err != nil {
+									log.Error(err, "Failed to re-subscribe after reconnection", "topic", sub.topic)
+								} else {
+									log.Info("Re-subscribed successfully", "topic", sub.topic)
+								}
+							}
+
+							log.Info("Periodic reconnection complete, all subscriptions re-registered")
+							c.reconnectMutex.Lock()
+							c.lastReconnect = time.Now()
+							c.reconnectMutex.Unlock()
+						}
+					}
 				}
 			} else {
 				consecutiveFailures++
@@ -545,15 +612,24 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 	}
 
 	type subscriber struct {
-		name  string
-		queue chan T
+		name   string
+		queue  chan T
+		cancel context.CancelFunc // Cancel function to signal subscriber removal
 	}
 
-	// Create a channel for this subscriber
+	// Create a channel for this subscriber with its own cancellation context
+	subCtx, cancel := context.WithCancel(ctx)
 	s := &subscriber{
-		name:  subscriberName,
-		queue: make(chan T, qlen),
+		name:   subscriberName,
+		queue:  make(chan T, qlen),
+		cancel: cancel,
 	}
+
+	// Ensure channel is closed when subscriber is cancelled
+	go func() {
+		<-subCtx.Done()
+		close(s.queue)
+	}()
 
 	// Load or create subscriber list for this topic
 	value, loaded := c.subscribers.LoadOrStore(topic, make([]*subscriber, 0))
@@ -579,17 +655,18 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 
 				// Transform and distribute to all subscribers
 				transformed := transform(msg)
-				log.V(1).Info("distribute: distributing to subscribers", "topic", topic, "subscriber_count", len(subscribers))
+				log.Info("distribute: distributing to subscribers", "topic", topic, "subscriber_count", len(subscribers))
 				for i, ch := range subscribers {
 					select {
 					case <-ctx.Done():
-						c.log.Info("Subscriber context done", "topic", topic, "index", i, "error", ctx.Err())
+						c.log.V(1).Info("Subscriber context done", "topic", topic, "index", i, "error", ctx.Err())
 						return
 					case ch.queue <- transformed:
 						log.V(1).Info("distribute: sent to subscriber", "topic", topic, "index", i, "subscriber", ch.name)
 					default:
-						// Channel full or closed, mark for removal
-						c.log.Error(nil, "Subscriber channel full or closed", "topic", topic, "index", i, "subscriber", ch.name)
+						// Channel full - mark for removal but don't close yet
+						// The channel will be closed by the cancellation goroutine
+						c.log.Error(nil, "Subscriber channel full, dropping subscriber", "topic", topic, "index", i, "subscriber", ch.name)
 						dropping = append(dropping, i)
 					}
 				}
@@ -598,9 +675,10 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 				if len(dropping) > 0 {
 					for i := len(dropping) - 1; i >= 0; i-- {
 						idx := dropping[i]
-						err := fmt.Errorf("subscriber channel full or closed topic %s index %d subscriber %s", topic, idx, subscribers[idx].name)
+						err := fmt.Errorf("subscriber channel full topic %s index %d subscriber %s", topic, idx, subscribers[idx].name)
 						c.log.Error(err, "Dropping subscriber")
-						close(subscribers[idx].queue)
+						// Cancel the subscriber context - this will trigger channel closure
+						subscribers[idx].cancel()
 						subscribers = append(subscribers[:idx], subscribers[idx+1:]...)
 					}
 					if len(subscribers) == 0 {
@@ -613,6 +691,9 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 				}
 			}(c.log.WithName("distribute"))
 		}
+
+		// Store the handler for potential re-registration during periodic reconnection
+		c.handlers.Store(topic, distribute)
 
 		token := c.mqtt.Subscribe(topic, 1 /*at-least-once*/, distribute)
 		for !token.WaitTimeout(c.timeout) {

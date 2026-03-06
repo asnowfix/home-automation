@@ -115,6 +115,10 @@ daemon:
   # MQTT watchdog max consecutive failures
   # mqtt_watchdog_max_failures: 3
   
+  # MQTT periodic reconnection interval to refresh retained messages (0 to disable)
+  # Useful after suspend/resume cycles to ensure latest device states
+  # mqtt_reconnect_interval: 2h
+  
   # MQTT broker client log interval (0 to disable)
   # mqtt_broker_client_log_interval: 2m
   

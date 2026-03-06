@@ -123,9 +123,9 @@ func (s *Storage) SaveRoom(config *RoomConfig) (bool, error) {
 		kinds = excluded.kinds,
 		levels = excluded.levels,
 		updated_at = excluded.updated_at
-	WHERE temperature_rooms.name IS NOT excluded.name
-	   OR temperature_rooms.kinds IS NOT excluded.kinds
-	   OR temperature_rooms.levels IS NOT excluded.levels
+	WHERE temperature_rooms.name IS DISTINCT FROM excluded.name
+	   OR temperature_rooms.kinds IS DISTINCT FROM excluded.kinds
+	   OR temperature_rooms.levels IS DISTINCT FROM excluded.levels
 	`
 
 	result, err := s.db.Exec(query, config.ID, config.Name, string(kindsJSON), string(levelsJSON), time.Now())
@@ -262,7 +262,7 @@ func (s *Storage) SetKindSchedule(kind myhome.RoomKind, dayType myhome.DayType, 
 	ON CONFLICT(kind, day_type) DO UPDATE SET
 		ranges = excluded.ranges,
 		updated_at = excluded.updated_at
-	WHERE temperature_kind_schedules.ranges IS NOT excluded.ranges
+	WHERE temperature_kind_schedules.ranges IS DISTINCT FROM excluded.ranges
 	`
 
 	result, err := s.db.Exec(query, string(kind), string(dayType), string(rangesJSON), time.Now())
@@ -339,7 +339,7 @@ func (s *Storage) SetWeekdayDefault(weekday int, dayType myhome.DayType) (bool, 
 	ON CONFLICT(weekday) DO UPDATE SET
 		day_type = excluded.day_type,
 		updated_at = excluded.updated_at
-	WHERE temperature_weekday_defaults.day_type IS NOT excluded.day_type
+	WHERE temperature_weekday_defaults.day_type IS DISTINCT FROM excluded.day_type
 	`
 
 	result, err := s.db.Exec(query, weekday, string(dayType), time.Now())

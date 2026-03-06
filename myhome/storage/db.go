@@ -164,13 +164,13 @@ func (s *DeviceStorage) SetDevice(ctx context.Context, device *myhome.Device, ov
         config_revision = excluded.config_revision, 
         config = excluded.config,
         room_id = excluded.room_id
-    WHERE devices.mac IS NOT excluded.mac
-       OR devices.name IS NOT excluded.name
-       OR devices.host IS NOT excluded.host
-       OR devices.info IS NOT excluded.info
-       OR devices.config_revision IS NOT excluded.config_revision
-       OR devices.config IS NOT excluded.config
-       OR devices.room_id IS NOT excluded.room_id`
+    WHERE devices.mac IS DISTINCT FROM excluded.mac
+       OR devices.name IS DISTINCT FROM excluded.name
+       OR devices.host IS DISTINCT FROM excluded.host
+       OR devices.info IS DISTINCT FROM excluded.info
+       OR devices.config_revision IS DISTINCT FROM excluded.config_revision
+       OR devices.config IS DISTINCT FROM excluded.config
+       OR devices.room_id IS DISTINCT FROM excluded.room_id`
 	rows, err := s.db.NamedExec(query, d)
 	if err != nil {
 		s.log.Error(err, "Failed to upsert device by manufacturer and id", "device", device)

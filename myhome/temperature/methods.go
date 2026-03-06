@@ -67,7 +67,7 @@ func (s *Service) HandleSet(ctx context.Context, p *myhome.TemperatureSetParams)
 
 	if modified {
 		s.log.Info("Room configuration updated", "room_id", p.RoomID, "name", p.Name, "kinds", p.Kinds)
-		// TODO: broadcase SSE event to every UI clients
+		// TODO: broadcast SSE event to all UI clients
 	} else {
 		s.log.Info("Room configuration unchanged", "room_id", p.RoomID, "name", p.Name, "kinds", p.Kinds)
 	}
@@ -425,7 +425,7 @@ func (s *Service) HandleRoomEdit(ctx context.Context, params *myhome.RoomEditPar
 
 	if modified {
 		s.log.Info("Room updated", "room_id", params.ID)
-		// TODO: broadcase SSE event to every UI clients
+		// TODO: broadcast SSE event to all UI clients
 	} else {
 		s.log.Info("Room unchanged", "room_id", params.ID)
 	}
@@ -519,11 +519,17 @@ func (s *Service) HandleRoomCreate(ctx context.Context, params *myhome.RoomCreat
 	s.mu.Unlock()
 
 	// Save to storage
-	if _, err := s.storage.SaveRoom(config); err != nil {
+	modified, err := s.storage.SaveRoom(config)
+	if err != nil {
 		return nil, fmt.Errorf("failed to save room: %w", err)
 	}
 
-	s.log.Info("Room created", "room_id", params.ID, "name", name)
+	if modified {
+		s.log.Info("Room created", "room_id", params.ID, "name", name)
+		// TODO: broadcast SSE event to all UI clients
+	} else {
+		s.log.Info("Room already exists (unchanged)", "room_id", params.ID, "name", name)
+	}
 
 	return &myhome.RoomCreateResult{
 		Success: true,

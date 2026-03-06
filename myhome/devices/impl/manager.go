@@ -17,8 +17,6 @@ import (
 	"net"
 	"pkg/devices"
 	"pkg/shelly"
-	"pkg/shelly/blu"
-	"pkg/shelly/gen1"
 	"pkg/shelly/kvs"
 	"pkg/shelly/types"
 	"reflect"
@@ -27,6 +25,8 @@ import (
 	"time"
 	"tools"
 
+	shellyblu "internal/myhome/shelly/blu"
+	shellygen1 "internal/myhome/shelly/gen1"
 	shellyscript "internal/myhome/shelly/script"
 	shellysetup "internal/myhome/shelly/setup"
 
@@ -398,14 +398,14 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	}
 
 	// Start Gen1 MQTT listener for sensor data (with SSE broadcaster)
-	err = gen1.StartMqttListener(ctx, dm.mqttClient, dm.dr, dm.router, dm.sseBroadcaster)
+	err = shellygen1.StartMqttListener(ctx, dm.mqttClient, dm.dr, dm.router, dm.sseBroadcaster)
 	if err != nil {
 		dm.log.Error(err, "Failed to start Gen1 MQTT listener")
 		return err
 	}
 
 	// Start BLU listener for Shelly BLU device discovery (with SSE broadcaster)
-	err = blu.StartBLUListener(ctx, dm.mqttClient, dm.dr, dm.sseBroadcaster)
+	err = shellyblu.StartBLUListener(ctx, dm.mqttClient, dm.dr, dm.sseBroadcaster)
 	if err != nil {
 		dm.log.Error(err, "Failed to start BLU listener")
 		return err

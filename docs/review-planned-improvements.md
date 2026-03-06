@@ -20,97 +20,70 @@ analysis, and a proposed fix.
 
 ## 1. `pkg/shelly/` Architecture Violations
 
-**Severity: High**
+**Severity: High** → **Status: ✅ RESOLVED (2026-03-04)**
 
 ### Problem
 
 AGENTS.md states that `pkg/shelly/` is a *"Pure, reusable Shelly device API
 implementation"* with *"No business logic or application-specific code"*. Three
-files violate this by importing from `myhome/` (which resolves to
+files violated this by importing from `myhome/` (which resolves to
 `internal/myhome/`).
 
-### Evidence
+### Solution Implemented
 
-#### Violation A — Dead blank import
+The MQTT listeners (BLU and Gen1) were **moved from `pkg/shelly/` to
+`internal/myhome/shelly/`** since they are application-specific and depend on
+MyHome types.
 
-**File:** `pkg/shelly/device.go:7`
+#### Changes Made
 
-```go
-import (
-    _ "myhome/net"  // blank import — no init() exists in myhome/net
-    ...
-)
+1. **Moved Gen1 MQTT listener:**
+   - `pkg/shelly/gen1/listener.go` → `internal/myhome/shelly/gen1/listener.go`
+   - `pkg/shelly/gen1/types.go` → `internal/myhome/shelly/gen1/types.go` (copied)
+   - Keeps `myhome`, `myhome/devices`, `myhome/model` imports (now appropriate)
+
+2. **Moved BLU MQTT listener:**
+   - `pkg/shelly/blu/listener.go` → `internal/myhome/shelly/blu/listener.go`
+   - Keeps `myhome`, `myhome/mqtt` imports (now appropriate)
+
+3. **Updated manager.go:**
+   - Changed imports from `pkg/shelly/gen1` and `pkg/shelly/blu` to:
+     ```go
+     shellygen1 "internal/myhome/shelly/gen1"
+     shellyblu "internal/myhome/shelly/blu"
+     ```
+   - Updated listener calls to use new aliases
+
+4. **Removed dead import:**
+   - Deleted `_ "myhome/net"` from `pkg/shelly/device.go:7`
+
+### Result
+
+- **`pkg/shelly/`** — Now contains only generic Shelly protocol implementation
+  (HTTP API, types, core functionality). Zero imports from `myhome/`.
+- **`internal/myhome/shelly/`** — Contains application-specific MQTT listeners
+  that depend on MyHome types.
+- **No import cycles** — Clean separation between generic library and application.
+- **Build verified** — All packages compile successfully.
+
+### Architecture
+
+```
+pkg/shelly/              # Generic Shelly library (reusable)
+├── gen1/                # Gen1 HTTP API & types
+├── blu/                 # BLU core types (no listener)
+├── shelly/              # Common Shelly types
+└── ...                  # Other generic components
+
+internal/myhome/shelly/  # MyHome-specific Shelly integration
+├── gen1/                # Gen1 MQTT listener (uses myhome types)
+├── blu/                 # BLU MQTT listener (uses myhome types)
+├── script/              # Script management
+└── setup/               # Device setup
 ```
 
-`internal/myhome/net/` contains `mynet.go` and `resolver.go`, neither of which
-defines an `init()` function. This import has no side effects and does nothing.
-It is dead code that creates a compile-time dependency on MyHome networking.
-
-#### Violation B — BLU listener creates `myhome.Device`
-
-**File:** `pkg/shelly/blu/listener.go:7-8`
-
-```go
-import (
-    "myhome"       // for myhome.NewDevice(), myhome.SHELLY
-    "myhome/mqtt"  // for mqtt.Client
-    ...
-)
-```
-
-The listener constructs a concrete `myhome.Device` at line ~336:
-
-```go
-device := myhome.NewDevice(log, myhome.SHELLY, deviceID)
-device = device.WithMAC(macAddr)
-device = device.WithName(deviceID)
-```
-
-This hardcodes the listener to the MyHome device model — it cannot be reused
-with a different device representation.
-
-#### Violation C — Gen1 listener creates `myhome.Device`
-
-**File:** `pkg/shelly/gen1/listener.go:7-9`
-
-```go
-import (
-    "myhome"          // for myhome.Device{}
-    "myhome/devices"  // for devices.DeviceRegistry
-    "myhome/model"    // for model.Router
-    ...
-)
-```
-
-The listener constructs `&myhome.Device{}` directly at line ~122 and calls
-builder methods (`.WithId()`, `.WithName()`, `.WithMAC()`).
-
-### Proposed Fix
-
-1. **Remove the dead import** in `pkg/shelly/device.go:7` — no code changes
-   needed beyond deleting the line.
-
-2. **Inject a device factory** into BLU and Gen1 listeners. Define a factory
-   interface in `pkg/shelly/types/`:
-
-   ```go
-   // DeviceFactory creates device objects for the host application.
-   type DeviceFactory func(log logr.Logger, id string, mac net.HardwareAddr) any
-   ```
-
-   Pass it as a parameter to `StartBLUListener()` and `StartGen1Listener()`
-   instead of importing `myhome.NewDevice` directly. The caller in
-   `myhome/daemon/daemon.go` supplies a factory that creates `myhome.Device`.
-
-3. **Move `myhome/devices.DeviceRegistry`** — the interface is already
-   abstract, but it lives under `myhome/`. Define an equivalent interface in
-   `pkg/shelly/types/` so the generic layer doesn't depend on the business
-   layer's package.
-
-### Impact
-
-After this change, `pkg/shelly/` has zero imports from `myhome/` and can be
-extracted as a standalone library or reused in other Shelly-based projects.
+The `pkg/shelly/` package can now be extracted as a standalone library or
+reused in other Shelly-based projects without any MyHome dependencies.
 
 ---
 

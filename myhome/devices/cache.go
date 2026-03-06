@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"myhome"
+	"strconv"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -43,6 +44,32 @@ func (c *Cache) Flush() error {
 	c.devicesByMAC = make(map[string]*myhome.Device)
 	c.devicesByHost = make(map[string]*myhome.Device)
 	c.devicesByName = make(map[string]*myhome.Device)
+	return nil
+}
+
+// Load pre-populates the cache with all devices from the database
+// This should be called on startup before MQTT listeners start, so that
+// retained sensor messages can update devices that already exist in cache
+func (c *Cache) Load(ctx context.Context) error {
+	c.log.Info("Pre-populating cache from database")
+
+	devices, err := c.db.GetAllDevices(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load devices from database: %w", err)
+	}
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	for _, d := range devices {
+		c.devices = append(c.devices, d)
+		c.devicesById[d.Id()] = d
+		c.devicesByMAC[d.MAC] = d
+		c.devicesByHost[d.Host_] = d
+		c.devicesByName[d.Name()] = d
+	}
+
+	c.log.Info("Cache pre-populated", "device_count", len(devices))
 	return nil
 }
 
@@ -202,4 +229,77 @@ func (c *Cache) GetDevicesByRoom(ctx context.Context, roomId string) ([]*myhome.
 
 	// TODO: use cache content
 	return c.db.GetDevicesByRoom(ctx, roomId)
+}
+
+// sensorFieldMap maps sensor names to their corresponding field pointers and types
+var sensorFieldMap = map[string]struct {
+	field interface{}
+	isInt bool
+}{
+	"temperature":  {field: func(s *myhome.Sensors) **float64 { return &s.Temperature }, isInt: false},
+	"humidity":     {field: func(s *myhome.Sensors) **float64 { return &s.Humidity }, isInt: false},
+	"pressure":     {field: func(s *myhome.Sensors) **float64 { return &s.Pressure }, isInt: false},
+	"illuminance":  {field: func(s *myhome.Sensors) **float64 { return &s.Illuminance }, isInt: false},
+	"mass":         {field: func(s *myhome.Sensors) **float64 { return &s.Mass }, isInt: false},
+	"dew_point":    {field: func(s *myhome.Sensors) **float64 { return &s.DewPoint }, isInt: false},
+	"energy":       {field: func(s *myhome.Sensors) **float64 { return &s.Energy }, isInt: false},
+	"power":        {field: func(s *myhome.Sensors) **float64 { return &s.Power }, isInt: false},
+	"voltage":      {field: func(s *myhome.Sensors) **float64 { return &s.Voltage }, isInt: false},
+	"current":      {field: func(s *myhome.Sensors) **float64 { return &s.Current }, isInt: false},
+	"rotation":     {field: func(s *myhome.Sensors) **float64 { return &s.Rotation }, isInt: false},
+	"distance_m":   {field: func(s *myhome.Sensors) **float64 { return &s.DistanceM }, isInt: false},
+	"acceleration": {field: func(s *myhome.Sensors) **float64 { return &s.Acceleration }, isInt: false},
+	"battery":      {field: func(s *myhome.Sensors) **int { return &s.Battery }, isInt: true},
+	"motion":       {field: func(s *myhome.Sensors) **int { return &s.Motion }, isInt: true},
+	"window":       {field: func(s *myhome.Sensors) **int { return &s.Window }, isInt: true},
+	"button":       {field: func(s *myhome.Sensors) **int { return &s.Button }, isInt: true},
+	"distance_mm":  {field: func(s *myhome.Sensors) **int { return &s.DistanceMM }, isInt: true},
+	"timestamp":    {field: func(s *myhome.Sensors) **int { return &s.Timestamp }, isInt: true},
+}
+
+// UpdateSensorValue updates a sensor value in the cached device
+// This does NOT persist to database - sensor values are ephemeral
+func (c *Cache) UpdateSensorValue(ctx context.Context, deviceID string, sensor string, value string) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	device, exists := c.devicesById[deviceID]
+	if !exists {
+		return fmt.Errorf("device not found in cache: %s", deviceID)
+	}
+
+	// Initialize Status and Sensors if needed
+	if device.Status == nil {
+		device.Status = &myhome.Status{}
+	}
+	if device.Status.Sensors == nil {
+		device.Status.Sensors = &myhome.Sensors{}
+	}
+
+	// Look up sensor field mapping
+	mapping, exists := sensorFieldMap[sensor]
+	if !exists {
+		c.log.V(1).Info("Unknown sensor type", "sensor", sensor, "value", value)
+		return fmt.Errorf("unknown sensor type: %s", sensor)
+	}
+
+	// Parse and assign value based on type
+	if mapping.isInt {
+		v, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid %s value: %s", sensor, value)
+		}
+		fieldPtr := mapping.field.(func(*myhome.Sensors) **int)(device.Status.Sensors)
+		*fieldPtr = &v
+	} else {
+		v, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return fmt.Errorf("invalid %s value: %s", sensor, value)
+		}
+		fieldPtr := mapping.field.(func(*myhome.Sensors) **float64)(device.Status.Sensors)
+		*fieldPtr = &v
+	}
+
+	c.log.V(1).Info("Updated sensor value in cache", "device_id", deviceID, "sensor", sensor, "value", value)
+	return nil
 }

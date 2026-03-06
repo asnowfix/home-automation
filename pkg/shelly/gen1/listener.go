@@ -60,9 +60,17 @@ func StartMqttListener(ctx context.Context, mc mqtt.Client, sc devices.DeviceReg
 		// Handle device registration
 		err := handleMessage(ctx, log, sc, router, topic, payload)
 
-		// Broadcast sensor updates via SSE if broadcaster is available
-		if sseBroadcaster != nil {
-			if update := ParseSensorEvent(topic, payload); update != nil {
+		// Update cached sensor values and broadcast via SSE
+		if update := ParseSensorEvent(topic, payload); update != nil {
+			log.V(1).Info("sensor update", "source", "Gen1", "device_id", update.DeviceID, "sensor", update.Type, "value", update.Value)
+
+			// Update sensor value in cache
+			if err := sc.UpdateSensorValue(ctx, update.DeviceID, update.Type, update.Value); err != nil {
+				log.Error(err, "Failed to update sensor in cache", "device_id", update.DeviceID, "sensor", update.Type)
+			}
+
+			// Broadcast to SSE clients
+			if sseBroadcaster != nil {
 				sseBroadcaster.BroadcastSensorUpdate(update.DeviceID, update.Type, update.Value)
 			}
 		}

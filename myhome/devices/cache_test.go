@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 
@@ -186,6 +187,271 @@ func (f *fakeRegistry) GetDevicesByRoom(_ context.Context, roomId string) ([]*my
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeRegistry) UpdateSensorValue(_ context.Context, deviceID string, sensor string, value string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls["UpdateSensorValue"]++
+	// Test mock doesn't actually update sensors - just tracks the call
+	return nil
+}
+
+func (f *fakeRegistry) Load(_ context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls["Load"]++
+	// Test mock doesn't need to load anything - devices are already in memory
+	return nil
+}
+
+// ── tests: sensor updates ─────────────────────────────────────────────────────
+
+// TestCache_UpdateSensorValue_FloatSensors tests updating float64 sensor values
+func TestCache_UpdateSensorValue_FloatSensors(t *testing.T) {
+	c := NewCache(testCtx(t), newFakeRegistry())
+	d := fakeDevice("shellyblu-001", "temp-sensor", "aa:bb:cc:dd:ee:01", "192.168.1.1")
+
+	if _, err := c.SetDevice(context.Background(), d, false); err != nil {
+		t.Fatalf("SetDevice: %v", err)
+	}
+
+	tests := []struct {
+		sensor string
+		value  string
+		check  func(*myhome.Device) error
+	}{
+		{
+			sensor: "temperature",
+			value:  "22.5",
+			check: func(d *myhome.Device) error {
+				if d.Status == nil || d.Status.Sensors == nil || d.Status.Sensors.Temperature == nil {
+					return fmt.Errorf("temperature not set")
+				}
+				if *d.Status.Sensors.Temperature != 22.5 {
+					return fmt.Errorf("expected 22.5, got %f", *d.Status.Sensors.Temperature)
+				}
+				return nil
+			},
+		},
+		{
+			sensor: "humidity",
+			value:  "65.3",
+			check: func(d *myhome.Device) error {
+				if d.Status == nil || d.Status.Sensors == nil || d.Status.Sensors.Humidity == nil {
+					return fmt.Errorf("humidity not set")
+				}
+				if *d.Status.Sensors.Humidity != 65.3 {
+					return fmt.Errorf("expected 65.3, got %f", *d.Status.Sensors.Humidity)
+				}
+				return nil
+			},
+		},
+		{
+			sensor: "pressure",
+			value:  "1013.25",
+			check: func(d *myhome.Device) error {
+				if d.Status == nil || d.Status.Sensors == nil || d.Status.Sensors.Pressure == nil {
+					return fmt.Errorf("pressure not set")
+				}
+				if *d.Status.Sensors.Pressure != 1013.25 {
+					return fmt.Errorf("expected 1013.25, got %f", *d.Status.Sensors.Pressure)
+				}
+				return nil
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.sensor, func(t *testing.T) {
+			if err := c.UpdateSensorValue(context.Background(), "shellyblu-001", tt.sensor, tt.value); err != nil {
+				t.Fatalf("UpdateSensorValue: %v", err)
+			}
+
+			device, err := c.GetDeviceById(context.Background(), "shellyblu-001")
+			if err != nil {
+				t.Fatalf("GetDeviceById: %v", err)
+			}
+
+			if err := tt.check(device); err != nil {
+				t.Errorf("check failed: %v", err)
+			}
+		})
+	}
+}
+
+// TestCache_UpdateSensorValue_IntSensors tests updating integer sensor values
+func TestCache_UpdateSensorValue_IntSensors(t *testing.T) {
+	c := NewCache(testCtx(t), newFakeRegistry())
+	d := fakeDevice("shellyblu-002", "door-sensor", "aa:bb:cc:dd:ee:02", "192.168.1.2")
+
+	if _, err := c.SetDevice(context.Background(), d, false); err != nil {
+		t.Fatalf("SetDevice: %v", err)
+	}
+
+	tests := []struct {
+		sensor string
+		value  string
+		check  func(*myhome.Device) error
+	}{
+		{
+			sensor: "battery",
+			value:  "85",
+			check: func(d *myhome.Device) error {
+				if d.Status == nil || d.Status.Sensors == nil || d.Status.Sensors.Battery == nil {
+					return fmt.Errorf("battery not set")
+				}
+				if *d.Status.Sensors.Battery != 85 {
+					return fmt.Errorf("expected 85, got %d", *d.Status.Sensors.Battery)
+				}
+				return nil
+			},
+		},
+		{
+			sensor: "window",
+			value:  "1",
+			check: func(d *myhome.Device) error {
+				if d.Status == nil || d.Status.Sensors == nil || d.Status.Sensors.Window == nil {
+					return fmt.Errorf("window not set")
+				}
+				if *d.Status.Sensors.Window != 1 {
+					return fmt.Errorf("expected 1, got %d", *d.Status.Sensors.Window)
+				}
+				return nil
+			},
+		},
+		{
+			sensor: "motion",
+			value:  "0",
+			check: func(d *myhome.Device) error {
+				if d.Status == nil || d.Status.Sensors == nil || d.Status.Sensors.Motion == nil {
+					return fmt.Errorf("motion not set")
+				}
+				if *d.Status.Sensors.Motion != 0 {
+					return fmt.Errorf("expected 0, got %d", *d.Status.Sensors.Motion)
+				}
+				return nil
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.sensor, func(t *testing.T) {
+			if err := c.UpdateSensorValue(context.Background(), "shellyblu-002", tt.sensor, tt.value); err != nil {
+				t.Fatalf("UpdateSensorValue: %v", err)
+			}
+
+			device, err := c.GetDeviceById(context.Background(), "shellyblu-002")
+			if err != nil {
+				t.Fatalf("GetDeviceById: %v", err)
+			}
+
+			if err := tt.check(device); err != nil {
+				t.Errorf("check failed: %v", err)
+			}
+		})
+	}
+}
+
+// TestCache_UpdateSensorValue_InvalidValues tests error handling for invalid sensor values
+func TestCache_UpdateSensorValue_InvalidValues(t *testing.T) {
+	c := NewCache(testCtx(t), newFakeRegistry())
+	d := fakeDevice("shellyblu-003", "test-sensor", "aa:bb:cc:dd:ee:03", "192.168.1.3")
+
+	if _, err := c.SetDevice(context.Background(), d, false); err != nil {
+		t.Fatalf("SetDevice: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		sensor string
+		value  string
+	}{
+		{"invalid_temperature", "temperature", "not-a-number"},
+		{"invalid_battery", "battery", "abc"},
+		{"invalid_window", "window", "2.5"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := c.UpdateSensorValue(context.Background(), "shellyblu-003", tt.sensor, tt.value)
+			if err == nil {
+				t.Errorf("expected error for invalid value, got nil")
+			}
+		})
+	}
+}
+
+// TestCache_UpdateSensorValue_DeviceNotFound tests error when device doesn't exist
+func TestCache_UpdateSensorValue_DeviceNotFound(t *testing.T) {
+	c := NewCache(testCtx(t), newFakeRegistry())
+
+	err := c.UpdateSensorValue(context.Background(), "nonexistent-device", "temperature", "22.5")
+	if err == nil {
+		t.Errorf("expected error for nonexistent device, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found' error, got: %v", err)
+	}
+}
+
+// TestCache_UpdateSensorValue_UnknownSensor tests error for unknown sensor types
+func TestCache_UpdateSensorValue_UnknownSensor(t *testing.T) {
+	c := NewCache(testCtx(t), newFakeRegistry())
+	d := fakeDevice("shellyblu-004", "test-sensor", "aa:bb:cc:dd:ee:04", "192.168.1.4")
+
+	if _, err := c.SetDevice(context.Background(), d, false); err != nil {
+		t.Fatalf("SetDevice: %v", err)
+	}
+
+	err := c.UpdateSensorValue(context.Background(), "shellyblu-004", "unknown_sensor", "123")
+	if err == nil {
+		t.Errorf("expected error for unknown sensor type, got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "unknown sensor type") {
+		t.Errorf("expected 'unknown sensor type' error, got: %v", err)
+	}
+}
+
+// TestCache_UpdateSensorValue_MultipleSensors tests updating multiple sensors on same device
+func TestCache_UpdateSensorValue_MultipleSensors(t *testing.T) {
+	c := NewCache(testCtx(t), newFakeRegistry())
+	d := fakeDevice("shellyht-001", "multi-sensor", "aa:bb:cc:dd:ee:05", "192.168.1.5")
+
+	if _, err := c.SetDevice(context.Background(), d, false); err != nil {
+		t.Fatalf("SetDevice: %v", err)
+	}
+
+	// Update multiple sensors
+	if err := c.UpdateSensorValue(context.Background(), "shellyht-001", "temperature", "21.5"); err != nil {
+		t.Fatalf("UpdateSensorValue temperature: %v", err)
+	}
+	if err := c.UpdateSensorValue(context.Background(), "shellyht-001", "humidity", "55.0"); err != nil {
+		t.Fatalf("UpdateSensorValue humidity: %v", err)
+	}
+	if err := c.UpdateSensorValue(context.Background(), "shellyht-001", "battery", "90"); err != nil {
+		t.Fatalf("UpdateSensorValue battery: %v", err)
+	}
+
+	device, err := c.GetDeviceById(context.Background(), "shellyht-001")
+	if err != nil {
+		t.Fatalf("GetDeviceById: %v", err)
+	}
+
+	// Verify all sensors are set
+	if device.Status == nil || device.Status.Sensors == nil {
+		t.Fatalf("device status or sensors not initialized")
+	}
+
+	if device.Status.Sensors.Temperature == nil || *device.Status.Sensors.Temperature != 21.5 {
+		t.Errorf("temperature: expected 21.5, got %v", device.Status.Sensors.Temperature)
+	}
+	if device.Status.Sensors.Humidity == nil || *device.Status.Sensors.Humidity != 55.0 {
+		t.Errorf("humidity: expected 55.0, got %v", device.Status.Sensors.Humidity)
+	}
+	if device.Status.Sensors.Battery == nil || *device.Status.Sensors.Battery != 90 {
+		t.Errorf("battery: expected 90, got %v", device.Status.Sensors.Battery)
+	}
 }
 
 // ── tests: in-memory maps ─────────────────────────────────────────────────────

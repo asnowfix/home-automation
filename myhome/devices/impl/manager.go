@@ -346,6 +346,13 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	dm.router = sfr.GetRouter(ctx)
 
+	// Pre-populate cache with existing devices from database
+	// This ensures devices exist when retained MQTT sensor messages arrive
+	if err := dm.dr.Load(ctx); err != nil {
+		dm.log.Error(err, "Failed to pre-populate cache from database")
+		// Don't fail startup - continue with empty cache
+	}
+
 	// Register heater service handlers
 	heaterService := shellyscript.NewHeaterService(dm.log, dm)
 	heaterService.RegisterHandlers()
@@ -359,7 +366,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
-	err = watch.StartMqttWatcher(ctx, dm.mqttClient, dm, dm)
+	err = watch.StartMqttWatcher(ctx, dm.mqttClient, dm, dm.dr)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch MQTT events")
 		return err

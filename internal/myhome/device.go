@@ -72,8 +72,14 @@ type Device struct {
 	RoomId         string             `db:"room_id" json:"room_id,omitempty"` // Room this device belongs to (optional, max one room)
 	Info           *shelly.DeviceInfo `db:"-" json:"info"`
 	Config         *shelly.Config     `db:"-" json:"config"`
-	impl           any                `db:"-" json:"-"` // Reference to the inner implementation
+	Status         *Status            `db:"-" json:"status,omitempty"` // Device status including sensor values (ephemeral, cached in memory)
+	impl           any                `db:"-" json:"-"`                // Reference to the inner implementation
 	log            logr.Logger        `db:"-" json:"-"`
+}
+
+// Status represents the current runtime status of a device
+type Status struct {
+	Sensors *Sensors `json:"sensors,omitempty"` // Sensor readings (BTHome format)
 }
 
 type Component struct {

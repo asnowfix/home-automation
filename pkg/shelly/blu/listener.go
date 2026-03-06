@@ -74,6 +74,7 @@ type BTHomeFrame struct {
 type DeviceRegistry interface {
 	SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) (bool, error)
 	GetDeviceById(ctx context.Context, id string) (*myhome.Device, error)
+	UpdateSensorValue(ctx context.Context, deviceID string, sensor string, value string) error
 }
 
 // SSEBroadcaster interface for broadcasting sensor updates to UI
@@ -103,16 +104,25 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 		mac := parts[2] // MAC address with colons
 		deviceID := "shellyblu-" + strings.ToLower(strings.ReplaceAll(mac, ":", ""))
 
-		log.V(1).Info("event emitter", "device_id", deviceID, "mac", mac)
-
 		// Handle device registration
 		sensors, err := handleBLUEvent(ctx, log, topic, payload, registry)
 
-		// Broadcast sensor updates via SSE if broadcaster is available
+		// Update cached sensor values and broadcast via SSE
 		// This happens regardless of registration success, similar to Gen1 pattern
-		if sseBroadcaster != nil && sensors != nil {
+		if sensors != nil {
+			// Update sensor values in cache
 			for sensor, value := range *sensors {
-				sseBroadcaster.BroadcastSensorUpdate(deviceID, sensor, value)
+				log.V(1).Info("sensor update", "source", "BLU", "device_id", deviceID, "mac", mac, "sensor", sensor, "value", value)
+				if err := registry.UpdateSensorValue(ctx, deviceID, sensor, value); err != nil {
+					log.Error(err, "Failed to update sensor in cache", "device_id", deviceID, "sensor", sensor)
+				}
+			}
+
+			// Broadcast to SSE clients
+			if sseBroadcaster != nil {
+				for sensor, value := range *sensors {
+					sseBroadcaster.BroadcastSensorUpdate(deviceID, sensor, value)
+				}
 			}
 		}
 

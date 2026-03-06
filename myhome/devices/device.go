@@ -7,6 +7,7 @@ import (
 
 type DeviceRegistry interface {
 	Flush() error
+	Load(ctx context.Context) error
 	SetDevice(ctx context.Context, d *myhome.Device, overwrite bool) (bool, error)
 	GetDevicesMatchingAny(ctx context.Context, name string) ([]*myhome.Device, error)
 	GetDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, error)
@@ -18,6 +19,7 @@ type DeviceRegistry interface {
 	GetAllDevices(ctx context.Context) ([]*myhome.Device, error)
 	SetDeviceRoom(ctx context.Context, identifier string, roomId string) (bool, error)
 	GetDevicesByRoom(ctx context.Context, roomId string) ([]*myhome.Device, error)
+	UpdateSensorValue(ctx context.Context, deviceID string, sensor string, value string) error
 }
 
 type Manager interface {

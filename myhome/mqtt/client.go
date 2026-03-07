@@ -57,80 +57,11 @@ const (
 	ExactlyOnce byte = 2 // QoS 2 - Exactly once delivery
 )
 
-// WaitForBrokerReady waits for an MQTT broker to be ready by attempting connections with exponential backoff
-// This is useful when starting an embedded broker and needing to wait for it to be ready before connecting clients
-func WaitForBrokerReady(ctx context.Context, log logr.Logger, brokerAddr string, initialDelay time.Duration, maxWait time.Duration) error {
-	log.Info("Waiting for MQTT broker to be ready", "broker", brokerAddr, "initial_delay", initialDelay, "max_wait", maxWait)
-
-	// Give the broker a moment to complete async initialization after Serve() returns
-	// Mochi MQTT's Serve() is non-blocking and listeners start asynchronously
-	if initialDelay > 0 {
-		log.V(1).Info("Initial delay for broker async initialization", "delay", initialDelay)
-		time.Sleep(initialDelay)
-	}
-
-	deadline := time.Now().Add(maxWait)
-	attempt := 0
-	backoff := 100 * time.Millisecond
-	maxBackoff := 5 * time.Second
-
-	for time.Now().Before(deadline) {
-		attempt++
-
-		log.V(1).Info("Attempting to connect to broker", "attempt", attempt, "broker", brokerAddr)
-
-		// Create a dedicated test client (not using singleton) to avoid state issues
-		opts := mqtt.NewClientOptions()
-		opts.AddBroker(fmt.Sprintf("tcp://%s", brokerAddr))
-		opts.SetClientID(fmt.Sprintf("readiness-check-%d", time.Now().UnixNano()))
-		opts.SetConnectTimeout(1 * time.Second)
-		opts.SetAutoReconnect(false)
-		opts.SetCleanSession(true)
-		opts.SetOrderMatters(false)
-
-		testClient := mqtt.NewClient(opts)
-		token := testClient.Connect()
-
-		// Wait for connection with timeout
-		if token.WaitTimeout(1 * time.Second) {
-			if token.Error() == nil {
-				// Successfully connected - broker is ready
-				testClient.Disconnect(100)
-				log.Info("MQTT broker is ready", "broker", brokerAddr, "attempts", attempt)
-				return nil
-			}
-			log.V(1).Info("Connection failed", "attempt", attempt, "error", token.Error())
-		} else {
-			log.V(1).Info("Connection timed out", "attempt", attempt)
-		}
-
-		log.V(1).Info("Broker not ready yet, waiting", "attempt", attempt, "backoff", backoff)
-
-		// Check if we've run out of time
-		if time.Now().Add(backoff).After(deadline) {
-			break
-		}
-
-		// Exponential backoff
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(backoff):
-		}
-
-		backoff = backoff * 2
-		if backoff > maxBackoff {
-			backoff = maxBackoff
-		}
-	}
-
-	return fmt.Errorf("MQTT broker at %s did not become ready within %v (after %d attempts)", brokerAddr, maxWait, attempt)
-}
-
 type Client interface {
 	GetServer() string
 	BrokerUrl() *url.URL
 	Id() string
+	Start() error
 	Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error)
 	SubscribeWithHandler(ctx context.Context, topic string, qlen uint, subscriber string, handle func(topic string, payload []byte, subcriber string) error) error
 	SubscribeWithTopic(ctx context.Context, topic string, qlen uint, subscriberName string) (<-chan Message, error)
@@ -142,23 +73,25 @@ type Client interface {
 
 type client struct {
 	// clientId  string      // MQTT client_id (this client)
-	mqtt                mqtt.Client        // MQTT stack
-	brokerUrl           *url.URL           // MQTT broker to connect to
-	log                 logr.Logger        // Logger to use
-	resolutionTimeout   time.Duration      // MQTT broker (mDNS) lookup resolution timeout
-	timeout             time.Duration      // MQTT operations timeout
-	grace               time.Duration      // MQTT disconnection grace period
-	watchdogStarted     bool               // Whether watchdog has been started
-	watchdogMutex       sync.Mutex         // Protects watchdogStarted
-	watchdogInterval    time.Duration      // Watchdog check interval
-	watchdogMaxFailures int                // Watchdog max consecutive failures
-	reconnectInterval   time.Duration      // Periodic reconnection interval to refresh retained messages
-	lastReconnect       time.Time          // Last time a periodic reconnection was performed
-	reconnectMutex      sync.Mutex         // Protects lastReconnect
-	ctx                 context.Context    // Process-wide context for background services
-	watchdogCancel      context.CancelFunc // Cancel function for watchdog
-	subscribers         sync.Map           // Map topic => []subscribers channels
-	handlers            sync.Map           // Map topic => mqtt.MessageHandler for re-registration
+	mqtt                 mqtt.Client                    // MQTT stack
+	brokerUrl            *url.URL                       // MQTT broker to connect to
+	log                  logr.Logger                    // Logger to use
+	resolutionTimeout    time.Duration                  // MQTT broker (mDNS) lookup resolution timeout
+	timeout              time.Duration                  // MQTT operations timeout
+	grace                time.Duration                  // MQTT disconnection grace period
+	watchdogStarted      bool                           // Whether watchdog has been started
+	watchdogMutex        sync.Mutex                     // Protects watchdogStarted
+	watchdogInterval     time.Duration                  // Watchdog check interval
+	watchdogMaxFailures  int                            // Watchdog max consecutive failures
+	reconnectInterval    time.Duration                  // Periodic reconnection interval to refresh retained messages
+	lastReconnect        time.Time                      // Last time a periodic reconnection was performed
+	reconnectMutex       sync.Mutex                     // Protects lastReconnect
+	ctx                  context.Context                // Process-wide context for background services
+	watchdogCancel       context.CancelFunc             // Cancel function for watchdog
+	subscribers          sync.Map                       // Map topic => []subscribers channels
+	handlers             sync.Map                       // Map topic => mqtt.MessageHandler for re-registration
+	pendingSubscriptions map[string]mqtt.MessageHandler // Subscriptions to apply on connect
+	pendingMutex         sync.Mutex                     // Protects pendingSubscriptions
 }
 
 const BROKER_DEFAULT_NAME = "mqtt"
@@ -202,21 +135,25 @@ func GetClientE(ctx context.Context) (Client, error) {
 
 	theClient = &client{
 		// clientId:  clientId,
-		mqtt:                mqtt.NewClient(mqttOps),
-		brokerUrl:           brokerUrl,
-		log:                 log,
-		resolutionTimeout:   options.Flags.MdnsTimeout,
-		timeout:             options.Flags.MqttTimeout,
-		grace:               options.Flags.MqttGrace,
-		watchdogInterval:    options.Flags.MqttWatchdogInterval,
-		watchdogMaxFailures: options.Flags.MqttWatchdogMaxFailures,
-		reconnectInterval:   options.Flags.MqttReconnectInterval,
-		lastReconnect:       time.Now(),
-		ctx:                 global.ProcessContext(ctx),
+		mqtt:                 mqtt.NewClient(mqttOps),
+		brokerUrl:            brokerUrl,
+		log:                  log,
+		resolutionTimeout:    options.Flags.MdnsTimeout,
+		timeout:              options.Flags.MqttTimeout,
+		grace:                options.Flags.MqttGrace,
+		watchdogInterval:     options.Flags.MqttWatchdogInterval,
+		watchdogMaxFailures:  options.Flags.MqttWatchdogMaxFailures,
+		reconnectInterval:    options.Flags.MqttReconnectInterval,
+		lastReconnect:        time.Now(),
+		ctx:                  global.ProcessContext(ctx),
+		pendingSubscriptions: make(map[string]mqtt.MessageHandler),
 	}
 
 	log.Info("MQTT client initialized", "client_id", theClient.Id(), "timeout", theClient.timeout, "grace", theClient.grace)
 
+	// Don't connect yet: This ensures subscriptions are set up before
+	// connection, so retained messages are delivered to handlers
+	// right at connection time.
 	return theClient, nil
 }
 
@@ -271,6 +208,41 @@ func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTim
 		log.Info("DEFAULT HANDLER: unrouted message", "topic", msg.Topic(), "payload_len", len(msg.Payload()))
 	})
 
+	// OnConnect callback: Subscribe all pending subscriptions when connection is established
+	// This allows subscriptions to be registered before connection, ensuring retained messages are delivered
+	mqttOps.SetOnConnectHandler(func(client mqtt.Client) {
+		if theClient == nil {
+			return
+		}
+
+		theClient.pendingMutex.Lock()
+		pending := make(map[string]mqtt.MessageHandler)
+		for topic, handler := range theClient.pendingSubscriptions {
+			pending[topic] = handler
+		}
+		// Clear pending subscriptions - they'll be re-added if subscription fails
+		theClient.pendingSubscriptions = make(map[string]mqtt.MessageHandler)
+		theClient.pendingMutex.Unlock()
+
+		if len(pending) > 0 {
+			log.Info("OnConnect: Subscribing pending topics", "count", len(pending))
+			for topic, handler := range pending {
+				log.V(1).Info("OnConnect: Subscribing to topic", "topic", topic)
+				token := client.Subscribe(topic, AtLeastOnce, handler)
+				if token.Wait() && token.Error() != nil {
+					log.Error(token.Error(), "OnConnect: Failed to subscribe", "topic", topic)
+					// Re-add to pending for next reconnection attempt
+					theClient.pendingMutex.Lock()
+					theClient.pendingSubscriptions[topic] = handler
+					theClient.pendingMutex.Unlock()
+				} else {
+					log.V(1).Info("OnConnect: Successfully subscribed", "topic", topic)
+				}
+			}
+			log.Info("OnConnect: Pending subscriptions processed", "count", len(pending))
+		}
+	})
+
 	if broker != "" {
 		mqttBroker = broker
 	}
@@ -295,6 +267,19 @@ func (c *client) BrokerUrl() *url.URL {
 
 func (c *client) IsConnected() bool {
 	return c.mqtt.IsConnected()
+}
+
+// Start explicitly connects the MQTT client to the broker
+// This triggers the OnConnect callback which processes all pending subscriptions
+// Useful to connect before starting HTTP server, ensuring all subscriptions are active
+func (c *client) Start() error {
+	c.log.Info("Explicitly connecting MQTT client")
+	err := c.connect()
+	if err != nil {
+		return err
+	}
+	c.log.Info("MQTT client connected - OnConnect callback will process pending subscriptions")
+	return nil
 }
 
 func (c *client) connect() error {
@@ -522,9 +507,9 @@ var MqttPassword string = ""
 const ZEROCONF_SERVICE = "_mqtt._tcp."
 
 func (c *client) Publisher(ctx context.Context, topic string, qlen uint, qos byte, retained bool, publisherName string) (chan<- []byte, error) {
-	err := c.connect()
-	if err != nil {
-		c.log.Error(err, "Unable to connect to create publisher channel", "topic", topic, "publisher", publisherName)
+	if !c.mqtt.IsConnected() {
+		err := fmt.Errorf("MQTT client not started")
+		c.log.Error(err, "Unable to create publisher channel", "topic", topic, "publisher", publisherName)
 		return nil, err
 	}
 	mch := make(chan []byte, qlen)
@@ -551,9 +536,9 @@ func (c *client) Publisher(ctx context.Context, topic string, qlen uint, qos byt
 }
 
 func (c *client) Publish(ctx context.Context, topic string, msg []byte, qos byte, retained bool, publisherName string) error {
-	err := c.connect()
-	if err != nil {
-		c.log.Error(err, "Unable to connect to publish", "topic", topic, "publisher", publisherName)
+	if !c.mqtt.IsConnected() {
+		err := fmt.Errorf("MQTT client not started")
+		c.log.Error(err, "Unable to publish", "topic", topic, "publisher", publisherName)
 		return err
 	}
 
@@ -605,12 +590,6 @@ func (c *client) SubscribeWithHandler(ctx context.Context, topic string, qlen ui
 }
 
 func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, subscriberName string, transform func(mqtt.Message) T) (<-chan T, error) {
-	err := c.connect()
-	if err != nil {
-		c.log.Error(err, "Unable to connect to create subscriber channel", "topic", topic)
-		return nil, err
-	}
-
 	type subscriber struct {
 		name   string
 		queue  chan T
@@ -639,7 +618,7 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 	c.log.Info("Subscriber added", "topic", topic, "subscriber", s.name, "count", len(subscribers), "qlen", qlen, "mqtt_subscribe_needed", !loaded)
 
 	if !loaded {
-		// Not yet subscribed at MQTT level: do it
+		// First subscriber for this topic - need to register MQTT subscription
 		distribute := func(client mqtt.Client, msg mqtt.Message) {
 			c.log.Info("distribute: message received from broker", "subscription_topic", topic, "message_topic", msg.Topic(), "payload_len", len(msg.Payload()))
 			go func(log logr.Logger) {
@@ -695,15 +674,26 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 		// Store the handler for potential re-registration during periodic reconnection
 		c.handlers.Store(topic, distribute)
 
-		token := c.mqtt.Subscribe(topic, 1 /*at-least-once*/, distribute)
-		for !token.WaitTimeout(c.timeout) {
-			c.log.Info("Retrying to subscribe", "to topic", topic, "as client_id", c.Id(), "timeout", c.timeout)
+		// Check if connected - if not, queue subscription for OnConnect callback
+		if !c.IsConnected() {
+			c.log.Info("Not connected - queueing subscription for OnConnect", "topic", topic)
+			c.pendingMutex.Lock()
+			c.pendingSubscriptions[topic] = distribute
+			c.pendingMutex.Unlock()
+		} else {
+			// Already connected - subscribe synchronously
+			c.log.Info("Already connected - subscribing synchronously", "topic", topic)
+			token := c.mqtt.Subscribe(topic, AtLeastOnce, distribute)
+			if !token.WaitTimeout(c.timeout) {
+				c.log.Error(nil, "Subscription timed out", "topic", topic, "timeout", c.timeout)
+				return nil, fmt.Errorf("subscription timed out for topic %s", topic)
+			}
+			if err := token.Error(); err != nil {
+				c.log.Error(err, "Subscription failed", "topic", topic)
+				return nil, err
+			}
+			c.log.Info("Subscribed synchronously", "topic", topic)
 		}
-		if err := token.Error(); err != nil {
-			c.log.Error(token.Error(), "Subscription failed", "topic", topic, "as client_id", c.Id())
-			return nil, err
-		}
-		c.log.Info("Subscribed", "to topic", topic, "as client_id", c.Id())
 	}
 
 	go func(log logr.Logger) {

@@ -98,23 +98,20 @@ func (d *daemon) Run() error {
 		// Include port so GetServer() returns host:port correctly
 		mqttBrokerAddr = fmt.Sprintf("localhost:%d", mqttclient.PRIVATE_PORT)
 
-		// Get broker readiness configuration from config
+		// Get broker readiness initial delay from config
 		readinessInitialDelay := 500 * time.Millisecond // default 500ms
-		readinessTimeout := 30 * time.Second            // default 30s
 
 		if options.ViperConfig != nil {
 			if options.ViperConfig.IsSet("daemon.broker_readiness_initial_delay") {
 				readinessInitialDelay = options.ViperConfig.GetDuration("daemon.broker_readiness_initial_delay")
 			}
-			if options.ViperConfig.IsSet("daemon.broker_readiness_timeout") {
-				readinessTimeout = options.ViperConfig.GetDuration("daemon.broker_readiness_timeout")
-			}
 		}
 
-		// Wait for broker to be ready by attempting MQTT client connections with exponential backoff
-		if err := mqttclient.WaitForBrokerReady(d.ctx, log, mqttBrokerAddr, readinessInitialDelay, readinessTimeout); err != nil {
-			log.Error(err, "MQTT broker failed to become ready")
-			return err
+		// Give embedded broker time to complete async initialization
+		// Mochi MQTT's Serve() is non-blocking and listeners start asynchronously
+		if readinessInitialDelay > 0 {
+			log.Info("Waiting for embedded broker async initialization", "delay", readinessInitialDelay)
+			time.Sleep(readinessInitialDelay)
 		}
 	} else {
 		log.Info("Embedded MQTT broker disabled")
@@ -135,21 +132,6 @@ func (d *daemon) Run() error {
 		return err
 	}
 	defer mc.Close()
-
-	// Subscribe to $SYS topics for monitoring (this will connect the process's MQTT client)
-	// Use large buffer (256) because broker publishes 15-20+ $SYS topics in rapid bursts every 30s
-	log.Info("Subscribing to $SYS/clients/# topics for broker monitoring")
-	err = mc.SubscribeWithHandler(d.ctx, "$SYS/clients/#", 256, "MqttClient/sys/clients", func(topic string, payload []byte, subscriber string) error {
-		// Use V(1) to reduce log volume - $SYS topics are published frequently
-		log.V(1).Info("Received on $SYS/clients/#", "topic", topic, "payload", string(payload))
-		return nil
-	})
-	if err != nil {
-		log.Error(err, "Failed to subscribe to $SYS topics (broker may not be ready yet)")
-		// Don't fail initialization - $SYS subscription is optional
-	} else {
-		log.Info("Successfully subscribed to $SYS topics")
-	}
 
 	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 
@@ -276,6 +258,30 @@ func (d *daemon) Run() error {
 			resolver.WithLocalName(d.ctx, myhome.MYHOME_HOSTNAME)
 		} else {
 			log.Info("Skipping mDNS hostname publishing (--no-mdns-publish)")
+		}
+
+		// Explicitly connect MQTT client to trigger OnConnect callback
+		// This processes all pending subscriptions before HTTP server starts
+		log.Info("Connecting MQTT client (all subscriptions queued)")
+		if err := mc.Start(); err != nil {
+			log.Error(err, "Failed to connect MQTT client")
+			return err
+		}
+		log.Info("MQTT client connected - subscriptions active")
+
+		// Subscribe to $SYS topics for monitoring (after connection to avoid early connection)
+		// Use large buffer (256) because broker publishes 15-20+ $SYS topics in rapid bursts every 30s
+		log.Info("Subscribing to $SYS/clients/# topics for broker monitoring")
+		err = mc.SubscribeWithHandler(d.ctx, "$SYS/clients/#", 256, "MqttClient/sys/clients", func(topic string, payload []byte, subscriber string) error {
+			// Use V(1) to reduce log volume - $SYS topics are published frequently
+			log.V(1).Info("Received on $SYS/clients/#", "topic", topic, "payload", string(payload))
+			return nil
+		})
+		if err != nil {
+			log.Error(err, "Failed to subscribe to $SYS topics")
+			// Don't fail initialization - $SYS subscription is optional
+		} else {
+			log.Info("Successfully subscribed to $SYS topics")
 		}
 
 		// Start UI & reverse HTTP proxy

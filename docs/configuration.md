@@ -45,6 +45,7 @@ daemon:
   refresh_interval: 1m
   mqtt_watchdog_interval: 30s
   mqtt_watchdog_max_failures: 3
+  mqtt_reconnect_interval: 2h
   mqtt_broker_client_log_interval: 2m
   
   # MyHome Ports
@@ -104,6 +105,13 @@ daemon:
 - Max consecutive failures before restart
 - Flag: `--mqtt-watchdog-max-failures` or `-F`
 - Env: `MYHOME_DAEMON_MQTT_WATCHDOG_MAX_FAILURES`
+
+**`mqtt_reconnect_interval`** (duration, default: `2h`)
+- Interval for periodic MQTT reconnection to refresh retained messages
+- Useful after suspend/resume cycles to ensure latest device states
+- Set to `0` to disable periodic reconnection
+- Flag: `--mqtt-reconnect-interval`
+- Env: `MYHOME_DAEMON_MQTT_RECONNECT_INTERVAL`
 
 **`mqtt_broker_client_log_interval`** (duration, default: `2m`)
 - Interval for logging MQTT broker connected clients

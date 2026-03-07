@@ -48,8 +48,8 @@ func ParseSensorEvent(topic string, payload []byte) *SensorUpdate {
 
 // StartMqttListener listens to Gen1 MQTT topics and updates device status
 // It subscribes to shellies/# and auto-registers devices as they publish data
-func StartMqttListener(ctx context.Context, mc mqtt.Client, sc devices.DeviceRegistry, router model.Router, sseBroadcaster SSEBroadcaster) error {
-	log := logr.FromContextOrDiscard(ctx).WithName("Gen1MqttListener")
+func StartMqttListener(ctx context.Context, log logr.Logger, mc mqtt.Client, sc devices.DeviceRegistry, router model.Router, sseBroadcaster SSEBroadcaster) error {
+	log = log.WithName("Gen1MqttListener")
 
 	log.Info("Starting Gen1 MQTT listener using MQTT client type", "type", fmt.Sprintf("%T", mc))
 
@@ -63,16 +63,22 @@ func StartMqttListener(ctx context.Context, mc mqtt.Client, sc devices.DeviceReg
 		// Broadcast sensor updates via SSE if broadcaster is available
 		if sseBroadcaster != nil {
 			if update := ParseSensorEvent(topic, payload); update != nil {
+				log.Info("Broadcasting Gen1 sensor update via SSE", "device_id", update.DeviceID, "sensor", update.Type, "value", update.Value)
 				sseBroadcaster.BroadcastSensorUpdate(update.DeviceID, update.Type, update.Value)
+			} else {
+				log.V(1).Info("Not a sensor event, skipping SSE broadcast", "topic", topic, "payload", payload)
 			}
+		} else {
+			log.Error(fmt.Errorf("sseBroadcaster is nil"), "Cannot broadcast sensor update", "topic", topic)
 		}
 		return err
 	})
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to Gen1 topics: %w", err)
+		log.Error(err, "failed to subscribe to Gen1 events", "topic", topic)
+		return err
 	}
 
-	log.Info("Gen1 MQTT listener started", "topic", topic)
+	log.Info("started", "topic", topic)
 	return nil
 }
 
@@ -90,7 +96,7 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 		deviceId := parts[1]
 		sensorType := parts[3]
 		value := string(payload)
-		log.V(1).Info("Received Gen1 sensor data", "device_id", deviceId, "sensor", sensorType, "value", value)
+		log.Info("Received Gen1 sensor data", "device_id", deviceId, "sensor", sensorType, "value", value)
 
 	case 3:
 		// Info topic: shellies/<device-id>/info

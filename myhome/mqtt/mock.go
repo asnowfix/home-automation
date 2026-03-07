@@ -16,8 +16,8 @@ type handlerEntry struct {
 // via Feed. All methods are safe for concurrent use.
 type RecordingMockClient struct {
 	mu          sync.Mutex
-	published   map[string][][]byte      // topic -> ordered published payloads
-	errors      map[string]error         // method name -> error to inject
+	published   map[string][][]byte       // topic -> ordered published payloads
+	errors      map[string]error          // method name -> error to inject
 	subChans    map[string][]chan []byte  // topic -> raw-payload subscriber channels
 	subMsgChans map[string][]chan Message // topic -> Message subscriber channels
 	handlers    map[string][]handlerEntry // topic -> SubscribeWithHandler entries
@@ -176,6 +176,8 @@ func (m *RecordingMockClient) Publisher(ctx context.Context, topic string, qlen 
 	}()
 	return ch, nil
 }
+
+func (m *RecordingMockClient) Start() error { return nil }
 
 func (m *RecordingMockClient) IsConnected() bool { return true }
 

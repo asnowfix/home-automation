@@ -19,40 +19,37 @@ import (
 	"github.com/go-logr/logr"
 )
 
-func StartMqttWatcher(ctx context.Context, mc mqttclient.Client, dm devices.Manager, dr devices.DeviceRegistry) error {
-	log, err := logr.FromContext(ctx)
-	if err != nil {
-		panic("BUG: No logger initialized")
-	}
+func StartMqttWatcher(ctx context.Context, log logr.Logger, mc mqttclient.Client, dm devices.Manager, dr devices.DeviceRegistry) error {
+	log = log.WithName("MqttWatcher")
 	topic := "+/events/rpc"
 	ch, err := mc.SubscribeWithTopic(ctx, topic, 16, "daemon/watch")
 	if err != nil {
-		log.Error(err, "Failed to subscribe to shelly gen2+ devices events")
+		log.Error(err, "Failed to start")
 		return err
 	}
 
-	log.Info("Starting MQTT watcher", "topic", topic)
-	go mqttWatcher(logr.NewContext(ctx, log.WithName("mqttWatcher")), topic, dm, dr, ch)
+	log.Info("Starting", "topic", topic)
+	go mqttWatcher(ctx, log, topic, dm, dr, ch)
 
 	return nil
 }
 
-func mqttWatcher(ctx context.Context, topic string, dm devices.Manager, dr devices.DeviceRegistry, ch <-chan mqtt.Message) {
-	log, err := logr.FromContext(ctx)
-	if err != nil {
-		panic("BUG: No logger initialized")
-	}
-	log.Info("Started MQTT watcher", "topic", topic)
+func mqttWatcher(ctx context.Context, log logr.Logger, topic string, dm devices.Manager, dr devices.DeviceRegistry, ch <-chan mqtt.Message) {
+	log.Info("Started", "topic", topic)
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("Cancelled MQTT watcher", "topic", topic)
+			log.Info("Cancelled", "topic", topic)
 			return
 
 		case msg := <-ch:
-			log.V(1).Info("Received RPC event", "topic", topic, "payload", string(msg.Payload()))
+			log.V(1).Info("Received", "topic", topic)
+			if msg == nil {
+				log.Error(fmt.Errorf("nil message"), "Skipping", "topic", topic)
+				continue
+			}
 			if len(msg.Payload()) < 2 {
-				log.Info("Skipping RPC event with invalid payload", "payload", string(msg.Payload()))
+				log.Error(fmt.Errorf("invalid payload length"), "Skipping", "topic", topic, "payload", string(msg.Payload()))
 				continue
 			}
 
@@ -75,13 +72,14 @@ func mqttWatcher(ctx context.Context, topic string, dm devices.Manager, dr devic
 			event := &shellymqtt.Event{}
 			err := json.Unmarshal(msg.Payload(), &event)
 			if err != nil {
-				log.Error(err, "Failed to unmarshal RPC event from payload", "payload", string(msg.Payload()))
+				log.Error(err, "Failed to unmarshal event from payload", "payload", string(msg.Payload()))
 				continue
 			}
 			if event.Src[:6] != "shelly" {
-				log.Info("Skipping non-shelly RPC event", "event", event)
+				log.Info("Skipping non-shelly event", "event", event)
 				continue
 			}
+
 			deviceId := event.Src
 			device, err := dr.GetDeviceById(ctx, deviceId)
 			if err != nil {

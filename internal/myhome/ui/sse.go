@@ -36,7 +36,7 @@ type SSEBroadcaster struct {
 func NewSSEBroadcaster(log logr.Logger) *SSEBroadcaster {
 	return &SSEBroadcaster{
 		clients: make(map[chan string]struct{}),
-		log:     log.WithName("SSEBroadcaster").V(1),
+		log:     log.WithName("SSEBroadcaster"),
 	}
 }
 
@@ -76,7 +76,7 @@ func (b *SSEBroadcaster) broadcast(event string, data interface{}) {
 	defer b.mu.RUnlock()
 
 	clientCount := len(b.clients)
-	b.log.Info("Broadcasting to clients", "event", event, "client_count", clientCount, "message", msg)
+	b.log.V(1).Info("Broadcasting to clients", "event", event, "data", data, "client_count", clientCount, "message", msg)
 
 	sentCount := 0
 	skippedCount := 0
@@ -89,7 +89,7 @@ func (b *SSEBroadcaster) broadcast(event string, data interface{}) {
 			b.log.Info("SSE client channel full, skipping message")
 		}
 	}
-	b.log.Info("Broadcast complete", "event", event, "sent", sentCount, "skipped", skippedCount)
+	b.log.Info("Broadcast complete", "event", event, "data", data, "sent", sentCount, "skipped", skippedCount)
 }
 
 // SensorUpdateData represents a sensor value update
@@ -101,7 +101,7 @@ type SensorUpdateData struct {
 
 // BroadcastSensorUpdate broadcasts a sensor value update to all SSE clients
 func (b *SSEBroadcaster) BroadcastSensorUpdate(deviceID string, sensor string, value string) {
-	b.log.Info("Broadcasting sensor update", "device_id", deviceID, "sensor", sensor, "value", value)
+	b.log.V(1).Info("Broadcasting sensor update", "device_id", deviceID, "sensor", sensor, "value", value)
 	b.broadcast("sensor-update", SensorUpdateData{
 		DeviceID: deviceID,
 		Sensor:   sensor,
@@ -111,7 +111,7 @@ func (b *SSEBroadcaster) BroadcastSensorUpdate(deviceID string, sensor string, v
 
 // BroadcastDeviceUpdate broadcasts a device update to all SSE clients
 func (b *SSEBroadcaster) BroadcastDeviceUpdate(dv DeviceView) {
-	b.log.Info("Broadcasting device update", "device_id", dv.Id, "name", dv.Name)
+	b.log.V(1).Info("Broadcasting device update", "device_id", dv.Id, "name", dv.Name)
 	b.broadcast("device-update", dv)
 }
 
@@ -145,7 +145,7 @@ func (b *SSEBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				b.log.Info("SSE client channel closed")
 				return
 			}
-			b.log.Info("SSE sending message to client", "message_preview", msg[:min(50, len(msg))])
+			b.log.V(1).Info("SSE sending message to client", "message", msg)
 			_, _ = w.Write([]byte(msg))
 			flusher.Flush()
 		}

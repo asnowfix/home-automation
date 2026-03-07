@@ -319,6 +319,18 @@ func (s *DeviceStorage) ForgetDevice(ctx context.Context, identifier string) err
 	return err
 }
 
+// UpdateSensorValue is a no-op for storage layer - sensors are ephemeral and cached in memory only
+func (s *DeviceStorage) UpdateSensorValue(ctx context.Context, deviceID string, sensor string, value string) error {
+	// Sensors are not persisted to database, only cached in memory by the device cache layer
+	return nil
+}
+
+// Load is a no-op for storage layer - storage IS the database
+func (s *DeviceStorage) Load(ctx context.Context) error {
+	// Storage layer doesn't need to load from itself
+	return nil
+}
+
 // GetDevicesByRoom retrieves all devices in a specific room
 func (s *DeviceStorage) GetDevicesByRoom(ctx context.Context, roomId string) ([]*myhome.Device, error) {
 	devices := make([]Device, 0)

@@ -100,7 +100,7 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal device info: %w", err)
 	}
-	hp.mc.Publish(hp.ctx, infoTopic, infoMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy")
+	hp.mc.Publish(hp.ctx, infoTopic, infoMsg, mqtt.AtLeastOnce, true /*retain*/, "shelly/gen1/proxy")
 	hp.log.Info("Published Gen1 MQTT", "topic", infoTopic, "value", device)
 
 	// Publish temperature (common to both H&T and Flood sensors)

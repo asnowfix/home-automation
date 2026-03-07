@@ -353,6 +353,61 @@ When a script contains errors:
 
 ## Go Development
 
+### Testing Guidelines
+
+**CRITICAL**: Every new feature MUST include incremental unit test cases.
+
+#### Testing Requirements
+
+1. **Write tests before or alongside implementation**
+   - Tests help validate the design and catch issues early
+   - Tests serve as documentation for how the feature works
+
+2. **Test coverage should include:**
+   - ✅ **Happy path**: Normal operation with valid inputs
+   - ✅ **Edge cases**: Boundary conditions, empty values, nil pointers
+   - ✅ **Error handling**: Invalid inputs, missing data, type mismatches
+   - ✅ **Concurrent access**: Thread safety when applicable (use Go's race detector)
+
+3. **Test organization:**
+   ```go
+   // Group related tests with table-driven approach
+   func TestFeature_HappyPath(t *testing.T) {
+       tests := []struct {
+           name  string
+           input string
+           want  string
+       }{
+           {"case1", "input1", "output1"},
+           {"case2", "input2", "output2"},
+       }
+       for _, tt := range tests {
+           t.Run(tt.name, func(t *testing.T) {
+               // test implementation
+           })
+       }
+   }
+   ```
+
+4. **Running tests:**
+   ```bash
+   # Run all tests
+   go test ./...
+   
+   # Run specific package tests
+   go test ./myhome/devices
+   
+   # Run with race detector
+   go test -race ./...
+   
+   # Run specific test
+   go test -v -run TestFeature_HappyPath ./package
+   ```
+
+5. **Example: Sensor update tests**
+   - See `myhome/devices/cache_test.go` for comprehensive examples
+   - Tests cover float/int sensors, error handling, edge cases, and multiple sensors
+
 ### Logging System
 
 The project uses a custom logging system (`hlog`) with the following principles:
@@ -600,6 +655,100 @@ The packaging workflow uses `git describe` to determine the version. For this to
 1. The tag must exist before the workflow runs
 2. The workflow must check out the tag (not the branch)
 3. Use `ref: ${{ github.event.ref }}` in checkout action
+
+---
+
+## Configuration Management
+
+### Adding New Configuration Options
+
+**CRITICAL**: When adding any new configuration option (environment variable, CLI flag, or config file option), you MUST update both documentation and example files.
+
+#### Required Updates
+
+For every new configuration option, you must update:
+
+1. **`myhome/ctl/options/options.go`**:
+   - Add constant for default value (if applicable)
+   - Add field to `Flags` struct with comment indicating the flag name
+
+2. **`myhome/daemon/run.go`** (for daemon options):
+   - Add `PersistentFlags()` declaration with flag name, default, and description
+   - Add viper config binding in `PreRunE` (for config file support)
+
+3. **`docs/configuration.md`**:
+   - Add option to the complete example YAML at the top
+   - Add detailed documentation entry in the appropriate section
+   - Include: description, default value, flag name, environment variable name
+   - Place alongside related options (e.g., MQTT options together)
+
+4. **`myhome-example.yaml`**:
+   - Add commented example in the appropriate section
+   - Include inline comment explaining the option's purpose
+   - Show the default value
+   - Place alongside related options
+
+#### Example: Adding `mqtt_reconnect_interval`
+
+**Step 1**: Add to `options.go`:
+```go
+const MQTT_RECONNECT_INTERVAL time.Duration = 2 * time.Hour
+
+var Flags struct {
+    // ...
+    MqttReconnectInterval time.Duration // the value taken by --mqtt-reconnect-interval
+}
+```
+
+**Step 2**: Add to `run.go`:
+```go
+runCmd.PersistentFlags().DurationVar(&options.Flags.MqttReconnectInterval, 
+    "mqtt-reconnect-interval", options.MQTT_RECONNECT_INTERVAL, 
+    "Interval for periodic MQTT reconnection to refresh retained messages (0 to disable)")
+
+// In PreRunE:
+if v.IsSet("daemon.mqtt_reconnect_interval") && !cmd.Flags().Changed("mqtt-reconnect-interval") {
+    options.Flags.MqttReconnectInterval = v.GetDuration("daemon.mqtt_reconnect_interval")
+}
+```
+
+**Step 3**: Add to `docs/configuration.md`:
+```yaml
+# In complete example:
+daemon:
+  mqtt_reconnect_interval: 2h
+
+# In detailed documentation:
+**`mqtt_reconnect_interval`** (duration, default: `2h`)
+- Interval for periodic MQTT reconnection to refresh retained messages
+- Useful after suspend/resume cycles to ensure latest device states
+- Set to `0` to disable periodic reconnection
+- Flag: `--mqtt-reconnect-interval`
+- Env: `MYHOME_DAEMON_MQTT_RECONNECT_INTERVAL`
+```
+
+**Step 4**: Add to `myhome-example.yaml`:
+```yaml
+daemon:
+  # MQTT periodic reconnection interval to refresh retained messages (0 to disable)
+  # Useful after suspend/resume cycles to ensure latest device states
+  # mqtt_reconnect_interval: 2h
+```
+
+#### Grouping and Organization
+
+- **Group related options together** in all files
+- MQTT options should be near other MQTT options
+- Service options should be near other service options
+- Maintain consistent ordering across all files
+
+#### Environment Variable Naming
+
+Follow the pattern: `MYHOME_<SECTION>_<KEY>`
+
+Examples:
+- `daemon.mqtt_reconnect_interval` → `MYHOME_DAEMON_MQTT_RECONNECT_INTERVAL`
+- `temperatures.port` → `MYHOME_TEMPERATURES_PORT`
 
 ---
 
@@ -957,3 +1106,4 @@ When creating memories during AI interactions:
 - **2025-10-01**: Added callback depth limits and refactoring patterns
 - **2025-10-01**: Added command output guidelines and tag propagation fixes
 - **2026-01-19**: Added utility package structure guidelines (internal/myhome/ for utilities)
+- **2026-03-05**: Added Configuration Management section with requirements for documenting all configuration options

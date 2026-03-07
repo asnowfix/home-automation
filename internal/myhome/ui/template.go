@@ -233,6 +233,35 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 		}
 	}
 
+	// Extract sensor values from cached device status
+	var temperature *float64
+	var humidity *float64
+	var doorOpened *bool
+
+	if d.Status != nil && d.Status.Sensors != nil {
+		temperature = d.Status.Sensors.Temperature
+		humidity = d.Status.Sensors.Humidity
+
+		// Convert Window sensor (0=closed, 1=open) to DoorOpened bool
+		if d.Status.Sensors.Window != nil {
+			opened := *d.Status.Sensors.Window == 1
+			doorOpened = &opened
+		}
+
+		// Debug logging to trace sensor values
+		log.V(1).Info("DeviceToView sensor values",
+			"device_id", d.Id(),
+			"temperature", temperature,
+			"humidity", humidity,
+			"window", d.Status.Sensors.Window,
+			"door_opened", doorOpened)
+	} else {
+		log.V(1).Info("DeviceToView no sensor data",
+			"device_id", d.Id(),
+			"has_status", d.Status != nil,
+			"has_sensors", d.Status != nil && d.Status.Sensors != nil)
+	}
+
 	return DeviceView{
 		Id:                   d.Id(),
 		Name:                 name,
@@ -245,14 +274,15 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 		HasTemperatureSensor: hasTemp,
 		HasHumiditySensor:    hasHumidity,
 		DeviceTypeEmoji:      emoji,
-		Temperature:          nil, // Sensor values are updated separately via SSE
-		DoorOpened:           nil,
+		Temperature:          temperature,
+		Humidity:             humidity,
+		DoorOpened:           doorOpened,
 		Switches:             switches,
 	}
 }
 
 // RenderIndex renders the index page with device list
-// Sensor values are populated via SSE after page load
+// Sensor values are read from cache and updated via SSE when they change
 func RenderIndex(ctx context.Context, db *storage.DeviceStorage, w io.Writer) error {
 	data := IndexData{
 		Devices: []DeviceView{},

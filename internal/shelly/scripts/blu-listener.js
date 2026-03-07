@@ -1,5 +1,5 @@
 // Shelly Script: BLE MQTT listener
-// - Subscribes to MQTT topics under "shelly-blu/events/#"
+// - Subscribes to MQTT topics under "shelly-blu/events/+"
 // - Keeps only events whose MAC is followed via KVS keys: follow/shelly-blu/<MAC>
 //   Value must be a JSON string: matching documentation below
 // - On match: Switch.Set on the configured switch; if auto_off>0, turns it off after N seconds.

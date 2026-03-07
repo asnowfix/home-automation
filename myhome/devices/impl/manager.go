@@ -366,7 +366,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
-	err = watch.StartMqttWatcher(ctx, dm.mqttClient, dm, dm.dr)
+	err = watch.StartMqttWatcher(ctx, dm.log, dm.mqttClient, dm, dm.dr)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch MQTT events")
 		return err
@@ -398,7 +398,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	}
 
 	// Start Gen1 MQTT listener for sensor data (with SSE broadcaster)
-	err = shellygen1.StartMqttListener(ctx, dm.mqttClient, dm.dr, dm.router, dm.sseBroadcaster)
+	err = shellygen1.StartMqttListener(ctx, dm.log, dm.mqttClient, dm.dr, dm.router, dm.sseBroadcaster)
 	if err != nil {
 		dm.log.Error(err, "Failed to start Gen1 MQTT listener")
 		return err

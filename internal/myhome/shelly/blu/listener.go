@@ -112,8 +112,13 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 		// This happens regardless of registration success, similar to Gen1 pattern
 		if sseBroadcaster != nil && sensors != nil {
 			for sensor, value := range *sensors {
+				log.Info("Broadcasting BLU sensor update via SSE", "device_id", deviceID, "sensor", sensor, "value", value)
 				sseBroadcaster.BroadcastSensorUpdate(deviceID, sensor, value)
 			}
+		} else if sseBroadcaster == nil {
+			log.Error(fmt.Errorf("sseBroadcaster is nil"), "Cannot broadcast sensor update", "topic", topic)
+		} else if sensors == nil {
+			log.V(1).Info("No sensors to broadcast", "topic", topic, "device_id", deviceID)
 		}
 
 		log.V(1).Info("event processing completed", "device_id", deviceID, "mac", mac)

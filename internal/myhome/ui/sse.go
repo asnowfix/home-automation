@@ -145,7 +145,7 @@ func (b *SSEBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				b.log.Info("SSE client channel closed")
 				return
 			}
-			b.log.V(1).Info("SSE sending message to client", "message_preview", msg[:min(50, len(msg))])
+			b.log.V(1).Info("SSE sending message to client", "message", msg)
 			_, _ = w.Write([]byte(msg))
 			flusher.Flush()
 		}

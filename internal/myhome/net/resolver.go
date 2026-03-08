@@ -189,9 +189,10 @@ func (r *resolver) LookupService(ctx context.Context, service string) (*url.URL,
 	entries := make(chan *zeroconf.ServiceEntry)
 	instances := make([]*url.URL, 0)
 
-	ctx, cancel := context.WithCancel(ctx)
+	browseCtx, found := context.WithCancel(ctx)
+	defer found()
 
-	go func(ctx context.Context, cancel context.CancelFunc, entries <-chan *zeroconf.ServiceEntry) {
+	go func(ctx context.Context, found context.CancelFunc, entries <-chan *zeroconf.ServiceEntry) {
 		for {
 			select {
 			case <-ctx.Done():
@@ -204,19 +205,20 @@ func (r *resolver) LookupService(ctx context.Context, service string) (*url.URL,
 							Scheme: "tcp",
 							Host:   fmt.Sprintf("%v:%v", addrIpV4, entry.Port),
 						})
-						cancel()
+						found()
 					}
 				}
 			}
 		}
-	}(ctx, cancel, entries)
+	}(browseCtx, found, entries)
 
-	err = resolver.Browse(ctx, service, "local.", entries)
+	err = resolver.Browse(browseCtx, service, "local.", entries)
 	if err != nil {
 		return nil, err
 	}
 
-	<-ctx.Done()
+	// Wait for browseCtx to be cancelled (either by service found or parent context cancelled)
+	<-browseCtx.Done()
 
 	if len(instances) == 0 {
 		return nil, fmt.Errorf("no instance found for service:%s", service)

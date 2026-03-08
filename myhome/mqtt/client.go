@@ -79,6 +79,7 @@ type client struct {
 	resolutionTimeout    time.Duration                  // MQTT broker (mDNS) lookup resolution timeout
 	timeout              time.Duration                  // MQTT operations timeout
 	grace                time.Duration                  // MQTT disconnection grace period
+	lazyStart            bool                           // If true, connect on first publish/subscribe instead of at initialization
 	watchdogStarted      bool                           // Whether watchdog has been started
 	watchdogMutex        sync.Mutex                     // Protects watchdogStarted
 	watchdogInterval     time.Duration                  // Watchdog check interval
@@ -133,6 +134,7 @@ func GetClientE(ctx context.Context) (Client, error) {
 	mqttOps.AddBroker(brokerUrl.String())
 	mqttOps.Servers = []*url.URL{brokerUrl}
 
+	// Direct call to GetClientE (not via NewClientE) - use lazyStart=true
 	theClient = &client{
 		// clientId:  clientId,
 		mqtt:                 mqtt.NewClient(mqttOps),
@@ -141,6 +143,7 @@ func GetClientE(ctx context.Context) (Client, error) {
 		resolutionTimeout:    options.Flags.MdnsTimeout,
 		timeout:              options.Flags.MqttTimeout,
 		grace:                options.Flags.MqttGrace,
+		lazyStart:            true,
 		watchdogInterval:     options.Flags.MqttWatchdogInterval,
 		watchdogMaxFailures:  options.Flags.MqttWatchdogMaxFailures,
 		reconnectInterval:    options.Flags.MqttReconnectInterval,
@@ -157,7 +160,7 @@ func GetClientE(ctx context.Context) (Client, error) {
 	return theClient, nil
 }
 
-func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration, reconnectInterval time.Duration) error {
+func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration, reconnectInterval time.Duration, lazyStart bool) error {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		return err
@@ -187,7 +190,7 @@ func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTim
 	}
 	clientId := fmt.Sprintf("%s-%s-%s-%d", programName, instanceName, hostname, os.Getpid())
 
-	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", mqttTimeout, "grace", mqttGrace)
+	log.Info("Initializing MQTT client", "client_id", clientId, "timeout", mqttTimeout, "grace", mqttGrace, "lazy_start", lazyStart)
 
 	mqttOps.SetUsername(MqttUsername)
 	mqttOps.SetPassword(MqttPassword)
@@ -280,6 +283,27 @@ func (c *client) Start() error {
 	}
 	c.log.Info("MQTT client connected - OnConnect callback will process pending subscriptions")
 	return nil
+}
+
+// autoConnect ensures the client is connected, using lazy-start if enabled
+// purpose is used for logging context (e.g., "publish", "subscribe", "publisher")
+func (c *client) autoConnect(purpose string) error {
+	if c.mqtt.IsConnected() {
+		return nil
+	}
+
+	if c.lazyStart {
+		c.log.Info("Lazy-starting MQTT client", "purpose", purpose)
+		if err := c.Start(); err != nil {
+			c.log.Error(err, "Failed to lazy-start MQTT client", "purpose", purpose)
+			return err
+		}
+		return nil
+	}
+
+	err := fmt.Errorf("MQTT client not started")
+	c.log.Error(err, "Unable to proceed - client not connected", "purpose", purpose)
+	return err
 }
 
 func (c *client) connect() error {
@@ -507,9 +531,7 @@ var MqttPassword string = ""
 const ZEROCONF_SERVICE = "_mqtt._tcp."
 
 func (c *client) Publisher(ctx context.Context, topic string, qlen uint, qos byte, retained bool, publisherName string) (chan<- []byte, error) {
-	if !c.mqtt.IsConnected() {
-		err := fmt.Errorf("MQTT client not started")
-		c.log.Error(err, "Unable to create publisher channel", "topic", topic, "publisher", publisherName)
+	if err := c.autoConnect(fmt.Sprintf("publisher:%s", topic)); err != nil {
 		return nil, err
 	}
 	mch := make(chan []byte, qlen)
@@ -536,9 +558,7 @@ func (c *client) Publisher(ctx context.Context, topic string, qlen uint, qos byt
 }
 
 func (c *client) Publish(ctx context.Context, topic string, msg []byte, qos byte, retained bool, publisherName string) error {
-	if !c.mqtt.IsConnected() {
-		err := fmt.Errorf("MQTT client not started")
-		c.log.Error(err, "Unable to publish", "topic", topic, "publisher", publisherName)
+	if err := c.autoConnect(fmt.Sprintf("publish:%s", topic)); err != nil {
 		return err
 	}
 
@@ -590,6 +610,11 @@ func (c *client) SubscribeWithHandler(ctx context.Context, topic string, qlen ui
 }
 
 func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, subscriberName string, transform func(mqtt.Message) T) (<-chan T, error) {
+	// Auto-connect if lazyStart is enabled and not connected
+	if err := c.autoConnect(fmt.Sprintf("subscribe:%s", topic)); err != nil {
+		return nil, err
+	}
+
 	type subscriber struct {
 		name   string
 		queue  chan T

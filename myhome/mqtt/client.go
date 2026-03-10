@@ -480,7 +480,7 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 	}
 
 	log.Info("Looking up broker by given host", "hostname", host)
-	if ips, err := resolver.LookupHost(ctx, host); err == nil {
+	if ips, err := resolver.LookupHost(ctx, log, host); err == nil {
 		ip := ips[0]
 		log.Info("Found IP", "addr", ip.String(), "port", port)
 		return &url.URL{
@@ -490,7 +490,7 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 	}
 
 	log.Info("Looking up broker by default host", "hostname", HOSTNAME)
-	if ips, err := resolver.LookupHost(ctx, HOSTNAME); err == nil {
+	if ips, err := resolver.LookupHost(ctx, log, HOSTNAME); err == nil {
 		ip := ips[0]
 		log.Info("Found IP", "addr", ip.String(), "port", port)
 		return &url.URL{

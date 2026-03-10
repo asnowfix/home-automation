@@ -19,14 +19,29 @@ import (
 )
 
 var (
-	shellyFlagSwitchID string
-	shellyFlagFollowID string
+	shellyFlagSwitchID   string
+	shellyFlagFollowID   string
+	shellyFlagFollowMode string
+	shellyFlagAutoOff    int
 )
 
 var Cmd = &cobra.Command{
 	Use:   "follow <follower-device> <followed-device>",
 	Short: "Configure Shelly device to follow another Shelly device status",
-	Args:  cobra.ExactArgs(2),
+	Long: `Configure Shelly device to follow another Shelly device with two modes:
+
+1. activation-only: Follower turns on when followed device activates, then uses auto-off timeout.
+   This is the mode BLU motion sensor followers use. Automatically enabled when --auto-off is provided.
+   
+2. full: Follower mirrors both activation and deactivation of the followed device (default).
+
+Examples:
+  # Full mirror mode (default) - follows both ON and OFF
+  myhome ctl shelly follow hallway-light office-switch
+  
+  # Activation-only mode - turns on for 5 minutes when motion detected (--auto-off implies activation-only)
+  myhome ctl shelly follow hallway-light motion-sensor --auto-off=300`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		followerDevice := args[0]
 		followedDevice := args[1]
@@ -49,6 +64,25 @@ var Cmd = &cobra.Command{
 		payload := make(map[string]any)
 		payload["switch_id"] = shellyFlagSwitchID
 		payload["follow_id"] = shellyFlagFollowID
+
+		// Determine follow mode: activation-only if auto-off is provided, otherwise full
+		var followMode string
+		if cmd.Flags().Changed("auto-off") && shellyFlagAutoOff > 0 {
+			followMode = "activation-only"
+			payload["auto_off"] = shellyFlagAutoOff
+		} else if cmd.Flags().Changed("follow-mode") {
+			// Allow explicit override if needed
+			if shellyFlagFollowMode != "activation-only" && shellyFlagFollowMode != "full" {
+				return fmt.Errorf("invalid follow-mode: %q (must be 'activation-only' or 'full')", shellyFlagFollowMode)
+			}
+			followMode = shellyFlagFollowMode
+			if cmd.Flags().Changed("auto-off") {
+				payload["auto_off"] = shellyFlagAutoOff
+			}
+		} else {
+			followMode = "full" // default
+		}
+		payload["follow_mode"] = followMode
 
 		valueBytes, err := json.Marshal(payload)
 		if err != nil {
@@ -78,6 +112,8 @@ var Cmd = &cobra.Command{
 func init() {
 	Cmd.Flags().StringVar(&shellyFlagSwitchID, "switch-id", "switch:0", "Local switch ID to control, e.g. switch:0")
 	Cmd.Flags().StringVar(&shellyFlagFollowID, "follow-id", "switch:0", "Remote input ID to monitor: switch:X (mirror state) or input:X (toggle on button press)")
+	Cmd.Flags().StringVar(&shellyFlagFollowMode, "follow-mode", "full", "Follow mode: 'activation-only' (turn on with timeout) or 'full' (mirror on/off)")
+	Cmd.Flags().IntVar(&shellyFlagAutoOff, "auto-off", 0, "Seconds before auto turn off (only for activation-only mode, 0 to disable)")
 }
 
 // doSetKVS is a helper function for setting KVS entries on Shelly devices

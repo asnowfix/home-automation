@@ -1,9 +1,13 @@
 // Shelly Script: Device Status Listener
-// - Subscribes to MQTT topics "+/events/rpc" and mirrors remote device switch status
+// - Subscribes to MQTT topics "+/events/rpc" and follows remote device switch status
 // - Keeps only events whose device is followed via KVS keys: follow/status/<DEVICE_ID>
-//   Value must be a JSON string: { "switch_id":"switch:0", "follow_id":"switch:0" }
+//   Value must be a JSON string with follow_mode controlling behavior
+// - Two follow modes:
+//   1. "activation-only": Turns on when followed device activates, uses auto_off timer, ignores deactivation
+//      (Similar to BLU motion sensor behavior)
+//   2. "full": Mirrors both activation and deactivation of the followed device (default)
 // - Action is inferred from follow_id type:
-//   - switch:X -> mirrors the switch state (set action)
+//   - switch:X -> mirrors the switch state (set action) or activation-only
 //   - input:X -> toggles on button release (toggle action)
 
 /**
@@ -11,8 +15,12 @@
  * @typedef {Object} FollowConfig
  * @property {string} switch_id - Local switch ID to control, e.g. "switch:0"
  * @property {string} [follow_id="switch:0"] - Remote input to monitor: "switch:0" (mirror) or "input:0" (toggle)
+ * @property {string} [follow_mode="full"] - Follow mode: "activation-only" or "full"
+ * @property {number} [auto_off=0] - Seconds before auto turn off (only for activation-only mode, 0 to disable)
  * @example
- * {"switch_id":"switch:0", "follow_id":"switch:0"} // Mirror switch state
+ * {"switch_id":"switch:0", "follow_id":"switch:0"} // Full mirror mode (default)
+ * @example
+ * {"switch_id":"switch:0", "follow_id":"switch:0", "follow_mode":"activation-only", "auto_off":300} // Activation-only with 5min timeout
  * @example
  * {"switch_id":"switch:1", "follow_id":"input:0"} // Toggle on button release
  */
@@ -28,7 +36,10 @@ var STATE = {
   // In-memory cache of follows loaded from KVS by loadFollowsFromKVS()
   // KVS keys are set externally via "myhome ctl follow shelly" command
   // Each followed device has its own KVS key: follow/status/<device-id>
-  follows: {}
+  follows: {},
+  
+  // switchIndex => timerId for activation-only mode auto-off timers
+  offTimers: {}
 };
 
 function getFollows() {
@@ -51,6 +62,8 @@ function setFollows(map) {
  * @property {"switch"|"input"} inputType // inferred from followId
  * @property {number} inputIndex   // numeric index parsed from followId
  * @property {"set"|"toggle"} action     // inferred action based on inputType
+ * @property {"activation-only"|"full"} followMode // follow mode
+ * @property {number} autoOff       // seconds to auto-off (activation-only mode only)
  */
 
 function log() {
@@ -115,6 +128,8 @@ function onProcessKvsKeyResponse(k, newMap, onComplete, gresp, gerr) {
     var value = JSON.parse(gresp.value);
     var switchIdStr = value && value.switch_id ? String(value.switch_id) : null;
     var followIdStr = value && value.follow_id ? String(value.follow_id) : "switch:0";
+    var followMode = value && value.follow_mode ? String(value.follow_mode) : "full";
+    var autoOff = value && typeof value.auto_off === "number" ? value.auto_off : 0;
     
     var devId = k.substr(CONFIG.kvsPrefix.length);
     devId = normalizeId(devId);
@@ -130,7 +145,9 @@ function onProcessKvsKeyResponse(k, newMap, onComplete, gresp, gerr) {
         followId: followIdStr,
         inputType: inputInfo.type,
         inputIndex: inputInfo.index,
-        action: action
+        action: action,
+        followMode: followMode,
+        autoOff: autoOff
       };
     } else {
       log("Ignoring invalid follow entry:", k, gresp.value);
@@ -160,6 +177,41 @@ function processKeysSequentially(list, newMap, callback, index) {
   
   // Process one key at a time
   processKvsKey(list[index], newMap, processKeysSequentially.bind(null, list, newMap, callback, index + 1));
+}
+
+function onAutoOffTimerFired(switchIndex) {
+  Shelly.call("Switch.Set", { id: switchIndex, on: false }, function(r, e) {
+    if (e) log("Switch.Set off error", switchIndex, e);
+    else log("Auto-off switch", switchIndex);
+  });
+  STATE.offTimers[switchIndex] = 0;
+}
+
+function ensureAutoOffTimer(switchIndex, seconds) {
+  // Cancel previous timer, set new one if seconds>0
+  var prev = STATE.offTimers[switchIndex];
+  if (prev) {
+    Timer.clear(prev);
+    STATE.offTimers[switchIndex] = 0;
+    log("Cancelled previous auto-off timer for switch", switchIndex, "- resetting to", seconds, "seconds");
+  }
+  if (!seconds || seconds <= 0) return;
+  var ms = Math.floor(seconds * 1000);
+  var tid = Timer.set(ms, false, onAutoOffTimerFired.bind(null, switchIndex));
+  STATE.offTimers[switchIndex] = tid;
+  log("Set auto-off timer for switch", switchIndex, "to", seconds, "seconds");
+}
+
+function cancelAllTimers() {
+  // Cancel all ongoing auto-off timers when manual operation is detected
+  for (var switchIndex in STATE.offTimers) {
+    var timerId = STATE.offTimers[switchIndex];
+    if (timerId) {
+      Timer.clear(timerId);
+      STATE.offTimers[switchIndex] = 0;
+      log("Cancelled auto-off timer for switch", switchIndex, "due to manual operation");
+    }
+  }
 }
 
 function loadFollowsFromKVS(callback) {
@@ -355,10 +407,33 @@ function handleStatusEvent(topic, message) {
     return;
   }
 
-  Shelly.call("Switch.Set", { id: idx, on: desired }, function (resp, err) {
-    if (err) log("Switch.Set error", idx, err);
-    else log("Mirrored", src, follow.inputId, "=>", follow.switchIdStr, "on=", desired);
-  });
+  // Handle follow modes
+  if (follow.followMode === "activation-only") {
+    // Activation-only mode: only follow ON events, use auto-off timer
+    if (desired === true) {
+      log("Activation-only mode: turning on", follow.switchIdStr, "for", src, "auto_off=", follow.autoOff, "s");
+      Shelly.call("Switch.Set", { id: idx, on: true }, function (resp, err) {
+        if (err) log("Switch.Set on error", idx, err);
+        else log("Turned on", follow.switchIdStr, "for", src, "(activation-only mode)");
+      });
+      ensureAutoOffTimer(idx, follow.autoOff);
+    } else {
+      log("Activation-only mode: ignoring OFF event from", src);
+    }
+  } else {
+    // Full mode (default): mirror both ON and OFF events
+    log("Full mode: mirroring state", desired, "from", src, "to", follow.switchIdStr);
+    Shelly.call("Switch.Set", { id: idx, on: desired }, function (resp, err) {
+      if (err) log("Switch.Set error", idx, err);
+      else log("Mirrored", src, follow.inputId, "=>", follow.switchIdStr, "on=", desired);
+    });
+    // Cancel any auto-off timer when in full mode (shouldn't exist, but be safe)
+    var prev = STATE.offTimers[idx];
+    if (prev) {
+      Timer.clear(prev);
+      STATE.offTimers[idx] = 0;
+    }
+  }
 }
 
 function subscribeMqtt() {
@@ -379,6 +454,12 @@ function subscribeKvsEvents() {
           log("KVS change detected for key:", kvsEvent.key, "action:", kvsEvent.action);
           loadFollowsFromKVS();
         }
+      } else if (eventData && eventData.info && eventData.info.event === "remote-input-event") {
+        log("Remote input event detected (cancelAllTimers)");
+        cancelAllTimers();
+      } else if (eventData && eventData.info && eventData.info.component && eventData.info.component.indexOf("input:") === 0) {
+        log("Local input event detected (cancelAllTimers)");
+        cancelAllTimers();
       } else if (eventData && eventData.info && eventData.info.event === "script_stop") {
         log("Script stopping");
       }

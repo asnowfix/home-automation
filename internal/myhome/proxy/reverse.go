@@ -103,7 +103,7 @@ func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db *s
 
 	log.Info("route", "hostToken", hostToken, "rest", rest)
 
-	targetIP, err := resolveToIPv4(ctx, resolver, db, hostToken)
+	targetIP, err := resolveToIPv4(ctx, log, resolver, db, hostToken)
 	if err != nil {
 		log.Error(err, "failed to resolve host", "host", hostToken)
 		http.Error(w, "unable to resolve host", http.StatusBadGateway)
@@ -328,7 +328,7 @@ func (w *statusWriter) Flush() {
 	}
 }
 
-func resolveToIPv4(ctx context.Context, resolver mynet.Resolver, db *storage.DeviceStorage, token string) (net.IP, error) {
+func resolveToIPv4(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db *storage.DeviceStorage, token string) (net.IP, error) {
 	// 1. If token is an IP, return it (prefer IPv4)
 	if ip := net.ParseIP(token); ip != nil {
 		if ip.To4() != nil {
@@ -354,7 +354,7 @@ func resolveToIPv4(ctx context.Context, resolver mynet.Resolver, db *storage.Dev
 	}
 
 	if resolver != nil {
-		if ips, err := resolver.LookupHost(ctx, query); err == nil {
+		if ips, err := resolver.LookupHost(ctx, log, query); err == nil {
 			if ip := pickV4(ips); ip != nil {
 				return ip, nil
 			}
@@ -383,7 +383,7 @@ func resolveToIPv4(ctx context.Context, resolver mynet.Resolver, db *storage.Dev
 				if strings.HasSuffix(strings.ToLower(q), ".local") {
 					q = strings.TrimSuffix(q, ".local")
 				}
-				if ips, err := resolver.LookupHost(ctx, q); err == nil {
+				if ips, err := resolver.LookupHost(ctx, log, q); err == nil {
 					if ip := pickV4(ips); ip != nil {
 						return ip, nil
 					}

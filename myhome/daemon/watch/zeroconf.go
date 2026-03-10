@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"myhome"
 	"myhome/devices"
-	"myhome/net"
+	mynet "myhome/net"
 	"net"
 	"pkg/shelly"
 	"time"
@@ -125,7 +125,7 @@ func completeEntry(ctx context.Context, log logr.Logger, resolver mynet.Resolver
 	var err error
 	if len(ips) == 0 {
 		log.Info("No IP in mDNS entry: resolving", "hostname", entry.HostName)
-		ips, err = resolver.LookupHost(ctx, entry.HostName)
+		ips, err = resolver.LookupHost(ctx, log, entry.HostName)
 		if err != nil || len(ips) == 0 {
 			log.Error(err, "Failed to resolve", "hostname", entry.HostName)
 			return nil, err

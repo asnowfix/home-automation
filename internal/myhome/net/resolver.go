@@ -20,7 +20,7 @@ import (
 
 type Resolver interface {
 	WithLocalName(ctx context.Context, hostname string) Resolver
-	LookupHost(ctx context.Context, host string) (ips []net.IP, err error)
+	LookupHost(ctx context.Context, log logr.Logger, host string) (ips []net.IP, err error)
 	LookupService(ctx context.Context, service string) (*url.URL, error)
 	BrowseService(ctx context.Context, service, domain string, entries chan<- *zeroconf.ServiceEntry) error // TODO: use our own type rather than zeroconf.ServiceEntry
 	PublishService(ctx context.Context, instance, service, domain string, port int, txt []string, ifaces []net.Interface) (*zeroconf.Server, error)
@@ -105,18 +105,19 @@ func (r *resolver) start(ctx context.Context) Resolver {
 		return nil
 	}
 
-	go func(ctx context.Context, r *resolver) {
-		r.mdns, err = mdns.Server(ipv4.NewPacketConn(l4), ipv6.NewPacketConn(l6), &mdns.Config{
-			LocalNames:   r.localNames,
-			LocalAddress: *ip,
-		})
-		if err != nil {
-			r.log.Error(err, "unable to publish over mDNS", "hostname", r.localNames)
-			panic(err)
-		}
-		r.log.Info("Published over mDNS", "hostnames", r.localNames, "ip", ip.String())
-		r.started = true
+	r.mdns, err = mdns.Server(ipv4.NewPacketConn(l4), ipv6.NewPacketConn(l6), &mdns.Config{
+		LocalNames:   r.localNames,
+		LocalAddress: *ip,
+	})
+	if err != nil {
+		r.log.Error(err, "unable to publish over mDNS", "hostname", r.localNames)
+		return nil
+	}
+	r.log.Info("Published over mDNS", "hostnames", r.localNames, "ip", ip.String())
+	r.started = true
 
+	// Start background goroutine for cleanup
+	go func(ctx context.Context, r *resolver) {
 		// Use process-wide context for background service lifecycle
 		processCtx := global.ProcessContext(ctx)
 		<-processCtx.Done()
@@ -148,25 +149,57 @@ func (r *resolver) waitForStart(ctx context.Context) {
 	r.Unlock()
 }
 
-func (r *resolver) LookupHost(ctx context.Context, host string) ([]net.IP, error) {
+func (r *resolver) LookupHost(ctx context.Context, log logr.Logger, host string) ([]net.IP, error) {
 	r.start(ctx)
 	r.waitForStart(ctx)
 
-	addrs, err := net.LookupHost(host)
-	if err == nil {
-		ips := make([]net.IP, len(addrs))
-		for i, addr := range addrs {
+	// Try standard DNS lookup with its own timeout, but make it interruptible
+	dnsCtx, dnsCancel := context.WithTimeout(ctx, r.mdnsTimeout)
+	defer dnsCancel()
+
+	type dnsResult struct {
+		addrs []string
+		err   error
+	}
+	dnsChan := make(chan dnsResult, 1)
+
+	go func() {
+		addrs, err := net.DefaultResolver.LookupHost(dnsCtx, host)
+		dnsChan <- dnsResult{addrs: addrs, err: err}
+	}()
+
+	var dnsRes dnsResult
+	select {
+	case <-ctx.Done():
+		// Parent context cancelled (e.g., Ctrl-C) - abort immediately
+		return nil, ctx.Err()
+	case dnsRes = <-dnsChan:
+		// DNS lookup completed
+	}
+
+	if dnsRes.err == nil {
+		ips := make([]net.IP, len(dnsRes.addrs))
+		for i, addr := range dnsRes.addrs {
 			ips[i] = net.ParseIP(addr)
 		}
 		return ips, nil
 	}
+
+	// Check if parent context was cancelled (e.g., Ctrl-C) before proceeding to mDNS
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	log.Info("Did not find host: looking up via mDNS", "host", host)
 	localHost := host + ".local"
 
-	// Use configured mDNS timeout to prevent goroutine leaks
-	queryCtx, cancel := context.WithTimeout(ctx, r.mdnsTimeout)
-	defer cancel()
+	// Try mDNS lookup with its own timeout
+	mdnsCtx, mdnsCancel := context.WithTimeout(ctx, r.mdnsTimeout)
+	defer mdnsCancel()
 
-	_, addr, err := r.mdns.QueryAddr(queryCtx, localHost)
+	_, addr, err := r.mdns.QueryAddr(mdnsCtx, localHost)
 	if err != nil {
 		r.log.Error(err, "Failed to query mDNS", "host", localHost)
 		return nil, err
@@ -189,9 +222,10 @@ func (r *resolver) LookupService(ctx context.Context, service string) (*url.URL,
 	entries := make(chan *zeroconf.ServiceEntry)
 	instances := make([]*url.URL, 0)
 
-	ctx, cancel := context.WithCancel(ctx)
+	browseCtx, found := context.WithCancel(ctx)
+	defer found()
 
-	go func(ctx context.Context, cancel context.CancelFunc, entries <-chan *zeroconf.ServiceEntry) {
+	go func(ctx context.Context, found context.CancelFunc, entries <-chan *zeroconf.ServiceEntry) {
 		for {
 			select {
 			case <-ctx.Done():
@@ -204,19 +238,20 @@ func (r *resolver) LookupService(ctx context.Context, service string) (*url.URL,
 							Scheme: "tcp",
 							Host:   fmt.Sprintf("%v:%v", addrIpV4, entry.Port),
 						})
-						cancel()
+						found()
 					}
 				}
 			}
 		}
-	}(ctx, cancel, entries)
+	}(browseCtx, found, entries)
 
-	err = resolver.Browse(ctx, service, "local.", entries)
+	err = resolver.Browse(browseCtx, service, "local.", entries)
 	if err != nil {
 		return nil, err
 	}
 
-	<-ctx.Done()
+	// Wait for browseCtx to be cancelled (either by service found or parent context cancelled)
+	<-browseCtx.Done()
 
 	if len(instances) == 0 {
 		return nil, fmt.Errorf("no instance found for service:%s", service)

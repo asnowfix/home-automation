@@ -259,7 +259,7 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 		} else {
 			// Need to resolve hostname and append port
 			if cfg.Resolver != nil {
-				ips, err := cfg.Resolver.LookupHost(ctx, cfg.MqttBroker)
+				ips, err := cfg.Resolver.LookupHost(ctx, log, cfg.MqttBroker)
 				if err != nil {
 					return fmt.Errorf("failed to resolve MQTT broker %s: %w", cfg.MqttBroker, err)
 				}

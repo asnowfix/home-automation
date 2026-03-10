@@ -9,6 +9,9 @@ MyHome Penates is the home automation system I develop & use to control my own h
 - [MyHome - Penates](#myhome---penates)
   - [Abstract](#abstract)
   - [Design Philosophy](#design-philosophy)
+  - [MQTT Client Architecture](#mqtt-client-architecture)
+    - [Lazy-Start for CLI Commands](#lazy-start-for-cli-commands)
+    - [Eager Connection for Daemon](#eager-connection-for-daemon)
   - [Releases](#releases)
   - [Development Tools](#development-tools)
     - [Shelly Device Data Collector](#shelly-device-data-collector)
@@ -96,6 +99,47 @@ MyHome is designed with the following core principles:
 - **Local Control**: All automation logic runs locally, ensuring your home continues to function even without internet access.
 
 This architecture ensures resilience, privacy, and independence from third-party services while keeping the system simple and maintainable.  At the same time, it does not disable any device features that require cloud connectivity & hence can be used along with the device manufacturers application (such as Shelly app & Cloud Services).
+
+## MQTT Client Architecture
+
+The MyHome MQTT client uses a smart connection strategy that adapts to different usage patterns:
+
+### Lazy-Start for CLI Commands
+
+CLI commands (`myhome ctl ...`) use **lazy-start mode** where the MQTT client automatically connects on the first operation (publish/subscribe). This provides:
+
+- **Fast startup**: Commands don't wait for MQTT connection during initialization
+- **On-demand connection**: Only connects when actually needed
+- **Automatic retry**: Connection failures are handled transparently
+
+**Example**:
+```bash
+# Client connects automatically when first RPC is sent
+myhome ctl shelly call device-name Shelly.GetStatus '{}'
+```
+
+### Eager Connection for Daemon
+
+The daemon (`myhome run`) uses **eager connection mode** where the MQTT client connects immediately at startup. This ensures:
+
+- **Immediate availability**: All subscriptions are active before HTTP server starts
+- **Retained messages**: Receives all retained MQTT messages at startup
+- **Watchdog monitoring**: Connection health is monitored continuously
+
+**Implementation Details**:
+
+The connection mode is determined automatically:
+- `NewClientE(..., lazyStart=false)` → Daemon mode (explicit `Start()` required)
+- `NewClientE(..., lazyStart=true)` → CLI mode (auto-connect on first operation)
+- `GetClientE()` alone → Defaults to lazy-start mode
+
+The `autoConnect()` method handles the logic:
+```go
+// Automatically connects if lazyStart=true and not connected
+// Returns error if lazyStart=false and not connected
+```
+
+For more details, see the [MQTT client tests](myhome/mqtt/client_test.go).
 
 ## Releases
 

@@ -52,7 +52,7 @@ var Cmd = &cobra.Command{
 			myhome.InstanceName = options.Flags.InstanceName
 		}
 
-		err := mqttclient.NewClientE(ctx, options.Flags.MqttBroker, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval)
+		err := mqttclient.NewClientE(ctx, options.Flags.MqttBroker, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, true)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
@@ -60,7 +60,7 @@ var Cmd = &cobra.Command{
 
 		mc, err := mqttclient.GetClientE(ctx)
 		if err != nil {
-			log.Error(err, "Failed to get MQTT client")
+			log.Error(err, "Failed to start MQTT client")
 			return err
 		}
 

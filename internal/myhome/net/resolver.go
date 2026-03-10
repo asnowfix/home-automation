@@ -153,18 +153,45 @@ func (r *resolver) LookupHost(ctx context.Context, log logr.Logger, host string)
 	r.start(ctx)
 	r.waitForStart(ctx)
 
-	// Try standard DNS lookup with its own timeout
+	// Try standard DNS lookup with its own timeout, but make it interruptible
 	dnsCtx, dnsCancel := context.WithTimeout(ctx, r.mdnsTimeout)
 	defer dnsCancel()
 
-	addrs, err := net.DefaultResolver.LookupHost(dnsCtx, host)
-	if err == nil {
-		ips := make([]net.IP, len(addrs))
-		for i, addr := range addrs {
+	type dnsResult struct {
+		addrs []string
+		err   error
+	}
+	dnsChan := make(chan dnsResult, 1)
+
+	go func() {
+		addrs, err := net.DefaultResolver.LookupHost(dnsCtx, host)
+		dnsChan <- dnsResult{addrs: addrs, err: err}
+	}()
+
+	var dnsRes dnsResult
+	select {
+	case <-ctx.Done():
+		// Parent context cancelled (e.g., Ctrl-C) - abort immediately
+		return nil, ctx.Err()
+	case dnsRes = <-dnsChan:
+		// DNS lookup completed
+	}
+
+	if dnsRes.err == nil {
+		ips := make([]net.IP, len(dnsRes.addrs))
+		for i, addr := range dnsRes.addrs {
 			ips[i] = net.ParseIP(addr)
 		}
 		return ips, nil
 	}
+
+	// Check if parent context was cancelled (e.g., Ctrl-C) before proceeding to mDNS
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	log.Info("Did not find host: looking up via mDNS", "host", host)
 	localHost := host + ".local"
 

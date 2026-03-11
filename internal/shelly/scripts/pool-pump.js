@@ -77,7 +77,10 @@ var STATE = {
   lowWaterActive: false,      // Low-water protection active
   
   // MQTT connection
-  mqttConnected: false
+  mqttConnected: false,
+  
+  // Initialization flag
+  initializing: true          // Prevents KVS writes during init
 };
 
 // === LOGGING ===
@@ -113,7 +116,10 @@ function storeValue(key, value) {
   } else {
     valueStr = String(value);
   }
-  Shelly.call("KVS.Set", {key: CONFIG_KEY_PREFIX + key, value: valueStr});
+  // Fire-and-forget KVS.Set to avoid callback nesting
+  Shelly.call("KVS.Set", {key: CONFIG_KEY_PREFIX + key, value: valueStr}, function(res, err) {
+    if (err && false) {}  // Prevent minifier from removing error parameter
+  });
 }
 
 function loadValue(key) {
@@ -171,8 +177,6 @@ function detectDeviceType() {
   log("Device type:", STATE.deviceType);
   log("Low-water input:", STATE.hasLowWater);
   log("High-water input:", STATE.hasHighWater);
-  
-  storeValue(STATE_KEYS.deviceType, STATE.deviceType);
 }
 
 // === STATE PERSISTENCE ===
@@ -194,6 +198,10 @@ function loadState() {
 }
 
 function saveState() {
+  // Skip KVS writes during initialization to avoid callback depth issues
+  if (STATE.initializing) {
+    return;
+  }
   storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
   storeValue(STATE_KEYS.savedOutput, STATE.savedOutput);
 }
@@ -444,6 +452,22 @@ function init() {
       publishWaterEvent("high", input1.state);
     }
   }
+  
+  // Initialization complete - enable state persistence and save initial state
+  STATE.initializing = false;
+  
+  // Defer state save to avoid callback nesting during init
+  // Space out KVS writes to prevent "Too many calls in progress"
+  Timer.set(100, false, function() {
+    storeValue(STATE_KEYS.deviceType, STATE.deviceType);
+  });
+  Timer.set(200, false, function() {
+    storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
+  });
+  Timer.set(300, false, function() {
+    storeValue(STATE_KEYS.savedOutput, STATE.savedOutput);
+    log("Initial state saved to KVS");
+  });
   
   log("Script initialization complete");
 }

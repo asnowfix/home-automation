@@ -58,9 +58,7 @@ initConfig();
 
 // State keys for KVS persistence
 var STATE_KEYS = {
-  deviceType: "device-type",        // "3-output" or "1-output"
-  activeOutput: "active-output",    // -1 (all off), 0, 1, 2 for 3-output; 0/1 for 1-output
-  savedOutput: "saved-output"       // Output to restore after low-water clears
+  activeOutput: "active-output"     // -1 (all off), 0, 1, 2 for 3-output; 0/1 for 1-output
 };
 
 // === STATE (DYNAMIC RUNTIME VALUES) ===
@@ -183,17 +181,11 @@ function detectDeviceType() {
 function loadState() {
   log("Loading persisted state...");
   
-  var savedDeviceType = loadValue(STATE_KEYS.deviceType);
   var savedActiveOutput = loadValue(STATE_KEYS.activeOutput);
-  var savedSavedOutput = loadValue(STATE_KEYS.savedOutput);
   
   if (savedActiveOutput !== null) {
     STATE.activeOutput = savedActiveOutput;
     log("Restored active output:", STATE.activeOutput);
-  }
-  
-  if (savedSavedOutput !== null) {
-    STATE.savedOutput = savedSavedOutput;
   }
 }
 
@@ -203,7 +195,6 @@ function saveState() {
     return;
   }
   storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
-  storeValue(STATE_KEYS.savedOutput, STATE.savedOutput);
 }
 
 // === OUTPUT CONTROL ===
@@ -457,15 +448,8 @@ function init() {
   STATE.initializing = false;
   
   // Defer state save to avoid callback nesting during init
-  // Space out KVS writes to prevent "Too many calls in progress"
   Timer.set(100, false, function() {
-    storeValue(STATE_KEYS.deviceType, STATE.deviceType);
-  });
-  Timer.set(200, false, function() {
     storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
-  });
-  Timer.set(300, false, function() {
-    storeValue(STATE_KEYS.savedOutput, STATE.savedOutput);
     log("Initial state saved to KVS");
   });
   

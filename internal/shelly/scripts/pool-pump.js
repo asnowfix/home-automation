@@ -1,184 +1,476 @@
 // pool-pump.js
 // ------------
 //
-// This script controls a pool pump:
+// Unified script for pool pump control supporting two cooperating Shelly devices:
 //
-// 1. At startup, it ensures that only one switch is ON.
-// 2. it ensures that when one switch is turned on, the other two are turned off.
-// 3. When the input:0 is activated (low water), it turns off all switches, so that refill can be done.
-// 4. When the input:0 is deactivated (high water), it turns on the switch that was active before the low water.
-// 
-// While running, ato also ensure that only one Shelly commend (eg. Switch.GetStatus / Switch.Set) is sent at a time.
+// Device 1 (3-output controller):
+//   - Input 0: Low-water indication (turns OFF all outputs + enables water supply via wire)
+//   - Input 1: High-water indication (reported as MQTT event)
+//   - Output 0: Low speed
+//   - Output 1: Medium speed  
+//   - Output 2: High speed
+//   - Rule: Only one output active at a time
+//   - Button: Cycles through all-off → output 0 → output 1 → output 2 → repeat
+//
+// Device 2 (1-output override):
+//   - Output 0: Full-speed override (when ON, disables Device 1 via wire)
+//   - Button: Toggles on/off
+//
+// Features:
+//   - Auto-detects device type at startup
+//   - Persists state across reboots via KVS
+//   - Low-water protection with state restoration
+//   - MQTT events for water level sensors
+//   - Physical button cycling
 
-let CONFIG = {
-    script: "[pool-pump]",
-    debug: true
+// === STATIC CONSTANTS ===
+var SCRIPT_NAME = "pool-pump";
+var CONFIG_KEY_PREFIX = "script/" + SCRIPT_NAME + "/";
+var SCRIPT_PREFIX = "[" + SCRIPT_NAME + "] ";
+
+// Configuration schema
+var CONFIG_SCHEMA = {
+  enableLogging: {
+    description: "Enable logging when true",
+    key: "enable-logging",
+    default: true,
+    type: "boolean"
+  },
+  mqttTopicPrefix: {
+    description: "MQTT topic prefix for water level events",
+    key: "mqtt-topic-prefix",
+    default: "pool/water",
+    type: "string"
+  }
 };
 
-let log = function() {
-    if (CONFIG && CONFIG.debug) {
-        let args = [CONFIG.script];
-        for (let i = 0; i < arguments.length; i++) {
-            if (typeof arguments[i] === "object") {
-                args.push(JSON.stringify(arguments[i]));
-            } else {
-                args.push(arguments[i]);
-            }
-        }
-        print.apply(null, args);
+// Runtime configuration values (initialized from defaults)
+var CONFIG = {};
+
+// Initialize CONFIG with default values
+function initConfig() {
+  for (var key in CONFIG_SCHEMA) {
+    CONFIG[key] = CONFIG_SCHEMA[key].default;
+  }
+}
+
+initConfig();
+
+// State keys for KVS persistence
+var STATE_KEYS = {
+  deviceType: "device-type",        // "3-output" or "1-output"
+  activeOutput: "active-output",    // -1 (all off), 0, 1, 2 for 3-output; 0/1 for 1-output
+  savedOutput: "saved-output"       // Output to restore after low-water clears
+};
+
+// === STATE (DYNAMIC RUNTIME VALUES) ===
+var STATE = {
+  // Device configuration (auto-detected at startup)
+  deviceType: null,           // "3-output" or "1-output"
+  outputs: [],                // Array of available output IDs
+  hasLowWater: false,         // Input 0 available
+  hasHighWater: false,        // Input 1 available
+  
+  // Current state
+  activeOutput: -1,           // Current active output (-1 = all off)
+  savedOutput: -1,            // Saved output before low-water event
+  lowWaterActive: false,      // Low-water protection active
+  
+  // MQTT connection
+  mqttConnected: false
+};
+
+// === LOGGING ===
+function log() {
+  if (!CONFIG.enableLogging) return;
+  var s = "";
+  for (var i = 0; i < arguments.length; i++) {
+    try {
+      var a = arguments[i];
+      if (typeof a === "object") {
+        s += JSON.stringify(a);
+      } else {
+        s += String(a);
+      }
+    } catch (e) {
+      s += String(arguments[i]);
+      if (e && false) {}
     }
-};
+    if (i + 1 < arguments.length) s += " ";
+  }
+  print(SCRIPT_PREFIX, s);
+}
 
-let switches = [0, 1, 2]; // Relay IDs for the three switches
+// === KVS HELPERS ===
+function storeValue(key, value) {
+  var valueStr;
+  if (typeof value === "undefined" || value === null) {
+    valueStr = "null";
+  } else if (typeof value === "number" || typeof value === "boolean") {
+    valueStr = value.toString();
+  } else if (typeof value === "object") {
+    valueStr = JSON.stringify(value);
+  } else {
+    valueStr = String(value);
+  }
+  Shelly.call("KVS.Set", {key: CONFIG_KEY_PREFIX + key, value: valueStr});
+}
 
-// --- BEGIN Input:0 Event Handling ---
-let input0_prev_switch_states = null;
-let input0_forced_off = false;
+function loadValue(key) {
+  var result = Shelly.call("KVS.Get", {key: CONFIG_KEY_PREFIX + key});
+  if (result && ("value" in result)) {
+    var v = result.value;
+    if (v === "null" || v === "undefined") return null;
+    if (v === "true") return true;
+    if (v === "false") return false;
+    var num = Number(v);
+    if (!isNaN(num)) return num;
+    try {
+      return JSON.parse(v);
+    } catch (e) {
+      if (e && false) {}
+      return v;
+    }
+  }
+  return null;
+}
 
-// When input:0 is activated (low water), it turns off all switches, so that refill can be done.
-// When input:0 is deactivated (high water), it turns on the switch that was active before the low water.
-function handleInput0Event(info) {
-    log("Input:0 info", info);
-    let newState = info.state;
-    if (newState === true) {
-        // Save current states and turn off all switches, one at a time
-        input0_prev_switch_states = [];
-        input0_forced_off = true;
-        function processSwitch(idx) {
-            if (idx >= switches.length) {
-                log("All switches turned off by input:0");
-                return;
-            }
+// === DEVICE DETECTION ===
+function detectDeviceType() {
+  log("Detecting device type...");
+  
+  // Check available outputs
+  var availableOutputs = [];
+  for (var i = 0; i < 10; i++) {
+    var status = Shelly.getComponentStatus("switch:" + i);
+    if (status && ("output" in status)) {
+      availableOutputs.push(i);
+    }
+  }
+  
+  STATE.outputs = availableOutputs;
+  
+  // Check inputs
+  var input0 = Shelly.getComponentStatus("input:0");
+  var input1 = Shelly.getComponentStatus("input:1");
+  STATE.hasLowWater = input0 && ("state" in input0);
+  STATE.hasHighWater = input1 && ("state" in input1);
+  
+  // Determine device type
+  if (availableOutputs.length >= 3) {
+    STATE.deviceType = "3-output";
+    log("Detected 3-output controller with outputs:", availableOutputs);
+  } else if (availableOutputs.length === 1) {
+    STATE.deviceType = "1-output";
+    log("Detected 1-output override device");
+  } else {
+    log("WARNING: Unexpected output count:", availableOutputs.length);
+    STATE.deviceType = availableOutputs.length > 1 ? "3-output" : "1-output";
+  }
+  
+  log("Device type:", STATE.deviceType);
+  log("Low-water input:", STATE.hasLowWater);
+  log("High-water input:", STATE.hasHighWater);
+  
+  storeValue(STATE_KEYS.deviceType, STATE.deviceType);
+}
 
-            let component = "switch:" + switches[idx];
-            let status = Shelly.getComponentStatus(component);
-            log("Switch status", component, status);
+// === STATE PERSISTENCE ===
+function loadState() {
+  log("Loading persisted state...");
+  
+  var savedDeviceType = loadValue(STATE_KEYS.deviceType);
+  var savedActiveOutput = loadValue(STATE_KEYS.activeOutput);
+  var savedSavedOutput = loadValue(STATE_KEYS.savedOutput);
+  
+  if (savedActiveOutput !== null) {
+    STATE.activeOutput = savedActiveOutput;
+    log("Restored active output:", STATE.activeOutput);
+  }
+  
+  if (savedSavedOutput !== null) {
+    STATE.savedOutput = savedSavedOutput;
+  }
+}
 
-            input0_prev_switch_states[switches[idx]] = status.output;
-            Shelly.call("Switch.Set", { id: switches[idx], on: false }, function() {
-                processSwitch(idx + 1);
-            });
+function saveState() {
+  storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
+  storeValue(STATE_KEYS.savedOutput, STATE.savedOutput);
+}
+
+// === OUTPUT CONTROL ===
+function setOutput(outputId, on, callback) {
+  if (STATE.outputs.indexOf(outputId) === -1) {
+    log("ERROR: Invalid output ID:", outputId);
+    if (callback) callback();
+    return;
+  }
+  
+  log("Setting output", outputId, "to", on);
+  Shelly.call("Switch.Set", {id: outputId, on: on}, callback);
+}
+
+function activateOutput(outputId, callback) {
+  log("Activating output:", outputId);
+  
+  if (STATE.deviceType === "3-output") {
+    // Turn off all outputs first, then turn on the requested one
+    var idx = 0;
+    function processOutput() {
+      if (idx >= STATE.outputs.length) {
+        // All outputs off, now turn on the requested one if not -1
+        if (outputId !== -1) {
+          setOutput(outputId, true, function() {
+            STATE.activeOutput = outputId;
+            saveState();
+            if (callback) callback();
+          });
+        } else {
+          STATE.activeOutput = -1;
+          saveState();
+          if (callback) callback();
         }
-        processSwitch(0);
+        return;
+      }
+      
+      setOutput(STATE.outputs[idx], false, function() {
+        idx++;
+        processOutput();
+      });
+    }
+    processOutput();
+  } else {
+    // 1-output device: simple toggle
+    var on = outputId === 0;
+    setOutput(0, on, function() {
+      STATE.activeOutput = on ? 0 : -1;
+      saveState();
+      if (callback) callback();
+    });
+  }
+}
+
+// === BUTTON HANDLING ===
+function cycleOutputs() {
+  log("Button pressed, cycling outputs");
+  
+  if (STATE.lowWaterActive) {
+    log("Low-water protection active, ignoring button press");
+    return;
+  }
+  
+  if (STATE.deviceType === "3-output") {
+    // Cycle: all off → 0 → 1 → 2 → all off
+    var nextOutput;
+    if (STATE.activeOutput === -1) {
+      nextOutput = 0;
+    } else if (STATE.activeOutput === 0) {
+      nextOutput = 1;
+    } else if (STATE.activeOutput === 1) {
+      nextOutput = 2;
     } else {
-        // Restore previous states
-        if (input0_prev_switch_states) {
-            function restoreSwitch(idx) {
-                if (idx >= switches.length) {
-                    log("Switch states restored after input:0 off");
-                    return;
-                }
-                let sw = switches[idx];
-                let prev = input0_prev_switch_states[sw];
-                if (typeof prev === 'boolean') {
-                    Shelly.call("Switch.Set", { id: sw, on: prev }, function() {
-                        restoreSwitch(idx + 1);
-                    });
-                } else {
-                    // Always use callback pattern, even if skipping
-                    restoreSwitch(idx + 1);
-                }
-            }
-            restoreSwitch(0);
-        }
-        input0_forced_off = false;
+      nextOutput = -1;
     }
+    
+    log("Cycling from", STATE.activeOutput, "to", nextOutput);
+    activateOutput(nextOutput);
+  } else {
+    // 1-output device: toggle
+    var nextOutput = STATE.activeOutput === -1 ? 0 : -1;
+    log("Toggling from", STATE.activeOutput, "to", nextOutput);
+    activateOutput(nextOutput);
+  }
 }
-// --- END Input:0 Event Handling ---
 
+// === WATER LEVEL HANDLING ===
+function publishWaterEvent(level, state) {
+  if (!STATE.mqttConnected) return;
+  
+  var topic = CONFIG.mqttTopicPrefix + "/" + level;
+  var message = JSON.stringify({
+    level: level,
+    state: state,
+    timestamp: Date.now()
+  });
+  
+  log("Publishing water event:", topic, message);
+  MQTT.publish(topic, message, 0, false);
+}
+
+function handleLowWater(active) {
+  log("Low-water event:", active);
+  
+  publishWaterEvent("low", active);
+  
+  if (active) {
+    // Save current state and turn off all outputs
+    STATE.savedOutput = STATE.activeOutput;
+    STATE.lowWaterActive = true;
+    log("Saving current output:", STATE.savedOutput);
+    
+    activateOutput(-1, function() {
+      log("All outputs turned off for low-water protection");
+    });
+  } else {
+    // Restore previous state
+    STATE.lowWaterActive = false;
+    log("Restoring output:", STATE.savedOutput);
+    
+    activateOutput(STATE.savedOutput, function() {
+      log("Output restored after low-water cleared");
+    });
+  }
+}
+
+function handleHighWater(active) {
+  log("High-water event:", active);
+  publishWaterEvent("high", active);
+}
+
+// === EVENT HANDLERS ===
 function handleSwitchEvent(info) {
-    // var = info = {
-    //     "component": "switch:1",
-    //     "id": 1,
-    //     "event": "toggle",
-    //     "state": false,
-    //     "ts": 1744662788.17999982833
-    // }
-
-    log("handleSwitchEvent:", info);
-    let activatedSwitch = info.id;
-    let newState = info.state;
-
-    log(
-        "Switch event: id=" + activatedSwitch +
-        ", state=" + newState
-    );
-
-    if (newState === true) { // Switch was turned ON
-        switches.forEach(function (sw) {
-            if (sw !== activatedSwitch) {
-                log(
-                    "Turning off switch id=" + sw +
-                    " because switch id=" + activatedSwitch + " was turned ON"
-                );
-                // Turn off the other switches
-                Shelly.call(
-                    "Switch.Set",
-                    { id: sw, on: false },
-                    null,
-                    null
-                );
-            }
-        });
+  log("Switch event:", info);
+  
+  // Ignore switch events during low-water protection
+  if (STATE.lowWaterActive && info.state === true) {
+    log("Low-water protection active, turning off switch", info.id);
+    setOutput(info.id, false);
+    return;
+  }
+  
+  if (STATE.deviceType === "3-output" && info.state === true) {
+    // Ensure only one output is on
+    var activatedOutput = info.id;
+    for (var i = 0; i < STATE.outputs.length; i++) {
+      var outputId = STATE.outputs[i];
+      if (outputId !== activatedOutput) {
+        setOutput(outputId, false);
+      }
     }
+    STATE.activeOutput = activatedOutput;
+    saveState();
+  } else if (STATE.deviceType === "1-output") {
+    STATE.activeOutput = info.state ? 0 : -1;
+    saveState();
+  }
 }
 
-// --- Ensure only one switch is ON at startup ---
-function enforceSingleSwitchOnAtStartup() {
-    // Get all switch states sequentially
-    let states = [];
-    function checkSwitch(idx) {
-        if (idx >= switches.length) {
-            // Count how many are ON
-            let onSwitches = [];
-            for (let i = 0; i < switches.length; i++) {
-                if (states[i]) onSwitches.push(i);
-            }
-            if (onSwitches.length > 1) {
-                // Leave the first ON, turn off the rest
-                function turnOffRest(offIdx) {
-                    if (offIdx >= onSwitches.length) return;
-                    let sw = onSwitches[offIdx];
-                    if (sw !== onSwitches[0]) {
-                        Shelly.call("Switch.Set", { id: sw, on: false }, function() {
-                            turnOffRest(offIdx + 1);
-                        });
-                    } else {
-                        turnOffRest(offIdx + 1);
-                    }
-                }
-                turnOffRest(0);
-            }
-            return;
-        }
-        let component = "switch:" + switches[idx];
-        let status = Shelly.getComponentStatus(component);
-        log("Switch status", component, status);
-        states[idx] = status.output;
-        checkSwitch(idx + 1);
-    }
-    checkSwitch(0);
+function handleInputEvent(info) {
+  log("Input event:", info);
+  
+  if (info.component === "input:0") {
+    handleLowWater(info.state);
+  } else if (info.component === "input:1") {
+    handleHighWater(info.state);
+  }
 }
 
-enforceSingleSwitchOnAtStartup();
+function handleButtonEvent(info) {
+  log("Button event:", info);
+  
+  // System button events: component="sys", event="brief_btn_down", name="sys"
+  if (info.component === "sys" && info.event === "brief_btn_down") {
+    cycleOutputs();
+  }
+}
 
-// Subscribe to status changes for all switches and input:0 with a single handler
-Shelly.addEventHandler(function (event) {
-    log("event", event)
-    let info = event.info;
-    if (info && typeof (info.component) === "string") {
-        if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
-            // Only allow switching if not forced off by input:0
-            if (!input0_forced_off) {
-                handleSwitchEvent(info);
-            } else if (info.state === true) {
-                // If input:0 is ON, immediately turn off any switch that tries to turn ON
-                Shelly.call("Switch.Set", { id: info.id, on: false });
-            }
-        } else if (info.component === "input:0" && typeof info.state === "boolean") {
-            handleInput0Event(info);
-        }
+// === MQTT SETUP ===
+function setupMQTT() {
+  var mqttStatus = Shelly.getComponentStatus("mqtt");
+  if (mqttStatus && mqttStatus.connected) {
+    STATE.mqttConnected = true;
+    log("MQTT connected");
+  } else {
+    log("MQTT not connected");
+  }
+}
+
+// === INITIALIZATION ===
+function enforceOutputState() {
+  log("Enforcing output state at startup...");
+  
+  if (STATE.deviceType === "3-output") {
+    // Ensure only one output is on
+    var onOutputs = [];
+    for (var i = 0; i < STATE.outputs.length; i++) {
+      var outputId = STATE.outputs[i];
+      var status = Shelly.getComponentStatus("switch:" + outputId);
+      if (status && status.output) {
+        onOutputs.push(outputId);
+      }
     }
+    
+    if (onOutputs.length > 1) {
+      log("Multiple outputs on, keeping first:", onOutputs[0]);
+      activateOutput(onOutputs[0]);
+    } else if (onOutputs.length === 1) {
+      STATE.activeOutput = onOutputs[0];
+      saveState();
+    } else {
+      STATE.activeOutput = -1;
+      saveState();
+    }
+  } else {
+    // 1-output device
+    var status = Shelly.getComponentStatus("switch:0");
+    if (status) {
+      STATE.activeOutput = status.output ? 0 : -1;
+      saveState();
+    }
+  }
+  
+  log("Current active output:", STATE.activeOutput);
+}
+
+function init() {
+  log("Script starting...");
+  
+  detectDeviceType();
+  loadState();
+  enforceOutputState();
+  setupMQTT();
+  
+  // Check initial water level states
+  if (STATE.hasLowWater) {
+    var input0 = Shelly.getComponentStatus("input:0");
+    if (input0 && input0.state) {
+      handleLowWater(true);
+    }
+  }
+  
+  if (STATE.hasHighWater) {
+    var input1 = Shelly.getComponentStatus("input:1");
+    if (input1) {
+      publishWaterEvent("high", input1.state);
+    }
+  }
+  
+  log("Script initialization complete");
+}
+
+// === EVENT SUBSCRIPTION ===
+Shelly.addEventHandler(function(event) {
+  if (!event || !event.info) return;
+  
+  var info = event.info;
+  
+  // Handle script stop event
+  if (info.event === "script_stop") {
+    log("Script stopping");
+    return;
+  }
+  
+  // Handle component events
+  if (typeof info.component === "string") {
+    if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
+      handleSwitchEvent(info);
+    } else if ((info.component === "input:0" || info.component === "input:1") && typeof info.state === "boolean") {
+      handleInputEvent(info);
+    } else if (info.component === "sys" && info.event === "brief_btn_down") {
+      handleButtonEvent(info);
+    }
+  }
 });
 
-log("Running")
+// Start the script
+init();

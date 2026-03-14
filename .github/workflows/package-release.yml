@@ -118,6 +118,10 @@ jobs:
           cp myhome-example.yaml .debpkg/usr/share/myhome/myhome-example.yaml
           chmod +x .debpkg/usr/share/myhome/*.sh
 
+          # Prometheus MQTT Exporter configuration
+          mkdir -p .debpkg/etc/prometheus
+          cp linux/prometheus/mqtt-exporter.yaml .debpkg/etc/prometheus/mqtt-exporter.yaml
+
           # DEBIAN maintainer scripts
           mkdir -p .debpkg/DEBIAN
           cp linux/debian/postinst.sh .debpkg/DEBIAN/postinst

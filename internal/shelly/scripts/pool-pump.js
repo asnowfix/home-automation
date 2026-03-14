@@ -367,8 +367,13 @@ function handleInputEvent(info) {
 function handleButtonEvent(info) {
   log("Button event:", info);
   
-  // System button events: component="sys", event="brief_btn_down", name="sys"
-  if (info.component === "sys" && info.event === "brief_btn_down") {
+  // System button events (component="sys"):
+  // - sys_btn_down: Button pressed down
+  // - sys_btn_up: Button released
+  // - sys_btn_push: Complete brief push (down + up)
+  // - brief_btn_down: Legacy event (deprecated, use sys_btn_push instead)
+  
+  if (info.component === "sys" && info.event === "sys_btn_push") {
     cycleOutputs();
   }
 }
@@ -474,7 +479,7 @@ Shelly.addEventHandler(function(event) {
       handleSwitchEvent(info);
     } else if ((info.component === "input:0" || info.component === "input:1") && typeof info.state === "boolean") {
       handleInputEvent(info);
-    } else if (info.component === "sys" && info.event === "brief_btn_down") {
+    } else if (info.component === "sys" && info.event === "sys_btn_push") {
       handleButtonEvent(info);
     }
   }

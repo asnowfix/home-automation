@@ -48,6 +48,18 @@ if [ "$1" = "configure" ]; then
         systemctl reenable "$timer"
         systemctl restart "$timer"
     done
+
+    # Restart prometheus-mqtt-exporter to apply new configuration
+    if systemctl list-unit-files prometheus-mqtt-exporter.service >/dev/null 2>&1; then
+        if systemctl is-active --quiet prometheus-mqtt-exporter; then
+            echo "Restarting prometheus-mqtt-exporter to apply new configuration..."
+            systemctl restart prometheus-mqtt-exporter
+        else
+            echo "prometheus-mqtt-exporter is installed but not running, skipping restart"
+        fi
+    else
+        echo "prometheus-mqtt-exporter is not installed, skipping restart"
+    fi
 fi
 
 # Exit successfully

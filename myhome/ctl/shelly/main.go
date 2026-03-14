@@ -10,6 +10,7 @@ import (
 	"myhome/ctl/shelly/reboot"
 	"myhome/ctl/shelly/script"
 	"myhome/ctl/shelly/setup"
+	"myhome/ctl/shelly/status"
 	"myhome/ctl/shelly/sys"
 	"myhome/ctl/shelly/wifi"
 
@@ -34,4 +35,5 @@ func init() {
 	Cmd.AddCommand(components.Cmd)
 	Cmd.AddCommand(setup.Cmd)
 	Cmd.AddCommand(reboot.Cmd)
+	Cmd.AddCommand(status.Cmd)
 }

@@ -28,8 +28,7 @@ var PoolKVSKeys = map[string]string{
 	"bootstrap_duration_ms":       "script/pool-pump/boot-duration",  // 32 chars ✓
 	"night_run_duration_ms":       "script/pool-pump/night-duration", // 32 chars ✓
 	"bootstrap_to_speed_delay_ms": "script/pool-pump/boot-delay",     // 28 chars ✓
-	"bootstrap_threshold":         "script/pool-pump/boot-threshold", // 32 chars ✓
-	"temperature_topic":           "script/pool-pump/temp-topic",     // 29 chars ✓
+	"bootstrap_hours_threshold":   "script/pool-pump/boot-hours",     // 28 chars ✓
 }
 
 // PoolService handles pool pump operations
@@ -50,8 +49,7 @@ func NewPoolService(log logr.Logger, provider DeviceProvider) *PoolService {
 type SetupOptions struct {
 	ControllerDeviceID      string
 	BootstrapDeviceID       string
-	TemperatureTopic        string
-	BootstrapThreshold      float64
+	BootstrapHoursThreshold float64
 	BootstrapDurationMs     int
 	NightRunDurationMs      int
 	BootstrapToSpeedDelayMs int
@@ -145,11 +143,7 @@ func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *sh
 			PoolKVSKeys["bootstrap_duration_ms"]:       fmt.Sprintf("%d", opts.BootstrapDurationMs),
 			PoolKVSKeys["night_run_duration_ms"]:       fmt.Sprintf("%d", opts.NightRunDurationMs),
 			PoolKVSKeys["bootstrap_to_speed_delay_ms"]: fmt.Sprintf("%d", opts.BootstrapToSpeedDelayMs),
-			PoolKVSKeys["bootstrap_threshold"]:         fmt.Sprintf("%.1f", opts.BootstrapThreshold),
-		}
-
-		if opts.TemperatureTopic != "" {
-			kvsConfig[PoolKVSKeys["temperature_topic"]] = opts.TemperatureTopic
+			PoolKVSKeys["bootstrap_hours_threshold"]:   fmt.Sprintf("%.1f", opts.BootstrapHoursThreshold),
 		}
 	}
 
@@ -376,10 +370,9 @@ type DeviceStatus struct {
 
 // Environment represents environmental conditions
 type Environment struct {
-	TemperatureTopic    string  `json:"temperature_topic,omitempty" yaml:"temperature_topic,omitempty"`
-	BootstrapThreshold  float64 `json:"bootstrap_threshold" yaml:"bootstrap_threshold"`
-	BootstrapRequired   bool    `json:"bootstrap_required" yaml:"bootstrap_required"`
-	BootstrapInProgress bool    `json:"bootstrap_in_progress" yaml:"bootstrap_in_progress"`
+	BootstrapHoursThreshold float64 `json:"bootstrap_hours_threshold" yaml:"bootstrap_hours_threshold"`
+	BootstrapRequired       bool    `json:"bootstrap_required" yaml:"bootstrap_required"`
+	BootstrapInProgress     bool    `json:"bootstrap_in_progress" yaml:"bootstrap_in_progress"`
 }
 
 // Status returns the current status of the pool pump system
@@ -403,7 +396,7 @@ func (s *PoolService) Status(ctx context.Context, controllerID string) (*PoolSta
 
 	status := &PoolStatus{
 		Environment: Environment{
-			BootstrapThreshold: 15.0, // Default, will be updated from KVS
+			BootstrapHoursThreshold: 6.0, // Default, will be updated from KVS
 		},
 	}
 
@@ -543,20 +536,15 @@ func (s *PoolService) getEnvironmentStatus(ctx context.Context, controllerID str
 
 	via := types.ChannelMqtt
 
-	// Get temperature topic from KVS
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["temperature_topic"]); err == nil && val != nil && val.Value != "" {
-		env.TemperatureTopic = val.Value
-	}
-
-	// Get bootstrap threshold from KVS
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["bootstrap_threshold"]); err == nil && val != nil {
+	// Get bootstrap hours threshold from KVS
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["bootstrap_hours_threshold"]); err == nil && val != nil {
 		var threshold float64
 		if _, err := fmt.Sscanf(val.Value, "%f", &threshold); err == nil {
-			env.BootstrapThreshold = threshold
+			env.BootstrapHoursThreshold = threshold
 		}
 	}
 
-	// Note: The script subscribes to the temperature topic and makes bootstrap decisions internally
+	// Note: The script tracks last run time and makes bootstrap decisions internally
 	// We only display the configuration here, not the runtime state
 
 	return nil

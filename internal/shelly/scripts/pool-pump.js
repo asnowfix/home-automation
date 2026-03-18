@@ -1,7 +1,7 @@
 // pool-pump.js
 // ------------
 //
-// Master-slave pool pump control with temperature-based bootstrap and schedule automation:
+// Master-slave pool pump control with time-based bootstrap and schedule automation:
 //
 // Device 1 (Pro3 - Master Controller):
 //   - Input 0: Water supply sensor (inverted: HIGH = water supply ON → turn off pumps)
@@ -11,19 +11,19 @@
 //   - Switch 1: Pump mid speed
 //   - Switch 2: Pump high speed
 //   - Controls Pro1 via MQTT RPC for bootstrap sequence
-//   - Monitors outdoor temperature for bootstrap decision
+//   - Tracks last run time for bootstrap decision
 //   - Manages schedules for automated operation
 //   - Button: Cycles through speeds
 //
 // Device 2 (Pro1 - Bootstrap Helper):
 //   - Input 0: Water supply sensor (inverted: HIGH = water supply ON → turn off pump)
 //   - Input 1: High-water sensor (MQTT event)
-//   - Switch 0: Pump max speed for cold-weather bootstrap
+//   - Switch 0: Pump max speed for bootstrap
 //   - Receives commands from Pro3 via MQTT RPC
 //   - Button: Toggles on/off
 //
 // Features:
-//   - Temperature-based bootstrap: Pro1 runs 2min at max speed when temp < threshold
+//   - Time-based bootstrap: Pro1 runs 2min at max speed when hours since last run > threshold
 //   - Schedule-driven automation: morning-start (SR+3h), evening-stop (SS), night-start (23:15)
 //   - MQTT RPC communication between Pro3 and Pro1
 //   - Auto-detects device role based on device ID
@@ -70,17 +70,10 @@ var CONFIG_SCHEMA = {
     type: "string",
     required: false
   },
-  temperatureTopic: {
-    description: "MQTT topic for outdoor temperature sensor (optional)",
-    key: "temp-topic",
-    default: null,
-    type: "string",
-    required: false
-  },
-  bootstrapThreshold: {
-    description: "Temperature threshold (°C) below which bootstrap is needed",
-    key: "boot-threshold",
-    default: 15,
+  bootstrapHoursThreshold: {
+    description: "Hours since last run above which bootstrap is needed",
+    key: "boot-hours",
+    default: 6,
     type: "number",
     required: false
   },
@@ -231,7 +224,8 @@ initConfig();
 
 // State keys for KVS persistence
 var STATE_KEYS = {
-  activeOutput: "active-output"     // -1 (all off), 0, 1, 2 for pro3; 0/1 for pro1
+  activeOutput: "active-output",    // -1 (all off), 0, 1, 2 for pro3; 0/1 for pro1
+  lastRunTimestamp: "last-run-ts"   // Unix timestamp (seconds) of last pump run
 };
 
 // === STATE (DYNAMIC RUNTIME VALUES) ===
@@ -250,12 +244,7 @@ var STATE = {
   // Current state
   activeOutput: -1,           // Current active output (-1 = all off)
   savedOutput: -1,            // Saved output before water-supply protection
-  
-  // Temperature monitoring
-  temperature: {
-    outdoor: null             // Outdoor temperature in °C
-  },
-  subscribedTemperatureTopic: null,
+  lastRunTimestamp: null,     // Unix timestamp (seconds) of last pump run
   
   // Bootstrap state
   bootstrapInProgress: false,
@@ -326,85 +315,18 @@ function loadValue(key) {
   return null;
 }
 
-// === TEMPERATURE MONITORING ===
-/**
- * Parse temperature from MQTT message (supports Gen1, Gen2, BLU formats)
- * @param {string} topic - MQTT topic
- * @param {string} message - MQTT message payload
- * @returns {number|null} Parsed temperature or null if not found
- */
-function parseTemperatureFromMqtt(topic, message) {
-  var temp = null;
-  try {
-    // H&T Gen1 format, via gen1 HTTP-to-MQTT proxy
-    // topic: shellies/<id>/sensor/temperature
-    // message: plain number payload
-    if (topic.indexOf('shellies/') === 0 && topic.indexOf('/sensor/temperature') > 0) {
-      temp = parseFloat(message);
-      if (!isNaN(temp)) {
-        log('Parsed Gen1 temperature:', temp, 'from topic:', topic);
-        return temp;
-      }
-    }
-    // H&T BLU Gen3 format, via blu-publisher.js script
-    // topic: shelly-blu/events/<mac>
-    // message: {"temperature":17,...}
-    if (topic.indexOf('shelly-blu/events/') === 0) {
-      var data = JSON.parse(message);
-      if (data.temperature) {
-        log('Parsed BLU Gen3 temperature:', data.temperature, 'from topic:', topic);
-        return data.temperature;
-      }
-    }
-    // Gen2 format: <id>/events/rpc with JSON payload
-    // topic: <id>/events/rpc
-    // message: {"method":"NotifyStatus","params":{"temperature:0":{"tC":22.5}}}
-    else if (topic.indexOf('/events/rpc') > 0) {
-      var data = JSON.parse(message);
-      if (data.method === 'NotifyStatus' && data.params) {
-        if (data.params['temperature:0'] && typeof data.params['temperature:0'].tC !== 'undefined') {
-          temp = data.params['temperature:0'].tC;
-        } else if (data.params['temperature:1'] && typeof data.params['temperature:1'].tC !== 'undefined') {
-          temp = data.params['temperature:1'].tC;
-        } else if (data.params['temperature:2'] && typeof data.params['temperature:2'].tC !== 'undefined') {
-          temp = data.params['temperature:2'].tC;
-        }
-        if (temp !== null) {
-          log('Parsed Gen2 temperature:', temp, 'from topic:', topic);
-          return temp;
-        }
-      }
-    }
-  } catch (e) {
-    log('Error parsing temperature from MQTT:', e);
-    if (e && false) {}  // Prevent minifier from removing error parameter
-  }
-  return null;
-}
-
-function onOutdoorTemperature(topic, message) {
-  var temp = parseTemperatureFromMqtt(topic, message);
-  if (temp !== null) {
-    STATE.temperature.outdoor = temp;
-    log('Outdoor temperature updated:', temp, '°C');
-  }
-}
-
-function subscribeToTemperature() {
-  if (CONFIG.temperatureTopic && !STATE.subscribedTemperatureTopic) {
-    log('Subscribing to temperature topic:', CONFIG.temperatureTopic);
-    MQTT.subscribe(CONFIG.temperatureTopic, onOutdoorTemperature);
-    STATE.subscribedTemperatureTopic = CONFIG.temperatureTopic;
-  }
-}
-
+// === BOOTSTRAP DECISION LOGIC ===
 function needsBootstrap() {
-  if (STATE.temperature.outdoor === null) {
-    log('No temperature data, assuming bootstrap needed');
+  if (STATE.lastRunTimestamp === null) {
+    log('No previous run recorded, bootstrap needed');
     return true;
   }
-  var needs = STATE.temperature.outdoor < CONFIG.bootstrapThreshold;
-  log('Temperature:', STATE.temperature.outdoor, '°C, threshold:', CONFIG.bootstrapThreshold, '°C, needs bootstrap:', needs);
+  
+  var now = Date.now() / 1000; // Current time in seconds
+  var hoursSinceLastRun = (now - STATE.lastRunTimestamp) / 3600;
+  var needs = hoursSinceLastRun > CONFIG.bootstrapHoursThreshold;
+  
+  log('Hours since last run:', hoursSinceLastRun.toFixed(1), 'threshold:', CONFIG.bootstrapHoursThreshold, 'hours, needs bootstrap:', needs);
   return needs;
 }
 
@@ -511,10 +433,10 @@ function executeBootstrap(targetSpeed, callback) {
 
 function startPumpWithBootstrap(targetSpeed, callback) {
   if (needsBootstrap()) {
-    log('Temperature below threshold, executing bootstrap');
+    log('Long time since last run, executing bootstrap');
     executeBootstrap(targetSpeed, callback);
   } else {
-    log('Temperature above threshold, direct Pro3 control');
+    log('Recent run detected, direct Pro3 control');
     activateOutput(targetSpeed, callback);
   }
 }
@@ -654,10 +576,15 @@ function loadState() {
   log("Loading persisted state...");
   
   var savedActiveOutput = loadValue(STATE_KEYS.activeOutput);
-  
   if (savedActiveOutput !== null) {
     STATE.activeOutput = savedActiveOutput;
     log("Restored active output:", STATE.activeOutput);
+  }
+  
+  var savedLastRunTimestamp = loadValue(STATE_KEYS.lastRunTimestamp);
+  if (savedLastRunTimestamp !== null) {
+    STATE.lastRunTimestamp = savedLastRunTimestamp;
+    log("Restored last run timestamp:", STATE.lastRunTimestamp);
   }
 }
 
@@ -667,6 +594,9 @@ function saveState() {
     return;
   }
   storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
+  if (STATE.lastRunTimestamp !== null) {
+    storeValue(STATE_KEYS.lastRunTimestamp, STATE.lastRunTimestamp);
+  }
 }
 
 // === OUTPUT CONTROL ===
@@ -697,6 +627,8 @@ function activateOutput(outputId, callback) {
       if (outputId !== -1) {
         setOutput(outputId, true, function() {
           STATE.activeOutput = outputId;
+          // Record timestamp when pump starts
+          STATE.lastRunTimestamp = Date.now() / 1000;
           saveState();
           if (callback) callback();
         });
@@ -711,6 +643,10 @@ function activateOutput(outputId, callback) {
     var on = outputId === 0;
     setOutput(0, on, function() {
       STATE.activeOutput = on ? 0 : -1;
+      // Record timestamp when pump starts (Pro1 bootstrap)
+      if (on) {
+        STATE.lastRunTimestamp = Date.now() / 1000;
+      }
       saveState();
       if (callback) callback();
     });
@@ -988,11 +924,11 @@ function handleMorningStart() {
   log('Morning start event');
   
   if (!needsBootstrap()) {
-    log('Temperature above threshold, starting eco speed');
+    log('Recent run detected, starting eco speed');
     activateOutput(CONFIG.ecoSpeed);
   } else {
-    log('Temperature below threshold, bootstrap required but not starting automatically');
-    // Don't auto-start in morning if cold - user decision
+    log('Long time since last run, bootstrap required but not starting automatically');
+    // Don't auto-start in morning if bootstrap needed - user decision
   }
 }
 
@@ -1015,7 +951,7 @@ function handleNightStart() {
   log('Night start event');
   
   if (needsBootstrap()) {
-    log('Temperature below threshold, starting 1-hour high-speed run');
+    log('Long time since last run, starting 1-hour high-speed run with bootstrap');
     
     // Start with bootstrap, then run high speed for 1 hour
     executeBootstrap(CONFIG.highSpeed, function() {
@@ -1027,7 +963,7 @@ function handleNightStart() {
       });
     });
   } else {
-    log('Temperature above threshold, ignoring night-start event');
+    log('Recent run detected, ignoring night-start event');
   }
 }
 
@@ -1117,10 +1053,6 @@ function init() {
       },
       function(next) {
         applyComponentNames();
-        next();
-      },
-      function(next) {
-        subscribeToTemperature();
         next();
       },
       function(next) {

@@ -14,6 +14,7 @@ import (
 	"myhome/ctl/mqtt"
 	"myhome/ctl/open"
 	"myhome/ctl/options"
+	"myhome/ctl/pool"
 	"myhome/ctl/room"
 	"myhome/ctl/sfr"
 	"myhome/ctl/shelly"
@@ -152,6 +153,7 @@ func init() {
 	Cmd.AddCommand(blu.Cmd)
 	Cmd.AddCommand(temperature.Cmd)
 	Cmd.AddCommand(heater.Cmd)
+	Cmd.AddCommand(pool.PoolCmd())
 	Cmd.AddCommand(room.Cmd)
 }
 

@@ -157,67 +157,90 @@ function initConfig() {
 }
 
 // Load configuration from KVS and validate required fields
-function loadConfig() {
+function loadConfig(callback) {
   log("Loading configuration from KVS...");
   
   var missingRequired = [];
+  var configKeys = [];
   
+  // Build array of config keys to load
   for (var key in CONFIG_SCHEMA) {
+    configKeys.push(key);
+  }
+  
+  var keyIndex = 0;
+  
+  // Process one key at a time using task queue
+  function loadNextKey() {
+    if (keyIndex >= configKeys.length) {
+      // All keys loaded, validate
+      if (missingRequired.length > 0) {
+        log("ERROR: Missing required configuration:");
+        for (var i = 0; i < missingRequired.length; i++) {
+          log("  -", missingRequired[i]);
+        }
+        log("Script cannot start without required configuration.");
+        log("Please run: myhome ctl pool setup <controller-device>");
+        callback(false);
+        return;
+      }
+      
+      // Role-specific validation
+      if (CONFIG.deviceRole === "controller" && !CONFIG.bootstrapDeviceId) {
+        log("ERROR: Controller role requires bootstrapDeviceId");
+        callback(false);
+        return;
+      }
+      
+      log("Configuration loaded successfully");
+      callback(true);
+      return;
+    }
+    
+    var key = configKeys[keyIndex];
     var schema = CONFIG_SCHEMA[key];
     var kvsKey = CONFIG_KEY_PREFIX + schema.key;
+    keyIndex++;
     
-    // Try to load from KVS
-    var result = Shelly.call("KVS.Get", {key: kvsKey});
-    
-    if (result && ("value" in result) && result.value !== null && result.value !== "") {
-      var value = result.value;
+    // Load from KVS asynchronously
+    Shelly.call("KVS.Get", {key: kvsKey}, function(result, err) {
+      if (err && false) {}  // Prevent minifier from removing error parameter
       
-      // Parse value based on type
-      if (schema.type === "boolean") {
-        CONFIG[key] = value === "true";
-      } else if (schema.type === "number") {
-        var num = Number(value);
-        if (!isNaN(num)) {
-          CONFIG[key] = num;
+      if (result && ("value" in result) && result.value !== null && result.value !== "") {
+        var value = result.value;
+        
+        // Parse value based on type
+        if (schema.type === "boolean") {
+          CONFIG[key] = value === "true";
+        } else if (schema.type === "number") {
+          var num = Number(value);
+          if (!isNaN(num)) {
+            CONFIG[key] = num;
+          } else {
+            log("WARNING: Invalid number for", key, ":", value);
+            CONFIG[key] = schema.default;
+          }
         } else {
-          log("WARNING: Invalid number for", key, ":", value);
-          CONFIG[key] = schema.default;
+          CONFIG[key] = value;
         }
+        
+        log("Loaded", key, "=", CONFIG[key]);
       } else {
-        CONFIG[key] = value;
+        // Use default
+        CONFIG[key] = schema.default;
+        
+        // Check if required
+        if (schema.required && CONFIG[key] === null) {
+          missingRequired.push(key + " (" + kvsKey + ")");
+        }
       }
       
-      log("Loaded", key, "=", CONFIG[key]);
-    } else {
-      // Use default
-      CONFIG[key] = schema.default;
-      
-      // Check if required
-      if (schema.required && CONFIG[key] === null) {
-        missingRequired.push(key + " (" + kvsKey + ")");
-      }
-    }
+      // Queue next key
+      queueTask(loadNextKey);
+    });
   }
   
-  // Validate required fields
-  if (missingRequired.length > 0) {
-    log("ERROR: Missing required configuration:");
-    for (var i = 0; i < missingRequired.length; i++) {
-      log("  -", missingRequired[i]);
-    }
-    log("Script cannot start without required configuration.");
-    log("Please run: myhome ctl pool setup <controller-device>");
-    return false;
-  }
-  
-  // Role-specific validation
-  if (CONFIG.deviceRole === "controller" && !CONFIG.bootstrapDeviceId) {
-    log("ERROR: Controller role requires bootstrapDeviceId");
-    return false;
-  }
-  
-  log("Configuration loaded successfully");
-  return true;
+  loadNextKey();
 }
 
 initConfig();
@@ -227,6 +250,47 @@ var STATE_KEYS = {
   activeOutput: "active-output",    // -1 (all off), 0, 1, 2 for pro3; 0/1 for pro1
   lastRunTimestamp: "last-run-ts"   // Unix timestamp (seconds) of last pump run
 };
+
+// === TASK QUEUE (SINGLE TIMER FOR ALL SEQUENTIAL OPERATIONS) ===
+var TASK_QUEUE = [];
+var TASK_INDEX = 0;
+var TASK_TIMER = null;
+
+function processTaskQueue() {
+  if (TASK_INDEX >= TASK_QUEUE.length) {
+    // No tasks left, stop timer and reset
+    if (TASK_TIMER) {
+      Timer.clear(TASK_TIMER);
+      TASK_TIMER = null;
+    }
+    TASK_QUEUE = [];
+    TASK_INDEX = 0;
+    return;
+  }
+  
+  // Get task at current index and increment
+  var task = TASK_QUEUE[TASK_INDEX];
+  TASK_INDEX++;
+  task();
+  
+  // Check again after task execution - if all tasks processed, stop timer
+  if (TASK_INDEX >= TASK_QUEUE.length && TASK_TIMER) {
+    Timer.clear(TASK_TIMER);
+    TASK_TIMER = null;
+    TASK_QUEUE = [];
+    TASK_INDEX = 0;
+  }
+}
+
+function queueTask(task) {
+  // Simply append to queue
+  TASK_QUEUE.push(task);
+  
+  // Start timer only if not already running
+  if (!TASK_TIMER) {
+    TASK_TIMER = Timer.set(200, true, processTaskQueue);
+  }
+}
 
 // === STATE (DYNAMIC RUNTIME VALUES) ===
 var STATE = {
@@ -508,11 +572,14 @@ function configureComponentNames() {
   }
 }
 
-function applyComponentNames() {
+function applyComponentNames(callback) {
   log("Applying component names to device...");
   
   var names = COMPONENT_NAMES[STATE.deviceType];
-  if (!names) return;
+  if (!names) {
+    if (callback) callback();
+    return;
+  }
   
   // Build list of components to configure
   var componentsToConfig = [];
@@ -536,12 +603,19 @@ function applyComponentNames() {
     }
   }
   
-  // Process components sequentially with a single recurring timer
+  if (componentsToConfig.length === 0) {
+    log("No components to configure");
+    if (callback) callback();
+    return;
+  }
+  
+  // Process components sequentially using task queue
   var index = 0;
   
   function processNext() {
     if (index >= componentsToConfig.length) {
       log("All component names applied");
+      if (callback) callback();
       return;
     }
     
@@ -556,16 +630,15 @@ function applyComponentNames() {
       Shelly.call("Input.SetConfig", {id: comp.id, config: config}, function(res, err) {
         if (err && false) {}
         log("Applied input:" + comp.id + " config:", JSON.stringify(config));
+        queueTask(processNext);
       });
     } else if (comp.type === "switch") {
       Shelly.call("Switch.SetConfig", {id: comp.id, config: {name: comp.name}}, function(res, err) {
         if (err && false) {}
         log("Applied switch:" + comp.id + " name:", comp.name);
+        queueTask(processNext);
       });
     }
-    
-    // Schedule next component
-    Timer.set(100, false, processNext);
   }
   
   processNext();
@@ -831,7 +904,7 @@ function clearNonUpdateSchedules(callback) {
       Shelly.call('Schedule.Delete', {id: jobId}, function(res, err) {
         if (err && false) {}
         log('Deleted schedule:', jobId);
-        Timer.set(100, false, deleteNext);
+        queueTask(deleteNext);
       });
     }
     
@@ -888,7 +961,7 @@ function createSchedules(callback) {
       } else {
         log('Created schedule:', schedule.timespec);
       }
-      Timer.set(200, false, createNext);
+      queueTask(createNext);
     });
   }
   
@@ -1007,12 +1080,18 @@ function enforceOutputState() {
 function init() {
   log("Script starting...");
   
-  // Load configuration from KVS first
-  if (!loadConfig()) {
-    log("FATAL: Configuration validation failed, script cannot start");
-    return;
-  }
-  
+  // Load configuration from KVS first (asynchronous)
+  loadConfig(function(success) {
+    if (!success) {
+      log("FATAL: Configuration validation failed, script cannot start");
+      return;
+    }
+    
+    continueInit();
+  });
+}
+
+function continueInit() {
   detectDeviceType();
   
   // Get device ID from system
@@ -1052,8 +1131,7 @@ function init() {
         next();
       },
       function(next) {
-        applyComponentNames();
-        next();
+        applyComponentNames(next);
       },
       function(next) {
         clearNonUpdateSchedules(next);
@@ -1075,17 +1153,16 @@ function init() {
       stepIndex++;
       
       step(function() {
-        Timer.set(200, false, runNextStep);
+        queueTask(runNextStep);
       });
     }
     
-    Timer.set(100, false, runNextStep);
+    queueTask(runNextStep);
   } else {
     // Bootstrap helper - clean schedules but don't create pump schedules
     var initSteps = [
       function(next) {
-        applyComponentNames();
-        next();
+        applyComponentNames(next);
       },
       function(next) {
         clearNonUpdateSchedules(next);
@@ -1104,11 +1181,11 @@ function init() {
       stepIndex++;
       
       step(function() {
-        Timer.set(200, false, runNextStep);
+        queueTask(runNextStep);
       });
     }
     
-    Timer.set(100, false, runNextStep);
+    queueTask(runNextStep);
   }
 }
 

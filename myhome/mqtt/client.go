@@ -407,6 +407,7 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 
 							// Re-subscribe to all topics with their stored handlers
 							// This is critical because manual disconnect loses Paho's subscription handlers
+							var failedSubs []subInfo
 							for _, sub := range subscriptions {
 								token := c.mqtt.Subscribe(sub.topic, 1 /*at-least-once*/, sub.handler)
 								for !token.WaitTimeout(c.timeout) {
@@ -414,9 +415,20 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 								}
 								if err := token.Error(); err != nil {
 									log.Error(err, "Failed to re-subscribe after reconnection", "topic", sub.topic)
+									failedSubs = append(failedSubs, sub)
 								} else {
 									log.Info("Re-subscribed successfully", "topic", sub.topic)
 								}
+							}
+
+							// Queue any failed subscriptions so they are retried on the next reconnection
+							if len(failedSubs) > 0 {
+								c.pendingMutex.Lock()
+								for _, sub := range failedSubs {
+									c.pendingSubscriptions[sub.topic] = sub.handler
+								}
+								c.pendingMutex.Unlock()
+								log.Info("Queued failed re-subscriptions for retry", "count", len(failedSubs))
 							}
 
 							log.Info("Periodic reconnection complete, all subscriptions re-registered")

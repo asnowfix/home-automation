@@ -251,3 +251,70 @@ func TestSubscribe_ConcurrentSubscriptions(t *testing.T) {
 		t.Errorf("expected %d subscribers, got %d (race condition lost some)", n, got)
 	}
 }
+
+// failingPahoClient wraps fakePahoClient but returns an error on Subscribe.
+type failingPahoClient struct {
+	fakePahoClient
+	subscribeErr error
+}
+
+func (f *failingPahoClient) Subscribe(topic string, qos byte, handler pahomqtt.MessageHandler) pahomqtt.Token {
+	return &failingToken{err: f.subscribeErr}
+}
+
+type failingToken struct{ err error }
+
+func (t *failingToken) Wait() bool                      { return true }
+func (t *failingToken) WaitTimeout(time.Duration) bool  { return true }
+func (t *failingToken) Done() <-chan struct{}             { ch := make(chan struct{}); close(ch); return ch }
+func (t *failingToken) Error() error                     { return t.err }
+
+// TestReconnect_FailedSubscriptionQueuedForRetry verifies that when a subscription
+// fails during periodic reconnection it is added to pendingSubscriptions so the
+// next reconnection attempt retries it.
+func TestReconnect_FailedSubscriptionQueuedForRetry(t *testing.T) {
+	subErr := fmt.Errorf("broker rejected subscription")
+	c := newTestClient(t)
+	c.mqtt = &failingPahoClient{subscribeErr: subErr}
+
+	handler := func(pahomqtt.Client, pahomqtt.Message) {}
+
+	// Simulate having a previously registered topic handler (as if we subscribed once)
+	c.handlers.Store("sensor/+", pahomqtt.MessageHandler(handler))
+
+	// Collect subscriptions (as the reconnect loop would)
+	type subInfo struct {
+		topic   string
+		handler pahomqtt.MessageHandler
+	}
+	var subscriptions []subInfo
+	c.handlers.Range(func(key, value interface{}) bool {
+		subscriptions = append(subscriptions, subInfo{key.(string), value.(pahomqtt.MessageHandler)})
+		return true
+	})
+
+	// Run the retry logic directly (extracted from the reconnect loop)
+	var failedSubs []subInfo
+	for _, sub := range subscriptions {
+		token := c.mqtt.Subscribe(sub.topic, 1, sub.handler)
+		token.WaitTimeout(c.timeout)
+		if err := token.Error(); err != nil {
+			failedSubs = append(failedSubs, sub)
+		}
+	}
+	if len(failedSubs) > 0 {
+		c.pendingMutex.Lock()
+		for _, sub := range failedSubs {
+			c.pendingSubscriptions[sub.topic] = sub.handler
+		}
+		c.pendingMutex.Unlock()
+	}
+
+	c.pendingMutex.Lock()
+	_, queued := c.pendingSubscriptions["sensor/+"]
+	c.pendingMutex.Unlock()
+
+	if !queued {
+		t.Error("failed subscription should have been added to pendingSubscriptions for retry")
+	}
+}

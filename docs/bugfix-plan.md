@@ -692,7 +692,7 @@ if sensors != nil {
 5. ✅ Issue #5: Cache pre-population timing
 6. ✅ Issue #6: Pool script error masking
 7. ✅ Issue #7: SSE slow client handling — DONE
-8. ✅ Issue #8: MQTT reconnection handler loss
+8. ✅ Issue #8: MQTT reconnection handler loss — DONE
 
 ### Phase 3: Low Priority (Week 3)
 9. ✅ Issue #9: Pool script time precision

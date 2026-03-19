@@ -204,8 +204,16 @@ function loadConfig(callback) {
     
     // Load from KVS asynchronously
     Shelly.call("KVS.Get", {key: kvsKey}, function(result, err) {
-      if (err && false) {}  // Prevent minifier from removing error parameter
-      
+      if (err) {
+        log("WARNING: KVS.Get failed for", kvsKey, ":", err, "- using default");
+        CONFIG[key] = schema.default;
+        if (schema.required && CONFIG[key] === null) {
+          missingRequired.push(key + " (" + kvsKey + ") - KVS error: " + err);
+        }
+        queueTask(loadNextKey);
+        return;
+      }
+
       if (result && ("value" in result) && result.value !== null && result.value !== "") {
         var value = result.value;
         
@@ -258,7 +266,7 @@ var TASK_TIMER = null;
 
 function processTaskQueue() {
   if (TASK_INDEX >= TASK_QUEUE.length) {
-    // No tasks left, stop timer and reset
+    // No tasks left — stop timer and reset so queueTask() can restart it later
     if (TASK_TIMER) {
       Timer.clear(TASK_TIMER);
       TASK_TIMER = null;
@@ -267,19 +275,12 @@ function processTaskQueue() {
     TASK_INDEX = 0;
     return;
   }
-  
-  // Get task at current index and increment
+
+  // Execute next task; new tasks queued by the task itself extend TASK_QUEUE
+  // and will be picked up on subsequent timer ticks.
   var task = TASK_QUEUE[TASK_INDEX];
   TASK_INDEX++;
   task();
-  
-  // Check again after task execution - if all tasks processed, stop timer
-  if (TASK_INDEX >= TASK_QUEUE.length && TASK_TIMER) {
-    Timer.clear(TASK_TIMER);
-    TASK_TIMER = null;
-    TASK_QUEUE = [];
-    TASK_INDEX = 0;
-  }
 }
 
 function queueTask(task) {
@@ -386,7 +387,7 @@ function needsBootstrap() {
     return true;
   }
   
-  var now = Date.now() / 1000; // Current time in seconds
+  var now = Math.floor(Date.now() / 1000); // Integer seconds (avoids float precision loss)
   var hoursSinceLastRun = (now - STATE.lastRunTimestamp) / 3600;
   var needs = hoursSinceLastRun > CONFIG.bootstrapHoursThreshold;
   
@@ -701,7 +702,7 @@ function activateOutput(outputId, callback) {
         setOutput(outputId, true, function() {
           STATE.activeOutput = outputId;
           // Record timestamp when pump starts
-          STATE.lastRunTimestamp = Date.now() / 1000;
+          STATE.lastRunTimestamp = Math.floor(Date.now() / 1000);
           saveState();
           if (callback) callback();
         });
@@ -718,7 +719,7 @@ function activateOutput(outputId, callback) {
       STATE.activeOutput = on ? 0 : -1;
       // Record timestamp when pump starts (Pro1 bootstrap)
       if (on) {
-        STATE.lastRunTimestamp = Date.now() / 1000;
+        STATE.lastRunTimestamp = Math.floor(Date.now() / 1000);
       }
       saveState();
       if (callback) callback();

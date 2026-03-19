@@ -684,18 +684,18 @@ if sensors != nil {
 
 ### Phase 1: Critical Fixes (Week 1)
 1. ✅ Issue #1: MQTT subscriber race condition — DONE
-2. ✅ Issue #2: Pool script task queue timing
+2. ✅ Issue #2: Pool script task queue timing — DONE
 3. ✅ Issue #3: Gen1 sensor cache updates — DONE
 
 ### Phase 2: Medium Priority (Week 2)
 4. ✅ Issue #4: Pool service error handling — DONE
 5. ✅ Issue #5: Cache pre-population timing
-6. ✅ Issue #6: Pool script error masking
+6. ✅ Issue #6: Pool script error masking — DONE
 7. ✅ Issue #7: SSE slow client handling — DONE
 8. ✅ Issue #8: MQTT reconnection handler loss — DONE
 
 ### Phase 3: Low Priority (Week 3)
-9. ✅ Issue #9: Pool script time precision
+9. ✅ Issue #9: Pool script time precision — DONE
 10. ✅ Issue #10: BLU sensor cache updates — DONE
 
 ---

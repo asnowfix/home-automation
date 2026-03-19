@@ -98,6 +98,11 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 		value := string(payload)
 		log.Info("Received Gen1 sensor data", "device_id", deviceId, "sensor", sensorType, "value", value)
 
+		// Update device cache so sensor values survive page reloads
+		if err := sc.UpdateSensorValue(ctx, deviceId, sensorType, value); err != nil {
+			log.V(1).Info("Failed to update sensor in cache", "error", err, "device_id", deviceId)
+		}
+
 	case 3:
 		// Info topic: shellies/<device-id>/info
 		if parts[2] != "info" {

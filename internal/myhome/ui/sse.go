@@ -25,17 +25,27 @@ func SSEFromContext(ctx context.Context) *SSEBroadcaster {
 	return nil
 }
 
+// sseSlowClientMaxSkips is the number of consecutive full-channel skips before
+// a slow client is forcibly disconnected.
+const sseSlowClientMaxSkips = 10
+
+// sseClient tracks per-client state inside the broadcaster.
+type sseClient struct {
+	ch               chan string
+	consecutiveSkips int
+}
+
 // SSEBroadcaster manages Server-Sent Events clients and broadcasts updates
 type SSEBroadcaster struct {
-	clients map[chan string]struct{}
-	mu      sync.RWMutex
+	clients map[chan string]*sseClient
+	mu      sync.Mutex
 	log     logr.Logger
 }
 
 // NewSSEBroadcaster creates a new SSE broadcaster
 func NewSSEBroadcaster(log logr.Logger) *SSEBroadcaster {
 	return &SSEBroadcaster{
-		clients: make(map[chan string]struct{}),
+		clients: make(map[chan string]*sseClient),
 		log:     log.WithName("SSEBroadcaster"),
 	}
 }
@@ -44,25 +54,29 @@ func NewSSEBroadcaster(log logr.Logger) *SSEBroadcaster {
 func (b *SSEBroadcaster) Subscribe() chan string {
 	ch := make(chan string, 10) // Buffer to prevent blocking
 	b.mu.Lock()
-	b.clients[ch] = struct{}{}
+	b.clients[ch] = &sseClient{ch: ch}
 	clientCount := len(b.clients)
 	b.mu.Unlock()
 	b.log.Info("SSE client subscribed", "total_clients", clientCount)
 	return ch
 }
 
-// Unsubscribe removes an SSE client
+// Unsubscribe removes an SSE client. It is safe to call even if the client was
+// already evicted by broadcast() due to being too slow.
 func (b *SSEBroadcaster) Unsubscribe(ch chan string) {
 	b.mu.Lock()
 	beforeCount := len(b.clients)
-	delete(b.clients, ch)
+	if _, exists := b.clients[ch]; exists {
+		delete(b.clients, ch)
+		close(ch)
+	}
 	afterCount := len(b.clients)
-	close(ch)
 	b.mu.Unlock()
 	b.log.Info("SSE client unsubscribed", "before", beforeCount, "after", afterCount)
 }
 
-// broadcast sends a message to all connected clients
+// broadcast sends a message to all connected clients, evicting any client whose
+// channel has been full for sseSlowClientMaxSkips consecutive broadcasts.
 func (b *SSEBroadcaster) broadcast(event string, data interface{}) {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -72,24 +86,36 @@ func (b *SSEBroadcaster) broadcast(event string, data interface{}) {
 
 	msg := fmt.Sprintf("event: %s\ndata: %s\n\n", event, string(jsonData))
 
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
 	clientCount := len(b.clients)
 	b.log.V(1).Info("Broadcasting to clients", "event", event, "data", data, "client_count", clientCount, "message", msg)
 
 	sentCount := 0
 	skippedCount := 0
-	for ch := range b.clients {
+	var toEvict []chan string
+	for ch, client := range b.clients {
 		select {
 		case ch <- msg:
+			client.consecutiveSkips = 0
 			sentCount++
 		default:
+			client.consecutiveSkips++
 			skippedCount++
-			b.log.Info("SSE client channel full, skipping message")
+			if client.consecutiveSkips >= sseSlowClientMaxSkips {
+				b.log.Info("Evicting slow SSE client", "consecutive_skips", client.consecutiveSkips)
+				toEvict = append(toEvict, ch)
+			} else {
+				b.log.Info("SSE client channel full, skipping message", "consecutive_skips", client.consecutiveSkips)
+			}
 		}
 	}
-	b.log.Info("Broadcast complete", "event", event, "data", data, "sent", sentCount, "skipped", skippedCount)
+	for _, ch := range toEvict {
+		delete(b.clients, ch)
+		close(ch)
+	}
+	b.log.Info("Broadcast complete", "event", event, "data", data, "sent", sentCount, "skipped", skippedCount, "evicted", len(toEvict))
 }
 
 // SensorUpdateData represents a sensor value update

@@ -90,6 +90,7 @@ type client struct {
 	ctx                  context.Context                // Process-wide context for background services
 	watchdogCancel       context.CancelFunc             // Cancel function for watchdog
 	subscribers          sync.Map                       // Map topic => []subscribers channels
+	subscribersMu        sync.Map                       // Map topic => *sync.Mutex, guards subscriber list mutations
 	handlers             sync.Map                       // Map topic => mqtt.MessageHandler for re-registration
 	pendingSubscriptions map[string]mqtt.MessageHandler // Subscriptions to apply on connect
 	pendingMutex         sync.Mutex                     // Protects pendingSubscriptions
@@ -406,6 +407,7 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 
 							// Re-subscribe to all topics with their stored handlers
 							// This is critical because manual disconnect loses Paho's subscription handlers
+							var failedSubs []subInfo
 							for _, sub := range subscriptions {
 								token := c.mqtt.Subscribe(sub.topic, 1 /*at-least-once*/, sub.handler)
 								for !token.WaitTimeout(c.timeout) {
@@ -413,9 +415,20 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 								}
 								if err := token.Error(); err != nil {
 									log.Error(err, "Failed to re-subscribe after reconnection", "topic", sub.topic)
+									failedSubs = append(failedSubs, sub)
 								} else {
 									log.Info("Re-subscribed successfully", "topic", sub.topic)
 								}
+							}
+
+							// Queue any failed subscriptions so they are retried on the next reconnection
+							if len(failedSubs) > 0 {
+								c.pendingMutex.Lock()
+								for _, sub := range failedSubs {
+									c.pendingSubscriptions[sub.topic] = sub.handler
+								}
+								c.pendingMutex.Unlock()
+								log.Info("Queued failed re-subscriptions for retry", "count", len(failedSubs))
 							}
 
 							log.Info("Periodic reconnection complete, all subscriptions re-registered")
@@ -635,11 +648,17 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 		close(s.queue)
 	}()
 
-	// Load or create subscriber list for this topic
+	// Get-or-create the per-topic mutex to guard subscriber list mutations
+	lockI, _ := c.subscribersMu.LoadOrStore(topic, &sync.Mutex{})
+	topicMu := lockI.(*sync.Mutex)
+
+	// Atomically append to subscriber list under the per-topic lock
+	topicMu.Lock()
 	value, loaded := c.subscribers.LoadOrStore(topic, make([]*subscriber, 0))
 	subscribers := value.([]*subscriber)
 	subscribers = append(subscribers, s)
 	c.subscribers.Store(topic, subscribers)
+	topicMu.Unlock()
 	c.log.Info("Subscriber added", "topic", topic, "subscriber", s.name, "count", len(subscribers), "qlen", qlen, "mqtt_subscribe_needed", !loaded)
 
 	if !loaded {
@@ -647,6 +666,16 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 		distribute := func(client mqtt.Client, msg mqtt.Message) {
 			c.log.Info("distribute: message received from broker", "subscription_topic", topic, "message_topic", msg.Topic(), "payload_len", len(msg.Payload()))
 			go func(log logr.Logger) {
+				// Acquire per-topic lock to safely read and modify the subscriber list
+				lockI, ok := c.subscribersMu.Load(topic)
+				if !ok {
+					log.Info("distribute: no lock found for topic", "topic", topic)
+					return
+				}
+				topicMu := lockI.(*sync.Mutex)
+				topicMu.Lock()
+				defer topicMu.Unlock()
+
 				// Load current subscribers
 				value, ok := c.subscribers.Load(topic)
 				if !ok {

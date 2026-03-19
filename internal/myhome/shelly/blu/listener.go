@@ -74,6 +74,7 @@ type BTHomeFrame struct {
 type DeviceRegistry interface {
 	SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) (bool, error)
 	GetDeviceById(ctx context.Context, id string) (*myhome.Device, error)
+	UpdateSensorValue(ctx context.Context, deviceID string, sensor string, value string) error
 }
 
 // SSEBroadcaster interface for broadcasting sensor updates to UI
@@ -108,17 +109,22 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 		// Handle device registration
 		sensors, err := handleBLUEvent(ctx, log, topic, payload, registry)
 
-		// Broadcast sensor updates via SSE if broadcaster is available
-		// This happens regardless of registration success, similar to Gen1 pattern
-		if sseBroadcaster != nil && sensors != nil {
+		// Update cache and broadcast sensor updates via SSE
+		// Both happen regardless of registration success, similar to Gen1 pattern
+		if sensors != nil {
 			for sensor, value := range *sensors {
-				log.Info("Broadcasting BLU sensor update via SSE", "device_id", deviceID, "sensor", sensor, "value", value)
-				sseBroadcaster.BroadcastSensorUpdate(deviceID, sensor, value)
+				// Update device cache so values survive page reloads
+				if cacheErr := registry.UpdateSensorValue(ctx, deviceID, sensor, value); cacheErr != nil {
+					log.V(1).Info("Failed to update sensor in cache", "error", cacheErr, "device_id", deviceID)
+				}
+				if sseBroadcaster != nil {
+					log.Info("Broadcasting BLU sensor update via SSE", "device_id", deviceID, "sensor", sensor, "value", value)
+					sseBroadcaster.BroadcastSensorUpdate(deviceID, sensor, value)
+				}
 			}
-		} else if sseBroadcaster == nil {
-			log.Error(fmt.Errorf("sseBroadcaster is nil"), "Cannot broadcast sensor update", "topic", topic)
-		} else if sensors == nil {
-			log.V(1).Info("No sensors to broadcast", "topic", topic, "device_id", deviceID)
+		}
+		if sensors == nil {
+			log.V(1).Info("No sensors in event", "topic", topic, "device_id", deviceID)
 		}
 
 		log.V(1).Info("event processing completed", "device_id", deviceID, "mac", mac)

@@ -417,12 +417,18 @@ func (s *PoolService) Status(ctx context.Context, controllerID string) (*PoolSta
 	// Get bootstrap status
 	bootstrapStatus, err := s.getDeviceStatus(ctx, bootstrapID, "bootstrap")
 	if err != nil {
+		// Best-effort: retrieve the bootstrap device name; fall back to its ID.
+		bootstrapName := bootstrapID
+		if bootstrapDev, lookupErr := s.provider.GetDeviceByAny(ctx, bootstrapID); lookupErr == nil {
+			bootstrapName = bootstrapDev.Name()
+		}
 		bootstrapStatus = DeviceStatus{
-			DeviceID: bootstrapID,
-			Role:     "bootstrap",
-			Online:   false,
-			Error:    err.Error(),
-			Inputs:   make(map[string]bool),
+			DeviceID:   bootstrapID,
+			DeviceName: bootstrapName,
+			Role:       "bootstrap",
+			Online:     false,
+			Error:      err.Error(),
+			Inputs:     make(map[string]bool),
 		}
 	}
 	status.Bootstrap = bootstrapStatus

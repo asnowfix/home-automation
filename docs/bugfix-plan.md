@@ -1,8 +1,11 @@
 # Bug Fix Plan - Code Review Findings (main vs v0.9.x)
 
-> **Created**: 2026-03-18  
-> **Review Scope**: 113 commits between main and v0.9.x branches  
-> **Status**: Ready for implementation
+> **Created**: 2026-03-18
+> **Last updated**: 2026-03-19 — All 10 issues complete
+> **Review Scope**: 113 commits between main and v0.9.x branches
+> **Status**: ✅ All issues implemented
+
+> **Note on Issue #5** (Cache pre-population): Already fixed prior to this plan — `dm.Start()` calls `dm.dr.Load(ctx)` at line 351 before starting any listeners. No code change required.
 
 ## Overview
 

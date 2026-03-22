@@ -1,0 +1,16 @@
+{
+  "kvs": {
+    "script/pool-pump/active-output": "-1",
+    "script/pool-pump/device-role": "controller"
+  },
+  "storage": {},
+  "component_status": {
+    "switch:0": {
+      "id": 0,
+      "output": false
+    },
+    "sys": {
+      "device_id": "test-device"
+    }
+  }
+}

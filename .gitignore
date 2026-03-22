@@ -52,6 +52,7 @@ SECRETS.md
 /myhome/ctl/shelly*/*.js
 /myhome/events/*
 /myhome/device*.json
+/device*.json
 myhome_*.deb
 database-export.json
 internal/myhome/ui/static/bulma.min.css

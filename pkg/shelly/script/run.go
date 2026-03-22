@@ -856,6 +856,12 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			value := paramsObj.Get("value").Export()
 			kvs := deviceState.GetKVS()
 			kvs[key] = value
+
+			// Trigger auto-save if callback is set
+			if deviceState.OnModified != nil {
+				deviceState.OnModified()
+			}
+
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
 					result := map[string]interface{}{"etag": "test", "rev": 1}
@@ -885,6 +891,23 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 				job = make(map[string]interface{})
 			}
 			id := deviceState.AddSchedule(job)
+
+			// Also persist in ComponentStatus as schedule:N component
+			if deviceState.ComponentStatus != nil {
+				key := fmt.Sprintf("schedule:%d", id)
+				deviceState.ComponentStatus[key] = map[string]interface{}{
+					"id":       id,
+					"enable":   job["enable"],
+					"timespec": job["timespec"],
+					"calls":    job["calls"],
+				}
+			}
+
+			// Trigger auto-save if callback is set
+			if deviceState.OnModified != nil {
+				deviceState.OnModified()
+			}
+
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
 					result := map[string]interface{}{"id": id}
@@ -899,6 +922,18 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			paramsObj := params.ToObject(vm)
 			id := int(paramsObj.Get("id").ToInteger())
 			deviceState.DeleteSchedule(id)
+
+			// Also remove from ComponentStatus
+			if deviceState.ComponentStatus != nil {
+				key := fmt.Sprintf("schedule:%d", id)
+				delete(deviceState.ComponentStatus, key)
+			}
+
+			// Trigger auto-save if callback is set
+			if deviceState.OnModified != nil {
+				deviceState.OnModified()
+			}
+
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
 					callable(goja.Undefined(), vm.ToValue(true), vm.ToValue(0), goja.Null(), userdata)
@@ -922,6 +957,12 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 					deviceState.ComponentStatus[key] = map[string]interface{}{"id": id, "output": on}
 				}
 			}
+
+			// Trigger auto-save if callback is set
+			if deviceState.OnModified != nil {
+				deviceState.OnModified()
+			}
+
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
 					result := map[string]interface{}{"id": id, "output": on}

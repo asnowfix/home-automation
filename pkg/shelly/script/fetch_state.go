@@ -60,19 +60,9 @@ func fetchAllKVS(ctx context.Context, via types.Channel, device types.Device) (m
 		if !ok {
 			return nil, fmt.Errorf("unexpected KVS.Get response type %T", out)
 		}
-		// The Value field contains a JSON-encoded string that needs to be parsed.
-		// For string values like "bootstrap", we need to add quotes to make it valid JSON.
-		// For other types (numbers, objects, arrays), the value is already valid JSON.
-		var parsedValue interface{}
-		valueBytes := []byte(getResp.Value)
-		if err := json.Unmarshal(valueBytes, &parsedValue); err != nil {
-			// If parsing fails, try wrapping in quotes (for unquoted string values)
-			quotedValue := []byte(`"` + getResp.Value + `"`)
-			if err := json.Unmarshal(quotedValue, &parsedValue); err != nil {
-				return nil, fmt.Errorf("parsing KVS value for key %q: %w", key, err)
-			}
-		}
-		result[key] = parsedValue
+		// KVS values are always stored as plain strings on Shelly devices.
+		// Store them as-is without JSON parsing to preserve the string type.
+		result[key] = getResp.Value
 	}
 	return result, nil
 }

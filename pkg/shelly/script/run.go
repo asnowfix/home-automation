@@ -855,7 +855,8 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			key := paramsObj.Get("key").String()
 			value := paramsObj.Get("value").Export()
 			kvs := deviceState.GetKVS()
-			kvs[key] = value
+			// KVS values are always stored as strings on real Shelly devices
+			kvs[key] = fmt.Sprintf("%v", value)
 
 			// Trigger auto-save if callback is set
 			if deviceState.OnModified != nil {

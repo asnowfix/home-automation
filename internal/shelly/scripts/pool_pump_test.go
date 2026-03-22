@@ -100,16 +100,17 @@ func shellyEvent(eventName string) []byte {
 	return data
 }
 
-// TestPoolPump_ControllerCreates4Schedules runs pool-pump.js as a controller
-// and verifies that all four expected schedules are registered after init.
+// TestPoolPump_ControllerCreates5Schedules runs pool-pump.js as a controller
+// and verifies that all five expected schedules are registered after init.
 //
 // Schedule timespecs expected:
 //
-//	morning-start : 0 0 SR+3 * * SUN,...
-//	evening-stop  : 0 0 SS * * SUN,...
+//	daily-check   : @sunrise * * SUN,...
+//	morning-start : @sunrise+3h * * SUN,...
+//	evening-stop  : @sunset * * SUN,...
 //	night-start   : 0 15 23 * * SUN,...
 //	night-stop    : 0 15 0 * * SUN,...
-func TestPoolPump_ControllerCreates4Schedules(t *testing.T) {
+func TestPoolPump_ControllerCreates5Schedules(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
 	mqtt.ResetClient()
@@ -134,13 +135,14 @@ func TestPoolPump_ControllerCreates4Schedules(t *testing.T) {
 	}()
 
 	wantTimespecs := []string{
-		"0 0 SR+3 * * SUN,MON,TUE,WED,THU,FRI,SAT",
-		"0 0 SS * * SUN,MON,TUE,WED,THU,FRI,SAT",
+		"@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT",
+		"@sunrise+3h * * SUN,MON,TUE,WED,THU,FRI,SAT",
+		"@sunset * * SUN,MON,TUE,WED,THU,FRI,SAT",
 		"0 15 23 * * SUN,MON,TUE,WED,THU,FRI,SAT",
 		"0 15 0 * * SUN,MON,TUE,WED,THU,FRI,SAT",
 	}
 
-	// Poll until all 4 schedules are created (or timeout).
+	// Poll until all 5 schedules are created (or timeout).
 	ok := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
 		return len(deviceState.Schedules) >= len(wantTimespecs)
 	})

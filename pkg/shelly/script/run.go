@@ -291,8 +291,13 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	// Shelly.getComponentStatus(component, id)
 	shellyObj.Set("getComponentStatus", func(call goja.FunctionCall) goja.Value {
 		component := call.Argument(0).String()
-		log.V(1).Info("Shelly.getComponentStatus placeholder", "component", component)
-		return vm.NewObject() // Return empty object
+		log.V(1).Info("Shelly.getComponentStatus", "component", component)
+		if deviceState.ComponentStatus != nil {
+			if v, ok := deviceState.ComponentStatus[component]; ok {
+				return vm.ToValue(v)
+			}
+		}
+		return vm.NewObject() // Return empty object when not found
 	})
 
 	// Shelly.getComponentConfig(component, id)
@@ -691,7 +696,8 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		for i, arg := range call.Arguments {
 			args[i] = arg.Export()
 		}
-		log.Info("Script print", "args", args)
+		// Write directly to stdout like a real print function
+		fmt.Println(args...)
 		return goja.Undefined()
 	})
 
@@ -702,7 +708,8 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		for i, arg := range call.Arguments {
 			args[i] = arg.Export()
 		}
-		log.Info("Script console.log", "args", args)
+		// Write directly to stdout like a real console.log
+		fmt.Println(args...)
 		return goja.Undefined()
 	})
 	vm.Set("console", consoleObj)
@@ -720,7 +727,31 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	// Add device's events handler to process emitted events
 	*handlers = append(*handlers, eh)
 
+	// If the caller provided an event-injection channel (for tests), wire it up
+	// so that raw JSON event bytes sent to the channel are forwarded to the
+	// script's registered Shelly.addEventHandler callbacks.
+	if deviceState.EventInjector != nil {
+		*handlers = append(*handlers, &testEventForwarder{
+			ch: deviceState.EventInjector,
+			eh: eh,
+		})
+	}
+
 	return vm, nil
+}
+
+// testEventForwarder is a handler that reads pre-encoded JSON event bytes from
+// a test-controlled channel and routes them into the script's event handlers.
+// This allows tests to simulate schedule-fired events without needing a real
+// Shelly device.
+type testEventForwarder struct {
+	ch <-chan []byte
+	eh *eventsHandler
+}
+
+func (f *testEventForwarder) Wait() <-chan []byte { return f.ch }
+func (f *testEventForwarder) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
+	return f.eh.Handle(ctx, vm, msg)
 }
 
 type methodFunc func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error)
@@ -751,10 +782,12 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			paramsObj := params.ToObject(vm)
 			key := paramsObj.Get("key").String()
 
+			kvs := deviceState.GetKVS()
+			val, found := kvs[key]
+
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
-					kvs := deviceState.GetKVS()
-					if val, ok := kvs[key]; ok {
+					if found {
 						result := map[string]interface{}{
 							"key":   key,
 							"etag":  "0DhkTpVgJk9zc2soEXlpoLrw==",
@@ -767,13 +800,23 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 						}
 						return ret.Export(), nil
 					} else {
-						// Key not found - add it with null value
+						// Key not found - record it as nil so repeated calls don't mutate the map
 						kvs[key] = nil
 						// Call callback with error code -114 (key not found)
 						callable(goja.Undefined(), goja.Null(), vm.ToValue(-114), vm.ToValue("Key not found"), userdata)
 						return nil, nil
 					}
 				}
+			}
+
+			// Synchronous call (no callback) — return the value directly so that
+			// scripts using loadValue() can read back KVS entries seeded in DeviceState.
+			if found && val != nil {
+				return map[string]interface{}{
+					"key":   key,
+					"etag":  "0DhkTpVgJk9zc2soEXlpoLrw==",
+					"value": val,
+				}, nil
 			}
 			return nil, nil
 		},
@@ -806,6 +849,108 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			}
 			return nil, nil
 		},
+		// KVS.Set — persist a key-value pair in the device state
+		"kvs.set": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
+			paramsObj := params.ToObject(vm)
+			key := paramsObj.Get("key").String()
+			value := paramsObj.Get("value").Export()
+			kvs := deviceState.GetKVS()
+			kvs[key] = value
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					result := map[string]interface{}{"etag": "test", "rev": 1}
+					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
+				}
+			}
+			return nil, nil
+		},
+
+		// Schedule.List — return all tracked schedules
+		"schedule.list": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					result := map[string]interface{}{
+						"jobs": deviceState.Schedules,
+					}
+					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
+				}
+			}
+			return nil, nil
+		},
+
+		// Schedule.Create — store a new schedule, return its assigned ID
+		"schedule.create": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
+			job, _ := params.Export().(map[string]interface{})
+			if job == nil {
+				job = make(map[string]interface{})
+			}
+			id := deviceState.AddSchedule(job)
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					result := map[string]interface{}{"id": id}
+					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
+				}
+			}
+			return nil, nil
+		},
+
+		// Schedule.Delete — remove a schedule by ID
+		"schedule.delete": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
+			paramsObj := params.ToObject(vm)
+			id := int(paramsObj.Get("id").ToInteger())
+			deviceState.DeleteSchedule(id)
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					callable(goja.Undefined(), vm.ToValue(true), vm.ToValue(0), goja.Null(), userdata)
+				}
+			}
+			return nil, nil
+		},
+
+		// Switch.Set — update ComponentStatus and call callback
+		"switch.set": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
+			paramsObj := params.ToObject(vm)
+			id := int(paramsObj.Get("id").ToInteger())
+			on := paramsObj.Get("on").ToBoolean()
+			key := fmt.Sprintf("switch:%d", id)
+			if deviceState.ComponentStatus != nil {
+				if existing, ok := deviceState.ComponentStatus[key]; ok {
+					if m, ok := existing.(map[string]interface{}); ok {
+						m["output"] = on
+					}
+				} else {
+					deviceState.ComponentStatus[key] = map[string]interface{}{"id": id, "output": on}
+				}
+			}
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					result := map[string]interface{}{"id": id, "output": on}
+					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
+				}
+			}
+			return nil, nil
+		},
+
+		// Input.SetConfig — acknowledge component rename, no state needed
+		"input.setconfig": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					callable(goja.Undefined(), vm.ToValue(true), vm.ToValue(0), goja.Null(), userdata)
+				}
+			}
+			return nil, nil
+		},
+
+		// Switch.SetConfig — acknowledge component rename, no state needed
+		"switch.setconfig": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					callable(goja.Undefined(), vm.ToValue(true), vm.ToValue(0), goja.Null(), userdata)
+				}
+			}
+			return nil, nil
+		},
+
 		"http.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/HTTP#httpget
 			// params: { url: string, timeout: number }

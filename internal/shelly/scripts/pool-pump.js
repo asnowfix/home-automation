@@ -156,6 +156,9 @@ function initConfig() {
   }
 }
 
+// Initialize CONFIG with defaults immediately so logging works
+initConfig();
+
 // Load configuration from KVS and validate required fields
 function loadConfig(callback) {
   log("Loading configuration from KVS...");
@@ -219,7 +222,7 @@ function loadConfig(callback) {
         
         // Parse value based on type
         if (schema.type === "boolean") {
-          CONFIG[key] = value === "true";
+          CONFIG[key] = value === "true" || value === true;
         } else if (schema.type === "number") {
           var num = Number(value);
           if (!isNaN(num)) {
@@ -231,8 +234,6 @@ function loadConfig(callback) {
         } else {
           CONFIG[key] = value;
         }
-        
-        log("Loaded", key, "=", CONFIG[key]);
       } else {
         // Use default
         CONFIG[key] = schema.default;
@@ -250,8 +251,6 @@ function loadConfig(callback) {
   
   loadNextKey();
 }
-
-initConfig();
 
 // State keys for KVS persistence
 var STATE_KEYS = {
@@ -919,7 +918,7 @@ function createSchedules(callback) {
   var schedules = [
     {
       enable: true,
-      timespec: '0 0 SR+3h * * SUN,MON,TUE,WED,THU,FRI,SAT',
+      timespec: '0 0 SR+3 * * SUN,MON,TUE,WED,THU,FRI,SAT',
       calls: [{
         method: 'Shelly.EmitEvent',
         params: {event: 'pool-pump/morning-start'}
@@ -939,6 +938,14 @@ function createSchedules(callback) {
       calls: [{
         method: 'Shelly.EmitEvent',
         params: {event: 'pool-pump/night-start'}
+      }]
+    },
+    {
+      enable: true,
+      timespec: '0 15 0 * * SUN,MON,TUE,WED,THU,FRI,SAT',
+      calls: [{
+        method: 'Shelly.EmitEvent',
+        params: {event: 'pool-pump/night-stop'}
       }]
     }
   ];
@@ -970,6 +977,20 @@ function createSchedules(callback) {
 }
 
 // === DEVICE EVENT HANDLERS ===
+function handleNightStop() {
+  log('Night stop event');
+
+  // Clear the in-script timer if it is still running (avoids a double stop)
+  if (STATE.nightRunTimerId) {
+    Timer.clear(STATE.nightRunTimerId);
+    STATE.nightRunTimerId = null;
+  }
+
+  activateOutput(-1, function() {
+    log('Pump stopped after night run');
+  });
+}
+
 function handleDeviceEvent(eventName) {
   log('Received device event:', eventName);
   
@@ -991,6 +1012,8 @@ function handleDeviceEvent(eventName) {
     handleEveningStop();
   } else if (eventName === 'pool-pump/night-start') {
     handleNightStart();
+  } else if (eventName === 'pool-pump/night-stop') {
+    handleNightStop();
   }
 }
 
@@ -1120,11 +1143,12 @@ function continueInit() {
   if (STATE.deviceRole === 'controller') {
     var initSteps = [
       function(next) {
-        storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
-        log('Initial state saved to KVS');
+        log('Step 1/5: Detecting device type...');
+        detectDeviceType();
         next();
       },
       function(next) {
+        log('Step 2/5: Checking water supply status...');
         var input0 = Shelly.getComponentStatus('input:0');
         if (input0) {
           handleWaterSupply(input0.state);
@@ -1132,12 +1156,15 @@ function continueInit() {
         next();
       },
       function(next) {
+        log('Step 3/5: Configuring component names...');
         applyComponentNames(next);
       },
       function(next) {
+        log('Step 4/5: Clearing old schedules...');
         clearNonUpdateSchedules(next);
       },
       function(next) {
+        log('Step 5/5: Creating schedules...');
         createSchedules(next);
       }
     ];
@@ -1146,7 +1173,7 @@ function continueInit() {
     
     function runNextStep() {
       if (stepIndex >= initSteps.length) {
-        log('All initialization steps complete');
+        log('✓ All initialization steps complete - script is now running');
         return;
       }
       
@@ -1163,9 +1190,11 @@ function continueInit() {
     // Bootstrap helper - clean schedules but don't create pump schedules
     var initSteps = [
       function(next) {
+        log('Step 1/2: Configuring component names...');
         applyComponentNames(next);
       },
       function(next) {
+        log('Step 2/2: Clearing old schedules...');
         clearNonUpdateSchedules(next);
       }
     ];
@@ -1174,7 +1203,7 @@ function continueInit() {
     
     function runNextStep() {
       if (stepIndex >= initSteps.length) {
-        log('All initialization steps complete');
+        log('✓ All initialization steps complete - script is now running');
         return;
       }
       

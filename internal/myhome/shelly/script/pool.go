@@ -148,6 +148,7 @@ func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *sh
 	}
 
 	// Set KVS configuration values
+	fmt.Printf("  → Configuring %s (%d settings)...\n", sd.Name(), len(kvsConfig))
 	for key, value := range kvsConfig {
 		if _, err := kvs.SetKeyValue(ctx, s.log, via, sd, key, value); err != nil {
 			return fmt.Errorf("failed to set KVS key %s: %w", key, err)
@@ -164,6 +165,7 @@ func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *sh
 		return fmt.Errorf("failed to read %s: %w", scriptName, err)
 	}
 
+	fmt.Printf("  → Uploading script to %s...\n", sd.Name())
 	uploadCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
@@ -172,6 +174,7 @@ func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *sh
 	if err != nil {
 		return fmt.Errorf("failed to upload/start %s: %w", scriptName, err)
 	}
+	fmt.Printf("  → Script uploaded and started on %s\n", sd.Name())
 
 	s.log.Info("Device setup complete", "device", sd.Name(), "role", role)
 	return nil

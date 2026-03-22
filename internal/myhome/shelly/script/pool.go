@@ -29,6 +29,7 @@ var PoolKVSKeys = map[string]string{
 	"night_run_duration_ms":       "script/pool-pump/night-duration", // 32 chars ✓
 	"bootstrap_to_speed_delay_ms": "script/pool-pump/boot-delay",     // 28 chars ✓
 	"bootstrap_hours_threshold":   "script/pool-pump/boot-hours",     // 28 chars ✓
+	"temperature_threshold":       "script/pool-pump/temp-threshold", // 32 chars ✓
 }
 
 // PoolService handles pool pump operations
@@ -56,6 +57,7 @@ type SetupOptions struct {
 	EcoSpeed                int
 	MidSpeed                int
 	HighSpeed               int
+	TemperatureThreshold    float64
 	ForceUpload             bool
 	NoMinify                bool
 }
@@ -144,6 +146,7 @@ func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *sh
 			PoolKVSKeys["night_run_duration_ms"]:       fmt.Sprintf("%d", opts.NightRunDurationMs),
 			PoolKVSKeys["bootstrap_to_speed_delay_ms"]: fmt.Sprintf("%d", opts.BootstrapToSpeedDelayMs),
 			PoolKVSKeys["bootstrap_hours_threshold"]:   fmt.Sprintf("%.1f", opts.BootstrapHoursThreshold),
+			PoolKVSKeys["temperature_threshold"]:       fmt.Sprintf("%.1f", opts.TemperatureThreshold),
 		}
 	}
 
@@ -360,22 +363,46 @@ type PoolStatus struct {
 
 // DeviceStatus represents the status of a single device
 type DeviceStatus struct {
-	DeviceID      string          `json:"device_id" yaml:"device_id"`
-	DeviceName    string          `json:"device_name,omitempty" yaml:"device_name,omitempty"`
-	Role          string          `json:"role" yaml:"role"`
-	Online        bool            `json:"online" yaml:"online"`
-	ScriptRunning bool            `json:"script_running" yaml:"script_running"`
-	ActiveOutput  int             `json:"active_output" yaml:"active_output"` // -1 = off, 0/1/2 = switch ID
-	ActiveSpeed   string          `json:"active_speed,omitempty" yaml:"active_speed,omitempty"`
-	Inputs        map[string]bool `json:"inputs" yaml:"inputs"`
-	Error         string          `json:"error,omitempty" yaml:"error,omitempty"`
+	DeviceID         string          `json:"device_id" yaml:"device_id"`
+	DeviceName       string          `json:"device_name,omitempty" yaml:"device_name,omitempty"`
+	DeviceType       string          `json:"device_type,omitempty" yaml:"device_type,omitempty"` // "pro3" or "pro1"
+	Role             string          `json:"role" yaml:"role"`
+	Online           bool            `json:"online" yaml:"online"`
+	ScriptRunning    bool            `json:"script_running" yaml:"script_running"`
+	ActiveOutput     int             `json:"active_output" yaml:"active_output"` // -1 = off, 0/1/2 = switch ID
+	ActiveSpeed      string          `json:"active_speed,omitempty" yaml:"active_speed,omitempty"`
+	SavedOutput      int             `json:"saved_output,omitempty" yaml:"saved_output,omitempty"` // Saved before water-supply protection
+	Inputs           map[string]bool `json:"inputs" yaml:"inputs"`
+	Switches         map[string]int  `json:"switches,omitempty" yaml:"switches,omitempty"` // Switch names to IDs
+	MqttConnected    bool            `json:"mqtt_connected,omitempty" yaml:"mqtt_connected,omitempty"`
+	LastRunTimestamp *int64          `json:"last_run_timestamp,omitempty" yaml:"last_run_timestamp,omitempty"` // Unix timestamp
+	ScheduleMode     string          `json:"schedule_mode,omitempty" yaml:"schedule_mode,omitempty"`           // "summer" or "winter"
+	Error            string          `json:"error,omitempty" yaml:"error,omitempty"`
 }
 
-// Environment represents environmental conditions
+// Environment represents environmental conditions and configuration
 type Environment struct {
+	// Bootstrap configuration
 	BootstrapHoursThreshold float64 `json:"bootstrap_hours_threshold" yaml:"bootstrap_hours_threshold"`
+	BootstrapDurationMs     int     `json:"bootstrap_duration_ms,omitempty" yaml:"bootstrap_duration_ms,omitempty"`
+	BootstrapToSpeedDelayMs int     `json:"bootstrap_to_speed_delay_ms,omitempty" yaml:"bootstrap_to_speed_delay_ms,omitempty"`
 	BootstrapRequired       bool    `json:"bootstrap_required" yaml:"bootstrap_required"`
 	BootstrapInProgress     bool    `json:"bootstrap_in_progress" yaml:"bootstrap_in_progress"`
+
+	// Schedule configuration
+	TemperatureThreshold float64 `json:"temperature_threshold,omitempty" yaml:"temperature_threshold,omitempty"`
+	NightRunDurationMs   int     `json:"night_run_duration_ms,omitempty" yaml:"night_run_duration_ms,omitempty"`
+
+	// Speed mappings (controller only)
+	EcoSpeed  *int `json:"eco_speed,omitempty" yaml:"eco_speed,omitempty"`
+	MidSpeed  *int `json:"mid_speed,omitempty" yaml:"mid_speed,omitempty"`
+	HighSpeed *int `json:"high_speed,omitempty" yaml:"high_speed,omitempty"`
+
+	// MQTT configuration
+	MqttTopicPrefix string `json:"mqtt_topic_prefix,omitempty" yaml:"mqtt_topic_prefix,omitempty"`
+
+	// Weather forecast
+	ForecastUrl string `json:"forecast_url,omitempty" yaml:"forecast_url,omitempty"`
 }
 
 // Status returns the current status of the pool pump system
@@ -458,6 +485,7 @@ func (s *PoolService) getDeviceStatus(ctx context.Context, deviceID, role string
 		DeviceName: device.Name(),
 		Role:       role,
 		Inputs:     make(map[string]bool),
+		Switches:   make(map[string]int),
 	}
 
 	sd, err := s.provider.GetShellyDevice(ctx, device)
@@ -529,6 +557,58 @@ func (s *PoolService) getDeviceStatus(ctx context.Context, deviceID, role string
 		}
 	}
 
+	// Get switch names from device config
+	switchNames := []string{"pump-eco", "pump-mid", "pump-high"}
+	if role == "bootstrap" {
+		switchNames = []string{"pump-max"}
+	}
+	for i, name := range switchNames {
+		if i < numSwitches {
+			status.Switches[name] = i
+		}
+	}
+
+	// Determine device type from number of switches
+	if numSwitches >= 3 {
+		status.DeviceType = "pro3"
+	} else {
+		status.DeviceType = "pro1"
+	}
+
+	// Get MQTT connection status
+	params := map[string]interface{}{}
+	if result, err := sd.CallE(ctx, via, "MQTT.GetStatus", params); err == nil && result != nil {
+		if mqttStatus, ok := result.(map[string]interface{}); ok {
+			if connected, ok := mqttStatus["connected"].(bool); ok {
+				status.MqttConnected = connected
+			}
+		}
+	}
+
+	// Get state from KVS (controller only has these)
+	if role == "controller" {
+		// Get last run timestamp
+		if val, err := kvs.GetValue(ctx, s.log, via, sd, "script/pool-pump/last-run-ts"); err == nil && val != nil && val.Value != "" {
+			var ts int64
+			if _, err := fmt.Sscanf(val.Value, "%d", &ts); err == nil {
+				status.LastRunTimestamp = &ts
+			}
+		}
+
+		// Get schedule mode
+		if val, err := kvs.GetValue(ctx, s.log, via, sd, "script/pool-pump/schedule-mode"); err == nil && val != nil && val.Value != "" {
+			status.ScheduleMode = val.Value
+		}
+
+		// Get saved output (for water-supply protection)
+		if val, err := kvs.GetValue(ctx, s.log, via, sd, "script/pool-pump/active-output"); err == nil && val != nil && val.Value != "" {
+			var savedOut int
+			if _, err := fmt.Sscanf(val.Value, "%d", &savedOut); err == nil {
+				status.SavedOutput = savedOut
+			}
+		}
+	}
+
 	return status, nil
 }
 
@@ -545,13 +625,73 @@ func (s *PoolService) getEnvironmentStatus(ctx context.Context, controllerID str
 
 	via := types.ChannelMqtt
 
-	// Get bootstrap hours threshold from KVS
+	// Get bootstrap configuration from KVS
 	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["bootstrap_hours_threshold"]); err == nil && val != nil {
 		var threshold float64
 		if _, err := fmt.Sscanf(val.Value, "%f", &threshold); err == nil {
 			env.BootstrapHoursThreshold = threshold
 		}
 	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["bootstrap_duration_ms"]); err == nil && val != nil {
+		var duration int
+		if _, err := fmt.Sscanf(val.Value, "%d", &duration); err == nil {
+			env.BootstrapDurationMs = duration
+		}
+	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["bootstrap_to_speed_delay_ms"]); err == nil && val != nil {
+		var delay int
+		if _, err := fmt.Sscanf(val.Value, "%d", &delay); err == nil {
+			env.BootstrapToSpeedDelayMs = delay
+		}
+	}
+
+	// Get schedule configuration from KVS
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["temperature_threshold"]); err == nil && val != nil {
+		var threshold float64
+		if _, err := fmt.Sscanf(val.Value, "%f", &threshold); err == nil {
+			env.TemperatureThreshold = threshold
+		}
+	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["night_run_duration_ms"]); err == nil && val != nil {
+		var duration int
+		if _, err := fmt.Sscanf(val.Value, "%d", &duration); err == nil {
+			env.NightRunDurationMs = duration
+		}
+	}
+
+	// Get speed mappings from KVS
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["eco_speed"]); err == nil && val != nil {
+		var speed int
+		if _, err := fmt.Sscanf(val.Value, "%d", &speed); err == nil {
+			env.EcoSpeed = &speed
+		}
+	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["mid_speed"]); err == nil && val != nil {
+		var speed int
+		if _, err := fmt.Sscanf(val.Value, "%d", &speed); err == nil {
+			env.MidSpeed = &speed
+		}
+	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["high_speed"]); err == nil && val != nil {
+		var speed int
+		if _, err := fmt.Sscanf(val.Value, "%d", &speed); err == nil {
+			env.HighSpeed = &speed
+		}
+	}
+
+	// Get MQTT configuration from KVS
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["mqtt_topic_prefix"]); err == nil && val != nil {
+		env.MqttTopicPrefix = val.Value
+	}
+
+	// Get forecast URL from Script.storage (not KVS)
+	// Note: This is stored in Script.storage, not KVS, so we'd need to call Script.Eval to retrieve it
+	// For now, we'll skip this as it requires executing code on the device
 
 	// Note: The script tracks last run time and makes bootstrap decisions internally
 	// We only display the configuration here, not the runtime state

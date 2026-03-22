@@ -118,6 +118,13 @@ var CONFIG_SCHEMA = {
     default: 500,
     type: "number",
     required: false
+  },
+  temperatureThreshold: {
+    description: "Temperature threshold (°C) for summer mode (day schedule)",
+    key: "temp-threshold",
+    default: 20,
+    type: "number",
+    required: false
   }
 };
 
@@ -252,10 +259,16 @@ function loadConfig(callback) {
   loadNextKey();
 }
 
+// Script.storage keys for continuously evolving values (survives reboots)
+var STORAGE_KEYS = {
+  forecastUrl: "forecast-url"       // Open-Meteo forecast URL built from device location
+};
+
 // State keys for KVS persistence
 var STATE_KEYS = {
   activeOutput: "active-output",    // -1 (all off), 0, 1, 2 for pro3; 0/1 for pro1
-  lastRunTimestamp: "last-run-ts"   // Unix timestamp (seconds) of last pump run
+  lastRunTimestamp: "last-run-ts",  // Unix timestamp (seconds) of last pump run
+  scheduleMode: "schedule-mode"     // "summer" or "winter" mode
 };
 
 // === TASK QUEUE (SINGLE TIMER FOR ALL SEQUENTIAL OPERATIONS) ===
@@ -318,6 +331,15 @@ var STATE = {
   // MQTT connection
   mqttConnected: false,
   
+  // Forecast cache (in-memory, refreshed daily)
+  forecastUrl: null,          // Open-Meteo forecast URL
+  cachedForecast: null,       // Array of hourly temperatures
+  cachedForecastTimes: null,  // Array of hourly timestamps
+  lastForecastFetchDate: null,// Date string (YYYY-M-D) of last fetch
+  
+  // Schedule mode
+  scheduleMode: null,         // "summer" or "winter"
+  
   // Initialization flag
   initializing: true          // Prevents KVS writes during init
 };
@@ -341,6 +363,37 @@ function log() {
     if (i + 1 < arguments.length) s += " ";
   }
   print(SCRIPT_PREFIX, s);
+}
+
+// === SCRIPT.STORAGE HELPERS (for forecast URL) ===
+function storeStorageValue(key, value) {
+  var valueStr;
+  if (typeof value === "undefined" || value === null) {
+    valueStr = "null";
+  } else if (typeof value === "number" || typeof value === "boolean") {
+    valueStr = value.toString();
+  } else if (typeof value === "object") {
+    valueStr = JSON.stringify(value);
+  } else {
+    valueStr = String(value);
+  }
+  Script.storage.setItem(key, valueStr);
+}
+
+function loadStorageValue(key) {
+  var v = Script.storage.getItem(key);
+  if (v === null || v === undefined) return null;
+  if (v === "null" || v === "undefined") return null;
+  if (v === "true") return true;
+  if (v === "false") return false;
+  var num = Number(v);
+  if (!isNaN(num)) return num;
+  try {
+    return JSON.parse(v);
+  } catch (e) {
+    if (e && false) {}
+    return v;
+  }
 }
 
 // === KVS HELPERS ===
@@ -392,6 +445,149 @@ function needsBootstrap() {
   
   log('Hours since last run:', hoursSinceLastRun.toFixed(1), 'threshold:', CONFIG.bootstrapHoursThreshold, 'hours, needs bootstrap:', needs);
   return needs;
+}
+
+// === WEATHER FORECAST FUNCTIONS ===
+function setForecastURL(lat, lon) {
+  log('setForecastURL', lat, lon);
+  if (lat !== null && lon !== null) {
+    var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&hourly=temperature_2m&forecast_days=1&timezone=auto';
+    STATE.forecastUrl = url;
+    storeStorageValue(STORAGE_KEYS.forecastUrl, url);
+    log('Forecast URL ready');
+  }
+}
+
+function shouldRefreshForecast() {
+  var now = new Date();
+  var today = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+  
+  if (STATE.lastForecastFetchDate === null || STATE.lastForecastFetchDate !== today) {
+    return true;
+  }
+  return false;
+}
+
+function scheduleForecastRetry() {
+  if (!STATE.cachedForecast) {
+    log('Scheduling forecast retry in 10 seconds...');
+    Timer.set(10000, false, function() {
+      if (!STATE.cachedForecast) {
+        log('Retrying forecast fetch...');
+        fetchAndCacheForecast();
+      }
+    });
+  }
+}
+
+function onForecast(result, error_code, error_message, cb) {
+  if (error_code !== 0) {
+    log('Forecast fetch error code:', error_code, 'message:', error_message);
+    scheduleForecastRetry();
+    if (typeof cb === 'function') cb();
+    return;
+  }
+  
+  if (!result || !result.body) {
+    log('No forecast data in response');
+    scheduleForecastRetry();
+    if (typeof cb === 'function') cb();
+    return;
+  }
+  
+  var data = null;
+  try {
+    data = JSON.parse(result.body);
+  } catch (e) {
+    log('JSON parse error:', result.body);
+    if (e && false) {}
+    scheduleForecastRetry();
+    if (typeof cb === 'function') cb();
+    return;
+  }
+  
+  if (!data || !data.hourly || !data.hourly.temperature_2m || data.hourly.temperature_2m.length === 0) {
+    log('Invalid forecast structure');
+    scheduleForecastRetry();
+    if (typeof cb === 'function') cb();
+    return;
+  }
+  
+  STATE.cachedForecast = data.hourly.temperature_2m;
+  STATE.cachedForecastTimes = data.hourly.time;
+  data = null;
+  
+  var now = new Date();
+  STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+  log('Forecast cached:', STATE.cachedForecast.length, 'values');
+  
+  if (typeof cb === 'function') {
+    Timer.set(100, false, cb);
+  }
+}
+
+function fetchAndCacheForecast(cb) {
+  var url = STATE.forecastUrl || loadStorageValue(STORAGE_KEYS.forecastUrl);
+  if (!url) {
+    log('Open-Meteo forecast URL not configured. Skipping forecast.');
+    if (typeof cb === 'function') cb();
+    return;
+  }
+  
+  log('Fetching fresh forecast from Open-Meteo...');
+  Shelly.call("HTTP.GET", {
+    url: url,
+    timeout: 10
+  }, onForecast, cb);
+}
+
+function getMaxForecastTemp() {
+  if (!STATE.cachedForecast || STATE.cachedForecast.length === 0) {
+    return null;
+  }
+  
+  var maxTemp = null;
+  for (var i = 0; i < STATE.cachedForecast.length; i++) {
+    var temp = STATE.cachedForecast[i];
+    if (temp !== null && (maxTemp === null || temp > maxTemp)) {
+      maxTemp = temp;
+    }
+  }
+  
+  return maxTemp;
+}
+
+function onDeviceLocation(result, error_code, error_message, cb) {
+  if (error_code === 0 && result) {
+    if (result.lat !== null && result.lon !== null) {
+      log('Auto-detected location: lat=' + result.lat + ', lon=' + result.lon);
+      setForecastURL(result.lat, result.lon);
+      if (typeof cb === 'function') cb();
+    } else {
+      log('Location detection returned null coordinates');
+      if (typeof cb === 'function') cb();
+    }
+  } else {
+    log('Location detection error:', error_code, error_message);
+    if (typeof cb === 'function') cb();
+  }
+}
+
+function ensureForecastUrl(cb) {
+  if (STATE.forecastUrl) {
+    if (typeof cb === 'function') cb();
+    return;
+  }
+  
+  STATE.forecastUrl = loadStorageValue(STORAGE_KEYS.forecastUrl);
+  if (STATE.forecastUrl) {
+    log('Loaded forecast URL from storage');
+    if (typeof cb === 'function') cb();
+    return;
+  }
+  
+  log('Forecast URL not found, detecting location...');
+  Shelly.call('Shelly.DetectLocation', {}, onDeviceLocation, cb);
 }
 
 // === MQTT RPC CONTROL (Pro3 -> Pro1) ===
@@ -659,6 +855,15 @@ function loadState() {
     STATE.lastRunTimestamp = savedLastRunTimestamp;
     log("Restored last run timestamp:", STATE.lastRunTimestamp);
   }
+  
+  var savedScheduleMode = loadValue(STATE_KEYS.scheduleMode);
+  if (savedScheduleMode !== null) {
+    STATE.scheduleMode = savedScheduleMode;
+    log("Restored schedule mode:", STATE.scheduleMode);
+  } else {
+    STATE.scheduleMode = "winter";
+    log("No saved schedule mode, defaulting to winter");
+  }
 }
 
 function saveState() {
@@ -669,6 +874,9 @@ function saveState() {
   storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
   if (STATE.lastRunTimestamp !== null) {
     storeValue(STATE_KEYS.lastRunTimestamp, STATE.lastRunTimestamp);
+  }
+  if (STATE.scheduleMode !== null) {
+    storeValue(STATE_KEYS.scheduleMode, STATE.scheduleMode);
   }
 }
 
@@ -915,37 +1123,62 @@ function clearNonUpdateSchedules(callback) {
 function createSchedules(callback) {
   log('Creating pool pump schedules...');
   
+  var scriptId = Shelly.getCurrentScriptId();
+  
   var schedules = [
     {
       enable: true,
-      timespec: '0 0 SR+3 * * SUN,MON,TUE,WED,THU,FRI,SAT',
+      timespec: '@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT',
       calls: [{
-        method: 'Shelly.EmitEvent',
-        params: {event: 'pool-pump/morning-start'}
+        method: 'script.eval',
+        params: {
+          id: scriptId,
+          code: 'handleDailyCheck()'
+        }
       }]
     },
     {
       enable: true,
-      timespec: '0 0 SS * * SUN,MON,TUE,WED,THU,FRI,SAT',
+      timespec: '@sunrise+3h * * SUN,MON,TUE,WED,THU,FRI,SAT',
       calls: [{
-        method: 'Shelly.EmitEvent',
-        params: {event: 'pool-pump/evening-stop'}
+        method: 'script.eval',
+        params: {
+          id: scriptId,
+          code: 'handleMorningStart()'
+        }
+      }]
+    },
+    {
+      enable: true,
+      timespec: '@sunset * * SUN,MON,TUE,WED,THU,FRI,SAT',
+      calls: [{
+        method: 'script.eval',
+        params: {
+          id: scriptId,
+          code: 'handleEveningStop()'
+        }
       }]
     },
     {
       enable: true,
       timespec: '0 15 23 * * SUN,MON,TUE,WED,THU,FRI,SAT',
       calls: [{
-        method: 'Shelly.EmitEvent',
-        params: {event: 'pool-pump/night-start'}
+        method: 'script.eval',
+        params: {
+          id: scriptId,
+          code: 'handleNightStart()'
+        }
       }]
     },
     {
       enable: true,
       timespec: '0 15 0 * * SUN,MON,TUE,WED,THU,FRI,SAT',
       calls: [{
-        method: 'Shelly.EmitEvent',
-        params: {event: 'pool-pump/night-stop'}
+        method: 'script.eval',
+        params: {
+          id: scriptId,
+          code: 'handleNightStop()'
+        }
       }]
     }
   ];
@@ -976,23 +1209,106 @@ function createSchedules(callback) {
   createNext();
 }
 
-// === DEVICE EVENT HANDLERS ===
-function handleNightStop() {
-  log('Night stop event');
-
-  // Clear the in-script timer if it is still running (avoids a double stop)
-  if (STATE.nightRunTimerId) {
-    Timer.clear(STATE.nightRunTimerId);
-    STATE.nightRunTimerId = null;
+// === SCHEDULE MODE MANAGEMENT ===
+function updateScheduleMode(newMode) {
+  if (STATE.scheduleMode === newMode) {
+    log('Schedule mode already set to:', newMode);
+    return;
   }
-
-  activateOutput(-1, function() {
-    log('Pump stopped after night run');
+  
+  log('Switching schedule mode from', STATE.scheduleMode, 'to', newMode);
+  STATE.scheduleMode = newMode;
+  saveState();
+  
+  // Enable/disable schedules based on mode
+  Shelly.call('Schedule.List', {}, function(result, err) {
+    if (err) {
+      log('ERROR: Failed to list schedules:', err);
+      if (err && false) {}
+      return;
+    }
+    
+    if (!result || !result.jobs) {
+      log('No schedules found');
+      return;
+    }
+    
+    var schedulesToUpdate = [];
+    for (var i = 0; i < result.jobs.length; i++) {
+      var job = result.jobs[i];
+      if (job.calls && job.calls.length > 0) {
+        var code = job.calls[0].params && job.calls[0].params.code;
+        if (code === 'handleMorningStart()' || code === 'handleEveningStop()') {
+          schedulesToUpdate.push({id: job.id, enable: newMode === 'summer', name: code});
+        } else if (code === 'handleNightStart()' || code === 'handleNightStop()') {
+          schedulesToUpdate.push({id: job.id, enable: newMode === 'winter', name: code});
+        }
+      }
+    }
+    
+    if (schedulesToUpdate.length === 0) {
+      log('No schedules to update');
+      return;
+    }
+    
+    var updateIndex = 0;
+    function updateNext() {
+      if (updateIndex >= schedulesToUpdate.length) {
+        log('All schedules updated for', newMode, 'mode');
+        return;
+      }
+      
+      var schedule = schedulesToUpdate[updateIndex];
+      updateIndex++;
+      
+      Shelly.call('Schedule.Update', {id: schedule.id, enable: schedule.enable}, function(res, err) {
+        if (err && false) {}
+        log('Updated schedule', schedule.name, 'enable:', schedule.enable);
+        queueTask(updateNext);
+      });
+    }
+    
+    updateNext();
   });
 }
 
-function handleDeviceEvent(eventName) {
-  log('Received device event:', eventName);
+function performDailyModeCheck() {
+  log('Performing daily mode check...');
+  
+  // Ensure forecast URL is configured
+  ensureForecastUrl(function() {
+    // Fetch or use cached forecast
+    if (shouldRefreshForecast()) {
+      log('Fetching fresh forecast for mode check...');
+      fetchAndCacheForecast(function() {
+        decideModeFromForecast();
+      });
+    } else {
+      log('Using cached forecast for mode check');
+      decideModeFromForecast();
+    }
+  });
+}
+
+function decideModeFromForecast() {
+  var maxTemp = getMaxForecastTemp();
+  
+  if (maxTemp === null) {
+    log('No forecast available, keeping current mode:', STATE.scheduleMode);
+    return;
+  }
+  
+  log('Max forecast temperature:', maxTemp, '°C, threshold:', CONFIG.temperatureThreshold, '°C');
+  
+  var newMode = maxTemp > CONFIG.temperatureThreshold ? 'summer' : 'winter';
+  log('Determined mode:', newMode);
+  
+  updateScheduleMode(newMode);
+}
+
+// === SCHEDULE EVENT HANDLERS ===
+function handleDailyCheck() {
+  log('Daily check event');
   
   if (STATE.deviceRole !== 'controller') {
     log('Ignoring event, not controller');
@@ -1006,31 +1322,47 @@ function handleDeviceEvent(eventName) {
     return;
   }
   
-  if (eventName === 'pool-pump/morning-start') {
-    handleMorningStart();
-  } else if (eventName === 'pool-pump/evening-stop') {
-    handleEveningStop();
-  } else if (eventName === 'pool-pump/night-start') {
-    handleNightStart();
-  } else if (eventName === 'pool-pump/night-stop') {
-    handleNightStop();
-  }
+  performDailyModeCheck();
 }
 
 function handleMorningStart() {
   log('Morning start event');
+  
+  if (STATE.deviceRole !== 'controller') {
+    log('Ignoring event, not controller');
+    return;
+  }
+  
+  // Check water supply protection
+  var input0 = Shelly.getComponentStatus('input:0');
+  if (input0 && input0.state) {
+    log('Water supply protection active, ignoring event');
+    return;
+  }
   
   if (!needsBootstrap()) {
     log('Recent run detected, starting eco speed');
     activateOutput(CONFIG.ecoSpeed);
   } else {
     log('Long time since last run, bootstrap required but not starting automatically');
-    // Don't auto-start in morning if bootstrap needed - user decision
   }
 }
 
+
 function handleEveningStop() {
   log('Evening stop event');
+  
+  if (STATE.deviceRole !== 'controller') {
+    log('Ignoring event, not controller');
+    return;
+  }
+  
+  // Check water supply protection
+  var input0 = Shelly.getComponentStatus('input:0');
+  if (input0 && input0.state) {
+    log('Water supply protection active, ignoring event');
+    return;
+  }
   
   // Clear any running timers
   if (STATE.nightRunTimerId) {
@@ -1038,7 +1370,6 @@ function handleEveningStop() {
     STATE.nightRunTimerId = null;
   }
   
-  // Stop pump regardless of current state
   activateOutput(-1, function() {
     log('Pump stopped for evening');
   });
@@ -1047,12 +1378,22 @@ function handleEveningStop() {
 function handleNightStart() {
   log('Night start event');
   
+  if (STATE.deviceRole !== 'controller') {
+    log('Ignoring event, not controller');
+    return;
+  }
+  
+  // Check water supply protection
+  var input0 = Shelly.getComponentStatus('input:0');
+  if (input0 && input0.state) {
+    log('Water supply protection active, ignoring event');
+    return;
+  }
+  
   if (needsBootstrap()) {
     log('Long time since last run, starting 1-hour high-speed run with bootstrap');
     
-    // Start with bootstrap, then run high speed for 1 hour
     executeBootstrap(CONFIG.highSpeed, function() {
-      // Set timer to stop after night run duration
       STATE.nightRunTimerId = Timer.set(CONFIG.nightRunDurationMs, false, function() {
         log('Night run duration complete, stopping pump');
         activateOutput(-1);
@@ -1062,6 +1403,32 @@ function handleNightStart() {
   } else {
     log('Recent run detected, ignoring night-start event');
   }
+}
+
+function handleNightStop() {
+  log('Night stop event');
+  
+  if (STATE.deviceRole !== 'controller') {
+    log('Ignoring event, not controller');
+    return;
+  }
+  
+  // Check water supply protection
+  var input0 = Shelly.getComponentStatus('input:0');
+  if (input0 && input0.state) {
+    log('Water supply protection active, ignoring event');
+    return;
+  }
+  
+  // Clear the in-script timer if it is still running (avoids a double stop)
+  if (STATE.nightRunTimerId) {
+    Timer.clear(STATE.nightRunTimerId);
+    STATE.nightRunTimerId = null;
+  }
+
+  activateOutput(-1, function() {
+    log('Pump stopped after night run');
+  });
 }
 
 // === INITIALIZATION ===
@@ -1228,12 +1595,6 @@ Shelly.addEventHandler(function(event) {
   // Handle script stop event
   if (info.event === "script_stop") {
     log("Script stopping");
-    return;
-  }
-  
-  // Handle device events (pool-pump/morning-start, evening-stop, night-start)
-  if (typeof info.event === "string" && info.event.indexOf("pool-pump/") === 0) {
-    handleDeviceEvent(info.event);
     return;
   }
   

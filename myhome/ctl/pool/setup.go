@@ -18,6 +18,7 @@ var setupFlags struct {
 	EcoSpeed                  int
 	MidSpeed                  int
 	HighSpeed                 int
+	TemperatureThreshold      float64
 	ForceUpload               bool
 	NoMinify                  bool
 }
@@ -66,6 +67,7 @@ The bootstrap device provides high-speed startup assistance in cold weather and 
 			EcoSpeed:                setupFlags.EcoSpeed,
 			MidSpeed:                setupFlags.MidSpeed,
 			HighSpeed:               setupFlags.HighSpeed,
+			TemperatureThreshold:    setupFlags.TemperatureThreshold,
 			ForceUpload:             setupFlags.ForceUpload,
 			NoMinify:                setupFlags.NoMinify,
 		}
@@ -74,6 +76,7 @@ The bootstrap device provides high-speed startup assistance in cold weather and 
 		fmt.Printf("  Controller: %s → %s (%s)\n", controllerDeviceID, controllerDev.Name(), controllerDev.Id())
 		fmt.Printf("  Bootstrap:  %s → %s (%s)\n", setupFlags.BootstrapDeviceIdentifier, bootstrapDev.Name(), bootstrapDev.Id())
 		fmt.Printf("  Bootstrap threshold: %.1f hours since last run\n", setupFlags.BootstrapHoursThreshold)
+		fmt.Printf("  Temperature threshold: %.1f°C for summer mode\n", setupFlags.TemperatureThreshold)
 		fmt.Printf("\n")
 
 		if err := service.Setup(ctx, opts); err != nil {
@@ -94,6 +97,7 @@ func init() {
 	setupCmd.Flags().DurationVar(&setupFlags.BootstrapDuration, "bootstrap-duration", 2*time.Minute, "Bootstrap duration (e.g., 2m, 120s)")
 	setupCmd.Flags().DurationVar(&setupFlags.NightRunDuration, "night-run-duration", 1*time.Hour, "Night run duration (e.g., 1h, 3600s)")
 	setupCmd.Flags().DurationVar(&setupFlags.BootstrapPostDelay, "bootstrap-post-delay", 500*time.Millisecond, "Delay after bootstrap before starting speed (e.g., 500ms, 5s)")
+	setupCmd.Flags().Float64Var(&setupFlags.TemperatureThreshold, "temperature-threshold", 20.0, "Temperature threshold (°C) for summer mode (day schedule)")
 
 	// Speed mappings
 	setupCmd.Flags().IntVar(&setupFlags.EcoSpeed, "eco-speed", 0, "Controller switch ID for eco/low speed (0, 1, or 2) (default 0)")

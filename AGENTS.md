@@ -323,6 +323,162 @@ state/<category>/<identifier>
 - **URL-safe**: Keys can be used in URLs without encoding
 - **Case-insensitive filesystems**: Avoids issues on case-insensitive systems
 
+### Data Storage Patterns
+
+#### Script.storage vs KVS vs In-Memory Variables
+
+Understanding the distinction between these three storage mechanisms is critical for Shelly scripts:
+
+**Script.storage (script-internal persistent data)**
+- **Use for**: Data that is managed ONLY by the script itself
+- **API**: `Script.storage.getItem(key)` and `Script.storage.setItem(key, value)`
+- **Example**: `heater.js` stores `coolingRate` and `forecastUrl` - values learned/computed by the script
+- **NOT accessible** from external commands or other scripts
+- **Persists** across script restarts and device reboots
+
+**KVS (external configuration)**
+- **Use for**: Data that is set by EXTERNAL commands/tools
+- **API**: `Shelly.call('KVS.Get', {key: key}, callback)` and `Shelly.call('KVS.Set', {key: key, value: value}, callback)`
+- **Example**: Follow configurations set by `myhome ctl follow blu` or `myhome ctl follow shelly`
+- **Keys follow pattern**: `follow/shelly-blu/<mac>` or `follow/status/<device-id>`
+- **Accessible** from external tools and other scripts
+- **Persists** across script restarts and device reboots
+
+**In-memory variables (runtime cache)**
+- **Use for**: Fast access to data loaded from KVS or Script.storage
+- **Example**: `var FOLLOWS = {}` in blu-listener.js, blu-publisher.js, status-listener.js
+- **Populated by**: `loadFollowsFromKVS()` which reads from KVS
+- **Updated when**: KVS changes are detected via event handlers
+- **Does NOT persist** across script restarts
+
+**Architecture flow for follow scripts:**
+
+1. External command sets KVS: `myhome ctl follow blu device mac` → KVS key `follow/shelly-blu/<mac>`
+2. Script loads on startup: `loadFollowsFromKVS()` → reads KVS → populates `FOLLOWS` variable
+3. Script watches for changes: KVS change event → `loadFollowsFromKVS()` → updates `FOLLOWS`
+4. Script uses data: `getFollows()` → returns `FOLLOWS` (fast in-memory access)
+
+**Common mistake**: Using `Script.storage` for data that should come from KVS. This breaks external configuration because Script.storage is script-private.
+
+**Example pattern:**
+
+```javascript
+// In-memory cache (fast access)
+var FOLLOWS = {};
+
+// Load from KVS into cache
+function loadFollowsFromKVS() {
+  Shelly.call('KVS.List', {}, function(result, error_code, error_message) {
+    if (error_code !== 0) {
+      log('KVS.List failed:', error_message);
+      return;
+    }
+    
+    var keys = result.keys || [];
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i].indexOf('follow/') === 0) {
+        loadSingleKey(keys[i]);
+      }
+    }
+  });
+}
+
+function loadSingleKey(key) {
+  Shelly.call('KVS.Get', {key: key}, function(result, error_code, error_message) {
+    if (error_code === 0 && result && result.value) {
+      var data = JSON.parse(result.value);
+      FOLLOWS[key] = data;
+    }
+  });
+}
+
+// Watch for KVS changes
+Shelly.addEventHandler(function(eventData) {
+  if (eventData && eventData.info && eventData.info.component === 'kvs') {
+    loadFollowsFromKVS();  // Reload cache
+  }
+});
+
+// Use cached data (fast)
+function getFollows() {
+  return FOLLOWS;
+}
+```
+
+### Resource Limit Workarounds
+
+#### Single Recurring Timer Pattern
+
+**Problem**: Shelly scripts are limited to **5 timers** per script. Sequential async operations (KVS calls, RPC calls) can quickly exhaust this limit if each operation creates its own timer.
+
+**Anti-Pattern (creates multiple timers):**
+```javascript
+function loadNextKey() {
+  Shelly.call("KVS.Get", {key: k}, function(result, err) {
+    // Process result
+    Timer.set(200, false, loadNextKey);  // Creates new timer each time
+  });
+}
+```
+
+**Correct Pattern (single recurring timer):**
+```javascript
+var taskQueue = [];
+var taskTimer = null;
+
+function processTaskQueue() {
+  if (taskQueue.length === 0) {
+    if (taskTimer) {
+      Timer.clear(taskTimer);
+      taskTimer = null;
+    }
+    return;
+  }
+  
+  var task = taskQueue.shift();  // Note: shift() not supported, use manual implementation
+  task();
+}
+
+function startTaskQueue() {
+  if (!taskTimer) {
+    taskTimer = Timer.set(200, true, processTaskQueue);  // Single recurring timer
+  }
+}
+
+// Add tasks to queue
+taskQueue.push(function() {
+  Shelly.call("KVS.Get", {key: k1}, function(r, e) { /* handle */ });
+});
+taskQueue.push(function() {
+  Shelly.call("KVS.Get", {key: k2}, function(r, e) { /* handle */ });
+});
+startTaskQueue();
+```
+
+**Note**: Since `[].shift()` is not supported, use this manual implementation:
+
+```javascript
+function processTaskQueue() {
+  if (taskQueue.length === 0) {
+    if (taskTimer) {
+      Timer.clear(taskTimer);
+      taskTimer = null;
+    }
+    return;
+  }
+  
+  // Manual shift implementation
+  var task = taskQueue[0];
+  var newQueue = [];
+  for (var i = 1; i < taskQueue.length; i++) {
+    newQueue.push(taskQueue[i]);
+  }
+  taskQueue = newQueue;
+  
+  task();
+}
+```
+
 ### Known Issues
 
 #### Non-blocking Execution
@@ -561,6 +717,43 @@ func (h *MethodHandlers) RegisterHandlers() {
     myhome.RegisterMethodHandler(myhome.YourMethod, h.handleMethod)
 }
 ```
+
+### Database Patterns
+
+#### SQLite Column Existence Check
+
+When adding database migrations to check if a column exists in SQLite, use `COUNT(*)` which returns an integer, not a boolean.
+
+**Correct pattern:**
+```go
+var count int
+query := `SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name='status'`
+err := s.db.Get(&count, query)
+if err != nil {
+    return fmt.Errorf("failed to check for status column: %w", err)
+}
+
+if count == 0 {
+    // Column doesn't exist, add it
+    log.Info("Adding status column to devices table")
+    alterQuery := `ALTER TABLE devices ADD COLUMN status TEXT DEFAULT ''`
+    _, err = s.db.Exec(alterQuery)
+    if err != nil {
+        return fmt.Errorf("failed to add status column: %w", err)
+    }
+}
+```
+
+**Wrong pattern:**
+```go
+var columnExists bool  // WRONG - COUNT(*) returns int, not bool
+query := `SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name='status'`
+err := s.db.Get(&columnExists, query)  // This will fail to properly detect
+```
+
+**When to use**: Call migration functions in `createTable()` after the initial schema creation to handle upgrades from older database versions.
+
+**Example location**: `myhome/storage/db.go`
 
 ### Command Output
 

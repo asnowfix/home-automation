@@ -77,6 +77,7 @@ Ports: 6080 (dev web UI), 80 (systemd), 6060 (pprof), 9100 (Prometheus).
 - **CLI output**: `fmt.Printf()` for user-facing messages; `hlog` for internal/debug logging. Never `log.Info()` in CLI commands.
 - **Config options**: adding any new option requires updating 4 files — `options.go`, `run.go`, `docs/configuration.md`, `myhome-example.yaml`. Env var pattern: `MYHOME_<SECTION>_<KEY>`.
 - **RPC handler tests**: tests that call `myhome.RegisterMethodHandler()` must restore state in `t.Cleanup` and must not call `t.Parallel()` (shared package-level map).
+- **Database migrations**: Use `COUNT(*)` (returns int) not bool when checking SQLite column existence. See AGENTS.md "Database Patterns".
 - **File moves**: always `git mv`, never delete-and-recreate (preserves `git log --follow` history).
 - **Non-trivial tasks**: create a plan file under `docs/` before writing code; mark each phase done before starting the next; commit plan updates alongside the implementation.
 
@@ -94,3 +95,5 @@ Shelly runs a modified Espruino (ES5, no hoisting, limited ES6). Violations belo
 - **Upload with `--no-minify`** when debugging; minification is fine in production if the rules above are followed.
 - **KVS keys**: lowercase, hyphens and forward slashes only — pattern `script/<name>/<key>`.
 - **Per-script limits**: 5 timers, 5 event subscriptions, 5 status-change subscriptions, 5 concurrent RPC calls, 10 MQTT subscriptions.
+- **Storage**: Use `Script.storage` for script-internal data, `KVS` for external config, in-memory vars for cache. See AGENTS.md "Data Storage Patterns".
+- **Timer limits**: Use single recurring timer with task queue for sequential async ops to avoid exhausting 5-timer limit. See AGENTS.md "Resource Limit Workarounds".

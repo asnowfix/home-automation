@@ -459,6 +459,16 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, where string) (*url.URL, error) {
 	log.Info("Looking up MQTT broker", "where", where)
 
+	// If caller passed a full URL (e.g. "tcp://192.168.1.2:1883"), parse it directly.
+	if strings.Contains(where, "://") {
+		u, err := url.Parse(where)
+		if err != nil {
+			return nil, fmt.Errorf("invalid broker URL %q: %w", where, err)
+		}
+		log.Info("Using broker URL directly", "url", u)
+		return u, nil
+	}
+
 	if where == "me" {
 		log.Info("Finding local IP")
 		_, ip, err := mynet.MainInterface(log)

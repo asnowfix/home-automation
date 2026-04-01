@@ -7,6 +7,7 @@ import (
 	"myhome"
 	"myhome/ctl/blu"
 	"myhome/ctl/config"
+	ctlmcp "myhome/ctl/mcp"
 	"myhome/ctl/db"
 	"myhome/ctl/forget"
 	"myhome/ctl/heater"
@@ -140,6 +141,7 @@ func init() {
 	// Make log level flags mutually exclusive
 	Cmd.MarkFlagsMutuallyExclusive("verbose", "debug", "quiet")
 
+	Cmd.AddCommand(ctlmcp.Cmd)
 	Cmd.AddCommand(list.Cmd)
 	Cmd.AddCommand(show.Cmd)
 	Cmd.AddCommand(open.Cmd)

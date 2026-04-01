@@ -1,6 +1,6 @@
 # Agent Guidelines for Home Automation Project
 
-This document contains project context, coding guidelines, best practices, and important knowledge for AI coding agents working on this project.
+Detailed reference for AI coding agents. `CLAUDE.md` contains the concise always-loaded summary; read sections here when actively working in a specific area.
 
 ## Table of Contents
 
@@ -1042,68 +1042,3 @@ git rm internal/myhome/old.go
 git add internal/myhome/new.go
 ```
 
-### Memory Management
-
-When creating memories during AI interactions:
-
-- **Shelly compatibility issues**: Tag with `shelly`, `javascript`, `compatibility`
-- **Go patterns**: Tag with `golang`, `logging`, `commands`
-- **Workflow issues**: Tag with `github`, `workflows`, `release`
-- **Bug fixes**: Tag with `bug`, `fix`, specific component
-
----
-
-### Best Practices Summary
-
-### Shelly Scripts
-
-✅ **DO**:
-- Use ES5-compatible JavaScript (most ES5 features work)
-- Keep callback nesting ≤ 2-3 levels
-- Use named functions over anonymous callbacks
-- Add startup/stop logging
-- Use `--no-minify` for uploads (recommended)
-- Use `"property" in object` for property checks (minifier-safe)
-- Use `var` for variable declarations (maximum compatibility)
-- Use ES5 array methods on arrays: `[].map()`, `[].filter()`, `[].forEach()`
-
-❌ **DON'T**:
-- Nest callbacks more than 2-3 levels deep (device will crash)
-- Use `Array.prototype.slice.call(arguments)` (may fail)
-- Use `!== undefined` (minifier breaks this)
-- Use ES6 Classes, Promises, or async/await
-- Use Regular Expressions (not supported on all boards)
-- Rely on hoisting (not implemented)
-
-### Go Commands
-
-✅ **DO**:
-- Print user-facing output to stdout with `fmt.Printf()`
-- Use hlog for internal/debug logging
-- Add `--verbose` flag to launch configurations
-- Provide clear success/failure messages
-
-❌ **DON'T**:
-- Use `log.Info()` for user-facing output
-- Assume commands run silently
-
-### GitHub Workflows
-
-✅ **DO**:
-- Wait for tag propagation (5 seconds) before triggering dependent workflows
-- Use `git describe` for version detection
-- Check out the correct ref (tag, not branch)
-
-❌ **DON'T**:
-- Trigger workflows immediately after creating tags
-- Assume tags are instantly available
-
----
-
-## Changelog
-
-- **2025-10-01**: Initial creation with Shelly scripting, Go development, and GitHub workflow guidelines
-- **2025-10-01**: Added callback depth limits and refactoring patterns
-- **2025-10-01**: Added command output guidelines and tag propagation fixes
-- **2026-01-19**: Added utility package structure guidelines (internal/myhome/ for utilities)
-- **2026-03-05**: Added Configuration Management section with requirements for documenting all configuration options

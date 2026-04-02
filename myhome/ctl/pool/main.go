@@ -16,6 +16,7 @@ func PoolCmd() *cobra.Command {
 	cmd.AddCommand(statusCmd)
 	cmd.AddCommand(startCmd)
 	cmd.AddCommand(stopCmd)
+	cmd.AddCommand(purgeCmd)
 
 	return cmd
 }

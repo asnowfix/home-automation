@@ -80,7 +80,7 @@ var CONFIG_SCHEMA = {
   ecoSpeed: {
     description: "Pro3 switch ID for eco/low speed (0, 1, or 2)",
     key: "eco-speed",
-    default: 0,
+    default: 2,
     type: "number",
     required: false
   },
@@ -94,7 +94,7 @@ var CONFIG_SCHEMA = {
   highSpeed: {
     description: "Pro3 switch ID for high speed (0, 1, or 2)",
     key: "high-speed",
-    default: 2,
+    default: 0,
     type: "number",
     required: false
   },
@@ -326,7 +326,6 @@ var STATE = {
   // Bootstrap state
   bootstrapInProgress: false,
   bootstrapTimerId: null,
-  nightRunTimerId: null,
   
   // MQTT connection
   mqttConnected: false,
@@ -408,9 +407,8 @@ function storeValue(key, value) {
   } else {
     valueStr = String(value);
   }
-  Shelly.call("KVS.Set", {key: CONFIG_KEY_PREFIX + key, value: valueStr}, function(res, err) {
-    if (err && false) {}  // Prevent minifier from removing error parameter
-  });
+  // Fire-and-forget to avoid callback depth issues
+  Shelly.call("KVS.Set", {key: CONFIG_KEY_PREFIX + key, value: valueStr});
 }
 
 function loadValue(key) {
@@ -871,12 +869,22 @@ function saveState() {
   if (STATE.initializing) {
     return;
   }
-  storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
+  
+  // Queue KVS writes to avoid callback depth issues and ensure sequential execution
+  queueTask(function() {
+    storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
+  });
+  
   if (STATE.lastRunTimestamp !== null) {
-    storeValue(STATE_KEYS.lastRunTimestamp, STATE.lastRunTimestamp);
+    queueTask(function() {
+      storeValue(STATE_KEYS.lastRunTimestamp, STATE.lastRunTimestamp);
+    });
   }
+  
   if (STATE.scheduleMode !== null) {
-    storeValue(STATE_KEYS.scheduleMode, STATE.scheduleMode);
+    queueTask(function() {
+      storeValue(STATE_KEYS.scheduleMode, STATE.scheduleMode);
+    });
   }
 }
 
@@ -1306,6 +1314,53 @@ function decideModeFromForecast() {
   updateScheduleMode(newMode);
 }
 
+// === UNIFIED START/STOP FUNCTIONS ===
+function doStart(speed, checkBootstrap, reason) {
+  log(reason || 'Start pump');
+  
+  if (STATE.deviceRole !== 'controller') {
+    log('Ignoring event, not controller');
+    return;
+  }
+  
+  var input0 = Shelly.getComponentStatus('input:0');
+  if (input0 && input0.state) {
+    log('Water supply protection active, ignoring start request');
+    return;
+  }
+  
+  if (checkBootstrap && needsBootstrap()) {
+    log('Bootstrap required, starting with bootstrap sequence at speed:', speed);
+    executeBootstrap(speed, function() {
+      log('Bootstrap complete, pump running at speed:', speed);
+    });
+  } else if (checkBootstrap) {
+    log('Bootstrap not required, ignoring start request');
+  } else {
+    log('Starting pump at speed:', speed);
+    activateOutput(speed);
+  }
+}
+
+function doStop(reason) {
+  log(reason || 'Stop pump');
+  
+  if (STATE.deviceRole !== 'controller') {
+    log('Ignoring event, not controller');
+    return;
+  }
+  
+  var input0 = Shelly.getComponentStatus('input:0');
+  if (input0 && input0.state) {
+    log('Water supply protection active, ignoring stop request');
+    return;
+  }
+  
+  activateOutput(-1, function() {
+    log('Pump stopped');
+  });
+}
+
 // === SCHEDULE EVENT HANDLERS ===
 function handleDailyCheck() {
   log('Daily check event');
@@ -1315,7 +1370,6 @@ function handleDailyCheck() {
     return;
   }
   
-  // Check water supply protection
   var input0 = Shelly.getComponentStatus('input:0');
   if (input0 && input0.state) {
     log('Water supply protection active, ignoring event');
@@ -1326,109 +1380,19 @@ function handleDailyCheck() {
 }
 
 function handleMorningStart() {
-  log('Morning start event');
-  
-  if (STATE.deviceRole !== 'controller') {
-    log('Ignoring event, not controller');
-    return;
-  }
-  
-  // Check water supply protection
-  var input0 = Shelly.getComponentStatus('input:0');
-  if (input0 && input0.state) {
-    log('Water supply protection active, ignoring event');
-    return;
-  }
-  
-  if (!needsBootstrap()) {
-    log('Recent run detected, starting eco speed');
-    activateOutput(CONFIG.ecoSpeed);
-  } else {
-    log('Long time since last run, bootstrap required but not starting automatically');
-  }
+  doStart(CONFIG.ecoSpeed, false, 'Morning start event');
 }
 
-
 function handleEveningStop() {
-  log('Evening stop event');
-  
-  if (STATE.deviceRole !== 'controller') {
-    log('Ignoring event, not controller');
-    return;
-  }
-  
-  // Check water supply protection
-  var input0 = Shelly.getComponentStatus('input:0');
-  if (input0 && input0.state) {
-    log('Water supply protection active, ignoring event');
-    return;
-  }
-  
-  // Clear any running timers
-  if (STATE.nightRunTimerId) {
-    Timer.clear(STATE.nightRunTimerId);
-    STATE.nightRunTimerId = null;
-  }
-  
-  activateOutput(-1, function() {
-    log('Pump stopped for evening');
-  });
+  doStop('Evening stop event');
 }
 
 function handleNightStart() {
-  log('Night start event');
-  
-  if (STATE.deviceRole !== 'controller') {
-    log('Ignoring event, not controller');
-    return;
-  }
-  
-  // Check water supply protection
-  var input0 = Shelly.getComponentStatus('input:0');
-  if (input0 && input0.state) {
-    log('Water supply protection active, ignoring event');
-    return;
-  }
-  
-  if (needsBootstrap()) {
-    log('Long time since last run, starting 1-hour high-speed run with bootstrap');
-    
-    executeBootstrap(CONFIG.highSpeed, function() {
-      STATE.nightRunTimerId = Timer.set(CONFIG.nightRunDurationMs, false, function() {
-        log('Night run duration complete, stopping pump');
-        activateOutput(-1);
-        STATE.nightRunTimerId = null;
-      });
-    });
-  } else {
-    log('Recent run detected, ignoring night-start event');
-  }
+  doStart(CONFIG.highSpeed, true, 'Night start event');
 }
 
 function handleNightStop() {
-  log('Night stop event');
-  
-  if (STATE.deviceRole !== 'controller') {
-    log('Ignoring event, not controller');
-    return;
-  }
-  
-  // Check water supply protection
-  var input0 = Shelly.getComponentStatus('input:0');
-  if (input0 && input0.state) {
-    log('Water supply protection active, ignoring event');
-    return;
-  }
-  
-  // Clear the in-script timer if it is still running (avoids a double stop)
-  if (STATE.nightRunTimerId) {
-    Timer.clear(STATE.nightRunTimerId);
-    STATE.nightRunTimerId = null;
-  }
-
-  activateOutput(-1, function() {
-    log('Pump stopped after night run');
-  });
+  doStop('Night stop event');
 }
 
 // === INITIALIZATION ===

@@ -291,28 +291,22 @@ func (s *PoolService) Start(ctx context.Context, controllerID string, speed Spee
 		return fmt.Errorf("invalid speed: %s", speed)
 	}
 
-	// Turn on the appropriate switch
-	// The pool-pump.js script will handle bootstrap logic automatically based on temperature
-	result, err := sswitch.Set(ctx, sd, via, switchID, true)
+	// Call doStart() in the script to use unified logic with guard conditions
+	// checkBootstrap=false for manual starts (user decides when to start)
+	code := fmt.Sprintf("doStart(%d, false, 'Manual start via ctl pool start %s')", switchID, speed)
+
+	result, err := pkgscript.EvalInDevice(ctx, via, sd, "pool-pump.js", code)
 	if err != nil {
-		return fmt.Errorf("failed to start pump: %w", err)
+		return fmt.Errorf("failed to start pump via script: %w", err)
 	}
 
-	s.log.Info("Pump started", "speed", speed, "switch", switchID, "result", result)
+	s.log.Info("Pump start command sent", "speed", speed, "switch", switchID, "result", result)
 	return nil
 }
 
 // Stop stops the pool pump on both devices
 func (s *PoolService) Stop(ctx context.Context, controllerID string) error {
 	s.log.Info("Stopping pool pump", "controller", controllerID)
-
-	// Get bootstrap device ID from controller's KVS
-	bootstrapID, err := s.getBootstrapDeviceID(ctx, controllerID)
-	if err != nil {
-		return fmt.Errorf("failed to get bootstrap device ID: %w", err)
-	}
-
-	s.log.V(1).Info("Retrieved bootstrap device ID from controller", "bootstrap", bootstrapID)
 
 	// Get controller device
 	controllerDev, err := s.provider.GetDeviceByAny(ctx, controllerID)
@@ -325,32 +319,132 @@ func (s *PoolService) Stop(ctx context.Context, controllerID string) error {
 		return fmt.Errorf("failed to get controller shelly device: %w", err)
 	}
 
-	// Get bootstrap device
-	bootstrapDev, err := s.provider.GetDeviceByAny(ctx, bootstrapID)
-	if err != nil {
-		return fmt.Errorf("bootstrap device not found: %w", err)
-	}
-
-	bootstrapSD, err := s.provider.GetShellyDevice(ctx, bootstrapDev)
-	if err != nil {
-		return fmt.Errorf("failed to get bootstrap shelly device: %w", err)
-	}
-
 	via := types.ChannelDefault
 
-	// Stop all controller switches (0, 1, 2)
-	for i := 0; i < 3; i++ {
-		if _, err := sswitch.Set(ctx, controllerSD, via, i, false); err != nil {
-			s.log.Error(err, "Failed to turn off controller switch", "switch", i)
+	// Call doStop() in the script to use unified logic with guard conditions
+	code := "doStop('Manual stop via ctl pool stop')"
+
+	result, err := pkgscript.EvalInDevice(ctx, via, controllerSD, "pool-pump.js", code)
+	if err != nil {
+		return fmt.Errorf("failed to stop pump via script: %w", err)
+	}
+
+	s.log.Info("Pump stop command sent", "result", result)
+	return nil
+}
+
+// Purge removes pool pump setup from both controller and bootstrap devices
+func (s *PoolService) Purge(ctx context.Context, controllerID string) error {
+	s.log.Info("Purging pool pump setup", "controller", controllerID)
+
+	// Get controller device
+	controllerDev, err := s.provider.GetDeviceByAny(ctx, controllerID)
+	if err != nil {
+		return fmt.Errorf("controller device not found: %w", err)
+	}
+
+	controllerSD, err := s.provider.GetShellyDevice(ctx, controllerDev)
+	if err != nil {
+		return fmt.Errorf("failed to get controller shelly device: %w", err)
+	}
+
+	via := types.ChannelMqtt
+
+	// Get bootstrap device ID from controller's KVS
+	bootstrapID, err := s.getBootstrapDeviceID(ctx, controllerDev.Id())
+	if err != nil {
+		s.log.V(1).Info("Could not get bootstrap device ID, will only clean controller", "error", err)
+		bootstrapID = ""
+	}
+
+	var bootstrapSD *shelly.Device
+	if bootstrapID != "" {
+		bootstrapDev, err := s.provider.GetDeviceByAny(ctx, bootstrapID)
+		if err != nil {
+			s.log.Error(err, "Bootstrap device not found, will only clean controller", "bootstrap", bootstrapID)
+		} else {
+			bootstrapSD, err = s.provider.GetShellyDevice(ctx, bootstrapDev)
+			if err != nil {
+				s.log.Error(err, "Failed to get bootstrap shelly device, will only clean controller")
+				bootstrapSD = nil
+			}
 		}
 	}
 
-	// Stop bootstrap switch (0)
-	if _, err := sswitch.Set(ctx, bootstrapSD, via, 0, false); err != nil {
-		s.log.Error(err, "Failed to turn off bootstrap switch")
+	// Purge controller device
+	fmt.Printf("  → Purging controller device %s...\n", controllerSD.Name())
+	if err := s.purgeDevice(ctx, via, controllerSD); err != nil {
+		return fmt.Errorf("failed to purge controller: %w", err)
 	}
 
-	s.log.Info("Pool pump stopped")
+	// Purge bootstrap device if available
+	if bootstrapSD != nil {
+		fmt.Printf("  → Purging bootstrap device %s...\n", bootstrapSD.Name())
+		if err := s.purgeDevice(ctx, via, bootstrapSD); err != nil {
+			s.log.Error(err, "Failed to purge bootstrap device", "device", bootstrapSD.Name())
+			// Don't fail the whole operation if bootstrap purge fails
+		}
+	}
+
+	s.log.Info("Pool pump setup purged")
+	return nil
+}
+
+func (s *PoolService) purgeDevice(ctx context.Context, via types.Channel, sd *shelly.Device) error {
+	scriptName := "pool-pump.js"
+
+	// Step 1: Stop all switches (best effort)
+	s.log.V(1).Info("Stopping all switches", "device", sd.Name())
+	for i := 0; i < 3; i++ {
+		params := map[string]interface{}{"id": i, "on": false}
+		if _, err := sd.CallE(ctx, via, "Switch.Set", params); err != nil {
+			s.log.V(1).Info("Failed to stop switch (ignoring)", "switch", i, "error", err)
+		}
+	}
+
+	// Step 2: List all KVS keys
+	s.log.V(1).Info("Listing KVS keys", "device", sd.Name())
+	listResp, err := kvs.ListKeys(ctx, s.log, via, sd, "*")
+	if err != nil {
+		s.log.Error(err, "Failed to list KVS keys", "device", sd.Name())
+	} else if listResp != nil {
+		// Step 3: Delete all pool-pump related KVS keys
+		var keysToDelete []string
+		for key := range listResp.Keys {
+			if len(key) >= 16 && key[:16] == "script/pool-pump" {
+				keysToDelete = append(keysToDelete, key)
+			}
+			// Also clean old pool/ prefix keys
+			if len(key) >= 5 && key[:5] == "pool/" {
+				keysToDelete = append(keysToDelete, key)
+			}
+			// Also clean script/pool/ prefix keys
+			if len(key) >= 12 && key[:12] == "script/pool/" {
+				keysToDelete = append(keysToDelete, key)
+			}
+		}
+
+		s.log.V(1).Info("Deleting KVS keys", "device", sd.Name(), "count", len(keysToDelete))
+		for _, key := range keysToDelete {
+			if _, err := kvs.DeleteKey(ctx, s.log, via, sd, key); err != nil {
+				s.log.V(1).Info("Failed to delete KVS key (ignoring)", "key", key, "error", err)
+			}
+		}
+	}
+
+	// Step 4: Stop script (if running)
+	s.log.V(1).Info("Stopping script", "device", sd.Name(), "script", scriptName)
+	if _, err := pkgscript.StartStopDelete(ctx, via, sd, scriptName, pkgscript.Stop); err != nil {
+		s.log.V(1).Info("Failed to stop script (may not be running)", "error", err)
+	}
+
+	// Step 5: Delete script
+	s.log.V(1).Info("Deleting script", "device", sd.Name(), "script", scriptName)
+	if _, err := pkgscript.StartStopDelete(ctx, via, sd, scriptName, pkgscript.Delete); err != nil {
+		s.log.V(1).Info("Failed to delete script (may not exist)", "error", err)
+	}
+
+	s.log.Info("Device cleaned", "device", sd.Name())
 	return nil
 }
 

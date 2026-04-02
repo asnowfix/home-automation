@@ -92,17 +92,17 @@ func init() {
 	// Device identifiers
 	setupCmd.Flags().StringVarP(&setupFlags.BootstrapDeviceIdentifier, "bootstrap-device-identifier", "b", "", "Bootstrap helper device identifier (name, IP, or ID)")
 
-	// Operational parameters
-	setupCmd.Flags().Float64Var(&setupFlags.BootstrapHoursThreshold, "bootstrap-hours-threshold", 6.0, "Hours since last run above which bootstrap is needed")
-	setupCmd.Flags().DurationVar(&setupFlags.BootstrapDuration, "bootstrap-duration", 2*time.Minute, "Bootstrap duration (e.g., 2m, 120s)")
-	setupCmd.Flags().DurationVar(&setupFlags.NightRunDuration, "night-run-duration", 1*time.Hour, "Night run duration (e.g., 1h, 3600s)")
-	setupCmd.Flags().DurationVar(&setupFlags.BootstrapPostDelay, "bootstrap-post-delay", 500*time.Millisecond, "Delay after bootstrap before starting speed (e.g., 500ms, 5s)")
-	setupCmd.Flags().Float64Var(&setupFlags.TemperatureThreshold, "temperature-threshold", 20.0, "Temperature threshold (°C) for summer mode (day schedule)")
+	// Operational parameters (defaults extracted from pool-pump.js via go:generate)
+	setupCmd.Flags().Float64Var(&setupFlags.BootstrapHoursThreshold, "bootstrap-hours-threshold", DefaultBootstrapHoursThreshold, "Hours since last run above which bootstrap is needed")
+	setupCmd.Flags().DurationVar(&setupFlags.BootstrapDuration, "bootstrap-duration", DefaultBootstrapDuration, "Bootstrap duration (e.g., 2m, 120s)")
+	setupCmd.Flags().DurationVar(&setupFlags.NightRunDuration, "night-run-duration", DefaultNightRunDuration, "Night run duration (e.g., 1h, 3600s)")
+	setupCmd.Flags().DurationVar(&setupFlags.BootstrapPostDelay, "bootstrap-post-delay", DefaultBootstrapToSpeedDelay, "Delay after bootstrap before starting speed (e.g., 500ms, 5s)")
+	setupCmd.Flags().Float64Var(&setupFlags.TemperatureThreshold, "temperature-threshold", DefaultTemperatureThreshold, "Temperature threshold (°C) for summer mode (day schedule)")
 
-	// Speed mappings
-	setupCmd.Flags().IntVar(&setupFlags.EcoSpeed, "eco-speed", 0, "Controller switch ID for eco/low speed (0, 1, or 2) (default 0)")
-	setupCmd.Flags().IntVar(&setupFlags.MidSpeed, "mid-speed", 1, "Controller switch ID for mid speed (0, 1, or 2)")
-	setupCmd.Flags().IntVar(&setupFlags.HighSpeed, "high-speed", 2, "Controller switch ID for high speed (0, 1, or 2)")
+	// Speed mappings (defaults extracted from pool-pump.js via go:generate)
+	setupCmd.Flags().IntVar(&setupFlags.EcoSpeed, "eco-speed", DefaultEcoSpeed, "Controller switch ID for eco/low speed (0, 1, or 2)")
+	setupCmd.Flags().IntVar(&setupFlags.MidSpeed, "mid-speed", DefaultMidSpeed, "Controller switch ID for mid speed (0, 1, or 2)")
+	setupCmd.Flags().IntVar(&setupFlags.HighSpeed, "high-speed", DefaultHighSpeed, "Controller switch ID for high speed (0, 1, or 2)")
 
 	// Upload options
 	setupCmd.Flags().BoolVar(&setupFlags.ForceUpload, "force", false, "Force re-upload even if version hash matches")

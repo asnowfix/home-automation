@@ -207,9 +207,59 @@ var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : n
 Uncaught Error: Too many calls in progress
 ```
 
-**Solution**: Define asynchronous callback functions at the top level and pass them as named references. Where possible, prefer synchronous calls like `Shelly.getComponentStatus()` and `Shelly.getComponentConfig()` to avoid async callbacks altogether.
+**Solutions**:
 
-**Example Refactoring**:
+1. **Use a task queue** - Queue async operations to execute sequentially via a single recurring timer (recommended)
+2. **Extract named functions** - Define callbacks at top level and pass as references
+3. **Use synchronous calls** - Prefer `Shelly.getComponentStatus()` and `Shelly.getComponentConfig()` when possible
+
+**Solution 1: Task Queue Pattern (Recommended)**
+
+Use a single recurring timer to process queued tasks sequentially. This avoids callback nesting entirely:
+
+```javascript
+// Task queue infrastructure (define once per script)
+var TASK_QUEUE = [];
+var TASK_INDEX = 0;
+var TASK_TIMER = null;
+
+function processTaskQueue() {
+  if (TASK_INDEX >= TASK_QUEUE.length) {
+    if (TASK_TIMER) {
+      Timer.clear(TASK_TIMER);
+      TASK_TIMER = null;
+    }
+    TASK_QUEUE = [];
+    TASK_INDEX = 0;
+    return;
+  }
+  var task = TASK_QUEUE[TASK_INDEX];
+  TASK_INDEX++;
+  task();
+}
+
+function queueTask(task) {
+  TASK_QUEUE.push(task);
+  if (!TASK_TIMER) {
+    TASK_TIMER = Timer.set(200, true, processTaskQueue);
+  }
+}
+
+// Usage: Queue multiple async operations without nesting
+function saveState() {
+  queueTask(function() {
+    Shelly.call("KVS.Set", {key: "key1", value: "val1"});
+  });
+  queueTask(function() {
+    Shelly.call("KVS.Set", {key: "key2", value: "val2"});
+  });
+  queueTask(function() {
+    Shelly.call("KVS.Set", {key: "key3", value: "val3"});
+  });
+}
+```
+
+**Solution 2: Extracted Named Functions**
 
 ```javascript
 // BROKEN - 5+ levels of nesting

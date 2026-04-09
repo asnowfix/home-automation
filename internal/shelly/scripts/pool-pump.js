@@ -1474,12 +1474,24 @@ function continueInit() {
   if (STATE.deviceRole === 'controller') {
     var initSteps = [
       function(next) {
-        log('Step 1/5: Detecting device type...');
+        log('Step 1/6: Disabling sys_btn_toggle...');
+        Shelly.call('Sys.SetConfig', {config: {device: {sys_btn_toggle: false}}}, function(res, err) {
+          if (err) {
+            log('WARNING: Failed to disable sys_btn_toggle:', err);
+            if (err && false) {}
+          } else {
+            log('sys_btn_toggle disabled (script handles button)');
+          }
+          next();
+        });
+      },
+      function(next) {
+        log('Step 2/6: Detecting device type...');
         detectDeviceType();
         next();
       },
       function(next) {
-        log('Step 2/5: Checking water supply status...');
+        log('Step 3/6: Checking water supply status...');
         var input0 = Shelly.getComponentStatus('input:0');
         if (input0) {
           handleWaterSupply(input0.state);
@@ -1487,15 +1499,15 @@ function continueInit() {
         next();
       },
       function(next) {
-        log('Step 3/5: Configuring component names...');
+        log('Step 4/6: Configuring component names...');
         applyComponentNames(next);
       },
       function(next) {
-        log('Step 4/5: Clearing old schedules...');
+        log('Step 5/6: Clearing old schedules...');
         clearNonUpdateSchedules(next);
       },
       function(next) {
-        log('Step 5/5: Creating schedules...');
+        log('Step 6/6: Creating schedules...');
         createSchedules(next);
       }
     ];
@@ -1521,11 +1533,23 @@ function continueInit() {
     // Bootstrap helper - clean schedules but don't create pump schedules
     var initSteps = [
       function(next) {
-        log('Step 1/2: Configuring component names...');
+        log('Step 1/3: Disabling sys_btn_toggle...');
+        Shelly.call('Sys.SetConfig', {config: {device: {sys_btn_toggle: false}}}, function(res, err) {
+          if (err) {
+            log('WARNING: Failed to disable sys_btn_toggle:', err);
+            if (err && false) {}
+          } else {
+            log('sys_btn_toggle disabled (script handles button)');
+          }
+          next();
+        });
+      },
+      function(next) {
+        log('Step 2/3: Configuring component names...');
         applyComponentNames(next);
       },
       function(next) {
-        log('Step 2/2: Clearing old schedules...');
+        log('Step 3/3: Clearing old schedules...');
         clearNonUpdateSchedules(next);
       }
     ];

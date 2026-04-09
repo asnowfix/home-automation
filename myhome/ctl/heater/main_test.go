@@ -2,7 +2,7 @@ package heater
 
 import (
 	"io/fs"
-	"shelly/scripts"
+	"github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"testing"
 
 	"github.com/dop251/goja"

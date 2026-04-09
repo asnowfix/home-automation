@@ -3,11 +3,11 @@ package script
 import (
 	"context"
 	"fmt"
-	"pkg/shelly"
-	"pkg/shelly/kvs"
-	pkgscript "pkg/shelly/script"
-	"pkg/shelly/sswitch"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
+	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"time"
 
 	"github.com/go-logr/logr"

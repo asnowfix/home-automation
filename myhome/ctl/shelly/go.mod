@@ -1,4 +1,4 @@
-module myhome/ctl/shelly
+module github.com/asnowfix/home-automation/myhome/ctl/shelly
 
 go 1.24.2
 
@@ -9,10 +9,10 @@ require (
 	github.com/spf13/cobra v1.10.1
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
-	myhome/ctl/shelly/follow v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/shelly/follow v0.0.0-00010101000000-000000000000
 )
 
-replace myhome/ctl/shelly/follow => ./follow
+replace github.com/asnowfix/home-automation/myhome/ctl/shelly/follow => ./follow
 
 require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

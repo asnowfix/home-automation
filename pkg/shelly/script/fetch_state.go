@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"pkg/shelly/kvs"
-	shellyrpc "pkg/shelly/shelly"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	shellyrpc "github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 )
 
 // FetchDeviceState fetches the live state of a Shelly device and returns a

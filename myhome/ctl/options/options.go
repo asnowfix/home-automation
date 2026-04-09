@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"global"
+	"github.com/asnowfix/home-automation/internal/global"
 	"os"
 	"os/signal"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"syscall"
 	"time"
 
-	"version"
+	"github.com/asnowfix/home-automation/pkg/version"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/viper"

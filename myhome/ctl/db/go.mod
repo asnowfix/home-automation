@@ -1,4 +1,4 @@
-module myhome/ctl/db
+module github.com/asnowfix/home-automation/myhome/ctl/db
 
 go 1.24.2
 

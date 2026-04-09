@@ -1,4 +1,4 @@
-module pkg/shelly/mqtt
+module github.com/asnowfix/home-automation/pkg/shelly/mqtt
 
 go 1.23.0
 

@@ -1,4 +1,4 @@
-module myhome/temperature
+module github.com/asnowfix/home-automation/myhome/temperature
 
 go 1.24.2
 
@@ -7,13 +7,13 @@ require (
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/ncruces/go-sqlite3 v0.22.0
 	github.com/spf13/viper v1.21.0
-	myhome v0.0.0-00010101000000-000000000000
-	myhome/mqtt v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/internal/myhome v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/mqtt v0.0.0-00010101000000-000000000000
 )
 
-replace myhome => ../../internal/myhome
+replace github.com/asnowfix/home-automation/internal/myhome => ../../internal/myhome
 
-replace myhome/mqtt => ../mqtt
+replace github.com/asnowfix/home-automation/myhome/mqtt => ../mqtt
 
 require (
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect

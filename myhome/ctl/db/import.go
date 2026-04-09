@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"os"
 
 	"github.com/spf13/cobra"

@@ -1,4 +1,4 @@
-module myhome/ctl/mqtt
+module github.com/asnowfix/home-automation/myhome/ctl/mqtt
 
 go 1.23.0
 

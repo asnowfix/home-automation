@@ -3,10 +3,10 @@ package script
 import (
 	"io/fs"
 	"net/http"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"reflect"
 
-	"hlog"
+	"github.com/asnowfix/home-automation/hlog"
 
 	"github.com/go-logr/logr"
 )

@@ -3,9 +3,9 @@ package sfr
 import (
 	"context"
 	"fmt"
-	"myhome/model"
+	"github.com/asnowfix/home-automation/internal/myhome/model"
 	"net"
-	"pkg/sfr"
+	"github.com/asnowfix/home-automation/pkg/sfr"
 	"sync"
 	"time"
 

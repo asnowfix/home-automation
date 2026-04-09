@@ -1,4 +1,4 @@
-module myhome/ctl/sfr
+module github.com/asnowfix/home-automation/myhome/ctl/sfr
 
 go 1.24.2
 

@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"global"
-	"myhome/mqtt"
-	mynet "myhome/net"
-	"myhome/proxy"
-	"myhome/storage"
-	"myhome/ui/static"
+	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	"github.com/asnowfix/home-automation/internal/myhome/proxy"
+	"github.com/asnowfix/home-automation/myhome/storage"
+	"github.com/asnowfix/home-automation/internal/myhome/ui/static"
 
 	"github.com/go-logr/logr"
 )

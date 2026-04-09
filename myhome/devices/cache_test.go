@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/testr"

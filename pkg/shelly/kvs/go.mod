@@ -1,4 +1,4 @@
-module pkg/shelly/kvs
+module github.com/asnowfix/home-automation/pkg/shelly/kvs
 
 go 1.23.0
 

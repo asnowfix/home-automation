@@ -3,19 +3,19 @@ package kvs
 import (
 	"context"
 	"fmt"
-	"hlog"
-	"myhome"
+	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"reflect"
 
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"pkg/devices"
-	"pkg/shelly"
-	"pkg/shelly/kvs"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/devices"
+	"github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 )
 
 func init() {

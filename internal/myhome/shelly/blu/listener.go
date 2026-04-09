@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"myhome"
-	"myhome/mqtt"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
 	"net"
-	"pkg/shelly/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"strings"
 
 	"github.com/go-logr/logr"

@@ -2,7 +2,7 @@ package input
 
 import (
 	"net/http"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"reflect"
 
 	"github.com/go-logr/logr"

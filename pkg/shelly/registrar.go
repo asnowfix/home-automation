@@ -3,7 +3,7 @@ package shelly
 import (
 	"context"
 	"fmt"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
 )

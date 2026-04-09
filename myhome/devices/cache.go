@@ -3,7 +3,7 @@ package devices
 import (
 	"context"
 	"fmt"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"strconv"
 	"sync"
 

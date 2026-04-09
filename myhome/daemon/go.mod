@@ -1,4 +1,4 @@
-module myhome/daemon
+module github.com/asnowfix/home-automation/myhome/daemon
 
 go 1.24.2
 

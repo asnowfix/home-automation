@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"reflect"
 	"strconv"
 

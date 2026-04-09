@@ -1,7 +1,7 @@
 package daemon
 
 import (
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"strconv"
 
 	"github.com/go-logr/logr"

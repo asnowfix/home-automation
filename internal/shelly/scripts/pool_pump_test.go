@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"pkg/shelly/mqtt"
-	"pkg/shelly/script"
+	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	"github.com/asnowfix/home-automation/pkg/shelly/script"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/testr"

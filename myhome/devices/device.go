@@ -2,7 +2,7 @@ package devices
 
 import (
 	"context"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 )
 
 type DeviceRegistry interface {

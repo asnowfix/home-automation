@@ -1,7 +1,7 @@
 package forget
 
 import (
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/spf13/cobra"
 )

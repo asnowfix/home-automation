@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net"
-	"pkg/devices"
-	"pkg/shelly/shelly"
+	"github.com/asnowfix/home-automation/pkg/devices"
+	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"strconv"
 	"strings"
 

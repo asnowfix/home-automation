@@ -2,7 +2,7 @@ package occupancy
 
 import (
 	"context"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"time"
 
 	"github.com/go-logr/logr"

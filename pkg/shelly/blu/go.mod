@@ -1,4 +1,4 @@
-module pkg/shelly/blu
+module github.com/asnowfix/home-automation/pkg/shelly/blu
 
 go 1.24.2
 

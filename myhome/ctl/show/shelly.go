@@ -3,10 +3,10 @@ package show
 import (
 	"encoding/json"
 	"fmt"
-	"hlog"
-	"myhome"
+	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/internal/myhome"
 
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"

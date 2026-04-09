@@ -1,4 +1,4 @@
-module pkg/shelly/shttp
+module github.com/asnowfix/home-automation/pkg/shelly/shttp
 
 go 1.23.0
 

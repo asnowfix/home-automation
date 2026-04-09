@@ -1,4 +1,4 @@
-module pkg/shelly/shelly
+module github.com/asnowfix/home-automation/pkg/shelly/shelly
 
 go 1.23.0
 

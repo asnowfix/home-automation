@@ -1,4 +1,4 @@
-module version
+module github.com/asnowfix/home-automation/pkg/version
 
 go 1.25.3
 

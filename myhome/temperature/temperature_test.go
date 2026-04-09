@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 )
 
 // TestIsInTimeRange verifies normal and midnight-crossing ranges.

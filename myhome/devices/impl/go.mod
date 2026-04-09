@@ -1,4 +1,4 @@
-module myhome/devices/impl
+module github.com/asnowfix/home-automation/myhome/devices/impl
 
 go 1.24.2
 

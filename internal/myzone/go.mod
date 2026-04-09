@@ -1,4 +1,4 @@
-module myzone
+module github.com/asnowfix/home-automation/internal/myzone
 
 go 1.23.0
 

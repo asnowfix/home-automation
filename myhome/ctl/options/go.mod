@@ -1,4 +1,4 @@
-module myhome/ctl/options
+module github.com/asnowfix/home-automation/myhome/ctl/options
 
 go 1.23.0
 

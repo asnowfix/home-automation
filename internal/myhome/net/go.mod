@@ -1,4 +1,4 @@
-module myhome/net
+module github.com/asnowfix/home-automation/internal/myhome/net
 
 go 1.24.2
 

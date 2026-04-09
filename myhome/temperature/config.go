@@ -2,7 +2,7 @@ package temperature
 
 import (
 	"fmt"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/spf13/viper"
 )

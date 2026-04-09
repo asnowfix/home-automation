@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"pkg/shelly/mqtt"
+	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 
 	"github.com/dop251/goja"
 	"github.com/go-logr/logr"

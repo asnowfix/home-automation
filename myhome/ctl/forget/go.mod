@@ -1,4 +1,4 @@
-module myhome/ctl/forget
+module github.com/asnowfix/home-automation/myhome/ctl/forget
 
 go 1.24.2
 

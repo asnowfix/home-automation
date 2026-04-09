@@ -1,4 +1,4 @@
-module myhome/occupancy
+module github.com/asnowfix/home-automation/myhome/occupancy
 
 go 1.24.2
 

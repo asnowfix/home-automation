@@ -1,4 +1,4 @@
-module myhome/ctl/show
+module github.com/asnowfix/home-automation/myhome/ctl/show
 
 go 1.24.2
 

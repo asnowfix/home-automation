@@ -1,4 +1,4 @@
-module tapo
+module github.com/asnowfix/home-automation/pkg/tapo
 
 go 1.23.0
 

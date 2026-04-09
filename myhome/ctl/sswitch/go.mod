@@ -1,4 +1,4 @@
-module myhome/ctl/sswitch
+module github.com/asnowfix/home-automation/myhome/ctl/sswitch
 
 go 1.24.2
 

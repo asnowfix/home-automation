@@ -1,4 +1,4 @@
-module schedule
+module github.com/asnowfix/home-automation/pkg/shelly/schedule
 
 go 1.23.0
 

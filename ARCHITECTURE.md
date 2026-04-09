@@ -54,24 +54,9 @@ Supporting: `internal/shelly/scripts/` (324 LOC) — embedded `.js` files + vers
 
 ## 2. Module & Dependency Structure
 
-### Module Naming Problem
+### Module Naming (Fixed)
 
-Module names are **inconsistent and non-standard**. Go modules intended for external consumption should use full GitHub paths:
-
-| Current module name | Expected name |
-|---|---|
-| `pkg/shelly` | `github.com/asnowfix/home-automation/pkg/shelly` |
-| `pkg/devices` | `github.com/asnowfix/home-automation/pkg/devices` |
-| `schedule` | `github.com/asnowfix/home-automation/pkg/shelly/schedule` |
-| `shelly/scripts` | `github.com/asnowfix/home-automation/internal/shelly/scripts` |
-| `myhome/net` | `github.com/asnowfix/home-automation/internal/myhome/net` |
-| `hlog` | `github.com/asnowfix/home-automation/hlog` |
-| `myhome` | `github.com/asnowfix/home-automation/internal/myhome` |
-| `tapo` | `github.com/asnowfix/home-automation/pkg/tapo` |
-
-Only the root module (`github.com/asnowfix/home-automation`) and one CLI module (`myhome/ctl/temperature`) use the full GitHub path. The rest use **short, non-importable names** that only work within `go.work` via `replace` directives.
-
-This means **none of these packages can be consumed by external projects** without `replace` directives — the module names are not resolvable by the Go toolchain.
+All 54 modules now use fully-qualified `github.com/asnowfix/home-automation/...` paths. This is a necessary prerequisite for external consumption, but not sufficient alone — modules still depend on `go.work` for local resolution and are not independently publishable until Phase 1 (consolidation into fewer modules) is complete.
 
 ### Dependency Graph (pkg/shelly focus)
 
@@ -111,13 +96,9 @@ pkg/shelly
 
 ## 3. Flaws and Issues
 
-### F1. Non-Standard Module Names (Critical for extraction)
+### ~~F1. Non-Standard Module Names~~ (FIXED)
 
-**Severity: High** — Blocks external consumption.
-
-All 57 sub-modules (except root + temperature) use short names (`pkg/shelly`, `hlog`, `myhome`). These only resolve within the workspace via `replace` directives in `go.mod`. External projects cannot `go get` any of these packages.
-
-**Impact:** Extracting `pkg/shelly` to a separate repo requires renaming the module from `pkg/shelly` to `github.com/asnowfix/go-shellies` (or similar) and updating all 57 modules' `replace` directives.
+**Status: Fixed** — All 54 modules now use full `github.com/asnowfix/home-automation/...` paths. Stale replace directives (`devices`, `mymqtt`, `internal`) removed from root go.mod.
 
 ### F2. Leaky Abstraction: pkg/shelly depends on myhome internals
 
@@ -127,9 +108,9 @@ All 57 sub-modules (except root + temperature) use short names (`pkg/shelly`, `h
 
 `pkg/shelly/ops.go` imports `shelly/scripts` (embedded `.js` files from `internal/shelly/scripts/`). These are MyHome-specific scripts (heater, pool-pump, watchdog, etc.) — they should not be compiled into the generic library.
 
-### F3. Inconsistent Module Name: `schedule`
+### ~~F3. Inconsistent Module Name: `schedule`~~ (FIXED)
 
-**Severity: Medium** — The module at `pkg/shelly/schedule/go.mod` declares itself as `module schedule` instead of `module pkg/shelly/schedule`. This is misleading and will conflict with any other package named `schedule`.
+**Status: Fixed** — Module renamed from `schedule` to `github.com/asnowfix/home-automation/pkg/shelly/schedule`. All imports updated.
 
 ### F4. `pkg/devices` Coupled to pkg/shelly
 
@@ -223,18 +204,18 @@ This should be decomposed: filtering and output belong at the application layer.
 
 ## 5. Summary of Issues by Priority
 
-| # | Issue | Severity | Blocks Extraction? |
-|---|---|---|---|
-| F1 | Non-standard module names | High | Yes |
-| F2 | pkg/shelly depends on myhome internals | High | Yes |
-| F9 | 16 separate modules instead of 1 | Medium | Yes |
-| F4 | pkg/devices coupling | Medium | Yes |
-| F3 | `schedule` module name | Medium | Yes |
-| F11 | Init requires embedded scripts | Medium | Yes |
-| F5 | Global mutable state | Medium | No (but limits reusability) |
-| F7 | Panic-driven error handling | Medium | No (but bad library practice) |
-| F8 | fmt.Printf in library code | Low-Medium | No (but bad library practice) |
-| F12 | MQTT client as global singleton | Medium | No (future improvement) |
-| F10 | Missing test coverage | Medium | No (but needed before refactor) |
-| F13 | Mixed concerns in Foreach | Low | No |
-| F6 | Commented-out code | Low | No |
+| # | Issue | Severity | Blocks Extraction? | Status |
+|---|---|---|---|---|
+| ~~F1~~ | ~~Non-standard module names~~ | ~~High~~ | ~~Yes~~ | **FIXED** |
+| F2 | pkg/shelly depends on myhome internals | High | Yes | Open |
+| F9 | 16 separate modules instead of 1 | Medium | Yes | Open |
+| F4 | pkg/devices coupling | Medium | Yes | Open |
+| ~~F3~~ | ~~`schedule` module name~~ | ~~Medium~~ | ~~Yes~~ | **FIXED** |
+| F11 | Init requires embedded scripts | Medium | Yes | Open |
+| F5 | Global mutable state | Medium | No (but limits reusability) | Open |
+| F7 | Panic-driven error handling | Medium | No (but bad library practice) | Open |
+| F8 | fmt.Printf in library code | Low-Medium | No (but bad library practice) | Open |
+| F12 | MQTT client as global singleton | Medium | No (future improvement) | Open |
+| F10 | Missing test coverage | Medium | No (but needed before refactor) | Open |
+| F13 | Mixed concerns in Foreach | Low | No | Open |
+| F6 | Commented-out code | Low | No | Open |

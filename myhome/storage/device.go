@@ -1,6 +1,6 @@
 package storage
 
-import "myhome"
+import "github.com/asnowfix/home-automation/internal/myhome"
 
 type Device struct {
 	myhome.Device

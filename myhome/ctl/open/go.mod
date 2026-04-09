@@ -1,4 +1,4 @@
-module myhome/ctl/open
+module github.com/asnowfix/home-automation/myhome/ctl/open
 
 go 1.24.2
 

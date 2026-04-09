@@ -1,4 +1,4 @@
-module hlog
+module github.com/asnowfix/home-automation/hlog
 
 go 1.23.0
 

@@ -3,7 +3,7 @@ package script
 import (
 	"context"
 	"fmt"
-	"pkg/shelly/script"
+	"github.com/asnowfix/home-automation/pkg/shelly/script"
 
 	"github.com/spf13/cobra"
 )

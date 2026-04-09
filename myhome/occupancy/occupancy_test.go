@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"myhome/mqtt"
-	"pkg/sfr"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/pkg/sfr"
 
 	"github.com/go-logr/logr"
 )

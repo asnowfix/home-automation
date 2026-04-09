@@ -1,4 +1,4 @@
-module myhome/ctl/list
+module github.com/asnowfix/home-automation/myhome/ctl/list
 
 go 1.24.2
 

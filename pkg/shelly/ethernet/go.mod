@@ -1,4 +1,4 @@
-module pkg/shelly/ethernet
+module github.com/asnowfix/home-automation/pkg/shelly/ethernet
 
 go 1.23.0
 

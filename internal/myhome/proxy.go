@@ -3,7 +3,7 @@ package myhome
 import (
 	"context"
 	"fmt"
-	"pkg/devices"
+	"github.com/asnowfix/home-automation/pkg/devices"
 )
 
 var TheClient Client

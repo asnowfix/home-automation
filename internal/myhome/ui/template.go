@@ -5,17 +5,17 @@ import (
 	"embed"
 	"io"
 	"io/fs"
-	"myhome"
-	"myhome/storage"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/storage"
 	"net/http"
-	"pkg/shelly"
-	pkgshelly "pkg/shelly/shelly"
-	"pkg/shelly/sswitch"
+	"github.com/asnowfix/home-automation/pkg/shelly"
+	pkgshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
 	"sort"
 	"strings"
 	"text/template"
 
-	"global"
+	"github.com/asnowfix/home-automation/internal/global"
 
 	"github.com/go-logr/logr"
 )

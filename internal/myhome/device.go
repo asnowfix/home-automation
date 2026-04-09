@@ -3,12 +3,12 @@ package myhome
 import (
 	"context"
 	"fmt"
-	"myhome/sfr"
+	"github.com/asnowfix/home-automation/internal/myhome/sfr"
 	"net"
-	"pkg/devices"
-	shellyapi "pkg/shelly"
-	"pkg/shelly/shelly"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/devices"
+	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"

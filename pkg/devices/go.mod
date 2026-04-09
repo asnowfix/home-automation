@@ -1,4 +1,4 @@
-module pkg/devices
+module github.com/asnowfix/home-automation/pkg/devices
 
 go 1.23.0
 

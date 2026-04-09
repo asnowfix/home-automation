@@ -9,16 +9,16 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"hlog"
-	shellysetup "internal/myhome/shelly/setup"
-	"myhome"
-	"myhome/ctl/options"
-	mhmqtt "myhome/mqtt"
-	mynet "myhome/net"
-	"pkg/devices"
-	shellyapi "pkg/shelly"
-	"pkg/shelly/types"
-	"pkg/shelly/wifi"
+	"github.com/asnowfix/home-automation/hlog"
+	shellysetup "github.com/asnowfix/home-automation/internal/myhome/shelly/setup"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	mhmqtt "github.com/asnowfix/home-automation/myhome/mqtt"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	"github.com/asnowfix/home-automation/pkg/devices"
+	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/wifi"
 )
 
 // options for STA

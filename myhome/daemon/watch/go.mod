@@ -1,4 +1,4 @@
-module myhome/daemon/watch
+module github.com/asnowfix/home-automation/myhome/daemon/watch
 
 go 1.24.2
 

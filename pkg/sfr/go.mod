@@ -1,4 +1,4 @@
-module pkg/sfr
+module github.com/asnowfix/home-automation/pkg/sfr
 
 go 1.24.2
 

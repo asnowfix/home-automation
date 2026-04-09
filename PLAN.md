@@ -44,11 +44,16 @@ Create a **standalone Go library** that any Go project can `go get` and use to i
   - Update all pkg/shelly files to use `pkg/shelly/types.Device` instead of `pkg/devices.Device`
   - Keep `pkg/devices` in home-automation for Tapo/SFR; have it import from go-shellies later or keep its own copy
 
-### 0.2 Fix module name anomalies
+### ~~0.2 Fix module name anomalies~~ (DONE)
 
-- [ ] **Rename `schedule` → `pkg/shelly/schedule`** in `pkg/shelly/schedule/go.mod`
-- [ ] Update all imports of `"schedule"` to `"pkg/shelly/schedule"`
-- [ ] Update `go.work` replace directives
+All 54 modules renamed to use full `github.com/asnowfix/home-automation/...` paths (208 files modified). This also fixes F1 and F3 from ARCHITECTURE.md. Stale replace directives (`devices`, `mymqtt`, `internal`) removed from root go.mod. Build and all tests pass.
+
+- [x] **Rename all modules** to `github.com/asnowfix/home-automation/<path>` format
+- [x] **Rename `schedule`** → `github.com/asnowfix/home-automation/pkg/shelly/schedule`
+- [x] Update all imports in 154 .go files and 54 go.mod files
+- [x] Fix `internal/myhome/...` imports that used filesystem paths instead of module paths
+- [x] Clean up stale replace directives in root go.mod
+- [x] Verify `make build` and `make test` pass
 
 ### 0.3 Replace panics with errors
 
@@ -168,25 +173,25 @@ Create a **standalone Go library** that any Go project can `go get` and use to i
 ### 2.2 Rename the module
 
 - [ ] Set `go.mod` to `module github.com/asnowfix/go-shellies`
-- [ ] **Global find-replace** all import paths:
-  - `"pkg/shelly/types"` → `"github.com/asnowfix/go-shellies/types"`
-  - `"pkg/shelly/mqtt"` → `"github.com/asnowfix/go-shellies/mqtt"`
-  - `"pkg/shelly/script"` → `"github.com/asnowfix/go-shellies/script"`
-  - `"pkg/shelly/kvs"` → `"github.com/asnowfix/go-shellies/kvs"`
-  - `"pkg/shelly/system"` → `"github.com/asnowfix/go-shellies/system"`
-  - `"pkg/shelly/wifi"` → `"github.com/asnowfix/go-shellies/wifi"`
-  - `"pkg/shelly/ethernet"` → `"github.com/asnowfix/go-shellies/ethernet"`
-  - `"pkg/shelly/input"` → `"github.com/asnowfix/go-shellies/input"`
-  - `"pkg/shelly/matter"` → `"github.com/asnowfix/go-shellies/matter"`
-  - `"pkg/shelly/schedule"` → `"github.com/asnowfix/go-shellies/schedule"`
-  - `"pkg/shelly/shttp"` → `"github.com/asnowfix/go-shellies/shttp"`
-  - `"pkg/shelly/sswitch"` → `"github.com/asnowfix/go-shellies/sswitch"`
-  - `"pkg/shelly/shelly"` → `"github.com/asnowfix/go-shellies/shelly"`
-  - `"pkg/shelly/ble"` → `"github.com/asnowfix/go-shellies/ble"`
-  - `"pkg/shelly/blu"` → `"github.com/asnowfix/go-shellies/blu"`
-  - `"pkg/shelly/gen1"` → `"github.com/asnowfix/go-shellies/gen1"`
-  - `"pkg/shelly"` → `"github.com/asnowfix/go-shellies"`
-  - `"pkg/devices"` → `"github.com/asnowfix/go-shellies/types"` (if Device interface was absorbed)
+- [ ] **Global find-replace** all import paths (now using full paths from Phase 0.2):
+  - `"github.com/asnowfix/home-automation/pkg/shelly/types"` → `"github.com/asnowfix/go-shellies/types"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/mqtt"` → `"github.com/asnowfix/go-shellies/mqtt"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/script"` → `"github.com/asnowfix/go-shellies/script"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/kvs"` → `"github.com/asnowfix/go-shellies/kvs"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/system"` → `"github.com/asnowfix/go-shellies/system"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/wifi"` → `"github.com/asnowfix/go-shellies/wifi"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/ethernet"` → `"github.com/asnowfix/go-shellies/ethernet"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/input"` → `"github.com/asnowfix/go-shellies/input"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/matter"` → `"github.com/asnowfix/go-shellies/matter"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/schedule"` → `"github.com/asnowfix/go-shellies/schedule"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/shttp"` → `"github.com/asnowfix/go-shellies/shttp"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/sswitch"` → `"github.com/asnowfix/go-shellies/sswitch"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/shelly"` → `"github.com/asnowfix/go-shellies/shelly"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/ble"` → `"github.com/asnowfix/go-shellies/ble"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/blu"` → `"github.com/asnowfix/go-shellies/blu"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly/gen1"` → `"github.com/asnowfix/go-shellies/gen1"`
+  - `"github.com/asnowfix/home-automation/pkg/shelly"` → `"github.com/asnowfix/go-shellies"`
+  - `"github.com/asnowfix/home-automation/pkg/devices"` → `"github.com/asnowfix/go-shellies/types"` (if Device interface was absorbed)
 - [ ] Run `go mod tidy` and verify `go build ./...` succeeds
 
 ### 2.3 Set up CI in go-shellies

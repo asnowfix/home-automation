@@ -2,9 +2,9 @@ package pool
 
 import (
 	"fmt"
-	"hlog"
-	mhscript "internal/myhome/shelly/script"
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/hlog"
+	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
 	"github.com/spf13/cobra"
 )

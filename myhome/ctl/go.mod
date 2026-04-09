@@ -1,29 +1,29 @@
-module myhome/ctl
+module github.com/asnowfix/home-automation/myhome/ctl
 
 go 1.24.2
 
 toolchain go1.24.3
 
 require (
-	debug v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/internal/debug v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.10.1
-	global v0.0.0-00010101000000-000000000000
-	hlog v0.0.0-00010101000000-000000000000
-	myhome v0.0.0-00010101000000-000000000000
-	myhome/ctl/blu v0.0.0-00010101000000-000000000000
-	myhome/ctl/forget v0.0.0-00010101000000-000000000000
-	myhome/ctl/list v0.0.0-00010101000000-000000000000
-	myhome/ctl/mqtt v0.0.0-00010101000000-000000000000
-	myhome/ctl/open v0.0.0-00010101000000-000000000000
-	myhome/ctl/options v0.0.0-00010101000000-000000000000
-	myhome/ctl/sfr v0.0.0-00010101000000-000000000000
-	myhome/ctl/shelly v0.0.0-00010101000000-000000000000
-	myhome/ctl/show v0.0.0-00010101000000-000000000000
-	myhome/ctl/sswitch v0.0.0-00010101000000-000000000000
-	myhome/ctl/temperature v0.0.0-00010101000000-000000000000
-	myhome/mqtt v0.0.0-00010101000000-000000000000
-	pkg/shelly v0.0.0-00010101000000-000000000000
-	pkg/shelly/types v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/internal/global v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/hlog v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/internal/myhome v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/blu v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/forget v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/list v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/mqtt v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/open v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/options v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/sfr v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/shelly v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/show v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/sswitch v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ctl/temperature v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/mqtt v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/pkg/shelly v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/pkg/shelly/types v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -53,38 +53,38 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace myhome/ctl/blu => ./blu
+replace github.com/asnowfix/home-automation/myhome/ctl/blu => ./blu
 
-replace myhome/ctl/forget => ./forget
+replace github.com/asnowfix/home-automation/myhome/ctl/forget => ./forget
 
-replace myhome/ctl/list => ./list
+replace github.com/asnowfix/home-automation/myhome/ctl/list => ./list
 
-replace myhome/ctl/mqtt => ./mqtt
+replace github.com/asnowfix/home-automation/myhome/ctl/mqtt => ./mqtt
 
-replace myhome/ctl/open => ./open
+replace github.com/asnowfix/home-automation/myhome/ctl/open => ./open
 
-replace myhome/ctl/options => ./options
+replace github.com/asnowfix/home-automation/myhome/ctl/options => ./options
 
-replace myhome/ctl/sfr => ./sfr
+replace github.com/asnowfix/home-automation/myhome/ctl/sfr => ./sfr
 
-replace myhome/ctl/shelly => ./shelly
+replace github.com/asnowfix/home-automation/myhome/ctl/shelly => ./shelly
 
-replace myhome/ctl/show => ./show
+replace github.com/asnowfix/home-automation/myhome/ctl/show => ./show
 
-replace myhome/ctl/sswitch => ./sswitch
+replace github.com/asnowfix/home-automation/myhome/ctl/sswitch => ./sswitch
 
-replace myhome/ctl/temperature => ./temperature
+replace github.com/asnowfix/home-automation/myhome/ctl/temperature => ./temperature
 
-replace global => ../../internal/global
+replace github.com/asnowfix/home-automation/internal/global => ../../internal/global
 
-replace hlog => ../../hlog
+replace github.com/asnowfix/home-automation/hlog => ../../hlog
 
-replace myhome => ../../internal/myhome
+replace github.com/asnowfix/home-automation/internal/myhome => ../../internal/myhome
 
-replace myhome/mqtt => ../mqtt
+replace github.com/asnowfix/home-automation/myhome/mqtt => ../mqtt
 
-replace pkg/shelly => ../../pkg/shelly
+replace github.com/asnowfix/home-automation/pkg/shelly => ../../pkg/shelly
 
-replace pkg/shelly/types => ../../pkg/shelly/types
+replace github.com/asnowfix/home-automation/pkg/shelly/types => ../../pkg/shelly/types
 
-replace debug => ../../internal/debug
+replace github.com/asnowfix/home-automation/internal/debug => ../../internal/debug

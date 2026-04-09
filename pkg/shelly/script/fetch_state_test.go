@@ -24,8 +24,8 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
-	"pkg/shelly/kvs"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 )
 
 var update = flag.Bool("update", false, "write golden files instead of comparing them")

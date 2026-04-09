@@ -1,7 +1,7 @@
 package blu
 
 import (
-	"myhome/ctl/blu/follow"
+	"github.com/asnowfix/home-automation/myhome/ctl/blu/follow"
 
 	"github.com/spf13/cobra"
 )

@@ -2,7 +2,7 @@ package shelly
 
 import (
 	"net"
-	"pkg/devices"
+	"github.com/asnowfix/home-automation/pkg/devices"
 )
 
 // func Devices(ctx context.Context, log logr.Logger, devices []devices.Device) []*Device {

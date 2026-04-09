@@ -1,4 +1,4 @@
-module myhome/storage
+module github.com/asnowfix/home-automation/myhome/storage
 
 go 1.24.2
 

@@ -3,9 +3,9 @@ package mqtt
 import (
 	"context"
 	"fmt"
-	"global"
-	"myhome/ctl/options"
-	mynet "myhome/net"
+	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
 	"net/url"
 	"os"

@@ -1,4 +1,4 @@
-module pkg/shelly/input
+module github.com/asnowfix/home-automation/pkg/shelly/input
 
 go 1.23.0
 

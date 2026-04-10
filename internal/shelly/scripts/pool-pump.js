@@ -1315,21 +1315,26 @@ function decideModeFromForecast() {
 }
 
 // === UNIFIED START/STOP FUNCTIONS ===
-function doStart(speed, checkBootstrap, reason) {
+function doStart(speed, checkBootstrap, forceBootstrap, reason) {
   log(reason || 'Start pump');
-  
+
   if (STATE.deviceRole !== 'controller') {
     log('Ignoring event, not controller');
     return;
   }
-  
+
   var input0 = Shelly.getComponentStatus('input:0');
   if (input0 && input0.state) {
     log('Water supply protection active, ignoring start request');
     return;
   }
-  
-  if (checkBootstrap && needsBootstrap()) {
+
+  if (forceBootstrap) {
+    log('Forcing bootstrap sequence at speed:', speed);
+    executeBootstrap(speed, function() {
+      log('Forced bootstrap complete, pump running at speed:', speed);
+    });
+  } else if (checkBootstrap && needsBootstrap()) {
     log('Bootstrap required, starting with bootstrap sequence at speed:', speed);
     executeBootstrap(speed, function() {
       log('Bootstrap complete, pump running at speed:', speed);
@@ -1380,7 +1385,7 @@ function handleDailyCheck() {
 }
 
 function handleMorningStart() {
-  doStart(CONFIG.ecoSpeed, false, 'Morning start event');
+  doStart(CONFIG.ecoSpeed, false /*checkBootstrap*/, false, 'Morning start event');
 }
 
 function handleEveningStop() {
@@ -1388,7 +1393,7 @@ function handleEveningStop() {
 }
 
 function handleNightStart() {
-  doStart(CONFIG.highSpeed, true, 'Night start event');
+  doStart(CONFIG.highSpeed, true /*checkBootstrap*/, false, 'Night start event');
 }
 
 function handleNightStop() {

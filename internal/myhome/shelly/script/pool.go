@@ -256,8 +256,8 @@ func (s *PoolService) getBootstrapDeviceID(ctx context.Context, controllerID str
 }
 
 // Start starts the pool pump at the specified speed
-func (s *PoolService) Start(ctx context.Context, controllerID string, speed Speed) error {
-	s.log.Info("Starting pool pump", "controller", controllerID, "speed", speed)
+func (s *PoolService) Start(ctx context.Context, controllerID string, speed Speed, forceBootstrap bool) error {
+	s.log.Info("Starting pool pump", "controller", controllerID, "speed", speed, "forceBootstrap", forceBootstrap)
 
 	// Get controller device
 	device, err := s.provider.GetDeviceByAny(ctx, controllerID)
@@ -293,14 +293,15 @@ func (s *PoolService) Start(ctx context.Context, controllerID string, speed Spee
 
 	// Call doStart() in the script to use unified logic with guard conditions
 	// checkBootstrap=false for manual starts (user decides when to start)
-	code := fmt.Sprintf("doStart(%d, false, 'Manual start via ctl pool start %s')", switchID, speed)
+	// forceBootstrap=true when --bootstrap flag is set
+	code := fmt.Sprintf("doStart(%d, false, %t, 'Manual start via ctl pool start %s')", switchID, forceBootstrap, speed)
 
 	result, err := pkgscript.EvalInDevice(ctx, via, sd, "pool-pump.js", code)
 	if err != nil {
 		return fmt.Errorf("failed to start pump via script: %w", err)
 	}
 
-	s.log.Info("Pump start command sent", "speed", speed, "switch", switchID, "result", result)
+	s.log.Info("Pump start command sent", "speed", speed, "switch", switchID, "forceBootstrap", forceBootstrap, "result", result)
 	return nil
 }
 

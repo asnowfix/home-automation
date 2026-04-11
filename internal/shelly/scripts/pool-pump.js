@@ -613,15 +613,12 @@ function sendPro1Command(method, params, callback) {
   
   log('Sending RPC to Pro1:', method, 'params:', JSON.stringify(params));
   
-  MQTT.publish(topic, JSON.stringify(request), 0, false, function(success) {
-    if (success) {
-      log('RPC request sent successfully');
-      if (callback) callback(null);
-    } else {
-      log('ERROR: Failed to send RPC request');
-      if (callback) callback('MQTT publish failed');
-    }
-  });
+  // Fire-and-forget the publish, then invoke callback via task queue (runs every 200ms).
+  var published = MQTT.publish(topic, JSON.stringify(request), 0 /*at-most-once*/, false /*dont-retain*/);
+  log('RPC request published:', published);
+  if (callback) {
+    queueTask(function() { callback(null); });
+  }
 }
 
 function turnOnPro1(callback) {

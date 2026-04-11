@@ -316,6 +316,46 @@ Shelly.addEventHandler(function(eventData) {
 });
 ```
 
+### MQTT API Constraints
+
+#### MQTT.publish — No Callback
+
+`MQTT.publish(topic, payload, qos, retain)` accepts **exactly 4 parameters** and returns a boolean.
+
+**❌ No 5th callback argument is supported.** Any function passed as a 5th argument is silently ignored — the callback will never be invoked.
+
+```javascript
+// BROKEN — callback is silently ignored, continuation never runs
+MQTT.publish(topic, payload, 0, false, function(success) {
+  doNextStep(); // never called
+});
+
+// CORRECT — fire-and-forget, schedule continuation via task queue
+MQTT.publish(topic, payload, 0 /*at-most-once*/, false /*dont-retain*/);
+queueTask(function() { doNextStep(); });
+```
+
+#### Design Rule: Always Use the Task Queue for Post-Async Continuations
+
+**Never create a one-shot `Timer.set(delayMs, false, fn)` to delay a continuation after an async operation.** Every such timer consumes one of the 5 available timer slots for its full duration.
+
+Instead, append the continuation to the task queue with `queueTask(fn)`. The task queue's single recurring `TASK_TIMER` fires every 200ms, so the continuation is guaranteed to run after at least one 200ms tick — the same minimum delay — without consuming an extra timer slot.
+
+```javascript
+// AVOID — wastes a timer slot
+Timer.set(200, false, function() {
+  callback(null);
+});
+
+// PREFER — reuses the task queue's existing timer
+queueTask(function() { callback(null); });
+```
+
+This rule applies to all continuations after:
+- `MQTT.publish(...)` (no callback supported)
+- Any fire-and-forget `Shelly.call(...)` where you need to proceed after a brief settle delay
+- Any inter-step sequencing that would otherwise require a one-shot timer
+
 ### Resource Limits
 
 **Official limits per script:**

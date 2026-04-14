@@ -118,7 +118,7 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 					log.V(1).Info("Failed to update sensor in cache", "error", cacheErr, "device_id", deviceID)
 				}
 				if sseBroadcaster != nil {
-					log.Info("Broadcasting BLU sensor update via SSE", "device_id", deviceID, "sensor", sensor, "value", value)
+					log.V(1).Info("Broadcasting BLU sensor update via SSE", "device_id", deviceID, "sensor", sensor, "value", value)
 					sseBroadcaster.BroadcastSensorUpdate(deviceID, sensor, value)
 				}
 			}

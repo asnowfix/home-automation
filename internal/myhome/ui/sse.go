@@ -115,7 +115,11 @@ func (b *SSEBroadcaster) broadcast(event string, data interface{}) {
 		delete(b.clients, ch)
 		close(ch)
 	}
-	b.log.Info("Broadcast complete", "event", event, "data", data, "sent", sentCount, "skipped", skippedCount, "evicted", len(toEvict))
+	if len(toEvict) > 0 {
+		b.log.Info("Evicted slow SSE clients", "event", event, "sent", sentCount, "skipped", skippedCount, "evicted", len(toEvict))
+	} else {
+		b.log.V(1).Info("Broadcast complete", "event", event, "sent", sentCount, "skipped", skippedCount)
+	}
 }
 
 // SensorUpdateData represents a sensor value update

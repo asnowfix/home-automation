@@ -36,6 +36,8 @@ var CONFIG_KEY_PREFIX = "script/" + SCRIPT_NAME + "/";
 var SCRIPT_PREFIX = "[" + SCRIPT_NAME + "] ";
 
 // Configuration schema
+// Both Pro3 and Pro1 run this same script with shared KVS configuration
+// Script compares preferred_device_id against its own device ID to decide if it should run
 var CONFIG_SCHEMA = {
   enableLogging: {
     description: "Enable logging when true",
@@ -49,32 +51,32 @@ var CONFIG_SCHEMA = {
     default: "pool/pump",
     type: "string"
   },
-  deviceRole: {
-    description: "Device role: 'controller' or 'bootstrap' (required)",
-    key: "device-role",
+  preferredDeviceId: {
+    description: "Which device ID should run (actual Shelly device ID). Script compares this to its own ID",
+    key: "preferred",
     default: null,
     type: "string",
     required: true
   },
-  controllerDeviceId: {
-    description: "Controller device ID (required)",
-    key: "controller-id",
-    default: null,
-    type: "string",
-    required: true
-  },
-  bootstrapDeviceId: {
-    description: "Bootstrap device ID (required for controller role)",
-    key: "bootstrap-id",
+  pro3DeviceId: {
+    description: "Pro3 device ID (for MQTT subscriptions - cross-device status tracking)",
+    key: "pro3-id",
     default: null,
     type: "string",
     required: false
   },
-  bootstrapHoursThreshold: {
-    description: "Hours since last run above which bootstrap is needed",
-    key: "boot-hours",
-    default: 6,
-    type: "number",
+  pro1DeviceId: {
+    description: "Pro1 device ID (for MQTT subscriptions - cross-device status tracking)",
+    key: "pro1-id",
+    default: null,
+    type: "string",
+    required: false
+  },
+  preferredSpeed: {
+    description: "Speed: 'eco', 'mid', 'high', 'max'. Maps to switches based on device capabilities",
+    key: "speed",
+    default: "eco",
+    type: "string",
     required: false
   },
   ecoSpeed: {
@@ -98,13 +100,6 @@ var CONFIG_SCHEMA = {
     type: "number",
     required: false
   },
-  bootstrapDurationMs: {
-    description: "Bootstrap duration in milliseconds",
-    key: "boot-duration",
-    default: 120000,
-    type: "number",
-    required: false
-  },
   nightRunDurationMs: {
     description: "Night run duration in milliseconds",
     key: "night-duration",
@@ -112,10 +107,10 @@ var CONFIG_SCHEMA = {
     type: "number",
     required: false
   },
-  bootstrapToSpeedDelayMs: {
-    description: "Delay between bootstrap end and real pump speed start in milliseconds",
-    key: "boot-delay",
-    default: 500,
+  graceDelayMs: {
+    description: "Cross-device grace delay in ms (minimum 10000)",
+    key: "grace-delay",
+    default: 10000,
     type: "number",
     required: false
   },
@@ -190,18 +185,43 @@ function loadConfig(callback) {
           log("  -", missingRequired[i]);
         }
         log("Script cannot start without required configuration.");
-        log("Please run: myhome ctl pool setup <controller-device>");
+        log("Please run: ctl pool setup <pro3-device> --pro1 <pro1-device>");
         callback(false);
         return;
       }
-      
-      // Role-specific validation
-      if (CONFIG.deviceRole === "controller" && !CONFIG.bootstrapDeviceId) {
-        log("ERROR: Controller role requires bootstrapDeviceId");
+
+      // Clamp grace delay to minimum safe value
+      if (CONFIG.graceDelayMs < 10000) {
+        log("WARNING: grace-delay below minimum (10000ms), clamping");
+        CONFIG.graceDelayMs = 10000;
+      }
+
+      // Detect device type based on switch count
+      var switch0 = Shelly.getComponentStatus("switch:0");
+      var switch1 = Shelly.getComponentStatus("switch:1");
+      var switch2 = Shelly.getComponentStatus("switch:2");
+      if (switch2) {
+        STATE.deviceType = "pro3";
+        log("Detected device type: Pro3 (3 switches)");
+      } else if (switch0 && !switch1) {
+        STATE.deviceType = "pro1";
+        log("Detected device type: Pro1 (1 switch)");
+      } else {
+        STATE.deviceType = "unknown";
+        log("WARNING: Could not detect device type");
+      }
+
+      // Cache my device ID
+      var deviceInfo = Shelly.getDeviceInfo();
+      if (deviceInfo && deviceInfo.id) {
+        STATE.myDeviceId = deviceInfo.id;
+        log("My device ID:", STATE.myDeviceId);
+      } else {
+        log("ERROR: Could not get device ID");
         callback(false);
         return;
       }
-      
+
       log("Configuration loaded successfully");
       callback(true);
       return;
@@ -259,6 +279,7 @@ function loadConfig(callback) {
   loadNextKey();
 }
 
+
 // Script.storage keys for continuously evolving values (survives reboots)
 var STORAGE_KEYS = {
   forecastUrl: "forecast-url"       // Open-Meteo forecast URL built from device location
@@ -266,9 +287,8 @@ var STORAGE_KEYS = {
 
 // State keys for KVS persistence
 var STATE_KEYS = {
-  activeOutput: "active-output",    // -1 (all off), 0, 1, 2 for pro3; 0/1 for pro1
-  lastRunTimestamp: "last-run-ts",  // Unix timestamp (seconds) of last pump run
-  scheduleMode: "schedule-mode"     // "summer" or "winter" mode
+  activeOutput: "active-output",    // -1 (all off), 0, 1, 2 for pro3; 0 for pro1
+  scheduleMode: "schedule-mode"     // "summer" or "winter" mode (Pro3 only)
 };
 
 // === TASK QUEUE (SINGLE TIMER FOR ALL SEQUENTIAL OPERATIONS) ===
@@ -309,36 +329,40 @@ function queueTask(task) {
 var STATE = {
   // Device configuration (auto-detected at startup)
   deviceType: null,           // "pro3" or "pro1"
-  deviceRole: null,           // "pro3-controller" or "pro1-helper"
-  deviceId: null,             // Actual device ID from system
+  myDeviceId: null,           // My Shelly device ID from Shelly.getDeviceInfo().id
   outputs: [],                // Array of available output IDs
   inputs: [],                 // Array of available input IDs
-  
+
   // Component name mappings
   inputNames: {},             // {id: name}
   switchNames: {},            // {id: name}
-  
+
   // Current state
   activeOutput: -1,           // Current active output (-1 = all off)
   savedOutput: -1,            // Saved output before water-supply protection
-  lastRunTimestamp: null,     // Unix timestamp (seconds) of last pump run
-  
-  // Bootstrap state
-  bootstrapInProgress: false,
-  bootstrapTimerId: null,
+
+  // Cross-device safety (grace delay during switchover)
+  graceTimer: null,
+  graceActive: false,
+
+  // Tracked pro1 switch:0 state (updated via MQTT status subscription, controller only)
+  pro1On: false,
+
+  // Tracked pro3 switch states (updated via MQTT status subscription, bootstrap only)
+  // Key: switch id (0,1,2), value: true/false
+  pro3SwitchStates: {},
   
   // MQTT connection
   mqttConnected: false,
   
-  // Forecast cache (in-memory, refreshed daily)
+  // Forecast cache (in-memory, refreshed daily) - cleared after use to save memory
   forecastUrl: null,          // Open-Meteo forecast URL
-  cachedForecast: null,       // Array of hourly temperatures
-  cachedForecastTimes: null,  // Array of hourly timestamps
+  maxForecastTemp: null,      // Only store max temp, not full array (memory optimization)
   lastForecastFetchDate: null,// Date string (YYYY-M-D) of last fetch
-  
+
   // Schedule mode
   scheduleMode: null,         // "summer" or "winter"
-  
+
   // Initialization flag
   initializing: true          // Prevents KVS writes during init
 };
@@ -430,22 +454,7 @@ function loadValue(key) {
   return null;
 }
 
-// === BOOTSTRAP DECISION LOGIC ===
-function needsBootstrap() {
-  if (STATE.lastRunTimestamp === null) {
-    log('No previous run recorded, bootstrap needed');
-    return true;
-  }
-  
-  var now = Math.floor(Date.now() / 1000); // Integer seconds (avoids float precision loss)
-  var hoursSinceLastRun = (now - STATE.lastRunTimestamp) / 3600;
-  var needs = hoursSinceLastRun > CONFIG.bootstrapHoursThreshold;
-  
-  log('Hours since last run:', hoursSinceLastRun.toFixed(1), 'threshold:', CONFIG.bootstrapHoursThreshold, 'hours, needs bootstrap:', needs);
-  return needs;
-}
-
-// === WEATHER FORECAST FUNCTIONS ===
+// === WEATHER FORECAST FUNCTIONS (Memory-Optimized) ===
 function setForecastURL(lat, lon) {
   log('setForecastURL', lat, lon);
   if (lat !== null && lon !== null) {
@@ -459,80 +468,80 @@ function setForecastURL(lat, lon) {
 function shouldRefreshForecast() {
   var now = new Date();
   var today = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
-  
+
   if (STATE.lastForecastFetchDate === null || STATE.lastForecastFetchDate !== today) {
     return true;
   }
   return false;
 }
 
-function scheduleForecastRetry() {
-  if (!STATE.cachedForecast) {
-    log('Scheduling forecast retry in 10 seconds...');
-    Timer.set(10000, false, function() {
-      if (!STATE.cachedForecast) {
-        log('Retrying forecast fetch...');
-        fetchAndCacheForecast();
-      }
-    });
-  }
-}
-
 function onForecast(result, error_code, error_message, cb) {
   if (error_code !== 0) {
     log('Forecast fetch error code:', error_code, 'message:', error_message);
-    scheduleForecastRetry();
-    if (typeof cb === 'function') cb();
+    if (typeof cb === 'function') queueTask(function() { cb(); });
     return;
   }
-  
+
   if (!result || !result.body) {
     log('No forecast data in response');
-    scheduleForecastRetry();
-    if (typeof cb === 'function') cb();
+    if (typeof cb === 'function') queueTask(function() { cb(); });
     return;
   }
-  
+
   var data = null;
   try {
     data = JSON.parse(result.body);
   } catch (e) {
-    log('JSON parse error:', result.body);
+    log('JSON parse error');
     if (e && false) {}
-    scheduleForecastRetry();
-    if (typeof cb === 'function') cb();
+    if (typeof cb === 'function') queueTask(function() { cb(); });
     return;
   }
-  
+
+  // Clear result to free memory immediately
+  result = null;
+
   if (!data || !data.hourly || !data.hourly.temperature_2m || data.hourly.temperature_2m.length === 0) {
     log('Invalid forecast structure');
-    scheduleForecastRetry();
-    if (typeof cb === 'function') cb();
+    data = null;
+    if (typeof cb === 'function') queueTask(function() { cb(); });
     return;
   }
-  
-  STATE.cachedForecast = data.hourly.temperature_2m;
-  STATE.cachedForecastTimes = data.hourly.time;
+
+  // Memory optimization: only compute and store max temp, not full array
+  var temps = data.hourly.temperature_2m;
+  var maxTemp = null;
+  for (var i = 0; i < temps.length; i++) {
+    var temp = temps[i];
+    if (temp !== null && (maxTemp === null || temp > maxTemp)) {
+      maxTemp = temp;
+    }
+  }
+
+  // Clear temps array immediately to free memory
+  temps = null;
   data = null;
-  
+
+  STATE.maxForecastTemp = maxTemp;
+
   var now = new Date();
   STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
-  log('Forecast cached:', STATE.cachedForecast.length, 'values');
-  
+  log('Forecast cached, max temp:', maxTemp);
+
   if (typeof cb === 'function') {
-    Timer.set(100, false, cb);
+    queueTask(function() { cb(); });
   }
 }
 
 function fetchAndCacheForecast(cb) {
   var url = STATE.forecastUrl || loadStorageValue(STORAGE_KEYS.forecastUrl);
   if (!url) {
-    log('Open-Meteo forecast URL not configured. Skipping forecast.');
-    if (typeof cb === 'function') cb();
+    log('Forecast URL not configured. Skipping.');
+    if (typeof cb === 'function') queueTask(function() { cb(); });
     return;
   }
-  
-  log('Fetching fresh forecast from Open-Meteo...');
+
+  log('Fetching forecast...');
   Shelly.call("HTTP.GET", {
     url: url,
     timeout: 10
@@ -540,19 +549,7 @@ function fetchAndCacheForecast(cb) {
 }
 
 function getMaxForecastTemp() {
-  if (!STATE.cachedForecast || STATE.cachedForecast.length === 0) {
-    return null;
-  }
-  
-  var maxTemp = null;
-  for (var i = 0; i < STATE.cachedForecast.length; i++) {
-    var temp = STATE.cachedForecast[i];
-    if (temp !== null && (maxTemp === null || temp > maxTemp)) {
-      maxTemp = temp;
-    }
-  }
-  
-  return maxTemp;
+  return STATE.maxForecastTemp;
 }
 
 function onDeviceLocation(result, error_code, error_message, cb) {
@@ -560,140 +557,140 @@ function onDeviceLocation(result, error_code, error_message, cb) {
     if (result.lat !== null && result.lon !== null) {
       log('Auto-detected location: lat=' + result.lat + ', lon=' + result.lon);
       setForecastURL(result.lat, result.lon);
-      if (typeof cb === 'function') cb();
+      if (typeof cb === 'function') queueTask(function() { cb(); });
     } else {
       log('Location detection returned null coordinates');
-      if (typeof cb === 'function') cb();
+      if (typeof cb === 'function') queueTask(function() { cb(); });
     }
   } else {
     log('Location detection error:', error_code, error_message);
-    if (typeof cb === 'function') cb();
+    if (typeof cb === 'function') queueTask(function() { cb(); });
   }
 }
 
 function ensureForecastUrl(cb) {
   if (STATE.forecastUrl) {
-    if (typeof cb === 'function') cb();
+    if (typeof cb === 'function') queueTask(function() { cb(); });
     return;
   }
-  
+
   STATE.forecastUrl = loadStorageValue(STORAGE_KEYS.forecastUrl);
   if (STATE.forecastUrl) {
     log('Loaded forecast URL from storage');
-    if (typeof cb === 'function') cb();
+    if (typeof cb === 'function') queueTask(function() { cb(); });
     return;
   }
-  
+
   log('Forecast URL not found, detecting location...');
   Shelly.call('Shelly.DetectLocation', {}, onDeviceLocation, cb);
 }
 
-// === MQTT RPC CONTROL (Pro3 -> Pro1) ===
-function sendPro1Command(method, params, callback) {
-  if (STATE.deviceRole !== 'controller') {
-    log('ERROR: Only controller can send commands to bootstrap device');
-    if (callback) callback('Not controller');
+// === INTER-DEVICE SAFETY (Grace Delay Guards) ===
+// Uses STATE.graceTimer — a single one-shot timer that occupies one timer slot only while
+// a transition is in progress (never running during steady-state operation).
+
+function startGraceDelay(delayMs, callback) {
+  if (STATE.graceActive) {
+    log("Grace delay already active, queueing continuation");
+    queueTask(function() { startGraceDelay(delayMs, callback); });
     return;
   }
-  
-  if (!CONFIG.bootstrapDeviceId) {
-    log('ERROR: Bootstrap device ID not configured');
-    if (callback) callback('Bootstrap device ID not configured');
-    return;
-  }
-  
-  var requestId = Math.floor(Math.random() * 1000000);
-  var topic = CONFIG.bootstrapDeviceId + '/rpc';
-  var request = {
-    id: requestId,
-    src: CONFIG.controllerDeviceId,
-    method: method,
-    params: params || {}
-  };
-  
-  log('Sending RPC to Pro1:', method, 'params:', JSON.stringify(params));
-  
-  // Fire-and-forget the publish, then invoke callback via task queue (runs every 200ms).
-  var published = MQTT.publish(topic, JSON.stringify(request), 0 /*at-most-once*/, false /*dont-retain*/);
-  log('RPC request published:', published);
-  if (callback) {
-    queueTask(function() { callback(null); });
-  }
-}
-
-function turnOnPro1(callback) {
-  sendPro1Command('Switch.Set', {id: 0, on: true}, callback);
-}
-
-function turnOffPro1(callback) {
-  sendPro1Command('Switch.Set', {id: 0, on: false}, callback);
-}
-
-// === BOOTSTRAP SEQUENCE ===
-function executeBootstrap(targetSpeed, callback) {
-  if (STATE.deviceRole !== 'controller') {
-    log('ERROR: Only controller can execute bootstrap');
+  STATE.graceActive = true;
+  log("Grace delay started:", delayMs, "ms");
+  STATE.graceTimer = Timer.set(delayMs, false, function() {
+    STATE.graceTimer = null;
+    STATE.graceActive = false;
+    log("Grace delay complete");
     if (callback) callback();
-    return;
-  }
-  
-  if (STATE.bootstrapInProgress) {
-    log('Bootstrap already in progress, ignoring');
-    if (callback) callback();
-    return;
-  }
-  
-  log('Starting bootstrap sequence...');
-  STATE.bootstrapInProgress = true;
-  
-  // Phase 1: Turn on Pro1 for bootstrap
-  turnOnPro1(function(err) {
-    if (err) {
-      log('ERROR: Failed to turn on Pro1:', err);
-      STATE.bootstrapInProgress = false;
-      STATE.bootstrapTimerId = null;
-      if (callback) callback();
-      return;
-    }
-    
-    log('Pro1 activated, waiting', CONFIG.bootstrapDurationMs, 'ms...');
-    
-    // Phase 2: After bootstrap duration, turn off Pro1 and activate Pro3
-    STATE.bootstrapTimerId = Timer.set(CONFIG.bootstrapDurationMs, false, function() {
-      log('Bootstrap duration complete, switching to controller control');
-      STATE.bootstrapTimerId = null;
-      
-      // Turn off Pro1
-      turnOffPro1(function(err) {
-        if (err) {
-          log('ERROR: Failed to turn off Pro1:', err);
-          STATE.bootstrapInProgress = false;
-          if (callback) callback();
-          return;
-        }
-        
-        // Wait configured delay before activating target speed on controller
-        log('Waiting', CONFIG.bootstrapToSpeedDelayMs, 'ms before starting controller at target speed');
-        Timer.set(CONFIG.bootstrapToSpeedDelayMs, false, function() {
-          activateOutput(targetSpeed, function() {
-            log('Bootstrap complete, controller now controlling at speed:', targetSpeed);
-            STATE.bootstrapInProgress = false;
-            if (callback) callback();
-          });
-        });
-      });
-    });
   });
 }
 
-function startPumpWithBootstrap(targetSpeed, callback) {
-  if (needsBootstrap()) {
-    log('Long time since last run, executing bootstrap');
-    executeBootstrap(targetSpeed, callback);
-  } else {
-    log('Recent run detected, direct Pro3 control');
-    activateOutput(targetSpeed, callback);
+// Called when pro1 (bootstrap) is about to turn its switch ON.
+// If any pro3 switch is known to be on, turn off own switch and wait pro1GraceDelayMs.
+function safeActivatePro1Bootstrap(callback) {
+  if (STATE.deviceType !== "pro1") {
+    if (callback) callback();
+    return;
   }
+
+  var anyPro3On = false;
+  for (var k in STATE.pro3SwitchStates) {
+    if (STATE.pro3SwitchStates[k]) {
+      anyPro3On = true;
+      break;
+    }
+  }
+
+  if (!anyPro3On) {
+    if (callback) callback();
+    return;
+  }
+
+  log("pro3 outputs are on — waiting grace delay before activating pro1 (grace:", CONFIG.pro1GraceDelayMs, "ms)");
+  startGraceDelay(CONFIG.pro1GraceDelayMs, callback);
+}
+
+// Called when pro3 (controller) wants to turn pro1 (bootstrap) ON.
+// If any pro3 switch is on, turn them all off first and wait pro1GraceDelayMs.
+function safeActivatePro1(callback) {
+  if (STATE.deviceType !== "pro3") {
+    if (callback) callback();
+    return;
+  }
+
+  // Check whether any pro3 output is currently on
+  var anyOn = false;
+  for (var i = 0; i < STATE.outputs.length; i++) {
+    var st = Shelly.getComponentStatus("switch:" + STATE.outputs[i]);
+    if (st && st.output) {
+      anyOn = true;
+      break;
+    }
+  }
+
+  if (!anyOn) {
+    if (callback) callback();
+    return;
+  }
+
+  log("pro3 outputs still on — turning off before activating pro1 (grace:", CONFIG.pro1GraceDelayMs, "ms)");
+  for (var j = 0; j < STATE.outputs.length; j++) {
+    Shelly.call("Switch.Set", {id: STATE.outputs[j], on: false}, function(r, e) { if (e && false) {} });
+  }
+  STATE.activeOutput = -1;
+  saveState();
+
+  startGraceDelay(CONFIG.pro1GraceDelayMs, callback);
+}
+
+// Called when pro3 (controller) wants to activate one of its own outputs (pump variator).
+// If pro1 is currently on, turn it off first and wait pro3GraceDelayMs.
+function safeActivatePro3(targetOutputId, callback) {
+  if (STATE.deviceType !== "pro3") {
+    if (callback) callback();
+    return;
+  }
+
+  if (targetOutputId === -1) {
+    // Turning everything off — no guard needed
+    if (callback) callback();
+    return;
+  }
+
+  // Use MQTT-tracked pro1 state (kept current by subscribePro1Status).
+  // Fall back to bootstrapInProgress if subscription is not yet active.
+  if (!STATE.pro1On && !STATE.bootstrapInProgress) {
+    if (callback) callback();
+    return;
+  }
+
+  log("pro1 is on — turning off before activating pro3 (grace:", CONFIG.pro3GraceDelayMs, "ms)");
+  turnOffPro1(function(err) {
+    if (err) {
+      log("WARNING: turnOffPro1 failed during safeActivatePro3:", err);
+    }
+    startGraceDelay(CONFIG.pro3GraceDelayMs, callback);
+  });
 }
 
 // === DEVICE DETECTION ===
@@ -824,9 +821,9 @@ function applyComponentNames(callback) {
         queueTask(processNext);
       });
     } else if (comp.type === "switch") {
-      Shelly.call("Switch.SetConfig", {id: comp.id, config: {name: comp.name}}, function(res, err) {
+      Shelly.call("Switch.SetConfig", {id: comp.id, config: {name: comp.name, in_mode: "detached"}}, function(res, err) {
         if (err && false) {}
-        log("Applied switch:" + comp.id + " name:", comp.name);
+        log("Applied switch:" + comp.id + " name:", comp.name, "in_mode: detached");
         queueTask(processNext);
       });
     }
@@ -838,19 +835,13 @@ function applyComponentNames(callback) {
 // === STATE PERSISTENCE ===
 function loadState() {
   log("Loading persisted state...");
-  
+
   var savedActiveOutput = loadValue(STATE_KEYS.activeOutput);
   if (savedActiveOutput !== null) {
     STATE.activeOutput = savedActiveOutput;
     log("Restored active output:", STATE.activeOutput);
   }
-  
-  var savedLastRunTimestamp = loadValue(STATE_KEYS.lastRunTimestamp);
-  if (savedLastRunTimestamp !== null) {
-    STATE.lastRunTimestamp = savedLastRunTimestamp;
-    log("Restored last run timestamp:", STATE.lastRunTimestamp);
-  }
-  
+
   var savedScheduleMode = loadValue(STATE_KEYS.scheduleMode);
   if (savedScheduleMode !== null) {
     STATE.scheduleMode = savedScheduleMode;
@@ -866,23 +857,56 @@ function saveState() {
   if (STATE.initializing) {
     return;
   }
-  
+
   // Queue KVS writes to avoid callback depth issues and ensure sequential execution
   queueTask(function() {
     storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
   });
-  
-  if (STATE.lastRunTimestamp !== null) {
-    queueTask(function() {
-      storeValue(STATE_KEYS.lastRunTimestamp, STATE.lastRunTimestamp);
-    });
-  }
-  
+
   if (STATE.scheduleMode !== null) {
     queueTask(function() {
       storeValue(STATE_KEYS.scheduleMode, STATE.scheduleMode);
     });
   }
+}
+
+// === DEVICE ACTIVATION DECISION ===
+function isMyTurnToRun() {
+  // Compare preferred device ID against my device ID
+  var preferredId = CONFIG.preferredDeviceId;
+  var myId = STATE.myDeviceId;
+
+  if (!preferredId || !myId) {
+    log("ERROR: Cannot determine activation - missing device ID");
+    return false;
+  }
+
+  var shouldRun = preferredId === myId;
+  log("Activation check: preferred=" + preferredId + ", me=" + myId + ", shouldRun=" + shouldRun);
+  return shouldRun;
+}
+
+function mapSpeedToSwitch(speed) {
+  // Map semantic speed to physical switch ID based on device type
+  // speed: 'eco', 'mid', 'high', 'max'
+  // Returns switch ID or -1 for off
+
+  if (!speed || speed === 'off') {
+    return -1;
+  }
+
+  if (STATE.deviceType === 'pro3') {
+    // Pro3: 3 switches
+    if (speed === 'eco') return CONFIG.ecoSpeed;
+    if (speed === 'mid') return CONFIG.midSpeed;
+    if (speed === 'high' || speed === 'max') return CONFIG.highSpeed;
+  } else if (STATE.deviceType === 'pro1') {
+    // Pro1: only 1 switch, all speeds map to switch:0
+    return 0;
+  }
+
+  log("WARNING: Unknown speed or device type, defaulting to off");
+  return -1;
 }
 
 // === OUTPUT CONTROL ===
@@ -899,40 +923,49 @@ function setOutput(outputId, on, callback) {
 
 function activateOutput(outputId, callback) {
   log("Activating output:", outputId);
-  
+
   if (STATE.deviceType === "pro3") {
-    // Turn off all outputs simultaneously
-    for (var i = 0; i < STATE.outputs.length; i++) {
-      Shelly.call("Switch.Set", {id: STATE.outputs[i], on: false}, function(res, err) {
-        if (err && false) {}  // Prevent minifier from removing error parameter
-      });
-    }
-    
-    // Wait for outputs to turn off, then activate the requested one
-    Timer.set(200, false, function() {
-      if (outputId !== -1) {
-        setOutput(outputId, true, function() {
-          STATE.activeOutput = outputId;
-          // Record timestamp when pump starts
-          STATE.lastRunTimestamp = Math.floor(Date.now() / 1000);
+    safeActivatePro3(outputId, function() {
+      // Turn off all outputs simultaneously
+      for (var i = 0; i < STATE.outputs.length; i++) {
+        Shelly.call("Switch.Set", {id: STATE.outputs[i], on: false}, function(res, err) {
+          if (err && false) {}
+        });
+      }
+
+      // Use task queue instead of a one-shot timer to avoid consuming a timer slot
+      queueTask(function() {
+        if (outputId !== -1) {
+          setOutput(outputId, true, function() {
+            STATE.activeOutput = outputId;
+            STATE.lastRunTimestamp = Math.floor(Date.now() / 1000);
+            saveState();
+            if (callback) callback();
+          });
+        } else {
+          STATE.activeOutput = -1;
           saveState();
           if (callback) callback();
-        });
-      } else {
+        }
+      });
+    });
+  } else {
+    // Pro1: guard against activating while pro3 is on
+    var on = outputId === 0;
+    if (!on) {
+      // Turning off — no guard needed
+      setOutput(0, false, function() {
         STATE.activeOutput = -1;
         saveState();
         if (callback) callback();
-      }
-    });
-  } else {
-    // Pro1: simple toggle
-    var on = outputId === 0;
-    setOutput(0, on, function() {
-      STATE.activeOutput = on ? 0 : -1;
-      // Record timestamp when pump starts (Pro1 bootstrap)
-      if (on) {
-        STATE.lastRunTimestamp = Math.floor(Date.now() / 1000);
-      }
+      });
+      return;
+    }
+
+    // For Pro1 turning on: check if Pro3 is active, wait grace delay
+    // (This is handled by the cross-device protection logic)
+    setOutput(0, true, function() {
+      STATE.activeOutput = 0;
       saveState();
       if (callback) callback();
     });
@@ -942,14 +975,14 @@ function activateOutput(outputId, callback) {
 // === BUTTON HANDLING ===
 function cycleOutputs() {
   log("Button pressed, cycling outputs");
-  
+
   // Check if water supply is active
   var input0 = Shelly.getComponentStatus("input:0");
   if (input0 && input0.state) {
     log("Water supply protection active, ignoring button press");
     return;
   }
-  
+
   if (STATE.deviceType === "pro3") {
     // Cycle: all off → 0 → 1 → 2 → all off
     var nextOutput;
@@ -962,14 +995,52 @@ function cycleOutputs() {
     } else {
       nextOutput = -1;
     }
-    
+
     log("Cycling from", STATE.activeOutput, "to", nextOutput);
-    activateOutput(nextOutput);
+
+    if (nextOutput === -1) {
+      // Target is OFF: turn off all speeds
+      log("Power off: turning off all speeds");
+      turnOffAllSwitches(function() {
+        STATE.activeOutput = -1;
+        saveState();
+      });
+    } else if (STATE.activeOutput === -1) {
+      // From OFF to speed: just turn on target speed
+      log("Power on: starting speed", nextOutput);
+      setOutput(nextOutput, true, function() {
+        STATE.activeOutput = nextOutput;
+        saveState();
+      });
+    } else {
+      // Speed-to-speed: make-before-break (turn ON new, then OFF old)
+      var prevOutput = STATE.activeOutput;
+      log("Speed change: ON speed", nextOutput, "then OFF speed", prevOutput);
+      setOutput(nextOutput, true, function() {
+        // New speed is now on, turn off the old speed
+        setOutput(prevOutput, false, function() {
+          STATE.activeOutput = nextOutput;
+          saveState();
+        });
+      });
+    }
   } else {
-    // Pro1: toggle
+    // Pro1: simple toggle
     var nextOutput = STATE.activeOutput === -1 ? 0 : -1;
     log("Toggling from", STATE.activeOutput, "to", nextOutput);
-    activateOutput(nextOutput);
+    if (nextOutput === -1) {
+      // Turning off
+      turnOffAllSwitches(function() {
+        STATE.activeOutput = -1;
+        saveState();
+      });
+    } else {
+      // Turning on
+      setOutput(0, true, function() {
+        STATE.activeOutput = 0;
+        saveState();
+      });
+    }
   }
 }
 
@@ -998,7 +1069,7 @@ function handleWaterSupply(waterSupplyActive) {
 // === EVENT HANDLERS ===
 function handleSwitchEvent(info) {
   log("Switch event:", info);
-  
+
   // Ignore switch events during water supply protection
   var input0 = Shelly.getComponentStatus("input:0");
   if (input0 && input0.state && info.state === true) {
@@ -1006,7 +1077,7 @@ function handleSwitchEvent(info) {
     setOutput(info.id, false);
     return;
   }
-  
+
   if (STATE.deviceType === "pro3" && info.state === true) {
     // Ensure only one output is on
     var activatedOutput = info.id;
@@ -1018,9 +1089,67 @@ function handleSwitchEvent(info) {
     }
     STATE.activeOutput = activatedOutput;
     saveState();
-  } else if (STATE.deviceType === "pro1") {
-    STATE.activeOutput = info.state ? 0 : -1;
+
+    // Inter-device safety: if pro1 is on (any source, including manual), turn it off.
+    // The grace delay is NOT applied here because pro3 turning on means variator is
+    // now active — pro1 must be off immediately; pro3 is already on.
+    // Note: cannot pre-intercept; this is the earliest reactive point.
+    if (STATE.pro1On) {
+      log("pro3 switch turned on but pro1 is on — sending turn-off to pro1");
+      turnOffPro1(function(err) {
+        if (err) {
+          log("WARNING: failed to turn off pro1 after pro3 switch on:", err);
+        }
+      });
+    }
+
+  } else if (STATE.deviceType === "pro1" && info.state === true) {
+    // Inter-device safety: if any pro3 switch is on, immediately turn ourselves off
+    // and queue a re-activation after the grace delay.
+    var anyPro3On = false;
+    for (var k in STATE.pro3SwitchStates) {
+      if (STATE.pro3SwitchStates[k]) {
+        anyPro3On = true;
+        break;
+      }
+    }
+    if (anyPro3On) {
+      log("pro1 switch turned on but pro3 is on — turning off immediately, will retry after grace delay");
+      setOutput(0, false, function() {
+        STATE.activeOutput = -1;
+        saveState();
+        startGraceDelay(CONFIG.pro1GraceDelayMs, function() {
+          log("Grace delay complete — re-activating pro1");
+          setOutput(0, true, function() {
+            STATE.activeOutput = 0;
+            STATE.lastRunTimestamp = Math.floor(Date.now() / 1000);
+            saveState();
+          });
+        });
+      });
+      return;
+    }
+
+    STATE.activeOutput = 0;
     saveState();
+
+  } else if (STATE.deviceType === "pro1" && info.state === false) {
+    STATE.activeOutput = -1;
+    saveState();
+  } else if (STATE.deviceType === "pro3" && info.state === false) {
+    // Track when all pro3 outputs are off
+    var anyStillOn = false;
+    for (var j = 0; j < STATE.outputs.length; j++) {
+      var st = Shelly.getComponentStatus("switch:" + STATE.outputs[j]);
+      if (st && st.output) {
+        anyStillOn = true;
+        break;
+      }
+    }
+    if (!anyStillOn) {
+      STATE.activeOutput = -1;
+      saveState();
+    }
   }
 }
 
@@ -1049,6 +1178,73 @@ function handleButtonEvent(info) {
 }
 
 // === MQTT SETUP ===
+
+// Parse a Shelly switch status payload and return the output boolean (or null on error)
+function parseSwitchStatus(message) {
+  var data = null;
+  try {
+    data = JSON.parse(message);
+  } catch (e) {
+    if (e && false) {}
+    return null;
+  }
+  if (!data || !("output" in data)) return null;
+  return data.output;
+}
+
+// --- Controller (pro3): track pro1 switch:0 ---
+function onPro1StatusMessage(topic, message) {
+  var on = parseSwitchStatus(message);
+  if (on === null) return;
+  if (STATE.pro1On !== on) {
+    log("pro1 switch:0 state updated via MQTT:", on);
+    STATE.pro1On = on;
+  }
+}
+
+function subscribePro1Status() {
+  // Subscribe to Pro1 status for cross-device protection
+  if (!CONFIG.pro1DeviceId) return;
+  var topic = CONFIG.pro1DeviceId + "/status/switch:0";
+  MQTT.subscribe(topic, onPro1StatusMessage);
+  log("Subscribed to pro1 status topic:", topic);
+  // Request current state immediately — status topics are NOT retained
+  MQTT.publish(CONFIG.pro1DeviceId + "/command/switch:0", "status_update", 0, false);
+  log("Requested pro1 switch:0 status_update");
+}
+
+// --- Bootstrap (pro1): track pro3 switch:0, switch:1, switch:2 ---
+function onPro3StatusMessage(topic, message) {
+  var on = parseSwitchStatus(message);
+  if (on === null) return;
+  // Extract switch id from topic suffix "…/status/switch:<id>"
+  var id = -1;
+  var parts = topic.split(":");
+  if (parts.length >= 2) {
+    var n = Number(parts[parts.length - 1]);
+    if (!isNaN(n)) id = n;
+  }
+  if (id < 0) return;
+  var prev = (id in STATE.pro3SwitchStates) ? STATE.pro3SwitchStates[id] : null;
+  if (prev !== on) {
+    log("pro3 switch:" + id + " state updated via MQTT:", on);
+    STATE.pro3SwitchStates[id] = on;
+  }
+}
+
+function subscribePro3Status() {
+  // Subscribe to Pro3 status for cross-device protection
+  if (!CONFIG.pro3DeviceId) return;
+  for (var i = 0; i < 3; i++) {
+    var topic = CONFIG.pro3DeviceId + "/status/switch:" + i;
+    MQTT.subscribe(topic, onPro3StatusMessage);
+    log("Subscribed to pro3 status topic:", topic);
+    // Request current state immediately — status topics are NOT retained
+    MQTT.publish(CONFIG.pro3DeviceId + "/command/switch:" + i, "status_update", 0, false);
+  }
+  log("Requested pro3 switch status_update for all 3 channels");
+}
+
 function setupMQTT() {
   var mqttStatus = Shelly.getComponentStatus("mqtt");
   if (mqttStatus && mqttStatus.connected) {
@@ -1057,6 +1253,8 @@ function setupMQTT() {
   } else {
     log("MQTT not connected");
   }
+  subscribePro1Status();
+  subscribePro3Status();
 }
 
 // === SCHEDULE MANAGEMENT ===
@@ -1127,9 +1325,9 @@ function clearNonUpdateSchedules(callback) {
 
 function createSchedules(callback) {
   log('Creating pool pump schedules...');
-  
+
   var scriptId = Shelly.getCurrentScriptId();
-  
+
   var schedules = [
     {
       enable: true,
@@ -1214,17 +1412,52 @@ function createSchedules(callback) {
   createNext();
 }
 
+// Verify schedules exist (lightweight check, logs warning if missing)
+function verifySchedules(cb) {
+  Shelly.call('Schedule.List', {}, function(result, err) {
+    if (err) {
+      log('WARNING: Cannot verify schedules:', err);
+      if (typeof cb === 'function') queueTask(function() { cb(); });
+      return;
+    }
+
+    var hasPoolSchedules = false;
+    if (result && result.jobs) {
+      for (var i = 0; i < result.jobs.length; i++) {
+        var job = result.jobs[i];
+        if (job.calls && job.calls.length > 0 && job.calls[0].method === 'script.eval') {
+          var code = job.calls[0].params && job.calls[0].params.code;
+          if (code && (code.indexOf('handleNight') === 0 || code.indexOf('handleDaily') === 0 || code.indexOf('handleMorning') === 0 || code.indexOf('handleEvening') === 0)) {
+            hasPoolSchedules = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!hasPoolSchedules) {
+      log('FATAL: No pool pump schedules found. Run: ctl pool setup');
+      // Stop script - schedules are required for operation
+      return;
+    }
+
+    log('Pool pump schedules verified');
+    if (typeof cb === 'function') queueTask(function() { cb(); });
+  });
+}
+
 // === SCHEDULE MODE MANAGEMENT ===
 function updateScheduleMode(newMode) {
   if (STATE.scheduleMode === newMode) {
-    log('Schedule mode already set to:', newMode);
+    log('Mode already:', newMode, '- no changes needed');
     return;
   }
-  
-  log('Switching schedule mode from', STATE.scheduleMode, 'to', newMode);
+
+  log('MODE CHANGE:', STATE.scheduleMode || 'unknown', '->', newMode);
+  log(newMode === 'summer' ? '  Summer: enabling morning/evening schedules' : '  Winter: enabling night schedules only');
   STATE.scheduleMode = newMode;
   saveState();
-  
+
   // Enable/disable schedules based on mode
   Shelly.call('Schedule.List', {}, function(result, err) {
     if (err) {
@@ -1232,12 +1465,12 @@ function updateScheduleMode(newMode) {
       if (err && false) {}
       return;
     }
-    
+
     if (!result || !result.jobs) {
       log('No schedules found');
       return;
     }
-    
+
     var schedulesToUpdate = [];
     for (var i = 0; i < result.jobs.length; i++) {
       var job = result.jobs[i];
@@ -1250,36 +1483,36 @@ function updateScheduleMode(newMode) {
         }
       }
     }
-    
+
     if (schedulesToUpdate.length === 0) {
       log('No schedules to update');
       return;
     }
-    
+
     var updateIndex = 0;
     function updateNext() {
       if (updateIndex >= schedulesToUpdate.length) {
         log('All schedules updated for', newMode, 'mode');
         return;
       }
-      
+
       var schedule = schedulesToUpdate[updateIndex];
       updateIndex++;
-      
+
       Shelly.call('Schedule.Update', {id: schedule.id, enable: schedule.enable}, function(res, err) {
         if (err && false) {}
-        log('Updated schedule', schedule.name, 'enable:', schedule.enable);
+        log('Schedule', schedule.name, schedule.enable ? 'ENABLED' : 'DISABLED');
         queueTask(updateNext);
       });
     }
-    
+
     updateNext();
   });
 }
 
 function performDailyModeCheck() {
   log('Performing daily mode check...');
-  
+
   // Ensure forecast URL is configured
   ensureForecastUrl(function() {
     // Fetch or use cached forecast
@@ -1297,26 +1530,33 @@ function performDailyModeCheck() {
 
 function decideModeFromForecast() {
   var maxTemp = getMaxForecastTemp();
-  
+
   if (maxTemp === null) {
-    log('No forecast available, keeping current mode:', STATE.scheduleMode);
+    log('No forecast data available, keeping mode:', STATE.scheduleMode || 'winter');
     return;
   }
-  
-  log('Max forecast temperature:', maxTemp, '°C, threshold:', CONFIG.temperatureThreshold, '°C');
-  
+
+  log('Forecast max temp:', maxTemp + '°C', '(threshold:', CONFIG.temperatureThreshold + '°C)');
+
   var newMode = maxTemp > CONFIG.temperatureThreshold ? 'summer' : 'winter';
-  log('Determined mode:', newMode);
-  
+  log('Selected mode:', newMode, maxTemp > CONFIG.temperatureThreshold ? '(above threshold)' : '(below threshold)');
+
   updateScheduleMode(newMode);
 }
 
 // === UNIFIED START/STOP FUNCTIONS ===
-function doStart(speed, checkBootstrap, forceBootstrap, reason) {
+// Both devices run same script. Each checks if it should activate based on preferred_device_id.
+function doStart(speed, reason) {
   log(reason || 'Start pump');
 
-  if (STATE.deviceRole !== 'controller') {
-    log('Ignoring event, not controller');
+  // Check if this device should run
+  if (!isMyTurnToRun()) {
+    log('Not my turn to run (preferred device: ' + CONFIG.preferredDeviceId + ', me: ' + STATE.myDeviceId + ')');
+    // Ensure I'm off if I'm not the preferred device
+    if (STATE.activeOutput !== -1) {
+      log('Turning off as I am not the preferred device');
+      activateOutput(-1);
+    }
     return;
   }
 
@@ -1326,63 +1566,58 @@ function doStart(speed, checkBootstrap, forceBootstrap, reason) {
     return;
   }
 
-  if (forceBootstrap) {
-    log('Forcing bootstrap sequence at speed:', speed);
-    executeBootstrap(speed, function() {
-      log('Forced bootstrap complete, pump running at speed:', speed);
-    });
-  } else if (checkBootstrap && needsBootstrap()) {
-    log('Bootstrap required, starting with bootstrap sequence at speed:', speed);
-    executeBootstrap(speed, function() {
-      log('Bootstrap complete, pump running at speed:', speed);
-    });
-  } else if (checkBootstrap) {
-    log('Bootstrap not required, ignoring start request');
-  } else {
-    log('Starting pump at speed:', speed);
-    activateOutput(speed);
+  // Map speed to physical switch
+  var switchId = mapSpeedToSwitch(speed);
+  if (switchId === -1) {
+    log('Invalid speed or off requested, turning off');
+    activateOutput(-1);
+    return;
   }
+
+  log('Starting pump at speed:', speed, '-> switch:', switchId);
+  activateOutput(switchId);
 }
 
 function doStop(reason) {
   log(reason || 'Stop pump');
-  
-  if (STATE.deviceRole !== 'controller') {
-    log('Ignoring event, not controller');
+
+  // Only stop if I'm currently the one running
+  if (!isMyTurnToRun() && STATE.activeOutput === -1) {
+    log('Not running and not preferred device, nothing to do');
     return;
   }
-  
+
   var input0 = Shelly.getComponentStatus('input:0');
   if (input0 && input0.state) {
-    log('Water supply protection active, ignoring stop request');
-    return;
+    log('Water supply protection active, still turning off');
+    // Continue to turn off even with water supply active
   }
-  
+
   activateOutput(-1, function() {
     log('Pump stopped');
   });
 }
 
 // === SCHEDULE EVENT HANDLERS ===
+// Schedules only execute on the preferred device (determined by isMyTurnToRun check in doStart/doStop)
 function handleDailyCheck() {
   log('Daily check event');
-  
-  if (STATE.deviceRole !== 'controller') {
-    log('Ignoring event, not controller');
-    return;
-  }
-  
+
   var input0 = Shelly.getComponentStatus('input:0');
   if (input0 && input0.state) {
     log('Water supply protection active, ignoring event');
     return;
   }
-  
-  performDailyModeCheck();
+
+  // Summer/winter mode check only runs on preferred device
+  if (isMyTurnToRun()) {
+    performDailyModeCheck();
+  }
 }
 
 function handleMorningStart() {
-  doStart(CONFIG.ecoSpeed, false /*checkBootstrap*/, false, 'Morning start event');
+  // Morning start uses preferred_speed from KVS
+  doStart(CONFIG.preferredSpeed, 'Morning start event');
 }
 
 function handleEveningStop() {
@@ -1390,7 +1625,8 @@ function handleEveningStop() {
 }
 
 function handleNightStart() {
-  doStart(CONFIG.highSpeed, true /*checkBootstrap*/, false, 'Night start event');
+  // Night start uses preferred_speed from KVS
+  doStart(CONFIG.preferredSpeed, 'Night start event');
 }
 
 function handleNightStop() {
@@ -1449,131 +1685,74 @@ function init() {
 }
 
 function continueInit() {
-  detectDeviceType();
-  
-  // Get device ID from system
-  var deviceInfo = Shelly.getComponentStatus('sys');
-  if (deviceInfo && ("device_id" in deviceInfo)) {
-    STATE.deviceId = deviceInfo.device_id;
-    log('Device ID:', STATE.deviceId);
-  }
-  
-  // Use role from configuration
-  STATE.deviceRole = CONFIG.deviceRole;
-  log('Device role:', STATE.deviceRole);
-  
+  // Device type and ID are already detected in loadConfig
+  // Just log them here for confirmation
+  log('Device type:', STATE.deviceType);
+  log('Device ID:', STATE.myDeviceId);
+  log('Preferred device:', CONFIG.preferredDeviceId);
+
   configureComponentNames();
   loadState();
   enforceOutputState();
   setupMQTT();
-  
+
   // Initialization complete - enable state persistence
   STATE.initializing = false;
-  
+
   log("Script initialization complete");
-  
-  // Sequential initialization for controller
-  if (STATE.deviceRole === 'controller') {
-    var initSteps = [
-      function(next) {
-        log('Step 1/6: Disabling sys_btn_toggle...');
-        Shelly.call('Sys.SetConfig', {config: {device: {sys_btn_toggle: false}}}, function(res, err) {
-          if (err) {
-            log('WARNING: Failed to disable sys_btn_toggle:', err);
-            if (err && false) {}
-          } else {
-            log('sys_btn_toggle disabled (script handles button)');
-          }
-          next();
-        });
-      },
-      function(next) {
-        log('Step 2/6: Detecting device type...');
-        detectDeviceType();
-        next();
-      },
-      function(next) {
-        log('Step 3/6: Checking water supply status...');
-        var input0 = Shelly.getComponentStatus('input:0');
-        if (input0) {
-          handleWaterSupply(input0.state);
+
+  // Unified initialization for all devices
+  var initSteps = [
+    function(next) {
+      log('Step 1/4: Disabling sys_btn_toggle...');
+      Shelly.call('Sys.SetConfig', {config: {device: {sys_btn_toggle: false}}}, function(res, err) {
+        if (err) {
+          log('WARNING: Failed to disable sys_btn_toggle:', err);
+          if (err && false) {}
+        } else {
+          log('sys_btn_toggle disabled (script handles button)');
         }
         next();
-      },
-      function(next) {
-        log('Step 4/6: Configuring component names...');
-        applyComponentNames(next);
-      },
-      function(next) {
-        log('Step 5/6: Clearing old schedules...');
-        clearNonUpdateSchedules(next);
-      },
-      function(next) {
-        log('Step 6/6: Creating schedules...');
-        createSchedules(next);
-      }
-    ];
-    
-    var stepIndex = 0;
-    
-    function runNextStep() {
-      if (stepIndex >= initSteps.length) {
-        log('✓ All initialization steps complete - script is now running');
-        return;
-      }
-      
-      var step = initSteps[stepIndex];
-      stepIndex++;
-      
-      step(function() {
-        queueTask(runNextStep);
       });
-    }
-    
-    queueTask(runNextStep);
-  } else {
-    // Bootstrap helper - clean schedules but don't create pump schedules
-    var initSteps = [
-      function(next) {
-        log('Step 1/3: Disabling sys_btn_toggle...');
-        Shelly.call('Sys.SetConfig', {config: {device: {sys_btn_toggle: false}}}, function(res, err) {
-          if (err) {
-            log('WARNING: Failed to disable sys_btn_toggle:', err);
-            if (err && false) {}
-          } else {
-            log('sys_btn_toggle disabled (script handles button)');
-          }
-          next();
-        });
-      },
-      function(next) {
-        log('Step 2/3: Configuring component names...');
-        applyComponentNames(next);
-      },
-      function(next) {
-        log('Step 3/3: Clearing old schedules...');
-        clearNonUpdateSchedules(next);
+    },
+    function(next) {
+      log('Step 2/4: Checking water supply status...');
+      var input0 = Shelly.getComponentStatus('input:0');
+      if (input0) {
+        handleWaterSupply(input0.state);
       }
-    ];
-    
-    var stepIndex = 0;
-    
-    function runNextStep() {
-      if (stepIndex >= initSteps.length) {
-        log('✓ All initialization steps complete - script is now running');
-        return;
-      }
-      
-      var step = initSteps[stepIndex];
-      stepIndex++;
-      
-      step(function() {
-        queueTask(runNextStep);
-      });
+      next();
+    },
+    function(next) {
+      log('Step 3/4: Configuring component names...');
+      applyComponentNames(next);
+    },
+    function(next) {
+      log('Step 4/4: Verifying schedules...');
+      // Only Pro3 has schedules, but all devices verify
+      verifySchedules(next);
     }
-    
-    queueTask(runNextStep);
+  ];
+
+  var stepIndex = 0;
+
+  function runNextStep() {
+    if (stepIndex >= initSteps.length) {
+      log('✓ All initialization steps complete - script is now running');
+      log('Current mode:', STATE.scheduleMode || 'winter');
+      log('Should I run?', isMyTurnToRun());
+      return;
+    }
+
+    var step = initSteps[stepIndex];
+    stepIndex++;
+
+    step(function() {
+      queueTask(runNextStep);
+    });
   }
+
+  queueTask(runNextStep);
 }
 
 // === EVENT SUBSCRIPTION ===

@@ -1,0 +1,211 @@
+# Pool Pump Control — Design Reference
+
+## Hardware
+
+| Device | Model | Capability |
+|--------|-------|-----------|
+| Pro3 | ShellyPro3 | 3 switches → drives pump variator (eco/mid/high) + schedules |
+| Pro1 | ShellyPro1 | 1 switch → drives pump at max speed via relay |
+
+**Both devices run the same `pool-pump.js` script.** Device type is detected at runtime by switch count. Each device independently decides whether to activate based on shared KVS configuration.
+
+### Pro3 wiring
+| Component | Purpose |
+|-----------|---------|
+| input:0 (`water-supply`, inverted) | HIGH = water supply ON → turn off pump |
+| switch:0 (`pump-eco`) | Variator eco/low speed |
+| switch:1 (`pump-mid`) | Variator mid speed |
+| switch:2 (`pump-high`) | Variator high speed |
+| sys button | Cycles speed: off → eco → mid → high → off |
+
+### Pro1 wiring
+| Component | Purpose |
+|-----------|---------|
+| input:0 (`water-supply`, inverted) | HIGH = water supply ON → turn off pump |
+| switch:0 (`pump-max`) | Full-speed relay |
+| sys button | Toggles on/off |
+
+**Both switches are configured with `in_mode: detached`** so physical inputs never override MQTT/RPC commands. All protection is handled in software.
+
+---
+
+## Button Handling (Power Cycling)
+
+The system button (`sys_btn_push` event) on both devices provides manual pump control.
+
+### Pro3 — Speed Cycling
+
+**Sequence**: off → eco (switch:0) → mid (switch:1) → high (switch:2) → off
+
+**Power cycling logic** (make-before-break for speed-to-speed transitions):
+
+| Transition | Action | Rationale |
+|------------|--------|-----------|
+| Off → Speed | Turn ON target speed only | Clean start from idle |
+| Speed → Off | Turn OFF all speeds | Full power cut |
+| Speed A → Speed B | Turn ON new speed, then turn OFF old speed | Variator handles transition; no gap in power |
+
+### Pro1 — Simple Toggle
+
+Toggles switch:0 on/off directly (no speed cycling needed on single-speed device).
+
+---
+
+## Architecture
+
+### Unified Script Model
+
+All devices in the pool pump mesh run the **same** `pool-pump.js` script. There is no controller role, no bootstrap role, and no central coordinator. Each device:
+
+1. Reads `preferred` KVS key (a Shelly device ID) on every activation event
+2. Compares it to its own device ID (`Shelly.getDeviceInfo().id`)
+3. If match → activate at `speed` KVS value
+4. If no match → ensure all switches are off
+
+**Mesh membership** is defined solely by the script running on a device. There is no separate registry — the Go CLI discovers mesh members dynamically by querying the server's device database and checking which devices have `pool-pump.js` loaded.
+
+### Device type detection
+
+At script startup, the device detects its own type by querying `Switch.GetStatus` for switch IDs 0, 1, 2. A device with 3 switches is a Pro3; with 1 switch, a Pro1. This drives speed mapping.
+
+**Speed mapping:**
+| Device | Speed | Physical Switch |
+|--------|-------|-----------------|
+| Pro3 | `eco` | switch:0 (or KVS `eco-speed`) |
+| Pro3 | `mid` | switch:1 (or KVS `mid-speed`) |
+| Pro3 | `high` / `max` | switch:2 (or KVS `high-speed`) |
+| Pro1 | any speed | switch:0 (only switch) |
+
+---
+
+## Cross-Device Safety (Grace Delays)
+
+Prevents multiple pool pump devices from being on simultaneously, which could damage the pump.
+
+### Grace delay
+| Config key | Default | Meaning |
+|------------|---------|---------|
+| `grace-delay` | 10 000 ms | Wait time when switching from one device to another |
+
+### Implementation
+- Before activating, check if **any peer device** has any switch ON (via MQTT status subscriptions)
+- If a peer is ON: turn it OFF via MQTT RPC → wait `grace-delay` → then activate self
+- `STATE.graceTimer` — single one-shot timer, only live during a transition
+- `STATE.graceActive` — boolean guard; concurrent calls wait via task queue
+
+### Cross-device state tracking (MQTT status subscriptions)
+Each device subscribes to all peer devices' switch status topics. KVS keys `pro3-id` and `pro1-id` provide the peer device IDs:
+- Device A subscribes to `<peer-id>/status/switch:*` for each peer
+- On startup, a `status_update` command is published to each peer topic to get current state (topics are not retained)
+
+### Reactive guards in `handleSwitchEvent`
+- **Any local switch turns on** + `isAnyPeerDeviceOn()` returns true → immediately sends `Switch.Set {on:false}` to the active peer (no grace delay — cut peer as fast as possible)
+- Protection is **reactive only**: the Shelly scripting API has no pre-intercept hook. `Shelly.addEventHandler` fires *after* the switch has already changed state. The brief window (~ms) is unavoidable without hardware interlocks.
+
+The `in_mode: detached` switch config prevents the *physical input* from directly toggling the relay, but does not block app / HTTP / MQTT / RPC commands.
+
+---
+
+## Schedules
+
+Schedules are created on Pro3 devices only (detected by switch count). Managed via `ctl pool add` using a **delete-and-recreate** strategy (no incremental reconciliation).
+
+| Schedule | Timespec | Handler | Default state |
+|----------|----------|---------|---------------|
+| Daily check | `@sunrise` daily | `handleDailyCheck()` | Enabled |
+| Morning start | `@sunrise+3h` daily | `handleMorningStart()` | **Disabled** (summer only) |
+| Evening stop | `@sunset` daily | `handleEveningStop()` | **Disabled** (summer only) |
+| Night start | `23:15` daily | `handleNightStart()` | Enabled |
+| Night stop | `00:15` daily | `handleNightStop()` | Enabled |
+
+### Schedule modes
+- **Summer** (`maxForecastTemp > temperatureThreshold`): morning/evening schedules enabled, night schedules disabled
+- **Winter** (default): night schedules enabled, morning/evening disabled
+
+Mode is determined daily at sunrise via Open-Meteo forecast, stored in KVS (`schedule-mode`).
+
+---
+
+## Weather Forecast (Memory-Optimized)
+
+- URL built from device GPS coordinates via `Shelly.DetectLocation` and stored in `Script.storage`
+- Fetched once per day (date-gated)
+- Only the **max temperature** is retained in `STATE.maxForecastTemp`; the full array is discarded immediately to save memory
+- On error, forecast is skipped and current schedule mode is preserved
+
+---
+
+## KVS Layout
+
+All keys use prefix `script/pool-pump/` (≤ 32 chars total).
+
+### Configuration (set by `ctl pool add` on each device)
+| Key | Default | Notes |
+|-----|---------|-------|
+| `preferred` | — | Shelly device ID of the device that should run the pump |
+| `speed` | `eco` | `eco`/`mid`/`high`/`max` — mapped to switches per device type |
+| `pro3-id` | — | Pro3 device ID (for peer MQTT subscriptions) |
+| `pro1-id` | — | Pro1 device ID (for peer MQTT subscriptions) |
+| `mqtt-topic` | `pool/pump` | MQTT topic prefix |
+| `logging` | `true` | |
+| `eco-speed` | `0` | Switch ID for `eco` speed (Pro3 only) |
+| `mid-speed` | `1` | Switch ID for `mid` speed (Pro3 only) |
+| `high-speed` | `2` | Switch ID for `high`/`max` speed (Pro3 only) |
+| `grace-delay` | `10000` | Cross-device switchover delay (ms) |
+| `night-duration` | `3600000` | Night run duration (ms) |
+| `temp-threshold` | `20` | °C threshold for summer mode |
+
+### State (managed by script, per device)
+| Key | Notes |
+|-----|-------|
+| `active-output` | `-1` or switch ID currently active |
+| `schedule-mode` | `"summer"` or `"winter"` |
+
+### Script.storage (script-private)
+| Key | Notes |
+|-----|-------|
+| `forecast-url` | Open-Meteo URL built from GPS coordinates |
+| `my-device-id` | Cached device ID from `Shelly.getDeviceInfo().id` |
+
+---
+
+## Go CLI (`ctl pool`)
+
+Mesh membership is discovered dynamically — the CLI queries the myhome server's device database and filters to devices running `pool-pump.js`. No local registry file is used.
+
+| Command | Action |
+|---------|--------|
+| `ctl pool add <device-identifier>` | Upload `pool-pump.js`, set KVS config, create schedules (Pro3 only) |
+| `ctl pool preferred <device-id> <speed>` | Set `preferred` + `speed` KVS on **all** mesh devices |
+| `ctl pool remove <device-identifier>` | Stop script, delete KVS on the specified device |
+| `ctl pool list` | List all devices running `pool-pump.js` with their KVS state |
+| `ctl pool start <device-identifier> <eco\|mid\|high>` | Activate pump at given speed on specified device |
+| `ctl pool stop <device-identifier>` | Stop pump on specified device |
+| `ctl pool status [pattern]` | Show KVS state of all (or matching) pool-pump devices |
+| `ctl pool purge <device-identifier>` | Stop switches, delete KVS, remove script from device |
+
+**Key principle**: `preferred` KVS value determines which device activates. `ctl pool preferred` propagates this to all devices atomically.
+
+---
+
+## Timer Budget
+
+Shelly scripts are limited to **5 timers**. Current usage:
+
+| Timer | Purpose | Lifetime |
+|-------|---------|---------|
+| `TASK_TIMER` | Task queue (200 ms recurring) | Only while queue is non-empty |
+| `STATE.graceTimer` | Inter-device grace delay | During switchover only |
+
+Peak simultaneous: **2** (task queue + grace timer). Well within the 5-timer limit.
+
+---
+
+## Resource Limits Summary
+
+| Resource | Limit | Used |
+|----------|-------|------|
+| Timers | 5 | ≤ 2 |
+| Event subscriptions | 5 | 1 (`addEventHandler`) |
+| MQTT subscriptions | 10 | ≤ 4 (1 per peer switch topic) |
+| KVS keys | — | ≤ 12 config + 2 state |

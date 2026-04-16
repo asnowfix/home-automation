@@ -4,19 +4,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// PoolCmd creates the pool command
+// poolCmd is the root command for pool pump management
+var poolCmd = &cobra.Command{
+	Use:   "pool",
+	Short: "Manage pool pump automation",
+	Long:  `Configure and control the pool pump system with multiple devices running the same script.`,
+}
+
+// PoolCmd returns the pool command (exported for registration)
 func PoolCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "pool",
-		Short: "Manage pool pump automation",
-		Long:  `Configure and control the pool pump system with controller and bootstrap devices.`,
-	}
-
-	cmd.AddCommand(setupCmd)
-	cmd.AddCommand(statusCmd)
-	cmd.AddCommand(startCmd)
-	cmd.AddCommand(stopCmd)
-	cmd.AddCommand(purgeCmd)
-
-	return cmd
+	return poolCmd
 }

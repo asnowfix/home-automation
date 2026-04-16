@@ -1,113 +1,307 @@
 package pool
 
 import (
+	"context"
 	"fmt"
+
 	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
-	"time"
+	"github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/spf13/cobra"
 )
 
-var setupFlags struct {
-	BootstrapDeviceIdentifier string
-	BootstrapHoursThreshold   float64
-	BootstrapDuration         time.Duration
-	NightRunDuration          time.Duration
-	BootstrapPostDelay        time.Duration
-	EcoSpeed                  int
-	MidSpeed                  int
-	HighSpeed                 int
-	TemperatureThreshold      float64
-	ForceUpload               bool
-	NoMinify                  bool
+// getAllKnownDevices returns all myhome.Device entries from the server
+func getAllKnownDevices(ctx context.Context) ([]*myhome.Device, error) {
+	devices, err := myhome.TheClient.LookupDevices(ctx, "*")
+	if err != nil {
+		return nil, err
+	}
+	var result []*myhome.Device
+	for _, d := range *devices {
+		mac := ""
+		if d.Mac() != nil {
+			mac = d.Mac().String()
+		}
+		result = append(result, &myhome.Device{
+			DeviceSummary: myhome.DeviceSummary{
+				DeviceIdentifier: myhome.DeviceIdentifier{
+					Manufacturer_: d.Manufacturer(),
+					Id_:           d.Id(),
+				},
+				MAC:   mac,
+				Host_: d.Host(),
+				Name_: d.Name(),
+			},
+		})
+	}
+	return result, nil
 }
 
-var setupCmd = &cobra.Command{
-	Use:   "setup <controller-device-identifier>",
-	Short: "Setup pool pump scripts on controller and bootstrap devices",
-	Long: `Upload pool-pump.js script to both controller and bootstrap devices and configure KVS settings.
+// getPoolDevices returns all Shelly devices currently running pool-pump.js,
+// discovered dynamically from the server's device registry.
+func getPoolDevices(ctx context.Context) ([]*shelly.Device, error) {
+	provider := &poolProvider{}
 
-The controller device manages the pump speeds and schedules and stores all configuration.
-The bootstrap device provides high-speed startup assistance in cold weather and receives minimal config.`,
+	allDevices, err := getAllKnownDevices(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list devices: %w", err)
+	}
+
+	var poolDevices []*shelly.Device
+	via := types.ChannelMqtt
+
+	for _, dev := range allDevices {
+		sd, err := provider.GetShellyDevice(ctx, dev)
+		if err != nil {
+			continue
+		}
+		status, err := pkgscript.ScriptStatus(ctx, sd, via, "pool-pump.js")
+		if err != nil || status == nil {
+			continue
+		}
+		poolDevices = append(poolDevices, sd)
+	}
+
+	return poolDevices, nil
+}
+
+// getKVSValue retrieves a single KVS value from a device
+func getKVSValue(ctx context.Context, sd *shelly.Device, via types.Channel, key string) (string, error) {
+	val, err := kvs.GetValue(ctx, hlog.Logger, via, sd, key)
+	if err != nil || val == nil {
+		return "", err
+	}
+	return val.Value, nil
+}
+
+var addCmd = &cobra.Command{
+	Use:   "add <device-identifier>",
+	Short: "Add a device to the pool pump mesh",
+	Long: `Upload pool-pump.js script to a device and configure it with KVS values.
+
+Membership is defined by the script running on a device — no local registry is used.
+Schedules are only created on Pro3 devices (detected by switch count).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		deviceID := args[0]
 
-		// Controller device ID from positional argument
-		controllerDeviceID := args[0]
-
-		// Validate required flags
-		if setupFlags.BootstrapDeviceIdentifier == "" {
-			return fmt.Errorf("--bootstrap-device-identifier is required")
+		provider := &poolProvider{}
+		dev, err := provider.GetDeviceByAny(ctx, deviceID)
+		if err != nil {
+			return fmt.Errorf("device not found: %s: %w", deviceID, err)
+		}
+		sd, err := provider.GetShellyDevice(ctx, dev)
+		if err != nil {
+			return fmt.Errorf("failed to get shelly device: %w", err)
 		}
 
-		// Create pool service
+		// Get all currently running pool-pump devices to determine peer IDs
+		existingDevices, _ := getPoolDevices(ctx)
+
+		// Build full device ID list: new device first, then existing peers
+		allIDs := []string{dev.Id()}
+		for _, existing := range existingDevices {
+			if existing.Id() != dev.Id() {
+				allIDs = append(allIDs, existing.Id())
+			}
+		}
+
+		// Simple heuristic: first = pro3, second = pro1
+		var pro3ID, pro1ID string
+		if len(allIDs) > 0 {
+			pro3ID = allIDs[0]
+		}
+		if len(allIDs) > 1 {
+			pro1ID = allIDs[1]
+		}
+
+		// Default preferred settings
+		currentPreferred := pro3ID
+		if currentPreferred == "" {
+			currentPreferred = dev.Id()
+		}
+		currentSpeed := "eco"
+
+		// If there are existing devices, read current preferred from one of them
+		via := types.ChannelMqtt
+		if len(existingDevices) > 0 {
+			if pref, err := getKVSValue(ctx, existingDevices[0], via, "script/pool-pump/preferred"); err == nil && pref != "" {
+				currentPreferred = pref
+			}
+			if speed, err := getKVSValue(ctx, existingDevices[0], via, "script/pool-pump/speed"); err == nil && speed != "" {
+				currentSpeed = speed
+			}
+		}
+
+		service := mhscript.NewPoolService(hlog.Logger, provider)
+		opts := mhscript.SetupOptions{
+			PreferredDeviceID:    currentPreferred,
+			PreferredSpeed:       currentSpeed,
+			NightRunDurationMs:   int(DefaultNightRunDuration.Milliseconds()),
+			GraceDelayMs:         int(DefaultGraceDelay.Milliseconds()),
+			EcoSpeed:             DefaultEcoSpeed,
+			MidSpeed:             DefaultMidSpeed,
+			HighSpeed:            DefaultHighSpeed,
+			TemperatureThreshold: DefaultTemperatureThreshold,
+		}
+
+		fmt.Printf("Adding device %s to pool pump mesh...\n", dev.Name())
+		if err := service.AddDevice(ctx, via, sd, dev.Id(), pro3ID, pro1ID, allIDs, opts); err != nil {
+			return fmt.Errorf("failed to add device: %w", err)
+		}
+
+		fmt.Printf("✓ Device %s added to pool pump mesh\n", dev.Name())
+		fmt.Printf("  Total devices in mesh: %d\n", len(allIDs))
+		fmt.Printf("  Preferred: %s (speed: %s)\n", currentPreferred, currentSpeed)
+		return nil
+	},
+}
+
+var preferredCmd = &cobra.Command{
+	Use:   "preferred <device-id> <speed>",
+	Short: "Set the preferred device and speed on all devices",
+	Long: `Sets preferred_device_id and preferred_speed KVS values on ALL devices
+in the pool pump mesh. The specified device will activate at the given speed.
+
+Speed values:
+  eco  - Low speed
+  mid  - Medium speed (Pro3 only)
+  high - High speed (Pro3 only)
+  max  - Maximum speed`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		preferredID := args[0]
+		speed := args[1]
+
+		validSpeeds := map[string]bool{"eco": true, "mid": true, "high": true, "max": true}
+		if !validSpeeds[speed] {
+			return fmt.Errorf("invalid speed: %s (must be eco, mid, high, or max)", speed)
+		}
+
+		devices, err := getPoolDevices(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to discover pool pump devices: %w", err)
+		}
+		if len(devices) == 0 {
+			return fmt.Errorf("no devices running pool-pump.js. Run 'ctl pool add <device>' first")
+		}
+
+		// Verify preferred device is in the mesh
+		found := false
+		for _, sd := range devices {
+			if sd.Id() == preferredID || sd.Name() == preferredID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("device %s is not in the pool pump mesh", preferredID)
+		}
+
 		provider := &poolProvider{}
 		service := mhscript.NewPoolService(hlog.Logger, provider)
+		via := types.ChannelMqtt
 
-		// Resolve controller and bootstrap devices to get IDs and names
-		controllerDev, err := provider.GetDeviceByAny(ctx, controllerDeviceID)
+		fmt.Printf("Setting preferred device to %s (speed: %s) on %d devices...\n",
+			preferredID, speed, len(devices))
+
+		for _, sd := range devices {
+			if err := service.SetPreferred(ctx, via, sd, preferredID, speed); err != nil {
+				fmt.Printf("  ⚠ Failed to update %s: %v\n", sd.Name(), err)
+				continue
+			}
+			fmt.Printf("  ✓ Updated %s\n", sd.Name())
+		}
+
+		fmt.Printf("\n✓ Preferred device set to %s (speed: %s)\n", preferredID, speed)
+		return nil
+	},
+}
+
+var removeCmd = &cobra.Command{
+	Use:   "remove <device-identifier>",
+	Short: "Remove a device from the pool pump mesh",
+	Long:  `Stop the pool-pump.js script and clear its KVS values on the specified device.`,
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+		deviceID := args[0]
+
+		provider := &poolProvider{}
+		dev, err := provider.GetDeviceByAny(ctx, deviceID)
 		if err != nil {
-			return fmt.Errorf("failed to resolve controller device %s: %w", controllerDeviceID, err)
+			return fmt.Errorf("device not found: %s: %w", deviceID, err)
 		}
-
-		bootstrapDev, err := provider.GetDeviceByAny(ctx, setupFlags.BootstrapDeviceIdentifier)
+		sd, err := provider.GetShellyDevice(ctx, dev)
 		if err != nil {
-			return fmt.Errorf("failed to resolve bootstrap device %s: %w", setupFlags.BootstrapDeviceIdentifier, err)
+			return fmt.Errorf("failed to get shelly device: %w", err)
 		}
 
-		opts := mhscript.SetupOptions{
-			ControllerDeviceID:      controllerDeviceID,
-			BootstrapDeviceID:       setupFlags.BootstrapDeviceIdentifier,
-			BootstrapHoursThreshold: setupFlags.BootstrapHoursThreshold,
-			BootstrapDurationMs:     int(setupFlags.BootstrapDuration.Milliseconds()),
-			NightRunDurationMs:      int(setupFlags.NightRunDuration.Milliseconds()),
-			BootstrapToSpeedDelayMs: int(setupFlags.BootstrapPostDelay.Milliseconds()),
-			EcoSpeed:                setupFlags.EcoSpeed,
-			MidSpeed:                setupFlags.MidSpeed,
-			HighSpeed:               setupFlags.HighSpeed,
-			TemperatureThreshold:    setupFlags.TemperatureThreshold,
-			ForceUpload:             setupFlags.ForceUpload,
-			NoMinify:                setupFlags.NoMinify,
+		service := mhscript.NewPoolService(hlog.Logger, provider)
+		via := types.ChannelMqtt
+		if err := service.RemoveDevice(ctx, via, sd); err != nil {
+			return fmt.Errorf("failed to remove device: %w", err)
 		}
 
-		fmt.Printf("Setting up pool pump system...\n")
-		fmt.Printf("  Controller: %s → %s (%s)\n", controllerDeviceID, controllerDev.Name(), controllerDev.Id())
-		fmt.Printf("  Bootstrap:  %s → %s (%s)\n", setupFlags.BootstrapDeviceIdentifier, bootstrapDev.Name(), bootstrapDev.Id())
-		fmt.Printf("  Bootstrap threshold: %.1f hours since last run\n", setupFlags.BootstrapHoursThreshold)
-		fmt.Printf("  Temperature threshold: %.1f°C for summer mode\n", setupFlags.TemperatureThreshold)
-		fmt.Printf("\n")
+		fmt.Printf("✓ Device %s removed from pool pump mesh\n", dev.Name())
+		return nil
+	},
+}
 
-		if err := service.Setup(ctx, opts); err != nil {
-			return fmt.Errorf("setup failed: %w", err)
+var listCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all devices in the pool pump mesh",
+	Long:  `Display all devices currently running pool-pump.js and their KVS state.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
+
+		devices, err := getPoolDevices(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to discover pool pump devices: %w", err)
 		}
 
-		fmt.Printf("\n✓ Pool pump setup complete\n")
+		if len(devices) == 0 {
+			fmt.Println("No devices running pool-pump.js.")
+			fmt.Println("Run 'ctl pool add <device-identifier>' to add devices.")
+			return nil
+		}
+
+		via := types.ChannelMqtt
+		fmt.Printf("Pool pump mesh: %d devices\n\n", len(devices))
+
+		for i, sd := range devices {
+			prefID, _ := getKVSValue(ctx, sd, via, "script/pool-pump/preferred")
+			prefSpeed, _ := getKVSValue(ctx, sd, via, "script/pool-pump/speed")
+
+			marker := ""
+			if prefID == sd.Id() {
+				marker = " [PREFERRED]"
+			}
+
+			fmt.Printf("%d. %s (%s)%s\n", i+1, sd.Name(), sd.Id(), marker)
+			fmt.Printf("   Preferred: %s  Speed: %s\n", prefID, prefSpeed)
+		}
+
 		return nil
 	},
 }
 
 func init() {
-	// Device identifiers
-	setupCmd.Flags().StringVarP(&setupFlags.BootstrapDeviceIdentifier, "bootstrap-device-identifier", "b", "", "Bootstrap helper device identifier (name, IP, or ID)")
+	// Add subcommands to poolCmd
+	poolCmd.AddCommand(addCmd)
+	poolCmd.AddCommand(preferredCmd)
+	poolCmd.AddCommand(removeCmd)
+	poolCmd.AddCommand(listCmd)
+	// Note: startCmd, stopCmd, statusCmd, purgeCmd are registered in their respective files
 
-	// Operational parameters (defaults extracted from pool-pump.js via go:generate)
-	setupCmd.Flags().Float64Var(&setupFlags.BootstrapHoursThreshold, "bootstrap-hours-threshold", DefaultBootstrapHoursThreshold, "Hours since last run above which bootstrap is needed")
-	setupCmd.Flags().DurationVar(&setupFlags.BootstrapDuration, "bootstrap-duration", DefaultBootstrapDuration, "Bootstrap duration (e.g., 2m, 120s)")
-	setupCmd.Flags().DurationVar(&setupFlags.NightRunDuration, "night-run-duration", DefaultNightRunDuration, "Night run duration (e.g., 1h, 3600s)")
-	setupCmd.Flags().DurationVar(&setupFlags.BootstrapPostDelay, "bootstrap-post-delay", DefaultBootstrapToSpeedDelay, "Delay after bootstrap before starting speed (e.g., 500ms, 5s)")
-	setupCmd.Flags().Float64Var(&setupFlags.TemperatureThreshold, "temperature-threshold", DefaultTemperatureThreshold, "Temperature threshold (°C) for summer mode (day schedule)")
-
-	// Speed mappings (defaults extracted from pool-pump.js via go:generate)
-	setupCmd.Flags().IntVar(&setupFlags.EcoSpeed, "eco-speed", DefaultEcoSpeed, "Controller switch ID for eco/low speed (0, 1, or 2)")
-	setupCmd.Flags().IntVar(&setupFlags.MidSpeed, "mid-speed", DefaultMidSpeed, "Controller switch ID for mid speed (0, 1, or 2)")
-	setupCmd.Flags().IntVar(&setupFlags.HighSpeed, "high-speed", DefaultHighSpeed, "Controller switch ID for high speed (0, 1, or 2)")
-
-	// Upload options
-	setupCmd.Flags().BoolVar(&setupFlags.ForceUpload, "force", false, "Force re-upload even if version hash matches")
-	setupCmd.Flags().BoolVar(&setupFlags.NoMinify, "no-minify", false, "Do not minify script before upload")
-
-	// Mark required flags
-	setupCmd.MarkFlagRequired("bootstrap-device-identifier")
+	// Flags for add command
+	addCmd.Flags().Bool("force", false, "Force re-upload even if version hash matches")
+	addCmd.Flags().Bool("no-minify", false, "Do not minify script before upload")
 }

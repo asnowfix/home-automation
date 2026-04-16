@@ -3,9 +3,6 @@ package mqtt
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/global"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
 	"net/url"
 	"os"
@@ -13,6 +10,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/asnowfix/home-automation/internal/global"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/go-logr/logr"
@@ -673,7 +674,7 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 
 	if !loaded {
 		// First subscriber for this topic - need to register MQTT subscription
-		distribute := func(client mqtt.Client, msg mqtt.Message) {
+		var distribute mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 			c.log.Info("distribute: message received from broker", "subscription_topic", topic, "message_topic", msg.Topic(), "payload_len", len(msg.Payload()))
 			go func(log logr.Logger) {
 				// Acquire per-topic lock to safely read and modify the subscriber list

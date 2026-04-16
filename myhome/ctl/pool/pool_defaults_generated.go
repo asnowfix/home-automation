@@ -7,12 +7,10 @@ import "time"
 
 // Pool pump default values extracted from pool-pump.js CONFIG_SCHEMA
 const (
-	DefaultEcoSpeed                = 2
-	DefaultMidSpeed                = 1
-	DefaultHighSpeed               = 0
-	DefaultBootstrapHoursThreshold = 6
-	DefaultBootstrapDuration       = 120000 * time.Millisecond
-	DefaultNightRunDuration        = 3600000 * time.Millisecond
-	DefaultBootstrapToSpeedDelay   = 500 * time.Millisecond
-	DefaultTemperatureThreshold    = 20
+	DefaultEcoSpeed             = 2
+	DefaultMidSpeed             = 1
+	DefaultHighSpeed            = 0
+	DefaultNightRunDuration     = 3600000 * time.Millisecond
+	DefaultGraceDelay           = 10000 * time.Millisecond
+	DefaultTemperatureThreshold = 20
 )

@@ -1,34 +1,30 @@
 // pool-pump.js
 // ------------
 //
-// Master-slave pool pump control with time-based bootstrap and schedule automation:
+// Unified pool pump control — same script runs on all devices in the mesh.
+// Each device compares CONFIG.preferredDeviceId to its own ID to decide if it
+// should be the active pump controller.
 //
-// Device 1 (Pro3 - Master Controller):
+// Pro3 (3-switch variator):
 //   - Input 0: Water supply sensor (inverted: HIGH = water supply ON → turn off pumps)
-//   - Input 1: High-water sensor (MQTT event)
-//   - Input 2: Max speed active from other device (MQTT event)
-//   - Switch 0: Pump low/eco speed
-//   - Switch 1: Pump mid speed
-//   - Switch 2: Pump high speed
-//   - Controls Pro1 via MQTT RPC for bootstrap sequence
-//   - Tracks last run time for bootstrap decision
-//   - Manages schedules for automated operation
+//   - Input 1: High-water sensor (MQTT notification)
+//   - Input 2: Max speed active from other device (MQTT notification)
+//   - Switch 0-2: Pump speed stages (eco/mid/high, configurable via KVS)
 //   - Button: Cycles through speeds
 //
-// Device 2 (Pro1 - Bootstrap Helper):
+// Pro1 (1-switch):
 //   - Input 0: Water supply sensor (inverted: HIGH = water supply ON → turn off pump)
-//   - Input 1: High-water sensor (MQTT event)
-//   - Switch 0: Pump max speed for bootstrap
-//   - Receives commands from Pro3 via MQTT RPC
+//   - Input 1: High-water sensor (MQTT notification)
+//   - Switch 0: Pump on/off
 //   - Button: Toggles on/off
 //
 // Features:
-//   - Time-based bootstrap: Pro1 runs 2min at max speed when hours since last run > threshold
-//   - Schedule-driven automation: morning-start (SR+3h), evening-stop (SS), night-start (23:15)
-//   - MQTT RPC communication between Pro3 and Pro1
-//   - Auto-detects device role based on device ID
-//   - Water supply protection with state restoration
-//   - Physical button cycling
+//   - Schedule-driven automation: daily-check (sunrise), morning-start (SR+3h),
+//     evening-stop (sunset), night-start (23:15), night-stop (00:15)
+//   - Summer/winter mode based on weather forecast (Open-Meteo)
+//   - Water supply protection with speed restoration
+//   - Cross-device safety: grace delay prevents Pro3 and Pro1 from running simultaneously
+//   - Physical button cycling with detached input mode
 
 // === STATIC CONSTANTS ===
 var SCRIPT_NAME = "pool-pump";
@@ -46,10 +42,11 @@ var CONFIG_SCHEMA = {
     type: "boolean"
   },
   mqttTopicPrefix: {
-    description: "MQTT topic prefix for events",
+    description: "MQTT topic prefix (written by CLI, not used by script)",
     key: "mqtt-topic",
     default: "pool/pump",
-    type: "string"
+    type: "string",
+    cliOnly: true
   },
   preferredDeviceId: {
     description: "Which device ID should run (actual Shelly device ID). Script compares this to its own ID",
@@ -101,11 +98,11 @@ var CONFIG_SCHEMA = {
     required: false
   },
   nightRunDurationMs: {
-    description: "Night run duration in milliseconds",
+    description: "Night run duration in ms (written by CLI, not used by script)",
     key: "night-duration",
     default: 3600000,
     type: "number",
-    required: false
+    cliOnly: true
   },
   graceDelayMs: {
     description: "Cross-device grace delay in ms (minimum 10000)",
@@ -123,30 +120,38 @@ var CONFIG_SCHEMA = {
   }
 };
 
-// Component names by device type
+// Component names by device type (inputs are static; switch names are built
+// dynamically from CONFIG speed mapping — see buildSwitchNames)
 var COMPONENT_NAMES = {
   "pro3": {
     inputs: [
       {id: 0, name: "water-supply", invert: true},
       {id: 1, name: "high-water", invert: false},
       {id: 2, name: "max-speed-active", invert: false}
-    ],
-    switches: [
-      {id: 0, name: "pump-eco"},
-      {id: 1, name: "pump-mid"},
-      {id: 2, name: "pump-high"}
     ]
   },
   "pro1": {
     inputs: [
       {id: 0, name: "water-supply", invert: true},
       {id: 1, name: "high-water", invert: false}
-    ],
-    switches: [
-      {id: 0, name: "pump-max"}
     ]
   }
 };
+
+// Build switch name list from CONFIG speed-to-switch mapping.
+// Called after config is loaded so CONFIG.ecoSpeed etc. are available.
+function buildSwitchNames() {
+  if (STATE.deviceType === "pro3") {
+    var names = [];
+    names.push({id: CONFIG.ecoSpeed, name: "pump-eco"});
+    names.push({id: CONFIG.midSpeed, name: "pump-mid"});
+    names.push({id: CONFIG.highSpeed, name: "pump-high"});
+    return names;
+  } else if (STATE.deviceType === "pro1") {
+    return [{id: 0, name: "pump-max"}];
+  }
+  return [];
+}
 
 // Runtime configuration values (initialized from defaults)
 var CONFIG = {};
@@ -168,9 +173,11 @@ function loadConfig(callback) {
   var missingRequired = [];
   var configKeys = [];
   
-  // Build array of config keys to load
+  // Build array of config keys to load (skip cliOnly — written by CLI, not needed at runtime)
   for (var key in CONFIG_SCHEMA) {
-    configKeys.push(key);
+    if (!CONFIG_SCHEMA[key].cliOnly) {
+      configKeys.push(key);
+    }
   }
   
   var keyIndex = 0;
@@ -622,64 +629,6 @@ function startGraceDelay(delayMs, callback) {
   });
 }
 
-// Called when pro1 (bootstrap) is about to turn its switch ON.
-// If any pro3 switch is known to be on, turn off own switch and wait graceDelayMs.
-function safeActivatePro1Bootstrap(callback) {
-  if (STATE.deviceType !== "pro1") {
-    if (callback) callback();
-    return;
-  }
-
-  var anyPro3On = false;
-  for (var k in STATE.pro3SwitchStates) {
-    if (STATE.pro3SwitchStates[k]) {
-      anyPro3On = true;
-      break;
-    }
-  }
-
-  if (!anyPro3On) {
-    if (callback) callback();
-    return;
-  }
-
-  log("pro3 outputs are on — waiting grace delay before activating pro1 (grace:", CONFIG.graceDelayMs, "ms)");
-  startGraceDelay(CONFIG.graceDelayMs, callback);
-}
-
-// Called when pro3 (controller) wants to turn pro1 (bootstrap) ON.
-// If any pro3 switch is on, turn them all off first and wait graceDelayMs.
-function safeActivatePro1(callback) {
-  if (STATE.deviceType !== "pro3") {
-    if (callback) callback();
-    return;
-  }
-
-  // Check whether any pro3 output is currently on
-  var anyOn = false;
-  for (var i = 0; i < STATE.outputs.length; i++) {
-    var st = Shelly.getComponentStatus("switch:" + STATE.outputs[i]);
-    if (st && st.output) {
-      anyOn = true;
-      break;
-    }
-  }
-
-  if (!anyOn) {
-    if (callback) callback();
-    return;
-  }
-
-  log("pro3 outputs still on — turning off before activating pro1 (grace:", CONFIG.graceDelayMs, "ms)");
-  for (var j = 0; j < STATE.outputs.length; j++) {
-    Shelly.call("Switch.Set", {id: STATE.outputs[j], on: false}, function(r, e) { if (e && false) {} });
-  }
-  STATE.activeOutput = -1;
-  saveState();
-
-  startGraceDelay(CONFIG.graceDelayMs, callback);
-}
-
 // Called when pro3 (controller) wants to activate one of its own outputs (pump variator).
 // If pro1 is currently on, turn it off first and wait graceDelayMs.
 function safeActivatePro3(targetOutputId, callback) {
@@ -695,8 +644,7 @@ function safeActivatePro3(targetOutputId, callback) {
   }
 
   // Use MQTT-tracked pro1 state (kept current by subscribePro1Status).
-  // Fall back to bootstrapInProgress if subscription is not yet active.
-  if (!STATE.pro1On && !STATE.bootstrapInProgress) {
+  if (!STATE.pro1On) {
     if (callback) callback();
     return;
   }
@@ -708,47 +656,6 @@ function safeActivatePro3(targetOutputId, callback) {
     }
     startGraceDelay(CONFIG.graceDelayMs, callback);
   });
-}
-
-// === DEVICE DETECTION ===
-function detectDeviceType() {
-  log("Detecting device type...");
-  
-  // Check available switches
-  var availableOutputs = [];
-  for (var i = 0; i < 4; i++) {
-    var status = Shelly.getComponentStatus("switch:" + i);
-    if (status && ("output" in status)) {
-      availableOutputs.push(i);
-    }
-  }
-  STATE.outputs = availableOutputs;
-  
-  // Check available inputs
-  var availableInputs = [];
-  for (var i = 0; i < 4; i++) {
-    var status = Shelly.getComponentStatus("input:" + i);
-    if (status && ("state" in status)) {
-      availableInputs.push(i);
-    }
-  }
-  STATE.inputs = availableInputs;
-  
-  // Determine device type
-  if (availableOutputs.length >= 3) {
-    STATE.deviceType = "pro3";
-    log("Detected Pro3 (3-switch controller)");
-  } else if (availableOutputs.length === 1) {
-    STATE.deviceType = "pro1";
-    log("Detected Pro1 (1-switch override)");
-  } else {
-    log("WARNING: Unexpected switch count:", availableOutputs.length);
-    STATE.deviceType = availableOutputs.length > 1 ? "pro3" : "pro1";
-  }
-  
-  log("Device type:", STATE.deviceType);
-  log("Switches:", availableOutputs);
-  log("Inputs:", availableInputs);
 }
 
 // === COMPONENT NAMING ===
@@ -768,9 +675,11 @@ function configureComponentNames() {
       STATE.inputNames[input.id] = input.name;
     }
   }
-  
-  for (var i = 0; i < names.switches.length; i++) {
-    var sw = names.switches[i];
+
+  // Switch names derived from CONFIG speed mapping
+  var switchNames = buildSwitchNames();
+  for (var i = 0; i < switchNames.length; i++) {
+    var sw = switchNames[i];
     if (STATE.outputs.indexOf(sw.id) !== -1) {
       STATE.switchNames[sw.id] = sw.name;
     }
@@ -801,8 +710,10 @@ function applyComponentNames(callback) {
     }
   }
   
-  for (var i = 0; i < names.switches.length; i++) {
-    var sw = names.switches[i];
+  // Switch names derived from CONFIG speed mapping
+  var switchNames = buildSwitchNames();
+  for (var i = 0; i < switchNames.length; i++) {
+    var sw = switchNames[i];
     if (STATE.outputs.indexOf(sw.id) !== -1) {
       componentsToConfig.push({type: "switch", id: sw.id, name: sw.name});
     }
@@ -975,7 +886,7 @@ function activateOutput(outputId, callback) {
         if (outputId !== -1) {
           setOutput(outputId, true, function() {
             STATE.activeOutput = outputId;
-            STATE.lastRunTimestamp = Math.floor(Date.now() / 1000);
+
             saveState();
             if (callback) callback();
           });
@@ -1082,21 +993,30 @@ function cycleOutputs() {
 }
 
 // === WATER SUPPLY PROTECTION ===
+var WATER_SUPPLY_ACTIVE = false;  // debounce guard
+
 function handleWaterSupply(waterSupplyActive) {
   log("Water supply active signal:", waterSupplyActive);
-  
+
+  // Debounce: ignore duplicate events for the same state
+  if (waterSupplyActive === WATER_SUPPLY_ACTIVE) {
+    log("Water supply state unchanged, ignoring duplicate");
+    return;
+  }
+  WATER_SUPPLY_ACTIVE = waterSupplyActive;
+
   if (waterSupplyActive) {
     // Water supply is ON (signal is HIGH after invert) - save current state and turn off all pumps
     STATE.savedOutput = STATE.activeOutput;
     log("Water supply ON - saving current output:", STATE.savedOutput);
-    
+
     activateOutput(-1, function() {
       log("All pumps turned off for water supply protection");
     });
   } else {
     // Water supply is OFF (signal is LOW after invert) - restore previous state
     log("Water supply OFF - restoring output:", STATE.savedOutput);
-    
+
     activateOutput(STATE.savedOutput, function() {
       log("Pump restored after water supply turned off");
     });
@@ -1159,7 +1079,7 @@ function handleSwitchEvent(info) {
           log("Grace delay complete — re-activating pro1");
           setOutput(0, true, function() {
             STATE.activeOutput = 0;
-            STATE.lastRunTimestamp = Math.floor(Date.now() / 1000);
+
             saveState();
           });
         });

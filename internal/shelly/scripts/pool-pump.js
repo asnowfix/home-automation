@@ -196,20 +196,37 @@ function loadConfig(callback) {
         CONFIG.graceDelayMs = 10000;
       }
 
+      // Enumerate available outputs and inputs
+      var availableOutputs = [];
+      for (var oi = 0; oi < 4; oi++) {
+        var swSt = Shelly.getComponentStatus("switch:" + oi);
+        if (swSt && ("output" in swSt)) {
+          availableOutputs.push(oi);
+        }
+      }
+      STATE.outputs = availableOutputs;
+
+      var availableInputs = [];
+      for (var ii = 0; ii < 4; ii++) {
+        var inSt = Shelly.getComponentStatus("input:" + ii);
+        if (inSt && ("state" in inSt)) {
+          availableInputs.push(ii);
+        }
+      }
+      STATE.inputs = availableInputs;
+
       // Detect device type based on switch count
-      var switch0 = Shelly.getComponentStatus("switch:0");
-      var switch1 = Shelly.getComponentStatus("switch:1");
-      var switch2 = Shelly.getComponentStatus("switch:2");
-      if (switch2) {
+      if (availableOutputs.length >= 3) {
         STATE.deviceType = "pro3";
         log("Detected device type: Pro3 (3 switches)");
-      } else if (switch0 && !switch1) {
+      } else if (availableOutputs.length === 1) {
         STATE.deviceType = "pro1";
         log("Detected device type: Pro1 (1 switch)");
       } else {
         STATE.deviceType = "unknown";
         log("WARNING: Could not detect device type");
       }
+      log("Switches:", availableOutputs, "Inputs:", availableInputs);
 
       // Cache my device ID
       var deviceInfo = Shelly.getDeviceInfo();
@@ -606,7 +623,7 @@ function startGraceDelay(delayMs, callback) {
 }
 
 // Called when pro1 (bootstrap) is about to turn its switch ON.
-// If any pro3 switch is known to be on, turn off own switch and wait pro1GraceDelayMs.
+// If any pro3 switch is known to be on, turn off own switch and wait graceDelayMs.
 function safeActivatePro1Bootstrap(callback) {
   if (STATE.deviceType !== "pro1") {
     if (callback) callback();
@@ -626,12 +643,12 @@ function safeActivatePro1Bootstrap(callback) {
     return;
   }
 
-  log("pro3 outputs are on — waiting grace delay before activating pro1 (grace:", CONFIG.pro1GraceDelayMs, "ms)");
-  startGraceDelay(CONFIG.pro1GraceDelayMs, callback);
+  log("pro3 outputs are on — waiting grace delay before activating pro1 (grace:", CONFIG.graceDelayMs, "ms)");
+  startGraceDelay(CONFIG.graceDelayMs, callback);
 }
 
 // Called when pro3 (controller) wants to turn pro1 (bootstrap) ON.
-// If any pro3 switch is on, turn them all off first and wait pro1GraceDelayMs.
+// If any pro3 switch is on, turn them all off first and wait graceDelayMs.
 function safeActivatePro1(callback) {
   if (STATE.deviceType !== "pro3") {
     if (callback) callback();
@@ -653,18 +670,18 @@ function safeActivatePro1(callback) {
     return;
   }
 
-  log("pro3 outputs still on — turning off before activating pro1 (grace:", CONFIG.pro1GraceDelayMs, "ms)");
+  log("pro3 outputs still on — turning off before activating pro1 (grace:", CONFIG.graceDelayMs, "ms)");
   for (var j = 0; j < STATE.outputs.length; j++) {
     Shelly.call("Switch.Set", {id: STATE.outputs[j], on: false}, function(r, e) { if (e && false) {} });
   }
   STATE.activeOutput = -1;
   saveState();
 
-  startGraceDelay(CONFIG.pro1GraceDelayMs, callback);
+  startGraceDelay(CONFIG.graceDelayMs, callback);
 }
 
 // Called when pro3 (controller) wants to activate one of its own outputs (pump variator).
-// If pro1 is currently on, turn it off first and wait pro3GraceDelayMs.
+// If pro1 is currently on, turn it off first and wait graceDelayMs.
 function safeActivatePro3(targetOutputId, callback) {
   if (STATE.deviceType !== "pro3") {
     if (callback) callback();
@@ -684,12 +701,12 @@ function safeActivatePro3(targetOutputId, callback) {
     return;
   }
 
-  log("pro1 is on — turning off before activating pro3 (grace:", CONFIG.pro3GraceDelayMs, "ms)");
+  log("pro1 is on — turning off before activating pro3 (grace:", CONFIG.graceDelayMs, "ms)");
   turnOffPro1(function(err) {
     if (err) {
       log("WARNING: turnOffPro1 failed during safeActivatePro3:", err);
     }
-    startGraceDelay(CONFIG.pro3GraceDelayMs, callback);
+    startGraceDelay(CONFIG.graceDelayMs, callback);
   });
 }
 
@@ -910,6 +927,26 @@ function mapSpeedToSwitch(speed) {
 }
 
 // === OUTPUT CONTROL ===
+function turnOffAllSwitches(callback) {
+  for (var i = 0; i < STATE.outputs.length; i++) {
+    Shelly.call("Switch.Set", {id: STATE.outputs[i], on: false}, function(res, err) {
+      if (err && false) {}
+    });
+  }
+  if (callback) queueTask(callback);
+}
+
+function turnOffPro1(callback) {
+  if (!CONFIG.pro1DeviceId) {
+    log("WARNING: pro1 device ID not configured");
+    if (callback) callback("no pro1 device ID");
+    return;
+  }
+  log("Sending turn-off command to pro1");
+  MQTT.publish(CONFIG.pro1DeviceId + "/command/switch:0", "off", 0, false);
+  if (callback) queueTask(function() { callback(null); });
+}
+
 function setOutput(outputId, on, callback) {
   if (STATE.outputs.indexOf(outputId) === -1) {
     log("ERROR: Invalid output ID:", outputId);
@@ -1118,7 +1155,7 @@ function handleSwitchEvent(info) {
       setOutput(0, false, function() {
         STATE.activeOutput = -1;
         saveState();
-        startGraceDelay(CONFIG.pro1GraceDelayMs, function() {
+        startGraceDelay(CONFIG.graceDelayMs, function() {
           log("Grace delay complete — re-activating pro1");
           setOutput(0, true, function() {
             STATE.activeOutput = 0;
@@ -1696,8 +1733,9 @@ function continueInit() {
   enforceOutputState();
   setupMQTT();
 
-  // Initialization complete - enable state persistence
+  // Initialization complete - enable state persistence and flush initial state to KVS
   STATE.initializing = false;
+  saveState();
 
   log("Script initialization complete");
 
@@ -1718,8 +1756,8 @@ function continueInit() {
     function(next) {
       log('Step 2/4: Checking water supply status...');
       var input0 = Shelly.getComponentStatus('input:0');
-      if (input0) {
-        handleWaterSupply(input0.state);
+      if (input0 && input0.state) {
+        handleWaterSupply(true);
       }
       next();
     },

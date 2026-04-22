@@ -36,23 +36,13 @@ use (
 	./myhome/occupancy
 	./myhome/storage
 	./myhome/temperature
-	./pkg/devices
 	./pkg/sfr
-	./pkg/shelly
-	./pkg/shelly/blu
-	./pkg/shelly/ethernet
-	./pkg/shelly/gen1
-	./pkg/shelly/input
-	./pkg/shelly/kvs
-	./pkg/shelly/mqtt
-	./pkg/shelly/schedule
-	./pkg/shelly/script
-	./pkg/shelly/shelly
-	./pkg/shelly/shttp
-	./pkg/shelly/sswitch
-	./pkg/shelly/system
-	./pkg/shelly/types
-	./pkg/shelly/wifi
 	./pkg/tapo
 	./pkg/version
+)
+
+replace (
+	github.com/asnowfix/go-shellies => /Users/fkowalski/GIT/go-shellies
+	github.com/asnowfix/go-shellies/gen1 => /Users/fkowalski/GIT/go-shellies/gen1
+	github.com/asnowfix/go-shellies/script => /Users/fkowalski/GIT/go-shellies/script
 )

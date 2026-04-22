@@ -15,10 +15,10 @@ import (
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	mhmqtt "github.com/asnowfix/home-automation/myhome/mqtt"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
-	"github.com/asnowfix/home-automation/pkg/devices"
-	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"github.com/asnowfix/home-automation/pkg/shelly/wifi"
+	"github.com/asnowfix/go-shellies/devices"
+	shellyapi "github.com/asnowfix/go-shellies"
+	"github.com/asnowfix/go-shellies/types"
+	"github.com/asnowfix/go-shellies/wifi"
 )
 
 // options for STA

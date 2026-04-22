@@ -3,7 +3,7 @@ package myhome
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/pkg/devices"
+	"github.com/asnowfix/go-shellies/devices"
 )
 
 var TheClient Client

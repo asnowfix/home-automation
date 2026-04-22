@@ -22,8 +22,8 @@ require (
 	github.com/asnowfix/home-automation/myhome/ctl/sswitch v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/ctl/temperature v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/mqtt v0.0.0-00010101000000-000000000000
-	github.com/asnowfix/home-automation/pkg/shelly v0.0.0-00010101000000-000000000000
-	github.com/asnowfix/home-automation/pkg/shelly/types v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/go-shellies v0.0.0
+	github.com/asnowfix/go-shellies/script v0.0.0
 )
 
 require (
@@ -83,8 +83,5 @@ replace github.com/asnowfix/home-automation/internal/myhome => ../../internal/my
 
 replace github.com/asnowfix/home-automation/myhome/mqtt => ../mqtt
 
-replace github.com/asnowfix/home-automation/pkg/shelly => ../../pkg/shelly
-
-replace github.com/asnowfix/home-automation/pkg/shelly/types => ../../pkg/shelly/types
 
 replace github.com/asnowfix/home-automation/internal/debug => ../../internal/debug

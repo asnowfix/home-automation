@@ -5,6 +5,9 @@ go 1.24.2
 toolchain go1.24.3
 
 require (
+	github.com/asnowfix/go-shellies v0.0.0
+	github.com/asnowfix/go-shellies/gen1 v0.0.0
+	github.com/asnowfix/go-shellies/script v0.0.0
 	github.com/go-logr/logr v1.4.3
 	github.com/kardianos/service v1.2.4
 	github.com/spf13/cobra v1.10.1

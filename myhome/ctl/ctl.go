@@ -7,7 +7,6 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/blu"
 	"github.com/asnowfix/home-automation/myhome/ctl/config"
-	ctlmcp "github.com/asnowfix/home-automation/myhome/ctl/mcp"
 	"github.com/asnowfix/home-automation/myhome/ctl/db"
 	"github.com/asnowfix/home-automation/myhome/ctl/forget"
 	"github.com/asnowfix/home-automation/myhome/ctl/heater"
@@ -25,8 +24,10 @@ import (
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	"os"
 	"os/signal"
-	shellyPkg "github.com/asnowfix/home-automation/pkg/shelly"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	shellyPkg "github.com/asnowfix/go-shellies"
+	shellyscript "github.com/asnowfix/go-shellies/script"
+	"github.com/asnowfix/go-shellies/types"
+	"github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"runtime/pprof"
 	"syscall"
 
@@ -72,7 +73,9 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		shellyPkg.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
+		shellyPkg.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit, func(log logr.Logger, r types.MethodsRegistrar) {
+				shellyscript.Init(log, r, scripts.GetFS())
+			})
 
 		// Start cleanup goroutine that closes MQTT client when context is cancelled OR on signal
 		// This ensures cleanup happens even when command returns an error or is interrupted
@@ -141,7 +144,6 @@ func init() {
 	// Make log level flags mutually exclusive
 	Cmd.MarkFlagsMutuallyExclusive("verbose", "debug", "quiet")
 
-	Cmd.AddCommand(ctlmcp.Cmd)
 	Cmd.AddCommand(list.Cmd)
 	Cmd.AddCommand(show.Cmd)
 	Cmd.AddCommand(open.Cmd)

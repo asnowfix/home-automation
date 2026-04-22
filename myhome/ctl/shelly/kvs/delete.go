@@ -12,10 +12,10 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"github.com/asnowfix/home-automation/pkg/devices"
-	"github.com/asnowfix/home-automation/pkg/shelly"
-	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/go-shellies/devices"
+	"github.com/asnowfix/go-shellies"
+	"github.com/asnowfix/go-shellies/kvs"
+	"github.com/asnowfix/go-shellies/types"
 )
 
 func init() {

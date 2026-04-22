@@ -13,11 +13,11 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"github.com/asnowfix/home-automation/pkg/devices"
-	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
-	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
-	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/go-shellies/devices"
+	shellyapi "github.com/asnowfix/go-shellies"
+	shellymqtt "github.com/asnowfix/go-shellies/mqtt"
+	"github.com/asnowfix/go-shellies/shelly"
+	"github.com/asnowfix/go-shellies/types"
 
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 )

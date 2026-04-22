@@ -7,9 +7,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
-	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
-	"github.com/asnowfix/home-automation/pkg/shelly/script"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/go-shellies/kvs"
+	"github.com/asnowfix/go-shellies/script"
+	"github.com/asnowfix/go-shellies/types"
 
 	"github.com/go-logr/logr"
 )

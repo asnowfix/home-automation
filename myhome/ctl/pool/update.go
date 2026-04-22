@@ -6,9 +6,9 @@ import (
 
 	"github.com/asnowfix/home-automation/hlog"
 	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
-	"github.com/asnowfix/home-automation/pkg/shelly"
-	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/go-shellies"
+	"github.com/asnowfix/go-shellies/kvs"
+	"github.com/asnowfix/go-shellies/types"
 
 	"github.com/spf13/cobra"
 )

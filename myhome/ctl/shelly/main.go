@@ -1,7 +1,6 @@
 package shelly
 
 import (
-	"github.com/asnowfix/home-automation/myhome/ctl/shelly/call"
 	"github.com/asnowfix/home-automation/myhome/ctl/shelly/components"
 	"github.com/asnowfix/home-automation/myhome/ctl/shelly/follow"
 	"github.com/asnowfix/home-automation/myhome/ctl/shelly/jobs"
@@ -24,7 +23,6 @@ var Cmd = &cobra.Command{
 }
 
 func init() {
-	Cmd.AddCommand(call.Cmd)
 	Cmd.AddCommand(follow.Cmd)
 	Cmd.AddCommand(jobs.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)

@@ -9,8 +9,7 @@ require (
 	github.com/asnowfix/home-automation/internal/myzone v0.0.0-20260402201030-0ed25e95389f
 	github.com/asnowfix/home-automation/myhome/ctl/options v0.0.0-20260402201030-0ed25e95389f
 	github.com/asnowfix/home-automation/myhome/temperature v0.0.0-00010101000000-000000000000
-	github.com/asnowfix/home-automation/pkg/shelly v0.0.0-20260402201030-0ed25e95389f
-	github.com/asnowfix/home-automation/pkg/shelly/types v0.0.0-20260402201030-0ed25e95389f
+	github.com/asnowfix/go-shellies v0.0.0
 	github.com/go-logr/logr v1.4.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
@@ -32,15 +31,6 @@ replace github.com/asnowfix/home-automation/internal/myzone => ./internal/myzone
 
 replace github.com/asnowfix/home-automation/internal/shelly/scripts => ./internal/shelly/scripts
 
-replace github.com/asnowfix/home-automation/pkg/shelly => ./pkg/shelly
-
-replace github.com/asnowfix/home-automation/pkg/shelly/gen1 => ./pkg/shelly/gen1
-
-replace github.com/asnowfix/home-automation/pkg/shelly/types => ./pkg/shelly/types
-
-replace github.com/asnowfix/home-automation/pkg/shelly/sswitch => ./pkg/shelly/sswitch
-
-replace github.com/asnowfix/home-automation/pkg/shelly/shttp => ./pkg/shelly/shttp
 
 require (
 	cloud.google.com/go/auth v0.20.0 // indirect
@@ -48,8 +38,6 @@ require (
 	cloud.google.com/go/compute v1.59.0 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/asnowfix/home-automation/internal/shelly/scripts v0.0.0-20260402201030-0ed25e95389f // indirect
-	github.com/asnowfix/home-automation/pkg/shelly/shttp v0.0.0-20260402201030-0ed25e95389f // indirect
-	github.com/asnowfix/home-automation/pkg/shelly/sswitch v0.0.0-20260402201030-0ed25e95389f // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect

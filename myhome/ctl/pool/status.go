@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/go-shellies/types"
 
 	"github.com/spf13/cobra"
 )

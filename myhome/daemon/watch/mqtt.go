@@ -11,9 +11,9 @@ import (
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	"os"
 	"path/filepath"
-	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
-	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
-	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	shellyapi "github.com/asnowfix/go-shellies"
+	shellymqtt "github.com/asnowfix/go-shellies/mqtt"
+	"github.com/asnowfix/go-shellies/shelly"
 	"time"
 
 	"github.com/go-logr/logr"

@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/asnowfix/home-automation/pkg/shelly"
-	sinput "github.com/asnowfix/home-automation/pkg/shelly/input"
-	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
-	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
-	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
-	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/go-shellies"
+	sinput "github.com/asnowfix/go-shellies/input"
+	"github.com/asnowfix/go-shellies/kvs"
+	"github.com/asnowfix/go-shellies/schedule"
+	pkgscript "github.com/asnowfix/go-shellies/script"
+	"github.com/asnowfix/go-shellies/sswitch"
+	"github.com/asnowfix/go-shellies/types"
 
 	"github.com/go-logr/logr"
 )

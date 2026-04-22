@@ -7,7 +7,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/devices"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
-	"github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/go-shellies"
 	"time"
 
 	"github.com/go-logr/logr"

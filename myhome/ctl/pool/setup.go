@@ -7,10 +7,10 @@ import (
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
-	"github.com/asnowfix/home-automation/pkg/shelly"
-	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
-	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/go-shellies"
+	"github.com/asnowfix/go-shellies/kvs"
+	pkgscript "github.com/asnowfix/go-shellies/script"
+	"github.com/asnowfix/go-shellies/types"
 
 	"github.com/spf13/cobra"
 )

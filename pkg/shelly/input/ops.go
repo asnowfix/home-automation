@@ -21,7 +21,7 @@ func (v Verb) String() string {
 // <https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Input>
 
 const (
-	SetConfig       Verb = "InputSetConfig" // TODO
+	SetConfig       Verb = "Input.SetConfig"
 	GetConfig       Verb = "Input.GetConfig"
 	GetStatus       Verb = "Input.GetStatus"
 	CheckExpression Verb = "Input.CheckExpression" // TODO
@@ -31,6 +31,10 @@ const (
 
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
+	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{
+		Allocate:   func() any { return new(ConfigurationResponse) },
+		HttpMethod: http.MethodPost,
+	})
 	r.RegisterMethodHandler(GetConfig.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Configuration) },
 		HttpMethod: http.MethodGet,

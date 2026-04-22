@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/pkg/shelly"
+	sinput "github.com/asnowfix/home-automation/pkg/shelly/input"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
@@ -379,6 +380,149 @@ func (s *PoolService) setComponentNames(ctx context.Context, via types.Channel, 
 	}
 
 	return nil
+}
+
+// knownPoolPumpStateKeys are KVS keys written at runtime by pool-pump.js itself
+// (via storeValue, which prepends "script/pool-pump/")
+var knownPoolPumpStateKeys = []string{
+	"script/pool-pump/active-output",
+	"script/pool-pump/schedule-mode",
+}
+
+// UpdateResult holds the outcome of auditing/updating a single device
+type UpdateResult struct {
+	DeviceName          string
+	DeviceID            string
+	DeviceType          string   // "pro3", "pro1", or "unknown"
+	MissingKVS          []string // required KVS config keys absent from the device
+	StaleKVS            []string // script/pool-pump/* keys on device that are not in the known set
+	ScriptUpdated       bool     // true if pool-pump.js was re-uploaded (version changed or forced)
+	SchedulesReconciled bool     // true if schedules were reconciled (Pro3 only)
+	WaterSupplyInvertOK bool     // true if input:0 invert was already correct
+	WaterSupplyFixed    bool     // true if input:0 invert was corrected
+	Errors              []string
+}
+
+// UpdateDevice audits and repairs a pool pump device:
+//   - reports KVS config keys from PoolKVSKeys that are absent
+//   - reports (returns) stale script/pool-pump/* KVS keys not in the known set
+//   - checks and fixes the water-supply input (input:0) invert flag
+//   - uploads pool-pump.js if its hash has changed (or force=true)
+//   - reconciles schedules on Pro3 devices
+func (s *PoolService) UpdateDevice(ctx context.Context, via types.Channel, sd *shelly.Device, force bool, noMinify bool) (*UpdateResult, error) {
+	result := &UpdateResult{
+		DeviceName: sd.Name(),
+		DeviceID:   sd.Id(),
+	}
+
+	// Detect device type by switch count (same heuristic as the JS script)
+	numSwitches := 0
+	for i := 0; i < 3; i++ {
+		if _, err := sswitch.GetStatus(ctx, sd, via, i); err != nil {
+			break
+		}
+		numSwitches++
+	}
+	switch {
+	case numSwitches >= 3:
+		result.DeviceType = "pro3"
+	case numSwitches == 1:
+		result.DeviceType = "pro1"
+	default:
+		result.DeviceType = "unknown"
+	}
+
+	// Build the complete set of expected script/pool-pump/* keys
+	knownKeys := make(map[string]bool, len(PoolKVSKeys)+len(knownPoolPumpStateKeys))
+	for _, v := range PoolKVSKeys {
+		knownKeys[v] = true
+	}
+	for _, k := range knownPoolPumpStateKeys {
+		knownKeys[k] = true
+	}
+
+	// List all script/pool-pump/* keys currently on the device
+	listResp, err := kvs.ListKeys(ctx, s.log, via, sd, "script/pool-pump/*")
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("failed to list KVS keys: %v", err))
+	} else if listResp != nil {
+		foundKeys := make(map[string]bool, len(listResp.Keys))
+		for key := range listResp.Keys {
+			foundKeys[key] = true
+		}
+
+		// Stale: present on device but not in the known set
+		for key := range listResp.Keys {
+			if !knownKeys[key] {
+				result.StaleKVS = append(result.StaleKVS, key)
+			}
+		}
+
+		// Missing: expected by PoolKVSKeys but absent from device
+		for _, v := range PoolKVSKeys {
+			if !foundKeys[v] {
+				result.MissingKVS = append(result.MissingKVS, v)
+			}
+		}
+	}
+
+	// Verify water-supply input (input:0) has invert=true.
+	// The JS script sets this via applyComponentNames() at startup, but we also
+	// enforce it here so a mis-configured device is fixed without waiting for
+	// the next script restart.
+	if cfgRaw, err := sd.CallE(ctx, via, "Input.GetConfig", map[string]interface{}{"id": 0}); err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("failed to get input:0 config: %v", err))
+	} else if cfg, ok := cfgRaw.(*sinput.Configuration); ok {
+		if cfg.Invert {
+			result.WaterSupplyInvertOK = true
+		} else {
+			// Fix: set invert=true so water-supply protection works correctly
+			fixParams := map[string]interface{}{
+				"id": 0,
+				"config": map[string]interface{}{
+					"invert": true,
+				},
+			}
+			if _, err := sd.CallE(ctx, via, "Input.SetConfig", fixParams); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("failed to fix input:0 invert: %v", err))
+			} else {
+				result.WaterSupplyFixed = true
+			}
+		}
+	}
+
+	// Update the script (version-tracked; skips upload when hash matches but always restarts)
+	scriptName := "pool-pump.js"
+	buf, err := pkgscript.ReadEmbeddedFile(scriptName)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("failed to read embedded script: %v", err))
+		return result, nil
+	}
+
+	uploadedID, err := UploadWithVersion(ctx, s.log, via, sd, scriptName, buf, !noMinify, force)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("failed to update script: %v", err))
+	} else {
+		// UploadWithVersion returns 0 when the version matched and no upload was performed
+		result.ScriptUpdated = uploadedID != 0
+	}
+
+	// Reconcile schedules on Pro3 devices.
+	// schedules reference the script by ID, so we fetch the current ID after upload.
+	if result.DeviceType == "pro3" {
+		scriptStatus, err := pkgscript.ScriptStatus(ctx, sd, via, scriptName)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("failed to get script status for schedule reconciliation: %v", err))
+		} else if scriptStatus != nil {
+			if err := s.reconcileSchedules(ctx, via, sd, int(scriptStatus.Id)); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("failed to reconcile schedules: %v", err))
+			} else {
+				result.SchedulesReconciled = true
+			}
+		}
+	}
+
+	return result, nil
 }
 
 // Speed represents pump speed

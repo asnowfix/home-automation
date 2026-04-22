@@ -14,6 +14,15 @@ func (t Type) String() string {
 	return [...]string{"switch", "button", "analog", "count"}[t]
 }
 
+type ConfigurationRequest struct {
+	Id     int           `json:"id"`
+	Config Configuration `json:"config"`
+}
+
+type ConfigurationResponse struct {
+	RestartRequired bool `json:"restart_required"`
+}
+
 // The configuration of the Input component contains information about the type, invert, and factory reset settings of the chosen input instance. To Get/Set the configuration of the Input component its id must be specified.
 // https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Input#configuration
 type Configuration struct {

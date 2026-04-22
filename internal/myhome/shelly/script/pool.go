@@ -194,12 +194,10 @@ func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *sh
 	}
 	time.Sleep(500 * time.Millisecond)
 
-	// Only reconcile schedules on Pro3 (detected by having 3+ switches)
-	// For now, we assume first device is Pro3 - schedules are created there
-	if deviceID == pro3ID {
-		if err := s.reconcileSchedules(ctx, via, sd, int(scriptResult)); err != nil {
-			return fmt.Errorf("failed to reconcile schedules: %w", err)
-		}
+	// Reconcile schedules on every device in the mesh — each device's script
+	// self-selects via isMyTurnToRun() so only the preferred device activates.
+	if err := s.reconcileSchedules(ctx, via, sd, int(scriptResult)); err != nil {
+		return fmt.Errorf("failed to reconcile schedules: %w", err)
 	}
 
 	s.log.Info("Device setup complete", "device", sd.Name())

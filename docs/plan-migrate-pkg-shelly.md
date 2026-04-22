@@ -9,47 +9,47 @@ Also move the MCP server (`myhome/ctl/mcp/`) and the direct-call CLI command
 
 ## Phase 1: Create plan document
 - [x] Write this plan file
-- [ ] Commit
+- [x] Commit
 
-## Phase 2: Set up go-shellies (target repo)
+## Phase 2: Set up go-shellies (target repo) -- DONE
 
 Branch: `feature/initial-library` in `/Users/fkowalski/GIT/go-shellies`
 
-1. `go mod init github.com/asnowfix/go-shellies`
-2. Copy `pkg/devices/` -> `devices/` (3 files: types.go, list.go, lookup.go)
-3. Copy `pkg/shelly/` root files -> root (device.go, config.go, registrar.go, ops.go, mdns.go, shelly.go)
-4. Copy all sub-package directories (ble, blu, ethernet, gen1, input, kvs, matter, mqtt, ratelimit, schedule, script, shelly, shttp, sswitch, system, temperature, types, wifi)
-5. Delete 12 go.mod/go.sum files being consolidated (blu, ethernet, input, kvs, mqtt, schedule, shelly, shttp, sswitch, system, types, wifi). Keep script/go.mod and gen1/go.mod.
-6. Update ALL import paths: `home-automation/pkg/shelly` -> `go-shellies`, `home-automation/pkg/devices` -> `go-shellies/devices`
-7. Fix Blocker 1: remove dead `internal/myhome/net` import from device.go
-8. Fix Blocker 2: add `scriptsFS fs.FS` parameter to root `Init()` in ops.go, remove `internal/shelly/scripts` import
-9. Fix script/ops.go: replace `hlog.GetLogger` with the logr.Logger passed as parameter (hlog is a home-automation internal package)
-10. Remove deprecated `golang.org/x/exp/rand` from mqtt/ops.go (Go 1.22+ auto-seeds math/rand)
-11. Create `DeviceDiscovery` interface + `ZeroConfDiscovery` implementation
-12. Copy and adapt MCP server (mcp/ sub-package): accept DeviceDiscovery, remove myhome imports
-13. Copy and adapt call command (call/ sub-package): accept DeviceDiscovery, remove myhome imports
-14. Run `go mod tidy` for root, script/, and gen1/ modules
-15. Verify `go build ./...` succeeds for all 3 modules
-16. Commit
+1. [x] `go mod init github.com/asnowfix/go-shellies`
+2. [x] Copy `pkg/devices/` -> `devices/` (3 files: types.go, list.go, lookup.go)
+3. [x] Copy `pkg/shelly/` root files -> root (device.go, config.go, registrar.go, ops.go, mdns.go, shelly.go)
+4. [x] Copy all sub-package directories
+5. [x] Delete 12 go.mod/go.sum files being consolidated. Keep script/go.mod and gen1/go.mod.
+6. [x] Update ALL import paths
+7. [x] Fix Blocker 1: remove dead `internal/myhome/net` import from device.go
+8. [x] Fix Blocker 2: changed Init() to accept `extras ...InitExtra` callbacks instead of importing script directly
+9. [x] Fix script/ops.go: use passed logr.Logger instead of hlog
+10. [x] Remove deprecated `golang.org/x/exp/rand` from mqtt/ops.go
+11. [x] Create `DeviceDiscovery` interface + `ZeroConfDiscovery` implementation
+12. [x] Copy and adapt MCP server (mcp/ sub-package)
+13. [x] Copy and adapt call command (call/ sub-package)
+14. [x] Run `go mod tidy` for root, script/, and gen1/ modules
+15. [x] Verify `go build ./...` and `go test ./...` succeed for all 3 modules
+16. [x] Commit
 
-## Phase 3: Update home-automation (this worktree)
+## Phase 3: Update home-automation (this worktree) -- DONE
 
 Branch: `feature/migrate-pkg-shelly-in-its-own-repo`
 
-1. Update go.work: remove all `./pkg/shelly/*` and `./pkg/devices` entries
-2. Update ALL import paths throughout home-automation to point to go-shellies
-3. `git rm -r pkg/shelly/` and `git rm -r pkg/devices/`
-4. `git rm -r myhome/ctl/mcp/` and `git rm -r myhome/ctl/shelly/call/` (moved to go-shellies)
-5. Add `replace` directives for local dev: `github.com/asnowfix/go-shellies => /Users/fkowalski/GIT/go-shellies`
-6. Update `Init()` call sites to pass `scripts.GetFS()` as the new fs.FS parameter
-7. Create daemon-based `DeviceDiscovery` implementation (wraps `myhome.TheClient.LookupDevices`)
-8. Run `go mod tidy` across affected modules
-9. Verify `make build` and `make test` succeed
-10. Commit
+1. [x] Update go.work: remove all `./pkg/shelly/*` and `./pkg/devices` entries, add replace directives
+2. [x] Update ALL import paths throughout home-automation (~90 files)
+3. [x] `git rm -r pkg/shelly/` and `git rm -r pkg/devices/`
+4. [x] `git rm -r myhome/ctl/mcp/` and `git rm -r myhome/ctl/shelly/call/`
+5. [x] Add `replace` directives in go.work for local dev
+6. [x] Update `Init()` call sites to pass `script.Init` via extras callback
+7. [-] Daemon-based DeviceDiscovery: deferred (myhome.Foreach still works for now)
+8. [x] Update go.mod files to require go-shellies
+9. [x] Verify `make build` and `make test` succeed
+10. [x] Commit
 
-## Phase 4: Update plan document
-- [ ] Mark all phases done
-- [ ] Commit
+## Phase 4: Update plan document -- DONE
+- [x] Mark all phases done
+- [x] Commit
 
 ## Module consolidation (13 -> 3 modules)
 

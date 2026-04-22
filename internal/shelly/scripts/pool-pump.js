@@ -869,8 +869,75 @@ function setOutput(outputId, on, callback) {
   Shelly.call("Switch.Set", {id: outputId, on: on}, callback);
 }
 
+// === SOFTWARE FUSE (ANTI-CYCLING PROTECTION) ===
+// Prevents rapid relay cycling that generates repeated motor inrush currents
+// and trips circuit breakers. Tracks output state changes in a sliding window;
+// if too many transitions occur, the fuse "trips": all switches are turned off
+// and ON activations are refused for a cooldown period.
+// OFF activations (-1) always pass — safety trumps the fuse.
+var FUSE_WINDOW_MS = 120000;      // 2-minute sliding window
+var FUSE_MAX_CHANGES = 4;         // max state changes per window
+var FUSE_COOLDOWN_MS = 300000;    // 5-minute cooldown after trip
+var FUSE_CHANGES = [];            // timestamps of recent state changes
+var FUSE_TRIPPED = false;
+var FUSE_TRIP_TIME = 0;
+
+function fuseRecord() {
+  FUSE_CHANGES.push(Date.now());
+}
+
+function fuseAllowOn() {
+  var now = Date.now();
+
+  // If tripped, check cooldown
+  if (FUSE_TRIPPED) {
+    if (now - FUSE_TRIP_TIME >= FUSE_COOLDOWN_MS) {
+      log("FUSE: cooldown expired, resetting");
+      FUSE_TRIPPED = false;
+      FUSE_CHANGES = [];
+      return true;
+    }
+    log("FUSE: tripped, refusing activation (cooldown remaining:",
+        Math.round((FUSE_COOLDOWN_MS - (now - FUSE_TRIP_TIME)) / 1000), "s)");
+    return false;
+  }
+
+  // Prune entries outside the window (no shift — manual loop per Shelly constraint)
+  var recent = [];
+  for (var i = 0; i < FUSE_CHANGES.length; i++) {
+    if (now - FUSE_CHANGES[i] < FUSE_WINDOW_MS) {
+      recent.push(FUSE_CHANGES[i]);
+    }
+  }
+  FUSE_CHANGES = recent;
+
+  // Check threshold
+  if (FUSE_CHANGES.length >= FUSE_MAX_CHANGES) {
+    log("FUSE: TRIPPED — " + FUSE_CHANGES.length + " state changes in " +
+        (FUSE_WINDOW_MS / 1000) + "s window. Blocking ON activations for " +
+        (FUSE_COOLDOWN_MS / 1000) + "s");
+    FUSE_TRIPPED = true;
+    FUSE_TRIP_TIME = now;
+    turnOffAllSwitches();
+    return false;
+  }
+
+  return true;
+}
+
 function activateOutput(outputId, callback) {
   log("Activating output:", outputId);
+
+  // Software fuse: always allow OFF (-1), check fuse for ON activations
+  if (outputId !== -1 && !fuseAllowOn()) {
+    log("FUSE: activation refused, forcing off");
+    outputId = -1;
+  }
+
+  // Record actual state changes for fuse tracking
+  if (outputId !== STATE.activeOutput) {
+    fuseRecord();
+  }
 
   if (STATE.deviceType === "pro3") {
     safeActivatePro3(outputId, function() {

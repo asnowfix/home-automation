@@ -106,9 +106,35 @@ The `in_mode: detached` switch config prevents the *physical input* from directl
 
 ---
 
+## Software Fuse (Anti-Cycling Protection)
+
+Prevents rapid relay cycling that generates repeated motor inrush currents and trips circuit breakers. The fuse monitors output state changes regardless of their source (schedules, buttons, MQTT, water supply).
+
+### Parameters
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `FUSE_WINDOW_MS` | 120 000 ms (2 min) | Sliding window for counting state changes |
+| `FUSE_MAX_CHANGES` | 4 | Max transitions allowed per window |
+| `FUSE_COOLDOWN_MS` | 300 000 ms (5 min) | Lockout duration after the fuse trips |
+
+### Behaviour
+1. Every call to `activateOutput()` that actually changes the relay state (on→off or off→on) records a timestamp.
+2. Before any **ON** activation, `fuseAllowOn()` prunes stale entries, then checks the count.
+3. If the count reaches `FUSE_MAX_CHANGES`, the fuse **trips**: all switches are turned off and all ON activations are refused.
+4. After `FUSE_COOLDOWN_MS` elapses, the fuse resets automatically and normal operation resumes.
+5. **OFF activations (`outputId = -1`) always pass** — safety takes precedence over the fuse.
+
+### Normal operation budget
+A start/stop cycle produces 2 state changes (on + off). The threshold of 4 allows two full cycles plus margin — well above the one cycle per scheduled period (night run or day run).
+
+### No extra timers
+The fuse uses only in-memory variables (`FUSE_CHANGES` array, `FUSE_TRIPPED` flag, `FUSE_TRIP_TIME` timestamp). It does not allocate timers; the cooldown is checked lazily on the next activation attempt.
+
+---
+
 ## Schedules
 
-Schedules are created on Pro3 devices only (detected by switch count). Managed via `ctl pool add` using a **delete-and-recreate** strategy (no incremental reconciliation).
+Schedules are created on **all devices** in the mesh. Each device's script self-selects via `isMyTurnToRun()` — only the preferred device activates on schedule events, others ignore them. Managed via `ctl pool setup` using a **delete-and-recreate** strategy (no incremental reconciliation).
 
 | Schedule | Timespec | Handler | Default state |
 |----------|----------|---------|---------------|

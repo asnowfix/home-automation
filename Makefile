@@ -147,6 +147,9 @@ debpkg: build
 	cp linux/systemd/myhome-db-backup.sh $(DEBPKG_DIR)/usr/share/myhome/myhome-db-backup.sh
 	cp myhome-example.yaml $(DEBPKG_DIR)/usr/share/myhome/myhome-example.yaml
 	chmod +x $(DEBPKG_DIR)/usr/share/myhome/*.sh
+	@# Prometheus MQTT Exporter configuration
+	mkdir -p $(DEBPKG_DIR)/etc/prometheus
+	cp linux/prometheus/mqtt-exporter.yaml $(DEBPKG_DIR)/etc/prometheus/mqtt-exporter.yaml
 	@# DEBIAN maintainer scripts
 	mkdir -p $(DEBPKG_DIR)/DEBIAN
 	cp linux/debian/postinst.sh $(DEBPKG_DIR)/DEBIAN/postinst
@@ -160,6 +163,7 @@ debpkg: build
 	@echo "Priority: optional" >> $(DEBPKG_DIR)/DEBIAN/control
 	@echo "Architecture: $(ARCH)" >> $(DEBPKG_DIR)/DEBIAN/control
 	@echo "Depends: libc6 (>= 2.2.1), systemd, jq, curl" >> $(DEBPKG_DIR)/DEBIAN/control
+	@echo "Recommends: prometheus-mqtt-exporter" >> $(DEBPKG_DIR)/DEBIAN/control
 	@echo "Maintainer: Francois-Xavier 'FiX' KOWALSKI <fix.kowalski@gmail.com>" >> $(DEBPKG_DIR)/DEBIAN/control
 	@echo "Description: MyHome Automation" >> $(DEBPKG_DIR)/DEBIAN/control
 	@echo " Home automation daemon and CLI tools." >> $(DEBPKG_DIR)/DEBIAN/control

@@ -31,7 +31,7 @@ var CONFIG = {
         enabled: true,
         publishIntervalSeconds: 30,  // Publish metrics every 30 seconds
         mqttTopic: "shelly/metrics",  // MQTT topic for metrics
-        monitoredSwitches: ["switch:0"]
+        publishIndividualMetrics: true  // Also publish individual metrics as JSON for mqtt-prometheus-exporter
     }
 };
 
@@ -145,15 +145,16 @@ var FirmwareUpdater = {
         this.lastCheckTimestamp = Date.now();
         
         // Call the Shelly API to check for updates
+        var self = this;
         Shelly.call("Shelly.CheckForUpdate", {}, function(result, error_code, error_message) {
             if (error_code) {
-                this.log("Error checking for updates: " + error_message);
+                self.log("Error checking for updates: " + error_message);
                 return;
             }
             
             // If result is empty, no update is available
             if (!result || (Object.keys(result).length === 0)) {
-                this.log("No firmware updates available");
+                self.log("No firmware updates available");
                 return;
             }
             
@@ -161,17 +162,17 @@ var FirmwareUpdater = {
             var updateInfo = null;
             if (CONFIG.firmwareUpdate.updateChannel === "beta" && result.beta) {
                 updateInfo = result.beta;
-                this.log("Beta update available: " + updateInfo.version + " (" + updateInfo.build_id + ")");
+                self.log("Beta update available: " + updateInfo.version + " (" + updateInfo.build_id + ")");
             } else if (result.stable) {
                 updateInfo = result.stable;
-                this.log("Stable update available: " + updateInfo.version + " (" + updateInfo.build_id + ")");
+                self.log("Stable update available: " + updateInfo.version + " (" + updateInfo.build_id + ")");
             }
             
             // If update is available and auto-update is enabled, apply it
             if (updateInfo && CONFIG.firmwareUpdate.autoUpdate) {
-                this.applyUpdate();
+                self.applyUpdate();
             }
-        }.bind(this));
+        });
     },
     
     // Apply the firmware update
@@ -184,14 +185,15 @@ var FirmwareUpdater = {
         this.log("Reboot lock enabled: " + SHARED_STATE.rebootLockReason);
         
         // Call the Shelly API to apply the update
+        var self = this;
         Shelly.call("Shelly.Update", { stage: CONFIG.firmwareUpdate.updateChannel }, function(result, error_code, error_message) {
             if (error_code) {
-                this.log("Error applying update: " + error_message);
+                self.log("Error applying update: " + error_message);
                 return;
             }
             
-            this.log("Update initiated successfully. Device will reboot.");
-        }.bind(this));
+            self.log("Update initiated successfully. Device will reboot.");
+        });
     },
     
     // Schedule the next update check
@@ -239,8 +241,71 @@ var PrometheusMetrics = {
     emittedMeta: {},
     publishTimer: null,
     
+    // Track switch states for activation/deactivation events
+    monitoredSwitches: [],  // Dynamically discovered at startup
+    switchStates: {},
+    activationCounts: {},
+    deactivationCounts: {},
+    
     // Helper function for logging
     log: log.bind(this, "[PrometheusMetrics]"),
+    
+    // Discover and initialize switch state tracking
+    initSwitchTracking: function() {
+        this.log("Discovering available switches...");
+        
+        // Auto-detect available switches (check up to 4 switches)
+        var availableSwitches = [];
+        for (var i = 0; i < 4; i++) {
+            var switchId = "switch:" + i;
+            var status = Shelly.getComponentStatus(switchId);
+            if (status && ("output" in status)) {
+                availableSwitches.push(switchId);
+                this.switchStates[switchId] = status.output || false;
+                this.activationCounts[switchId] = 0;
+                this.deactivationCounts[switchId] = 0;
+            }
+        }
+        
+        this.monitoredSwitches = availableSwitches;
+        this.log("Found " + availableSwitches.length + " switch(es): " + JSON.stringify(availableSwitches));
+    },
+    
+    // Check for switch state changes and track activation/deactivation
+    checkSwitchStateChanges: function() {
+        var list = this.monitoredSwitches;
+        for (var i = 0; i < list.length; i++) {
+            var switchId = list[i];
+            var sw = Shelly.getComponentStatus(switchId);
+            if (!sw) continue;
+            
+            var currentState = sw.output || false;
+            var previousState = this.switchStates[switchId];
+            
+            // Detect state change
+            if (currentState !== previousState) {
+                if (currentState) {
+                    // Switch turned ON (activation)
+                    this.activationCounts[switchId]++;
+                    this.log("Switch " + switchId + " activated (count: " + this.activationCounts[switchId] + ")");
+                } else {
+                    // Switch turned OFF (deactivation)
+                    this.deactivationCounts[switchId]++;
+                    this.log("Switch " + switchId + " deactivated (count: " + this.deactivationCounts[switchId] + ")");
+                }
+                
+                // Update stored state
+                this.switchStates[switchId] = currentState;
+                
+                // Publish activation/deactivation counts immediately
+                if (CONFIG.prometheus.publishIndividualMetrics) {
+                    var idNum = switchId.split(":")[1] || "0";
+                    this.publishIndividualMetric("switch_" + idNum + "_activated", this.activationCounts[switchId]);
+                    this.publishIndividualMetric("switch_" + idNum + "_deactivated", this.deactivationCounts[switchId]);
+                }
+            }
+        }
+    },
     
     // Initialize Prometheus metrics
     init: function() {
@@ -261,6 +326,9 @@ var PrometheusMetrics = {
                                    this.promLabel("mac", this.deviceInfo.mac) + "," +
                                    this.promLabel("app", this.deviceInfo.app);
             this.emittedMeta = {};
+            
+            // Initialize switch state tracking
+            this.initSwitchTracking();
 
             // Start periodic MQTT publishing
             var intervalMs = CONFIG.prometheus.publishIntervalSeconds * 1000;
@@ -268,6 +336,7 @@ var PrometheusMetrics = {
             
             var self = this;
             this.publishTimer = Timer.set(intervalMs, true, function() {
+                self.checkSwitchStateChanges();
                 self.publishMetrics();
             });
             
@@ -306,6 +375,22 @@ var PrometheusMetrics = {
         return result;
     },
     
+    // Publish individual metric as JSON to MQTT topic
+    publishIndividualMetric: function(metricName, value) {
+        if (!CONFIG.prometheus.publishIndividualMetrics) {
+            return;
+        }
+        
+        try {
+            var topic = "shelly/" + this.deviceInfo.id + "/" + metricName;
+            var payload = JSON.stringify({value: value});
+            MQTT.publish(topic, payload, 1 /*at least once*/, false /*retain*/);
+        } catch (e) {
+            this.log("Error publishing individual metric " + metricName + ": " + e.message);
+            if (e && false) {}  // Prevent minifier from removing catch parameter
+        }
+    },
+    
     // Publish metrics to MQTT
     publishMetrics: function() {
         if (!MQTT.isConnected()) {
@@ -338,15 +423,23 @@ var PrometheusMetrics = {
         result += this.printPrometheusMetric("uptime_seconds", this.TYPE_COUNTER, [], "System uptime in seconds", sys.uptime);
         result += this.printPrometheusMetric("ram_size_bytes", this.TYPE_GAUGE, [], "Internal board RAM size in bytes", sys.ram_size);
         result += this.printPrometheusMetric("ram_free_bytes", this.TYPE_GAUGE, [], "Internal board free RAM size in bytes", sys.ram_free);
+        
+        // Publish individual metrics for mqtt-prometheus-exporter
+        this.publishIndividualMetric("uptime_seconds", sys.uptime);
+        this.publishIndividualMetric("ram_size_bytes", sys.ram_size);
+        this.publishIndividualMetric("ram_free_bytes", sys.ram_free);
+        
         return result;
     },
     
     // Generate metrics for all monitored switches
     generateMetricsForSwitches: function() {
-        var list = CONFIG.prometheus.monitoredSwitches && CONFIG.prometheus.monitoredSwitches.length > 0 ? CONFIG.prometheus.monitoredSwitches : [];
+        var list = this.monitoredSwitches;
         var result = "";
         for (var i = 0; i < list.length; i++) {
-            result += this.generateMetricsForSwitch(list[i]);
+            var switchId = list[i];
+            var id = switchId.split(":")[1] || "0";
+            result += this.generateMetricsForSwitch(id);
         }
         return result;
     },
@@ -363,12 +456,28 @@ var PrometheusMetrics = {
             var switchLabel = this.promLabel("switch", stringId);
             
             var result = "";
-            result += this.printPrometheusMetric("switch_power_watts", this.TYPE_GAUGE, [switchLabel], "Instant power consumption in watts", sw.apower || 0);
-            result += this.printPrometheusMetric("switch_voltage_volts", this.TYPE_GAUGE, [switchLabel], "Instant voltage in volts", sw.voltage || 0);
-            result += this.printPrometheusMetric("switch_current_amperes", this.TYPE_GAUGE, [switchLabel], "Instant current in amperes", sw.current || 0);
-            result += this.printPrometheusMetric("switch_temperature_celsius", this.TYPE_GAUGE, [switchLabel], "Temperature of the device in celsius", sw.temperature && sw.temperature.tC ? sw.temperature.tC : 0);
-            result += this.printPrometheusMetric("switch_power_total", this.TYPE_COUNTER, [switchLabel], "Accumulated energy consumed in watts hours", sw.aenergy && sw.aenergy.total ? sw.aenergy.total : 0);
-            result += this.printPrometheusMetric("switch_output", this.TYPE_GAUGE, [switchLabel], "Switch state (1=on, 0=off)", sw.output ? 1 : 0);
+            var power = sw.apower || 0;
+            var voltage = sw.voltage || 0;
+            var current = sw.current || 0;
+            var temperature = sw.temperature && sw.temperature.tC ? sw.temperature.tC : 0;
+            var powerTotal = sw.aenergy && sw.aenergy.total ? sw.aenergy.total : 0;
+            var output = sw.output ? 1 : 0;
+            
+            result += this.printPrometheusMetric("switch_power_watts", this.TYPE_GAUGE, [switchLabel], "Instant power consumption in watts", power);
+            result += this.printPrometheusMetric("switch_voltage_volts", this.TYPE_GAUGE, [switchLabel], "Instant voltage in volts", voltage);
+            result += this.printPrometheusMetric("switch_current_amperes", this.TYPE_GAUGE, [switchLabel], "Instant current in amperes", current);
+            result += this.printPrometheusMetric("switch_temperature_celsius", this.TYPE_GAUGE, [switchLabel], "Temperature of the device in celsius", temperature);
+            result += this.printPrometheusMetric("switch_power_total", this.TYPE_COUNTER, [switchLabel], "Accumulated energy consumed in watts hours", powerTotal);
+            result += this.printPrometheusMetric("switch_output", this.TYPE_GAUGE, [switchLabel], "Switch state (1=on, 0=off)", output);
+            
+            // Publish individual metrics for mqtt-prometheus-exporter
+            this.publishIndividualMetric("switch_" + id + "_power_watts", power);
+            this.publishIndividualMetric("switch_" + id + "_voltage_volts", voltage);
+            this.publishIndividualMetric("switch_" + id + "_current_amperes", current);
+            this.publishIndividualMetric("switch_" + id + "_temperature_celsius", temperature);
+            this.publishIndividualMetric("switch_" + id + "_power_total", powerTotal);
+            this.publishIndividualMetric("switch_" + id + "_output", output);
+            
             return result;
         } catch (e) {
             if (e && false) {}  // Prevent minifier from removing catch parameter

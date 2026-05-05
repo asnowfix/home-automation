@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
@@ -15,8 +16,9 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"net/http"
 	_ "net/http/pprof"
-	"github.com/asnowfix/home-automation/pkg/shelly"
-	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
+	"github.com/asnowfix/go-shellies"
+	"github.com/asnowfix/go-shellies/gen1"
+	"github.com/asnowfix/go-shellies/script"
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
@@ -133,7 +135,8 @@ func (d *daemon) Run() error {
 	}
 	defer mc.Close()
 
-	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
+	script.SetFS(scripts.GetFS())
+	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit, script.Init)
 
 	// Start the main HTTP server (as a Mux), given to every other servers started below
 	// mux := http.NewServeMux()

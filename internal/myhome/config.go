@@ -3,7 +3,7 @@ package myhome
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/go-shellies"
 
 	"github.com/go-logr/logr"
 )

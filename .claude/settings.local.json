@@ -65,7 +65,9 @@
       "Bash(HOME=/tmp/empty-home GIT_CONFIG_NOSYSTEM=1 git -c user.email=fix.kowalski@gmail.com -c \"user.name=Francois-Xavier 'FiX' KOWALSKI\" -c commit.gpgsign=false add README.md)",
       "Bash(HOME=/tmp/empty-home GIT_CONFIG_NOSYSTEM=1 git -c user.email=fix.kowalski@gmail.com -c \"user.name=Francois-Xavier 'FiX' KOWALSKI\" -c commit.gpgsign=false commit -m \"docs: rewrite README for the standalone library + shelly CLI\")",
       "Bash(go generate *)",
-      "Bash(make build *)"
+      "Bash(make build *)",
+      "Bash(HOME=/tmp/empty-home GIT_CONFIG_NOSYSTEM=1 git -c user.email=fix.kowalski@gmail.com -c \"user.name=Francois-Xavier 'FiX' KOWALSKI\" -c commit.gpgsign=false add docs/plan-migrate-pkg-shelly-v2.md docs/plan-migrate-pkg-shelly.md)",
+      "Bash(HOME=/tmp/empty-home GIT_CONFIG_NOSYSTEM=1 git -c user.email=fix.kowalski@gmail.com -c \"user.name=Francois-Xavier 'FiX' KOWALSKI\" -c commit.gpgsign=false commit -m \"docs\\(plan\\): mark v2 migration phases done; drop superseded v1 plan\")"
     ]
   }
 }

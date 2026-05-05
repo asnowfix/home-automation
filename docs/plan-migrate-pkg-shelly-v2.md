@@ -75,14 +75,14 @@ go-shellies/
 ## Phases
 
 ### Phase 1: Plan + rollback v1 — DONE when committed
-- [ ] Write this plan
-- [ ] Commit plan on the worktree branch
-- [ ] `git push origin --delete feature/migrate-pkg-shelly-in-its-own-repo` (home-automation)
-- [ ] `git -C /Users/fix/Desktop/GIT/go-shellies push origin --delete feature/initial-library`
+- [x] Write this plan
+- [x] Commit plan on the worktree branch
+- [x] `git push origin --delete feature/migrate-pkg-shelly-in-its-own-repo` (home-automation)
+- [x] `git -C /Users/fix/Desktop/GIT/go-shellies push origin --delete feature/initial-library`
 
 ### Phase 2: filter-repo extraction
-- [ ] Single-branch clone of home-automation `main` into `/tmp/go-shellies-extract/`
-- [ ] Run filter-repo with path filters and renames:
+- [x] Single-branch clone of home-automation `main` into `/tmp/go-shellies-extract/`
+- [x] Run filter-repo with path filters and renames:
   ```
   --path pkg/shelly/
   --path pkg/devices/
@@ -93,40 +93,40 @@ go-shellies/
   --path-rename myhome/ctl/shelly/:cmd/shelly/
   --path-rename myhome/ctl/mcp/:cmd/shelly/mcp/
   ```
-- [ ] Run filter-repo with `--replace-text` for import path rewrite:
+- [x] Run filter-repo with `--replace-text` for import path rewrite:
   ```
   github.com/asnowfix/home-automation/pkg/shelly==>github.com/asnowfix/go-shellies
   github.com/asnowfix/home-automation/pkg/devices==>github.com/asnowfix/go-shellies/devices
   ```
-- [ ] Add seed remote, fetch `main`, `git merge --allow-unrelated-histories seed/main` to anchor LICENSE+README
-- [ ] Push as `feature/initial-library` on go-shellies
+- [x] Add seed remote, fetch `main`, `git merge --allow-unrelated-histories seed/main` to anchor LICENSE+README
+- [x] Push as `feature/initial-library` on go-shellies
 
 ### Phase 3: standalone shelly CLI in go-shellies
-- [ ] Add `cmd/shelly/dispatch/` — resolves devices via `devices/` + `mdns.go` or hostname; opens `shttp` or `mqtt` channel; iterates over wildcards
-- [ ] Add `cmd/shelly/options/` — replaces `myhome/ctl/options`; no myhome config
-- [ ] Decouple each subcommand from `internal/myhome*`, `internal/tools`, `internal/shelly/scripts`, `myhome/mqtt`
-- [ ] Delete `cmd/shelly/{script,setup,follow}/` (out of scope for v2; history preserved by filter-repo)
-- [ ] Add `cmd/shelly/emulate/` — wraps `script/run.go` goja runtime; loads device-state + KVS JSON, runs script, prints captured event stream
-- [ ] Add `cmd/shelly/main.go` cobra root that registers all migrated subcommands + `cmd/shelly/cmd.go` `main()` entry
-- [ ] `go build ./...` and `go test ./...` pass for all 3 modules (root, script, gen1)
-- [ ] Update README.md with build/install/usage
-- [ ] Push commits on `feature/initial-library`
+- [x] Add `cmd/shelly/dispatch/` — resolves devices via `devices/` + `mdns.go` or hostname; opens `shttp` or `mqtt` channel; iterates over wildcards
+- [x] Add `cmd/shelly/options/` — replaces `myhome/ctl/options`; no myhome config
+- [x] Decouple each subcommand from `internal/myhome*`, `internal/tools`, `internal/shelly/scripts`, `myhome/mqtt`
+- [x] Delete `cmd/shelly/{script,setup,follow}/` (out of scope for v2; history preserved by filter-repo)
+- [x] Add `cmd/shelly/emulate/` — wraps `script/run.go` goja runtime; loads device-state + KVS JSON, runs script, prints captured event stream
+- [x] Add `cmd/shelly/main.go` cobra root that registers all migrated subcommands + `cmd/shelly/cmd.go` `main()` entry
+- [x] `go build ./...` and `go test ./...` pass for all 3 modules (root, script, gen1)
+- [x] Update README.md with build/install/usage
+- [x] Push commits on `feature/initial-library`
 
 ### Phase 4: home-automation rewire
-- [ ] On a fresh branch, push as `feature/migrate-pkg-shelly-in-its-own-repo` (re-using the original name now that v1 is rolled back)
-- [ ] `go.work`: remove `./pkg/shelly/*` and `./pkg/devices` entries; remove now-empty workspace modules
-- [ ] Add `replace github.com/asnowfix/go-shellies => /Users/fix/Desktop/GIT/go-shellies` for local dev
-- [ ] Rewrite ~90 import paths: `pkg/shelly` → `go-shellies`, `pkg/devices` → `go-shellies/devices`
-- [ ] `Init()` call sites pass `script.Init` via the extras callback (same as v1)
-- [ ] `git rm -r pkg/shelly/ pkg/devices/ myhome/ctl/mcp/`
-- [ ] `git rm -r myhome/ctl/shelly/{call,kvs,wifi,mqtt,sys,status,reboot,components,jobs}/`
-- [ ] Update `myhome/ctl/shelly/main.go` — register only `script`, `setup`, `follow`
-- [ ] `make build` and `make test` pass
-- [ ] Open PR
+- [x] On a fresh branch, push as `feature/migrate-pkg-shelly-in-its-own-repo` (re-using the original name now that v1 is rolled back)
+- [x] `go.work`: remove `./pkg/shelly/*` and `./pkg/devices` entries; remove now-empty workspace modules
+- [x] Add `replace github.com/asnowfix/go-shellies => /Users/fix/Desktop/GIT/go-shellies` for local dev
+- [x] Rewrite ~90 import paths: `pkg/shelly` → `go-shellies`, `pkg/devices` → `go-shellies/devices`
+- [x] `Init()` call sites pass `script.Init` via the extras callback (same as v1)
+- [x] `git rm -r pkg/shelly/ pkg/devices/ myhome/ctl/mcp/`
+- [x] `git rm -r myhome/ctl/shelly/{call,kvs,wifi,mqtt,sys,status,reboot,components,jobs}/`
+- [x] Update `myhome/ctl/shelly/main.go` — register only `script`, `setup`, `follow`
+- [x] `make build` and `make test` pass
+- [x] Open PR
 
 ### Phase 5: cleanup
-- [ ] Delete `docs/plan-migrate-pkg-shelly.md` (the v1 plan, never made it to main)
-- [ ] Mark all phases done
+- [x] Delete `docs/plan-migrate-pkg-shelly.md` (the v1 plan, never made it to main)
+- [x] Mark all phases done
 
 ## Module consolidation (unchanged from v1)
 

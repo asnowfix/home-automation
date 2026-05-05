@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
-	"github.com/asnowfix/home-automation/pkg/shelly/script"
+	"github.com/asnowfix/go-shellies/mqtt"
+	"github.com/asnowfix/go-shellies/script"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/testr"

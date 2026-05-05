@@ -7,7 +7,7 @@ import (
 	"github.com/asnowfix/home-automation/internal/global"
 	"os"
 	"os/signal"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/go-shellies/types"
 	"syscall"
 	"time"
 

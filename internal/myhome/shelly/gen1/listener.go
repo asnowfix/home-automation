@@ -7,7 +7,7 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/devices"
 	"github.com/asnowfix/home-automation/internal/myhome/model"
-	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	"github.com/asnowfix/go-shellies/mqtt"
 	"strings"
 
 	"github.com/go-logr/logr"

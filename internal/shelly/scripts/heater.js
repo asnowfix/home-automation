@@ -536,6 +536,7 @@ function initDeviceInfo() {
   STATE.deviceId = STATE.deviceInfo.id || 'unknown';
 
   log('Device ID:', STATE.deviceId, 'Device Name:', STATE.deviceName);
+  STATE.deviceInfo = null; // release — id and name already extracted above
 }
 
 // === PRE-HEATING LOGIC ===

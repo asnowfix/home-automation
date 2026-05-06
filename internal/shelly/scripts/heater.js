@@ -29,63 +29,53 @@ const DEFAULT_COOLING_RATE = 1.0;
 // Any changes here must be reflected in the Go code and validated by TestHeaterKVSKeysMatchJSSchema
 var CONFIG_SCHEMA = {
   enableLogging: {
-    description: "Enable logging when true",
     key: "enable-logging",
     default: true,
     type: "boolean"
   },
   roomId: {
-    description: "Room identifier for temperature API",
     key: "room-id",
     default: null,
     type: "string",
     unprefixed: true
   },
   cheapStartHour: {
-    description: "Start hour of cheap electricity window",
     key: "cheap-start-hour",
     default: 23,
     type: "number"
   },
   cheapEndHour: {
-    description: "End hour of cheap electricity window",
     key: "cheap-end-hour",
     default: 7,
     type: "number"
   },
   pollIntervalMs: {
-    description: "Polling interval in milliseconds",
     key: "poll-interval-ms",
-    default: 5 * 60 * 1000, // 5 minutes
+    default: 5 * 60 * 1000,
     type: "number"
   },
   preheatHours: {
-    description: "Hours before cheap window end to start preheating",
     key: "preheat-hours",
     default: 2,
     type: "number"
   },
   normallyClosed: {
-    description: "Whether the switch is normally closed",
     key: "normally-closed",
     default: true,
     type: "boolean",
     unprefixed: true
   },
   internalTemperatureTopic: {
-    description: "MQTT topic for internal temperature sensor",
     key: "internal-temperature-topic",
     default: null,
     type: "string"
   },
   externalTemperatureTopic: {
-    description: "MQTT topic for external temperature sensor",
     key: "external-temperature-topic",
     default: null,
     type: "string"
   },
   doorSensorTopics: {
-    description: "Comma-separated list of MQTT topics for door/window sensors",
     key: "door-sensor-topics",
     default: "",
     type: "string"

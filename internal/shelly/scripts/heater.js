@@ -171,7 +171,6 @@ var STATE = {
 
   // Heater state
   lastHeaterState: false,
-  normallyClosed: true,
 
   // Temperature values (in-memory cache from MQTT)
   temperature: {
@@ -210,16 +209,12 @@ var STATE = {
 
   // Temperature ranges subscription topics (for dynamic config change)
   temperatureRangesTopic: null,
-  subscribedTemperatureRangesTopic: null,
 
   // Control loop timer handle
   controlLoopTimerId: null,
 
   // Pending control loop check timer handle (for deferred checks)
   controlLoopCheckTimerId: null,
-
-  // Last successful temperature ranges from RPC
-  lastSuccessfulRanges: null,
 
   // Door/window sensor states: { topic: { open: boolean, lastUpdate: timestamp } }
   doorSensors: {},

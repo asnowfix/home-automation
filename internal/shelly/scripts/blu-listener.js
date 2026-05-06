@@ -430,24 +430,30 @@ function processKvsKey(k, newMap, onComplete) {
   Shelly.call("KVS.Get", { key: k }, onProcessKvsKeyResponse.bind(null, k, newMap, onComplete))
 }
 
+// Timer.set(0) breaks the synchronous call chain so the stack resets
+// between iterations, avoiding both stack overflow and nested-anon limits.
+
+function continueLoadIlluminance(macs, callback, index) {
+  loadIlluminanceStatesSequentially(macs, callback, index);
+}
+
+function onOneIlluminanceLoaded(macs, callback, index) {
+  Timer.set(0, false, continueLoadIlluminance.bind(null, macs, callback, index + 1));
+}
+
 function loadIlluminanceStatesSequentially(macs, callback, index) {
   if (index >= macs.length) {
-    // All states loaded
     if (callback) callback();
     return;
   }
-  
-  // Load one state at a time
-  loadIlluminanceState(macs[index], loadIlluminanceStatesSequentially.bind(null, macs, callback, index + 1));
+  loadIlluminanceState(macs[index], onOneIlluminanceLoaded.bind(null, macs, callback, index));
 }
 
 function loadAllIlluminanceStates(macs, callback) {
-  if (macs.length === 0) {
+  if (!macs || macs.length === 0) {
     if (callback) callback();
     return;
   }
-  
-  // Process sequentially to avoid "too many calls in progress"
   loadIlluminanceStatesSequentially(macs, callback, 0);
 }
 
@@ -461,15 +467,20 @@ function onAllKeysProcessed(newMap, callback) {
   loadAllIlluminanceStates(Object.keys(newMap), onAllIlluminanceStatesLoaded.bind(null, callback));
 }
 
+function continueLoadKeys(list, newMap, callback, index) {
+  processKeysSequentially(list, newMap, callback, index);
+}
+
+function onOneKeyLoaded(list, newMap, callback, index) {
+  Timer.set(0, false, continueLoadKeys.bind(null, list, newMap, callback, index + 1));
+}
+
 function processKeysSequentially(list, newMap, callback, index) {
   if (index >= list.length) {
-    // All keys processed
     onAllKeysProcessed(newMap, callback);
     return;
   }
-  
-  // Process one key at a time
-  processKvsKey(list[index], newMap, processKeysSequentially.bind(null, list, newMap, callback, index + 1));
+  processKvsKey(list[index], newMap, onOneKeyLoaded.bind(null, list, newMap, callback, index));
 }
 
 function onKvsListResponse(callback, resp, err) {
@@ -506,7 +517,6 @@ function onKvsListResponse(callback, resp, err) {
     return;
   }
 
-  // Process keys sequentially to avoid "too many calls in progress"
   processKeysSequentially(list, newMap, callback, 0);
 }
 

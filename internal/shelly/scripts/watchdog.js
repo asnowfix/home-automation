@@ -145,33 +145,34 @@ var FirmwareUpdater = {
         this.lastCheckTimestamp = Date.now();
         
         // Call the Shelly API to check for updates
+        var self = this;
         Shelly.call("Shelly.CheckForUpdate", {}, function(result, error_code, error_message) {
             if (error_code) {
-                this.log("Error checking for updates: " + error_message);
+                self.log("Error checking for updates: " + error_message);
                 return;
             }
-            
+
             // If result is empty, no update is available
             if (!result || (Object.keys(result).length === 0)) {
-                this.log("No firmware updates available");
+                self.log("No firmware updates available");
                 return;
             }
-            
+
             // Determine which update to use based on configuration
             var updateInfo = null;
             if (CONFIG.firmwareUpdate.updateChannel === "beta" && result.beta) {
                 updateInfo = result.beta;
-                this.log("Beta update available: " + updateInfo.version + " (" + updateInfo.build_id + ")");
+                self.log("Beta update available: " + updateInfo.version + " (" + updateInfo.build_id + ")");
             } else if (result.stable) {
                 updateInfo = result.stable;
-                this.log("Stable update available: " + updateInfo.version + " (" + updateInfo.build_id + ")");
+                self.log("Stable update available: " + updateInfo.version + " (" + updateInfo.build_id + ")");
             }
-            
+
             // If update is available and auto-update is enabled, apply it
             if (updateInfo && CONFIG.firmwareUpdate.autoUpdate) {
-                this.applyUpdate();
+                self.applyUpdate();
             }
-        }.bind(this));
+        });
     },
     
     // Apply the firmware update
@@ -184,14 +185,15 @@ var FirmwareUpdater = {
         this.log("Reboot lock enabled: " + SHARED_STATE.rebootLockReason);
         
         // Call the Shelly API to apply the update
+        var self = this;
         Shelly.call("Shelly.Update", { stage: CONFIG.firmwareUpdate.updateChannel }, function(result, error_code, error_message) {
             if (error_code) {
-                this.log("Error applying update: " + error_message);
+                self.log("Error applying update: " + error_message);
                 return;
             }
-            
-            this.log("Update initiated successfully. Device will reboot.");
-        }.bind(this));
+
+            self.log("Update initiated successfully. Device will reboot.");
+        });
     },
     
     // Schedule the next update check

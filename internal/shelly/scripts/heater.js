@@ -248,21 +248,6 @@ var STATE = {
   subscribedDoorSensorTopics: []
 };
 
-function onDeviceLocation(result, error_code, error_message, cb) {
-  log('onDeviceLocation')
-  if (error_code === 0 && result) {
-    if (result.lat !== null && result.lon !== null) {
-      log('Auto-detected location: lat=' + result.lat + ', lon=' + result.lon + ', tz=' + result.tz);
-      setForecastURL(result.lat, result.lon);
-      if (typeof cb === 'function') cb();
-    } else {
-      log('Location detection returned null coordinates');
-    }
-  } else {
-    log('Failed to detect location (error ' + error_code + '): ' + error_message);
-  }
-}
-
 function onForecastUrlReady(cb) {
   log('onForecastUrlReady')
   fetchAndCacheForecast(loadConfig.bind(null, cb));

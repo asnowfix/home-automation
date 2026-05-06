@@ -187,7 +187,6 @@ var STATE = {
   // Forecast cache
   forecastUrl: null,
   cachedForecast: null,
-  cachedForecastTimes: null,
   lastForecastFetchDate: null,
 
   // Heater state
@@ -1099,9 +1098,8 @@ function onForecast(result, error_code, error_message, cb) {
     return;
   }
 
-  // Cache only the arrays we need, let GC clean up the rest
+  // Cache only the array we need, let GC clean up the rest
   STATE.cachedForecast = data.hourly.temperature_2m;
-  STATE.cachedForecastTimes = data.hourly.time;
   data = null; // Help GC
 
   var now = new Date();

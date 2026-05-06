@@ -618,7 +618,7 @@ function fetchControlInputsWithCachedForecast(cb) {
   };
   // Store last external temp for fallback in shouldPreheat
   if (results.external !== null) lastExternalTemp = results.external;
-  log('Fetched all control inputs:', JSON.stringify(results));
+  // log('Fetched all control inputs:', JSON.stringify(results)); // hot path — serialises full results every 5 min
 
   // Clear guard before calling callback
   _fetchingControlInputs = false;
@@ -674,7 +674,7 @@ var kalman = new KalmanFilter();
  */
 function parseTemperatureFromMqtt(topic, message) {
   var temp = null;
-  log("parseTemperatureFromMqtt", topic, message);
+  // log("parseTemperatureFromMqtt", topic, message); // hot path — logs full payload every MQTT event
   try {
     // H&T Gen1 format, via gen1 HTTP-to-MQTT proxy
     // topic: shellies/<id>/sensor/temperature
@@ -754,11 +754,11 @@ function onExternalTemperature(topic, message) {
 function onTemperatureRanges(topic, message) {
   log('Received temperature ranges update from MQTT:', topic);
   try {
-    log('Received temperature ranges update from MQTT:', message);
+    // log('Received temperature ranges update from MQTT:', message); // duplicates topic log above, logs full payload
     var data = JSON.parse(message);
     if (data && data.ranges) {
       STATE.cachedTemperatureRanges = data
-      log('Updated temperature ranges:', JSON.stringify(STATE.cachedTemperatureRanges));
+      // log('Updated temperature ranges:', JSON.stringify(STATE.cachedTemperatureRanges)); // serialises full object
 
       // Schedule control loop check
       scheduleControlLoopCheck();
@@ -1309,9 +1309,8 @@ if (typeof Shelly !== "undefined") {
     if (status && status.component === "sys" && status.delta && ("kvs_rev" in status.delta)) {
       log('KVS updated (rev ' + status.delta.kvs_rev + '), reloading configuration and re-fetching temperatures');
       loadConfig(onConfigLoaded);
-    } else {
-      log('Script status:', JSON.stringify(status));
     }
+    // else { log('Script status:', JSON.stringify(status)); } // hot path — fires on every switch/temp event
   });
 
   // Subscribe to all heater commands using wildcard

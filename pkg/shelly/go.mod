@@ -1,8 +1,8 @@
 module github.com/asnowfix/home-automation/pkg/shelly
 
-go 1.24.2
+go 1.25.0
 
-toolchain go1.24.3
+toolchain go1.25.3
 
 require (
 	github.com/go-logr/logr v1.4.3

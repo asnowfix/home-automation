@@ -29,7 +29,9 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23.x'
+          go-version: '1.25.x'
+        env:
+          GOTOOLCHAIN: go1.25.3
       - name: Run go generate
         run: |
           set -x
@@ -168,7 +170,9 @@ jobs:
         name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: 1.23.0
+          go-version: '1.25.x'
+        env:
+          GOTOOLCHAIN: go1.25.3
       - name: Run go generate
         run: |
           go generate -v ./internal/myhome/ui/...

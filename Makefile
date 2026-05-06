@@ -19,6 +19,8 @@ GO := go
 folder = $1
 endif
 
+export GOTOOLCHAIN=go1.25.3
+
 GOOS := $(shell go env GOOS)
 GOARCH := $(shell go env GOARCH)
 

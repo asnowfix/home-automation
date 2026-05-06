@@ -1,15 +1,16 @@
 module github.com/asnowfix/home-automation/myhome/ctl/temperature
 
-go 1.24.2
+go 1.25.0
 
 require (
-	github.com/spf13/cobra v1.10.1
 	github.com/asnowfix/home-automation/internal/myhome v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/ctl/options v0.0.0-00010101000000-000000000000
+	github.com/spf13/cobra v1.10.1
 	sigs.k8s.io/yaml v1.6.0
 )
 
 require (
+	github.com/asnowfix/home-automation/myhome/mqtt v0.0.0-00010101000000-000000000000 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/dgraph-io/ristretto v0.2.0 // indirect
@@ -42,7 +43,6 @@ require (
 	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/tools v0.35.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	github.com/asnowfix/home-automation/myhome/mqtt v0.0.0-00010101000000-000000000000 // indirect
 )
 
 replace github.com/asnowfix/home-automation/internal/myhome => ../../../internal/myhome

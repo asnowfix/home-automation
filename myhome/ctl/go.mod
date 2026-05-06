@@ -1,14 +1,13 @@
 module github.com/asnowfix/home-automation/myhome/ctl
 
-go 1.24.2
+go 1.25.0
 
-toolchain go1.24.3
+toolchain go1.25.3
 
 require (
-	github.com/asnowfix/home-automation/internal/debug v0.0.0-00010101000000-000000000000
-	github.com/spf13/cobra v1.10.1
-	github.com/asnowfix/home-automation/internal/global v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/hlog v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/internal/debug v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/internal/global v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/internal/myhome v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/ctl/blu v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/ctl/forget v0.0.0-00010101000000-000000000000
@@ -24,6 +23,7 @@ require (
 	github.com/asnowfix/home-automation/myhome/mqtt v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/pkg/shelly v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/pkg/shelly/types v0.0.0-00010101000000-000000000000
+	github.com/spf13/cobra v1.10.1
 )
 
 require (

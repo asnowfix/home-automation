@@ -1,8 +1,8 @@
 module github.com/asnowfix/home-automation/myhome/ctl/show
 
-go 1.24.2
+go 1.25.0
 
-toolchain go1.24.3
+toolchain go1.25.3
 
 require (
 	github.com/spf13/cobra v1.10.1

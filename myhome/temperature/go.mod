@@ -1,14 +1,14 @@
 module github.com/asnowfix/home-automation/myhome/temperature
 
-go 1.24.2
+go 1.25.0
 
 require (
+	github.com/asnowfix/home-automation/internal/myhome v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/mqtt v0.0.0-00010101000000-000000000000
 	github.com/go-logr/logr v1.4.3
 	github.com/jmoiron/sqlx v1.4.0
 	github.com/ncruces/go-sqlite3 v0.22.0
 	github.com/spf13/viper v1.21.0
-	github.com/asnowfix/home-automation/internal/myhome v0.0.0-00010101000000-000000000000
-	github.com/asnowfix/home-automation/myhome/mqtt v0.0.0-00010101000000-000000000000
 )
 
 replace github.com/asnowfix/home-automation/internal/myhome => ../../internal/myhome

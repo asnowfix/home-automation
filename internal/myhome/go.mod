@@ -1,13 +1,13 @@
 module github.com/asnowfix/home-automation/internal/myhome
 
-go 1.24.2
+go 1.25.0
 
-toolchain go1.24.3
+toolchain go1.25.3
 
 require (
+	github.com/asnowfix/home-automation/internal/myhome/net v0.0.0-00010101000000-000000000000
 	github.com/go-logr/logr v1.4.3
 	github.com/grandcat/zeroconf v1.0.0
-	github.com/asnowfix/home-automation/internal/myhome/net v0.0.0-00010101000000-000000000000
 )
 
 require (

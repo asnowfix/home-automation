@@ -167,16 +167,6 @@ function logMemory(label) {
   }
 }
 
-// Generate a simple random ID
-function randomId(n) {
-  var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  var id = '';
-  for (var i = 0; i < n; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return id;
-}
-
 // === STATE (DYNAMIC RUNTIME VALUES) ===
 var STATE = {
   // Device info (cached at startup)
@@ -969,16 +959,6 @@ function subscribeToDoorSensors() {
   }
 }
 
-// Extract device name from MQTT topic (e.g., "shellies/device-name/sensor/temperature" -> "device-name")
-function extractDeviceNameFromTopic(topic) {
-  if (!topic) return null;
-  var parts = topic.split('/');
-  if (parts.length >= 2) {
-    return parts[1];
-  }
-  return null;
-}
-
 function subscribeMqttTemperature(location, topic) {
   log('Subscribing to MQTT topic for', location, 'temperature...');
 
@@ -1008,21 +988,6 @@ function subscribeMqttTemperature(location, topic) {
       MQTT.subscribe(newTopic, onExternalTemperature);
     }
     STATE.subscribedTemperatureTopic[location] = newTopic;
-  }
-}
-
-// === DATA FETCHING FUNCTIONS ===
-// Read temperature from STATE (in-memory cache)
-function getShellyTemperature(location, cb) {
-  log('getShellyTemperature', location);
-  var temp = STATE.temperature[location];
-
-  if (!temp) {
-    log('Read', location, 'temperature:', temp);
-    cb(temp);
-  } else {
-    log('No', location, 'temperature available yet');
-    cb(null);
   }
 }
 

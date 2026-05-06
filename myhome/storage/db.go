@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"

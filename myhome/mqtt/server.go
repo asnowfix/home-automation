@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	mynet "myhome/net"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
 	"os"
 	"time"

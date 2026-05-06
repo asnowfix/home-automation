@@ -2,8 +2,8 @@ package sfr
 
 import (
 	"fmt"
-	"myhome/ctl/options"
-	"pkg/sfr"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	"github.com/asnowfix/home-automation/pkg/sfr"
 	"strings"
 
 	"github.com/spf13/cobra"

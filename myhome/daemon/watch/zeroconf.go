@@ -3,11 +3,11 @@ package watch
 import (
 	"context"
 	"fmt"
-	"myhome"
-	"myhome/devices"
-	mynet "myhome/net"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/devices"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
-	"pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly"
 	"time"
 
 	"github.com/go-logr/logr"

@@ -3,7 +3,7 @@ package blu
 import (
 	"context"
 	"encoding/json"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"testing"
 
 	"github.com/go-logr/logr"

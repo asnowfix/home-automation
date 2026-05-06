@@ -3,8 +3,8 @@ package mynet
 import (
 	"context"
 	"fmt"
-	"global"
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"net"
 	"net/url"
 	"strings"

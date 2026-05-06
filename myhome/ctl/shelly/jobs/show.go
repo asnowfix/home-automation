@@ -4,19 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"hlog"
-	"myhome"
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"reflect"
-	"schedule"
+	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"pkg/devices"
-	"pkg/shelly"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/devices"
+	"github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 )
 
 var showCtl = &cobra.Command{

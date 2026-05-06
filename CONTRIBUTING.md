@@ -874,6 +874,70 @@ Once in the pprof interactive mode:
 - **Comparing profiles**: Essential for detecting memory leaks over time
 - **Web UI**: Provides flame graphs and interactive exploration (`-http` flag)
 
+## Code Generation
+
+### Pool Pump Default Values
+
+The pool pump configuration uses `go:generate` to extract default values from the JavaScript source (`pool-pump.js`) and generate Go constants. This ensures a single source of truth for configuration defaults.
+
+**How it works:**
+
+1. **Source of truth**: Default values are defined in `internal/shelly/scripts/pool-pump.js` in the `CONFIG_SCHEMA` object
+2. **Generator tool**: `tools/extract-pool-defaults/main.go` parses the JavaScript and extracts defaults
+3. **Generated file**: `myhome/ctl/pool/pool_defaults_generated.go` contains Go constants
+4. **Usage**: The `setup.go` command uses these constants for flag defaults
+
+**When to regenerate:**
+
+Run `go generate` whenever you modify default values in `pool-pump.js`:
+
+```bash
+# Generate all code (including pool defaults)
+make generate
+
+# Or generate just the pool package
+go generate ./myhome/ctl/pool
+```
+
+**Build integration:**
+
+- `make build` automatically runs `make generate`
+- GitHub Actions workflows run `go generate` before building
+- The generated file is committed to the repository
+
+**Adding new defaults:**
+
+1. Add the field to `CONFIG_SCHEMA` in `pool-pump.js`
+2. Update `tools/extract-pool-defaults/main.go` to extract the new field
+3. Run `go generate ./myhome/ctl/pool`
+4. Use the new constant in `setup.go`
+
+**Example:**
+
+```javascript
+// pool-pump.js
+CONFIG_SCHEMA = {
+  ecoSpeed: {
+    default: 2,  // ← Source of truth
+    // ...
+  }
+}
+```
+
+```go
+// Generated: pool_defaults_generated.go
+const (
+  DefaultEcoSpeed = 2  // ← Auto-generated
+)
+```
+
+```go
+// setup.go
+setupCmd.Flags().IntVar(&setupFlags.EcoSpeed, "eco-speed", 
+  DefaultEcoSpeed,  // ← Uses generated constant
+  "Controller switch ID for eco/low speed")
+```
+
 ## Architecture
 
 ### MyHome RPC Service Architecture

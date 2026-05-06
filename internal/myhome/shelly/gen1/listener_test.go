@@ -3,9 +3,9 @@ package gen1
 import (
 	"context"
 	"fmt"
-	"myhome"
-	"myhome/devices"
-	"myhome/model"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/devices"
+	"github.com/asnowfix/home-automation/internal/myhome/model"
 	"testing"
 
 	"github.com/go-logr/logr"

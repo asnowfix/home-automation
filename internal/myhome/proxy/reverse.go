@@ -18,11 +18,11 @@ import (
 	"strings"
 	"time"
 
-	"global"
-	mynet "myhome/net"
-	"myhome/storage"
-	"myhome/ui/assets"
-	"myhome/ui/static"
+	"github.com/asnowfix/home-automation/internal/global"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	"github.com/asnowfix/home-automation/myhome/storage"
+	"github.com/asnowfix/home-automation/internal/myhome/ui/assets"
+	"github.com/asnowfix/home-automation/internal/myhome/ui/static"
 
 	"github.com/go-logr/logr"
 )

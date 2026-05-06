@@ -4,22 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"hlog"
-	"myhome"
-	mqttclient "myhome/mqtt"
+	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"pkg/devices"
-	shellyapi "pkg/shelly"
-	shellymqtt "pkg/shelly/mqtt"
-	"pkg/shelly/shelly"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/devices"
+	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
+	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 )
 
 func init() {

@@ -7,7 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"pkg/shelly/mqtt"
+	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"regexp"
 
 	"github.com/go-logr/logr"

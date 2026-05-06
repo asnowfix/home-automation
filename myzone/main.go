@@ -1,8 +1,8 @@
 package main
 
 import (
-	"hlog"
-	"internal/myzone"
+	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/internal/myzone"
 )
 
 func main() {

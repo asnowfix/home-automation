@@ -6,7 +6,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"
-	"myhome/mqtt"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
 )
 
 // newTestDB opens an in-memory SQLite database and registers t.Cleanup to close it.

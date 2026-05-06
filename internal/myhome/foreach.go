@@ -2,9 +2,9 @@ package myhome
 
 import (
 	"context"
-	"pkg/devices"
-	"pkg/shelly"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/devices"
+	"github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
 )

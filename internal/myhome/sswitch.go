@@ -3,7 +3,7 @@ package myhome
 // Switch RPC types
 
 import (
-	"pkg/shelly/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 )
 
 // SwitchParams represents parameters for switch.toggle, switch.on, switch.off and switch.status

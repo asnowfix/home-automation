@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"internal/myip"
+	"github.com/asnowfix/home-automation/internal/myip"
 )
 
 func main() {

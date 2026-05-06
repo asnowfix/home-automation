@@ -3,7 +3,7 @@ package temperature
 import (
 	"context"
 	"fmt"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"time"
 )
 

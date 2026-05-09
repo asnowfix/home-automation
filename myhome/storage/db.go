@@ -9,8 +9,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"
 
-	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
+	_ "modernc.org/sqlite"
 )
 
 type DeviceStorage struct {
@@ -19,9 +18,24 @@ type DeviceStorage struct {
 }
 
 func NewDeviceStorage(log logr.Logger, dbName string) (*DeviceStorage, error) {
-	db, err := sqlx.Connect("sqlite3", dbName)
+	db, err := sqlx.Connect("sqlite", dbName)
 	if err != nil {
-		log.Error(err, "Failed to connect to database", "dbType", "sqlite3", "dbName", dbName)
+		log.Error(err, "Failed to connect to database", "dbType", "sqlite", "dbName", dbName)
+		return nil, err
+	}
+
+	// WAL mode gives better write throughput by allowing concurrent readers
+	// during a write. On in-memory databases the pragma is a no-op (SQLite
+	// keeps mode "memory"); on file-based databases it creates a -wal sidecar.
+	// synchronous=NORMAL is safe with WAL: data reaches disk at each checkpoint
+	// rather than on every write, at the cost of at most one uncommitted
+	// transaction lost on OS crash (acceptable for device metadata).
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		log.Error(err, "Failed to set WAL journal mode")
+		return nil, err
+	}
+	if _, err := db.Exec(`PRAGMA synchronous=NORMAL`); err != nil {
+		log.Error(err, "Failed to set synchronous=NORMAL")
 		return nil, err
 	}
 

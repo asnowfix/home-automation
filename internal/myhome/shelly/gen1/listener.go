@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/myhome/devices"
-	"github.com/asnowfix/home-automation/internal/myhome/model"
-	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	"strconv"
 	"strings"
 
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/internal/myhome/model"
+	"github.com/asnowfix/home-automation/myhome/devices"
+	"github.com/asnowfix/home-automation/myhome/events"
+	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/go-logr/logr"
 )
 
@@ -49,6 +51,12 @@ func ParseSensorEvent(topic string, payload []byte) *SensorUpdate {
 // StartMqttListener listens to Gen1 MQTT topics and updates device status
 // It subscribes to shellies/# and auto-registers devices as they publish data
 func StartMqttListener(ctx context.Context, log logr.Logger, mc mqtt.Client, sc devices.DeviceRegistry, router model.Router, sseBroadcaster SSEBroadcaster) error {
+	return StartMqttListenerWithEvents(ctx, log, mc, sc, router, sseBroadcaster, nil, nil)
+}
+
+// StartMqttListenerWithEvents is like StartMqttListener but also records events and sensor observations.
+// eventSvc and tracker may be nil, in which case event recording is skipped.
+func StartMqttListenerWithEvents(ctx context.Context, log logr.Logger, mc mqtt.Client, sc devices.DeviceRegistry, router model.Router, sseBroadcaster SSEBroadcaster, eventSvc *events.Service, tracker *events.SensorDailyTracker) error {
 	log = log.WithName("Gen1MqttListener")
 
 	log.Info("Starting Gen1 MQTT listener using MQTT client type", "type", fmt.Sprintf("%T", mc))
@@ -71,6 +79,10 @@ func StartMqttListener(ctx context.Context, log logr.Logger, mc mqtt.Client, sc 
 		} else {
 			log.Error(fmt.Errorf("sseBroadcaster is nil"), "Cannot broadcast sensor update", "topic", topic)
 		}
+
+		// Feed event log and sensor tracker (nil-safe)
+		handleGen1EventBridge(ctx, log, topic, payload, eventSvc, tracker)
+
 		return err
 	})
 	if err != nil {
@@ -80,6 +92,84 @@ func StartMqttListener(ctx context.Context, log logr.Logger, mc mqtt.Client, sc 
 
 	log.Info("started", "topic", topic)
 	return nil
+}
+
+// handleGen1EventBridge maps Gen1 MQTT topics to event log entries and tracker observations.
+func handleGen1EventBridge(ctx context.Context, log logr.Logger, topic string, payload []byte, eventSvc *events.Service, tracker *events.SensorDailyTracker) {
+	parts := strings.Split(topic, "/")
+	// Minimum: shellies/<device-id>/<subtopic>
+	if len(parts) < 3 || parts[0] != "shellies" {
+		return
+	}
+	deviceID := parts[1]
+
+	switch {
+	case len(parts) == 4 && parts[2] == "relay":
+		// shellies/<id>/relay/<n> → switch.on / switch.off
+		if eventSvc == nil {
+			return
+		}
+		n := parts[3]
+		component := "switch:" + n
+		eventName := "switch.off"
+		if string(payload) == "on" {
+			eventName = "switch.on"
+		}
+		e := events.Event{
+			DeviceID:  deviceID,
+			Component: component,
+			Event:     eventName,
+			Severity:  "info",
+		}
+		if err := eventSvc.Record(ctx, e); err != nil {
+			log.Error(err, "Failed to record switch event", "device_id", deviceID)
+		}
+
+	case len(parts) == 3 && parts[2] == "online":
+		// shellies/<id>/online → device.online / device.offline
+		if eventSvc == nil {
+			return
+		}
+		eventName := "device.offline"
+		if string(payload) == "1" || string(payload) == "true" {
+			eventName = "device.online"
+		}
+		e := events.Event{
+			DeviceID:  deviceID,
+			Component: "mqtt",
+			Event:     eventName,
+			Severity:  "info",
+		}
+		if err := eventSvc.Record(ctx, e); err != nil {
+			log.Error(err, "Failed to record online event", "device_id", deviceID)
+		}
+
+	case len(parts) == 4 && parts[2] == "sensor" && parts[3] == "temperature":
+		// shellies/<id>/sensor/temperature → tracker only, no event row
+		if tracker == nil {
+			return
+		}
+		v, err := strconv.ParseFloat(string(payload), 64)
+		if err != nil {
+			return
+		}
+		if err := tracker.Observe(ctx, events.Metric{DeviceID: deviceID, Component: "temperature:0", Metric: "tC"}, v); err != nil {
+			log.Error(err, "Failed to observe temperature", "device_id", deviceID)
+		}
+
+	case len(parts) == 4 && parts[2] == "sensor" && parts[3] == "humidity":
+		// shellies/<id>/sensor/humidity → tracker only, no event row
+		if tracker == nil {
+			return
+		}
+		v, err := strconv.ParseFloat(string(payload), 64)
+		if err != nil {
+			return
+		}
+		if err := tracker.Observe(ctx, events.Metric{DeviceID: deviceID, Component: "humidity:0", Metric: "rh"}, v); err != nil {
+			log.Error(err, "Failed to observe humidity", "device_id", deviceID)
+		}
+	}
 }
 
 // handleMessage processes a Gen1 MQTT message

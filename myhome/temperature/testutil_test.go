@@ -13,7 +13,7 @@ import (
 // The SQLite driver is registered by storage.go's blank import.
 func newTestDB(t *testing.T) *sqlx.DB {
 	t.Helper()
-	db, err := sqlx.Connect("sqlite3", ":memory:")
+	db, err := sqlx.Connect("sqlite", ":memory:")
 	if err != nil {
 		t.Fatalf("newTestDB: %v", err)
 	}

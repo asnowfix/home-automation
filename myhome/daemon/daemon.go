@@ -3,25 +3,26 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
+	"time"
+
 	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
+	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
+	"github.com/asnowfix/home-automation/myhome/events"
+	"github.com/asnowfix/home-automation/myhome/metrics"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	mqttserver "github.com/asnowfix/home-automation/myhome/mqtt"
-	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/myhome/occupancy"
 	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/myhome/temperature"
-	"github.com/asnowfix/home-automation/internal/myhome/ui"
-	"net/http"
-	_ "net/http/pprof"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
-	"time"
-
-	"github.com/asnowfix/home-automation/internal/myhome"
-
-	"github.com/asnowfix/home-automation/myhome/metrics"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
 )
@@ -208,14 +209,41 @@ func (d *daemon) Run() error {
 		// Create SSE broadcaster for live sensor updates
 		sseBroadcaster := ui.NewSSEBroadcaster(log.WithName("sse"))
 
+		// Start event service if enabled
+		var eventsSvc *events.Service
+		var eventsTracker *events.SensorDailyTracker
+		if options.Flags.EnableEventsService {
+			eventsStore, err := events.NewStorage(log.WithName("events"), options.Flags.EventsDBPath)
+			if err != nil {
+				log.Error(err, "Failed to initialize events storage", "path", options.Flags.EventsDBPath)
+				// Non-fatal: continue without event recording
+			} else {
+				eventsTracker = events.NewSensorDailyTracker(log.WithName("events"), eventsStore)
+				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, nil, options.Flags.EventsRetention)
+				go eventsTracker.Start(d.ctx)
+				go eventsSvc.Start(d.ctx)
+				log.Info("Events service started", "db", options.Flags.EventsDBPath, "retention", options.Flags.EventsRetention)
+			}
+		} else {
+			log.Info("Events service disabled")
+		}
+
 		// Start device manager
 		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc, sseBroadcaster)
+		d.dm.WithEventService(eventsSvc, eventsTracker)
 		err = d.dm.Start(d.ctx)
 		if err != nil {
 			log.Error(err, "Failed to start device manager")
 			return err
 		}
 		log.Info("Started device manager", "manager", d.dm)
+
+		// Start Gen2 NotifyEvent listener
+		if eventsSvc != nil && eventsTracker != nil {
+			gen2Listener := shellygen2l.NewListener(log.WithName("gen2"), mc, eventsSvc, eventsTracker)
+			go gen2Listener.Start(d.ctx)
+			log.Info("Gen2 event listener started")
+		}
 
 		// Start the main RPC server
 		d.rpc, err = myhome.NewServerE(d.ctx, mc, d.dm)

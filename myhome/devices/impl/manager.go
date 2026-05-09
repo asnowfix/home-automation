@@ -3,33 +3,33 @@ package impl
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/myhome/daemon/watch"
-	mhd "github.com/asnowfix/home-automation/myhome/devices"
-	"github.com/asnowfix/home-automation/internal/myhome/model"
-	"github.com/asnowfix/home-automation/myhome/mqtt"
-	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
-	"github.com/asnowfix/home-automation/internal/myhome/sfr"
-	mhswitch "github.com/asnowfix/home-automation/internal/myhome/shelly/sswitch"
-	"github.com/asnowfix/home-automation/myhome/storage"
-	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"net"
-	"github.com/asnowfix/home-automation/pkg/devices"
-	"github.com/asnowfix/home-automation/pkg/shelly"
-	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
-	"github.com/asnowfix/home-automation/internal/tools"
 
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/internal/myhome/model"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	"github.com/asnowfix/home-automation/internal/myhome/sfr"
 	shellyblu "github.com/asnowfix/home-automation/internal/myhome/shelly/blu"
 	shellygen1 "github.com/asnowfix/home-automation/internal/myhome/shelly/gen1"
 	shellyscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	shellysetup "github.com/asnowfix/home-automation/internal/myhome/shelly/setup"
-
+	mhswitch "github.com/asnowfix/home-automation/internal/myhome/shelly/sswitch"
+	"github.com/asnowfix/home-automation/internal/myhome/ui"
+	"github.com/asnowfix/home-automation/internal/tools"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	"github.com/asnowfix/home-automation/myhome/daemon/watch"
+	mhd "github.com/asnowfix/home-automation/myhome/devices"
+	"github.com/asnowfix/home-automation/myhome/events"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/myhome/storage"
+	"github.com/asnowfix/home-automation/pkg/devices"
+	"github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/go-logr/logr"
 )
 
@@ -45,6 +45,8 @@ type DeviceManager struct {
 	router         model.Router
 	setupConfig    shellysetup.Config // Configuration for auto-setup of new devices
 	setupInFlight  sync.Map           // Track devices currently being set up (device_id -> bool)
+	eventSvc       *events.Service
+	eventTracker   *events.SensorDailyTracker
 }
 
 // SSEBroadcaster interface for broadcasting sensor updates to UI
@@ -339,6 +341,13 @@ func (dm *DeviceManager) UpdateChannel() chan<- *myhome.Device {
 	return dm.update
 }
 
+// WithEventService wires the event service and sensor tracker into the device manager.
+// Must be called before Start(). eventSvc and tracker may be nil.
+func (dm *DeviceManager) WithEventService(eventSvc *events.Service, tracker *events.SensorDailyTracker) {
+	dm.eventSvc = eventSvc
+	dm.eventTracker = tracker
+}
+
 func (dm *DeviceManager) Start(ctx context.Context) error {
 	var err error
 
@@ -397,15 +406,15 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Start Gen1 MQTT listener for sensor data (with SSE broadcaster)
-	err = shellygen1.StartMqttListener(ctx, dm.log, dm.mqttClient, dm.dr, dm.router, dm.sseBroadcaster)
+	// Start Gen1 MQTT listener for sensor data (with SSE broadcaster and optional event service)
+	err = shellygen1.StartMqttListenerWithEvents(ctx, dm.log, dm.mqttClient, dm.dr, dm.router, dm.sseBroadcaster, dm.eventSvc, dm.eventTracker)
 	if err != nil {
 		dm.log.Error(err, "Failed to start Gen1 MQTT listener")
 		return err
 	}
 
-	// Start BLU listener for Shelly BLU device discovery (with SSE broadcaster)
-	err = shellyblu.StartBLUListener(ctx, dm.mqttClient, dm.dr, dm.sseBroadcaster)
+	// Start BLU listener for Shelly BLU device discovery (with SSE broadcaster and optional event service)
+	err = shellyblu.StartBLUListenerWithEvents(ctx, dm.mqttClient, dm.dr, dm.sseBroadcaster, dm.eventSvc, dm.eventTracker)
 	if err != nil {
 		dm.log.Error(err, "Failed to start BLU listener")
 		return err

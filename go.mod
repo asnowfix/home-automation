@@ -8,6 +8,8 @@ require (
 	github.com/asnowfix/home-automation/internal/myip v0.0.0-20260402201030-0ed25e95389f
 	github.com/asnowfix/home-automation/internal/myzone v0.0.0-20260402201030-0ed25e95389f
 	github.com/asnowfix/home-automation/myhome/ctl/options v0.0.0-20260402201030-0ed25e95389f
+	github.com/asnowfix/home-automation/myhome/devices/impl v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/events v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/temperature v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/pkg/shelly v0.0.0-20260402201030-0ed25e95389f
 	github.com/asnowfix/home-automation/pkg/shelly/types v0.0.0-20260402201030-0ed25e95389f
@@ -21,6 +23,10 @@ replace github.com/asnowfix/home-automation/hlog => ./hlog
 replace github.com/asnowfix/home-automation/myhome/ctl/options => ./myhome/ctl/options
 
 replace github.com/asnowfix/home-automation/myhome/temperature => ./myhome/temperature
+
+replace github.com/asnowfix/home-automation/myhome/events => ./myhome/events
+
+replace github.com/asnowfix/home-automation/myhome/devices/impl => ./myhome/devices/impl
 
 replace github.com/asnowfix/home-automation/internal/global => ./internal/global
 

@@ -115,21 +115,12 @@ func parseLogLevel(verbose bool, debug bool, defaultLevel zerolog.Level) zerolog
 
 // isRunningUnderDebugger detects if the process is running under a debugger (like VSCode)
 func isRunningUnderDebugger() bool {
-	// Check for common debugger environment variables
 	if os.Getenv("DELVE_DEBUGGER") != "" {
 		return true
 	}
-
-	// Check if MYHOME_LOG is set to stderr (common in VSCode launch configs)
-	if LogToStderr() {
-		return true
-	}
-
-	// Check for VSCode-specific environment variables
 	if os.Getenv("VSCODE_PID") != "" || os.Getenv("VSCODE_IPC_HOOK") != "" {
 		return true
 	}
-
 	return false
 }
 
@@ -170,9 +161,8 @@ func isColorTerminal() bool {
 }
 
 func logWriter() (io.Writer, error) {
-	// When running under VSCode debugger, use stderr
 	if LogToStderr() {
-		debugInit("VSCode debug session detected, using stderr for logging")
+		debugInit("MYHOME_LOG=stderr, using stderr for logging")
 		return os.Stderr, nil
 	}
 

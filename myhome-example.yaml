@@ -139,3 +139,17 @@ daemon:
   
   # Disable auto-setup
   # disable_auto_setup: false
+
+# Event Log Configuration
+events:
+  # Path to the events SQLite database (separate from devices.db)
+  # Default: ~/.myhome/events.db
+  # db: ~/.myhome/events.db
+
+  # Auto-purge threshold: events older than this duration are deleted hourly
+  # Default: 2160h (90 days). Set to 0 to disable automatic purging.
+  # retention: 2160h
+
+  # Set to false to disable event recording entirely
+  # Default: true
+  # enabled: true

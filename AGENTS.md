@@ -845,6 +845,35 @@ err := s.db.Get(&columnExists, query)  // This will fail to properly detect
 
 **Example location**: `myhome/storage/db.go`
 
+### Event Log
+
+#### Events DB path convention
+
+`events.db` lives alongside `devices.db` (default `~/.myhome/events.db`). It is opened by `myhome/events/storage.go` with its own `*sqlx.DB` connection. The path is configurable via `--events-db` / `MYHOME_EVENTS_DB`. Never share the events `*sqlx.DB` with the devices store — independent backup and rotation are a design goal.
+
+#### `SensorDailyTracker` pattern
+
+`SensorDailyTracker` (in `myhome/events/tracker.go`) computes rolling daily min/max/avg for any numeric sensor without storing individual measurement rows. Each sample is upserted to `sensor_daily_stats` immediately, so a daemon restart never loses the current day's running extremes.
+
+To add a new sensor type (e.g. energy kWh):
+
+1. Call `tracker.Observe(ctx, events.Metric{DeviceID: id, Component: "em:0", Metric: "kWh"}, value)` from your listener.
+2. That is all — no schema change needed; the `sensor_daily_stats` table uses `(date, device_id, component, metric)` as primary key and accepts any metric name.
+3. At midnight, `Flush()` emits a synthetic `<metric>.daily_min` / `<metric>.daily_max` event row automatically.
+
+The tracker is shared across the Gen2, Gen1, and BLU listeners. Always pass `nil` in tests — listeners must guard with `if tracker != nil`.
+
+#### Event severity levels
+
+| Level   | When to use |
+|---------|-------------|
+| `alarm` | Requires immediate attention: smoke alarm, temperature threshold breach |
+| `warn`  | Degraded state, user should notice eventually: battery low (<20%), OTA error, future power-spike threshold |
+| `info`  | Normal state changes worth recording: switch on/off, motion, device online/offline, daily stats |
+| `debug` | High-frequency or low-significance: button raw events, periodic temperature/humidity changes, OTA progress |
+
+When adding a new event type, default to `info`. Upgrade to `warn`/`alarm` only if the condition is operationally significant. Avoid `debug` for anything a user might want to query later.
+
 ### Command Output
 
 **Important**: For user-facing commands (like `script upload`, `script update`, `script debug`), print progress and results to **stdout** using `fmt.Printf()`, not `log.Info()`.

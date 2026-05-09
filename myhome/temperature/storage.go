@@ -9,8 +9,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
+	_ "modernc.org/sqlite"
 )
 
 // Type aliases for convenience

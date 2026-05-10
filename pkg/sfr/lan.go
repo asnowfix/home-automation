@@ -3,6 +3,7 @@ package sfr
 import (
 	"context"
 	"encoding/xml"
+	"fmt"
 	"net"
 )
 
@@ -23,9 +24,7 @@ type LanInfo struct {
 }
 
 func GetLanInfo(ctx context.Context, ip net.IP) (*LanInfo, error) {
-	params := map[string]string{
-		// "token": token, // no more needed: public IRL
-	}
+	params := map[string]string{}
 	res, err := queryBox(ip, "lan.getInfo", &params)
 	if err != nil {
 		log.Error(err, "lan.getInfo")
@@ -55,12 +54,10 @@ type DnsHost struct {
 
 func GetHostsList(ctx context.Context) (*[]*LanHost, error) {
 	ip := getBoxIp(ctx)
-	// if len(token) == 0 {
-	// 	renewToken(ip)
-	// }
-	params := map[string]string{
-		// "token": token, // no more needed: public IRL
+	if ip == nil {
+		return nil, fmt.Errorf("SFR box IP not discovered (set SFR_BOX_IP env var to override)")
 	}
+	params := map[string]string{}
 	res, err := queryBox(ip, "lan.getHostsList", &params)
 	if err != nil {
 		log.Error(err, "lan.getHostsList")
@@ -72,12 +69,10 @@ func GetHostsList(ctx context.Context) (*[]*LanHost, error) {
 
 func GetDnsHostList(ctx context.Context) (*[]*DnsHost, error) {
 	ip := getBoxIp(ctx)
-	// if len(token) == 0 {
-	// 	renewToken(ip)
-	// }
-	params := map[string]string{
-		// "token": token, // no more needed: public IRL
+	if ip == nil {
+		return nil, fmt.Errorf("SFR box IP not discovered (set SFR_BOX_IP env var to override)")
 	}
+	params := map[string]string{}
 	res, err := queryBox(ip, "lan.getDnsHostList", &params)
 	if err != nil {
 		log.Error(err, "lan.getDnsHostList")

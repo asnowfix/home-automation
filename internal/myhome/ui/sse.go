@@ -1,15 +1,11 @@
 package ui
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"html/template"
 	"net/http"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/go-logr/logr"
@@ -146,66 +142,11 @@ func (b *SSEBroadcaster) BroadcastDeviceUpdate(dv DeviceView) {
 	b.broadcast("device-update", dv)
 }
 
-// BroadcastEvent broadcasts a new event log entry as an HTML table row to all SSE clients.
-// The row is sent as SSE event "eventlog" so the events page can prepend it live.
+// BroadcastEvent broadcasts a new event log entry as JSON to all SSE clients.
+// The payload is sent as SSE event "eventlog". The web UI renders the row from JSON;
+// the CLI follow command also parses JSON from this event type.
 func (b *SSEBroadcaster) BroadcastEvent(e events.Event) {
-	var buf bytes.Buffer
-	tmpl := template.Must(template.New("event-row").Funcs(template.FuncMap{
-		"formatTime": func(ts float64) string {
-			t := time.Unix(int64(ts), 0)
-			return t.Format("2006-01-02 15:04:05")
-		},
-		"truncate": func(s *string) string {
-			if s == nil {
-				return ""
-			}
-			if len(*s) > 60 {
-				return (*s)[:60] + "…"
-			}
-			return *s
-		},
-		"severityClass": func(sev string) string {
-			switch sev {
-			case "alarm":
-				return "has-text-danger"
-			case "warn":
-				return "has-text-warning"
-			case "debug":
-				return "has-text-grey-light"
-			default:
-				return ""
-			}
-		},
-	}).Parse(eventRowTemplate))
-
-	if err := tmpl.Execute(&buf, e); err != nil {
-		b.log.Error(err, "BroadcastEvent: failed to render event row")
-		return
-	}
-
-	// Escape newlines so the SSE data field stays on one line.
-	row := strings.ReplaceAll(buf.String(), "\n", "")
-	msg := fmt.Sprintf("event: eventlog\ndata: %s\n\n", row)
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	var toEvict []chan string
-	for ch, client := range b.clients {
-		select {
-		case ch <- msg:
-			client.consecutiveSkips = 0
-		default:
-			client.consecutiveSkips++
-			if client.consecutiveSkips >= sseSlowClientMaxSkips {
-				toEvict = append(toEvict, ch)
-			}
-		}
-	}
-	for _, ch := range toEvict {
-		delete(b.clients, ch)
-		close(ch)
-	}
+	b.broadcast("eventlog", e)
 }
 
 // ServeHTTP handles SSE client connections using the broadcaster's client list

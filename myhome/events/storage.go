@@ -12,14 +12,14 @@ import (
 )
 
 type Event struct {
-	ID         int64   `db:"id"`
-	Ts         float64 `db:"ts"`
-	ReceivedAt float64 `db:"received_at"`
-	DeviceID   string  `db:"device_id"`
-	Component  string  `db:"component"`
-	Event      string  `db:"event"`
-	Severity   string  `db:"severity"`
-	Data       *string `db:"data"`
+	ID         int64   `db:"id"          json:"id"`
+	Ts         float64 `db:"ts"          json:"ts"`
+	ReceivedAt float64 `db:"received_at" json:"received_at"`
+	DeviceID   string  `db:"device_id"   json:"device_id"`
+	Component  string  `db:"component"   json:"component"`
+	Event      string  `db:"event"       json:"event"`
+	Severity   string  `db:"severity"    json:"severity"`
+	Data       *string `db:"data"        json:"data,omitempty"`
 }
 
 type DailyStat struct {

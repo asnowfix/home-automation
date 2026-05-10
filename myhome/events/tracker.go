@@ -69,6 +69,9 @@ func (t *SensorDailyTracker) midnightTimer(ctx context.Context) {
 	next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
 	d := next.Sub(now)
 	time.AfterFunc(d, func() {
+		if ctx.Err() != nil {
+			return
+		}
 		t.rollover(ctx)
 		t.midnightTimer(ctx)
 	})
@@ -134,8 +137,10 @@ var metricEventPrefix = map[string]string{
 	"kWh": "energy",
 }
 
-// Flush writes synthetic daily_min / daily_max event rows for the given date.
-// If emit is nil, only DB persistence is ensured (no events emitted).
+// Flush emits synthetic daily_min / daily_max event rows for the given date by
+// calling emit for each stat loaded from the DB. Stats are already persisted
+// continuously via Observe, so no extra DB write is needed here.
+// If emit is nil, Flush returns immediately (no events are emitted).
 func (t *SensorDailyTracker) Flush(ctx context.Context, date string, emit func(Event) error) error {
 	if emit == nil {
 		return nil

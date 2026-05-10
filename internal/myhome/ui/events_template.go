@@ -203,12 +203,19 @@ const eventLogPageHTML = `<!doctype html>
           eventSource.addEventListener('eventlog', function(e) {
             var tbody = document.getElementById('events-tbody');
             if (!tbody) { return; }
-            var tmp = document.createElement('tbody');
-            tmp.innerHTML = e.data;
-            var row = tmp.firstElementChild;
-            if (row) {
-              tbody.insertBefore(row, tbody.firstChild);
-            }
+            var ev;
+            try { ev = JSON.parse(e.data); } catch(_) { return; }
+            var ts = new Date(ev.ts * 1000).toISOString().replace('T', ' ').substring(0, 19);
+            var sevClass = {'alarm': 'has-text-danger', 'warn': 'has-text-warning', 'debug': 'has-text-grey-light'}[ev.severity] || '';
+            var data = ev.data ? (ev.data.length > 60 ? ev.data.substring(0, 60) + '…' : ev.data) : '';
+            var tr = document.createElement('tr');
+            if (sevClass) { tr.className = sevClass; }
+            ['ts_fmt', 'device_id', 'component', 'event', 'severity', 'data_trunc'].forEach(function(f, i) {
+              var td = document.createElement('td');
+              td.textContent = [ts, ev.device_id, ev.component, ev.event, ev.severity, data][i];
+              tr.appendChild(td);
+            });
+            tbody.insertBefore(tr, tbody.firstChild);
           });
 
           eventSource.onerror = function(e) {

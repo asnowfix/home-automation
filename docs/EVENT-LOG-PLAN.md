@@ -520,12 +520,12 @@ Mark each phase **[done]** before starting the next. Commit plan updates alongsi
 - [ ] Graceful shutdown: call `tracker.Flush()` for today before exit
 
 ### Phase 6 — RPC API
-- [ ] `EventList` verb + request/response types in `internal/myhome/`
-- [ ] Register handler
+- [x] `EventList` verb + request/response types in `internal/myhome/`
+- [x] Register handler
 
 ### Phase 7 — CLI
-- [ ] `myhome/ctl/events/`: `list`, `follow`, `clear` sub-commands
-- [ ] Register under `myhome ctl`
+- [x] `myhome/ctl/events/`: `list`, `follow`, `clear` sub-commands
+- [x] Register under `myhome ctl`
 
 ### Phase 8 — Web UI
 - [ ] `/htmx/events` HTMX route + events table template
@@ -533,7 +533,10 @@ Mark each phase **[done]** before starting the next. Commit plan updates alongsi
 - [ ] Events tab in navigation
 
 ### Phase 9 — Docs & config
-- [ ] `docs/configuration.md`, `myhome-example.yaml`, `options.go`, `run.go`
+- [x] Update `docs/configuration.md` — added `## Events` section with YAML example, env vars, and CLI command reference
+- [x] Update `myhome-example.yaml` — added commented `events:` stanza alongside other service configs
+- [x] Update `AGENTS.md` — added events DB path convention, `SensorDailyTracker` extension guide, severity level table
+- [x] Update `options.go` and `run.go` — wired by implementation agent
 
 ---
 

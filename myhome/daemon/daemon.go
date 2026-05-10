@@ -212,11 +212,13 @@ func (d *daemon) Run() error {
 		// Start event service if enabled
 		var eventsSvc *events.Service
 		var eventsTracker *events.SensorDailyTracker
+		var eventsStore *events.Storage
 		if options.Flags.EnableEventsService {
-			eventsStore, err := events.NewStorage(log.WithName("events"), options.Flags.EventsDBPath)
+			eventsStore, err = events.NewStorage(log.WithName("events"), options.Flags.EventsDBPath)
 			if err != nil {
 				log.Error(err, "Failed to initialize events storage", "path", options.Flags.EventsDBPath)
 				// Non-fatal: continue without event recording
+				eventsStore = nil
 			} else {
 				eventsTracker = events.NewSensorDailyTracker(log.WithName("events"), eventsStore)
 				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, nil, options.Flags.EventsRetention)
@@ -250,6 +252,43 @@ func (d *daemon) Run() error {
 		if err != nil {
 			log.Error(err, "Failed to start MyHome RPC service")
 			return err
+		}
+
+		// Register EventList RPC handler if events service is running
+		if eventsStore != nil {
+			myhome.RegisterMethodHandler(myhome.EventList, func(ctx context.Context, in any) (any, error) {
+				req, ok := in.(*myhome.EventListRequest)
+				if !ok {
+					return nil, fmt.Errorf("unexpected param type: %T", in)
+				}
+				q := events.Query{
+					DeviceID:  req.DeviceID,
+					EventType: req.EventType,
+					Severity:  req.Severity,
+					Since:     req.Since,
+					Limit:     req.Limit,
+					Offset:    req.Offset,
+				}
+				rows, err := eventsStore.Query(ctx, q)
+				if err != nil {
+					return nil, err
+				}
+				views := make([]myhome.EventView, len(rows))
+				for i, e := range rows {
+					views[i] = myhome.EventView{
+						ID:         e.ID,
+						Ts:         e.Ts,
+						ReceivedAt: e.ReceivedAt,
+						DeviceID:   e.DeviceID,
+						Component:  e.Component,
+						Event:      e.Event,
+						Severity:   e.Severity,
+						Data:       e.Data,
+					}
+				}
+				return &myhome.EventListResponse{Events: views, Total: len(views)}, nil
+			})
+			log.Info("EventList RPC handler registered")
 		}
 
 		// Register Temperature RPC methods if enabled

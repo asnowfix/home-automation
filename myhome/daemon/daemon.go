@@ -221,7 +221,7 @@ func (d *daemon) Run() error {
 				eventsStore = nil
 			} else {
 				eventsTracker = events.NewSensorDailyTracker(log.WithName("events"), eventsStore)
-				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, nil, options.Flags.EventsRetention)
+				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, sseBroadcaster.BroadcastEvent, options.Flags.EventsRetention)
 				go eventsTracker.Start(d.ctx)
 				go eventsSvc.Start(d.ctx)
 				log.Info("Events service started", "db", options.Flags.EventsDBPath, "retention", options.Flags.EventsRetention)
@@ -352,7 +352,7 @@ func (d *daemon) Run() error {
 		}
 
 		// Start UI & reverse HTTP proxy
-		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, storage, mc, sseBroadcaster); err != nil {
+		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, storage, mc, sseBroadcaster, eventsSvc); err != nil {
 			log.Error(err, "Failed to start UI server")
 			return err
 		}

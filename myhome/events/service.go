@@ -45,6 +45,11 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 }
 
+// Store returns the underlying storage for direct queries.
+func (s *Service) Store() *Storage {
+	return s.store
+}
+
 func (s *Service) Record(ctx context.Context, e Event) error {
 	if e.ReceivedAt == 0 {
 		e.ReceivedAt = float64(time.Now().Unix())

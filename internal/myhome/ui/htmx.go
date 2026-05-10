@@ -4,28 +4,33 @@ import (
 	"context"
 	"fmt"
 	"html/template"
-	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/myhome/storage"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/events"
+	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/go-logr/logr"
 )
 
 // HTMXHandler returns handlers for HTMX partial HTML responses
 type HTMXHandler struct {
-	ctx context.Context
-	log logr.Logger
-	db  *storage.DeviceStorage
+	ctx       context.Context
+	log       logr.Logger
+	db        *storage.DeviceStorage
+	eventsSvc *events.Service
 }
 
 // NewHTMXHandler creates a new HTMX handler
-func NewHTMXHandler(ctx context.Context, log logr.Logger, db *storage.DeviceStorage) *HTMXHandler {
+func NewHTMXHandler(ctx context.Context, log logr.Logger, db *storage.DeviceStorage, eventsSvc *events.Service) *HTMXHandler {
 	return &HTMXHandler{
-		ctx: ctx,
-		log: log,
-		db:  db,
+		ctx:       ctx,
+		log:       log,
+		db:        db,
+		eventsSvc: eventsSvc,
 	}
 }
 
@@ -178,6 +183,90 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 	if err := tmpl.Execute(w, data); err != nil {
 		h.log.Error(err, "failed to render switch button")
 		http.Error(w, "render error", http.StatusInternalServerError)
+	}
+}
+
+// EventsTable renders the events table HTMX fragment (newest first, limit 50).
+func (h *HTMXHandler) EventsTable(w http.ResponseWriter, r *http.Request) {
+	h.renderEventsTable(w, r, 0)
+}
+
+// EventsMore renders additional event rows for pagination (appended into tbody).
+func (h *HTMXHandler) EventsMore(w http.ResponseWriter, r *http.Request) {
+	offsetStr := r.URL.Query().Get("offset")
+	offset, _ := strconv.Atoi(offsetStr)
+	h.renderEventsRows(w, r, offset)
+}
+
+func (h *HTMXHandler) buildQuery(r *http.Request, offset int) events.Query {
+	device := r.URL.Query().Get("device")
+	evType := r.URL.Query().Get("type")
+	severity := r.URL.Query().Get("severity")
+	return events.Query{
+		DeviceID:  device,
+		EventType: evType,
+		Severity:  severity,
+		Since:     24 * time.Hour,
+		Limit:     50,
+		Offset:    offset,
+	}
+}
+
+func (h *HTMXHandler) renderEventsTable(w http.ResponseWriter, r *http.Request, offset int) {
+	if h.eventsSvc == nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<p class="has-text-grey">Event service not available.</p>`)
+		return
+	}
+
+	q := h.buildQuery(r, offset)
+	evts, err := h.eventsSvc.Store().Query(h.ctx, q)
+	if err != nil {
+		h.log.Error(err, "EventsTable: failed to query events")
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+
+	data := map[string]interface{}{
+		"Events":   evts,
+		"Offset":   offset + len(evts),
+		"Device":   q.DeviceID,
+		"Type":     q.EventType,
+		"Severity": q.Severity,
+	}
+
+	tmpl := template.Must(template.New("events-table").Funcs(eventTemplateFuncs()).Parse(eventsTableTemplate))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.Execute(w, data); err != nil {
+		h.log.Error(err, "EventsTable: failed to render template")
+	}
+}
+
+func (h *HTMXHandler) renderEventsRows(w http.ResponseWriter, r *http.Request, offset int) {
+	if h.eventsSvc == nil {
+		return
+	}
+
+	q := h.buildQuery(r, offset)
+	evts, err := h.eventsSvc.Store().Query(h.ctx, q)
+	if err != nil {
+		h.log.Error(err, "EventsMore: failed to query events")
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+
+	data := map[string]interface{}{
+		"Events":   evts,
+		"Offset":   offset + len(evts),
+		"Device":   q.DeviceID,
+		"Type":     q.EventType,
+		"Severity": q.Severity,
+	}
+
+	tmpl := template.Must(template.New("events-rows").Funcs(eventTemplateFuncs()).Parse(eventsRowsTemplate))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.Execute(w, data); err != nil {
+		h.log.Error(err, "EventsMore: failed to render template")
 	}
 }
 

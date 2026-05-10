@@ -8,8 +8,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
+	_ "modernc.org/sqlite"
 )
 
 type Event struct {
@@ -50,9 +49,18 @@ type Storage struct {
 }
 
 func NewStorage(log logr.Logger, dbPath string) (*Storage, error) {
-	db, err := sqlx.Connect("sqlite3", dbPath)
+	db, err := sqlx.Connect("sqlite", dbPath)
 	if err != nil {
 		log.Error(err, "Failed to connect to events database", "dbPath", dbPath)
+		return nil, err
+	}
+
+	if _, err := db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(`PRAGMA synchronous=NORMAL`); err != nil {
+		db.Close()
 		return nil, err
 	}
 

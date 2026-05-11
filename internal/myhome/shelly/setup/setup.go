@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -268,7 +269,7 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 				}
 				mqttServer = ips[0].String()
 			}
-			mqttServer = mqttServer + ":" + strconv.Itoa(cfg.MqttPort)
+			mqttServer = net.JoinHostPort(mqttServer, strconv.Itoa(cfg.MqttPort))
 		}
 
 		log.Info("Setting MQTT broker", "device", deviceId, "server", mqttServer, "via", via, "http_ready", sd.IsHttpReady(), "mqtt_ready", sd.IsMqttReady())

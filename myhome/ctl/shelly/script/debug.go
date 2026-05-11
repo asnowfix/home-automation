@@ -185,7 +185,7 @@ var debugCtl = &cobra.Command{
 				}
 			}(ctx, udpChan)
 
-			addr := fmt.Sprintf("%s:%d", ip.String(), port)
+			addr := net.JoinHostPort(ip.String(), strconv.Itoa(port))
 			args = []string{addr}
 		} else {
 			args = []string{}

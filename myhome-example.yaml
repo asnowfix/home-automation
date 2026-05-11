@@ -124,6 +124,9 @@ daemon:
   
   # UI listen port
   # ui_port: 6080
+
+  # Forward /devices/... to a remote myhome daemon (useful when working remotely via SSH tunnel)
+  # remote_proxy: http://home-pi:6080
   
   # Enable Gen1 HTTP->MQTT proxy
   # enable_gen1_proxy: false

@@ -37,7 +37,7 @@ use (
 	./myhome/mqtt
 	./myhome/occupancy
 	./myhome/storage
-	./myhome/temperature
+	./myhome/rooms
 	./pkg/devices
 	./pkg/sfr
 	./pkg/shelly

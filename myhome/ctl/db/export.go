@@ -12,7 +12,7 @@ import (
 // DatabaseExport represents the complete database export
 type DatabaseExport struct {
 	Devices          any                                      `json:"devices,omitempty"`
-	TemperatureRooms map[string]*myhome.TemperatureRoomConfig `json:"temperature_rooms,omitempty"`
+	TemperatureRooms map[string]*myhome.TemperatureRoomConfig `json:"rooms,omitempty"`
 	WeekdayDefaults  map[int]myhome.DayType                   `json:"weekday_defaults,omitempty"`
 	KindSchedules    []myhome.TemperatureKindSchedule         `json:"kind_schedules,omitempty"`
 }

@@ -11,7 +11,7 @@ import (
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/myhome/occupancy"
 	"github.com/asnowfix/home-automation/myhome/storage"
-	"github.com/asnowfix/home-automation/myhome/temperature"
+	"github.com/asnowfix/home-automation/myhome/rooms"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"net/http"
 	_ "net/http/pprof"
@@ -229,14 +229,14 @@ func (d *daemon) Run() error {
 			log.Info("Initializing temperature RPC methods")
 
 			// Create temperature storage using the same database
-			tempStorage, err := temperature.NewStorage(log, storage.DB())
+			tempStorage, err := rooms.NewStorage(log, storage.DB())
 			if err != nil {
 				log.Error(err, "Failed to initialize temperature storage")
 				return err
 			}
 
 			// Create and register temperature method handlers, republishing temperature ranges at startup
-			tempHandlers := temperature.NewService(d.ctx, log, mc, tempStorage)
+			tempHandlers := rooms.NewService(d.ctx, log, mc, tempStorage)
 			tempHandlers.RegisterHandlers()
 
 			log.Info("Temperature RPC methods registered")

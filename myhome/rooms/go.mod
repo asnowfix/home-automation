@@ -1,4 +1,4 @@
-module github.com/asnowfix/home-automation/myhome/temperature
+module github.com/asnowfix/home-automation/myhome/rooms
 
 go 1.25.0
 

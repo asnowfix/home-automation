@@ -67,6 +67,9 @@ type IndexData struct {
 // index template and renderer
 var indexTmpl *template.Template
 
+// eventLogTmpl is the full-page event log template
+var eventLogTmpl *template.Template
+
 func init() {
 	indexContent, err := staticFS.ReadFile("static/index.html")
 	if err != nil {
@@ -78,6 +81,11 @@ func init() {
 		"lower": strings.ToLower,
 	})
 	indexTmpl = template.Must(tmpl.Parse(string(indexContent)))
+
+	// Build the event-log page template
+	eventLogTmpl = template.Must(template.New("event-log").Funcs(template.FuncMap{
+		"lower": strings.ToLower,
+	}).Parse(eventLogPageHTML))
 }
 
 // DeviceToView converts a myhome.Device to ui.DeviceView for SSE broadcasting and UI rendering
@@ -279,6 +287,24 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 		DoorOpened:           doorOpened,
 		Switches:             switches,
 	}
+}
+
+// RenderEventLog renders the event log page.
+// It reuses the same index layout but injects the events table section.
+func RenderEventLog(ctx context.Context, db *storage.DeviceStorage, w io.Writer) error {
+	data := IndexData{
+		Devices: []DeviceView{},
+		Version: ctx.Value(global.VersionKey).(string),
+	}
+	if db != nil {
+		devices, err := db.GetAllDevices(ctx)
+		if err == nil {
+			for _, d := range devices {
+				data.Devices = append(data.Devices, DeviceToView(ctx, d))
+			}
+		}
+	}
+	return eventLogTmpl.Execute(w, data)
 }
 
 // RenderIndex renders the index page with device list

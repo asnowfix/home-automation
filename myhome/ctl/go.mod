@@ -20,6 +20,7 @@ require (
 	github.com/asnowfix/home-automation/myhome/ctl/show v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/ctl/sswitch v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/ctl/temperature v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/events v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/mqtt v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/pkg/shelly v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/pkg/shelly/types v0.0.0-00010101000000-000000000000
@@ -74,6 +75,8 @@ replace github.com/asnowfix/home-automation/myhome/ctl/show => ./show
 replace github.com/asnowfix/home-automation/myhome/ctl/sswitch => ./sswitch
 
 replace github.com/asnowfix/home-automation/myhome/ctl/temperature => ./temperature
+
+replace github.com/asnowfix/home-automation/myhome/events => ../events
 
 replace github.com/asnowfix/home-automation/internal/global => ../../internal/global
 

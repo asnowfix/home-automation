@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/myhome/mqtt"
 	"net"
-	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"strings"
 
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/events"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/go-logr/logr"
 )
 
@@ -84,6 +85,12 @@ type SSEBroadcaster interface {
 
 // StartBLUListener starts listening to BLU device MQTT events and registers them
 func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegistry, sseBroadcaster SSEBroadcaster) error {
+	return StartBLUListenerWithEvents(ctx, mc, registry, sseBroadcaster, nil, nil)
+}
+
+// StartBLUListenerWithEvents is like StartBLUListener but also records events and sensor observations.
+// eventSvc and tracker may be nil, in which case event recording is skipped.
+func StartBLUListenerWithEvents(ctx context.Context, mc mqtt.Client, registry DeviceRegistry, sseBroadcaster SSEBroadcaster, eventSvc *events.Service, tracker *events.SensorDailyTracker) error {
 	log := logr.FromContextOrDiscard(ctx).WithName("BLUListener")
 
 	log.Info("Starting BLU listener", "mqtt_client", fmt.Sprintf("%T", mc), "registry", fmt.Sprintf("%T", registry))
@@ -127,6 +134,9 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 			log.V(1).Info("No sensors in event", "topic", topic, "device_id", deviceID)
 		}
 
+		// Feed event log and sensor tracker from the raw payload (nil-safe)
+		handleBLUEventBridge(ctx, log, payload, eventSvc, tracker)
+
 		log.V(1).Info("event processing completed", "device_id", deviceID, "mac", mac)
 
 		return err
@@ -137,6 +147,98 @@ func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegist
 
 	log.Info("started", "topic", topic)
 	return nil
+}
+
+// handleBLUEventBridge maps BTHome object IDs to event log entries and tracker observations.
+func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, eventSvc *events.Service, tracker *events.SensorDailyTracker) {
+	var data BLUEventData
+	if err := json.Unmarshal(payload, &data); err != nil {
+		return
+	}
+	if data.Address == "" {
+		return
+	}
+
+	// device_id = BLU sensor MAC address
+	deviceID := data.Address
+
+	// Motion (0x21)
+	if data.Motion != nil {
+		if eventSvc != nil {
+			eventName := "motion.cleared"
+			if *data.Motion == 1 {
+				eventName = "motion.detected"
+			}
+			if err := eventSvc.Record(ctx, events.Event{
+				DeviceID:  deviceID,
+				Component: "motion:0",
+				Event:     eventName,
+				Severity:  "info",
+			}); err != nil {
+				log.Error(err, "Failed to record motion event", "device_id", deviceID)
+			}
+		}
+	}
+
+	// Window (0x2D)
+	if data.Window != nil {
+		if eventSvc != nil {
+			eventName := "window.closed"
+			if *data.Window == 1 {
+				eventName = "window.opened"
+			}
+			if err := eventSvc.Record(ctx, events.Event{
+				DeviceID:  deviceID,
+				Component: "window:0",
+				Event:     eventName,
+				Severity:  "info",
+			}); err != nil {
+				log.Error(err, "Failed to record window event", "device_id", deviceID)
+			}
+		}
+	}
+
+	// Button (0x3A)
+	if data.Button != nil {
+		if eventSvc != nil {
+			if err := eventSvc.Record(ctx, events.Event{
+				DeviceID:  deviceID,
+				Component: "button:0",
+				Event:     "button.push",
+				Severity:  "info",
+			}); err != nil {
+				log.Error(err, "Failed to record button event", "device_id", deviceID)
+			}
+		}
+	}
+
+	// Battery low
+	if data.Battery != nil && *data.Battery < 20 {
+		if eventSvc != nil {
+			if err := eventSvc.Record(ctx, events.Event{
+				DeviceID:  deviceID,
+				Component: "battery",
+				Event:     "battery.low",
+				Severity:  "warn",
+			}); err != nil {
+				log.Error(err, "Failed to record battery.low event", "device_id", deviceID)
+			}
+		}
+	}
+
+	// Temperature (0x02) → tracker only
+	if data.Temperature != nil && tracker != nil {
+		if err := tracker.Observe(ctx, events.Metric{DeviceID: deviceID, Component: "temperature:0", Metric: "tC"}, *data.Temperature); err != nil {
+			log.Error(err, "Failed to observe BLU temperature", "device_id", deviceID)
+		}
+	}
+
+	// Humidity (0x03) → tracker only
+	if data.Humidity != nil && tracker != nil {
+		if err := tracker.Observe(ctx, events.Metric{DeviceID: deviceID, Component: "humidity:0", Metric: "rh"}, *data.Humidity); err != nil {
+			log.Error(err, "Failed to observe BLU humidity", "device_id", deviceID)
+		}
+	}
 }
 
 func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload []byte, registry DeviceRegistry) (*map[string]string, error) {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/go-logr/logr"
 )
 
@@ -139,6 +140,13 @@ func (b *SSEBroadcaster) BroadcastSensorUpdate(deviceID string, sensor string, v
 func (b *SSEBroadcaster) BroadcastDeviceUpdate(dv DeviceView) {
 	b.log.V(1).Info("Broadcasting device update", "device_id", dv.Id, "name", dv.Name)
 	b.broadcast("device-update", dv)
+}
+
+// BroadcastEvent broadcasts a new event log entry as JSON to all SSE clients.
+// The payload is sent as SSE event "eventlog". The web UI renders the row from JSON;
+// the CLI follow command also parses JSON from this event type.
+func (b *SSEBroadcaster) BroadcastEvent(e events.Event) {
+	b.broadcast("eventlog", e)
 }
 
 // ServeHTTP handles SSE client connections using the broadcaster's client list

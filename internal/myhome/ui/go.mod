@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/asnowfix/home-automation/internal/myhome v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/events v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/storage v0.0.0-00010101000000-000000000000
 	github.com/go-logr/logr v1.4.3
 )
@@ -22,6 +23,8 @@ require (
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/tools v0.35.0 // indirect
 )
+
+replace github.com/asnowfix/home-automation/myhome/events => ../../../myhome/events
 
 replace github.com/asnowfix/home-automation/myhome/storage => ../../../myhome/storage
 

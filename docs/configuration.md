@@ -168,6 +168,76 @@ daemon:
 - Flag: `--events-dir` or `-E`
 - Env: `MYHOME_DAEMON_EVENTS_DIR`
 
+## Events Configuration
+
+The event log service records every meaningful state-change event from all devices to a dedicated SQLite database, with optional auto-purge and live CLI tailing.
+
+### Example
+
+```yaml
+events:
+  db: ~/.myhome/events.db    # path to events SQLite database (separate from devices.db)
+  retention: 2160h           # auto-purge threshold; events older than this are deleted (default 90 days)
+  enabled: true              # set false to disable event recording entirely
+```
+
+### Options
+
+**`db`** (string, default: `~/.myhome/events.db`)
+- Path to the events SQLite database file
+- Kept separate from `devices.db` to allow independent backup and rotation
+- Flag: `--events-db`
+- Env: `MYHOME_EVENTS_DB`
+
+**`retention`** (duration, default: `2160h`)
+- How long events are kept before automatic deletion (90 days by default)
+- Purge runs hourly; only the `events` table is purged (sensor daily stats are kept indefinitely)
+- Set to `0` to disable automatic purging
+- Flag: `--events-retention`
+- Env: `MYHOME_EVENTS_RETENTION`
+
+**`enabled`** (bool, default: `true`)
+- Set to `false` to disable the event recording service entirely
+- Flag: `--enable-events-service` / `--disable-events-service`
+- Env: `MYHOME_EVENTS_ENABLED`
+
+### CLI Commands
+
+#### `myhome ctl events list`
+
+Query historical events from the database.
+
+```
+myhome ctl events list
+    [--device <id|name|mac>]   filter by device
+    [--type <event-prefix>]    e.g. "switch" matches switch.on + switch.off
+    [--severity <level>]       alarm|warn|info|debug
+    [--since <duration>]       e.g. 24h, 7d (default: 24h)
+    [--limit <n>]              max rows (default: 100)
+    [--json]                   machine-readable output
+```
+
+#### `myhome ctl events follow`
+
+Tail live events via SSE stream (real-time output).
+
+```
+myhome ctl events follow
+    [--device <id|name|mac>]   filter by device
+    [--type <event-prefix>]    filter by event type prefix
+    [--severity <level>]       default: info+warn+alarm
+```
+
+#### `myhome ctl events clear`
+
+Delete events from the database.
+
+```
+myhome ctl events clear
+    [--before <RFC3339 | duration>]   default: retention threshold
+    [--dry-run]                       show what would be deleted without deleting
+```
+
 ## Temperature Configuration
 
 ### Example

@@ -56,6 +56,7 @@ func init() {
 	runCmd.PersistentFlags().StringVar(&options.Flags.EventsDBPath, "events-db", defaultEventsDBPath(), "Path to the events SQLite database")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.EventsRetention, "events-retention", 90*24*time.Hour, "Retention period for event records (default 90 days)")
 	runCmd.PersistentFlags().BoolVar(&disableEventsService, "disable-events-service", false, "Disable the event recording service")
+	runCmd.PersistentFlags().StringVar(&options.Flags.RemoteProxy, "remote-proxy", "", "Forward /devices/... requests to a remote myhome daemon (e.g. http://home-pi:6080) instead of connecting directly")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
@@ -144,6 +145,9 @@ var runCmd = &cobra.Command{
 		}
 		if v.IsSet("daemon.disable_device_manager") && !cmd.Flags().Changed("disable-device-manager") {
 			disableDeviceManager = v.GetBool("daemon.disable_device_manager")
+		}
+		if v.IsSet("daemon.remote_proxy") && !cmd.Flags().Changed("remote-proxy") {
+			options.Flags.RemoteProxy = v.GetString("daemon.remote_proxy")
 		}
 		// Handle auto-setup flag (default is enabled, --disable-auto-setup disables it)
 		// Config file can also disable it via daemon.disable_auto_setup: true

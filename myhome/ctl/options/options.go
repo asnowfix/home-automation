@@ -78,6 +78,7 @@ var Flags struct {
 	EventsDBPath                string        // path to events SQLite database
 	EventsRetention             time.Duration // retention period for event records
 	EnableEventsService         bool          // whether to enable the event recording service
+	RemoteProxy                 string        // the value taken by --remote-proxy; delegates /devices/... to a remote myhome daemon
 }
 
 var Via types.Channel

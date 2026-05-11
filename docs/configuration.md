@@ -126,6 +126,12 @@ daemon:
 - Flag: `--ui-port` or `-u`
 - Env: `MYHOME_DAEMON_UI_PORT`
 
+**`remote_proxy`** (string, default: `""`)
+- Forward all `/devices/...` HTTP requests to a remote myhome daemon instead of connecting to devices directly. Useful when running a local myhome instance that reaches the home network via SSH port-forwarding and cannot dial device IPs directly.
+- Example: `http://home-pi:6080` or `http://localhost:6081` (when `ssh -L 6081:localhost:6080 home-pi`)
+- Flag: `--remote-proxy`
+- Env: `MYHOME_DAEMON_REMOTE_PROXY`
+
 #### Service Enablement
 
 **`enable_gen1_proxy`** (bool, default: auto)

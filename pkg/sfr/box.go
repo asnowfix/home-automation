@@ -19,10 +19,9 @@ import (
 )
 
 var (
-	boxIp         net.IP
-	boxIpMutex    sync.Mutex
-	boxIpInitOnce sync.Once
-	log           logr.Logger
+	boxIp      net.IP
+	boxIpMutex sync.Mutex
+	log        logr.Logger
 )
 
 func getBoxIp(ctx context.Context) net.IP {
@@ -39,26 +38,34 @@ func getBoxIp(ctx context.Context) net.IP {
 	}
 	log = log.WithName("sfr")
 
-	boxIpInitOnce.Do(func() {
-		ips, err := gateway.DiscoverGateways()
-		if err != nil {
-			log.Error(err, "Failed to discover gateway")
-			return
+	// Allow explicit override via env var (useful when running remotely or when
+	// gateway discovery fails because the host is multi-homed / behind a VPN).
+	if override := os.Getenv("SFR_BOX_IP"); override != "" {
+		if ip := net.ParseIP(override); ip != nil {
+			log.Info("Using SFR box IP from SFR_BOX_IP env", "ip", ip.String())
+			boxIp = ip
+			return boxIp
 		}
+		log.Error(fmt.Errorf("invalid IP: %s", override), "SFR_BOX_IP env var ignored")
+	}
 
-		// loop on every IP's, trying to test public API
-		for _, ip := range ips {
-			log.Info("Testing gateway IP", "ip", ip.String())
-			info, err := GetLanInfo(ctx, ip)
-			if err == nil {
-				log.Info("Discovered gateway IP", "ip", ip.String(), "info", info)
-				boxIp = ip
-				return
-			} else {
-				log.V(1).Info("Skipping potential gateway", "ip", ip, "error", err)
-			}
+	ips, err := gateway.DiscoverGateways()
+	if err != nil {
+		log.Error(err, "Failed to discover gateway")
+		return nil
+	}
+
+	// loop on every IP, trying to test the SFR public API
+	for _, ip := range ips {
+		log.Info("Testing gateway IP", "ip", ip.String())
+		info, err := GetLanInfo(ctx, ip)
+		if err == nil {
+			log.Info("Discovered gateway IP", "ip", ip.String(), "info", info)
+			boxIp = ip
+			return boxIp
 		}
-	})
+		log.V(1).Info("Skipping potential gateway", "ip", ip, "error", err)
+	}
 
 	return boxIp
 }

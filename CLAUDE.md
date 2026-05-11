@@ -9,7 +9,8 @@ Hobby project with three goals: learn Go, learn Claude Code, automate the house 
 ## Commands
 
 ```bash
-make build          # build everything (runs go generate first)
+make build          # build everything (runs go generate first — required before bare `go build`)
+make generate       # fetch/embed static JS/CSS assets (alpine.min.js, htmx.min.js, bulma.min.css); must run before `go build` in a fresh worktree
 make test           # canonical: tests root module + all go.work sub-modules
 make run            # build and run daemon locally
 make tidy           # tidy all workspace modules

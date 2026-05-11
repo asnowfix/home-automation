@@ -352,7 +352,7 @@ func (d *daemon) Run() error {
 		}
 
 		// Start UI & reverse HTTP proxy
-		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, storage, mc, sseBroadcaster, eventsSvc); err != nil {
+		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, storage, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy); err != nil {
 			log.Error(err, "Failed to start UI server")
 			return err
 		}

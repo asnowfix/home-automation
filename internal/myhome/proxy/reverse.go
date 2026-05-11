@@ -27,15 +27,16 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// Setup adds a reverse proxy handler to the given mux that proxies
-// requests shaped like: http://<listen_host>:<port>/<hostname>/<path...>
-// to: http://<resolved-ip>:80/<path...>
+// Handle proxies HTTP requests shaped like /devices/{hostToken}/...
 //
-// <hostname> can be:
-// - an IPv4/IPv6 address
-// - a .local hostname
-// - any known identifier in the myhome database (name, id, mac, host)
-func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db *storage.DeviceStorage, w http.ResponseWriter, r *http.Request) {
+// When upstreamProxy is non-empty, requests are forwarded to
+// upstreamProxy/devices/{hostToken}/... instead of connecting directly.
+// This is used when a local myhome instance delegates device access to a
+// remote myhome daemon (e.g. accessed via SSH port-forward).
+//
+// When upstreamProxy is empty, the host token is resolved to an IP and
+// the request is forwarded directly to the device on port 80 or 443.
+func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db *storage.DeviceStorage, upstreamProxy string, w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	// Panic recovery to avoid blank pages
@@ -102,6 +103,25 @@ func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db *s
 	}
 
 	log.Info("route", "hostToken", hostToken, "rest", rest)
+
+	// When a remote proxy is configured, forward the entire /devices/... request
+	// to the upstream daemon rather than connecting to the device directly.
+	if upstreamProxy != "" {
+		upstreamURL, err := url.Parse(upstreamProxy)
+		if err != nil || upstreamURL.Host == "" {
+			log.Error(fmt.Errorf("invalid upstream proxy URL: %s", upstreamProxy), "remote-proxy misconfigured")
+			http.Error(w, "remote-proxy misconfigured", http.StatusInternalServerError)
+			return
+		}
+		p := httputil.NewSingleHostReverseProxy(upstreamURL)
+		p.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, e error) {
+			log.Error(e, "upstream proxy error", "upstream", upstreamProxy, "path", r.URL.Path)
+			http.Error(rw, "upstream proxy error", http.StatusBadGateway)
+		}
+		log.Info("forwarding to upstream proxy", "upstream", upstreamProxy, "path", r.URL.Path)
+		p.ServeHTTP(w, r)
+		return
+	}
 
 	targetIP, err := resolveToIPv4(ctx, log, resolver, db, hostToken)
 	if err != nil {

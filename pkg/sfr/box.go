@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/jackpal/gateway"
@@ -22,6 +23,18 @@ var (
 	boxIp      net.IP
 	boxIpMutex sync.Mutex
 	log        logr.Logger
+
+	// sfrHTTPClient is used for all SFR box HTTP calls.
+	// - Timeout: makes gateway probing fail fast when the router is unreachable
+	//   (e.g. running behind a proxy or during a transient network issue) instead
+	//   of blocking indefinitely on the default http.Client.
+	// - Proxy: honours HTTP_PROXY / HTTPS_PROXY / NO_PROXY env vars so that an
+	//   SSH SOCKS tunnel (ssh -D 1080 home-pi) can forward requests to the home LAN
+	//   when the daemon is running on a machine without direct LAN access.
+	sfrHTTPClient = &http.Client{
+		Timeout:   3 * time.Second,
+		Transport: http.DefaultTransport,
+	}
 )
 
 func getBoxIp(ctx context.Context) net.IP {
@@ -221,7 +234,7 @@ func queryBox(ip net.IP, method string, params *map[string]string) (any, error) 
 
 // tweaked from: https://stackoverflow.com/a/42718113/1170664
 func getXML(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+	resp, err := sfrHTTPClient.Get(url)
 	if err != nil {
 		return []byte{}, fmt.Errorf("GET error: %v", err)
 	}

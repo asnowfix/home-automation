@@ -353,7 +353,11 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	dm.log.Info("Starting device manager")
 
-	dm.router = sfr.GetRouter(ctx)
+	if options.Flags.RemoteProxy == "" {
+		dm.router = sfr.GetRouter(ctx)
+	} else {
+		dm.log.Info("Remote proxy configured — skipping SFR router (no direct LAN access assumed)")
+	}
 
 	// Pre-populate cache with existing devices from database
 	// This ensures devices exist when retained MQTT sensor messages arrive
@@ -543,19 +547,21 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.R
 	}
 
 	var modified bool = false
-	mac, err := net.ParseMAC(device.MAC)
-	host, err := router.GetHostByMac(ctx, mac)
-	if err == nil {
-		ip := host.Ip().String()
-		if ip != device.Host() {
-			log.V(1).Info("Changing IP", "device", device.DeviceSummary, "old_ip", device.Host(), "new_ip", ip)
-			device = device.WithHost(ip)
+	if router != nil {
+		mac, err := net.ParseMAC(device.MAC)
+		host, err := router.GetHostByMac(ctx, mac)
+		if err == nil {
+			ip := host.Ip().String()
+			if ip != device.Host() {
+				log.V(1).Info("Changing IP", "device", device.DeviceSummary, "old_ip", device.Host(), "new_ip", ip)
+				device = device.WithHost(ip)
+				modified = true
+			}
+		} else {
+			log.Error(err, "Router has no IP for MAC", "device", device.DeviceSummary, "mac", device.MAC)
+			device = device.WithHost(fmt.Sprintf("%s.local", device.Id()))
 			modified = true
 		}
-	} else {
-		log.Error(err, "Router has no IP for MAC", "device", device.DeviceSummary, "mac", device.MAC)
-		device = device.WithHost(fmt.Sprintf("%s.local", device.Id()))
-		modified = true
 	}
 
 	updated, err := device.Refresh(ctx)

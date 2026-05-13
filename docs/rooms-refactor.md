@@ -175,7 +175,7 @@ internal/myhome/ui/
 
 ---
 
-## Phase 0 — Rename & DB refactor `[ ]`
+## Phase 0 — Rename & DB refactor `[DONE]`
 
 Goal: rename the Go package and DB tables; remove in-memory caches; no behaviour change yet.
 

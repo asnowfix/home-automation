@@ -37,6 +37,7 @@ use (
 	./myhome/mqtt
 	./myhome/occupancy
 	./myhome/storage
+	./myhome/electricity
 	./myhome/rooms
 	./pkg/devices
 	./pkg/sfr

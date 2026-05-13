@@ -133,9 +133,19 @@ daemon:
   
   # Enable temperature service
   # enable_temperature_service: true
-  
+
+  # Enable electricity pricing publisher
+  # enable_electricity_service: true
+
   # Disable device manager
   # disable_device_manager: false
   
   # Disable auto-setup
   # disable_auto_setup: false
+
+# Electricity pricing configuration
+electricity:
+  # Start of the cheap electricity window (24h HH:MM, may cross midnight)
+  cheap_start: "23:15"
+  # End of the cheap electricity window (24h HH:MM)
+  cheap_end: "07:15"

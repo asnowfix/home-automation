@@ -11,6 +11,7 @@ import (
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/myhome/occupancy"
 	"github.com/asnowfix/home-automation/myhome/storage"
+	"github.com/asnowfix/home-automation/myhome/electricity"
 	"github.com/asnowfix/home-automation/myhome/rooms"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"net/http"
@@ -222,6 +223,24 @@ func (d *daemon) Run() error {
 		if err != nil {
 			log.Error(err, "Failed to start MyHome RPC service")
 			return err
+		}
+
+		// Start electricity pricing publisher if enabled
+		if options.Flags.EnableElectricityService {
+			log.Info("Starting electricity pricing publisher",
+				"cheap_start", options.Flags.ElectricityCheapStart,
+				"cheap_end", options.Flags.ElectricityCheapEnd)
+			pricer, err := electricity.NewFixedWindowPricer(
+				options.Flags.ElectricityCheapStart,
+				options.Flags.ElectricityCheapEnd,
+			)
+			if err != nil {
+				log.Error(err, "Failed to create electricity pricer — check cheap_start/cheap_end config")
+			} else {
+				pub := electricity.NewPublisher(log, pricer, mc)
+				go pub.Run(d.ctx)
+				log.Info("Electricity pricing publisher started")
+			}
 		}
 
 		// Register Temperature RPC methods if enabled

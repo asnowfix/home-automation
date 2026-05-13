@@ -147,6 +147,12 @@ daemon:
 - Flag: `--enable-temperature-service` / `--disable-temperature-service`
 - Env: `MYHOME_DAEMON_ENABLE_TEMPERATURE_SERVICE`
 
+**`enable_electricity_service`** (bool, default: auto)
+- Enable the electricity pricing MQTT publisher (`myhome/electricity/status`)
+- Auto-enabled with device manager; publishes retained every 15 minutes
+- Flag: `--enable-electricity-service` / `--disable-electricity-service`
+- Env: `MYHOME_DAEMON_ENABLE_ELECTRICITY_SERVICE`
+
 #### Device Manager
 
 **`disable_device_manager`** (bool, default: `false`)
@@ -440,3 +446,40 @@ Or use flag:
 ```bash
 myhome daemon run --enable-temperature-service
 ```
+
+## Electricity Pricing Configuration
+
+Controls the electricity pricing publisher. The publisher broadcasts a retained MQTT message to
+`myhome/electricity/status` every 15 minutes so heater scripts can decide whether to run.
+
+### Configuration keys (`electricity.*`)
+
+**`cheap_start`** (string, default: `"23:15"`)
+- Start of the cheap electricity window in `HH:MM` 24-hour format
+- The window may cross midnight (e.g., `23:15`–`07:15`)
+- Flag: `--electricity-cheap-start`
+- Env: `MYHOME_ELECTRICITY_CHEAP_START`
+
+**`cheap_end`** (string, default: `"07:15"`)
+- End of the cheap electricity window in `HH:MM` 24-hour format
+- Flag: `--electricity-cheap-end`
+- Env: `MYHOME_ELECTRICITY_CHEAP_END`
+
+### Example
+
+```yaml
+electricity:
+  cheap_start: "23:15"
+  cheap_end: "07:15"
+```
+
+### MQTT payload
+
+Topic: `myhome/electricity/status` (retained, QoS 1)
+
+```json
+{"cheap": true, "until_epoch": 1234567890}
+```
+
+- `cheap`: `true` if the current time is within the cheap window
+- `until_epoch`: Unix timestamp when the current period (cheap or expensive) ends

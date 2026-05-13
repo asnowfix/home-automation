@@ -224,12 +224,16 @@ func handleMessage(ctx context.Context, log logr.Logger, sc devices.DeviceRegist
 			mhd = mhd.WithId(device.Id)
 			mhd = mhd.WithName(device.Id)
 
-			host, err := router.GetHostByIp(ctx, device.Ip)
-			if err != nil {
-				log.Error(err, "Failed to get host", "ip", device.Ip)
-				return err
+			if router != nil {
+				host, err := router.GetHostByIp(ctx, device.Ip)
+				if err != nil {
+					log.Error(err, "Failed to get host by IP", "ip", device.Ip)
+					return err
+				}
+				mhd = mhd.WithMAC(host.Mac())
+			} else {
+				log.Info("No SFR router — registering Gen1 device without MAC", "device_id", device.Id)
 			}
-			mhd = mhd.WithMAC(host.Mac())
 		}
 
 		// Save the device (will create or update)

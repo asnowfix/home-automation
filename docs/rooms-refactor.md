@@ -191,7 +191,7 @@ Tasks:
 - Update `internal/myhome/temperature.go` types to match new table names
 - `make test` must pass
 
-## Phase 1 — Electricity pricing interface `[ ]`
+## Phase 1 — Electricity pricing interface `[DONE]`
 
 Goal: daemon publishes cheap/expensive signal; scripted via a clean interface for future swap.
 

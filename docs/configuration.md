@@ -483,3 +483,44 @@ Topic: `myhome/electricity/status` (retained, QoS 1)
 
 - `cheap`: `true` if the current time is within the cheap window
 - `until_epoch`: Unix timestamp when the current period (cheap or expensive) ends
+
+## Weather Forecast Configuration
+
+The daemon fetches hourly temperature forecasts from [Open-Meteo](https://open-meteo.com/) (no API key required) every 6 hours and publishes a 4-slot distilled payload to MQTT. Device scripts subscribe and use the data to decide whether to pre-heat.
+
+### Configuration keys (`weather.*`)
+
+**`latitude`** (float, required to enable weather publishing)
+- Location latitude in decimal degrees (e.g., `48.8566` for Paris)
+- Flag: `--weather-latitude`
+- Env: `MYHOME_WEATHER_LATITUDE`
+
+**`longitude`** (float, required to enable weather publishing)
+- Location longitude in decimal degrees (e.g., `2.3522` for Paris)
+- Flag: `--weather-longitude`
+- Env: `MYHOME_WEATHER_LONGITUDE`
+
+### Example
+
+```yaml
+weather:
+  latitude: 48.8566
+  longitude: 2.3522
+```
+
+### MQTT payload
+
+Topic: `myhome/weather/forecast` (retained, QoS 1)
+
+```json
+{"slots": [{"h":9,"t":4.2},{"h":10,"t":3.8},{"h":11,"t":3.1},{"h":12,"t":2.9}], "stale": false}
+```
+
+- `slots`: next 4 hourly readings from now; `h` = hour of day, `t` = temperature °C
+- `stale`: `true` if internet has been unavailable for more than 24 hours (last known forecast is being repeated)
+
+### Offline behaviour
+
+- On network failure: last known forecast is re-served from SQLite (`weather_cache` table)
+- If the cached forecast is older than 24 hours: payload includes `"stale": true`
+- If no cache exists: nothing is published until the first successful fetch

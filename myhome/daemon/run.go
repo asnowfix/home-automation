@@ -40,6 +40,8 @@ func init() {
 	runCmd.PersistentFlags().BoolVar(&disableElectricityService, "disable-electricity-service", false, "Disable the electricity pricing publisher (mutually exclusive with --enable-electricity-service)")
 	runCmd.PersistentFlags().StringVar(&options.Flags.ElectricityCheapStart, "electricity-cheap-start", "23:15", "Start of the cheap electricity window (HH:MM)")
 	runCmd.PersistentFlags().StringVar(&options.Flags.ElectricityCheapEnd, "electricity-cheap-end", "07:15", "End of the cheap electricity window (HH:MM)")
+	runCmd.PersistentFlags().Float64Var(&options.Flags.WeatherLatitude, "weather-latitude", 0, "Location latitude for weather forecast (decimal degrees)")
+	runCmd.PersistentFlags().Float64Var(&options.Flags.WeatherLongitude, "weather-longitude", 0, "Location longitude for weather forecast (decimal degrees)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableMetricsExporter, "enable-metrics-exporter", false, "Enable the Prometheus metrics exporter (auto-enabled with device manager)")
 	runCmd.PersistentFlags().IntVar(&options.Flags.MetricsExporterPort, "metrics-exporter-port", options.PROMETHEUS_DEFAULT_PORT, "Prometheus metrics exporter HTTP port")
 	runCmd.PersistentFlags().StringVar(&options.Flags.MetricsExporterTopic, "metrics-exporter-topic", "shelly/metrics", "MQTT topic for Shelly device metrics")
@@ -141,6 +143,12 @@ var runCmd = &cobra.Command{
 		}
 		if v.IsSet("electricity.cheap_end") && !cmd.Flags().Changed("electricity-cheap-end") {
 			options.Flags.ElectricityCheapEnd = v.GetString("electricity.cheap_end")
+		}
+		if v.IsSet("weather.latitude") && !cmd.Flags().Changed("weather-latitude") {
+			options.Flags.WeatherLatitude = v.GetFloat64("weather.latitude")
+		}
+		if v.IsSet("weather.longitude") && !cmd.Flags().Changed("weather-longitude") {
+			options.Flags.WeatherLongitude = v.GetFloat64("weather.longitude")
 		}
 		if v.IsSet("daemon.disable_device_manager") && !cmd.Flags().Changed("disable-device-manager") {
 			disableDeviceManager = v.GetBool("daemon.disable_device_manager")

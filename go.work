@@ -38,6 +38,7 @@ use (
 	./myhome/occupancy
 	./myhome/storage
 	./myhome/electricity
+	./myhome/weather
 	./myhome/rooms
 	./pkg/devices
 	./pkg/sfr

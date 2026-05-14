@@ -13,6 +13,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/myhome/electricity"
 	"github.com/asnowfix/home-automation/myhome/rooms"
+	"github.com/asnowfix/home-automation/myhome/weather"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"net/http"
 	_ "net/http/pprof"
@@ -240,6 +241,20 @@ func (d *daemon) Run() error {
 				pub := electricity.NewPublisher(log, pricer, mc)
 				go pub.Run(d.ctx)
 				log.Info("Electricity pricing publisher started")
+			}
+		}
+
+		// Start weather forecast publisher if lat/lon are configured
+		if options.Flags.WeatherLatitude != 0 || options.Flags.WeatherLongitude != 0 {
+			log.Info("Starting weather forecast publisher",
+				"lat", options.Flags.WeatherLatitude,
+				"lon", options.Flags.WeatherLongitude)
+			forecaster, err := weather.New(log, options.Flags.WeatherLatitude, options.Flags.WeatherLongitude, mc, storage.DB())
+			if err != nil {
+				log.Error(err, "Failed to create weather forecaster — check weather.latitude/longitude config")
+			} else {
+				go forecaster.Run(d.ctx)
+				log.Info("Weather forecast publisher started")
 			}
 		}
 

@@ -12,6 +12,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/occupancy"
 	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/myhome/electricity"
+	"github.com/asnowfix/home-automation/myhome/ical"
 	"github.com/asnowfix/home-automation/myhome/rooms"
 	"github.com/asnowfix/home-automation/myhome/weather"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
@@ -258,22 +259,40 @@ func (d *daemon) Run() error {
 			}
 		}
 
-		// Register Temperature RPC methods if enabled
+		// Register Rooms RPC methods if enabled; also start iCal agenda publisher
 		if options.Flags.EnableTemperatureService {
-			log.Info("Initializing temperature RPC methods")
+			log.Info("Initializing rooms RPC methods")
 
-			// Create temperature storage using the same database
-			tempStorage, err := rooms.NewStorage(log, storage.DB())
+			roomsStorage, err := rooms.NewStorage(log, storage.DB())
 			if err != nil {
-				log.Error(err, "Failed to initialize temperature storage")
+				log.Error(err, "Failed to initialize rooms storage")
 				return err
 			}
 
-			// Create and register temperature method handlers, republishing temperature ranges at startup
-			tempHandlers := rooms.NewService(d.ctx, log, mc, tempStorage)
-			tempHandlers.RegisterHandlers()
+			roomsSvc := rooms.NewService(d.ctx, log, mc, roomsStorage)
+			roomsSvc.RegisterHandlers()
 
-			log.Info("Temperature RPC methods registered")
+			// Start iCal agenda fetcher — polls room iCal URLs and publishes busy slots
+			icalFetcher, err := ical.New(log, mc, storage.DB())
+			if err != nil {
+				log.Error(err, "Failed to create iCal fetcher")
+			} else {
+				go icalFetcher.Run(d.ctx, func() map[string]string {
+					roomMap, err := roomsStorage.ListRooms()
+					if err != nil {
+						log.Error(err, "Failed to list rooms for iCal refresh")
+						return nil
+					}
+					urls := make(map[string]string, len(roomMap))
+					for id, r := range roomMap {
+						urls[id] = r.ICalURL
+					}
+					return urls
+				})
+				log.Info("iCal agenda fetcher started")
+			}
+
+			log.Info("Rooms RPC methods registered")
 		}
 
 		// Register Occupancy RPC methods if enabled

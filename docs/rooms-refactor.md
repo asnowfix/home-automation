@@ -205,7 +205,7 @@ Tasks:
   payload: `{"cheap":<bool>,"until_epoch":<unix>}`
 - `make test` must pass
 
-## Phase 2 — Weather proxy `[ ]`
+## Phase 2 — Weather proxy `[DONE]`
 
 Goal: daemon fetches Open-Meteo, distils to 4 hourly slots, publishes retained; persists for offline.
 

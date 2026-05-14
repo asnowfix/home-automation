@@ -2,6 +2,8 @@
   "enabledMcpjsonServers": ["shelly"],
   "permissions": {
     "allow": [
+      "Write",
+      "Edit",
       "Bash(cat *)",
       "Bash(go build *)",
       "Bash(go test *)",
@@ -18,7 +20,7 @@
       "Bash(git diff *)",
       "Bash(git show *)",
       "Bash(mkdir *)",
-      "Bash(find * -name *)",
+      "Bash(find *)",
       "Bash(grep *)",
       "Bash(sed *)",
       "Bash(head *)",
@@ -26,7 +28,8 @@
       "Bash(ls *)",
       "Bash(echo *)",
       "Bash(gh pr *)",
-      "Bash(gh api *)"
+      "Bash(gh api *)",
+      "Bash(jq *)"
     ]
   }
 }

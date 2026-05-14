@@ -3,6 +3,8 @@ package events
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,7 +37,8 @@ type DailyStat struct {
 }
 
 type Query struct {
-	DeviceID  string
+	DeviceIDs []string // IN match; takes precedence over DeviceID when set
+	DeviceID  string   // exact match (used when DeviceIDs is empty)
 	EventType string
 	Severity  string
 	Since     time.Duration
@@ -49,6 +52,12 @@ type Storage struct {
 }
 
 func NewStorage(log logr.Logger, dbPath string) (*Storage, error) {
+	if dir := filepath.Dir(dbPath); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Error(err, "Failed to create events database directory", "dir", dir)
+			return nil, err
+		}
+	}
 	db, err := sqlx.Connect("sqlite", dbPath)
 	if err != nil {
 		log.Error(err, "Failed to connect to events database", "dbPath", dbPath)
@@ -149,7 +158,14 @@ func (s *Storage) Query(ctx context.Context, q Query) ([]Event, error) {
 	parts := []string{"1=1"}
 	args := []interface{}{}
 
-	if q.DeviceID != "" {
+	if len(q.DeviceIDs) > 0 {
+		placeholders := make([]string, len(q.DeviceIDs))
+		for i, id := range q.DeviceIDs {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		parts = append(parts, "device_id IN ("+strings.Join(placeholders, ",")+")")
+	} else if q.DeviceID != "" {
 		parts = append(parts, "device_id = ?")
 		args = append(args, q.DeviceID)
 	}

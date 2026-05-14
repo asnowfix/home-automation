@@ -34,6 +34,8 @@ func (f *fakeBLURegistry) UpdateSensorValue(_ context.Context, deviceID, sensor,
 	return nil
 }
 
+func (f *fakeBLURegistry) RenameDevice(_ context.Context, _, _ string) error { return nil }
+
 func buildBLUPayload(t *testing.T, data BLUEventData) []byte {
 	t.Helper()
 	b, err := json.Marshal(data)
@@ -62,7 +64,7 @@ func TestHandleBLUEvent_SensorUpdateWritesCache(t *testing.T) {
 	ctx := logr.NewContext(context.Background(), logr.Discard())
 	topic := "shelly-blu/events/aa:bb:cc:dd:ee:ff"
 
-	sensors, err := handleBLUEvent(ctx, logr.Discard(), topic, payload, reg)
+	_, sensors, err := handleBLUEvent(ctx, logr.Discard(), topic, payload, reg)
 	if err != nil {
 		t.Fatalf("handleBLUEvent error: %v", err)
 	}
@@ -109,7 +111,7 @@ func TestHandleBLUEvent_NoSensorsNoCache(t *testing.T) {
 	ctx := logr.NewContext(context.Background(), logr.Discard())
 	topic := "shelly-blu/events/aa:bb:cc:dd:ee:ff"
 
-	sensors, _ := handleBLUEvent(ctx, logr.Discard(), topic, payload, reg)
+	_, sensors, _ := handleBLUEvent(ctx, logr.Discard(), topic, payload, reg)
 
 	if sensors != nil && len(*sensors) > 0 {
 		t.Errorf("expected no sensors, got %v", *sensors)

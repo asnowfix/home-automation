@@ -1,8 +1,6 @@
 package daemon
 
 import (
-	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -13,11 +11,7 @@ import (
 )
 
 func defaultEventsDBPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "events.db"
-	}
-	return filepath.Join(home, ".myhome", "events.db")
+	return "events.db"
 }
 
 var disableGen1Proxy bool

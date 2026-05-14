@@ -583,6 +583,31 @@ func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) (devices.D
 	return d, nil
 }
 
+// MacFromShellyID extracts the MAC address embedded in a Shelly device ID of
+// the form "<model>-<12hexchars>" (e.g. "shelly1minig3-54320464e730").
+// Returns nil when the ID does not follow that pattern.
+func MacFromShellyID(id string) net.HardwareAddr {
+	i := strings.LastIndex(id, "-")
+	if i < 0 {
+		return nil
+	}
+	h := id[i+1:]
+	if len(h) != 12 {
+		return nil
+	}
+	for _, c := range h {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return nil
+		}
+	}
+	mac, err := net.ParseMAC(fmt.Sprintf("%s:%s:%s:%s:%s:%s",
+		h[0:2], h[2:4], h[4:6], h[6:8], h[8:10], h[10:12]))
+	if err != nil {
+		return nil
+	}
+	return mac
+}
+
 func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devices.Device, error) {
 	if id == "" || id == "<nil>" {
 		return nil, fmt.Errorf("invalid device id: %s", id)
@@ -591,6 +616,9 @@ func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devic
 		log: log,
 	}
 	d.UpdateId(id)
+	if mac := MacFromShellyID(id); mac != nil {
+		d.UpdateMac(mac.String())
+	}
 	return d, nil
 }
 

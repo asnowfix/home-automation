@@ -3,6 +3,7 @@ package gen2
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strings"
 	"time"
 
@@ -29,7 +30,7 @@ func NewListener(log logr.Logger, mqtt mqttclient.Client, svc *events.Service, t
 
 func (l *Listener) Start(ctx context.Context) error {
 	if err := l.mqtt.SubscribeWithHandler(ctx, "+/events/rpc", 16, "shelly/gen2/events", func(topic string, payload []byte, _ string) error {
-		return l.handleNotifyEvent(ctx, payload)
+		return l.handleRpc(ctx, payload)
 	}); err != nil {
 		l.log.Error(err, "Failed to subscribe to +/events/rpc")
 		return err
@@ -46,22 +47,100 @@ func (l *Listener) Start(ctx context.Context) error {
 	return nil
 }
 
+func (l *Listener) handleRpc(ctx context.Context, payload []byte) error {
+	var hdr struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal(payload, &hdr); err != nil {
+		l.log.V(1).Info("Failed to parse +/events/rpc header", "error", err)
+		return nil
+	}
+	switch hdr.Method {
+	case "NotifyEvent":
+		return l.handleNotifyEvent(ctx, payload)
+	case "NotifyStatus":
+		return l.handleNotifyStatus(ctx, payload)
+	}
+	return nil
+}
+
+func (l *Listener) handleNotifyStatus(ctx context.Context, payload []byte) error {
+	var msg struct {
+		Src    string                     `json:"src"`
+		Params map[string]json.RawMessage `json:"params"`
+	}
+	if err := json.Unmarshal(payload, &msg); err != nil {
+		l.log.V(1).Info("Failed to parse NotifyStatus", "error", err)
+		return nil
+	}
+
+	for key, raw := range msg.Params {
+		if key == "ts" {
+			continue
+		}
+		// Only handle switch:N components for on/off events.
+		if !strings.HasPrefix(key, "switch:") {
+			continue
+		}
+		var sw struct {
+			Output  *bool    `json:"output"`
+			Ts      float64  `json:"ts"`
+			APower  *float64 `json:"apower"`
+			Voltage *float64 `json:"voltage"`
+		}
+		if err := json.Unmarshal(raw, &sw); err != nil || sw.Output == nil {
+			continue
+		}
+		var ts float64
+		if sw.Ts != 0 {
+			ts = sw.Ts
+		} else {
+			ts = float64(time.Now().Unix())
+		}
+		eventName := "switch.off"
+		if *sw.Output {
+			eventName = "switch.on"
+		}
+		var dataPtr *string
+		if sw.APower != nil || sw.Voltage != nil {
+			m := make(map[string]float64, 2)
+			if sw.APower != nil {
+				m["apower"] = *sw.APower
+			}
+			if sw.Voltage != nil {
+				m["voltage"] = *sw.Voltage
+			}
+			b, _ := json.Marshal(m)
+			s := string(b)
+			dataPtr = &s
+		}
+		e := events.Event{
+			Ts:        ts,
+			DeviceID:  msg.Src,
+			Component: key,
+			Event:     eventName,
+			Severity:  "info",
+			Data:      dataPtr,
+		}
+		if err := l.service.Record(ctx, e); err != nil {
+			l.log.Error(err, "Failed to record switch status event", "device_id", msg.Src, "component", key)
+		}
+	}
+	return nil
+}
+
 func (l *Listener) handleNotifyEvent(ctx context.Context, payload []byte) error {
 	var msg struct {
 		Src    string `json:"src"`
 		Method string `json:"method"`
 		Params struct {
-			Ts     float64          `json:"ts"`
+			Ts     float64           `json:"ts"`
 			Events []json.RawMessage `json:"events"`
 		} `json:"params"`
 	}
 
 	if err := json.Unmarshal(payload, &msg); err != nil {
 		l.log.V(1).Info("Failed to parse +/events/rpc message", "error", err)
-		return nil
-	}
-
-	if msg.Method != "NotifyEvent" {
 		return nil
 	}
 
@@ -98,7 +177,14 @@ func (l *Listener) handleNotifyEvent(ctx context.Context, payload []byte) error 
 
 		ts := entry.Ts
 		if ts == 0 {
-			ts = msg.Params.Ts
+			if msg.Params.Ts >= 1e9 {
+				// Floor to integer seconds: multiple gateways relaying the same
+				// BLU broadcast within the same second share an identical ts and
+				// are deduplicated by the UNIQUE(device_id,component,event,ts) constraint.
+				ts = math.Floor(msg.Params.Ts)
+			} else {
+				ts = float64(time.Now().Unix())
+			}
 		}
 
 		e := events.Event{

@@ -318,6 +318,14 @@ func (s *DeviceStorage) GetDeviceByHost(ctx context.Context, host string) (*myho
 }
 
 // ForgetDevice deletes a device from the database by any of its identifiers (Id, MAC address, name, host)
+func (s *DeviceStorage) RenameDevice(ctx context.Context, oldID, newID string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE devices SET id = ? WHERE id = ?`, newID, oldID)
+	if err != nil {
+		s.log.Error(err, "Failed to rename device", "old_id", oldID, "new_id", newID)
+	}
+	return err
+}
+
 func (s *DeviceStorage) ForgetDevice(ctx context.Context, identifier string) error {
 	query := `DELETE FROM devices WHERE id = $1 OR mac = $1 OR name = $1 OR host = $1`
 	res, err := s.db.Exec(query, identifier)

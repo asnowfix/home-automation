@@ -13,6 +13,7 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/asnowfix/home-automation/myhome/storage"
+	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/go-logr/logr"
 )
 
@@ -198,18 +199,105 @@ func (h *HTMXHandler) EventsMore(w http.ResponseWriter, r *http.Request) {
 	h.renderEventsRows(w, r, offset)
 }
 
+// eventRow is the template view for a single event row.
+// Fields are copied explicitly to avoid the embedded-struct name collision:
+// events.Event has a field named Event (string), and embedding events.Event
+// creates an outer field also named Event (the struct itself), shadowing it.
+type eventRow struct {
+	Ts         float64
+	DeviceID   string
+	Component  string
+	Event      string
+	Severity   string
+	Data       *string
+	DeviceName string
+}
+
+// resolveDeviceFilter translates a free-text device filter (name, id, or MAC)
+// into the list of device_id values that may appear in the events table.
+// Both the stored id and the MAC are included because different event sources
+// (Gen2 MQTT vs BLU) store different identifiers as device_id.
+// Falls back to the raw filter string when no device record is found.
+func (h *HTMXHandler) resolveDeviceFilter(filter string) []string {
+	if filter == "" {
+		return nil
+	}
+	d, err := h.db.GetDeviceByAny(h.ctx, filter)
+	if err != nil {
+		if mac := shellyapi.MacFromShellyID(filter); mac != nil {
+			d, err = h.db.GetDeviceByAny(h.ctx, mac.String())
+		}
+	}
+	if err != nil {
+		return []string{filter}
+	}
+	ids := []string{d.Id()}
+	if mac := d.Mac(); mac != nil {
+		if s := mac.String(); s != d.Id() {
+			ids = append(ids, s)
+		}
+	}
+	return ids
+}
+
+// deviceNameMap resolves names for all unique device IDs that appear in evts.
+// It uses GetDeviceByAny so it matches across id, mac, name, and host columns.
+// For Shelly devices whose stored id differs from the MQTT src, it also tries
+// the MAC address derived from the device ID suffix as a fallback.
+// Unknown or unnamed devices are omitted; callers fall back to the raw ID.
+func (h *HTMXHandler) deviceNameMap(evts []events.Event) map[string]string {
+	seen := make(map[string]struct{}, len(evts))
+	for _, e := range evts {
+		seen[e.DeviceID] = struct{}{}
+	}
+	m := make(map[string]string, len(seen))
+	for id := range seen {
+		d, err := h.db.GetDeviceByAny(h.ctx, id)
+		if err != nil {
+			if mac := shellyapi.MacFromShellyID(id); mac != nil {
+				d, err = h.db.GetDeviceByAny(h.ctx, mac.String())
+			}
+		}
+		if err != nil {
+			continue
+		}
+		if n := d.Name(); n != "" && n != id {
+			m[id] = n
+		}
+	}
+	return m
+}
+
+// toEventRows decorates a slice of events with device names from the map.
+func toEventRows(evts []events.Event, names map[string]string) []eventRow {
+	rows := make([]eventRow, len(evts))
+	for i, e := range evts {
+		rows[i] = eventRow{
+			Ts:         e.Ts,
+			DeviceID:   e.DeviceID,
+			Component:  e.Component,
+			Event:      e.Event,
+			Severity:   e.Severity,
+			Data:       e.Data,
+			DeviceName: names[e.DeviceID],
+		}
+	}
+	return rows
+}
+
 func (h *HTMXHandler) buildQuery(r *http.Request, offset int) events.Query {
 	device := r.URL.Query().Get("device")
 	evType := r.URL.Query().Get("type")
 	severity := r.URL.Query().Get("severity")
-	return events.Query{
-		DeviceID:  device,
+	q := events.Query{
+		DeviceIDs: h.resolveDeviceFilter(device),
 		EventType: evType,
 		Severity:  severity,
 		Since:     24 * time.Hour,
 		Limit:     50,
 		Offset:    offset,
 	}
+	return q
 }
 
 func (h *HTMXHandler) renderEventsTable(w http.ResponseWriter, r *http.Request, offset int) {
@@ -228,9 +316,9 @@ func (h *HTMXHandler) renderEventsTable(w http.ResponseWriter, r *http.Request, 
 	}
 
 	data := map[string]interface{}{
-		"Events":   evts,
+		"Events":   toEventRows(evts, h.deviceNameMap(evts)),
 		"Offset":   offset + len(evts),
-		"Device":   q.DeviceID,
+		"Device":   r.URL.Query().Get("device"),
 		"Type":     q.EventType,
 		"Severity": q.Severity,
 	}
@@ -256,9 +344,9 @@ func (h *HTMXHandler) renderEventsRows(w http.ResponseWriter, r *http.Request, o
 	}
 
 	data := map[string]interface{}{
-		"Events":   evts,
+		"Events":   toEventRows(evts, h.deviceNameMap(evts)),
 		"Offset":   offset + len(evts),
-		"Device":   q.DeviceID,
+		"Device":   r.URL.Query().Get("device"),
 		"Type":     q.EventType,
 		"Severity": q.Severity,
 	}

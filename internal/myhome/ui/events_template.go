@@ -40,7 +40,7 @@ func eventTemplateFuncs() template.FuncMap {
 // Used both in the HTMX table and in BroadcastEvent SSE push.
 const eventRowTemplate = `<tr class="{{severityClass .Severity}}">
   <td>{{formatTime .Ts}}</td>
-  <td>{{.DeviceID}}</td>
+  <td>{{if .DeviceName}}<span title="{{.DeviceID}}">{{.DeviceName}}</span>{{else}}{{.DeviceID}}{{end}}</td>
   <td>{{.Component}}</td>
   <td>{{.Event}}</td>
   <td>{{.Severity}}</td>
@@ -71,7 +71,7 @@ const eventsTableTemplate = `<form id="events-filter-form"
       hx-swap="innerHTML">
   <div class="field is-grouped is-grouped-multiline mb-4">
     <div class="control">
-      <input class="input is-small" type="text" name="device" placeholder="Device ID"
+      <input class="input is-small" type="text" name="device" placeholder="Device name, ID or MAC"
              value="{{.Device}}">
     </div>
     <div class="control">

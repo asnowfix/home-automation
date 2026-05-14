@@ -205,6 +205,18 @@ func (c *Cache) ForgetDevice(ctx context.Context, id string) error {
 	return c.db.ForgetDevice(ctx, id)
 }
 
+func (c *Cache) RenameDevice(ctx context.Context, oldID, newID string) error {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	if d, exists := c.devicesById[oldID]; exists {
+		delete(c.devicesById, oldID)
+		d.Id_ = newID
+		c.devicesById[newID] = d
+	}
+	return c.db.RenameDevice(ctx, oldID, newID)
+}
+
 func (c *Cache) SetDeviceRoom(ctx context.Context, identifier string, roomId string) (bool, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()

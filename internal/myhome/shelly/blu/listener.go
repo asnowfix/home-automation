@@ -76,6 +76,7 @@ type DeviceRegistry interface {
 	SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) (bool, error)
 	GetDeviceById(ctx context.Context, id string) (*myhome.Device, error)
 	UpdateSensorValue(ctx context.Context, deviceID string, sensor string, value string) error
+	RenameDevice(ctx context.Context, oldID, newID string) error
 }
 
 // SSEBroadcaster interface for broadcasting sensor updates to UI
@@ -86,6 +87,28 @@ type SSEBroadcaster interface {
 // StartBLUListener starts listening to BLU device MQTT events and registers them
 func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegistry, sseBroadcaster SSEBroadcaster) error {
 	return StartBLUListenerWithEvents(ctx, mc, registry, sseBroadcaster, nil, nil)
+}
+
+// deviceIDFromCapabilities infers the Shelly BLU device-type prefix from the
+// sensor fields present in a BLU event, then appends the normalised MAC suffix.
+// Precedence follows field exclusivity: window sensors never carry motion data,
+// H&T sensors never carry motion/window data, etc.
+func deviceIDFromCapabilities(mac string, data BLUEventData) string {
+	suffix := strings.ToLower(strings.ReplaceAll(mac, ":", ""))
+	var prefix string
+	switch {
+	case data.Window != nil:
+		prefix = "shellybludoorwindow2"
+	case data.Temperature != nil || data.Humidity != nil:
+		prefix = "shellybluht3"
+	case data.Motion != nil:
+		prefix = "shellyblumotion1"
+	case data.Button != nil:
+		prefix = "shellyblubutton1"
+	default:
+		prefix = "shellyblu"
+	}
+	return prefix + "-" + suffix
 }
 
 // StartBLUListenerWithEvents is like StartBLUListener but also records events and sensor observations.
@@ -101,26 +124,12 @@ func StartBLUListenerWithEvents(ctx context.Context, mc mqtt.Client, registry De
 	err := mc.SubscribeWithHandler(ctx, topic, 16, "shelly/blu", func(topic string, payload []byte, subscriber string) error {
 		log.Info("event received", "topic", topic, "payload", string(payload))
 
-		// Parse BLU event topic first: shelly-blu/events/<MAC>
-		parts := strings.Split(topic, "/")
-		if len(parts) != 3 {
-			err := fmt.Errorf("invalid BLU event topic: %s", topic)
-			log.Error(err, "invalid BLU event topic", "topic", topic)
-			return err
-		}
-		mac := parts[2] // MAC address with colons
-		deviceID := "shellyblu-" + strings.ToLower(strings.ReplaceAll(mac, ":", ""))
-
-		log.V(1).Info("event emitter", "device_id", deviceID, "mac", mac)
-
-		// Handle device registration
-		sensors, err := handleBLUEvent(ctx, log, topic, payload, registry)
+		// Handle device registration; returns the resolved device ID.
+		deviceID, sensors, err := handleBLUEvent(ctx, log, topic, payload, registry)
 
 		// Update cache and broadcast sensor updates via SSE
-		// Both happen regardless of registration success, similar to Gen1 pattern
 		if sensors != nil {
 			for sensor, value := range *sensors {
-				// Update device cache so values survive page reloads
 				if cacheErr := registry.UpdateSensorValue(ctx, deviceID, sensor, value); cacheErr != nil {
 					log.V(1).Info("Failed to update sensor in cache", "error", cacheErr, "device_id", deviceID)
 				}
@@ -129,15 +138,14 @@ func StartBLUListenerWithEvents(ctx context.Context, mc mqtt.Client, registry De
 					sseBroadcaster.BroadcastSensorUpdate(deviceID, sensor, value)
 				}
 			}
-		}
-		if sensors == nil {
+		} else {
 			log.V(1).Info("No sensors in event", "topic", topic, "device_id", deviceID)
 		}
 
 		// Feed event log and sensor tracker from the raw payload (nil-safe)
 		handleBLUEventBridge(ctx, log, payload, eventSvc, tracker)
 
-		log.V(1).Info("event processing completed", "device_id", deviceID, "mac", mac)
+		log.V(1).Info("event processing completed", "device_id", deviceID)
 
 		return err
 	})
@@ -241,26 +249,27 @@ func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, 
 	}
 }
 
-func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload []byte, registry DeviceRegistry) (*map[string]string, error) {
+// handleBLUEvent returns (deviceID, sensors, error).
+func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload []byte, registry DeviceRegistry) (string, *map[string]string, error) {
 	log.V(1).Info("Handling BLU event", "topic", topic, "payload", string(payload))
 
 	// Parse the event data
 	var eventData BLUEventData
 	if err := json.Unmarshal(payload, &eventData); err != nil {
 		log.V(1).Info("Failed to parse event", "topic", topic, "error", err)
-		return nil, err
+		return "", nil, err
 	}
 
 	// Validate MAC address
 	if eventData.Address == "" {
 		err := fmt.Errorf("event missing MAC address")
 		log.Error(err, "Event missing MAC address", "event", eventData)
-		return nil, err
+		return "", nil, err
 	}
 
-	// Normalize MAC address: lowercase, remove colons
-	mac := strings.ToLower(strings.ReplaceAll(eventData.Address, ":", ""))
-	deviceID := "shellyblu-" + mac
+	deviceID := deviceIDFromCapabilities(eventData.Address, eventData)
+	// Fallback: look up by old generic ID for devices stored before type inference.
+	legacyID := "shellyblu-" + strings.ToLower(strings.ReplaceAll(eventData.Address, ":", ""))
 
 	// Determine sensor capabilities from the event data
 	capabilities := []string{}
@@ -389,11 +398,22 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 	macAddr, parseErr := net.ParseMAC(eventData.Address)
 	if parseErr != nil {
 		log.Error(parseErr, "Failed to parse MAC address", "device_id", deviceID, "mac", eventData.Address)
-		return nil, parseErr
+		return deviceID, nil, parseErr
 	}
 
-	// Try to get existing device from DB
+	// Try to get existing device from DB; fall back to legacy generic ID.
 	existingDevice, err := registry.GetDeviceById(ctx, deviceID)
+	if err != nil && legacyID != deviceID {
+		existingDevice, err = registry.GetDeviceById(ctx, legacyID)
+		if err == nil && existingDevice != nil {
+			log.Info("Upgrading BLU device ID", "old_id", legacyID, "new_id", deviceID)
+			if renameErr := registry.RenameDevice(ctx, legacyID, deviceID); renameErr != nil {
+				log.Error(renameErr, "Failed to rename BLU device", "old_id", legacyID, "new_id", deviceID)
+			} else {
+				existingDevice.Id_ = deviceID
+			}
+		}
+	}
 	if err == nil && existingDevice != nil {
 		// Device exists - check if anything changed
 		changed := false
@@ -429,7 +449,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 			modified, err := registry.SetDevice(ctx, existingDevice, true)
 			if err != nil {
 				log.Error(err, "Failed to update BLU device", "device_id", deviceID)
-				return nil, err
+				return deviceID, nil, err
 			}
 			if modified {
 				log.V(1).Info("Updated BLU device", "device_id", deviceID, "capabilities", capabilities)
@@ -437,7 +457,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 				log.V(2).Info("BLU device unchanged in database", "device_id", deviceID)
 			}
 		}
-		return &sensors, nil
+		return deviceID, &sensors, nil
 	}
 
 	// Device doesn't exist - create new entry
@@ -459,7 +479,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 	modified, err := registry.SetDevice(ctx, device, true)
 	if err != nil {
 		log.Error(err, "Failed to register BLU device", "device_id", deviceID)
-		return nil, err
+		return deviceID, nil, err
 	}
 
 	if modified {
@@ -467,7 +487,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 	} else {
 		log.V(1).Info("BLU device already exists (unchanged)", "device_id", deviceID)
 	}
-	return &sensors, nil
+	return deviceID, &sensors, nil
 }
 
 // btHomeInfoEqual compares two BTHomeInfo structs for equality

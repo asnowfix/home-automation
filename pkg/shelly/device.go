@@ -136,7 +136,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	}
 
 	// BLU devices (Generation 0) cannot be refreshed via RPC - they are updated via MQTT events only
-	if strings.HasPrefix(d.Id(), "shellyblu-") {
+	if IsBluDevice(d.Id()) {
 		d.log.V(1).Info("Skipping refresh for BLU device (updated via MQTT events)", "device_id", d.Id())
 		return false, nil
 	}
@@ -482,10 +482,15 @@ func IsGen1Device(deviceId string) bool {
 	return false
 }
 
-// BLU device ID prefixes that identify BLU devices
+// BLU device ID prefixes that identify BLU devices.
+// Must stay in sync with deviceIDFromCapabilities() in internal/myhome/shelly/blu/listener.go.
 var bluPrefixes = []string{
-	"shellyblu-", // Shelly BLU (generic, if unknown)
-	"sbht-",      // Shelly BLU H&T (Humidity & Temperature)
+	"shellyblu-",            // generic BLU fallback
+	"shellybluht3-",         // BLU H&T v3
+	"shellybludoorwindow2-", // BLU door/window v2
+	"shellyblumotion1-",     // BLU motion v1
+	"shellyblubutton1-",     // BLU button v1
+	"sbht-",                 // alternate H&T naming
 }
 
 func IsBluDevice(deviceId string) bool {
@@ -694,6 +699,9 @@ func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
 	if d == nil {
 		panic("device is nil")
 	}
+	if IsBluDevice(d.Id()) {
+		return nil
+	}
 	if d.Id() == "" || d.Mac() == nil {
 		info, err := shelly.GetDeviceInfo(ctx, d, via)
 		if err != nil {
@@ -781,7 +789,7 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 			}
 
 			// Skip BLU devices (Generation 0) - they cannot receive commands or run scripts
-			if strings.HasPrefix(devSummary.Id(), "shellyblu-") {
+			if IsBluDevice(devSummary.Id()) {
 				log.V(1).Info("Skipping BLU device (no command/script support)", "device_id", devSummary.Id())
 				results <- DeviceResult{Device: devSummary, Error: nil}
 				return

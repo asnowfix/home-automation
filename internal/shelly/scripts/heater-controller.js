@@ -1,5 +1,5 @@
 // heater-controller.js
-// Six-gate heater control loop. Reads policy from KVS (written by data-relay.js).
+// Six-gate heater control loop. Reads policy from KVS (written by heater-data-relay.js).
 // Direct Open-Meteo and occupancy MQTT access removed; all external state comes from KVS.
 //
 // Resource budget: 2–3 MQTT subscriptions, 2 timers.
@@ -16,7 +16,7 @@
 // Gate 0 is a hard override: it bypasses gates 1–5.
 //
 // KVS config keys (pushed by daemon setup, read at startup):
-//   room-id                                 (string, shared with data-relay)
+//   room-id                                 (string, shared with heater-data-relay)
 //   normally-closed                         (bool, default true)
 //   script/heater/enable-logging            (bool, default true)
 //   script/heater/internal-temperature-topic (string)
@@ -30,7 +30,7 @@ var SCRIPT_NAME = "heater-controller";
 var PREFIX = "[" + SCRIPT_NAME + "] ";
 var KEY_PREFIX = "script/heater/";
 
-// KVS keys written by data-relay (read-only here)
+// KVS keys written by heater-data-relay (read-only here)
 var KVS_ELECTRICITY = "room/electricity";
 var KVS_WEATHER     = "room/weather";
 var KVS_AGENDA      = "room/agenda";

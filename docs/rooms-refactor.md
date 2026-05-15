@@ -24,10 +24,10 @@ A heater turns ON only when **all** of the following pass simultaneously:
 | # | Condition | Source on device |
 |---|---|---|
 | 0 | Internal temperature ≤ 7 °C (frost override — bypasses all other gates) | local MQTT sensor |
-| 1 | Electricity is cheap now | KVS (written by data-relay) |
-| 2 | Weather forecast predicts a temperature drop worth pre-heating | KVS (written by data-relay) |
-| 3 | Home is globally occupied (someone seen in past 12 h) | KVS (written by data-relay) |
-| 4 | Room agenda says this room should be occupied right now | KVS (written by data-relay) |
+| 1 | Electricity is cheap now | KVS (written by heater-data-relay) |
+| 2 | Weather forecast predicts a temperature drop worth pre-heating | KVS (written by heater-data-relay) |
+| 3 | Home is globally occupied (someone seen in past 12 h) | KVS (written by heater-data-relay) |
+| 4 | Room agenda says this room should be occupied right now | KVS (written by heater-data-relay) |
 | 5 | All room doors/windows are closed | local MQTT sensors |
 
 Gate 0 (frost) is a hard override: it turns the heater ON regardless of gates 1–5.
@@ -39,18 +39,18 @@ Gates 1–5 must all pass for the heater to run in normal comfort mode.
 
 | Topic | Publisher | Subscriber | Payload |
 |---|---|---|---|
-| `myhome/electricity/status` | daemon | data-relay | `{"cheap":true,"until_epoch":1234567890}` |
-| `myhome/weather/forecast` | daemon | data-relay | `[{"h":6,"t":4.2},{"h":10,"t":5.1},{"h":14,"t":3.8},{"h":18,"t":2.1}]` |
-| `myhome/rooms/<id>/agenda` | daemon | data-relay | `[{"s":480,"e":1020},{"s":1200,"e":1380}]` (minutes since midnight) |
+| `myhome/electricity/status` | daemon | heater-data-relay | `{"cheap":true,"until_epoch":1234567890}` |
+| `myhome/weather/forecast` | daemon | heater-data-relay | `[{"h":6,"t":4.2},{"h":10,"t":5.1},{"h":14,"t":3.8},{"h":18,"t":2.1}]` |
+| `myhome/rooms/<id>/agenda` | daemon | heater-data-relay | `[{"s":480,"e":1020},{"s":1200,"e":1380}]` (minutes since midnight) |
 | `myhome/rooms/<id>/schedule` | daemon | heater-controller | comfort time ranges (existing format) |
-| `myhome/occupancy` | occupancy svc | data-relay | existing format |
+| `myhome/occupancy` | occupancy svc | heater-data-relay | existing format |
 | `shelly-blu/events/<mac>` | blu-publisher | heater-controller | BTHome v2 (temperature + window fields) |
 | `shellies/shellyht-<id>/sensor/temperature` | device | heater-controller | float string |
 
 All daemon-published topics use retained messages so scripts recover state after reboot without
 waiting for the next publish cycle.
 
-### KVS keys written by data-relay (read by heater-controller)
+### KVS keys written by heater-data-relay (read by heater-controller)
 
 | Key | Content |
 |---|---|
@@ -165,7 +165,7 @@ myhome/
     publisher.go           ← MQTT publish loop for myhome/rooms/<id>/agenda
 
 internal/shelly/scripts/
-  data-relay.js            ← new: daemon MQTT → KVS bridge
+  heater-data-relay.js            ← new: daemon MQTT → KVS bridge
   heater-controller.js     ← refactored from heater.js (no direct Open-Meteo)
 
 internal/myhome/ui/
@@ -252,13 +252,13 @@ Tasks:
 
 ## Phase 5 — JS script split `[DONE]`
 
-Goal: split heater.js into data-relay.js + heater-controller.js to stay within Shelly resource limits.
+Goal: split heater.js into heater-data-relay.js + heater-controller.js to stay within Shelly resource limits.
 
-### data-relay.js (new)
+### heater-data-relay.js (new)
 
 Resource budget: 4 MQTT subscriptions, 1 timer.
 
-Config KVS key: `script/data-relay/room-id` (room-id string)
+Config KVS key: `script/heater-data-relay/room-id` (room-id string)
 
 Behaviour:
 - Subscribe to 4 topics: `myhome/electricity/status`, `myhome/weather/forecast`,
@@ -294,7 +294,7 @@ Behaviour:
 | Script | MQTT subs used | Timer used |
 |---|---|---|
 | blu-publisher | 0 (BLE) + 1 event handler | 0 |
-| data-relay | 4 | 1 |
+| heater-data-relay | 4 | 1 |
 | heater-controller | 2–3 | 2 |
 | Total per heater device | ≤ 8 of 10 MQTT | ≤ 3 of 5 timers |
 

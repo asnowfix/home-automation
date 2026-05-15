@@ -32,12 +32,6 @@ jobs:
           go-version: '1.25.x'
         env:
           GOTOOLCHAIN: go1.25.3
-      - name: Run go generate
-        run: |
-          set -x
-          go generate -v ./internal/myhome/ui/...
-          go generate -v ./...
-          ls -la internal/myhome/ui/static/bulma.min.css || echo "bulma.min.css not found!"
       - name: Extract tag name
         id: extract-tag
         run: |

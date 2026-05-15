@@ -292,6 +292,33 @@ func (d *daemon) Run() error {
 				log.Info("iCal agenda fetcher started")
 			}
 
+			// Register room.setup RPC backed by the device manager
+			if d.dm != nil {
+				rooms.RegisterSetupHandler(func(ctx context.Context, roomID string) (*myhome.RoomSetupResult, error) {
+					return d.dm.SetupRoom(ctx, roomID)
+				})
+			}
+
+			// Run initial room setup + daily refresh
+			go func() {
+				if d.dm != nil {
+					d.dm.SetupAllRooms(d.ctx)
+				}
+
+				ticker := time.NewTicker(24 * time.Hour)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-d.ctx.Done():
+						return
+					case <-ticker.C:
+						if d.dm != nil {
+							d.dm.SetupAllRooms(d.ctx)
+						}
+					}
+				}
+			}()
+
 			log.Info("Rooms RPC methods registered")
 		}
 

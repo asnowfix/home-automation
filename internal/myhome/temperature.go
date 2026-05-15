@@ -138,3 +138,23 @@ type TemperatureDeleteResult struct {
 	Status string `json:"status"`
 	RoomID string `json:"room_id"`
 }
+
+// RoomSetupParams represents parameters for room.setup RPC
+type RoomSetupParams struct {
+	RoomID string `json:"room_id"` // empty = setup all rooms
+}
+
+// RoomSetupDeviceResult represents the outcome for a single heater device
+type RoomSetupDeviceResult struct {
+	DeviceID         string   `json:"device_id"`
+	TempSensorTopic  string   `json:"temp_sensor_topic,omitempty"`
+	DoorSensorTopics []string `json:"door_sensor_topics,omitempty"`
+	KVSKeysSet       int      `json:"kvs_keys_set"`
+	Error            string   `json:"error,omitempty"`
+}
+
+// RoomSetupResult represents the result of room.setup RPC
+type RoomSetupResult struct {
+	RoomsProcessed int                     `json:"rooms_processed"`
+	Devices        []RoomSetupDeviceResult `json:"devices"`
+}

@@ -218,7 +218,7 @@ Tasks:
 - On internet loss: re-serve last cached forecast; if cache is >24 h old, repeat it with `"stale":true`
 - `make test` must pass (mock HTTP for Open-Meteo)
 
-## Phase 3 — iCal integration `[ ]`
+## Phase 3 — iCal integration `[DONE]`
 
 Goal: daemon fetches per-room public iCal URL, distils today's busy slots, publishes retained.
 

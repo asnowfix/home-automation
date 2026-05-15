@@ -298,7 +298,7 @@ Behaviour:
 | heater-controller | 2–3 | 2 |
 | Total per heater device | ≤ 8 of 10 MQTT | ≤ 3 of 5 timers |
 
-## Phase 6 — Rooms UI tab `[ ]`
+## Phase 6 — Rooms UI tab `[DONE]`
 
 Goal: dedicated Rooms tab with per-room view of devices, sensor readings, and gate status.
 

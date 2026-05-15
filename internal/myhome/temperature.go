@@ -60,10 +60,11 @@ type TemperatureSetWeekdayDefaultParams struct {
 
 // TemperatureRoomConfig represents a room's temperature configuration
 type TemperatureRoomConfig struct {
-	RoomID string             `json:"room_id"`
-	Name   string             `json:"name"`
-	Kinds  []RoomKind         `json:"kinds"`  // Room kinds (can be multiple)
-	Levels map[string]float64 `json:"levels"` // Temperature levels: "eco" (default), "comfort", "away", etc.
+	RoomID  string             `json:"room_id"`
+	Name    string             `json:"name"`
+	Kinds   []RoomKind         `json:"kinds"`            // Room kinds (can be multiple)
+	Levels  map[string]float64 `json:"levels"`           // Temperature levels: "eco" (default), "comfort", "away", etc.
+	ICalURL string             `json:"ical_url,omitempty"` // Public iCal URL for room agenda
 }
 
 // TemperatureKindSchedule represents comfort time ranges for a room kind and day type

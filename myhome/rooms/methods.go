@@ -15,10 +15,11 @@ func (s *Service) HandleGet(ctx context.Context, params *myhome.TemperatureGetPa
 	}
 
 	return &myhome.TemperatureRoomConfig{
-		RoomID: config.ID,
-		Name:   config.Name,
-		Kinds:  config.Kinds,
-		Levels: config.Levels,
+		RoomID:  config.ID,
+		Name:    config.Name,
+		Kinds:   config.Kinds,
+		Levels:  config.Levels,
+		ICalURL: config.ICalURL,
 	}, nil
 }
 
@@ -74,10 +75,11 @@ func (s *Service) HandleList(ctx context.Context) (*myhome.TemperatureRoomList, 
 	result := make(myhome.TemperatureRoomList, len(rooms))
 	for roomID, config := range rooms {
 		result[roomID] = &myhome.TemperatureRoomConfig{
-			RoomID: config.ID,
-			Name:   config.Name,
-			Kinds:  config.Kinds,
-			Levels: config.Levels,
+			RoomID:  config.ID,
+			Name:    config.Name,
+			Kinds:   config.Kinds,
+			Levels:  config.Levels,
+			ICalURL: config.ICalURL,
 		}
 	}
 
@@ -352,6 +354,9 @@ func (s *Service) HandleRoomEdit(ctx context.Context, params *myhome.RoomEditPar
 			return &myhome.RoomEditResult{Success: false, Message: "'eco' temperature level is required"}, nil
 		}
 		config.Levels = params.Levels
+	}
+	if params.ICalURL != nil {
+		config.ICalURL = *params.ICalURL
 	}
 
 	if _, err := s.storage.SaveRoom(config); err != nil {

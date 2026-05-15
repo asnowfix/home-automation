@@ -234,7 +234,7 @@ Tasks:
 - UI: iCal URL field in room edit form
 - `make test` must pass (use fixture `.ics` file)
 
-## Phase 4 — Automatic heater device setup `[ ]`
+## Phase 4 — Automatic heater device setup `[DONE]`
 
 Goal: daemon computes and pushes sensor topics to each heater KVS; no more manual strings.
 
@@ -250,7 +250,7 @@ Tasks:
 - CLI: `myhome ctl room setup <room-id>` triggers `SetupRoom` immediately
 - `make test` must pass
 
-## Phase 5 — JS script split `[ ]`
+## Phase 5 — JS script split `[DONE]`
 
 Goal: split heater.js into data-relay.js + heater-controller.js to stay within Shelly resource limits.
 

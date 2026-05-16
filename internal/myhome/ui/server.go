@@ -12,11 +12,12 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/global"
-	"github.com/asnowfix/home-automation/myhome/mqtt"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/internal/myhome/proxy"
-	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/internal/myhome/ui/static"
+	"github.com/asnowfix/home-automation/myhome/events"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/myhome/storage"
 
 	"github.com/go-logr/logr"
 )
@@ -29,7 +30,7 @@ import (
 // - an IPv4/IPv6 address
 // - a .local hostname
 // - any known identifier in the myhome database (name, id, mac, host)
-func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db *storage.DeviceStorage, mc mqtt.Client, sseBroadcaster *SSEBroadcaster) error {
+func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db *storage.DeviceStorage, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string) error {
 	addr := fmt.Sprintf(":%d", listenPort)
 	srv := &http.Server{Addr: addr}
 
@@ -62,7 +63,17 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 			return
 		}
 
-		proxy.Handle(ctx, log, resolver, db, w, r)
+		if path == "event-log" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if err := RenderEventLog(ctx, db, w); err != nil {
+				log.Error(err, "failed to render event log page")
+				http.Error(w, "unable to render event log", http.StatusInternalServerError)
+			}
+			log.Info("served event log", "dur", time.Since(start))
+			return
+		}
+
+		proxy.Handle(ctx, log, resolver, db, upstreamProxy, w, r)
 
 	})
 
@@ -82,11 +93,13 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	})
 
 	// HTMX endpoints for partial HTML responses
-	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db)
+	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc)
 	mux.HandleFunc("/htmx/devices", htmxHandler.DeviceCards)
 	mux.HandleFunc("/htmx/device/", htmxHandler.DeviceCard)
 	mux.HandleFunc("/htmx/rooms", htmxHandler.RoomsList)
 	mux.HandleFunc("/htmx/switch/toggle", htmxHandler.SwitchButton)
+	mux.HandleFunc("/htmx/events", htmxHandler.EventsTable)
+	mux.HandleFunc("/htmx/events/more", htmxHandler.EventsMore)
 
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Info("http-incoming", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "proto", r.Proto, "content-length", r.ContentLength)

@@ -479,7 +479,7 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 		}
 		return &url.URL{
 			Scheme: "tcp",
-			Host:   fmt.Sprintf("%s:%d", ip, PRIVATE_PORT),
+			Host:   net.JoinHostPort(ip.String(), strconv.Itoa(PRIVATE_PORT)),
 		}, nil
 	}
 
@@ -499,7 +499,7 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 		log.Info("Found IP", "addr", ip.String(), "port", port)
 		return &url.URL{
 			Scheme: "tcp",
-			Host:   fmt.Sprintf("%s:%d", ip.String(), port),
+			Host:   net.JoinHostPort(ip.String(), strconv.Itoa(port)),
 		}, nil
 	}
 
@@ -509,7 +509,7 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 		log.Info("Found IP", "addr", ip.String(), "port", port)
 		return &url.URL{
 			Scheme: "tcp",
-			Host:   fmt.Sprintf("%s:%d", ip.String(), PRIVATE_PORT),
+			Host:   net.JoinHostPort(ip.String(), strconv.Itoa(PRIVATE_PORT)),
 		}, nil
 	}
 
@@ -519,7 +519,7 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 		log.Info("Found IP", "addr", ip.String(), "port", port)
 		return &url.URL{
 			Scheme: "tcp",
-			Host:   fmt.Sprintf("%s:%d", ip.String(), PRIVATE_PORT),
+			Host:   net.JoinHostPort(ip.String(), strconv.Itoa(PRIVATE_PORT)),
 		}, nil
 	}
 

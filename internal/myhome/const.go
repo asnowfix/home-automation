@@ -47,6 +47,7 @@ const (
 	SwitchOff                     Verb = "switch.off"
 	SwitchStatus                  Verb = "switch.status"
 	SwitchAll                     Verb = "switch.all"
+	EventList                     Verb = "event.list"
 )
 
 type Key string

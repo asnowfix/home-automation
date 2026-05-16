@@ -305,4 +305,12 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &SwitchAllResult{}
 		},
 	},
+	EventList: {
+		NewParams: func() any {
+			return &EventListRequest{}
+		},
+		NewResult: func() any {
+			return &EventListResponse{}
+		},
+	},
 }

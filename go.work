@@ -32,6 +32,7 @@ use (
 	./myhome/ctl/temperature
 	./myhome/daemon
 	./myhome/daemon/watch
+	./myhome/events
 	./myhome/devices
 	./myhome/devices/impl
 	./myhome/mqtt

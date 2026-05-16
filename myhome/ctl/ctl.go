@@ -9,6 +9,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/ctl/config"
 	ctlmcp "github.com/asnowfix/home-automation/myhome/ctl/mcp"
 	"github.com/asnowfix/home-automation/myhome/ctl/db"
+	eventsctl "github.com/asnowfix/home-automation/myhome/ctl/events"
 	"github.com/asnowfix/home-automation/myhome/ctl/forget"
 	"github.com/asnowfix/home-automation/myhome/ctl/heater"
 	"github.com/asnowfix/home-automation/myhome/ctl/list"
@@ -157,6 +158,7 @@ func init() {
 	Cmd.AddCommand(heater.Cmd)
 	Cmd.AddCommand(pool.PoolCmd())
 	Cmd.AddCommand(room.Cmd)
+	Cmd.AddCommand(eventsctl.Cmd)
 }
 
 var Commit string

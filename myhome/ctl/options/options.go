@@ -80,6 +80,10 @@ var Flags struct {
 	AutoSetup                   bool          // the value taken by --auto-setup / -A
 	NoMdnsPublish               bool          // the value taken by --no-mdns-publish
 	InstanceName                string        // the value taken by --instance / -I
+	EventsDBPath                string        // path to events SQLite database
+	EventsRetention             time.Duration // retention period for event records
+	EnableEventsService         bool          // whether to enable the event recording service
+	RemoteProxy                 string        // the value taken by --remote-proxy; delegates /devices/... to a remote myhome daemon
 }
 
 var Via types.Channel

@@ -7,27 +7,32 @@ import (
 	"html/template"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/asnowfix/home-automation/myhome/storage"
+	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/go-logr/logr"
 )
 
 // HTMXHandler returns handlers for HTMX partial HTML responses
 type HTMXHandler struct {
-	ctx context.Context
-	log logr.Logger
-	db  *storage.DeviceStorage
+	ctx       context.Context
+	log       logr.Logger
+	db        *storage.DeviceStorage
+	eventsSvc *events.Service
 }
 
 // NewHTMXHandler creates a new HTMX handler
-func NewHTMXHandler(ctx context.Context, log logr.Logger, db *storage.DeviceStorage) *HTMXHandler {
+func NewHTMXHandler(ctx context.Context, log logr.Logger, db *storage.DeviceStorage, eventsSvc *events.Service) *HTMXHandler {
 	return &HTMXHandler{
-		ctx: ctx,
-		log: log,
-		db:  db,
+		ctx:       ctx,
+		log:       log,
+		db:        db,
+		eventsSvc: eventsSvc,
 	}
 }
 
@@ -338,6 +343,177 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 	if err := tmpl.Execute(w, data); err != nil {
 		h.log.Error(err, "failed to render switch button")
 		http.Error(w, "render error", http.StatusInternalServerError)
+	}
+}
+
+// EventsTable renders the events table HTMX fragment (newest first, limit 50).
+func (h *HTMXHandler) EventsTable(w http.ResponseWriter, r *http.Request) {
+	h.renderEventsTable(w, r, 0)
+}
+
+// EventsMore renders additional event rows for pagination (appended into tbody).
+func (h *HTMXHandler) EventsMore(w http.ResponseWriter, r *http.Request) {
+	offsetStr := r.URL.Query().Get("offset")
+	offset, _ := strconv.Atoi(offsetStr)
+	h.renderEventsRows(w, r, offset)
+}
+
+// eventRow is the template view for a single event row.
+// Fields are copied explicitly to avoid the embedded-struct name collision:
+// events.Event has a field named Event (string), and embedding events.Event
+// creates an outer field also named Event (the struct itself), shadowing it.
+type eventRow struct {
+	Ts         float64
+	DeviceID   string
+	Component  string
+	Event      string
+	Severity   string
+	Data       *string
+	DeviceName string
+}
+
+// resolveDeviceFilter translates a free-text device filter (name, id, or MAC)
+// into the list of device_id values that may appear in the events table.
+// Both the stored id and the MAC are included because different event sources
+// (Gen2 MQTT vs BLU) store different identifiers as device_id.
+// Falls back to the raw filter string when no device record is found.
+func (h *HTMXHandler) resolveDeviceFilter(filter string) []string {
+	if filter == "" {
+		return nil
+	}
+	d, err := h.db.GetDeviceByAny(h.ctx, filter)
+	if err != nil {
+		if mac := shellyapi.MacFromShellyID(filter); mac != nil {
+			d, err = h.db.GetDeviceByAny(h.ctx, mac.String())
+		}
+	}
+	if err != nil {
+		return []string{filter}
+	}
+	ids := []string{d.Id()}
+	if mac := d.Mac(); mac != nil {
+		if s := mac.String(); s != d.Id() {
+			ids = append(ids, s)
+		}
+	}
+	return ids
+}
+
+// deviceNameMap resolves names for all unique device IDs that appear in evts.
+// It uses GetDeviceByAny so it matches across id, mac, name, and host columns.
+// For Shelly devices whose stored id differs from the MQTT src, it also tries
+// the MAC address derived from the device ID suffix as a fallback.
+// Unknown or unnamed devices are omitted; callers fall back to the raw ID.
+func (h *HTMXHandler) deviceNameMap(evts []events.Event) map[string]string {
+	seen := make(map[string]struct{}, len(evts))
+	for _, e := range evts {
+		seen[e.DeviceID] = struct{}{}
+	}
+	m := make(map[string]string, len(seen))
+	for id := range seen {
+		d, err := h.db.GetDeviceByAny(h.ctx, id)
+		if err != nil {
+			if mac := shellyapi.MacFromShellyID(id); mac != nil {
+				d, err = h.db.GetDeviceByAny(h.ctx, mac.String())
+			}
+		}
+		if err != nil {
+			continue
+		}
+		if n := d.Name(); n != "" && n != id {
+			m[id] = n
+		}
+	}
+	return m
+}
+
+// toEventRows decorates a slice of events with device names from the map.
+func toEventRows(evts []events.Event, names map[string]string) []eventRow {
+	rows := make([]eventRow, len(evts))
+	for i, e := range evts {
+		rows[i] = eventRow{
+			Ts:         e.Ts,
+			DeviceID:   e.DeviceID,
+			Component:  e.Component,
+			Event:      e.Event,
+			Severity:   e.Severity,
+			Data:       e.Data,
+			DeviceName: names[e.DeviceID],
+		}
+	}
+	return rows
+}
+
+func (h *HTMXHandler) buildQuery(r *http.Request, offset int) events.Query {
+	device := r.URL.Query().Get("device")
+	evType := r.URL.Query().Get("type")
+	severity := r.URL.Query().Get("severity")
+	q := events.Query{
+		DeviceIDs: h.resolveDeviceFilter(device),
+		EventType: evType,
+		Severity:  severity,
+		Since:     24 * time.Hour,
+		Limit:     50,
+		Offset:    offset,
+	}
+	return q
+}
+
+func (h *HTMXHandler) renderEventsTable(w http.ResponseWriter, r *http.Request, offset int) {
+	if h.eventsSvc == nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, `<p class="has-text-grey">Event service not available.</p>`)
+		return
+	}
+
+	q := h.buildQuery(r, offset)
+	evts, err := h.eventsSvc.Store().Query(h.ctx, q)
+	if err != nil {
+		h.log.Error(err, "EventsTable: failed to query events")
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+
+	data := map[string]interface{}{
+		"Events":   toEventRows(evts, h.deviceNameMap(evts)),
+		"Offset":   offset + len(evts),
+		"Device":   r.URL.Query().Get("device"),
+		"Type":     q.EventType,
+		"Severity": q.Severity,
+	}
+
+	tmpl := template.Must(template.New("events-table").Funcs(eventTemplateFuncs()).Parse(eventsTableTemplate))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.Execute(w, data); err != nil {
+		h.log.Error(err, "EventsTable: failed to render template")
+	}
+}
+
+func (h *HTMXHandler) renderEventsRows(w http.ResponseWriter, r *http.Request, offset int) {
+	if h.eventsSvc == nil {
+		return
+	}
+
+	q := h.buildQuery(r, offset)
+	evts, err := h.eventsSvc.Store().Query(h.ctx, q)
+	if err != nil {
+		h.log.Error(err, "EventsMore: failed to query events")
+		http.Error(w, "query error", http.StatusInternalServerError)
+		return
+	}
+
+	data := map[string]interface{}{
+		"Events":   toEventRows(evts, h.deviceNameMap(evts)),
+		"Offset":   offset + len(evts),
+		"Device":   r.URL.Query().Get("device"),
+		"Type":     q.EventType,
+		"Severity": q.Severity,
+	}
+
+	tmpl := template.Must(template.New("events-rows").Funcs(eventTemplateFuncs()).Parse(eventsRowsTemplate))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.Execute(w, data); err != nil {
+		h.log.Error(err, "EventsMore: failed to render template")
 	}
 }
 

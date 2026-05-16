@@ -13,16 +13,28 @@ import (
 	"net/url"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/jackpal/gateway"
 )
 
 var (
-	boxIp         net.IP
-	boxIpMutex    sync.Mutex
-	boxIpInitOnce sync.Once
-	log           logr.Logger
+	boxIp      net.IP
+	boxIpMutex sync.Mutex
+	log        logr.Logger
+
+	// sfrHTTPClient is used for all SFR box HTTP calls.
+	// - Timeout: makes gateway probing fail fast when the router is unreachable
+	//   (e.g. running behind a proxy or during a transient network issue) instead
+	//   of blocking indefinitely on the default http.Client.
+	// - Proxy: honours HTTP_PROXY / HTTPS_PROXY / NO_PROXY env vars so that an
+	//   SSH SOCKS tunnel (ssh -D 1080 home-pi) can forward requests to the home LAN
+	//   when the daemon is running on a machine without direct LAN access.
+	sfrHTTPClient = &http.Client{
+		Timeout:   3 * time.Second,
+		Transport: http.DefaultTransport,
+	}
 )
 
 func getBoxIp(ctx context.Context) net.IP {
@@ -39,26 +51,34 @@ func getBoxIp(ctx context.Context) net.IP {
 	}
 	log = log.WithName("sfr")
 
-	boxIpInitOnce.Do(func() {
-		ips, err := gateway.DiscoverGateways()
-		if err != nil {
-			log.Error(err, "Failed to discover gateway")
-			return
+	// Allow explicit override via env var (useful when running remotely or when
+	// gateway discovery fails because the host is multi-homed / behind a VPN).
+	if override := os.Getenv("SFR_BOX_IP"); override != "" {
+		if ip := net.ParseIP(override); ip != nil {
+			log.Info("Using SFR box IP from SFR_BOX_IP env", "ip", ip.String())
+			boxIp = ip
+			return boxIp
 		}
+		log.Error(fmt.Errorf("invalid IP: %s", override), "SFR_BOX_IP env var ignored")
+	}
 
-		// loop on every IP's, trying to test public API
-		for _, ip := range ips {
-			log.Info("Testing gateway IP", "ip", ip.String())
-			info, err := GetLanInfo(ctx, ip)
-			if err == nil {
-				log.Info("Discovered gateway IP", "ip", ip.String(), "info", info)
-				boxIp = ip
-				return
-			} else {
-				log.V(1).Info("Skipping potential gateway", "ip", ip, "error", err)
-			}
+	ips, err := gateway.DiscoverGateways()
+	if err != nil {
+		log.Error(err, "Failed to discover gateway")
+		return nil
+	}
+
+	// loop on every IP, trying to test the SFR public API
+	for _, ip := range ips {
+		log.Info("Testing gateway IP", "ip", ip.String())
+		info, err := GetLanInfo(ctx, ip)
+		if err == nil {
+			log.Info("Discovered gateway IP", "ip", ip.String(), "info", info)
+			boxIp = ip
+			return boxIp
 		}
-	})
+		log.V(1).Info("Skipping potential gateway", "ip", ip, "error", err)
+	}
 
 	return boxIp
 }
@@ -214,7 +234,7 @@ func queryBox(ip net.IP, method string, params *map[string]string) (any, error) 
 
 // tweaked from: https://stackoverflow.com/a/42718113/1170664
 func getXML(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+	resp, err := sfrHTTPClient.Get(url)
 	if err != nil {
 		return []byte{}, fmt.Errorf("GET error: %v", err)
 	}

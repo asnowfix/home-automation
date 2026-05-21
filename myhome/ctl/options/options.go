@@ -68,6 +68,11 @@ var Flags struct {
 	EnableGen1Proxy             bool
 	EnableOccupancyService      bool
 	EnableTemperatureService    bool
+	EnableElectricityService    bool
+	ElectricityCheapStart       string  // HH:MM, e.g. "23:15"
+	ElectricityCheapEnd         string  // HH:MM, e.g. "07:15"
+	WeatherLatitude             float64 // decimal degrees
+	WeatherLongitude            float64 // decimal degrees
 	EnableMetricsExporter       bool
 	MetricsExporterPort         int
 	MetricsExporterTopic        string

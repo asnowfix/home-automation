@@ -17,6 +17,7 @@ func defaultEventsDBPath() string {
 var disableGen1Proxy bool
 var disableOccupancyService bool
 var disableTemperatureService bool
+var disableElectricityService bool
 var disableAutoSetup bool
 var disableEventsService bool
 
@@ -41,6 +42,12 @@ func init() {
 	runCmd.PersistentFlags().BoolVar(&disableOccupancyService, "disable-occupancy-service", false, "Disable the occupancy service (mutually exclusive with --enable-occupancy-service)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableTemperatureService, "enable-temperature-service", false, "Enable the temperature service (auto-enabled with device manager)")
 	runCmd.PersistentFlags().BoolVar(&disableTemperatureService, "disable-temperature-service", false, "Disable the temperature service (mutually exclusive with --enable-temperature-service)")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableElectricityService, "enable-electricity-service", false, "Enable the electricity pricing publisher (auto-enabled with device manager)")
+	runCmd.PersistentFlags().BoolVar(&disableElectricityService, "disable-electricity-service", false, "Disable the electricity pricing publisher (mutually exclusive with --enable-electricity-service)")
+	runCmd.PersistentFlags().StringVar(&options.Flags.ElectricityCheapStart, "electricity-cheap-start", "23:15", "Start of the cheap electricity window (HH:MM)")
+	runCmd.PersistentFlags().StringVar(&options.Flags.ElectricityCheapEnd, "electricity-cheap-end", "07:15", "End of the cheap electricity window (HH:MM)")
+	runCmd.PersistentFlags().Float64Var(&options.Flags.WeatherLatitude, "weather-latitude", 0, "Location latitude for weather forecast (decimal degrees)")
+	runCmd.PersistentFlags().Float64Var(&options.Flags.WeatherLongitude, "weather-longitude", 0, "Location longitude for weather forecast (decimal degrees)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableMetricsExporter, "enable-metrics-exporter", false, "Enable the Prometheus metrics exporter (auto-enabled with device manager)")
 	runCmd.PersistentFlags().IntVar(&options.Flags.MetricsExporterPort, "metrics-exporter-port", options.PROMETHEUS_DEFAULT_PORT, "Prometheus metrics exporter HTTP port")
 	runCmd.PersistentFlags().StringVar(&options.Flags.MetricsExporterTopic, "metrics-exporter-topic", "shelly/metrics", "MQTT topic for Shelly device metrics")
@@ -54,6 +61,7 @@ func init() {
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
+	runCmd.MarkFlagsMutuallyExclusive("enable-electricity-service", "disable-electricity-service")
 }
 
 var runCmd = &cobra.Command{
@@ -137,6 +145,21 @@ var runCmd = &cobra.Command{
 		if v.IsSet("daemon.enable_temperature_service") && !cmd.Flags().Changed("enable-temperature-service") {
 			options.Flags.EnableTemperatureService = v.GetBool("daemon.enable_temperature_service")
 		}
+		if v.IsSet("daemon.enable_electricity_service") && !cmd.Flags().Changed("enable-electricity-service") {
+			options.Flags.EnableElectricityService = v.GetBool("daemon.enable_electricity_service")
+		}
+		if v.IsSet("electricity.cheap_start") && !cmd.Flags().Changed("electricity-cheap-start") {
+			options.Flags.ElectricityCheapStart = v.GetString("electricity.cheap_start")
+		}
+		if v.IsSet("electricity.cheap_end") && !cmd.Flags().Changed("electricity-cheap-end") {
+			options.Flags.ElectricityCheapEnd = v.GetString("electricity.cheap_end")
+		}
+		if v.IsSet("weather.latitude") && !cmd.Flags().Changed("weather-latitude") {
+			options.Flags.WeatherLatitude = v.GetFloat64("weather.latitude")
+		}
+		if v.IsSet("weather.longitude") && !cmd.Flags().Changed("weather-longitude") {
+			options.Flags.WeatherLongitude = v.GetFloat64("weather.longitude")
+		}
 		if v.IsSet("daemon.disable_device_manager") && !cmd.Flags().Changed("disable-device-manager") {
 			disableDeviceManager = v.GetBool("daemon.disable_device_manager")
 		}
@@ -201,6 +224,16 @@ var runCmd = &cobra.Command{
 			options.Flags.EnableEventsService = !disableDeviceManager
 			if options.Flags.EnableEventsService {
 				log.Info("Auto-enabling events service (device manager enabled)")
+			}
+		}
+
+		// Handle electricity service flags — auto-enable with device manager
+		if cmd.Flags().Changed("disable-electricity-service") && disableElectricityService {
+			options.Flags.EnableElectricityService = false
+		} else if !cmd.Flags().Changed("enable-electricity-service") && !cmd.Flags().Changed("disable-electricity-service") {
+			options.Flags.EnableElectricityService = !disableDeviceManager
+			if options.Flags.EnableElectricityService {
+				log.Info("Auto-enabling electricity service (device manager enabled)")
 			}
 		}
 

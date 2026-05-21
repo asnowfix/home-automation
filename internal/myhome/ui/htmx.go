@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -103,26 +104,184 @@ func (h *HTMXHandler) DeviceCard(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// roomDeviceView summarises one device assigned to a room.
+type roomDeviceView struct {
+	ID   string
+	Name string
+	Role string // "heater", "temp-sensor", "door-sensor", "other"
+}
+
+// agendaSlot mirrors the JSON stored in room_agenda_cache.
+type agendaSlot struct {
+	S int `json:"s"` // start minutes since midnight
+	E int `json:"e"` // end minutes since midnight
+}
+
+// RoomView is the template data for a single room card.
+type RoomView struct {
+	ID      string
+	Name    string
+	Kinds   []string
+	Levels  map[string]float64
+	ICalURL string
+
+	Devices []roomDeviceView
+	// today's agenda from cache (nil if not available)
+	AgendaSlots []agendaSlot
+	AgendaNow   bool   // is current time in a busy slot?
+	AgendaNext  string // e.g. "busy at 18:00" or "free until 22:00"
+}
+
+func (h *HTMXHandler) roomAgenda(roomID string) []agendaSlot {
+	var row struct {
+		Slots string `db:"slots"`
+	}
+	if err := h.db.DB().Get(&row, `SELECT slots FROM room_agenda_cache WHERE room_id = ?`, roomID); err != nil {
+		return nil
+	}
+	var slots []agendaSlot
+	if err := json.Unmarshal([]byte(row.Slots), &slots); err != nil {
+		return nil
+	}
+	return slots
+}
+
+func formatMinutes(m int) string {
+	return fmt.Sprintf("%02d:%02d", m/60, m%60)
+}
+
+func agendaStatus(slots []agendaSlot) (inBusy bool, next string) {
+	now := time.Now()
+	currentMin := now.Hour()*60 + now.Minute()
+	for _, s := range slots {
+		if currentMin >= s.S && currentMin < s.E {
+			return true, "free at " + formatMinutes(s.E)
+		}
+	}
+	// find next upcoming slot
+	for _, s := range slots {
+		if s.S > currentMin {
+			return false, "busy at " + formatMinutes(s.S)
+		}
+	}
+	return false, ""
+}
+
+func deviceRoleLabel(d *myhome.Device) string {
+	id := strings.ToLower(d.Id())
+	if strings.HasPrefix(id, "shellyblu-") {
+		if d.Info != nil && d.Info.BTHome != nil {
+			for _, cap := range d.Info.BTHome.Capabilities {
+				if cap == "window" {
+					return "door-sensor"
+				}
+			}
+			for _, cap := range d.Info.BTHome.Capabilities {
+				if cap == "temperature" {
+					return "temp-sensor"
+				}
+			}
+		}
+		return "other"
+	}
+	if strings.HasPrefix(id, "shellyht-") {
+		return "temp-sensor"
+	}
+	return "heater"
+}
+
 // RoomsList renders the rooms list HTML fragment
 func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
-	// Call the temperature.list RPC method
 	mh, err := myhome.Methods(myhome.TemperatureList)
 	if err != nil {
 		http.Error(w, "method not found", http.StatusInternalServerError)
 		return
 	}
 
-	params := mh.Signature.NewParams()
-	res, err := mh.ActionE(h.ctx, params)
+	res, err := mh.ActionE(h.ctx, mh.Signature.NewParams())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	tmpl := template.Must(template.New("rooms-list").Parse(roomsListTemplate))
+	roomMap, ok := res.(*myhome.TemperatureRoomList)
+	if !ok {
+		http.Error(w, "unexpected result type", http.StatusInternalServerError)
+		return
+	}
+
+	views := make([]RoomView, 0, len(*roomMap))
+	for _, rc := range *roomMap {
+		kinds := make([]string, len(rc.Kinds))
+		for i, k := range rc.Kinds {
+			kinds[i] = string(k)
+		}
+
+		var devViews []roomDeviceView
+		devices, _ := h.db.GetDevicesByRoom(h.ctx, rc.RoomID)
+		for _, d := range devices {
+			name := d.Name()
+			if name == "" {
+				name = d.Id()
+			}
+			devViews = append(devViews, roomDeviceView{
+				ID:   d.Id(),
+				Name: name,
+				Role: deviceRoleLabel(d),
+			})
+		}
+
+		slots := h.roomAgenda(rc.RoomID)
+		inBusy, nextLabel := agendaStatus(slots)
+
+		views = append(views, RoomView{
+			ID:          rc.RoomID,
+			Name:        rc.Name,
+			Kinds:       kinds,
+			Levels:      rc.Levels,
+			ICalURL:     rc.ICalURL,
+			Devices:     devViews,
+			AgendaSlots: slots,
+			AgendaNow:   inBusy,
+			AgendaNext:  nextLabel,
+		})
+	}
+
+	sort.Slice(views, func(i, j int) bool {
+		return views[i].Name < views[j].Name
+	})
+
+	tmpl := template.Must(template.New("rooms-list").Funcs(template.FuncMap{
+		"kindColor": func(k string) string {
+			switch k {
+			case "bedroom":
+				return "is-info"
+			case "office":
+				return "is-warning"
+			case "living-room":
+				return "is-success"
+			case "kitchen":
+				return "is-danger"
+			default:
+				return "is-light"
+			}
+		},
+		"roleEmoji": func(role string) string {
+			switch role {
+			case "heater":
+				return "🔥"
+			case "temp-sensor":
+				return "🌡️"
+			case "door-sensor":
+				return "🚪"
+			default:
+				return "📦"
+			}
+		},
+	}).Parse(roomsListTemplate))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.Execute(w, res); err != nil {
+	if err := tmpl.Execute(w, views); err != nil {
 		h.log.Error(err, "failed to render rooms list")
 		http.Error(w, "render error", http.StatusInternalServerError)
 	}
@@ -582,37 +741,62 @@ const deviceCardTemplate = `
 `
 
 const roomsListTemplate = `
-{{$rooms := .}}
-{{if $rooms}}
-  {{range $roomId, $room := $rooms}}
-    <div class="column is-4">
-      <div class="box">
-        <div class="level mb-2">
-          <div class="level-left"><strong>{{if $room.Name}}{{$room.Name}}{{else}}{{$roomId}}{{end}}</strong></div>
-          <div class="level-right">
-            <button class="button is-small is-info is-outlined mr-1" 
-                    @click="$dispatch('edit-room', {roomId: '{{$roomId}}'})"
-                    title="Edit">✏️</button>
-            <button class="button is-small is-danger is-outlined" 
-                    @click="$dispatch('delete-room', {roomId: '{{$roomId}}', roomName: '{{if $room.Name}}{{$room.Name}}{{else}}{{$roomId}}{{end}}'})"
-                    title="Delete">🗑️</button>
+{{if .}}
+  {{range .}}
+  <div class="column is-4-desktop is-6-tablet">
+    <div class="box">
+      <div class="level mb-2">
+        <div class="level-left">
+          <div>
+            <strong>{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</strong>
+            {{if .ICalURL}}<span class="ml-1" title="iCal agenda configured">📅</span>{{end}}
+            <p class="is-size-7 has-text-grey">{{.ID}}</p>
           </div>
         </div>
-        <p class="is-size-7 has-text-grey">ID: {{$roomId}}</p>
-        {{if $room.Kinds}}
-          <p class="is-size-7">Types: {{range $i, $k := $room.Kinds}}{{if $i}}, {{end}}{{$k}}{{end}}</p>
-        {{end}}
-        {{if $room.Levels}}
-          <p class="is-size-7">Levels: 
-            {{range $k, $v := $room.Levels}}{{$k}}: {{$v}}°C {{end}}
-          </p>
+        <div class="level-right">
+          <button class="button is-small is-ghost mr-1"
+                  @click="$dispatch('edit-room', {roomId: '{{.ID}}'})"
+                  title="Edit">✏️</button>
+          <button class="button is-small is-ghost"
+                  @click="$dispatch('delete-room', {roomId: '{{.ID}}', roomName: '{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}'})"
+                  title="Delete">🗑️</button>
+        </div>
+      </div>
+
+      {{if .Kinds}}
+      <div class="tags mb-2">
+        {{range .Kinds}}<span class="tag {{kindColor .}}">{{.}}</span>{{end}}
+      </div>
+      {{end}}
+
+      {{if .Levels}}
+      <p class="is-size-7 mb-2">
+        {{with index .Levels "eco"}}eco {{printf "%.0f" .}}°C{{end}}
+        {{with index .Levels "comfort"}} · comfort {{printf "%.0f" .}}°C{{end}}
+        {{with index .Levels "away"}} · away {{printf "%.0f" .}}°C{{end}}
+      </p>
+      {{end}}
+
+      {{if .AgendaSlots}}
+      <p class="is-size-7 mb-2">
+        {{if .AgendaNow}}<span class="tag is-success is-light">busy now</span>{{else}}<span class="tag is-light">free now</span>{{end}}
+        {{if .AgendaNext}}<span class="has-text-grey ml-1">{{.AgendaNext}}</span>{{end}}
+      </p>
+      {{end}}
+
+      {{if .Devices}}
+      <div class="mt-2">
+        {{range .Devices}}
+        <p class="is-size-7">{{roleEmoji .Role}} <a href="/devices/{{.ID}}/" target="_blank" rel="noopener noreferrer">{{.Name}}</a></p>
         {{end}}
       </div>
+      {{end}}
     </div>
+  </div>
   {{end}}
 {{else}}
   <div class="column is-12">
-    <p class="has-text-grey">No rooms configured yet.</p>
+    <p class="has-text-grey">No rooms configured yet. Click <strong>+ Add Room</strong> to create one.</p>
   </div>
 {{end}}
 `

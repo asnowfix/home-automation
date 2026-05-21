@@ -18,9 +18,12 @@ import (
 	"github.com/asnowfix/home-automation/myhome/metrics"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	mqttserver "github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/myhome/electricity"
+	"github.com/asnowfix/home-automation/myhome/ical"
 	"github.com/asnowfix/home-automation/myhome/occupancy"
+	"github.com/asnowfix/home-automation/myhome/rooms"
 	"github.com/asnowfix/home-automation/myhome/storage"
-	"github.com/asnowfix/home-automation/myhome/temperature"
+	"github.com/asnowfix/home-automation/myhome/weather"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
 	"github.com/go-logr/logr"
@@ -291,22 +294,99 @@ func (d *daemon) Run() error {
 			log.Info("EventList RPC handler registered")
 		}
 
-		// Register Temperature RPC methods if enabled
-		if options.Flags.EnableTemperatureService {
-			log.Info("Initializing temperature RPC methods")
-
-			// Create temperature storage using the same database
-			tempStorage, err := temperature.NewStorage(log, storage.DB())
+		// Start electricity pricing publisher if enabled
+		if options.Flags.EnableElectricityService {
+			log.Info("Starting electricity pricing publisher",
+				"cheap_start", options.Flags.ElectricityCheapStart,
+				"cheap_end", options.Flags.ElectricityCheapEnd)
+			pricer, err := electricity.NewFixedWindowPricer(
+				options.Flags.ElectricityCheapStart,
+				options.Flags.ElectricityCheapEnd,
+			)
 			if err != nil {
-				log.Error(err, "Failed to initialize temperature storage")
+				log.Error(err, "Failed to create electricity pricer — check cheap_start/cheap_end config")
+			} else {
+				pub := electricity.NewPublisher(log, pricer, mc)
+				go pub.Run(d.ctx)
+				log.Info("Electricity pricing publisher started")
+			}
+		}
+
+		// Start weather forecast publisher if lat/lon are configured
+		if options.Flags.WeatherLatitude != 0 || options.Flags.WeatherLongitude != 0 {
+			log.Info("Starting weather forecast publisher",
+				"lat", options.Flags.WeatherLatitude,
+				"lon", options.Flags.WeatherLongitude)
+			forecaster, err := weather.New(log, options.Flags.WeatherLatitude, options.Flags.WeatherLongitude, mc, storage.DB())
+			if err != nil {
+				log.Error(err, "Failed to create weather forecaster — check weather.latitude/longitude config")
+			} else {
+				go forecaster.Run(d.ctx)
+				log.Info("Weather forecast publisher started")
+			}
+		}
+
+		// Register Rooms RPC methods if enabled; also start iCal agenda publisher
+		if options.Flags.EnableTemperatureService {
+			log.Info("Initializing rooms RPC methods")
+
+			roomsStorage, err := rooms.NewStorage(log, storage.DB())
+			if err != nil {
+				log.Error(err, "Failed to initialize rooms storage")
 				return err
 			}
 
-			// Create and register temperature method handlers, republishing temperature ranges at startup
-			tempHandlers := temperature.NewService(d.ctx, log, mc, tempStorage)
-			tempHandlers.RegisterHandlers()
+			roomsSvc := rooms.NewService(d.ctx, log, mc, roomsStorage)
+			roomsSvc.RegisterHandlers()
 
-			log.Info("Temperature RPC methods registered")
+			// Start iCal agenda fetcher — polls room iCal URLs and publishes busy slots
+			icalFetcher, err := ical.New(log, mc, storage.DB())
+			if err != nil {
+				log.Error(err, "Failed to create iCal fetcher")
+			} else {
+				go icalFetcher.Run(d.ctx, func() map[string]string {
+					roomMap, err := roomsStorage.ListRooms()
+					if err != nil {
+						log.Error(err, "Failed to list rooms for iCal refresh")
+						return nil
+					}
+					urls := make(map[string]string, len(roomMap))
+					for id, r := range roomMap {
+						urls[id] = r.ICalURL
+					}
+					return urls
+				})
+				log.Info("iCal agenda fetcher started")
+			}
+
+			// Register room.setup RPC backed by the device manager
+			if d.dm != nil {
+				rooms.RegisterSetupHandler(func(ctx context.Context, roomID string) (*myhome.RoomSetupResult, error) {
+					return d.dm.SetupRoom(ctx, roomID)
+				})
+			}
+
+			// Run initial room setup + daily refresh
+			go func() {
+				if d.dm != nil {
+					d.dm.SetupAllRooms(d.ctx)
+				}
+
+				ticker := time.NewTicker(24 * time.Hour)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-d.ctx.Done():
+						return
+					case <-ticker.C:
+						if d.dm != nil {
+							d.dm.SetupAllRooms(d.ctx)
+						}
+					}
+				}
+			}()
+
+			log.Info("Rooms RPC methods registered")
 		}
 
 		// Register Occupancy RPC methods if enabled

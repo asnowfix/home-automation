@@ -99,10 +99,11 @@ type RoomCreateResult struct {
 
 // RoomEditParams represents parameters for room.edit RPC
 type RoomEditParams struct {
-	ID     string             `json:"id"`               // Room ID (required, cannot be changed)
-	Name   *string            `json:"name,omitempty"`   // New room name
-	Kinds  []RoomKind         `json:"kinds,omitempty"`  // Room kinds (bedroom, office, etc.)
-	Levels map[string]float64 `json:"levels,omitempty"` // Temperature levels (eco, comfort, away)
+	ID      string             `json:"id"`                // Room ID (required, cannot be changed)
+	Name    *string            `json:"name,omitempty"`    // New room name
+	Kinds   []RoomKind         `json:"kinds,omitempty"`   // Room kinds (bedroom, office, etc.)
+	Levels  map[string]float64 `json:"levels,omitempty"`  // Temperature levels (eco, comfort, away)
+	ICalURL *string            `json:"ical_url,omitempty"` // Public iCal URL for room agenda
 }
 
 // RoomEditResult represents the result of room.edit RPC

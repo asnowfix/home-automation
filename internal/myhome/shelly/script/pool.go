@@ -166,11 +166,25 @@ func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *sh
 	defer cancel()
 
 	minify := !opts.NoMinify
-	scriptResult, err := UploadWithVersion(uploadCtx, s.log, via, sd, scriptName, buf, minify, opts.ForceUpload)
+	uploadedID, err := UploadWithVersion(uploadCtx, s.log, via, sd, scriptName, buf, minify, opts.ForceUpload)
 	if err != nil {
 		return fmt.Errorf("failed to upload/start %s: %w", scriptName, err)
 	}
-	fmt.Printf("  → Script uploaded and started on %s (id:%d)\n", sd.Name(), scriptResult)
+
+	// UploadWithVersion returns 0 when the version matched and no upload was performed.
+	// Fetch the real script ID in that case — schedules reference it by ID, so using 0
+	// would create broken schedules that silently fail to call any handler at fire time.
+	scriptID := int(uploadedID)
+	if scriptID == 0 {
+		status, err := pkgscript.ScriptStatus(ctx, sd, via, scriptName)
+		if err != nil || status == nil {
+			return fmt.Errorf("script version unchanged but failed to get script ID for %s: %w", scriptName, err)
+		}
+		scriptID = int(status.Id)
+		fmt.Printf("  → Script unchanged on %s (id:%d)\n", sd.Name(), scriptID)
+	} else {
+		fmt.Printf("  → Script uploaded and started on %s (id:%d)\n", sd.Name(), scriptID)
+	}
 
 	// Pause to let script initialize and device settle
 	time.Sleep(2 * time.Second)
@@ -196,7 +210,7 @@ func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *sh
 
 	// Reconcile schedules on every device in the mesh — each device's script
 	// self-selects via isMyTurnToRun() so only the preferred device activates.
-	if err := s.reconcileSchedules(ctx, via, sd, int(scriptResult)); err != nil {
+	if err := s.reconcileSchedules(ctx, via, sd, scriptID); err != nil {
 		return fmt.Errorf("failed to reconcile schedules: %w", err)
 	}
 
@@ -603,8 +617,9 @@ func (s *PoolService) Start(ctx context.Context, deviceID string, speed Speed) e
 		return fmt.Errorf("invalid speed: %s", speed)
 	}
 
-	// Call doStart() in the script to use unified logic
-	code := fmt.Sprintf("doStart(%d, 'Manual start via ctl pool start %s')", switchID, speed)
+	// Call doStart() in the script to use unified logic.
+	// doStart() expects a speed string ('eco'/'mid'/'high'), not a switch ID integer.
+	code := fmt.Sprintf("doStart('%s', 'Manual start via ctl pool start %s')", speed, speed)
 
 	result, err := pkgscript.EvalInDevice(ctx, via, sd, "pool-pump.js", code)
 	if err != nil {

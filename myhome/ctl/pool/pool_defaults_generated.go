@@ -13,4 +13,12 @@ const (
 	DefaultNightRunDuration     = 3600000 * time.Millisecond
 	DefaultGraceDelay           = 10000 * time.Millisecond
 	DefaultTemperatureThreshold = 20
+	DefaultPoolVolume           = 46
+	DefaultTurnover             = 5
+	DefaultMaxFlowRate          = 31
+	DefaultMaxRpm               = 2900
+	DefaultEcoRpm               = 2000
+	DefaultMidRpm               = 2600
+	DefaultHighRpm              = 2900
+	DefaultMaxTemp              = 35
 )

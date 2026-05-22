@@ -139,13 +139,15 @@ Schedules are created on **all devices** in the mesh. Each device's script self-
 | Schedule | Timespec | Handler | Default state |
 |----------|----------|---------|---------------|
 | Daily check | `@sunrise` daily | `handleDailyCheck()` | Enabled |
-| Morning start | `@sunrise+3h` daily | `handleMorningStart()` | **Disabled** (summer only) |
-| Evening stop | `@sunset` daily | `handleEveningStop()` | **Disabled** (summer only) |
+| Morning start | Absolute `HH:MM` (updated daily) | `handleMorningStart()` | **Disabled** (summer only) |
+| Evening stop | Absolute `HH:MM` (updated daily) | `handleEveningStop()` | **Disabled** (summer only) |
 | Night start | `23:15` daily | `handleNightStart()` | Enabled |
 | Night stop | `00:15` daily | `handleNightStop()` | Enabled |
 
+Morning-start and evening-stop timespecs are recalculated each morning by `handleDailyCheck()` and written directly to the Shelly schedule via `Schedule.Update`. The initial timespec created by `ctl pool add` is `@sunrise+3h` / `@sunset` and is overwritten on the first daily check.
+
 ### Schedule modes
-- **Summer** (`maxForecastTemp > temperatureThreshold`): morning/evening schedules enabled, night schedules disabled
+- **Summer** (`maxForecastTemp > temperatureThreshold`): morning/evening schedules enabled (with computed absolute times), night schedules disabled
 - **Winter** (default): night schedules enabled, morning/evening disabled
 
 Mode is determined daily at sunrise via Open-Meteo forecast, stored in KVS (`schedule-mode`).
@@ -158,6 +160,45 @@ Mode is determined daily at sunrise via Open-Meteo forecast, stored in KVS (`sch
 - Fetched once per day (date-gated)
 - Only the **max temperature** is retained in `STATE.maxForecastTemp`; the full array is discarded immediately to save memory
 - On error, forecast is skipped and current schedule mode is preserved
+
+---
+
+## Temperature-Proportional Scheduling
+
+Every morning at sunrise, `handleDailyCheck()` fetches the Open-Meteo forecast (which now includes `daily=sunrise,sunset`), computes how many hours the pump should run today, centres that window on the hottest forecast hour, and calls `Schedule.Update` to write absolute `HH:MM` timespecs for the morning-start and evening-stop schedules.
+
+### Run-hours calculation
+
+1. **Base hours** = `(poolVolume × turnover) / flowRate`
+   - `flowRate` is computed from `maxFlowRate × (preferredSpeedRpm / maxRpm)`
+   - `preferredSpeed` maps to one of `ecoRpm` / `midRpm` / `highRpm`
+2. **Scale factor** = clamp(`(todayMaxTemp − tempThreshold) / (maxTemp − tempThreshold)`, 0, 1)
+3. **Run hours** = `baseHours × scale`, clamped to `[baseHours × 0.5, baseHours × 1.5]`
+
+At `tempThreshold` the pump runs at half base hours; at `maxTemp` it runs at full base hours (one turnover). At temperatures above `maxTemp` the cap prevents overshooting.
+
+### Window centering
+
+The run window is centered on the peak-temperature hour from the forecast:
+
+```
+startHour = peakHour − runHours / 2
+stopHour  = peakHour + runHours / 2
+```
+
+Boundary enforcement (applied in order):
+- If `startHour < sunriseHour + 1h` → shift window forward
+- If `stopHour > sunsetHour − 0.5h` → shift window backward
+- Hard floor of `sunriseHour + 1h` applied after both shifts
+
+### Fallback values
+
+| Condition | Fallback used |
+|-----------|--------------|
+| `peakForecastHour` not available | 14:00 |
+| `sunriseHour` not available | 06:00 |
+| `sunsetHour` not available | 21:00 |
+| Flow rate zero / invalid | 8 hours |
 
 ---
 
@@ -180,6 +221,14 @@ All keys use prefix `script/pool-pump/` (≤ 32 chars total).
 | `grace-delay` | `10000` | Cross-device switchover delay (ms) |
 | `night-duration` | `3600000` | Night run duration (ms) |
 | `temp-threshold` | `20` | °C threshold for summer mode |
+| `pool-volume`    | `46`  | Pool volume in m³ |
+| `turnover`       | `5`   | Daily turnover target (× pool volumes) |
+| `max-flow-rate`  | `31`  | Pump max flow rate (m³/h at max RPM) |
+| `max-rpm`        | `2900` | Pump physical rated max RPM |
+| `eco-rpm`        | `2000` | Variator RPM setting for eco speed |
+| `mid-rpm`        | `2600` | Variator RPM setting for mid speed |
+| `high-rpm`       | `2900` | Variator RPM setting for high speed |
+| `max-temp`       | `35`  | °C at which run time = one full turnover |
 
 ### State (managed by script, per device)
 | Key | Notes |
@@ -234,4 +283,4 @@ Peak simultaneous: **2** (task queue + grace timer). Well within the 5-timer lim
 | Timers | 5 | ≤ 2 |
 | Event subscriptions | 5 | 1 (`addEventHandler`) |
 | MQTT subscriptions | 10 | ≤ 4 (1 per peer switch topic) |
-| KVS keys | — | ≤ 12 config + 2 state |
+| KVS keys | — | ≤ 20 config + 2 state |

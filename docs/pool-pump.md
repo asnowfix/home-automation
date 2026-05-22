@@ -165,40 +165,70 @@ Mode is determined daily at sunrise via Open-Meteo forecast, stored in KVS (`sch
 
 ## Temperature-Proportional Scheduling
 
-Every morning at sunrise, `handleDailyCheck()` fetches the Open-Meteo forecast (which now includes `daily=sunrise,sunset`), computes how many hours the pump should run today, centres that window on the hottest forecast hour, and calls `Schedule.Update` to write absolute `HH:MM` timespecs for the morning-start and evening-stop schedules.
+Every morning at sunrise, `handleDailyCheck()` fetches the Open-Meteo forecast (which includes `hourly=temperature_2m&daily=sunrise,sunset`), computes how many hours the pump should run today, centres that window on the hottest forecast hour, and calls `Schedule.Update` to write absolute `HH:MM` timespecs for the morning-start and evening-stop schedules.
+
+This replaces the old fixed `@sunrise+3h` / `@sunset` timespecs. The algorithm only applies in summer mode (above `temp-threshold`). Winter mode is unchanged.
+
+**Pro1 note**: the Pro1 can only toggle on/off at max speed — it does not participate in proportional scheduling. The algorithm runs on the Pro3 (the preferred device in summer).
 
 ### Run-hours calculation
 
-1. **Base hours** = `(poolVolume × turnover) / flowRate`
-   - `flowRate` is computed from `maxFlowRate × (preferredSpeedRpm / maxRpm)`
-   - `preferredSpeed` maps to one of `ecoRpm` / `midRpm` / `highRpm`
-2. **Scale factor** = clamp(`(todayMaxTemp − tempThreshold) / (maxTemp − tempThreshold)`, 0, 1)
-3. **Run hours** = `baseHours × scale`, clamped to `[baseHours × 0.5, baseHours × 1.5]`
+```
+flowRate  = maxFlowRate × (preferredSpeedRpm / maxRpm)
+baseHours = (poolVolume × turnover) / flowRate
+scale     = clamp((todayMaxTemp − tempThreshold) / (maxTemp − tempThreshold), 0, 1)
+runHours  = clamp(baseHours × scale, baseHours × 0.5, baseHours × 1.5)
+```
 
-At `tempThreshold` the pump runs at half base hours; at `maxTemp` it runs at full base hours (one turnover). At temperatures above `maxTemp` the cap prevents overshooting.
+- At `tempThreshold` → scale = 0 → pump runs `baseHours × 0.5` (minimum, half a turnover)
+- At `maxTemp` → scale = 1 → pump runs `baseHours` (one full turnover)
+- Above `maxTemp` → scale clamped to 1 → same as at `maxTemp`
+- The `baseHours × 1.5` ceiling is a safety cap; it is not reachable through normal temperature variation
 
 ### Window centering
-
-The run window is centered on the peak-temperature hour from the forecast:
 
 ```
 startHour = peakHour − runHours / 2
 stopHour  = peakHour + runHours / 2
 ```
 
+`peakHour` is the index (= hour of day) of the maximum temperature in the hourly forecast — the pump runs centred on the hottest part of the day when UV and algae pressure are highest.
+
 Boundary enforcement (applied in order):
-- If `startHour < sunriseHour + 1h` → shift window forward
-- If `stopHour > sunsetHour − 0.5h` → shift window backward
-- Hard floor of `sunriseHour + 1h` applied after both shifts
+1. If `startHour < sunriseHour + 1h` → shift window forward: `startHour = sunriseHour + 1h`, `stopHour = startHour + runHours`
+2. If `stopHour > sunsetHour − 0.5h` → shift window backward: `stopHour = sunsetHour − 0.5h`, `startHour = stopHour − runHours`
+3. Hard floor `startHour = max(startHour, sunriseHour + 1h)` — applied after both shifts in case `runHours` is longer than the available window
+
+When `runHours` exceeds the available window (e.g. eco speed with a large pool), the pump runs the full available window rather than failing.
+
+### Worked example (default config, southern France summer)
+
+- Pool: 46 m³, turnover target: 5×, preferred speed: eco (2000 rpm)
+- `flowRate` = 31 × (2000 / 2900) ≈ 21.4 m³/h
+- `baseHours` = (46 × 5) / 21.4 ≈ 10.7 h
+
+| Forecast max | scale | runHours | Centred on 14:00 | Start | Stop |
+|---|---|---|---|---|---|
+| 20 °C (threshold) | 0.0 | 5.4 h (min) | 11:18 – 16:42 | 11:18 | 16:42 |
+| 25 °C | 0.33 | 3.6 h | 12:12 – 15:48 | 12:12 | 15:48 |
+| 30 °C | 0.67 | 7.1 h | 10:27 – 17:33 | 10:27 | 17:33 |
+| 35 °C (max-temp) | 1.0 | 10.7 h | 08:39 – 19:21 | 08:39 | 19:21 |
+
+At high speed (2900 rpm, 31 m³/h): `baseHours` = (46 × 5) / 31 ≈ 7.4 h — shorter windows, same centering.
 
 ### Fallback values
 
-| Condition | Fallback used |
-|-----------|--------------|
+| Condition | Fallback |
+|-----------|----------|
 | `peakForecastHour` not available | 14:00 |
 | `sunriseHour` not available | 06:00 |
 | `sunsetHour` not available | 21:00 |
-| Flow rate zero / invalid | 8 hours |
+| Flow rate zero or invalid config | 8 h fixed |
+| Forecast fetch fails | schedule unchanged, mode preserved |
+
+### Upgrade note — forecast URL migration
+
+Devices running a pre-#230 version of the script have a forecast URL without `daily=sunrise,sunset` in `Script.storage`. On the first `handleDailyCheck()` after upgrade, `ensureForecastUrl()` detects the missing `daily=` parameter, re-detects the device location, and rebuilds the URL. No manual intervention is needed.
 
 ---
 

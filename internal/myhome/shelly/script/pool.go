@@ -32,6 +32,14 @@ var PoolKVSKeys = map[string]string{
 	"night_run_duration_ms": "script/pool-pump/night-duration", // 32 chars ✓
 	"grace_delay_ms":        "script/pool-pump/grace-delay",    // 30 chars ✓
 	"temperature_threshold": "script/pool-pump/temp-threshold", // 32 chars ✓
+	"pool_volume":           "script/pool-pump/pool-volume",    // 29 chars ✓
+	"turnover":              "script/pool-pump/turnover",       // 27 chars ✓
+	"max_flow_rate":         "script/pool-pump/max-flow-rate",  // 31 chars ✓
+	"max_rpm":               "script/pool-pump/max-rpm",        // 26 chars ✓
+	"eco_rpm":               "script/pool-pump/eco-rpm",        // 26 chars ✓
+	"mid_rpm":               "script/pool-pump/mid-rpm",        // 26 chars ✓
+	"high_rpm":              "script/pool-pump/high-rpm",       // 27 chars ✓
+	"max_temp":              "script/pool-pump/max-temp",       // 27 chars ✓
 }
 
 // PoolService handles pool pump operations
@@ -59,6 +67,14 @@ type SetupOptions struct {
 	MidSpeed             int
 	HighSpeed            int
 	TemperatureThreshold float64
+	PoolVolume           int
+	Turnover             int
+	MaxFlowRate          int
+	MaxRpm               int
+	EcoRpm               int
+	MidRpm               int
+	HighRpm              int
+	MaxTemp              float64
 	ForceUpload          bool
 	NoMinify             bool
 }
@@ -139,6 +155,14 @@ func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *sh
 		PoolKVSKeys["night_run_duration_ms"]: fmt.Sprintf("%d", opts.NightRunDurationMs),
 		PoolKVSKeys["grace_delay_ms"]:        fmt.Sprintf("%d", opts.GraceDelayMs),
 		PoolKVSKeys["temperature_threshold"]: fmt.Sprintf("%.1f", opts.TemperatureThreshold),
+		PoolKVSKeys["pool_volume"]:           fmt.Sprintf("%d", opts.PoolVolume),
+		PoolKVSKeys["turnover"]:              fmt.Sprintf("%d", opts.Turnover),
+		PoolKVSKeys["max_flow_rate"]:         fmt.Sprintf("%d", opts.MaxFlowRate),
+		PoolKVSKeys["max_rpm"]:               fmt.Sprintf("%d", opts.MaxRpm),
+		PoolKVSKeys["eco_rpm"]:               fmt.Sprintf("%d", opts.EcoRpm),
+		PoolKVSKeys["mid_rpm"]:               fmt.Sprintf("%d", opts.MidRpm),
+		PoolKVSKeys["high_rpm"]:              fmt.Sprintf("%d", opts.HighRpm),
+		PoolKVSKeys["max_temp"]:              fmt.Sprintf("%.1f", opts.MaxTemp),
 	}
 
 	// Set KVS configuration values with delays to avoid overloading device
@@ -718,6 +742,14 @@ func (s *PoolService) RemoveDevice(ctx context.Context, via types.Channel, sd *s
 		PoolKVSKeys["night_run_duration_ms"],
 		PoolKVSKeys["grace_delay_ms"],
 		PoolKVSKeys["temperature_threshold"],
+		PoolKVSKeys["pool_volume"],
+		PoolKVSKeys["turnover"],
+		PoolKVSKeys["max_flow_rate"],
+		PoolKVSKeys["max_rpm"],
+		PoolKVSKeys["eco_rpm"],
+		PoolKVSKeys["mid_rpm"],
+		PoolKVSKeys["high_rpm"],
+		PoolKVSKeys["max_temp"],
 	}
 
 	for _, key := range kvsKeys {
@@ -859,6 +891,16 @@ type Environment struct {
 
 	// Weather forecast
 	ForecastUrl string `json:"forecast_url,omitempty" yaml:"forecast_url,omitempty"`
+
+	// Temperature-proportional scheduling parameters
+	PoolVolume  int     `json:"pool_volume,omitempty"   yaml:"pool_volume,omitempty"`
+	Turnover    int     `json:"turnover,omitempty"      yaml:"turnover,omitempty"`
+	MaxFlowRate int     `json:"max_flow_rate,omitempty" yaml:"max_flow_rate,omitempty"`
+	MaxRpm      int     `json:"max_rpm,omitempty"       yaml:"max_rpm,omitempty"`
+	EcoRpm      int     `json:"eco_rpm,omitempty"       yaml:"eco_rpm,omitempty"`
+	MidRpm      int     `json:"mid_rpm,omitempty"       yaml:"mid_rpm,omitempty"`
+	HighRpm     int     `json:"high_rpm,omitempty"      yaml:"high_rpm,omitempty"`
+	MaxTemp     float64 `json:"max_temp,omitempty"      yaml:"max_temp,omitempty"`
 }
 
 // Status returns the status of a single device
@@ -1055,6 +1097,63 @@ func (s *PoolService) getEnvironmentStatus(ctx context.Context, controllerID str
 		var speed int
 		if _, err := fmt.Sscanf(val.Value, "%d", &speed); err == nil {
 			env.HighSpeed = &speed
+		}
+	}
+
+	// Get temperature-proportional scheduling parameters from KVS
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["pool_volume"]); err == nil && val != nil {
+		var v int
+		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
+			env.PoolVolume = v
+		}
+	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["turnover"]); err == nil && val != nil {
+		var v int
+		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
+			env.Turnover = v
+		}
+	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["max_flow_rate"]); err == nil && val != nil {
+		var v int
+		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
+			env.MaxFlowRate = v
+		}
+	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["max_rpm"]); err == nil && val != nil {
+		var v int
+		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
+			env.MaxRpm = v
+		}
+	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["eco_rpm"]); err == nil && val != nil {
+		var v int
+		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
+			env.EcoRpm = v
+		}
+	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["mid_rpm"]); err == nil && val != nil {
+		var v int
+		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
+			env.MidRpm = v
+		}
+	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["high_rpm"]); err == nil && val != nil {
+		var v int
+		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
+			env.HighRpm = v
+		}
+	}
+
+	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["max_temp"]); err == nil && val != nil {
+		var v float64
+		if _, err := fmt.Sscanf(val.Value, "%f", &v); err == nil {
+			env.MaxTemp = v
 		}
 	}
 

@@ -117,6 +117,54 @@ var CONFIG_SCHEMA = {
     default: 20,
     type: "number",
     required: false
+  },
+  poolVolume: {
+    description: "Pool volume in m³",
+    key: "pool-volume",
+    default: 46,
+    type: "number"
+  },
+  turnover: {
+    description: "Daily turnover target (number of full pool volumes to filter per day)",
+    key: "turnover",
+    default: 5,
+    type: "number"
+  },
+  maxFlowRate: {
+    description: "Pump max flow rate in m³/h at max RPM",
+    key: "max-flow-rate",
+    default: 31,
+    type: "number"
+  },
+  maxRpm: {
+    description: "Pump rated max RPM",
+    key: "max-rpm",
+    default: 2900,
+    type: "number"
+  },
+  ecoRpm: {
+    description: "Variator RPM setting for eco speed",
+    key: "eco-rpm",
+    default: 2000,
+    type: "number"
+  },
+  midRpm: {
+    description: "Variator RPM setting for mid speed",
+    key: "mid-rpm",
+    default: 2600,
+    type: "number"
+  },
+  highRpm: {
+    description: "Variator RPM setting for high speed",
+    key: "high-rpm",
+    default: 2900,
+    type: "number"
+  },
+  maxTemp: {
+    description: "Temperature (°C) at which run time reaches one full turnover",
+    key: "max-temp",
+    default: 35,
+    type: "number"
   }
 };
 
@@ -386,6 +434,9 @@ var STATE = {
   forecastUrl: null,          // Open-Meteo forecast URL
   maxForecastTemp: null,      // Only store max temp, not full array (memory optimization)
   lastForecastFetchDate: null,// Date string (YYYY-M-D) of last fetch
+  peakForecastHour: null,      // Hour-of-day (0-23) of max temperature in today's forecast
+  sunriseHour: null,           // Fractional hour of today's sunrise (from forecast API)
+  sunsetHour: null,            // Fractional hour of today's sunset (from forecast API)
 
   // Schedule mode
   scheduleMode: null,         // "summer" or "winter"
@@ -485,7 +536,7 @@ function loadValue(key) {
 function setForecastURL(lat, lon) {
   log('setForecastURL', lat, lon);
   if (lat !== null && lon !== null) {
-    var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&hourly=temperature_2m&forecast_days=1&timezone=auto';
+    var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lon + '&hourly=temperature_2m&daily=sunrise,sunset&forecast_days=1&timezone=auto';
     STATE.forecastUrl = url;
     storeStorageValue(STORAGE_KEYS.forecastUrl, url);
     log('Forecast URL ready');
@@ -535,21 +586,29 @@ function onForecast(result, error_code, error_message, cb) {
     return;
   }
 
-  // Memory optimization: only compute and store max temp, not full array
+  // Extract peak hour and max temp from hourly data; discard array immediately after
   var temps = data.hourly.temperature_2m;
   var maxTemp = null;
+  var peakHour = 12;
   for (var i = 0; i < temps.length; i++) {
     var temp = temps[i];
     if (temp !== null && (maxTemp === null || temp > maxTemp)) {
       maxTemp = temp;
+      peakHour = i;
     }
   }
-
-  // Clear temps array immediately to free memory
   temps = null;
-  data = null;
-
   STATE.maxForecastTemp = maxTemp;
+  STATE.peakForecastHour = peakHour;
+
+  // Parse sunrise/sunset from daily section (added to URL for schedule centering)
+  if (data.daily && data.daily.sunrise && data.daily.sunrise.length > 0) {
+    STATE.sunriseHour = parseHourFromISO(data.daily.sunrise[0]);
+  }
+  if (data.daily && data.daily.sunset && data.daily.sunset.length > 0) {
+    STATE.sunsetHour = parseHourFromISO(data.daily.sunset[0]);
+  }
+  data = null;
 
   var now = new Date();
   STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
@@ -601,8 +660,9 @@ function ensureForecastUrl(cb) {
     return;
   }
 
-  STATE.forecastUrl = loadStorageValue(STORAGE_KEYS.forecastUrl);
-  if (STATE.forecastUrl) {
+  var storedUrl = loadStorageValue(STORAGE_KEYS.forecastUrl);
+  if (storedUrl && storedUrl.indexOf('daily=') !== -1) {
+    STATE.forecastUrl = storedUrl;
     log('Loaded forecast URL from storage');
     if (typeof cb === 'function') queueTask(function() { cb(); });
     return;
@@ -1477,18 +1537,83 @@ function verifySchedules(cb) {
 }
 
 // === SCHEDULE MODE MANAGEMENT ===
-function updateScheduleMode(newMode) {
-  if (STATE.scheduleMode === newMode) {
+
+// Parse fractional hour from Open-Meteo ISO timestamp ("2025-07-15T06:15")
+function parseHourFromISO(isoStr) {
+  var tIdx = isoStr.indexOf('T');
+  if (tIdx < 0) return null;
+  var timePart = isoStr.slice(tIdx + 1);
+  var colonIdx = timePart.indexOf(':');
+  if (colonIdx < 0) return Number(timePart);
+  var h = Number(timePart.slice(0, colonIdx));
+  var m = Number(timePart.slice(colonIdx + 1, colonIdx + 3));
+  if (isNaN(h)) return null;
+  if (isNaN(m)) m = 0;
+  return h + m / 60;
+}
+
+function lpad2(n) {
+  return n < 10 ? '0' + n : String(n);
+}
+
+// Flow rate (m3/h) at the currently configured preferred speed
+function computeFlowRate() {
+  var speedRpms = {eco: CONFIG.ecoRpm, mid: CONFIG.midRpm, high: CONFIG.highRpm, max: CONFIG.highRpm};
+  var rpm = speedRpms[CONFIG.preferredSpeed];
+  if (!rpm) rpm = CONFIG.highRpm;
+  return CONFIG.maxFlowRate * (rpm / CONFIG.maxRpm);
+}
+
+// Daily run hours proportional to today's max temperature
+function computeRunHours(maxForecastTemp) {
+  var flowRate = computeFlowRate();
+  if (!flowRate || flowRate <= 0) {
+    log('WARNING: invalid flow rate, defaulting run hours to 8');
+    return 8;
+  }
+  var baseHours = (CONFIG.poolVolume * CONFIG.turnover) / flowRate;
+  var minHours  = baseHours * 0.5;
+  var maxHours  = baseHours * 1.5;
+  var range = CONFIG.maxTemp - CONFIG.temperatureThreshold;
+  var scale = range > 0 ? (maxForecastTemp - CONFIG.temperatureThreshold) / range : 1;
+  if (scale < 0) scale = 0;
+  if (scale > 1) scale = 1;
+  var runHours = baseHours * scale;
+  if (runHours < minHours) runHours = minHours;
+  if (runHours > maxHours) runHours = maxHours;
+  return runHours;
+}
+
+// Build a Shelly cron timespec string from a fractional hour (e.g. 9.625 → "0 37 9 * * SUN,...")
+function makeTimespec(fractHours) {
+  if (fractHours < 0) fractHours = 0;
+  if (fractHours >= 24) fractHours = 23.99;
+  var h = Math.floor(fractHours);
+  var m = Math.round((fractHours - h) * 60);
+  if (m >= 60) { h++; m = 0; }
+  h = h % 24;
+  return '0 ' + m + ' ' + h + ' * * SUN,MON,TUE,WED,THU,FRI,SAT';
+}
+
+function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
+  var hasTimings = morningStartHours !== null && morningStartHours !== undefined;
+  var modeChanged = STATE.scheduleMode !== newMode;
+
+  if (!modeChanged && !hasTimings) {
     log('Mode already:', newMode, '- no changes needed');
     return;
   }
 
-  log('MODE CHANGE:', STATE.scheduleMode || 'unknown', '->', newMode);
-  log(newMode === 'summer' ? '  Summer: enabling morning/evening schedules' : '  Winter: enabling night schedules only');
-  STATE.scheduleMode = newMode;
-  saveState();
+  if (modeChanged) {
+    log('MODE CHANGE:', STATE.scheduleMode || 'unknown', '->', newMode);
+    log(newMode === 'summer' ? '  Summer: enabling morning/evening schedules' : '  Winter: enabling night schedules only');
+    STATE.scheduleMode = newMode;
+    saveState();
+  } else {
+    log('Updating', newMode, 'schedule times');
+  }
 
-  // Enable/disable schedules based on mode
+  // Enable/disable schedules based on mode; include new timespec for summer timings
   Shelly.call('Schedule.List', {}, function(result, err) {
     if (err) {
       log('ERROR: Failed to list schedules:', err);
@@ -1506,8 +1631,18 @@ function updateScheduleMode(newMode) {
       var job = result.jobs[i];
       if (job.calls && job.calls.length > 0) {
         var code = job.calls[0].params && job.calls[0].params.code;
-        if (code === 'handleMorningStart()' || code === 'handleEveningStop()') {
-          schedulesToUpdate.push({id: job.id, enable: newMode === 'summer', name: code});
+        if (code === 'handleMorningStart()') {
+          var updM = {id: job.id, enable: newMode === 'summer', name: code};
+          if (hasTimings && newMode === 'summer') {
+            updM.timespec = makeTimespec(morningStartHours);
+          }
+          schedulesToUpdate.push(updM);
+        } else if (code === 'handleEveningStop()') {
+          var updE = {id: job.id, enable: newMode === 'summer', name: code};
+          if (hasTimings && newMode === 'summer') {
+            updE.timespec = makeTimespec(eveningStopHours);
+          }
+          schedulesToUpdate.push(updE);
         } else if (code === 'handleNightStart()' || code === 'handleNightStop()') {
           schedulesToUpdate.push({id: job.id, enable: newMode === 'winter', name: code});
         }
@@ -1525,13 +1660,17 @@ function updateScheduleMode(newMode) {
         log('All schedules updated for', newMode, 'mode');
         return;
       }
-
-      var schedule = schedulesToUpdate[updateIndex];
+      var sched = schedulesToUpdate[updateIndex];
       updateIndex++;
-
-      Shelly.call('Schedule.Update', {id: schedule.id, enable: schedule.enable}, function(res, err) {
+      var params = {id: sched.id, enable: sched.enable};
+      if (sched.timespec) {
+        params.timespec = sched.timespec;
+      }
+      Shelly.call('Schedule.Update', params, function(res, err) {
         if (err && false) {}
-        log('Schedule', schedule.name, schedule.enable ? 'ENABLED' : 'DISABLED');
+        var msg = sched.name + ' ' + (sched.enable ? 'ENABLED' : 'DISABLED');
+        if (sched.timespec) msg = msg + ' (' + sched.timespec + ')';
+        log('Schedule', msg);
         queueTask(updateNext);
       });
     }
@@ -1567,11 +1706,40 @@ function decideModeFromForecast() {
   }
 
   log('Forecast max temp:', maxTemp + '°C', '(threshold:', CONFIG.temperatureThreshold + '°C)');
-
   var newMode = maxTemp > CONFIG.temperatureThreshold ? 'summer' : 'winter';
   log('Selected mode:', newMode, maxTemp > CONFIG.temperatureThreshold ? '(above threshold)' : '(below threshold)');
 
-  updateScheduleMode(newMode);
+  if (newMode !== 'summer') {
+    updateScheduleMode(newMode, null, null);
+    return;
+  }
+
+  var runHours   = computeRunHours(maxTemp);
+  var peakHour   = STATE.peakForecastHour !== null ? STATE.peakForecastHour : 14;
+  var startFloor = (STATE.sunriseHour !== null ? STATE.sunriseHour : 6) + 1;
+  var stopCeil   = (STATE.sunsetHour  !== null ? STATE.sunsetHour  : 21) - 0.5;
+
+  var startHour = peakHour - runHours / 2;
+  var stopHour  = peakHour + runHours / 2;
+
+  // Shift window forward if start is too early
+  if (startHour < startFloor) {
+    startHour = startFloor;
+    stopHour  = startFloor + runHours;
+  }
+  // Shift window backward if stop is too late
+  if (stopHour > stopCeil) {
+    stopHour  = stopCeil;
+    startHour = stopCeil - runHours;
+  }
+  // Hard floor after both shifts
+  if (startHour < startFloor) startHour = startFloor;
+
+  log('Run hours:', Math.round(runHours * 10) / 10,
+      'Start:', Math.floor(startHour) + ':' + lpad2(Math.round((startHour % 1) * 60)),
+      'Stop:',  Math.floor(stopHour)  + ':' + lpad2(Math.round((stopHour  % 1) * 60)));
+
+  updateScheduleMode(newMode, startHour, stopHour);
 }
 
 // === UNIFIED START/STOP FUNCTIONS ===
@@ -1772,6 +1940,7 @@ function continueInit() {
       log('✓ All initialization steps complete - script is now running');
       log('Current mode:', STATE.scheduleMode || 'winter');
       log('Should I run?', isMyTurnToRun());
+      queueTask(handleDailyCheck);
       return;
     }
 

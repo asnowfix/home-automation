@@ -1940,6 +1940,7 @@ function continueInit() {
       log('✓ All initialization steps complete - script is now running');
       log('Current mode:', STATE.scheduleMode || 'winter');
       log('Should I run?', isMyTurnToRun());
+      queueTask(handleDailyCheck);
       return;
     }
 

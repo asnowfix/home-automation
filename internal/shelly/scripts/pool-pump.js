@@ -304,15 +304,18 @@ function loadConfig(callback) {
 }
 
 
-// Script.storage keys for continuously evolving values (survives reboots)
+// Script.storage keys for continuously evolving values (survives reboots, synchronous)
 var STORAGE_KEYS = {
-  forecastUrl: "forecast-url"       // Open-Meteo forecast URL built from device location
+  forecastUrl:   "forecast-url",    // Open-Meteo forecast URL built from device location
+  scheduleMode:  "schedule-mode"    // "summer" or "winter" — moved here from KVS because
+                                    // Script.storage.getItem() is synchronous; KVS.Get is
+                                    // async-only, so Shelly.call without a callback always
+                                    // returns null and schedule mode was lost on every reboot
 };
 
-// State keys for KVS persistence
+// State keys for KVS persistence (fire-and-forget writes only; reads use Script.storage)
 var STATE_KEYS = {
-  activeOutput: "active-output",    // -1 (all off), 0, 1, 2 for pro3; 0 for pro1
-  scheduleMode: "schedule-mode"     // "summer" or "winter" mode (Pro3 only)
+  activeOutput: "active-output"     // -1 (all off), 0, 1, 2 for pro3; 0 for pro1
 };
 
 // === TASK QUEUE (SINGLE TIMER FOR ALL SEQUENTIAL OPERATIONS) ===
@@ -764,15 +767,15 @@ function applyComponentNames(callback) {
 function loadState() {
   log("Loading persisted state...");
 
-  var savedActiveOutput = loadValue(STATE_KEYS.activeOutput);
-  if (savedActiveOutput !== null) {
-    STATE.activeOutput = savedActiveOutput;
-    log("Restored active output:", STATE.activeOutput);
-  }
+  // activeOutput: KVS fire-and-forget write; read is skipped here because
+  // enforceOutputState() reads the actual hardware switch state right after
+  // this call — hardware truth overrides any stale KVS value.
 
-  var savedScheduleMode = loadValue(STATE_KEYS.scheduleMode);
-  if (savedScheduleMode !== null) {
-    STATE.scheduleMode = savedScheduleMode;
+  // scheduleMode: use Script.storage (synchronous getItem/setItem) so that
+  // the correct mode survives a reboot without needing an async callback chain.
+  var savedMode = loadStorageValue(STORAGE_KEYS.scheduleMode);
+  if (savedMode !== null && (savedMode === "summer" || savedMode === "winter")) {
+    STATE.scheduleMode = savedMode;
     log("Restored schedule mode:", STATE.scheduleMode);
   } else {
     STATE.scheduleMode = "winter";
@@ -781,19 +784,22 @@ function loadState() {
 }
 
 function saveState() {
-  // Skip KVS writes during initialization to avoid callback depth issues
+  // Skip writes during initialization to avoid callback depth issues
   if (STATE.initializing) {
     return;
   }
 
-  // Queue KVS writes to avoid callback depth issues and ensure sequential execution
+  // activeOutput → KVS (fire-and-forget, read by CLI status command)
   queueTask(function() {
     storeValue(STATE_KEYS.activeOutput, STATE.activeOutput);
   });
 
+  // scheduleMode → Script.storage (synchronous read in loadState on next boot)
+  //              → KVS as well (CLI status command reads it there)
   if (STATE.scheduleMode !== null) {
+    storeStorageValue(STORAGE_KEYS.scheduleMode, STATE.scheduleMode);
     queueTask(function() {
-      storeValue(STATE_KEYS.scheduleMode, STATE.scheduleMode);
+      storeValue("schedule-mode", STATE.scheduleMode);
     });
   }
 }

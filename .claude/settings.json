@@ -13,7 +13,6 @@
       "Bash(make *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)",
       "Bash(git mv *)",
       "Bash(git status*)",
       "Bash(git log *)",
@@ -30,6 +29,9 @@
       "Bash(gh pr *)",
       "Bash(gh api *)",
       "Bash(jq *)"
+    ],
+    "ask": [
+      "Bash(git push *)"
     ]
   }
 }

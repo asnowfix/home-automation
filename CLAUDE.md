@@ -26,6 +26,8 @@ go run ./myhome ctl shelly script debug <device> true
 
 `make test` is canonical — never bare `go test ./...` (it skips workspace sub-modules). New CI test commands must also invoke `make test`, not go directly to `go test`.
 
+When asked to run `myhome <args>`, use `go run ./myhome <args>` — do not rely on a pre-built binary.
+
 ## Architecture
 
 ### Go Workspace

@@ -1,0 +1,11 @@
+{
+  "dst": "shellyplus1-b8d61a86cac0/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1755256640.89,
+    "wifi": {
+      "ap_client_count": 1
+    }
+  },
+  "src": "shellyplus1-b8d61a86cac0"
+}

@@ -1,0 +1,11 @@
+{
+  "dst": "shellyplus1-08b61fd90730/events",
+  "method": "NotifyStatus",
+  "params": {
+    "cloud": {
+      "connected": false
+    },
+    "ts": 1755252382.7
+  },
+  "src": "shellyplus1-08b61fd90730"
+}

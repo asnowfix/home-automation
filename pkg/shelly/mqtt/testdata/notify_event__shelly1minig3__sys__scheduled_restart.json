@@ -1,0 +1,16 @@
+{
+  "dst": "shelly1minig3-54320464074c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "sys",
+        "event": "scheduled_restart",
+        "time_ms": 995,
+        "ts": 1758225541.76
+      }
+    ],
+    "ts": 1758225541.76
+  },
+  "src": "shelly1minig3-54320464074c"
+}

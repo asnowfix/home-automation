@@ -1,0 +1,13 @@
+{
+  "dst": "shellyplusi4-c4d8d554ad6c/events",
+  "method": "NotifyStatus",
+  "params": {
+    "script:1": {
+      "error_msg": null,
+      "errors": [],
+      "running": true
+    },
+    "ts": 1759263935.61
+  },
+  "src": "shellyplusi4-c4d8d554ad6c"
+}

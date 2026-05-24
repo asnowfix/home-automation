@@ -1204,6 +1204,40 @@ mac, err := blu.ResolveMac(ctx, identifier)
   - `list`: List scripts on device(s)
   - `start/stop/delete`: Script lifecycle management
 
+### Developer Tools
+
+One-off Go programs in `tools/`. Each is its own workspace module — always add new ones with `go work use ./tools/<name>`. Run from the repo root.
+
+| Tool | Purpose |
+|---|---|
+| `tools/classify-events/` | Classifies raw Shelly MQTT event dumps → test fixtures in `pkg/shelly/mqtt/testdata/` |
+| `tools/extract-pool-defaults/` | Code-gen: extracts pool-pump JS constants → `myhome/ctl/pool/pool_defaults_generated.go` |
+
+#### `tools/classify-events`
+
+Reads every `*.json` file from an events dump directory (default: `myhome/events`), groups events by `(method, component, device-type)`, writes one pretty-printed representative per shape to a testdata directory (default: `pkg/shelly/mqtt/testdata/`), then deletes all originals.
+
+```bash
+go run ./tools/classify-events                            # use defaults
+go run ./tools/classify-events <events-dir> <testdata-dir>
+```
+
+Output filenames follow the pattern:
+- `notify_status__<device-type>__<component>.json`
+- `notify_event__<device-type>__<component>__<event>.json`
+
+The testdata lives alongside `pkg/shelly/mqtt/` so it travels with that package when it is eventually extracted into its own repository.
+
+#### `tools/extract-pool-defaults`
+
+Code-generation tool invoked by `//go:generate` in `myhome/ctl/pool/generate.go`. Parses `CONFIG_SCHEMA` from `internal/shelly/scripts/pool-pump.js` and writes typed Go constants to `myhome/ctl/pool/pool_defaults_generated.go`. Run via `make generate`, not directly.
+
+```bash
+go run ./tools/extract-pool-defaults \
+    internal/shelly/scripts/pool-pump.js \
+    myhome/ctl/pool/pool_defaults_generated.go
+```
+
 ---
 
 ## Common Issues and Solutions

@@ -1,0 +1,12 @@
+{
+  "dst": "shellyplus1-b8d61a85ed58/events",
+  "method": "NotifyStatus",
+  "params": {
+    "switch:0": {
+      "output": true,
+      "source": "loopback"
+    },
+    "ts": 1755025562.18
+  },
+  "src": "shellyplus1-b8d61a85ed58"
+}

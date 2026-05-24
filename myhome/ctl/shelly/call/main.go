@@ -32,7 +32,11 @@ var Cmd = &cobra.Command{
 			}
 		}
 		
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, deviceId, options.Via, callOneDevice, []string{method, args[2]})
+		paramsArg := ""
+		if len(args) == 3 {
+			paramsArg = args[2]
+		}
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, deviceId, options.Via, callOneDevice, []string{method, paramsArg})
 		return err
 	},
 }

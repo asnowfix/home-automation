@@ -24,6 +24,8 @@ go run ./myhome ctl shelly script update <device>
 go run ./myhome ctl shelly script debug <device> true
 ```
 
+To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call` tools). It is pre-configured in `.mcp.json` with MQTT broker `tcp://192.168.1.2:1883` and approved via `enabledMcpjsonServers` in `.claude/settings.json`. Restart Claude Code to activate.
+
 `make test` is canonical — never bare `go test ./...` (it skips workspace sub-modules). New CI test commands must also invoke `make test`, not go directly to `go test`.
 
 ## Architecture

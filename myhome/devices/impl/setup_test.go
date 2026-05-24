@@ -23,11 +23,19 @@ func TestClassifyDevice(t *testing.T) {
 		caps []string
 		want deviceRole
 	}{
+		// Generic BLU fallback ID
 		{"shellyblu-aabbccddeeff", []string{"window", "temperature", "battery"}, roleDoorSensor},
 		{"shellyblu-aabbccddeeff", []string{"temperature", "humidity", "battery"}, roleTempSensor},
+		{"shellyblu-aabbccddeeff", []string{"motion"}, roleMotionSensor},
 		{"shellyblu-aabbccddeeff", []string{"battery"}, roleUnknown},
 		{"shellyblu-aabbccddeeff", nil, roleUnknown},
+		// Typed BLU device IDs
+		{"shellybludoorwindow2-aabbccddeeff", []string{"window", "battery"}, roleDoorSensor},
+		{"shellybluht3-aabbccddeeff", []string{"temperature", "humidity", "battery"}, roleTempSensor},
+		{"shellyblumotion1-aabbccddeeff", []string{"motion", "battery"}, roleMotionSensor},
+		// Gen1 H&T
 		{"shellyht-abc123", nil, roleTempSensor},
+		// Heaters
 		{"shellyplus1-aabbcc", nil, roleHeater},
 		{"shellyplus2pm-xxyyzz", nil, roleHeater},
 	}
@@ -46,18 +54,16 @@ func TestSensorMQTTTopic(t *testing.T) {
 		id   string
 		want string
 	}{
-		{
-			"shellyblu-aabbccddeeff",
-			"shelly-blu/events/aa:bb:cc:dd:ee:ff",
-		},
-		{
-			"shellyht-abc123",
-			"shellies/shellyht-abc123/sensor/temperature",
-		},
-		{
-			"shellyplus1-aabb",
-			"", // heaters have no sensor topic
-		},
+		// Generic BLU fallback
+		{"shellyblu-aabbccddeeff", "shelly-blu/events/aa:bb:cc:dd:ee:ff"},
+		// Typed BLU device IDs — same topic pattern, MAC extracted from suffix
+		{"shellybludoorwindow2-aabbccddeeff", "shelly-blu/events/aa:bb:cc:dd:ee:ff"},
+		{"shellybluht3-aabbccddeeff", "shelly-blu/events/aa:bb:cc:dd:ee:ff"},
+		{"shellyblumotion1-aabbccddeeff", "shelly-blu/events/aa:bb:cc:dd:ee:ff"},
+		// Gen1 H&T
+		{"shellyht-abc123", "shellies/shellyht-abc123/sensor/temperature"},
+		// Heaters have no sensor topic
+		{"shellyplus1-aabb", ""},
 	}
 
 	for _, c := range cases {
@@ -65,20 +71,6 @@ func TestSensorMQTTTopic(t *testing.T) {
 		got := sensorMQTTTopic(d)
 		if got != c.want {
 			t.Errorf("sensorMQTTTopic(%q) = %q, want %q", c.id, got, c.want)
-		}
-	}
-}
-
-func TestMacWithColons(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"aabbccddeeff", "aa:bb:cc:dd:ee:ff"},
-		{"AA:BB:CC:DD:EE:FF", "aa:bb:cc:dd:ee:ff"}, // already has colons
-		{"short", "short"},                          // not 12 hex chars, returned as-is
-	}
-	for _, c := range cases {
-		got := macWithColons(c.in)
-		if got != c.want {
-			t.Errorf("macWithColons(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

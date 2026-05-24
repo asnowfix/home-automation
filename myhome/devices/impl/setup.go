@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 )
@@ -14,27 +15,27 @@ import (
 type deviceRole int
 
 const (
-	roleUnknown    deviceRole = iota
-	roleHeater                // non-BLU, non-sensor device (Shelly Gen2 switch)
-	roleTempSensor            // BLU H&T or Gen1 shellyht
-	roleDoorSensor            // BLU door/window sensor
+	roleUnknown      deviceRole = iota
+	roleHeater                  // non-BLU, non-sensor device (Shelly Gen2 switch)
+	roleTempSensor              // BLU H&T or Gen1 shellyht
+	roleDoorSensor              // BLU door/window sensor
+	roleMotionSensor            // BLU motion sensor (classified but not wired to heater gates)
 )
 
-// classifyDevice returns the role of a device based on its ID and capabilities.
+// classifyDevice returns the role of a device based on its ID and BTHome capabilities.
 func classifyDevice(d *myhome.Device) deviceRole {
 	id := strings.ToLower(d.Id())
 
-	if strings.HasPrefix(id, "shellyblu-") {
-		// BLU device — classify by BTHome capabilities
+	if shelly.IsBluDevice(id) {
 		if d.Info != nil && d.Info.BTHome != nil {
 			for _, cap := range d.Info.BTHome.Capabilities {
-				if cap == "window" {
+				switch cap {
+				case "window":
 					return roleDoorSensor
-				}
-			}
-			for _, cap := range d.Info.BTHome.Capabilities {
-				if cap == "temperature" {
+				case "temperature":
 					return roleTempSensor
+				case "motion":
+					return roleMotionSensor
 				}
 			}
 		}
@@ -50,12 +51,16 @@ func classifyDevice(d *myhome.Device) deviceRole {
 }
 
 // sensorMQTTTopic derives the MQTT topic for a sensor device.
+// All BLU devices publish to shelly-blu/events/<mac:with:colons> regardless of type.
 func sensorMQTTTopic(d *myhome.Device) string {
 	id := strings.ToLower(d.Id())
 
-	if strings.HasPrefix(id, "shellyblu-") {
-		mac := strings.TrimPrefix(id, "shellyblu-")
-		return "shelly-blu/events/" + macWithColons(mac)
+	if shelly.IsBluDevice(id) {
+		mac := shelly.MacFromShellyID(id)
+		if mac == nil {
+			return ""
+		}
+		return "shelly-blu/events/" + mac.String()
 	}
 
 	if strings.HasPrefix(id, "shellyht-") {
@@ -64,20 +69,6 @@ func sensorMQTTTopic(d *myhome.Device) string {
 	}
 
 	return ""
-}
-
-// macWithColons converts a 12-hex MAC string to colon-separated form.
-func macWithColons(mac string) string {
-	mac = strings.ReplaceAll(mac, ":", "")
-	mac = strings.ToLower(mac)
-	if len(mac) != 12 {
-		return mac
-	}
-	parts := make([]string, 6)
-	for i := range parts {
-		parts[i] = mac[i*2 : i*2+2]
-	}
-	return strings.Join(parts, ":")
 }
 
 // SetupRoom classifies devices in a room and pushes sensor topics to each heater's KVS.
@@ -90,7 +81,7 @@ func (dm *DeviceManager) SetupRoom(ctx context.Context, roomID string) (*myhome.
 		return nil, fmt.Errorf("list devices: %w", err)
 	}
 
-	var heaters, tempSensors, doorSensors []*myhome.Device
+	var heaters, tempSensors, doorSensors, motionSensors []*myhome.Device
 	for _, d := range devices {
 		switch classifyDevice(d) {
 		case roleHeater:
@@ -99,13 +90,16 @@ func (dm *DeviceManager) SetupRoom(ctx context.Context, roomID string) (*myhome.
 			tempSensors = append(tempSensors, d)
 		case roleDoorSensor:
 			doorSensors = append(doorSensors, d)
+		case roleMotionSensor:
+			motionSensors = append(motionSensors, d)
 		}
 	}
 
 	log.Info("Classified devices",
 		"heaters", len(heaters),
 		"temp_sensors", len(tempSensors),
-		"door_sensors", len(doorSensors))
+		"door_sensors", len(doorSensors),
+		"motion_sensors", len(motionSensors))
 
 	// Derive sensor topics
 	var tempTopic string

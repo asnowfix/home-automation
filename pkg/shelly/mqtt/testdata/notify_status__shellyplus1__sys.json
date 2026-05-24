@@ -1,0 +1,12 @@
+{
+  "dst": "shellyplus1-08b61fd9333c/events",
+  "method": "NotifyStatus",
+  "params": {
+    "sys": {
+      "time": "18:37",
+      "unixtime": 1755016629
+    },
+    "ts": 1755016629.06
+  },
+  "src": "shellyplus1-08b61fd9333c"
+}

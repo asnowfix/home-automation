@@ -1,0 +1,11 @@
+{
+  "dst": "shelly1minig3-54320464a1d0/events",
+  "method": "NotifyStatus",
+  "params": {
+    "ts": 1758225698.19,
+    "wifi": {
+      "ap_client_count": 0
+    }
+  },
+  "src": "shelly1minig3-54320464a1d0"
+}

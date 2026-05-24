@@ -1,0 +1,11 @@
+{
+  "dst": "shellyplusi4-c4d8d554ad6c/events",
+  "method": "NotifyStatus",
+  "params": {
+    "cloud": {
+      "connected": true
+    },
+    "ts": 1759263982.49
+  },
+  "src": "shellyplusi4-c4d8d554ad6c"
+}

@@ -1,0 +1,17 @@
+{
+  "dst": "shelly1minig3-54320464074c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "sys",
+        "event": "ota_progress",
+        "msg": "in_progress",
+        "progress_percent": 8,
+        "ts": 1758225558.81
+      }
+    ],
+    "ts": 1758225558.81
+  },
+  "src": "shelly1minig3-54320464074c"
+}

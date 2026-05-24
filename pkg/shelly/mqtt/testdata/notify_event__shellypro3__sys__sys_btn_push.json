@@ -1,0 +1,15 @@
+{
+  "dst": "shellypro3-34987a48c26c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "sys",
+        "event": "sys_btn_push",
+        "ts": 1758144175.54
+      }
+    ],
+    "ts": 1758144175.54
+  },
+  "src": "shellypro3-34987a48c26c"
+}

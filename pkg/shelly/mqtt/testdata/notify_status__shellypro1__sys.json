@@ -1,0 +1,12 @@
+{
+  "dst": "shellypro1-30c6f782d274/events",
+  "method": "NotifyStatus",
+  "params": {
+    "sys": {
+      "time": "23:22",
+      "unixtime": 1758144178
+    },
+    "ts": 1758144178.05
+  },
+  "src": "shellypro1-30c6f782d274"
+}

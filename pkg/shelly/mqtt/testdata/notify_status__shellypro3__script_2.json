@@ -1,0 +1,13 @@
+{
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyStatus",
+  "params": {
+    "script:2": {
+      "error_msg": null,
+      "errors": [],
+      "running": true
+    },
+    "ts": 1759261529.16
+  },
+  "src": "shellypro3-a0dd6ca1c588"
+}

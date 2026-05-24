@@ -297,14 +297,12 @@ func (d *daemon) Run() error {
 		// Start electricity pricing publisher if enabled
 		if options.Flags.EnableElectricityService {
 			log.Info("Starting electricity pricing publisher",
-				"cheap_start", options.Flags.ElectricityCheapStart,
-				"cheap_end", options.Flags.ElectricityCheapEnd)
-			pricer, err := electricity.NewFixedWindowPricer(
-				options.Flags.ElectricityCheapStart,
-				options.Flags.ElectricityCheapEnd,
+				"cheap_intervals", options.Flags.ElectricityCheapIntervals)
+			pricer, err := electricity.NewMultiIntervalPricerFromString(
+				options.Flags.ElectricityCheapIntervals,
 			)
 			if err != nil {
-				log.Error(err, "Failed to create electricity pricer — check cheap_start/cheap_end config")
+				log.Error(err, "Failed to create electricity pricer — check --cheap-electricity flag")
 			} else {
 				pub := electricity.NewPublisher(log, pricer, mc)
 				go pub.Run(d.ctx)

@@ -148,10 +148,10 @@ daemon:
 
 # Electricity pricing configuration
 electricity:
-  # Start of the cheap electricity window (24h HH:MM, may cross midnight)
-  cheap_start: "23:15"
-  # End of the cheap electricity window (24h HH:MM)
-  cheap_end: "07:15"
+  # Cheap electricity window(s) as "START-END[,START-END]" (HH:MM, may cross midnight).
+  # Multiple intervals are supported (e.g. night tariff + midday solar surplus).
+  cheap_intervals: "23:15-07:15"
+  # Two-interval example: cheap_intervals: "23:15-07:15,12:00-14:00"
 
 # Weather forecast configuration (Open-Meteo, no API key required)
 weather:

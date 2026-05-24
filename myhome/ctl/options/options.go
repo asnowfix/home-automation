@@ -69,8 +69,7 @@ var Flags struct {
 	EnableOccupancyService      bool
 	EnableTemperatureService    bool
 	EnableElectricityService    bool
-	ElectricityCheapStart       string  // HH:MM, e.g. "23:15"
-	ElectricityCheapEnd         string  // HH:MM, e.g. "07:15"
+	ElectricityCheapIntervals   string  // "HH:MM-HH:MM[,HH:MM-HH:MM]", e.g. "23:15-07:15"
 	WeatherLatitude             float64 // decimal degrees
 	WeatherLongitude            float64 // decimal degrees
 	EnableMetricsExporter       bool

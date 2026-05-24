@@ -594,14 +594,23 @@ Topic: `myhome/electricity/status` (retained, QoS 1)
 
 The daemon fetches hourly temperature forecasts from [Open-Meteo](https://open-meteo.com/) (no API key required) every 6 hours and publishes a 4-slot distilled payload to MQTT. Device scripts subscribe and use the data to decide whether to pre-heat.
 
+### Location auto-discovery
+
+If `latitude`/`longitude` are not set, the daemon discovers its location automatically via a priority chain:
+
+1. **Shelly cloud** — queries each known Gen2 device for `Cloud.GetStatus` (checks connectivity) then `Shelly.DetectLocation`. Uses the first device that responds with a non-zero position.
+2. **IP geolocation** — falls back to [ip-api.com](https://ip-api.com/) (free, no authentication). City-level accuracy (~5–50 km).
+
+Weather publishing is skipped entirely only if every source in the chain fails (e.g., no internet access at startup).
+
 ### Configuration keys (`weather.*`)
 
-**`latitude`** (float, required to enable weather publishing)
+**`latitude`** (float, optional — overrides auto-discovery)
 - Location latitude in decimal degrees (e.g., `48.8566` for Paris)
 - Flag: `--weather-latitude`
 - Env: `MYHOME_WEATHER_LATITUDE`
 
-**`longitude`** (float, required to enable weather publishing)
+**`longitude`** (float, optional — overrides auto-discovery)
 - Location longitude in decimal degrees (e.g., `2.3522` for Paris)
 - Flag: `--weather-longitude`
 - Env: `MYHOME_WEATHER_LONGITUDE`
@@ -609,9 +618,13 @@ The daemon fetches hourly temperature forecasts from [Open-Meteo](https://open-m
 ### Example
 
 ```yaml
+# Explicit coordinates (skips auto-discovery):
 weather:
   latitude: 48.8566
   longitude: 2.3522
+
+# Omit both to use auto-discovery (Shelly cloud → IP geolocation):
+# weather: {}
 ```
 
 ### MQTT payload

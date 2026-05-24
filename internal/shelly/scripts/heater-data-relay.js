@@ -1,4 +1,4 @@
-// data-relay.js
+// heater-data-relay.js
 // Bridges daemon MQTT publications to device KVS for offline resilience.
 // heater-controller.js reads from this KVS.
 //

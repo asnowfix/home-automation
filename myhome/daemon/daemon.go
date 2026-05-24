@@ -25,6 +25,9 @@ import (
 	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/myhome/weather"
 	"github.com/asnowfix/home-automation/pkg/shelly"
+	shellycloud "github.com/asnowfix/home-automation/pkg/shelly/cloud"
+	shellyshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	shellytypes "github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
@@ -51,6 +54,66 @@ func NewDaemon(ctx context.Context) *daemon {
 		ctx:    ctx,
 		cancel: ctx.Value(global.CancelKey).(context.CancelFunc),
 	}
+}
+
+// discoverLocation tries each source in priority order and returns the first that succeeds.
+// Priority: Shelly cloud-connected device → IP geolocation.
+// Returns zero lat/lon only if all sources fail (caller should skip the weather publisher).
+func discoverLocation(ctx context.Context, log logr.Logger, dm *impl.DeviceManager) (lat, lon float64, source string) {
+	log = log.WithName("location.discover")
+
+	devices, err := dm.GetAllDevices(ctx)
+	if err != nil {
+		log.V(1).Info("Could not list devices for location discovery", "error", err)
+	} else {
+		for _, d := range devices {
+			id := d.Id()
+			if shelly.IsBluDevice(id) || shelly.IsGen1Device(id) {
+				continue
+			}
+			sd, ok := d.Impl().(*shelly.Device)
+			if !ok || sd == nil {
+				continue
+			}
+			lat, lon, err = shellyLocation(ctx, sd)
+			if err != nil {
+				log.V(1).Info("Shelly location failed", "device", id, "error", err)
+				continue
+			}
+			log.Info("Location discovered via Shelly", "device", id, "lat", lat, "lon", lon)
+			return lat, lon, "shelly:" + id
+		}
+	}
+
+	lat, lon, err = weather.IPGeoLocation(ctx)
+	if err != nil {
+		log.V(1).Info("IP geolocation failed", "error", err)
+		return 0, 0, ""
+	}
+	log.Info("Location discovered via IP geolocation", "lat", lat, "lon", lon)
+	return lat, lon, "ip-geolocation"
+}
+
+// shellyLocation calls Cloud.GetStatus and Shelly.DetectLocation on one device.
+func shellyLocation(ctx context.Context, sd *shelly.Device) (float64, float64, error) {
+	raw, err := sd.CallE(ctx, shellytypes.ChannelHttp, shellycloud.GetStatus.String(), nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("Cloud.GetStatus: %w", err)
+	}
+	status, ok := raw.(*shellycloud.Status)
+	if !ok || !status.Connected {
+		return 0, 0, fmt.Errorf("not cloud-connected")
+	}
+
+	raw, err = sd.CallE(ctx, shellytypes.ChannelHttp, shellyshelly.DetectLocation.String(), nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("Shelly.DetectLocation: %w", err)
+	}
+	loc, ok := raw.(*shellyshelly.DetectLocationResponse)
+	if !ok || (loc.Lat == 0 && loc.Lon == 0) {
+		return 0, 0, fmt.Errorf("empty location response")
+	}
+	return loc.Lat, loc.Lon, nil
 }
 
 func (d *daemon) Start(s service.Service) error {
@@ -310,17 +373,23 @@ func (d *daemon) Run() error {
 			}
 		}
 
-		// Start weather forecast publisher if lat/lon are configured
-		if options.Flags.WeatherLatitude != 0 || options.Flags.WeatherLongitude != 0 {
-			log.Info("Starting weather forecast publisher",
-				"lat", options.Flags.WeatherLatitude,
-				"lon", options.Flags.WeatherLongitude)
-			forecaster, err := weather.New(log, options.Flags.WeatherLatitude, options.Flags.WeatherLongitude, mc, storage.DB())
-			if err != nil {
-				log.Error(err, "Failed to create weather forecaster — check weather.latitude/longitude config")
+		// Resolve weather coordinates via priority chain, then start forecast publisher.
+		{
+			lat, lon, source := options.Flags.WeatherLatitude, options.Flags.WeatherLongitude, "config"
+			if lat == 0 && lon == 0 {
+				lat, lon, source = discoverLocation(d.ctx, log, d.dm)
+			}
+			if lat != 0 || lon != 0 {
+				log.Info("Starting weather forecast publisher", "lat", lat, "lon", lon, "source", source)
+				forecaster, err := weather.New(log, lat, lon, mc, storage.DB())
+				if err != nil {
+					log.Error(err, "Failed to create weather forecaster")
+				} else {
+					go forecaster.Run(d.ctx)
+					log.Info("Weather forecast publisher started")
+				}
 			} else {
-				go forecaster.Run(d.ctx)
-				log.Info("Weather forecast publisher started")
+				log.Info("Weather forecast publisher disabled: no location available")
 			}
 		}
 

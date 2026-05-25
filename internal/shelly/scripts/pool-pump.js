@@ -295,6 +295,8 @@ function loadConfig(callback) {
       }
 
       log("Configuration loaded successfully");
+      // Free schema object — only needed during KVS loading, not at runtime
+      CONFIG_SCHEMA = null;
       callback(true);
       return;
     }
@@ -487,8 +489,13 @@ function loadStorageValue(key) {
   if (v === "null" || v === "undefined") return null;
   if (v === "true") return true;
   if (v === "false") return false;
-  var num = Number(v);
-  if (!isNaN(num)) return num;
+  try {
+    var num = Number(v);
+    if (!isNaN(num)) return num;
+  } catch (e) {
+    // Espruino throws "String too big to convert to float" on long strings
+    if (e && false) {}
+  }
   try {
     return JSON.parse(v);
   } catch (e) {
@@ -794,6 +801,8 @@ function applyComponentNames(callback) {
   function processNext() {
     if (index >= componentsToConfig.length) {
       log("All component names applied");
+      // Free static data — only needed during component setup
+      COMPONENT_NAMES = null;
       if (callback) callback();
       return;
     }

@@ -1,4 +1,4 @@
-package temperature
+package rooms
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome"
 )
 
-// seedRoom is a test helper that adds a room both to in-memory state and storage.
+// seedRoom is a test helper that saves a room to storage.
 func seedRoom(t *testing.T, svc *Service, id, name string) *RoomConfig {
 	t.Helper()
 	config := &RoomConfig{
@@ -17,9 +17,6 @@ func seedRoom(t *testing.T, svc *Service, id, name string) *RoomConfig {
 		Kinds:  []myhome.RoomKind{myhome.RoomKindOther},
 		Levels: map[string]float64{"eco": 17.0, "comfort": 21.0},
 	}
-	svc.mu.Lock()
-	svc.rooms[id] = config
-	svc.mu.Unlock()
 	if _, err := svc.storage.SaveRoom(config); err != nil {
 		t.Fatalf("seedRoom SaveRoom: %v", err)
 	}
@@ -67,11 +64,9 @@ func TestHandleSet_Valid(t *testing.T) {
 	if result.Status != "ok" {
 		t.Errorf("status: got %q, want \"ok\"", result.Status)
 	}
-	svc.mu.RLock()
-	_, exists := svc.rooms["r1"]
-	svc.mu.RUnlock()
-	if !exists {
-		t.Error("expected room to be stored in svc.rooms")
+	_, err = svc.storage.GetRoom("r1")
+	if err != nil {
+		t.Error("expected room to be stored in storage")
 	}
 }
 
@@ -141,11 +136,9 @@ func TestHandleDelete_Found(t *testing.T) {
 	if result.Status != "ok" {
 		t.Errorf("status: got %q, want \"ok\"", result.Status)
 	}
-	svc.mu.RLock()
-	_, exists := svc.rooms["r1"]
-	svc.mu.RUnlock()
-	if exists {
-		t.Error("expected room to be removed from svc.rooms")
+	_, err = svc.storage.GetRoom("r1")
+	if err == nil {
+		t.Error("expected room to be removed from storage")
 	}
 }
 
@@ -190,11 +183,9 @@ func TestHandleRoomCreate_DefaultName(t *testing.T) {
 	if !result.Success {
 		t.Errorf("expected success=true")
 	}
-	svc.mu.RLock()
-	room := svc.rooms["bedroom"]
-	svc.mu.RUnlock()
-	if room == nil {
-		t.Fatal("room not in memory")
+	room, err := svc.storage.GetRoom("bedroom")
+	if err != nil {
+		t.Fatalf("room not in storage: %v", err)
 	}
 	if room.Name != "bedroom" {
 		t.Errorf("name: got %q, want \"bedroom\"", room.Name)
@@ -231,11 +222,12 @@ func TestHandleRoomEdit(t *testing.T) {
 	if !result.Success {
 		t.Errorf("expected success=true, got message: %q", result.Message)
 	}
-	svc.mu.RLock()
-	name := svc.rooms["r1"].Name
-	svc.mu.RUnlock()
-	if name != "New Name" {
-		t.Errorf("in-memory name: got %q, want \"New Name\"", name)
+	stored, err := svc.storage.GetRoom("r1")
+	if err != nil {
+		t.Fatalf("GetRoom: %v", err)
+	}
+	if stored.Name != "New Name" {
+		t.Errorf("stored name: got %q, want \"New Name\"", stored.Name)
 	}
 }
 
@@ -267,11 +259,9 @@ func TestHandleRoomDelete(t *testing.T) {
 	if !result.Success {
 		t.Errorf("expected success=true, got: %q", result.Message)
 	}
-	svc.mu.RLock()
-	_, exists := svc.rooms["r1"]
-	svc.mu.RUnlock()
-	if exists {
-		t.Error("room should be removed from memory")
+	_, err = svc.storage.GetRoom("r1")
+	if err == nil {
+		t.Error("room should be removed from storage")
 	}
 }
 
@@ -301,12 +291,12 @@ func TestHandleSetKindSchedule(t *testing.T) {
 	if result.Status != "ok" {
 		t.Errorf("status: got %q, want \"ok\"", result.Status)
 	}
-	// Verify in-memory cache was updated.
-	svc.mu.RLock()
-	ranges, exists := svc.kindSchedules[myhome.RoomKindBedroom][myhome.DayTypeWorkDay]
-	svc.mu.RUnlock()
-	if !exists || len(ranges) == 0 {
-		t.Error("expected schedule in in-memory cache")
+	// Verify schedule was persisted to storage.
+	kind := myhome.RoomKindBedroom
+	dayType := myhome.DayTypeWorkDay
+	schedules, err := svc.storage.GetKindSchedules(&kind, &dayType)
+	if err != nil || len(schedules) == 0 {
+		t.Errorf("expected schedule in storage: err=%v schedules=%d", err, len(schedules))
 	}
 }
 
@@ -379,19 +369,14 @@ func TestPublishRangesUpdate(t *testing.T) {
 	svc, mc := newTestService(t)
 	ctx := context.Background()
 
-	// Set up room and kind schedule in memory.
-	svc.rooms["r1"] = &RoomConfig{
-		ID:    "r1",
-		Name:  "Room 1",
-		Kinds: []myhome.RoomKind{myhome.RoomKindBedroom},
-		Levels: map[string]float64{
-			"eco":     17.0,
-			"comfort": 21.0,
-		},
-	}
-	svc.kindSchedules[myhome.RoomKindBedroom] = map[myhome.DayType][]TimeRange{
-		myhome.DayTypeWorkDay: {{Start: 360, End: 1380}},
-	}
+	// Set up room and kind schedule in storage.
+	svc.storage.SaveRoom(&RoomConfig{
+		ID:     "r1",
+		Name:   "Room 1",
+		Kinds:  []myhome.RoomKind{myhome.RoomKindBedroom},
+		Levels: map[string]float64{"eco": 17.0, "comfort": 21.0},
+	})
+	svc.storage.SetKindSchedule(myhome.RoomKindBedroom, myhome.DayTypeWorkDay, []myhome.TemperatureTimeRange{{Start: 360, End: 1380}})
 
 	if err := svc.PublishRangesUpdate(ctx, "r1"); err != nil {
 		t.Fatalf("PublishRangesUpdate: %v", err)

@@ -136,12 +136,28 @@ daemon:
   
   # Enable temperature service
   # enable_temperature_service: true
-  
+
+  # Enable electricity pricing publisher
+  # enable_electricity_service: true
+
   # Disable device manager
   # disable_device_manager: false
   
   # Disable auto-setup
   # disable_auto_setup: false
+
+# Electricity pricing configuration
+electricity:
+  # Cheap electricity window(s) as "START-END[,START-END]" (HH:MM, may cross midnight).
+  # Multiple intervals are supported (e.g. night tariff + midday solar surplus).
+  cheap_intervals: "23:15-07:15"
+  # Two-interval example: cheap_intervals: "23:15-07:15,12:00-14:00"
+
+# Weather forecast configuration (Open-Meteo, no API key required)
+weather:
+  # Location for weather forecast (decimal degrees)
+  latitude: 48.8566
+  longitude: 2.3522
 
 # Event Log Configuration
 events:

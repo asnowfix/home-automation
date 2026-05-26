@@ -153,6 +153,12 @@ daemon:
 - Flag: `--enable-temperature-service` / `--disable-temperature-service`
 - Env: `MYHOME_DAEMON_ENABLE_TEMPERATURE_SERVICE`
 
+**`enable_electricity_service`** (bool, default: auto)
+- Enable the electricity pricing MQTT publisher (`myhome/electricity/status`)
+- Auto-enabled with device manager; publishes retained every 15 minutes
+- Flag: `--enable-electricity-service` / `--disable-electricity-service`
+- Env: `MYHOME_DAEMON_ENABLE_ELECTRICITY_SERVICE`
+
 #### Device Manager
 
 **`disable_device_manager`** (bool, default: `false`)
@@ -516,3 +522,124 @@ Or use flag:
 ```bash
 myhome daemon run --enable-temperature-service
 ```
+
+## Electricity Pricing Configuration
+
+Controls the electricity pricing publisher. The publisher broadcasts a retained MQTT message to
+`myhome/electricity/status` every 15 minutes so heater scripts can decide whether to run.
+
+### `Pricer` interface
+
+Electricity pricing is implemented behind a `Pricer` interface with two methods:
+
+- `IsCheapNow(ctx, horizonHours int) bool` — returns `true` if electricity is cheap right now **or** will be cheap within the next `horizonHours` hours (used by heater scripts for pre-heating decisions).
+- `UntilEpoch(now time.Time) int64` — returns the Unix timestamp when the current period (cheap or expensive) ends. If multiple windows overlap, returns the earliest end time.
+
+The current implementation is `MultiIntervalPricer`: one or more fixed daily time windows. See below for ENEDIS-specific mapping.
+
+### Configuration key (`electricity.*`)
+
+**`cheap_intervals`** (string, default: `"23:15-07:15"`)
+- One or more cheap electricity windows in `HH:MM-HH:MM` format, comma-separated
+- Each window may cross midnight (e.g., `23:15-07:15`)
+- Flag: `--cheap-electricity=HH:MM-HH:MM[,HH:MM-HH:MM]`
+- Env: `MYHOME_ELECTRICITY_CHEAP_INTERVALS`
+
+### Example
+
+Single window (ENEDIS Heures Creuses — see below):
+
+```yaml
+electricity:
+  cheap_intervals: "23:15-07:15"
+```
+
+Two windows (night tariff + midday surplus):
+
+```yaml
+electricity:
+  cheap_intervals: "23:15-07:15,12:00-14:00"
+```
+
+Or via flag:
+
+```bash
+myhome daemon run --cheap-electricity=23:15-07:15
+myhome daemon run --cheap-electricity=23:15-07:15,12:00-14:00
+```
+
+### ENEDIS tariff mapping (France)
+
+**Heures Creuses** (off-peak hours contract) — configurable static windows, typically:
+
+```yaml
+electricity:
+  cheap_intervals: "22:00-06:00"  # adjust to your meter's programmed window
+```
+
+**Tempo contract** (Blue/White/Red day types with a published next-day colour API) requires a dynamic implementation that calls the ENEDIS API. This is not yet implemented — tracked in [#236](https://github.com/asnowfix/home-automation/issues/236).
+
+### MQTT payload
+
+Topic: `myhome/electricity/status` (retained, QoS 1)
+
+```json
+{"cheap": true, "until_epoch": 1234567890}
+```
+
+- `cheap`: `true` if the current time is within any cheap window
+- `until_epoch`: Unix timestamp when the current period (cheap or expensive) ends
+
+## Weather Forecast Configuration
+
+The daemon fetches hourly temperature forecasts from [Open-Meteo](https://open-meteo.com/) (no API key required) every 6 hours and publishes a 4-slot distilled payload to MQTT. Device scripts subscribe and use the data to decide whether to pre-heat.
+
+### Location auto-discovery
+
+If `latitude`/`longitude` are not set, the daemon discovers its location automatically via a priority chain:
+
+1. **Shelly cloud** — queries each known Gen2 device for `Cloud.GetStatus` (checks connectivity) then `Shelly.DetectLocation`. Uses the first device that responds with a non-zero position.
+2. **IP geolocation** — falls back to [ip-api.com](https://ip-api.com/) (free, no authentication). City-level accuracy (~5–50 km).
+
+Weather publishing is skipped entirely only if every source in the chain fails (e.g., no internet access at startup).
+
+### Configuration keys (`weather.*`)
+
+**`latitude`** (float, optional — overrides auto-discovery)
+- Location latitude in decimal degrees (e.g., `48.8566` for Paris)
+- Flag: `--weather-latitude`
+- Env: `MYHOME_WEATHER_LATITUDE`
+
+**`longitude`** (float, optional — overrides auto-discovery)
+- Location longitude in decimal degrees (e.g., `2.3522` for Paris)
+- Flag: `--weather-longitude`
+- Env: `MYHOME_WEATHER_LONGITUDE`
+
+### Example
+
+```yaml
+# Explicit coordinates (skips auto-discovery):
+weather:
+  latitude: 48.8566
+  longitude: 2.3522
+
+# Omit both to use auto-discovery (Shelly cloud → IP geolocation):
+# weather: {}
+```
+
+### MQTT payload
+
+Topic: `myhome/weather/forecast` (retained, QoS 1)
+
+```json
+{"slots": [{"h":9,"t":4.2},{"h":10,"t":3.8},{"h":11,"t":3.1},{"h":12,"t":2.9}], "stale": false}
+```
+
+- `slots`: next 4 hourly readings from now; `h` = hour of day, `t` = temperature °C
+- `stale`: `true` if internet has been unavailable for more than 24 hours (last known forecast is being repeated)
+
+### Offline behaviour
+
+- On network failure: last known forecast is re-served from SQLite (`weather_cache` table)
+- If the cached forecast is older than 24 hours: payload includes `"stale": true`
+- If no cache exists: nothing is published until the first successful fetch

@@ -14,7 +14,7 @@ import (
 // Supports both unified format and legacy devices-only format
 type DatabaseImport struct {
 	Devices          []myhome.Device                          `json:"devices,omitempty"`
-	TemperatureRooms map[string]*myhome.TemperatureRoomConfig `json:"temperature_rooms,omitempty"`
+	TemperatureRooms map[string]*myhome.TemperatureRoomConfig `json:"rooms,omitempty"`
 	WeekdayDefaults  map[int]myhome.DayType                   `json:"weekday_defaults,omitempty"`
 	KindSchedules    []myhome.TemperatureKindSchedule         `json:"kind_schedules,omitempty"`
 }

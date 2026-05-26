@@ -9,8 +9,11 @@ require (
 	github.com/asnowfix/home-automation/internal/myzone v0.0.0-20260402201030-0ed25e95389f
 	github.com/asnowfix/home-automation/myhome/ctl/options v0.0.0-20260402201030-0ed25e95389f
 	github.com/asnowfix/home-automation/myhome/devices/impl v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/electricity v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/events v0.0.0-00010101000000-000000000000
-	github.com/asnowfix/home-automation/myhome/temperature v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/ical v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/rooms v0.0.0-00010101000000-000000000000
+	github.com/asnowfix/home-automation/myhome/weather v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/pkg/shelly v0.0.0-20260402201030-0ed25e95389f
 	github.com/asnowfix/home-automation/pkg/shelly/types v0.0.0-20260402201030-0ed25e95389f
 	github.com/go-logr/logr v1.4.3
@@ -22,7 +25,13 @@ replace github.com/asnowfix/home-automation/hlog => ./hlog
 
 replace github.com/asnowfix/home-automation/myhome/ctl/options => ./myhome/ctl/options
 
-replace github.com/asnowfix/home-automation/myhome/temperature => ./myhome/temperature
+replace github.com/asnowfix/home-automation/myhome/electricity => ./myhome/electricity
+
+replace github.com/asnowfix/home-automation/myhome/ical => ./myhome/ical
+
+replace github.com/asnowfix/home-automation/myhome/weather => ./myhome/weather
+
+replace github.com/asnowfix/home-automation/myhome/rooms => ./myhome/rooms
 
 replace github.com/asnowfix/home-automation/myhome/events => ./myhome/events
 

@@ -146,6 +146,13 @@
             </template>
           </div>
         </div>
+        <div class="field">
+          <label class="label">iCal Agenda URL <span class="has-text-grey has-text-weight-normal">(optional)</span></label>
+          <div class="control">
+            <input class="input" type="url" x-model="roomForm.icalUrl" placeholder="https://calendar.example.com/room.ics">
+          </div>
+          <p class="help">Public iCal URL for room occupancy agenda (used by heater controller)</p>
+        </div>
         <hr>
         <p class="has-text-weight-semibold mb-2">Temperature Levels (°C)</p>
         <div class="columns">
@@ -296,6 +303,7 @@
           name: '',
           kinds: ['other'],
           levels: { eco: 18, comfort: 20, away: 15 },
+          icalUrl: '',
           saving: false
         },
         setupForm: {
@@ -564,6 +572,7 @@
             name: '',
             kinds: ['other'],
             levels: { eco: 18, comfort: 20, away: 15 },
+            icalUrl: '',
             saving: false
           };
           this.modals.room = true;
@@ -589,6 +598,7 @@
               name: room.name || '',
               kinds: room.kinds || ['other'],
               levels: room.levels || { eco: 18, comfort: 20, away: 15 },
+              icalUrl: room.ical_url || '',
               saving: false
             };
             this.modals.room = true;
@@ -609,7 +619,8 @@
               id: this.roomForm.id,
               name: this.roomForm.name || this.roomForm.id,
               kinds: this.roomForm.kinds,
-              levels: this.roomForm.levels
+              levels: this.roomForm.levels,
+              ical_url: this.roomForm.icalUrl
             };
 
             const res = await fetch('/rpc', {
@@ -628,16 +639,26 @@
               await fetch('/rpc', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                  method: 'temperature.set', 
-                  params: { 
-                    room_id: this.roomForm.id, 
-                    name: this.roomForm.name || this.roomForm.id, 
-                    kinds: this.roomForm.kinds, 
-                    levels: this.roomForm.levels 
-                  } 
+                body: JSON.stringify({
+                  method: 'temperature.set',
+                  params: {
+                    room_id: this.roomForm.id,
+                    name: this.roomForm.name || this.roomForm.id,
+                    kinds: this.roomForm.kinds,
+                    levels: this.roomForm.levels
+                  }
                 })
               });
+              if (this.roomForm.icalUrl) {
+                await fetch('/rpc', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    method: 'room.edit',
+                    params: { id: this.roomForm.id, ical_url: this.roomForm.icalUrl }
+                  })
+                });
+              }
             }
 
             this.closeRoomModal();

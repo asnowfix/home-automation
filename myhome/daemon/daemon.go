@@ -18,10 +18,16 @@ import (
 	"github.com/asnowfix/home-automation/myhome/metrics"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	mqttserver "github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/myhome/electricity"
+	"github.com/asnowfix/home-automation/myhome/ical"
 	"github.com/asnowfix/home-automation/myhome/occupancy"
+	"github.com/asnowfix/home-automation/myhome/rooms"
 	"github.com/asnowfix/home-automation/myhome/storage"
-	"github.com/asnowfix/home-automation/myhome/temperature"
+	"github.com/asnowfix/home-automation/myhome/weather"
 	"github.com/asnowfix/home-automation/pkg/shelly"
+	shellycloud "github.com/asnowfix/home-automation/pkg/shelly/cloud"
+	shellyshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	shellytypes "github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
@@ -48,6 +54,66 @@ func NewDaemon(ctx context.Context) *daemon {
 		ctx:    ctx,
 		cancel: ctx.Value(global.CancelKey).(context.CancelFunc),
 	}
+}
+
+// discoverLocation tries each source in priority order and returns the first that succeeds.
+// Priority: Shelly cloud-connected device → IP geolocation.
+// Returns zero lat/lon only if all sources fail (caller should skip the weather publisher).
+func discoverLocation(ctx context.Context, log logr.Logger, dm *impl.DeviceManager) (lat, lon float64, source string) {
+	log = log.WithName("location.discover")
+
+	devices, err := dm.GetAllDevices(ctx)
+	if err != nil {
+		log.V(1).Info("Could not list devices for location discovery", "error", err)
+	} else {
+		for _, d := range devices {
+			id := d.Id()
+			if shelly.IsBluDevice(id) || shelly.IsGen1Device(id) {
+				continue
+			}
+			sd, ok := d.Impl().(*shelly.Device)
+			if !ok || sd == nil {
+				continue
+			}
+			lat, lon, err = shellyLocation(ctx, sd)
+			if err != nil {
+				log.V(1).Info("Shelly location failed", "device", id, "error", err)
+				continue
+			}
+			log.Info("Location discovered via Shelly", "device", id, "lat", lat, "lon", lon)
+			return lat, lon, "shelly:" + id
+		}
+	}
+
+	lat, lon, err = weather.IPGeoLocation(ctx)
+	if err != nil {
+		log.V(1).Info("IP geolocation failed", "error", err)
+		return 0, 0, ""
+	}
+	log.Info("Location discovered via IP geolocation", "lat", lat, "lon", lon)
+	return lat, lon, "ip-geolocation"
+}
+
+// shellyLocation calls Cloud.GetStatus and Shelly.DetectLocation on one device.
+func shellyLocation(ctx context.Context, sd *shelly.Device) (float64, float64, error) {
+	raw, err := sd.CallE(ctx, shellytypes.ChannelHttp, shellycloud.GetStatus.String(), nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("Cloud.GetStatus: %w", err)
+	}
+	status, ok := raw.(*shellycloud.Status)
+	if !ok || !status.Connected {
+		return 0, 0, fmt.Errorf("not cloud-connected")
+	}
+
+	raw, err = sd.CallE(ctx, shellytypes.ChannelHttp, shellyshelly.DetectLocation.String(), nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("Shelly.DetectLocation: %w", err)
+	}
+	loc, ok := raw.(*shellyshelly.DetectLocationResponse)
+	if !ok || (loc.Lat == 0 && loc.Lon == 0) {
+		return 0, 0, fmt.Errorf("empty location response")
+	}
+	return loc.Lat, loc.Lon, nil
 }
 
 func (d *daemon) Start(s service.Service) error {
@@ -291,22 +357,103 @@ func (d *daemon) Run() error {
 			log.Info("EventList RPC handler registered")
 		}
 
-		// Register Temperature RPC methods if enabled
-		if options.Flags.EnableTemperatureService {
-			log.Info("Initializing temperature RPC methods")
-
-			// Create temperature storage using the same database
-			tempStorage, err := temperature.NewStorage(log, storage.DB())
+		// Start electricity pricing publisher if enabled
+		if options.Flags.EnableElectricityService {
+			log.Info("Starting electricity pricing publisher",
+				"cheap_intervals", options.Flags.ElectricityCheapIntervals)
+			pricer, err := electricity.NewMultiIntervalPricerFromString(
+				options.Flags.ElectricityCheapIntervals,
+			)
 			if err != nil {
-				log.Error(err, "Failed to initialize temperature storage")
+				log.Error(err, "Failed to create electricity pricer — check --cheap-electricity flag")
+			} else {
+				pub := electricity.NewPublisher(log, pricer, mc)
+				go pub.Run(d.ctx)
+				log.Info("Electricity pricing publisher started")
+			}
+		}
+
+		// Resolve weather coordinates via priority chain, then start forecast publisher.
+		{
+			lat, lon, source := options.Flags.WeatherLatitude, options.Flags.WeatherLongitude, "config"
+			if lat == 0 && lon == 0 {
+				lat, lon, source = discoverLocation(d.ctx, log, d.dm)
+			}
+			if lat != 0 || lon != 0 {
+				log.Info("Starting weather forecast publisher", "lat", lat, "lon", lon, "source", source)
+				forecaster, err := weather.New(log, lat, lon, mc, storage.DB())
+				if err != nil {
+					log.Error(err, "Failed to create weather forecaster")
+				} else {
+					go forecaster.Run(d.ctx)
+					log.Info("Weather forecast publisher started")
+				}
+			} else {
+				log.Info("Weather forecast publisher disabled: no location available")
+			}
+		}
+
+		// Register Rooms RPC methods if enabled; also start iCal agenda publisher
+		if options.Flags.EnableTemperatureService {
+			log.Info("Initializing rooms RPC methods")
+
+			roomsStorage, err := rooms.NewStorage(log, storage.DB())
+			if err != nil {
+				log.Error(err, "Failed to initialize rooms storage")
 				return err
 			}
 
-			// Create and register temperature method handlers, republishing temperature ranges at startup
-			tempHandlers := temperature.NewService(d.ctx, log, mc, tempStorage)
-			tempHandlers.RegisterHandlers()
+			roomsSvc := rooms.NewService(d.ctx, log, mc, roomsStorage)
+			roomsSvc.RegisterHandlers()
 
-			log.Info("Temperature RPC methods registered")
+			// Start iCal agenda fetcher — polls room iCal URLs and publishes busy slots
+			icalFetcher, err := ical.New(log, mc, storage.DB())
+			if err != nil {
+				log.Error(err, "Failed to create iCal fetcher")
+			} else {
+				go icalFetcher.Run(d.ctx, func() map[string]string {
+					roomMap, err := roomsStorage.ListRooms()
+					if err != nil {
+						log.Error(err, "Failed to list rooms for iCal refresh")
+						return nil
+					}
+					urls := make(map[string]string, len(roomMap))
+					for id, r := range roomMap {
+						urls[id] = r.ICalURL
+					}
+					return urls
+				})
+				log.Info("iCal agenda fetcher started")
+			}
+
+			// Register room.setup RPC backed by the device manager
+			if d.dm != nil {
+				rooms.RegisterSetupHandler(func(ctx context.Context, roomID string) (*myhome.RoomSetupResult, error) {
+					return d.dm.SetupRoom(ctx, roomID)
+				})
+			}
+
+			// Run initial room setup + daily refresh
+			go func() {
+				if d.dm != nil {
+					d.dm.SetupAllRooms(d.ctx)
+				}
+
+				ticker := time.NewTicker(24 * time.Hour)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-d.ctx.Done():
+						return
+					case <-ticker.C:
+						if d.dm != nil {
+							d.dm.SetupAllRooms(d.ctx)
+						}
+					}
+				}
+			}()
+
+			log.Info("Rooms RPC methods registered")
 		}
 
 		// Register Occupancy RPC methods if enabled

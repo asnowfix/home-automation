@@ -4,13 +4,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"
-	_ "github.com/ncruces/go-sqlite3/driver"
-	_ "github.com/ncruces/go-sqlite3/embed"
+	_ "modernc.org/sqlite"
 )
 
 // Type aliases for convenience

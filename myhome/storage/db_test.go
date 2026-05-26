@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/go-logr/logr/testr"
 )

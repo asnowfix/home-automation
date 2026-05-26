@@ -56,7 +56,7 @@ var CONFIG_SCHEMA = {
   pollIntervalMs: {
     description: "Polling interval in milliseconds",
     key: "poll-interval-ms",
-    default: 5 * 60 * 1000, // 5 minutes
+    default: 5 * 60 * 1000,
     type: "number"
   },
   preheatHours: {
@@ -167,16 +167,6 @@ function logMemory(label) {
   }
 }
 
-// Generate a simple random ID
-function randomId(n) {
-  var chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  var id = '';
-  for (var i = 0; i < n; i++) {
-    id += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return id;
-}
-
 // === STATE (DYNAMIC RUNTIME VALUES) ===
 var STATE = {
   // Device info (cached at startup)
@@ -187,12 +177,10 @@ var STATE = {
   // Forecast cache
   forecastUrl: null,
   cachedForecast: null,
-  cachedForecastTimes: null,
   lastForecastFetchDate: null,
 
   // Heater state
   lastHeaterState: false,
-  normallyClosed: true,
 
   // Temperature values (in-memory cache from MQTT)
   temperature: {
@@ -231,7 +219,6 @@ var STATE = {
 
   // Temperature ranges subscription topics (for dynamic config change)
   temperatureRangesTopic: null,
-  subscribedTemperatureRangesTopic: null,
 
   // Control loop timer handle
   controlLoopTimerId: null,
@@ -239,30 +226,12 @@ var STATE = {
   // Pending control loop check timer handle (for deferred checks)
   controlLoopCheckTimerId: null,
 
-  // Last successful temperature ranges from RPC
-  lastSuccessfulRanges: null,
-
   // Door/window sensor states: { topic: { open: boolean, lastUpdate: timestamp } }
   doorSensors: {},
 
   // Track subscribed door sensor topics
   subscribedDoorSensorTopics: []
 };
-
-function onDeviceLocation(result, error_code, error_message, cb) {
-  log('onDeviceLocation')
-  if (error_code === 0 && result) {
-    if (result.lat !== null && result.lon !== null) {
-      log('Auto-detected location: lat=' + result.lat + ', lon=' + result.lon + ', tz=' + result.tz);
-      setForecastURL(result.lat, result.lon);
-      if (typeof cb === 'function') cb();
-    } else {
-      log('Location detection returned null coordinates');
-    }
-  } else {
-    log('Failed to detect location (error ' + error_code + '): ' + error_message);
-  }
-}
 
 function onForecastUrlReady(cb) {
   log('onForecastUrlReady')
@@ -446,6 +415,11 @@ function onKvsLoaded(result, error_code, error_message, userdata) {
   } else {
     log('Failed to load KVS config (error ' + error_code + '): ' + error_message);
   }
+  // Drop description strings now that config is loaded — only needed at parse/load time
+  for (var name in CONFIG_SCHEMA) {
+    CONFIG_SCHEMA[name].description = null;
+  }
+
   if (typeof userdata === 'function') {
     userdata(updated);
   } else {
@@ -577,6 +551,7 @@ function initDeviceInfo() {
   STATE.deviceId = STATE.deviceInfo.id || 'unknown';
 
   log('Device ID:', STATE.deviceId, 'Device Name:', STATE.deviceName);
+  STATE.deviceInfo = null; // release — id and name already extracted above
 }
 
 // === PRE-HEATING LOGIC ===
@@ -658,7 +633,7 @@ function fetchControlInputsWithCachedForecast(cb) {
   };
   // Store last external temp for fallback in shouldPreheat
   if (results.external !== null) lastExternalTemp = results.external;
-  log('Fetched all control inputs:', JSON.stringify(results));
+  // log('Fetched all control inputs:', JSON.stringify(results)); // hot path — serialises full results every 5 min
 
   // Clear guard before calling callback
   _fetchingControlInputs = false;
@@ -714,7 +689,7 @@ var kalman = new KalmanFilter();
  */
 function parseTemperatureFromMqtt(topic, message) {
   var temp = null;
-  log("parseTemperatureFromMqtt", topic, message);
+  // log("parseTemperatureFromMqtt", topic, message); // hot path — logs full payload every MQTT event
   try {
     // H&T Gen1 format, via gen1 HTTP-to-MQTT proxy
     // topic: shellies/<id>/sensor/temperature
@@ -794,11 +769,11 @@ function onExternalTemperature(topic, message) {
 function onTemperatureRanges(topic, message) {
   log('Received temperature ranges update from MQTT:', topic);
   try {
-    log('Received temperature ranges update from MQTT:', message);
+    // log('Received temperature ranges update from MQTT:', message); // duplicates topic log above, logs full payload
     var data = JSON.parse(message);
     if (data && data.ranges) {
       STATE.cachedTemperatureRanges = data
-      log('Updated temperature ranges:', JSON.stringify(STATE.cachedTemperatureRanges));
+      // log('Updated temperature ranges:', JSON.stringify(STATE.cachedTemperatureRanges)); // serialises full object
 
       // Schedule control loop check
       scheduleControlLoopCheck();
@@ -985,16 +960,6 @@ function subscribeToDoorSensors() {
   }
 }
 
-// Extract device name from MQTT topic (e.g., "shellies/device-name/sensor/temperature" -> "device-name")
-function extractDeviceNameFromTopic(topic) {
-  if (!topic) return null;
-  var parts = topic.split('/');
-  if (parts.length >= 2) {
-    return parts[1];
-  }
-  return null;
-}
-
 function subscribeMqttTemperature(location, topic) {
   log('Subscribing to MQTT topic for', location, 'temperature...');
 
@@ -1024,21 +989,6 @@ function subscribeMqttTemperature(location, topic) {
       MQTT.subscribe(newTopic, onExternalTemperature);
     }
     STATE.subscribedTemperatureTopic[location] = newTopic;
-  }
-}
-
-// === DATA FETCHING FUNCTIONS ===
-// Read temperature from STATE (in-memory cache)
-function getShellyTemperature(location, cb) {
-  log('getShellyTemperature', location);
-  var temp = STATE.temperature[location];
-
-  if (!temp) {
-    log('Read', location, 'temperature:', temp);
-    cb(temp);
-  } else {
-    log('No', location, 'temperature available yet');
-    cb(null);
   }
 }
 
@@ -1099,9 +1049,8 @@ function onForecast(result, error_code, error_message, cb) {
     return;
   }
 
-  // Cache only the arrays we need, let GC clean up the rest
+  // Cache only the array we need, let GC clean up the rest
   STATE.cachedForecast = data.hourly.temperature_2m;
-  STATE.cachedForecastTimes = data.hourly.time;
   data = null; // Help GC
 
   var now = new Date();
@@ -1375,9 +1324,8 @@ if (typeof Shelly !== "undefined") {
     if (status && status.component === "sys" && status.delta && ("kvs_rev" in status.delta)) {
       log('KVS updated (rev ' + status.delta.kvs_rev + '), reloading configuration and re-fetching temperatures');
       loadConfig(onConfigLoaded);
-    } else {
-      log('Script status:', JSON.stringify(status));
     }
+    // else { log('Script status:', JSON.stringify(status)); } // hot path — fires on every switch/temp event
   });
 
   // Subscribe to all heater commands using wildcard

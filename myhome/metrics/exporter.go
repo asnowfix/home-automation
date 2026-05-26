@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"myhome/mqtt"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
 
 	"github.com/go-logr/logr"
 )

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/testr"
@@ -162,6 +162,17 @@ func (f *fakeRegistry) ForgetDevice(_ context.Context, id string) error {
 	defer f.mu.Unlock()
 	f.calls["ForgetDevice"]++
 	delete(f.devices, id)
+	return nil
+}
+
+func (f *fakeRegistry) RenameDevice(_ context.Context, oldID, newID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls["RenameDevice"]++
+	if d, ok := f.devices[oldID]; ok {
+		delete(f.devices, oldID)
+		f.devices[newID] = d
+	}
 	return nil
 }
 

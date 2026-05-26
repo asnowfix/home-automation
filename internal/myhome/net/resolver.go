@@ -3,10 +3,11 @@ package mynet
 import (
 	"context"
 	"fmt"
-	"global"
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -236,7 +237,7 @@ func (r *resolver) LookupService(ctx context.Context, service string) (*url.URL,
 					for _, addrIpV4 := range entry.AddrIPv4 {
 						instances = append(instances, &url.URL{
 							Scheme: "tcp",
-							Host:   fmt.Sprintf("%v:%v", addrIpV4, entry.Port),
+							Host:   net.JoinHostPort(addrIpV4.String(), strconv.Itoa(entry.Port)),
 						})
 						found()
 					}

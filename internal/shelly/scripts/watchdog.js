@@ -151,13 +151,13 @@ var FirmwareUpdater = {
                 self.log("Error checking for updates: " + error_message);
                 return;
             }
-            
+
             // If result is empty, no update is available
             if (!result || (Object.keys(result).length === 0)) {
                 self.log("No firmware updates available");
                 return;
             }
-            
+
             // Determine which update to use based on configuration
             var updateInfo = null;
             if (CONFIG.firmwareUpdate.updateChannel === "beta" && result.beta) {
@@ -167,7 +167,7 @@ var FirmwareUpdater = {
                 updateInfo = result.stable;
                 self.log("Stable update available: " + updateInfo.version + " (" + updateInfo.build_id + ")");
             }
-            
+
             // If update is available and auto-update is enabled, apply it
             if (updateInfo && CONFIG.firmwareUpdate.autoUpdate) {
                 self.applyUpdate();
@@ -191,7 +191,8 @@ var FirmwareUpdater = {
                 self.log("Error applying update: " + error_message);
                 return;
             }
-            
+
+
             self.log("Update initiated successfully. Device will reboot.");
         });
     },

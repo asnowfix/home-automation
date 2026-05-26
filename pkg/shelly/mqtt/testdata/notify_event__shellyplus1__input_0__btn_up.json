@@ -1,0 +1,16 @@
+{
+  "dst": "shellyplus1-b8d61a85ed58/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "input:0",
+        "event": "btn_up",
+        "id": 0,
+        "ts": 1758231448.73
+      }
+    ],
+    "ts": 1758231448.73
+  },
+  "src": "shellyplus1-b8d61a85ed58"
+}

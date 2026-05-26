@@ -1,0 +1,16 @@
+{
+  "dst": "shellyplusi4-c4d8d554ad6c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "sys",
+        "event": "ota_begin",
+        "msg": "in_progress",
+        "ts": 1759263939.01
+      }
+    ],
+    "ts": 1759263939.01
+  },
+  "src": "shellyplusi4-c4d8d554ad6c"
+}

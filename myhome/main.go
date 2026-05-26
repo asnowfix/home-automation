@@ -3,19 +3,19 @@ package main
 import (
 	"context"
 	"fmt"
-	"global"
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"os"
 	"runtime/pprof"
 
-	"version"
+	"github.com/asnowfix/home-automation/pkg/version"
 
-	"hlog"
+	"github.com/asnowfix/home-automation/hlog"
 
-	"myhome/ctl"
-	"myhome/daemon"
+	"github.com/asnowfix/home-automation/myhome/ctl"
+	"github.com/asnowfix/home-automation/myhome/daemon"
 
-	"debug"
+	"github.com/asnowfix/home-automation/internal/debug"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"

@@ -1,16 +1,16 @@
-module myhome/mqtt
+module github.com/asnowfix/home-automation/myhome/mqtt
 
-go 1.24.2
+go 1.25.0
 
-toolchain go1.24.3
+toolchain go1.25.3
 
 require (
+	github.com/asnowfix/home-automation/internal/global v0.0.0-00010101000000-000000000000
 	github.com/eclipse/paho.mqtt.golang v1.5.0
 	github.com/go-logr/logr v1.4.3
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/mochi-mqtt/server/v2 v2.6.6
 	github.com/spf13/viper v1.21.0
-	global v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -48,4 +48,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace global => ../../internal/global
+replace github.com/asnowfix/home-automation/internal/global => ../../internal/global

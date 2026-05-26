@@ -1,0 +1,11 @@
+{
+  "dst": "shelly1minig3-54320464ac08/events",
+  "method": "NotifyStatus",
+  "params": {
+    "sys": {
+      "last_sync_ts": 1755016844
+    },
+    "ts": 1755016844.23
+  },
+  "src": "shelly1minig3-54320464ac08"
+}

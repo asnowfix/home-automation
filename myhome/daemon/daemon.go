@@ -3,25 +3,26 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"global"
-	"myhome/ctl/options"
-	"myhome/devices/impl"
-	mqttclient "myhome/mqtt"
-	mqttserver "myhome/mqtt"
-	mynet "myhome/net"
-	"myhome/occupancy"
-	"myhome/storage"
-	"myhome/temperature"
-	"myhome/ui"
 	"net/http"
 	_ "net/http/pprof"
-	"pkg/shelly"
-	"pkg/shelly/gen1"
 	"time"
 
-	"myhome"
-
+	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
+	"github.com/asnowfix/home-automation/internal/myhome/ui"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	"github.com/asnowfix/home-automation/myhome/devices/impl"
+	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/asnowfix/home-automation/myhome/metrics"
+	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
+	mqttserver "github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/myhome/occupancy"
+	"github.com/asnowfix/home-automation/myhome/storage"
+	"github.com/asnowfix/home-automation/myhome/temperature"
+	"github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
 )
@@ -208,8 +209,30 @@ func (d *daemon) Run() error {
 		// Create SSE broadcaster for live sensor updates
 		sseBroadcaster := ui.NewSSEBroadcaster(log.WithName("sse"))
 
+		// Start event service if enabled
+		var eventsSvc *events.Service
+		var eventsTracker *events.SensorDailyTracker
+		var eventsStore *events.Storage
+		if options.Flags.EnableEventsService {
+			eventsStore, err = events.NewStorage(log.WithName("events"), options.Flags.EventsDBPath)
+			if err != nil {
+				log.Error(err, "Failed to initialize events storage", "path", options.Flags.EventsDBPath)
+				// Non-fatal: continue without event recording
+				eventsStore = nil
+			} else {
+				eventsTracker = events.NewSensorDailyTracker(log.WithName("events"), eventsStore)
+				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, sseBroadcaster.BroadcastEvent, options.Flags.EventsRetention)
+				go eventsTracker.Start(d.ctx)
+				go eventsSvc.Start(d.ctx)
+				log.Info("Events service started", "db", options.Flags.EventsDBPath, "retention", options.Flags.EventsRetention)
+			}
+		} else {
+			log.Info("Events service disabled")
+		}
+
 		// Start device manager
 		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc, sseBroadcaster)
+		d.dm.WithEventService(eventsSvc, eventsTracker)
 		err = d.dm.Start(d.ctx)
 		if err != nil {
 			log.Error(err, "Failed to start device manager")
@@ -217,11 +240,55 @@ func (d *daemon) Run() error {
 		}
 		log.Info("Started device manager", "manager", d.dm)
 
+		// Start Gen2 NotifyEvent listener
+		if eventsSvc != nil && eventsTracker != nil {
+			gen2Listener := shellygen2l.NewListener(log.WithName("gen2"), mc, eventsSvc, eventsTracker)
+			go gen2Listener.Start(d.ctx)
+			log.Info("Gen2 event listener started")
+		}
+
 		// Start the main RPC server
 		d.rpc, err = myhome.NewServerE(d.ctx, mc, d.dm)
 		if err != nil {
 			log.Error(err, "Failed to start MyHome RPC service")
 			return err
+		}
+
+		// Register EventList RPC handler if events service is running
+		if eventsStore != nil {
+			myhome.RegisterMethodHandler(myhome.EventList, func(ctx context.Context, in any) (any, error) {
+				req, ok := in.(*myhome.EventListRequest)
+				if !ok {
+					return nil, fmt.Errorf("unexpected param type: %T", in)
+				}
+				q := events.Query{
+					DeviceID:  req.DeviceID,
+					EventType: req.EventType,
+					Severity:  req.Severity,
+					Since:     req.Since,
+					Limit:     req.Limit,
+					Offset:    req.Offset,
+				}
+				rows, err := eventsStore.Query(ctx, q)
+				if err != nil {
+					return nil, err
+				}
+				views := make([]myhome.EventView, len(rows))
+				for i, e := range rows {
+					views[i] = myhome.EventView{
+						ID:         e.ID,
+						Ts:         e.Ts,
+						ReceivedAt: e.ReceivedAt,
+						DeviceID:   e.DeviceID,
+						Component:  e.Component,
+						Event:      e.Event,
+						Severity:   e.Severity,
+						Data:       e.Data,
+					}
+				}
+				return &myhome.EventListResponse{Events: views, Total: len(views)}, nil
+			})
+			log.Info("EventList RPC handler registered")
 		}
 
 		// Register Temperature RPC methods if enabled
@@ -285,7 +352,7 @@ func (d *daemon) Run() error {
 		}
 
 		// Start UI & reverse HTTP proxy
-		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, storage, mc, sseBroadcaster); err != nil {
+		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, storage, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy); err != nil {
 			log.Error(err, "Failed to start UI server")
 			return err
 		}

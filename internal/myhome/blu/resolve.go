@@ -3,9 +3,9 @@ package blu
 import (
 	"context"
 	"fmt"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"strings"
-	"tools"
+	"github.com/asnowfix/home-automation/internal/tools"
 )
 
 // ResolveMac resolves a BLU device identifier (MAC address, device ID, or device name)

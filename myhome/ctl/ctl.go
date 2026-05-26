@@ -2,29 +2,32 @@ package ctl
 
 import (
 	"context"
-	"global"
-	"hlog"
-	"myhome"
-	"myhome/ctl/blu"
-	"myhome/ctl/config"
-	"myhome/ctl/db"
-	"myhome/ctl/forget"
-	"myhome/ctl/heater"
-	"myhome/ctl/list"
-	"myhome/ctl/mqtt"
-	"myhome/ctl/open"
-	"myhome/ctl/options"
-	"myhome/ctl/room"
-	"myhome/ctl/sfr"
-	"myhome/ctl/shelly"
-	"myhome/ctl/show"
-	"myhome/ctl/sswitch"
-	"myhome/ctl/temperature"
-	mqttclient "myhome/mqtt"
+	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/ctl/blu"
+	"github.com/asnowfix/home-automation/myhome/ctl/config"
+	ctlmcp "github.com/asnowfix/home-automation/myhome/ctl/mcp"
+	"github.com/asnowfix/home-automation/myhome/ctl/db"
+	eventsctl "github.com/asnowfix/home-automation/myhome/ctl/events"
+	"github.com/asnowfix/home-automation/myhome/ctl/forget"
+	"github.com/asnowfix/home-automation/myhome/ctl/heater"
+	"github.com/asnowfix/home-automation/myhome/ctl/list"
+	"github.com/asnowfix/home-automation/myhome/ctl/mqtt"
+	"github.com/asnowfix/home-automation/myhome/ctl/open"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	"github.com/asnowfix/home-automation/myhome/ctl/pool"
+	"github.com/asnowfix/home-automation/myhome/ctl/room"
+	"github.com/asnowfix/home-automation/myhome/ctl/sfr"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly"
+	"github.com/asnowfix/home-automation/myhome/ctl/show"
+	"github.com/asnowfix/home-automation/myhome/ctl/sswitch"
+	"github.com/asnowfix/home-automation/myhome/ctl/temperature"
+	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	"os"
 	"os/signal"
-	shellyPkg "pkg/shelly"
-	"pkg/shelly/types"
+	shellyPkg "github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"runtime/pprof"
 	"syscall"
 
@@ -139,6 +142,7 @@ func init() {
 	// Make log level flags mutually exclusive
 	Cmd.MarkFlagsMutuallyExclusive("verbose", "debug", "quiet")
 
+	Cmd.AddCommand(ctlmcp.Cmd)
 	Cmd.AddCommand(list.Cmd)
 	Cmd.AddCommand(show.Cmd)
 	Cmd.AddCommand(open.Cmd)
@@ -152,7 +156,9 @@ func init() {
 	Cmd.AddCommand(blu.Cmd)
 	Cmd.AddCommand(temperature.Cmd)
 	Cmd.AddCommand(heater.Cmd)
+	Cmd.AddCommand(pool.PoolCmd())
 	Cmd.AddCommand(room.Cmd)
+	Cmd.AddCommand(eventsctl.Cmd)
 }
 
 var Commit string

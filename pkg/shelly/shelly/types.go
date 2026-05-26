@@ -2,12 +2,12 @@ package shelly
 
 import (
 	"encoding/json"
-	"pkg/shelly/ethernet"
-	"pkg/shelly/mqtt"
-	"pkg/shelly/sswitch"
-	"pkg/shelly/system"
-	"pkg/shelly/wifi"
-	"schedule"
+	"github.com/asnowfix/home-automation/pkg/shelly/ethernet"
+	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
+	"github.com/asnowfix/home-automation/pkg/shelly/system"
+	"github.com/asnowfix/home-automation/pkg/shelly/wifi"
+	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
 )
 
 type Product struct {

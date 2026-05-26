@@ -20,7 +20,9 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23.x'
+          go-version: '1.25.x'
+        env:
+          GOTOOLCHAIN: go1.25.3
       - id: go-generate
         name: Run go generate
         run: |

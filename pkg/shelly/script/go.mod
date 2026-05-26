@@ -1,6 +1,6 @@
-module pkg/shelly/script
+module github.com/asnowfix/home-automation/pkg/shelly/script
 
-go 1.23.0
+go 1.25.0
 
 require (
 	github.com/dop251/goja v0.0.0-20251103141225-af2ceb9156d7

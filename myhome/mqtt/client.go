@@ -3,9 +3,6 @@ package mqtt
 import (
 	"context"
 	"fmt"
-	"global"
-	"myhome/ctl/options"
-	mynet "myhome/net"
 	"net"
 	"net/url"
 	"os"
@@ -13,6 +10,10 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/asnowfix/home-automation/internal/global"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/go-logr/logr"
@@ -90,6 +91,7 @@ type client struct {
 	ctx                  context.Context                // Process-wide context for background services
 	watchdogCancel       context.CancelFunc             // Cancel function for watchdog
 	subscribers          sync.Map                       // Map topic => []subscribers channels
+	subscribersMu        sync.Map                       // Map topic => *sync.Mutex, guards subscriber list mutations
 	handlers             sync.Map                       // Map topic => mqtt.MessageHandler for re-registration
 	pendingSubscriptions map[string]mqtt.MessageHandler // Subscriptions to apply on connect
 	pendingMutex         sync.Mutex                     // Protects pendingSubscriptions
@@ -406,6 +408,7 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 
 							// Re-subscribe to all topics with their stored handlers
 							// This is critical because manual disconnect loses Paho's subscription handlers
+							var failedSubs []subInfo
 							for _, sub := range subscriptions {
 								token := c.mqtt.Subscribe(sub.topic, 1 /*at-least-once*/, sub.handler)
 								for !token.WaitTimeout(c.timeout) {
@@ -413,9 +416,20 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 								}
 								if err := token.Error(); err != nil {
 									log.Error(err, "Failed to re-subscribe after reconnection", "topic", sub.topic)
+									failedSubs = append(failedSubs, sub)
 								} else {
 									log.Info("Re-subscribed successfully", "topic", sub.topic)
 								}
+							}
+
+							// Queue any failed subscriptions so they are retried on the next reconnection
+							if len(failedSubs) > 0 {
+								c.pendingMutex.Lock()
+								for _, sub := range failedSubs {
+									c.pendingSubscriptions[sub.topic] = sub.handler
+								}
+								c.pendingMutex.Unlock()
+								log.Info("Queued failed re-subscriptions for retry", "count", len(failedSubs))
 							}
 
 							log.Info("Periodic reconnection complete, all subscriptions re-registered")
@@ -446,6 +460,16 @@ func (c *client) watchdog(ctx context.Context, log logr.Logger) {
 func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, where string) (*url.URL, error) {
 	log.Info("Looking up MQTT broker", "where", where)
 
+	// If caller passed a full URL (e.g. "tcp://192.168.1.2:1883"), parse it directly.
+	if strings.Contains(where, "://") {
+		u, err := url.Parse(where)
+		if err != nil {
+			return nil, fmt.Errorf("invalid broker URL %q: %w", where, err)
+		}
+		log.Info("Using broker URL directly", "url", u)
+		return u, nil
+	}
+
 	if where == "me" {
 		log.Info("Finding local IP")
 		_, ip, err := mynet.MainInterface(log)
@@ -455,7 +479,7 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 		}
 		return &url.URL{
 			Scheme: "tcp",
-			Host:   fmt.Sprintf("%s:%d", ip, PRIVATE_PORT),
+			Host:   net.JoinHostPort(ip.String(), strconv.Itoa(PRIVATE_PORT)),
 		}, nil
 	}
 
@@ -475,7 +499,7 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 		log.Info("Found IP", "addr", ip.String(), "port", port)
 		return &url.URL{
 			Scheme: "tcp",
-			Host:   fmt.Sprintf("%s:%d", ip.String(), port),
+			Host:   net.JoinHostPort(ip.String(), strconv.Itoa(port)),
 		}, nil
 	}
 
@@ -485,7 +509,7 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 		log.Info("Found IP", "addr", ip.String(), "port", port)
 		return &url.URL{
 			Scheme: "tcp",
-			Host:   fmt.Sprintf("%s:%d", ip.String(), PRIVATE_PORT),
+			Host:   net.JoinHostPort(ip.String(), strconv.Itoa(PRIVATE_PORT)),
 		}, nil
 	}
 
@@ -495,7 +519,7 @@ func lookupBroker(ctx context.Context, log logr.Logger, resolver mynet.Resolver,
 		log.Info("Found IP", "addr", ip.String(), "port", port)
 		return &url.URL{
 			Scheme: "tcp",
-			Host:   fmt.Sprintf("%s:%d", ip.String(), PRIVATE_PORT),
+			Host:   net.JoinHostPort(ip.String(), strconv.Itoa(PRIVATE_PORT)),
 		}, nil
 	}
 
@@ -635,18 +659,34 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 		close(s.queue)
 	}()
 
-	// Load or create subscriber list for this topic
+	// Get-or-create the per-topic mutex to guard subscriber list mutations
+	lockI, _ := c.subscribersMu.LoadOrStore(topic, &sync.Mutex{})
+	topicMu := lockI.(*sync.Mutex)
+
+	// Atomically append to subscriber list under the per-topic lock
+	topicMu.Lock()
 	value, loaded := c.subscribers.LoadOrStore(topic, make([]*subscriber, 0))
 	subscribers := value.([]*subscriber)
 	subscribers = append(subscribers, s)
 	c.subscribers.Store(topic, subscribers)
+	topicMu.Unlock()
 	c.log.Info("Subscriber added", "topic", topic, "subscriber", s.name, "count", len(subscribers), "qlen", qlen, "mqtt_subscribe_needed", !loaded)
 
 	if !loaded {
 		// First subscriber for this topic - need to register MQTT subscription
-		distribute := func(client mqtt.Client, msg mqtt.Message) {
+		var distribute mqtt.MessageHandler = func(client mqtt.Client, msg mqtt.Message) {
 			c.log.Info("distribute: message received from broker", "subscription_topic", topic, "message_topic", msg.Topic(), "payload_len", len(msg.Payload()))
 			go func(log logr.Logger) {
+				// Acquire per-topic lock to safely read and modify the subscriber list
+				lockI, ok := c.subscribersMu.Load(topic)
+				if !ok {
+					log.Info("distribute: no lock found for topic", "topic", topic)
+					return
+				}
+				topicMu := lockI.(*sync.Mutex)
+				topicMu.Lock()
+				defer topicMu.Unlock()
+
 				// Load current subscribers
 				value, ok := c.subscribers.Load(topic)
 				if !ok {

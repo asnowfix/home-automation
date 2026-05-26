@@ -10,17 +10,17 @@ import (
 	"strings"
 	"time"
 
-	"myhome"
-	"myhome/mqtt"
-	"pkg/shelly"
-	"pkg/shelly/ethernet"
-	"pkg/shelly/kvs"
-	"pkg/shelly/system"
-	"pkg/shelly/types"
-	"pkg/shelly/wifi"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/ethernet"
+	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	"github.com/asnowfix/home-automation/pkg/shelly/system"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/wifi"
 
-	"hlog"
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
 	"github.com/go-logr/logr"
 )

@@ -3,7 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"os"
 
 	"github.com/spf13/cobra"

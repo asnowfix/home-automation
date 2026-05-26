@@ -22,7 +22,7 @@ builds:
     dir: .
     main: ./myhome
     ldflags:
-      - -X version.Program=myhome
-      - -X version.Repo={{.GitURL}}
-      - -X version.Version={{if .IsSnapshot}}{{.Summary}}{{else}}{{.Version}}{{end}}
-      - -X version.Commit={{.FullCommit}}
+      - -X github.com/asnowfix/home-automation/pkg/version.Program=myhome
+      - -X github.com/asnowfix/home-automation/pkg/version.Repo={{.GitURL}}
+      - -X github.com/asnowfix/home-automation/pkg/version.Version={{if .IsSnapshot}}{{.Summary}}{{else}}{{.Version}}{{end}}
+      - -X github.com/asnowfix/home-automation/pkg/version.Commit={{.FullCommit}}

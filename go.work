@@ -1,4 +1,6 @@
-go 1.25.3
+go 1.25.0
+
+toolchain go1.25.3
 
 use (
 	.
@@ -32,6 +34,7 @@ use (
 	./myhome/daemon/watch
 	./myhome/devices
 	./myhome/devices/impl
+	./myhome/events
 	./myhome/mqtt
 	./myhome/occupancy
 	./myhome/storage
@@ -55,4 +58,5 @@ use (
 	./pkg/shelly/wifi
 	./pkg/tapo
 	./pkg/version
+	./tools/classify-events
 )

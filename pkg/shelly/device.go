@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	_ "myhome/net"
+	_ "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
-	"pkg/devices"
-	"pkg/shelly/mqtt"
-	"pkg/shelly/ratelimit"
-	"pkg/shelly/shelly"
-	"pkg/shelly/system"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/devices"
+	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	"github.com/asnowfix/home-automation/pkg/shelly/ratelimit"
+	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/system"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"reflect"
 	"regexp"
 	"strings"
@@ -136,7 +136,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	}
 
 	// BLU devices (Generation 0) cannot be refreshed via RPC - they are updated via MQTT events only
-	if strings.HasPrefix(d.Id(), "shellyblu-") {
+	if IsBluDevice(d.Id()) {
 		d.log.V(1).Info("Skipping refresh for BLU device (updated via MQTT events)", "device_id", d.Id())
 		return false, nil
 	}
@@ -482,10 +482,15 @@ func IsGen1Device(deviceId string) bool {
 	return false
 }
 
-// BLU device ID prefixes that identify BLU devices
+// BLU device ID prefixes that identify BLU devices.
+// Must stay in sync with deviceIDFromCapabilities() in internal/myhome/shelly/blu/listener.go.
 var bluPrefixes = []string{
-	"shellyblu-", // Shelly BLU (generic, if unknown)
-	"sbht-",      // Shelly BLU H&T (Humidity & Temperature)
+	"shellyblu-",            // generic BLU fallback
+	"shellybluht3-",         // BLU H&T v3
+	"shellybludoorwindow2-", // BLU door/window v2
+	"shellyblumotion1-",     // BLU motion v1
+	"shellyblubutton1-",     // BLU button v1
+	"sbht-",                 // alternate H&T naming
 }
 
 func IsBluDevice(deviceId string) bool {
@@ -583,6 +588,31 @@ func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) (devices.D
 	return d, nil
 }
 
+// MacFromShellyID extracts the MAC address embedded in a Shelly device ID of
+// the form "<model>-<12hexchars>" (e.g. "shelly1minig3-54320464e730").
+// Returns nil when the ID does not follow that pattern.
+func MacFromShellyID(id string) net.HardwareAddr {
+	i := strings.LastIndex(id, "-")
+	if i < 0 {
+		return nil
+	}
+	h := id[i+1:]
+	if len(h) != 12 {
+		return nil
+	}
+	for _, c := range h {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return nil
+		}
+	}
+	mac, err := net.ParseMAC(fmt.Sprintf("%s:%s:%s:%s:%s:%s",
+		h[0:2], h[2:4], h[4:6], h[6:8], h[8:10], h[10:12]))
+	if err != nil {
+		return nil
+	}
+	return mac
+}
+
 func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devices.Device, error) {
 	if id == "" || id == "<nil>" {
 		return nil, fmt.Errorf("invalid device id: %s", id)
@@ -591,6 +621,9 @@ func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devic
 		log: log,
 	}
 	d.UpdateId(id)
+	if mac := MacFromShellyID(id); mac != nil {
+		d.UpdateMac(mac.String())
+	}
 	return d, nil
 }
 
@@ -665,6 +698,9 @@ func (d *Device) initMqtt(ctx context.Context) error {
 func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
 	if d == nil {
 		panic("device is nil")
+	}
+	if IsBluDevice(d.Id()) {
+		return nil
 	}
 	if d.Id() == "" || d.Mac() == nil {
 		info, err := shelly.GetDeviceInfo(ctx, d, via)
@@ -753,7 +789,7 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 			}
 
 			// Skip BLU devices (Generation 0) - they cannot receive commands or run scripts
-			if strings.HasPrefix(devSummary.Id(), "shellyblu-") {
+			if IsBluDevice(devSummary.Id()) {
 				log.V(1).Info("Skipping BLU device (no command/script support)", "device_id", devSummary.Id())
 				results <- DeviceResult{Device: devSummary, Error: nil}
 				return

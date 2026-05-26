@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 )
 
 // seedRoom is a test helper that adds a room both to in-memory state and storage.

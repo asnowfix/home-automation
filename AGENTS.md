@@ -1,6 +1,6 @@
 # Agent Guidelines for Home Automation Project
 
-This document contains project context, coding guidelines, best practices, and important knowledge for AI coding agents working on this project.
+Detailed reference for AI coding agents. `CLAUDE.md` contains the concise always-loaded summary; read sections here when actively working in a specific area.
 
 ## Table of Contents
 
@@ -207,9 +207,59 @@ var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : n
 Uncaught Error: Too many calls in progress
 ```
 
-**Solution**: Define asynchronous callback functions at the top level and pass them as named references. Where possible, prefer synchronous calls like `Shelly.getComponentStatus()` and `Shelly.getComponentConfig()` to avoid async callbacks altogether.
+**Solutions**:
 
-**Example Refactoring**:
+1. **Use a task queue** - Queue async operations to execute sequentially via a single recurring timer (recommended)
+2. **Extract named functions** - Define callbacks at top level and pass as references
+3. **Use synchronous calls** - Prefer `Shelly.getComponentStatus()` and `Shelly.getComponentConfig()` when possible
+
+**Solution 1: Task Queue Pattern (Recommended)**
+
+Use a single recurring timer to process queued tasks sequentially. This avoids callback nesting entirely:
+
+```javascript
+// Task queue infrastructure (define once per script)
+var TASK_QUEUE = [];
+var TASK_INDEX = 0;
+var TASK_TIMER = null;
+
+function processTaskQueue() {
+  if (TASK_INDEX >= TASK_QUEUE.length) {
+    if (TASK_TIMER) {
+      Timer.clear(TASK_TIMER);
+      TASK_TIMER = null;
+    }
+    TASK_QUEUE = [];
+    TASK_INDEX = 0;
+    return;
+  }
+  var task = TASK_QUEUE[TASK_INDEX];
+  TASK_INDEX++;
+  task();
+}
+
+function queueTask(task) {
+  TASK_QUEUE.push(task);
+  if (!TASK_TIMER) {
+    TASK_TIMER = Timer.set(200, true, processTaskQueue);
+  }
+}
+
+// Usage: Queue multiple async operations without nesting
+function saveState() {
+  queueTask(function() {
+    Shelly.call("KVS.Set", {key: "key1", value: "val1"});
+  });
+  queueTask(function() {
+    Shelly.call("KVS.Set", {key: "key2", value: "val2"});
+  });
+  queueTask(function() {
+    Shelly.call("KVS.Set", {key: "key3", value: "val3"});
+  });
+}
+```
+
+**Solution 2: Extracted Named Functions**
 
 ```javascript
 // BROKEN - 5+ levels of nesting
@@ -265,6 +315,46 @@ Shelly.addEventHandler(function(eventData) {
   }
 });
 ```
+
+### MQTT API Constraints
+
+#### MQTT.publish — No Callback
+
+`MQTT.publish(topic, payload, qos, retain)` accepts **exactly 4 parameters** and returns a boolean.
+
+**❌ No 5th callback argument is supported.** Any function passed as a 5th argument is silently ignored — the callback will never be invoked.
+
+```javascript
+// BROKEN — callback is silently ignored, continuation never runs
+MQTT.publish(topic, payload, 0, false, function(success) {
+  doNextStep(); // never called
+});
+
+// CORRECT — fire-and-forget, schedule continuation via task queue
+MQTT.publish(topic, payload, 0 /*at-most-once*/, false /*dont-retain*/);
+queueTask(function() { doNextStep(); });
+```
+
+#### Design Rule: Always Use the Task Queue for Post-Async Continuations
+
+**Never create a one-shot `Timer.set(delayMs, false, fn)` to delay a continuation after an async operation.** Every such timer consumes one of the 5 available timer slots for its full duration.
+
+Instead, append the continuation to the task queue with `queueTask(fn)`. The task queue's single recurring `TASK_TIMER` fires every 200ms, so the continuation is guaranteed to run after at least one 200ms tick — the same minimum delay — without consuming an extra timer slot.
+
+```javascript
+// AVOID — wastes a timer slot
+Timer.set(200, false, function() {
+  callback(null);
+});
+
+// PREFER — reuses the task queue's existing timer
+queueTask(function() { callback(null); });
+```
+
+This rule applies to all continuations after:
+- `MQTT.publish(...)` (no callback supported)
+- Any fire-and-forget `Shelly.call(...)` where you need to proceed after a brief settle delay
+- Any inter-step sequencing that would otherwise require a one-shot timer
 
 ### Resource Limits
 
@@ -322,6 +412,162 @@ state/<category>/<identifier>
 - **Easy discovery**: Hierarchical structure allows prefix-based listing
 - **URL-safe**: Keys can be used in URLs without encoding
 - **Case-insensitive filesystems**: Avoids issues on case-insensitive systems
+
+### Data Storage Patterns
+
+#### Script.storage vs KVS vs In-Memory Variables
+
+Understanding the distinction between these three storage mechanisms is critical for Shelly scripts:
+
+**Script.storage (script-internal persistent data)**
+- **Use for**: Data that is managed ONLY by the script itself
+- **API**: `Script.storage.getItem(key)` and `Script.storage.setItem(key, value)`
+- **Example**: `heater.js` stores `coolingRate` and `forecastUrl` - values learned/computed by the script
+- **NOT accessible** from external commands or other scripts
+- **Persists** across script restarts and device reboots
+
+**KVS (external configuration)**
+- **Use for**: Data that is set by EXTERNAL commands/tools
+- **API**: `Shelly.call('KVS.Get', {key: key}, callback)` and `Shelly.call('KVS.Set', {key: key, value: value}, callback)`
+- **Example**: Follow configurations set by `myhome ctl follow blu` or `myhome ctl follow shelly`
+- **Keys follow pattern**: `follow/shelly-blu/<mac>` or `follow/status/<device-id>`
+- **Accessible** from external tools and other scripts
+- **Persists** across script restarts and device reboots
+
+**In-memory variables (runtime cache)**
+- **Use for**: Fast access to data loaded from KVS or Script.storage
+- **Example**: `var FOLLOWS = {}` in blu-listener.js, blu-publisher.js, status-listener.js
+- **Populated by**: `loadFollowsFromKVS()` which reads from KVS
+- **Updated when**: KVS changes are detected via event handlers
+- **Does NOT persist** across script restarts
+
+**Architecture flow for follow scripts:**
+
+1. External command sets KVS: `myhome ctl follow blu device mac` → KVS key `follow/shelly-blu/<mac>`
+2. Script loads on startup: `loadFollowsFromKVS()` → reads KVS → populates `FOLLOWS` variable
+3. Script watches for changes: KVS change event → `loadFollowsFromKVS()` → updates `FOLLOWS`
+4. Script uses data: `getFollows()` → returns `FOLLOWS` (fast in-memory access)
+
+**Common mistake**: Using `Script.storage` for data that should come from KVS. This breaks external configuration because Script.storage is script-private.
+
+**Example pattern:**
+
+```javascript
+// In-memory cache (fast access)
+var FOLLOWS = {};
+
+// Load from KVS into cache
+function loadFollowsFromKVS() {
+  Shelly.call('KVS.List', {}, function(result, error_code, error_message) {
+    if (error_code !== 0) {
+      log('KVS.List failed:', error_message);
+      return;
+    }
+    
+    var keys = result.keys || [];
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i].indexOf('follow/') === 0) {
+        loadSingleKey(keys[i]);
+      }
+    }
+  });
+}
+
+function loadSingleKey(key) {
+  Shelly.call('KVS.Get', {key: key}, function(result, error_code, error_message) {
+    if (error_code === 0 && result && result.value) {
+      var data = JSON.parse(result.value);
+      FOLLOWS[key] = data;
+    }
+  });
+}
+
+// Watch for KVS changes
+Shelly.addEventHandler(function(eventData) {
+  if (eventData && eventData.info && eventData.info.component === 'kvs') {
+    loadFollowsFromKVS();  // Reload cache
+  }
+});
+
+// Use cached data (fast)
+function getFollows() {
+  return FOLLOWS;
+}
+```
+
+### Resource Limit Workarounds
+
+#### Single Recurring Timer Pattern
+
+**Problem**: Shelly scripts are limited to **5 timers** per script. Sequential async operations (KVS calls, RPC calls) can quickly exhaust this limit if each operation creates its own timer.
+
+**Anti-Pattern (creates multiple timers):**
+```javascript
+function loadNextKey() {
+  Shelly.call("KVS.Get", {key: k}, function(result, err) {
+    // Process result
+    Timer.set(200, false, loadNextKey);  // Creates new timer each time
+  });
+}
+```
+
+**Correct Pattern (single recurring timer):**
+```javascript
+var taskQueue = [];
+var taskTimer = null;
+
+function processTaskQueue() {
+  if (taskQueue.length === 0) {
+    if (taskTimer) {
+      Timer.clear(taskTimer);
+      taskTimer = null;
+    }
+    return;
+  }
+  
+  var task = taskQueue.shift();  // Note: shift() not supported, use manual implementation
+  task();
+}
+
+function startTaskQueue() {
+  if (!taskTimer) {
+    taskTimer = Timer.set(200, true, processTaskQueue);  // Single recurring timer
+  }
+}
+
+// Add tasks to queue
+taskQueue.push(function() {
+  Shelly.call("KVS.Get", {key: k1}, function(r, e) { /* handle */ });
+});
+taskQueue.push(function() {
+  Shelly.call("KVS.Get", {key: k2}, function(r, e) { /* handle */ });
+});
+startTaskQueue();
+```
+
+**Note**: Since `[].shift()` is not supported, use this manual implementation:
+
+```javascript
+function processTaskQueue() {
+  if (taskQueue.length === 0) {
+    if (taskTimer) {
+      Timer.clear(taskTimer);
+      taskTimer = null;
+    }
+    return;
+  }
+  
+  // Manual shift implementation
+  var task = taskQueue[0];
+  var newQueue = [];
+  for (var i = 1; i < taskQueue.length; i++) {
+    newQueue.push(taskQueue[i]);
+  }
+  taskQueue = newQueue;
+  
+  task();
+}
+```
 
 ### Known Issues
 
@@ -561,6 +807,72 @@ func (h *MethodHandlers) RegisterHandlers() {
     myhome.RegisterMethodHandler(myhome.YourMethod, h.handleMethod)
 }
 ```
+
+### Database Patterns
+
+#### SQLite Column Existence Check
+
+When adding database migrations to check if a column exists in SQLite, use `COUNT(*)` which returns an integer, not a boolean.
+
+**Correct pattern:**
+```go
+var count int
+query := `SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name='status'`
+err := s.db.Get(&count, query)
+if err != nil {
+    return fmt.Errorf("failed to check for status column: %w", err)
+}
+
+if count == 0 {
+    // Column doesn't exist, add it
+    log.Info("Adding status column to devices table")
+    alterQuery := `ALTER TABLE devices ADD COLUMN status TEXT DEFAULT ''`
+    _, err = s.db.Exec(alterQuery)
+    if err != nil {
+        return fmt.Errorf("failed to add status column: %w", err)
+    }
+}
+```
+
+**Wrong pattern:**
+```go
+var columnExists bool  // WRONG - COUNT(*) returns int, not bool
+query := `SELECT COUNT(*) FROM pragma_table_info('devices') WHERE name='status'`
+err := s.db.Get(&columnExists, query)  // This will fail to properly detect
+```
+
+**When to use**: Call migration functions in `createTable()` after the initial schema creation to handle upgrades from older database versions.
+
+**Example location**: `myhome/storage/db.go`
+
+### Event Log
+
+#### Events DB path convention
+
+`events.db` lives alongside `devices.db` (default `~/.myhome/events.db`). It is opened by `myhome/events/storage.go` with its own `*sqlx.DB` connection. The path is configurable via `--events-db` / `MYHOME_EVENTS_DB`. Never share the events `*sqlx.DB` with the devices store — independent backup and rotation are a design goal.
+
+#### `SensorDailyTracker` pattern
+
+`SensorDailyTracker` (in `myhome/events/tracker.go`) computes rolling daily min/max/avg for any numeric sensor without storing individual measurement rows. Each sample is upserted to `sensor_daily_stats` immediately, so a daemon restart never loses the current day's running extremes.
+
+To add a new sensor type (e.g. energy kWh):
+
+1. Call `tracker.Observe(ctx, events.Metric{DeviceID: id, Component: "em:0", Metric: "kWh"}, value)` from your listener.
+2. That is all — no schema change needed; the `sensor_daily_stats` table uses `(date, device_id, component, metric)` as primary key and accepts any metric name.
+3. At midnight, `Flush()` emits a synthetic `<metric>.daily_min` / `<metric>.daily_max` event row automatically.
+
+The tracker is shared across the Gen2, Gen1, and BLU listeners. Always pass `nil` in tests — listeners must guard with `if tracker != nil`.
+
+#### Event severity levels
+
+| Level   | When to use |
+|---------|-------------|
+| `alarm` | Requires immediate attention: smoke alarm, temperature threshold breach |
+| `warn`  | Degraded state, user should notice eventually: battery low (<20%), OTA error, future power-spike threshold |
+| `info`  | Normal state changes worth recording: switch on/off, motion, device online/offline, daily stats |
+| `debug` | High-frequency or low-significance: button raw events, periodic temperature/humidity changes, OTA progress |
+
+When adding a new event type, default to `info`. Upgrade to `warn`/`alarm` only if the condition is operationally significant. Avoid `debug` for anything a user might want to query later.
 
 ### Command Output
 
@@ -892,6 +1204,40 @@ mac, err := blu.ResolveMac(ctx, identifier)
   - `list`: List scripts on device(s)
   - `start/stop/delete`: Script lifecycle management
 
+### Developer Tools
+
+One-off Go programs in `tools/`. Each is its own workspace module — always add new ones with `go work use ./tools/<name>`. Run from the repo root.
+
+| Tool | Purpose |
+|---|---|
+| `tools/classify-events/` | Classifies raw Shelly MQTT event dumps → test fixtures in `pkg/shelly/mqtt/testdata/` |
+| `tools/extract-pool-defaults/` | Code-gen: extracts pool-pump JS constants → `myhome/ctl/pool/pool_defaults_generated.go` |
+
+#### `tools/classify-events`
+
+Reads every `*.json` file from an events dump directory (default: `myhome/events`), groups events by `(method, component, device-type)`, writes one pretty-printed representative per shape to a testdata directory (default: `pkg/shelly/mqtt/testdata/`), then deletes all originals.
+
+```bash
+go run ./tools/classify-events                            # use defaults
+go run ./tools/classify-events <events-dir> <testdata-dir>
+```
+
+Output filenames follow the pattern:
+- `notify_status__<device-type>__<component>.json`
+- `notify_event__<device-type>__<component>__<event>.json`
+
+The testdata lives alongside `pkg/shelly/mqtt/` so it travels with that package when it is eventually extracted into its own repository.
+
+#### `tools/extract-pool-defaults`
+
+Code-generation tool invoked by `//go:generate` in `myhome/ctl/pool/generate.go`. Parses `CONFIG_SCHEMA` from `internal/shelly/scripts/pool-pump.js` and writes typed Go constants to `myhome/ctl/pool/pool_defaults_generated.go`. Run via `make generate`, not directly.
+
+```bash
+go run ./tools/extract-pool-defaults \
+    internal/shelly/scripts/pool-pump.js \
+    myhome/ctl/pool/pool_defaults_generated.go
+```
+
 ---
 
 ## Common Issues and Solutions
@@ -1042,68 +1388,3 @@ git rm internal/myhome/old.go
 git add internal/myhome/new.go
 ```
 
-### Memory Management
-
-When creating memories during AI interactions:
-
-- **Shelly compatibility issues**: Tag with `shelly`, `javascript`, `compatibility`
-- **Go patterns**: Tag with `golang`, `logging`, `commands`
-- **Workflow issues**: Tag with `github`, `workflows`, `release`
-- **Bug fixes**: Tag with `bug`, `fix`, specific component
-
----
-
-### Best Practices Summary
-
-### Shelly Scripts
-
-✅ **DO**:
-- Use ES5-compatible JavaScript (most ES5 features work)
-- Keep callback nesting ≤ 2-3 levels
-- Use named functions over anonymous callbacks
-- Add startup/stop logging
-- Use `--no-minify` for uploads (recommended)
-- Use `"property" in object` for property checks (minifier-safe)
-- Use `var` for variable declarations (maximum compatibility)
-- Use ES5 array methods on arrays: `[].map()`, `[].filter()`, `[].forEach()`
-
-❌ **DON'T**:
-- Nest callbacks more than 2-3 levels deep (device will crash)
-- Use `Array.prototype.slice.call(arguments)` (may fail)
-- Use `!== undefined` (minifier breaks this)
-- Use ES6 Classes, Promises, or async/await
-- Use Regular Expressions (not supported on all boards)
-- Rely on hoisting (not implemented)
-
-### Go Commands
-
-✅ **DO**:
-- Print user-facing output to stdout with `fmt.Printf()`
-- Use hlog for internal/debug logging
-- Add `--verbose` flag to launch configurations
-- Provide clear success/failure messages
-
-❌ **DON'T**:
-- Use `log.Info()` for user-facing output
-- Assume commands run silently
-
-### GitHub Workflows
-
-✅ **DO**:
-- Wait for tag propagation (5 seconds) before triggering dependent workflows
-- Use `git describe` for version detection
-- Check out the correct ref (tag, not branch)
-
-❌ **DON'T**:
-- Trigger workflows immediately after creating tags
-- Assume tags are instantly available
-
----
-
-## Changelog
-
-- **2025-10-01**: Initial creation with Shelly scripting, Go development, and GitHub workflow guidelines
-- **2025-10-01**: Added callback depth limits and refactoring patterns
-- **2025-10-01**: Added command output guidelines and tag propagation fixes
-- **2026-01-19**: Added utility package structure guidelines (internal/myhome/ for utilities)
-- **2026-03-05**: Added Configuration Management section with requirements for documenting all configuration options

@@ -19,6 +19,8 @@ GO := go
 folder = $1
 endif
 
+export GOTOOLCHAIN=go1.25.3
+
 GOOS := $(shell go env GOOS)
 GOARCH := $(shell go env GOARCH)
 
@@ -115,6 +117,7 @@ build: generate
 
 generate:
 	$(GO) generate ./internal/myhome/ui/...
+	$(GO) generate ./myhome/ctl/pool
 	$(GO) generate ./...
 
 # Build Debian package for current OS/ARCH (Linux only)

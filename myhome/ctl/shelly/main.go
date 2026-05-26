@@ -1,18 +1,18 @@
 package shelly
 
 import (
-	"myhome/ctl/shelly/call"
-	"myhome/ctl/shelly/components"
-	"myhome/ctl/shelly/follow"
-	"myhome/ctl/shelly/jobs"
-	"myhome/ctl/shelly/kvs"
-	"myhome/ctl/shelly/mqtt"
-	"myhome/ctl/shelly/reboot"
-	"myhome/ctl/shelly/script"
-	"myhome/ctl/shelly/setup"
-	"myhome/ctl/shelly/status"
-	"myhome/ctl/shelly/sys"
-	"myhome/ctl/shelly/wifi"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/call"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/components"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/follow"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/jobs"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/kvs"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/mqtt"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/reboot"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/script"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/setup"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/status"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/sys"
+	"github.com/asnowfix/home-automation/myhome/ctl/shelly/wifi"
 
 	"github.com/spf13/cobra"
 )

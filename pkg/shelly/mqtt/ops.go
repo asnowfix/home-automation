@@ -3,7 +3,7 @@ package mqtt
 import (
 	"context"
 	"fmt"
-	"pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"time"
 
 	"net/http"

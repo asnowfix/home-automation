@@ -3,9 +3,9 @@ package open
 import (
 	"encoding/json"
 	"fmt"
-	"hlog"
-	"myhome"
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"os/exec"
 
 	"github.com/spf13/cobra"

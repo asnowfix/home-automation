@@ -3,11 +3,11 @@ package watch
 import (
 	"context"
 	"fmt"
-	"myhome"
-	"myhome/devices"
-	mynet "myhome/net"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/devices"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
-	"pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -22,8 +22,11 @@ func ZeroConf(ctx context.Context, restartAfter time.Duration, dm devices.Manage
 
 	go func(log logr.Logger) error {
 		stopped := make(chan struct{}, 1)
-		scan := make(chan *zeroconf.ServiceEntry, 1)
 		for {
+			// A fresh channel is required each iteration: zeroconf closes the
+			// entries channel when Browse exits (via LookupParams.done()), so
+			// reusing a closed channel on restart causes panic: close of closed channel.
+			scan := make(chan *zeroconf.ServiceEntry, 1)
 			err := dr.BrowseService(ctx, shelly.MDNS_SHELLIES, "local.", scan)
 			if err != nil {
 				log.Error(err, "Failed to start ZeroConf browser, will retry after delay")

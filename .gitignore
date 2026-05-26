@@ -43,6 +43,10 @@ SECRETS.md
 # goreleaser
 /dist
 
+# Claude Code worktrees
+/worktrees
+/.claude/worktrees
+
 # Local files
 /myhome/ctl/homectl*
 /myhome/myhome*
@@ -50,8 +54,9 @@ SECRETS.md
 /mqtt-cli-*.deb
 /wix.build.json
 /myhome/ctl/shelly*/*.js
-/myhome/events/*
+/myhome/events/*.db
 /myhome/device*.json
+/device*.json
 myhome_*.deb
 database-export.json
 internal/myhome/ui/static/bulma.min.css
@@ -60,3 +65,4 @@ dist/config.yaml
 dist/metadata.json
 internal/myhome/ui/static/alpine.min.js
 internal/myhome/ui/static/htmx.min.js
+myhome/ctl/pool/pool_defaults_generated.go

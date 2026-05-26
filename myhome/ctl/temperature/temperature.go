@@ -2,8 +2,8 @@ package temperature
 
 import (
 	"fmt"
-	"myhome"
-	"myhome/ctl/options"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"os"
 	"strings"
 	"text/tabwriter"

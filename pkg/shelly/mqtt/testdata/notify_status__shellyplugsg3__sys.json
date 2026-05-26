@@ -1,0 +1,12 @@
+{
+  "dst": "shellyplugsg3-e4b323390b4c/events",
+  "method": "NotifyStatus",
+  "params": {
+    "sys": {
+      "time": "19:15",
+      "unixtime": 1755191744
+    },
+    "ts": 1755191744.44
+  },
+  "src": "shellyplugsg3-e4b323390b4c"
+}

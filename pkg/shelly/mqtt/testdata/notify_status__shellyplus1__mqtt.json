@@ -1,0 +1,11 @@
+{
+  "dst": "shellyplus1-b8d61a86cac0/events",
+  "method": "NotifyStatus",
+  "params": {
+    "mqtt": {
+      "connected": true
+    },
+    "ts": 1758145137.11
+  },
+  "src": "shellyplus1-b8d61a86cac0"
+}

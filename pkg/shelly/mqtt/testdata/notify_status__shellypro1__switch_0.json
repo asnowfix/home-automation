@@ -1,0 +1,14 @@
+{
+  "dst": "shellypro1-30c6f782d274/events",
+  "method": "NotifyStatus",
+  "params": {
+    "switch:0": {
+      "temperature": {
+        "tC": 45.71,
+        "tF": 114.27
+      }
+    },
+    "ts": 1758144873.23
+  },
+  "src": "shellypro1-30c6f782d274"
+}

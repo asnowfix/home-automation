@@ -1,3 +1,3 @@
-module myip
+module github.com/asnowfix/home-automation/internal/myip
 
-go 1.23.0
+go 1.25.0

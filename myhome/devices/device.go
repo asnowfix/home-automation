@@ -2,7 +2,7 @@ package devices
 
 import (
 	"context"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 )
 
 type DeviceRegistry interface {
@@ -16,6 +16,7 @@ type DeviceRegistry interface {
 	GetDeviceByMAC(ctx context.Context, mac string) (*myhome.Device, error)
 	GetDeviceByName(ctx context.Context, name string) (*myhome.Device, error)
 	ForgetDevice(ctx context.Context, id string) error
+	RenameDevice(ctx context.Context, oldID, newID string) error
 	GetAllDevices(ctx context.Context) ([]*myhome.Device, error)
 	SetDeviceRoom(ctx context.Context, identifier string, roomId string) (bool, error)
 	GetDevicesByRoom(ctx context.Context, roomId string) ([]*myhome.Device, error)

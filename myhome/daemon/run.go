@@ -1,18 +1,24 @@
 package daemon
 
 import (
-	"myhome/ctl/options"
 	"strconv"
+	"time"
 
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
+func defaultEventsDBPath() string {
+	return "events.db"
+}
+
 var disableGen1Proxy bool
 var disableOccupancyService bool
 var disableTemperatureService bool
 var disableAutoSetup bool
+var disableEventsService bool
 
 func init() {
 	Cmd.AddCommand(runCmd)
@@ -41,6 +47,10 @@ func init() {
 	runCmd.PersistentFlags().BoolVar(&disableAutoSetup, "disable-auto-setup", false, "Disable automatic configuration of newly discovered unknown devices")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.NoMdnsPublish, "no-mdns-publish", false, "Disable mDNS/Zeroconf publishing (useful for dev instances)")
 	runCmd.PersistentFlags().StringVarP(&options.Flags.InstanceName, "instance", "I", "myhome", "Server instance name for RPC topics (default: myhome)")
+	runCmd.PersistentFlags().StringVar(&options.Flags.EventsDBPath, "events-db", defaultEventsDBPath(), "Path to the events SQLite database")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.EventsRetention, "events-retention", 90*24*time.Hour, "Retention period for event records (default 90 days)")
+	runCmd.PersistentFlags().BoolVar(&disableEventsService, "disable-events-service", false, "Disable the event recording service")
+	runCmd.PersistentFlags().StringVar(&options.Flags.RemoteProxy, "remote-proxy", "", "Forward /devices/... requests to a remote myhome daemon (e.g. http://home-pi:6080) instead of connecting directly")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
@@ -130,6 +140,9 @@ var runCmd = &cobra.Command{
 		if v.IsSet("daemon.disable_device_manager") && !cmd.Flags().Changed("disable-device-manager") {
 			disableDeviceManager = v.GetBool("daemon.disable_device_manager")
 		}
+		if v.IsSet("daemon.remote_proxy") && !cmd.Flags().Changed("remote-proxy") {
+			options.Flags.RemoteProxy = v.GetString("daemon.remote_proxy")
+		}
 		// Handle auto-setup flag (default is enabled, --disable-auto-setup disables it)
 		// Config file can also disable it via daemon.disable_auto_setup: true
 		if cmd.Flags().Changed("disable-auto-setup") && disableAutoSetup {
@@ -170,6 +183,24 @@ var runCmd = &cobra.Command{
 			options.Flags.EnableTemperatureService = !disableDeviceManager
 			if options.Flags.EnableTemperatureService {
 				log.Info("Auto-enabling temperature service (device manager enabled)")
+			}
+		}
+
+		// Handle events service config from viper / flags
+		if v.IsSet("events.db") && !cmd.Flags().Changed("events-db") {
+			options.Flags.EventsDBPath = v.GetString("events.db")
+		}
+		if v.IsSet("events.retention") && !cmd.Flags().Changed("events-retention") {
+			options.Flags.EventsRetention = v.GetDuration("events.retention")
+		}
+		if cmd.Flags().Changed("disable-events-service") && disableEventsService {
+			options.Flags.EnableEventsService = false
+		} else if v.IsSet("events.enabled") && !v.GetBool("events.enabled") {
+			options.Flags.EnableEventsService = false
+		} else {
+			options.Flags.EnableEventsService = !disableDeviceManager
+			if options.Flags.EnableEventsService {
+				log.Info("Auto-enabling events service (device manager enabled)")
 			}
 		}
 

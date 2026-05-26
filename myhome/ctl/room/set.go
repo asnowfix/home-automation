@@ -2,7 +2,7 @@ package room
 
 import (
 	"fmt"
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/spf13/cobra"
 )

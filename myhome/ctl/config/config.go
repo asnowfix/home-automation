@@ -2,8 +2,8 @@ package config
 
 import (
 	"fmt"
-	"hlog"
-	"myhome"
+	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/spf13/cobra"
 )

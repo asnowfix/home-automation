@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
@@ -11,21 +12,21 @@ import (
 
 	"github.com/go-logr/logr"
 
-	mhscript "internal/myhome/shelly/script"
-	mynet "myhome/net"
-	"pkg/devices"
-	shellyapi "pkg/shelly"
-	"pkg/shelly/input"
-	"pkg/shelly/kvs"
-	"pkg/shelly/matter"
-	"pkg/shelly/mqtt"
-	pkgscript "pkg/shelly/script"
-	"pkg/shelly/shelly"
-	"pkg/shelly/sswitch"
-	"pkg/shelly/system"
-	"pkg/shelly/types"
-	"pkg/shelly/wifi"
-	"schedule"
+	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	"github.com/asnowfix/home-automation/pkg/devices"
+	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/input"
+	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	"github.com/asnowfix/home-automation/pkg/shelly/matter"
+	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
+	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
+	"github.com/asnowfix/home-automation/pkg/shelly/system"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/wifi"
+	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
 )
 
 // Config holds configuration options for device setup
@@ -268,7 +269,7 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 				}
 				mqttServer = ips[0].String()
 			}
-			mqttServer = mqttServer + ":" + strconv.Itoa(cfg.MqttPort)
+			mqttServer = net.JoinHostPort(mqttServer, strconv.Itoa(cfg.MqttPort))
 		}
 
 		log.Info("Setting MQTT broker", "device", deviceId, "server", mqttServer, "via", via, "http_ready", sd.IsHttpReady(), "mqtt_ready", sd.IsMqttReady())

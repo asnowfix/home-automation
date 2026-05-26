@@ -3,7 +3,7 @@ package temperature
 import (
 	"testing"
 
-	"myhome"
+	"github.com/asnowfix/home-automation/internal/myhome"
 )
 
 func TestNewStorage_CreatesSchema(t *testing.T) {

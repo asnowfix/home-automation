@@ -1,0 +1,16 @@
+{
+  "dst": "shellypro1-30c6f782d274/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "input:0",
+        "event": "single_push",
+        "id": 0,
+        "ts": 1758405108.65
+      }
+    ],
+    "ts": 1758405108.65
+  },
+  "src": "shellypro1-30c6f782d274"
+}

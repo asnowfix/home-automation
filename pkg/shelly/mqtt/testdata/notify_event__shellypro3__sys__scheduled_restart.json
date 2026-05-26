@@ -1,0 +1,16 @@
+{
+  "dst": "shellypro3-a0dd6ca1c588/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "sys",
+        "event": "scheduled_restart",
+        "time_ms": 999,
+        "ts": 1758144064.05
+      }
+    ],
+    "ts": 1758144064.05
+  },
+  "src": "shellypro3-a0dd6ca1c588"
+}

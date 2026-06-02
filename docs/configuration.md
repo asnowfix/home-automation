@@ -544,3 +544,39 @@ pool:
 |-----|---------|------|---------|-------------|
 | `pool.device_id` | `MYHOME_POOL_DEVICE_ID` | `--pool-device-id` | — | Pool Shelly device ID (e.g. `shellyplus1pm-aabbccddeeff`) |
 | `pool.enabled` | `MYHOME_POOL_ENABLED` | `--enable-pool` | `false` | Enable pool runtime tracking |
+
+### Solar automation
+
+The solar automation goroutine subscribes to Beem Energy power samples and controls the pool pump using a hysteresis state machine:
+
+- **IDLE → RUNNING** when `solar_w ≥ start_threshold_w` for `start_delay`
+- **RUNNING → IDLE** when `solar_w < stop_threshold_w` for `stop_delay`
+- **RUNNING → IDLE** when daily filtration target is reached (if `daily_target_sec > 0`)
+
+Requires both `pool.device_id` and Beem Energy integration (`beem.enabled: true`) to be configured.
+
+#### Example
+
+```yaml
+pool:
+  device_id: "shellyplus1pm-aabbccddeeff"
+  enabled: true
+  solar:
+    enabled: true
+    start_threshold_w: 500
+    stop_threshold_w:  200
+    start_delay:       5m
+    stop_delay:        10m
+    daily_target_sec:  0   # 0 = run as long as solar is available
+```
+
+#### Options
+
+| Key | Env var | Flag | Default | Description |
+|-----|---------|------|---------|-------------|
+| `pool.solar.enabled` | `MYHOME_POOL_SOLAR_ENABLED` | `--enable-pool-solar` | `false` | Enable solar-driven pump automation |
+| `pool.solar.start_threshold_w` | `MYHOME_POOL_SOLAR_START_THRESHOLD_W` | `--pool-solar-start-threshold-w` | `500` | Solar power threshold to start pump (W) |
+| `pool.solar.stop_threshold_w` | `MYHOME_POOL_SOLAR_STOP_THRESHOLD_W` | `--pool-solar-stop-threshold-w` | `200` | Solar power threshold to stop pump (W) |
+| `pool.solar.start_delay` | `MYHOME_POOL_SOLAR_START_DELAY` | `--pool-solar-start-delay` | `5m` | Solar must hold above start threshold for this long |
+| `pool.solar.stop_delay` | `MYHOME_POOL_SOLAR_STOP_DELAY` | `--pool-solar-stop-delay` | `10m` | Solar must hold below stop threshold for this long |
+| `pool.solar.daily_target_sec` | `MYHOME_POOL_SOLAR_DAILY_TARGET_SEC` | `--pool-solar-daily-target-sec` | `0` | Daily filtration target in seconds; pump won't start via solar once reached (0 = no check) |

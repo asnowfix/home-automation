@@ -168,6 +168,33 @@ pool:
   # Default: false
   # enabled: false
 
+  # Solar-driven pump automation
+  solar:
+    # Set to true to enable solar-driven pump control
+    # Default: false
+    # enabled: false
+
+    # Start pump when solar production exceeds this value (W)
+    # Default: 500
+    # start_threshold_w: 500
+
+    # Stop pump when solar production falls below this value (W)
+    # Default: 200
+    # stop_threshold_w: 200
+
+    # Solar must hold above start_threshold_w for this long before the pump starts
+    # Default: 5m
+    # start_delay: 5m
+
+    # Solar must hold below stop_threshold_w for this long before the pump stops
+    # Default: 10m
+    # stop_delay: 10m
+
+    # Daily filtration target in seconds; pump won't be started via solar once reached.
+    # 0 = no target check (pump runs whenever solar is sufficient).
+    # Default: 0
+    # daily_target_sec: 0
+
 # Beem Energy Configuration
 beem:
   email:         "you@example.com"

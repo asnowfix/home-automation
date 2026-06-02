@@ -79,6 +79,13 @@ var Flags struct {
 	EventsRetention             time.Duration // retention period for event records
 	EnableEventsService         bool          // whether to enable the event recording service
 	RemoteProxy                 string        // the value taken by --remote-proxy; delegates /devices/... to a remote myhome daemon
+	PoolDBPath                  string        // path to pool SQLite database
+	PoolDeviceID                string        // Shelly device ID for the pool pump
+	PoolEnabled                 bool          // whether to enable pool runtime tracking
+	BeemEmail                   string        // Beem Energy account email
+	BeemPassword                string        // Beem Energy account password
+	BeemPollInterval            time.Duration // Beem Energy poll interval
+	BeemEnabled                 bool          // whether to enable Beem Energy integration
 }
 
 var Via types.Channel

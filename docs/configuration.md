@@ -516,3 +516,33 @@ Or use flag:
 ```bash
 myhome daemon run --enable-temperature-service
 ```
+
+## Beem Energy
+
+| Key | Env var | Default | Description |
+|-----|---------|---------|-------------|
+| `beem.email` | `MYHOME_BEEM_EMAIL` | — | Beem Energy account email |
+| `beem.password` | `MYHOME_BEEM_PASSWORD` | — | Beem Energy account password |
+| `beem.poll_interval` | `MYHOME_BEEM_POLL_INTERVAL` | `60s` | How often to poll the Beem REST API |
+| `beem.enabled` | `MYHOME_BEEM_ENABLED` | `false` | Enable Beem Energy integration |
+
+## Pool
+
+The pool runtime tracker records how many seconds the pool pump has run today. It subscribes to the pool Shelly device's MQTT events topic and persists every ON/OFF transition to a SQLite event log, surviving daemon restarts.
+
+### Example
+
+```yaml
+pool:
+  db: pool.db
+  device_id: "aabbccddeeff"
+  enabled: true
+```
+
+### Options
+
+| Key | Env var | Flag | Default | Description |
+|-----|---------|------|---------|-------------|
+| `pool.db` | `MYHOME_POOL_DB` | `--pool-db` | `pool.db` | Path to pool SQLite database |
+| `pool.device_id` | `MYHOME_POOL_DEVICE_ID` | `--pool-device-id` | — | Pool Shelly device ID (e.g. `shellyplus1pm-aabbccddeeff`) |
+| `pool.enabled` | `MYHOME_POOL_ENABLED` | `--enable-pool` | `false` | Enable pool runtime tracking |

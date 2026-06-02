@@ -156,3 +156,26 @@ events:
   # Set to false to disable event recording entirely
   # Default: true
   # enabled: true
+
+# Pool Runtime Tracking Configuration
+pool:
+  # Path to the pool SQLite database
+  # Default: pool.db
+  db: pool.db
+
+  # Shelly device ID for the pool pump
+  # Example: shellyplus1pm-aabbccddeeff
+  # device_id: "aabbccddeeff"
+
+  # Set to true to enable pool runtime tracking
+  # Default: false
+  # enabled: false
+
+# Beem Energy Configuration
+beem:
+  email:         "you@example.com"
+  password:      "secret"
+  poll_interval: 60s
+  # Set to true to enable Beem Energy solar production polling
+  # Default: false
+  # enabled: false

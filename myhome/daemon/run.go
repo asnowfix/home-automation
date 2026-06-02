@@ -51,6 +51,13 @@ func init() {
 	runCmd.PersistentFlags().DurationVar(&options.Flags.EventsRetention, "events-retention", 90*24*time.Hour, "Retention period for event records (default 90 days)")
 	runCmd.PersistentFlags().BoolVar(&disableEventsService, "disable-events-service", false, "Disable the event recording service")
 	runCmd.PersistentFlags().StringVar(&options.Flags.RemoteProxy, "remote-proxy", "", "Forward /devices/... requests to a remote myhome daemon (e.g. http://home-pi:6080) instead of connecting directly")
+	runCmd.PersistentFlags().StringVar(&options.Flags.PoolDBPath, "pool-db", "pool.db", "Path to the pool SQLite database")
+	runCmd.PersistentFlags().StringVar(&options.Flags.PoolDeviceID, "pool-device-id", "", "Pool Shelly device ID")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolEnabled, "enable-pool", false, "Enable pool runtime tracking")
+	runCmd.PersistentFlags().StringVar(&options.Flags.BeemEmail, "beem-email", "", "Beem Energy account email")
+	runCmd.PersistentFlags().StringVar(&options.Flags.BeemPassword, "beem-password", "", "Beem Energy account password")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.BeemPollInterval, "beem-poll-interval", 60*time.Second, "Beem Energy poll interval")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.BeemEnabled, "enable-beem", false, "Enable Beem Energy integration")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
@@ -202,6 +209,31 @@ var runCmd = &cobra.Command{
 			if options.Flags.EnableEventsService {
 				log.Info("Auto-enabling events service (device manager enabled)")
 			}
+		}
+
+		// Handle pool runtime tracker config from viper / flags
+		if v.IsSet("pool.db") && !cmd.Flags().Changed("pool-db") {
+			options.Flags.PoolDBPath = v.GetString("pool.db")
+		}
+		if v.IsSet("pool.device_id") && !cmd.Flags().Changed("pool-device-id") {
+			options.Flags.PoolDeviceID = v.GetString("pool.device_id")
+		}
+		if v.IsSet("pool.enabled") && !cmd.Flags().Changed("enable-pool") {
+			options.Flags.PoolEnabled = v.GetBool("pool.enabled")
+		}
+
+		// Handle Beem Energy config from viper / flags
+		if v.IsSet("beem.email") && !cmd.Flags().Changed("beem-email") {
+			options.Flags.BeemEmail = v.GetString("beem.email")
+		}
+		if v.IsSet("beem.password") && !cmd.Flags().Changed("beem-password") {
+			options.Flags.BeemPassword = v.GetString("beem.password")
+		}
+		if v.IsSet("beem.poll_interval") && !cmd.Flags().Changed("beem-poll-interval") {
+			options.Flags.BeemPollInterval = v.GetDuration("beem.poll_interval")
+		}
+		if v.IsSet("beem.enabled") && !cmd.Flags().Changed("enable-beem") {
+			options.Flags.BeemEnabled = v.GetBool("beem.enabled")
 		}
 
 		// Store Viper instance in global options for daemon to use

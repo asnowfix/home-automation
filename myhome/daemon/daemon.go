@@ -21,6 +21,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/occupancy"
 	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/myhome/temperature"
+	beem "github.com/asnowfix/home-automation/pkg/beem"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
 	"github.com/go-logr/logr"
@@ -195,6 +196,24 @@ func (d *daemon) Run() error {
 			"mqtt_topic", options.Flags.MetricsExporterTopic)
 	} else {
 		log.Info("Prometheus metrics exporter disabled")
+	}
+
+	// Start Beem Energy watcher if enabled
+	if options.Flags.BeemEnabled && options.Flags.BeemEmail != "" {
+		log.Info("Starting Beem Energy watcher")
+		beemCfg := beem.ClientConfig{
+			Email:        options.Flags.BeemEmail,
+			Password:     options.Flags.BeemPassword,
+			PollInterval: options.Flags.BeemPollInterval,
+		}
+		beemWatcher := beem.NewWatcher(d.ctx, beemCfg, mc)
+		if err := beemWatcher.Start(d.ctx); err != nil {
+			log.Error(err, "Failed to start Beem watcher")
+			return err
+		}
+		log.Info("Beem Energy watcher started")
+	} else {
+		log.Info("Beem Energy integration disabled")
 	}
 
 	if !disableDeviceManager {

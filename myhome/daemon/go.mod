@@ -10,7 +10,6 @@ require (
 	github.com/go-logr/logr v1.4.3
 	github.com/kardianos/service v1.2.4
 	github.com/spf13/cobra v1.10.1
-	modernc.org/sqlite v1.50.0
 )
 
 require (

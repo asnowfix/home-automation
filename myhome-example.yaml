@@ -158,11 +158,8 @@ events:
   # enabled: true
 
 # Pool Runtime Tracking Configuration
+# Pool runtime is derived from the shared events database (events.db) — no separate pool.db.
 pool:
-  # Path to the pool SQLite database
-  # Default: pool.db
-  db: pool.db
-
   # Shelly device ID for the pool pump
   # Example: shellyplus1pm-aabbccddeeff
   # device_id: "aabbccddeeff"

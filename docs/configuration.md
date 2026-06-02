@@ -528,13 +528,12 @@ myhome daemon run --enable-temperature-service
 
 ## Pool
 
-The pool runtime tracker records how many seconds the pool pump has run today. It subscribes to the pool Shelly device's MQTT events topic and persists every ON/OFF transition to a SQLite event log, surviving daemon restarts.
+The pool runtime tracker reports how many seconds the pool pump has run today by querying the shared events database (`events.db`). The gen2 listener already captures every switch ON/OFF event from all Shelly devices — no separate pool database is needed.
 
 ### Example
 
 ```yaml
 pool:
-  db: pool.db
   device_id: "aabbccddeeff"
   enabled: true
 ```
@@ -543,6 +542,5 @@ pool:
 
 | Key | Env var | Flag | Default | Description |
 |-----|---------|------|---------|-------------|
-| `pool.db` | `MYHOME_POOL_DB` | `--pool-db` | `pool.db` | Path to pool SQLite database |
 | `pool.device_id` | `MYHOME_POOL_DEVICE_ID` | `--pool-device-id` | — | Pool Shelly device ID (e.g. `shellyplus1pm-aabbccddeeff`) |
 | `pool.enabled` | `MYHOME_POOL_ENABLED` | `--enable-pool` | `false` | Enable pool runtime tracking |

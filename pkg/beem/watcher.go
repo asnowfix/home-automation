@@ -41,8 +41,14 @@ func NewWatcher(ctx context.Context, cfg ClientConfig, mqttClient mqttclient.Cli
 }
 
 // Start launches the polling goroutine.  It returns immediately; the goroutine
-// runs until ctx is cancelled.
+// runs until ctx is cancelled.  If either Email or Password is empty, Start is
+// a no-op and returns nil — the caller is responsible for checking credentials
+// before calling, but a double guard here prevents accidental unauthenticated loops.
 func (w *Watcher) Start(ctx context.Context) error {
+	if w.client.cfg.Email == "" || w.client.cfg.Password == "" {
+		w.log.Info("Beem Energy watcher: email or password not set, skipping start")
+		return nil
+	}
 	if w.client.cfg.PollInterval <= 0 {
 		w.client.cfg.PollInterval = 60 * time.Second
 	}

@@ -83,9 +83,12 @@ beem:
 
 Env vars: `MYHOME_BEEM_EMAIL`, `MYHOME_BEEM_PASSWORD`, `MYHOME_BEEM_POLL_INTERVAL`
 
+**Poll interval:** 60 s matches the interval used by community integrations (CharlesP44/Beem_Energy, ClaraVnk/home-assistant-beem-energy). The actual Beem app poll rate is not publicly documented; 60 s is treated as a minimum. Set `poll_interval` higher (e.g. `120s`) to be more conservative with the cloud API.
+
 ### Design constraints
 
 - Auth token kept in memory only; no disk persistence
+- **Both `email` and `password` must be non-empty** for the watcher to start. If either is absent, `Watcher.Start` returns immediately without starting the poll loop (no unauthenticated requests are ever made).
 - `pkg/beem` exposes a `Watcher` with a `PowerCh <-chan PowerSample` channel — callers decide what to do with the data
 - No SQLite, no KVS — this package is stateless
 - Log each sample at `DEBUG`; log auth events and errors at `INFO`/`ERROR`
@@ -158,6 +161,10 @@ Values read from pool KVS at daemon startup:
 - `script/pool-pump/max-flow-rate`
 - `script/pool-pump/max-rpm`
 - `script/pool-pump/eco-rpm` (or whichever speed is `script/pool-pump/speed`)
+- `script/pool-pump/max-power` — nameplate power at `max-rpm` (W); used to derive power per speed:
+  `power_at_speed_w = max_power_w × (speed_rpm / max_rpm)`
+  Example: 1600 W at 2900 rpm → eco at 1450 rpm ≈ 800 W. This feeds the aenergy-based runtime
+  option (Option C, Part 3) and future speed-adaptive triggering (see follow-up issue).
 
 ---
 
@@ -222,15 +229,21 @@ The Shelly switch already accumulates `aenergy.total` (total Wh since last reset
 
 ```
 daily_wh = aenergy.total - midnight_baseline_wh
-runtime_sec = daily_wh / avg_power_w(current_speed) × 3600
+runtime_sec = daily_wh / power_at_speed_w × 3600
 ```
 
 Baseline stored as a retained MQTT message (`myhome/pool/aenergy-baseline`) written once at midnight.
 
+**Key hardware note:** the Shelly switch controls a contactor, not a VFD. Once the contactor is closed, the pump runs at a fixed speed with constant power draw. There is no power variation while running — `aenergy` is therefore a direct, exact proxy for runtime (no averaging or approximation needed). The `power_at_speed_w` value is a one-time constant derived from `max-power` KVS key (see daily target computation above).
+
+**Variant — pool-pump.js subscribes to energy topic:** the JS script can call `Shelly.call("Switch.GetStatus")` periodically to read `aenergy.total`, accumulate daily Wh in a variable, and write `{date, runtime_sec}` to KVS whenever it changes by more than ~5%. This keeps the accumulator on the device, survives daemon restarts, and requires no Go changes.
+
 | | |
 |---|---|
-| **Pros** | Hardware counter is completely independent of daemon uptime; no mid-day accumulator to lose |
-| **Cons** | Requires configuring pump power draw per speed (W at eco/mid/high — must be measured or estimated); `aenergy.total` resets on Shelly reboot; energy→runtime conversion is indirect and less precise; midnight baseline still needs durable storage (deferred problem, not eliminated) |
+| **Pros** | Hardware counter is independent of daemon uptime; with contactor control, energy→runtime is exact (not indirect); JS-side variant survives daemon restarts without any daemon code |
+| **Cons** | `aenergy.total` resets on Shelly reboot (mitigated by reading at every timer tick and detecting drops); midnight baseline still needs durable storage; JS-side variant requires a pool-pump.js change and uses one of the 5 recurring timers |
+
+**Open question (see follow-up issue #246):** with contactor control making Option C viable and simpler than originally assessed, should Option C replace the already-implemented Option A SQLite tracker, or run alongside it as a cross-check?
 
 ---
 
@@ -252,5 +265,6 @@ Implement phases in order. Mark each phase done in this file before starting the
 ## Open questions / future work
 
 - **Beem Battery upgrade:** if a Beem Battery is added later, enable the MQTT channel in `pkg/beem` and populate `GridW` in `PowerSample`. The solar trigger can then switch to net-surplus mode (`solar_w - grid_w > threshold`) for more accurate triggering.
-- **Prometheus metrics:** publish `myhome/metrics/beem/solar_w` and `myhome/metrics/pool/runtime_today_sec` so Grafana can display them.
-- **Speed selection during solar run:** currently uses `preferredSpeed` from KVS. Could dynamically select speed based on available solar W (more sun → higher speed → faster turnover).
+- **aenergy-based runtime tracker (Option C):** see follow-up issue #246. With contactor control, Option C is simpler and more hardware-independent than assessed in the original design. Decide whether to replace or complement the SQLite tracker.
+- **Prometheus metrics:** see follow-up issue #247. Publish `myhome/metrics/beem/solar_w` and `myhome/metrics/pool/runtime_today_sec` so Grafana can display them.
+- **Speed-adaptive solar triggering:** see follow-up issue #248. Valid only if the multi-speed variator (currently managed by pro3) can be repaired. Would dynamically select pump speed based on available solar W.

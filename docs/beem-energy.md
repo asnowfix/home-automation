@@ -113,6 +113,8 @@ A new goroutine in `myhome/daemon/solar_automation.go` subscribes to `myhome/ene
 
 ### Hysteresis state machine
 
+Variables `daily_target_sec` and `max_rotation_sec` are computed from `min_volume_turnover` / `max_volume_turnover` and KVS at startup — see "Runtime target computation" below.
+
 ```
 IDLE  →  (solar_w ≥ start_threshold_w  for  start_delay
           AND  runtime < max_rotation_sec)                          →  RUNNING
@@ -125,8 +127,8 @@ RUNNING  →  (runtime ≥ max_rotation_sec)                           →  IDLE
 
 **Soft stop vs. hard ceiling:**
 
-- `daily_target_sec` is the normal filtration goal (e.g. 5× pool volume). Reaching it stops the pump *only if solar has also dropped below `start_threshold_w`*. While solar is still producing, the pump keeps running past the daily target — free energy is used to over-filter rather than going to waste.
-- `max_rotation_sec` is an absolute ceiling (e.g. 7× pool volume). The pump always stops when this is reached, regardless of solar output. Set to `0` to disable the ceiling entirely (run unlimited while solar is sufficient).
+- `daily_target_sec` (`min_volume_turnover × …`) is the normal filtration goal. Reaching it stops the pump *only if solar has also dropped below `start_threshold_w`*. While solar is still producing, the pump keeps running past the daily target — free energy is used to over-filter rather than going to waste.
+- `max_rotation_sec` (`max_volume_turnover × …`) is an absolute ceiling. The pump always stops when this is reached, regardless of solar output.
 - The pump will not be *started* via solar once `max_rotation_sec` is already reached.
 
 **Combined stop logic on each power sample (RUNNING state):**
@@ -150,21 +152,41 @@ myhome/daemon/pool_runtime_tracker.go — daily runtime accumulator (see Part 3)
 ```yaml
 pool:
   solar:
-    enabled:             true
-    start_threshold_w:   500    # start pump when solar exceeds this
-    stop_threshold_w:    200    # stop when solar falls below this
-    start_delay:         5m     # must hold above threshold before starting
-    stop_delay:          10m    # must hold below threshold before stopping
-    daily_target_sec:    0      # soft stop: stop pump when target met AND solar gone (0 = no soft stop)
-    max_rotation_sec:    0      # hard ceiling: always stop when reached (0 = no ceiling)
+    enabled:               true
+    start_threshold_w:     500   # start pump when solar exceeds this
+    stop_threshold_w:      200   # stop when solar falls below this
+    start_delay:           5m    # must hold above threshold before starting
+    stop_delay:            10m   # must hold below threshold before stopping
+    min_volume_turnover:   5     # soft stop: stop when this many pool volumes filtered AND solar gone
+    max_volume_turnover:   7     # hard ceiling: always stop when this many pool volumes filtered
 ```
 
-`daily_target_sec` and `max_rotation_sec` are expressed in seconds. Typical values derived from pool volume and turnover:
+`min_volume_turnover` and `max_volume_turnover` are dimensionless multipliers (pool volumes filtered per day). The daemon converts them to seconds at startup by reading the pool device KVS — see "Runtime target computation" below.
+
+Env vars: `MYHOME_POOL_SOLAR_MIN_VOLUME_TURNOVER`, `MYHOME_POOL_SOLAR_MAX_VOLUME_TURNOVER`
+
+**Startup validation:** solar automation refuses to initialize if `max_volume_turnover < min_volume_turnover`. The daemon logs an error and continues without solar automation.
+
+### Runtime target computation
+
+At solar automation startup, the daemon reads four KVS keys from the pool Shelly device (identified by `pool.device_id`) — the same keys pool-pump.js uses for its own autonomous scheduling, nothing new is written:
+
+| KVS key | Unit | Description |
+|---|---|---|
+| `script/pool-pump/pool-volume` | m³ | Pool water volume |
+| `script/pool-pump/max-flow-rate` | m³/h | Flow rate at max RPM |
+| `script/pool-pump/max-rpm` | RPM | Motor max speed |
+| `script/pool-pump/speed` | RPM | Current operating speed |
+
+From these the daemon derives:
 
 ```
-daily_target_sec  =  pool_volume × 5 / flow_rate × 3600   (5× turnover)
-max_rotation_sec  =  pool_volume × 7 / flow_rate × 3600   (7× turnover)
+flow_rate        = max_flow_rate × (speed / max_rpm)            [m³/h]
+daily_target_sec = pool_volume × min_volume_turnover / flow_rate × 3600   [s]
+max_rotation_sec = pool_volume × max_volume_turnover / flow_rate × 3600   [s]
 ```
+
+**KVS write policy:** the daemon reads KVS at startup but never writes it for this feature. The device KVS remains exclusively the JS script's domain, preserving its ability to run autonomously if the daemon is down.
 
 ### Interaction with existing schedule (additive / substitute semantics)
 
@@ -255,7 +277,7 @@ WHERE e1.device_id = <deviceID> AND e1.component = <component>
 | 4 | Solar automation goroutine | ✅ done |
 | 5 | Daemon wiring | ✅ done |
 | 6 | Tests | ✅ done |
-| 7 | Soft stop + hard ceiling (`daily_target_sec` / `max_rotation_sec`) | ⬜ pending |
+| 7 | Soft stop + hard ceiling: `min_volume_turnover` / `max_volume_turnover` config; KVS read at startup to derive `daily_target_sec` / `max_rotation_sec`; startup validation | ⬜ pending |
 
 ---
 

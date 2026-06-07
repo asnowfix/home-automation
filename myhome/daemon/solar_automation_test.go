@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -25,6 +26,23 @@ func (m *mockPumpController) lastCall() (on bool, ok bool) {
 		return false, false
 	}
 	return m.calls[len(m.calls)-1], true
+}
+
+// flakyPumpController simulates a flaky MQTT link by failing the first
+// failCount SetPump calls (e.g. a Switch.Set lost in transit) before
+// succeeding, so tests can assert the retry-on-failure behavior of the
+// state machine without depending on shellyPumpController's own retry loop.
+type flakyPumpController struct {
+	failCount int
+	calls     []bool
+}
+
+func (m *flakyPumpController) SetPump(_ context.Context, on bool) error {
+	m.calls = append(m.calls, on)
+	if len(m.calls) <= m.failCount {
+		return fmt.Errorf("simulated dropped Switch.Set (MQTT not retained)")
+	}
+	return nil
 }
 
 // send pushes a sample to ch and gives the goroutine time to process it.
@@ -284,6 +302,39 @@ func TestSolarAutomation_HardCeilingStopsRegardlessOfSolar(t *testing.T) {
 	on, ok := pump.lastCall()
 	if !ok || on {
 		t.Errorf("expected pump OFF on hard ceiling; calls=%v", pump.calls)
+	}
+}
+
+// TestSolarAutomation_HardCeilingRetriesStopOnSetPumpFailure verifies that a
+// dropped stop command (e.g. Switch.Set lost on a flaky MQTT link, which the
+// broker never retains/redelivers) does not make the automation believe the
+// pump stopped. It must stay RUNNING so the hard-ceiling check fires again on
+// the next sample and retries — otherwise the "absolute" ceiling guarantee
+// would be silently defeated by network flakiness.
+func TestSolarAutomation_HardCeilingRetriesStopOnSetPumpFailure(t *testing.T) {
+	s := newTestEventsStorage(t)
+	seedDailyRuntime(t, s, "pool-device", 8000) // past the hard ceiling
+	tracker := NewPoolRuntimeTracker(logr.Discard(), s, "pool-device")
+
+	cfg := defaultCfg()
+	cfg.DailyTargetSec = 3600
+	cfg.MaxRotationSec = 7200
+
+	pump := &flakyPumpController{failCount: 1}
+	sa := NewSolarAutomation(logr.Discard(), make(chan beem.PowerSample), tracker, pump, cfg)
+	sample := beem.PowerSample{SolarW: 900, Source: "test", TS: time.Now()}
+
+	state, _, _ := sa.step(context.Background(), sample, pumpRunning, time.Time{}, time.Time{})
+	if state != pumpRunning {
+		t.Fatalf("expected to stay RUNNING after a dropped stop command so the ceiling check retries; state=%v", state)
+	}
+
+	state, _, _ = sa.step(context.Background(), sample, state, time.Time{}, time.Time{})
+	if state != pumpIdle {
+		t.Errorf("expected the retried stop to land and reach IDLE; state=%v", state)
+	}
+	if len(pump.calls) != 2 || pump.calls[0] != false || pump.calls[1] != false {
+		t.Errorf("expected two OFF attempts (one dropped, one landing); calls=%v", pump.calls)
 	}
 }
 

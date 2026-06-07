@@ -178,11 +178,16 @@ func (sa *SolarAutomation) step(
 		runtime, haveRuntime := sa.dailyRuntimeSec(ctx)
 
 		// Hard ceiling: always stop once max_rotation_sec is reached, regardless of solar.
+		// Stay in pumpRunning on failure — like the solar-loss stop below — so the
+		// ceiling check fires again on the next sample and retries the stop. Moving
+		// to pumpIdle here would silently defeat the "absolute" ceiling guarantee
+		// if the (already retried) Switch.Set still couldn't be confirmed.
 		if haveRuntime && sa.cfg.MaxRotationSec > 0 && runtime >= sa.cfg.MaxRotationSec {
 			sa.log.Info("Hard ceiling reached, stopping pump",
 				"runtime_sec", runtime, "max_rotation_sec", sa.cfg.MaxRotationSec)
 			if err := sa.pump.SetPump(ctx, false); err != nil {
-				sa.log.Error(err, "Failed to stop pump")
+				sa.log.Error(err, "Failed to stop pump (hard ceiling); will retry next sample")
+				break
 			}
 			return pumpIdle, zero, zero
 		}
@@ -190,12 +195,14 @@ func (sa *SolarAutomation) step(
 		// Soft stop: the normal filtration goal stops the pump only once solar
 		// has also dropped below the start threshold — while solar still
 		// produces, free energy keeps over-filtering past the daily target.
+		// Same retry-on-failure rationale as the hard ceiling above.
 		if haveRuntime && sa.cfg.DailyTargetSec > 0 && runtime >= sa.cfg.DailyTargetSec &&
 			sample.SolarW < sa.cfg.StartThresholdW {
 			sa.log.Info("Daily target reached and solar gone, stopping pump (soft stop)",
 				"runtime_sec", runtime, "daily_target_sec", sa.cfg.DailyTargetSec, "solar_w", sample.SolarW)
 			if err := sa.pump.SetPump(ctx, false); err != nil {
-				sa.log.Error(err, "Failed to stop pump")
+				sa.log.Error(err, "Failed to stop pump (soft stop); will retry next sample")
+				break
 			}
 			return pumpIdle, zero, zero
 		}
@@ -285,13 +292,64 @@ func newShellyPumpController(ctx context.Context, log logr.Logger, deviceID stri
 	return &shellyPumpController{log: log.WithName("PumpController"), device: sd}, nil
 }
 
+// pumpSetMaxAttempts/pumpSetRetryDelay/pumpVerifyDelay bound the retry-and-
+// verify loop in SetPump. Switch.Set is fire-and-forget over MQTT — the broker
+// does not retain or redeliver it, so a message dropped by a flaky link is
+// gone for good unless the daemon notices and resends it. Reading back
+// Switch.GetStatus closes that loop: only a confirmed state change counts as
+// success.
+const (
+	pumpSetMaxAttempts = 3
+	pumpSetRetryDelay  = 2 * time.Second
+	pumpVerifyDelay    = 1 * time.Second
+)
+
 func (c *shellyPumpController) SetPump(ctx context.Context, on bool) error {
-	_, err := sswitch.Set(ctx, c.device, types.ChannelMqtt, 0, on)
-	if err != nil {
-		return fmt.Errorf("Switch.Set on=%v: %w", on, err)
+	var lastErr error
+	for attempt := 1; attempt <= pumpSetMaxAttempts; attempt++ {
+		if attempt > 1 {
+			if err := sleepCtx(ctx, pumpSetRetryDelay); err != nil {
+				return err
+			}
+		}
+
+		if _, err := sswitch.Set(ctx, c.device, types.ChannelMqtt, 0, on); err != nil {
+			lastErr = fmt.Errorf("Switch.Set on=%v: %w", on, err)
+			c.log.Error(err, "Switch.Set failed, will retry", "device_id", c.device.Id(), "on", on, "attempt", attempt)
+			continue
+		}
+
+		// Switch.Set acknowledges receipt, not the resulting state — read
+		// it back to confirm the device actually applied the change.
+		if err := sleepCtx(ctx, pumpVerifyDelay); err != nil {
+			return err
+		}
+		status, err := sswitch.GetStatus(ctx, c.device, types.ChannelMqtt, 0)
+		if err != nil {
+			lastErr = fmt.Errorf("Switch.GetStatus: %w", err)
+			c.log.Error(err, "Failed to verify pump state, will retry", "device_id", c.device.Id(), "on", on, "attempt", attempt)
+			continue
+		}
+		if status.Output != on {
+			lastErr = fmt.Errorf("pump state mismatch after Switch.Set: want on=%v, got on=%v", on, status.Output)
+			c.log.Error(lastErr, "Pump did not reach desired state, will retry", "device_id", c.device.Id(), "attempt", attempt)
+			continue
+		}
+
+		c.log.Info("Switch.Set verified", "device_id", c.device.Id(), "on", on, "attempt", attempt)
+		return nil
 	}
-	c.log.Info("Switch.Set sent", "device_id", c.device.Id(), "on", on)
-	return nil
+	return fmt.Errorf("failed to set pump on=%v after %d attempts: %w", on, pumpSetMaxAttempts, lastErr)
+}
+
+// sleepCtx waits for d or returns ctx.Err() if ctx is cancelled first.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }
 
 // poolRuntimeKVSKeys are the pool device KVS keys read at solar-automation

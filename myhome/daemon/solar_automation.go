@@ -2,9 +2,12 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
+	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	beem "github.com/asnowfix/home-automation/pkg/beem"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
@@ -269,14 +272,25 @@ func (sa *SolarAutomation) dailyRuntimeSec(ctx context.Context) (int64, bool) {
 	return runtime, true
 }
 
-// shellyPumpController implements PumpController using the Shelly Switch.Set RPC over MQTT.
+// shellyPumpController implements PumpController using the Shelly Switch.Set
+// RPC over MQTT. Because Switch.Set is fire-and-forget — the MQTT broker
+// neither retains nor redelivers it, so a message dropped by a flaky link is
+// gone for good — it confirms the resulting state by tracking the device's own
+// NotifyStatus push notifications (subscribed for the daemon's lifetime, see
+// newShellyPumpController) rather than polling Switch.GetStatus synchronously.
 type shellyPumpController struct {
 	log    logr.Logger
 	device *shellyapi.Device
+
+	mu     sync.Mutex
+	output *bool         // last known switch:0 output reported via MQTT; nil = unknown
+	notify chan struct{} // closed and replaced whenever output changes, to wake waiters
 }
 
-// newShellyPumpController creates and MQTT-initializes a shellyPumpController for the given device ID.
-// Must be called after shelly.Init() and the MQTT client have been set up.
+// newShellyPumpController creates and MQTT-initializes a shellyPumpController
+// for the given device ID, and subscribes to its status notifications for the
+// lifetime of ctx (the daemon context). Must be called after shelly.Init() and
+// the MQTT client have been set up.
 func newShellyPumpController(ctx context.Context, log logr.Logger, deviceID string) (*shellyPumpController, error) {
 	d, err := shellyapi.NewDeviceFromMqttId(ctx, log, deviceID)
 	if err != nil {
@@ -289,19 +303,105 @@ func newShellyPumpController(ctx context.Context, log logr.Logger, deviceID stri
 	if err := sd.Init(ctx); err != nil {
 		return nil, fmt.Errorf("init device %s: %w", deviceID, err)
 	}
-	return &shellyPumpController{log: log.WithName("PumpController"), device: sd}, nil
+
+	mc, err := mqttclient.GetClientE(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get MQTT client: %w", err)
+	}
+
+	c := &shellyPumpController{
+		log:    log.WithName("PumpController"),
+		device: sd,
+		notify: make(chan struct{}),
+	}
+
+	// Shelly Gen2 devices push NotifyStatus on <device_id>/events/rpc whenever
+	// a component's status changes (rpc_ntf, enabled by default) — the same
+	// mechanism gen2.Listener uses to record switch.on/switch.off events.
+	topic := sd.Id() + "/events/rpc"
+	if err := mc.SubscribeWithHandler(ctx, topic, 8, "solar.pump.status", func(_ string, payload []byte, _ string) error {
+		c.handleStatusNotification(payload)
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("subscribe to %s: %w", topic, err)
+	}
+
+	return c, nil
 }
 
-// pumpSetMaxAttempts/pumpSetRetryDelay/pumpVerifyDelay bound the retry-and-
-// verify loop in SetPump. Switch.Set is fire-and-forget over MQTT — the broker
-// does not retain or redeliver it, so a message dropped by a flaky link is
-// gone for good unless the daemon notices and resends it. Reading back
-// Switch.GetStatus closes that loop: only a confirmed state change counts as
-// success.
+// handleStatusNotification parses a NotifyStatus message from the pump device
+// and records the switch:0 output state, waking any goroutines waiting in
+// waitForOutput.
+func (c *shellyPumpController) handleStatusNotification(payload []byte) {
+	var msg struct {
+		Method string                     `json:"method"`
+		Params map[string]json.RawMessage `json:"params"`
+	}
+	if err := json.Unmarshal(payload, &msg); err != nil || msg.Method != "NotifyStatus" {
+		return
+	}
+	raw, ok := msg.Params["switch:0"]
+	if !ok {
+		return
+	}
+	var sw struct {
+		Output *bool `json:"output"`
+	}
+	if err := json.Unmarshal(raw, &sw); err != nil || sw.Output == nil {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.output != nil && *c.output == *sw.Output {
+		return
+	}
+	c.output = sw.Output
+	close(c.notify)
+	c.notify = make(chan struct{})
+	c.log.V(1).Info("Pump switch status update", "device_id", c.device.Id(), "output", *sw.Output)
+}
+
+// waitForOutput blocks until the tracked switch:0 output matches want, ctx is
+// cancelled, or timeout elapses — whichever comes first. It returns true only
+// on a confirmed match.
+func (c *shellyPumpController) waitForOutput(ctx context.Context, want bool, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		c.mu.Lock()
+		output := c.output
+		ch := c.notify
+		c.mu.Unlock()
+
+		if output != nil && *output == want {
+			return true
+		}
+
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		timer := time.NewTimer(remaining)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return false
+		case <-ch:
+			timer.Stop()
+		case <-timer.C:
+			return false
+		}
+	}
+}
+
+// pumpSetMaxAttempts/pumpSetRetryDelay/pumpVerifyTimeout bound the
+// retry-and-confirm loop in SetPump: Switch.Set only acknowledges receipt, not
+// the resulting state, so each attempt waits for the device's own status
+// notification to confirm the change landed before declaring success.
 const (
 	pumpSetMaxAttempts = 3
 	pumpSetRetryDelay  = 2 * time.Second
-	pumpVerifyDelay    = 1 * time.Second
+	pumpVerifyTimeout  = 5 * time.Second
 )
 
 func (c *shellyPumpController) SetPump(ctx context.Context, on bool) error {
@@ -319,25 +419,13 @@ func (c *shellyPumpController) SetPump(ctx context.Context, on bool) error {
 			continue
 		}
 
-		// Switch.Set acknowledges receipt, not the resulting state — read
-		// it back to confirm the device actually applied the change.
-		if err := sleepCtx(ctx, pumpVerifyDelay); err != nil {
-			return err
-		}
-		status, err := sswitch.GetStatus(ctx, c.device, types.ChannelMqtt, 0)
-		if err != nil {
-			lastErr = fmt.Errorf("Switch.GetStatus: %w", err)
-			c.log.Error(err, "Failed to verify pump state, will retry", "device_id", c.device.Id(), "on", on, "attempt", attempt)
-			continue
-		}
-		if status.Output != on {
-			lastErr = fmt.Errorf("pump state mismatch after Switch.Set: want on=%v, got on=%v", on, status.Output)
-			c.log.Error(lastErr, "Pump did not reach desired state, will retry", "device_id", c.device.Id(), "attempt", attempt)
-			continue
+		if c.waitForOutput(ctx, on, pumpVerifyTimeout) {
+			c.log.Info("Pump state confirmed via status notification", "device_id", c.device.Id(), "on", on, "attempt", attempt)
+			return nil
 		}
 
-		c.log.Info("Switch.Set verified", "device_id", c.device.Id(), "on", on, "attempt", attempt)
-		return nil
+		lastErr = fmt.Errorf("no status notification confirming pump on=%v", on)
+		c.log.Error(lastErr, "Pump did not confirm desired state, will retry", "device_id", c.device.Id(), "on", on, "attempt", attempt)
 	}
 	return fmt.Errorf("failed to set pump on=%v after %d attempts: %w", on, pumpSetMaxAttempts, lastErr)
 }

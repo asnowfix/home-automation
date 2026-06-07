@@ -277,7 +277,7 @@ WHERE e1.device_id = <deviceID> AND e1.component = <component>
 | 4 | Solar automation goroutine | ✅ done |
 | 5 | Daemon wiring | ✅ done |
 | 6 | Tests | ✅ done |
-| 7 | Soft stop + hard ceiling: `min_volume_turnover` / `max_volume_turnover` config; KVS read at startup to derive `daily_target_sec` / `max_rotation_sec`; startup validation | ⬜ pending |
+| 7 | Soft stop + hard ceiling: `min_volume_turnover` / `max_volume_turnover` config; KVS read at startup to derive `daily_target_sec` / `max_rotation_sec`; startup validation | ✅ done |
 
 ---
 

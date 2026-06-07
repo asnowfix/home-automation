@@ -549,9 +549,20 @@ pool:
 
 The solar automation goroutine subscribes to Beem Energy power samples and controls the pool pump using a hysteresis state machine:
 
-- **IDLE → RUNNING** when `solar_w ≥ start_threshold_w` for `start_delay`
+- **IDLE → RUNNING** when `solar_w ≥ start_threshold_w` for `start_delay` (and the hard ceiling hasn't been reached today)
+- **RUNNING → IDLE** when the hard ceiling (`max_volume_turnover`) is reached — always, regardless of solar
+- **RUNNING → IDLE** when the soft-stop target (`min_volume_turnover`) is reached **and** `solar_w < start_threshold_w` — while solar is still producing, the pump keeps running past the soft target to use free energy
 - **RUNNING → IDLE** when `solar_w < stop_threshold_w` for `stop_delay`
-- **RUNNING → IDLE** when daily filtration target is reached (if `daily_target_sec > 0`)
+
+`min_volume_turnover` and `max_volume_turnover` are dimensionless multipliers (pool volumes filtered per day). At startup the daemon reads `script/pool-pump/{pool-volume,max-flow-rate,max-rpm,speed}` from the pool device KVS — the same values pool-pump.js uses for its own scheduling — and derives `daily_target_sec` / `max_rotation_sec`:
+
+```
+flow_rate        = max_flow_rate × (speed / max_rpm)
+daily_target_sec = pool_volume × min_volume_turnover / flow_rate × 3600
+max_rotation_sec = pool_volume × max_volume_turnover / flow_rate × 3600
+```
+
+The daemon only reads these KVS keys, never writes them — KVS remains exclusively the JS script's domain. Solar automation is disabled (with a logged error) if `max_volume_turnover < min_volume_turnover` or if any of the four KVS keys is missing or non-numeric.
 
 Requires both `pool.device_id` and Beem Energy integration (`beem.enabled: true`) to be configured.
 
@@ -563,11 +574,12 @@ pool:
   enabled: true
   solar:
     enabled: true
-    start_threshold_w: 500
-    stop_threshold_w:  200
-    start_delay:       5m
-    stop_delay:        10m
-    daily_target_sec:  0   # 0 = run as long as solar is available
+    start_threshold_w:   500
+    stop_threshold_w:    200
+    start_delay:         5m
+    stop_delay:          10m
+    min_volume_turnover: 5   # soft stop: stop once filtered AND solar gone
+    max_volume_turnover: 7   # hard ceiling: always stop once filtered
 ```
 
 #### Options
@@ -579,4 +591,5 @@ pool:
 | `pool.solar.stop_threshold_w` | `MYHOME_POOL_SOLAR_STOP_THRESHOLD_W` | `--pool-solar-stop-threshold-w` | `200` | Solar power threshold to stop pump (W) |
 | `pool.solar.start_delay` | `MYHOME_POOL_SOLAR_START_DELAY` | `--pool-solar-start-delay` | `5m` | Solar must hold above start threshold for this long |
 | `pool.solar.stop_delay` | `MYHOME_POOL_SOLAR_STOP_DELAY` | `--pool-solar-stop-delay` | `10m` | Solar must hold below stop threshold for this long |
-| `pool.solar.daily_target_sec` | `MYHOME_POOL_SOLAR_DAILY_TARGET_SEC` | `--pool-solar-daily-target-sec` | `0` | Daily filtration target in seconds; pump won't start via solar once reached (0 = no check) |
+| `pool.solar.min_volume_turnover` | `MYHOME_POOL_SOLAR_MIN_VOLUME_TURNOVER` | `--pool-solar-min-volume-turnover` | `5` | Soft-stop target: pool volumes filtered per day; pump keeps running past this while solar is still above the start threshold |
+| `pool.solar.max_volume_turnover` | `MYHOME_POOL_SOLAR_MAX_VOLUME_TURNOVER` | `--pool-solar-max-volume-turnover` | `7` | Hard ceiling: pool volumes filtered per day; pump always stops (and won't be solar-started) once reached |

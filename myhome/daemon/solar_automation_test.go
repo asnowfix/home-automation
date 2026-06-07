@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asnowfix/home-automation/myhome/events"
 	beem "github.com/asnowfix/home-automation/pkg/beem"
 	"github.com/go-logr/logr"
 )
@@ -177,6 +178,137 @@ func TestSolarAutomation_ContextCancelStopsPump(t *testing.T) {
 	on, ok := pump.lastCall()
 	if !ok || on {
 		t.Errorf("expected pump OFF after context cancel; calls=%v", pump.calls)
+	}
+}
+
+// seedDailyRuntime records a single ON→OFF interval of the given length,
+// starting one hour into today, so PoolRuntimeTracker.DailyRuntimeSec reports
+// exactly `seconds` for the rest of the test.
+func seedDailyRuntime(t *testing.T, s *events.Storage, deviceID string, seconds float64) {
+	t.Helper()
+	base := float64(time.Now().Truncate(24*time.Hour).Unix()) + 3600
+	insertSwitchEvent(t, s, deviceID, "switch.on", base)
+	insertSwitchEvent(t, s, deviceID, "switch.off", base+seconds)
+}
+
+// TestSolarAutomation_SoftStopWhenTargetReachedAndSolarGone verifies the
+// soft-stop transition: once the daily target is reached, the pump stops only
+// when solar also drops below the start threshold.
+func TestSolarAutomation_SoftStopWhenTargetReachedAndSolarGone(t *testing.T) {
+	s := newTestEventsStorage(t)
+	seedDailyRuntime(t, s, "pool-device", 4000) // already past the soft target, below the ceiling
+	tracker := NewPoolRuntimeTracker(logr.Discard(), s, "pool-device")
+
+	cfg := defaultCfg()
+	cfg.DailyTargetSec = 3600
+	cfg.MaxRotationSec = 7200
+
+	pump := &mockPumpController{}
+	ch := make(chan beem.PowerSample, 8)
+	sa := NewSolarAutomation(logr.Discard(), ch, tracker, pump, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sa.Start(ctx)
+
+	send(ch, 600) // runtime (4000s) < ceiling (7200s) → solar start permitted
+	if n := len(pump.calls); n != 1 || !pump.calls[0] {
+		t.Fatalf("expected pump ON; calls=%v", pump.calls)
+	}
+
+	// Solar drops below the start threshold while the soft target is already met.
+	send(ch, 400)
+	on, ok := pump.lastCall()
+	if !ok || on {
+		t.Errorf("expected soft stop (target reached + solar below start threshold); calls=%v", pump.calls)
+	}
+}
+
+// TestSolarAutomation_KeepsRunningPastSoftTargetWhileSolarHigh verifies that
+// reaching the soft daily target alone does not stop the pump — solar still
+// above the start threshold means free energy keeps over-filtering.
+func TestSolarAutomation_KeepsRunningPastSoftTargetWhileSolarHigh(t *testing.T) {
+	s := newTestEventsStorage(t)
+	seedDailyRuntime(t, s, "pool-device", 4000) // past the soft target, below the ceiling
+	tracker := NewPoolRuntimeTracker(logr.Discard(), s, "pool-device")
+
+	cfg := defaultCfg()
+	cfg.DailyTargetSec = 3600
+	cfg.MaxRotationSec = 7200
+
+	pump := &mockPumpController{}
+	ch := make(chan beem.PowerSample, 8)
+	sa := NewSolarAutomation(logr.Discard(), ch, tracker, pump, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sa.Start(ctx)
+
+	send(ch, 600) // start
+	if n := len(pump.calls); n != 1 {
+		t.Fatalf("expected pump to start; calls=%v", pump.calls)
+	}
+
+	// Soft target already met, but solar stays well above the start threshold.
+	for i := 0; i < 3; i++ {
+		send(ch, 700)
+	}
+	if n := len(pump.calls); n != 1 {
+		t.Errorf("expected pump to keep running past the soft target while solar is high; calls=%v", pump.calls)
+	}
+}
+
+// TestSolarAutomation_HardCeilingStopsRegardlessOfSolar verifies that the hard
+// ceiling stops a running pump even while solar production is still high.
+func TestSolarAutomation_HardCeilingStopsRegardlessOfSolar(t *testing.T) {
+	s := newTestEventsStorage(t)
+	seedDailyRuntime(t, s, "pool-device", 8000) // past the hard ceiling
+	tracker := NewPoolRuntimeTracker(logr.Discard(), s, "pool-device")
+
+	cfg := defaultCfg()
+	cfg.DailyTargetSec = 3600
+	cfg.MaxRotationSec = 7200
+
+	pump := &mockPumpController{}
+	sa := NewSolarAutomation(logr.Discard(), make(chan beem.PowerSample), tracker, pump, cfg)
+
+	// Exercise the running-state transition directly: the pump may have been
+	// started by the JS schedule rather than the solar trigger, so the hard
+	// ceiling must stop it regardless of how it got into the RUNNING state.
+	sample := beem.PowerSample{SolarW: 900, Source: "test", TS: time.Now()}
+	newState, _, _ := sa.step(context.Background(), sample, pumpRunning, time.Time{}, time.Time{})
+
+	if newState != pumpIdle {
+		t.Errorf("expected hard ceiling to stop the pump; state=%v", newState)
+	}
+	on, ok := pump.lastCall()
+	if !ok || on {
+		t.Errorf("expected pump OFF on hard ceiling; calls=%v", pump.calls)
+	}
+}
+
+// TestSolarAutomation_CannotStartPastHardCeiling verifies that the solar trigger
+// refuses to start the pump once the hard ceiling has already been reached.
+func TestSolarAutomation_CannotStartPastHardCeiling(t *testing.T) {
+	s := newTestEventsStorage(t)
+	seedDailyRuntime(t, s, "pool-device", 8000) // past the hard ceiling
+	tracker := NewPoolRuntimeTracker(logr.Discard(), s, "pool-device")
+
+	cfg := defaultCfg()
+	cfg.DailyTargetSec = 3600
+	cfg.MaxRotationSec = 7200
+
+	pump := &mockPumpController{}
+	ch := make(chan beem.PowerSample, 8)
+	sa := NewSolarAutomation(logr.Discard(), ch, tracker, pump, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sa.Start(ctx)
+
+	send(ch, 900) // well above the start threshold, but the ceiling is already reached
+	if len(pump.calls) != 0 {
+		t.Errorf("expected no solar start once the hard ceiling is reached; calls=%v", pump.calls)
 	}
 }
 

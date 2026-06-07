@@ -62,7 +62,8 @@ func init() {
 	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarStopThresholdW, "pool-solar-stop-threshold-w", 200, "Solar power threshold to stop pump (W)")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.PoolSolarStartDelay, "pool-solar-start-delay", 5*time.Minute, "Solar must hold above start threshold for this long before starting pump")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.PoolSolarStopDelay, "pool-solar-stop-delay", 10*time.Minute, "Solar must hold below stop threshold for this long before stopping pump")
-	runCmd.PersistentFlags().Int64Var(&options.Flags.PoolSolarDailyTargetSec, "pool-solar-daily-target-sec", 0, "Daily filtration target in seconds; pump won't start via solar once reached (0 = no check)")
+	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarMinVolumeTurnover, "pool-solar-min-volume-turnover", 5, "Soft-stop target: pool volumes filtered per day; pump keeps running past this while solar is still above start threshold")
+	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarMaxVolumeTurnover, "pool-solar-max-volume-turnover", 7, "Hard ceiling: pool volumes filtered per day; pump always stops (and won't be solar-started) once reached")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
@@ -254,8 +255,11 @@ var runCmd = &cobra.Command{
 		if v.IsSet("pool.solar.stop_delay") && !cmd.Flags().Changed("pool-solar-stop-delay") {
 			options.Flags.PoolSolarStopDelay = v.GetDuration("pool.solar.stop_delay")
 		}
-		if v.IsSet("pool.solar.daily_target_sec") && !cmd.Flags().Changed("pool-solar-daily-target-sec") {
-			options.Flags.PoolSolarDailyTargetSec = v.GetInt64("pool.solar.daily_target_sec")
+		if v.IsSet("pool.solar.min_volume_turnover") && !cmd.Flags().Changed("pool-solar-min-volume-turnover") {
+			options.Flags.PoolSolarMinVolumeTurnover = v.GetFloat64("pool.solar.min_volume_turnover")
+		}
+		if v.IsSet("pool.solar.max_volume_turnover") && !cmd.Flags().Changed("pool-solar-max-volume-turnover") {
+			options.Flags.PoolSolarMaxVolumeTurnover = v.GetFloat64("pool.solar.max_volume_turnover")
 		}
 
 		// Store Viper instance in global options for daemon to use

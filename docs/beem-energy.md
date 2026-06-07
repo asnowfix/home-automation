@@ -114,10 +114,29 @@ A new goroutine in `myhome/daemon/solar_automation.go` subscribes to `myhome/ene
 ### Hysteresis state machine
 
 ```
-IDLE  →  (solar_w > start_threshold_w  for  start_delay)  →  RUNNING
-RUNNING  →  (solar_w < stop_threshold_w  for  stop_delay)  →  IDLE
-RUNNING  →  (remaining_runtime_sec <= 0)                   →  IDLE
+IDLE  →  (solar_w ≥ start_threshold_w  for  start_delay
+          AND  runtime < max_rotation_sec)                          →  RUNNING
+
+RUNNING  →  (solar_w < stop_threshold_w  for  stop_delay)          →  IDLE  [solar loss]
+RUNNING  →  (runtime ≥ daily_target_sec
+             AND  solar_w < start_threshold_w)                      →  IDLE  [soft stop]
+RUNNING  →  (runtime ≥ max_rotation_sec)                           →  IDLE  [hard ceiling]
 ```
+
+**Soft stop vs. hard ceiling:**
+
+- `daily_target_sec` is the normal filtration goal (e.g. 5× pool volume). Reaching it stops the pump *only if solar has also dropped below `start_threshold_w`*. While solar is still producing, the pump keeps running past the daily target — free energy is used to over-filter rather than going to waste.
+- `max_rotation_sec` is an absolute ceiling (e.g. 7× pool volume). The pump always stops when this is reached, regardless of solar output. Set to `0` to disable the ceiling entirely (run unlimited while solar is sufficient).
+- The pump will not be *started* via solar once `max_rotation_sec` is already reached.
+
+**Combined stop logic on each power sample (RUNNING state):**
+
+| Condition | Action |
+|---|---|
+| `runtime ≥ max_rotation_sec` | Stop immediately (hard ceiling) |
+| `runtime ≥ daily_target_sec` AND `solar_w < start_threshold_w` | Stop immediately (soft stop: goal met, solar gone) |
+| `solar_w < stop_threshold_w` held for `stop_delay` | Stop (solar loss, regardless of runtime) |
+| otherwise | Keep running |
 
 ### New files
 
@@ -136,15 +155,23 @@ pool:
     stop_threshold_w:    200    # stop when solar falls below this
     start_delay:         5m     # must hold above threshold before starting
     stop_delay:          10m    # must hold below threshold before stopping
+    daily_target_sec:    0      # soft stop: stop pump when target met AND solar gone (0 = no soft stop)
+    max_rotation_sec:    0      # hard ceiling: always stop when reached (0 = no ceiling)
+```
+
+`daily_target_sec` and `max_rotation_sec` are expressed in seconds. Typical values derived from pool volume and turnover:
+
+```
+daily_target_sec  =  pool_volume × 5 / flow_rate × 3600   (5× turnover)
+max_rotation_sec  =  pool_volume × 7 / flow_rate × 3600   (7× turnover)
 ```
 
 ### Interaction with existing schedule (additive / substitute semantics)
 
-- Solar goroutine starts the pump **only when** `RemainingRuntimeSec() > 0`
-- Solar goroutine stops the pump when solar drops OR `RemainingRuntimeSec() <= 0`
-- The normal JS schedule (morning start / evening stop / night run) fires independently
-- When the JS schedule starts the pump and `RemainingRuntimeSec() > 0`, the runtime tracker counts that time too — the schedule naturally fills the gap left by solar
-- When `RemainingRuntimeSec() <= 0` and the JS night schedule fires at 23:15, the daemon detects the pump turning on and sends a stop command ~30 s later (one relay click; no JS changes required)
+- Solar goroutine starts the pump **only when** `runtime < max_rotation_sec` (or `max_rotation_sec == 0`)
+- Solar goroutine stops the pump on solar loss, soft stop (target met + solar gone), or hard ceiling
+- The normal JS schedule (morning start / evening stop / night run) fires independently; the runtime tracker counts all pump-on time regardless of who started the pump
+- When `max_rotation_sec` is reached and the JS night schedule fires at 23:15, the daemon detects the pump turning on and sends a stop command ~30 s later (one relay click; no JS changes required)
 
 ### Daily target computation (Go side)
 
@@ -228,6 +255,7 @@ WHERE e1.device_id = <deviceID> AND e1.component = <component>
 | 4 | Solar automation goroutine | ✅ done |
 | 5 | Daemon wiring | ✅ done |
 | 6 | Tests | ✅ done |
+| 7 | Soft stop + hard ceiling (`daily_target_sec` / `max_rotation_sec`) | ⬜ pending |
 
 ---
 

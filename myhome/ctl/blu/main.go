@@ -14,5 +14,7 @@ var Cmd = &cobra.Command{
 
 func init() {
 	Cmd.AddCommand(follow.Cmd)
+	Cmd.AddCommand(follow.UnfollowCmd)
 	Cmd.AddCommand(PublishCmd)
+	Cmd.AddCommand(UnpublishCmd)
 }

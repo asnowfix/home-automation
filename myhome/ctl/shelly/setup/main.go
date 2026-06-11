@@ -68,8 +68,8 @@ func setupDevicesByName(ctx context.Context, pattern string) error {
 }
 
 // getSetupConfig returns the setup configuration, using the current process MQTT broker
-// unless overridden by command-line flag
-func getSetupConfig(ctx context.Context) shellysetup.Config {
+// unless overridden by command-line flag.
+func getSetupConfig(ctx context.Context) (shellysetup.Config, error) {
 	cfg := shellysetup.Config{
 		MqttPort: 1883,
 		Resolver: mynet.MyResolver(hlog.Logger),
@@ -82,17 +82,21 @@ func getSetupConfig(ctx context.Context) shellysetup.Config {
 		// Get the MQTT broker from the current process client
 		mqttClient, err := mhmqtt.GetClientE(ctx)
 		if err == nil && mqttClient != nil {
-			// GetServer returns host:port, we just need the host part for setup
-			server := mqttClient.GetServer()
-			cfg.MqttBroker = server // Already includes port, setup will handle it
-			cfg.MqttPort = 0        // Signal to use the server as-is (includes port)
+			// DeviceServer returns host:port and substitutes a loopback address with the
+			// machine's LAN IP so the device can actually reach the broker.
+			server, err := mqttClient.DeviceServer()
+			if err != nil {
+				return cfg, fmt.Errorf("could not resolve device-facing MQTT broker address: %w", err)
+			}
+			cfg.MqttBroker = server
+			cfg.MqttPort = 0 // Signal to use the server as-is (includes port)
 		} else {
 			// Fallback to mqtt.local if no client available
 			cfg.MqttBroker = "mqtt.local"
 		}
 	}
 
-	return cfg
+	return cfg, nil
 }
 
 // doSetup performs the actual setup logic for a single device
@@ -206,13 +210,17 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	}
 
 	// Get setup configuration (uses current process MQTT broker by default)
-	cfg := getSetupConfig(ctx)
+	cfg, err := getSetupConfig(ctx)
+	if err != nil {
+		fmt.Printf("  ✗ Cannot determine MQTT broker for %s: %v\n", deviceId, err)
+		return nil, err
+	}
 
 	fmt.Printf("  . Running core setup (firmware, MQTT, watchdog, auto-update)...\n")
 	fmt.Printf("    MQTT broker: %s\n", cfg.MqttBroker)
 
 	// Delegate to the internal setup package for core setup
-	err := shellysetup.SetupDevice(ctx, log, sd, targetName, cfg)
+	err = shellysetup.SetupDevice(ctx, log, sd, targetName, cfg)
 	if err != nil {
 		fmt.Printf("  ✗ Setup failed on %s: %v\n", deviceId, err)
 		return nil, err

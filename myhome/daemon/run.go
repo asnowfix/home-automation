@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -46,11 +49,15 @@ func init() {
 	runCmd.PersistentFlags().StringVar(&options.Flags.MetricsExporterTopic, "metrics-exporter-topic", "shelly/metrics", "MQTT topic for Shelly device metrics")
 	runCmd.PersistentFlags().BoolVar(&disableAutoSetup, "disable-auto-setup", false, "Disable automatic configuration of newly discovered unknown devices")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.NoMdnsPublish, "no-mdns-publish", false, "Disable mDNS/Zeroconf publishing (useful for dev instances)")
-	runCmd.PersistentFlags().StringVarP(&options.Flags.InstanceName, "instance", "I", "myhome", "Server instance name for RPC topics (default: myhome)")
+	runCmd.PersistentFlags().StringVarP(&options.Flags.InstanceName, "instance", "I", "", "Daemon instance name used in RPC topics (default: OS hostname; the daemon running the embedded broker also serves the well-known 'myhome' topics)")
 	runCmd.PersistentFlags().StringVar(&options.Flags.EventsDBPath, "events-db", defaultEventsDBPath(), "Path to the events SQLite database")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.EventsRetention, "events-retention", 90*24*time.Hour, "Retention period for event records (default 90 days)")
 	runCmd.PersistentFlags().BoolVar(&disableEventsService, "disable-events-service", false, "Disable the event recording service")
 	runCmd.PersistentFlags().StringVar(&options.Flags.RemoteProxy, "remote-proxy", "", "Forward /devices/... requests to a remote myhome daemon (e.g. http://home-pi:6080) instead of connecting directly")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.ScriptsEnabled, "enable-scripts", false, "Enable the daemon script host (JS workflows on goja)")
+	runCmd.PersistentFlags().StringVar(&options.Flags.ScriptsDir, "scripts-dir", "", "Directory of workflow scripts overriding the embedded library")
+	runCmd.PersistentFlags().StringSliceVar(&options.Flags.ScriptsRun, "scripts-run", nil, "Workflow scripts to run on the daemon (e.g. occupancy,heater-myhome)")
+	runCmd.PersistentFlags().StringVar(&options.Flags.ScriptsStateDir, "scripts-state-dir", "scripts-state", "Directory for per-script persistent state (KVS + Script.storage)")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
@@ -142,6 +149,36 @@ var runCmd = &cobra.Command{
 		}
 		if v.IsSet("daemon.remote_proxy") && !cmd.Flags().Changed("remote-proxy") {
 			options.Flags.RemoteProxy = v.GetString("daemon.remote_proxy")
+		}
+		if v.IsSet("daemon.instance_name") && !cmd.Flags().Changed("instance") {
+			options.Flags.InstanceName = v.GetString("daemon.instance_name")
+		}
+		if v.IsSet("daemon.scripts.enabled") && !cmd.Flags().Changed("enable-scripts") {
+			options.Flags.ScriptsEnabled = v.GetBool("daemon.scripts.enabled")
+		}
+		if v.IsSet("daemon.scripts.dir") && !cmd.Flags().Changed("scripts-dir") {
+			options.Flags.ScriptsDir = v.GetString("daemon.scripts.dir")
+		}
+		if v.IsSet("daemon.scripts.run") && !cmd.Flags().Changed("scripts-run") {
+			options.Flags.ScriptsRun = v.GetStringSlice("daemon.scripts.run")
+		}
+		if v.IsSet("daemon.scripts.state_dir") && !cmd.Flags().Changed("scripts-state-dir") {
+			options.Flags.ScriptsStateDir = v.GetString("daemon.scripts.state_dir")
+		}
+		// Listing scripts implies enabling the script host (unless explicitly disabled)
+		if len(options.Flags.ScriptsRun) > 0 && !cmd.Flags().Changed("enable-scripts") && !v.IsSet("daemon.scripts.enabled") {
+			options.Flags.ScriptsEnabled = true
+		}
+		// Default instance name: short OS hostname (the well-known "myhome"
+		// topics stay reachable because the daemon running the embedded broker
+		// also serves them — see daemon.Run).
+		if options.Flags.InstanceName == "" {
+			hostname, err := os.Hostname()
+			if err != nil || hostname == "" {
+				options.Flags.InstanceName = myhome.MYHOME
+			} else {
+				options.Flags.InstanceName = strings.Split(hostname, ".")[0]
+			}
 		}
 		// Handle auto-setup flag (default is enabled, --disable-auto-setup disables it)
 		// Config file can also disable it via daemon.disable_auto_setup: true

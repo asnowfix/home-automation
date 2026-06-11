@@ -37,6 +37,7 @@ use (
 	./myhome/events
 	./myhome/mqtt
 	./myhome/occupancy
+	./myhome/scripthost
 	./myhome/storage
 	./myhome/temperature
 	./pkg/devices

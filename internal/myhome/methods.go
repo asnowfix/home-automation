@@ -2,7 +2,9 @@ package myhome
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
 )
 
 type MethodHandler func(ctx context.Context, in any) (any, error)
@@ -36,6 +38,30 @@ func RegisterMethodHandler(name Verb, mh MethodHandler) {
 		Signature: s,
 		ActionE:   mh,
 	}
+}
+
+// CallLocalE dispatches a verb to its registered handler in-process, decoding
+// rawParams according to the verb signature. It mirrors what the MQTT RPC
+// server does for remote requests, and is used by daemon-hosted scripts
+// (MyHome.call) to reach Go infrastructure without a network round-trip.
+func CallLocalE(ctx context.Context, verb Verb, rawParams json.RawMessage) (any, error) {
+	m, err := Methods(verb)
+	if err != nil {
+		return nil, err
+	}
+	params := m.Signature.NewParams()
+	if len(rawParams) > 0 && string(rawParams) != "null" {
+		if params != nil && reflect.ValueOf(params).Kind() == reflect.Pointer {
+			if err := json.Unmarshal(rawParams, params); err != nil {
+				return nil, fmt.Errorf("invalid params for %s: %w", verb, err)
+			}
+		} else {
+			if err := json.Unmarshal(rawParams, &params); err != nil {
+				return nil, fmt.Errorf("invalid params for %s: %w", verb, err)
+			}
+		}
+	}
+	return m.ActionE(ctx, params)
 }
 
 var methods map[Verb]*Method = make(map[Verb]*Method)
@@ -303,6 +329,22 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 		},
 		NewResult: func() any {
 			return &EventListResponse{}
+		},
+	},
+	ScriptInvoke: {
+		NewParams: func() any {
+			return &ScriptInvokeParams{}
+		},
+		NewResult: func() any {
+			return &ScriptInvokeResult{}
+		},
+	},
+	LanHosts: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &LanHostsResult{}
 		},
 	},
 }

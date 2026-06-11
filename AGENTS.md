@@ -833,6 +833,52 @@ func (h *MethodHandlers) RegisterHandlers() {
 }
 ```
 
+### Daemon Script Host (JS Workflows)
+
+MyHome-specific *workflows* are written in JavaScript and executed on the daemon by the
+built-in goja engine (`myhome/scripthost`); communication, persistence and infrastructure
+stay in Go. Daemon scripts use the same Shelly API as device scripts (Timer, MQTT,
+Shelly.call with KVS emulation, Script.storage — persisted under `scripts-state/<name>.json`)
+plus a `MyHome` global:
+
+| API | Purpose |
+|---|---|
+| `MyHome.instance()` | This daemon's instance name |
+| `MyHome.log(...)` | Structured daemon log |
+| `MyHome.on(name, fn)` | Handle `script.invoke` calls addressed to this script |
+| `MyHome.call(verb, params, cb)` | In-process myhome RPC verb (`cb(result, error_code, error_message)`) |
+| `MyHome.deviceCall(device, method, params, cb)` | RPC to a Shelly device (any identifier) |
+| `MyHome.uploadScript(device, scriptName, cb)` | Upload + start an embedded device script |
+| `MyHome.registerVerb(verb, fn)` | JS implementation of an existing RPC verb (opt-in workflow replacement) |
+
+Configuration: `daemon.scripts.run: [occupancy, heater-myhome]` (see docs/configuration.md).
+Scripts are resolved from `daemon.scripts.dir` first, then the embedded
+`internal/shelly/scripts` library — so **every device script can assume a script of the
+same name is also present on the daemon**. A script detects which side it runs on with
+`typeof MyHome !== "undefined"` (see `myhome-link.js` for the dual-mode pattern).
+
+#### Device → Daemon Script Invocation (script.invoke)
+
+Devices call daemon-hosted script handlers through the regular myhome RPC protocol —
+no extra MQTT subscription on the daemon side:
+
+```js
+// Request: publish on "<instance>/rpc" ("myhome/rpc" reaches the main daemon)
+{ "id": "dev-1", "src": "<own-mqtt-prefix>/myhome", "dst": "<instance>",
+  "method": "script.invoke",
+  "params": { "script": "myhome-link", "name": "ping", "params": {"any": "json"} } }
+```
+
+The daemon responds on `<src>/rpc`, i.e. `<own-mqtt-prefix>/myhome/rpc` — the `/myhome`
+suffix keeps the response topic clear of the device's own RPC prefix. Devices subscribe
+to that topic once and match responses by `id` (full ES5-safe implementation:
+`internal/shelly/scripts/myhome-link.js`).
+
+Instance names: every daemon serves `<instance>/rpc` (default instance = short OS
+hostname); the daemon running the embedded broker additionally serves the well-known
+`myhome/rpc`. Dev/test daemons use `--instance <name> --mqtt-broker <addr>` and are
+addressed explicitly (KVS `script/<name>/instance` on the device).
+
 ### Database Patterns
 
 #### SQLite Column Existence Check

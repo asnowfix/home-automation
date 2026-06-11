@@ -74,11 +74,15 @@ var Flags struct {
 	ShellyRateLimit             time.Duration // the value taken by --shelly-rate-limit
 	AutoSetup                   bool          // the value taken by --auto-setup / -A
 	NoMdnsPublish               bool          // the value taken by --no-mdns-publish
-	InstanceName                string        // the value taken by --instance / -I
+	InstanceName                string        // the value taken by --instance / -I (daemon default: short OS hostname)
 	EventsDBPath                string        // path to events SQLite database
 	EventsRetention             time.Duration // retention period for event records
 	EnableEventsService         bool          // whether to enable the event recording service
 	RemoteProxy                 string        // the value taken by --remote-proxy; delegates /devices/... to a remote myhome daemon
+	ScriptsEnabled              bool          // whether the daemon hosts workflow scripts (goja)
+	ScriptsDir                  string        // optional user dir overriding embedded workflow scripts
+	ScriptsRun                  []string      // names of workflow scripts to run on the daemon
+	ScriptsStateDir             string        // per-script KVS/storage state files (default "scripts-state")
 }
 
 var Via types.Channel

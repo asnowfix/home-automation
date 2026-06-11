@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
+	"slices"
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/global"
@@ -12,6 +13,7 @@ import (
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
+	"github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	"github.com/asnowfix/home-automation/myhome/events"
@@ -19,8 +21,10 @@ import (
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	mqttserver "github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/asnowfix/home-automation/myhome/occupancy"
+	"github.com/asnowfix/home-automation/myhome/scripthost"
 	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/myhome/temperature"
+	"github.com/asnowfix/home-automation/pkg/sfr"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
 	"github.com/go-logr/logr"
@@ -41,6 +45,36 @@ type Config struct {
 
 var DefaultConfig = Config{
 	RefreshInterval: 3 * time.Minute,
+}
+
+// scriptsRunContains reports whether a workflow script is configured on the
+// daemon script host (names accepted with or without the .js suffix).
+func scriptsRunContains(name string) bool {
+	return slices.ContainsFunc(options.Flags.ScriptsRun, func(s string) bool {
+		return s == name || s == name+".js"
+	})
+}
+
+// registerLanHostsHandler exposes LAN presence polling (SFR box) to JS
+// workflows: the occupancy workflow is JS, the infrastructure stays in Go.
+func registerLanHostsHandler() {
+	myhome.RegisterMethodHandler(myhome.LanHosts, func(ctx context.Context, in any) (any, error) {
+		hosts, err := sfr.GetHostsList(ctx)
+		if err != nil {
+			return nil, err
+		}
+		res := &myhome.LanHostsResult{Hosts: make([]myhome.LanHostInfo, 0, len(*hosts))}
+		for _, h := range *hosts {
+			res.Hosts = append(res.Hosts, myhome.LanHostInfo{
+				Name:   h.Name,
+				Ip:     h.Ip.String(),
+				Mac:    h.Mac,
+				Status: h.Status,
+				Alive:  h.Alive,
+			})
+		}
+		return res, nil
+	})
 }
 
 func NewDaemon(ctx context.Context) *daemon {
@@ -147,8 +181,14 @@ func (d *daemon) Run() error {
 		log.Info("Gen1 (HTTP->MQTT) proxy disabled")
 	}
 
-	// Start Occupancy service (MQTT only)
-	if options.Flags.EnableOccupancyService {
+	// Start Occupancy service (MQTT only). When the JS occupancy workflow is
+	// configured on the script host, it replaces the Go implementation (both
+	// publish the retained myhome/occupancy topic and must not coexist).
+	jsOccupancy := options.Flags.ScriptsEnabled && scriptsRunContains("occupancy")
+	if jsOccupancy && options.Flags.EnableOccupancyService {
+		log.Info("Occupancy service: Go implementation replaced by JS workflow (daemon.scripts.run)")
+	}
+	if options.Flags.EnableOccupancyService && !jsOccupancy {
 		log.Info("Starting occupancy service")
 
 		// Create occupancy service
@@ -247,11 +287,38 @@ func (d *daemon) Run() error {
 			log.Info("Gen2 event listener started")
 		}
 
-		// Start the main RPC server
-		d.rpc, err = myhome.NewServerE(d.ctx, mc, d.dm)
+		// Start the main RPC server. The daemon running the embedded broker is
+		// the main daemon: it also serves the well-known "myhome/rpc" topic so
+		// that CLI clients and devices keep working without knowing its
+		// instance name.
+		rpcTopics := []string{myhome.ServerTopic()}
+		if !disableEmbeddedMqttBroker && myhome.InstanceName != myhome.MYHOME {
+			rpcTopics = append(rpcTopics, myhome.MYHOME+"/rpc")
+		}
+		d.rpc, err = myhome.NewServerE(d.ctx, mc, d.dm, rpcTopics...)
 		if err != nil {
 			log.Error(err, "Failed to start MyHome RPC service")
 			return err
+		}
+
+		// Start the script host: JS workflows running on the daemon's goja
+		// engine, invocable from devices via the script.invoke RPC verb.
+		if options.Flags.ScriptsEnabled {
+			log.Info("Starting script host", "scripts", options.Flags.ScriptsRun)
+			sh := scripthost.NewService(log, scripthost.Config{
+				Enabled:  true,
+				Dir:      options.Flags.ScriptsDir,
+				Run:      options.Flags.ScriptsRun,
+				StateDir: options.Flags.ScriptsStateDir,
+			}, scripts.GetFS(), d.dm, myhome.InstanceName)
+			if err := sh.Start(d.ctx); err != nil {
+				log.Error(err, "Failed to start script host")
+				return err
+			}
+			// Infrastructure verbs only needed by JS workflows
+			registerLanHostsHandler()
+		} else {
+			log.Info("Script host disabled")
 		}
 
 		// Register EventList RPC handler if events service is running

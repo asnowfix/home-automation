@@ -123,14 +123,14 @@ Key properties:
 - [x] Unit test via emulator.
 
 ### Phase 7 — Live validation on development.local
-- [ ] Build; run dev daemon `--instance dev-claude --mqtt-broker 192.168.1.2 …`
+- [x] Build; run dev daemon `--instance dev-claude --mqtt-broker 192.168.1.2 …`
       (no mDNS publish, no embedded broker, separate db/state files, UI port off 6080).
-- [ ] Upload `myhome-link.js` to development.local (`--no-minify`), enable script debug,
+- [x] Upload `myhome-link.js` to development.local (`--no-minify`), enable script debug,
       verify device→daemon `script.invoke` round-trip and distributed heater forecast.
-- [ ] `make test` green.
+- [x] `make test` green.
 
 ### Phase 8 — Draft PR
-- [ ] Push branch, open draft PR with summary, config examples, and migration notes
+- [x] Push branch, open draft PR with summary, config examples, and migration notes
       (main daemon: nothing to change — alias topic keeps current behaviour).
 
 ## Risks / notes

@@ -71,14 +71,14 @@ Key properties:
 - [x] `Run()/RunWithDeviceState()` keep their behaviour (existing tests must pass).
 
 ### Phase 3 — Daemon script host (`myhome/scripthost`)
-- [ ] New workspace module `myhome/scripthost` (`go work use`).
-- [ ] Loads scripts by name: user dir (`daemon.scripts.dir`, optional) first, then the
+- [x] New workspace module `myhome/scripthost` (`go work use`).
+- [x] Loads scripts by name: user dir (`daemon.scripts.dir`, optional) first, then the
       embedded `internal/shelly/scripts` FS — *every device script is also present on
       the daemon*.
-- [ ] Per-script engine goroutine; crash → restart with backoff; stop on ctx cancel.
-- [ ] State persisted per script: `scripts-state/<name>.json` (KVS + Script.storage),
+- [x] Per-script engine goroutine; crash → restart with backoff; stop on ctx cancel.
+- [x] State persisted per script: `scripts-state/<name>.json` (KVS + Script.storage),
       auto-saved on modification (reuses DeviceState persistence).
-- [ ] `MyHome` JS API:
+- [x] `MyHome` JS API:
       - `MyHome.instance()` → instance name
       - `MyHome.call(method, params, callback)` → in-process myhome verb dispatch
       - `MyHome.deviceCall(device, method, params, callback)` → RPC to a Shelly device
@@ -86,19 +86,19 @@ Key properties:
       - `MyHome.registerVerb(verb, fn)` → JS implementation of an existing RPC verb
         (used for opt-in workflow replacement, e.g. `heater.getconfig`)
       - `MyHome.log(...)` → hlog-backed structured logging
-- [ ] Config: `daemon.scripts.enabled`, `daemon.scripts.dir`, `daemon.scripts.run`
+- [x] Config: `daemon.scripts.enabled`, `daemon.scripts.dir`, `daemon.scripts.run`
       (list of script names) — 4-file rule.
 
 ### Phase 4 — `script.invoke` protocol (device→daemon)
-- [ ] RPC 4 steps: Verb `script.invoke` in const.go; `ScriptInvokeParams{Script, Name,
+- [x] RPC 4 steps: Verb `script.invoke` in const.go; `ScriptInvokeParams{Script, Name,
       Params}` / `ScriptInvokeResult{Result}` types; signatures map entry;
       `RegisterMethodHandler` from scripthost.
-- [ ] Device-side calling convention (ES5, minify-safe):
+- [x] Device-side calling convention (ES5, minify-safe):
       publish request to `myhome/rpc` (or specific instance) with
       `src = <device-topic-prefix> + "/myhome"`, subscribe `<prefix>/myhome/rpc`,
       match responses by id. Helper shipped as `internal/shelly/scripts/myhome-link.js`
       (test/demo script for development.local).
-- [ ] Document the convention in AGENTS.md.
+- [x] Document the convention in AGENTS.md.
 
 ### Phase 5 — Occupancy workflow in JS (opt-in)
 - [ ] Go infra verb `lan.hosts` (wraps `pkg/sfr.GetHostsList`) — presence polling is

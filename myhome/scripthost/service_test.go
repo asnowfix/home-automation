@@ -3,6 +3,8 @@ package scripthost
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -139,6 +141,32 @@ func TestRegisterVerb(t *testing.T) {
 	}
 	if m["device_id"] != "dev1" || m["device_name"] != "js" {
 		t.Fatalf("unexpected result: %v", m)
+	}
+}
+
+// TestMyHomeLinkDaemonMode runs the real myhome-link.js (dual-mode script) on
+// the host and exercises its daemon-side ping handler — the same handler that
+// devices reach via script.invoke.
+func TestMyHomeLinkDaemonMode(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "internal", "shelly", "scripts", "myhome-link.js"))
+	if err != nil {
+		t.Fatalf("read myhome-link.js: %v", err)
+	}
+	scripts := fstest.MapFS{
+		"myhome-link.js": &fstest.MapFile{Data: src},
+	}
+	ctx, svc := newTestService(t, scripts, []string{"myhome-link"})
+
+	res := invokeEventually(t, ctx, svc, "myhome-link", "ping", map[string]any{"from": "test"})
+	m, ok := res.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected result type: %T (%v)", res.Result, res.Result)
+	}
+	if m["pong"] != true {
+		t.Errorf("pong = %v, want true", m["pong"])
+	}
+	if m["instance"] != "test-instance" {
+		t.Errorf("instance = %v, want test-instance", m["instance"])
 	}
 }
 

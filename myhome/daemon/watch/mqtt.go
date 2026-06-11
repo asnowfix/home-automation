@@ -42,7 +42,13 @@ func mqttWatcher(ctx context.Context, log logr.Logger, topic string, dm devices.
 			log.Info("Cancelled", "topic", topic)
 			return
 
-		case msg := <-ch:
+		case msg, ok := <-ch:
+			if !ok {
+				// Subscription channel closed (reconnect/shutdown): exit
+				// instead of spinning on nil receives.
+				log.Info("Subscription channel closed, stopping watcher", "topic", topic)
+				return
+			}
 			log.V(1).Info("Received", "topic", topic)
 			if msg == nil {
 				log.Error(fmt.Errorf("nil message"), "Skipping", "topic", topic)

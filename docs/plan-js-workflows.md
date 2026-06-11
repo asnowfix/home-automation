@@ -112,15 +112,15 @@ Key properties:
 - [x] Unit test runs occupancy.js in the emulator (pattern: blu_listener_test.go).
 
 ### Phase 6 — Heater workflow in JS (opt-in)
-- [ ] `internal/shelly/scripts/heater-myhome.js` (daemon flavour):
+- [x] `internal/shelly/scripts/heater-myhome.js` (daemon flavour):
       - `MyHome.registerVerb("heater.getconfig"/"heater.setconfig", …)` re-implementing
         internal/myhome/shelly/script/heater.go logic via `MyHome.deviceCall`
         (KVS.GetMany / KVS.Set) and `MyHome.uploadScript` Go binding (wraps
         UploadWithVersion — uploading firmware-grade JS to devices stays Go infra).
       - `MyHome.on("get_forecast", …)`: serves cached weather forecast to device heater
         scripts via `script.invoke` — demonstrates distributed device↔daemon execution.
-- [ ] Opt-in: `heater-myhome` in `daemon.scripts.run` ⇒ Go HeaterService not registered.
-- [ ] Unit test via emulator.
+- [x] Opt-in: `heater-myhome` in `daemon.scripts.run` ⇒ Go HeaterService not registered.
+- [x] Unit test via emulator.
 
 ### Phase 7 — Live validation on development.local
 - [ ] Build; run dev daemon `--instance dev-claude --mqtt-broker 192.168.1.2 …`

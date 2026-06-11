@@ -76,7 +76,7 @@ func (r *runner) installMyHomeAPI(ctx context.Context, vm *goja.Runtime) error {
 		go func() {
 			callCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 			defer cancel()
-			out, err := r.doDeviceCall(callCtx, identifier, method, params)
+			out, err := r.svc.deviceCall(callCtx, identifier, method, params)
 			r.deliver(ctx, callback, out, err)
 		}()
 		return goja.Undefined()
@@ -92,7 +92,7 @@ func (r *runner) installMyHomeAPI(ctx context.Context, vm *goja.Runtime) error {
 		go func() {
 			callCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer cancel()
-			err := r.doUploadScript(callCtx, identifier, scriptName)
+			err := r.svc.uploadScript(callCtx, identifier, scriptName)
 			r.deliver(ctx, callback, map[string]interface{}{"uploaded": err == nil}, err)
 		}()
 		return goja.Undefined()
@@ -149,58 +149,107 @@ func (r *runner) registerGoVerb(ctx context.Context, verb myhome.Verb) (err erro
 		callCtx, cancel := context.WithTimeout(callCtx, 30*time.Second)
 		defer cancel()
 
-		var out any
-		var jsErr error
-		err = eng.Dispatch(callCtx, func(vm *goja.Runtime) {
+		return r.callJSHandler(callCtx, eng, generic, fmt.Sprintf("verb %s", verb), func() (goja.Callable, bool) {
 			cb, ok := r.verbHandlers[verb]
-			if !ok {
-				jsErr = fmt.Errorf("script %s lost handler for %s", r.name, verb)
-				return
-			}
-			v, err := cb(goja.Undefined(), vm.ToValue(generic))
-			if err != nil {
-				jsErr = err
-				return
-			}
-			if v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
-				out = v.Export()
-			}
+			return cb, ok
 		})
-		if err != nil {
-			return nil, err
-		}
-		if jsErr != nil {
-			return nil, jsErr
-		}
-		return out, nil
 	})
 	return nil
 }
 
-func (r *runner) doDeviceCall(ctx context.Context, identifier, method string, params any) (any, error) {
-	if r.svc.provider == nil {
+// jsOutcome carries an async handler result back to the Go caller.
+type jsOutcome struct {
+	out any
+	err error
+}
+
+// callJSHandler invokes a JS handler as handler(params, respond) on the VM
+// goroutine and waits for its result. Two completion styles are supported:
+//   - synchronous: the handler returns a value (anything but undefined)
+//   - asynchronous: the handler returns undefined and later calls
+//     respond(result, error) — typically from MyHome.call/deviceCall
+//     callbacks. The Go side blocks until respond() or callCtx timeout.
+//
+// lookup resolves the JS callable on the VM goroutine (handler maps are only
+// touched there).
+func (r *runner) callJSHandler(callCtx context.Context, eng *pkgscript.Engine, params any, what string, lookup func() (goja.Callable, bool)) (any, error) {
+	resultCh := make(chan jsOutcome, 1)
+	settle := func(out any, err error) {
+		select {
+		case resultCh <- jsOutcome{out: out, err: err}:
+		default: // already settled (sync return + late respond): keep first
+		}
+	}
+
+	err := eng.Dispatch(callCtx, func(vm *goja.Runtime) {
+		cb, ok := lookup()
+		if !ok {
+			settle(nil, fmt.Errorf("script %s has no handler for %s", r.name, what))
+			return
+		}
+		respond := vm.ToValue(func(call goja.FunctionCall) goja.Value {
+			errArg := call.Argument(1)
+			if !goja.IsUndefined(errArg) && !goja.IsNull(errArg) {
+				settle(nil, fmt.Errorf("script %s %s: %s", r.name, what, errArg.String()))
+			} else {
+				settle(exportValue(call.Argument(0)), nil)
+			}
+			return goja.Undefined()
+		})
+		v, err := cb(goja.Undefined(), toJSValue(vm, params), respond)
+		if err != nil {
+			settle(nil, fmt.Errorf("script %s %s: %w", r.name, what, err))
+			return
+		}
+		if v != nil && !goja.IsUndefined(v) {
+			// Synchronous completion (null is a valid result)
+			settle(exportValue(v), nil)
+		}
+		// undefined: handler completes asynchronously via respond()
+	})
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case res := <-resultCh:
+		return res.out, res.err
+	case <-callCtx.Done():
+		return nil, fmt.Errorf("script %s %s: %w (handler returned undefined and never called respond)", r.name, what, callCtx.Err())
+	}
+}
+
+// exportValue converts a JS value to a generic Go value (nil for null/undefined).
+func exportValue(v goja.Value) any {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return nil
+	}
+	return v.Export()
+}
+
+func (s *Service) doDeviceCall(ctx context.Context, identifier, method string, params any) (any, error) {
+	if s.provider == nil {
 		return nil, fmt.Errorf("no device provider on this daemon")
 	}
-	device, err := r.svc.provider.GetDeviceByAny(ctx, identifier)
+	device, err := s.provider.GetDeviceByAny(ctx, identifier)
 	if err != nil {
 		return nil, fmt.Errorf("device %s not found: %w", identifier, err)
 	}
-	sd, err := r.svc.provider.GetShellyDevice(ctx, device)
+	sd, err := s.provider.GetShellyDevice(ctx, device)
 	if err != nil {
 		return nil, fmt.Errorf("shelly device %s: %w", identifier, err)
 	}
 	return sd.CallE(ctx, types.ChannelDefault, method, params)
 }
 
-func (r *runner) doUploadScript(ctx context.Context, identifier, scriptName string) error {
-	if r.svc.provider == nil {
+func (s *Service) doUploadScript(ctx context.Context, identifier, scriptName string) error {
+	if s.provider == nil {
 		return fmt.Errorf("no device provider on this daemon")
 	}
-	device, err := r.svc.provider.GetDeviceByAny(ctx, identifier)
+	device, err := s.provider.GetDeviceByAny(ctx, identifier)
 	if err != nil {
 		return fmt.Errorf("device %s not found: %w", identifier, err)
 	}
-	sd, err := r.svc.provider.GetShellyDevice(ctx, device)
+	sd, err := s.provider.GetShellyDevice(ctx, device)
 	if err != nil {
 		return fmt.Errorf("shelly device %s: %w", identifier, err)
 	}
@@ -208,7 +257,7 @@ func (r *runner) doUploadScript(ctx context.Context, identifier, scriptName stri
 	if err != nil {
 		return fmt.Errorf("embedded script %s: %w", scriptName, err)
 	}
-	_, err = shellyscript.UploadWithVersion(ctx, r.log, types.ChannelDefault, sd, scriptName, buf, true, false)
+	_, err = shellyscript.UploadWithVersion(ctx, s.log, types.ChannelDefault, sd, scriptName, buf, true, false)
 	return err
 }
 

@@ -53,13 +53,18 @@ type Service struct {
 
 	mu      sync.RWMutex
 	runners map[string]*runner // key: script name without .js
+
+	// deviceCall / uploadScript back MyHome.deviceCall and
+	// MyHome.uploadScript; overridable for tests (see WithDeviceCaller).
+	deviceCall   func(ctx context.Context, identifier, method string, params any) (any, error)
+	uploadScript func(ctx context.Context, identifier, scriptName string) error
 }
 
 func NewService(log logr.Logger, cfg Config, embedded fs.FS, provider DeviceProvider, instance string) *Service {
 	if cfg.StateDir == "" {
 		cfg.StateDir = "scripts-state"
 	}
-	return &Service{
+	s := &Service{
 		log:      log.WithName("scripthost"),
 		cfg:      cfg,
 		embedded: embedded,
@@ -67,6 +72,23 @@ func NewService(log logr.Logger, cfg Config, embedded fs.FS, provider DeviceProv
 		instance: instance,
 		runners:  make(map[string]*runner),
 	}
+	s.deviceCall = s.doDeviceCall
+	s.uploadScript = s.doUploadScript
+	return s
+}
+
+// WithDeviceCaller overrides the device RPC backends (tests).
+func (s *Service) WithDeviceCaller(
+	deviceCall func(ctx context.Context, identifier, method string, params any) (any, error),
+	uploadScript func(ctx context.Context, identifier, scriptName string) error,
+) *Service {
+	if deviceCall != nil {
+		s.deviceCall = deviceCall
+	}
+	if uploadScript != nil {
+		s.uploadScript = uploadScript
+	}
+	return s
 }
 
 // Start launches every configured script and registers the script.invoke RPC
@@ -133,28 +155,12 @@ func (s *Service) Invoke(ctx context.Context, scriptName, name string, params an
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	var out any
-	var jsErr error
-	err := eng.Dispatch(ctx, func(vm *goja.Runtime) {
+	out, err := r.callJSHandler(ctx, eng, params, fmt.Sprintf("handler %q (MyHome.on)", name), func() (goja.Callable, bool) {
 		cb, ok := r.invokeHandlers[name]
-		if !ok {
-			jsErr = fmt.Errorf("script %s has no handler %q (MyHome.on)", scriptName, name)
-			return
-		}
-		v, err := cb(goja.Undefined(), toJSValue(vm, params))
-		if err != nil {
-			jsErr = fmt.Errorf("script %s handler %q: %w", scriptName, name, err)
-			return
-		}
-		if v != nil && !goja.IsUndefined(v) && !goja.IsNull(v) {
-			out = v.Export()
-		}
+		return cb, ok
 	})
 	if err != nil {
 		return nil, err
-	}
-	if jsErr != nil {
-		return nil, jsErr
 	}
 	return &myhome.ScriptInvokeResult{Result: out}, nil
 }

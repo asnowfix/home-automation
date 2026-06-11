@@ -74,7 +74,7 @@ var Flags struct {
 	ShellyRateLimit             time.Duration // the value taken by --shelly-rate-limit
 	AutoSetup                   bool          // the value taken by --auto-setup / -A
 	NoMdnsPublish               bool          // the value taken by --no-mdns-publish
-	InstanceName                string        // the value taken by --instance / -I
+	InstanceName                string        // the value taken by --instance / -I (daemon default: short OS hostname)
 	EventsDBPath                string        // path to events SQLite database
 	EventsRetention             time.Duration // retention period for event records
 	EnableEventsService         bool          // whether to enable the event recording service

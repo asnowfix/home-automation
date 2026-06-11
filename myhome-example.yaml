@@ -87,6 +87,11 @@ mqtt:
 daemon:
   # MQTT broker address (leave empty to use embedded broker)
   # mqtt_broker: "192.168.1.2"
+
+  # Daemon instance name, used in RPC topics ("<instance>/rpc").
+  # Default: short OS hostname. The daemon running the embedded broker is the
+  # main daemon and also serves the well-known "myhome/rpc" topic.
+  # instance_name: myhome
   
   # Initial delay before checking if embedded MQTT broker is ready
   # Gives the broker time to complete async initialization after Serve() returns

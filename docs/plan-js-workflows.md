@@ -53,12 +53,12 @@ Key properties:
 ## Phases
 
 ### Phase 1 — Instance name plumbing
-- [ ] `--instance` flag default changes `"myhome"` → `""`; resolution order:
+- [x] `--instance` flag default changes `"myhome"` → `""`; resolution order:
       flag > `daemon.instance_name` (config/env) > OS hostname.
-- [ ] Daemon with embedded broker also serves the well-known `myhome/rpc` alias
+- [x] Daemon with embedded broker also serves the well-known `myhome/rpc` alias
       (it is the *main* daemon by definition).
-- [ ] `myhome.NewServerE` accepts explicit topics (instance + optional alias).
-- [ ] 4-file config rule: options.go, run.go, docs/configuration.md, myhome-example.yaml.
+- [x] `myhome.NewServerE` accepts explicit topics (instance + optional alias).
+- [x] 4-file config rule: options.go, run.go, docs/configuration.md, myhome-example.yaml.
 
 ### Phase 2 — Reusable goja Engine in pkg/shelly/script
 - [ ] Extract `createShellyRuntime` + event loop from `Run()` into an exported

@@ -247,8 +247,15 @@ func (d *daemon) Run() error {
 			log.Info("Gen2 event listener started")
 		}
 
-		// Start the main RPC server
-		d.rpc, err = myhome.NewServerE(d.ctx, mc, d.dm)
+		// Start the main RPC server. The daemon running the embedded broker is
+		// the main daemon: it also serves the well-known "myhome/rpc" topic so
+		// that CLI clients and devices keep working without knowing its
+		// instance name.
+		rpcTopics := []string{myhome.ServerTopic()}
+		if !disableEmbeddedMqttBroker && myhome.InstanceName != myhome.MYHOME {
+			rpcTopics = append(rpcTopics, myhome.MYHOME+"/rpc")
+		}
+		d.rpc, err = myhome.NewServerE(d.ctx, mc, d.dm, rpcTopics...)
 		if err != nil {
 			log.Error(err, "Failed to start MyHome RPC service")
 			return err

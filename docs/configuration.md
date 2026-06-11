@@ -126,6 +126,13 @@ daemon:
 - Flag: `--ui-port` or `-u`
 - Env: `MYHOME_DAEMON_UI_PORT`
 
+**`instance_name`** (string, default: short OS hostname)
+- Daemon instance name, used in RPC topics (`<instance>/rpc`)
+- The daemon running the embedded broker is the *main* daemon: it additionally serves the well-known `myhome/rpc` topic, so clients that do not specify an instance keep working
+- Secondary daemons (development, tests) should use a distinct instance name and an external broker (`mqtt_broker`)
+- Flag: `--instance` or `-I`
+- Env: `MYHOME_DAEMON_INSTANCE_NAME`
+
 **`remote_proxy`** (string, default: `""`)
 - Forward all `/devices/...` HTTP requests to a remote myhome daemon instead of connecting to devices directly. Useful when running a local myhome instance that reaches the home network via SSH port-forwarding and cannot dial device IPs directly.
 - Example: `http://home-pi:6080` or `http://localhost:6081` (when `ssh -L 6081:localhost:6080 home-pi`)

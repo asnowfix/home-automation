@@ -622,12 +622,21 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		return vm.ToValue(false)
 	})
 	mqttObj.Set("publish", func(call goja.FunctionCall) goja.Value {
+		// MQTT.publish(topic, message[, qos[, retain]]) per Shelly API
 		topic := call.Argument(0).String()
 		message := call.Argument(1).String()
+		qos := mqtt.AtLeastOnce
+		if len(call.Arguments) > 2 && !goja.IsUndefined(call.Argument(2)) {
+			qos = byte(call.Argument(2).ToInteger())
+		}
+		retain := false
+		if len(call.Arguments) > 3 {
+			retain = call.Argument(3).ToBoolean()
+		}
 
-		log.Info("MQTT.publish()", "topic", topic, "message", message)
+		log.Info("MQTT.publish()", "topic", topic, "message", message, "qos", qos, "retain", retain)
 
-		err := mc.Publish(ctx, topic, []byte(message), mqtt.AtLeastOnce, false /*retain*/, "shelly/script/run")
+		err := mc.Publish(ctx, topic, []byte(message), qos, retain, "shelly/script/run")
 		if err != nil {
 			log.Error(err, "MQTT.publish() failed", "topic", topic)
 			return vm.ToValue(false)

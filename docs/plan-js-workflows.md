@@ -101,15 +101,15 @@ Key properties:
 - [x] Document the convention in AGENTS.md.
 
 ### Phase 5 — Occupancy workflow in JS (opt-in)
-- [ ] Go infra verb `lan.hosts` (wraps `pkg/sfr.GetHostsList`) — presence polling is
+- [x] Go infra verb `lan.hosts` (wraps `pkg/sfr.GetHostsList`) — presence polling is
       infrastructure, stays in Go.
-- [ ] `internal/shelly/scripts/occupancy.js`: subscribes `+/events/rpc` (NotifyStatus
+- [x] `internal/shelly/scripts/occupancy.js`: subscribes `+/events/rpc` (NotifyStatus
       with `input:` changes), polls `MyHome.call("lan.hosts")` for mobile-device
       patterns, publishes retained `myhome/occupancy` (same payloads as Go version),
       12 h expiry timer.
-- [ ] Opt-in: `occupancy` listed in `daemon.scripts.run` ⇒ daemon skips the Go
+- [x] Opt-in: `occupancy` listed in `daemon.scripts.run` ⇒ daemon skips the Go
       occupancy service (logs the substitution). Default unchanged (Go).
-- [ ] Unit test runs occupancy.js in the emulator (pattern: blu_listener_test.go).
+- [x] Unit test runs occupancy.js in the emulator (pattern: blu_listener_test.go).
 
 ### Phase 6 — Heater workflow in JS (opt-in)
 - [ ] `internal/shelly/scripts/heater-myhome.js` (daemon flavour):

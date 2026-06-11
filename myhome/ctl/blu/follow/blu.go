@@ -138,31 +138,18 @@ func configureBluFollow(cmd *cobra.Command, followerDevice, bluDevice string) er
 		return fmt.Errorf("failed to resolve BLU device %q: %w", bluDevice, err)
 	}
 
-	// Validate illuminance values
-	if err := validateIlluminanceValue(bluFlagIllumMin); err != nil {
-		return fmt.Errorf("invalid illuminance-min: %w", err)
-	}
-	if err := validateIlluminanceValue(bluFlagIllumMax); err != nil {
-		return fmt.Errorf("invalid illuminance-max: %w", err)
-	}
-
-	// Build JSON payload with defaults and optional fields
-	payload := make(map[string]any)
-	payload["switch_id"] = bluFlagSwitchID
-	payload["auto_off"] = bluFlagAutoOff
-
-	if cmd.Flags().Changed("illuminance-min") && strings.TrimSpace(bluFlagIllumMin) != "" {
-		payload["illuminance_min"] = parseIlluminanceValue(bluFlagIllumMin)
-	}
-	if cmd.Flags().Changed("illuminance-max") && strings.TrimSpace(bluFlagIllumMax) != "" {
-		payload["illuminance_max"] = parseIlluminanceValue(bluFlagIllumMax)
-	} else if !cmd.Flags().Changed("illuminance-max") {
-		// Set default max to 10% if not explicitly provided
-		payload["illuminance_max"] = "10%"
-	}
-
-	if cmd.Flags().Changed("next-switch") && strings.TrimSpace(bluFlagNextSwitch) != "" {
-		payload["next_switch"] = bluFlagNextSwitch
+	payload, err := buildBluFollowPayload(bluFollowOptions{
+		switchID:      bluFlagSwitchID,
+		autoOff:       bluFlagAutoOff,
+		illumMin:      bluFlagIllumMin,
+		illumMax:      bluFlagIllumMax,
+		illumMinSet:   cmd.Flags().Changed("illuminance-min"),
+		illumMaxSet:   cmd.Flags().Changed("illuminance-max"),
+		nextSwitch:    bluFlagNextSwitch,
+		nextSwitchSet: cmd.Flags().Changed("next-switch"),
+	})
+	if err != nil {
+		return err
 	}
 
 	valueBytes, err := json.Marshal(payload)
@@ -226,6 +213,17 @@ func doSetKVS(ctx context.Context, log logr.Logger, via types.Channel, device de
 	return kvs.SetKeyValue(ctx, log, via, sd, key, value)
 }
 
+// doDeleteKVS is a helper function for deleting KVS entries on Shelly devices
+func doDeleteKVS(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
+	}
+	key := args[0]
+	log.Info("Deleting follow config", "key", key, "device", sd.Id())
+	return kvs.DeleteKey(ctx, log, via, sd, key)
+}
+
 // uploadScript is a helper function to upload and start scripts on Shelly devices
 func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
@@ -243,6 +241,65 @@ func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, devic
 	}
 	fmt.Printf("✓ Successfully uploaded %s to %s (id: %d)\n", scriptName, sd.Name(), id)
 	return id, nil
+}
+
+// deleteScript is a helper function to stop and delete scripts on Shelly devices
+func deleteScript(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	sd, ok := device.(*shelly.Device)
+	if !ok {
+		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
+	}
+	scriptName := args[0]
+	fmt.Printf(". Removing %s from %s...\n", scriptName, sd.Name())
+	out, err := mhscript.DeleteWithVersion(ctx, log, via, sd, scriptName)
+	if err != nil {
+		fmt.Printf("✗ %v\n", err)
+		return nil, err
+	}
+	fmt.Printf("✓ Successfully removed %s from %s\n", scriptName, sd.Name())
+	return out, nil
+}
+
+var UnfollowCmd = &cobra.Command{
+	Use:   "unfollow <follower-device> <blu-device>",
+	Short: "Remove BLU follow configuration and blu-listener script",
+	Long: `Remove follow configuration between a Shelly device and a BLU device.
+
+Deletes the KVS key that configures the follow relationship and stops/deletes
+the blu-listener.js script from the follower device.
+
+The <blu-device> can be specified as:
+- MAC address: "e8:e0:7e:a6:0c:6f", "E8E07EA60C6F", "e8-e0-7e-a6-0c-6f"
+- Device ID: "shellyblu-e8e07ea60c6f"
+- Device name: "motion-sensor-hallway"
+
+Examples:
+  myhome ctl blu unfollow hallway-light motion-sensor-hallway`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		followerDevice := args[0]
+		bluDevice := args[1]
+
+		mac, err := mhblu.ResolveMac(cmd.Context(), bluDevice)
+		if err != nil {
+			return fmt.Errorf("failed to resolve BLU device %q: %w", bluDevice, err)
+		}
+
+		kvKey := "follow/shelly-blu/" + mac
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, doDeleteKVS, []string{kvKey})
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("\nRemoving blu-listener.js script...\n")
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, deleteScript, []string{"blu-listener.js"})
+		if err != nil {
+			return fmt.Errorf("failed to remove script: %w", err)
+		}
+
+		return nil
+	},
 }
 
 // listFollowedBluDevices lists the BLU devices followed by the specified follower device
@@ -274,4 +331,46 @@ func listFollowedBluDevices(ctx context.Context, followerDevice string) error {
 		return nil, nil
 	}, []string{})
 	return err
+}
+
+type bluFollowOptions struct {
+	switchID      string
+	autoOff       int
+	illumMin      string
+	illumMax      string
+	illumMinSet   bool
+	illumMaxSet   bool
+	nextSwitch    string
+	nextSwitchSet bool
+}
+
+// buildBluFollowPayload constructs the KVS payload for blu-listener.js.
+// illuminance_max defaults to "10%" when not explicitly set.
+func buildBluFollowPayload(opts bluFollowOptions) (map[string]any, error) {
+	if err := validateIlluminanceValue(opts.illumMin); err != nil {
+		return nil, fmt.Errorf("invalid illuminance-min: %w", err)
+	}
+	if err := validateIlluminanceValue(opts.illumMax); err != nil {
+		return nil, fmt.Errorf("invalid illuminance-max: %w", err)
+	}
+
+	payload := map[string]any{
+		"switch_id": opts.switchID,
+		"auto_off":  opts.autoOff,
+	}
+
+	if opts.illumMinSet && strings.TrimSpace(opts.illumMin) != "" {
+		payload["illuminance_min"] = parseIlluminanceValue(opts.illumMin)
+	}
+	if opts.illumMaxSet && strings.TrimSpace(opts.illumMax) != "" {
+		payload["illuminance_max"] = parseIlluminanceValue(opts.illumMax)
+	} else if !opts.illumMaxSet {
+		payload["illuminance_max"] = "10%"
+	}
+
+	if opts.nextSwitchSet && strings.TrimSpace(opts.nextSwitch) != "" {
+		payload["next_switch"] = opts.nextSwitch
+	}
+
+	return payload, nil
 }

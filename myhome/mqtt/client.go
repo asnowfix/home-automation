@@ -61,6 +61,9 @@ const (
 type Client interface {
 	GetServer() string
 	BrokerUrl() *url.URL
+	// DeviceServer returns the broker address (host:port) suitable for writing
+	// to a Shelly device — loopback is replaced with the machine's LAN IP.
+	DeviceServer() (string, error)
 	Id() string
 	Start() error
 	Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error)
@@ -259,6 +262,41 @@ func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTim
 func (c *client) GetServer() string {
 	// Host == <hostname>:<port>
 	return c.brokerUrl.Host
+}
+
+// resolveDeviceHost replaces a loopback host with the machine's LAN IP so that
+// the address can be written to a remote Shelly device.  getIP is injected so
+// unit tests can exercise the substitution without a real network interface.
+func resolveDeviceHost(host string, getIP func() (*net.IP, error)) (string, error) {
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return host, nil
+	}
+	lanIP, err := getIP()
+	if err != nil {
+		return "", fmt.Errorf("broker is loopback (%s) but could not determine LAN IP: %w", host, err)
+	}
+	return lanIP.String(), nil
+}
+
+// DeviceServer returns the broker address in host:port form suitable for
+// writing to a Shelly device.  If the current broker is a loopback address
+// (e.g. 127.0.0.1 from a local daemon), it is replaced with the machine's LAN
+// IP on the same subnet as the default gateway so the device can actually reach
+// the broker.
+func (c *client) DeviceServer() (string, error) {
+	host, port, err := net.SplitHostPort(c.brokerUrl.Host)
+	if err != nil {
+		return "", fmt.Errorf("invalid broker address %q: %w", c.brokerUrl.Host, err)
+	}
+	resolved, err := resolveDeviceHost(host, func() (*net.IP, error) {
+		_, ip, err := mynet.MainInterface(c.log)
+		return ip, err
+	})
+	if err != nil {
+		return "", err
+	}
+	return net.JoinHostPort(resolved, port), nil
 }
 
 func (c *client) Id() string {

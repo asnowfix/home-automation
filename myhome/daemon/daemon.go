@@ -10,10 +10,10 @@ import (
 
 	"github.com/asnowfix/home-automation/internal/global"
 	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/internal/shelly/scripts"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
+	"github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	"github.com/asnowfix/home-automation/myhome/events"

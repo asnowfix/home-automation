@@ -79,6 +79,10 @@ var Flags struct {
 	EventsRetention             time.Duration // retention period for event records
 	EnableEventsService         bool          // whether to enable the event recording service
 	RemoteProxy                 string        // the value taken by --remote-proxy; delegates /devices/... to a remote myhome daemon
+	ScriptsEnabled              bool          // whether the daemon hosts workflow scripts (goja)
+	ScriptsDir                  string        // optional user dir overriding embedded workflow scripts
+	ScriptsRun                  []string      // names of workflow scripts to run on the daemon
+	ScriptsStateDir             string        // per-script KVS/storage state files (default "scripts-state")
 }
 
 var Via types.Channel

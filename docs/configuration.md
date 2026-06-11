@@ -139,6 +139,31 @@ daemon:
 - Flag: `--remote-proxy`
 - Env: `MYHOME_DAEMON_REMOTE_PROXY`
 
+#### Workflow Scripts (daemon script host)
+
+**`scripts.enabled`** (bool, default: `false`)
+- Enable the daemon script host: MyHome workflow scripts written in JavaScript, executed on the daemon's built-in goja engine
+- Auto-enabled when `scripts.run` is non-empty
+- Flag: `--enable-scripts`
+- Env: `MYHOME_DAEMON_SCRIPTS_ENABLED`
+
+**`scripts.run`** (string list, default: empty)
+- Names of workflow scripts to run on the daemon (with or without `.js`)
+- Scripts are resolved from `scripts.dir` first, then from the embedded device-script library (`internal/shelly/scripts`)
+- Some scripts replace their Go workflow counterpart when listed (e.g. `occupancy` replaces the Go occupancy service; `heater-myhome` takes over the `heater.getconfig`/`heater.setconfig` RPC verbs)
+- Flag: `--scripts-run occupancy,heater-myhome`
+- Env: `MYHOME_DAEMON_SCRIPTS_RUN`
+
+**`scripts.dir`** (string, default: `""`)
+- Optional directory of workflow scripts overriding the embedded library (useful for development)
+- Flag: `--scripts-dir`
+- Env: `MYHOME_DAEMON_SCRIPTS_DIR`
+
+**`scripts.state_dir`** (string, default: `scripts-state`)
+- Directory holding one JSON state file per script (persisted KVS + `Script.storage`)
+- Flag: `--scripts-state-dir`
+- Env: `MYHOME_DAEMON_SCRIPTS_STATE_DIR`
+
 #### Service Enablement
 
 **`enable_gen1_proxy`** (bool, default: auto)

@@ -47,6 +47,8 @@ const (
 	SwitchStatus                  Verb = "switch.status"
 	SwitchAll                     Verb = "switch.all"
 	EventList                     Verb = "event.list"
+	ScriptInvoke                  Verb = "script.invoke"
+	LanHosts                      Verb = "lan.hosts"
 )
 
 type Key string

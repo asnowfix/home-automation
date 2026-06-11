@@ -148,6 +148,17 @@ daemon:
   # Disable auto-setup
   # disable_auto_setup: false
 
+  # Workflow scripts (JavaScript, executed on the daemon's goja engine).
+  # Scripts come from scripts.dir (if set) or the embedded library.
+  # Listing a script may replace its Go counterpart (e.g. occupancy).
+  # scripts:
+  #   enabled: true
+  #   run:
+  #     - occupancy
+  #     - heater-myhome
+  #   dir: ""
+  #   state_dir: scripts-state
+
 # Event Log Configuration
 events:
   # Path to the events SQLite database (separate from devices.db)

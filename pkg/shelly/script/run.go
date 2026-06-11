@@ -66,6 +66,20 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 		return nil
 	}
 
+	return runEventLoop(ctx, vm, &handlers)
+}
+
+// runEventLoop waits on all handler channels simultaneously and dispatches
+// messages into the VM. It returns when the context is cancelled or when all
+// handler channels are closed. The calling goroutine owns the VM: handlers
+// are the only place where script callbacks are executed.
+func runEventLoop(ctx context.Context, vm *goja.Runtime, handlersPtr *[]handler) error {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return err
+	}
+	handlers := *handlersPtr
+
 	log.Info("Starting event loop", "handlers", len(handlers))
 
 	// Build select cases: context.Done() + all handler channels
@@ -92,6 +106,7 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 	for {
 		// Rebuild cases if needed (deferred from previous iteration)
 		if needsRebuild {
+			handlers = *handlersPtr
 			cases = buildCases()
 			needsRebuild = false
 		}
@@ -108,20 +123,21 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 		if ok {
 			handlerIdx := chosen - 1
 			msg := value.Bytes()
-			handlerCountBefore := len(handlers)
+			handlerCountBefore := len(*handlersPtr)
 			if err := handlers[handlerIdx].Handle(ctx, vm, msg); err != nil {
 				log.Error(err, "Handler failed", "handler", handlerIdx)
 			}
 			// Check if new handlers were added during Handle()
-			if len(handlers) != handlerCountBefore {
-				log.Info("Handlers changed, will rebuild cases", "before", handlerCountBefore, "after", len(handlers))
+			if len(*handlersPtr) != handlerCountBefore {
+				log.Info("Handlers changed, will rebuild cases", "before", handlerCountBefore, "after", len(*handlersPtr))
 				needsRebuild = true
 			}
 		} else {
 			// Channel closed, remove it from cases
 			log.Info("Handler channel closed", "handler", chosen-1)
 			// Remove the closed handler
-			handlers = append(handlers[:chosen-1], handlers[chosen:]...)
+			*handlersPtr = append(handlers[:chosen-1], handlers[chosen:]...)
+			handlers = *handlersPtr
 
 			// If no handlers left, exit
 			if len(handlers) == 0 {

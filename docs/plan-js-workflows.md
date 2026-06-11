@@ -61,14 +61,14 @@ Key properties:
 - [x] 4-file config rule: options.go, run.go, docs/configuration.md, myhome-example.yaml.
 
 ### Phase 2 — Reusable goja Engine in pkg/shelly/script
-- [ ] Extract `createShellyRuntime` + event loop from `Run()` into an exported
+- [x] Extract `createShellyRuntime` + event loop from `Run()` into an exported
       `Engine` (`NewEngine(ctx, EngineOptions)`, `Engine.Loop(ctx)`).
-- [ ] `EngineOptions`: script name, source, `*DeviceState`, extra-API hook
+- [x] `EngineOptions`: script name, source, `*DeviceState`, extra-API hook
       (`Customize func(vm *goja.Runtime) error`).
-- [ ] **External invocation**: `Engine.Invoke(ctx, fnName, jsonParams) (any, error)` —
+- [x] **External invocation**: `Engine.Invoke(ctx, fnName, jsonParams) (any, error)` —
       thread-safe dispatch into the VM through the event loop (goja VMs are
       single-threaded); used by `script.invoke` and by Go→JS callbacks.
-- [ ] `Run()/RunWithDeviceState()` keep their behaviour (existing tests must pass).
+- [x] `Run()/RunWithDeviceState()` keep their behaviour (existing tests must pass).
 
 ### Phase 3 — Daemon script host (`myhome/scripthost`)
 - [ ] New workspace module `myhome/scripthost` (`go work use`).

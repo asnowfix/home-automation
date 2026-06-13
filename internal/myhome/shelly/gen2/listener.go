@@ -257,7 +257,8 @@ func severityFor(event string) string {
 	switch event {
 	case "smoke.alarm", "smoke.alarm_test", "smoke.alarm_off":
 		return "alarm"
-	case "battery.low", "ota_error", "switch.active_power_change":
+	case "battery.low", "ota_error", "switch.active_power_change",
+		"pool.fuse_tripped", "pool.water_supply_protected":
 		return "warn"
 	}
 	if strings.HasPrefix(event, "input.button_") ||

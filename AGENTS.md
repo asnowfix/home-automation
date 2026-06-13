@@ -42,6 +42,32 @@ MyHome is designed with the following core principles (from README):
 
 These principles ensure resilience, privacy, and independence from third-party services, while remaining compatible with the manufacturers' own apps (e.g., Shelly app & Cloud).
 
+### Resilience Rules for Agents
+
+Two rules must hold for every change. Check them before marking a task done.
+
+#### Rule 1 — Internet-optional
+
+The system must stay fully functional on the local LAN when the internet is unreachable. Any code that reaches an external URL (weather APIs, firmware update servers, cloud dashboards, package registries at runtime) must:
+
+1. Set an explicit HTTP/dial timeout (no infinite waits).
+2. Return a cached value, a zero value, or a no-op — never an error that propagates up and kills unrelated functionality.
+3. Log the failure at `warn` level and continue.
+
+**Violation examples**: a goroutine that blocks indefinitely on a DNS lookup; a startup function that `log.Fatal`s when a weather endpoint is unreachable; an HTTP handler that returns 500 because a cloud API is down.
+
+**Test signal**: if you add an external call, add a test (or at minimum a comment) that proves the feature degrades cleanly when the call fails.
+
+#### Rule 2 — Daemon-optional per device
+
+Each Shelly device must keep operating normally when the `myhome` daemon is down. Device scripts run on the device firmware (Espruino/JS) and must not rely on the daemon for their core function.
+
+- Cross-device flows implemented *through* the daemon (device A → MQTT → daemon → device B) are acceptable but must be documented as "degraded when daemon is down".
+- A device's local automation (heater script, watchdog, BLU listener) must keep working with only the MQTT broker running and no daemon.
+- When refactoring logic from a device script into the daemon, the PR description must name the degraded mode explicitly.
+
+**Violation examples**: moving a script's keep-alive timer into a daemon goroutine; making a device's switch behaviour depend on a live RPC call to `myhome/rpc`; removing a device-side fallback because "the daemon handles it now".
+
 ---
 
 ## Shelly Device Scripting
@@ -312,7 +338,69 @@ function loadData(callback) {
 }
 ```
 
-#### Script Lifecycle Logging
+#### Observability: Script Event Emissions
+
+Scripts must call `Shelly.emitEvent(name, data)` for any change a human operator might want to know about — schedule decisions, safety actions, pump start/stop, mode changes. These flow through the device's standard `NotifyEvent` MQTT notification (`<device_id>/events/rpc`), are picked up by the daemon's Gen2 listener (`internal/myhome/shelly/gen2/listener.go`), and are stored in the events database where the web UI and `myhome ctl events` can display them.
+
+#### When to emit
+
+| Category | Examples | Severity |
+|---|---|---|
+| Schedule decisions | daily run-window computed, summer/winter mode selected | `info` |
+| Start/stop | pump started at speed X, pump stopped | `info` |
+| Safety actions | water-supply protection activated, anti-cycling fuse tripped | `warn` |
+| Restoration | pump restored after water supply turned off | `info` |
+
+**Rule of thumb**: if it would make sense as a line in a physical maintenance logbook, emit it.
+
+#### How to call
+
+```javascript
+// Fire-and-forget — does NOT count against the 5-concurrent-RPC limit.
+Shelly.emitEvent("pool.run_window", {
+  mode: "summer",
+  max_temp_c: 28.5,
+  run_hours: 7.3,
+  start_h: 9.5,   // fractional hour — 9.5 means 09:30
+  stop_h: 16.8
+});
+```
+
+The firmware publishes a standard `NotifyEvent` to `<device_id>/events/rpc` with `component: "script:<id>"`. The daemon's Gen2 listener (`internal/myhome/shelly/gen2/listener.go`) catches this and records it exactly like any other device event. The second argument is stored **nested under a `"data"` key** in the event's `data` column:
+
+```json
+{
+  "component": "script:1",
+  "event": "pool.run_window",
+  "id": 1,
+  "ts": 1234567890,
+  "data": { "mode": "summer", "max_temp_c": 28.5, "run_hours": 7.3, "start_h": 9.5, "stop_h": 16.8 }
+}
+```
+
+This is proven by captured real-device traffic — see `pkg/shelly/mqtt/testdata/notify_event__shelly1minig3__script_3__remote_button_event.json`.
+
+#### Naming convention
+
+- Format: `<script_name>.<verb>` — lowercase, underscores only: `pool.pump_start`, `pool.fuse_tripped`.
+- Use the script's `SCRIPT_NAME` constant as the prefix so events are grouped in the UI.
+- Name the specific occurrence, not a generic noun: `pool.pump_start` not `pool.event`.
+
+#### Data payload guidelines
+
+- Include enough context to understand the event without cross-referencing other state.
+- Use `snake_case` field names.
+- Include units in the name when non-obvious: `max_temp_c`, `run_hours`, not `temp`, `run`.
+- Do not include timestamps — the event already has `ts`.
+- Keep payloads small (under ~200 bytes). Avoid embedding arrays or large structures.
+
+#### Severity for new event types
+
+Severity is assigned by `internal/myhome/shelly/gen2/listener.go:severityFor()`. New event names default to `"info"`. When you add events that represent a degraded state or a safety interrupt, also add the event name to `severityFor()` with `"warn"` or `"alarm"` — do this in the same commit as the JS change.
+
+---
+
+### Script Lifecycle Logging
 
 Always add startup and stop logging to Shelly scripts:
 

@@ -10,6 +10,8 @@ MyHome uses a hierarchical configuration system with three levels of precedence:
 
 This allows flexible deployment scenarios from development to production.
 
+> **Env var naming**: all config keys are reachable as `MYHOME_<SECTION>_<KEY>` (e.g. `daemon.mqtt_timeout` → `MYHOME_DAEMON_MQTT_TIMEOUT`) via `AutomaticEnv`. Only account credentials are explicitly documented with their env var name.
+
 ## Configuration File
 
 ### Location
@@ -72,65 +74,54 @@ daemon:
 - Empty string = use embedded broker (auto-discovered)
 - Example: `"mqtt://192.168.1.100:1883"`
 - Flag: `--mqtt-broker` or `-B`
-- Env: `MYHOME_DAEMON_MQTT_BROKER`
 
 #### Timeouts and Intervals
 
 **`mdns_timeout`** (duration, default: `7s`)
 - Timeout for mDNS lookups
 - Flag: `--mdns-timeout` or `-M`
-- Env: `MYHOME_DAEMON_MDNS_TIMEOUT`
 
 **`mqtt_timeout`** (duration, default: `14s`)
 - Timeout for MQTT operations
 - Flag: `--mqtt-timeout` or `-T`
-- Env: `MYHOME_DAEMON_MQTT_TIMEOUT`
 
 **`mqtt_grace`** (duration, default: `2s`)
 - MQTT disconnection grace period
 - Flag: `--mqtt-grace` or `-G`
-- Env: `MYHOME_DAEMON_MQTT_GRACE`
 
 **`refresh_interval`** (duration, default: `1m`)
 - Known devices refresh interval
 - Flag: `--refresh-interval` or `-R`
-- Env: `MYHOME_DAEMON_REFRESH_INTERVAL`
 
 **`mqtt_watchdog_interval`** (duration, default: `30s`)
 - MQTT watchdog check interval
 - Flag: `--mqtt-watchdog-interval` or `-W`
-- Env: `MYHOME_DAEMON_MQTT_WATCHDOG_INTERVAL`
 
 **`mqtt_watchdog_max_failures`** (int, default: `3`)
 - Max consecutive failures before restart
 - Flag: `--mqtt-watchdog-max-failures` or `-F`
-- Env: `MYHOME_DAEMON_MQTT_WATCHDOG_MAX_FAILURES`
 
 **`mqtt_reconnect_interval`** (duration, default: `2h`)
 - Interval for periodic MQTT reconnection to refresh retained messages
 - Useful after suspend/resume cycles to ensure latest device states
 - Set to `0` to disable periodic reconnection
 - Flag: `--mqtt-reconnect-interval`
-- Env: `MYHOME_DAEMON_MQTT_RECONNECT_INTERVAL`
 
 **`mqtt_broker_client_log_interval`** (duration, default: `2m`)
 - Interval for logging MQTT broker connected clients
 - Set to `0` to disable
 - Flag: `--mqtt-broker-client-log-interval`
-- Env: `MYHOME_DAEMON_MQTT_BROKER_CLIENT_LOG_INTERVAL`
 
 #### Service Ports
 
 **`ui_port`** (int, default: `6080`)
 - UI listen port
 - Flag: `--ui-port` or `-u`
-- Env: `MYHOME_DAEMON_UI_PORT`
 
 **`remote_proxy`** (string, default: `""`)
 - Forward all `/devices/...` HTTP requests to a remote myhome daemon instead of connecting to devices directly. Useful when running a local myhome instance that reaches the home network via SSH port-forwarding and cannot dial device IPs directly.
 - Example: `http://home-pi:6080` or `http://localhost:6081` (when `ssh -L 6081:localhost:6080 home-pi`)
 - Flag: `--remote-proxy`
-- Env: `MYHOME_DAEMON_REMOTE_PROXY`
 
 #### Service Enablement
 
@@ -138,27 +129,23 @@ daemon:
 - Enable Gen1 HTTP->MQTT proxy
 - Auto-enabled when using embedded broker
 - Flag: `--enable-gen1-proxy` / `--disable-gen1-proxy`
-- Env: `MYHOME_DAEMON_ENABLE_GEN1_PROXY`
 
 **`enable_occupancy_service`** (bool, default: auto)
 - Enable occupancy detection service (port 8889)
 - Auto-enabled when using embedded broker
 - Flag: `--enable-occupancy-service` / `--disable-occupancy-service`
-- Env: `MYHOME_DAEMON_ENABLE_OCCUPANCY_SERVICE`
 
 **`enable_temperature_service`** (bool, default: auto)
 - Enable temperature scheduling service (port 8890)
 - Auto-enabled when using embedded broker
 - Requires `temperatures` section in config
 - Flag: `--enable-temperature-service` / `--disable-temperature-service`
-- Env: `MYHOME_DAEMON_ENABLE_TEMPERATURE_SERVICE`
 
 #### Device Manager
 
 **`disable_device_manager`** (bool, default: `false`)
 - Disable the device manager
 - Flag: `--disable-device-manager` or `-D`
-- Env: `MYHOME_DAEMON_DISABLE_DEVICE_MANAGER`
 
 #### Event Logging
 
@@ -166,7 +153,6 @@ daemon:
 - Directory to write received MQTT events as JSON files
 - Empty = disabled
 - Flag: `--events-dir` or `-E`
-- Env: `MYHOME_DAEMON_EVENTS_DIR`
 
 ## Events Configuration
 
@@ -187,19 +173,16 @@ events:
 - Path to the events SQLite database file
 - Kept separate from `devices.db` to allow independent backup and rotation
 - Flag: `--events-db`
-- Env: `MYHOME_EVENTS_DB`
 
 **`retention`** (duration, default: `2160h`)
 - How long events are kept before automatic deletion (90 days by default)
 - Purge runs hourly; only the `events` table is purged (sensor daily stats are kept indefinitely)
 - Set to `0` to disable automatic purging
 - Flag: `--events-retention`
-- Env: `MYHOME_EVENTS_RETENTION`
 
 **`enabled`** (bool, default: `true`)
 - Set to `false` to disable the event recording service entirely
 - Flag: `--enable-events-service` / `--disable-events-service`
-- Env: `MYHOME_EVENTS_ENABLED`
 
 ### CLI Commands
 
@@ -334,34 +317,15 @@ temperatures:
 myhome daemon run --mqtt-timeout 60s --proxy-port 8080
 ```
 
-### 3. Container/Cloud (environment variables)
+### 3. Account credentials via environment variables
+
+Credentials can be passed via env vars without embedding them in the config file:
 
 ```bash
-# No config file needed
-export MYHOME_DAEMON_MQTT_BROKER="mqtt://mqtt.svc.cluster.local:1883"
-export MYHOME_DAEMON_MQTT_TIMEOUT="30s"
-export MYHOME_DAEMON_ENABLE_TEMPERATURE_SERVICE="true"
-export MYHOME_TEMPERATURES_PORT="8890"
+export MYHOME_BEEM_EMAIL="you@example.com"
+export MYHOME_BEEM_PASSWORD="secret"
 
 myhome daemon run
-```
-
-### 4. Hybrid (all three)
-
-```yaml
-# myhome.yaml - base configuration
-daemon:
-  mqtt_broker: "mqtt://mqtt.local:1883"
-  mqtt_timeout: 14s
-```
-
-```bash
-# Environment variable override
-export MYHOME_DAEMON_MQTT_TIMEOUT="30s"
-
-# Command-line flag override (highest priority)
-myhome daemon run --mqtt-timeout 60s
-# Result: mqtt_timeout = 60s (from flag)
 ```
 
 ## Precedence Rules
@@ -382,18 +346,10 @@ daemon:
 ```
 
 ```bash
-export MYHOME_DAEMON_MQTT_TIMEOUT="30s"
 myhome daemon run --mqtt-timeout 60s
 ```
 
 **Result**: `mqtt_timeout = 60s` (flag wins)
-
-```bash
-export MYHOME_DAEMON_MQTT_TIMEOUT="30s"
-myhome daemon run
-```
-
-**Result**: `mqtt_timeout = 30s` (env var wins over config file)
 
 ```bash
 myhome daemon run
@@ -416,21 +372,6 @@ Durations use Go's duration format:
 - `m` = minutes (e.g., `5m`)
 - `h` = hours (e.g., `2h`)
 - Combined: `1h30m`, `2m30s`
-
-## Environment Variable Naming
-
-Environment variables follow this pattern:
-
-```
-MYHOME_<SECTION>_<KEY>
-```
-
-Examples:
-- `daemon.mqtt_broker` → `MYHOME_DAEMON_MQTT_BROKER`
-- `daemon.mqtt_timeout` → `MYHOME_DAEMON_MQTT_TIMEOUT`
-- `temperatures.port` → `MYHOME_TEMPERATURES_PORT`
-
-**Note**: Nested keys use underscores, not dots.
 
 ## Validation
 
@@ -457,8 +398,8 @@ Invalid configuration will cause startup failure with a descriptive error messag
 - Override with flags for temporary changes
 
 ### Containers
-- Use environment variables primarily
-- Mount config file for complex settings
+- Use environment variables for credentials
+- Mount config file for other settings
 - Use secrets management for sensitive data
 
 ### Testing
@@ -479,27 +420,12 @@ myhome daemon run
 
 ### Config file found but ignored
 
-Check precedence - flags and environment variables override config file.
+Check precedence — flags and environment variables override config file.
 
 ```bash
 # See what config file is loaded
 myhome daemon run
 # Output: Loaded config from: /path/to/myhome.yaml
-```
-
-### Environment variables not working
-
-Ensure correct naming:
-- Prefix: `MYHOME_`
-- Section: `DAEMON_` or `TEMPERATURES_`
-- Key: uppercase with underscores
-
-```bash
-# Wrong
-export MYHOME_MQTT_BROKER="..."
-
-# Correct
-export MYHOME_DAEMON_MQTT_BROKER="..."
 ```
 
 ### Service not starting
@@ -519,12 +445,12 @@ myhome daemon run --enable-temperature-service
 
 ## Beem Energy
 
-| Key | Env var | Default | Description |
-|-----|---------|---------|-------------|
-| `beem.email` | `MYHOME_BEEM_EMAIL` | — | Beem Energy account email |
-| `beem.password` | `MYHOME_BEEM_PASSWORD` | — | Beem Energy account password |
-| `beem.poll_interval` | `MYHOME_BEEM_POLL_INTERVAL` | `60s` | How often to poll the Beem REST API |
-| `beem.enabled` | `MYHOME_BEEM_ENABLED` | `false` | Enable Beem Energy integration |
+| Key | Default | Description |
+|-----|---------|-------------|
+| `beem.email` | — | Beem Energy account email (env: `MYHOME_BEEM_EMAIL`) |
+| `beem.password` | — | Beem Energy account password (env: `MYHOME_BEEM_PASSWORD`) |
+| `beem.poll_interval` | `60s` | How often to poll the Beem REST API |
+| `beem.enabled` | `false` | Enable Beem Energy integration |
 
 ## Pool
 
@@ -540,18 +466,21 @@ pool:
 
 ### Options
 
-| Key | Env var | Flag | Default | Description |
-|-----|---------|------|---------|-------------|
-| `pool.device_id` | `MYHOME_POOL_DEVICE_ID` | `--pool-device-id` | — | Pool Shelly device ID (e.g. `shellyplus1pm-aabbccddeeff`) |
-| `pool.enabled` | `MYHOME_POOL_ENABLED` | `--enable-pool` | `false` | Enable pool runtime tracking |
+| Key | Flag | Default | Description |
+|-----|------|---------|-------------|
+| `pool.device_id` | `--pool-device-id` | — | Pool Shelly device ID (e.g. `shellyplus1pm-aabbccddeeff`) |
+| `pool.enabled` | `--enable-pool` | `false` | Enable pool runtime tracking |
 
 ### Solar automation
 
-The solar automation goroutine subscribes to Beem Energy power samples and controls the pool pump using a hysteresis state machine:
+The solar automation goroutine subscribes to Beem Energy power samples and controls the pool pump using a hysteresis state machine with four transitions:
 
-- **IDLE → RUNNING** when `solar_w ≥ start_threshold_w` for `start_delay`
-- **RUNNING → IDLE** when `solar_w < stop_threshold_w` for `stop_delay`
-- **RUNNING → IDLE** when daily filtration target is reached (if `daily_target_sec > 0`)
+- **IDLE → RUNNING** when `solar_w ≥ start_threshold_w` for `start_delay` AND daily runtime < hard ceiling
+- **RUNNING → IDLE** when `solar_w < stop_threshold_w` for `stop_delay` (solar loss)
+- **RUNNING → IDLE** when daily runtime ≥ `daily_target_sec` AND `solar_w < start_threshold_w` (soft stop: goal met, solar gone)
+- **RUNNING → IDLE** when daily runtime ≥ `max_rotation_sec`, regardless of solar (hard ceiling)
+
+Runtime targets (`daily_target_sec`, `max_rotation_sec`) are computed at startup from `min_volume_turnover` / `max_volume_turnover` multiplied by the pool volume and flow rate read from the pool device KVS. The daemon never writes to the device KVS.
 
 Requires both `pool.device_id` and Beem Energy integration (`beem.enabled: true`) to be configured.
 
@@ -563,20 +492,22 @@ pool:
   enabled: true
   solar:
     enabled: true
-    start_threshold_w: 500
-    stop_threshold_w:  200
-    start_delay:       5m
-    stop_delay:        10m
-    daily_target_sec:  0   # 0 = run as long as solar is available
+    start_threshold_w:   500
+    stop_threshold_w:    200
+    start_delay:         5m
+    stop_delay:          10m
+    min_volume_turnover: 5   # soft stop after 5× pool volumes filtered (if solar is gone)
+    max_volume_turnover: 7   # hard ceiling at 7× pool volumes filtered
 ```
 
 #### Options
 
-| Key | Env var | Flag | Default | Description |
-|-----|---------|------|---------|-------------|
-| `pool.solar.enabled` | `MYHOME_POOL_SOLAR_ENABLED` | `--enable-pool-solar` | `false` | Enable solar-driven pump automation |
-| `pool.solar.start_threshold_w` | `MYHOME_POOL_SOLAR_START_THRESHOLD_W` | `--pool-solar-start-threshold-w` | `500` | Solar power threshold to start pump (W) |
-| `pool.solar.stop_threshold_w` | `MYHOME_POOL_SOLAR_STOP_THRESHOLD_W` | `--pool-solar-stop-threshold-w` | `200` | Solar power threshold to stop pump (W) |
-| `pool.solar.start_delay` | `MYHOME_POOL_SOLAR_START_DELAY` | `--pool-solar-start-delay` | `5m` | Solar must hold above start threshold for this long |
-| `pool.solar.stop_delay` | `MYHOME_POOL_SOLAR_STOP_DELAY` | `--pool-solar-stop-delay` | `10m` | Solar must hold below stop threshold for this long |
-| `pool.solar.daily_target_sec` | `MYHOME_POOL_SOLAR_DAILY_TARGET_SEC` | `--pool-solar-daily-target-sec` | `0` | Daily filtration target in seconds; pump won't start via solar once reached (0 = no check) |
+| Key | Flag | Default | Description |
+|-----|------|---------|-------------|
+| `pool.solar.enabled` | `--enable-pool-solar` | `false` | Enable solar-driven pump automation |
+| `pool.solar.start_threshold_w` | `--pool-solar-start-threshold-w` | `500` | Solar power threshold to start pump (W) |
+| `pool.solar.stop_threshold_w` | `--pool-solar-stop-threshold-w` | `200` | Solar power threshold to stop pump (W) |
+| `pool.solar.start_delay` | `--pool-solar-start-delay` | `5m` | Solar must hold above start threshold for this long |
+| `pool.solar.stop_delay` | `--pool-solar-stop-delay` | `10m` | Solar must hold below stop threshold for this long |
+| `pool.solar.min_volume_turnover` | `--pool-solar-min-volume-turnover` | `5` | Soft stop: pool volumes filtered per day after which the pump stops once solar is also gone (0 = no soft stop) |
+| `pool.solar.max_volume_turnover` | `--pool-solar-max-volume-turnover` | `7` | Hard ceiling: always stop (and refuse to start) once this many pool volumes have been filtered, regardless of solar (0 = no ceiling; must be ≥ `min_volume_turnover` when both are set) |

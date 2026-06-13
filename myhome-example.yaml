@@ -190,10 +190,17 @@ pool:
     # Default: 10m
     # stop_delay: 10m
 
-    # Daily filtration target in seconds; pump won't be started via solar once reached.
-    # 0 = no target check (pump runs whenever solar is sufficient).
-    # Default: 0
-    # daily_target_sec: 0
+    # Soft stop: stop the pump when this many pool volumes have been filtered today
+    # AND solar has also dropped below start_threshold_w. Free solar energy is used
+    # to over-filter rather than going to waste. 0 = no soft stop.
+    # Default: 5
+    # min_volume_turnover: 5
+
+    # Hard ceiling: always stop the pump (and prevent starting it) when this many
+    # pool volumes have been filtered today, regardless of solar output. 0 = no ceiling.
+    # Must be ≥ min_volume_turnover when both are set.
+    # Default: 7
+    # max_volume_turnover: 7
 
 # Beem Energy Configuration
 beem:

@@ -18,7 +18,12 @@ type SolarConfig struct {
 	StopThresholdW  float64       // stop pump when solar_w < this
 	StartDelay      time.Duration // solar must hold above start threshold for this long
 	StopDelay       time.Duration // solar must hold below stop threshold for this long
-	DailyTargetSec  int64         // daily filtration target in seconds; 0 = no target check
+	// DailyTargetSec is the soft-stop threshold: stop the pump when daily runtime ≥ this
+	// AND solar has also dropped below StartThresholdW. 0 = no soft stop.
+	DailyTargetSec int64
+	// MaxRotationSec is the hard ceiling: always stop when daily runtime ≥ this,
+	// regardless of solar output. Also prevents starting when already reached. 0 = no ceiling.
+	MaxRotationSec int64
 }
 
 // PumpController abstracts switch control so the state machine can be tested without MQTT.
@@ -26,16 +31,22 @@ type PumpController interface {
 	SetPump(ctx context.Context, on bool) error
 }
 
+// RuntimeTracker reports how long the pool pump has run today.
+type RuntimeTracker interface {
+	DailyRuntimeSec(ctx context.Context) (int64, error)
+}
+
 // SolarAutomation subscribes to Beem power samples and controls the pool pump
 // using a hysteresis state machine:
 //
-//	IDLE  →  (solar_w ≥ StartThresholdW  for  StartDelay)  →  RUNNING
-//	RUNNING  →  (solar_w < StopThresholdW  for  StopDelay)  →  IDLE
-//	RUNNING  →  (DailyRemainingRuntimeSec ≤ 0)              →  IDLE
+//	IDLE    → (solar_w ≥ StartThresholdW for StartDelay AND runtime < MaxRotationSec) → RUNNING
+//	RUNNING → (solar_w < StopThresholdW for StopDelay)                                → IDLE  [solar loss]
+//	RUNNING → (runtime ≥ DailyTargetSec AND solar_w < StartThresholdW)               → IDLE  [soft stop]
+//	RUNNING → (runtime ≥ MaxRotationSec)                                              → IDLE  [hard ceiling]
 type SolarAutomation struct {
 	log     logr.Logger
 	powerCh <-chan beem.PowerSample
-	tracker *PoolRuntimeTracker // nil ⇒ no daily-target check
+	tracker RuntimeTracker // nil ⇒ no runtime checks
 	pump    PumpController
 	cfg     SolarConfig
 }
@@ -58,7 +69,7 @@ func (s pumpState) String() string {
 func NewSolarAutomation(
 	log logr.Logger,
 	powerCh <-chan beem.PowerSample,
-	tracker *PoolRuntimeTracker,
+	tracker RuntimeTracker,
 	pump PumpController,
 	cfg SolarConfig,
 ) *SolarAutomation {
@@ -89,6 +100,7 @@ func (sa *SolarAutomation) run(ctx context.Context) {
 		"start_delay", sa.cfg.StartDelay,
 		"stop_delay", sa.cfg.StopDelay,
 		"daily_target_sec", sa.cfg.DailyTargetSec,
+		"max_rotation_sec", sa.cfg.MaxRotationSec,
 	)
 
 	for {
@@ -165,13 +177,37 @@ func (sa *SolarAutomation) step(
 		}
 
 	case pumpRunning:
-		// Stop if daily filtration target is reached.
-		if sa.targetReached(ctx) {
-			sa.log.Info("Daily runtime target reached, stopping pump")
-			if err := sa.pump.SetPump(ctx, false); err != nil {
-				sa.log.Error(err, "Failed to stop pump")
+		// Check runtime-based stop conditions before the solar-loss hysteresis.
+		if sa.tracker != nil {
+			runtime, err := sa.tracker.DailyRuntimeSec(ctx)
+			if err != nil {
+				sa.log.Error(err, "Failed to check daily runtime")
+			} else {
+				// Hard ceiling: stop immediately regardless of solar.
+				if sa.cfg.MaxRotationSec > 0 && runtime >= sa.cfg.MaxRotationSec {
+					sa.log.Info("Hard ceiling reached, stopping pump",
+						"runtime_sec", runtime,
+						"max_rotation_sec", sa.cfg.MaxRotationSec,
+					)
+					if err := sa.pump.SetPump(ctx, false); err != nil {
+						sa.log.Error(err, "Failed to stop pump")
+					}
+					return pumpIdle, zero, zero
+				}
+				// Soft stop: stop only once solar has also dropped below start threshold.
+				if sa.cfg.DailyTargetSec > 0 && runtime >= sa.cfg.DailyTargetSec &&
+					sample.SolarW < sa.cfg.StartThresholdW {
+					sa.log.Info("Daily target reached and solar below start threshold, stopping pump",
+						"runtime_sec", runtime,
+						"daily_target_sec", sa.cfg.DailyTargetSec,
+						"solar_w", sample.SolarW,
+					)
+					if err := sa.pump.SetPump(ctx, false); err != nil {
+						sa.log.Error(err, "Failed to stop pump")
+					}
+					return pumpIdle, zero, zero
+				}
 			}
-			return pumpIdle, zero, zero
 		}
 
 		if sample.SolarW < sa.cfg.StopThresholdW {
@@ -208,30 +244,17 @@ func (sa *SolarAutomation) step(
 }
 
 // canStart returns true when a solar-driven start is permitted.
-// If no tracker or no target is configured, it always returns true.
+// Returns false only when the hard ceiling (MaxRotationSec) has already been reached.
 func (sa *SolarAutomation) canStart(ctx context.Context) bool {
-	if sa.tracker == nil || sa.cfg.DailyTargetSec <= 0 {
+	if sa.tracker == nil || sa.cfg.MaxRotationSec <= 0 {
 		return true
 	}
-	remaining, err := sa.tracker.RemainingRuntimeSec(ctx, sa.cfg.DailyTargetSec)
+	runtime, err := sa.tracker.DailyRuntimeSec(ctx)
 	if err != nil {
-		sa.log.Error(err, "Failed to check remaining runtime; allowing start")
+		sa.log.Error(err, "Failed to check daily runtime; allowing start")
 		return true
 	}
-	return remaining > 0
-}
-
-// targetReached returns true when the daily filtration target has been met.
-func (sa *SolarAutomation) targetReached(ctx context.Context) bool {
-	if sa.tracker == nil || sa.cfg.DailyTargetSec <= 0 {
-		return false
-	}
-	remaining, err := sa.tracker.RemainingRuntimeSec(ctx, sa.cfg.DailyTargetSec)
-	if err != nil {
-		sa.log.Error(err, "Failed to check remaining runtime")
-		return false
-	}
-	return remaining <= 0
+	return runtime < sa.cfg.MaxRotationSec
 }
 
 // shellyPumpController implements PumpController using the Shelly Switch.Set RPC over MQTT.

@@ -81,7 +81,7 @@ beem:
   poll_interval: 60s
 ```
 
-Env vars: `MYHOME_BEEM_EMAIL`, `MYHOME_BEEM_PASSWORD`, `MYHOME_BEEM_POLL_INTERVAL`
+Env vars: `MYHOME_BEEM_EMAIL`, `MYHOME_BEEM_PASSWORD`
 
 **Poll interval:** 60 s matches the interval used by community integrations (CharlesP44/Beem_Energy, ClaraVnk/home-assistant-beem-energy). The actual Beem app poll rate is not publicly documented; 60 s is treated as a minimum. Set `poll_interval` higher (e.g. `120s`) to be more conservative with the cloud API.
 
@@ -162,8 +162,6 @@ pool:
 ```
 
 `min_volume_turnover` and `max_volume_turnover` are dimensionless multipliers (pool volumes filtered per day). The daemon converts them to seconds at startup by reading the pool device KVS — see "Runtime target computation" below.
-
-Env vars: `MYHOME_POOL_SOLAR_MIN_VOLUME_TURNOVER`, `MYHOME_POOL_SOLAR_MAX_VOLUME_TURNOVER`
 
 **Startup validation:** solar automation refuses to initialize if `max_volume_turnover < min_volume_turnover`. The daemon logs an error and continues without solar automation.
 
@@ -277,7 +275,7 @@ WHERE e1.device_id = <deviceID> AND e1.component = <component>
 | 4 | Solar automation goroutine | ✅ done |
 | 5 | Daemon wiring | ✅ done |
 | 6 | Tests | ✅ done |
-| 7 | Soft stop + hard ceiling: `min_volume_turnover` / `max_volume_turnover` config; KVS read at startup to derive `daily_target_sec` / `max_rotation_sec`; startup validation | ⬜ pending |
+| 7 | Soft stop + hard ceiling: `min_volume_turnover` / `max_volume_turnover` config; KVS read at startup to derive `daily_target_sec` / `max_rotation_sec`; startup validation | ✅ done |
 
 ---
 

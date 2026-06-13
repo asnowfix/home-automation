@@ -12,6 +12,7 @@ require (
 	github.com/asnowfix/home-automation/myhome/events v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/myhome/temperature v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/pkg/shelly v0.0.0-20260402201030-0ed25e95389f
+	github.com/asnowfix/home-automation/pkg/shelly/kvs v0.0.0-20260402201030-0ed25e95389f
 	github.com/asnowfix/home-automation/pkg/shelly/types v0.0.0-20260402201030-0ed25e95389f
 	github.com/go-logr/logr v1.4.3
 	github.com/spf13/cobra v1.10.2
@@ -43,6 +44,8 @@ replace github.com/asnowfix/home-automation/pkg/shelly => ./pkg/shelly
 replace github.com/asnowfix/home-automation/pkg/shelly/gen1 => ./pkg/shelly/gen1
 
 replace github.com/asnowfix/home-automation/pkg/shelly/types => ./pkg/shelly/types
+
+replace github.com/asnowfix/home-automation/pkg/shelly/kvs => ./pkg/shelly/kvs
 
 replace github.com/asnowfix/home-automation/pkg/shelly/sswitch => ./pkg/shelly/sswitch
 

@@ -32,6 +32,13 @@ func send(ch chan<- beem.PowerSample, w float64) {
 	time.Sleep(20 * time.Millisecond)
 }
 
+// mockRuntimeTracker implements RuntimeTracker with a fixed runtime value for tests.
+type mockRuntimeTracker struct{ runtimeSec int64 }
+
+func (m *mockRuntimeTracker) DailyRuntimeSec(_ context.Context) (int64, error) {
+	return m.runtimeSec, nil
+}
+
 func defaultCfg() SolarConfig {
 	return SolarConfig{
 		StartThresholdW: 500,
@@ -39,6 +46,7 @@ func defaultCfg() SolarConfig {
 		StartDelay:      0, // zero delay → deterministic single-sample transitions
 		StopDelay:       0,
 		DailyTargetSec:  0,
+		MaxRotationSec:  0,
 	}
 }
 
@@ -196,5 +204,119 @@ func TestSolarAutomation_NoPumpStartWhenIdle(t *testing.T) {
 
 	if len(pump.calls) != 0 {
 		t.Errorf("no pump calls expected when cancelling from idle; calls=%v", pump.calls)
+	}
+}
+
+// TestSolarAutomation_HardCeilingPreventsStart verifies that canStart returns false
+// when the daily runtime has already reached MaxRotationSec.
+func TestSolarAutomation_HardCeilingPreventsStart(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.MaxRotationSec = 3600 // 1 h ceiling
+
+	pump := &mockPumpController{}
+	ch := make(chan beem.PowerSample, 8)
+	tracker := &mockRuntimeTracker{runtimeSec: 3600} // already at ceiling
+	sa := NewSolarAutomation(logr.Discard(), ch, tracker, pump, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sa.Start(ctx)
+
+	// Solar is well above start threshold, but ceiling is already reached.
+	send(ch, 800)
+	if len(pump.calls) != 0 {
+		t.Errorf("pump should not start when hard ceiling is already reached; calls=%v", pump.calls)
+	}
+}
+
+// TestSolarAutomation_HardCeilingStopsPump verifies that a running pump is stopped
+// immediately when MaxRotationSec is reached mid-run.
+func TestSolarAutomation_HardCeilingStopsPump(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.MaxRotationSec = 3600
+
+	pump := &mockPumpController{}
+	ch := make(chan beem.PowerSample, 8)
+	tracker := &mockRuntimeTracker{runtimeSec: 0} // not yet at ceiling
+	sa := NewSolarAutomation(logr.Discard(), ch, tracker, pump, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sa.Start(ctx)
+
+	send(ch, 800) // start pump
+	if on, ok := pump.lastCall(); !ok || !on {
+		t.Fatalf("expected pump ON; calls=%v", pump.calls)
+	}
+
+	// Simulate ceiling reached during the next sample.
+	tracker.runtimeSec = 3600
+	send(ch, 800) // still high solar, but ceiling hit → must stop
+
+	on, ok := pump.lastCall()
+	if !ok || on {
+		t.Errorf("expected pump OFF when hard ceiling reached; calls=%v", pump.calls)
+	}
+}
+
+// TestSolarAutomation_SoftStopKeepsRunningWithSolar verifies that the pump is NOT
+// stopped when daily_target_sec is reached while solar is still above StartThresholdW.
+func TestSolarAutomation_SoftStopKeepsRunningWithSolar(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.DailyTargetSec = 3600
+	cfg.MaxRotationSec = 7200 // ceiling above soft stop so it doesn't interfere
+
+	pump := &mockPumpController{}
+	ch := make(chan beem.PowerSample, 8)
+	tracker := &mockRuntimeTracker{runtimeSec: 0}
+	sa := NewSolarAutomation(logr.Discard(), ch, tracker, pump, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sa.Start(ctx)
+
+	send(ch, 800) // start pump
+	if on, ok := pump.lastCall(); !ok || !on {
+		t.Fatalf("expected pump ON; calls=%v", pump.calls)
+	}
+
+	// Target reached, but solar still above StartThresholdW → must keep running.
+	tracker.runtimeSec = 3600
+	send(ch, 800)
+
+	on, ok := pump.lastCall()
+	if !ok || !on {
+		t.Errorf("expected pump to keep running when target met but solar still up; calls=%v", pump.calls)
+	}
+}
+
+// TestSolarAutomation_SoftStopWhenSolarGone verifies that the pump IS stopped when
+// daily_target_sec is reached AND solar has dropped below StartThresholdW.
+func TestSolarAutomation_SoftStopWhenSolarGone(t *testing.T) {
+	cfg := defaultCfg()
+	cfg.DailyTargetSec = 3600
+	cfg.MaxRotationSec = 7200
+
+	pump := &mockPumpController{}
+	ch := make(chan beem.PowerSample, 8)
+	tracker := &mockRuntimeTracker{runtimeSec: 0}
+	sa := NewSolarAutomation(logr.Discard(), ch, tracker, pump, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sa.Start(ctx)
+
+	send(ch, 800) // start pump
+	if on, ok := pump.lastCall(); !ok || !on {
+		t.Fatalf("expected pump ON; calls=%v", pump.calls)
+	}
+
+	// Target reached AND solar below StartThresholdW → soft stop must fire.
+	tracker.runtimeSec = 3600
+	send(ch, 300) // 300 W: above StopThresholdW (200) but below StartThresholdW (500)
+
+	on, ok := pump.lastCall()
+	if !ok || on {
+		t.Errorf("expected pump OFF (soft stop: target met, solar gone); calls=%v", pump.calls)
 	}
 }

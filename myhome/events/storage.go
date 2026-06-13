@@ -233,6 +233,52 @@ func (s *Storage) LoadTodayStats(ctx context.Context, date string) ([]DailyStat,
 	return stats, nil
 }
 
+// OnDurationSec returns the total seconds a component spent in the "on" state
+// on the given date (YYYY-MM-DD format).  Each off→on transition contributes
+// (next_off.ts - on.ts) to the sum; if no off event follows the most recent on
+// (component is currently active), the open interval is measured to now.
+// Consecutive on events without an intervening off are deduplicated — only the
+// first in each run is counted.
+func (s *Storage) OnDurationSec(ctx context.Context, deviceID, component, onEvent, offEvent, date string) (int64, error) {
+	const q = `
+SELECT COALESCE(SUM(
+    COALESCE(
+        (SELECT MIN(e2.ts) FROM events e2
+         WHERE e2.device_id = e1.device_id
+           AND e2.component  = e1.component
+           AND e2.event      = ?
+           AND e2.ts         > e1.ts),
+        unixepoch('now')
+    ) - e1.ts
+), 0)
+FROM events e1
+WHERE e1.device_id = ?
+  AND e1.component = ?
+  AND e1.event     = ?
+  AND date(e1.ts, 'unixepoch') = ?
+  AND COALESCE(
+      (SELECT e0.event FROM events e0
+       WHERE e0.device_id = e1.device_id
+         AND e0.component  = e1.component
+         AND (e0.event = ? OR e0.event = ?)
+         AND e0.ts         < e1.ts
+       ORDER BY e0.ts DESC LIMIT 1),
+      ?
+  ) = ?`
+	var sec float64
+	err := s.db.QueryRowContext(ctx, q,
+		offEvent,                   // correlated subquery: min off.ts after this on
+		deviceID, component, onEvent, date, // outer WHERE
+		onEvent, offEvent,          // previous-event lookup: on OR off
+		offEvent,                   // COALESCE default: no prior event → treat as off
+		offEvent,                   // final equality: previous must be off
+	).Scan(&sec)
+	if err != nil {
+		return 0, err
+	}
+	return int64(sec), nil
+}
+
 func (s *Storage) DB() *sqlx.DB {
 	return s.db
 }

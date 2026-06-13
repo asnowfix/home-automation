@@ -51,6 +51,19 @@ func init() {
 	runCmd.PersistentFlags().DurationVar(&options.Flags.EventsRetention, "events-retention", 90*24*time.Hour, "Retention period for event records (default 90 days)")
 	runCmd.PersistentFlags().BoolVar(&disableEventsService, "disable-events-service", false, "Disable the event recording service")
 	runCmd.PersistentFlags().StringVar(&options.Flags.RemoteProxy, "remote-proxy", "", "Forward /devices/... requests to a remote myhome daemon (e.g. http://home-pi:6080) instead of connecting directly")
+	runCmd.PersistentFlags().StringVar(&options.Flags.PoolDeviceID, "pool-device-id", "", "Pool Shelly device ID")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolEnabled, "enable-pool", false, "Enable pool runtime tracking")
+	runCmd.PersistentFlags().StringVar(&options.Flags.BeemEmail, "beem-email", "", "Beem Energy account email")
+	runCmd.PersistentFlags().StringVar(&options.Flags.BeemPassword, "beem-password", "", "Beem Energy account password")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.BeemPollInterval, "beem-poll-interval", 60*time.Second, "Beem Energy poll interval")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.BeemEnabled, "enable-beem", false, "Enable Beem Energy integration")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolSolarEnabled, "enable-pool-solar", false, "Enable solar-driven pool pump automation")
+	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarStartThresholdW, "pool-solar-start-threshold-w", 500, "Solar power threshold to start pump (W)")
+	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarStopThresholdW, "pool-solar-stop-threshold-w", 200, "Solar power threshold to stop pump (W)")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.PoolSolarStartDelay, "pool-solar-start-delay", 5*time.Minute, "Solar must hold above start threshold for this long before starting pump")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.PoolSolarStopDelay, "pool-solar-stop-delay", 10*time.Minute, "Solar must hold below stop threshold for this long before stopping pump")
+	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarMinVolumeTurnover, "pool-solar-min-volume-turnover", 5, "Soft-stop target: pool volumes filtered per day; pump keeps running past this while solar is still above start threshold")
+	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarMaxVolumeTurnover, "pool-solar-max-volume-turnover", 7, "Hard ceiling: pool volumes filtered per day; pump always stops (and won't be solar-started) once reached")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
@@ -202,6 +215,51 @@ var runCmd = &cobra.Command{
 			if options.Flags.EnableEventsService {
 				log.Info("Auto-enabling events service (device manager enabled)")
 			}
+		}
+
+		// Handle pool runtime tracker config from viper / flags
+		if v.IsSet("pool.device_id") && !cmd.Flags().Changed("pool-device-id") {
+			options.Flags.PoolDeviceID = v.GetString("pool.device_id")
+		}
+		if v.IsSet("pool.enabled") && !cmd.Flags().Changed("enable-pool") {
+			options.Flags.PoolEnabled = v.GetBool("pool.enabled")
+		}
+
+		// Handle Beem Energy config from viper / flags
+		if v.IsSet("beem.email") && !cmd.Flags().Changed("beem-email") {
+			options.Flags.BeemEmail = v.GetString("beem.email")
+		}
+		if v.IsSet("beem.password") && !cmd.Flags().Changed("beem-password") {
+			options.Flags.BeemPassword = v.GetString("beem.password")
+		}
+		if v.IsSet("beem.poll_interval") && !cmd.Flags().Changed("beem-poll-interval") {
+			options.Flags.BeemPollInterval = v.GetDuration("beem.poll_interval")
+		}
+		if v.IsSet("beem.enabled") && !cmd.Flags().Changed("enable-beem") {
+			options.Flags.BeemEnabled = v.GetBool("beem.enabled")
+		}
+
+		// Handle pool solar automation config from viper / flags
+		if v.IsSet("pool.solar.enabled") && !cmd.Flags().Changed("enable-pool-solar") {
+			options.Flags.PoolSolarEnabled = v.GetBool("pool.solar.enabled")
+		}
+		if v.IsSet("pool.solar.start_threshold_w") && !cmd.Flags().Changed("pool-solar-start-threshold-w") {
+			options.Flags.PoolSolarStartThresholdW = v.GetFloat64("pool.solar.start_threshold_w")
+		}
+		if v.IsSet("pool.solar.stop_threshold_w") && !cmd.Flags().Changed("pool-solar-stop-threshold-w") {
+			options.Flags.PoolSolarStopThresholdW = v.GetFloat64("pool.solar.stop_threshold_w")
+		}
+		if v.IsSet("pool.solar.start_delay") && !cmd.Flags().Changed("pool-solar-start-delay") {
+			options.Flags.PoolSolarStartDelay = v.GetDuration("pool.solar.start_delay")
+		}
+		if v.IsSet("pool.solar.stop_delay") && !cmd.Flags().Changed("pool-solar-stop-delay") {
+			options.Flags.PoolSolarStopDelay = v.GetDuration("pool.solar.stop_delay")
+		}
+		if v.IsSet("pool.solar.min_volume_turnover") && !cmd.Flags().Changed("pool-solar-min-volume-turnover") {
+			options.Flags.PoolSolarMinVolumeTurnover = v.GetFloat64("pool.solar.min_volume_turnover")
+		}
+		if v.IsSet("pool.solar.max_volume_turnover") && !cmd.Flags().Changed("pool-solar-max-volume-turnover") {
+			options.Flags.PoolSolarMaxVolumeTurnover = v.GetFloat64("pool.solar.max_volume_turnover")
 		}
 
 		// Store Viper instance in global options for daemon to use

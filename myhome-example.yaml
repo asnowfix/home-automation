@@ -190,15 +190,18 @@ pool:
     # Default: 10m
     # stop_delay: 10m
 
-    # Soft stop: stop the pump when this many pool volumes have been filtered today
-    # AND solar has also dropped below start_threshold_w. Free solar energy is used
-    # to over-filter rather than going to waste. 0 = no soft stop.
+    # Soft-stop target: pool volumes filtered per day. Reaching this only stops
+    # the pump once solar has also dropped below start_threshold_w — while solar
+    # is still producing, the pump keeps running past this target to use free energy.
+    # Converted to daily_target_sec at startup via pool device KVS
+    # (script/pool-pump/{pool-volume,max-flow-rate,max-rpm,speed}).
     # Default: 5
     # min_volume_turnover: 5
 
-    # Hard ceiling: always stop the pump (and prevent starting it) when this many
-    # pool volumes have been filtered today, regardless of solar output. 0 = no ceiling.
-    # Must be ≥ min_volume_turnover when both are set.
+    # Hard ceiling: pool volumes filtered per day. The pump always stops once
+    # reached, regardless of solar, and won't be started via solar past this point.
+    # Converted to max_rotation_sec at startup the same way as min_volume_turnover.
+    # Must be >= min_volume_turnover.
     # Default: 7
     # max_volume_turnover: 7
 

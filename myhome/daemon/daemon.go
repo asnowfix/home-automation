@@ -261,56 +261,44 @@ func (d *daemon) Run() error {
 
 		// Start solar automation if enabled
 		if options.Flags.PoolSolarEnabled && options.Flags.PoolDeviceID != "" && beemWatcher != nil {
-			minT := options.Flags.PoolSolarMinVolumeTurnover
-			maxT := options.Flags.PoolSolarMaxVolumeTurnover
-			if maxT > 0 && maxT < minT {
-				log.Error(nil, "Solar automation disabled: max_volume_turnover must be ≥ min_volume_turnover",
-					"min_volume_turnover", minT, "max_volume_turnover", maxT)
+			if options.Flags.PoolSolarMaxVolumeTurnover < options.Flags.PoolSolarMinVolumeTurnover {
+				log.Error(nil, "Solar automation disabled: pool.solar.max_volume_turnover must be >= min_volume_turnover",
+					"min_volume_turnover", options.Flags.PoolSolarMinVolumeTurnover,
+					"max_volume_turnover", options.Flags.PoolSolarMaxVolumeTurnover,
+				)
+			} else if pumpCtrl, err := newShellyPumpController(d.ctx, log.WithName("solar.pump"), options.Flags.PoolDeviceID); err != nil {
+				log.Error(err, "Failed to create pump controller for solar automation")
+			} else if dailyTargetSec, maxRotationSec, err := computeRuntimeTargets(
+				d.ctx, log.WithName("solar"), pumpCtrl.device,
+				options.Flags.PoolSolarMinVolumeTurnover, options.Flags.PoolSolarMaxVolumeTurnover,
+			); err != nil {
+				log.Error(err, "Solar automation disabled: failed to derive runtime targets from pool KVS")
 			} else {
-				pumpCtrl, err := newShellyPumpController(d.ctx, log.WithName("solar.pump"), options.Flags.PoolDeviceID)
-				if err != nil {
-					log.Error(err, "Failed to create pump controller for solar automation")
-				} else {
-					solarCfg := SolarConfig{
-						StartThresholdW: options.Flags.PoolSolarStartThresholdW,
-						StopThresholdW:  options.Flags.PoolSolarStopThresholdW,
-						StartDelay:      options.Flags.PoolSolarStartDelay,
-						StopDelay:       options.Flags.PoolSolarStopDelay,
-					}
-					// Compute DailyTargetSec / MaxRotationSec from KVS if turnovers are set.
-					if minT > 0 || maxT > 0 {
-						kvsp, err := readPoolKVS(d.ctx, log.WithName("solar.kvs"), options.Flags.PoolDeviceID)
-						if err != nil {
-							log.Error(err, "Failed to read pool KVS; runtime targets will be 0 (no ceiling)")
-						} else {
-							solarCfg.DailyTargetSec = runtimeSecs(kvsp, minT)
-							solarCfg.MaxRotationSec = runtimeSecs(kvsp, maxT)
-							log.Info("Solar runtime targets computed from KVS",
-								"min_volume_turnover", minT,
-								"max_volume_turnover", maxT,
-								"daily_target_sec", solarCfg.DailyTargetSec,
-								"max_rotation_sec", solarCfg.MaxRotationSec,
-							)
-						}
-					}
-					solarAuto := NewSolarAutomation(
-						log.WithName("solar"),
-						beemWatcher.PowerCh,
-						poolTracker, // nil if pool tracker not enabled
-						pumpCtrl,
-						solarCfg,
-					)
-					solarAuto.Start(d.ctx)
-					log.Info("Solar automation started",
-						"device_id", options.Flags.PoolDeviceID,
-						"start_threshold_w", solarCfg.StartThresholdW,
-						"stop_threshold_w", solarCfg.StopThresholdW,
-						"start_delay", solarCfg.StartDelay,
-						"stop_delay", solarCfg.StopDelay,
-						"daily_target_sec", solarCfg.DailyTargetSec,
-						"max_rotation_sec", solarCfg.MaxRotationSec,
-					)
+				solarCfg := SolarConfig{
+					StartThresholdW: options.Flags.PoolSolarStartThresholdW,
+					StopThresholdW:  options.Flags.PoolSolarStopThresholdW,
+					StartDelay:      options.Flags.PoolSolarStartDelay,
+					StopDelay:       options.Flags.PoolSolarStopDelay,
+					DailyTargetSec:  dailyTargetSec,
+					MaxRotationSec:  maxRotationSec,
 				}
+				solarAuto := NewSolarAutomation(
+					log.WithName("solar"),
+					beemWatcher.PowerCh,
+					poolTracker, // nil if pool tracker not enabled
+					pumpCtrl,
+					solarCfg,
+				)
+				solarAuto.Start(d.ctx)
+				log.Info("Solar automation started",
+					"device_id", options.Flags.PoolDeviceID,
+					"start_threshold_w", solarCfg.StartThresholdW,
+					"stop_threshold_w", solarCfg.StopThresholdW,
+					"start_delay", solarCfg.StartDelay,
+					"stop_delay", solarCfg.StopDelay,
+					"daily_target_sec", solarCfg.DailyTargetSec,
+					"max_rotation_sec", solarCfg.MaxRotationSec,
+				)
 			}
 		} else if options.Flags.PoolSolarEnabled {
 			if options.Flags.PoolDeviceID == "" {

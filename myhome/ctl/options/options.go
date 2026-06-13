@@ -90,8 +90,8 @@ var Flags struct {
 	PoolSolarStopThresholdW     float64       // solar power threshold to stop pump (W)
 	PoolSolarStartDelay         time.Duration // solar must hold above start threshold for this long
 	PoolSolarStopDelay          time.Duration // solar must hold below stop threshold for this long
-	PoolSolarMinVolumeTurnover  float64       // soft-stop: stop when this many pool volumes filtered AND solar gone (0 = no soft stop)
-	PoolSolarMaxVolumeTurnover  float64       // hard ceiling: always stop when this many pool volumes filtered (0 = no ceiling)
+	PoolSolarMinVolumeTurnover  float64       // soft-stop target: pool volumes filtered per day (converted to daily_target_sec via pool KVS)
+	PoolSolarMaxVolumeTurnover  float64       // hard ceiling: pool volumes filtered per day (converted to max_rotation_sec via pool KVS)
 }
 
 var Via types.Channel

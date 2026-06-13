@@ -1,0 +1,17 @@
+{
+  "dst": "shellyplusi4-c4d8d554ad6c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "sys",
+        "event": "ota_progress",
+        "msg": "in_progress",
+        "progress_percent": 18,
+        "ts": 1759263946.22
+      }
+    ],
+    "ts": 1759263946.22
+  },
+  "src": "shellyplusi4-c4d8d554ad6c"
+}

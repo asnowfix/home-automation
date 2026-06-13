@@ -3,6 +3,8 @@ package mqtt
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/url"
 	"reflect"
 	"sync"
 	"testing"
@@ -249,6 +251,84 @@ func TestSubscribe_ConcurrentSubscriptions(t *testing.T) {
 	}
 	if got := reflect.ValueOf(value).Len(); got != n {
 		t.Errorf("expected %d subscribers, got %d (race condition lost some)", n, got)
+	}
+}
+
+// TestResolveDeviceHost_NonLoopback verifies that non-loopback addresses pass through unchanged.
+func TestResolveDeviceHost_NonLoopback(t *testing.T) {
+	cases := []struct {
+		host string
+	}{
+		{"192.168.1.2"},
+		{"10.0.0.1"},
+		{"mqtt.local"},
+		{"::1"},  // IPv6 loopback — handled below, included for clarity
+		{"2001:db8::1"},
+	}
+
+	neverCalled := func() (*net.IP, error) {
+		t.Fatal("getIP should not be called for non-loopback host")
+		return nil, nil
+	}
+
+	for _, tc := range cases {
+		ip := net.ParseIP(tc.host)
+		if ip != nil && ip.IsLoopback() {
+			continue // skip loopback entries in this table
+		}
+		got, err := resolveDeviceHost(tc.host, neverCalled)
+		if err != nil {
+			t.Errorf("resolveDeviceHost(%q) unexpected error: %v", tc.host, err)
+		}
+		if got != tc.host {
+			t.Errorf("resolveDeviceHost(%q) = %q, want %q", tc.host, got, tc.host)
+		}
+	}
+}
+
+// TestResolveDeviceHost_LoopbackSubstituted verifies that 127.x.x.x is replaced with the LAN IP.
+func TestResolveDeviceHost_LoopbackSubstituted(t *testing.T) {
+	lanIP := net.ParseIP("192.168.1.100")
+
+	cases := []string{"127.0.0.1", "127.0.0.2", "::1"}
+
+	for _, host := range cases {
+		got, err := resolveDeviceHost(host, func() (*net.IP, error) {
+			return &lanIP, nil
+		})
+		if err != nil {
+			t.Errorf("resolveDeviceHost(%q) unexpected error: %v", host, err)
+			continue
+		}
+		if got != lanIP.String() {
+			t.Errorf("resolveDeviceHost(%q) = %q, want %q", host, got, lanIP.String())
+		}
+	}
+}
+
+// TestResolveDeviceHost_LoopbackLookupFails verifies that an error from getIP propagates.
+func TestResolveDeviceHost_LoopbackLookupFails(t *testing.T) {
+	lookupErr := fmt.Errorf("no network interface found")
+	_, err := resolveDeviceHost("127.0.0.1", func() (*net.IP, error) {
+		return nil, lookupErr
+	})
+	if err == nil {
+		t.Fatal("expected error when getIP fails, got nil")
+	}
+}
+
+// TestDeviceServer_NonLoopback verifies DeviceServer returns the address unchanged for a LAN broker.
+func TestDeviceServer_NonLoopback(t *testing.T) {
+	u, _ := url.Parse("tcp://192.168.1.2:1883")
+	c := newTestClient(t)
+	c.brokerUrl = u
+
+	got, err := c.DeviceServer()
+	if err != nil {
+		t.Fatalf("DeviceServer() unexpected error: %v", err)
+	}
+	if got != "192.168.1.2:1883" {
+		t.Errorf("DeviceServer() = %q, want %q", got, "192.168.1.2:1883")
 	}
 }
 

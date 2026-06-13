@@ -1,0 +1,11 @@
+{
+  "dst": "shellypro2-2cbcbb9fb834/events",
+  "method": "NotifyStatus",
+  "params": {
+    "sys": {
+      "last_sync_ts": 1755025482
+    },
+    "ts": 1755025482
+  },
+  "src": "shellypro2-2cbcbb9fb834"
+}

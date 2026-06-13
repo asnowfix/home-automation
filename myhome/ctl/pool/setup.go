@@ -149,6 +149,14 @@ Schedules are only created on Pro3 devices (detected by switch count).`,
 			MidSpeed:             DefaultMidSpeed,
 			HighSpeed:            DefaultHighSpeed,
 			TemperatureThreshold: DefaultTemperatureThreshold,
+			PoolVolume:           DefaultPoolVolume,
+			Turnover:             DefaultTurnover,
+			MaxFlowRate:          DefaultMaxFlowRate,
+			MaxRpm:               DefaultMaxRpm,
+			EcoRpm:               DefaultEcoRpm,
+			MidRpm:               DefaultMidRpm,
+			HighRpm:              DefaultHighRpm,
+			MaxTemp:              DefaultMaxTemp,
 		}
 
 		fmt.Printf("Adding device %s to pool pump mesh...\n", dev.Name())

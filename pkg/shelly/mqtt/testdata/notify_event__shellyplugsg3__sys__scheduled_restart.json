@@ -1,0 +1,16 @@
+{
+  "dst": "shellyplugsg3-e4b3233885e8/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "sys",
+        "event": "scheduled_restart",
+        "time_ms": 998,
+        "ts": 1755844971.97
+      }
+    ],
+    "ts": 1755844971.97
+  },
+  "src": "shellyplugsg3-e4b3233885e8"
+}

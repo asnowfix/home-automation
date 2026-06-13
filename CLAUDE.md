@@ -22,9 +22,16 @@ go test -race ./...                              # with race detector
 go run ./myhome ctl shelly script upload <device> <script.js> --no-minify
 go run ./myhome ctl shelly script update <device>
 go run ./myhome ctl shelly script debug <device> true
+
+# developer tools (run from repo root)
+go run ./tools/classify-events [events-dir] [testdata-dir]   # classify raw event dumps → pkg/shelly/mqtt/testdata/
 ```
 
+To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call` tools). It is pre-configured in `.mcp.json` with MQTT broker `tcp://192.168.1.2:1883` and approved via `enabledMcpjsonServers` in `.claude/settings.json`. Restart Claude Code to activate.
+
 `make test` is canonical — never bare `go test ./...` (it skips workspace sub-modules). New CI test commands must also invoke `make test`, not go directly to `go test`.
+
+When asked to run `myhome <args>`, use `go run ./myhome <args>` — do not rely on a pre-built binary.
 
 ## Architecture
 

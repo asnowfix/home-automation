@@ -1,0 +1,16 @@
+{
+  "dst": "shellyplusi4-c4d8d554ad6c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "sys",
+        "event": "scheduled_restart",
+        "time_ms": 929,
+        "ts": 1759263968.75
+      }
+    ],
+    "ts": 1759263968.75
+  },
+  "src": "shellyplusi4-c4d8d554ad6c"
+}

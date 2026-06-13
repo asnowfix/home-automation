@@ -1,0 +1,16 @@
+{
+  "dst": "shelly1minig3-5432046415d4/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "sys",
+        "event": "ota_error",
+        "msg": "error",
+        "ts": 1758232803.04
+      }
+    ],
+    "ts": 1758232803.04
+  },
+  "src": "shelly1minig3-5432046415d4"
+}

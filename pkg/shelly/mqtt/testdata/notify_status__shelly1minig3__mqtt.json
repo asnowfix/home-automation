@@ -1,0 +1,11 @@
+{
+  "dst": "shelly1minig3-54320464f17c/events",
+  "method": "NotifyStatus",
+  "params": {
+    "mqtt": {
+      "connected": true
+    },
+    "ts": 1755246470.29
+  },
+  "src": "shelly1minig3-54320464f17c"
+}

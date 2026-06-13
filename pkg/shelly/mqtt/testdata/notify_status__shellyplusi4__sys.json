@@ -1,0 +1,12 @@
+{
+  "dst": "shellyplusi4-c4d8d554ad6c/events",
+  "method": "NotifyStatus",
+  "params": {
+    "sys": {
+      "time": "18:52",
+      "unixtime": 1755190330
+    },
+    "ts": 1755190330.55
+  },
+  "src": "shellyplusi4-c4d8d554ad6c"
+}

@@ -207,6 +207,20 @@ var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : n
 Uncaught Error: Too many calls in progress
 ```
 
+This error has **two distinct causes** — both hit the same 5-concurrent-RPC limit but for different reasons:
+
+**Cause A — too many nested callbacks** (the nesting depth issue above).
+
+**Cause B — `Shelly.call` inside a `for` loop.** On the real device `Shelly.call` is asynchronous and returns immediately; a `for` loop dispatches all iterations before any response arrives, exhausting the 5-concurrent budget even with zero nesting depth.
+
+```javascript
+// DANGEROUS — fires N concurrent Shelly.call invocations
+for (var i = 0; i < items.length; i++) {
+  Shelly.call("KVS.Set", { key: keys[i], value: vals[i] }, onDone);
+}
+// Use queueTask() for each iteration instead (see task queue pattern below)
+```
+
 **Solutions**:
 
 1. **Use a task queue** - Queue async operations to execute sequentially via a single recurring timer (recommended)
@@ -241,6 +255,7 @@ function processTaskQueue() {
 function queueTask(task) {
   TASK_QUEUE.push(task);
   if (!TASK_TIMER) {
+    // NOTE: this recurring timer counts against the 5-timer-per-script budget.
     TASK_TIMER = Timer.set(200, true, processTaskQueue);
   }
 }
@@ -359,12 +374,22 @@ This rule applies to all continuations after:
 ### Resource Limits
 
 **Official limits per script:**
-- No more than **5 timers**
+- No more than **5 timers** — the task queue drain timer counts against this budget
 - No more than **5 event subscriptions**
 - No more than **5 status change subscriptions**
-- No more than **5 RPC calls** (concurrent)
+- No more than **5 RPC calls** (concurrent) — both nesting depth *and* for-loop dispatch contribute; see Callback Depth Limits above
 - No more than **10 MQTT topic subscriptions**
 - No more than **5 HTTP registered endpoints**
+
+**Per-device script count limit (varies by model):**
+
+The number of scripts that can run simultaneously on a single device depends on the hardware. Observed limits:
+
+| Model | Max enabled scripts |
+|---|---|
+| Shelly 1 Mini G3 (`shelly1minig3`) | 3 |
+
+Other models are not yet catalogued here — add entries as you hit them. Attempting to enable a script beyond the limit returns: `"Reached the maximum N of enabled scripts"` (error code -108).
 
 ### KVS Key Naming Convention
 
@@ -1203,6 +1228,40 @@ mac, err := blu.ResolveMac(ctx, identifier)
   - `debug`: Enable/disable debugging
   - `list`: List scripts on device(s)
   - `start/stop/delete`: Script lifecycle management
+
+### Developer Tools
+
+One-off Go programs in `tools/`. Each is its own workspace module — always add new ones with `go work use ./tools/<name>`. Run from the repo root.
+
+| Tool | Purpose |
+|---|---|
+| `tools/classify-events/` | Classifies raw Shelly MQTT event dumps → test fixtures in `pkg/shelly/mqtt/testdata/` |
+| `tools/extract-pool-defaults/` | Code-gen: extracts pool-pump JS constants → `myhome/ctl/pool/pool_defaults_generated.go` |
+
+#### `tools/classify-events`
+
+Reads every `*.json` file from an events dump directory (default: `myhome/events`), groups events by `(method, component, device-type)`, writes one pretty-printed representative per shape to a testdata directory (default: `pkg/shelly/mqtt/testdata/`), then deletes all originals.
+
+```bash
+go run ./tools/classify-events                            # use defaults
+go run ./tools/classify-events <events-dir> <testdata-dir>
+```
+
+Output filenames follow the pattern:
+- `notify_status__<device-type>__<component>.json`
+- `notify_event__<device-type>__<component>__<event>.json`
+
+The testdata lives alongside `pkg/shelly/mqtt/` so it travels with that package when it is eventually extracted into its own repository.
+
+#### `tools/extract-pool-defaults`
+
+Code-generation tool invoked by `//go:generate` in `myhome/ctl/pool/generate.go`. Parses `CONFIG_SCHEMA` from `internal/shelly/scripts/pool-pump.js` and writes typed Go constants to `myhome/ctl/pool/pool_defaults_generated.go`. Run via `make generate`, not directly.
+
+```bash
+go run ./tools/extract-pool-defaults \
+    internal/shelly/scripts/pool-pump.js \
+    myhome/ctl/pool/pool_defaults_generated.go
+```
 
 ---
 

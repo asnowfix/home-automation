@@ -32,9 +32,9 @@ use (
 	./myhome/ctl/temperature
 	./myhome/daemon
 	./myhome/daemon/watch
-	./myhome/events
 	./myhome/devices
 	./myhome/devices/impl
+	./myhome/events
 	./myhome/mqtt
 	./myhome/occupancy
 	./myhome/storage
@@ -58,4 +58,5 @@ use (
 	./pkg/shelly/wifi
 	./pkg/tapo
 	./pkg/version
+	./tools/classify-events
 )

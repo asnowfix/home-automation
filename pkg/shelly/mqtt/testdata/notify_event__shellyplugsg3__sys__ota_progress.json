@@ -1,0 +1,17 @@
+{
+  "dst": "shellyplugsg3-e4b323390b4c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "sys",
+        "event": "ota_progress",
+        "msg": "in_progress",
+        "progress_percent": 12,
+        "ts": 1759263363.8
+      }
+    ],
+    "ts": 1759263363.8
+  },
+  "src": "shellyplugsg3-e4b323390b4c"
+}

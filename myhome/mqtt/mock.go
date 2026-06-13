@@ -112,6 +112,8 @@ func (m *RecordingMockClient) BrokerUrl() *url.URL {
 	return u
 }
 
+func (m *RecordingMockClient) DeviceServer() (string, error) { return "localhost:1883", nil }
+
 func (m *RecordingMockClient) Id() string { return "recording-mock" }
 
 func (m *RecordingMockClient) Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error) {

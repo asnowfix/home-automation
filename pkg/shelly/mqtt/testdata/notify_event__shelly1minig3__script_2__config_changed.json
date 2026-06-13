@@ -1,0 +1,18 @@
+{
+  "dst": "shelly1minig3-54320440d02c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "cfg_rev": 277,
+        "component": "script:2",
+        "event": "config_changed",
+        "id": 2,
+        "restart_required": false,
+        "ts": 1758225944.92
+      }
+    ],
+    "ts": 1758225944.92
+  },
+  "src": "shelly1minig3-54320440d02c"
+}

@@ -1,0 +1,16 @@
+{
+  "dst": "shelly1minig3-54320464074c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "input:0",
+        "event": "btn_down",
+        "id": 0,
+        "ts": 1758144838.48
+      }
+    ],
+    "ts": 1758144838.48
+  },
+  "src": "shelly1minig3-54320464074c"
+}

@@ -41,7 +41,7 @@ func init() {
 
 	configCmd.Flags().StringVarP(&flags.Ssid, "ssid", "S", "", "WiFi SSID")
 	configCmd.Flags().StringVarP(&flags.Password, "password", "P", "", "WiFi password")
-	configCmd.Flags().StringVarP(&flags.Ip, "ip", "I", "", "Static IP address (Station mode only)")
+	configCmd.Flags().StringVarP(&flags.Ip, "ip", "i", "", "Static IP address (Station mode only)")
 	configCmd.Flags().StringVarP(&flags.Netmask, "netmask", "N", "", "Static netmask (Access Point mode only)")
 	configCmd.Flags().StringVarP(&flags.Gateway, "gateway", "g", "", "Static gateway (Access Point mode only)")
 }

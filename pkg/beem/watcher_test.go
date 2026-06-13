@@ -181,6 +181,7 @@ func (r *retainedRecorder) SubscribeWithHandler(ctx context.Context, topic strin
 func (r *retainedRecorder) SubscribeWithTopic(ctx context.Context, topic string, qlen uint, subscriberName string) (<-chan mqttclient.Message, error) {
 	return nil, nil
 }
+func (r *retainedRecorder) DeviceServer() (string, error) { return "localhost:1883", nil }
 func (r *retainedRecorder) Publisher(ctx context.Context, topic string, qlen uint, qos byte, retained bool, publisherName string) (chan<- []byte, error) {
 	return nil, nil
 }

@@ -207,6 +207,20 @@ var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : n
 Uncaught Error: Too many calls in progress
 ```
 
+This error has **two distinct causes** — both hit the same 5-concurrent-RPC limit but for different reasons:
+
+**Cause A — too many nested callbacks** (the nesting depth issue above).
+
+**Cause B — `Shelly.call` inside a `for` loop.** On the real device `Shelly.call` is asynchronous and returns immediately; a `for` loop dispatches all iterations before any response arrives, exhausting the 5-concurrent budget even with zero nesting depth.
+
+```javascript
+// DANGEROUS — fires N concurrent Shelly.call invocations
+for (var i = 0; i < items.length; i++) {
+  Shelly.call("KVS.Set", { key: keys[i], value: vals[i] }, onDone);
+}
+// Use queueTask() for each iteration instead (see task queue pattern below)
+```
+
 **Solutions**:
 
 1. **Use a task queue** - Queue async operations to execute sequentially via a single recurring timer (recommended)
@@ -241,6 +255,7 @@ function processTaskQueue() {
 function queueTask(task) {
   TASK_QUEUE.push(task);
   if (!TASK_TIMER) {
+    // NOTE: this recurring timer counts against the 5-timer-per-script budget.
     TASK_TIMER = Timer.set(200, true, processTaskQueue);
   }
 }
@@ -359,12 +374,22 @@ This rule applies to all continuations after:
 ### Resource Limits
 
 **Official limits per script:**
-- No more than **5 timers**
+- No more than **5 timers** — the task queue drain timer counts against this budget
 - No more than **5 event subscriptions**
 - No more than **5 status change subscriptions**
-- No more than **5 RPC calls** (concurrent)
+- No more than **5 RPC calls** (concurrent) — both nesting depth *and* for-loop dispatch contribute; see Callback Depth Limits above
 - No more than **10 MQTT topic subscriptions**
 - No more than **5 HTTP registered endpoints**
+
+**Per-device script count limit (varies by model):**
+
+The number of scripts that can run simultaneously on a single device depends on the hardware. Observed limits:
+
+| Model | Max enabled scripts |
+|---|---|
+| Shelly 1 Mini G3 (`shelly1minig3`) | 3 |
+
+Other models are not yet catalogued here — add entries as you hit them. Attempting to enable a script beyond the limit returns: `"Reached the maximum N of enabled scripts"` (error code -108).
 
 ### KVS Key Naming Convention
 

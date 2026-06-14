@@ -543,7 +543,7 @@ function saveDeficit(zoneId, value) {
   if (value < 0) value = 0;
   if (value > CONFIG.maxDeficitMm) value = CONFIG.maxDeficitMm;
   storeStorageValue(deficitKey(zoneId), value);
-  storeKVSValue("zone" + zoneId + "-deficit", value); // mirror for CLI status
+  // KVS mirror is done in bulk by commitPlan() to avoid concurrent RPC limit
 }
 
 // === ET0 DEFICIT UPDATE ===
@@ -1008,6 +1008,55 @@ function handleCalibrate(zoneId, minutes) {
   });
 }
 
+// === SERIAL KVS PLAN COMMIT ===
+// Writes deficit mirrors + plan data to KVS one at a time, then calls
+// updatePlanSchedule. Avoids the 5-concurrent-RPC limit: updateDeficits()
+// already writes up to 3 KVS.Set (deficit mirrors removed from saveDeficit),
+// plus plan-start and plan-zones = would be 5 before Schedule.List fails.
+var PLAN_COMMIT_ITEMS = [];
+var PLAN_COMMIT_IDX = 0;
+var PLAN_COMMIT_SCHEDULE_H = -1;
+
+function doPlanCommitStep() {
+  if (PLAN_COMMIT_IDX >= PLAN_COMMIT_ITEMS.length) {
+    PLAN_COMMIT_ITEMS = [];
+    PLAN_COMMIT_IDX = 0;
+    if (PLAN_COMMIT_SCHEDULE_H >= 0) {
+      updatePlanSchedule(PLAN_COMMIT_SCHEDULE_H);
+      PLAN_COMMIT_SCHEDULE_H = -1;
+    }
+    return;
+  }
+  var item = PLAN_COMMIT_ITEMS[PLAN_COMMIT_IDX];
+  PLAN_COMMIT_IDX++;
+  Shelly.call("KVS.Set", {key: CONFIG_KEY_PREFIX + item.k, value: item.v}, function(r, e) {
+    if (e && false) {}
+    queueTask(doPlanCommitStep);
+  });
+}
+
+function commitPlan(plan, startH) {
+  PLAN_COMMIT_ITEMS = [];
+  PLAN_COMMIT_IDX = 0;
+  PLAN_COMMIT_SCHEDULE_H = startH;
+  for (var ci = 0; ci < ZONES.length; ci++) {
+    var def = loadDeficit(ZONES[ci].id);
+    PLAN_COMMIT_ITEMS.push({k: "zone" + ZONES[ci].id + "-deficit", v: String(Math.round(def * 1000) / 1000)});
+  }
+  PLAN_COMMIT_ITEMS.push({k: "last-plan-start", v: String(startH)});
+  PLAN_COMMIT_ITEMS.push({k: "last-plan-zones", v: JSON.stringify(plan)});
+  queueTask(doPlanCommitStep);
+}
+
+function commitFallback(queue, fallbackH) {
+  PLAN_COMMIT_ITEMS = [];
+  PLAN_COMMIT_IDX = 0;
+  PLAN_COMMIT_SCHEDULE_H = fallbackH;
+  PLAN_COMMIT_ITEMS.push({k: "last-plan-start", v: String(fallbackH)});
+  PLAN_COMMIT_ITEMS.push({k: "last-plan-zones", v: JSON.stringify(queue)});
+  queueTask(doPlanCommitStep);
+}
+
 // === DAILY PLANNER ===
 function runFallbackPlanner() {
   log("Using fallback plan (no forecast data)");
@@ -1018,9 +1067,7 @@ function runFallbackPlanner() {
     }
   }
   storeWateringQueue(queue);
-  storeKVSValue("last-plan-start", CONFIG.fallbackStartHour);
-  storeKVSValue("last-plan-zones", queue);
-  updatePlanSchedule(CONFIG.fallbackStartHour);
+  commitFallback(queue, CONFIG.fallbackStartHour);
   Shelly.emitEvent("garden.plan_fallback", {start_h: CONFIG.fallbackStartHour, zones: queue.length});
   log("Fallback: start " + CONFIG.fallbackStartHour + ":00, " + queue.length + " zones");
 }
@@ -1077,11 +1124,9 @@ function runPlanner() {
     return;
   }
 
-  // Step 6: commit plan
+  // Step 6: commit plan (serial KVS writes avoid hitting the 5-concurrent-RPC limit)
   storeWateringQueue(plan);
-  storeKVSValue("last-plan-start", startH);
-  storeKVSValue("last-plan-zones", plan);
-  updatePlanSchedule(startH);
+  commitPlan(plan, startH);
   Shelly.emitEvent("garden.plan", {
     start_h:      startH,
     zones:        plan.length,

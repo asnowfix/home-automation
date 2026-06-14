@@ -54,6 +54,13 @@ func minifyJS(src []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// Minify minifies JavaScript source. It is exported so tests can verify
+// minify-safety (e.g. that catch blocks survive minification) before running a
+// script through the goja harness.
+func Minify(src []byte) ([]byte, error) {
+	return minifyJS(src)
+}
+
 // downgradeTemplates converts ES6 template literals without interpolations (${...})
 // into normal double-quoted strings with escaped newlines and quotes. This helps
 // older JS engines that don't support backtick template strings.

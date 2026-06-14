@@ -46,7 +46,9 @@ func ListAvailable() ([]string, error) {
 
 func minifyJS(src []byte) ([]byte, error) {
 	m := minify.New()
-	m.AddFunc("text/javascript", mjs.Minify)
+	// Version: 2009 (ES5) prevents template literals and optional catch binding,
+	// both of which crash Espruino's modified JS engine.
+	m.AddFunc("text/javascript", (&mjs.Minifier{Version: 2009}).Minify)
 	var out bytes.Buffer
 	if err := m.Minify("text/javascript", &out, bytes.NewReader(src)); err != nil {
 		return nil, err

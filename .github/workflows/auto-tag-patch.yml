@@ -5,15 +5,21 @@ on:
   pull_request:
     types: [closed]
     branches: 'v[0-9]+.[0-9]+.x'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Release branch (e.g. v0.10.x)'
+        required: true
 jobs:
   tag-patch:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.event.pull_request.base.ref }}
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -25,7 +31,7 @@ jobs:
         id: previoustag
         run: |
           set -euo pipefail
-          BRANCH="${{ github.event.pull_request.base.ref }}"
+          BRANCH="${{ github.event_name == 'workflow_dispatch' && inputs.branch || github.event.pull_request.base.ref }}"
           if [[ "$BRANCH" =~ ^v([0-9]+)\.([0-9]+)\.x$ ]]; then
             MAJOR="${BASH_REMATCH[1]}"
             MINOR="${BASH_REMATCH[2]}"
@@ -98,4 +104,4 @@ jobs:
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
               https://api.github.com/repos/${{ github.repository }}/actions/workflows/package-release.yml/dispatches \
-              -d '{"ref":"${{ steps.semver.outputs.v_patch }}","inputs":{"ref":"refs/tags/${{ steps.semver.outputs.v_patch }}","previous":"${{ steps.previoustag.outputs.tag }}","source_branch":"${{ github.event.pull_request.base.ref }}"}}' 
+              -d '{"ref":"${{ steps.semver.outputs.v_patch }}","inputs":{"ref":"refs/tags/${{ steps.semver.outputs.v_patch }}","previous":"${{ steps.previoustag.outputs.tag }}","source_branch":"${{ github.event_name == '\''workflow_dispatch'\'' && inputs.branch || github.event.pull_request.base.ref }}"}}' 

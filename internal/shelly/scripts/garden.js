@@ -14,7 +14,7 @@ var SCRIPT_NAME = "garden";
 var CONFIG_KEY_PREFIX = "script/" + SCRIPT_NAME + "/";
 var SCRIPT_PREFIX = "[" + SCRIPT_NAME + "] ";
 var NUM_ZONES = 3;
-var PAST_DAYS = 3; // days of past data in query: daily[PAST_DAYS-1]=yesterday, daily[PAST_DAYS]=today
+var PAST_DAYS = 1; // past_days=1: daily[0]=yesterday, daily[1]=today; hourly[24+h]=today's hour h
 
 // === CONFIG SCHEMA (global settings; zone config lives in ZONE_DEFAULTS) ===
 // KVS key lengths: prefix 14 chars + suffix ≤18 chars = ≤32 chars total
@@ -191,7 +191,6 @@ var STATE = {
   forecastRainToday:     null,  // forecast precipitation today (mm) — rain holdoff check
   forecastWinds:         [],    // today's hourly wind_speed_10m [h] = km/h
   forecastTemps:         [],    // today's hourly temperature_2m [h] = C
-  sunriseHour:           null,  // fractional hour of today's sunrise (informational)
   activeOutput:          -1,    // -1 = all off, 0/1/2 = that switch on
   initializing:          true
 };
@@ -385,8 +384,8 @@ function setForecastURL(lat, lon) {
   var url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat +
     "&longitude=" + lon +
     "&hourly=temperature_2m,wind_speed_10m" +
-    "&daily=sunrise,precipitation_sum,et0_fao_evapotranspiration" +
-    "&past_days=" + PAST_DAYS + "&forecast_days=2&timezone=auto";
+    "&daily=precipitation_sum,et0_fao_evapotranspiration" +
+    "&past_days=" + PAST_DAYS + "&forecast_days=1&timezone=auto";
   STATE.forecastUrl = url;
   storeStorageValue(STORAGE_KEYS.forecastUrl, url);
   log("Forecast URL set");
@@ -427,24 +426,19 @@ function onForecast(result, error_code, error_message, cb) {
     return;
   }
 
-  // PAST_DAYS=3: daily[0]=3d ago, daily[1]=2d ago, daily[2]=yesterday, daily[3]=today
-  var yIdx = PAST_DAYS - 1; // yesterday
-  var tDay = PAST_DAYS;     // today
-
-  if (data.daily.et0_fao_evapotranspiration && data.daily.et0_fao_evapotranspiration.length > yIdx) {
-    STATE.forecastEt0Yesterday = data.daily.et0_fao_evapotranspiration[yIdx];
+  // past_days=1: daily[0]=yesterday, daily[1]=today
+  var et0 = data.daily.et0_fao_evapotranspiration;
+  var rain = data.daily.precipitation_sum;
+  if (et0 && et0.length > 0) STATE.forecastEt0Yesterday = et0[0];
+  if (rain && rain.length > 1) {
+    STATE.forecastRainYesterday = rain[0];
+    STATE.forecastRainToday     = rain[1];
   }
-  if (data.daily.precipitation_sum && data.daily.precipitation_sum.length > tDay) {
-    STATE.forecastRainYesterday = data.daily.precipitation_sum[yIdx];
-    STATE.forecastRainToday     = data.daily.precipitation_sum[tDay];
-  }
-  if (data.daily.sunrise && data.daily.sunrise.length > tDay) {
-    STATE.sunriseHour = parseHourFromISO(data.daily.sunrise[tDay]);
-  }
+  et0 = null; rain = null;
 
   // Extract today's hourly wind and temp for hours 0..lunchStart
-  // hourly[PAST_DAYS*24 + h] = today's hour h
-  var todayBase = PAST_DAYS * 24;
+  // past_days=1: hourly[0..23]=yesterday, hourly[24+h]=today's hour h
+  var todayBase = PAST_DAYS * 24; // = 24
   var maxH = Math.ceil(CONFIG.lunchStart) + 1;
   if (maxH > 24) maxH = 24;
   var winds = [];
@@ -501,6 +495,9 @@ function ensureForecastUrl(cb) {
     return;
   }
   var stored = loadStorageValue(STORAGE_KEYS.forecastUrl);
+  // Reject any stale URL built with old parameters (past_days=3 / forecast_days=2)
+  if (stored && stored.indexOf("past_days=3") !== -1) stored = null;
+  if (stored && stored.indexOf("forecast_days=2") !== -1) stored = null;
   if (stored && stored.indexOf("daily=") !== -1) {
     STATE.forecastUrl = stored;
     log("Forecast URL loaded from storage");

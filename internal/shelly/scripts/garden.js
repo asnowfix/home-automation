@@ -629,6 +629,20 @@ function findCalmWindow(totalMinutes) {
   return best;
 }
 
+// === RUN COUNTERS ===
+// Per-zone run count in Script.storage ("runs/<id>"); mirrored to KVS for CLI reads.
+function loadRunCount(zoneId) {
+  var v = loadStorageValue("runs/" + zoneId);
+  return (typeof v === "number") ? v : 0;
+}
+
+function incrementRunCount(zoneId) {
+  var n = loadRunCount(zoneId) + 1;
+  storeStorageValue("runs/" + zoneId, n);
+  Shelly.call("KVS.Set", {key: CONFIG_KEY_PREFIX + "zone" + zoneId + "-runs", value: String(n)},
+    function(r, e) { if (e && false) {} });
+}
+
 // === WATERING QUEUE PERSISTENCE ===
 function storeWateringQueue(queue) {
   storeStorageValue(STORAGE_KEYS.wateringQueue, queue);
@@ -930,6 +944,7 @@ function tickWatering() {
       applied_mm:  Math.round(appliedMm * 10) / 10,
       deficit_mm:  Math.round(deficit * 10) / 10
     });
+    incrementRunCount(entry.id);
     log("Zone " + entry.id + " done. Applied " + Math.round(appliedMm * 10) / 10 +
         " mm. Deficit now " + Math.round(deficit * 10) / 10 + " mm");
     Shelly.call("Switch.Set", {id: entry.id, on: false}, function(r, e) { if (e && false) {} });
@@ -1152,17 +1167,18 @@ function enforceOutputState() {
     var st = Shelly.getComponentStatus("switch:" + i);
     if (st && st.output) onSwitches.push(i);
   }
-  if (onSwitches.length > 1) {
-    log("Multiple switches on at startup — keeping first only");
-    for (var j = 1; j < onSwitches.length; j++) {
-      Shelly.call("Switch.Set", {id: onSwitches[j], on: false}, function(r, e) { if (e && false) {} });
+  if (onSwitches.length > 0) {
+    // Sprinkler(s) were on when the device rebooted — mid-cycle reboot.
+    // We cannot know elapsed time, so turn everything off and start clean.
+    // The planner will re-schedule a fresh cycle at its next run (00:30).
+    log("Reboot recovery: " + onSwitches.length + " switch(es) were on — turning off and clearing queue");
+    for (var i = 0; i < onSwitches.length; i++) {
+      Shelly.call("Switch.Set", {id: onSwitches[i], on: false}, function(r, e) { if (e && false) {} });
     }
-    STATE.activeOutput = onSwitches[0];
-  } else if (onSwitches.length === 1) {
-    STATE.activeOutput = onSwitches[0];
-  } else {
-    STATE.activeOutput = -1;
+    storeWateringQueue([]); // discard interrupted cycle; planner rebuilds tonight
+    Shelly.emitEvent("garden.reboot_recovery", {zones_on: onSwitches});
   }
+  STATE.activeOutput = -1;
   log("Active output at startup:", STATE.activeOutput);
 }
 

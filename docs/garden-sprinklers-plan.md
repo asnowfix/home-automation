@@ -1,10 +1,8 @@
 # Garden Sprinkler Controller (`garden.js`) — Implementation Plan
 
-> **Status:** not started. This document is the executable spec for the feature on branch
-> `worktree-feature+garden-sprinklers`. It is written to be picked up by any coding agent
-> (target: Sonnet 4.6) with no prior conversation context. Mark each phase done (check the boxes)
-> and commit this file alongside the implementation, per the repo's "non-trivial tasks" rule in
-> `CLAUDE.md`.
+> **Status:** Phases 0–5 complete (implementation merged to PR #265). Phase 6 (device
+> verification) pending — device `arrosage` must be powered on. This document is the living
+> spec; update it alongside the code per the repo's "non-trivial tasks" rule in `CLAUDE.md`.
 
 ---
 
@@ -21,9 +19,9 @@ Zone → switch mapping (fixed, defaults for the `zoneN-name` config keys):
 
 | Switch | Zone (FR) | Default name | Type |
 |---|---|---|---|
-| `switch:0` | pelouse côté maison | `pelouse-maison` | lawn |
-| `switch:1` | massifs | `massifs` | flower beds |
-| `switch:2` | pelouse côté barrière | `pelouse-barriere` | lawn |
+| `switch:0` | pelouse côté maison | `pelouse-maison` | lawn (2 pop-up heads) |
+| `switch:1` | massifs | `massifs` | flower beds (drip pipe) |
+| `switch:2` | pelouse côté barrière | `pelouse-barriere` | lawn (2 pop-up heads) |
 
 **Goal:** water the minimum amount that keeps the garden healthy, by combining **recent actual rainfall**,
 **reference evapotranspiration (ET₀)**, and the **weather forecast**; and run the zones during the
@@ -134,7 +132,7 @@ for each enabled zone z:
 ```
 
 `appRateMmPerH[z]` (mm of water delivered per hour) is **measured per zone** via the calibrate command
-(§5) and stored in KVS; defaults are first-guesses (lawn ≈ 12, beds ≈ 18).
+(§5) and stored in KVS; defaults are first-guesses (lawn = 192, beds = 18).
 
 ### 3.3 Whole-cycle skip guards
 
@@ -184,7 +182,74 @@ ignoring the deficit model but **still refusing to turn on inside a quiet window
 
 ---
 
-## 4. CONFIG_SCHEMA (device KVS, prefix `script/garden/`)
+## 4. Reboot resilience & run counting
+
+### 4.1 Startup state detection (`enforceOutputState`)
+
+At every script start (power-on, firmware update, script restart), `enforceOutputState()` runs before
+`STATE.initializing` is cleared. It inspects all three switch states synchronously via
+`Shelly.getComponentStatus("switch:N")`:
+
+| Switch state at startup | Meaning | Action |
+|---|---|---|
+| All OFF | Normal start or graceful stop before reboot | No action — proceed |
+| Any ON | Device rebooted **mid-cycle** | Turn all ON switches OFF; clear `Script.storage` watering queue; emit `garden.reboot_recovery {zones_on:[...]}` |
+
+Turning off and clearing the queue is safe because:
+- Elapsed time for the interrupted zone is unknown, so deficit credit cannot be applied correctly.
+- The planner rebuilds tonight's cycle from KVS deficits (which were persisted before the reboot) and
+  emits a fresh `garden.plan`.
+- The operator sees the `garden.reboot_recovery` event in the daemon events DB and knows a cycle was cut short.
+
+### 4.2 Per-zone run counting
+
+Every time a zone completes normally (after `garden.zone_stop`), `incrementRunCount(zoneId)`:
+- Increments `Script.storage` key `runs/<id>` (survives reboots, synchronous).
+- Mirrors the new count to KVS key `script/garden/zone<id>-runs` (readable by `ctl garden status`
+  without the daemon).
+
+The daemon events DB additionally gives the full run history (one `garden.zone_stop` row per
+completion) with timestamps, applied mm, and resulting deficit — useful for multi-week analysis.
+
+Runs interrupted by a reboot are **not** counted (the zone never emitted `garden.zone_stop`).
+
+---
+
+## 5. Measured calibration data
+
+### Grass zones (switch:0 and switch:2)
+
+Each lawn zone has **two rotating pop-up heads** connected to the same valve, spraying from opposite
+sides of the zone. Measurement method: catch-cup, single head running alone.
+
+| Measurement | Value |
+|---|---|
+| Single head, 5 min | **8 mm** |
+| Single head application rate | 8 mm / 5 min × 60 = **96 mm/h** |
+| Both heads combined (same zone) | 2 × 96 = **192 mm/h** |
+
+Summer budget check (ET₀ = 6 mm/day, Kc = 0.8, ETc = 4.8 mm/day):
+- `triggerMm = 12` → deficit accumulates in ~2.5 days without rain
+- At 192 mm/h: deliver 12 mm in **3.75 min**, deliver max-deficit 25 mm in **7.8 min**
+- `fallbackMin = 8` → delivers ~25.6 mm ≈ 5-day deficit (internet-outage fallback)
+- `maxMin = 15` → hard cap at 48 mm (above maxDeficitMm=25, so effectively never reached)
+
+### Flower beds (switch:1 — massifs)
+
+Uses drip pipe; no emitter specs or area measurements available. Conservative starting defaults retained:
+
+| Default | Value | Rationale |
+|---|---|---|
+| `appRateMmH` | 18 mm/h | Placeholder — to be updated via KVS after observing plant health |
+| `triggerMm` | 8 mm | Water more frequently than lawn (shallow-rooted ornamentals) |
+| `fallbackMin` | 15 min | Conservative placeholder |
+| `maxMin` | 30 min | Conservative cap |
+
+To adjust without re-uploading: `KVS.Set script/garden/zone1-app-rate <new_value>` then restart script.
+
+---
+
+## 6. CONFIG_SCHEMA (device KVS, prefix `script/garden/`)
 
 Model the schema object + `initConfig`/`loadConfig` loader on pool-pump.js:37-353. **Keep KVS key
 suffixes ≤ 18 chars** (prefix is 14; hard limit 42).
@@ -195,140 +260,111 @@ suffixes ≤ 18 chars** (prefix is 14; hard limit 42).
 |---|---|---|---|---|
 | enableLogging | `logging` | `true` | bool | |
 | mqttTopicPrefix | `mqtt-topic` | `garden` | string | cliOnly |
-| pastDays | `past-days` | `3` | number | |
-| earliestStartHour | `early-start-h` | `3` | number | |
+| earliestStartHour | `earliest-start` | `3` | number | |
 | lunchStart / lunchEnd | `lunch-start` / `lunch-end` | `12.0` / `14.0` | number | fractional hours |
-| eveningStart / eveningEnd | `eve-start` / `eve-end` | `19.0` / `23.5` | number | fractional hours |
-| fallbackStartHour | `fb-start-h` | `5` | number | |
-| frostCutoffC | `frost-c` | `2` | number | |
-| rainHoldoffMm | `rain-holdoff` | `8` | number | |
-| maxDeficitMm | `max-deficit` | `25` | number | |
-| windWeight / tempWeight | `wind-w` / `temp-w` | `1.0` / `0.1` | number | scoring weights |
-| gapSeconds | `gap-s` | `15` | number | between zones |
+| eveningStart / eveningEnd | `evening-start` / `evening-end` | `19.0` / `23.5` | number | fractional hours |
+| fallbackStartHour | `fallback-start` | `5` | number | |
+| frostCutoffC | `frost-cutoff-c` | `2` | number | |
+| rainHoldoffMm | `rain-holdoff-mm` | `8` | number | |
+| maxDeficitMm | `max-deficit-mm` | `25` | number | |
 
 **Per-zone keys** (`z` ∈ {0,1,2})
 
 | Config field | KVS suffix | Default (z0 lawn / z1 beds / z2 lawn) | Type |
 |---|---|---|---|
-| name | `z<z>-name` | `pelouse-maison` / `massifs` / `pelouse-barriere` | string |
-| appRateMmPerH | `z<z>-rate` | `12` / `18` / `12` | number |
-| cropFactor (Kc) | `z<z>-kc` | `0.8` / `0.6` / `0.8` | number |
-| triggerDeficitMm | `z<z>-trig` | `12` / `8` / `12` | number |
-| maxRunMinutes | `z<z>-max-min` | `30` | number |
-| fallbackRunMinutes | `z<z>-fb-min` | `15` | number |
-| enabled | `z<z>-on` | `true` | bool |
-
-> All defaults are starting guesses. `appRateMmPerH` and `cropFactor` are meant to be tuned from real
-> measurements (see calibrate, §5) without re-uploading the script.
+| name | `zone<z>-name` | `pelouse-maison` / `massifs` / `pelouse-barriere` | string |
+| appRateMmPerH | `zone<z>-app-rate` | `192` / `18` / `192` | number |
+| cropFactor (Kc) | `zone<z>-kc` | `0.8` / `0.6` / `0.8` | number |
+| triggerDeficitMm | `zone<z>-trigger-mm` | `12` / `8` / `12` | number |
+| maxRunMinutes | `zone<z>-max-min` | `15` / `30` / `15` | number |
+| fallbackRunMinutes | `zone<z>-fallback-min` | `8` / `15` / `8` | number |
+| enabled | `zone<z>-enabled` | `true` | bool |
+| run count (read-only) | `zone<z>-runs` | — | number | written by script, read by CLI |
 
 ---
 
-## 5. CLI + Go integration (mirror the pool-pump wiring)
+## 7. CLI + Go integration (mirror the pool-pump wiring)
 
-| pool-pump artifact (existing) | new garden artifact (to create) |
+| pool-pump artifact (existing) | new garden artifact |
 |---|---|
-| `myhome/ctl/pool/main.go` (`poolCmd`, `PoolCmd()`) | `myhome/ctl/garden/main.go` (`gardenCmd`, `GardenCmd()`) |
-| `myhome/ctl/pool/setup.go` / `status.go` | `myhome/ctl/garden/setup.go` / `status.go` |
-| — | `myhome/ctl/garden/calibrate.go` (new sub-command) |
-| `myhome/ctl/pool/generate.go` (`//go:generate`) | `myhome/ctl/garden/generate.go` |
-| `myhome/ctl/pool/pool_defaults_generated.go` | `myhome/ctl/garden/garden_defaults_generated.go` (generated) |
-| `tools/extract-pool-defaults/main.go` | `tools/extract-garden-defaults/main.go` |
-| `internal/myhome/shelly/script/pool.go` | `internal/myhome/shelly/script/garden.go` |
-
-Wiring details verified in this repo:
-- **Register the command** in `myhome/ctl/ctl.go` next to line 159 `Cmd.AddCommand(pool.PoolCmd())` →
-  add `Cmd.AddCommand(garden.GardenCmd())` (and the import).
-- **Codegen** is run via `go run` from `generate.go`; `tools/extract-*-defaults` lives in the **root
-  module** (it is **not** a separate `go.work` entry), so **no `go.work` change is needed**. New
-  `generate.go` content:
-  ```go
-  package garden
-  //go:generate go run ../../../tools/extract-garden-defaults/main.go ../../../internal/shelly/scripts/garden.js garden_defaults_generated.go
-  ```
-- **Script embedding** is automatic: `internal/shelly/scripts/scripts.go` has `//go:embed *.js`, so
-  dropping `garden.js` into that directory is sufficient — no Go change to register it.
-- `extract-garden-defaults/main.go` parses the `CONFIG_SCHEMA` literal (regex, as pool's does) and emits
-  `const Default... = ...` into `package garden`. Mirror `tools/extract-pool-defaults/main.go`.
+| `myhome/ctl/pool/main.go` | `myhome/ctl/garden/garden.go` (`gardenCmd`, `GardenCmd()`) ✅ |
+| `myhome/ctl/pool/setup.go` | `myhome/ctl/garden/setup.go` ✅ |
+| `myhome/ctl/pool/status.go` | `myhome/ctl/garden/status.go` ✅ |
+| — | `myhome/ctl/garden/calibrate.go` ✅ |
+| `myhome/ctl/pool/generate.go` | `myhome/ctl/garden/generate.go` ✅ |
+| `tools/extract-pool-defaults/main.go` | `tools/extract-garden-defaults/main.go` ✅ |
 
 Commands:
-- `ctl garden setup <device>` — upload `garden.js` (reuse the script upload/version machinery used by
-  `ctl shelly script upload`), write `script/garden/*` KVS from flags (lat/lon optional → auto-detect),
-  create the base `handlePlan` + `handleWateringStart` schedules (model on pool-pump.js:1432-1519 and
-  `internal/myhome/shelly/script/pool.go`).
-- `ctl garden status <device>` — read & print per-zone deficits, last plan (next start + per-zone
-  minutes), and the most recent cycle.
-- `ctl garden calibrate <device> <zone> <minutes>` — `script.eval handleCalibrate(<zone>, <minutes>)`:
-  runs exactly one zone for the requested time (one-at-a-time + quiet windows honored), emitting
-  `garden.calibrate_start`/`garden.calibrate_stop`. Operator measures applied depth (catch-cups / rain
-  gauge), divides by minutes → mm/min × 60 = mm/h, then sets `z<z>-rate` via `ctl garden setup`.
+- `ctl garden setup <device>` — upload `garden.js`, write `script/garden/*` KVS, create schedules ✅
+- `ctl garden status <device>` — read per-zone deficits, run counts, last plan ✅
+- `ctl garden calibrate <device> <zone> <minutes>` — `script.eval handleCalibrate(<zone>, <minutes>)` ✅
 
 ---
 
-## 6. Files to create / modify
+## 8. Files created / modified
 
-**Create**
-- `internal/shelly/scripts/garden.js` — the controller (auto-embedded).
-- `myhome/ctl/garden/main.go`, `setup.go`, `status.go`, `calibrate.go`, `generate.go`.
+**Created** ✅
+- `internal/shelly/scripts/garden.js` — the controller (auto-embedded via `//go:embed *.js`).
+- `myhome/ctl/garden/garden.go`, `setup.go`, `status.go`, `calibrate.go`, `generate.go`.
 - `tools/extract-garden-defaults/main.go`.
-- (generated, committed) `myhome/ctl/garden/garden_defaults_generated.go`.
 
-**Modify**
-- `myhome/ctl/ctl.go` — register `garden.GardenCmd()` (~line 159) + import.
-- `docs/garden-sprinklers-plan.md` — this file: tick phase boxes as you go.
+**Modified** ✅
+- `myhome/ctl/ctl.go` — registered `garden.GardenCmd()` + import.
+- `.gitignore` — added `*_defaults_generated.go` (both pool and garden); untracked generated files.
+- `docs/garden-sprinklers-plan.md` — this file.
+
+**Removed** ✅
+- `internal/shelly/scripts/precipitation-irrigation.js` — third-party single-zone example, wrong API.
 
 **No change needed**
 - `go.work` (codegen tool is in root module), `internal/shelly/scripts/scripts.go` (`//go:embed *.js`).
 
 ---
 
-## 7. Phased execution checklist
+## 9. Phased execution checklist
 
-- [ ] **Phase 0 — Skeleton & wiring.** Create empty `garden.js` (just `init()` + logging + KVS load
-      stub), `myhome/ctl/garden/main.go`, register in `ctl.go`. `make build` green. Commit.
-- [ ] **Phase 1 — Config + codegen.** Define full `CONFIG_SCHEMA` in `garden.js`; write
-      `tools/extract-garden-defaults`; add `generate.go`; `make generate && make build` green; verify
-      `garden_defaults_generated.go` matches the schema. Commit.
-- [ ] **Phase 2 — Forecast fetch.** Port Open-Meteo fetch/cache/location with the extended query (§2);
-      add the `et0`/rain/wind/temp extraction in `onForecast`. Add Go unit test stub if feasible. Commit.
-- [ ] **Phase 3 — Planner.** Implement deficit update, per-zone minutes, skip guards, calm-window
-      selection, schedule timespec update, fallback. Emit `garden.plan*`. Add Go unit tests for the
-      math + window selection (mirror pool tests). Commit.
-- [ ] **Phase 4 — Runtime state machine.** Implement `handleWateringStart()` tick-timer sequencing,
-      one-at-a-time enforcement, anti-cycle fuse, quiet-window abort guard, button cycling. Commit.
-- [ ] **Phase 5 — CLI.** Implement `setup` (upload + KVS + base schedules), `status`, `calibrate` +
-      `handleCalibrate` in the script. Commit.
-- [ ] **Phase 6 — Verify on device** (see §8) once `arrosage` is powered. Commit any fixes.
-
-> Commit after each green phase. Push regularly to the PR branch.
+- [x] **Phase 0 — Skeleton & wiring.** Create empty `garden.js`, `myhome/ctl/garden/garden.go`, register in `ctl.go`. `make build` green.
+- [x] **Phase 1 — Config + codegen.** Full `CONFIG_SCHEMA`; `tools/extract-garden-defaults`; `generate.go`; `make generate && make build` green.
+- [x] **Phase 2 — Forecast fetch.** Open-Meteo fetch/cache/location with extended query; ET₀/rain/wind/temp extraction in `onForecast`.
+- [x] **Phase 3 — Planner.** Deficit update, per-zone minutes, skip guards, calm-window selection, schedule timespec update, fallback. `garden.plan*` events.
+- [x] **Phase 4 — Runtime state machine.** `handleWateringStart()` tick-timer sequencing, one-at-a-time enforcement, anti-cycle fuse, quiet-window abort guard, button cycling.
+- [x] **Phase 5 — CLI.** `setup` (upload + KVS + schedules), `status`, `calibrate` + `handleCalibrate`.
+- [x] **Phase 5b — Calibration data.** Grass zones updated to 192 mm/h (measured: 8 mm/5 min per head, 2 heads/zone). Massifs kept at placeholder defaults pending observation.
+- [x] **Phase 5c — Reboot resilience.** `enforceOutputState()` turns off any ON switch at startup, clears the interrupted watering queue, emits `garden.reboot_recovery`. Per-zone run counters in `Script.storage` + KVS mirror (`zone<z>-runs`), incremented on `garden.zone_stop`.
+- [ ] **Phase 6 — Verify on device** (§10) once `arrosage` is powered. Commit any fixes.
 
 ---
 
-## 8. Verification
+## 10. Verification
 
-1. **Build/codegen/tests:** `make generate && make build && make test` (canonical; all sub-modules).
-2. **Go unit tests:** deficit→minutes math, calm-window selection incl. quiet-window exclusion,
-   rain/frost skip. Mirror existing pool tests' style.
-3. **JS sanity (device powered):**
+1. **Build/codegen/tests:** `make generate && make build && make test` (canonical; all sub-modules). ✅
+2. **JS sanity (device powered):**
    `go run ./myhome ctl shelly script upload arrosage internal/shelly/scripts/garden.js --no-minify`
    then `go run ./myhome ctl shelly script debug arrosage true` and watch logs.
-4. **Live dry-run** via MCP `shelly_call` on `arrosage`:
+3. **Live dry-run** via MCP `shelly_call` on `arrosage`:
    - `Schedule.List` → confirm `handlePlan` + `handleWateringStart` jobs exist.
    - `KVS.GetMany {match:"script/garden/*"}` → confirm config written.
-   - `Script.Eval handlePlan()` → confirm `garden.plan` event emitted and the watering-start schedule
-     timespec updated to the chosen calm hour.
-   - `Script.Eval handleWateringStart()` → confirm zones fire **one at a time**, in sequence, and stop.
-   - `go run ./myhome ctl garden calibrate arrosage 0 2` → confirm a single 2-minute zone-0 run.
-5. **Resilience:** point `forecast-url` at an unreachable host (or block egress); confirm planner emits
+   - `Script.Eval handlePlan()` → confirm `garden.plan` event emitted + schedule timespec updated.
+   - `Script.Eval handleWateringStart()` → confirm zones fire **one at a time**, in sequence, stop.
+   - `go run ./myhome ctl garden calibrate arrosage 0 2` → confirm single 2-minute zone-0 run.
+   - Check `script/garden/zone0-runs` KVS key incremented after the calibrate run.
+4. **Reboot recovery:** while a zone is running, power-cycle the device. At restart, confirm:
+   - All switches go OFF (not left on).
+   - `garden.reboot_recovery` event in daemon events DB.
+   - `Script.storage` watering queue is cleared.
+   - Planner rebuilds cycle at next 00:30 schedule.
+5. **Resilience:** point `forecast-url` at an unreachable host; confirm planner emits
    `garden.plan_fallback` and schedules the fixed fallback rather than erroring.
-6. **Quiet-window:** craft a plan whose span would overlap 12:00 or 19:00; confirm the planner relocates/
-   shrinks the window and the runtime abort-guard prevents any zone running inside a quiet window.
+6. **Quiet-window:** craft a plan whose span would overlap 12:00 or 19:00; confirm the planner
+   relocates/shrinks the window and the runtime abort-guard prevents any zone running inside a quiet window.
 
 ---
 
-## 9. Assumptions & out of scope
+## 11. Assumptions & out of scope
 
 - **Forecast-only** — no physical rain/soil-moisture sensor assumed on Pro3 inputs.
 - Liters/volume reporting is informational only (no per-zone area model unless added later).
 - **Winter** is handled implicitly (ET₀ ≈ 0 + rain ⇒ deficit stays below trigger ⇒ no watering); add an
   explicit season switch only if desired.
 - `appRateMmPerH` / `cropFactor` defaults are guesses to be calibrated in the field.
+- Massifs drip rate is a placeholder; adjust `zone1-app-rate` KVS key after observing plant health.

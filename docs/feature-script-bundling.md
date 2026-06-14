@@ -157,8 +157,15 @@ import (
 // Bundles maps a bundle name to the ordered list of fragment files it contains.
 // Membership is intentionally a plain Go map — easy to edit per the device fleet's needs.
 var Bundles = map[string][]string{
-	// Always-on utilities, reuniting the #268 split, plus a BLU consumer for the Pro 1 test.
-	"utilities": {"watchdog.js", "prometheus-metrics.js", "blu-listener.js"},
+	// Always-on background services: MQTT watchdog, firmware updates, Prometheus metrics,
+	// daily reboot scheduler. 3 static timers — safe headroom.
+	"always-on": {"watchdog.js", "prometheus-metrics.js", "daily-reboot.js"},
+
+	// Full utility bundle for devices that also run BLU listener.
+	// WARNING: 5 static timers (Watchdog 1 + FirmwareUpdater 1 + PrometheusMetrics 1 +
+	// DailyReboot 1 + BluListener queue 1) — AT the 5-timer limit before any BluListener
+	// auto-off timer fires. Validate carefully on "development". See §6.
+	"utilities": {"watchdog.js", "prometheus-metrics.js", "daily-reboot.js", "blu-listener.js"},
 }
 
 const corePreamble = "_core.js"
@@ -383,10 +390,41 @@ Current: flat functions, `const`/`let`, implicit global `topic`, guarded init at
 - Register its single `Shelly.addEventHandler` and the `BLE.Scanner.Subscribe` in `init`.
 - Add `features.BluPublisher = BluPublisher;`.
 
-### 4.5 Keep standalone uploads working
+### 4.5 daily-reboot.js → `DailyReboot` feature
 
-`blu-listener.js`/`blu-publisher.js` are uploaded standalone by `myhome/ctl/blu/follow/blu.go`
-and `myhome/ctl/blu/publish.go`. After conversion the raw fragment has no bootstrap, so
+Current: top-level `var CONFIG`, `var STATE`, `var DailyReboot = {...}`, trailing IIFE
+(`daily-reboot.js:80-94`) that calls `DailyReboot.init()` and registers a trivial
+`script_stop` event handler (just prints; no functional value in bundled form).
+
+**Important:** `daily-reboot.js` has its own `STATE.rebootLock`/`rebootLockReason`, identical
+in semantics to watchdog's `SHARED_STATE`. In bundled form all three reboot-aware features
+(Watchdog, FirmwareUpdater, DailyReboot) must share the **same lock** via `features._shared`,
+otherwise DailyReboot can reboot mid-firmware-update.
+
+Conversion steps:
+- Remove top-level `CONFIG`, `STATE`, `log`.
+- Move `CONFIG` → `DailyReboot.config`.
+- Replace `CONFIG.windowStartHour`/`CONFIG.windowEndHour`/`CONFIG.debug` references inside
+  the object with `this.config.*` (callbacks already use closure, so straightforward).
+- Replace the inline `log: function(message) { if (CONFIG.debug) { print(...) } }` with
+  `log: mkLog("[DailyReboot]")` (mkLog always prints; the `debug` gate is redundant in
+  bundled context where logging is always on).
+- Replace `STATE.rebootLock`/`STATE.rebootLockReason` with `features._shared.rebootLock`/
+  `features._shared.rebootLockReason`. In `scheduleRandomReboot`'s callback:
+  `if (features._shared.rebootLock) { ... }`. In `init()` (defensive default, same pattern
+  as Watchdog): `if (!("rebootLock" in features._shared)) features._shared.rebootLock = false;`.
+- Drop the `script_stop` event handler from the IIFE (trivial; no functional loss).
+- Delete the trailing IIFE; add `features.DailyReboot = DailyReboot;`.
+
+Timer: 1 one-shot (rescheduled inside the callback via `self.scheduleRandomReboot()`). At
+most 1 DailyReboot timer live at any time. But it is still +1 toward the 5-timer budget
+— see §6 for the constraint this creates.
+
+### 4.6 Keep standalone uploads working
+
+`blu-listener.js`/`blu-publisher.js`/`daily-reboot.js` are uploaded standalone by
+`myhome/ctl/blu/follow/blu.go`, `myhome/ctl/blu/publish.go`, and any setup command. After
+conversion the raw fragment has no bootstrap, so
 those call sites must upload the **assembled single-feature** form. Add a tiny bundle entry
 or assemble ad-hoc, e.g. `AssembleBundle([]string{"blu-listener.js"})` + `UploadWithVersion`
 under name `blu-listener.js` (unchanged device-script name and KVS key → no migration churn
@@ -407,8 +445,11 @@ uploads these). Search: `grep -rln "blu-listener.js\|blu-publisher.js" myhome --
   - Assemble `"utilities"`; eval in goja with Shelly/MQTT/BLE/Timer mocks (follow the harness
     in `blu_listener_test.go` and the constraint checks in `pkg/shelly/script/compat_test.go`).
   - Assert every feature registers (`features.Watchdog`, `.FirmwareUpdater`,
-    `.PrometheusMetrics`, `.BluListener` all defined) and `init()` runs without throwing;
-    assert `_shared` is skipped by the bootstrap; assert no duplicate-global crash.
+    `.PrometheusMetrics`, `.DailyReboot`, `.BluListener` all defined) and `init()` runs
+    without throwing; assert `_shared` is skipped by the bootstrap; assert no
+    duplicate-global crash; assert `features._shared.rebootLock` is initialized once (not
+    re-initialized if already set — the defensive `if (!("rebootLock" in features._shared))`
+    guard in each feature's `init()` must be present).
   - Assert the assembled source obeys the Espruino constraints checked in `compat_test.go`
     (no hoisting issues, `catch (e)` present, `var`-only).
 - **New `ops` test** (`internal/myhome/shelly/script/`): assert the upload version equals
@@ -418,30 +459,64 @@ uploads these). Search: `grep -rln "blu-listener.js\|blu-publisher.js" myhome --
 
 ## 6. Known resource-budget risks (validate on-device; do not pre-optimize)
 
-Combined static timers ≈ Watchdog(1) + FirmwareUpdater(1) + PrometheusMetrics(1) +
-BluListener(1 queue) = 4, **plus** BluListener's dynamic per-switch auto-off timers → can
-approach the **5-timer limit** under load. RPC-in-flight (5) is shared across features
-(BluListener already serializes via its 200ms queue). Event handlers: BluListener(1) +
-BluPublisher(1) = 2 of 5. First cut: ship as-is and **watch `development` for `-108`,
-timer-exhaustion, or "Too many calls in progress"**. Future optimization (follow-up): share
-one tick timer across Watchdog+PrometheusMetrics. Document the degraded modes in the PR
-description per `CLAUDE.md` resilience rules.
+### Timer budget (5-timer hard limit)
+
+| Feature | Timers | Notes |
+|---|---|---|
+| Watchdog | 1 | one-shot, rescheduled |
+| FirmwareUpdater | 1 | recurring (7-day interval) |
+| PrometheusMetrics | 1 | recurring (30s interval) |
+| DailyReboot | 1 | one-shot, rescheduled |
+| BluListener queue | 1 | recurring 200ms, cleared when queue empty |
+| BluListener auto-off | N (dynamic) | per followed switch, seconds-range |
+
+**`"utilities"` bundle = 5 static timers — AT the limit before any auto-off timer fires.**
+Any BluListener auto-off activation pushes the count to 6+, which is likely to be silently
+dropped or cause a runtime error. Mitigation options:
+
+1. **Use `"always-on"` bundle** (watchdog + prometheus + daily-reboot, 3 timers) on devices
+   that don't need BLU listening. BluListener then runs as a standalone script.
+2. **Share one tick timer** across Watchdog + PrometheusMetrics (follow-up work; see §9).
+3. **Disable DailyReboot** in `"utilities"` (remove from bundle or make no-op when
+   `features.BluListener` is present).
+
+For the validation phase (§7), use the `"always-on"` bundle first to prove the framework,
+then add BluListener (i.e. use `"utilities"`) and monitor for timer-exhaustion errors.
+
+### Other limits
+
+- **RPC in-flight (5):** shared across all features. BluListener serializes via its 200ms
+  task-queue; FirmwareUpdater and DailyReboot each fire at most 1-2 concurrent RPCs; these
+  should not contend in practice. Watch for "Too many calls in progress".
+- **Event handlers (5):** BluListener(1) + BluPublisher(1) = 2 of 5. Safe.
+- **Reboot-lock correctness:** Watchdog, FirmwareUpdater, and DailyReboot all read/write
+  `features._shared.rebootLock`. Verify that DailyReboot skips its reboot (and reschedules)
+  whenever FirmwareUpdater has set the lock, and that the lock is always released after a
+  failed update (`applyUpdate` callback).
+
+Document degraded modes in the PR description per `CLAUDE.md` resilience rules.
 
 ## 7. Verification (end-to-end on `development`, Shelly Pro 1)
 
 1. `make build` (runs `go generate` first).
-2. `go run ./myhome ctl shelly script bundle development utilities --no-minify`
-3. MCP `shelly_call` → `Script.List` on `development`: confirm a single `utilities.js`
-   script, enabled and running; standalone members (`watchdog.js`, etc.) removed (cleanup OK).
-4. Device logs show `Bundle starting...` → each feature's init log → `Bundle startup
-   complete`; **no** `-108`, timer-exhaustion, or "Too many calls" errors.
-5. Runtime config still honored from per-feature prefixes: set a `script/blu-listener/...`
-   (`follow/shelly-blu/<mac>`) KVS key and confirm the bundled BluListener reacts.
-6. Re-run step 2 → expect "Script version is the same, skipping upload".
-7. MCP read KVS: `script/utilities.js` (whole-bundle SHA1) and `script/utilities.js/manifest`
-   (per-feature versions) present and correct.
-8. `go run ./myhome ctl shelly script update development` → `utilities.js` recognized as a
-   bundle and re-checked idempotently.
+2. **Phase A — `always-on` bundle (3 timers, safe):**
+   `go run ./myhome ctl shelly script bundle development always-on --no-minify`
+   - `Script.List` on `development`: single `always-on.js`, running; standalone members
+     (`watchdog.js`, `prometheus-metrics.js`, `daily-reboot.js`) removed.
+   - Device logs: `Bundle starting...` → Watchdog/FirmwareUpdater/PrometheusMetrics/DailyReboot
+     init messages → `Bundle startup complete`. No timer errors.
+   - KVS: `script/always-on.js` (SHA1) + `script/always-on.js/manifest` (per-feature versions).
+   - Re-run → "version is the same, skipping upload".
+3. **Phase B — `utilities` bundle (5 static timers; watch for exhaustion):**
+   `go run ./myhome ctl shelly script bundle development utilities --no-minify`
+   - Same checks as above but for `utilities.js`; additionally confirm BluListener is present.
+   - Runtime config test: set a `follow/shelly-blu/<mac>` KVS key; confirm the bundled
+     BluListener reacts to an injected motion event.
+   - Trigger a BluListener auto-off scenario and verify no timer-exhaustion error (`-107` or
+     similar) in device logs.
+4. `go run ./myhome ctl shelly script update development` → `utilities.js` recognized as a
+   bundle, re-checked idempotently.
+5. Record timer observations and any `-107`/`-108` errors in the PR description.
 
 ## 8. Implementation order (phases)
 
@@ -451,11 +526,13 @@ description per `CLAUDE.md` resilience rules.
 - [ ] **P2 — prometheus-metrics.js → feature.** Convert; unit-assemble a one-feature bundle
   and eval in goja.
 - [ ] **P3 — watchdog.js → Watchdog + FirmwareUpdater.** Convert; `_shared.rebootLock`.
-- [ ] **P4 — blu-listener.js → BluListener.** Convert; update `blu_listener_test.go` to load
-  assembled form; keep all assertions green. Fix standalone call sites (§4.5).
-- [ ] **P5 — blu-publisher.js → BluPublisher.** Convert; `const`→`var`; fix call sites.
-- [ ] **P6 — Tests.** `bundle_test.go`, ops/manifest test; `make test` green.
-- [ ] **P7 — On-device validation.** Run §7 on `development`; record results in the PR.
+- [ ] **P4 — daily-reboot.js → DailyReboot.** Convert; wire `_shared.rebootLock` read.
+- [ ] **P5 — blu-listener.js → BluListener.** Convert; update `blu_listener_test.go` to load
+  assembled form; keep all assertions green. Fix standalone call sites (§4.6).
+- [ ] **P6 — blu-publisher.js → BluPublisher.** Convert; `const`→`var`; fix call sites.
+- [ ] **P7 — Tests.** `bundle_test.go`, ops/manifest test; `make test` green.
+- [ ] **P8 — On-device validation.** Run §7 on `development` starting with `"always-on"`,
+  then `"utilities"`; record results and timer observations in the PR.
 
 ## 9. Out of scope (follow-ups)
 

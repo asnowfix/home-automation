@@ -89,13 +89,21 @@ var CONFIG_SCHEMA = {
 };
 
 // Per-zone defaults — calibrate appRateMmH via 'ctl garden calibrate'
-// appRateMmH: assumed water delivery rate (mm/h). Lawn ~12, beds ~18.
+// appRateMmH: water delivery rate (mm/h).
+//   Grass zones (0, 2): 2 pop-up heads per zone, each measured at 96 mm/h (8 mm/5 min),
+//   covering the same ground simultaneously → 192 mm/h.
+//   Massifs zone (1): drip pipe — set after measuring or via KVS.
 // kc: crop coefficient — ET0 multiplier. Lawn 0.8, ornamental beds 0.6.
 // triggerMm: water when deficit reaches this depth (deep-infrequent irrigation).
+//   Grass: 12 mm ≈ 2.5 days of peak-summer ETc (ET0=6 mm/d × kc=0.8).
+//   At 192 mm/h the planner delivers 12 mm in ~3.75 min, 25 mm in ~7.8 min.
+// fallbackMin: used when no forecast is available (internet outage).
+//   Grass: 8 min delivers ~25.6 mm ≈ 5-day peak-summer deficit.
+// maxMin: hard cap per session; 15 min @ 192 mm/h = 48 mm (more than maxDeficitMm=25).
 var ZONE_DEFAULTS = [
-  {id: 0, name: "pelouse-maison",   appRateMmH: 12.0, kc: 0.8, triggerMm: 12.0, maxMin: 30, fallbackMin: 15, enabled: true},
-  {id: 1, name: "massifs",          appRateMmH: 18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, enabled: true},
-  {id: 2, name: "pelouse-barriere", appRateMmH: 12.0, kc: 0.8, triggerMm: 12.0, maxMin: 30, fallbackMin: 15, enabled: true}
+  {id: 0, name: "pelouse-maison",   appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8, enabled: true},
+  {id: 1, name: "massifs",          appRateMmH:  18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, enabled: true},
+  {id: 2, name: "pelouse-barriere", appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8, enabled: true}
 ];
 
 // Runtime config — populated from defaults then overridden by KVS at startup

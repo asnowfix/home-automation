@@ -54,11 +54,12 @@ type ZoneDefault struct {
 }
 
 // defaultZoneDefaults mirrors ZONE_DEFAULTS from garden.js.
-// Update appRateMmH for each zone after running 'ctl garden calibrate'.
+// Grass zones (0,2): 192 mm/h = 2 pop-up heads × 96 mm/h each (measured: 8 mm/5 min).
+// Massifs zone (1): drip pipe — update appRateMmH after measuring with catch-cups.
 var defaultZoneDefaults = []ZoneDefault{
-	{name: "pelouse-maison",   appRateMmH: 12.0, kc: 0.8, triggerMm: 12.0, maxMin: 30, fallbackMin: 15, enabled: true},
-	{name: "massifs",          appRateMmH: 18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, enabled: true},
-	{name: "pelouse-barriere", appRateMmH: 12.0, kc: 0.8, triggerMm: 12.0, maxMin: 30, fallbackMin: 15, enabled: true},
+	{name: "pelouse-maison",   appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8, enabled: true},
+	{name: "massifs",          appRateMmH:  18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, enabled: true},
+	{name: "pelouse-barriere", appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8, enabled: true},
 }
 `
 

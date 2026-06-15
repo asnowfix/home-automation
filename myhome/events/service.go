@@ -54,6 +54,9 @@ func (s *Service) Record(ctx context.Context, e Event) error {
 	if e.ReceivedAt == 0 {
 		e.ReceivedAt = float64(time.Now().Unix())
 	}
+	if e.Ts == 0 {
+		e.Ts = e.ReceivedAt
+	}
 	if err := s.store.Record(ctx, e); err != nil {
 		return err
 	}

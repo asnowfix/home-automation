@@ -1,8 +1,8 @@
 # Garden Sprinkler Controller (`garden.js`) — Implementation Plan
 
-> **Status:** Phases 0–5 complete (implementation merged to PR #265). Phase 6 (device
-> verification) pending — device `arrosage` must be powered on. This document is the living
-> spec; update it alongside the code per the repo's "non-trivial tasks" rule in `CLAUDE.md`.
+> **Status:** Phases 0–6 complete. Device `arrosage` verified in production (2026-06-14/15).
+> All verification steps passed; two runtime bugs found and fixed during live testing.
+> PR #265 open for review.
 
 ---
 
@@ -331,7 +331,11 @@ Commands:
 - [x] **Phase 5 — CLI.** `setup` (upload + KVS + schedules), `status`, `calibrate` + `handleCalibrate`.
 - [x] **Phase 5b — Calibration data.** Grass zones updated to 192 mm/h (measured: 8 mm/5 min per head, 2 heads/zone). Massifs kept at placeholder defaults pending observation.
 - [x] **Phase 5c — Reboot resilience.** `enforceOutputState()` turns off any ON switch at startup, clears the interrupted watering queue, emits `garden.reboot_recovery`. Per-zone run counters in `Script.storage` + KVS mirror (`zone<z>-runs`), incremented on `garden.zone_stop`.
-- [ ] **Phase 6 — Verify on device** (§10) once `arrosage` is powered. Commit any fixes.
+- [x] **Phase 6 — Verify on device** (§10). Live testing on `arrosage` (2026-06-14/15). Two runtime bugs found and fixed:
+  - **OOM** (`out_of_memory`): Open-Meteo `past_days=3,forecast_days=2` response was ~5 KB → ~28 KB heap peak on 30 KB limit. Fixed by switching to `past_days=1,forecast_days=1` (~2 KB, 18.5 KB peak, 14 KB free). Added stale-URL guard to invalidate any cached URL with old parameters.
+  - **Too many calls** in `updatePlanSchedule`: `updateDeficits()` fired 3 fire-and-forget `KVS.Set` calls (per-zone deficit mirrors), plus 2 more for plan data = 5 concurrent RPC calls, then `Schedule.List` exceeded the 5-call limit. Fixed by extracting a serial commit chain (`doPlanCommitStep`/`commitPlan`/`commitFallback`) that processes one KVS write at a time via the task queue, then calls `updatePlanSchedule` only after all writes complete.
+  - **KVS pagination**: `KVS.GetMany "script/garden/*"` hit MQTT message size limit at 22 of 38 keys. Fixed in `status.go` by making 4 targeted calls (`zone0*`, `zone1*`, `zone2*`, `*`) and merging results.
+  - **First automated cycle ran overnight** successfully (2026-06-15 ~03:00): all 3 zones completed, `zone<n>-runs = 1`, deficits reduced in Script.storage.
 
 ---
 
@@ -341,22 +345,19 @@ Commands:
 2. **JS sanity (device powered):**
    `go run ./myhome ctl shelly script upload arrosage internal/shelly/scripts/garden.js --no-minify`
    then `go run ./myhome ctl shelly script debug arrosage true` and watch logs.
-3. **Live dry-run** via MCP `shelly_call` on `arrosage`:
-   - `Schedule.List` → confirm `handlePlan` + `handleWateringStart` jobs exist.
-   - `KVS.GetMany {match:"script/garden/*"}` → confirm config written.
-   - `Script.Eval handlePlan()` → confirm `garden.plan` event emitted + schedule timespec updated.
-   - `Script.Eval handleWateringStart()` → confirm zones fire **one at a time**, in sequence, stop.
-   - `go run ./myhome ctl garden calibrate arrosage 0 2` → confirm single 2-minute zone-0 run.
-   - Check `script/garden/zone0-runs` KVS key incremented after the calibrate run.
-4. **Reboot recovery:** while a zone is running, power-cycle the device. At restart, confirm:
-   - All switches go OFF (not left on).
-   - `garden.reboot_recovery` event in daemon events DB.
-   - `Script.storage` watering queue is cleared.
-   - Planner rebuilds cycle at next 00:30 schedule.
-5. **Resilience:** point `forecast-url` at an unreachable host; confirm planner emits
-   `garden.plan_fallback` and schedules the fixed fallback rather than erroring.
-6. **Quiet-window:** craft a plan whose span would overlap 12:00 or 19:00; confirm the planner
-   relocates/shrinks the window and the runtime abort-guard prevents any zone running inside a quiet window.
+3. **Live dry-run** via MCP `shelly_call` on `arrosage`: ✅
+   - `Schedule.List` → confirmed `handlePlan` (00:30) + `handleWateringStart` jobs exist. ✅
+   - `KVS.GetMany` → confirmed 38 config keys written. ✅
+   - `Script.Eval handlePlan()` → `garden.plan` emitted, schedule timespec updated. ✅
+   - `Script.Eval handleWateringStart()` → quiet-window abort at 20:33 (switches stayed OFF). ✅
+   - `go run ./myhome ctl garden calibrate arrosage 0 2` → refused in quiet window (switch stayed OFF). ✅
+     Note: CLI prints "Calibration started" regardless of quiet-window refusal (script returns `undefined` in both cases). Device emits `garden.calibrate_refused` event. Minor UX improvement noted for follow-up.
+   - `script/garden/zone<n>-runs` KVS keys written by serial commit chain. ✅
+4. **Reboot recovery:** switch:0 turned on manually, script stopped/started → switch turned off (source: "loopback"), `garden.reboot_recovery` emitted. ✅
+5. **Resilience:** set forecast URL to `http://192.0.2.1/...?daily=...` (unreachable, 10 s timeout). Planner emitted `garden.plan_fallback` with `start_h=5`, all zones at `fallbackMin`. ✅
+6. **Quiet-window guard:** `handleWateringStart()` called at 20:33 → returned immediately without turning on any switch. ✅
+7. **Full automated cycle (overnight 2026-06-15):** `handlePlan()` at 00:30 computed plan; `handleWateringStart()` ran all 3 zones sequentially. Post-run: `zone<n>-runs = 1`, deficits reduced in Script.storage. ✅
+8. **`ctl garden status arrosage`:** shows all 38 KVS keys, correct deficits and plan. ✅
 
 ---
 

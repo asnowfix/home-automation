@@ -3,9 +3,12 @@ package blu
 import (
 	"context"
 	"encoding/json"
-	"github.com/asnowfix/home-automation/internal/myhome"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/go-logr/logr"
 )
 
@@ -118,5 +121,62 @@ func TestHandleBLUEvent_NoSensorsNoCache(t *testing.T) {
 	}
 	if len(reg.sensorUpdates) != 0 {
 		t.Errorf("expected 0 cache updates, got %d", len(reg.sensorUpdates))
+	}
+}
+
+func newTestEventsService(t *testing.T) *events.Service {
+	t.Helper()
+	store, err := events.NewStorage(logr.Discard(), ":memory:")
+	if err != nil {
+		t.Fatalf("events.NewStorage: %v", err)
+	}
+	t.Cleanup(store.Close)
+	return events.NewService(logr.Discard(), store, nil, nil, 0)
+}
+
+// TestHandleBLUEventBridge_WindowEvent checks that a window open/close event is
+// stored with a non-zero Ts, the canonical device id (not the raw MAC), and a
+// populated Data field containing the triggering sensor value.
+func TestHandleBLUEventBridge_WindowEvent(t *testing.T) {
+	const mac = "7c:c6:b6:9e:7c:99"
+	open := 1
+	data := BLUEventData{
+		Address: mac,
+		Window:  &open,
+		RSSI:    -70,
+	}
+	payload := buildBLUPayload(t, data)
+
+	svc := newTestEventsService(t)
+	before := time.Now().Unix()
+	handleBLUEventBridge(context.Background(), logr.Discard(), payload, svc, nil)
+	after := time.Now().Unix()
+
+	evts, err := svc.Store().Query(context.Background(), events.Query{})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(evts) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(evts))
+	}
+	e := evts[0]
+
+	// Ts must be a plausible receive time, not epoch 0
+	if e.Ts < float64(before) || e.Ts > float64(after)+1 {
+		t.Errorf("Ts=%v is not within [%d, %d]", e.Ts, before, after+1)
+	}
+
+	// DeviceID must be the canonical type-inferred id, not the raw MAC
+	wantID := deviceIDFromCapabilities(mac, data)
+	if e.DeviceID != wantID {
+		t.Errorf("DeviceID=%q, want canonical %q", e.DeviceID, wantID)
+	}
+
+	// Data must be populated and contain the triggering field
+	if e.Data == nil {
+		t.Fatal("Data must not be nil for a window event")
+	}
+	if !strings.Contains(*e.Data, "window") {
+		t.Errorf("Data %q should contain 'window'", *e.Data)
 	}
 }

@@ -94,6 +94,9 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 
 	// HTMX endpoints for partial HTML responses
 	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc)
+	if sseBroadcaster != nil {
+		sseBroadcaster.SetDeviceNameResolver(htmxHandler.DeviceNameResolver())
+	}
 	mux.HandleFunc("/htmx/devices", htmxHandler.DeviceCards)
 	mux.HandleFunc("/htmx/device/", htmxHandler.DeviceCard)
 	mux.HandleFunc("/htmx/rooms", htmxHandler.RoomsList)

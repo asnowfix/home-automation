@@ -1,0 +1,18 @@
+{
+  "dst": "shelly1minig3-54320440d02c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "cfg_rev": 273,
+        "component": "sys",
+        "event": "component_removed",
+        "restart_required": false,
+        "target": "script:1",
+        "ts": 1758225767.04
+      }
+    ],
+    "ts": 1758225767.04
+  },
+  "src": "shelly1minig3-54320440d02c"
+}

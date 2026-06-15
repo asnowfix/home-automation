@@ -295,6 +295,8 @@ function loadConfig(callback) {
       }
 
       log("Configuration loaded successfully");
+      // Free schema object — only needed during KVS loading, not at runtime
+      CONFIG_SCHEMA = null;
       callback(true);
       return;
     }
@@ -487,8 +489,13 @@ function loadStorageValue(key) {
   if (v === "null" || v === "undefined") return null;
   if (v === "true") return true;
   if (v === "false") return false;
-  var num = Number(v);
-  if (!isNaN(num)) return num;
+  try {
+    var num = Number(v);
+    if (!isNaN(num)) return num;
+  } catch (e) {
+    // Espruino throws "String too big to convert to float" on long strings
+    if (e && false) {}
+  }
   try {
     return JSON.parse(v);
   } catch (e) {
@@ -794,6 +801,8 @@ function applyComponentNames(callback) {
   function processNext() {
     if (index >= componentsToConfig.length) {
       log("All component names applied");
+      // Free static data — only needed during component setup
+      COMPONENT_NAMES = null;
       if (callback) callback();
       return;
     }
@@ -985,6 +994,11 @@ function fuseAllowOn() {
     FUSE_TRIPPED = true;
     FUSE_TRIP_TIME = now;
     turnOffAllSwitches();
+    Shelly.emitEvent("pool.fuse_tripped", {
+      changes: FUSE_CHANGES.length,
+      window_s: FUSE_WINDOW_MS / 1000,
+      cooldown_s: FUSE_COOLDOWN_MS / 1000
+    });
     return false;
   }
 
@@ -1143,6 +1157,7 @@ function handleWaterSupply(waterSupplyActive) {
     STATE.savedOutput = STATE.activeOutput;
     log("Water supply ON - saving current output:", STATE.savedOutput);
 
+    Shelly.emitEvent("pool.water_supply_protected", {saved_output: STATE.savedOutput});
     activateOutput(-1, function() {
       log("All pumps turned off for water supply protection");
     });
@@ -1150,6 +1165,7 @@ function handleWaterSupply(waterSupplyActive) {
     // Water supply is OFF (signal is LOW after invert) - restore previous state
     log("Water supply OFF - restoring output:", STATE.savedOutput);
 
+    Shelly.emitEvent("pool.water_supply_restored", {restored_output: STATE.savedOutput});
     activateOutput(STATE.savedOutput, function() {
       log("Pump restored after water supply turned off");
     });
@@ -1710,6 +1726,7 @@ function decideModeFromForecast() {
   log('Selected mode:', newMode, maxTemp > CONFIG.temperatureThreshold ? '(above threshold)' : '(below threshold)');
 
   if (newMode !== 'summer') {
+    Shelly.emitEvent("pool.run_window", {mode: "winter", max_temp_c: maxTemp});
     updateScheduleMode(newMode, null, null);
     return;
   }
@@ -1738,6 +1755,14 @@ function decideModeFromForecast() {
   log('Run hours:', Math.round(runHours * 10) / 10,
       'Start:', Math.floor(startHour) + ':' + lpad2(Math.round((startHour % 1) * 60)),
       'Stop:',  Math.floor(stopHour)  + ':' + lpad2(Math.round((stopHour  % 1) * 60)));
+
+  Shelly.emitEvent("pool.run_window", {
+    mode: "summer",
+    max_temp_c: maxTemp,
+    run_hours: Math.round(runHours * 10) / 10,
+    start_h: Math.round(startHour * 100) / 100,
+    stop_h:  Math.round(stopHour  * 100) / 100
+  });
 
   updateScheduleMode(newMode, startHour, stopHour);
 }
@@ -1773,6 +1798,7 @@ function doStart(speed, reason) {
   }
 
   log('Starting pump at speed:', speed, '-> switch:', switchId);
+  Shelly.emitEvent("pool.pump_start", {speed: speed, switch_id: switchId});
   activateOutput(switchId);
 }
 
@@ -1791,6 +1817,7 @@ function doStop(reason) {
     // Continue to turn off even with water supply active
   }
 
+  Shelly.emitEvent("pool.pump_stop", {reason: reason || "stop"});
   activateOutput(-1, function() {
     log('Pump stopped');
   });

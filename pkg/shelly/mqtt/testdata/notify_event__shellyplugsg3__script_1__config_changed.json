@@ -1,0 +1,18 @@
+{
+  "dst": "shellyplugsg3-e4b3233885e8/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "cfg_rev": 21,
+        "component": "script:1",
+        "event": "config_changed",
+        "id": 1,
+        "restart_required": false,
+        "ts": 1755843599.67
+      }
+    ],
+    "ts": 1755843599.67
+  },
+  "src": "shellyplugsg3-e4b3233885e8"
+}

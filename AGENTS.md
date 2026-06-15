@@ -42,6 +42,32 @@ MyHome is designed with the following core principles (from README):
 
 These principles ensure resilience, privacy, and independence from third-party services, while remaining compatible with the manufacturers' own apps (e.g., Shelly app & Cloud).
 
+### Resilience Rules for Agents
+
+Two rules must hold for every change. Check them before marking a task done.
+
+#### Rule 1 — Internet-optional
+
+The system must stay fully functional on the local LAN when the internet is unreachable. Any code that reaches an external URL (weather APIs, firmware update servers, cloud dashboards, package registries at runtime) must:
+
+1. Set an explicit HTTP/dial timeout (no infinite waits).
+2. Return a cached value, a zero value, or a no-op — never an error that propagates up and kills unrelated functionality.
+3. Log the failure at `warn` level and continue.
+
+**Violation examples**: a goroutine that blocks indefinitely on a DNS lookup; a startup function that `log.Fatal`s when a weather endpoint is unreachable; an HTTP handler that returns 500 because a cloud API is down.
+
+**Test signal**: if you add an external call, add a test (or at minimum a comment) that proves the feature degrades cleanly when the call fails.
+
+#### Rule 2 — Daemon-optional per device
+
+Each Shelly device must keep operating normally when the `myhome` daemon is down. Device scripts run on the device firmware (Espruino/JS) and must not rely on the daemon for their core function.
+
+- Cross-device flows implemented *through* the daemon (device A → MQTT → daemon → device B) are acceptable but must be documented as "degraded when daemon is down".
+- A device's local automation (heater script, watchdog, BLU listener) must keep working with only the MQTT broker running and no daemon.
+- When refactoring logic from a device script into the daemon, the PR description must name the degraded mode explicitly.
+
+**Violation examples**: moving a script's keep-alive timer into a daemon goroutine; making a device's switch behaviour depend on a live RPC call to `myhome/rpc`; removing a device-side fallback because "the daemon handles it now".
+
 ---
 
 ## Shelly Device Scripting
@@ -207,6 +233,20 @@ var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : n
 Uncaught Error: Too many calls in progress
 ```
 
+This error has **two distinct causes** — both hit the same 5-concurrent-RPC limit but for different reasons:
+
+**Cause A — too many nested callbacks** (the nesting depth issue above).
+
+**Cause B — `Shelly.call` inside a `for` loop.** On the real device `Shelly.call` is asynchronous and returns immediately; a `for` loop dispatches all iterations before any response arrives, exhausting the 5-concurrent budget even with zero nesting depth.
+
+```javascript
+// DANGEROUS — fires N concurrent Shelly.call invocations
+for (var i = 0; i < items.length; i++) {
+  Shelly.call("KVS.Set", { key: keys[i], value: vals[i] }, onDone);
+}
+// Use queueTask() for each iteration instead (see task queue pattern below)
+```
+
 **Solutions**:
 
 1. **Use a task queue** - Queue async operations to execute sequentially via a single recurring timer (recommended)
@@ -241,6 +281,7 @@ function processTaskQueue() {
 function queueTask(task) {
   TASK_QUEUE.push(task);
   if (!TASK_TIMER) {
+    // NOTE: this recurring timer counts against the 5-timer-per-script budget.
     TASK_TIMER = Timer.set(200, true, processTaskQueue);
   }
 }
@@ -297,7 +338,69 @@ function loadData(callback) {
 }
 ```
 
-#### Script Lifecycle Logging
+#### Observability: Script Event Emissions
+
+Scripts must call `Shelly.emitEvent(name, data)` for any change a human operator might want to know about — schedule decisions, safety actions, pump start/stop, mode changes. These flow through the device's standard `NotifyEvent` MQTT notification (`<device_id>/events/rpc`), are picked up by the daemon's Gen2 listener (`internal/myhome/shelly/gen2/listener.go`), and are stored in the events database where the web UI and `myhome ctl events` can display them.
+
+#### When to emit
+
+| Category | Examples | Severity |
+|---|---|---|
+| Schedule decisions | daily run-window computed, summer/winter mode selected | `info` |
+| Start/stop | pump started at speed X, pump stopped | `info` |
+| Safety actions | water-supply protection activated, anti-cycling fuse tripped | `warn` |
+| Restoration | pump restored after water supply turned off | `info` |
+
+**Rule of thumb**: if it would make sense as a line in a physical maintenance logbook, emit it.
+
+#### How to call
+
+```javascript
+// Fire-and-forget — does NOT count against the 5-concurrent-RPC limit.
+Shelly.emitEvent("pool.run_window", {
+  mode: "summer",
+  max_temp_c: 28.5,
+  run_hours: 7.3,
+  start_h: 9.5,   // fractional hour — 9.5 means 09:30
+  stop_h: 16.8
+});
+```
+
+The firmware publishes a standard `NotifyEvent` to `<device_id>/events/rpc` with `component: "script:<id>"`. The daemon's Gen2 listener (`internal/myhome/shelly/gen2/listener.go`) catches this and records it exactly like any other device event. The second argument is stored **nested under a `"data"` key** in the event's `data` column:
+
+```json
+{
+  "component": "script:1",
+  "event": "pool.run_window",
+  "id": 1,
+  "ts": 1234567890,
+  "data": { "mode": "summer", "max_temp_c": 28.5, "run_hours": 7.3, "start_h": 9.5, "stop_h": 16.8 }
+}
+```
+
+This is proven by captured real-device traffic — see `pkg/shelly/mqtt/testdata/notify_event__shelly1minig3__script_3__remote_button_event.json`.
+
+#### Naming convention
+
+- Format: `<script_name>.<verb>` — lowercase, underscores only: `pool.pump_start`, `pool.fuse_tripped`.
+- Use the script's `SCRIPT_NAME` constant as the prefix so events are grouped in the UI.
+- Name the specific occurrence, not a generic noun: `pool.pump_start` not `pool.event`.
+
+#### Data payload guidelines
+
+- Include enough context to understand the event without cross-referencing other state.
+- Use `snake_case` field names.
+- Include units in the name when non-obvious: `max_temp_c`, `run_hours`, not `temp`, `run`.
+- Do not include timestamps — the event already has `ts`.
+- Keep payloads small (under ~200 bytes). Avoid embedding arrays or large structures.
+
+#### Severity for new event types
+
+Severity is assigned by `internal/myhome/shelly/gen2/listener.go:severityFor()`. New event names default to `"info"`. When you add events that represent a degraded state or a safety interrupt, also add the event name to `severityFor()` with `"warn"` or `"alarm"` — do this in the same commit as the JS change.
+
+---
+
+### Script Lifecycle Logging
 
 Always add startup and stop logging to Shelly scripts:
 
@@ -359,12 +462,22 @@ This rule applies to all continuations after:
 ### Resource Limits
 
 **Official limits per script:**
-- No more than **5 timers**
+- No more than **5 timers** — the task queue drain timer counts against this budget
 - No more than **5 event subscriptions**
 - No more than **5 status change subscriptions**
-- No more than **5 RPC calls** (concurrent)
+- No more than **5 RPC calls** (concurrent) — both nesting depth *and* for-loop dispatch contribute; see Callback Depth Limits above
 - No more than **10 MQTT topic subscriptions**
 - No more than **5 HTTP registered endpoints**
+
+**Per-device script count limit (varies by model):**
+
+The number of scripts that can run simultaneously on a single device depends on the hardware. Observed limits:
+
+| Model | Max enabled scripts |
+|---|---|
+| Shelly 1 Mini G3 (`shelly1minig3`) | 3 |
+
+Other models are not yet catalogued here — add entries as you hit them. Attempting to enable a script beyond the limit returns: `"Reached the maximum N of enabled scripts"` (error code -108).
 
 ### KVS Key Naming Convention
 
@@ -1203,6 +1316,40 @@ mac, err := blu.ResolveMac(ctx, identifier)
   - `debug`: Enable/disable debugging
   - `list`: List scripts on device(s)
   - `start/stop/delete`: Script lifecycle management
+
+### Developer Tools
+
+One-off Go programs in `tools/`. Each is its own workspace module — always add new ones with `go work use ./tools/<name>`. Run from the repo root.
+
+| Tool | Purpose |
+|---|---|
+| `tools/classify-events/` | Classifies raw Shelly MQTT event dumps → test fixtures in `pkg/shelly/mqtt/testdata/` |
+| `tools/extract-pool-defaults/` | Code-gen: extracts pool-pump JS constants → `myhome/ctl/pool/pool_defaults_generated.go` |
+
+#### `tools/classify-events`
+
+Reads every `*.json` file from an events dump directory (default: `myhome/events`), groups events by `(method, component, device-type)`, writes one pretty-printed representative per shape to a testdata directory (default: `pkg/shelly/mqtt/testdata/`), then deletes all originals.
+
+```bash
+go run ./tools/classify-events                            # use defaults
+go run ./tools/classify-events <events-dir> <testdata-dir>
+```
+
+Output filenames follow the pattern:
+- `notify_status__<device-type>__<component>.json`
+- `notify_event__<device-type>__<component>__<event>.json`
+
+The testdata lives alongside `pkg/shelly/mqtt/` so it travels with that package when it is eventually extracted into its own repository.
+
+#### `tools/extract-pool-defaults`
+
+Code-generation tool invoked by `//go:generate` in `myhome/ctl/pool/generate.go`. Parses `CONFIG_SCHEMA` from `internal/shelly/scripts/pool-pump.js` and writes typed Go constants to `myhome/ctl/pool/pool_defaults_generated.go`. Run via `make generate`, not directly.
+
+```bash
+go run ./tools/extract-pool-defaults \
+    internal/shelly/scripts/pool-pump.js \
+    myhome/ctl/pool/pool_defaults_generated.go
+```
 
 ---
 

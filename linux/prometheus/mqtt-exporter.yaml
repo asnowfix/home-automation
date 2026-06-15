@@ -1,0 +1,257 @@
+# Prometheus MQTT Exporter Configuration
+# This file should be installed as /etc/prometheus/mqtt-exporter.yaml
+# It configures the exporter to consume metrics published by Shelly watchdog.js scripts
+#
+# The watchdog.js script publishes individual metrics as JSON to topics like:
+#   shelly/{device_id}/{metric_name}
+# with payload: {"value": <numeric_value>}
+
+# Logger configuration
+logging:
+  level: INFO
+  developmentMode: false
+
+# HTTP server configuration
+server:
+  port: 8079
+
+# MQTT client configuration
+mqtt:
+  # MQTT broker connection - adjust host/port as needed
+  host: "tcp://localhost"
+  port: 1883
+  username: ""
+  password: ""
+  timeout: 3s
+
+# Internal cache configuration
+cache:
+  # Keep metrics for 60 seconds - watchdog.js publishes every 30s by default
+  expiration: 60s
+
+# Metrics configuration
+# Each metric definition maps an MQTT topic pattern to a Prometheus metric
+# Topic pattern: shelly/{device_id}/{metric_name}
+# Payload format: {"value": <number>}
+metrics:
+  # System uptime counter
+  - mqtt_topic: "shelly/+/uptime_seconds"
+    prom_name: "shelly_uptime_seconds"
+    type: "counter"
+    help: "System uptime in seconds"
+    json_field: "value"
+    topic_labels:
+      - device_id: 1
+
+  # System RAM size
+  - mqtt_topic: "shelly/+/ram_size_bytes"
+    prom_name: "shelly_ram_size_bytes"
+    type: "gauge"
+    help: "Internal board RAM size in bytes"
+    json_field: "value"
+    topic_labels:
+      - device_id: 1
+
+  # System free RAM
+  - mqtt_topic: "shelly/+/ram_free_bytes"
+    prom_name: "shelly_ram_free_bytes"
+    type: "gauge"
+    help: "Internal board free RAM size in bytes"
+    json_field: "value"
+    topic_labels:
+      - device_id: 1
+
+  # Switch 0 power consumption
+  - mqtt_topic: "shelly/+/switch_0_power_watts"
+    prom_name: "shelly_switch_power_watts"
+    type: "gauge"
+    help: "Instant power consumption in watts"
+    json_field: "value"
+    const_labels:
+      - switch: "switch:0"
+    topic_labels:
+      - device_id: 1
+
+  # Switch 0 voltage
+  - mqtt_topic: "shelly/+/switch_0_voltage_volts"
+    prom_name: "shelly_switch_voltage_volts"
+    type: "gauge"
+    help: "Instant voltage in volts"
+    json_field: "value"
+    const_labels:
+      - switch: "switch:0"
+    topic_labels:
+      - device_id: 1
+
+  # Switch 0 current
+  - mqtt_topic: "shelly/+/switch_0_current_amperes"
+    prom_name: "shelly_switch_current_amperes"
+    type: "gauge"
+    help: "Instant current in amperes"
+    json_field: "value"
+    const_labels:
+      - switch: "switch:0"
+    topic_labels:
+      - device_id: 1
+
+  # Switch 0 temperature
+  - mqtt_topic: "shelly/+/switch_0_temperature_celsius"
+    prom_name: "shelly_switch_temperature_celsius"
+    type: "gauge"
+    help: "Temperature of the device in celsius"
+    json_field: "value"
+    const_labels:
+      - switch: "switch:0"
+    topic_labels:
+      - device_id: 1
+
+  # Switch 0 total power consumption
+  - mqtt_topic: "shelly/+/switch_0_power_total"
+    prom_name: "shelly_switch_power_total"
+    type: "counter"
+    help: "Accumulated energy consumed in watts hours"
+    json_field: "value"
+    const_labels:
+      - switch: "switch:0"
+    topic_labels:
+      - device_id: 1
+
+  # Switch 0 output state
+  - mqtt_topic: "shelly/+/switch_0_output"
+    prom_name: "shelly_switch_output"
+    type: "gauge"
+    help: "Switch state (1=on, 0=off)"
+    json_field: "value"
+    const_labels:
+      - switch: "switch:0"
+    topic_labels:
+      - device_id: 1
+
+  # Switch 0 activation events (on/off transitions)
+  - mqtt_topic: "shelly/+/switch_0_activated"
+    prom_name: "shelly_switch_activated_total"
+    type: "counter"
+    help: "Total number of switch activation events (on transitions)"
+    json_field: "value"
+    const_labels:
+      - switch: "switch:0"
+    topic_labels:
+      - device_id: 1
+
+  - mqtt_topic: "shelly/+/switch_0_deactivated"
+    prom_name: "shelly_switch_deactivated_total"
+    type: "counter"
+    help: "Total number of switch deactivation events (off transitions)"
+    json_field: "value"
+    const_labels:
+      - switch: "switch:0"
+    topic_labels:
+      - device_id: 1
+
+  # ========================================
+  # Gen1 H&T Device Metrics
+  # ========================================
+  # Topic format: shellies/{device-id}/sensor/{metric}
+  # Payload: Plain numeric value (e.g., "22.5")
+
+  # Gen1 Temperature
+  - mqtt_topic: "shellies/+/sensor/temperature"
+    prom_name: "shelly_gen1_temperature_celsius"
+    type: "gauge"
+    help: "Temperature from Gen1 H&T sensor in Celsius"
+    topic_labels:
+      - device_id: 1
+
+  # Gen1 Humidity
+  - mqtt_topic: "shellies/+/sensor/humidity"
+    prom_name: "shelly_gen1_humidity_percent"
+    type: "gauge"
+    help: "Humidity from Gen1 H&T sensor in percent"
+    topic_labels:
+      - device_id: 1
+
+  # Gen1 Battery Voltage
+  - mqtt_topic: "shellies/+/sensor/battery"
+    prom_name: "shelly_gen1_battery_volts"
+    type: "gauge"
+    help: "Battery voltage from Gen1 sensor in volts"
+    topic_labels:
+      - device_id: 1
+
+  # ========================================
+  # BLU Device Metrics (BTHome Protocol)
+  # ========================================
+  # Topic format: shelly-blu/events/{mac}
+  # Payload: JSON with BTHome decoded data
+
+  # BLU Temperature
+  - mqtt_topic: "shelly-blu/events/+"
+    prom_name: "shelly_blu_temperature_celsius"
+    type: "gauge"
+    help: "Temperature from Shelly BLU device in Celsius"
+    json_field: "temperature"
+    topic_labels:
+      - mac: 2
+
+  # BLU Humidity
+  - mqtt_topic: "shelly-blu/events/+"
+    prom_name: "shelly_blu_humidity_percent"
+    type: "gauge"
+    help: "Humidity from Shelly BLU device in percent"
+    json_field: "humidity"
+    topic_labels:
+      - mac: 2
+
+  # BLU Battery
+  - mqtt_topic: "shelly-blu/events/+"
+    prom_name: "shelly_blu_battery_percent"
+    type: "gauge"
+    help: "Battery level from Shelly BLU device in percent"
+    json_field: "battery"
+    topic_labels:
+      - mac: 2
+
+  # BLU Motion
+  - mqtt_topic: "shelly-blu/events/+"
+    prom_name: "shelly_blu_motion"
+    type: "gauge"
+    help: "Motion detection from Shelly BLU device (0=clear, 1=detected)"
+    json_field: "motion"
+    topic_labels:
+      - mac: 2
+
+  # BLU Button
+  - mqtt_topic: "shelly-blu/events/+"
+    prom_name: "shelly_blu_button_total"
+    type: "counter"
+    help: "Button press count from Shelly BLU device"
+    json_field: "button"
+    topic_labels:
+      - mac: 2
+
+  # BLU Window
+  - mqtt_topic: "shelly-blu/events/+"
+    prom_name: "shelly_blu_window"
+    type: "gauge"
+    help: "Window state from Shelly BLU device (0=closed, 1=open)"
+    json_field: "window"
+    topic_labels:
+      - mac: 2
+
+  # BLU Illuminance
+  - mqtt_topic: "shelly-blu/events/+"
+    prom_name: "shelly_blu_illuminance_lux"
+    type: "gauge"
+    help: "Illuminance from Shelly BLU device in lux"
+    json_field: "illuminance"
+    topic_labels:
+      - mac: 2
+
+  # BLU RSSI (signal strength)
+  - mqtt_topic: "shelly-blu/events/+"
+    prom_name: "shelly_blu_rssi_dbm"
+    type: "gauge"
+    help: "Signal strength from Shelly BLU device in dBm"
+    json_field: "rssi"
+    topic_labels:
+      - mac: 2

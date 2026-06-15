@@ -16,6 +16,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/ctl/mqtt"
 	"github.com/asnowfix/home-automation/myhome/ctl/open"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	"github.com/asnowfix/home-automation/myhome/ctl/garden"
 	"github.com/asnowfix/home-automation/myhome/ctl/pool"
 	"github.com/asnowfix/home-automation/myhome/ctl/room"
 	"github.com/asnowfix/home-automation/myhome/ctl/sfr"
@@ -125,7 +126,7 @@ var Cmd = &cobra.Command{
 }
 
 func init() {
-	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "P", "", "write CPU profile to `file`")
+	Cmd.PersistentFlags().StringVarP(&options.Flags.CpuProfile, "cpuprofile", "C", "", "write CPU profile to `file`")
 	Cmd.PersistentFlags().DurationVarP(&options.Flags.Wait, "wait", "w", options.COMMAND_DEFAULT_TIMEOUT, "Maximum time to wait for command to finish (0 = wait indefinitely)")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Verbose, "verbose", "v", false, "verbose output (info level, mutually exclusive with --debug and --quiet)")
 	Cmd.PersistentFlags().BoolVarP(&options.Flags.Debug, "debug", "d", false, "debug output (debug level, shows V(1) logs, mutually exclusive with --verbose and --quiet)")
@@ -157,6 +158,7 @@ func init() {
 	Cmd.AddCommand(temperature.Cmd)
 	Cmd.AddCommand(heater.Cmd)
 	Cmd.AddCommand(pool.PoolCmd())
+	Cmd.AddCommand(garden.GardenCmd())
 	Cmd.AddCommand(room.Cmd)
 	Cmd.AddCommand(eventsctl.Cmd)
 }

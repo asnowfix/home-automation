@@ -40,20 +40,25 @@ func ResolveMac(ctx context.Context, identifier string) (string, error) {
 	device := (*devices)[0]
 	deviceID := device.Id()
 
-	// Check if this is a BLU device (ID starts with "shellyblu-")
-	if !strings.HasPrefix(deviceID, "shellyblu-") {
-		return "", fmt.Errorf("device %q is not a BLU device (id: %s)", identifier, deviceID)
+	mac, err = macFromBluDeviceID(deviceID)
+	if err != nil {
+		return "", fmt.Errorf("device %q: %w", identifier, err)
 	}
+	return mac, nil
+}
 
-	// Extract MAC from device ID: "shellyblu-e8e07ea60c6f" -> "e8e07ea60c6f"
-	macHex := strings.TrimPrefix(deviceID, "shellyblu-")
-
-	// Normalize to colon-separated format
-	mac = tools.NormalizeMac(macHex)
-	if mac == "" || !isValidMac(mac) {
-		return "", fmt.Errorf("failed to extract valid MAC from device %q (id: %s)", identifier, deviceID)
+// macFromBluDeviceID extracts and normalizes the MAC address from a Shelly BLU device ID.
+// BLU device IDs follow the pattern <model>-<mac12hex> where model starts with "shellyblu".
+// Examples: "shellyblu-e8e07ea60c6f", "shellyblumotion1-e8e07ed0f989", "shellyblubutton1-..."
+func macFromBluDeviceID(deviceID string) (string, error) {
+	if !strings.HasPrefix(deviceID, "shellyblu") {
+		return "", fmt.Errorf("not a BLU device (id: %s)", deviceID)
 	}
-
+	parts := strings.Split(deviceID, "-")
+	mac := tools.NormalizeMac(parts[len(parts)-1])
+	if !isValidMac(mac) {
+		return "", fmt.Errorf("failed to extract valid MAC from BLU device ID %q", deviceID)
+	}
 	return mac, nil
 }
 

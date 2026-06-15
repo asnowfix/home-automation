@@ -1,0 +1,15 @@
+{
+  "dst": "shellyplus1-b8d61a85ed58/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "ble",
+        "event": "infos_updated",
+        "ts": 1755247298.74
+      }
+    ],
+    "ts": 1755247298.74
+  },
+  "src": "shellyplus1-b8d61a85ed58"
+}

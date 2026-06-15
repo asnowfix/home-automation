@@ -17,6 +17,10 @@
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
 
+# Coverage artifacts (make cover)
+/coverage/
+/coverage.txt
+
 # SQLite database file
 *.db*
 
@@ -66,3 +70,4 @@ dist/metadata.json
 internal/myhome/ui/static/alpine.min.js
 internal/myhome/ui/static/htmx.min.js
 myhome/ctl/pool/pool_defaults_generated.go
+myhome/ctl/garden/garden_defaults_generated.go

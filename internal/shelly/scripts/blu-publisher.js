@@ -76,7 +76,7 @@ const CONFIG = {
   // Specify the destination event where the decoded BLE data will be emitted. It allows for easy identification by other applications/scripts
   eventName: "shelly-blu",
 
-  kvsPrefix: "follow/shelly-blu/",
+  kvsPrefix: "publish/shelly-blu/",
 
   // If the script owns the scanner and this value is set to true, the scan will be active.
   // If the script does not own the scanner, it may remain passive even when set to true.
@@ -86,8 +86,8 @@ const CONFIG = {
 
 var STATE = {
   // In-memory cache of follows loaded from KVS by loadFollowsFromKVS()
-  // KVS keys are set externally via "myhome ctl follow blu" command
-  // Each followed MAC has its own KVS key: follow/shelly-blu/<mac>
+  // KVS keys are set externally via "myhome ctl blu publish" command
+  // Each followed MAC has its own KVS key: publish/shelly-blu/<mac>
   // Empty map = publish ALL BLU events (no filtering)
   follows: {}
 };

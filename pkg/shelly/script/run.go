@@ -622,6 +622,11 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		log.V(1).Info("MQTT.setStatusHandler placeholder")
 		return goja.Undefined()
 	})
+	// MQTT.isConnected() — https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#mqttisconnected
+	// The mock client is always treated as connected.
+	mqttObj.Set("isConnected", func(call goja.FunctionCall) goja.Value {
+		return vm.ToValue(true)
+	})
 	vm.Set("MQTT", mqttObj)
 
 	// Script object
@@ -776,6 +781,37 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 				}
 			}
 			return nil, nil
+		},
+		// KVS.List — enumerate keys matching an optional prefix
+		// https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/KVS#kvslist
+		"kvs.list": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
+			prefix := ""
+			if !goja.IsUndefined(params) && !goja.IsNull(params) {
+				paramsObj := params.ToObject(vm)
+				if p := paramsObj.Get("prefix"); p != nil && !goja.IsUndefined(p) && !goja.IsNull(p) {
+					prefix = p.String()
+				}
+			}
+
+			kvs := deviceState.GetKVS()
+			keys := make([]string, 0)
+			for k := range kvs {
+				if strings.HasPrefix(k, prefix) {
+					keys = append(keys, k)
+				}
+			}
+
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					result := map[string]interface{}{"keys": keys}
+					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
+					if err != nil {
+						return nil, err
+					}
+					return ret.Export(), nil
+				}
+			}
+			return map[string]interface{}{"keys": keys}, nil
 		},
 		"kvs.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/KVS#kvsget

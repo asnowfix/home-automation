@@ -26,6 +26,7 @@ var Cmd = &cobra.Command{
 func init() {
 	Cmd.AddCommand(call.Cmd)
 	Cmd.AddCommand(follow.Cmd)
+	Cmd.AddCommand(follow.UnfollowCmd)
 	Cmd.AddCommand(jobs.Cmd)
 	Cmd.AddCommand(mqtt.Cmd)
 	Cmd.AddCommand(kvs.Cmd)

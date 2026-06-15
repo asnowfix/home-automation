@@ -1,0 +1,18 @@
+{
+  "dst": "shellyplusi4-c4d8d554ad6c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "cfg_rev": 40,
+        "component": "sys",
+        "event": "component_added",
+        "restart_required": false,
+        "target": "script:1",
+        "ts": 1759263932.53
+      }
+    ],
+    "ts": 1759263932.53
+  },
+  "src": "shellyplusi4-c4d8d554ad6c"
+}

@@ -1,0 +1,15 @@
+{
+  "dst": "shelly1minig3-54320464074c/events",
+  "method": "NotifyStatus",
+  "params": {
+    "script:1": {
+      "error_msg": null,
+      "errors": [
+        "out_of_memory"
+      ],
+      "running": false
+    },
+    "ts": 1758225505.98
+  },
+  "src": "shelly1minig3-54320464074c"
+}

@@ -1,0 +1,20 @@
+{
+  "dst": "shelly1minig3-54320464074c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "script:3",
+        "data": {
+          "component": "switch:0",
+          "src": "shellyplus1-b8d61a85ed58"
+        },
+        "event": "remote-input-event",
+        "id": 3,
+        "ts": 1758231446.6
+      }
+    ],
+    "ts": 1758231446.6
+  },
+  "src": "shelly1minig3-54320464074c"
+}

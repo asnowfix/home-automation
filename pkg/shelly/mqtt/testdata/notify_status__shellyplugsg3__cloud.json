@@ -1,0 +1,11 @@
+{
+  "dst": "shellyplugsg3-b08184a53f24/events",
+  "method": "NotifyStatus",
+  "params": {
+    "cloud": {
+      "connected": false
+    },
+    "ts": 1755535675.79
+  },
+  "src": "shellyplugsg3-b08184a53f24"
+}

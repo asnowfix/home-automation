@@ -62,7 +62,12 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 		log.Error(err, "Unable to get MQTT client to reach device")
 		return nil, err
 	}
-	config.Server = mc.BrokerUrl().String()
+	deviceServer, err := mc.DeviceServer()
+	if err != nil {
+		log.Error(err, "Unable to resolve device-facing MQTT broker address")
+		return nil, err
+	}
+	config.Server = deviceServer
 
 	out, err = sd.CallE(ctx, via, shellymqtt.SetConfig.String(), shellymqtt.SetConfigRequest{
 		Config: *config,

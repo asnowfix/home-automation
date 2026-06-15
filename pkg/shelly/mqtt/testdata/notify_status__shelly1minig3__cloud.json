@@ -1,0 +1,11 @@
+{
+  "dst": "shelly1minig3-54320464074c/events",
+  "method": "NotifyStatus",
+  "params": {
+    "cloud": {
+      "connected": true
+    },
+    "ts": 1755025632.54
+  },
+  "src": "shelly1minig3-54320464074c"
+}

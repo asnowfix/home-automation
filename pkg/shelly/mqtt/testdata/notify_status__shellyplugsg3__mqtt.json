@@ -1,0 +1,11 @@
+{
+  "dst": "shellyplugsg3-e4b3233885e8/events",
+  "method": "NotifyStatus",
+  "params": {
+    "mqtt": {
+      "connected": true
+    },
+    "ts": 1755252384.94
+  },
+  "src": "shellyplugsg3-e4b3233885e8"
+}

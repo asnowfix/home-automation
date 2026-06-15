@@ -1,0 +1,23 @@
+{
+  "dst": "shelly1minig3-54320464074c/events",
+  "method": "NotifyEvent",
+  "params": {
+    "events": [
+      {
+        "component": "script:3",
+        "data": {
+          "event": "single_push",
+          "eventTime": 1758226433755.712,
+          "src": "shellyplus1-b8d61a85ed58",
+          "switchId": "switch:0",
+          "switchIndex": 0
+        },
+        "event": "remote-button-event",
+        "id": 3,
+        "ts": 1758226433.76
+      }
+    ],
+    "ts": 1758226433.76
+  },
+  "src": "shelly1minig3-54320464074c"
+}

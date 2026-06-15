@@ -27,11 +27,27 @@ per-zone water deficits, today's planned watering, and active state.`,
 		}
 		via := types.ChannelMqtt
 
-		resp, err := kvs.GetManyValues(ctx, hlog.Logger, via, sd, "script/garden/*")
-		if err != nil {
-			return fmt.Errorf("KVS.GetMany failed: %w", err)
+		// KVS.GetMany is bounded by MQTT message size (~22 items per call for
+		// this device). Split into 4 targeted prefix calls and merge results.
+		allItems := make(map[string]any)
+		prefixes := []string{
+			"script/garden/zone0*",
+			"script/garden/zone1*",
+			"script/garden/zone2*",
+			"script/garden/*", // global config + plan keys (alphabetically first)
 		}
-		if resp == nil || len(resp.Items) == 0 {
+		for _, prefix := range prefixes {
+			r, rErr := kvs.GetManyValues(ctx, hlog.Logger, via, sd, prefix)
+			if rErr != nil {
+				return fmt.Errorf("KVS.GetMany(%s) failed: %w", prefix, rErr)
+			}
+			if r != nil {
+				for k, v := range r.Items {
+					allItems[k] = v
+				}
+			}
+		}
+		if len(allItems) == 0 {
 			fmt.Printf("No garden KVS entries found on %s.\n", sd.Name())
 			fmt.Printf("Run 'ctl garden setup %s' first.\n", args[0])
 			return nil
@@ -39,8 +55,8 @@ per-zone water deficits, today's planned watering, and active state.`,
 
 		// Collect and sort entries for stable output
 		type kv struct{ k, v string }
-		entries := make([]kv, 0, len(resp.Items))
-		for k, v := range resp.Items {
+		entries := make([]kv, 0, len(allItems))
+		for k, v := range allItems {
 			entries = append(entries, kv{k, fmt.Sprintf("%v", v)})
 		}
 		sort.Slice(entries, func(i, j int) bool { return entries[i].k < entries[j].k })

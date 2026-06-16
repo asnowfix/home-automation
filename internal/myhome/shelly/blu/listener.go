@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/events"
@@ -157,6 +158,16 @@ func StartBLUListenerWithEvents(ctx context.Context, mc mqtt.Client, registry De
 	return nil
 }
 
+// bluData marshals a map to a compact JSON *string for the event Data field.
+func bluData(fields map[string]any) *string {
+	b, err := json.Marshal(fields)
+	if err != nil {
+		return nil
+	}
+	s := string(b)
+	return &s
+}
+
 // handleBLUEventBridge maps BTHome object IDs to event log entries and tracker observations.
 func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, eventSvc *events.Service, tracker *events.SensorDailyTracker) {
 	var data BLUEventData
@@ -167,70 +178,78 @@ func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, 
 		return
 	}
 
-	// device_id = BLU sensor MAC address
-	deviceID := data.Address
+	// Use the canonical type-inferred device id so the name lookup in the UI
+	// can match the device registration record (which uses the same id).
+	deviceID := deviceIDFromCapabilities(data.Address, data)
+
+	// Use the device-side BTHome timestamp when available (0x50); fall back
+	// to the daemon's receive time so the event never displays as 1970-01-01.
+	ts := float64(time.Now().Unix())
+	if data.Timestamp != nil {
+		ts = float64(*data.Timestamp)
+	}
 
 	// Motion (0x21)
-	if data.Motion != nil {
-		if eventSvc != nil {
-			eventName := "motion.cleared"
-			if *data.Motion == 1 {
-				eventName = "motion.detected"
-			}
-			if err := eventSvc.Record(ctx, events.Event{
-				DeviceID:  deviceID,
-				Component: "motion:0",
-				Event:     eventName,
-				Severity:  "info",
-			}); err != nil {
-				log.Error(err, "Failed to record motion event", "device_id", deviceID)
-			}
+	if data.Motion != nil && eventSvc != nil {
+		eventName := "motion.cleared"
+		if *data.Motion == 1 {
+			eventName = "motion.detected"
+		}
+		if err := eventSvc.Record(ctx, events.Event{
+			Ts:        ts,
+			DeviceID:  deviceID,
+			Component: "motion:0",
+			Event:     eventName,
+			Severity:  "info",
+			Data:      bluData(map[string]any{"motion": *data.Motion, "address": data.Address, "rssi": data.RSSI}),
+		}); err != nil {
+			log.Error(err, "Failed to record motion event", "device_id", deviceID)
 		}
 	}
 
 	// Window (0x2D)
-	if data.Window != nil {
-		if eventSvc != nil {
-			eventName := "window.closed"
-			if *data.Window == 1 {
-				eventName = "window.opened"
-			}
-			if err := eventSvc.Record(ctx, events.Event{
-				DeviceID:  deviceID,
-				Component: "window:0",
-				Event:     eventName,
-				Severity:  "info",
-			}); err != nil {
-				log.Error(err, "Failed to record window event", "device_id", deviceID)
-			}
+	if data.Window != nil && eventSvc != nil {
+		eventName := "window.closed"
+		if *data.Window == 1 {
+			eventName = "window.opened"
+		}
+		if err := eventSvc.Record(ctx, events.Event{
+			Ts:        ts,
+			DeviceID:  deviceID,
+			Component: "window:0",
+			Event:     eventName,
+			Severity:  "info",
+			Data:      bluData(map[string]any{"window": *data.Window, "address": data.Address, "rssi": data.RSSI}),
+		}); err != nil {
+			log.Error(err, "Failed to record window event", "device_id", deviceID)
 		}
 	}
 
 	// Button (0x3A)
-	if data.Button != nil {
-		if eventSvc != nil {
-			if err := eventSvc.Record(ctx, events.Event{
-				DeviceID:  deviceID,
-				Component: "button:0",
-				Event:     "button.push",
-				Severity:  "info",
-			}); err != nil {
-				log.Error(err, "Failed to record button event", "device_id", deviceID)
-			}
+	if data.Button != nil && eventSvc != nil {
+		if err := eventSvc.Record(ctx, events.Event{
+			Ts:        ts,
+			DeviceID:  deviceID,
+			Component: "button:0",
+			Event:     "button.push",
+			Severity:  "info",
+			Data:      bluData(map[string]any{"button": *data.Button, "address": data.Address, "rssi": data.RSSI}),
+		}); err != nil {
+			log.Error(err, "Failed to record button event", "device_id", deviceID)
 		}
 	}
 
 	// Battery low
-	if data.Battery != nil && *data.Battery < 20 {
-		if eventSvc != nil {
-			if err := eventSvc.Record(ctx, events.Event{
-				DeviceID:  deviceID,
-				Component: "battery",
-				Event:     "battery.low",
-				Severity:  "warn",
-			}); err != nil {
-				log.Error(err, "Failed to record battery.low event", "device_id", deviceID)
-			}
+	if data.Battery != nil && *data.Battery < 20 && eventSvc != nil {
+		if err := eventSvc.Record(ctx, events.Event{
+			Ts:        ts,
+			DeviceID:  deviceID,
+			Component: "battery",
+			Event:     "battery.low",
+			Severity:  "warn",
+			Data:      bluData(map[string]any{"battery": *data.Battery, "address": data.Address, "rssi": data.RSSI}),
+		}); err != nil {
+			log.Error(err, "Failed to record battery.low event", "device_id", deviceID)
 		}
 	}
 

@@ -39,6 +39,7 @@ use (
 	./myhome/occupancy
 	./myhome/storage
 	./myhome/temperature
+	./pkg/beem
 	./pkg/devices
 	./pkg/sfr
 	./pkg/shelly

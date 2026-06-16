@@ -51,17 +51,6 @@ func getBoxIp(ctx context.Context) net.IP {
 	}
 	log = log.WithName("sfr")
 
-	// Allow explicit override via env var (useful when running remotely or when
-	// gateway discovery fails because the host is multi-homed / behind a VPN).
-	if override := os.Getenv("SFR_BOX_IP"); override != "" {
-		if ip := net.ParseIP(override); ip != nil {
-			log.Info("Using SFR box IP from SFR_BOX_IP env", "ip", ip.String())
-			boxIp = ip
-			return boxIp
-		}
-		log.Error(fmt.Errorf("invalid IP: %s", override), "SFR_BOX_IP env var ignored")
-	}
-
 	ips, err := gateway.DiscoverGateways()
 	if err != nil {
 		log.Error(err, "Failed to discover gateway")

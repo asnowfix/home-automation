@@ -8,53 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/testr"
 )
-
-// stubResolver implements mynet.Resolver for tests.
-// LookupHost returns the pre-seeded entries; everything else is a no-op.
-type stubResolver struct {
-	hosts map[string][]net.IP
-}
-
-func (r *stubResolver) WithLocalName(_ context.Context, _ string) interface{ LookupHost(context.Context, logr.Logger, string) ([]net.IP, error) } {
-	return r
-}
-func (r *stubResolver) LookupHost(_ context.Context, _ logr.Logger, host string) ([]net.IP, error) {
-	if ips, ok := r.hosts[host]; ok {
-		return ips, nil
-	}
-	return nil, net.UnknownNetworkError("not found")
-}
-
-// resolverOnly wraps stubResolver to satisfy the mynet.Resolver interface.
-// We only need the LookupHost method for resolveToIPv4, so we embed enough.
-type resolverOnly struct{ stubResolver }
-
-func (r *resolverOnly) BrowseService(ctx context.Context, service, domain string, entries chan interface{}) error {
-	return nil
-}
-func (r *resolverOnly) PublishService(ctx context.Context, instance, service, domain string, port int, txt []string, ifaces []net.Interface) (interface{}, error) {
-	return nil, nil
-}
-func (r *resolverOnly) LookupService(ctx context.Context, service string) (interface{}, error) {
-	return nil, nil
-}
-func (r *resolverOnly) WithLocalName(ctx context.Context, hostname string) interface{} { return r }
-
-// minimalResolver is a thin wrapper that satisfies only the subset of
-// mynet.Resolver used by resolveToIPv4.
-type minimalResolver struct {
-	hosts map[string][]net.IP
-}
-
-func (m *minimalResolver) LookupHost(_ context.Context, _ logr.Logger, host string) ([]net.IP, error) {
-	if ips, ok := m.hosts[host]; ok {
-		return ips, nil
-	}
-	return nil, net.UnknownNetworkError("not found")
-}
 
 // TestResolveToIPv4_RawIP verifies that a plain IPv4 string is returned as-is.
 func TestResolveToIPv4_RawIP(t *testing.T) {

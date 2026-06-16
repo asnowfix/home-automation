@@ -5,15 +5,29 @@ on:
   pull_request:
     types: [closed]
     branches: 'v[0-9]+.[0-9]+.x'
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Release branch (e.g. v0.10.x)'
+        required: true
 jobs:
   tag-patch:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     steps:
+      - name: Resolve release branch
+        id: branch
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "name=${{ inputs.branch }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ github.event.pull_request.base.ref }}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ steps.branch.outputs.name }}
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -25,7 +39,7 @@ jobs:
         id: previoustag
         run: |
           set -euo pipefail
-          BRANCH="${{ github.event.pull_request.base.ref }}"
+          BRANCH="${{ steps.branch.outputs.name }}"
           if [[ "$BRANCH" =~ ^v([0-9]+)\.([0-9]+)\.x$ ]]; then
             MAJOR="${BASH_REMATCH[1]}"
             MINOR="${BASH_REMATCH[2]}"
@@ -74,17 +88,17 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED_TAG="${{ steps.semver.outputs.v_patch }}"
-          
+
           # Build the binary
           cd myhome
           make build
-          
+
           # Get version from binary
           VERSION=$(./myhome version)
-          
+
           echo "Expected version: $EXPECTED_TAG"
           echo "Actual version: $VERSION"
-          
+
           # Check if version matches the tag (may have -dirty suffix in dev)
           if [[ "$VERSION" == "$EXPECTED_TAG" ]] || [[ "$VERSION" == "${EXPECTED_TAG}-dirty" ]]; then
             echo "✓ Version validation passed"
@@ -98,4 +112,4 @@ jobs:
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Accept: application/vnd.github.v3+json" \
               https://api.github.com/repos/${{ github.repository }}/actions/workflows/package-release.yml/dispatches \
-              -d '{"ref":"${{ steps.semver.outputs.v_patch }}","inputs":{"ref":"refs/tags/${{ steps.semver.outputs.v_patch }}","previous":"${{ steps.previoustag.outputs.tag }}","source_branch":"${{ github.event.pull_request.base.ref }}"}}' 
+              -d "{\"ref\":\"${{ steps.semver.outputs.v_patch }}\",\"inputs\":{\"ref\":\"refs/tags/${{ steps.semver.outputs.v_patch }}\",\"previous\":\"${{ steps.previoustag.outputs.tag }}\",\"source_branch\":\"${{ steps.branch.outputs.name }}\"}}"

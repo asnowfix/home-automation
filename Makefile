@@ -39,6 +39,9 @@ help:
 	@echo "  status                - Show service status"
 	@echo "  logs                  - Show service logs"
 	@echo "  test                  - Run tests across all workspace modules"
+	@echo "  cover                 - Run tests with coverage; produces coverage.txt"
+	@echo "  cover-report          - Print aggregate coverage total from coverage.txt"
+	@echo "  cover-html            - Open coverage.txt as an HTML report in the browser"
 	@echo "  tidy                  - Tidy Go modules"
 	@echo "  debpkg                - Build Debian package (Linux only, VERSION=X.Y.Z optional)"
 	@echo "  upload-release-notes  - Upload release notes to GitHub (VERSION=vX.Y.Z optional)"
@@ -112,12 +115,33 @@ test: build
 	  fi; \
 	done; exit $$rc
 
+cover: build
+	@mkdir -p coverage
+	$(GO) test -covermode=atomic -coverprofile=coverage/root.cov ./...
+	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
+	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
+	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
+	    sdir=$$(echo $$dir | tr '/' '_'); \
+	    (cd $$dir && $(GO) test -covermode=atomic -coverprofile=$(CURDIR)/coverage/$$sdir.cov ./...) || rc=1; \
+	  fi; \
+	done; \
+	echo "mode: atomic" > coverage.txt; \
+	for f in coverage/*.cov; do grep -v "^mode:" "$$f" >> coverage.txt 2>/dev/null || true; done; \
+	exit $$rc
+
+cover-report: coverage.txt
+	$(GO) tool cover -func=coverage.txt | tail -1
+
+cover-html: coverage.txt
+	$(GO) tool cover -html=coverage.txt
+
 build: generate
 	$(MAKE) -C myhome $(@)
 
 generate:
 	$(GO) generate ./internal/myhome/ui/...
 	$(GO) generate ./myhome/ctl/pool
+	$(GO) generate ./myhome/ctl/garden
 	$(GO) generate ./...
 
 # Build Debian package for current OS/ARCH (Linux only)

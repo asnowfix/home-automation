@@ -622,6 +622,11 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		log.V(1).Info("MQTT.setStatusHandler placeholder")
 		return goja.Undefined()
 	})
+	// MQTT.isConnected() — https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#mqttisconnected
+	// The mock client is always treated as connected.
+	mqttObj.Set("isConnected", func(call goja.FunctionCall) goja.Value {
+		return vm.ToValue(true)
+	})
 	vm.Set("MQTT", mqttObj)
 
 	// Script object

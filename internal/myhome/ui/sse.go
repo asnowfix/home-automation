@@ -41,6 +41,7 @@ type SSEBroadcaster struct {
 	clients map[chan string]*sseClient
 	mu      sync.Mutex
 	log     logr.Logger
+	nameFor func(string) string // optional: resolves device id → friendly name
 }
 
 // NewSSEBroadcaster creates a new SSE broadcaster
@@ -49,6 +50,15 @@ func NewSSEBroadcaster(log logr.Logger) *SSEBroadcaster {
 		clients: make(map[chan string]*sseClient),
 		log:     log.WithName("SSEBroadcaster"),
 	}
+}
+
+// SetDeviceNameResolver registers a function that maps a device id to a
+// friendly name. When set, BroadcastEvent includes a device_name field in the
+// SSE payload so live rows match the server-rendered table.
+func (b *SSEBroadcaster) SetDeviceNameResolver(fn func(string) string) {
+	b.mu.Lock()
+	b.nameFor = fn
+	b.mu.Unlock()
 }
 
 // Subscribe adds a new SSE client and returns a channel for receiving events
@@ -146,11 +156,27 @@ func (b *SSEBroadcaster) BroadcastDeviceUpdate(dv DeviceView) {
 	b.broadcast("device-update", dv)
 }
 
+// eventLogPayload is the JSON structure sent over SSE for new event log entries.
+// It extends events.Event with an optional device_name field so live rows can
+// display a friendly name without a round-trip. Existing fields are kept as-is
+// so CLI consumers (event follow) continue to work without changes.
+type eventLogPayload struct {
+	events.Event
+	DeviceName string `json:"device_name,omitempty"`
+}
+
 // BroadcastEvent broadcasts a new event log entry as JSON to all SSE clients.
 // The payload is sent as SSE event "eventlog". The web UI renders the row from JSON;
 // the CLI follow command also parses JSON from this event type.
 func (b *SSEBroadcaster) BroadcastEvent(e events.Event) {
-	b.broadcast("eventlog", e)
+	b.mu.Lock()
+	nameFor := b.nameFor
+	b.mu.Unlock()
+	payload := eventLogPayload{Event: e}
+	if nameFor != nil {
+		payload.DeviceName = nameFor(e.DeviceID)
+	}
+	b.broadcast("eventlog", payload)
 }
 
 // ServeHTTP handles SSE client connections using the broadcaster's client list

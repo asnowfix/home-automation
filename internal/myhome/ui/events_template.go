@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"bytes"
+	"encoding/json"
 	"html/template"
 	"time"
 )
@@ -33,18 +35,43 @@ func eventTemplateFuncs() template.FuncMap {
 				return ""
 			}
 		},
+		// eventDataCell renders Data as a collapsible <details> when the value is
+		// valid JSON, or a plain span otherwise. Returns template.HTML so the
+		// caller does not need to mark it safe.
+		"eventDataCell": func(s *string) template.HTML {
+			if s == nil || *s == "" {
+				return ""
+			}
+			raw := *s
+			var pretty bytes.Buffer
+			if err := json.Indent(&pretty, []byte(raw), "", "  "); err != nil {
+				// Not JSON — render as escaped plain text
+				return template.HTML("<span>" + template.HTMLEscapeString(raw) + "</span>")
+			}
+			preview := raw
+			if len(preview) > 60 {
+				preview = preview[:60] + "…"
+			}
+			return template.HTML(
+				`<details class="event-data">` +
+					`<summary><code>` + template.HTMLEscapeString(preview) + `</code></summary>` +
+					`<pre style="max-height:12em;overflow-y:auto">` + template.HTMLEscapeString(pretty.String()) + `</pre>` +
+					`</details>`,
+			)
+		},
 	}
 }
 
 // eventRowTemplate is the shared <tr> fragment for a single event.
 // Used both in the HTMX table and in BroadcastEvent SSE push.
+// Columns: Time | Device (name + id below) | Component | Event | Severity | Data
 const eventRowTemplate = `<tr class="{{severityClass .Severity}}">
   <td>{{formatTime .Ts}}</td>
-  <td>{{if .DeviceName}}<span title="{{.DeviceID}}">{{.DeviceName}}</span>{{else}}{{.DeviceID}}{{end}}</td>
+  <td>{{if .DeviceName}}{{.DeviceName}}<br><code class="is-size-7 has-text-grey">{{.DeviceID}}</code>{{else}}{{.DeviceID}}{{end}}</td>
   <td>{{.Component}}</td>
   <td>{{.Event}}</td>
   <td>{{.Severity}}</td>
-  <td>{{truncate .Data}}</td>
+  <td>{{eventDataCell .Data}}</td>
 </tr>`
 
 // eventsRowsTemplate renders a list of <tr> rows plus a "Load more" button.
@@ -207,14 +234,56 @@ const eventLogPageHTML = `<!doctype html>
             try { ev = JSON.parse(e.data); } catch(_) { return; }
             var ts = new Date(ev.ts * 1000).toISOString().replace('T', ' ').substring(0, 19);
             var sevClass = {'alarm': 'has-text-danger', 'warn': 'has-text-warning', 'debug': 'has-text-grey-light'}[ev.severity] || '';
-            var data = ev.data ? (ev.data.length > 60 ? ev.data.substring(0, 60) + '…' : ev.data) : '';
             var tr = document.createElement('tr');
             if (sevClass) { tr.className = sevClass; }
-            ['ts_fmt', 'device_id', 'component', 'event', 'severity', 'data_trunc'].forEach(function(f, i) {
+            // Time
+            var timeTd = document.createElement('td');
+            timeTd.textContent = ts;
+            tr.appendChild(timeTd);
+            // Device: name on top, id below in small grey code
+            var deviceTd = document.createElement('td');
+            if (ev.device_name) {
+              deviceTd.appendChild(document.createTextNode(ev.device_name));
+              deviceTd.appendChild(document.createElement('br'));
+              var idCode = document.createElement('code');
+              idCode.className = 'is-size-7 has-text-grey';
+              idCode.textContent = ev.device_id || '';
+              deviceTd.appendChild(idCode);
+            } else {
+              deviceTd.textContent = ev.device_id || '';
+            }
+            tr.appendChild(deviceTd);
+            // Component | Event | Severity
+            [ev.component, ev.event, ev.severity].forEach(function(val) {
               var td = document.createElement('td');
-              td.textContent = [ts, ev.device_id, ev.component, ev.event, ev.severity, data][i];
+              td.textContent = val || '';
               tr.appendChild(td);
             });
+            // Data cell — collapsible pretty JSON when possible
+            var dataTd = document.createElement('td');
+            if (ev.data) {
+              try {
+                var parsed = JSON.parse(ev.data);
+                var pretty = JSON.stringify(parsed, null, 2);
+                var preview = ev.data.length > 60 ? ev.data.substring(0, 60) + '…' : ev.data;
+                var details = document.createElement('details');
+                details.className = 'event-data';
+                var summary = document.createElement('summary');
+                var code = document.createElement('code');
+                code.textContent = preview;
+                summary.appendChild(code);
+                var pre = document.createElement('pre');
+                pre.style.maxHeight = '12em';
+                pre.style.overflowY = 'auto';
+                pre.textContent = pretty;
+                details.appendChild(summary);
+                details.appendChild(pre);
+                dataTd.appendChild(details);
+              } catch(_) {
+                dataTd.textContent = ev.data;
+              }
+            }
+            tr.appendChild(dataTd);
             tbody.insertBefore(tr, tbody.firstChild);
           });
 

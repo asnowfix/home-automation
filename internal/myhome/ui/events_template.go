@@ -55,7 +55,7 @@ func eventTemplateFuncs() template.FuncMap {
 			return template.HTML(
 				`<details class="event-data">` +
 					`<summary><code>` + template.HTMLEscapeString(preview) + `</code></summary>` +
-					`<pre>` + template.HTMLEscapeString(pretty.String()) + `</pre>` +
+					`<pre style="max-height:12em;overflow-y:auto">` + template.HTMLEscapeString(pretty.String()) + `</pre>` +
 					`</details>`,
 			)
 		},
@@ -64,15 +64,14 @@ func eventTemplateFuncs() template.FuncMap {
 
 // eventRowTemplate is the shared <tr> fragment for a single event.
 // Used both in the HTMX table and in BroadcastEvent SSE push.
-// Columns: Time | Device (name or id) | Component | Event | Severity | Data | Device ID
+// Columns: Time | Device (name + id below) | Component | Event | Severity | Data
 const eventRowTemplate = `<tr class="{{severityClass .Severity}}">
   <td>{{formatTime .Ts}}</td>
-  <td>{{if .DeviceName}}{{.DeviceName}}{{else}}{{.DeviceID}}{{end}}</td>
+  <td>{{if .DeviceName}}{{.DeviceName}}<br><code class="is-size-7 has-text-grey">{{.DeviceID}}</code>{{else}}{{.DeviceID}}{{end}}</td>
   <td>{{.Component}}</td>
   <td>{{.Event}}</td>
   <td>{{.Severity}}</td>
   <td>{{eventDataCell .Data}}</td>
-  <td><code class="is-size-7 has-text-grey">{{.DeviceID}}</code></td>
 </tr>`
 
 // eventsRowsTemplate renders a list of <tr> rows plus a "Load more" button.
@@ -80,7 +79,7 @@ const eventsRowsTemplate = `{{range .Events}}` + eventRowTemplate + `
 {{end}}
 {{if .Events}}
 <tr id="load-more-row">
-  <td colspan="7" class="has-text-centered">
+  <td colspan="6" class="has-text-centered">
     <button class="button is-small is-light"
             hx-get="/htmx/events/more?offset={{.Offset}}&device={{.Device}}&type={{.Type}}&severity={{.Severity}}"
             hx-swap="outerHTML"
@@ -129,7 +128,6 @@ const eventsTableTemplate = `<form id="events-filter-form"
         <th>Event</th>
         <th>Severity</th>
         <th>Data</th>
-        <th>Device ID</th>
       </tr>
     </thead>
     <tbody id="events-tbody">
@@ -137,7 +135,7 @@ const eventsTableTemplate = `<form id="events-filter-form"
       {{end}}
       {{if .Events}}
       <tr id="load-more-row">
-        <td colspan="7" class="has-text-centered">
+        <td colspan="6" class="has-text-centered">
           <button class="button is-small is-light"
                   hx-get="/htmx/events/more?offset={{.Offset}}&device={{.Device}}&type={{.Type}}&severity={{.Severity}}"
                   hx-swap="outerHTML"
@@ -236,11 +234,27 @@ const eventLogPageHTML = `<!doctype html>
             try { ev = JSON.parse(e.data); } catch(_) { return; }
             var ts = new Date(ev.ts * 1000).toISOString().replace('T', ' ').substring(0, 19);
             var sevClass = {'alarm': 'has-text-danger', 'warn': 'has-text-warning', 'debug': 'has-text-grey-light'}[ev.severity] || '';
-            var deviceLabel = ev.device_name || ev.device_id;
             var tr = document.createElement('tr');
             if (sevClass) { tr.className = sevClass; }
-            // Columns: Time | Device | Component | Event | Severity | Data | Device ID
-            [ts, deviceLabel, ev.component, ev.event, ev.severity].forEach(function(val) {
+            // Time
+            var timeTd = document.createElement('td');
+            timeTd.textContent = ts;
+            tr.appendChild(timeTd);
+            // Device: name on top, id below in small grey code
+            var deviceTd = document.createElement('td');
+            if (ev.device_name) {
+              deviceTd.appendChild(document.createTextNode(ev.device_name));
+              deviceTd.appendChild(document.createElement('br'));
+              var idCode = document.createElement('code');
+              idCode.className = 'is-size-7 has-text-grey';
+              idCode.textContent = ev.device_id || '';
+              deviceTd.appendChild(idCode);
+            } else {
+              deviceTd.textContent = ev.device_id || '';
+            }
+            tr.appendChild(deviceTd);
+            // Component | Event | Severity
+            [ev.component, ev.event, ev.severity].forEach(function(val) {
               var td = document.createElement('td');
               td.textContent = val || '';
               tr.appendChild(td);
@@ -259,6 +273,8 @@ const eventLogPageHTML = `<!doctype html>
                 code.textContent = preview;
                 summary.appendChild(code);
                 var pre = document.createElement('pre');
+                pre.style.maxHeight = '12em';
+                pre.style.overflowY = 'auto';
                 pre.textContent = pretty;
                 details.appendChild(summary);
                 details.appendChild(pre);
@@ -268,13 +284,6 @@ const eventLogPageHTML = `<!doctype html>
               }
             }
             tr.appendChild(dataTd);
-            // Device ID column (rightmost)
-            var idTd = document.createElement('td');
-            var idCode = document.createElement('code');
-            idCode.className = 'is-size-7 has-text-grey';
-            idCode.textContent = ev.device_id || '';
-            idTd.appendChild(idCode);
-            tr.appendChild(idTd);
             tbody.insertBefore(tr, tbody.firstChild);
           });
 

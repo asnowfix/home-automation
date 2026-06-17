@@ -46,7 +46,12 @@ var STATE = {
   // In-memory cache of follows loaded from KVS by loadFollowsFromKVS()
   // KVS keys are set externally via "myhome ctl follow blu" command
   // Each followed MAC has its own KVS key: follow/shelly-blu/<mac>
-  follows: {}
+  follows: {},
+
+  // True while a KVS reload is in progress (KVS.List → KVS.Get chain).
+  // BLU events that arrive during a reload are deferred through the task
+  // queue so they are processed after follows are updated, never dropped.
+  reloading: false
 };
 
 // === TASK QUEUE (SINGLE TIMER FOR ALL SEQUENTIAL OPERATIONS) ===
@@ -190,6 +195,7 @@ function processKvsKey(k, newMap, onComplete) {
 }
 
 function onAllKeysProcessed(newMap, callback) {
+  STATE.reloading = false;
   setFollows(newMap);
   log("Loaded follows:", newMap);
   if (callback) callback(true);
@@ -210,6 +216,7 @@ function processKeysSequentially(list, newMap, callback, index) {
 function onKvsListResponse(callback, resp, err) {
   if (err) {
     log("KVS.List error:", err);
+    STATE.reloading = false;
     if (callback) callback(false);
     return;
   }
@@ -234,6 +241,7 @@ function onKvsListResponse(callback, resp, err) {
   var newMap = {};
 
   if (!list || !list.length) {
+    STATE.reloading = false;
     setFollows(newMap);
     log("No followed MACs.");
     if (callback) callback(true);
@@ -244,6 +252,7 @@ function onKvsListResponse(callback, resp, err) {
 }
 
 function loadFollowsFromKVS(callback) {
+  STATE.reloading = true;
   Shelly.call("KVS.List", { prefix: CONFIG.kvsPrefix }, onKvsListResponse.bind(null, callback));
 }
 
@@ -283,6 +292,12 @@ function ensureAutoOffTimer(switchIndex, seconds, follow) {
 }
 
 function handleBluEvent(topic, message) {
+  // If a KVS reload is in progress, defer this event so it is processed
+  // after follows are updated rather than being silently dropped.
+  if (STATE.reloading) {
+    queueTask(function() { handleBluEvent(topic, message); });
+    return;
+  }
   var data = null;
   try {
     data = JSON.parse(message);

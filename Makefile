@@ -129,6 +129,13 @@ cover: build
 	for f in coverage/*.cov; do grep -v "^mode:" "$$f" >> coverage.txt 2>/dev/null || true; done; \
 	exit $$rc
 
+# stress: run timing-sensitive packages with GOMAXPROCS=2 and -count=10 to
+# simulate CI-like goroutine starvation. Catches flaky tests that pass locally
+# under full CPU but fail in CI where multiple packages compete for 2 cores.
+# Run before pushing any test that uses time.Sleep or async protocol polling.
+stress:
+	GOMAXPROCS=2 $(GO) test -count=10 -timeout=300s ./internal/shelly/scripts/...
+
 cover-report: coverage.txt
 	$(GO) tool cover -func=coverage.txt | tail -1
 

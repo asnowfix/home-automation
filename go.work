@@ -42,6 +42,7 @@ use (
 	./myhome/ical
 	./myhome/weather
 	./myhome/rooms
+	./pkg/beem
 	./pkg/devices
 	./pkg/sfr
 	./pkg/shelly

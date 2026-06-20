@@ -83,6 +83,19 @@ var Flags struct {
 	EventsRetention             time.Duration // retention period for event records
 	EnableEventsService         bool          // whether to enable the event recording service
 	RemoteProxy                 string        // the value taken by --remote-proxy; delegates /devices/... to a remote myhome daemon
+	PoolDeviceID                string        // Shelly device ID for the pool pump
+	PoolEnabled                 bool          // whether to enable pool runtime tracking
+	BeemEmail                   string        // Beem Energy account email
+	BeemPassword                string        // Beem Energy account password
+	BeemPollInterval            time.Duration // Beem Energy poll interval
+	BeemEnabled                 bool          // whether to enable Beem Energy integration
+	PoolSolarEnabled            bool          // whether to enable solar-driven pool pump automation
+	PoolSolarStartThresholdW    float64       // solar power threshold to start pump (W)
+	PoolSolarStopThresholdW     float64       // solar power threshold to stop pump (W)
+	PoolSolarStartDelay         time.Duration // solar must hold above start threshold for this long
+	PoolSolarStopDelay          time.Duration // solar must hold below stop threshold for this long
+	PoolSolarMinVolumeTurnover  float64       // soft-stop target: pool volumes filtered per day (converted to daily_target_sec via pool KVS)
+	PoolSolarMaxVolumeTurnover  float64       // hard ceiling: pool volumes filtered per day (converted to max_rotation_sec via pool KVS)
 }
 
 var Via types.Channel

@@ -108,3 +108,4 @@ Shelly runs a modified Espruino (ES5, no hoisting, limited ES6). Violations belo
 - **Per-script limits**: 5 timers, 5 event subscriptions, 5 status-change subscriptions, 5 concurrent RPC calls, 10 MQTT subscriptions.
 - **Storage**: Use `Script.storage` for script-internal data, `KVS` for external config, in-memory vars for cache. See AGENTS.md "Data Storage Patterns".
 - **Timer limits**: Use single recurring timer with task queue for sequential async ops to avoid exhausting 5-timer limit. See AGENTS.md "Resource Limit Workarounds".
+- **Async state rebuild guard**: When a multi-step async chain rebuilds shared state (e.g. KVS.List → N×KVS.Get), set a `STATE.reloading` flag and have event handlers that read that state defer themselves via `queueTask` instead of silently dropping work. Clear the flag in every exit path (normal, empty-result, error). See AGENTS.md "Defer Incoming Events During Multi-Step Async State Updates".

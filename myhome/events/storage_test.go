@@ -70,6 +70,99 @@ func TestRecordAndQuery(t *testing.T) {
 	}
 }
 
+func TestOnDurationSec(t *testing.T) {
+	s := newTestStorage(t)
+	ctx := context.Background()
+
+	today := time.Now().Format("2006-01-02")
+	// Use a base timestamp that falls on today's date.
+	base := float64(time.Now().Truncate(24*time.Hour).Unix()) + 3600 // 01:00 today
+
+	record := func(deviceID, component, event string, ts float64) {
+		t.Helper()
+		if err := s.Record(ctx, Event{Ts: ts, DeviceID: deviceID, Component: component, Event: event, Severity: "info"}); err != nil {
+			t.Fatalf("Record %s: %v", event, err)
+		}
+	}
+
+	dur := func(deviceID, component string) int64 {
+		t.Helper()
+		d, err := s.OnDurationSec(ctx, deviceID, component, "switch.on", "switch.off", today)
+		if err != nil {
+			t.Fatalf("OnDurationSec: %v", err)
+		}
+		return d
+	}
+
+	// No events yet → 0.
+	if got := dur("pump", "switch:0"); got != 0 {
+		t.Errorf("empty: want 0, got %d", got)
+	}
+
+	// Single completed ON→OFF pair (100 s).
+	record("pump", "switch:0", "switch.on", base)
+	record("pump", "switch:0", "switch.off", base+100)
+	if got := dur("pump", "switch:0"); got != 100 {
+		t.Errorf("single pair: want 100, got %d", got)
+	}
+
+	// Second pair (200 s).
+	record("pump", "switch:0", "switch.on", base+200)
+	record("pump", "switch:0", "switch.off", base+400)
+	if got := dur("pump", "switch:0"); got != 300 {
+		t.Errorf("two pairs: want 300, got %d", got)
+	}
+
+	// Consecutive ON events (duplicate reconnect): only first counted.
+	record("pump", "switch:0", "switch.on", base+500)
+	record("pump", "switch:0", "switch.on", base+510) // duplicate
+	record("pump", "switch:0", "switch.off", base+600)
+	// 100 s run from base+500, duplicate ON at base+510 ignored.
+	if got := dur("pump", "switch:0"); got != 400 {
+		t.Errorf("consecutive ONs: want 400, got %d", got)
+	}
+
+	// Different device is not counted.
+	record("heater", "switch:0", "switch.on", base)
+	record("heater", "switch:0", "switch.off", base+9999)
+	if got := dur("pump", "switch:0"); got != 400 {
+		t.Errorf("cross-device: want 400, got %d", got)
+	}
+
+	// Pump currently ON (no OFF yet): open interval counted toward now.
+	record("pump2", "switch:0", "switch.on", base)
+	got := dur("pump2", "switch:0")
+	elapsed := int64(time.Now().Unix()) - int64(base)
+	if got < elapsed-2 || got > elapsed+2 {
+		t.Errorf("open interval: want ~%d, got %d", elapsed, got)
+	}
+}
+
+func TestOnDurationSec_WrongDay(t *testing.T) {
+	s := newTestStorage(t)
+	ctx := context.Background()
+
+	yesterday := time.Now().Add(-24 * time.Hour).Format("2006-01-02")
+	today := time.Now().Format("2006-01-02")
+	baseYesterday := float64(time.Now().Add(-24*time.Hour).Truncate(24*time.Hour).Unix()) + 3600
+
+	if err := s.Record(ctx, Event{Ts: baseYesterday, DeviceID: "pump", Component: "switch:0", Event: "switch.on", Severity: "info"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Record(ctx, Event{Ts: baseYesterday + 100, DeviceID: "pump", Component: "switch:0", Event: "switch.off", Severity: "info"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Querying yesterday returns 100.
+	if got, _ := s.OnDurationSec(ctx, "pump", "switch:0", "switch.on", "switch.off", yesterday); got != 100 {
+		t.Errorf("yesterday: want 100, got %d", got)
+	}
+	// Querying today returns 0.
+	if got, _ := s.OnDurationSec(ctx, "pump", "switch:0", "switch.on", "switch.off", today); got != 0 {
+		t.Errorf("today (no events): want 0, got %d", got)
+	}
+}
+
 func TestPurge(t *testing.T) {
 	s := newTestStorage(t)
 	ctx := context.Background()

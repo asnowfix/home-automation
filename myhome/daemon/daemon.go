@@ -24,6 +24,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/rooms"
 	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/myhome/weather"
+	beem "github.com/asnowfix/home-automation/pkg/beem"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	shellycloud "github.com/asnowfix/home-automation/pkg/shelly/cloud"
 	shellyshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
@@ -263,6 +264,25 @@ func (d *daemon) Run() error {
 		log.Info("Prometheus metrics exporter disabled")
 	}
 
+	// Start Beem Energy watcher if enabled
+	var beemWatcher *beem.Watcher
+	if options.Flags.BeemEnabled && options.Flags.BeemEmail != "" && options.Flags.BeemPassword != "" {
+		log.Info("Starting Beem Energy watcher")
+		beemCfg := beem.ClientConfig{
+			Email:        options.Flags.BeemEmail,
+			Password:     options.Flags.BeemPassword,
+			PollInterval: options.Flags.BeemPollInterval,
+		}
+		beemWatcher = beem.NewWatcher(d.ctx, beemCfg, mc)
+		if err := beemWatcher.Start(d.ctx); err != nil {
+			log.Error(err, "Failed to start Beem watcher")
+			return err
+		}
+		log.Info("Beem Energy watcher started")
+	} else {
+		log.Info("Beem Energy integration disabled")
+	}
+
 	if !disableDeviceManager {
 		log.Info("Starting device manager")
 		storage, err := storage.NewDeviceStorage(log, "myhome.db")
@@ -294,6 +314,64 @@ func (d *daemon) Run() error {
 			}
 		} else {
 			log.Info("Events service disabled")
+		}
+
+		// Initialize pool runtime tracker if enabled
+		var poolTracker *PoolRuntimeTracker
+		if options.Flags.PoolEnabled && options.Flags.PoolDeviceID != "" && eventsStore != nil {
+			poolTracker = NewPoolRuntimeTracker(log.WithName("pool"), eventsStore, options.Flags.PoolDeviceID)
+			log.Info("Pool runtime tracker initialized", "device_id", options.Flags.PoolDeviceID)
+		} else if options.Flags.PoolEnabled {
+			log.Info("Pool runtime tracker disabled (no device ID or events store unavailable)")
+		}
+
+		// Start solar automation if enabled
+		if options.Flags.PoolSolarEnabled && options.Flags.PoolDeviceID != "" && beemWatcher != nil {
+			if options.Flags.PoolSolarMaxVolumeTurnover < options.Flags.PoolSolarMinVolumeTurnover {
+				log.Error(nil, "Solar automation disabled: pool.solar.max_volume_turnover must be >= min_volume_turnover",
+					"min_volume_turnover", options.Flags.PoolSolarMinVolumeTurnover,
+					"max_volume_turnover", options.Flags.PoolSolarMaxVolumeTurnover,
+				)
+			} else if pumpCtrl, err := newShellyPumpController(d.ctx, log.WithName("solar.pump"), options.Flags.PoolDeviceID); err != nil {
+				log.Error(err, "Failed to create pump controller for solar automation")
+			} else if dailyTargetSec, maxRotationSec, err := computeRuntimeTargets(
+				d.ctx, log.WithName("solar"), pumpCtrl.device,
+				options.Flags.PoolSolarMinVolumeTurnover, options.Flags.PoolSolarMaxVolumeTurnover,
+			); err != nil {
+				log.Error(err, "Solar automation disabled: failed to derive runtime targets from pool KVS")
+			} else {
+				solarCfg := SolarConfig{
+					StartThresholdW: options.Flags.PoolSolarStartThresholdW,
+					StopThresholdW:  options.Flags.PoolSolarStopThresholdW,
+					StartDelay:      options.Flags.PoolSolarStartDelay,
+					StopDelay:       options.Flags.PoolSolarStopDelay,
+					DailyTargetSec:  dailyTargetSec,
+					MaxRotationSec:  maxRotationSec,
+				}
+				solarAuto := NewSolarAutomation(
+					log.WithName("solar"),
+					beemWatcher.PowerCh,
+					poolTracker, // nil if pool tracker not enabled
+					pumpCtrl,
+					solarCfg,
+				)
+				solarAuto.Start(d.ctx)
+				log.Info("Solar automation started",
+					"device_id", options.Flags.PoolDeviceID,
+					"start_threshold_w", solarCfg.StartThresholdW,
+					"stop_threshold_w", solarCfg.StopThresholdW,
+					"start_delay", solarCfg.StartDelay,
+					"stop_delay", solarCfg.StopDelay,
+					"daily_target_sec", solarCfg.DailyTargetSec,
+					"max_rotation_sec", solarCfg.MaxRotationSec,
+				)
+			}
+		} else if options.Flags.PoolSolarEnabled {
+			if options.Flags.PoolDeviceID == "" {
+				log.Info("Solar automation disabled: no pool device ID configured")
+			} else {
+				log.Info("Solar automation disabled: Beem Energy watcher not running")
+			}
 		}
 
 		// Start device manager

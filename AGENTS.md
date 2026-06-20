@@ -459,6 +459,72 @@ This rule applies to all continuations after:
 - Any fire-and-forget `Shelly.call(...)` where you need to proceed after a brief settle delay
 - Any inter-step sequencing that would otherwise require a one-shot timer
 
+#### Design Rule: Defer Incoming Events During Multi-Step Async State Updates
+
+**Never let event handlers read shared state while an async operation is rebuilding it.**
+
+When a script performs a multi-step async operation that rebuilds a shared structure — a KVS reload chain (`KVS.List` → N×`KVS.Get`), a sequential fetch, a settings migration — any event that fires during the chain reads **stale or partially-built state** and silently drops work. This is a logic bug on real devices, not just a test artifact: Espruino is single-threaded but its event loop interleaves callbacks freely.
+
+**The pattern: guard flag + deferred queueTask**
+
+```javascript
+var STATE = {
+  myData: {},
+  reloading: false   // true while the async rebuild chain is in progress
+};
+
+// 1. Set the flag at the top of the async operation
+function reloadFromKVS(callback) {
+  STATE.reloading = true;
+  Shelly.call("KVS.List", { prefix: "..." }, onListResponse.bind(null, callback));
+}
+
+// 2. Clear the flag in EVERY exit path of the async chain
+function onAllDone(newData, callback) {
+  STATE.reloading = false;     // clear BEFORE installing new state
+  STATE.myData = newData;
+  if (callback) callback(true);
+}
+
+function onListResponse(callback, resp, err) {
+  if (err) {
+    STATE.reloading = false;   // error exit
+    if (callback) callback(false);
+    return;
+  }
+  if (!resp || !resp.keys || !resp.keys.length) {
+    STATE.reloading = false;   // empty-list exit
+    STATE.myData = {};
+    if (callback) callback(true);
+    return;
+  }
+  processKeysSequentially(resp.keys, {}, callback, 0);
+}
+
+// 3. Defer any event handler that reads the shared state
+function handleIncomingEvent(topic, payload) {
+  if (STATE.reloading) {
+    // Re-queue instead of silently dropping.
+    // Because onAllDone() runs inside a task-queue slot, this deferred call
+    // is guaranteed to run after the flag is cleared and state is installed.
+    queueTask(function() { handleIncomingEvent(topic, payload); });
+    return;
+  }
+  // ... normal processing using STATE.myData
+}
+```
+
+**Why `queueTask` is the right deferral mechanism here (not a flag poll):**
+
+`onAllDone` itself runs inside a task-queue slot (the last step of `processKeysSequentially` calls `queueTask` for each key). Any `queueTask(handleIncomingEvent)` added *during* the reload is appended to the same FIFO queue. Since the completion slot is already enqueued, the deferred event slot is guaranteed to run after it — FIFO order, no timing assumption required.
+
+**Checklist for any async state-rebuild operation:**
+
+- [ ] `STATE.reloading = true` at the **top** of the function that starts the chain
+- [ ] `STATE.reloading = false` in **every** exit path: normal completion, empty-result early return, and error early return
+- [ ] All event handlers that read the shared state check the flag and re-queue via `queueTask` when it is set
+- [ ] The final completion step (`onAllDone`) clears the flag **before** installing new state so deferred events see the updated data
+
 ### Resource Limits
 
 **Official limits per script:**
@@ -750,20 +816,52 @@ When a script contains errors:
 
 4. **Running tests:**
    ```bash
-   # Run all tests
-   go test ./...
-   
+   # Run all tests (canonical — also covers workspace sub-modules)
+   make test
+
    # Run specific package tests
    go test ./myhome/devices
-   
+
    # Run with race detector
    go test -race ./...
-   
+
    # Run specific test
    go test -v -run TestFeature_HappyPath ./package
+
+   # Stress test timing-sensitive packages before pushing (simulates CI load)
+   make stress
    ```
 
-5. **Example: Sensor update tests**
+5. **Avoid `time.Sleep` in async-protocol tests.** Fixed sleeps that "feel long enough" locally fail silently under CI load because the Go scheduler is starved when many packages run concurrently. Use observable-state polling instead:
+
+   ```go
+   // AVOID — drops the event if the async chain takes longer than 400ms
+   time.Sleep(400 * time.Millisecond)
+   injectEvent(t, ch, payload)
+   ok := waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+       return stateIsReady()
+   })
+
+   // PREFER — re-injects on every poll iteration; robust to any reload latency
+   ok := waitFor(8*time.Second, 100*time.Millisecond, func() bool {
+       injectEvent(t, ch, payload)
+       return stateIsReady()
+   })
+   ```
+
+   The re-inject pattern works because the system under test drops the event when
+   not ready and handles it correctly once it is — so repeated injection is safe
+   and the test converges as soon as the async operation completes.
+
+6. **Stress-test before pushing timing-sensitive tests.** CI runners typically have 2 cores and run all packages concurrently; a local fast Mac sees none of this contention. Before pushing any test that involves timers or async sequencing:
+
+   ```bash
+   make stress   # GOMAXPROCS=2, -count=10 on internal/shelly/scripts
+   ```
+
+   Add the package to the `stress` Makefile target if it contains timing-sensitive tests.
+
+7. **Example: Sensor update tests**
    - See `myhome/devices/cache_test.go` for comprehensive examples
    - Tests cover float/int sensors, error handling, edge cases, and multiple sensors
 

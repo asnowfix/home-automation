@@ -594,52 +594,79 @@ Topic: `myhome/electricity/status` (retained, QoS 1)
 
 The daemon fetches hourly temperature forecasts from [Open-Meteo](https://open-meteo.com/) (no API key required) every 6 hours and publishes a 4-slot distilled payload to MQTT. Device scripts subscribe and use the data to decide whether to pre-heat.
 
-### Location auto-discovery
+## Beem Energy
 
-If `latitude`/`longitude` are not set, the daemon discovers its location automatically via a priority chain:
+| Key | Env var | Default | Description |
+|-----|---------|---------|-------------|
+| `beem.email` | `MYHOME_BEEM_EMAIL` | — | Beem Energy account email |
+| `beem.password` | `MYHOME_BEEM_PASSWORD` | — | Beem Energy account password |
+| `beem.poll_interval` | `MYHOME_BEEM_POLL_INTERVAL` | `60s` | How often to poll the Beem REST API |
+| `beem.enabled` | `MYHOME_BEEM_ENABLED` | `false` | Enable Beem Energy integration |
 
-1. **Shelly cloud** — queries each known Gen2 device for `Cloud.GetStatus` (checks connectivity) then `Shelly.DetectLocation`. Uses the first device that responds with a non-zero position.
-2. **IP geolocation** — falls back to [ip-api.com](https://ip-api.com/) (free, no authentication). City-level accuracy (~5–50 km).
+## Pool
 
-Weather publishing is skipped entirely only if every source in the chain fails (e.g., no internet access at startup).
-
-### Configuration keys (`weather.*`)
-
-**`latitude`** (float, optional — overrides auto-discovery)
-- Location latitude in decimal degrees (e.g., `48.8566` for Paris)
-- Flag: `--weather-latitude`
-- Env: `MYHOME_WEATHER_LATITUDE`
-
-**`longitude`** (float, optional — overrides auto-discovery)
-- Location longitude in decimal degrees (e.g., `2.3522` for Paris)
-- Flag: `--weather-longitude`
-- Env: `MYHOME_WEATHER_LONGITUDE`
+The pool runtime tracker reports how many seconds the pool pump has run today by querying the shared events database (`events.db`). The gen2 listener already captures every switch ON/OFF event from all Shelly devices — no separate pool database is needed.
 
 ### Example
 
 ```yaml
-# Explicit coordinates (skips auto-discovery):
-weather:
-  latitude: 48.8566
-  longitude: 2.3522
-
-# Omit both to use auto-discovery (Shelly cloud → IP geolocation):
-# weather: {}
+pool:
+  device_id: "aabbccddeeff"
+  enabled: true
 ```
 
-### MQTT payload
+### Options
 
-Topic: `myhome/weather/forecast` (retained, QoS 1)
+| Key | Env var | Flag | Default | Description |
+|-----|---------|------|---------|-------------|
+| `pool.device_id` | `MYHOME_POOL_DEVICE_ID` | `--pool-device-id` | — | Pool Shelly device ID (e.g. `shellyplus1pm-aabbccddeeff`) |
+| `pool.enabled` | `MYHOME_POOL_ENABLED` | `--enable-pool` | `false` | Enable pool runtime tracking |
 
-```json
-{"slots": [{"h":9,"t":4.2},{"h":10,"t":3.8},{"h":11,"t":3.1},{"h":12,"t":2.9}], "stale": false}
+### Solar automation
+
+The solar automation goroutine subscribes to Beem Energy power samples and controls the pool pump using a hysteresis state machine:
+
+- **IDLE → RUNNING** when `solar_w ≥ start_threshold_w` for `start_delay` (and the hard ceiling hasn't been reached today)
+- **RUNNING → IDLE** when the hard ceiling (`max_volume_turnover`) is reached — always, regardless of solar
+- **RUNNING → IDLE** when the soft-stop target (`min_volume_turnover`) is reached **and** `solar_w < start_threshold_w` — while solar is still producing, the pump keeps running past the soft target to use free energy
+- **RUNNING → IDLE** when `solar_w < stop_threshold_w` for `stop_delay`
+
+`min_volume_turnover` and `max_volume_turnover` are dimensionless multipliers (pool volumes filtered per day). At startup the daemon reads `script/pool-pump/{pool-volume,max-flow-rate,max-rpm,speed}` from the pool device KVS — the same values pool-pump.js uses for its own scheduling — and derives `daily_target_sec` / `max_rotation_sec`:
+
+```
+flow_rate        = max_flow_rate × (speed / max_rpm)
+daily_target_sec = pool_volume × min_volume_turnover / flow_rate × 3600
+max_rotation_sec = pool_volume × max_volume_turnover / flow_rate × 3600
 ```
 
-- `slots`: next 4 hourly readings from now; `h` = hour of day, `t` = temperature °C
-- `stale`: `true` if internet has been unavailable for more than 24 hours (last known forecast is being repeated)
+The daemon only reads these KVS keys, never writes them — KVS remains exclusively the JS script's domain. Solar automation is disabled (with a logged error) if `max_volume_turnover < min_volume_turnover` or if any of the four KVS keys is missing or non-numeric.
 
-### Offline behaviour
+Requires both `pool.device_id` and Beem Energy integration (`beem.enabled: true`) to be configured.
 
-- On network failure: last known forecast is re-served from SQLite (`weather_cache` table)
-- If the cached forecast is older than 24 hours: payload includes `"stale": true`
-- If no cache exists: nothing is published until the first successful fetch
+#### Example
+
+```yaml
+pool:
+  device_id: "shellyplus1pm-aabbccddeeff"
+  enabled: true
+  solar:
+    enabled: true
+    start_threshold_w:   500
+    stop_threshold_w:    200
+    start_delay:         5m
+    stop_delay:          10m
+    min_volume_turnover: 5   # soft stop: stop once filtered AND solar gone
+    max_volume_turnover: 7   # hard ceiling: always stop once filtered
+```
+
+#### Options
+
+| Key | Env var | Flag | Default | Description |
+|-----|---------|------|---------|-------------|
+| `pool.solar.enabled` | `MYHOME_POOL_SOLAR_ENABLED` | `--enable-pool-solar` | `false` | Enable solar-driven pump automation |
+| `pool.solar.start_threshold_w` | `MYHOME_POOL_SOLAR_START_THRESHOLD_W` | `--pool-solar-start-threshold-w` | `500` | Solar power threshold to start pump (W) |
+| `pool.solar.stop_threshold_w` | `MYHOME_POOL_SOLAR_STOP_THRESHOLD_W` | `--pool-solar-stop-threshold-w` | `200` | Solar power threshold to stop pump (W) |
+| `pool.solar.start_delay` | `MYHOME_POOL_SOLAR_START_DELAY` | `--pool-solar-start-delay` | `5m` | Solar must hold above start threshold for this long |
+| `pool.solar.stop_delay` | `MYHOME_POOL_SOLAR_STOP_DELAY` | `--pool-solar-stop-delay` | `10m` | Solar must hold below stop threshold for this long |
+| `pool.solar.min_volume_turnover` | `MYHOME_POOL_SOLAR_MIN_VOLUME_TURNOVER` | `--pool-solar-min-volume-turnover` | `5` | Soft-stop target: pool volumes filtered per day; pump keeps running past this while solar is still above the start threshold |
+| `pool.solar.max_volume_turnover` | `MYHOME_POOL_SOLAR_MAX_VOLUME_TURNOVER` | `--pool-solar-max-volume-turnover` | `7` | Hard ceiling: pool volumes filtered per day; pump always stops (and won't be solar-started) once reached |

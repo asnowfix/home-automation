@@ -399,11 +399,31 @@ func (h *HTMXHandler) resolveDeviceFilter(filter string) []string {
 	return ids
 }
 
+// deviceName resolves a single device id to a friendly name.
+// It queries by id first, then falls back to the MAC derived from a Shelly id suffix.
+// Returns "" when no friendly name is found (caller shows the raw id).
+func (h *HTMXHandler) deviceName(id string) string {
+	d, err := h.db.GetDeviceByAny(h.ctx, id)
+	if err != nil {
+		if mac := shellyapi.MacFromShellyID(id); mac != nil {
+			d, err = h.db.GetDeviceByAny(h.ctx, mac.String())
+		}
+	}
+	if err != nil {
+		return ""
+	}
+	if n := d.Name(); n != "" && n != id {
+		return n
+	}
+	return ""
+}
+
+// DeviceNameResolver returns a function suitable for SSEBroadcaster.SetDeviceNameResolver.
+func (h *HTMXHandler) DeviceNameResolver() func(string) string {
+	return h.deviceName
+}
+
 // deviceNameMap resolves names for all unique device IDs that appear in evts.
-// It uses GetDeviceByAny so it matches across id, mac, name, and host columns.
-// For Shelly devices whose stored id differs from the MQTT src, it also tries
-// the MAC address derived from the device ID suffix as a fallback.
-// Unknown or unnamed devices are omitted; callers fall back to the raw ID.
 func (h *HTMXHandler) deviceNameMap(evts []events.Event) map[string]string {
 	seen := make(map[string]struct{}, len(evts))
 	for _, e := range evts {
@@ -411,16 +431,7 @@ func (h *HTMXHandler) deviceNameMap(evts []events.Event) map[string]string {
 	}
 	m := make(map[string]string, len(seen))
 	for id := range seen {
-		d, err := h.db.GetDeviceByAny(h.ctx, id)
-		if err != nil {
-			if mac := shellyapi.MacFromShellyID(id); mac != nil {
-				d, err = h.db.GetDeviceByAny(h.ctx, mac.String())
-			}
-		}
-		if err != nil {
-			continue
-		}
-		if n := d.Name(); n != "" && n != id {
+		if n := h.deviceName(id); n != "" {
 			m[id] = n
 		}
 	}

@@ -347,12 +347,12 @@ func TestBluListener_KVSReloadPicksUpNewFollow(t *testing.T) {
 	})
 	state.EventInjector <- kvsEvent
 
-	// Allow reload chain to complete
-	time.Sleep(400 * time.Millisecond)
-
-	injectBluEvent(t, state.EventInjector, mac, 50, 1)
-
-	ok := waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+	// Re-inject a motion event on each poll iteration. Once the async KVS reload
+	// chain has installed the new follow (kvs event → task-queue timer → KVS.List
+	// → KVS.Get), the next injection will turn the switch on. This avoids a fixed
+	// sleep that is fragile under CI load.
+	ok := waitFor(8*time.Second, 100*time.Millisecond, func() bool {
+		injectBluEvent(t, state.EventInjector, mac, 50, 1)
 		return switchIsOn(state, "switch:0")
 	})
 	cancel()

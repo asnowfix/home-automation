@@ -2,8 +2,8 @@
   "mcpServers": {
     "shelly": {
       "type": "stdio",
-      "command": "go",
-      "args": ["run", "./myhome", "ctl", "--mqtt-broker", "tcp://192.168.1.2:1883", "mcp"]
+      "command": "./myhome-local.sh",
+      "args": ["mcp"]
     }
   }
 }

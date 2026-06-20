@@ -168,6 +168,18 @@ func (l *Listener) handleNotifyEvent(ctx context.Context, payload []byte) error 
 		delete(all, "event")
 		delete(all, "ts")
 
+		// For shelly-blu events the relay Shelly is not the sensor: extract the
+		// BLU sensor address from the nested data frame and use it as DeviceID so
+		// the event appears under the correct BLU device. Store the relay device
+		// in the Data payload so duplicate gateway configurations can be detected.
+		deviceID := msg.Src
+		if entry.Event == "shelly-blu" {
+			if bluAddr := shellyBLUAddress(all); bluAddr != "" {
+				deviceID = bluAddr
+				all["relay"] = msg.Src
+			}
+		}
+
 		var dataPtr *string
 		if len(all) > 0 {
 			b, _ := json.Marshal(all)
@@ -189,7 +201,7 @@ func (l *Listener) handleNotifyEvent(ctx context.Context, payload []byte) error 
 
 		e := events.Event{
 			Ts:        ts,
-			DeviceID:  msg.Src,
+			DeviceID:  deviceID,
 			Component: entry.Component,
 			Event:     entry.Event,
 			Severity:  severityFor(entry.Event),
@@ -268,6 +280,21 @@ func severityFor(event string) string {
 		return "debug"
 	}
 	return "info"
+}
+
+// shellyBLUAddress extracts the BLU sensor MAC address from a shelly-blu event
+// data map. The address is nested one level deep under a "data" key.
+func shellyBLUAddress(all map[string]interface{}) string {
+	inner, ok := all["data"]
+	if !ok {
+		return ""
+	}
+	m, ok := inner.(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	addr, _ := m["address"].(string)
+	return addr
 }
 
 func floatFrom(m map[string]interface{}, key string) (float64, bool) {

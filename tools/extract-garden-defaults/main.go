@@ -44,22 +44,32 @@ const (
 
 // ZoneDefault holds initial per-zone configuration values.
 type ZoneDefault struct {
-	name        string
-	appRateMmH  float64
-	kc          float64
-	triggerMm   float64
-	maxMin      int
-	fallbackMin int
-	enabled     bool
+	name         string
+	appRateMmH   float64
+	kc           float64
+	triggerMm    float64
+	maxMin       int
+	fallbackMin  int
+	group        string
+	intervalDays int
+	enabled      bool
 }
 
 // defaultZoneDefaults mirrors ZONE_DEFAULTS from garden.js.
 // Grass zones (0,2): 192 mm/h = 2 pop-up heads × 96 mm/h each (measured: 8 mm/5 min).
 // Massifs zone (1): drip pipe — update appRateMmH after measuring with catch-cups.
+// massifs (zone 1) plant list — true mediterranean, low-water (rosemary/Romarin,
+// society garlic/Tulbaghia, boxwood/Buis, NZ flax/Phormium, Abelia, feijoa) mixed
+// with thirstier plants (lemon/Citronnier, orange/Oranger de Chine, bird-of-paradise/
+// Strelitzia, Agapanthus, daylily/Hémérocalle, Carex/Laîche).
+// group/intervalDays: zones sharing a group water on the same days, gated by the
+// minimum interval (days) across the group's enabled members. Lawn fires together
+// daily-eligible; massifs intervalDays=4 is the watering-cadence compromise between
+// the two plant groups above (see docs/garden-sprinklers-plan.md §11 for rationale).
 var defaultZoneDefaults = []ZoneDefault{
-	{name: "pelouse-maison",   appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8, enabled: true},
-	{name: "massifs",          appRateMmH:  18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, enabled: true},
-	{name: "pelouse-barriere", appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8, enabled: true},
+	{name: "pelouse-maison",   appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: true},
+	{name: "massifs",          appRateMmH:  18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, group: "beds", intervalDays: 4, enabled: true},
+	{name: "pelouse-barriere", appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: true},
 }
 `
 
@@ -69,7 +79,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	inputFile  := os.Args[1]
+	inputFile := os.Args[1]
 	outputFile := os.Args[2]
 
 	content, err := os.ReadFile(inputFile)

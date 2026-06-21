@@ -1,10 +1,10 @@
 // garden.js — ET₀ water-balance garden sprinkler controller
 // Target device: Shelly Pro3 (device named "arrosage", 192.168.1.83)
 //
-// Zone mapping:
-//   switch:0  pelouse-maison   (lawn, house side)
-//   switch:1  massifs          (flower beds)
-//   switch:2  pelouse-barriere (lawn, fence side)
+// Zone mapping (group: zones sharing a group water on the same days):
+//   switch:0  pelouse-maison   (lawn, house side)   group=lawn, interval=1d
+//   switch:1  massifs          (flower beds)        group=beds, interval=4d
+//   switch:2  pelouse-barriere (lawn, fence side)    group=lawn, interval=1d
 //
 // Power supply supports ONE valve at a time — enforced in hardware and software.
 // All logic runs on-device; no daemon dependency (resilience per CLAUDE.md).
@@ -93,6 +93,12 @@ var CONFIG_SCHEMA = {
 //   Grass zones (0, 2): 2 pop-up heads per zone, each measured at 96 mm/h (8 mm/5 min),
 //   covering the same ground simultaneously → 192 mm/h.
 //   Massifs zone (1): drip pipe — set after measuring or via KVS.
+// massifs (zone 1) plant list — true mediterranean, low-water (rosemary/Romarin,
+//   society garlic/Tulbaghia, boxwood/Buis, NZ flax/Phormium, Abelia, feijoa) mixed
+//   with thirstier plants (lemon/Citronnier, orange/Oranger de Chine, bird-of-paradise/
+//   Strelitzia, Agapanthus, daylily/Hémérocalle, Carex/Laîche). intervalDays=4 below
+//   is the watering-cadence compromise between these two groups (see docs/garden-
+//   sprinklers-plan.md §11 for the full per-plant water-need rationale).
 // kc: crop coefficient — ET0 multiplier. Lawn 0.8, ornamental beds 0.6.
 // triggerMm: water when deficit reaches this depth (deep-infrequent irrigation).
 //   Grass: 12 mm ≈ 2.5 days of peak-summer ETc (ET0=6 mm/d × kc=0.8).
@@ -100,10 +106,18 @@ var CONFIG_SCHEMA = {
 // fallbackMin: used when no forecast is available (internet outage).
 //   Grass: 8 min delivers ~25.6 mm ≈ 5-day peak-summer deficit.
 // maxMin: hard cap per session; 15 min @ 192 mm/h = 48 mm (more than maxDeficitMm=25).
+// group: zones sharing a group water on the same days, gated by intervalDays
+//   (minimum days between waterings for that group; effective interval is the
+//   min across the group's enabled members). lawn zones fire together; massifs
+//   waters at most every 4 days regardless of how quickly its own deficit
+//   crosses trigger — a compromise between the bed's true-mediterranean plants
+//   (rosemary, society garlic, boxwood — happy with a weekly soak) and its
+//   citrus (lemon, orange) and Strelitzia/Agapanthus/daylily/Carex, which want
+//   water more often in peak summer heat.
 var ZONE_DEFAULTS = [
-  {id: 0, name: "pelouse-maison",   appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8, enabled: true},
-  {id: 1, name: "massifs",          appRateMmH:  18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, enabled: true},
-  {id: 2, name: "pelouse-barriere", appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8, enabled: true}
+  {id: 0, name: "pelouse-maison",   appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: true},
+  {id: 1, name: "massifs",          appRateMmH:  18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, group: "beds", intervalDays: 4, enabled: true},
+  {id: 2, name: "pelouse-barriere", appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: true}
 ];
 
 // Runtime config — populated from defaults then overridden by KVS at startup
@@ -121,27 +135,31 @@ var ZONES = [];
 
 // KVS key specs for a single zone (key suffix applied after "zoneN-")
 var ZONE_KEY_SPECS = [
-  {field: "name",        key: "name",         type: "string"},
-  {field: "appRateMmH",  key: "app-rate",      type: "number"},
-  {field: "kc",          key: "kc",            type: "number"},
-  {field: "triggerMm",   key: "trigger-mm",    type: "number"},
-  {field: "maxMin",      key: "max-min",       type: "number"},
-  {field: "fallbackMin", key: "fallback-min",  type: "number"},
-  {field: "enabled",     key: "enabled",       type: "boolean"}
+  {field: "name",         key: "name",         type: "string"},
+  {field: "appRateMmH",   key: "app-rate",     type: "number"},
+  {field: "kc",           key: "kc",           type: "number"},
+  {field: "triggerMm",    key: "trigger-mm",   type: "number"},
+  {field: "maxMin",       key: "max-min",      type: "number"},
+  {field: "fallbackMin",  key: "fallback-min", type: "number"},
+  {field: "group",        key: "group",        type: "string"},
+  {field: "intervalDays", key: "interval",     type: "number"},
+  {field: "enabled",      key: "enabled",      type: "boolean"}
 ];
 
 function initZones() {
   for (var i = 0; i < ZONE_DEFAULTS.length; i++) {
     var d = ZONE_DEFAULTS[i];
     ZONES.push({
-      id:          d.id,
-      name:        d.name,
-      appRateMmH:  d.appRateMmH,
-      kc:          d.kc,
-      triggerMm:   d.triggerMm,
-      maxMin:      d.maxMin,
-      fallbackMin: d.fallbackMin,
-      enabled:     d.enabled
+      id:           d.id,
+      name:         d.name,
+      appRateMmH:   d.appRateMmH,
+      kc:           d.kc,
+      triggerMm:    d.triggerMm,
+      maxMin:       d.maxMin,
+      fallbackMin:  d.fallbackMin,
+      group:        d.group,
+      intervalDays: d.intervalDays,
+      enabled:      d.enabled
     });
   }
   ZONE_DEFAULTS = null; // free — not needed after copy
@@ -546,6 +564,35 @@ function saveDeficit(zoneId, value) {
   // KVS mirror is done in bulk by commitPlan() to avoid concurrent RPC limit
 }
 
+// === PER-GROUP CADENCE (Script.storage, survives reboot) ===
+// UTC day number (Espruino's Date has no getTimezoneOffset()). Coarse by design:
+// watering always runs near the same local hour, so a few hours of zone offset
+// near the UTC day boundary doesn't affect "every N days" gating.
+function todayDayNumber() {
+  return Math.floor(Date.now() / 86400000);
+}
+
+function groupLastKey(name) {
+  return "group-last/" + name;
+}
+
+function loadGroupLastDay(name) {
+  var v = loadStorageValue(groupLastKey(name));
+  if (v === null) return -99999; // never watered — always eligible
+  var n = Number(v);
+  return isNaN(n) ? -99999 : n;
+}
+
+// Sets the in-memory/Script.storage value AND mirrors to KVS (fire-and-forget,
+// like incrementRunCount's runs mirror) — called only when a zone actually
+// finishes watering, never at plan time, so aborted cycles don't skip a week.
+function saveGroupLastDay(name) {
+  var today = todayDayNumber();
+  storeStorageValue(groupLastKey(name), today);
+  Shelly.call("KVS.Set", {key: CONFIG_KEY_PREFIX + "group/" + name + "-last", value: String(today)},
+    function(r, e) { if (e && false) {} });
+}
+
 // === ET0 DEFICIT UPDATE ===
 function updateDeficits() {
   var et0 = STATE.forecastEt0Yesterday;
@@ -568,24 +615,59 @@ function updateDeficits() {
 }
 
 // === ZONE PLAN COMPUTATION ===
-// Returns [{id, minutes}] for zones whose deficit >= trigger
+// Groups enabled zones by `group`, gates each group by its minimum cadence
+// (effective interval = min intervalDays among enabled members), and fires
+// every enabled member of a due group whose deficit yields >= 1 minute
+// (this is what makes lawn zones 0/2 water together). Returns [{id, minutes}].
 function computeZonePlan() {
-  var plan = [];
+  var groupNames = [];
+  var groupZones = {};
   for (var i = 0; i < ZONES.length; i++) {
     var z = ZONES[i];
     if (!z.enabled) continue;
-    var deficit = loadDeficit(z.id);
-    if (deficit < z.triggerMm) {
-      log("Zone " + z.id + ": deficit " + Math.round(deficit * 10) / 10 + " mm < trigger " + z.triggerMm + " mm, skip");
+    if (!(z.group in groupZones)) {
+      groupZones[z.group] = [];
+      groupNames.push(z.group);
+    }
+    groupZones[z.group].push(z);
+  }
+
+  var plan = [];
+  for (var gi = 0; gi < groupNames.length; gi++) {
+    var gname = groupNames[gi];
+    var members = groupZones[gname];
+
+    var groupInterval = members[0].intervalDays;
+    for (var mi = 1; mi < members.length; mi++) {
+      if (members[mi].intervalDays < groupInterval) groupInterval = members[mi].intervalDays;
+    }
+
+    var daysSince = todayDayNumber() - loadGroupLastDay(gname);
+    if (daysSince < groupInterval) {
+      log("Group " + gname + " not due (" + daysSince + " < " + groupInterval + " d)");
       continue;
     }
-    var depthMm = deficit < CONFIG.maxDeficitMm ? deficit : CONFIG.maxDeficitMm;
-    var minutes = depthMm / z.appRateMmH * 60;
-    if (minutes > z.maxMin) minutes = z.maxMin;
-    minutes = Math.round(minutes);
-    if (minutes < 1) continue;
-    plan.push({id: z.id, minutes: minutes});
-    log("Zone " + z.id + ": water " + minutes + " min (deficit=" + Math.round(deficit * 10) / 10 + " mm)");
+
+    var anyDue = false;
+    for (var di = 0; di < members.length; di++) {
+      if (loadDeficit(members[di].id) >= members[di].triggerMm) { anyDue = true; break; }
+    }
+    if (!anyDue) {
+      log("Group " + gname + " due but no member over trigger, skip");
+      continue;
+    }
+
+    for (var fi = 0; fi < members.length; fi++) {
+      var zone = members[fi];
+      var deficit = loadDeficit(zone.id);
+      var depthMm = deficit < CONFIG.maxDeficitMm ? deficit : CONFIG.maxDeficitMm;
+      var minutes = depthMm / zone.appRateMmH * 60;
+      if (minutes > zone.maxMin) minutes = zone.maxMin;
+      minutes = Math.round(minutes);
+      if (minutes < 1) continue;
+      plan.push({id: zone.id, minutes: minutes});
+      log("Zone " + zone.id + " (" + gname + "): water " + minutes + " min (deficit=" + Math.round(deficit * 10) / 10 + " mm)");
+    }
   }
   return plan;
 }
@@ -942,6 +1024,7 @@ function tickWatering() {
       deficit_mm:  Math.round(deficit * 10) / 10
     });
     incrementRunCount(entry.id);
+    saveGroupLastDay(zone.group);
     log("Zone " + entry.id + " done. Applied " + Math.round(appliedMm * 10) / 10 +
         " mm. Deficit now " + Math.round(deficit * 10) / 10 + " mm");
     Shelly.call("Switch.Set", {id: entry.id, on: false}, function(r, e) { if (e && false) {} });
@@ -1058,6 +1141,8 @@ function commitFallback(queue, fallbackH) {
 }
 
 // === DAILY PLANNER ===
+// Offline fallback intentionally ignores group cadence — waters every enabled
+// zone at its fallbackMin. Internet-outage resilience takes priority over cadence.
 function runFallbackPlanner() {
   log("Using fallback plan (no forecast data)");
   var queue = [];

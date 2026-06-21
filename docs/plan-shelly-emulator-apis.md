@@ -32,7 +32,7 @@ per global confirming the panic message and that it's catchable.
 Top-level functions next to `print`/`console`. `btoa`/`atob` = standard base64;
 `btoh` = lowercase hex of the input bytes. Tests cover round-trip + known vectors.
 
-### Phase 3 — Virtual components
+### Phase 3 — Virtual components (done)
 `Virtual.getHandle(key)` returns an instance backed by a new `DeviceState.Virtual
 map[string]*VirtualComponent` field (mirrors the `ComponentStatus` pattern). Instance
 methods: `setValue`/`getValue`/`getStatus`/`getConfig`/`setConfig`/`on`/`off`. Support

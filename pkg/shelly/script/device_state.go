@@ -23,6 +23,13 @@ type DeviceState struct {
 	// Populated by tests or loaded from a device snapshot (see FetchDeviceState).
 	ComponentStatus map[string]interface{} `json:"component_status,omitempty"`
 
+	// Virtual backs Virtual.getHandle(key): real devices only expose handles
+	// for components pre-configured through the device UI/config, never
+	// created by scripts — so this is populated by tests or a device
+	// snapshot, the same way as ComponentStatus, keyed by "<kind>:<id>"
+	// (e.g. "number:200").
+	Virtual map[string]*VirtualComponentState `json:"virtual,omitempty"`
+
 	// EventInjector, when non-nil, allows a test to push raw JSON-encoded
 	// device-event objects into the running script's event-handler loop.
 	// Send a JSON object with the same shape as Shelly device events:
@@ -102,6 +109,9 @@ func LoadDeviceState(log logr.Logger, filename string) (*DeviceState, error) {
 	}
 	if state.ComponentStatus == nil {
 		state.ComponentStatus = make(map[string]interface{})
+	}
+	if state.Virtual == nil {
+		state.Virtual = make(map[string]*VirtualComponentState)
 	}
 
 	log.Info("Loaded device state", "file", filename, "kvs_keys", len(state.KVS), "storage_keys", len(state.Storage))

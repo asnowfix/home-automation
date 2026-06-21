@@ -741,6 +741,8 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	})
 	vm.Set("console", consoleObj)
 
+	installUtilities(vm)
+
 	// Global JSON object (usually available, but ensure it's there)
 	vm.RunString(`
 		if (typeof JSON === 'undefined') {

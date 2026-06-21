@@ -28,7 +28,7 @@ Add each global (and sub-objects: `BLE.Scanner`, `BLE.GAP`, `BLE.AdvBuilder`,
 catchable by script `try/catch` like a real exception. Test: one table-driven test
 per global confirming the panic message and that it's catchable.
 
-### Phase 2 — utilities: btoa, atob, btoh
+### Phase 2 — utilities: btoa, atob, btoh (done)
 Top-level functions next to `print`/`console`. `btoa`/`atob` = standard base64;
 `btoh` = lowercase hex of the input bytes. Tests cover round-trip + known vectors.
 

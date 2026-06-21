@@ -148,10 +148,13 @@ debpkg: build
 	cp linux/systemd/update.sh $(DEBPKG_DIR)/usr/share/myhome/update.sh
 	cp linux/systemd/myhome-db-backup.sh $(DEBPKG_DIR)/usr/share/myhome/myhome-db-backup.sh
 	cp myhome-example.yaml $(DEBPKG_DIR)/usr/share/myhome/myhome-example.yaml
+	cp linux/prometheus/mqtt-exporter.yaml.sample $(DEBPKG_DIR)/usr/share/myhome/prometheus-mqtt-exporter.yaml.sample
 	chmod +x $(DEBPKG_DIR)/usr/share/myhome/*.sh
-	@# Prometheus MQTT Exporter configuration
-	mkdir -p $(DEBPKG_DIR)/etc/prometheus
-	cp linux/prometheus/mqtt-exporter.yaml $(DEBPKG_DIR)/etc/prometheus/mqtt-exporter.yaml
+	@# Prometheus MQTT Exporter: systemd drop-in pointing it at our own config
+	@# path, instead of /etc/prometheus/mqtt-exporter.yaml (owned by the
+	@# upstream prometheus-mqtt-exporter package — see #261)
+	mkdir -p $(DEBPKG_DIR)/lib/systemd/system/prometheus-mqtt-exporter.service.d
+	cp linux/prometheus/myhome.conf $(DEBPKG_DIR)/lib/systemd/system/prometheus-mqtt-exporter.service.d/myhome.conf
 	@# DEBIAN maintainer scripts
 	mkdir -p $(DEBPKG_DIR)/DEBIAN
 	cp linux/debian/postinst.sh $(DEBPKG_DIR)/DEBIAN/postinst

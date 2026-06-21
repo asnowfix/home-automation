@@ -23,6 +23,13 @@ if [ "$1" = "purge" ]; then
     # Reload systemd
     systemctl daemon-reload
 
+    # dpkg already removed our prometheus-mqtt-exporter.service.d drop-in;
+    # restart so the exporter reverts to its own default configuration
+    if systemctl is-active --quiet prometheus-mqtt-exporter 2>/dev/null; then
+        echo "Restarting prometheus-mqtt-exporter to drop myhome's configuration override..."
+        systemctl restart prometheus-mqtt-exporter 2>/dev/null || true
+    fi
+
     # Optionally remove data directory (commented out for safety)
     # rm -rf /var/lib/$SERVICE
 fi
@@ -41,6 +48,13 @@ if [ "$1" = "remove" ]; then
 
     # Reload systemd
     systemctl daemon-reload
+
+    # dpkg already removed our prometheus-mqtt-exporter.service.d drop-in;
+    # restart so the exporter reverts to its own default configuration
+    if systemctl is-active --quiet prometheus-mqtt-exporter 2>/dev/null; then
+        echo "Restarting prometheus-mqtt-exporter to drop myhome's configuration override..."
+        systemctl restart prometheus-mqtt-exporter 2>/dev/null || true
+    fi
 fi
 
 # Exit successfully

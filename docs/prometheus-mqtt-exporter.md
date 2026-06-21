@@ -100,29 +100,57 @@ Where `{mac}` is the BLU device MAC address (e.g., `e8:e0:7e:d0:f9:89`).
 
 ## Configuration File
 
-The configuration file should be installed as `/etc/prometheus/mqtt-exporter.yaml` and will override the default configuration from the Debian `prometheus-mqtt-exporter` package.
+The Debian `prometheus-mqtt-exporter` package owns `/etc/prometheus/mqtt-exporter.yaml`
+as a conffile, so myhome never installs anything at that path (doing so used
+to conflict at `dpkg -i` time — see [#261](https://github.com/asnowfix/home-automation/issues/261)).
+Instead, myhome ships its own config under `/etc/myhome/` and uses a systemd
+unit drop-in to point the exporter at it:
+
+- `linux/prometheus/mqtt-exporter.yaml.sample` is installed to
+  `/usr/share/myhome/prometheus-mqtt-exporter.yaml.sample`. The package's
+  `postinst` copies it to `/etc/myhome/prometheus-mqtt-exporter.yaml` on
+  first install, only if that file doesn't already exist (same pattern as
+  `myhome.yaml`/`myhome-example.yaml`).
+- `linux/prometheus/myhome.conf` is installed to
+  `/lib/systemd/system/prometheus-mqtt-exporter.service.d/myhome.conf`. It
+  overrides the unit's `ExecStart` to pass
+  `-config /etc/myhome/prometheus-mqtt-exporter.yaml`, since the exporter
+  itself only accepts a single `-config` flag and has no conf.d/include
+  mechanism of its own.
+
+myhome never touches `/etc/prometheus/mqtt-exporter.yaml` or any other file
+owned by `prometheus-mqtt-exporter`, so the two packages can coexist without
+`Conflicts:`/`Replaces:` or `dpkg --force-overwrite`.
 
 ### Location
 
 ```
-/Users/fix/Desktop/GIT/home-automation/linux/prometheus/mqtt-exporter.yaml
+linux/prometheus/mqtt-exporter.yaml.sample
+linux/prometheus/myhome.conf
 ```
 
 ### Installation
 
+Installed automatically by the `myhome` `.deb` package's `postinst`/`debpkg`
+build (see `Makefile`'s `debpkg` target). To apply manually on a system
+where `myhome` is already installed:
+
 ```bash
-# Copy the configuration file to the system location
-sudo cp linux/prometheus/mqtt-exporter.yaml /etc/prometheus/mqtt-exporter.yaml
+# Edit myhome's own copy of the exporter config
+sudo vi /etc/myhome/prometheus-mqtt-exporter.yaml
 
 # Reload systemd daemon and restart the service
 sudo systemctl daemon-reload
 sudo systemctl restart prometheus-mqtt-exporter
 
-# Verify the service is running
+# Verify the service is running, and that it picked up myhome's config
 sudo systemctl status prometheus-mqtt-exporter
+sudo systemctl cat prometheus-mqtt-exporter | grep ExecStart
 ```
 
-**Note**: The service automatically reads `/etc/prometheus/mqtt-exporter.yaml` on startup. A simple restart is sufficient to apply configuration changes.
+**Note**: Editing `/etc/myhome/prometheus-mqtt-exporter.yaml` only needs a
+service restart (no `daemon-reload`) to take effect. `daemon-reload` is only
+needed when the drop-in unit file itself changes.
 
 ### Configuration Structure
 
@@ -296,6 +324,6 @@ monitoredSwitches: ["switch:0", "switch:1"]
 
 ## References
 
-- [mqtt-prometheus-exporter GitHub](https://github.com/torilabs/mqtt-prometheus-exporter)
+- [mqtt2prometheus GitHub](https://github.com/hikhvar/mqtt2prometheus) (upstream of the Debian `prometheus-mqtt-exporter` package)
 - [Prometheus Documentation](https://prometheus.io/docs/)
 - [HiveMQ MQTT CLI](https://hivemq.github.io/mqtt-cli/)

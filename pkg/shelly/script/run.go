@@ -629,6 +629,8 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	})
 	vm.Set("MQTT", mqttObj)
 
+	installHardwareStubs(vm)
+
 	// Script object
 	scriptObj := vm.NewObject()
 

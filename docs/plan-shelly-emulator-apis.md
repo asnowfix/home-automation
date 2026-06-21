@@ -40,7 +40,7 @@ component kinds Number/Text/Boolean/Enum/Button/Group per the docs; `on`/`off` u
 existing event-handler-list pattern already used for `Shelly.addEventHandler`. Test:
 get/set round-trip, `change` event firing, `Button` push events.
 
-### Phase 4 — AES
+### Phase 4 — AES (done)
 `AES.encrypt(plainText, key, mode)` / `AES.decrypt(cypherText, key, mode)` operating on
 `goja.ArrayBuffer` (`vm.NewArrayBuffer`/`.Export().(goja.ArrayBuffer).Bytes()`). Modes:
 CBC, CFB, CTR, OFB (stdlib `crypto/cipher`), ECB (manual block-by-block, stdlib has no

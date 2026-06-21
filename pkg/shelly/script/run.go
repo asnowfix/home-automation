@@ -651,6 +651,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 
 	installHardwareStubs(vm)
 	installVirtual(vm, deviceState)
+	installAES(vm)
 
 	// Script object
 	scriptObj := vm.NewObject()

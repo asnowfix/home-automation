@@ -78,6 +78,14 @@ per-zone water deficits, today's planned watering, and active state.`,
 			}
 		}
 
+		fmt.Println("\nCadence:")
+		for _, e := range entries {
+			if strings.HasSuffix(e.k, "-group") || strings.HasSuffix(e.k, "-interval") ||
+				strings.HasSuffix(e.k, "-last") {
+				fmt.Printf("  %-32s  %s\n", e.k, e.v)
+			}
+		}
+
 		fmt.Println("\nAll KVS entries:")
 		for _, e := range entries {
 			fmt.Printf("  %-32s  %s\n", e.k, e.v)

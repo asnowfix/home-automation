@@ -7,11 +7,11 @@ import (
 
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
-	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
@@ -19,22 +19,22 @@ import (
 )
 
 const scriptName = "garden.js"
-const kvsPrefix  = "script/garden/"
+const kvsPrefix = "script/garden/"
 
 // gardenKVSKeys maps logical field names to KVS keys.
 // All keys: prefix (14) + suffix ≤18 chars = ≤32 chars total.
 var gardenKVSKeys = map[string]string{
-	"logging":        kvsPrefix + "logging",
-	"mqtt-topic":     kvsPrefix + "mqtt-topic",
-	"earliest-start": kvsPrefix + "earliest-start",
-	"lunch-start":    kvsPrefix + "lunch-start",
-	"lunch-end":      kvsPrefix + "lunch-end",
-	"evening-start":  kvsPrefix + "evening-start",
-	"evening-end":    kvsPrefix + "evening-end",
-	"fallback-start": kvsPrefix + "fallback-start",
-	"frost-cutoff-c": kvsPrefix + "frost-cutoff-c",
+	"logging":         kvsPrefix + "logging",
+	"mqtt-topic":      kvsPrefix + "mqtt-topic",
+	"earliest-start":  kvsPrefix + "earliest-start",
+	"lunch-start":     kvsPrefix + "lunch-start",
+	"lunch-end":       kvsPrefix + "lunch-end",
+	"evening-start":   kvsPrefix + "evening-start",
+	"evening-end":     kvsPrefix + "evening-end",
+	"fallback-start":  kvsPrefix + "fallback-start",
+	"frost-cutoff-c":  kvsPrefix + "frost-cutoff-c",
 	"rain-holdoff-mm": kvsPrefix + "rain-holdoff-mm",
-	"max-deficit-mm": kvsPrefix + "max-deficit-mm",
+	"max-deficit-mm":  kvsPrefix + "max-deficit-mm",
 }
 
 // defaultGlobalKVS holds the initial KVS values to write on setup.
@@ -58,13 +58,15 @@ func defaultZoneKVS() map[string]string {
 	m := make(map[string]string)
 	for i, z := range defaultZoneDefaults {
 		pfx := kvsPrefix + fmt.Sprintf("zone%d-", i)
-		m[pfx+"name"]         = z.name
-		m[pfx+"app-rate"]     = fmt.Sprintf("%.1f", z.appRateMmH)
-		m[pfx+"kc"]           = fmt.Sprintf("%.2f", z.kc)
-		m[pfx+"trigger-mm"]   = fmt.Sprintf("%.1f", z.triggerMm)
-		m[pfx+"max-min"]      = fmt.Sprintf("%d", z.maxMin)
+		m[pfx+"name"] = z.name
+		m[pfx+"app-rate"] = fmt.Sprintf("%.1f", z.appRateMmH)
+		m[pfx+"kc"] = fmt.Sprintf("%.2f", z.kc)
+		m[pfx+"trigger-mm"] = fmt.Sprintf("%.1f", z.triggerMm)
+		m[pfx+"max-min"] = fmt.Sprintf("%d", z.maxMin)
 		m[pfx+"fallback-min"] = fmt.Sprintf("%d", z.fallbackMin)
-		m[pfx+"enabled"]      = fmt.Sprintf("%t", z.enabled)
+		m[pfx+"group"] = z.group
+		m[pfx+"interval"] = fmt.Sprintf("%d", z.intervalDays)
+		m[pfx+"enabled"] = fmt.Sprintf("%t", z.enabled)
 	}
 	return m
 }
@@ -128,7 +130,7 @@ to reflect real coverage.`,
 		identifier := args[0]
 
 		noMinify, _ := cmd.Flags().GetBool("no-minify")
-		force, _    := cmd.Flags().GetBool("force")
+		force, _ := cmd.Flags().GetBool("force")
 
 		_, sd, err := getDeviceByAny(ctx, identifier)
 		if err != nil {

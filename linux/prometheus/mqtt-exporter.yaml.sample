@@ -1,5 +1,9 @@
-# Prometheus MQTT Exporter Configuration
-# This file should be installed as /etc/prometheus/mqtt-exporter.yaml
+# Prometheus MQTT Exporter Configuration (myhome sample)
+# Installed by myhome's postinst as /etc/myhome/prometheus-mqtt-exporter.yaml
+# (only if that file doesn't already exist), and pointed to by the
+# prometheus-mqtt-exporter.service systemd drop-in shipped alongside it.
+# This avoids clashing with /etc/prometheus/mqtt-exporter.yaml, which is
+# owned by the upstream prometheus-mqtt-exporter Debian package (see #261).
 # It configures the exporter to consume metrics published by Shelly watchdog.js scripts
 #
 # The watchdog.js script publishes individual metrics as JSON to topics like:

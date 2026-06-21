@@ -5,6 +5,8 @@ SERVICE="myhome"
 CONFIG_DIR="/etc/$SERVICE"
 CONFIG_FILE="$CONFIG_DIR/myhome.yaml"
 EXAMPLE_CONFIG="/usr/share/$SERVICE/myhome-example.yaml"
+PROM_CONFIG_FILE="$CONFIG_DIR/prometheus-mqtt-exporter.yaml"
+PROM_EXAMPLE_CONFIG="/usr/share/$SERVICE/prometheus-mqtt-exporter.yaml.sample"
 
 # All systemd units to manage
 SERVICES="${SERVICE}.service"
@@ -28,6 +30,22 @@ if [ ! -f "$CONFIG_FILE" ]; then
     fi
 else
     echo "Configuration file already exists at $CONFIG_FILE"
+fi
+
+# Create default Prometheus MQTT exporter configuration if it doesn't exist.
+# Lives under /etc/myhome (not /etc/prometheus) to avoid clashing with the
+# upstream prometheus-mqtt-exporter package's own conffile (see #261); the
+# systemd drop-in shipped alongside it points the exporter here.
+if [ ! -f "$PROM_CONFIG_FILE" ]; then
+    if [ -f "$PROM_EXAMPLE_CONFIG" ]; then
+        echo "Creating default Prometheus MQTT exporter configuration at $PROM_CONFIG_FILE..."
+        cp "$PROM_EXAMPLE_CONFIG" "$PROM_CONFIG_FILE"
+        chmod 644 "$PROM_CONFIG_FILE"
+    else
+        echo "Warning: Example Prometheus MQTT exporter configuration not found at $PROM_EXAMPLE_CONFIG"
+    fi
+else
+    echo "Prometheus MQTT exporter configuration already exists at $PROM_CONFIG_FILE"
 fi
 
 # Check if the script is being run during package installation

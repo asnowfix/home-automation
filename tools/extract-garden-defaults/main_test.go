@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -88,5 +89,28 @@ func TestExtractFloatDefault_NotFound(t *testing.T) {
 	_, err := extractFloatDefault("nothing here", "bar")
 	if err == nil {
 		t.Fatal("expected error for missing field")
+	}
+}
+
+// TestOutputTemplate_ZoneDefaultsGroupingAndInterval guards the hardcoded
+// per-zone group/intervalDays literal in outputTemplate (defaultZoneDefaults
+// is not parsed from garden.js — see the comment above outputTemplate).
+// Catches a typo'd group name or a forgotten intervalDays update next time
+// these defaults are retuned (as happened going from beds intervalDays 7->4).
+func TestOutputTemplate_ZoneDefaultsGroupingAndInterval(t *testing.T) {
+	want := []string{
+		`group: "lawn", intervalDays: 1`,
+		`group: "beds", intervalDays: 4`,
+	}
+	for _, w := range want {
+		if !strings.Contains(outputTemplate, w) {
+			t.Errorf("outputTemplate missing expected zone default %q", w)
+		}
+	}
+	if n := strings.Count(outputTemplate, `group: "lawn"`); n != 2 {
+		t.Errorf("expected 2 zones in group \"lawn\", found %d", n)
+	}
+	if n := strings.Count(outputTemplate, `group: "beds"`); n != 1 {
+		t.Errorf("expected 1 zone in group \"beds\", found %d", n)
 	}
 }

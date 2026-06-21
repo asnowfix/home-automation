@@ -5,5 +5,6 @@ go 1.25.0
 require (
 	github.com/asnowfix/home-automation/pkg/shelly v0.0.0-00010101000000-000000000000
 	github.com/asnowfix/home-automation/pkg/shelly/types v0.0.0-00010101000000-000000000000
+	github.com/dop251/goja v0.0.0-20251103141225-af2ceb9156d7
 	github.com/go-logr/logr v1.4.3
 )

@@ -26,6 +26,12 @@ type EngineOptions struct {
 	// registers no timer/MQTT handlers, so that Dispatch() can be served.
 	// Daemon-hosted scripts set this; the CLI emulator does not.
 	EnableExternalCalls bool
+
+	// TODO(#250): add a Mode field (DeviceTestMode | DeviceExtensionMode) once
+	// resource-limit emulation lands. myhome/scripthost must construct its
+	// engines with DeviceExtensionMode (unlimited) — daemon-hosted scripts
+	// exist precisely to subcontract work that exceeds real device limits.
+	// Device-bound script tests must default to DeviceTestMode (enforced).
 }
 
 // Engine runs one script in one goja VM. The VM is single-threaded: the

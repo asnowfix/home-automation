@@ -8,6 +8,14 @@
 // embedded device-script library — so every device script can assume a script
 // of the same name is also present on the daemon. Devices invoke daemon
 // scripts through the script.invoke RPC verb on the regular myhome/rpc topic.
+//
+// Daemon-hosted scripts deliberately run unconstrained by Shelly device
+// resource limits (5 timers, 5 event/status handlers, 10 MQTT subscriptions,
+// ~30KB heap — see AGENTS.md "Resource Limits"): the whole point of hosting a
+// workflow here instead of on the device is to subcontract memory/CPU-heavy
+// work the device can't do. When script.Engine gains resource-limit
+// emulation (issue #250), engines built by this package must use
+// script.DeviceExtensionMode, never script.DeviceTestMode.
 package scripthost
 
 import (

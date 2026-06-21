@@ -391,6 +391,27 @@ The number of scripts that can run simultaneously on a single device depends on 
 
 Other models are not yet catalogued here — add entries as you hit them. Attempting to enable a script beyond the limit returns: `"Reached the maximum N of enabled scripts"` (error code -108).
 
+#### Emulator enforcement: device-test vs device-extension mode
+
+The goja-based emulator (`pkg/shelly/script`) does not yet enforce the limits above
+(tracked in issue #250) — scripts can currently pass emulated tests while exceeding
+limits that crash real hardware. When #250 lands, the emulator will support two modes:
+
+- **`DeviceTestMode`** (default for tests of device-bound scripts): mirrors real
+  hardware — any violation panics/fails the test immediately.
+- **`DeviceExtensionMode`** (used by `myhome/scripthost`, the daemon-side script host):
+  no limits enforced.
+
+These are deliberately different, not a TODO to "finish enforcing everywhere": the
+daemon hosts JS workflows (`internal/shelly/scripts/heater-myhome.js`, `occupancy.js`)
+specifically to **subcontract memory/CPU-heavy work off the device** — see
+`myhome/scripthost/service.go` package doc. A device has a ~30 KB JS heap and the
+5-timer/5-handler/10-subscription ceilings above; the daemon has neither, by design.
+Enforcing device limits on daemon-hosted scripts would defeat the purpose of having a
+daemon-side script host at all. Any code/tests built against `pkg/shelly/script` for
+device-bound scripts must use `DeviceTestMode`; `myhome/scripthost` must construct its
+engines in `DeviceExtensionMode`.
+
 ### KVS Key Naming Convention
 
 **All KVS (Key-Value Storage) keys must use only lowercase letters, digits, hyphens, and slashes: `[0-9a-z-/]`**

@@ -47,6 +47,7 @@ daemon:
   mqtt_watchdog_max_failures: 3
   mqtt_reconnect_interval: 2h
   mqtt_broker_client_log_interval: 2m
+  reconcile_interval: 1h
   
   # MyHome Ports
   ui_port: 6080
@@ -118,6 +119,12 @@ daemon:
 - Set to `0` to disable
 - Flag: `--mqtt-broker-client-log-interval`
 - Env: `MYHOME_DAEMON_MQTT_BROKER_CLIENT_LOG_INTERVAL`
+
+**`reconcile_interval`** (duration, default: `1h`)
+- Interval for re-applying the canonical MQTT broker address, NTP server, and Matter-disabled setting to every known Gen2+ device, over HTTP. Self-healing safety net against config drift (e.g. a device ending up with the wrong MQTT broker). Never touches device name, WiFi, or scripts.
+- Set to `0` to disable
+- Flag: `--reconcile-interval`
+- Env: `MYHOME_DAEMON_RECONCILE_INTERVAL`
 
 #### Service Ports
 

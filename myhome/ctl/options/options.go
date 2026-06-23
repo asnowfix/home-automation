@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"os"
 	"os/signal"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"syscall"
 	"time"
 
@@ -31,6 +31,8 @@ const MQTT_DEFAULT_GRACE time.Duration = 2 * time.Second
 const COMMAND_DEFAULT_TIMEOUT time.Duration = 0 // No timeout by default (wait indefinitely)
 
 const DEVICE_REFRESH_INTERVAL time.Duration = 1 * time.Minute
+
+const RECONCILE_DEFAULT_INTERVAL time.Duration = 1 * time.Hour
 
 const MQTT_WATCHDOG_CHECK_INTERVAL time.Duration = 30 * time.Second
 
@@ -73,6 +75,7 @@ var Flags struct {
 	MetricsExporterTopic        string
 	ShellyRateLimit             time.Duration // the value taken by --shelly-rate-limit
 	AutoSetup                   bool          // the value taken by --auto-setup / -A
+	ReconcileInterval           time.Duration // the value taken by --reconcile-interval (0 disables)
 	NoMdnsPublish               bool          // the value taken by --no-mdns-publish
 	InstanceName                string        // the value taken by --instance / -I
 	EventsDBPath                string        // path to events SQLite database

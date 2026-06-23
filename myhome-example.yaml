@@ -121,7 +121,11 @@ daemon:
   
   # MQTT broker client log interval (0 to disable)
   # mqtt_broker_client_log_interval: 2m
-  
+
+  # Interval for re-applying canonical MQTT broker/NTP/Matter config to known
+  # devices over HTTP, as a self-healing safety net against config drift (0 to disable)
+  # reconcile_interval: 1h
+
   # UI listen port
   # ui_port: 6080
 

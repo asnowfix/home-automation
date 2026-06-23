@@ -389,19 +389,32 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	dm.setupConfig = shellysetup.Config{
 		Resolver: dm.resolver,
 	}
-	// Use the current process MQTT broker for auto-setup
+	// Use the current process MQTT broker for auto-setup. DeviceServer()
+	// resolves a loopback address (e.g. the embedded broker's "localhost:1883")
+	// to the host's LAN IP, since the device itself would otherwise resolve
+	// "localhost" to its own loopback interface.
+	deviceServer := ""
 	if dm.mqttClient != nil {
-		// GetServer returns host:port, use it directly
-		dm.setupConfig.MqttBroker = dm.mqttClient.GetServer()
+		var err error
+		deviceServer, err = dm.mqttClient.DeviceServer()
+		if err != nil {
+			dm.log.Error(err, "Failed to resolve device-facing MQTT broker address; falling back to configured broker")
+		}
+	}
+	switch {
+	case deviceServer != "":
+		dm.setupConfig.MqttBroker = deviceServer
 		dm.setupConfig.MqttPort = 0 // Signal that broker already includes port
-	} else if options.Flags.MqttBroker != "" {
+	case options.Flags.MqttBroker != "":
 		dm.setupConfig.MqttBroker = options.Flags.MqttBroker
 		dm.setupConfig.MqttPort = 1883
-	} else {
+	default:
 		dm.setupConfig.MqttBroker = "mqtt.local"
 		dm.setupConfig.MqttPort = 1883
 	}
 	dm.log.Info("Auto-setup configuration", "enabled", options.Flags.AutoSetup, "mqtt_broker", dm.setupConfig.MqttBroker)
+
+	go dm.runReconciliationLoop(logr.NewContext(ctx, dm.log.WithName("runReconciliationLoop")), options.Flags.ReconcileInterval)
 
 	// Loop on ZeroConf devices discovery
 	err = watch.ZeroConf(ctx, options.Flags.MdnsTimeout, dm, dm.dr, dm.resolver)
@@ -507,7 +520,13 @@ func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, 
 	}
 
 	// Check if device is already set up (has watchdog script running)
-	if shellysetup.IsDeviceSetUp(ctx, log, sd) {
+	setUp, err := shellysetup.IsDeviceSetUp(ctx, log, sd)
+	if err != nil {
+		log.Info("Skipping auto-setup this round: could not determine setup state", "device_id", deviceId, "error", err)
+		dm.setupInFlight.Delete(deviceId)
+		return
+	}
+	if setUp {
 		log.V(1).Info("Skipping auto-setup: device already set up", "device_id", deviceId)
 		dm.setupInFlight.Delete(deviceId)
 		return
@@ -656,6 +675,69 @@ func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, interval time.
 			dm.UpdateChannel() <- gen2Devices[i]
 			i++
 		}
+	}
+}
+
+// runReconciliationLoop periodically re-applies canonical MQTT broker / NTP / Matter
+// config to every known Gen2+ device over HTTP, as a self-healing safety net against
+// config drift (see docs/MQTT-BROKER-LOOPBACK-PLAN.md). interval <= 0 disables the loop.
+//
+// HTTP is forced rather than auto-selected: if a device's MQTT broker is wrong, its
+// "MQTT ready" flag can look fine while nothing actually reaches it, so only HTTP to
+// the device's own IP reflects reality.
+func (dm *DeviceManager) runReconciliationLoop(ctx context.Context, interval time.Duration) {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
+	if interval <= 0 {
+		log.Info("Reconciliation loop disabled")
+		return
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Exiting reconciliation loop")
+			return
+		case <-ticker.C:
+			devices, err := dm.GetAllDevices(ctx)
+			if err != nil {
+				log.Error(err, "Failed to get all devices for reconciliation")
+				continue
+			}
+			for _, d := range devices {
+				if shelly.IsGen1Device(d.Id()) || strings.HasPrefix(d.Id(), "shellyblu-") {
+					continue
+				}
+				dm.reconcileOneDevice(ctx, log, d)
+			}
+		}
+	}
+}
+
+func (dm *DeviceManager) reconcileOneDevice(ctx context.Context, log logr.Logger, device *myhome.Device) {
+	sd, ok := device.Impl().(*shelly.Device)
+	if !ok || sd == nil {
+		impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
+		if err != nil {
+			log.Error(err, "Failed to create device for reconciliation", "device", device.Id())
+			return
+		}
+		sd, ok = impl.(*shelly.Device)
+		if !ok || sd == nil {
+			return
+		}
+	}
+	if sd.Host() == "" {
+		log.V(1).Info("Skipping reconciliation: no host known for device", "device", device.Id())
+		return
+	}
+	if err := shellysetup.ReconcileConfig(ctx, log, types.ChannelHttp, sd, dm.setupConfig); err != nil {
+		log.Error(err, "Reconciliation failed", "device", device.Id())
 	}
 }
 

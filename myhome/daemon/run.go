@@ -45,6 +45,7 @@ func init() {
 	runCmd.PersistentFlags().IntVar(&options.Flags.MetricsExporterPort, "metrics-exporter-port", options.PROMETHEUS_DEFAULT_PORT, "Prometheus metrics exporter HTTP port")
 	runCmd.PersistentFlags().StringVar(&options.Flags.MetricsExporterTopic, "metrics-exporter-topic", "shelly/metrics", "MQTT topic for Shelly device metrics")
 	runCmd.PersistentFlags().BoolVar(&disableAutoSetup, "disable-auto-setup", false, "Disable automatic configuration of newly discovered unknown devices")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.ReconcileInterval, "reconcile-interval", options.RECONCILE_DEFAULT_INTERVAL, "Interval for re-applying canonical MQTT broker/NTP/Matter config to known devices over HTTP (0 to disable)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.NoMdnsPublish, "no-mdns-publish", false, "Disable mDNS/Zeroconf publishing (useful for dev instances)")
 	runCmd.PersistentFlags().StringVarP(&options.Flags.InstanceName, "instance", "I", "myhome", "Server instance name for RPC topics (default: myhome)")
 	runCmd.PersistentFlags().StringVar(&options.Flags.EventsDBPath, "events-db", defaultEventsDBPath(), "Path to the events SQLite database")
@@ -134,6 +135,9 @@ var runCmd = &cobra.Command{
 		}
 		if v.IsSet("daemon.mqtt_broker_client_log_interval") && !cmd.Flags().Changed("mqtt-broker-client-log-interval") {
 			options.Flags.MqttBrokerClientLogInterval = v.GetDuration("daemon.mqtt_broker_client_log_interval")
+		}
+		if v.IsSet("daemon.reconcile_interval") && !cmd.Flags().Changed("reconcile-interval") {
+			options.Flags.ReconcileInterval = v.GetDuration("daemon.reconcile_interval")
 		}
 		if v.IsSet("daemon.events_dir") && !cmd.Flags().Changed("events-dir") {
 			options.Flags.EventsDir = v.GetString("daemon.events_dir")

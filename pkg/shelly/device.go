@@ -628,6 +628,9 @@ func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devic
 }
 
 func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.Device) (devices.Device, error) {
+	if summary.Id() == "" {
+		return nil, fmt.Errorf("device summary has empty ID (name=%q, host=%q)", summary.Name(), summary.Host())
+	}
 	d := &Device{
 		// info: &shelly.DeviceInfo{
 		// 	Name:    summary.Name(),
@@ -780,6 +783,13 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 		wg.Add(1)
 		go func(devSummary devices.Device) {
 			defer wg.Done()
+
+			// Skip devices whose ID is not yet known (partially discovered)
+			if devSummary.Id() == "" {
+				log.V(1).Info("Skipping device with no ID yet", "name", devSummary.Name(), "host", devSummary.Host())
+				results <- DeviceResult{Device: devSummary, Error: nil}
+				return
+			}
 
 			// Skip Gen1 devices - they cannot receive commands or run scripts
 			if IsGen1Device(devSummary.Id()) {

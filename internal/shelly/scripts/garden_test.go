@@ -92,17 +92,17 @@ func zonePlanIDs(t *testing.T, raw string) map[int]int {
 }
 
 // TestGarden_LawnFiresTogetherBedsIndependent verifies the core grouping
-// behaviour added for differentiated cadence: lawn zones (0 and 2, group
+// behaviour added for differentiated cadence: lawn zones (0 and 1, group
 // "lawn") water together as soon as either crosses its trigger, while massifs
-// (zone 1, group "beds") is gated independently by its own trigger.
+// (zone 2, group "beds") is gated independently by its own trigger.
 func TestGarden_LawnFiresTogetherBedsIndependent(t *testing.T) {
 	vm := gardenVM(t)
 
-	// Zone 0 above its 12mm trigger, zone 2 below it (but in the same "lawn"
-	// group as zone 0), zone 1 (massifs) below its 8mm trigger.
+	// Zone 0 above its 12mm trigger, zone 1 below it (but in the same "lawn"
+	// group as zone 0), zone 2 (massifs) below its 8mm trigger.
 	mustEval(t, vm, `storeStorageValue(deficitKey(0), 15);`)
-	mustEval(t, vm, `storeStorageValue(deficitKey(1), 3);`)
-	mustEval(t, vm, `storeStorageValue(deficitKey(2), 9);`)
+	mustEval(t, vm, `storeStorageValue(deficitKey(1), 9);`)
+	mustEval(t, vm, `storeStorageValue(deficitKey(2), 3);`)
 
 	raw := mustEval(t, vm, `JSON.stringify(computeZonePlan())`).String()
 	plan := zonePlanIDs(t, raw)
@@ -110,11 +110,11 @@ func TestGarden_LawnFiresTogetherBedsIndependent(t *testing.T) {
 	if _, ok := plan[0]; !ok {
 		t.Errorf("expected zone 0 (over trigger) in plan, got %v", plan)
 	}
-	if _, ok := plan[2]; !ok {
-		t.Errorf("expected lawn zone 2 to fire together with zone 0, got %v", plan)
+	if _, ok := plan[1]; !ok {
+		t.Errorf("expected lawn zone 1 to fire together with zone 0, got %v", plan)
 	}
-	if _, ok := plan[1]; ok {
-		t.Errorf("expected massifs (zone 1, below its trigger) to stay excluded, got %v", plan)
+	if _, ok := plan[2]; ok {
+		t.Errorf("expected massifs (zone 2, below its trigger) to stay excluded, got %v", plan)
 	}
 }
 
@@ -132,7 +132,7 @@ func TestGarden_GroupCadenceGate(t *testing.T) {
 	mustEval(t, vm, `storeStorageValue(deficitKey(1), 25);`)
 	mustEval(t, vm, `storeStorageValue(deficitKey(2), 25);`)
 
-	bedsInterval := mustEval(t, vm, `ZONES[1].intervalDays`).ToInteger()
+	bedsInterval := mustEval(t, vm, `ZONES[2].intervalDays`).ToInteger()
 	if bedsInterval < 1 {
 		t.Fatalf("unexpected beds intervalDays: %d", bedsInterval)
 	}
@@ -155,10 +155,10 @@ func TestGarden_GroupCadenceGate(t *testing.T) {
 	if _, ok := plan[0]; ok {
 		t.Errorf("lawn zone 0 should still be gated (watered today), got %v", plan)
 	}
-	if _, ok := plan[2]; ok {
-		t.Errorf("lawn zone 2 should still be gated (watered today), got %v", plan)
+	if _, ok := plan[1]; ok {
+		t.Errorf("lawn zone 1 should still be gated (watered today), got %v", plan)
 	}
-	if _, ok := plan[1]; !ok {
-		t.Errorf("expected massifs (zone 1) to be due again, got %v", plan)
+	if _, ok := plan[2]; !ok {
+		t.Errorf("expected massifs (zone 2) to be due again, got %v", plan)
 	}
 }

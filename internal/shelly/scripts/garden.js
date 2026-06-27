@@ -3,8 +3,8 @@
 //
 // Zone mapping (group: zones sharing a group water on the same days):
 //   switch:0  pelouse-maison   (lawn, house side)   group=lawn, interval=1d
-//   switch:1  massifs          (flower beds)        group=beds, interval=4d
-//   switch:2  pelouse-barriere (lawn, fence side)    group=lawn, interval=1d
+//   switch:1  pelouse-barriere (lawn, fence side)    group=lawn, interval=1d
+//   switch:2  massifs          (flower beds)        group=beds, interval=4d
 //
 // Power supply supports ONE valve at a time — enforced in hardware and software.
 // All logic runs on-device; no daemon dependency (resilience per CLAUDE.md).
@@ -90,10 +90,10 @@ var CONFIG_SCHEMA = {
 
 // Per-zone defaults — calibrate appRateMmH via 'ctl garden calibrate'
 // appRateMmH: water delivery rate (mm/h).
-//   Grass zones (0, 2): 2 pop-up heads per zone, each measured at 96 mm/h (8 mm/5 min),
+//   Grass zones (0, 1): 2 pop-up heads per zone, each measured at 96 mm/h (8 mm/5 min),
 //   covering the same ground simultaneously → 192 mm/h.
-//   Massifs zone (1): drip pipe — set after measuring or via KVS.
-// massifs (zone 1) plant list — true mediterranean, low-water (rosemary/Romarin,
+//   Massifs zone (2): drip pipe — set after measuring or via KVS.
+// massifs (zone 2) plant list — true mediterranean, low-water (rosemary/Romarin,
 //   society garlic/Tulbaghia, boxwood/Buis, NZ flax/Phormium, Abelia, feijoa) mixed
 //   with thirstier plants (lemon/Citronnier, orange/Oranger de Chine, bird-of-paradise/
 //   Strelitzia, Agapanthus, daylily/Hémérocalle, Carex/Laîche). intervalDays=4 below
@@ -116,8 +116,8 @@ var CONFIG_SCHEMA = {
 //   water more often in peak summer heat.
 var ZONE_DEFAULTS = [
   {id: 0, name: "pelouse-maison",   appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: true},
-  {id: 1, name: "massifs",          appRateMmH:  18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, group: "beds", intervalDays: 4, enabled: true},
-  {id: 2, name: "pelouse-barriere", appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: true}
+  {id: 1, name: "pelouse-barriere", appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: true},
+  {id: 2, name: "massifs",          appRateMmH:  18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, group: "beds", intervalDays: 4, enabled: true}
 ];
 
 // Runtime config — populated from defaults then overridden by KVS at startup

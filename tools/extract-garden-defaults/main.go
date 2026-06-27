@@ -56,9 +56,9 @@ type ZoneDefault struct {
 }
 
 // defaultZoneDefaults mirrors ZONE_DEFAULTS from garden.js.
-// Grass zones (0,2): 192 mm/h = 2 pop-up heads × 96 mm/h each (measured: 8 mm/5 min).
-// Massifs zone (1): drip pipe — update appRateMmH after measuring with catch-cups.
-// massifs (zone 1) plant list — true mediterranean, low-water (rosemary/Romarin,
+// Grass zones (0,1): 192 mm/h = 2 pop-up heads × 96 mm/h each (measured: 8 mm/5 min).
+// Massifs zone (2): drip pipe — update appRateMmH after measuring with catch-cups.
+// massifs (zone 2) plant list — true mediterranean, low-water (rosemary/Romarin,
 // society garlic/Tulbaghia, boxwood/Buis, NZ flax/Phormium, Abelia, feijoa) mixed
 // with thirstier plants (lemon/Citronnier, orange/Oranger de Chine, bird-of-paradise/
 // Strelitzia, Agapanthus, daylily/Hémérocalle, Carex/Laîche).
@@ -68,8 +68,8 @@ type ZoneDefault struct {
 // the two plant groups above (see docs/garden-sprinklers-plan.md §11 for rationale).
 var defaultZoneDefaults = []ZoneDefault{
 	{name: "pelouse-maison",   appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: true},
-	{name: "massifs",          appRateMmH:  18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, group: "beds", intervalDays: 4, enabled: true},
 	{name: "pelouse-barriere", appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: true},
+	{name: "massifs",          appRateMmH:  18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, group: "beds", intervalDays: 4, enabled: true},
 }
 `
 

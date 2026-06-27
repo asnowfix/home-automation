@@ -4,6 +4,8 @@ project_name: myhome
 before:
   hooks:
     - go generate ./internal/myhome/ui/...
+    - go generate ./myhome/ctl/pool
+    - go generate ./myhome/ctl/garden
     - go generate ./...
 builds:
   - env: [CGO_ENABLED=0]

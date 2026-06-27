@@ -14,10 +14,10 @@ func TestDefaultZoneKVS(t *testing.T) {
 	want := map[string]string{
 		kvsPrefix + "zone0-group":    "lawn",
 		kvsPrefix + "zone0-interval": "1",
-		kvsPrefix + "zone1-group":    "beds",
-		kvsPrefix + "zone1-interval": "4",
-		kvsPrefix + "zone2-group":    "lawn",
-		kvsPrefix + "zone2-interval": "1",
+		kvsPrefix + "zone1-group":    "lawn",
+		kvsPrefix + "zone1-interval": "1",
+		kvsPrefix + "zone2-group":    "beds",
+		kvsPrefix + "zone2-interval": "4",
 	}
 	for k, wantV := range want {
 		gotV, ok := m[k]

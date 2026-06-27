@@ -38,7 +38,10 @@ use (
 	./myhome/mqtt
 	./myhome/occupancy
 	./myhome/storage
-	./myhome/temperature
+	./myhome/electricity
+	./myhome/ical
+	./myhome/weather
+	./myhome/rooms
 	./pkg/beem
 	./pkg/devices
 	./pkg/sfr

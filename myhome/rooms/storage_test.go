@@ -1,4 +1,4 @@
-package temperature
+package rooms
 
 import (
 	"testing"

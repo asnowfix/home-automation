@@ -56,8 +56,9 @@ jobs:
           set -euo pipefail
           EXPECTED_TAG="${{ github.ref_name }}"
           
-          # Build the binary
+          # Build the binary (make generate fetches embedded JS/CSS assets)
           cd myhome
+          make generate
           make build
           
           # Get version from binary

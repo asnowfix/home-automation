@@ -209,11 +209,15 @@ pool:
     # Default: 7
     # max_volume_turnover: 7
 
-# Beem Energy Configuration
+# Beem Energy: set email and password to enable solar production polling.
+# Integration is enabled automatically when both values are non-empty.
 beem:
   email:         "you@example.com"
   password:      "secret"
   poll_interval: 60s
-  # Set to true to enable Beem Energy solar production polling
-  # Default: false
-  # enabled: false
+
+# SFR box credentials — used to authenticate when the box requires a password.
+# Leave empty to skip authentication (works for boxes with no password policy).
+sfr:
+  username: ""
+  password: ""

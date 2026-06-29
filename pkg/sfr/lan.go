@@ -55,7 +55,7 @@ type DnsHost struct {
 func GetHostsList(ctx context.Context) (*[]*LanHost, error) {
 	ip := getBoxIp(ctx)
 	if ip == nil {
-		return nil, fmt.Errorf("SFR box IP not discovered (set SFR_BOX_IP env var to override)")
+		return nil, fmt.Errorf("SFR box IP not discovered (no gateway reachable)")
 	}
 	params := map[string]string{}
 	res, err := queryBox(ip, "lan.getHostsList", &params)
@@ -70,7 +70,7 @@ func GetHostsList(ctx context.Context) (*[]*LanHost, error) {
 func GetDnsHostList(ctx context.Context) (*[]*DnsHost, error) {
 	ip := getBoxIp(ctx)
 	if ip == nil {
-		return nil, fmt.Errorf("SFR box IP not discovered (set SFR_BOX_IP env var to override)")
+		return nil, fmt.Errorf("SFR box IP not discovered (no gateway reachable)")
 	}
 	params := map[string]string{}
 	res, err := queryBox(ip, "lan.getDnsHostList", &params)

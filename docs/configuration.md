@@ -526,12 +526,22 @@ myhome daemon run --enable-temperature-service
 
 ## Beem Energy
 
+Integration is enabled automatically when both `beem.email` and `beem.password` are set and non-empty. There is no separate enable flag.
+
 | Key | Env var | Default | Description |
 |-----|---------|---------|-------------|
 | `beem.email` | `MYHOME_BEEM_EMAIL` | — | Beem Energy account email |
 | `beem.password` | `MYHOME_BEEM_PASSWORD` | — | Beem Energy account password |
-| `beem.poll_interval` | `MYHOME_BEEM_POLL_INTERVAL` | `60s` | How often to poll the Beem REST API |
-| `beem.enabled` | `MYHOME_BEEM_ENABLED` | `false` | Enable Beem Energy integration |
+| `beem.poll_interval` | — | `60s` | How often to poll the Beem REST API (config file only) |
+
+## SFR Box
+
+Credentials for the SFR home gateway. Authentication is skipped when either value is empty.
+
+| Key | Env var | Default | Description |
+|-----|---------|---------|-------------|
+| `sfr.username` | `MYHOME_SFR_USERNAME` | — | SFR box admin username |
+| `sfr.password` | `MYHOME_SFR_PASSWORD` | — | SFR box admin password |
 
 ## Pool
 
@@ -571,7 +581,7 @@ max_rotation_sec = pool_volume × max_volume_turnover / flow_rate × 3600
 
 The daemon only reads these KVS keys, never writes them — KVS remains exclusively the JS script's domain. Solar automation is disabled (with a logged error) if `max_volume_turnover < min_volume_turnover` or if any of the four KVS keys is missing or non-numeric.
 
-Requires both `pool.device_id` and Beem Energy integration (`beem.enabled: true`) to be configured.
+Requires both `pool.device_id` and Beem Energy credentials (`beem.email` + `beem.password`) to be configured.
 
 #### Example
 

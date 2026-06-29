@@ -7,6 +7,7 @@ CONFIG_FILE="$CONFIG_DIR/myhome.yaml"
 EXAMPLE_CONFIG="/usr/share/$SERVICE/myhome-example.yaml"
 PROM_CONFIG_FILE="$CONFIG_DIR/prometheus-mqtt-exporter.yaml"
 PROM_EXAMPLE_CONFIG="/usr/share/$SERVICE/prometheus-mqtt-exporter.yaml.sample"
+ENV_FILE="/var/lib/$SERVICE/.env"
 
 # All systemd units to manage
 SERVICES="${SERVICE}.service"
@@ -16,6 +17,93 @@ TIMERS="${SERVICE}-update.timer ${SERVICE}-db-backup.timer"
 mkdir -p /var/lib/$SERVICE
 mkdir -p /var/lib/$SERVICE/backups
 mkdir -p "$CONFIG_DIR"
+
+# ---------------------------------------------------------------------------
+# Credentials helper: read a current value from the .env file
+# ---------------------------------------------------------------------------
+_env_get() {
+    local key="$1"
+    if [ -f "$ENV_FILE" ]; then
+        grep "^${key}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- || true
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Write (or rewrite) the .env file from the four credential variables.
+# Called after interactive prompting or when creating the skeleton.
+# ---------------------------------------------------------------------------
+_write_env() {
+    local beem_email="$1"
+    local beem_password="$2"
+    local sfr_username="$3"
+    local sfr_password="$4"
+
+    cat > "$ENV_FILE" <<EOF
+# MyHome credentials — loaded by systemd via EnvironmentFile.
+# Run: dpkg-reconfigure $SERVICE   to update interactively.
+MYHOME_BEEM_EMAIL=${beem_email}
+MYHOME_BEEM_PASSWORD=${beem_password}
+MYHOME_SFR_USERNAME=${sfr_username}
+MYHOME_SFR_PASSWORD=${sfr_password}
+EOF
+    chmod 600 "$ENV_FILE"
+}
+
+# ---------------------------------------------------------------------------
+# Credential configuration — interactive or skeleton
+# ---------------------------------------------------------------------------
+if [ -t 0 ] && [ "${DEBIAN_FRONTEND:-}" != "noninteractive" ]; then
+    # --- Interactive path: prompt for credentials ---
+
+    # Read existing values (pre-fill prompts on reconfigure)
+    cur_beem_email="$(_env_get MYHOME_BEEM_EMAIL)"
+    cur_sfr_username="$(_env_get MYHOME_SFR_USERNAME)"
+
+    echo ""
+    echo "=== Beem Energy credentials ==="
+    echo "Set email and password to enable solar production polling."
+    echo "Leave email blank to disable Beem integration."
+    echo ""
+
+    read -rp "Beem email [${cur_beem_email}]: " beem_email
+    beem_email="${beem_email:-$cur_beem_email}"
+
+    beem_password=""
+    if [ -n "$beem_email" ]; then
+        while true; do
+            read -rsp "Beem password: " beem_password
+            echo ""
+            if [ -n "$beem_password" ]; then
+                break
+            fi
+            echo "Password cannot be empty when email is set. Try again."
+        done
+    fi
+
+    echo ""
+    echo "=== SFR box credentials (optional) ==="
+    echo "Leave username blank to skip SFR authentication."
+    echo ""
+
+    read -rp "SFR username [${cur_sfr_username}]: " sfr_username
+    sfr_username="${sfr_username:-$cur_sfr_username}"
+
+    sfr_password=""
+    if [ -n "$sfr_username" ]; then
+        read -rsp "SFR password: " sfr_password
+        echo ""
+    fi
+
+    _write_env "$beem_email" "$beem_password" "$sfr_username" "$sfr_password"
+    echo "Credentials written to $ENV_FILE"
+else
+    # --- Non-interactive path: create skeleton if absent ---
+    if [ ! -f "$ENV_FILE" ]; then
+        _write_env "" "" "" ""
+        echo "Created credential skeleton at $ENV_FILE"
+        echo "Run 'dpkg-reconfigure $SERVICE' to configure credentials interactively."
+    fi
+fi
 
 # Create default configuration file if it doesn't exist
 if [ ! -f "$CONFIG_FILE" ]; then

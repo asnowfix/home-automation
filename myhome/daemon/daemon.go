@@ -200,7 +200,7 @@ func (d *daemon) Run() error {
 
 	// Start Beem Energy watcher if enabled
 	var beemWatcher *beem.Watcher
-	if options.Flags.BeemEnabled && options.Flags.BeemEmail != "" && options.Flags.BeemPassword != "" {
+	if options.Flags.BeemEmail != "" && options.Flags.BeemPassword != "" {
 		log.Info("Starting Beem Energy watcher")
 		beemCfg := beem.ClientConfig{
 			Email:        options.Flags.BeemEmail,

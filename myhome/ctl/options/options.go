@@ -87,7 +87,6 @@ var Flags struct {
 	BeemEmail                   string        // Beem Energy account email
 	BeemPassword                string        // Beem Energy account password
 	BeemPollInterval            time.Duration // Beem Energy poll interval
-	BeemEnabled                 bool          // whether to enable Beem Energy integration
 	PoolSolarEnabled            bool          // whether to enable solar-driven pool pump automation
 	PoolSolarStartThresholdW    float64       // solar power threshold to start pump (W)
 	PoolSolarStopThresholdW     float64       // solar power threshold to stop pump (W)

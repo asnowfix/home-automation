@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	"github.com/asnowfix/home-automation/pkg/sfr"
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -54,10 +55,6 @@ func init() {
 	runCmd.PersistentFlags().StringVar(&options.Flags.RemoteProxy, "remote-proxy", "", "Forward /devices/... requests to a remote myhome daemon (e.g. http://home-pi:6080) instead of connecting directly")
 	runCmd.PersistentFlags().StringVar(&options.Flags.PoolDeviceID, "pool-device-id", "", "Pool Shelly device ID")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolEnabled, "enable-pool", false, "Enable pool runtime tracking")
-	runCmd.PersistentFlags().StringVar(&options.Flags.BeemEmail, "beem-email", "", "Beem Energy account email")
-	runCmd.PersistentFlags().StringVar(&options.Flags.BeemPassword, "beem-password", "", "Beem Energy account password")
-	runCmd.PersistentFlags().DurationVar(&options.Flags.BeemPollInterval, "beem-poll-interval", 60*time.Second, "Beem Energy poll interval")
-	runCmd.PersistentFlags().BoolVar(&options.Flags.BeemEnabled, "enable-beem", false, "Enable Beem Energy integration")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolSolarEnabled, "enable-pool-solar", false, "Enable solar-driven pool pump automation")
 	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarStartThresholdW, "pool-solar-start-threshold-w", 500, "Solar power threshold to start pump (W)")
 	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarStopThresholdW, "pool-solar-stop-threshold-w", 200, "Solar power threshold to stop pump (W)")
@@ -92,6 +89,7 @@ var runCmd = &cobra.Command{
 		// Enable environment variable support
 		v.SetEnvPrefix("MYHOME")
 		v.AutomaticEnv()
+		v.SetDefault("beem.poll_interval", "60s")
 
 		// Try to read config file (optional)
 		if err := v.ReadInConfig(); err == nil {
@@ -229,19 +227,14 @@ var runCmd = &cobra.Command{
 			options.Flags.PoolEnabled = v.GetBool("pool.enabled")
 		}
 
-		// Handle Beem Energy config from viper / flags
-		if v.IsSet("beem.email") && !cmd.Flags().Changed("beem-email") {
-			options.Flags.BeemEmail = v.GetString("beem.email")
-		}
-		if v.IsSet("beem.password") && !cmd.Flags().Changed("beem-password") {
-			options.Flags.BeemPassword = v.GetString("beem.password")
-		}
-		if v.IsSet("beem.poll_interval") && !cmd.Flags().Changed("beem-poll-interval") {
-			options.Flags.BeemPollInterval = v.GetDuration("beem.poll_interval")
-		}
-		if v.IsSet("beem.enabled") && !cmd.Flags().Changed("enable-beem") {
-			options.Flags.BeemEnabled = v.GetBool("beem.enabled")
-		}
+		// Beem Energy: enabled automatically when both email and password are set
+		options.Flags.BeemEmail = v.GetString("beem.email")
+		options.Flags.BeemPassword = v.GetString("beem.password")
+		options.Flags.BeemPollInterval = v.GetDuration("beem.poll_interval")
+
+		// SFR box credentials — Viper reads MYHOME_SFR_USERNAME / MYHOME_SFR_PASSWORD
+		// from the environment or config file; auth is skipped if either is empty.
+		sfr.Init(v.GetString("sfr.username"), v.GetString("sfr.password"))
 
 		// Handle pool solar automation config from viper / flags
 		if v.IsSet("pool.solar.enabled") && !cmd.Flags().Changed("enable-pool-solar") {

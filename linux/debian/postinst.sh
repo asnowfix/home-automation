@@ -29,7 +29,7 @@ _env_get() {
 }
 
 # ---------------------------------------------------------------------------
-# Write (or rewrite) the .env file from the four credential variables.
+# Write (or rewrite) the .env file from the credential variables.
 # Called after interactive prompting or when creating the skeleton.
 # ---------------------------------------------------------------------------
 _write_env() {
@@ -37,6 +37,10 @@ _write_env() {
     local beem_password="$2"
     local sfr_username="$3"
     local sfr_password="$4"
+    local smtp_username="$5"
+    local smtp_password="$6"
+    local smtp_from="$7"
+    local smtp_to="$8"
 
     cat > "$ENV_FILE" <<EOF
 # MyHome credentials — loaded by systemd via EnvironmentFile.
@@ -45,6 +49,12 @@ MYHOME_BEEM_EMAIL=${beem_email}
 MYHOME_BEEM_PASSWORD=${beem_password}
 MYHOME_SFR_USERNAME=${sfr_username}
 MYHOME_SFR_PASSWORD=${sfr_password}
+# Notice digest email (smtp.host/smtp.port live in myhome.yaml, not here).
+# Leave MYHOME_SMTP_FROM blank to disable email sending entirely.
+MYHOME_SMTP_USERNAME=${smtp_username}
+MYHOME_SMTP_PASSWORD=${smtp_password}
+MYHOME_SMTP_FROM=${smtp_from}
+MYHOME_SMTP_TO=${smtp_to}
 EOF
     chmod 600 "$ENV_FILE"
 }
@@ -94,12 +104,42 @@ if [ -t 0 ] && [ "${DEBIAN_FRONTEND:-}" != "noninteractive" ]; then
         echo ""
     fi
 
-    _write_env "$beem_email" "$beem_password" "$sfr_username" "$sfr_password"
+    cur_smtp_from="$(_env_get MYHOME_SMTP_FROM)"
+    cur_smtp_to="$(_env_get MYHOME_SMTP_TO)"
+    cur_smtp_username="$(_env_get MYHOME_SMTP_USERNAME)"
+
+    echo ""
+    echo "=== Email (SMTP) credentials — notice digest (optional) ==="
+    echo "Used to email a daily summary of notice events (pool/garden plans,"
+    echo "solar pump on/off, motion alerts). Leave 'From' blank to disable"
+    echo "email sending entirely. For Gmail, use an App Password:"
+    echo "https://myaccount.google.com/apppasswords"
+    echo ""
+
+    read -rp "SMTP From address [${cur_smtp_from}]: " smtp_from
+    smtp_from="${smtp_from:-$cur_smtp_from}"
+
+    smtp_to=""
+    smtp_username=""
+    smtp_password=""
+    if [ -n "$smtp_from" ]; then
+        read -rp "SMTP To address(es) [${cur_smtp_to}]: " smtp_to
+        smtp_to="${smtp_to:-$cur_smtp_to}"
+
+        read -rp "SMTP username [${cur_smtp_username:-$smtp_from}]: " smtp_username
+        smtp_username="${smtp_username:-${cur_smtp_username:-$smtp_from}}"
+
+        read -rsp "SMTP password (e.g. a Gmail App Password): " smtp_password
+        echo ""
+    fi
+
+    _write_env "$beem_email" "$beem_password" "$sfr_username" "$sfr_password" \
+        "$smtp_username" "$smtp_password" "$smtp_from" "$smtp_to"
     echo "Credentials written to $ENV_FILE"
 else
     # --- Non-interactive path: create skeleton if absent ---
     if [ ! -f "$ENV_FILE" ]; then
-        _write_env "" "" "" ""
+        _write_env "" "" "" "" "" "" "" ""
         echo "Created credential skeleton at $ENV_FILE"
         echo "Run 'dpkg-reconfigure $SERVICE' to configure credentials interactively."
     fi

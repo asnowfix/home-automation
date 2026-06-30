@@ -29,6 +29,8 @@ func eventTemplateFuncs() template.FuncMap {
 				return "has-text-danger"
 			case "warn":
 				return "has-text-warning"
+			case "notice":
+				return "has-text-link"
 			case "debug":
 				return "has-text-grey-light"
 			default:
@@ -109,10 +111,11 @@ const eventsTableTemplate = `<form id="events-filter-form"
       <div class="select is-small">
         <select name="severity">
           <option value="" {{if eq .Severity ""}}selected{{end}}>All severities</option>
-          <option value="alarm" {{if eq .Severity "alarm"}}selected{{end}}>alarm</option>
-          <option value="warn"  {{if eq .Severity "warn"}}selected{{end}}>warn</option>
-          <option value="info"  {{if eq .Severity "info"}}selected{{end}}>info</option>
-          <option value="debug" {{if eq .Severity "debug"}}selected{{end}}>debug</option>
+          <option value="alarm"  {{if eq .Severity "alarm"}}selected{{end}}>alarm</option>
+          <option value="warn"   {{if eq .Severity "warn"}}selected{{end}}>warn</option>
+          <option value="notice" {{if eq .Severity "notice"}}selected{{end}}>notice</option>
+          <option value="info"   {{if eq .Severity "info"}}selected{{end}}>info</option>
+          <option value="debug"  {{if eq .Severity "debug"}}selected{{end}}>debug</option>
         </select>
       </div>
     </div>
@@ -233,7 +236,7 @@ const eventLogPageHTML = `<!doctype html>
             var ev;
             try { ev = JSON.parse(e.data); } catch(_) { return; }
             var ts = new Date(ev.ts * 1000).toISOString().replace('T', ' ').substring(0, 19);
-            var sevClass = {'alarm': 'has-text-danger', 'warn': 'has-text-warning', 'debug': 'has-text-grey-light'}[ev.severity] || '';
+            var sevClass = {'alarm': 'has-text-danger', 'warn': 'has-text-warning', 'notice': 'has-text-link', 'debug': 'has-text-grey-light'}[ev.severity] || '';
             var tr = document.createElement('tr');
             if (sevClass) { tr.className = sevClass; }
             // Time

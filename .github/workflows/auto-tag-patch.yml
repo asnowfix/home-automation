@@ -89,12 +89,11 @@ jobs:
           set -euo pipefail
           EXPECTED_TAG="${{ steps.semver.outputs.v_patch }}"
 
-          # Build the binary
-          cd myhome
+          # make build depends on generate (fetches JS/CSS assets, runs go generate for all packages)
           make build
 
           # Get version from binary
-          VERSION=$(./myhome version)
+          VERSION=$(./myhome/myhome version)
 
           echo "Expected version: $EXPECTED_TAG"
           echo "Actual version: $VERSION"

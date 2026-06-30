@@ -56,12 +56,11 @@ jobs:
           set -euo pipefail
           EXPECTED_TAG="${{ github.ref_name }}"
           
-          # Build the binary
-          cd myhome
+          # Build the binary; root make build depends on generate (fetches embedded JS/CSS assets)
           make build
-          
+
           # Get version from binary
-          VERSION=$(./myhome version)
+          VERSION=$(./myhome/myhome version)
           
           echo "Expected version: $EXPECTED_TAG"
           echo "Actual version: $VERSION"

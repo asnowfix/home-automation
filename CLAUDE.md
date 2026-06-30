@@ -31,6 +31,16 @@ To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call`
 
 `make test` is canonical — never bare `go test ./...` (it skips workspace sub-modules). New CI test commands must also invoke `make test`, not go directly to `go test`.
 
+**`go generate` sub-module gap**: `go generate ./...` from the workspace root does NOT recurse into Go workspace sub-modules. Adding a new `//go:generate` directive to any package under `myhome/ctl/` requires registering it explicitly in **all four** of these places, or CI will fail with "undefined: DefaultXxx" compile errors:
+1. Root `Makefile` — `generate` target (already has explicit lines for `pool` and `garden`)
+2. `.goreleaser.yml` — `before.hooks` list
+3. `.github/workflows/package-release.yml` — Windows MSI "Run go generate" step
+4. Any other workflow that builds the binary directly (check for bare `go build` calls)
+
+Workflows that validate the binary must run `make build` from the **repo root** (not `cd myhome && make build`) — the sub-Makefile has no `generate` target, so embedded assets and generated constants will be missing. The binary then lives at `./myhome/myhome`, not `./myhome`.
+
+Gitignored generated files (`garden_defaults_generated.go`, `pool_defaults_generated.go`) are invisible to CI. Every build path must explicitly generate them; a missing call produces a silent build failure, not a lint warning.
+
 When asked to run `myhome <args>`, use `go run ./myhome <args>` — do not rely on a pre-built binary.
 
 ## Architecture

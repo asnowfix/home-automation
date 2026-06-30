@@ -272,6 +272,10 @@ func severityFor(event string) string {
 	case "battery.low", "ota_error", "switch.active_power_change",
 		"pool.fuse_tripped", "pool.water_supply_protected":
 		return "warn"
+	case "pool.run_window", "pool.pump_start", "pool.pump_stop",
+		"garden.plan", "garden.skip_rain", "garden.skip_frost", "garden.plan_fallback":
+		// Daily schedule/plan decisions and pump actions worth a human's attention.
+		return "notice"
 	}
 	if strings.HasPrefix(event, "input.button_") ||
 		event == "temperature.change" ||

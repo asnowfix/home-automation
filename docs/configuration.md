@@ -610,3 +610,40 @@ pool:
 | `pool.solar.stop_delay` | `MYHOME_POOL_SOLAR_STOP_DELAY` | `--pool-solar-stop-delay` | `10m` | Solar must hold below stop threshold for this long |
 | `pool.solar.min_volume_turnover` | `MYHOME_POOL_SOLAR_MIN_VOLUME_TURNOVER` | `--pool-solar-min-volume-turnover` | `5` | Soft-stop target: pool volumes filtered per day; pump keeps running past this while solar is still above the start threshold |
 | `pool.solar.max_volume_turnover` | `MYHOME_POOL_SOLAR_MAX_VOLUME_TURNOVER` | `--pool-solar-max-volume-turnover` | `7` | Hard ceiling: pool volumes filtered per day; pump always stops (and won't be solar-started) once reached |
+
+## Notice & Email (SMTP)
+
+The notice service (see `docs/notice-events-plan.md`) curates a `notice` severity for events worth a human's attention — the daily pool/garden plans, solar pump on/off, and motion at night or while the home is unoccupied — and emails a daily digest. Unlike the events/occupancy/temperature services, it is **not** auto-enabled with the device manager: it depends on both the events and occupancy services already running, so an operator opts in explicitly with `notice.enabled: true` or `--enable-notice-service`.
+
+Email sending uses the agnostic `myhome/notify.Mailer` interface; the only implementation today targets Gmail via an [App Password](https://myaccount.google.com/apppasswords) over STARTTLS/587 (works with any standards-compliant SMTP server, not just Gmail). **Email is silently skipped — not an error — whenever `smtp.from` is empty.** This lets the notice service run unconditionally (motion notices are still recorded as events even with email off); only the digest send is disabled. Credentials are written to `/var/lib/myhome/.env` by `dpkg-reconfigure myhome` (see the package's `postinst.sh`), never to the YAML config file.
+
+### Example
+
+```yaml
+notice:
+  enabled: true
+  night_start: "22:00"
+  night_end: "06:00"
+  digest_hour: 8
+
+smtp:
+  host: "smtp.gmail.com"
+  port: 587
+  # username/password/from/to are credentials — set via .env / MYHOME_SMTP_*,
+  # never in this file.
+```
+
+### Options
+
+| Key | Env var | Flag | Default | Description |
+|-----|---------|------|---------|-------------|
+| `notice.enabled` | `MYHOME_NOTICE_ENABLED` | `--enable-notice-service` | `false` | Enable the notice service (motion rule + daily email digest) |
+| `notice.night_start` | `MYHOME_NOTICE_NIGHT_START` | `--notice-night-start` | `22:00` | Night window start (`HH:MM`, 24h), used by the motion notice rule |
+| `notice.night_end` | `MYHOME_NOTICE_NIGHT_END` | `--notice-night-end` | `06:00` | Night window end (`HH:MM`, 24h); the window may wrap past midnight |
+| `notice.digest_hour` | `MYHOME_NOTICE_DIGEST_HOUR` | `--notice-digest-hour` | `8` | Local hour (0-23) at which the daily digest email is sent |
+| `smtp.host` | `MYHOME_SMTP_HOST` | `--smtp-host` | `smtp.gmail.com` | SMTP host |
+| `smtp.port` | `MYHOME_SMTP_PORT` | `--smtp-port` | `587` | SMTP port (STARTTLS submission) |
+| `smtp.username` | `MYHOME_SMTP_USERNAME` | — | — | SMTP auth username (credential; `.env` only) |
+| `smtp.password` | `MYHOME_SMTP_PASSWORD` | — | — | SMTP auth password — for Gmail, an App Password (credential; `.env` only) |
+| `smtp.from` | `MYHOME_SMTP_FROM` | — | — | Envelope/header From address. **Empty disables email sending entirely.** |
+| `smtp.to` | `MYHOME_SMTP_TO` | — | — | Recipient address, or comma-separated list of addresses (credential; `.env` only) |

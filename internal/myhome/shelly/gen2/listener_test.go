@@ -56,6 +56,35 @@ func buildShellyBLUNotifyEvent(t *testing.T, relaySrc, bluAddress string, ts flo
 	return b
 }
 
+// TestSeverityFor verifies severity classification for the curated "notice"
+// events (daily pool/garden plans and pump actions worth a human's
+// attention) alongside the pre-existing alarm/warn/debug/info cases.
+func TestSeverityFor(t *testing.T) {
+	cases := []struct {
+		event string
+		want  string
+	}{
+		{"smoke.alarm", "alarm"},
+		{"battery.low", "warn"},
+		{"pool.fuse_tripped", "warn"},
+		{"pool.run_window", "notice"},
+		{"pool.pump_start", "notice"},
+		{"pool.pump_stop", "notice"},
+		{"garden.plan", "notice"},
+		{"garden.skip_rain", "notice"},
+		{"garden.skip_frost", "notice"},
+		{"garden.plan_fallback", "notice"},
+		{"input.button_push", "debug"},
+		{"temperature.change", "debug"},
+		{"switch.on", "info"},
+	}
+	for _, c := range cases {
+		if got := severityFor(c.event); got != c.want {
+			t.Errorf("severityFor(%q) = %q, want %q", c.event, got, c.want)
+		}
+	}
+}
+
 // TestHandleNotifyEvent_ShellyBLU verifies that a relayed shelly-blu event is
 // stored under the BLU sensor's address (not the relay device's id), and that
 // the relay device id is preserved in the Data field.

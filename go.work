@@ -36,6 +36,8 @@ use (
 	./myhome/devices/impl
 	./myhome/events
 	./myhome/mqtt
+	./myhome/notice
+	./myhome/notify
 	./myhome/occupancy
 	./myhome/storage
 	./myhome/temperature

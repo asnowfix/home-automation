@@ -62,6 +62,12 @@ func init() {
 	runCmd.PersistentFlags().DurationVar(&options.Flags.PoolSolarStopDelay, "pool-solar-stop-delay", 10*time.Minute, "Solar must hold below stop threshold for this long before stopping pump")
 	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarMinVolumeTurnover, "pool-solar-min-volume-turnover", 5, "Soft-stop target: pool volumes filtered per day; pump keeps running past this while solar is still above start threshold")
 	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarMaxVolumeTurnover, "pool-solar-max-volume-turnover", 7, "Hard ceiling: pool volumes filtered per day; pump always stops (and won't be solar-started) once reached")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableNoticeService, "enable-notice-service", false, "Enable the notice service (motion rule + daily email digest); requires the events and occupancy services")
+	runCmd.PersistentFlags().StringVar(&options.Flags.NoticeNightStart, "notice-night-start", "22:00", "Night window start (HH:MM) used by the motion notice rule")
+	runCmd.PersistentFlags().StringVar(&options.Flags.NoticeNightEnd, "notice-night-end", "06:00", "Night window end (HH:MM) used by the motion notice rule")
+	runCmd.PersistentFlags().IntVar(&options.Flags.NoticeDigestHour, "notice-digest-hour", 8, "Local hour (0-23) at which the daily notice digest email is sent")
+	runCmd.PersistentFlags().StringVar(&options.Flags.SMTPHost, "smtp-host", "smtp.gmail.com", "SMTP host for the notice digest email")
+	runCmd.PersistentFlags().IntVar(&options.Flags.SMTPPort, "smtp-port", 587, "SMTP port for the notice digest email (STARTTLS submission)")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
@@ -218,6 +224,39 @@ var runCmd = &cobra.Command{
 				log.Info("Auto-enabling events service (device manager enabled)")
 			}
 		}
+
+		// Handle notice service config from viper / flags. Unlike events/
+		// occupancy/temperature, notice is not auto-enabled with the device
+		// manager — it depends on both of those already being enabled and
+		// on (optional) SMTP credentials, so an operator opts in explicitly.
+		if v.IsSet("notice.enabled") && !cmd.Flags().Changed("enable-notice-service") {
+			options.Flags.EnableNoticeService = v.GetBool("notice.enabled")
+		}
+		if v.IsSet("notice.night_start") && !cmd.Flags().Changed("notice-night-start") {
+			options.Flags.NoticeNightStart = v.GetString("notice.night_start")
+		}
+		if v.IsSet("notice.night_end") && !cmd.Flags().Changed("notice-night-end") {
+			options.Flags.NoticeNightEnd = v.GetString("notice.night_end")
+		}
+		if v.IsSet("notice.digest_hour") && !cmd.Flags().Changed("notice-digest-hour") {
+			options.Flags.NoticeDigestHour = v.GetInt("notice.digest_hour")
+		}
+		if v.IsSet("smtp.host") && !cmd.Flags().Changed("smtp-host") {
+			options.Flags.SMTPHost = v.GetString("smtp.host")
+		}
+		if v.IsSet("smtp.port") && !cmd.Flags().Changed("smtp-port") {
+			options.Flags.SMTPPort = v.GetInt("smtp.port")
+		}
+
+		// SMTP credentials — Viper reads MYHOME_SMTP_USERNAME / MYHOME_SMTP_PASSWORD /
+		// MYHOME_SMTP_FROM / MYHOME_SMTP_TO from the environment or config file.
+		// Like Beem/SFR above, these are never CLI flags. Email sending is
+		// skipped entirely (not an error) when smtp.from is empty — see
+		// myhome/notify.New.
+		options.Flags.SMTPUsername = v.GetString("smtp.username")
+		options.Flags.SMTPPassword = v.GetString("smtp.password")
+		options.Flags.SMTPFrom = v.GetString("smtp.from")
+		options.Flags.SMTPTo = v.GetString("smtp.to")
 
 		// Handle pool runtime tracker config from viper / flags
 		if v.IsSet("pool.device_id") && !cmd.Flags().Changed("pool-device-id") {

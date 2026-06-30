@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asnowfix/home-automation/myhome/events"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	beem "github.com/asnowfix/home-automation/pkg/beem"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
@@ -56,6 +57,12 @@ type SolarAutomation struct {
 	tracker RuntimeTracker // nil ⇒ no daily-target check
 	pump    PumpController
 	cfg     SolarConfig
+
+	// events/deviceID are optional (set via WithEvents); when nil/empty,
+	// recordNotice is a no-op, so existing callers and tests that never
+	// call WithEvents are unaffected.
+	events   *events.Service
+	deviceID string
 }
 
 type pumpState int
@@ -86,6 +93,42 @@ func NewSolarAutomation(
 		tracker: tracker,
 		pump:    pump,
 		cfg:     cfg,
+	}
+}
+
+// WithEvents enables recording "notice"-severity pool.solar_start /
+// pool.solar_stop events to eventsSvc, attributed to deviceID. Without this,
+// the solar pump still operates identically — only the notice trail is
+// skipped (degraded mode: daemon-down or events-disabled never blocks pump
+// control, see CLAUDE.md "daemon-optional per device").
+func (sa *SolarAutomation) WithEvents(eventsSvc *events.Service, deviceID string) *SolarAutomation {
+	sa.events = eventsSvc
+	sa.deviceID = deviceID
+	return sa
+}
+
+// recordNotice emits a "notice"-severity event for a solar pump decision. A
+// nil events service (WithEvents never called) makes this a silent no-op.
+func (sa *SolarAutomation) recordNotice(ctx context.Context, name string, data map[string]any) {
+	if sa.events == nil || sa.deviceID == "" {
+		return
+	}
+	payload, err := json.Marshal(data)
+	if err != nil {
+		sa.log.Error(err, "Failed to marshal solar notice data", "event", name)
+		return
+	}
+	str := string(payload)
+	e := events.Event{
+		Ts:        float64(time.Now().Unix()),
+		DeviceID:  sa.deviceID,
+		Component: "solar",
+		Event:     name,
+		Severity:  "notice",
+		Data:      &str,
+	}
+	if err := sa.events.Record(ctx, e); err != nil {
+		sa.log.Error(err, "Failed to record solar notice", "event", name)
 	}
 }
 
@@ -172,6 +215,11 @@ func (sa *SolarAutomation) step(
 					aboveStart = zero
 					break
 				}
+				sa.recordNotice(ctx, "pool.solar_start", map[string]any{
+					"solar_w":     sample.SolarW,
+					"threshold_w": sa.cfg.StartThresholdW,
+					"held_for_s":  time.Since(aboveStart).Seconds(),
+				})
 				return pumpRunning, zero, zero
 			}
 		} else {
@@ -197,6 +245,11 @@ func (sa *SolarAutomation) step(
 				sa.log.Error(err, "Failed to stop pump (hard ceiling); will retry next sample")
 				break
 			}
+			sa.recordNotice(ctx, "pool.solar_stop", map[string]any{
+				"reason":           "hard_ceiling",
+				"runtime_sec":      runtime,
+				"max_rotation_sec": sa.cfg.MaxRotationSec,
+			})
 			return pumpIdle, zero, zero
 		}
 
@@ -212,6 +265,12 @@ func (sa *SolarAutomation) step(
 				sa.log.Error(err, "Failed to stop pump (soft stop); will retry next sample")
 				break
 			}
+			sa.recordNotice(ctx, "pool.solar_stop", map[string]any{
+				"reason":           "soft_stop",
+				"runtime_sec":      runtime,
+				"daily_target_sec": sa.cfg.DailyTargetSec,
+				"solar_w":          sample.SolarW,
+			})
 			return pumpIdle, zero, zero
 		}
 
@@ -234,6 +293,12 @@ func (sa *SolarAutomation) step(
 					belowStop = zero
 					break
 				}
+				sa.recordNotice(ctx, "pool.solar_stop", map[string]any{
+					"reason":      "solar_loss",
+					"solar_w":     sample.SolarW,
+					"threshold_w": sa.cfg.StopThresholdW,
+					"held_for_s":  time.Since(belowStop).Seconds(),
+				})
 				return pumpIdle, zero, zero
 			}
 		} else {

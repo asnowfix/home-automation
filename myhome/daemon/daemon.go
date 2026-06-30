@@ -18,6 +18,8 @@ import (
 	"github.com/asnowfix/home-automation/myhome/metrics"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	mqttserver "github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/myhome/notice"
+	"github.com/asnowfix/home-automation/myhome/notify"
 	"github.com/asnowfix/home-automation/myhome/occupancy"
 	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/myhome/temperature"
@@ -233,6 +235,20 @@ func (d *daemon) Run() error {
 		var eventsSvc *events.Service
 		var eventsTracker *events.SensorDailyTracker
 		var eventsStore *events.Storage
+
+		// noticeSvc is set below (after eventsSvc exists, since it needs to
+		// call eventsSvc.Record). The broadcast closure below captures the
+		// variable itself, not its value, so it sees the later assignment —
+		// by the time any event is actually broadcast, noticeSvc has long
+		// since been wired up.
+		var noticeSvc *notice.Service
+		broadcastFn := func(e events.Event) {
+			sseBroadcaster.BroadcastEvent(e)
+			if noticeSvc != nil {
+				noticeSvc.OnEvent(d.ctx, e)
+			}
+		}
+
 		if options.Flags.EnableEventsService {
 			eventsStore, err = events.NewStorage(log.WithName("events"), options.Flags.EventsDBPath)
 			if err != nil {
@@ -241,13 +257,53 @@ func (d *daemon) Run() error {
 				eventsStore = nil
 			} else {
 				eventsTracker = events.NewSensorDailyTracker(log.WithName("events"), eventsStore)
-				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, sseBroadcaster.BroadcastEvent, options.Flags.EventsRetention)
+				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, broadcastFn, options.Flags.EventsRetention)
 				go eventsTracker.Start(d.ctx)
 				go eventsSvc.Start(d.ctx)
 				log.Info("Events service started", "db", options.Flags.EventsDBPath, "retention", options.Flags.EventsRetention)
 			}
 		} else {
 			log.Info("Events service disabled")
+		}
+
+		// Start the notice service (curated "notice"-severity events + daily
+		// email digest) if enabled. Requires both the events service (to
+		// record derived motion notices and query the digest) and the
+		// occupancy service (to tell motion-while-absent from routine
+		// motion). Degraded mode: if disabled or its dependencies aren't
+		// running, every other notice source (pool/garden plans emitted
+		// on-device, solar pump notices) still gets recorded as a plain
+		// "notice"-severity event — only the motion rule and the email
+		// digest are unavailable.
+		if options.Flags.EnableNoticeService {
+			if eventsSvc == nil {
+				log.Info("Notice service disabled: events service is not running")
+			} else if d.occupancyService == nil {
+				log.Info("Notice service disabled: occupancy service is not running")
+			} else {
+				mailer := notify.New(log.WithName("notify"), notify.Config{
+					Host:     options.Flags.SMTPHost,
+					Port:     options.Flags.SMTPPort,
+					Username: options.Flags.SMTPUsername,
+					Password: options.Flags.SMTPPassword,
+					From:     options.Flags.SMTPFrom,
+					To:       options.Flags.SMTPTo,
+				})
+				noticeSvc = notice.NewService(log.WithName("notice"), eventsSvc, d.occupancyService, mailer, notice.Config{
+					NightStart: options.Flags.NoticeNightStart,
+					NightEnd:   options.Flags.NoticeNightEnd,
+					DigestHour: options.Flags.NoticeDigestHour,
+				})
+				go noticeSvc.Start(d.ctx)
+				log.Info("Notice service started",
+					"night_start", options.Flags.NoticeNightStart,
+					"night_end", options.Flags.NoticeNightEnd,
+					"digest_hour", options.Flags.NoticeDigestHour,
+					"email_enabled", options.Flags.SMTPFrom != "",
+				)
+			}
+		} else {
+			log.Info("Notice service disabled")
 		}
 
 		// Initialize pool runtime tracker if enabled
@@ -289,6 +345,10 @@ func (d *daemon) Run() error {
 					pumpCtrl,
 					solarCfg,
 				)
+				// eventsSvc may be nil (events service disabled) — WithEvents
+				// degrades to a no-op in that case; solar pump control is
+				// unaffected either way (see SolarAutomation.recordNotice).
+				solarAuto.WithEvents(eventsSvc, options.Flags.PoolDeviceID)
 				solarAuto.Start(d.ctx)
 				log.Info("Solar automation started",
 					"device_id", options.Flags.PoolDeviceID,

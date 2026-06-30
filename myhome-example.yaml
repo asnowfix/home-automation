@@ -221,3 +221,29 @@ beem:
 sfr:
   username: ""
   password: ""
+
+# Notice service: curates a "notice" event severity (daily pool/garden plans,
+# solar pump on/off, motion at night or while absent) and emails a daily
+# digest. Unlike events/occupancy/temperature, this is NOT auto-enabled with
+# the device manager — it requires the events and occupancy services to
+# already be running, so set enabled: true explicitly once those are on.
+notice:
+  # Default: false
+  # enabled: true
+
+  # Night window (HH:MM, 24h) used by the motion notice rule; wraps past midnight.
+  # Default: 22:00 / 06:00
+  # night_start: "22:00"
+  # night_end:   "06:00"
+
+  # Local hour (0-23) at which the daily digest email is sent.
+  # Default: 8
+  # digest_hour: 8
+
+# Outbound email (SMTP) for the notice digest. Only host/port belong here —
+# username/password/from/to are credentials and are read from the .env file
+# (MYHOME_SMTP_*), written by `dpkg-reconfigure myhome`, never from this file.
+# Sending is silently skipped (not an error) whenever smtp.from is empty.
+smtp:
+  host: "smtp.gmail.com"
+  port: 587

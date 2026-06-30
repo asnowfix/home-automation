@@ -94,6 +94,16 @@ var Flags struct {
 	PoolSolarStopDelay          time.Duration // solar must hold below stop threshold for this long
 	PoolSolarMinVolumeTurnover  float64       // soft-stop target: pool volumes filtered per day (converted to daily_target_sec via pool KVS)
 	PoolSolarMaxVolumeTurnover  float64       // hard ceiling: pool volumes filtered per day (converted to max_rotation_sec via pool KVS)
+	EnableNoticeService         bool          // whether to enable the notice service (motion rule + daily email digest)
+	NoticeNightStart            string        // "HH:MM" start of the night window used by the motion rule
+	NoticeNightEnd              string        // "HH:MM" end of the night window used by the motion rule
+	NoticeDigestHour            int           // local hour (0-23) at which the daily notice digest email is sent
+	SMTPHost                    string        // SMTP host, e.g. smtp.gmail.com
+	SMTPPort                    int           // SMTP port, e.g. 587 (STARTTLS submission)
+	SMTPUsername                string        // SMTP auth username
+	SMTPPassword                string        // SMTP auth password (e.g. a Gmail App Password); from .env, never a flag
+	SMTPFrom                    string        // envelope/header From address; empty disables email entirely
+	SMTPTo                      string        // recipient address, or comma-separated list of addresses
 }
 
 var Via types.Channel

@@ -152,6 +152,40 @@ func TestSolarAutomation_RecordsSoftStopNotice(t *testing.T) {
 	}
 }
 
+// TestSolarAutomation_RecordNoticeFailureDoesNotBlockPump confirms that a
+// failure to record the notice (e.g. events DB unavailable) is only logged
+// — it must never prevent or delay the pump's own state transition.
+func TestSolarAutomation_RecordNoticeFailureDoesNotBlockPump(t *testing.T) {
+	pump := &mockPumpController{}
+	ch := make(chan beem.PowerSample, 8)
+	evSvc, store := newTestEventsService(t)
+	store.Close() // force the underlying Record call to fail
+
+	sa := NewSolarAutomation(logr.Discard(), ch, nil, pump, defaultCfg())
+	sa.WithEvents(evSvc, "pool-device")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sa.Start(ctx)
+
+	send(ch, 600) // pump must still start even though notice recording fails
+
+	on, ok := pump.lastCall()
+	if !ok || !on {
+		t.Fatalf("expected pump ON despite events store being closed; calls=%v", pump.calls)
+	}
+}
+
+// TestPumpState_String covers the small String() helper used in log lines.
+func TestPumpState_String(t *testing.T) {
+	if got := pumpIdle.String(); got != "idle" {
+		t.Errorf("pumpIdle.String() = %q, want \"idle\"", got)
+	}
+	if got := pumpRunning.String(); got != "running" {
+		t.Errorf("pumpRunning.String() = %q, want \"running\"", got)
+	}
+}
+
 // TestSolarAutomation_NoNoticesWithoutWithEvents confirms recordNotice is a
 // silent no-op (and never panics) when WithEvents was never called — the
 // many pre-existing tests in solar_automation_test.go rely on this.

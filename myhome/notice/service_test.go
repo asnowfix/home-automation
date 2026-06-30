@@ -2,7 +2,9 @@ package notice
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,27 +21,73 @@ func (f *fakeOccupancy) IsOccupied(_ context.Context) bool {
 	return f.occupied
 }
 
+// captureMailer is safe for concurrent use: Start runs the digest scheduler
+// on its own goroutine, so tests that drive Start and then inspect call
+// counts read/write this from two goroutines.
 type captureMailer struct {
+	mu      sync.Mutex
 	calls   int
 	subject string
 	body    string
 }
 
 func (m *captureMailer) Send(_ context.Context, subject, body string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls++
 	m.subject = subject
 	m.body = body
 	return nil
 }
 
-func newTestEventsService(t *testing.T) *events.Service {
+func (m *captureMailer) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
+}
+
+// failingMailer always returns an error, for testing SendDigest's
+// mailer-failure branch.
+type failingMailer struct{}
+
+func (failingMailer) Send(context.Context, string, string) error {
+	return fmt.Errorf("simulated SMTP failure")
+}
+
+// countingFailingMailer is failingMailer plus a thread-safe call counter, so
+// Start-loop tests can confirm the scheduler keeps running (logs and
+// continues) across repeated send failures instead of stopping.
+type countingFailingMailer struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (m *countingFailingMailer) Send(context.Context, string, string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls++
+	return fmt.Errorf("simulated SMTP failure")
+}
+
+func (m *countingFailingMailer) callCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
+}
+
+func newTestEventsStorage(t *testing.T) *events.Storage {
 	t.Helper()
 	store, err := events.NewStorage(logr.Discard(), ":memory:")
 	if err != nil {
 		t.Fatalf("events.NewStorage: %v", err)
 	}
 	t.Cleanup(store.Close)
-	return events.NewService(logr.Discard(), store, nil, nil, 0)
+	return store
+}
+
+func newTestEventsService(t *testing.T) *events.Service {
+	t.Helper()
+	return events.NewService(logr.Discard(), newTestEventsStorage(t), nil, nil, 0)
 }
 
 func newTestService(t *testing.T, occupied bool, cfg Config) (*Service, *events.Service) {
@@ -187,5 +235,117 @@ func TestSendDigest(t *testing.T) {
 	}
 	if !strings.Contains(mailer.body, "pool.run_window") {
 		t.Errorf("digest body missing pool.run_window:\n%s", mailer.body)
+	}
+}
+
+// TestSendDigest_QueryError confirms a storage failure is wrapped as
+// "query notice events:" rather than panicking.
+func TestSendDigest_QueryError(t *testing.T) {
+	store := newTestEventsStorage(t)
+	evSvc := events.NewService(logr.Discard(), store, nil, nil, 0)
+	store.Close() // force the digest's Query call to fail
+
+	svc := NewService(logr.Discard(), evSvc, &fakeOccupancy{}, &captureMailer{}, Config{})
+	err := svc.SendDigest(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "query notice events:") {
+		t.Fatalf("SendDigest() = %v, want error wrapped with \"query notice events:\"", err)
+	}
+}
+
+// TestSendDigest_MailerError confirms a Mailer.Send failure is wrapped as
+// "send digest email:" — this is what Start logs and continues past rather
+// than treating as fatal.
+func TestSendDigest_MailerError(t *testing.T) {
+	evSvc := newTestEventsService(t)
+	svc := NewService(logr.Discard(), evSvc, &fakeOccupancy{}, failingMailer{}, Config{})
+
+	err := svc.SendDigest(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "send digest email:") {
+		t.Fatalf("SendDigest() = %v, want error wrapped with \"send digest email:\"", err)
+	}
+}
+
+// TestOnEvent_RecordFailureDoesNotPanic exercises recordDerived's
+// events.Record error branch: with the underlying store closed, OnEvent
+// must log and return rather than panic or propagate.
+func TestOnEvent_RecordFailureDoesNotPanic(t *testing.T) {
+	store := newTestEventsStorage(t)
+	evSvc := events.NewService(logr.Discard(), store, nil, nil, 0)
+	store.Close()
+
+	svc := NewService(logr.Discard(), evSvc, &fakeOccupancy{occupied: false}, &captureMailer{}, Config{})
+	src := events.Event{Ts: float64(time.Now().Unix()), DeviceID: "dev1", Event: "motion.detected"}
+	svc.OnEvent(context.Background(), src) // must not panic
+}
+
+// TestStart_RunsDigestOnScheduleAndStopsOnCancel drives the real Start loop
+// (not just SendDigest/untilNextDigest in isolation): it sets now() to land
+// a few milliseconds before DigestHour so the loop fires quickly and
+// repeatedly, confirms at least two digests are sent, then cancels ctx and
+// confirms Start actually returns.
+func TestStart_RunsDigestOnScheduleAndStopsOnCancel(t *testing.T) {
+	evSvc := newTestEventsService(t)
+	mailer := &captureMailer{}
+	svc := NewService(logr.Discard(), evSvc, &fakeOccupancy{}, mailer, Config{DigestHour: 10})
+
+	target := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	almostThere := target.Add(-5 * time.Millisecond)
+	svc.now = func() time.Time { return almostThere }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		svc.Start(ctx)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for mailer.callCount() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("digest scheduler only fired %d time(s) within 2s, want >= 2", mailer.callCount())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not return within 2s of context cancellation")
+	}
+}
+
+// TestStart_LogsAndContinuesPastDigestFailures covers Start's error-logging
+// branch: a digest send failure (offline SMTP, bad creds) must not stop the
+// scheduler — it keeps firing on the same cadence.
+func TestStart_LogsAndContinuesPastDigestFailures(t *testing.T) {
+	evSvc := newTestEventsService(t)
+	mailer := &countingFailingMailer{}
+	svc := NewService(logr.Discard(), evSvc, &fakeOccupancy{}, mailer, Config{DigestHour: 10})
+
+	target := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	almostThere := target.Add(-5 * time.Millisecond)
+	svc.now = func() time.Time { return almostThere }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		svc.Start(ctx)
+		close(done)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for mailer.callCount() < 2 {
+		if time.Now().After(deadline) {
+			t.Fatalf("digest scheduler only attempted %d send(s) within 2s, want >= 2", mailer.callCount())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start did not return within 2s of context cancellation")
 	}
 }

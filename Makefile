@@ -160,7 +160,15 @@ VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
 DEBPKG_DIR := .debpkg
 DEB_FILE := myhome_$(VERSION)_$(ARCH).deb
 
-debpkg: build
+debpkg: build debpkg-package
+
+# debpkg-package assembles the .deb from an already-built myhome/myhome
+# binary, without (re)triggering `build`/`generate`. Split out so that
+# cross-compiling CI jobs can run `make generate` and a GOARCH-scoped
+# `make -C myhome build` themselves — see .goreleaser.yml's `before.hooks`
+# for why: `go generate` invokes host-native helper tools (e.g. fetchasset)
+# that must NOT inherit a cross GOARCH, while the final binary must.
+debpkg-package:
 	@echo "Building Debian package for $(ARCH), version $(VERSION)..."
 	@# Clean previous build
 	rm -rf $(DEBPKG_DIR)

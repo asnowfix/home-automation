@@ -271,17 +271,19 @@ func (d *daemon) Run() error {
 		var eventsTracker *events.SensorDailyTracker
 		var eventsStore *events.Storage
 
-		// noticeSvc is set below (after eventsSvc exists, since it needs to
-		// call eventsSvc.Record). The broadcast closure below captures the
-		// variable itself, not its value, so it sees the later assignment —
-		// by the time any event is actually broadcast, noticeSvc has long
-		// since been wired up.
+		// noticeSvc and poolNotices are set below (after eventsSvc exists,
+		// since both need to call eventsSvc.Record). The broadcast closure
+		// below captures the variables themselves, not their values, so it
+		// sees the later assignment — by the time any event is actually
+		// broadcast, both have long since been wired up.
 		var noticeSvc *notice.Service
+		var poolNotices *PoolNotices
 		broadcastFn := func(e events.Event) {
 			sseBroadcaster.BroadcastEvent(e)
 			if noticeSvc != nil {
 				noticeSvc.OnEvent(d.ctx, e)
 			}
+			poolNotices.OnEvent(d.ctx, e)
 		}
 
 		if options.Flags.EnableEventsService {
@@ -352,6 +354,15 @@ func (d *daemon) Run() error {
 			log.Info("Pool runtime tracker initialized", "device_id", options.Flags.PoolDeviceID)
 		} else if options.Flags.PoolEnabled {
 			log.Info("Pool runtime tracker disabled (no device ID or events store unavailable)")
+		}
+
+		// Record a "pool.turnover_today" notice whenever the pump stops
+		// (schedule/manual pool.pump_stop, or solar-driven pool.solar_stop).
+		// Degraded mode: if the pool device can't be reached, NewPoolNotices
+		// returns nil and broadcastFn's poolNotices.OnEvent call is then a
+		// no-op — pump control itself is entirely unaffected either way.
+		if poolTracker != nil {
+			poolNotices = NewPoolNotices(d.ctx, log.WithName("pool"), eventsSvc, poolTracker, options.Flags.PoolDeviceID)
 		}
 
 		// Start solar automation if enabled

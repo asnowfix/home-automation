@@ -55,18 +55,31 @@ device; no account-status registry; no pool rendering in the web UI.
 - [ ] Optional: extend `myhome/metrics/exporter.go` `handleHealth` with per-account block — SKIPPED
       (not essential; UI panel covers the requirement)
 
-### Phase 2 — Pool notice enrichment
-- [ ] `internal/shelly/scripts/pool-pump.js` `doStart`: include `reason` in `pool.pump_start`
-      emit; schedule handlers pass `"schedule"` token
-- [ ] `make generate` re-run after JS change (keeps `pool_defaults_generated.go` in sync)
-- [ ] New `myhome/daemon/pool_notices.go`: subscribe to pool events via daemon broadcast,
-      attribute reason (solar / schedule / manual) by correlating with recent solar notices
-- [ ] On pump stop: compute today's turnover (achieved vs target) via `PoolRuntimeTracker` +
-      KVS reads; record as companion `pool.turnover_today` notice
-- [ ] Manual CLI reason: `myhome/ctl/pool/start.go` / `stop.go` record `reason:"manual"` notice
-      (or confirm daemon-correlation default is sufficient — leave a note in this file either way)
-- [ ] `internal/myhome/shelly/gen2/listener.go` `severityFor`: add `pool.water_supply_restored`
-      and move/add `pool.water_supply_protected` to `notice`; new companion event → `notice`
+### Phase 2 — Pool notice enrichment — DONE
+- [x] REVISED FINDING (during implementation): `myhome/ctl/pool/start.go`/`stop.go` already call
+      `doStart('...', 'Manual start via ctl pool start <speed>')` / `doStart(..., 'Manual stop
+      via ctl pool stop')` via `EvalInDevice` — manual CLI actions already flow through
+      `doStart`/`doStop` with a distinguishing reason string. Solar automation never calls
+      `doStart`/`doStop` at all — it drives `Switch.Set` directly and records its own
+      `pool.solar_start`/`pool.solar_stop` notices with an explicit `reason` field. So
+      schedule/manual vs. solar are *already* naturally separated by which event fires
+      (`pool.pump_start`/`stop` vs `pool.solar_start`/`stop`) — no daemon-side correlation
+      logic was needed, simplifying this phase considerably vs. the original plan.
+- [x] `internal/shelly/scripts/pool-pump.js` `doStart` (~line 1801): `pool.pump_start` now emits
+      `reason: reason || "start"` alongside `speed`/`switch_id` (`doStop` already carried reason)
+- [x] `make generate` re-run after JS change — no generated-defaults diff (event payload only)
+- [x] New `myhome/daemon/pool_notices.go` (`PoolNotices`, `NewPoolNotices`, `OnEvent`): subscribes
+      to `pool.pump_stop` and `pool.solar_stop` via the existing `broadcastFn` hook in
+      `daemon.go` (same pattern as `noticeSvc.OnEvent`); nil-receiver safe so it can be wired
+      unconditionally. Computes `turnover_achieved` from `PoolRuntimeTracker.DailyRuntimeSec` +
+      pool-volume/max-flow-rate/max-rpm/speed KVS (reusing `computeRuntimeTargets`'s helpers in
+      `solar_automation.go`), `turnover_target` from KVS `turnover`; records companion
+      `pool.turnover_today` notice. Unit tests in `pool_notices_test.go` (roundTo, nil-receiver,
+      event-name filter).
+- [x] Manual CLI reason: no change needed — already flows through `doStart`/`doStop` (see above)
+- [x] `internal/myhome/shelly/gen2/listener.go` `severityFor`: `pool.water_supply_protected` moved
+      warn→notice, `pool.water_supply_restored` and `pool.turnover_today` added as notice;
+      `listener_test.go` table updated
 
 ### Phase 3 — Readable digest/log rendering
 - [ ] `myhome/notice/digest.go` `formatDigest`: render pool events as sentences (run_window,

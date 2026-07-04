@@ -12,8 +12,13 @@ Hobby project with three goals: learn Go, learn Claude Code, automate the house 
 make build          # build everything (runs go generate first — required before bare `go build`)
 make generate       # fetch/embed static JS/CSS assets (alpine.min.js, htmx.min.js, bulma.min.css); must run before `go build` in a fresh worktree
 make test           # canonical: tests root module + all go.work sub-modules
-make run            # build and run daemon locally
+make run            # build and run daemon locally (myhome/Makefile just does `go run .` with no args — prints help, does NOT start the daemon)
 make tidy           # tidy all workspace modules
+
+# Run the full daemon locally against the real home MQTT broker (needed to test UI/RPC changes
+# against live devices, e.g. via a browser at http://127.0.0.1:6080). Run from the worktree
+# whose code you want to test — each worktree's `go run` builds its own checked-out sources.
+go run ./myhome daemon run --instance local --mqtt-broker tcp://192.168.1.2:1883
 
 go test ./internal/myhome/...                    # single package
 go test -v -run TestName ./path/to/package       # specific test

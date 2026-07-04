@@ -51,6 +51,10 @@ SECRETS.md
 /worktrees
 /.claude/worktrees
 
+# Local credentials (see example.env / CONTRIBUTING.md "Local Credentials")
+.env
+.env.local
+
 # Local files
 /myhome/ctl/homectl*
 /myhome/myhome*

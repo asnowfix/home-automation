@@ -138,15 +138,43 @@ device; no account-status registry; no pool rendering in the web UI.
     it's unrelated to this feature.
 
 ### Phase 5 — Verification
-- [ ] `make build` then `make test` from repo root
-- [ ] Trigger pool start/stop via MCP `shelly_call`; confirm `pool.pump_start` carries `reason`
-      and turnover notice appears on stop
-- [ ] `go run ./myhome ctl pool status` shows Turnover + Water supply lines
-- [ ] `make run`, open dev UI (port 6080): Accounts panel shows 4 accounts w/ status tags; pool
-      card shows turnover + water-supply
-- [ ] Trigger digest send; confirm pool notices render as readable sentences
-- [ ] New unit tests pass with `go test -race` (accounts registry, digest formatting, pool RPC
-      handler, CLI status output)
+- [x] `make build` then `make test` from repo root — all packages pass, including every
+      package touched (accounts, sfr, gen2, ui, daemon, notice, ctl builds).
+- [ ] Trigger pool start/stop via MCP `shelly_call` against a real device; confirm
+      `pool.pump_start` carries `reason` and the turnover notice appears on stop — NOT DONE
+      (no live pool device in this session; covered by unit tests instead, see below)
+- [ ] `go run ./myhome ctl pool status` against a running daemon with a configured pool
+      device — NOT DONE live, but code path is exercised by the new CLI/RPC unit tests
+- [ ] `make run` + open dev UI (port 6080): Accounts panel + pool card — NOT DONE live in this
+      session (no browser/daemon instance driven); template rendering covered by
+      `htmx_pool_test.go` instead
+- [x] Digest formatting verified via unit tests (`digest_pool_test.go`) rather than a live send
+- [x] Unit tests added/passing: `internal/myhome/accounts` (registry), `myhome/notice`
+      (`humanizePoolData`, `hoursToClock`, `formatDigest`), `myhome/daemon`
+      (`pool_notices_test.go`: roundTo, nil-receiver safety, event filter), `internal/myhome/ui`
+      (`htmx_pool_test.go`: template funcs + full card rendering, pointer-leak guard)
+- [x] `go test -race` run on the new/touched packages — see below
+
+**Caveat**: this session had no live Shelly pool device or running daemon to exercise
+end-to-end (MQTT round trips, real KVS reads, actual digest email send). Attempted
+`shelly_list` (filter "pool") via the built-in MCP — timed out waiting for a response from
+`dst: local`, confirming no myhome daemon instance is currently running/reachable on this
+machine to query against. Everything was instead verified via `make build`/`make test` plus
+targeted unit tests. Before calling this feature fully verified, a follow-up session should:
+run `make run` against the real pool mesh (with the user's go-ahead, since it's a live
+service), trigger an actual start/stop, confirm the digest email, and load the dev UI in a
+browser.
+
+**Also found while verifying (both pre-existing, unrelated to this feature, NOT fixed)**:
+- `TestSolarAutomation_NoNoticesWithoutWithEvents` (`solar_automation_test.go`/
+  `solar_notice_test.go`) fails under `-race`: `mockPumpController.lastCall` is read/written
+  without synchronization from the test goroutine and the automation's own goroutine.
+  Confirmed present on unmodified `main` via a throwaway detached worktree at commit `a1aa7f6`.
+- The `.Temperature`/`.Humidity` tags in `deviceCardsTemplate`/`deviceCardTemplate`
+  (`internal/myhome/ui/htmx.go`) use `{{printf "%.1f" .Temperature}}` where `.Temperature` is
+  `*float64` — confirmed via a standalone repro that `html/template` does not auto-dereference
+  pointers for `printf`, so this renders `%!f(*float64=0x...)°C` instead of the number whenever
+  a real (non-nil) value is present. New pool tags avoid this via `cardTemplateFuncs()`.
 
 ## Notes for a cold resume
 

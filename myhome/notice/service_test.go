@@ -215,9 +215,13 @@ func TestSendDigest(t *testing.T) {
 	fixed := time.Date(2026, 6, 30, 8, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return fixed }
 
+	// events.Query's Since filter is always evaluated against real wall-clock
+	// time.Now() (see myhome/events/storage.go), not svc.now — so the seeded
+	// event must fall within the last 24h of actual now, independent of the
+	// fixed clock used above for digest subject/scheduling formatting.
 	data := `{"mode":"summer"}`
 	if err := evSvc.Record(context.Background(), events.Event{
-		Ts:        float64(fixed.Add(-time.Hour).Unix()),
+		Ts:        float64(time.Now().Add(-time.Hour).Unix()),
 		DeviceID:  "pool-pump",
 		Component: "pool",
 		Event:     "pool.run_window",

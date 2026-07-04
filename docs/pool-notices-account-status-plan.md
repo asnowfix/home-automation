@@ -81,10 +81,23 @@ device; no account-status registry; no pool rendering in the web UI.
       warn→notice, `pool.water_supply_restored` and `pool.turnover_today` added as notice;
       `listener_test.go` table updated
 
-### Phase 3 — Readable digest/log rendering
-- [ ] `myhome/notice/digest.go` `formatDigest`: render pool events as sentences (run_window,
-      pump_start w/ reason, pump_stop w/ reason+turnover, water_supply protected/restored)
-- [ ] Reuse formatting helper in UI event log (`internal/myhome/ui/template.go` `RenderEventLog`)
+### Phase 3 — Readable digest/log rendering — DONE (event-log reuse deliberately skipped)
+- [x] `myhome/notice/digest.go`: new `humanizePoolData(event, data)` + `hoursToClock(h)` render
+      pool events as sentences (run_window w/ mode+clock times, pump_start w/ speed+reason,
+      pump_stop w/ reason, turnover_today, water_supply protected/restored, solar_start/stop);
+      unrecognized events or unparseable JSON fall back to the raw JSON tail unchanged, so
+      `formatDigest`'s prefix columns (device/component/event) are untouched — only the tail
+      changed, keeping all pre-existing digest tests passing. New `digest_pool_test.go`.
+- [x] Found & fixed a pre-existing, date-dependent flaky test while verifying:
+      `TestSendDigest` (service_test.go) seeded its event at a hardcoded fixed clock date, but
+      `events.Query`'s `Since` filter always uses real `time.Now()` — confirmed via a throwaway
+      detached worktree at the pre-change commit that this already failed on `main` today
+      (2026-07-04). Fixed by seeding relative to `time.Now()` instead.
+- [ ] Reuse formatting helper in UI event log (`internal/myhome/ui/template.go`/`events_template.go`)
+      — SKIPPED: would require adding `myhome/notice` as a new cross-module dependency of
+      `internal/myhome/ui` (go.mod require+replace) purely to reformat the event-log's Data
+      cell, which already has a reasonable collapsible-JSON UX. Lower priority than Phase 4
+      (explicit user ask for CLI/UI turnover+water-supply status); revisit later if wanted.
 
 ### Phase 4 — Pool status in UI + terminal
 - [ ] `myhome/ctl/pool/status.go`: use `PoolService` (like `start.go`) to print Turnover

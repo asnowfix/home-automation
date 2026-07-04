@@ -34,19 +34,26 @@ device; no account-status registry; no pool rendering in the web UI.
 
 ### Phase 0 — Setup
 - [x] Worktree created, branch `worktree-feature-pool-notices-account-status`
-- [ ] `make generate` run successfully in this worktree (required before any `go build`)
+- [x] `make generate` run successfully in this worktree (required before any `go build`)
 
-### Phase 1 — Account connection status (net-new)
-- [ ] New package `internal/myhome/accounts/registry.go`: `Status` struct + `Registry` with
-      `Report(name, ok, err)`, `SetEnabled(name, on)`, `Snapshot() []Status`
-- [ ] Wire Beem (`pkg/beem/watcher.go` `poll`) to report into registry
-- [ ] Wire SFR (`pkg/sfr/box.go` token renew/init) to report into registry
-- [ ] Wire SMTP (`myhome/notify/gmail.go` `Send`, `notify.New` enabled-state) to report
-- [ ] Wire MQTT (`daemon.go` periodic status block ~504-528) to report
-- [ ] Construct registry once in `daemon.go`, pass to integrations + UI server
-- [ ] UI: `/htmx/accounts` handler in `internal/myhome/ui/htmx.go` + route in `server.go`
-- [ ] UI: lazy-load container in `internal/myhome/ui/static/index.html`
-- [ ] Optional: extend `myhome/metrics/exporter.go` `handleHealth` with per-account block
+### Phase 1 — Account connection status (net-new) — DONE
+- [x] New package `internal/myhome/accounts/registry.go`: `Status` struct + `Registry` with
+      `Report(name, err)`, `SetEnabled(name, on)`, `Snapshot() []Status` (+ registry_test.go)
+- [x] Wire Beem (`pkg/beem/watcher.go` `poll`, new `Watcher.OnResult` hook) to report into registry
+- [x] Wire SFR (`internal/myhome/sfr/router.go` `refresh`, new package-level `StatusReporter`/
+      `SetStatusReporter`) to report into registry. Added `options.Flags.SFRUsername/SFRPassword`
+      (mirrors Beem) so daemon.go can compute `SetEnabled`.
+- [x] Wire SMTP via a small `reportingMailer` wrapper defined in `myhome/daemon/daemon.go`
+      (decorates `notify.Mailer` without touching the leaf `myhome/notify` package)
+- [x] Wire MQTT (`daemon.go` periodic status block + right after `mc.Start()`) to report
+- [x] Construct registry once in `daemon.go` (`accountsRegistry := accounts.NewRegistry()`),
+      pass to integrations + `ui.Start(...)` (new trailing param) + `NewHTMXHandler(...)`
+- [x] UI: `/htmx/accounts` handler `HTMXHandler.AccountsPanel` in `internal/myhome/ui/htmx.go` +
+      route in `server.go`
+- [x] UI: lazy-load container in `internal/myhome/ui/static/index.html` ("🔌 Accounts" section,
+      mirrors the Rooms section pattern)
+- [ ] Optional: extend `myhome/metrics/exporter.go` `handleHealth` with per-account block — SKIPPED
+      (not essential; UI panel covers the requirement)
 
 ### Phase 2 — Pool notice enrichment
 - [ ] `internal/shelly/scripts/pool-pump.js` `doStart`: include `reason` in `pool.pump_start`

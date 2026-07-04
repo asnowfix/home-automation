@@ -9,7 +9,9 @@ import (
 
 	"github.com/asnowfix/home-automation/internal/global"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/internal/myhome/accounts"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	myhomesfr "github.com/asnowfix/home-automation/internal/myhome/sfr"
 	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
@@ -44,6 +46,20 @@ type Config struct {
 
 var DefaultConfig = Config{
 	RefreshInterval: 3 * time.Minute,
+}
+
+// reportingMailer wraps a notify.Mailer to report each Send outcome into the
+// accounts registry, without notify (a leaf, provider-agnostic package)
+// needing to know about account-status tracking.
+type reportingMailer struct {
+	notify.Mailer
+	registry *accounts.Registry
+}
+
+func (m *reportingMailer) Send(ctx context.Context, subject, body string) error {
+	err := m.Mailer.Send(ctx, subject, body)
+	m.registry.Report("smtp", err)
+	return err
 }
 
 func NewDaemon(ctx context.Context) *daemon {
@@ -200,9 +216,18 @@ func (d *daemon) Run() error {
 		log.Info("Prometheus metrics exporter disabled")
 	}
 
+	// accountsRegistry tracks the connection status of every external
+	// account myhome talks to (Beem, SFR, SMTP, MQTT), surfaced in the UI's
+	// accounts panel. Each integration below reports into it at its existing
+	// connection/poll point; a disabled integration is marked enabled=false
+	// so it reads as "not configured" rather than "failed".
+	accountsRegistry := accounts.NewRegistry()
+
 	// Start Beem Energy watcher if enabled
 	var beemWatcher *beem.Watcher
-	if options.Flags.BeemEmail != "" && options.Flags.BeemPassword != "" {
+	beemEnabled := options.Flags.BeemEmail != "" && options.Flags.BeemPassword != ""
+	accountsRegistry.SetEnabled("beem", beemEnabled)
+	if beemEnabled {
 		log.Info("Starting Beem Energy watcher")
 		beemCfg := beem.ClientConfig{
 			Email:        options.Flags.BeemEmail,
@@ -210,6 +235,7 @@ func (d *daemon) Run() error {
 			PollInterval: options.Flags.BeemPollInterval,
 		}
 		beemWatcher = beem.NewWatcher(d.ctx, beemCfg, mc)
+		beemWatcher.OnResult = func(err error) { accountsRegistry.Report("beem", err) }
 		if err := beemWatcher.Start(d.ctx); err != nil {
 			log.Error(err, "Failed to start Beem watcher")
 			return err
@@ -218,6 +244,15 @@ func (d *daemon) Run() error {
 	} else {
 		log.Info("Beem Energy integration disabled")
 	}
+
+	// SFR box: the device manager (below) starts a periodic refresh loop via
+	// myhomesfr.GetRouter regardless of credentials — auth is skipped
+	// internally when username/password are empty. Report status from every
+	// refresh attempt; SetStatusReporter must be called before the device
+	// manager starts (it triggers the first refresh synchronously).
+	sfrEnabled := options.Flags.SFRUsername != "" && options.Flags.SFRPassword != ""
+	accountsRegistry.SetEnabled("sfr", sfrEnabled)
+	myhomesfr.SetStatusReporter(func(err error) { accountsRegistry.Report("sfr", err) })
 
 	if !disableDeviceManager {
 		log.Info("Starting device manager")
@@ -281,14 +316,18 @@ func (d *daemon) Run() error {
 			} else if d.occupancyService == nil {
 				log.Info("Notice service disabled: occupancy service is not running")
 			} else {
-				mailer := notify.New(log.WithName("notify"), notify.Config{
-					Host:     options.Flags.SMTPHost,
-					Port:     options.Flags.SMTPPort,
-					Username: options.Flags.SMTPUsername,
-					Password: options.Flags.SMTPPassword,
-					From:     options.Flags.SMTPFrom,
-					To:       options.Flags.SMTPTo,
-				})
+				accountsRegistry.SetEnabled("smtp", options.Flags.SMTPFrom != "")
+				mailer := &reportingMailer{
+					Mailer: notify.New(log.WithName("notify"), notify.Config{
+						Host:     options.Flags.SMTPHost,
+						Port:     options.Flags.SMTPPort,
+						Username: options.Flags.SMTPUsername,
+						Password: options.Flags.SMTPPassword,
+						From:     options.Flags.SMTPFrom,
+						To:       options.Flags.SMTPTo,
+					}),
+					registry: accountsRegistry,
+				}
 				noticeSvc = notice.NewService(log.WithName("notice"), eventsSvc, d.occupancyService, mailer, notice.Config{
 					NightStart: options.Flags.NoticeNightStart,
 					NightEnd:   options.Flags.NoticeNightEnd,
@@ -473,6 +512,8 @@ func (d *daemon) Run() error {
 			return err
 		}
 		log.Info("MQTT client connected - subscriptions active")
+		accountsRegistry.SetEnabled("mqtt", true)
+		accountsRegistry.Report("mqtt", nil)
 
 		// Subscribe to $SYS topics for monitoring (after connection to avoid early connection)
 		// Use large buffer (256) because broker publishes 15-20+ $SYS topics in rapid bursts every 30s
@@ -490,7 +531,7 @@ func (d *daemon) Run() error {
 		}
 
 		// Start UI & reverse HTTP proxy
-		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, storage, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy); err != nil {
+		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, storage, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy, accountsRegistry); err != nil {
 			log.Error(err, "Failed to start UI server")
 			return err
 		}
@@ -520,6 +561,11 @@ func (d *daemon) Run() error {
 					if mc != nil {
 						connected := mc.IsConnected()
 						log.Info("MQTT client connection status", "connected", connected, "client_id", mc.Id())
+						var reportErr error
+						if !connected {
+							reportErr = fmt.Errorf("mqtt client disconnected")
+						}
+						accountsRegistry.Report("mqtt", reportErr)
 					}
 				}
 			}

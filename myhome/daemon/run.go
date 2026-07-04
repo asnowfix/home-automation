@@ -273,7 +273,9 @@ var runCmd = &cobra.Command{
 
 		// SFR box credentials — Viper reads MYHOME_SFR_USERNAME / MYHOME_SFR_PASSWORD
 		// from the environment or config file; auth is skipped if either is empty.
-		sfr.Init(v.GetString("sfr.username"), v.GetString("sfr.password"))
+		options.Flags.SFRUsername = v.GetString("sfr.username")
+		options.Flags.SFRPassword = v.GetString("sfr.password")
+		sfr.Init(options.Flags.SFRUsername, options.Flags.SFRPassword)
 
 		// Handle pool solar automation config from viper / flags
 		if v.IsSet("pool.solar.enabled") && !cmd.Flags().Changed("enable-pool-solar") {

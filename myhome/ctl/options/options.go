@@ -87,6 +87,8 @@ var Flags struct {
 	BeemEmail                   string        // Beem Energy account email
 	BeemPassword                string        // Beem Energy account password
 	BeemPollInterval            time.Duration // Beem Energy poll interval
+	SFRUsername                 string        // SFR box account username; from .env, never a flag
+	SFRPassword                 string        // SFR box account password; from .env, never a flag
 	PoolSolarEnabled            bool          // whether to enable solar-driven pool pump automation
 	PoolSolarStartThresholdW    float64       // solar power threshold to start pump (W)
 	PoolSolarStopThresholdW     float64       // solar power threshold to stop pump (W)

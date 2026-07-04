@@ -83,46 +83,11 @@ func (p *PoolNotices) OnEvent(ctx context.Context, e events.Event) {
 }
 
 func (p *PoolNotices) recordTurnoverToday(ctx context.Context) {
-	runtimeSec, err := p.tracker.DailyRuntimeSec(ctx)
+	achieved, target, runtimeSec, err := p.ComputeTurnover(ctx)
 	if err != nil {
-		p.log.Error(err, "Failed to read daily pump runtime for turnover notice")
+		p.log.Error(err, "Failed to compute turnover for notice")
 		return
 	}
-
-	via := types.ChannelMqtt
-	poolVolume, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyPoolVolume)
-	if err != nil {
-		p.log.Error(err, "Failed to read pool volume for turnover notice")
-		return
-	}
-	maxFlowRate, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyMaxFlowRate)
-	if err != nil {
-		p.log.Error(err, "Failed to read max flow rate for turnover notice")
-		return
-	}
-	maxRpm, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyMaxRpm)
-	if err != nil {
-		p.log.Error(err, "Failed to read max rpm for turnover notice")
-		return
-	}
-	speed, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeySpeed)
-	if err != nil {
-		p.log.Error(err, "Failed to read active speed for turnover notice")
-		return
-	}
-	target, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyTurnover)
-	if err != nil {
-		p.log.Error(err, "Failed to read turnover target for turnover notice")
-		return
-	}
-	if poolVolume <= 0 || maxFlowRate <= 0 || maxRpm <= 0 || speed <= 0 {
-		p.log.Info("Skipping turnover notice: invalid pool KVS values",
-			"pool_volume", poolVolume, "max_flow_rate", maxFlowRate, "max_rpm", maxRpm, "speed", speed)
-		return
-	}
-
-	flowRate := maxFlowRate * (speed / maxRpm) // m3/h
-	achieved := roundTo(float64(runtimeSec)/3600*flowRate/poolVolume, 2)
 
 	payload, err := json.Marshal(map[string]any{
 		"turnover_achieved": achieved,
@@ -145,6 +110,66 @@ func (p *PoolNotices) recordTurnoverToday(ctx context.Context) {
 	if err := p.events.Record(ctx, ev); err != nil {
 		p.log.Error(err, "Failed to record turnover_today notice")
 	}
+}
+
+// ComputeTurnover returns today's achieved water-volume turnovers (pool
+// volumes filtered so far today) against the configured daily target, plus
+// the runtime in seconds they were derived from. Shared by the
+// pool.turnover_today notice (recordTurnoverToday) and the pool.getstatus
+// RPC handler (PoolRPCHandler) so both read the same KVS values the same way.
+func (p *PoolNotices) ComputeTurnover(ctx context.Context) (achieved, target float64, runtimeSec int64, err error) {
+	runtimeSec, err = p.tracker.DailyRuntimeSec(ctx)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("read daily pump runtime: %w", err)
+	}
+
+	via := types.ChannelMqtt
+	poolVolume, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyPoolVolume)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("read pool volume: %w", err)
+	}
+	maxFlowRate, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyMaxFlowRate)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("read max flow rate: %w", err)
+	}
+	maxRpm, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyMaxRpm)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("read max rpm: %w", err)
+	}
+	speed, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeySpeed)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("read active speed: %w", err)
+	}
+	target, err = readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyTurnover)
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("read turnover target: %w", err)
+	}
+	if poolVolume <= 0 || maxFlowRate <= 0 || maxRpm <= 0 || speed <= 0 {
+		return 0, 0, 0, fmt.Errorf(
+			"invalid pool KVS values: pool_volume=%v max_flow_rate=%v max_rpm=%v speed=%v",
+			poolVolume, maxFlowRate, maxRpm, speed,
+		)
+	}
+
+	flowRate := maxFlowRate * (speed / maxRpm) // m3/h
+	achieved = roundTo(float64(runtimeSec)/3600*flowRate/poolVolume, 2)
+	return achieved, target, runtimeSec, nil
+}
+
+// WaterSupplyActive reports whether the pool device's water-supply
+// protection input is currently engaged (true = active, pump forced off by
+// pool-pump.js's handleWaterSupply; false = normal operation).
+func (p *PoolNotices) WaterSupplyActive(ctx context.Context) (bool, error) {
+	result, err := p.device.CallE(ctx, types.ChannelMqtt, "Input.GetStatus", map[string]any{"id": 0})
+	if err != nil {
+		return false, fmt.Errorf("Input.GetStatus: %w", err)
+	}
+	m, ok := result.(map[string]any)
+	if !ok {
+		return false, fmt.Errorf("unexpected Input.GetStatus response type %T", result)
+	}
+	active, _ := m["state"].(bool)
+	return active, nil
 }
 
 // roundTo rounds v to the given number of decimal places.

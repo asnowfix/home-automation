@@ -508,6 +508,13 @@ func (d *daemon) Run() error {
 			log.Info("Occupancy RPC methods registered")
 		}
 
+		// Register Pool RPC methods (turnover rate + water-supply status for
+		// the UI and `ctl pool status`). Always registered — the signature
+		// exists regardless of pool tracking; handleGetStatus itself returns
+		// a clear error if poolNotices is nil (pool disabled/unreachable).
+		poolRPCHandler := NewPoolRPCHandler(log, poolNotices)
+		poolRPCHandler.RegisterHandlers()
+
 		// Publish a hostname for the DeviceManager host: myhome.local
 		if !options.Flags.NoMdnsPublish {
 			resolver.WithLocalName(d.ctx, myhome.MYHOME_HOSTNAME)

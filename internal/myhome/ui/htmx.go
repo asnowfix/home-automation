@@ -127,13 +127,12 @@ func (h *HTMXHandler) DeviceCards(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(deviceViews, func(i, j int) bool {
 		return strings.ToLower(deviceViews[i].Name) < strings.ToLower(deviceViews[j].Name)
 	})
+	applyPoolStatus(h.ctx, deviceViews)
 
 	h.log.Info("DeviceCards: rendering template", "device_count", len(deviceViews))
 
 	// Render all device cards
-	tmpl := template.Must(template.New("device-cards").Funcs(template.FuncMap{
-		"lower": strings.ToLower,
-	}).Parse(deviceCardsTemplate))
+	tmpl := template.Must(template.New("device-cards").Funcs(cardTemplateFuncs()).Parse(deviceCardsTemplate))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, deviceViews); err != nil {
@@ -159,11 +158,11 @@ func (h *HTMXHandler) DeviceCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dv := DeviceToView(h.ctx, device)
+	views := []DeviceView{DeviceToView(h.ctx, device)}
+	applyPoolStatus(h.ctx, views)
+	dv := views[0]
 
-	tmpl := template.Must(template.New("device-card").Funcs(template.FuncMap{
-		"lower": strings.ToLower,
-	}).Parse(deviceCardTemplate))
+	tmpl := template.Must(template.New("device-card").Funcs(cardTemplateFuncs()).Parse(deviceCardTemplate))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, dv); err != nil {
@@ -438,6 +437,26 @@ func (h *HTMXHandler) renderEventsRows(w http.ResponseWriter, r *http.Request, o
 	}
 }
 
+// cardTemplateFuncs returns the template.FuncMap shared by deviceCardsTemplate
+// and deviceCardTemplate. isActive/turnoverText exist because html/template
+// does not auto-dereference *bool/*float64 fields for {{if}} or {{printf}} —
+// a non-nil pointer is always "truthy" regardless of the value it points to,
+// and printf on a pointer prints its address, not the pointed-to value.
+func cardTemplateFuncs() template.FuncMap {
+	return template.FuncMap{
+		"lower": strings.ToLower,
+		"isActive": func(b *bool) bool {
+			return b != nil && *b
+		},
+		"turnoverText": func(achieved, target *float64) string {
+			if achieved == nil || target == nil {
+				return ""
+			}
+			return fmt.Sprintf("%.1f/%.1f x/day", *achieved, *target)
+		},
+	}
+}
+
 const deviceCardsTemplate = `
 {{range .}}
 {{ $deviceId := .Id }}
@@ -507,6 +526,14 @@ const deviceCardsTemplate = `
               --
             </span>
           {{end}}
+        {{end}}
+        {{if .IsPoolPump}}
+          {{if isActive .WaterSupplyActive}}
+            <span class="tag is-warning ml-2" id="water-supply-{{.Id}}" title="Water supply active, pump paused">💧 Paused</span>
+          {{else}}
+            <span class="tag is-success ml-2" id="water-supply-{{.Id}}" title="Water supply OK">💧 OK</span>
+          {{end}}
+          <span class="tag is-light ml-2" id="turnover-{{.Id}}" title="Filtration turnover today">🔄 {{turnoverText .TurnoverAchieved .TurnoverTarget}}</span>
         {{end}}
       </p>
       <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
@@ -618,6 +645,14 @@ const deviceCardTemplate = `
               --
             </span>
           {{end}}
+        {{end}}
+        {{if .IsPoolPump}}
+          {{if isActive .WaterSupplyActive}}
+            <span class="tag is-warning ml-2" id="water-supply-{{.Id}}" title="Water supply active, pump paused">💧 Paused</span>
+          {{else}}
+            <span class="tag is-success ml-2" id="water-supply-{{.Id}}" title="Water supply OK">💧 OK</span>
+          {{end}}
+          <span class="tag is-light ml-2" id="turnover-{{.Id}}" title="Filtration turnover today">🔄 {{turnoverText .TurnoverAchieved .TurnoverTarget}}</span>
         {{end}}
       </p>
       <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>

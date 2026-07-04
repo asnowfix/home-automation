@@ -99,17 +99,43 @@ device; no account-status registry; no pool rendering in the web UI.
       cell, which already has a reasonable collapsible-JSON UX. Lower priority than Phase 4
       (explicit user ask for CLI/UI turnover+water-supply status); revisit later if wanted.
 
-### Phase 4 — Pool status in UI + terminal
-- [ ] `myhome/ctl/pool/status.go`: use `PoolService` (like `start.go`) to print Turnover
-      (target + achieved) and Water supply (`Inputs["water-supply"]`) lines
-- [ ] New pool RPC verb: `internal/myhome/const.go` (Verb) → new `internal/myhome/pool.go`
-      (req/resp types) → `internal/myhome/methods.go` (signatures) → handler registered in
-      daemon via `myhome.RegisterMethodHandler`, calling `PoolService.Status` +
-      `PoolRuntimeTracker`
-- [ ] `internal/myhome/ui/template.go` `DeviceView`: add `IsPoolPump`, `TurnoverAchieved`,
-      `TurnoverTarget`, `WaterSupplyOK` fields; populate in `DeviceToView`
-- [ ] `internal/myhome/ui/htmx.go`: render pool tags in `deviceCardsTemplate` /
-      `deviceCardTemplate`
+### Phase 4 — Pool status in UI + terminal — DONE
+- [x] New pool RPC verb `pool.getstatus` (`internal/myhome/const.go`), no-params/
+      `PoolGetStatusResult` type (`internal/myhome/pool.go`: `DeviceID`, `WaterSupplyActive`,
+      `TurnoverAchieved`, `TurnoverTarget`, `RuntimeSec`), signature registered in
+      `internal/myhome/methods.go`.
+- [x] Handler: `myhome/daemon/pool_rpc.go` (`PoolRPCHandler`, registered unconditionally in
+      `daemon.go` next to the occupancy/temperature RPC registration) — reuses
+      `PoolNotices.ComputeTurnover` (refactored out of `recordTurnoverToday`, same KVS reads) and
+      new `PoolNotices.WaterSupplyActive` (reads `Input.GetStatus` id 0). Returns a clear error
+      if `poolNotices` is nil (pool disabled/device unreachable) rather than panicking.
+- [x] `myhome/ctl/pool/status.go`: new `printFiltrationStatus`/`formatRuntime`, calls
+      `myhome.TheClient.CallE(ctx, myhome.PoolGetStatus, nil)` and prints a "Filtration Status"
+      section (turnover achieved/target/runtime, water-supply OK/active) after the per-device
+      mesh listing; degrades to a one-line note if the RPC errors.
+  - REVISED FINDING: `PoolService.Status`/`getDeviceStatus` (the originally-planned data
+    source) queries per-device KVS the same way `PoolNotices`/`SolarAutomation` already do —
+    reusing the daemon's existing `PoolNotices` handle (single configured device) was simpler
+    than standing up a `mhscript.PoolService` + `DeviceProvider` inside the daemon just for
+    this, so the CLI/UI path goes through the new RPC verb instead of `PoolService.Status`.
+- [x] `internal/myhome/ui/template.go`: added `IsPoolPump`, `TurnoverAchieved`,
+      `TurnoverTarget`, `WaterSupplyActive` to `DeviceView`; new `applyPoolStatus(ctx, views)`
+      calls `pool.getstatus` **once per request** (not per device — avoids N redundant
+      KVS/MQTT round trips) and matches by `DeviceID`. Wired into `RenderIndex`,
+      `htmx.go`'s `DeviceCards` and `DeviceCard`.
+- [x] `internal/myhome/ui/htmx.go`: pool tags (💧 water-supply OK/Paused, 🔄 turnover x/day)
+      added to both `deviceCardsTemplate`/`deviceCardTemplate`, via new `cardTemplateFuncs()`
+      (`isActive`, `turnoverText`) — required because `html/template` does **not**
+      auto-dereference `*bool`/`*float64` fields for `{{if}}`/`{{printf}}` (verified
+      empirically: a non-nil pointer is always template-truthy regardless of its value, and
+      `{{printf "%.1f" ptr}}` prints the pointer's address, not the float). New
+      `htmx_pool_test.go` covers both funcs and full template rendering (including a
+      pointer-address leak guard).
+  - **Pre-existing bug found (out of scope, not fixed)**: the existing `.Temperature`/
+    `.Humidity` tags in both card templates use this exact broken `{{printf "%.1f" .Temperature}}`
+    pattern (`*float64` field) — confirmed via a standalone repro that this renders
+    `%!f(*float64=0x...)` instead of the number. Flagged to the user; not touched here since
+    it's unrelated to this feature.
 
 ### Phase 5 — Verification
 - [ ] `make build` then `make test` from repo root

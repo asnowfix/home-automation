@@ -3,6 +3,7 @@ package beem
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -195,5 +196,41 @@ func TestTokenProactiveRefresh(t *testing.T) {
 	}
 	if c.token != "tok-proactive" {
 		t.Errorf("token = %q, want \"tok-proactive\"", c.token)
+	}
+}
+
+// realWorldLoginBody is a redacted copy of an actual Beem API login response:
+// HTTP 201 Created (not 200 OK), a raft of account fields the client doesn't
+// model, and no "expiresIn" field at all.
+const realWorldLoginBody = `{"lastname":"DOE","firstname":"Jane","email":"jane.doe@example.com","userId":50969,"journeyStatus":"house_filled","countryCode":"FR","toggles":[],"isVerified":true,"accessToken":"tok-real-world","phoneNumber":"+33600000000","birthday":null,"civility":"sir","motivationForBeem":"energySelfSufficient"}`
+
+// TestLogin_201CreatedRealWorldPayload verifies that login succeeds against
+// the actual shape of a Beem API response: status 201 (not 200), and a body
+// containing many account fields the client doesn't care about, decoded via
+// loginResponse which only extracts accessToken/expiresIn.
+func TestLogin_201CreatedRealWorldPayload(t *testing.T) {
+	loginHandler := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		io.WriteString(w, realWorldLoginBody)
+	}
+
+	srv := buildTestServer(t, loginHandler, summaryOK(100, 200, 300))
+	defer srv.Close()
+
+	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"})
+	c.http = *srv.Client()
+
+	origLogin, origSummary := loginURL, summaryURL
+	loginURL = srv.URL + "/beemapp/user/login"
+	summaryURL = srv.URL + "/beemapp/box/summary"
+	defer func() { loginURL = origLogin; summaryURL = origSummary }()
+
+	ctx := context.Background()
+	if _, err := c.PollSummary(ctx); err != nil {
+		t.Fatalf("PollSummary returned unexpected error: %v", err)
+	}
+	if c.token != "tok-real-world" {
+		t.Errorf("token = %q, want \"tok-real-world\"", c.token)
 	}
 }

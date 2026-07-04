@@ -41,11 +41,12 @@ func NewHTMXHandler(ctx context.Context, log logr.Logger, db *storage.DeviceStor
 // accountRow is the template view for one account's status row, with
 // display fields pre-formatted server-side to keep the template simple.
 type accountRow struct {
-	Name        string
-	StatusClass string // Bulma tag color: is-success / is-danger / is-light
-	StatusText  string
-	LastChecked string
-	LastError   string
+	Name          string
+	StatusClass   string // Bulma tag color: is-success / is-danger / is-light
+	StatusText    string
+	LastChecked   string
+	LastError     string // truncated to maxErrorDisplayLen for display
+	LastErrorFull string // untruncated, shown as a hover tooltip
 }
 
 // accountDisplayNames maps internal account keys (used by Registry.Report)
@@ -57,6 +58,21 @@ var accountDisplayNames = map[string]string{
 	"mqtt": "MQTT Broker",
 }
 
+// maxErrorDisplayLen caps how much of a LastError string is shown on an
+// account status card. Errors like Beem's login failure embed the entire
+// JSON response body, which would otherwise overflow the card.
+const maxErrorDisplayLen = 120
+
+// truncateError shortens s to maxErrorDisplayLen runes, appending an ellipsis
+// if it was cut. The full text is kept separately for a hover tooltip.
+func truncateError(s string) string {
+	r := []rune(s)
+	if len(r) <= maxErrorDisplayLen {
+		return s
+	}
+	return string(r[:maxErrorDisplayLen]) + "…"
+}
+
 func toAccountRows(statuses []accounts.Status) []accountRow {
 	rows := make([]accountRow, len(statuses))
 	for i, s := range statuses {
@@ -64,7 +80,7 @@ func toAccountRows(statuses []accounts.Status) []accountRow {
 		if name == "" {
 			name = s.Name
 		}
-		row := accountRow{Name: name, LastError: s.LastError}
+		row := accountRow{Name: name, LastError: truncateError(s.LastError), LastErrorFull: s.LastError}
 		switch {
 		case !s.Enabled:
 			row.StatusClass = "is-light"
@@ -744,7 +760,7 @@ const accountsPanelTemplate = `
       <p class="is-size-7 has-text-grey">Last checked: {{.LastChecked}}</p>
     {{end}}
     {{if .LastError}}
-      <p class="is-size-7 has-text-danger">{{.LastError}}</p>
+      <p class="is-size-7 has-text-danger" style="overflow-wrap: anywhere;" title="{{.LastErrorFull}}">{{.LastError}}</p>
     {{end}}
   </div>
 </div>

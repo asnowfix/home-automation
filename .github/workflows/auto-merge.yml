@@ -1,0 +1,98 @@
+name: Auto-merge on green CI
+
+# Arms/disarms GitHub's native auto-merge on a PR based on simple, tunable
+# rules. Auto-merge itself still waits for the required "build" status check
+# (see branch protection on main) before actually merging anything.
+#
+# A PR is held for MANUAL merge instead of being armed if any of:
+#   - it carries the "manual-merge" label (explicit opt-out)
+#   - it changes more than FILE_LIMIT files or LINE_LIMIT lines (size net)
+#   - it touches a "structural" file: go.work(.sum), an added/removed go.mod
+#     (new/removed workspace sub-module), or anything under
+#     .github/workflows/ (structural net)
+#
+# Late-added labels/changes re-run this workflow (labeled/unlabeled,
+# synchronize triggers) so a PR can be armed or disarmed after it's opened.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false && github.event.pull_request.state == 'open'
+    steps:
+      - name: Enable or disable auto-merge based on PR shape
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const FILE_LIMIT = 15;
+            const LINE_LIMIT = 400;
+
+            function isStructural(file) {
+              const path = file.filename;
+              if (path === 'go.work' || path === 'go.work.sum') return true;
+              const base = path.split('/').pop();
+              if (base === 'go.mod' && (file.status === 'added' || file.status === 'removed')) return true;
+              if (path.startsWith('.github/workflows/')) return true;
+              return false;
+            }
+
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const pr_number = pr.number;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: pr_number,
+              per_page: 100,
+            });
+
+            const filesChanged = files.length;
+            const lines = files.reduce((sum, f) => sum + f.additions + f.deletions, 0);
+            const hasStructural = files.some(isStructural);
+            const hasManualLabel = pr.labels.some(l => l.name === 'manual-merge');
+
+            let reason = null;
+            if (hasManualLabel) reason = 'label (manual-merge)';
+            else if (filesChanged > FILE_LIMIT) reason = `size (files=${filesChanged} > ${FILE_LIMIT})`;
+            else if (lines > LINE_LIMIT) reason = `size (lines=${lines} > ${LINE_LIMIT})`;
+            else if (hasStructural) reason = 'structural (go.work, go.mod add/remove, or .github/workflows/**)';
+
+            const hold = reason !== null;
+
+            const enableMutation = `
+              mutation($id: ID!) {
+                enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: MERGE }) {
+                  pullRequest { autoMergeRequest { enabledAt } }
+                }
+              }`;
+
+            const disableMutation = `
+              mutation($id: ID!) {
+                disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
+                  pullRequest { autoMergeRequest { enabledAt } }
+                }
+              }`;
+
+            try {
+              if (hold) {
+                console.log(`Holding PR #${pr_number} for manual merge: ${reason}`);
+                await github.graphql(disableMutation, { id: pr.node_id });
+                console.log('Auto-merge disabled (or was already off).');
+              } else {
+                console.log(`PR #${pr_number} eligible for auto-merge (files=${filesChanged}, lines=${lines}). Enabling.`);
+                await github.graphql(enableMutation, { id: pr.node_id });
+                console.log('Auto-merge enabled.');
+              }
+            } catch (err) {
+              // Enabling when already enabled, or disabling when not enabled,
+              // are not real failures — just log and move on.
+              console.log(`Note: ${err.message}`);
+            }

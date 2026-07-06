@@ -26,6 +26,28 @@ GOARCH := $(shell go env GOARCH)
 
 mods = $(patsubst %/,%,$(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */*/*/go.mod) $(wildcard */*/*/*/go.mod))
 
+# Local daemon dev loop: run/stop/tail a daemon instance built from whichever
+# worktree invokes it, pointed at the real home MQTT broker. --instance local
+# matches myhome-local.sh's convention (avoids RPC topic collisions with the
+# systemd-managed "myhome" instance).
+#
+# State (pidfile/log) lives in a single OS-standard user directory, NOT under
+# the repo/worktree: only one dev daemon should ever run at a time (it binds
+# fixed ports 6080/6060), and a per-worktree location can't see a stale
+# instance left running by a different worktree.
+MYHOME_MQTT_BROKER ?= tcp://192.168.1.2:1883
+ifeq ($(OS),Windows_NT)
+LOCAL_DAEMON_STATE_DIR := $(LOCALAPPDATA)/myhome/local-daemon
+else ifeq ($(OS),Darwin)
+LOCAL_DAEMON_STATE_DIR := $(HOME)/Library/Application Support/myhome/local-daemon
+else
+XDG_STATE_HOME ?= $(HOME)/.local/state
+LOCAL_DAEMON_STATE_DIR := $(XDG_STATE_HOME)/myhome/local-daemon
+endif
+LOCAL_DAEMON_PID := $(LOCAL_DAEMON_STATE_DIR)/myhome.pid
+LOCAL_DAEMON_LOG := $(LOCAL_DAEMON_STATE_DIR)/myhome.log
+LOCAL_DAEMON_PATTERN := daemon run --instance local --mqtt-broker $(MYHOME_MQTT_BROKER)
+
 default: help
 
 help:
@@ -33,6 +55,10 @@ help:
 	@echo "  help                  - Show this help message"
 	@echo "  build                 - Build the project"
 	@echo "  run                   - Run the project"
+	@echo "  run-local-daemon      - Start a dev-loop daemon in the background (kills any prior instance first)"
+	@echo "  stop-local-daemon     - Stop the dev-loop daemon started by run-local-daemon"
+	@echo "  status-local-daemon   - Show whether the dev-loop daemon is running"
+	@echo "  logs-local-daemon     - Tail the dev-loop daemon's log file"
 	@echo "  install               - Install the project"
 	@echo "  start                 - Start the service"
 	@echo "  stop                  - Stop the service"
@@ -105,6 +131,54 @@ release:
 
 run: build
 	$(MAKE) -C myhome $(@)
+
+# Dev-loop daemon: always kills any other instance before starting a fresh
+# one built from the current checkout. Two layers of detection, since the
+# pidfile alone can go stale (state dir wiped, process killed -9 elsewhere):
+#   1. the shared pidfile — authoritative, works across worktrees/sessions
+#   2. a pgrep fallback for a stray instance the pidfile doesn't know about
+# The pgrep pattern also matches this very recipe's own shell (its command
+# text contains the pattern string), so its own $$ (current shell PID) is
+# excluded from the kill list.
+run-local-daemon: build
+	@mkdir -p "$(LOCAL_DAEMON_STATE_DIR)"
+	@if [ -f "$(LOCAL_DAEMON_PID)" ]; then \
+		OLD_PID=$$(cat "$(LOCAL_DAEMON_PID)"); \
+		if kill -0 $$OLD_PID 2>/dev/null; then \
+			echo "run-local-daemon: stopping existing instance (pid $$OLD_PID)"; \
+			kill $$OLD_PID 2>/dev/null; sleep 1; kill -9 $$OLD_PID 2>/dev/null || true; \
+		fi; \
+	fi
+	@PIDS="$$(pgrep -f '$(LOCAL_DAEMON_PATTERN)' 2>/dev/null | grep -v -x $$$$)"; \
+	if [ -n "$$PIDS" ]; then \
+		echo "run-local-daemon: stopping stray instance(s) not tracked by pidfile: $$PIDS"; \
+		kill $$PIDS 2>/dev/null; sleep 1; kill -9 $$PIDS 2>/dev/null || true; \
+	fi
+	@rm -f "$(LOCAL_DAEMON_PID)"
+	@(nohup ./myhome/myhome daemon run --instance local --mqtt-broker $(MYHOME_MQTT_BROKER) > "$(LOCAL_DAEMON_LOG)" 2>&1 & echo $$! > "$(LOCAL_DAEMON_PID)")
+	@sleep 1
+	@echo "run-local-daemon: started (pid $$(cat "$(LOCAL_DAEMON_PID)")), logs: $(LOCAL_DAEMON_LOG)"
+
+stop-local-daemon:
+	@if [ -f "$(LOCAL_DAEMON_PID)" ]; then \
+		PID=$$(cat "$(LOCAL_DAEMON_PID)"); \
+		if kill -0 $$PID 2>/dev/null; then kill $$PID && echo "stop-local-daemon: stopped (pid $$PID)"; else echo "stop-local-daemon: pidfile stale, not running"; fi; \
+		rm -f "$(LOCAL_DAEMON_PID)"; \
+	else \
+		echo "stop-local-daemon: no pidfile ($(LOCAL_DAEMON_PID))"; \
+	fi
+	@PIDS="$$(pgrep -f '$(LOCAL_DAEMON_PATTERN)' 2>/dev/null | grep -v -x $$$$)"; \
+	if [ -n "$$PIDS" ]; then kill $$PIDS 2>/dev/null; sleep 1; kill -9 $$PIDS 2>/dev/null || true; fi
+
+status-local-daemon:
+	@if [ -f "$(LOCAL_DAEMON_PID)" ] && kill -0 $$(cat "$(LOCAL_DAEMON_PID)") 2>/dev/null; then \
+		echo "status-local-daemon: running (pid $$(cat "$(LOCAL_DAEMON_PID)"))"; \
+	else \
+		echo "status-local-daemon: not running"; \
+	fi
+
+logs-local-daemon:
+	@tail -n 100 -f "$(LOCAL_DAEMON_LOG)"
 
 test: build
 	$(GO) test ./...

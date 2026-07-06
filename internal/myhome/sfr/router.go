@@ -22,6 +22,17 @@ var router *Router
 
 var routerLock sync.Mutex
 
+// StatusReporter, if set, is called after every periodic refresh attempt
+// with the outcome (nil error on success). Set it via SetStatusReporter
+// before the device manager first calls GetRouter, so the daemon can track
+// SFR box connection status without this package knowing that concept.
+var StatusReporter func(err error)
+
+// SetStatusReporter installs fn as the StatusReporter.
+func SetStatusReporter(fn func(err error)) {
+	StatusReporter = fn
+}
+
 // Refreshes the IP address of the known devices every minute
 func GetRouter(ctx context.Context) model.Router {
 	routerLock.Lock()
@@ -67,6 +78,9 @@ func GetRouter(ctx context.Context) model.Router {
 
 func (r *Router) refresh(ctx context.Context, log logr.Logger) error {
 	devices, err := sfr.ListDevices(ctx, log)
+	if StatusReporter != nil {
+		StatusReporter(err)
+	}
 	if err != nil {
 		return err
 	}

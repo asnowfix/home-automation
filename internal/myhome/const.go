@@ -47,6 +47,7 @@ const (
 	SwitchStatus                  Verb = "switch.status"
 	SwitchAll                     Verb = "switch.all"
 	EventList                     Verb = "event.list"
+	PoolGetStatus                 Verb = "pool.getstatus"
 )
 
 type Key string

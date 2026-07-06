@@ -40,7 +40,7 @@ func TestFormatDigest_Singular(t *testing.T) {
 	// expected clock string must be derived the same way rather than
 	// hardcoded, to keep this test timezone-independent.
 	wantClock := time.Unix(eventTs.Unix(), 0).Format("15:04")
-	for _, want := range []string{wantClock, "pool-pump", "pool", "pool.run_window", "max_temp_c"} {
+	for _, want := range []string{wantClock, "pool-pump", "pool", "pool.run_window", "winter mode", "28°C"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("digest body missing %q:\n%s", want, body)
 		}

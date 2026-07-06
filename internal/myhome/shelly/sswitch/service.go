@@ -184,18 +184,32 @@ func (s *Service) onValue(ctx context.Context, sd *shelly.Device, switchId int) 
 		s.log.Info("Unable to get value", "key", string(myhome.NormallyClosedKey), "reason", err)
 		return true
 	}
-
-	// if switchId is 0, the value might be a boolean.  Otherwise, it is an array indexed by the switchId
-	var nc bool
 	if switchId == 0 {
-		nc, _ = strconv.ParseBool(kv.Value)
-	} else {
-		var ncs []bool
-		err = json.Unmarshal([]byte(kv.Value), &ncs)
-		if err != nil {
-			nc = false
-		}
-		nc = ncs[switchId]
+		return parseOnValue(kv.Value)
 	}
+	return parseOnValueIndexed(kv.Value, switchId)
+}
+
+// parseOnValue decides the switch's logical "on" value from the raw
+// normally-closed KVS string for switchId 0: it's a single bool
+// ("true"/"false"), and the returned value is the negation of that flag.
+func parseOnValue(value string) bool {
+	nc, _ := strconv.ParseBool(value)
 	return !nc
+}
+
+// parseOnValueIndexed decides the switch's logical "on" value from the raw
+// normally-closed KVS string for a non-zero switchId: it's a JSON array of
+// bools indexed by switchId, and the returned value is the negation of
+// ncs[switchId].
+//
+// NOTE: preserves a pre-existing behavior from before this extraction: the
+// unmarshal error is ignored and ncs[switchId] is always evaluated, so an
+// invalid value or an out-of-range switchId panics (index out of range) since
+// ncs stays nil/short. Not fixed here — out of scope for a
+// behavior-preserving testability refactor; flagged for a future fix.
+func parseOnValueIndexed(value string, switchId int) bool {
+	var ncs []bool
+	_ = json.Unmarshal([]byte(value), &ncs)
+	return !ncs[switchId]
 }

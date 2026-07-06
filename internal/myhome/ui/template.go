@@ -56,6 +56,41 @@ type DeviceView struct {
 	Humidity             *float64                        `json:"humidity,omitempty"`     // Current humidity in percentage (nil if not a humidity sensor)
 	DoorOpened           *bool                           `json:"door_opened,omitempty"`  // true if door/window is open, false if closed (nil if not a door/window sensor)
 	Switches             map[int]pkgshelly.SwitchSummary `json:"switches,omitempty"`     // Switches on the device (nil if not a switch)
+	IsPoolPump           bool                            `json:"is_pool_pump,omitempty"`           // true if this is the configured pool pump device
+	TurnoverAchieved     *float64                        `json:"turnover_achieved,omitempty"`      // pool volumes filtered today so far (nil unless IsPoolPump)
+	TurnoverTarget       *float64                        `json:"turnover_target,omitempty"`        // configured daily turnover target, times/day (nil unless IsPoolPump)
+	WaterSupplyActive    *bool                           `json:"water_supply_active,omitempty"`    // true = water-supply protection engaged, pump paused (nil unless IsPoolPump)
+}
+
+// applyPoolStatus enriches views in place with the configured pool device's
+// turnover rate and water-supply status, fetched once via the pool.getstatus
+// RPC method (myhome/daemon/pool_rpc.go) rather than once per device — there
+// is exactly one configured pool device system-wide, so doing this inside
+// DeviceToView itself would trigger a redundant KVS/MQTT round trip for
+// every other device on each dashboard refresh.
+func applyPoolStatus(ctx context.Context, views []DeviceView) {
+	mh, err := myhome.Methods(myhome.PoolGetStatus)
+	if err != nil {
+		return // pool RPC not registered (pool tracking disabled)
+	}
+	res, err := mh.ActionE(ctx, nil)
+	if err != nil {
+		return // device unreachable / KVS misconfigured — leave fields blank
+	}
+	status, ok := res.(*myhome.PoolGetStatusResult)
+	if !ok {
+		return
+	}
+	for i := range views {
+		if views[i].Id != status.DeviceID {
+			continue
+		}
+		achieved, target, active := status.TurnoverAchieved, status.TurnoverTarget, status.WaterSupplyActive
+		views[i].IsPoolPump = true
+		views[i].TurnoverAchieved = &achieved
+		views[i].TurnoverTarget = &target
+		views[i].WaterSupplyActive = &active
+	}
 }
 
 // IndexData holds the data for rendering the index page
@@ -325,6 +360,7 @@ func RenderIndex(ctx context.Context, db *storage.DeviceStorage, w io.Writer) er
 		sort.Slice(data.Devices, func(i, j int) bool {
 			return strings.ToLower(data.Devices[i].Name) < strings.ToLower(data.Devices[j].Name)
 		})
+		applyPoolStatus(ctx, data.Devices)
 	}
 	return indexTmpl.Execute(w, data)
 }

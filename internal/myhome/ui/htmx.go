@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/internal/myhome/accounts"
 	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/asnowfix/home-automation/myhome/storage"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
@@ -19,19 +20,103 @@ import (
 
 // HTMXHandler returns handlers for HTMX partial HTML responses
 type HTMXHandler struct {
-	ctx       context.Context
-	log       logr.Logger
-	db        *storage.DeviceStorage
-	eventsSvc *events.Service
+	ctx              context.Context
+	log              logr.Logger
+	db               *storage.DeviceStorage
+	eventsSvc        *events.Service
+	accountsRegistry *accounts.Registry
 }
 
 // NewHTMXHandler creates a new HTMX handler
-func NewHTMXHandler(ctx context.Context, log logr.Logger, db *storage.DeviceStorage, eventsSvc *events.Service) *HTMXHandler {
+func NewHTMXHandler(ctx context.Context, log logr.Logger, db *storage.DeviceStorage, eventsSvc *events.Service, accountsRegistry *accounts.Registry) *HTMXHandler {
 	return &HTMXHandler{
-		ctx:       ctx,
-		log:       log,
-		db:        db,
-		eventsSvc: eventsSvc,
+		ctx:              ctx,
+		log:              log,
+		db:               db,
+		eventsSvc:        eventsSvc,
+		accountsRegistry: accountsRegistry,
+	}
+}
+
+// accountRow is the template view for one account's status row, with
+// display fields pre-formatted server-side to keep the template simple.
+type accountRow struct {
+	Name          string
+	StatusClass   string // Bulma tag color: is-success / is-danger / is-light
+	StatusText    string
+	LastChecked   string
+	LastError     string // truncated to maxErrorDisplayLen for display
+	LastErrorFull string // untruncated, shown as a hover tooltip
+}
+
+// accountDisplayNames maps internal account keys (used by Registry.Report)
+// to their human-readable label in the UI.
+var accountDisplayNames = map[string]string{
+	"beem": "Beem Energy",
+	"sfr":  "SFR Box",
+	"smtp": "Email (SMTP)",
+	"mqtt": "MQTT Broker",
+}
+
+// maxErrorDisplayLen caps how much of a LastError string is shown on an
+// account status card. Errors like Beem's login failure embed the entire
+// JSON response body, which would otherwise overflow the card.
+const maxErrorDisplayLen = 120
+
+// truncateError shortens s to maxErrorDisplayLen runes, appending an ellipsis
+// if it was cut. The full text is kept separately for a hover tooltip.
+func truncateError(s string) string {
+	r := []rune(s)
+	if len(r) <= maxErrorDisplayLen {
+		return s
+	}
+	return string(r[:maxErrorDisplayLen]) + "…"
+}
+
+func toAccountRows(statuses []accounts.Status) []accountRow {
+	rows := make([]accountRow, len(statuses))
+	for i, s := range statuses {
+		name := accountDisplayNames[s.Name]
+		if name == "" {
+			name = s.Name
+		}
+		row := accountRow{Name: name, LastError: truncateError(s.LastError), LastErrorFull: s.LastError}
+		switch {
+		case !s.Enabled:
+			row.StatusClass = "is-light"
+			row.StatusText = "Not configured"
+		case s.LastAttempt.IsZero():
+			row.StatusClass = "is-light"
+			row.StatusText = "Pending"
+		case s.LastOK:
+			row.StatusClass = "is-success"
+			row.StatusText = "Connected"
+		default:
+			row.StatusClass = "is-danger"
+			row.StatusText = "Failed"
+		}
+		if !s.LastAttempt.IsZero() {
+			row.LastChecked = s.LastAttempt.Format("2006-01-02 15:04:05")
+		}
+		rows[i] = row
+	}
+	return rows
+}
+
+// AccountsPanel renders the connection status of every external account
+// myhome talks to (Beem Energy, SFR box, SMTP, MQTT broker).
+func (h *HTMXHandler) AccountsPanel(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if h.accountsRegistry == nil {
+		fmt.Fprintf(w, `<p class="has-text-grey">Account status not available.</p>`)
+		return
+	}
+
+	tmpl := template.Must(template.New("accounts-panel").Parse(accountsPanelTemplate))
+
+	if err := tmpl.Execute(w, toAccountRows(h.accountsRegistry.Snapshot())); err != nil {
+		h.log.Error(err, "failed to render accounts panel")
+		http.Error(w, "render error", http.StatusInternalServerError)
 	}
 }
 
@@ -58,13 +143,12 @@ func (h *HTMXHandler) DeviceCards(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(deviceViews, func(i, j int) bool {
 		return strings.ToLower(deviceViews[i].Name) < strings.ToLower(deviceViews[j].Name)
 	})
+	applyPoolStatus(h.ctx, deviceViews)
 
 	h.log.Info("DeviceCards: rendering template", "device_count", len(deviceViews))
 
 	// Render all device cards
-	tmpl := template.Must(template.New("device-cards").Funcs(template.FuncMap{
-		"lower": strings.ToLower,
-	}).Parse(deviceCardsTemplate))
+	tmpl := template.Must(template.New("device-cards").Funcs(cardTemplateFuncs()).Parse(deviceCardsTemplate))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, deviceViews); err != nil {
@@ -90,11 +174,11 @@ func (h *HTMXHandler) DeviceCard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dv := DeviceToView(h.ctx, device)
+	views := []DeviceView{DeviceToView(h.ctx, device)}
+	applyPoolStatus(h.ctx, views)
+	dv := views[0]
 
-	tmpl := template.Must(template.New("device-card").Funcs(template.FuncMap{
-		"lower": strings.ToLower,
-	}).Parse(deviceCardTemplate))
+	tmpl := template.Must(template.New("device-card").Funcs(cardTemplateFuncs()).Parse(deviceCardTemplate))
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, dv); err != nil {
@@ -369,6 +453,26 @@ func (h *HTMXHandler) renderEventsRows(w http.ResponseWriter, r *http.Request, o
 	}
 }
 
+// cardTemplateFuncs returns the template.FuncMap shared by deviceCardsTemplate
+// and deviceCardTemplate. isActive/turnoverText exist because html/template
+// does not auto-dereference *bool/*float64 fields for {{if}} or {{printf}} —
+// a non-nil pointer is always "truthy" regardless of the value it points to,
+// and printf on a pointer prints its address, not the pointed-to value.
+func cardTemplateFuncs() template.FuncMap {
+	return template.FuncMap{
+		"lower": strings.ToLower,
+		"isActive": func(b *bool) bool {
+			return b != nil && *b
+		},
+		"turnoverText": func(achieved, target *float64) string {
+			if achieved == nil || target == nil {
+				return ""
+			}
+			return fmt.Sprintf("%.1f/%.1f x/day", *achieved, *target)
+		},
+	}
+}
+
 const deviceCardsTemplate = `
 {{range .}}
 {{ $deviceId := .Id }}
@@ -438,6 +542,14 @@ const deviceCardsTemplate = `
               --
             </span>
           {{end}}
+        {{end}}
+        {{if .IsPoolPump}}
+          {{if isActive .WaterSupplyActive}}
+            <span class="tag is-warning ml-2" id="water-supply-{{.Id}}" title="Water supply active, pump paused">💧 Paused</span>
+          {{else}}
+            <span class="tag is-success ml-2" id="water-supply-{{.Id}}" title="Water supply OK">💧 OK</span>
+          {{end}}
+          <span class="tag is-light ml-2" id="turnover-{{.Id}}" title="Filtration turnover today">🔄 {{turnoverText .TurnoverAchieved .TurnoverTarget}}</span>
         {{end}}
       </p>
       <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
@@ -550,6 +662,14 @@ const deviceCardTemplate = `
             </span>
           {{end}}
         {{end}}
+        {{if .IsPoolPump}}
+          {{if isActive .WaterSupplyActive}}
+            <span class="tag is-warning ml-2" id="water-supply-{{.Id}}" title="Water supply active, pump paused">💧 Paused</span>
+          {{else}}
+            <span class="tag is-success ml-2" id="water-supply-{{.Id}}" title="Water supply OK">💧 OK</span>
+          {{end}}
+          <span class="tag is-light ml-2" id="turnover-{{.Id}}" title="Filtration turnover today">🔄 {{turnoverText .TurnoverAchieved .TurnoverTarget}}</span>
+        {{end}}
       </p>
       <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
       <div class="buttons mt-3">
@@ -625,6 +745,29 @@ const roomsListTemplate = `
   <div class="column is-12">
     <p class="has-text-grey">No rooms configured yet.</p>
   </div>
+{{end}}
+`
+
+const accountsPanelTemplate = `
+{{range .}}
+<div class="column is-3-desktop is-6-tablet">
+  <div class="box">
+    <div class="level mb-0">
+      <div class="level-left"><strong>{{.Name}}</strong></div>
+      <div class="level-right"><span class="tag {{.StatusClass}}">{{.StatusText}}</span></div>
+    </div>
+    {{if .LastChecked}}
+      <p class="is-size-7 has-text-grey">Last checked: {{.LastChecked}}</p>
+    {{end}}
+    {{if .LastError}}
+      <p class="is-size-7 has-text-danger" style="overflow-wrap: anywhere;" title="{{.LastErrorFull}}">{{.LastError}}</p>
+    {{end}}
+  </div>
+</div>
+{{else}}
+<div class="column is-12">
+  <p class="has-text-grey">No accounts tracked yet.</p>
+</div>
 {{end}}
 `
 

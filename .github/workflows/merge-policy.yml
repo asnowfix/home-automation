@@ -1,0 +1,86 @@
+name: Merge policy advisory
+
+# Posts an advisory "merge-policy" check on every PR, flagging whether it
+# looks safe to merge as-is or should get extra care before you merge it
+# by hand. This does NOT enable GitHub's auto-merge or merge anything
+# itself — merging is always a manual action.
+#
+# A PR is flagged "manual merge required" if any of:
+#   - it carries the "manual-merge" label (explicit flag)
+#   - it changes more than FILE_LIMIT files or LINE_LIMIT lines (size)
+#   - it touches a "structural" file: go.work(.sum), an added/removed
+#     go.mod (new/removed workspace sub-module), or anything under
+#     .github/workflows/ (structural change)
+# Otherwise it's flagged "looks safe to merge".
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  advise:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false && github.event.pull_request.state == 'open'
+    steps:
+      - name: Post merge-policy check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const FILE_LIMIT = 15;
+            const LINE_LIMIT = 400;
+
+            function isStructural(file) {
+              const path = file.filename;
+              if (path === 'go.work' || path === 'go.work.sum') return true;
+              const base = path.split('/').pop();
+              if (base === 'go.mod' && (file.status === 'added' || file.status === 'removed')) return true;
+              if (path.startsWith('.github/workflows/')) return true;
+              return false;
+            }
+
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const filesChanged = files.length;
+            const lines = files.reduce((sum, f) => sum + f.additions + f.deletions, 0);
+            const structuralFiles = files.filter(isStructural).map(f => f.filename);
+            const hasManualLabel = pr.labels.some(l => l.name === 'manual-merge');
+
+            let reason = null;
+            if (hasManualLabel) reason = 'carries the "manual-merge" label';
+            else if (filesChanged > FILE_LIMIT) reason = `changes ${filesChanged} files (limit ${FILE_LIMIT})`;
+            else if (lines > LINE_LIMIT) reason = `changes ${lines} lines (limit ${LINE_LIMIT})`;
+            else if (structuralFiles.length > 0) reason = `touches structural file(s): ${structuralFiles.join(', ')}`;
+
+            const hold = reason !== null;
+
+            await github.rest.checks.create({
+              owner,
+              repo,
+              name: 'merge-policy',
+              head_sha: pr.head.sha,
+              status: 'completed',
+              conclusion: hold ? 'action_required' : 'success',
+              output: hold
+                ? {
+                    title: 'Manual merge required',
+                    summary: `This PR is flagged for manual review before merging: ${reason}.\n\nfiles=${filesChanged}, lines=${lines}`,
+                  }
+                : {
+                    title: 'Looks safe to merge',
+                    summary: `No manual-merge label, size (files=${filesChanged}, lines=${lines}) within limits, and no structural files touched.`,
+                  },
+            });
+
+            console.log(hold ? `Flagged: ${reason}` : `Looks safe (files=${filesChanged}, lines=${lines}).`);

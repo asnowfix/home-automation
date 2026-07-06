@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
@@ -94,6 +95,7 @@ var runCmd = &cobra.Command{
 
 		// Enable environment variable support
 		v.SetEnvPrefix("MYHOME")
+		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 		v.AutomaticEnv()
 		v.SetDefault("beem.poll_interval", "60s")
 

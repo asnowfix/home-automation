@@ -577,32 +577,40 @@ type speedMappings struct {
 	High int
 }
 
+// defaultSpeedMappings are the eco/mid/high switch indices used when a
+// controller has no speed mapping configured in KVS yet.
+var defaultSpeedMappings = speedMappings{Eco: 0, Mid: 1, High: 2}
+
+// parseSpeedMappings turns up to three raw KVS string values into a
+// speedMappings, falling back to defaultSpeedMappings for any value that's
+// missing (nil) or fails to parse as an integer.
+func parseSpeedMappings(ecoRaw, midRaw, highRaw *string) *speedMappings {
+	mappings := defaultSpeedMappings
+	if ecoRaw != nil {
+		fmt.Sscanf(*ecoRaw, "%d", &mappings.Eco)
+	}
+	if midRaw != nil {
+		fmt.Sscanf(*midRaw, "%d", &mappings.Mid)
+	}
+	if highRaw != nil {
+		fmt.Sscanf(*highRaw, "%d", &mappings.High)
+	}
+	return &mappings
+}
+
 // getSpeedMappings retrieves speed-to-switch mappings from controller's KVS
 func (s *PoolService) getSpeedMappings(ctx context.Context, sd *shelly.Device, via types.Channel) (*speedMappings, error) {
-	mappings := &speedMappings{
-		Eco:  0, // defaults
-		Mid:  1,
-		High: 2,
-	}
-
-	// Try to load from KVS
+	var eco, mid, high *string
 	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["eco_speed"]); err == nil && val != nil {
-		if _, err := fmt.Sscanf(val.Value, "%d", &mappings.Eco); err != nil {
-			s.log.V(1).Info("Failed to parse eco_speed, using default", "error", err)
-		}
+		eco = &val.Value
 	}
 	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["mid_speed"]); err == nil && val != nil {
-		if _, err := fmt.Sscanf(val.Value, "%d", &mappings.Mid); err != nil {
-			s.log.V(1).Info("Failed to parse mid_speed, using default", "error", err)
-		}
+		mid = &val.Value
 	}
 	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["high_speed"]); err == nil && val != nil {
-		if _, err := fmt.Sscanf(val.Value, "%d", &mappings.High); err != nil {
-			s.log.V(1).Info("Failed to parse high_speed, using default", "error", err)
-		}
+		high = &val.Value
 	}
-
-	return mappings, nil
+	return parseSpeedMappings(eco, mid, high), nil
 }
 
 // Start starts the pool pump at the specified speed
@@ -1057,6 +1065,96 @@ func (s *PoolService) getDeviceStatus(ctx context.Context, deviceID string) (Dev
 	return status, nil
 }
 
+// environmentKVSFields lists the PoolKVSKeys names read by getEnvironmentStatus,
+// in fetch order.
+var environmentKVSFields = []string{
+	"temperature_threshold", "eco_speed", "mid_speed", "high_speed",
+	"pool_volume", "turnover", "max_flow_rate", "max_rpm", "eco_rpm", "mid_rpm", "high_rpm",
+	"max_temp", "mqtt_topic_prefix",
+}
+
+// applyEnvironmentKVSValues parses the raw KVS string values successfully
+// fetched for controllerID (keyed by the same names as environmentKVSFields)
+// and assigns them onto env. Missing keys and unparseable values are left
+// untouched, matching the original fetch-and-best-effort-parse behavior.
+func applyEnvironmentKVSValues(env *Environment, raw map[string]string) {
+	if v, ok := raw["temperature_threshold"]; ok {
+		var threshold float64
+		if _, err := fmt.Sscanf(v, "%f", &threshold); err == nil {
+			env.TemperatureThreshold = threshold
+		}
+	}
+	if v, ok := raw["eco_speed"]; ok {
+		var speed int
+		if _, err := fmt.Sscanf(v, "%d", &speed); err == nil {
+			env.EcoSpeed = &speed
+		}
+	}
+	if v, ok := raw["mid_speed"]; ok {
+		var speed int
+		if _, err := fmt.Sscanf(v, "%d", &speed); err == nil {
+			env.MidSpeed = &speed
+		}
+	}
+	if v, ok := raw["high_speed"]; ok {
+		var speed int
+		if _, err := fmt.Sscanf(v, "%d", &speed); err == nil {
+			env.HighSpeed = &speed
+		}
+	}
+	if v, ok := raw["pool_volume"]; ok {
+		var i int
+		if _, err := fmt.Sscanf(v, "%d", &i); err == nil {
+			env.PoolVolume = i
+		}
+	}
+	if v, ok := raw["turnover"]; ok {
+		var i int
+		if _, err := fmt.Sscanf(v, "%d", &i); err == nil {
+			env.Turnover = i
+		}
+	}
+	if v, ok := raw["max_flow_rate"]; ok {
+		var i int
+		if _, err := fmt.Sscanf(v, "%d", &i); err == nil {
+			env.MaxFlowRate = i
+		}
+	}
+	if v, ok := raw["max_rpm"]; ok {
+		var i int
+		if _, err := fmt.Sscanf(v, "%d", &i); err == nil {
+			env.MaxRpm = i
+		}
+	}
+	if v, ok := raw["eco_rpm"]; ok {
+		var i int
+		if _, err := fmt.Sscanf(v, "%d", &i); err == nil {
+			env.EcoRpm = i
+		}
+	}
+	if v, ok := raw["mid_rpm"]; ok {
+		var i int
+		if _, err := fmt.Sscanf(v, "%d", &i); err == nil {
+			env.MidRpm = i
+		}
+	}
+	if v, ok := raw["high_rpm"]; ok {
+		var i int
+		if _, err := fmt.Sscanf(v, "%d", &i); err == nil {
+			env.HighRpm = i
+		}
+	}
+	if v, ok := raw["max_temp"]; ok {
+		var f float64
+		if _, err := fmt.Sscanf(v, "%f", &f); err == nil {
+			env.MaxTemp = f
+		}
+	}
+	if v, ok := raw["mqtt_topic_prefix"]; ok {
+		env.MqttTopicPrefix = v
+	}
+}
+
 func (s *PoolService) getEnvironmentStatus(ctx context.Context, controllerID string, env *Environment) error {
 	device, err := s.provider.GetDeviceByAny(ctx, controllerID)
 	if err != nil {
@@ -1070,97 +1168,13 @@ func (s *PoolService) getEnvironmentStatus(ctx context.Context, controllerID str
 
 	via := types.ChannelMqtt
 
-	// Get schedule configuration from KVS
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["temperature_threshold"]); err == nil && val != nil {
-		var threshold float64
-		if _, err := fmt.Sscanf(val.Value, "%f", &threshold); err == nil {
-			env.TemperatureThreshold = threshold
+	raw := make(map[string]string)
+	for _, key := range environmentKVSFields {
+		if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys[key]); err == nil && val != nil {
+			raw[key] = val.Value
 		}
 	}
-
-	// Get speed mappings from KVS
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["eco_speed"]); err == nil && val != nil {
-		var speed int
-		if _, err := fmt.Sscanf(val.Value, "%d", &speed); err == nil {
-			env.EcoSpeed = &speed
-		}
-	}
-
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["mid_speed"]); err == nil && val != nil {
-		var speed int
-		if _, err := fmt.Sscanf(val.Value, "%d", &speed); err == nil {
-			env.MidSpeed = &speed
-		}
-	}
-
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["high_speed"]); err == nil && val != nil {
-		var speed int
-		if _, err := fmt.Sscanf(val.Value, "%d", &speed); err == nil {
-			env.HighSpeed = &speed
-		}
-	}
-
-	// Get temperature-proportional scheduling parameters from KVS
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["pool_volume"]); err == nil && val != nil {
-		var v int
-		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
-			env.PoolVolume = v
-		}
-	}
-
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["turnover"]); err == nil && val != nil {
-		var v int
-		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
-			env.Turnover = v
-		}
-	}
-
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["max_flow_rate"]); err == nil && val != nil {
-		var v int
-		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
-			env.MaxFlowRate = v
-		}
-	}
-
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["max_rpm"]); err == nil && val != nil {
-		var v int
-		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
-			env.MaxRpm = v
-		}
-	}
-
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["eco_rpm"]); err == nil && val != nil {
-		var v int
-		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
-			env.EcoRpm = v
-		}
-	}
-
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["mid_rpm"]); err == nil && val != nil {
-		var v int
-		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
-			env.MidRpm = v
-		}
-	}
-
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["high_rpm"]); err == nil && val != nil {
-		var v int
-		if _, err := fmt.Sscanf(val.Value, "%d", &v); err == nil {
-			env.HighRpm = v
-		}
-	}
-
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["max_temp"]); err == nil && val != nil {
-		var v float64
-		if _, err := fmt.Sscanf(val.Value, "%f", &v); err == nil {
-			env.MaxTemp = v
-		}
-	}
-
-	// Get MQTT configuration from KVS
-	if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys["mqtt_topic_prefix"]); err == nil && val != nil {
-		env.MqttTopicPrefix = val.Value
-	}
+	applyEnvironmentKVSValues(env, raw)
 
 	// Get forecast URL from Script.storage (not KVS)
 	// Note: This is stored in Script.storage, not KVS, so we'd need to call Script.Eval to retrieve it

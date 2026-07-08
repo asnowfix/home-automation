@@ -219,6 +219,12 @@ cover-report: coverage.txt
 cover-html: coverage.txt
 	$(GO) tool cover -html=coverage.txt
 
+# cover-min-suggest: prints the integer floor of the current aggregate
+# coverage, i.e. the value to paste into .coverage-min after a PR that raises
+# coverage. Run `make cover` first.
+cover-min-suggest: coverage.txt
+	@$(GO) tool cover -func=coverage.txt | awk '/^total:/{ split($$3, p, "."); print p[1] }'
+
 build: generate
 	$(MAKE) -C myhome $(@)
 

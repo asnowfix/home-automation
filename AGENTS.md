@@ -1569,6 +1569,28 @@ One paragraph.
 The workflows must always invoke `make test` rather than bare `go test ./...`
 so that the Makefile remains the single source of truth for how tests are run.
 
+### Coverage Gate and Ratcheting
+
+`make cover` is `make test`'s coverage-instrumented sibling: it runs every
+module the same way `test` does, but with `-covermode=atomic
+-coverprofile=...`, and merges the per-module profiles into `coverage.txt` at
+the repo root. `.github/workflows/test.yml`'s `build` job runs it on every
+push/PR and fails via `scripts/check-coverage.sh "$(cat .coverage-min)"` if
+the aggregate drops below the floor recorded in `.coverage-min`.
+
+**When a PR raises coverage, bump `.coverage-min` in that same PR** — this is
+how the floor ratchets up over time instead of just preventing regressions
+(precedent: commit `9ccc01b`). After running `make cover` locally,
+`make cover-min-suggest` prints the integer floor to paste into
+`.coverage-min`.
+
+For visibility without needing to run anything locally:
+- Every CI run's job summary includes a **per-package coverage breakdown**
+  (`go tool cover -func=coverage.txt`), even if the gate fails.
+- Every **pull_request** run additionally computes the aggregate coverage
+  **delta vs `main`** (a separate `coverage-delta` job) and posts it to the
+  job summary — purely informational, it never blocks merging.
+
 ### Testing Shelly Scripts
 
 1. **Local testing**: Use `--no-minify` for easier debugging

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/global"
@@ -38,6 +39,7 @@ type daemon struct {
 	dm               *impl.DeviceManager
 	rpc              myhome.Server
 	occupancyService *occupancy.Service
+	stopped          chan struct{} // closed once Run() returns, so Stop() can wait for a clean shutdown
 }
 
 type Config struct {
@@ -64,19 +66,45 @@ func (m *reportingMailer) Send(ctx context.Context, subject, body string) error 
 
 func NewDaemon(ctx context.Context) *daemon {
 	return &daemon{
-		ctx:    ctx,
-		cancel: ctx.Value(global.CancelKey).(context.CancelFunc),
+		ctx:     ctx,
+		cancel:  ctx.Value(global.CancelKey).(context.CancelFunc),
+		stopped: make(chan struct{}),
 	}
 }
 
 func (d *daemon) Start(s service.Service) error {
+	// When launched by the OS service manager (not an interactive session),
+	// the working directory defaults to a system directory (e.g. System32 on
+	// Windows). Chdir into the service data directory so relative paths (the
+	// device DB, config file lookup, --events-dir, etc.) land somewhere
+	// sensible instead. No-op on platforms where the service manager already
+	// sets the working directory (see serviceDataDir).
+	if !service.Interactive() {
+		if dir := serviceDataDir(); dir != "" {
+			if err := os.MkdirAll(dir, 0o755); err == nil {
+				_ = os.Chdir(dir)
+			}
+		}
+	}
+
 	// Start should not block. Do the actual work async.
-	go d.Run()
+	go func() {
+		defer close(d.stopped)
+		d.Run()
+	}()
 	return nil
 }
 
 func (d *daemon) Stop(s service.Service) error {
 	d.cancel()
+	// Give Run() a bounded window to finish its deferred cleanup (closing the
+	// MQTT client, storage, etc.) before reporting stopped to the service
+	// manager. Bounded so a stuck shutdown can't hang the SCM stop request
+	// (Windows' default service stop timeout is ~30s).
+	select {
+	case <-d.stopped:
+	case <-time.After(10 * time.Second):
+	}
 	return nil
 }
 

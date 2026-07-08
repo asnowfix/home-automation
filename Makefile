@@ -225,12 +225,16 @@ generate:
 	$(GO) generate ./myhome/ctl/garden
 	$(GO) generate ./...
 
+VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
+
+# MSI Version must be strictly numeric (max 4 dot-separated fields) — strip any
+# git-describe suffix (e.g. "0.11.3-2-gabcdef" -> "0.11.3").
+MSI_VERSION := $(shell echo $(VERSION) | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+
 # Build Debian package for current OS/ARCH (Linux only)
 # Usage: make debpkg [VERSION=X.Y.Z]
-# If VERSION is not specified, uses git describe
 ifeq ($(OS),Linux)
 ARCH := $(shell dpkg --print-architecture 2>/dev/null || uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
-VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
 DEBPKG_DIR := .debpkg
 DEB_FILE := myhome_$(VERSION)_$(ARCH).deb
 
@@ -299,9 +303,17 @@ endif
 push:
 	$(GIT) push
 
-msi: build-msi
-	$msi = "$out\MyHome-0.0.18.msi"
-	go-msi make --msi $msi --version 0.0.18 --path .\wix.json --arch amd64 --license .\LICENSE --out $out
+installer: build-windows
+	@echo "Building Windows installer with WiX (MSI version $(MSI_VERSION))..."
+	@if not exist dist mkdir dist
+	@if not exist assets mkdir assets
+	@magick convert "internal/myhome/ui/static/penates.svg" -define icon:auto-resize=256,128,64,48,32,16 "assets/penates.ico"
+	@wix build myhome.wxs -arch x64 -ext WixToolset.Util.wixext -d Version=$(MSI_VERSION) -o dist\myhome-$(MSI_VERSION).msi
+	@echo "Installer created in dist/ directory"
+
+build-windows:
+	@echo "Building Windows executable..."
+	@go build -ldflags "-X version.Version=$(VERSION)" -o myhome.exe ./myhome
 
 # Upload release notes for the latest version to GitHub
 # Usage: make upload-release-notes [VERSION=vX.Y.Z]

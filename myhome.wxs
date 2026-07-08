@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <Package Name="MyHome"
+           Manufacturer="AsNowFiX"
+           Version="$(var.Version)"
+           UpgradeCode="b25f3b95-7f8b-43c6-af70-036454f54374"
+           Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of MyHome is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="MyHomeIcon" SourceFile="assets\penates.ico" />
+    <Property Id="ARPPRODUCTICON" Value="MyHomeIcon" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="MyHome">
+        <Component Id="MainExecutable" Guid="5b4e432c-e6da-4259-8981-67cd54d07471" Bitness="always64">
+          <File Id="MyHomeExe" Source="myhome.exe" KeyPath="yes" />
+          <ServiceInstall Id="MyHomeServiceInstall"
+                          Name="myhome"
+                          DisplayName="MyHome"
+                          Description="MyHome Daemon, with embedded MQTT broker and persistent device manager"
+                          Start="auto"
+                          Type="ownProcess"
+                          ErrorControl="normal"
+                          Account="LocalSystem"
+                          Arguments="daemon run" />
+          <ServiceControl Id="MyHomeServiceControl"
+                           Name="myhome"
+                           Start="install"
+                           Stop="both"
+                           Remove="uninstall"
+                           Wait="yes" />
+        </Component>
+
+        <Component Id="SystemPathEntry" Guid="f2be1491-b113-4052-89d2-327395d84383" Bitness="always64">
+          <Environment Id="PATH" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="yes" />
+          <RegistryValue Root="HKLM" Key="Software\AsNowFiX\MyHome" Name="PathEntryAdded" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppProgramMenuFolder" Name="MyHome">
+        <Component Id="ApplicationShortcuts" Guid="0bd5eaaa-55ae-44b1-99d0-20fcbe48e611" Bitness="always64">
+          <Shortcut Id="MyHomeStartMenuShortcut"
+                    Name="MyHome"
+                    Description="MyHome Home Automation"
+                    Target="[INSTALLFOLDER]myhome.exe"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Icon="MyHomeIcon" />
+          <Shortcut Id="UninstallShortcut"
+                    Name="Uninstall MyHome"
+                    Target="[System64Folder]msiexec.exe"
+                    Arguments="/x [ProductCode]" />
+          <RemoveFolder Id="RemoveAppProgramMenuFolder" On="uninstall" />
+          <RegistryValue Root="HKLM" Key="Software\AsNowFiX\MyHome" Name="ShortcutInstalled" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="MyHome" Level="1">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="SystemPathEntry" />
+      <ComponentRef Id="ApplicationShortcuts" />
+    </Feature>
+
+  </Package>
+</Wix>

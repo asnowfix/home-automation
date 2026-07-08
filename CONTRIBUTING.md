@@ -783,6 +783,24 @@ Build the Windows installer (automatically handles versioning from git, icon con
 
 The installer will be created in the `dist/` directory as `myhome-<version>.msi`.
 
+#### Running tests (`make test` equivalent)
+
+The root `Makefile`'s `test` target depends on GNU Make plus `awk`/`find`/`bash`-style
+recipes (see the Git Bash section below for installing GNU Make on Windows), which is
+extra setup if you just want to run the test suite. `scripts\make-test.ps1` is a
+PowerShell-native equivalent — no GNU Make or Unix tools required:
+
+```pwsh
+.\scripts\make-test.ps1
+```
+
+It mirrors the Makefile's `generate` + `test` targets exactly: runs the required
+`go generate` steps (UI assets, pool/garden defaults), then `go test ./...` at the repo
+root, then `go test ./...` inside every Go workspace module listed in `go.work` that has
+its own direct test files (a module whose only tests live in a nested sub-module, also
+listed separately in `go.work`, is skipped — that sub-module gets tested in its own
+iteration). Exits non-zero if anything fails, so it's safe to use as a pre-push gate.
+
 ```pwsh
 cd myhome
 go run . -h

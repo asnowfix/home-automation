@@ -155,7 +155,10 @@ run-local-daemon: build
 		kill $$PIDS 2>/dev/null; sleep 1; kill -9 $$PIDS 2>/dev/null || true; \
 	fi
 	@rm -f "$(LOCAL_DAEMON_PID)"
-	@(nohup ./myhome/myhome daemon run --instance local --mqtt-broker $(MYHOME_MQTT_BROKER) > "$(LOCAL_DAEMON_LOG)" 2>&1 & echo $$! > "$(LOCAL_DAEMON_PID)")
+	@( \
+		if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
+		nohup ./myhome/myhome daemon run --instance local --mqtt-broker $(MYHOME_MQTT_BROKER) > "$(LOCAL_DAEMON_LOG)" 2>&1 & echo $$! > "$(LOCAL_DAEMON_PID)" \
+	)
 	@sleep 1
 	@echo "run-local-daemon: started (pid $$(cat "$(LOCAL_DAEMON_PID)")), logs: $(LOCAL_DAEMON_LOG)"
 

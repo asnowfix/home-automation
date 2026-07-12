@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/go-logr/logr"
@@ -121,6 +123,60 @@ func (s *DeviceStorage) createTable() error {
 			s.log.Error(err, "Failed to get rows affected")
 			// Don't return error - tables might not exist
 		}
+	}
+
+	if err := s.migrateHostsToHostnames(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// migrateHostsToHostnames replaces any literal IP address left in the host
+// column (from before #252) with "<id>.local". host is no longer written
+// with a live-resolved IP (see docs/no-ip-address-plan.md); a pre-existing
+// IP is stale by definition — the device may have moved to a different
+// address since it was last cached — so it is rewritten to the device's
+// mDNS-resolvable hostname instead of being left permanently wrong.
+func (s *DeviceStorage) migrateHostsToHostnames() error {
+	rows, err := s.db.Query(`SELECT rowid, id, host FROM devices WHERE host != ''`)
+	if err != nil {
+		s.log.Error(err, "Failed to query devices for host migration")
+		return err
+	}
+
+	type staleRow struct {
+		rowid int64
+		id    string
+	}
+	var stale []staleRow
+	for rows.Next() {
+		var rowid int64
+		var id, host string
+		if err := rows.Scan(&rowid, &id, &host); err != nil {
+			rows.Close()
+			s.log.Error(err, "Failed to scan device row during host migration")
+			return err
+		}
+		if net.ParseIP(host) != nil {
+			stale = append(stale, staleRow{rowid: rowid, id: id})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		s.log.Error(err, "Failed to iterate devices during host migration")
+		return err
+	}
+	rows.Close()
+
+	for _, r := range stale {
+		if _, err := s.db.Exec(`UPDATE devices SET host = ? WHERE rowid = ?`, r.id+".local", r.rowid); err != nil {
+			s.log.Error(err, "Failed to migrate cached IP to hostname", "id", r.id)
+			return err
+		}
+	}
+	if len(stale) > 0 {
+		s.log.Info("Migrated cached IP addresses in devices DB to mDNS hostnames", "count", len(stale))
 	}
 
 	return nil

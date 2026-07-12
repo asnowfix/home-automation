@@ -130,11 +130,14 @@ func (d *Device) WithName(name string) *Device {
 	return d
 }
 
+// NewDeviceFromImpl builds a Device from a freshly discovered
+// devices.Device. Host is deliberately not copied — see WithZeroConfEntry's
+// doc comment; device's IP already lives in-memory on the wrapped impl for
+// this run, and is never persisted to the devices DB.
 func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Device) (*Device, error) {
 	d := NewDevice(log, SHELLY, device.Id())
 	d = d.WithImpl(device)
 	d = d.WithMAC(device.Mac())
-	d = d.WithHost(device.Host())
 	d = d.WithName(device.Name())
 
 	return d, nil
@@ -181,9 +184,12 @@ func (d *Device) Refresh(ctx context.Context) (bool, error) {
 		}
 
 		// Always copy config and info to myhome device, even if not modified
-		// This ensures they're available for saving to database
+		// This ensures they're available for saving to database.
+		// Host is deliberately NOT copied here: it is a live-resolved,
+		// in-memory-only value on sd (see pkg/shelly's types.HostResolver
+		// seam) and must not be persisted to the devices DB — see #252 /
+		// docs/no-ip-address-plan.md.
 		d.WithId(sd.Id())
-		d.WithHost(sd.Host())
 		d.WithName(sd.Name())
 		d.WithMAC(sd.Mac())
 		d.ConfigRevision = sd.ConfigRevision()
@@ -202,24 +208,29 @@ func (d *Device) Refresh(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+// WithZeroConfEntry updates d's name and MAC from a freshly browsed mDNS
+// entry. It deliberately does NOT write entry's IP into d.Host_: that field
+// is persisted to the devices DB, which must not cache resolved IPs — see
+// #252 / docs/no-ip-address-plan.md. The entry's IP is only used transiently
+// here, as a lookup key into the SFR router to discover the device's MAC.
 func (d *Device) WithZeroConfEntry(ctx context.Context, entry *zeroconf.ServiceEntry) *Device {
 	d.log.Info("Updating device", "id", d.Id, "zeroconf entry", entry)
 
+	var ip net.IP
 	if len(entry.AddrIPv4) > 0 {
-		d.WithHost(entry.AddrIPv4[0].String())
+		ip = entry.AddrIPv4[0]
 	} else if len(entry.AddrIPv6) > 0 {
-		d.WithHost(entry.AddrIPv6[0].String())
+		ip = entry.AddrIPv6[0]
 	}
 
 	if entry.Instance != "" && entry.Instance != d.Id() {
 		d.WithName(entry.Instance)
 	}
 
-	ip := net.ParseIP(d.Host())
 	if ip != nil {
 		host, err := sfr.GetRouter(ctx).GetHostByIp(ctx, ip)
 		if err != nil {
-			d.log.Error(err, "Failed to get host by IP", "ip", d.Host())
+			d.log.Error(err, "Failed to get host by IP", "ip", ip.String())
 			return d
 		}
 		d.WithMAC(host.Mac())

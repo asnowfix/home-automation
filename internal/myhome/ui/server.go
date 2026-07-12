@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/internal/myhome/accounts"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/internal/myhome/proxy"
 	"github.com/asnowfix/home-automation/internal/myhome/ui/static"
@@ -30,7 +31,7 @@ import (
 // - an IPv4/IPv6 address
 // - a .local hostname
 // - any known identifier in the myhome database (name, id, mac, host)
-func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db *storage.DeviceStorage, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string) error {
+func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db *storage.DeviceStorage, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry) error {
 	addr := fmt.Sprintf(":%d", listenPort)
 	srv := &http.Server{Addr: addr}
 
@@ -93,7 +94,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	})
 
 	// HTMX endpoints for partial HTML responses
-	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc)
+	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc, accountsRegistry)
 	if sseBroadcaster != nil {
 		sseBroadcaster.SetDeviceNameResolver(htmxHandler.DeviceNameResolver())
 	}
@@ -103,6 +104,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	mux.HandleFunc("/htmx/switch/toggle", htmxHandler.SwitchButton)
 	mux.HandleFunc("/htmx/events", htmxHandler.EventsTable)
 	mux.HandleFunc("/htmx/events/more", htmxHandler.EventsMore)
+	mux.HandleFunc("/htmx/accounts", htmxHandler.AccountsPanel)
 
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Info("http-incoming", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "proto", r.Proto, "content-length", r.ContentLength)

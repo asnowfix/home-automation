@@ -23,8 +23,53 @@ jobs:
           GOTOOLCHAIN: go1.25.3
       - name: Run tests with coverage
         run: make cover
+      - name: Per-package coverage summary
+        if: always()
+        run: |
+          {
+            echo "## Coverage by package"
+            echo '```'
+            go tool cover -func=coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Check coverage gate
         run: ./scripts/check-coverage.sh "$(cat .coverage-min)"
+
+  # Additive visibility only — never blocks merging. Computes the PR
+  # branch's aggregate coverage against main's so a reviewer can see at a
+  # glance whether a PR moved the needle, without running `make cover`
+  # locally on both branches themselves.
+  coverage-delta:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+        env:
+          GOTOOLCHAIN: go1.25.3
+      - name: Coverage on PR branch
+        run: |
+          make cover
+          echo "PR_COVERAGE=$(go tool cover -func=coverage.txt | awk '/^total:/{print $3}' | tr -d '%')" >> "$GITHUB_ENV"
+      - name: Coverage on main
+        run: |
+          git worktree add /tmp/main-checkout origin/main
+          (cd /tmp/main-checkout && make cover)
+          echo "MAIN_COVERAGE=$(go tool cover -func=/tmp/main-checkout/coverage.txt | awk '/^total:/{print $3}' | tr -d '%')" >> "$GITHUB_ENV"
+      - name: Post coverage delta
+        run: |
+          delta=$(awk -v pr="$PR_COVERAGE" -v main="$MAIN_COVERAGE" 'BEGIN { printf "%+.1f", pr - main }')
+          {
+            echo "## Coverage delta vs main"
+            echo "PR: ${PR_COVERAGE}% · main: ${MAIN_COVERAGE}% · delta: ${delta}pp"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Builds a temporary arm64 .deb for manual testing of this PR's changes —
   # NOT a release artifact (version is derived from `git describe`, not a

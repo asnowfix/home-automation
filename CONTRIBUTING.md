@@ -2,6 +2,10 @@
 
 ## Table of Contents <!-- omit in toc -->
 
+- [Local Credentials (.env)](#local-credentials-env)
+  - [.worktreeinclude](#worktreeinclude)
+  - [example.env](#exampleenv)
+  - [Using .env locally](#using-env-locally)
 - [Release Workflow](#release-workflow)
   - [Workflow Overview](#workflow-overview)
   - [Before First Release](#before-first-release)
@@ -56,6 +60,53 @@
     - [Configuration Hierarchy (highest to lowest priority):](#configuration-hierarchy-highest-to-lowest-priority)
   - [Database Schema](#database-schema)
 - [VSCode](#vscode)
+
+## Local Credentials (.env)
+
+myhome's account integrations (Beem Energy, SFR box, SMTP) are configured exclusively via
+environment variables for credentials — never in `myhome.yaml`, never as command-line flags.
+See `docs/configuration.md` for the authoritative list of every config key, its env var, its
+flag (if any), and its default.
+
+### .worktreeinclude
+
+`.worktreeinclude` (repo root) is a [Claude Code worktree
+convention](https://code.claude.com/docs/en/worktrees): it lists gitignored files that should be
+copied from the main checkout into every new git worktree Claude Code creates. `.env` and
+`.env.local` are both gitignored (they hold real credentials, see `.gitignore`), so without this
+file a fresh worktree would have no way to inherit them — `git worktree add` only carries
+tracked files. This is unrelated to `go.work`/module resolution; it only affects which
+gitignored files get copied into a new worktree's directory.
+
+### example.env
+
+`example.env` (repo root) is a template listing every credential env var myhome reads, with
+empty placeholder values and a comment explaining what each one is for and when it's needed
+(mirrors `docs/configuration.md`'s "Beem Energy" / "SFR Box" / "Notice & Email (SMTP)"
+sections). Copy it to `.env`, fill in real values, and never commit `.env` itself.
+
+```bash
+cp example.env .env
+# edit .env with real values
+```
+
+### Using .env locally
+
+**myhome does not auto-load `.env`** the way `python-dotenv` does — there is no such library
+wired into the Go binary. Viper's `AutomaticEnv()` only reads whatever is already in the
+process environment (see `myhome/daemon/run.go`), so you must source `.env` into your shell
+before running the daemon or any `ctl` command that needs those credentials:
+
+```bash
+set -a; source .env; set +a
+go run ./myhome daemon run --mqtt-broker tcp://192.168.1.2:1883
+```
+
+In production this is handled differently but with the same file convention: `dpkg-reconfigure
+myhome` writes `/var/lib/myhome/.env` (see the Debian package's `postinst.sh`), and the systemd
+unit loads it via an `EnvironmentFile=` directive before starting the process — so the
+credentials are already in the environment by the time the binary's `main()` runs, and no
+in-process `.env` parsing is ever needed there either.
 
 ## Release Workflow
 

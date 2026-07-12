@@ -20,7 +20,7 @@ Beem Energy produces solar PnP kits (Hoymiles micro-inverters + DTU gateway). Th
 ### REST API
 
 - **Login:** `POST https://api-x.beem.energy/beemapp/user/login` with `{email, password}` → JWT `accessToken`
-- **Data:** `GET https://api-x.beem.energy/beemapp/box/summary` (Bearer token) → instantaneous production W, daily Wh, monthly Wh
+- **Data:** `POST https://api-x.beem.energy/beemapp/box/summary` (Bearer token) with body `{month, year}` (current period) → JSON array, one entry per registered Beem box: `wattHour` (instantaneous production W, despite the name), `totalDay` (Wh), `totalMonth` (Wh). This project assumes a single-box household and reads `[0]`.
 - **Token refresh:** on 401 or proactively 60 s before expiry; token is stateless in memory (no disk persistence needed)
 
 ### Community references

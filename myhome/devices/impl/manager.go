@@ -835,7 +835,13 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 	if err != nil {
 		return nil, fmt.Errorf("failed to get devices: %w", err)
 	}
+	return &myhome.ThermometerListResult{Thermometers: classifyThermometers(devices)}, nil
+}
 
+// classifyThermometers scans devices for Gen1 H&T sensors (by Info.Application
+// or the "shellyht-" id prefix) and BLU sensors advertising a "temperature"
+// BTHome capability, returning one ThermometerInfo per match.
+func classifyThermometers(devices []*myhome.Device) []myhome.ThermometerInfo {
 	thermometers := make([]myhome.ThermometerInfo, 0)
 
 	for _, d := range devices {
@@ -846,8 +852,7 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 				Name:      d.Name(),
 				Type:      "Gen1",
 				MqttTopic: fmt.Sprintf("shellies/%s/sensor/temperature", d.Id()),
-				RoomId:    d.RoomId, // Add this field
-
+				RoomId:    d.RoomId,
 			})
 			continue
 		}
@@ -862,7 +867,7 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 						Name:      d.Name(),
 						Type:      "BLU",
 						MqttTopic: fmt.Sprintf("shelly-blu/events/%s", d.MAC),
-						RoomId:    d.RoomId, // Add this field
+						RoomId:    d.RoomId,
 					})
 					break
 				}
@@ -870,7 +875,7 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 		}
 	}
 
-	return &myhome.ThermometerListResult{Thermometers: thermometers}, nil
+	return thermometers
 }
 
 // HandleDoorList returns a list of devices with window/door sensing capability
@@ -879,7 +884,12 @@ func (dm *DeviceManager) HandleDoorList(ctx context.Context) (*myhome.DoorListRe
 	if err != nil {
 		return nil, fmt.Errorf("failed to get devices: %w", err)
 	}
+	return &myhome.DoorListResult{Doors: classifyDoors(devices)}, nil
+}
 
+// classifyDoors scans devices for BLU sensors advertising a "window" BTHome
+// capability, returning one DoorInfo per match.
+func classifyDoors(devices []*myhome.Device) []myhome.DoorInfo {
 	doors := make([]myhome.DoorInfo, 0)
 
 	for _, d := range devices {
@@ -901,7 +911,7 @@ func (dm *DeviceManager) HandleDoorList(ctx context.Context) (*myhome.DoorListRe
 		}
 	}
 
-	return &myhome.DoorListResult{Doors: doors}, nil
+	return doors
 }
 
 // GetShellyDevice returns a Shelly device for RPC calls (implements script.DeviceProvider)

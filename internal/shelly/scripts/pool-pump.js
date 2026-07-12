@@ -1798,7 +1798,7 @@ function doStart(speed, reason) {
   }
 
   log('Starting pump at speed:', speed, '-> switch:', switchId);
-  Shelly.emitEvent("pool.pump_start", {speed: speed, switch_id: switchId});
+  Shelly.emitEvent("pool.pump_start", {speed: speed, switch_id: switchId, reason: reason || "start"});
   activateOutput(switchId);
 }
 

@@ -90,6 +90,22 @@
     </div>
   </section>
 
+  <!-- Accounts Section -->
+  <section class="section pt-0">
+    <div class="container">
+      <h2 class="title is-4">🔌 Accounts</h2>
+      <div class="columns is-multiline"
+           id="accounts-container"
+           hx-get="/htmx/accounts"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div class="column is-12">
+          <p class="has-text-grey">Loading accounts...</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Rooms Management Section -->
   <section class="section pt-0">
     <div class="container">

@@ -270,11 +270,13 @@ func severityFor(event string) string {
 	case "smoke.alarm", "smoke.alarm_test", "smoke.alarm_off":
 		return "alarm"
 	case "battery.low", "ota_error", "switch.active_power_change",
-		"pool.fuse_tripped", "pool.water_supply_protected":
+		"pool.fuse_tripped":
 		return "warn"
 	case "pool.run_window", "pool.pump_start", "pool.pump_stop",
+		"pool.water_supply_protected", "pool.water_supply_restored", "pool.turnover_today",
 		"garden.plan", "garden.skip_rain", "garden.skip_frost", "garden.plan_fallback":
-		// Daily schedule/plan decisions and pump actions worth a human's attention.
+		// Daily schedule/plan decisions, pump actions, and water-supply
+		// on/off transitions worth a human's attention.
 		return "notice"
 	}
 	if strings.HasPrefix(event, "input.button_") ||

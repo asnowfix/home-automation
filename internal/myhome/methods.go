@@ -305,4 +305,12 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &EventListResponse{}
 		},
 	},
+	PoolGetStatus: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &PoolGetStatusResult{}
+		},
+	},
 }

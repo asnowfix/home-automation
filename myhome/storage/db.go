@@ -25,6 +25,12 @@ func NewDeviceStorage(log logr.Logger, dbName string) (*DeviceStorage, error) {
 		log.Error(err, "Failed to connect to database", "dbType", "sqlite", "dbName", dbName)
 		return nil, err
 	}
+	// A pooled second connection to ":memory:" opens its own empty database
+	// (no shared-cache URI is used here), so reads on that connection would
+	// silently see none of the rows written on the first. Pin the pool to a
+	// single connection to keep all reads/writes on the same in-memory (or
+	// file) database; SQLite serializes writers anyway.
+	db.SetMaxOpenConns(1)
 
 	// WAL mode gives better write throughput by allowing concurrent readers
 	// during a write. On in-memory databases the pragma is a no-op (SQLite

@@ -22,7 +22,7 @@ jobs:
         arch: [amd64, arm64]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref }}
@@ -152,7 +152,7 @@ jobs:
       msi_file: ${{ steps.build-msi.outputs.msi_file }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref }}
@@ -262,7 +262,7 @@ jobs:
     steps:
       - name: Checkout
         id: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: version
@@ -316,7 +316,7 @@ jobs:
     if: github.event.inputs.source_branch != ''
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.inputs.source_branch }}

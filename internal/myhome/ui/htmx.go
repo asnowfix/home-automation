@@ -469,6 +469,12 @@ func cardTemplateFuncs() template.FuncMap {
 			}
 			return fmt.Sprintf("%.1f/%.1f x/day", *achieved, *target)
 		},
+		"f1": func(f *float64) string {
+			if f == nil {
+				return ""
+			}
+			return fmt.Sprintf("%.1f", *f)
+		},
 	}
 }
 
@@ -483,7 +489,7 @@ const deviceCardsTemplate = `
         <span id="device-{{.Id}}-name">{{.Name}}</span>
         {{if .HasTemperatureSensor}}
           {{if .Temperature}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{printf "%.1f" .Temperature}}°C</span>
+            <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{f1 .Temperature}}°C</span>
           {{else}}
             <span class="tag is-light ml-2" id="sensor-{{.Id}}-temperature">--°C</span>
           {{end}}
@@ -511,7 +517,7 @@ const deviceCardsTemplate = `
         
         {{if .HasHumiditySensor}}
           {{if .Humidity}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{printf "%.1f" .Humidity}}%</span>
+            <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{f1 .Humidity}}%</span>
           {{else}}
             <span class="tag is-light ml-2" id="sensor-{{.Id}}-humidity">--%</span>
           {{end}}
@@ -602,7 +608,7 @@ const deviceCardTemplate = `
         <span id="device-{{.Id}}-name">{{.Name}}</span>
         {{if .HasTemperatureSensor}}
           {{if .Temperature}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{printf "%.1f" .Temperature}}°C</span>
+            <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{f1 .Temperature}}°C</span>
           {{else}}
             <span class="tag is-light ml-2" id="sensor-{{.Id}}-temperature">--°C</span>
           {{end}}
@@ -630,7 +636,7 @@ const deviceCardTemplate = `
         
         {{if .HasHumiditySensor}}
           {{if .Humidity}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{printf "%.1f" .Humidity}}%</span>
+            <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{f1 .Humidity}}%</span>
           {{else}}
             <span class="tag is-light ml-2" id="sensor-{{.Id}}-humidity">--%</span>
           {{end}}

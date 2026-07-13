@@ -95,6 +95,14 @@ Ports: 6080 (dev web UI), 80 (systemd), 6060 (pprof), 9100 (Prometheus).
 
 ## Conventions
 
+### GitHub Issues
+
+A **self-contained issue** has full context and does not depend on any coding agent's or human's
+memory of a prior conversation or session — anyone (agent or human) can pick it up cold, with no
+other source of information than what the issue itself contains. It may, and should, reference
+external sources (docs URLs) and/or other issue(s) and/or PR(s), but must not assume the reader
+was present for the discussion that led to filing it.
+
 ### Go
 
 - **CLI output**: `fmt.Printf()` for user-facing messages; `hlog` for internal/debug logging. Never `log.Info()` in CLI commands.

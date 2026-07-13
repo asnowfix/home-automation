@@ -82,7 +82,7 @@ func (f *FakeDevice) StopDialog(ctx context.Context, id uint32) {}
 
 func (f *FakeDevice) IsHttpReady() bool           { return true }
 func (f *FakeDevice) IsMqttReady() bool           { return true }
-func (f *FakeDevice) Channel(via Channel) Channel { return via }
+func (f *FakeDevice) Channel(ctx context.Context, via Channel) Channel { return via }
 
 func (f *FakeDevice) UpdateName(name string) { f.NameValue = name }
 func (f *FakeDevice) UpdateHost(host string) { f.HostValue = host }

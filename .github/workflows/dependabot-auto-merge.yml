@@ -1,0 +1,35 @@
+name: Dependabot auto-merge
+
+# Enables GitHub's native auto-merge on Dependabot PRs for patch/minor
+# updates only. Auto-merge just arms the PR to merge itself the moment
+# all required status checks (the "build" check from test.yml) go green —
+# it does not bypass CI. Major version bumps are left alone: dependabot.yml
+# excludes them from the grouped patch/minor PRs, so they land as separate
+# PRs here that never match the update-type check below and require a
+# manual merge.
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    runs-on: ubuntu-latest
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Dependabot metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Enable auto-merge for patch/minor updates
+        if: |
+          steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

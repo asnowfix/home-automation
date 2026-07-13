@@ -59,6 +59,7 @@ type DeviceView struct {
 	Manufacturer         string                          `json:"manufacturer"`
 	Host                 string                          `json:"host"`
 	LinkToken            string                          `json:"link_token"`
+	HasWebUI             bool                            `json:"has_web_ui"` // true if the device exposes an HTTP web UI at all (excludes BLU); reachability itself is resolved live when the link is opened, see internal/myhome/proxy
 	IsRefreshable        bool                            `json:"is_refreshable"`
 	HasHeaterScript      bool                            `json:"has_heater_script"`
 	HasDoorSensor        bool                            `json:"has_door_sensor"`        // true if device has door/window sensing capability
@@ -231,6 +232,13 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 	// Check if device is refreshable
 	isRefreshable := !shelly.IsBluDevice(d.Id()) && !shelly.IsGen1Device(d.Id())
 
+	// BLU devices are BLE-only sensors with no HTTP/web interface at all.
+	// Everything else has one, whether or not we currently have a cached
+	// dialable address for it — Host is no longer persisted (see #252), and
+	// the /devices/{token}/ proxy route resolves the device live (via MAC,
+	// then mDNS on its device ID) at click time instead.
+	hasWebUI := !shelly.IsBluDevice(d.Id())
+
 	// Get switch information
 	switches := make(map[int]pkgshelly.SwitchSummary)
 
@@ -337,6 +345,7 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 		Manufacturer:         d.Manufacturer(),
 		Host:                 host,
 		LinkToken:            token,
+		HasWebUI:             hasWebUI,
 		IsRefreshable:        isRefreshable,
 		HasHeaterScript:      hasHeater,
 		HasDoorSensor:        hasDoor,

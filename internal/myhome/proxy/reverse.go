@@ -389,28 +389,26 @@ func resolveToIPv4(ctx context.Context, log logr.Logger, resolver mynet.Resolver
 		}
 	}
 
-	// 3. Try myhome database lookup
+	// 3. Try myhome database lookup. device.Host is no longer persisted
+	// (see #252 / docs/no-ip-address-plan.md), so this normally falls
+	// through to resolving by device ID — which is guaranteed to match the
+	// device's mDNS "<id>.local" name — then Name as a last resort.
 	if db != nil {
 		if d, err := db.GetDeviceByAny(ctx, token); err == nil {
-			// Prefer device.Host when present
-			host := d.Host()
-			if host == "" {
-				// Fallbacks
-				host = d.Name()
-				if host == "" {
-					host = d.Id()
+			for _, candidate := range []string{d.Host(), d.Id(), d.Name()} {
+				if candidate == "" {
+					continue
 				}
-			}
-			if net.ParseIP(host) != nil {
-				ip := net.ParseIP(host)
-				if v4 := ip.To4(); v4 != nil {
-					return v4, nil
+				if ip := net.ParseIP(candidate); ip != nil {
+					if v4 := ip.To4(); v4 != nil {
+						return v4, nil
+					}
+					continue
 				}
-			} else if resolver != nil {
-				q := host
-				if strings.HasSuffix(strings.ToLower(q), ".local") {
-					q = strings.TrimSuffix(q, ".local")
+				if resolver == nil {
+					continue
 				}
+				q := strings.TrimSuffix(strings.ToLower(candidate), ".local")
 				if ips, err := resolver.LookupHost(ctx, log, q); err == nil {
 					if ip := pickV4(ips); ip != nil {
 						return ip, nil

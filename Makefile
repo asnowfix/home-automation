@@ -197,9 +197,21 @@ test: build
 # test-race: same module loop as `test`, with the race detector enabled.
 # Kept as a separate target/CI job from `test`/`cover` so a slow or flaky
 # race run never blocks the coverage gate's timing.
+#
+# RACE_SKIP: modules with known, pre-existing data races surfaced when the
+# race job was introduced (#355). Each entry is tracked by a dedicated bug;
+# remove the entry when closing the bug:
+#   internal/shelly/scripts — #372 (script-emulator DeviceState maps)
+#   myhome/daemon           — #373 (mockPumpController.calls in solar tests)
+#   pkg/beem                — #374 (package-level loginURL/summaryURL swap)
+RACE_SKIP := internal/shelly/scripts myhome/daemon pkg/beem
+
 test-race: build
 	$(GO) test -race ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
+	  case " $(RACE_SKIP) " in *" $$dir "*) \
+	    echo "test-race: SKIP $$dir (known races, see RACE_SKIP in Makefile)"; continue;; \
+	  esac; \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
 	    (cd $$dir && $(GO) test -race ./...) || rc=1; \

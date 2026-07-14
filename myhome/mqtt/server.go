@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
 	"os"
 	"time"
+
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
@@ -90,7 +91,7 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 		return err
 	}
 
-	var instance string = program
+	var instance = program
 	if program == "" {
 		instance = host
 	}

@@ -3,14 +3,15 @@ package mynet
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/global"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"net"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"

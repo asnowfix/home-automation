@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
@@ -12,7 +14,6 @@ import (
 	shellypkg "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -119,7 +120,7 @@ func doSwitchOneDevice(ctx context.Context, log logr.Logger, via types.Channel, 
 	}
 
 	if err != nil {
-		err = fmt.Errorf("failed to run %s device %s: %v", args[0], sd.Id(), err)
+		err = fmt.Errorf("failed to run %s device %s: %w", args[0], sd.Id(), err)
 		log.Info("Failed to run %s device %s: %v", sd.Id(), err)
 		return nil, err
 	}

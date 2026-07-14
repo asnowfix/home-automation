@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"reflect"
+
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
 )
@@ -23,19 +24,19 @@ func (v Verb) String() string {
 }
 
 const (
-	GetConfig                  Verb = "BLE.GetConfig"
-	SetConfig                  Verb = "BLE.SetConfig"
-	GetStatus                  Verb = "BLE.GetStatus"
-	CloudRelayList             Verb = "BLE.CloudRelay.List"
-	CloudRelayListInfos        Verb = "BLE.CloudRelay.ListInfos"
-	StartBluTrvAssociations    Verb = "BLE.StartBluTrvAssociations"
+	GetConfig               Verb = "BLE.GetConfig"
+	SetConfig               Verb = "BLE.SetConfig"
+	GetStatus               Verb = "BLE.GetStatus"
+	CloudRelayList          Verb = "BLE.CloudRelay.List"
+	CloudRelayListInfos     Verb = "BLE.CloudRelay.ListInfos"
+	StartBluTrvAssociations Verb = "BLE.StartBluTrvAssociations"
 )
 
 // Init registers BLE component methods with the device method registrar
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log = l
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
-	
+
 	r.RegisterMethodHandler(GetConfig.String(), types.MethodHandler{
 		Allocate:   func() any { return new(Config) },
 		HttpMethod: http.MethodGet,
@@ -123,7 +124,7 @@ func DoCloudRelayListInfos(ctx context.Context, via types.Channel, device types.
 	if offset > 0 {
 		req.Offset = offset
 	}
-	
+
 	out, err := device.CallE(ctx, via, string(CloudRelayListInfos), req)
 	if err != nil {
 		return nil, err

@@ -7,8 +7,9 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"regexp"
+
+	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 
 	"github.com/go-logr/logr"
 	"github.com/gorilla/schema"
@@ -33,11 +34,15 @@ func StartHttp2MqttProxy(ctx context.Context, port int, mc mqtt.Client) {
 		mc:      mc,
 		decoder: schema.NewDecoder(),
 	}
-	go http.ListenAndServe(fmt.Sprintf(":%d", port), &hp)
+	go func() {
+		if err := http.ListenAndServe(fmt.Sprintf(":%d", port), &hp); err != nil {
+			hp.log.Error(err, "Gen1 HTTP->MQTT proxy server stopped", "port", port)
+		}
+	}()
 }
 
 func (hp *http2MqttProxy) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	defer w.Write([]byte("")) // 200 OK
+	defer func() { _, _ = w.Write([]byte("")) }() // 200 OK
 
 	for k, v := range req.Header {
 		hp.log.Info("Inbound Header", k, v)
@@ -100,7 +105,9 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal device info: %w", err)
 	}
-	hp.mc.Publish(hp.ctx, infoTopic, infoMsg, mqtt.AtLeastOnce, true /*retain*/, "shelly/gen1/proxy")
+	if err := hp.mc.Publish(hp.ctx, infoTopic, infoMsg, mqtt.AtLeastOnce, true /*retain*/, "shelly/gen1/proxy"); err != nil {
+		return fmt.Errorf("failed to publish device info: %w", err)
+	}
 	hp.log.Info("Published Gen1 MQTT", "topic", infoTopic, "value", device)
 
 	// Publish temperature (common to both H&T and Flood sensors)
@@ -110,7 +117,9 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal temperature: %w", err)
 		}
-		hp.mc.Publish(hp.ctx, tempTopic, tempMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy")
+		if err := hp.mc.Publish(hp.ctx, tempTopic, tempMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy"); err != nil {
+			return fmt.Errorf("failed to publish temperature: %w", err)
+		}
 		hp.log.Info("Published Gen1 MQTT", "topic", tempTopic, "value", device.Temperature)
 	}
 
@@ -121,7 +130,9 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal humidity: %w", err)
 		}
-		hp.mc.Publish(hp.ctx, humTopic, humMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy")
+		if err := hp.mc.Publish(hp.ctx, humTopic, humMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy"); err != nil {
+			return fmt.Errorf("failed to publish humidity: %w", err)
+		}
 		hp.log.Info("Published Gen1 MQTT", "topic", humTopic, "value", device.Humidity)
 	}
 	if device.Flood != nil {
@@ -131,7 +142,9 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal flood: %w", err)
 		}
-		hp.mc.Publish(hp.ctx, floodTopic, floodMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy")
+		if err := hp.mc.Publish(hp.ctx, floodTopic, floodMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy"); err != nil {
+			return fmt.Errorf("failed to publish flood: %w", err)
+		}
 		hp.log.Info("Published Gen1 MQTT", "topic", floodTopic, "value", device.Flood)
 
 		// Publish battery voltage
@@ -140,7 +153,9 @@ func (hp *http2MqttProxy) publishAsGen1MQTT(device Device) error {
 		if err != nil {
 			return fmt.Errorf("failed to marshal battery: %w", err)
 		}
-		hp.mc.Publish(hp.ctx, batTopic, batMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy")
+		if err := hp.mc.Publish(hp.ctx, batTopic, batMsg, mqtt.AtLeastOnce, true, "shelly/gen1/proxy"); err != nil {
+			return fmt.Errorf("failed to publish battery: %w", err)
+		}
 		hp.log.Info("Published Gen1 MQTT", "topic", batTopic, "value", device.BatV)
 	}
 

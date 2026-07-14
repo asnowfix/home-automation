@@ -3,8 +3,9 @@ package temperature
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
 	"time"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
 )
 
 // RPC method handlers

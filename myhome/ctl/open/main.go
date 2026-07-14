@@ -3,10 +3,11 @@ package open
 import (
 	"encoding/json"
 	"fmt"
+	"os/exec"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"os/exec"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"

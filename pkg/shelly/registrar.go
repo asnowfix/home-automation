@@ -3,6 +3,7 @@ package shelly
 import (
 	"context"
 	"fmt"
+
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
@@ -33,7 +34,7 @@ func (r *Registrar) Init(log logr.Logger) {
 
 func discardDeviceCaller(ctx context.Context, device types.Device, mh types.MethodHandler, out any, params any) (any, error) {
 	log := logr.FromContextOrDiscard(ctx)
-	err := fmt.Errorf("Unable to reach device: %v (%s)", device.Name(), device.Id())
+	err := fmt.Errorf("unable to reach device: %v (%s)", device.Name(), device.Id())
 	log.Error(err, "Discarding method call", "method", mh.Method, "params", params)
 	return nil, err
 }

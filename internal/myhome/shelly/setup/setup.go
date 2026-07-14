@@ -632,8 +632,8 @@ func setupAutoUpdateJob(ctx context.Context, log logr.Logger, via types.Channel,
 	for _, job := range scheduled.Jobs {
 		for _, call := range job.Calls {
 			if call.Method == "Shelly.Update" {
-				existingJobId = &job.JobId.Id
-				log.Info("Found existing Shelly.Update job", "job_id", job.JobId.Id, "timespec", job.Timespec)
+				existingJobId = &job.Id
+				log.Info("Found existing Shelly.Update job", "job_id", job.Id, "timespec", job.Timespec)
 				break
 			}
 		}

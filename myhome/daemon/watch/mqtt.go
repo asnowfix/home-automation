@@ -4,22 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices"
 	"github.com/asnowfix/home-automation/myhome/mqtt"
-	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
-	"os"
-	"path/filepath"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
-	"time"
 
 	"github.com/go-logr/logr"
 )
 
-func StartMqttWatcher(ctx context.Context, log logr.Logger, mc mqttclient.Client, dm devices.Manager, dr devices.DeviceRegistry) error {
+func StartMqttWatcher(ctx context.Context, log logr.Logger, mc mqtt.Client, dm devices.Manager, dr devices.DeviceRegistry) error {
 	log = log.WithName("MqttWatcher")
 	topic := "+/events/rpc"
 	ch, err := mc.SubscribeWithTopic(ctx, topic, 16, "daemon/watch")

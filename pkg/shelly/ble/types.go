@@ -4,9 +4,9 @@ package ble
 
 // Config represents the BLE configuration for the device.
 type Config struct {
-	Enable   bool        `json:"enable"`             // True if bluetooth is enabled, false otherwise
-	RPC      *RPCConfig  `json:"rpc,omitempty"`      // Configuration of the rpc service
-	Observer *Observer   `json:"observer,omitempty"` // Configuration of the BT LE observer (obsoleted as of 1.5.0-beta1)
+	Enable   bool       `json:"enable"`             // True if bluetooth is enabled, false otherwise
+	RPC      *RPCConfig `json:"rpc,omitempty"`      // Configuration of the rpc service
+	Observer *Observer  `json:"observer,omitempty"` // Configuration of the BT LE observer (obsoleted as of 1.5.0-beta1)
 }
 
 // RPCConfig represents the RPC service configuration for BLE
@@ -55,10 +55,10 @@ type CloudRelayListInfosRequest struct {
 
 // CloudRelayListInfosResponse represents the response from BLE.CloudRelay.ListInfos
 type CloudRelayListInfosResponse struct {
-	TS      int                        `json:"ts"`      // Unix timestamp of the response
-	Offset  int                        `json:"offset"`  // Offset in the list of the first item in the current page
-	Count   int                        `json:"count"`   // Number of items in the current page
-	Total   int                        `json:"total"`   // Total number of items in the list
+	TS      int                         `json:"ts"`      // Unix timestamp of the response
+	Offset  int                         `json:"offset"`  // Offset in the list of the first item in the current page
+	Count   int                         `json:"count"`   // Number of items in the current page
+	Total   int                         `json:"total"`   // Total number of items in the list
 	Devices map[string]CloudRelayDevice `json:"devices"` // Device information keyed by MAC address
 }
 

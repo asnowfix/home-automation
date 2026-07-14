@@ -3,9 +3,10 @@ package kvs
 import (
 	"context"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -46,6 +47,8 @@ func get(ctx context.Context, log logr.Logger, via types.Channel, device devices
 		log.Error(err, "Unable to get many key-values")
 		return nil, err
 	}
-	options.PrintResult(out)
+	if err := options.PrintResult(out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }

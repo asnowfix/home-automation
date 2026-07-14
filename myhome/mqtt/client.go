@@ -610,7 +610,9 @@ func (c *client) Publisher(ctx context.Context, topic string, qlen uint, qos byt
 					log.Info("Channel closed", "topic", topic, "publisher", publisherName)
 					return
 				}
-				c.Publish(ctx, topic, msg, qos, retained, publisherName)
+				if err := c.Publish(ctx, topic, msg, qos, retained, publisherName); err != nil {
+					log.Error(err, "Failed to publish", "topic", topic, "publisher", publisherName)
+				}
 			}
 		}
 	}(c.log.WithName(publisherName))
@@ -664,7 +666,9 @@ func (c *client) SubscribeWithHandler(ctx context.Context, topic string, qlen ui
 		log.Info("Handler goroutine started", "topic", topic, "subscriber", subscriberName)
 		for msg := range mch {
 			log.V(1).Info("Handler received message from channel", "topic", msg.Topic(), "subscriber", msg.Subscriber(), "payload_len", len(msg.Payload()))
-			handler(msg.Topic(), msg.Payload(), msg.Subscriber())
+			if err := handler(msg.Topic(), msg.Payload(), msg.Subscriber()); err != nil {
+				log.Error(err, "Message handler failed", "topic", msg.Topic(), "subscriber", msg.Subscriber())
+			}
 		}
 		log.Info("Handler goroutine exiting", "topic", topic, "subscriber", subscriberName)
 	}(c.log.WithName(subscriberName))

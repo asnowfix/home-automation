@@ -80,8 +80,8 @@ func (f *FakeDevice) From() <-chan []byte   { return nil }
 func (f *FakeDevice) StartDialog(ctx context.Context) uint32    { return 0 }
 func (f *FakeDevice) StopDialog(ctx context.Context, id uint32) {}
 
-func (f *FakeDevice) IsHttpReady() bool           { return true }
-func (f *FakeDevice) IsMqttReady() bool           { return true }
+func (f *FakeDevice) IsHttpReady() bool                                { return true }
+func (f *FakeDevice) IsMqttReady() bool                                { return true }
 func (f *FakeDevice) Channel(ctx context.Context, via Channel) Channel { return via }
 
 func (f *FakeDevice) UpdateName(name string) { f.NameValue = name }

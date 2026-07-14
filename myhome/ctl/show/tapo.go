@@ -2,8 +2,9 @@ package show
 
 import (
 	"fmt"
-	"github.com/asnowfix/home-automation/hlog"
 	"net"
+
+	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/pkg/tapo"
 
 	"github.com/spf13/cobra"

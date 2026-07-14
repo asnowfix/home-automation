@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net"
-	"github.com/asnowfix/home-automation/pkg/devices"
-	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"strconv"
 	"strings"
+
+	"github.com/asnowfix/home-automation/pkg/devices"
+	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"

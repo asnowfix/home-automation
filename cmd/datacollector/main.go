@@ -295,7 +295,7 @@ func saveTestSuite(testSuite *TestSuite, filename string) error {
 	outputDir := "test_data"
 	err := os.MkdirAll(outputDir, 0755)
 	if err != nil {
-		return fmt.Errorf("failed to create output directory: %v", err)
+		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
 	filePath := filepath.Join(outputDir, filename)
@@ -303,13 +303,13 @@ func saveTestSuite(testSuite *TestSuite, filename string) error {
 	// Marshal to JSON with pretty printing
 	jsonData, err := json.MarshalIndent(testSuite, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal test suite: %v", err)
+		return fmt.Errorf("failed to marshal test suite: %w", err)
 	}
 
 	// Write to file
 	err = os.WriteFile(filePath, jsonData, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to write file: %v", err)
+		return fmt.Errorf("failed to write file: %w", err)
 	}
 
 	logger.Info("Test data saved", "file", filePath, "size_bytes", len(jsonData))

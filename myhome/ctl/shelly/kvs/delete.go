@@ -3,9 +3,10 @@ package kvs
 import (
 	"context"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
-	"reflect"
 
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
@@ -74,6 +75,8 @@ func doDeleteKey(ctx context.Context, log logr.Logger, via types.Channel, device
 		log.Error(err, "Unable to delete", "key", key)
 		return nil, err
 	}
-	options.PrintResult(out)
+	if err := options.PrintResult(out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }

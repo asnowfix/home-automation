@@ -3,10 +3,11 @@ package show
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"reflect"
 
 	"gopkg.in/yaml.v3"
 

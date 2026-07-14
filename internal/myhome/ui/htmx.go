@@ -229,7 +229,10 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 
 	// Parse switch ID
 	var sid int
-	fmt.Sscanf(switchID, "%d", &sid)
+	if _, err := fmt.Sscanf(switchID, "%d", &sid); err != nil {
+		http.Error(w, "invalid switch_id", http.StatusBadRequest)
+		return
+	}
 
 	// Call switch.toggle RPC
 	mh, err := myhome.Methods(myhome.SwitchToggle)

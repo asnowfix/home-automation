@@ -8,7 +8,7 @@ package myhome
 type PoolGetStatusResult struct {
 	DeviceID          string  `json:"device_id" yaml:"device_id"`
 	WaterSupplyActive bool    `json:"water_supply_active" yaml:"water_supply_active"` // true = protection engaged, pump forced off
-	TurnoverAchieved  float64 `json:"turnover_achieved" yaml:"turnover_achieved"`       // pool volumes filtered today so far
-	TurnoverTarget    float64 `json:"turnover_target" yaml:"turnover_target"`           // configured daily target (times/day)
-	RuntimeSec        int64   `json:"runtime_sec" yaml:"runtime_sec"`                   // pump runtime today, in seconds
+	TurnoverAchieved  float64 `json:"turnover_achieved" yaml:"turnover_achieved"`     // pool volumes filtered today so far
+	TurnoverTarget    float64 `json:"turnover_target" yaml:"turnover_target"`         // configured daily target (times/day)
+	RuntimeSec        int64   `json:"runtime_sec" yaml:"runtime_sec"`                 // pump runtime today, in seconds
 }

@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"reflect"
 	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
 
 	"github.com/go-logr/logr"
@@ -41,11 +42,11 @@ func showOneDeviceJobs(ctx context.Context, log logr.Logger, via types.Channel, 
 	}
 
 	jobs := out.(*schedule.Scheduled)
-	
+
 	// Prepare complete output as a single string to avoid interleaving
 	var output string
 	deviceHeader := fmt.Sprintf("%s (%s)", sd.Name(), sd.Id())
-	
+
 	if options.Flags.Json {
 		// For JSON, include device info in the output
 		jsonOutput := map[string]interface{}{
@@ -67,7 +68,7 @@ func showOneDeviceJobs(ctx context.Context, log logr.Logger, via types.Channel, 
 		}
 		output = fmt.Sprintf("# %s\n%s", deviceHeader, string(s))
 	}
-	
+
 	// Print complete output atomically
 	fmt.Print(output)
 

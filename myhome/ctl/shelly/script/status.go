@@ -3,15 +3,16 @@ package script
 import (
 	"context"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	myScript "github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
-	myScript "github.com/asnowfix/home-automation/internal/shelly/scripts"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -45,7 +46,9 @@ func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device de
 			hlog.Logger.Error(err, "Unable to get script status")
 			return nil, err
 		}
-		options.PrintResult(out, sd.Name())
+		if err := options.PrintResult(out, sd.Name()); err != nil {
+			return nil, err
+		}
 		return out, nil
 	}
 
@@ -56,6 +59,8 @@ func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device de
 		return nil, err
 	}
 
-	options.PrintResult(enhancedStatuses, sd.Name())
+	if err := options.PrintResult(enhancedStatuses, sd.Name()); err != nil {
+		return nil, err
+	}
 	return enhancedStatuses, nil
 }

@@ -23,9 +23,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-logr/logr"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/go-logr/logr"
 )
 
 var update = flag.Bool("update", false, "write golden files instead of comparing them")
@@ -48,27 +48,27 @@ func (f *fakeDevice) CallE(_ context.Context, _ types.Channel, method string, pa
 	return f.callFn(method, params)
 }
 
-func (f *fakeDevice) String() string                            { return "fake" }
-func (f *fakeDevice) Name() string                             { return "fake" }
-func (f *fakeDevice) Host() string                             { return "fake" }
-func (f *fakeDevice) Manufacturer() string                     { return "fake" }
-func (f *fakeDevice) Id() string                               { return "fake" }
-func (f *fakeDevice) Mac() net.HardwareAddr                    { return nil }
-func (f *fakeDevice) ReplyTo() string                          { return "" }
-func (f *fakeDevice) To() chan<- []byte                        { return nil }
-func (f *fakeDevice) From() <-chan []byte                      { return nil }
-func (f *fakeDevice) StartDialog(_ context.Context) uint32     { return 0 }
-func (f *fakeDevice) StopDialog(_ context.Context, _ uint32)  {}
-func (f *fakeDevice) IsHttpReady() bool                        { return false }
-func (f *fakeDevice) IsMqttReady() bool                        { return true }
+func (f *fakeDevice) String() string                                             { return "fake" }
+func (f *fakeDevice) Name() string                                               { return "fake" }
+func (f *fakeDevice) Host() string                                               { return "fake" }
+func (f *fakeDevice) Manufacturer() string                                       { return "fake" }
+func (f *fakeDevice) Id() string                                                 { return "fake" }
+func (f *fakeDevice) Mac() net.HardwareAddr                                      { return nil }
+func (f *fakeDevice) ReplyTo() string                                            { return "" }
+func (f *fakeDevice) To() chan<- []byte                                          { return nil }
+func (f *fakeDevice) From() <-chan []byte                                        { return nil }
+func (f *fakeDevice) StartDialog(_ context.Context) uint32                       { return 0 }
+func (f *fakeDevice) StopDialog(_ context.Context, _ uint32)                     {}
+func (f *fakeDevice) IsHttpReady() bool                                          { return false }
+func (f *fakeDevice) IsMqttReady() bool                                          { return true }
 func (f *fakeDevice) Channel(_ context.Context, via types.Channel) types.Channel { return via }
-func (f *fakeDevice) UpdateName(_ string)                      {}
-func (f *fakeDevice) UpdateHost(_ string)                      {}
-func (f *fakeDevice) ClearHost()                               {}
-func (f *fakeDevice) UpdateMac(_ string)                       {}
-func (f *fakeDevice) UpdateId(_ string)                        {}
-func (f *fakeDevice) IsModified() bool                         { return false }
-func (f *fakeDevice) ResetModified()                           {}
+func (f *fakeDevice) UpdateName(_ string)                                        {}
+func (f *fakeDevice) UpdateHost(_ string)                                        {}
+func (f *fakeDevice) ClearHost()                                                 {}
+func (f *fakeDevice) UpdateMac(_ string)                                         {}
+func (f *fakeDevice) UpdateId(_ string)                                          {}
+func (f *fakeDevice) IsModified() bool                                           { return false }
+func (f *fakeDevice) ResetModified()                                             {}
 
 // kvsListResp builds a KVS.List response from a store map.
 func kvsListResp(store map[string]string) *kvs.ListResponse {

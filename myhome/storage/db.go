@@ -128,6 +128,8 @@ func (s *DeviceStorage) createTable() error {
 		if err != nil {
 			s.log.Error(err, "Failed to get rows affected")
 			// Don't return error - tables might not exist
+		} else {
+			s.log.Info("Added room_id column", "rows_affected", rowsAffected)
 		}
 	}
 

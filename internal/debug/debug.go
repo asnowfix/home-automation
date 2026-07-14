@@ -2,7 +2,6 @@ package debug
 
 import (
 	"os"
-	"runtime"
 	"strings"
 )
 
@@ -24,14 +23,9 @@ func IsDebuggerAttached() bool {
 		return true
 	}
 
-	// On Windows, check if debugger is present
-	if runtime.GOOS == "windows" {
-		// Import "golang.org/x/sys/windows" if needed
-		// kernel32 := syscall.NewLazyDLL("kernel32.dll")
-		// isDebuggerPresent := kernel32.NewProc("IsDebuggerPresent")
-		// ret, _, _ := isDebuggerPresent.Call()
-		// return ret != 0
-	}
+	// On Windows, a real IsDebuggerPresent check would require
+	// golang.org/x/sys/windows (kernel32.dll IsDebuggerPresent);
+	// not implemented — Windows debugger detection is unsupported.
 
 	return false
 }

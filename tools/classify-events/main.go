@@ -96,7 +96,9 @@ func main() {
 		}
 		// pretty-print for readability
 		var raw any
-		json.Unmarshal(data, &raw)
+		if err := json.Unmarshal(data, &raw); err != nil {
+			fatalf("unmarshal %s: %v", srcPath, err)
+		}
 		pretty, err := json.MarshalIndent(raw, "", "  ")
 		if err != nil {
 			fatalf("marshal %s: %v", srcPath, err)

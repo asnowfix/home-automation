@@ -3,6 +3,7 @@ package myhome
 import (
 	"context"
 	"encoding/json"
+
 	"github.com/asnowfix/home-automation/myhome/mqtt"
 
 	"github.com/go-logr/logr"
@@ -68,7 +69,7 @@ func NewServerE(ctx context.Context, mc mqtt.Client, handler Server) (Server, er
 
 				err = ValidateDialog(req.Dialog)
 				if err != nil {
-					log.Error(err, "Invalid dialog:"+req.Dialog.String())
+					log.Error(err, "Invalid dialog:"+req.String())
 					s.fail(ctx, 1, err, &req, mc)
 					continue
 				}
@@ -121,7 +122,9 @@ func NewServerE(ctx context.Context, mc mqtt.Client, handler Server) (Server, er
 				}
 				// to <- outMsg
 				log.Info("Publishing response", "dst", res.Dst, "topic", ClientTopic(req.Src), "request_id", res.Id)
-				mc.Publish(ctx, ClientTopic(req.Src), outMsg, mqtt.AtLeastOnce, false, InstanceName+".rpc/Server")
+				if err := mc.Publish(ctx, ClientTopic(req.Src), outMsg, mqtt.AtLeastOnce, false, InstanceName+".rpc/Server"); err != nil {
+					log.Error(err, "Failed to publish response", "dst", res.Dst, "request_id", res.Id)
+				}
 			}
 		}
 	}(logr.NewContext(ctx, log.WithName("Server")))
@@ -131,7 +134,7 @@ func NewServerE(ctx context.Context, mc mqtt.Client, handler Server) (Server, er
 }
 
 func (sp *server) fail(ctx context.Context, code int, err error, req *request, mc mqtt.Client) {
-	var res response = response{
+	var res = response{
 		Dialog: Dialog{
 			Id:  req.Id,
 			Src: mc.Id(),
@@ -140,9 +143,14 @@ func (sp *server) fail(ctx context.Context, code int, err error, req *request, m
 		Error:  &Error{Code: code, Message: err.Error()},
 		Result: nil,
 	}
-	outMsg, _ := json.Marshal(res)
+	outMsg, err := json.Marshal(res)
+	if err != nil {
+		// response carries only strings and ints; this cannot happen
+		return
+	}
 	// sp.to <- outMsg
-	mc.Publish(ctx, ClientTopic(res.Dst), outMsg, mqtt.AtLeastOnce, false, InstanceName+".rpc/Server")
+	// Best-effort: the requester will time out if this error response is lost.
+	_ = mc.Publish(ctx, ClientTopic(res.Dst), outMsg, mqtt.AtLeastOnce, false, InstanceName+".rpc/Server")
 }
 
 func (sp *server) MethodE(method Verb) (*Method, error) {

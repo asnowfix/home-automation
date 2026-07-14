@@ -4,18 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"time"
+
 	"github.com/asnowfix/home-automation/hlog"
-	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
-	"strconv"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -246,31 +246,4 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 	}
 
 	return result, nil
-}
-
-// Helper function to parse value from KVS string
-func parseKVSValue(valueStr string) interface{} {
-	// Try to parse as JSON first
-	var jsonValue interface{}
-	if err := json.Unmarshal([]byte(valueStr), &jsonValue); err == nil {
-		return jsonValue
-	}
-
-	// Try as int
-	if intVal, err := strconv.Atoi(valueStr); err == nil {
-		return intVal
-	}
-
-	// Try as float
-	if floatVal, err := strconv.ParseFloat(valueStr, 64); err == nil {
-		return floatVal
-	}
-
-	// Try as bool
-	if boolVal, err := strconv.ParseBool(valueStr); err == nil {
-		return boolVal
-	}
-
-	// Return as string
-	return valueStr
 }

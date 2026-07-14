@@ -4,18 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	_ "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
+	"reflect"
+	"regexp"
+	"strings"
+	"sync"
+
+	_ "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/ratelimit"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/system"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
-	"regexp"
-	"strings"
-	"sync"
 
 	"github.com/go-logr/logr"
 )
@@ -144,7 +145,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	if !d.IsMqttReady() && d.Id() != "" {
 		err := d.initMqtt(ctx)
 		if err != nil {
-			return false, fmt.Errorf("unable to init MQTT (%v)", err)
+			return false, fmt.Errorf("unable to init MQTT (%w)", err)
 		}
 	}
 
@@ -155,13 +156,13 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	if d.Id() == "" {
 		err := d.initDeviceInfo(ctx, via)
 		if err != nil {
-			return d.IsModified(), fmt.Errorf("unable to init device (%v) using HTTP", err)
+			return d.IsModified(), fmt.Errorf("unable to init device (%w) using HTTP", err)
 		}
 	}
 	if d.Mac() == nil {
 		err := d.initDeviceInfo(ctx, via)
 		if err != nil {
-			return d.IsModified(), fmt.Errorf("unable to init device (%v)", err)
+			return d.IsModified(), fmt.Errorf("unable to init device (%w)", err)
 		}
 	}
 
@@ -454,8 +455,6 @@ func (d *Device) resolveHost(ctx context.Context) bool {
 	return true
 }
 
-var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", MDNS_SHELLIES))
-
 var hostRe = regexp.MustCompile("^(?P<model>[a-zA-Z0-9]+)-(?P<serial>[A-Z0-9]+).local.$")
 
 var generationRe = regexp.MustCompile("^gen=(?P<generation>[0-9]+)$")
@@ -613,7 +612,7 @@ func MacFromShellyID(id string) net.HardwareAddr {
 		return nil
 	}
 	for _, c := range h {
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
 			return nil
 		}
 	}
@@ -685,7 +684,10 @@ func (d *Device) initHttp(ctx context.Context) error {
 	if !d.IsHttpReady() {
 		return fmt.Errorf("device host is empty: no channel to communicate with HTTP")
 	}
-	d.initDeviceInfo(ctx, types.ChannelHttp)
+	// Best-effort: device info can be fetched later; the HTTP channel itself is ready.
+	if err := d.initDeviceInfo(ctx, types.ChannelHttp); err != nil {
+		d.log.V(1).Info("Unable to init device info (will retry later)", "via", types.ChannelHttp, "error", err)
+	}
 	return nil
 }
 
@@ -706,7 +708,10 @@ func (d *Device) initMqtt(ctx context.Context) error {
 	}
 
 	d.log.V(1).Info("MQTT channels ready", "device_id", d.Id())
-	d.initDeviceInfo(ctx, types.ChannelMqtt)
+	// Best-effort: device info can be fetched later; the MQTT channel itself is ready.
+	if err := d.initDeviceInfo(ctx, types.ChannelMqtt); err != nil {
+		d.log.V(1).Info("Unable to init device info (will retry later)", "via", types.ChannelMqtt, "error", err)
+	}
 	return nil
 }
 

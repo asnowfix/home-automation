@@ -2,11 +2,12 @@ package temperature
 
 import (
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"os"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
 	"github.com/spf13/cobra"
 )

@@ -3,7 +3,6 @@ package beem
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/asnowfix/home-automation/hlog"
@@ -125,6 +124,6 @@ func (w *Watcher) poll(ctx context.Context) {
 	// Ensure payload string shows up in logs as a human-readable JSON string.
 	w.log.Info("Beem Energy: published sample",
 		"topic", MQTTTopic,
-		"payload", fmt.Sprintf("%s", payload),
+		"payload", string(payload),
 	)
 }

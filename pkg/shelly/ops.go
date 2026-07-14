@@ -2,6 +2,10 @@ package shelly
 
 import (
 	"context"
+	"reflect"
+	"time"
+
+	scripts "github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/pkg/shelly/ble"
 	"github.com/asnowfix/home-automation/pkg/shelly/ethernet"
 	"github.com/asnowfix/home-automation/pkg/shelly/input"
@@ -9,6 +13,7 @@ import (
 	"github.com/asnowfix/home-automation/pkg/shelly/matter"
 	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/ratelimit"
+	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	shttp "github.com/asnowfix/home-automation/pkg/shelly/shttp"
@@ -16,10 +21,6 @@ import (
 	"github.com/asnowfix/home-automation/pkg/shelly/system"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/asnowfix/home-automation/pkg/shelly/wifi"
-	"reflect"
-	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
-	scripts "github.com/asnowfix/home-automation/internal/shelly/scripts"
-	"time"
 
 	"github.com/go-logr/logr"
 )

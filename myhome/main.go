@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/global"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"os"
 	"runtime/pprof"
+
+	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
 	"github.com/asnowfix/home-automation/pkg/version"
 
@@ -50,33 +51,22 @@ var Cmd = &cobra.Command{
 		ctx := logr.NewContext(cmd.Context(), log)
 
 		if options.Flags.CpuProfile != "" {
-			if options.Flags.CpuProfile != "" {
-				f, err := os.Create(options.Flags.CpuProfile)
-				if err != nil {
-					log.Error(err, "Failed to create CPU profile")
-					return err
-				}
-				pprof.StartCPUProfile(f)
-				ctx = context.WithValue(ctx, global.CpuProfileKey, f)
+			f, err := os.Create(options.Flags.CpuProfile)
+			if err != nil {
+				log.Error(err, "Failed to create CPU profile")
+				return err
 			}
+			if err := pprof.StartCPUProfile(f); err != nil {
+				log.Error(err, "Failed to start CPU profile")
+				return err
+			}
+			ctx = context.WithValue(ctx, global.CpuProfileKey, f)
 		}
 
 		if debug.IsDebuggerAttached() {
 			log.Info("Running under debugger (will wait forever)")
 			// You can set different timeouts or behavior here
 			options.Flags.Wait = 0
-		}
-
-		if options.Flags.CpuProfile != "" {
-			if options.Flags.CpuProfile != "" {
-				f, err := os.Create(options.Flags.CpuProfile)
-				if err != nil {
-					log.Error(err, "Failed to create CPU profile")
-					return err
-				}
-				pprof.StartCPUProfile(f)
-				ctx = context.WithValue(ctx, global.CpuProfileKey, f)
-			}
 		}
 
 		// Daemon commands should run indefinitely, no timeout

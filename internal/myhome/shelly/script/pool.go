@@ -290,7 +290,7 @@ func (s *PoolService) reconcileSchedules(ctx context.Context, via types.Channel,
 
 	// Delete all pool-pump related schedules first
 	for _, job := range existing {
-		if job.Calls == nil || len(job.Calls) == 0 {
+		if len(job.Calls) == 0 {
 			continue
 		}
 
@@ -312,8 +312,8 @@ func (s *PoolService) reconcileSchedules(ctx context.Context, via types.Channel,
 		}
 
 		// Check if this is a pool-pump schedule by code pattern
-		if code == "" || !(code == "handleDailyCheck()" || code == "handleMorningStart()" ||
-			code == "handleEveningStop()" || code == "handleNightStart()" || code == "handleNightStop()") {
+		if code == "" || (code != "handleDailyCheck()" && code != "handleMorningStart()" &&
+			code != "handleEveningStop()" && code != "handleNightStart()" && code != "handleNightStop()") {
 			continue
 		}
 
@@ -586,14 +586,16 @@ var defaultSpeedMappings = speedMappings{Eco: 0, Mid: 1, High: 2}
 // missing (nil) or fails to parse as an integer.
 func parseSpeedMappings(ecoRaw, midRaw, highRaw *string) *speedMappings {
 	mappings := defaultSpeedMappings
+	// A failed Sscanf leaves the default value untouched — that is the
+	// documented fallback behavior.
 	if ecoRaw != nil {
-		fmt.Sscanf(*ecoRaw, "%d", &mappings.Eco)
+		_, _ = fmt.Sscanf(*ecoRaw, "%d", &mappings.Eco)
 	}
 	if midRaw != nil {
-		fmt.Sscanf(*midRaw, "%d", &mappings.Mid)
+		_, _ = fmt.Sscanf(*midRaw, "%d", &mappings.Mid)
 	}
 	if highRaw != nil {
-		fmt.Sscanf(*highRaw, "%d", &mappings.High)
+		_, _ = fmt.Sscanf(*highRaw, "%d", &mappings.High)
 	}
 	return &mappings
 }
@@ -695,13 +697,10 @@ func (s *PoolService) Stop(ctx context.Context, deviceID string) error {
 func (s *PoolService) AddDevice(ctx context.Context, via types.Channel, sd *shelly.Device, deviceID, pro3ID, pro1ID string, allDeviceIDs []string, opts SetupOptions) error {
 	s.log.Info("Adding device to pool pump mesh", "device", sd.Name(), "id", deviceID)
 
-	// Build peer device list for KVS (all devices except this one)
-	peerIDs := []string{}
-	for _, id := range allDeviceIDs {
-		if id != deviceID {
-			peerIDs = append(peerIDs, id)
-		}
-	}
+	// NOTE: allDeviceIDs (the peer device list) is currently unused here —
+	// setupDevice derives per-device configuration itself. Kept in the
+	// signature for CLI compatibility.
+	_ = allDeviceIDs
 
 	// Use the unified setupDevice function
 	return s.setupDevice(ctx, via, sd, deviceID, pro3ID, pro1ID, opts)
@@ -984,13 +983,14 @@ func (s *PoolService) getDeviceStatus(ctx context.Context, deviceID string) (Dev
 		}
 		// Map switch ID back to speed name
 		if status.ActiveOutput >= 0 && mappings != nil {
-			if status.ActiveOutput == mappings.Eco {
+			switch status.ActiveOutput {
+			case mappings.Eco:
 				status.ActiveSpeed = "eco"
-			} else if status.ActiveOutput == mappings.Mid {
+			case mappings.Mid:
 				status.ActiveSpeed = "mid"
-			} else if status.ActiveOutput == mappings.High {
+			case mappings.High:
 				status.ActiveSpeed = "high"
-			} else {
+			default:
 				status.ActiveSpeed = fmt.Sprintf("switch-%d", status.ActiveOutput)
 			}
 		}
@@ -1065,18 +1065,10 @@ func (s *PoolService) getDeviceStatus(ctx context.Context, deviceID string) (Dev
 	return status, nil
 }
 
-// environmentKVSFields lists the PoolKVSKeys names read by getEnvironmentStatus,
-// in fetch order.
-var environmentKVSFields = []string{
-	"temperature_threshold", "eco_speed", "mid_speed", "high_speed",
-	"pool_volume", "turnover", "max_flow_rate", "max_rpm", "eco_rpm", "mid_rpm", "high_rpm",
-	"max_temp", "mqtt_topic_prefix",
-}
-
 // applyEnvironmentKVSValues parses the raw KVS string values successfully
-// fetched for controllerID (keyed by the same names as environmentKVSFields)
-// and assigns them onto env. Missing keys and unparseable values are left
-// untouched, matching the original fetch-and-best-effort-parse behavior.
+// fetched for a controller (keyed by PoolKVSKeys names) and assigns them
+// onto env. Missing keys and unparseable values are left untouched,
+// matching the original fetch-and-best-effort-parse behavior.
 func applyEnvironmentKVSValues(env *Environment, raw map[string]string) {
 	if v, ok := raw["temperature_threshold"]; ok {
 		var threshold float64
@@ -1153,35 +1145,4 @@ func applyEnvironmentKVSValues(env *Environment, raw map[string]string) {
 	if v, ok := raw["mqtt_topic_prefix"]; ok {
 		env.MqttTopicPrefix = v
 	}
-}
-
-func (s *PoolService) getEnvironmentStatus(ctx context.Context, controllerID string, env *Environment) error {
-	device, err := s.provider.GetDeviceByAny(ctx, controllerID)
-	if err != nil {
-		return err
-	}
-
-	sd, err := s.provider.GetShellyDevice(ctx, device)
-	if err != nil {
-		return err
-	}
-
-	via := types.ChannelMqtt
-
-	raw := make(map[string]string)
-	for _, key := range environmentKVSFields {
-		if val, err := kvs.GetValue(ctx, s.log, via, sd, PoolKVSKeys[key]); err == nil && val != nil {
-			raw[key] = val.Value
-		}
-	}
-	applyEnvironmentKVSValues(env, raw)
-
-	// Get forecast URL from Script.storage (not KVS)
-	// Note: This is stored in Script.storage, not KVS, so we'd need to call Script.Eval to retrieve it
-	// For now, we'll skip this as it requires executing code on the device
-
-	// Note: The script tracks last run time and makes bootstrap decisions internally
-	// We only display the configuration here, not the runtime state
-
-	return nil
 }

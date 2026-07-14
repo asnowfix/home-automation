@@ -25,12 +25,12 @@ type stubDevice struct {
 	host string
 }
 
-func (s stubDevice) Manufacturer() string      { return "shelly" }
-func (s stubDevice) Id() string                { return s.id }
-func (s stubDevice) Name() string              { return s.name }
-func (s stubDevice) Host() string              { return s.host }
-func (s stubDevice) Ip() net.IP               { return net.ParseIP(s.host) }
-func (s stubDevice) Mac() net.HardwareAddr    { return nil }
+func (s stubDevice) Manufacturer() string  { return "shelly" }
+func (s stubDevice) Id() string            { return s.id }
+func (s stubDevice) Name() string          { return s.name }
+func (s stubDevice) Host() string          { return s.host }
+func (s stubDevice) Ip() net.IP            { return net.ParseIP(s.host) }
+func (s stubDevice) Mac() net.HardwareAddr { return nil }
 
 func TestNewDeviceFromSummary_EmptyId_ReturnsError(t *testing.T) {
 	_, err := NewDeviceFromSummary(context.Background(), logr.Discard(), stubDevice{id: "", name: "unknown", host: "192.168.1.99"})

@@ -2,6 +2,7 @@ package shelly
 
 import (
 	"net"
+
 	"github.com/asnowfix/home-automation/pkg/devices"
 )
 

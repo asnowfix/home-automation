@@ -5,9 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"reflect"
 	"strconv"
+
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/tdewolff/minify/v2"
 	mjs "github.com/tdewolff/minify/v2/js"

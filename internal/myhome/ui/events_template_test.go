@@ -81,4 +81,3 @@ func TestEventDataCell(t *testing.T) {
 		t.Errorf("eventDataCell(notJSON) = %q, want a plain <span>", got)
 	}
 }
-

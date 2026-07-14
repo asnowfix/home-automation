@@ -4,18 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"strings"
+	"time"
+
 	"github.com/asnowfix/home-automation/hlog"
-	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
-	"strings"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -85,10 +86,11 @@ func init() {
 	setupCmd.Flags().BoolVar(&setupFlags.ForceUpload, "force", false, "Force re-upload even if version hash matches")
 	setupCmd.Flags().BoolVar(&setupFlags.AutoDiscover, "auto-discover", false, "Auto-discover sensors in the same room")
 
-	// Mark mandatory flags
-	setupCmd.MarkFlagRequired("internal-temperature-topic")
-	setupCmd.MarkFlagRequired("external-temperature-topic")
-	setupCmd.MarkFlagRequired("room-id")
+	// Mark mandatory flags (error only fires for an unknown flag name,
+	// which would be a programming error caught by any invocation)
+	_ = setupCmd.MarkFlagRequired("internal-temperature-topic")
+	_ = setupCmd.MarkFlagRequired("external-temperature-topic")
+	_ = setupCmd.MarkFlagRequired("room-id")
 }
 
 func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {

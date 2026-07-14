@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -73,7 +74,7 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 	}
 
 	// Update config from flags, if any provided
-	var changed bool = false
+	var changed = false
 	var sta wifi.STA
 	var sta1 wifi.STA
 	var ap wifi.AP
@@ -147,7 +148,9 @@ func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, de
 			return nil, fmt.Errorf("invalid WiFi set config response type %T", out)
 		}
 		if res.Result.RestartRequired {
-			sd.CallE(ctx, via, string(shelly.Reboot), nil)
+			// Best-effort: the device may drop the connection mid-reply while
+			// rebooting, so a transport error here is expected.
+			_, _ = sd.CallE(ctx, via, string(shelly.Reboot), nil)
 		}
 
 		// get updated config from devices after applied

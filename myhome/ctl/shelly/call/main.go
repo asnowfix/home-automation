@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
-	
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
@@ -25,13 +25,13 @@ var Cmd = &cobra.Command{
 		deviceId := args[0]
 		method := args[1]
 		var params interface{}
-		
+
 		if len(args) == 3 {
 			if err := json.Unmarshal([]byte(args[2]), &params); err != nil {
-				return fmt.Errorf("failed to parse params JSON: %v", err)
+				return fmt.Errorf("failed to parse params JSON: %w", err)
 			}
 		}
-		
+
 		paramsArg := ""
 		if len(args) == 3 {
 			paramsArg = args[2]
@@ -46,24 +46,24 @@ func callOneDevice(ctx context.Context, log logr.Logger, via types.Channel, devi
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
-	
+
 	method := args[0]
 	var params interface{}
-	
+
 	if len(args) > 1 && args[1] != "" {
 		if err := json.Unmarshal([]byte(args[1]), &params); err != nil {
-			return nil, fmt.Errorf("failed to parse params JSON: %v", err)
+			return nil, fmt.Errorf("failed to parse params JSON: %w", err)
 		}
 	}
-	
+
 	log.Info("Calling method", "device", sd.Id(), "method", method, "params", params)
-	
+
 	// Make the RPC call
 	result, err := sd.CallE(ctx, via, method, params)
 	if err != nil {
-		return nil, fmt.Errorf("RPC call failed: %v", err)
+		return nil, fmt.Errorf("RPC call failed: %w", err)
 	}
-	
+
 	// Pretty print the result if we got one
 	if result != nil {
 		resultJson, err := json.MarshalIndent(result, "", "  ")
@@ -74,7 +74,7 @@ func callOneDevice(ctx context.Context, log logr.Logger, via types.Channel, devi
 		fmt.Println(string(resultJson))
 		return result, nil
 	}
-	
+
 	fmt.Println("Call completed successfully but returned no result")
 	return nil, nil
 }

@@ -23,18 +23,18 @@ func TestRecordAndQuery(t *testing.T) {
 	ctx := context.Background()
 
 	e1 := Event{
-		Ts:       1700000000.0,
-		DeviceID: "dev-1",
+		Ts:        1700000000.0,
+		DeviceID:  "dev-1",
 		Component: "switch:0",
-		Event:    "switch.on",
-		Severity: "info",
+		Event:     "switch.on",
+		Severity:  "info",
 	}
 	e2 := Event{
-		Ts:       1700000001.0,
-		DeviceID: "dev-2",
+		Ts:        1700000001.0,
+		DeviceID:  "dev-2",
 		Component: "switch:0",
-		Event:    "switch.off",
-		Severity: "info",
+		Event:     "switch.off",
+		Severity:  "info",
 	}
 
 	if err := s.Record(ctx, e1); err != nil {

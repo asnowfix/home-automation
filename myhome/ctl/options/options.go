@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/global"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/asnowfix/home-automation/pkg/version"
 

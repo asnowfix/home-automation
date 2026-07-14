@@ -3,8 +3,9 @@ package ui
 import (
 	"context"
 	"encoding/json"
-	"github.com/asnowfix/home-automation/internal/myhome"
 	"net/http"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/go-logr/logr"
 )

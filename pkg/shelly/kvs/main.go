@@ -42,6 +42,12 @@ func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, devi
 }
 
 func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, key string) (*GetResponse, error) {
+	if cached, ok := cacheGet(device.Id(), key); ok {
+		log.V(1).Info("KVS cache hit", "device", device.Id(), "key", key)
+		res := cached
+		return &res, nil
+	}
+
 	out, err := device.CallE(ctx, via, string(Get), &GetRequest{
 		Key: key,
 	})
@@ -53,11 +59,8 @@ func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device ty
 	if !ok {
 		return nil, fmt.Errorf("expected %T, got %T", reflect.TypeOf(&GetResponse{}), out)
 	}
-	// s, err := json.Marshal(res)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// fmt.Print(string(s))
+
+	cachePut(device.Id(), key, *res)
 
 	return res, nil
 }
@@ -75,6 +78,10 @@ func SetKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device
 	if !ok {
 		return nil, fmt.Errorf("expected %T, got %T", reflect.TypeOf(&Status{}), out)
 	}
+
+	cacheInvalidate(device.Id(), key)
+	noteSelfWrite(device.Id())
+
 	return status, nil
 }
 
@@ -95,6 +102,9 @@ func DeleteKey(ctx context.Context, log logr.Logger, via types.Channel, device t
 		return nil, err
 	}
 	fmt.Print(string(s))
+
+	cacheInvalidate(device.Id(), key)
+	noteSelfWrite(device.Id())
 
 	return status, nil
 }

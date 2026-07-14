@@ -185,8 +185,9 @@ func (c *Cache) GetAllDevices(ctx context.Context) ([]*myhome.Device, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	// TODO: use cache content
-	return c.db.GetAllDevices(ctx)
+	all := make([]*myhome.Device, len(c.devices))
+	copy(all, c.devices)
+	return all, nil
 }
 
 func (c *Cache) GetDevicesMatchingAny(ctx context.Context, name string) ([]*myhome.Device, error) {

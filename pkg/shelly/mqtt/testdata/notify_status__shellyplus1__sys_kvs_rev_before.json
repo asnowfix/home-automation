@@ -1,0 +1,11 @@
+{
+  "dst": "shellyplus1-08b61fd98f44/events",
+  "method": "NotifyStatus",
+  "params": {
+    "sys": {
+      "kvs_rev": 6
+    },
+    "ts": 1783954457.61
+  },
+  "src": "shellyplus1-08b61fd98f44"
+}

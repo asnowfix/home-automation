@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # go.work workspace root — Dependabot discovers all 59 sub-module go.mod
+  # files listed in go.work from this single entry.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      # Patch/minor bumps are low-risk and grouped into one PR so they can
+      # be auto-merged together (see dependabot-auto-merge.yml). Major
+      # bumps are deliberately left out of the group: each gets its own PR
+      # and is never auto-merged, since a major version can break the API.
+      go-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"

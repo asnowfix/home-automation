@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref }}
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
         env:
@@ -169,7 +169,7 @@ jobs:
           Add-Content -Path $env:GITHUB_OUTPUT -Value "version_patch=$($version[2])"
       - id: install-go
         name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.25.x'
         env:

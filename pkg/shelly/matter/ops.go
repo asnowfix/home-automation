@@ -3,6 +3,7 @@ package matter
 import (
 	"context"
 	"net/http"
+
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
@@ -29,7 +30,7 @@ var log logr.Logger
 func Init(l logr.Logger, r types.MethodsRegistrar) {
 	log = l
 	log.Info("Init", "package", "pkg/shelly/matter")
-	
+
 	r.RegisterMethodHandler(setConfig.String(), types.MethodHandler{
 		Allocate:   func() any { return nil },
 		HttpMethod: http.MethodPost,

@@ -2,7 +2,9 @@ package script
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 
 	"github.com/spf13/cobra"
@@ -53,7 +55,7 @@ Examples:
 
 		// Run locally without device, with device state file
 		err := script.RunWithDeviceFile(cmd.Context(), scriptName, nil, runMinify, runDeviceFile)
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			fmt.Printf("\n✗ Script execution failed: %v\n", err)
 			return err
 		}

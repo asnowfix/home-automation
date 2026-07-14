@@ -3,8 +3,9 @@ package blu
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
 	"strings"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/internal/tools"
 )
 

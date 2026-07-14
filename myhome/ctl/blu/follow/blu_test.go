@@ -16,8 +16,8 @@ func TestBuildBluFollowPayload(t *testing.T) {
 				autoOff:  300,
 			},
 			want: map[string]any{
-				"switch_id":      "switch:0",
-				"auto_off":       300,
+				"switch_id":       "switch:0",
+				"auto_off":        300,
 				"illuminance_max": "10%",
 			},
 		},
@@ -28,8 +28,8 @@ func TestBuildBluFollowPayload(t *testing.T) {
 				autoOff:  300,
 			},
 			want: map[string]any{
-				"switch_id":      "switch:1",
-				"auto_off":       300,
+				"switch_id":       "switch:1",
+				"auto_off":        300,
 				"illuminance_max": "10%",
 			},
 		},
@@ -42,8 +42,8 @@ func TestBuildBluFollowPayload(t *testing.T) {
 				illumMaxSet: true,
 			},
 			want: map[string]any{
-				"switch_id":      "switch:0",
-				"auto_off":       300,
+				"switch_id":       "switch:0",
+				"auto_off":        300,
 				"illuminance_max": 50,
 			},
 		},
@@ -56,8 +56,8 @@ func TestBuildBluFollowPayload(t *testing.T) {
 				illumMaxSet: true,
 			},
 			want: map[string]any{
-				"switch_id":      "switch:0",
-				"auto_off":       300,
+				"switch_id":       "switch:0",
+				"auto_off":        300,
 				"illuminance_max": "20%",
 			},
 		},
@@ -70,8 +70,8 @@ func TestBuildBluFollowPayload(t *testing.T) {
 				illumMinSet: true,
 			},
 			want: map[string]any{
-				"switch_id":      "switch:0",
-				"auto_off":       300,
+				"switch_id":       "switch:0",
+				"auto_off":        300,
 				"illuminance_min": 5,
 				"illuminance_max": "10%",
 			},
@@ -85,10 +85,10 @@ func TestBuildBluFollowPayload(t *testing.T) {
 				nextSwitchSet: true,
 			},
 			want: map[string]any{
-				"switch_id":      "switch:0",
-				"auto_off":       300,
+				"switch_id":       "switch:0",
+				"auto_off":        300,
 				"illuminance_max": "10%",
-				"next_switch":    "switch:1",
+				"next_switch":     "switch:1",
 			},
 		},
 		{

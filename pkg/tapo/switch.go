@@ -19,7 +19,7 @@ type Switch struct {
 }
 
 func NewSwitch(log logr.Logger, ip net.IP) (*Switch, error) {
-	var s Switch = Switch{
+	var s = Switch{
 		log: log,
 	}
 

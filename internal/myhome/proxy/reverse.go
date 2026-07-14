@@ -20,9 +20,9 @@ import (
 
 	"github.com/asnowfix/home-automation/internal/global"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
-	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/internal/myhome/ui/assets"
 	"github.com/asnowfix/home-automation/internal/myhome/ui/static"
+	"github.com/asnowfix/home-automation/myhome/storage"
 
 	"github.com/go-logr/logr"
 )
@@ -151,9 +151,7 @@ func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db *s
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	if scheme == "https" {
 		// accept self-signed device certs
-		if tp, ok := proxy.Transport.(*http.Transport); ok && tp != nil {
-			// unexpected: ReverseProxy.Transport is nil by default, so ok==false
-		}
+		// (ReverseProxy.Transport is nil by default, so a fresh Transport is set)
 		proxy.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	}
 

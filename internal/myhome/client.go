@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/asnowfix/home-automation/myhome/mqtt"
-	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
-	"github.com/asnowfix/home-automation/pkg/devices"
-	"github.com/asnowfix/home-automation/pkg/shelly"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/pkg/devices"
+	"github.com/asnowfix/home-automation/pkg/shelly"
 
 	"github.com/go-logr/logr"
 )

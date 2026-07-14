@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"os"
 
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"

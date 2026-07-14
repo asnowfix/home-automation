@@ -18,8 +18,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/asnowfix/home-automation/myhome/metrics"
-	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
-	mqttserver "github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/asnowfix/home-automation/myhome/notice"
 	"github.com/asnowfix/home-automation/myhome/notify"
 	"github.com/asnowfix/home-automation/myhome/occupancy"
@@ -70,8 +69,9 @@ func NewDaemon(ctx context.Context) *daemon {
 }
 
 func (d *daemon) Start(s service.Service) error {
-	// Start should not block. Do the actual work async.
-	go d.Run()
+	// Start should not block. Do the actual work async; Run logs its own
+	// errors and the service manager observes liveness, not this return.
+	go func() { _ = d.Run() }()
 	return nil
 }
 
@@ -100,7 +100,7 @@ func (d *daemon) Run() error {
 		}
 	}()
 
-	var disableEmbeddedMqttBroker bool = len(options.Flags.MqttBroker) != 0
+	var disableEmbeddedMqttBroker = len(options.Flags.MqttBroker) != 0
 
 	resolver := mynet.MyResolver(log.WithName("mynet.Resolver"))
 
@@ -109,14 +109,14 @@ func (d *daemon) Run() error {
 	if !disableEmbeddedMqttBroker {
 		log.Info("Starting embedded MQTT broker")
 
-		err := mqttserver.Broker(d.ctx, log, resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval, options.Flags.NoMdnsPublish, options.ViperConfig)
+		err := mqtt.Broker(d.ctx, log, resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval, options.Flags.NoMdnsPublish, options.ViperConfig)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome")
 			return err
 		}
 		// Connect to localhost when using embedded broker
 		// Include port so GetServer() returns host:port correctly
-		mqttBrokerAddr = fmt.Sprintf("localhost:%d", mqttclient.PRIVATE_PORT)
+		mqttBrokerAddr = fmt.Sprintf("localhost:%d", mqtt.PRIVATE_PORT)
 
 		// Get broker readiness initial delay from config
 		readinessInitialDelay := 500 * time.Millisecond // default 500ms
@@ -139,14 +139,14 @@ func (d *daemon) Run() error {
 	}
 
 	// Connect to the network's MQTT broker or use the embedded broker
-	err = mqttclient.NewClientE(d.ctx, mqttBrokerAddr, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, false)
+	err = mqtt.NewClientE(d.ctx, mqttBrokerAddr, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, false)
 	if err != nil {
 		log.Error(err, "Failed to initialize MQTT client")
 		return err
 	}
 
 	// Start the MQTT client and get the client instance
-	mc, err := mqttclient.GetClientE(d.ctx)
+	mc, err := mqtt.GetClientE(d.ctx)
 	if err != nil {
 		log.Error(err, "Failed to start MQTT client")
 		return err
@@ -295,8 +295,16 @@ func (d *daemon) Run() error {
 			} else {
 				eventsTracker = events.NewSensorDailyTracker(log.WithName("events"), eventsStore)
 				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, broadcastFn, options.Flags.EventsRetention)
-				go eventsTracker.Start(d.ctx)
-				go eventsSvc.Start(d.ctx)
+				go func() {
+					if err := eventsTracker.Start(d.ctx); err != nil {
+						log.Error(err, "Events tracker stopped")
+					}
+				}()
+				go func() {
+					if err := eventsSvc.Start(d.ctx); err != nil {
+						log.Error(err, "Events service stopped")
+					}
+				}()
 				log.Info("Events service started", "db", options.Flags.EventsDBPath, "retention", options.Flags.EventsRetention)
 			}
 		} else {
@@ -431,7 +439,11 @@ func (d *daemon) Run() error {
 		// Start Gen2 NotifyEvent listener
 		if eventsSvc != nil && eventsTracker != nil {
 			gen2Listener := shellygen2l.NewListener(log.WithName("gen2"), mc, eventsSvc, eventsTracker)
-			go gen2Listener.Start(d.ctx)
+			go func() {
+				if err := gen2Listener.Start(d.ctx); err != nil {
+					log.Error(err, "Gen2 event listener stopped")
+				}
+			}()
 			log.Info("Gen2 event listener started")
 		}
 

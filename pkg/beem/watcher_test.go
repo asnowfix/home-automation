@@ -166,12 +166,12 @@ func (r *retainedRecorder) Publish(ctx context.Context, topic string, payload []
 }
 
 // The remaining Client interface methods are stubs.
-func (r *retainedRecorder) GetServer() string                  { return "mock://localhost:1883" }
-func (r *retainedRecorder) BrokerUrl() *url.URL                { u, _ := url.Parse(r.GetServer()); return u }
-func (r *retainedRecorder) Id() string                         { return "retained-recorder" }
-func (r *retainedRecorder) Start() error                       { return nil }
-func (r *retainedRecorder) IsConnected() bool                  { return true }
-func (r *retainedRecorder) Close()                             {}
+func (r *retainedRecorder) GetServer() string   { return "mock://localhost:1883" }
+func (r *retainedRecorder) BrokerUrl() *url.URL { u, _ := url.Parse(r.GetServer()); return u }
+func (r *retainedRecorder) Id() string          { return "retained-recorder" }
+func (r *retainedRecorder) Start() error        { return nil }
+func (r *retainedRecorder) IsConnected() bool   { return true }
+func (r *retainedRecorder) Close()              {}
 func (r *retainedRecorder) Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error) {
 	return nil, nil
 }

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"
-	"github.com/asnowfix/home-automation/myhome/mqtt"
 )
 
 // newTestDB opens an in-memory SQLite database and registers t.Cleanup to close it.

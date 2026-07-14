@@ -2,6 +2,7 @@ package myhome
 
 import (
 	"context"
+
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"

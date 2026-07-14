@@ -3,6 +3,7 @@ package script
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 
@@ -164,7 +165,7 @@ func RunWithDeviceFile(ctx context.Context, name string, buf []byte, minify bool
 
 	// Save device state after script completes, but not if it was canceled
 	// (cancellation means Ctrl+C or timeout, and the state may be incomplete)
-	if deviceFile != "" && err != context.Canceled {
+	if deviceFile != "" && !errors.Is(err, context.Canceled) {
 		if saveErr := SaveDeviceState(log, deviceFile, deviceState); saveErr != nil {
 			log.Error(saveErr, "Failed to save device state", "file", deviceFile)
 			if err == nil {

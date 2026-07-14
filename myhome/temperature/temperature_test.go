@@ -243,8 +243,8 @@ func TestIsComfortTime(t *testing.T) {
 	svc, _ := newTestService(t)
 	kinds := []myhome.RoomKind{myhome.RoomKindBedroom}
 	svc.kindSchedules[myhome.RoomKindBedroom] = map[myhome.DayType][]TimeRange{
-		myhome.DayTypeWorkDay: {{Start: 360, End: 1380}},   // 06:00-23:00
-		myhome.DayTypeDayOff:  {{Start: 1380, End: 360}},   // 23:00-06:00 (crosses midnight)
+		myhome.DayTypeWorkDay: {{Start: 360, End: 1380}}, // 06:00-23:00
+		myhome.DayTypeDayOff:  {{Start: 1380, End: 360}}, // 23:00-06:00 (crosses midnight)
 	}
 
 	if !svc.isComfortTime(kinds, myhome.DayTypeWorkDay, tod(12, 0)) {

@@ -1,0 +1,68 @@
+# golangci-lint v2 configuration.
+#
+# The repo is a Go workspace (~59 modules under go.work). golangci-lint has
+# no built-in "loop over workspace modules" mode, so CI and `make lint` run
+# this same config once per module, mirroring the `make test` module loop
+# in the root Makefile.
+#
+# Curated linter set per issue #355: catch mechanically-findable defects
+# (ignored errors, %v-wrapping, dead assignments, unused code, vet issues)
+# without requiring a full style rewrite. Expand the set in a follow-up once
+# the codebase is clean against this baseline.
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - errorlint
+    - unused
+    - ineffassign
+    - revive
+  settings:
+    errcheck:
+      exclude-functions:
+        # goja (JS engine) bindings in the script emulator: Object.Set /
+        # Runtime.Set only fail on exotic property redefinitions; the
+        # emulator registers dozens of host functions and checking each one
+        # would drown the code in unreachable error paths.
+        - (*github.com/dop251/goja.Object).Set
+        - (*github.com/dop251/goja.Runtime).Set
+    revive:
+      rules:
+        # The codebase has many small CLI/RPC handler functions with unused
+        # parameters (interface conformance, cobra signatures); this rule
+        # produces mostly noise for this project's shape.
+        - name: unused-parameter
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      # Excludes errcheck on the conventional "error return deliberately
+      # ignored" std-lib patterns: deferred/simple x.Close(), x.Flush(),
+      # fmt.(F)Print*, os.Setenv, etc.
+      - std-error-handling
+    rules:
+      # Test files: unchecked errors in test fixtures/fakes are acceptable;
+      # the test itself fails if the setup misbehaves.
+      - path: _test\.go
+        linters:
+          - errcheck
+      # Generated assets/constants (go:generate output) are gitignored and
+      # regenerated at build time; still, be lenient if they're ever linted
+      # directly from a stale checkout.
+      - path: _generated\.go$
+        linters:
+          - errcheck
+          - staticcheck
+          - unused
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

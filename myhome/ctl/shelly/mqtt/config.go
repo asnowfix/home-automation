@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"

@@ -3,14 +3,15 @@ package script
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"strconv"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
-	"strconv"
 
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 

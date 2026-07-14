@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"strings"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
@@ -12,8 +15,6 @@ import (
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"

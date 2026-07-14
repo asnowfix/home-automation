@@ -3,22 +3,23 @@ package script
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/hlog"
-	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
 	"os"
+	"reflect"
+	"strconv"
+	"strings"
+
+	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/internal/myhome"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	"github.com/asnowfix/home-automation/internal/tools"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	shellyscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/system"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
-	"strconv"
-	"strings"
-	"github.com/asnowfix/home-automation/internal/tools"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -66,7 +67,9 @@ func doScriptDebug(ctx context.Context, log logr.Logger, via types.Channel, devi
 		log.Error(err, "Script.Eval failed", "script", scriptName)
 		return nil, err
 	}
-	options.PrintResult(res)
+	if err := options.PrintResult(res); err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 
@@ -95,7 +98,7 @@ var debugCtl = &cobra.Command{
 			return fmt.Errorf("device name/IP/MAC must be non-empty")
 		}
 		if _, err := strconv.ParseBool(args[1]); err != nil {
-			return fmt.Errorf("second arg must be boolean (true/false/1/0): %v", err)
+			return fmt.Errorf("second arg must be boolean (true/false/1/0): %w", err)
 		}
 		if len(args) == 3 && strings.TrimSpace(args[2]) == "" {
 			return fmt.Errorf("script name must be non-empty when provided")
@@ -248,7 +251,9 @@ func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		}
 		log.Info("Restarted", "res", res)
 	}
-	options.PrintResult(res)
+	if err := options.PrintResult(res); err != nil {
+		return nil, err
+	}
 
 	return res, nil
 }

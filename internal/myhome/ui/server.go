@@ -1,11 +1,9 @@
 package ui
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -90,7 +88,8 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 		}
 		w.Header().Set("Content-Type", asset.ContentType)
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		w.Write(asset.Content)
+		// Best-effort: a failed asset write means the client went away.
+		_, _ = w.Write(asset.Content)
 	})
 
 	// HTMX endpoints for partial HTML responses
@@ -131,41 +130,4 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	}()
 
 	return nil
-}
-
-// statusWriter captures response status code and bytes written
-type statusWriter struct {
-	http.ResponseWriter
-	status int
-	bytes  int64
-}
-
-func (w *statusWriter) WriteHeader(code int) {
-	w.status = code
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *statusWriter) Write(b []byte) (int, error) {
-	if w.status == 0 {
-		// default if WriteHeader not called
-		w.status = http.StatusOK
-	}
-	n, err := w.ResponseWriter.Write(b)
-	w.bytes += int64(n)
-	return n, err
-}
-
-// Ensure websocket upgrades can hijack the connection through this wrapper
-func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
-	}
-	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
-}
-
-// Pass through Flush when supported
-func (w *statusWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
 }

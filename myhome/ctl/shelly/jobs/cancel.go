@@ -3,14 +3,15 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
 	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -32,8 +33,8 @@ var cancelCtl = &cobra.Command{
 	Short: "Cancel scheduled jobs on Shelly devices",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, cancelOneDeviceJob, options.Args(args))
-		return nil
+		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, cancelOneDeviceJob, options.Args(args))
+		return err
 	},
 }
 

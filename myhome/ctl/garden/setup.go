@@ -109,7 +109,7 @@ func getDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, *sh
 		return nil, nil, sdErr
 	}
 	if sd == nil {
-		return nil, nil, fmt.Errorf("Shelly device not found: %s", identifier)
+		return nil, nil, fmt.Errorf("shelly device not found: %s", identifier)
 	}
 	return mhDev, sd, nil
 }
@@ -185,7 +185,7 @@ to reflect real coverage.`,
 
 		// 4. Create schedules via script.eval
 		fmt.Printf("Creating schedules via script.eval...\n")
-		code := fmt.Sprintf("clearNonUpdateSchedules(function(){createSchedules(null)})")
+		code := "clearNonUpdateSchedules(function(){createSchedules(null)})"
 		if _, err := pkgscript.EvalInDevice(ctx, via, sd, scriptName, code); err != nil {
 			fmt.Printf("  Warning: schedule creation may have failed: %v\n", err)
 		} else {

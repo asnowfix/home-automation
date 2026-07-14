@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
@@ -11,7 +13,6 @@ import (
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/system"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -74,10 +75,10 @@ func oneDeviceConfig(ctx context.Context, log logr.Logger, via types.Channel, de
 
 	config, err := system.GetConfig(ctx, via, sd)
 	if err != nil {
-		return nil, fmt.Errorf("unable to get config: %v", err)
+		return nil, fmt.Errorf("unable to get config: %w", err)
 	}
 
-	var changed bool = false
+	var changed = false
 	// if configCmd.Flags().Changed("ecomode") && flags.EcoMode != config.Device.EcoMode {
 	// 	config.Device.EcoMode = flags.EcoMode
 	// 	changed = true
@@ -91,7 +92,7 @@ func oneDeviceConfig(ctx context.Context, log logr.Logger, via types.Channel, de
 	if changed {
 		out, err := system.SetConfig(ctx, via, sd, config)
 		if err != nil {
-			return nil, fmt.Errorf("unable to set config: %v", err)
+			return nil, fmt.Errorf("unable to set config: %w", err)
 		}
 		return out, nil
 	}

@@ -38,7 +38,6 @@ type DeviceManager struct {
 	dr             mhd.DeviceRegistry
 	update         chan *myhome.Device
 	refreshed      chan *myhome.Device
-	cancel         context.CancelFunc
 	log            logr.Logger
 	mqttClient     mqtt.Client
 	sseBroadcaster SSEBroadcaster // For broadcasting sensor updates to UI
@@ -112,7 +111,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 			return &devices, nil
 		}
 
-		return nil, fmt.Errorf("failed to get device by identifier: %v", err)
+		return nil, fmt.Errorf("failed to get device by identifier: %w", err)
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceShow, func(ctx context.Context, in any) (any, error) {
 		params := in.(*myhome.DeviceShowParams)
@@ -515,12 +514,12 @@ func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, 
 	if !ok {
 		d, err := shelly.NewDeviceFromSummary(ctx, log, device)
 		if err != nil || d == nil {
-			err = fmt.Errorf("Cannot auto-setup: failed to create Shelly device %s", deviceId)
+			err = fmt.Errorf("cannot auto-setup: failed to create Shelly device %s", deviceId)
 			panic(err)
 		}
 		sd, ok = d.(*shelly.Device)
 		if !ok || sd == nil {
-			err = fmt.Errorf("Cannot auto-setup: failed to create Shelly device %s", deviceId)
+			err = fmt.Errorf("cannot auto-setup: failed to create Shelly device %s", deviceId)
 			panic(err)
 		}
 		device.WithImpl(sd)
@@ -624,8 +623,7 @@ func (dm *DeviceManager) storeDeviceLoop(ctx context.Context, refreshed <-chan *
 		case <-ctx.Done():
 			return
 		case device := <-refreshed:
-			var modified bool = false
-			modified, err = dm.dr.SetDevice(ctx, device, true)
+			modified, err := dm.dr.SetDevice(ctx, device, true)
 			if err != nil {
 				log.Error(err, "Failed to upsert", "device", device.DeviceSummary)
 				continue

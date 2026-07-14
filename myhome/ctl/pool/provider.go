@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"fmt"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/pkg/devices"

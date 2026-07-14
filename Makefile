@@ -65,6 +65,8 @@ help:
 	@echo "  status                - Show service status"
 	@echo "  logs                  - Show service logs"
 	@echo "  test                  - Run tests across all workspace modules"
+	@echo "  test-race             - Run tests with -race across all workspace modules"
+	@echo "  lint                  - Run golangci-lint across all workspace modules"
 	@echo "  cover                 - Run tests with coverage; produces coverage.txt"
 	@echo "  cover-report          - Print aggregate coverage total from coverage.txt"
 	@echo "  cover-html            - Open coverage.txt as an HTML report in the browser"
@@ -189,6 +191,46 @@ test: build
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
 	    (cd $$dir && $(GO) test ./...) || rc=1; \
+	  fi; \
+	done; exit $$rc
+
+# test-race: same module loop as `test`, with the race detector enabled.
+# Kept as a separate target/CI job from `test`/`cover` so a slow or flaky
+# race run never blocks the coverage gate's timing.
+#
+# RACE_SKIP: modules with known, pre-existing data races surfaced when the
+# race job was introduced (#355). Each entry is tracked by a dedicated bug;
+# remove the entry when closing the bug:
+#   internal/shelly/scripts — #372 (script-emulator DeviceState maps)
+#   myhome/daemon           — #373 (mockPumpController.calls in solar tests)
+#   pkg/beem                — #374 (package-level loginURL/summaryURL swap)
+RACE_SKIP := internal/shelly/scripts myhome/daemon pkg/beem
+
+test-race: build
+	$(GO) test -race ./...
+	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
+	  case " $(RACE_SKIP) " in *" $$dir "*) \
+	    echo "test-race: SKIP $$dir (known races, see RACE_SKIP in Makefile)"; continue;; \
+	  esac; \
+	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
+	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
+	    (cd $$dir && $(GO) test -race ./...) || rc=1; \
+	  fi; \
+	done; exit $$rc
+
+# lint: same module loop as `test`. golangci-lint has no native concept of a
+# Go workspace with ~59 modules, so it must be invoked once per module; each
+# invocation auto-discovers the root .golangci.yml by walking up from its
+# working directory. Requires golangci-lint on PATH (see
+# https://golangci-lint.run/welcome/install/ or CI's pinned-version install
+# step in .github/workflows/test.yml).
+lint: build
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "lint: golangci-lint not found on PATH; see https://golangci-lint.run/welcome/install/"; exit 1; }
+	golangci-lint run ./...
+	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
+	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
+	          -o \( -type f -name "*.go" -print -quit \) 2>/dev/null | grep -q .; then \
+	    (cd $$dir && golangci-lint run ./...) || rc=1; \
 	  fi; \
 	done; exit $$rc
 
@@ -344,4 +386,4 @@ upload-release-notes:
 		exit 1; \
 	fi
 
-.PHONY: upload-release-notes
+.PHONY: upload-release-notes lint test-race

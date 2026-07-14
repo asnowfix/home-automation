@@ -62,7 +62,7 @@ var installCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		l.Info("Installing service")
+		_ = l.Info("Installing service") // best-effort service-manager logging
 		return s.Install()
 	},
 }
@@ -75,7 +75,7 @@ var uninstallCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		l.Info("Uninstalling service")
+		_ = l.Info("Uninstalling service") // best-effort service-manager logging
 		return s.Uninstall()
 	},
 }

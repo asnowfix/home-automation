@@ -4,17 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
 	"github.com/asnowfix/home-automation/hlog"
-	shellysetup "github.com/asnowfix/home-automation/internal/myhome/shelly/setup"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	shellysetup "github.com/asnowfix/home-automation/internal/myhome/shelly/setup"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	mhmqtt "github.com/asnowfix/home-automation/myhome/mqtt"
-	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
@@ -42,17 +41,6 @@ func init() {
 	Cmd.Flags().StringVar(&sta1Passwd, "sta1-passwd", "", "STA1 Password")
 	Cmd.Flags().StringVar(&apPasswd, "ap-passwd", "", "AP Password")
 	Cmd.Flags().StringVar(&deviceNameOverride, "name", "", "Set device name (overrides auto-derivation)")
-}
-
-// isTimeoutError checks if an error is a timeout error
-func isTimeoutError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "timeout") ||
-		strings.Contains(errStr, "Timeout") ||
-		strings.Contains(errStr, "deadline exceeded")
 }
 
 // setupDeviceByIP sets up a device using its IP address (initial setup mode)

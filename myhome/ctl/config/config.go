@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 
@@ -71,7 +72,7 @@ Examples:
 func init() {
 	Cmd.Flags().StringVarP(&flags.Name, "name", "n", "", "Set device name (updates local DB and Gen2+ devices)")
 	Cmd.Flags().BoolVar(&flags.EcoMode, "ecomode", false, "Set eco mode on Gen2+ devices (true/false)")
-	
+
 	// Track if ecomode was explicitly set
 	Cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		flags.EcoModeSet = cmd.Flags().Changed("ecomode")

@@ -3,16 +3,17 @@ package script
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"os"
-	"path/filepath"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -75,8 +76,12 @@ func fetchOneScript(ctx context.Context, log logr.Logger, via types.Channel, dev
 				return err
 			}
 			// store code string in file by name, in a folder named by the device id
-			os.MkdirAll(sd.Id(), 0755)
-			os.WriteFile(filepath.Join(sd.Id(), args[0]), []byte(code), 0644)
+			if err := os.MkdirAll(sd.Id(), 0755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(sd.Id(), args[0]), []byte(code), 0644); err != nil {
+				return err
+			}
 			return nil
 		}
 	}

@@ -3,8 +3,9 @@ package script
 import (
 	"io/fs"
 	"net/http"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"reflect"
+
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/asnowfix/home-automation/hlog"
 

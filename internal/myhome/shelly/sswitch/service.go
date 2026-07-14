@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	pkgshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	pkgsswitch "github.com/asnowfix/home-automation/pkg/shelly/sswitch"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"strconv"
 
 	"github.com/go-logr/logr"
 )

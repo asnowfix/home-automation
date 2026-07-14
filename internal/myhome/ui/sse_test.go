@@ -35,7 +35,7 @@ func TestSSE_SlowClientEvictedAfterThreshold(t *testing.T) {
 	b := newTestBroadcaster(t)
 
 	// slow client: buffer=0 so every broadcast fills immediately
-	slowCh := make(chan string, 0)
+	slowCh := make(chan string)
 	b.mu.Lock()
 	b.clients[slowCh] = &sseClient{ch: slowCh}
 	b.mu.Unlock()
@@ -80,7 +80,7 @@ func TestSSE_SlowClientDoesNotAffectFastClients(t *testing.T) {
 	defer b.Unsubscribe(fastCh)
 
 	// slow client
-	slowCh := make(chan string, 0)
+	slowCh := make(chan string)
 	b.mu.Lock()
 	b.clients[slowCh] = &sseClient{ch: slowCh}
 	b.mu.Unlock()
@@ -105,7 +105,7 @@ func TestSSE_SlowClientDoesNotAffectFastClients(t *testing.T) {
 func TestSSE_UnsubscribeAfterEvictionIsSafe(t *testing.T) {
 	b := newTestBroadcaster(t)
 
-	slowCh := make(chan string, 0)
+	slowCh := make(chan string)
 	b.mu.Lock()
 	b.clients[slowCh] = &sseClient{ch: slowCh}
 	b.mu.Unlock()

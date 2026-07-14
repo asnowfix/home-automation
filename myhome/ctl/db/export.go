@@ -3,8 +3,9 @@ package db
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
 	"os"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/spf13/cobra"
 )

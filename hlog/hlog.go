@@ -182,7 +182,7 @@ func logWriter() (io.Writer, error) {
 
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		debugInit(fmt.Sprintf("Failed to create log directory: %v", err))
-		return nil, fmt.Errorf("failed to create log directory: %v", err)
+		return nil, fmt.Errorf("failed to create log directory: %w", err)
 	}
 
 	logPath := filepath.Join(logDir, "myhome.log")

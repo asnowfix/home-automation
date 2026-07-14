@@ -3,8 +3,9 @@ package myhome
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome/sfr"
 	"net"
+
+	"github.com/asnowfix/home-automation/internal/myhome/sfr"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
@@ -146,7 +147,7 @@ func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Devi
 func (d *Device) Refresh(ctx context.Context) (bool, error) {
 	d.log.Info("Refreshing device", "id", d.Id(), "name", d.Name())
 
-	var modified bool = false
+	var modified bool
 	var err error
 
 	switch d.Manufacturer() {

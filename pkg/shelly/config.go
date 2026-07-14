@@ -3,6 +3,7 @@ package shelly
 import (
 	"context"
 	"fmt"
+
 	"github.com/asnowfix/home-automation/pkg/shelly/system"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 

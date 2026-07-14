@@ -3,9 +3,11 @@ package temperature
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
 	"time"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"
@@ -155,7 +157,7 @@ func (s *Storage) GetRoom(roomID string) (*RoomConfig, error) {
 	          FROM temperature_rooms WHERE room_id = ?`
 
 	err := s.db.Get(&dbConfig, query, roomID)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("room not found: %s", roomID)
 	}
 	if err != nil {
@@ -368,7 +370,7 @@ func (s *Storage) GetWeekdayDefault(weekday int) (myhome.DayType, error) {
 	query := `SELECT weekday, day_type, updated_at FROM temperature_weekday_defaults WHERE weekday = ?`
 
 	err := s.db.Get(&dbEntry, query, weekday)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("weekday default not found for weekday %d", weekday)
 	}
 	if err != nil {

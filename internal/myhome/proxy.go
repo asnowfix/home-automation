@@ -3,6 +3,7 @@ package myhome
 import (
 	"context"
 	"fmt"
+
 	"github.com/asnowfix/home-automation/pkg/devices"
 )
 

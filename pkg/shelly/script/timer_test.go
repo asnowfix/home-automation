@@ -2,6 +2,7 @@ package script
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -510,7 +511,7 @@ func TestTimerSetWithShellyRuntime(t *testing.T) {
 
 	// Wait for completion
 	err := <-done
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("Script execution failed: %v", err)
 	}
 
@@ -555,7 +556,7 @@ func TestTimerSetOneShotWithRuntime(t *testing.T) {
 
 	// Wait for completion
 	err := <-done
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("Script execution failed: %v", err)
 	}
 
@@ -600,7 +601,7 @@ func TestTimerSetRecurringWithRuntime(t *testing.T) {
 
 	// Wait for completion
 	err := <-done
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("Script execution failed: %v", err)
 	}
 
@@ -650,7 +651,7 @@ func TestTimerClearWithRuntime(t *testing.T) {
 
 	// Wait for completion
 	err := <-done
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("Script execution failed: %v", err)
 	}
 
@@ -703,7 +704,7 @@ func TestTimerMultipleWithRuntime(t *testing.T) {
 
 	// Wait for completion
 	err := <-done
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("Script execution failed: %v", err)
 	}
 
@@ -758,7 +759,7 @@ func TestTimerTimingWithRuntime(t *testing.T) {
 
 	// Wait for completion
 	err := <-done
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("Script execution failed: %v", err)
 	}
 
@@ -814,7 +815,7 @@ func TestTimerRecurringIntervalAccuracyWithRuntime(t *testing.T) {
 
 	// Wait for completion
 	err := <-done
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("Script execution failed: %v", err)
 	}
 

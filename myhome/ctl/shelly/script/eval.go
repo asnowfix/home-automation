@@ -3,6 +3,8 @@ package script
 import (
 	"context"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
@@ -10,7 +12,6 @@ import (
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -18,7 +19,7 @@ import (
 
 func init() {
 	Cmd.AddCommand(evalCtl)
-	evalCtl.MarkFlagRequired("id")
+	_ = evalCtl.MarkFlagRequired("id")
 }
 
 var evalCtl = &cobra.Command{
@@ -40,7 +41,7 @@ Examples:
   
   # Inspect state
   myhome ctl shelly script eval radiateur-salon-hiver heater.js "STATE"`,
-	Args:  cobra.ExactArgs(3),
+	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEval, args[1:])
 		return err

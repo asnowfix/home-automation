@@ -273,11 +273,11 @@ WHERE e1.device_id = ?
   ) = ?`
 	var sec float64
 	err := s.db.QueryRowContext(ctx, q,
-		offEvent,                   // correlated subquery: min off.ts after this on
+		offEvent,                           // correlated subquery: min off.ts after this on
 		deviceID, component, onEvent, date, // outer WHERE
-		onEvent, offEvent,          // previous-event lookup: on OR off
-		offEvent,                   // COALESCE default: no prior event → treat as off
-		offEvent,                   // final equality: previous must be off
+		onEvent, offEvent, // previous-event lookup: on OR off
+		offEvent, // COALESCE default: no prior event → treat as off
+		offEvent, // final equality: previous must be off
 	).Scan(&sec)
 	if err != nil {
 		return 0, err

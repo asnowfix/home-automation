@@ -3,6 +3,7 @@ package list
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 

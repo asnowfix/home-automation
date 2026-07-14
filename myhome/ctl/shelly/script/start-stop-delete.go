@@ -3,15 +3,16 @@ package script
 import (
 	"context"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
-	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -141,7 +142,9 @@ func doStartStopDelete(ctx context.Context, log logr.Logger, via types.Channel, 
 			return nil, err
 		}
 		fmt.Printf("✓ Successfully deleted %s from %s (including KVS version entry)\n", scriptName, sd.Name())
-		options.PrintResult(out)
+		if err := options.PrintResult(out); err != nil {
+			return nil, err
+		}
 		return out, nil
 	}
 
@@ -152,6 +155,8 @@ func doStartStopDelete(ctx context.Context, log logr.Logger, via types.Channel, 
 		return nil, err
 	}
 
-	options.PrintResult(out)
+	if err := options.PrintResult(out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }

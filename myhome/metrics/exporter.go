@@ -163,7 +163,9 @@ func (e *Exporter) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(metrics))
+	if _, err := w.Write([]byte(metrics)); err != nil {
+		e.log.V(2).Info("Failed to write metrics response", "error", err)
+	}
 
 	e.log.V(2).Info("Served metrics", "size_bytes", len(metrics))
 }

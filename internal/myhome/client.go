@@ -246,17 +246,24 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 		hc.pendingLock.Unlock()
 	}()
 
+	// hc.timeout bounds the whole exchange (publish + wait for response), so
+	// an undrained publisher channel cannot block CallE forever even when ctx
+	// carries no deadline of its own.
+	timeoutCtx, cancel := context.WithTimeout(ctx, hc.timeout)
+	defer cancel()
+
 	hc.log.Info("Calling method", "method", req.Method, "params", req.Params, "request_id", requestId, "dst", req.Dst)
 	select {
 	case hc.to <- reqStr:
 		hc.log.Info("Request published", "topic", ServerTopic(), "request_id", requestId)
-	case <-ctx.Done():
-		// Don't log context cancellation as an error
-		return nil, ctx.Err()
+	case <-timeoutCtx.Done():
+		if ctx.Err() != nil {
+			// Don't log context cancellation as an error
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("timeout publishing request for method %s after %v (request_id: %s, dst: %s)",
+			method, hc.timeout, requestId, req.Dst)
 	}
-
-	timeoutCtx, cancel := context.WithTimeout(ctx, hc.timeout)
-	defer cancel()
 
 	var res response
 	select {

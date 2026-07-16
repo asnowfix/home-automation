@@ -2,6 +2,8 @@ package myhome
 
 import (
 	"context"
+	crand "crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -26,6 +28,11 @@ type client struct {
 	me      string
 	timeout time.Duration
 	mc      mqtt.Client
+
+	// pendingLock guards pending, the routing table used to correlate
+	// in-flight requests with their responses (see dispatch/CallE).
+	pendingLock sync.Mutex
+	pending     map[string]chan response
 }
 
 func NewClientE(ctx context.Context, log logr.Logger, mc mqtt.Client, timeout time.Duration) (Client, error) {
@@ -37,32 +44,86 @@ func NewClientE(ctx context.Context, log logr.Logger, mc mqtt.Client, timeout ti
 	return c, nil
 }
 
-func (hc *client) start(ctx context.Context) {
-	var err error
+// newRequestID returns a random hex-encoded request identifier suitable for
+// Dialog.Id. It uses crypto/rand directly rather than a bespoke
+// charset-mapping helper.
+func newRequestID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := crand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
 
+// start lazily connects the client to the RPC transport: it subscribes to
+// this client's response topic and prepares a publisher for the server's
+// request topic. It is safe to call concurrently and idempotent once it has
+// succeeded.
+//
+// On failure hc.me is left unset, so a later call retries the connection
+// from scratch instead of getting stuck: previously hc.me was set before the
+// subscribe/publish calls, so a failed start() silently left hc.to nil and
+// every subsequent CallE blocked forever sending on it.
+func (hc *client) start(ctx context.Context) error {
 	hc.lock.Lock()
 	defer hc.lock.Unlock()
 	if hc.me != "" {
-		hc.log.Info("Client already started", "me", hc.me)
-		return
+		return nil
 	}
-	hc.me = hc.mc.Id()
 
-	hc.from, err = hc.mc.Subscribe(ctx, ClientTopic(hc.mc.Id()), 8, InstanceName+"/client")
+	me := hc.mc.Id()
+
+	from, err := hc.mc.Subscribe(ctx, ClientTopic(me), 8, InstanceName+"/client")
 	if err != nil {
-		hc.log.Error(err, "Failed to subscribe to client topic", "topic", ClientTopic(hc.mc.Id()))
-		return
+		hc.log.Error(err, "Failed to subscribe to client topic", "topic", ClientTopic(me))
+		return fmt.Errorf("subscribe to client topic %s: %w", ClientTopic(me), err)
 	}
 	// Note: Subscriber() waits for MQTT subscription ACK via token.WaitTimeout()
 	// so the subscription is guaranteed to be active when it returns successfully
 
-	hc.to, err = hc.mc.Publisher(ctx, ServerTopic(), 8, mqtt.AtLeastOnce, false, InstanceName+"/client")
+	to, err := hc.mc.Publisher(ctx, ServerTopic(), 8, mqtt.AtLeastOnce, false, InstanceName+"/client")
 	if err != nil {
 		hc.log.Error(err, "Failed to prepare publishing to server topic", "topic", ServerTopic())
-		return
+		return fmt.Errorf("prepare publisher for server topic %s: %w", ServerTopic(), err)
 	}
 
-	hc.log.Info("Started client", "me", hc.mc.Id())
+	hc.me = me
+	hc.from = from
+	hc.to = to
+	hc.pending = make(map[string]chan response)
+
+	go hc.dispatch(from)
+
+	hc.log.Info("Started client", "me", me)
+	return nil
+}
+
+// dispatch is the single reader of hc.from. It runs for the lifetime of the
+// client and routes every incoming response to the pending CallE waiting on
+// it, keyed by Dialog.Id. This is what makes concurrent CallE calls safe:
+// without it, whichever goroutine happened to read hc.from next could
+// receive a response meant for a different caller.
+func (hc *client) dispatch(from <-chan []byte) {
+	for resStr := range from {
+		var res response
+		if err := json.Unmarshal(resStr, &res); err != nil {
+			hc.log.Error(err, "Failed to unmarshal response envelope", "payload", string(resStr))
+			continue
+		}
+
+		hc.pendingLock.Lock()
+		ch, ok := hc.pending[res.Id]
+		if ok {
+			delete(hc.pending, res.Id)
+		}
+		hc.pendingLock.Unlock()
+
+		if !ok {
+			hc.log.Info("Discarding response with no matching pending request", "request_id", res.Id)
+			continue
+		}
+		ch <- res
+	}
 }
 
 // func (hc *client) Shutdown() {
@@ -96,15 +157,13 @@ func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.De
 		return &[]devices.Device{device}, nil
 	}
 
-	hc.start(ctx)
-
 	var out any
 	var err error
 
 	if strings.HasPrefix(name, "*") || strings.HasSuffix(name, "*") {
-		out, err = TheClient.CallE(ctx, DevicesMatch, name)
+		out, err = hc.CallE(ctx, DevicesMatch, name)
 	} else {
-		out, err = TheClient.CallE(ctx, DeviceLookup, name)
+		out, err = hc.CallE(ctx, DeviceLookup, name)
 	}
 	if err != nil {
 		return nil, err
@@ -123,15 +182,13 @@ func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.De
 }
 
 func (hc *client) ForgetDevices(ctx context.Context, name string) error {
-	hc.start(ctx)
-
 	devices, err := hc.LookupDevices(ctx, name)
 	if err != nil {
 		return err
 	}
 
 	for _, d := range *devices {
-		_, err = TheClient.CallE(ctx, DeviceForget, d.Id())
+		_, err = hc.CallE(ctx, DeviceForget, d.Id())
 		if err != nil {
 			return err
 		}
@@ -140,16 +197,18 @@ func (hc *client) ForgetDevices(ctx context.Context, name string) error {
 }
 
 func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, error) {
-	hc.start(ctx)
+	if err := hc.start(ctx); err != nil {
+		return nil, err
+	}
 
-	requestId, err := RandStringBytesMaskImprRandReaderUnsafe(16)
+	requestId, err := newRequestID()
 	if err != nil {
 		return nil, err
 	}
 
 	m, exists := signatures[method]
 	if !exists {
-		return Method{}, fmt.Errorf("unknown method %s", method)
+		return nil, fmt.Errorf("unknown method %s", method)
 	}
 
 	if reflect.TypeOf(params) != reflect.TypeOf(m.NewParams()) {
@@ -175,28 +234,48 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 		return nil, err
 	}
 
-	hc.log.Info("Calling method", "method", req.Method, "params", req.Params, "request_id", requestId, "dst", req.Dst)
-	hc.to <- reqStr
-	hc.log.Info("Request published", "topic", ServerTopic(), "request_id", requestId)
+	// Register this call's response channel before publishing the request,
+	// so dispatch can never race ahead of the registration.
+	respCh := make(chan response, 1)
+	hc.pendingLock.Lock()
+	hc.pending[requestId] = respCh
+	hc.pendingLock.Unlock()
+	defer func() {
+		hc.pendingLock.Lock()
+		delete(hc.pending, requestId)
+		hc.pendingLock.Unlock()
+	}()
 
-	var resStr []byte
+	// hc.timeout bounds the whole exchange (publish + wait for response), so
+	// an undrained publisher channel cannot block CallE forever even when ctx
+	// carries no deadline of its own.
+	timeoutCtx, cancel := context.WithTimeout(ctx, hc.timeout)
+	defer cancel()
+
+	hc.log.Info("Calling method", "method", req.Method, "params", req.Params, "request_id", requestId, "dst", req.Dst)
 	select {
-	case <-ctx.Done():
-		// Don't log context cancellation as an error
-		return nil, ctx.Err()
-	case resStr = <-hc.from:
-		hc.log.Info("Response received", "payload", string(resStr), "request_id", requestId)
-		break
-	case <-time.After(hc.timeout):
-		return nil, fmt.Errorf("timeout waiting for response to method %s after %v (request_id: %s, dst: %s, topic: %s)",
-			method, hc.timeout, requestId, req.Dst, ClientTopic(hc.me))
+	case hc.to <- reqStr:
+		hc.log.Info("Request published", "topic", ServerTopic(), "request_id", requestId)
+	case <-timeoutCtx.Done():
+		if ctx.Err() != nil {
+			// Don't log context cancellation as an error
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("timeout publishing request for method %s after %v (request_id: %s, dst: %s)",
+			method, hc.timeout, requestId, req.Dst)
 	}
 
 	var res response
-	err = json.Unmarshal(resStr, &res)
-	if err != nil {
-		hc.log.Error(err, "Failed to unmarshal response", "payload", resStr)
-		return nil, err
+	select {
+	case <-timeoutCtx.Done():
+		if ctx.Err() != nil {
+			// Don't log context cancellation as an error
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("timeout waiting for response to method %s after %v (request_id: %s, dst: %s, topic: %s)",
+			method, hc.timeout, requestId, req.Dst, ClientTopic(hc.me))
+	case res = <-respCh:
+		hc.log.Info("Response received", "dialog", res.String(), "request_id", requestId)
 	}
 
 	if err := ValidateDialog(res.Dialog); err != nil {

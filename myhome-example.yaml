@@ -1,5 +1,4 @@
-#
- MyHome Configuration Example
+# MyHome Configuration Example
 # Copy this file to myhome.yaml and customize as needed
 
 mqtt:

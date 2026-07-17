@@ -4,11 +4,9 @@ import (
 	"context"
 	"os"
 	"os/signal"
-	"runtime/pprof"
 	"syscall"
 
 	"github.com/asnowfix/home-automation/hlog"
-	"github.com/asnowfix/home-automation/internal/global"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/blu"
 	"github.com/asnowfix/home-automation/myhome/ctl/config"
@@ -37,6 +35,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// cancelFunc is owned by this package alone, set once in PersistentPreRunE
+// and consumed once in PersistentPostRunE. It's a package-level var rather
+// than a context value on purpose: context.WithValue is for request-scoped
+// data, not for a control-flow handle like a CancelFunc (an unchecked type
+// assertion on a missing/mistyped value would panic). ctl.Cmd runs once per
+// process invocation, so there's no concurrent-invocation hazard here.
+var cancelFunc context.CancelFunc
+
 var Cmd = &cobra.Command{
 	Use:              "ctl",
 	Short:            "Control and manage home automation devices",
@@ -50,7 +56,9 @@ var Cmd = &cobra.Command{
 		log := hlog.Logger
 		ctx := logr.NewContext(cmd.Context(), log)
 
-		ctx = options.CommandLineContext(ctx)
+		var cancel context.CancelFunc
+		ctx, cancel = options.CommandLineContext(ctx)
+		cancelFunc = cancel
 
 		// Set the target instance name for RPC topics
 		if options.Flags.InstanceName != "" {
@@ -109,18 +117,18 @@ var Cmd = &cobra.Command{
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		f := ctx.Value(global.CpuProfileKey)
-		if f != nil {
-			defer pprof.StopCPUProfile()
-		}
+		// CPU profile start/stop/close is owned entirely by myhome/main.go's
+		// PersistentPostRunE (which always runs, as the root command's
+		// persistent hooks apply to every subcommand); nothing to do here.
 
 		mc, err := mqttclient.GetClientE(ctx)
 		if err != nil {
 			return err
 		}
 
-		cancel := ctx.Value(global.CancelKey).(context.CancelFunc)
-		cancel()
+		if cancelFunc != nil {
+			cancelFunc()
+		}
 		mc.Close()
 		return nil
 	},

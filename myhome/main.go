@@ -22,12 +22,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// cpuProfileFile and shutdownCancel are owned by this package alone: they
+// are set once in PersistentPreRunE and consumed once in
+// PersistentPostRunE. They intentionally live as package-level vars rather
+// than context values — context.WithValue is for request-scoped data, not
+// for a control-flow handle (CancelFunc) or a resource that must be closed
+// exactly once (*os.File). myhome runs Execute() a single time per process,
+// so there's no concurrent-invocation hazard here.
+var cpuProfileFile *os.File
+var shutdownCancel context.CancelFunc
+
 var Cmd = &cobra.Command{
 	Use:  "myhome",
 	Args: cobra.NoArgs,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// For daemon commands, default to verbose unless --quiet is specified
-		isDaemon := cmd.Name() == "daemon" || cmd.Parent() != nil && cmd.Parent().Name() == "daemon"
+		isDaemon := daemon.IsDaemonCommand(cmd)
 		verbose := options.Flags.Verbose
 		debugFlag := options.Flags.Debug
 		if isDaemon {
@@ -58,9 +68,12 @@ var Cmd = &cobra.Command{
 			}
 			if err := pprof.StartCPUProfile(f); err != nil {
 				log.Error(err, "Failed to start CPU profile")
+				if closeErr := f.Close(); closeErr != nil {
+					log.Error(closeErr, "Failed to close CPU profile file after start failure")
+				}
 				return err
 			}
-			ctx = context.WithValue(ctx, global.CpuProfileKey, f)
+			cpuProfileFile = f
 		}
 
 		if debug.IsDebuggerAttached() {
@@ -74,7 +87,9 @@ var Cmd = &cobra.Command{
 			options.Flags.Wait = 0
 		}
 
-		ctx = options.CommandLineContext(ctx)
+		var cancel context.CancelFunc
+		ctx, cancel = options.CommandLineContext(ctx)
+		shutdownCancel = cancel
 		cmd.SetContext(ctx)
 
 		return nil
@@ -82,14 +97,19 @@ var Cmd = &cobra.Command{
 
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		log := hlog.Logger
 
-		f := ctx.Value(global.CpuProfileKey)
-		if f != nil {
-			defer pprof.StopCPUProfile()
+		if cpuProfileFile != nil {
+			pprof.StopCPUProfile()
+			if err := cpuProfileFile.Close(); err != nil {
+				log.Error(err, "Failed to close CPU profile file")
+			}
+			cpuProfileFile = nil
 		}
 
-		cancel := ctx.Value(global.CancelKey).(context.CancelFunc)
-		cancel()
+		if shutdownCancel != nil {
+			shutdownCancel()
+		}
 
 		<-ctx.Done()
 

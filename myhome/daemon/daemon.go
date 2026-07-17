@@ -7,7 +7,6 @@ import (
 	_ "net/http/pprof"
 	"time"
 
-	"github.com/asnowfix/home-automation/internal/global"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/internal/myhome/accounts"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
@@ -61,10 +60,19 @@ func (m *reportingMailer) Send(ctx context.Context, subject, body string) error 
 	return err
 }
 
+// NewDaemon owns its shutdown explicitly: it derives its own cancellable
+// context from ctx rather than reaching into ctx for a CancelFunc stashed
+// there by an unrelated caller (context values are for request-scoped data,
+// not control-flow handles, and a missing/mistyped value would panic here).
+// d.cancel (invoked from Stop, on OS service-stop requests) cancels d.ctx;
+// d.ctx.Done() also fires if the parent ctx is cancelled (e.g. SIGINT/SIGTERM
+// handled upstream in options.CommandLineContext), so both shutdown paths
+// still converge on the same <-d.ctx.Done() wait in Run.
 func NewDaemon(ctx context.Context) *daemon {
+	ctx, cancel := context.WithCancel(ctx)
 	return &daemon{
 		ctx:    ctx,
-		cancel: ctx.Value(global.CancelKey).(context.CancelFunc),
+		cancel: cancel,
 	}
 }
 

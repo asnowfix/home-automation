@@ -111,7 +111,13 @@ var Flags struct {
 
 var Via types.Channel
 
-func CommandLineContext(ctx context.Context) context.Context {
+// CommandLineContext builds the cancellable, request-scoped context shared by
+// every myhome entry point (daemon and ctl). It returns the derived context
+// together with its CancelFunc: the caller owns that CancelFunc explicitly
+// (e.g. in a package-level var used from PersistentPostRunE) rather than
+// threading it through context.WithValue, which is for request-scoped data,
+// not control-flow dependencies.
+func CommandLineContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	var cancel context.CancelFunc
 
 	// Create the process-wide context that background services can use
@@ -119,10 +125,8 @@ func CommandLineContext(ctx context.Context) context.Context {
 
 	if Flags.Wait > 0 {
 		ctx, cancel = context.WithTimeout(processCtx, Flags.Wait)
-		ctx = context.WithValue(ctx, global.CancelKey, cancel)
 	} else {
 		ctx, cancel = context.WithCancel(processCtx)
-		ctx = context.WithValue(ctx, global.CancelKey, cancel)
 	}
 
 	// Store the process-wide context so lazy-started services can access it
@@ -140,7 +144,7 @@ func CommandLineContext(ctx context.Context) context.Context {
 		cancel()
 		processCancel()
 	}()
-	return ctx
+	return ctx, cancel
 }
 
 func Args(args []string) []string {

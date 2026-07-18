@@ -166,45 +166,6 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 		}
 	}
 
-	// // If device is not ready for HTTP, try to find IP
-	// if !d.IsHttpReady() {
-	// 	if d.status == nil {
-	// 		d.status = &shelly.Status{}
-	// 	}
-	// 	ws, err := wifi.DoGetStatus(ctx, via, d)
-	// 	d.log.Info("Wifi status", "device", d.Id(), "status", ws, "error", err)
-	// 	if err == nil && ws.IP != "" {
-	// 		d.status.Wifi = ws
-	// 		d.Host_ = net.ParseIP(ws.IP)
-	// 		d.UpdateHost(ws.IP)
-	// 	}
-	// 	es, err := ethernet.DoGetStatus(ctx, via, d)
-	// 	d.log.Info("Ethernet status", "device", d.Id(), "status", es, "error", err)
-	// 	if err == nil && es.IP != "" {
-	// 		d.status.Ethernet = es
-	// 		d.UpdateHost(es.IP)
-	// 	}
-	// 	d.log.Info("Will use IP", "device", d.Id(), "ip", d.Host())
-	// }
-
-	// // Always fetch system config to get current device name
-	// config, err := system.GetConfig(ctx, via, d)
-	// if err != nil {
-	// 	return d.IsModified(), fmt.Errorf("unable to system.GetDeviceConfig (%v)", err)
-	// }
-	// if d.config == nil {
-	// 	d.config = &shelly.Config{}
-	// }
-	// d.config.System = config
-	// if config.Device.Name != "" && config.Device.Name != d.Name() {
-	// 	d.UpdateName(config.Device.Name)
-	// }
-
-	// // Fetch scripts list and store in config
-	// if err := d.refreshScripts(ctx, via); err != nil {
-	// 	d.log.V(1).Info("Failed to refresh scripts (continuing)", "error", err)
-	// }
-
 	// Fetch device info to store in database
 	info, err := shelly.GetDeviceInfo(ctx, d, via)
 	if err != nil {

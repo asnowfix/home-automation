@@ -1,12 +1,21 @@
 name: Dependabot auto-merge
 
-# Enables GitHub's native auto-merge on Dependabot PRs for patch/minor
-# updates only. Auto-merge just arms the PR to merge itself the moment
-# all required status checks (the "build" check from test.yml) go green —
-# it does not bypass CI. Major version bumps are left alone: dependabot.yml
-# excludes them from the grouped patch/minor PRs, so they land as separate
-# PRs here that never match the update-type check below and require a
-# manual merge.
+# Enables GitHub's native auto-merge on Dependabot PRs. Auto-merge just
+# arms the PR to merge itself the moment all required status checks (the
+# "build" check from test.yml) go green — it does not bypass CI.
+#
+# Which PRs get armed:
+# - github-actions ecosystem: ALL updates, including majors. Workflows pin
+#   floating major tags (e.g. actions/checkout@v4), so patch/minor updates
+#   arrive silently as GitHub moves the tag and Dependabot only ever files
+#   major bumps — restricting to patch/minor would auto-merge nothing.
+#   Known trade-off: PR CI does not exercise tag/dispatch-triggered release
+#   workflows, so a breaking action major there surfaces at the next
+#   release run, which fails loudly and is easy to fix.
+# - Go modules: patch/minor only. Major bumps mean API breaks in our own
+#   code: dependabot.yml excludes them from the grouped patch/minor PRs,
+#   so they land as separate PRs that never match the check below and
+#   require a manual merge.
 
 on: pull_request
 
@@ -25,8 +34,9 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Enable auto-merge for patch/minor updates
+      - name: Enable auto-merge (all actions updates, patch/minor Go modules)
         if: |
+          steps.metadata.outputs.package-ecosystem == 'github_actions' ||
           steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
           steps.metadata.outputs.update-type == 'version-update:semver-minor'
         run: gh pr merge --auto --squash "$PR_URL"

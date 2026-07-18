@@ -11,12 +11,19 @@ import (
 // ttl bounds staleness from KVS writes this cache doesn't observe directly
 // (a script running on the device itself, another myhome process, the Shelly
 // app). SetKeyValue/DeleteKey invalidate their key immediately, so the TTL is
-// only a safety net, not the primary invalidation path.
+// only a safety net, not the primary invalidation path. This also bounds
+// "key not found" results: a device simply not having a given KVS key
+// configured (common — not every switch has "normally-closed" set) is a
+// stable fact, not a transient failure, so it's as cachable as a real value —
+// ObserveRevision already invalidates it immediately if the key is later set.
+// Before this, a failed Get was never cached at all, so it paid a live RPC
+// round trip on every single request, forever.
 const ttl = 5 * time.Minute
 
 type cacheEntry struct {
-	value   GetResponse
-	expires time.Time
+	value    GetResponse
+	notFound bool
+	expires  time.Time
 }
 
 var (
@@ -28,20 +35,26 @@ func cacheKey(deviceId, key string) string {
 	return deviceId + "\x00" + key
 }
 
-func cacheGet(deviceId, key string) (GetResponse, bool) {
+func cacheGet(deviceId, key string) (cacheEntry, bool) {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 	e, ok := cache[cacheKey(deviceId, key)]
 	if !ok || time.Now().After(e.expires) {
-		return GetResponse{}, false
+		return cacheEntry{}, false
 	}
-	return e.value, true
+	return e, true
 }
 
 func cachePut(deviceId, key string, value GetResponse) {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
 	cache[cacheKey(deviceId, key)] = cacheEntry{value: value, expires: time.Now().Add(ttl)}
+}
+
+func cachePutNotFound(deviceId, key string) {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	cache[cacheKey(deviceId, key)] = cacheEntry{notFound: true, expires: time.Now().Add(ttl)}
 }
 
 func cacheInvalidate(deviceId, key string) {

@@ -11,7 +11,6 @@ import (
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	pkgshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
-	"sort"
 	"strings"
 	"text/template"
 
@@ -110,7 +109,6 @@ func applyPoolStatus(ctx context.Context, views []DeviceView) {
 // IndexData holds the data for rendering the index page
 type IndexData struct {
 	Version string
-	Devices []DeviceView
 }
 
 // index template and renderer
@@ -361,41 +359,25 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 
 // RenderEventLog renders the event log page.
 // It reuses the same index layout but injects the events table section.
-func RenderEventLog(ctx context.Context, db DeviceRegistry, w io.Writer) error {
+// Device data is loaded separately by the client via hx-get="/htmx/devices"
+// (index.html/eventLogPageHTML never reference .Devices), so this does not
+// enumerate devices — that work would be discarded and was the dominant
+// cost of loading this page (see #390).
+func RenderEventLog(ctx context.Context, w io.Writer) error {
 	data := IndexData{
-		Devices: []DeviceView{},
 		Version: ctx.Value(global.VersionKey).(string),
-	}
-	if db != nil {
-		devices, err := db.GetAllDevices(ctx)
-		if err == nil {
-			for _, d := range devices {
-				data.Devices = append(data.Devices, DeviceToView(ctx, d))
-			}
-		}
 	}
 	return eventLogTmpl.Execute(w, data)
 }
 
-// RenderIndex renders the index page with device list
-// Sensor values are read from cache and updated via SSE when they change
-func RenderIndex(ctx context.Context, db DeviceRegistry, w io.Writer) error {
+// RenderIndex renders the index page.
+// Device cards are loaded separately by the client via hx-get="/htmx/devices"
+// (see HTMXHandler.DeviceCards), so this does not enumerate devices itself —
+// that work would be discarded and was the dominant cost of loading this
+// page (see #390).
+func RenderIndex(ctx context.Context, w io.Writer) error {
 	data := IndexData{
-		Devices: []DeviceView{},
 		Version: ctx.Value(global.VersionKey).(string),
-	}
-	if db != nil {
-		devices, err := db.GetAllDevices(ctx)
-		if err != nil {
-			return indexTmpl.Execute(w, data)
-		}
-		for _, d := range devices {
-			data.Devices = append(data.Devices, DeviceToView(ctx, d))
-		}
-		sort.Slice(data.Devices, func(i, j int) bool {
-			return strings.ToLower(data.Devices[i].Name) < strings.ToLower(data.Devices[j].Name)
-		})
-		applyPoolStatus(ctx, data.Devices)
 	}
 	return indexTmpl.Execute(w, data)
 }

@@ -42,9 +42,13 @@ func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, devi
 }
 
 func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, key string) (*GetResponse, error) {
-	if cached, ok := cacheGet(device.Id(), key); ok {
+	if entry, ok := cacheGet(device.Id(), key); ok {
+		if entry.notFound {
+			log.V(1).Info("KVS cache hit (not found)", "device", device.Id(), "key", key)
+			return nil, fmt.Errorf("kvs: key %q not found on device %q (cached)", key, device.Id())
+		}
 		log.V(1).Info("KVS cache hit", "device", device.Id(), "key", key)
-		res := cached
+		res := entry.value
 		return &res, nil
 	}
 
@@ -53,6 +57,7 @@ func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device ty
 	})
 	if err != nil {
 		log.Info("Unable to get on key (continuing)", "key", key)
+		cachePutNotFound(device.Id(), key)
 		return nil, err
 	}
 	res, ok := out.(*GetResponse)

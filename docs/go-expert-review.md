@@ -494,9 +494,15 @@ well-commented, `db.SetMaxOpenConns(1)` rationale documented). Remaining:
   shutdown/timeouts can cancel in-flight queries.
 - Device `info`/`config` stored as JSON TEXT columns is fine for this scale —
   no change needed; resist the temptation to normalize.
+  *Superseded by owner decision (2026-07-18, #388): the columns stay JSON but
+  each becomes a namespaced envelope `{"myhome": {...}, "manufacturer": {...}}`;
+  no `status` column (device status stays runtime-only).*
 - Two separate DB layers (`myhome/storage` for devices, `myhome/temperature/storage.go`)
   each open their own SQLite database with their own migration logic. Fine at
   this scale, but share the open/pragma/migrate bootstrap helper.
+  *Owner decision (2026-07-18): `myhome.db` is confirmed as the single device
+  DB; the temperature/rooms subsystem is refactored separately in PR #224 and
+  owns its own storage decisions.*
 
 ---
 

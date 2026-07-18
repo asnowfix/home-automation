@@ -14,7 +14,10 @@ on:
       - v[0-9]+.[0-9x]+.x
       # Integration branch for the Go expert-review roadmap (#368): its PRs
       # must pass the same build/lint/race gates as PRs to main.
-      - worktree-feature+golang-expert-review
+      # NB: '+' is a one-or-more quantifier in Actions filter patterns and
+      # must be escaped, otherwise this entry never matches (verified on
+      # PRs #375/#378/#380, which all ran without the Build and Test gate).
+      - worktree-feature\+golang-expert-review
 jobs:
   build:
     runs-on: ubuntu-latest

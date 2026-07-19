@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
@@ -1176,8 +1177,10 @@ type timerHandler struct {
 	timer     *time.Timer
 	startTime time.Time
 	nextFire  time.Time
-	stopped   bool
-	ch        chan []byte // cached channel, created once in Wait()
+	// stopped is read by the timer goroutines in Wait() while Stop() sets it
+	// from the VM goroutine, so it must be atomic.
+	stopped atomic.Bool
+	ch      chan []byte // cached channel, created once in Wait()
 }
 
 func (th *timerHandler) Wait() <-chan []byte {
@@ -1194,7 +1197,7 @@ func (th *timerHandler) Wait() <-chan []byte {
 		th.nextFire = time.Now().Add(th.period)
 		go func() {
 			for range th.ticker.C {
-				if th.stopped {
+				if th.stopped.Load() {
 					break
 				}
 				th.nextFire = time.Now().Add(th.period)
@@ -1213,7 +1216,7 @@ func (th *timerHandler) Wait() <-chan []byte {
 		th.nextFire = time.Now().Add(period)
 		go func() {
 			<-th.timer.C
-			if !th.stopped {
+			if !th.stopped.Load() {
 				th.ch <- []byte{} // Signal to fire callback
 			}
 			close(th.ch)
@@ -1242,7 +1245,7 @@ func (th *timerHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte
 }
 
 func (th *timerHandler) Stop() {
-	th.stopped = true
+	th.stopped.Store(true)
 	if th.ticker != nil {
 		th.ticker.Stop()
 	}

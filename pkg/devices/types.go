@@ -29,10 +29,6 @@ type Provider interface {
 	Search(names []string) []Host
 }
 
-// type Devices struct {
-// 	List []Device
-// }
-
 type Device interface {
 	Manufacturer() string  // Device manufacturer
 	Id() string            // Device immutable Id (usually set by manufacturer)

@@ -10,10 +10,8 @@ import (
 )
 
 type server struct {
-	// mc      *mymqtt.Client
 	handler Server
 	from    <-chan []byte
-	// to      chan []byte
 }
 
 type Server interface {
@@ -31,16 +29,9 @@ func NewServerE(ctx context.Context, mc mqtt.Client, handler Server) (Server, er
 		log.Error(err, "Failed to subscribe to server", "topic", ServerTopic())
 		return nil, err
 	}
-	// to, err := mc.Publisher(ctx, ServerTopic(), 1)
-	// if err != nil {
-	// 	log.Error(err, "Failed to publish to server", "topic", ServerTopic())
-	// 	return nil, err
-	// }
 	s := server{
-		// mc:      mc,
 		handler: handler,
 		from:    from,
-		// to:      to,
 	}
 
 	go func(ctx context.Context) {
@@ -106,12 +97,6 @@ func NewServerE(ctx context.Context, mc mqtt.Client, handler Server) (Server, er
 					continue
 				}
 
-				// FIXME: produces errors like: `Error: unexpected type returned from action: got *[]devices.Device, want *interface {} (code:1)`
-				// if reflect.TypeOf(out) != reflect.TypeOf(res.Result) {
-				// 	s.fail(ctx, 1, fmt.Errorf("unexpected type returned from action: got %v, want %v", reflect.TypeOf(out), reflect.TypeOf(res.Result)), &req, mc)
-				// 	continue
-				// }
-
 				res.Result = &out
 
 				outMsg, err := json.Marshal(res)
@@ -120,7 +105,6 @@ func NewServerE(ctx context.Context, mc mqtt.Client, handler Server) (Server, er
 					s.fail(ctx, 1, err, &req, mc)
 					continue
 				}
-				// to <- outMsg
 				log.Info("Publishing response", "dst", res.Dst, "topic", ClientTopic(req.Src), "request_id", res.Id)
 				if err := mc.Publish(ctx, ClientTopic(req.Src), outMsg, mqtt.AtLeastOnce, false, InstanceName+".rpc/Server"); err != nil {
 					log.Error(err, "Failed to publish response", "dst", res.Dst, "request_id", res.Id)
@@ -148,7 +132,6 @@ func (sp *server) fail(ctx context.Context, code int, err error, req *request, m
 		// response carries only strings and ints; this cannot happen
 		return
 	}
-	// sp.to <- outMsg
 	// Best-effort: the requester will time out if this error response is lost.
 	_ = mc.Publish(ctx, ClientTopic(res.Dst), outMsg, mqtt.AtLeastOnce, false, InstanceName+".rpc/Server")
 }

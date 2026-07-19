@@ -10,7 +10,7 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/mqtt"
-	"github.com/asnowfix/home-automation/pkg/devices"
+	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
@@ -38,7 +38,7 @@ func init() {
 	showCmd.Flags().DurationVar(&showFlags.Timeout, "timeout", 5*time.Second, "Query timeout")
 }
 
-func doShow(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doShow(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	// Get MQTT client
 	mc, err := mqtt.GetClientE(ctx)
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/typestest"
 
 	"github.com/go-logr/logr"
 )
@@ -35,7 +36,7 @@ func TestCallE_SucceedsWithoutResolution(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	device := types.NewFakeDevice()
+	device := typestest.NewFakeDevice()
 	device.IdValue = "shellyplus1pm-aabbccddeeff"
 	device.HostValue = srv.Listener.Addr().String()
 
@@ -64,7 +65,7 @@ func TestCallE_RetriesOnceAfterReResolution(t *testing.T) {
 		return net.ParseIP("127.0.0.1"), nil
 	}))
 
-	device := types.NewFakeDevice()
+	device := typestest.NewFakeDevice()
 	device.IdValue = "shellyplus1pm-aabbccddeeff"
 	// Port 1 is reserved/unassigned: connection is refused immediately on
 	// both the first attempt and the retry (the resolver only returns a bare
@@ -95,7 +96,7 @@ func TestCallE_NoResolverClearsHostOnFailure(t *testing.T) {
 	t.Cleanup(func() { types.SetHostResolver(nil) })
 	types.SetHostResolver(nil)
 
-	device := types.NewFakeDevice()
+	device := typestest.NewFakeDevice()
 	device.IdValue = "shellyplus1pm-aabbccddeeff"
 	device.HostValue = "127.0.0.1:1"
 

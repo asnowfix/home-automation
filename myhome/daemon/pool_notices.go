@@ -44,14 +44,9 @@ func NewPoolNotices(ctx context.Context, log logr.Logger, eventsSvc *events.Serv
 
 	log = log.WithName("PoolNotices")
 
-	d, err := shellyapi.NewDeviceFromMqttId(ctx, log, deviceID)
+	sd, err := shellyapi.NewDeviceFromMqttId(ctx, log, deviceID)
 	if err != nil {
 		log.Error(err, "Failed to create device handle, turnover notices disabled", "device_id", deviceID)
-		return nil
-	}
-	sd, ok := d.(*shellyapi.Device)
-	if !ok {
-		log.Error(fmt.Errorf("unexpected device type %T", d), "Turnover notices disabled", "device_id", deviceID)
 		return nil
 	}
 	if err := sd.Init(ctx); err != nil {

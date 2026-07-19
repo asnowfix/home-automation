@@ -7,12 +7,13 @@ import (
 
 	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/typestest"
 	"github.com/go-logr/logr"
 )
 
 func TestDoGetComponents(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		want := &ComponentsResponse{Total: 1}
 		d.SetResult(GetComponents.String(), want)
 
@@ -26,7 +27,7 @@ func TestDoGetComponents(t *testing.T) {
 	})
 
 	t.Run("zero total is an error", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		d.SetResult(GetComponents.String(), &ComponentsResponse{Total: 0})
 
 		_, err := DoGetComponents(context.Background(), d, &ComponentsRequest{})
@@ -36,7 +37,7 @@ func TestDoGetComponents(t *testing.T) {
 	})
 
 	t.Run("nil reply is an error", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		d.SetResult(GetComponents.String(), nil)
 
 		_, err := DoGetComponents(context.Background(), d, &ComponentsRequest{})
@@ -46,7 +47,7 @@ func TestDoGetComponents(t *testing.T) {
 	})
 
 	t.Run("device error propagates", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		wantErr := errors.New("components unavailable")
 		d.SetError(GetComponents.String(), wantErr)
 
@@ -58,7 +59,7 @@ func TestDoGetComponents(t *testing.T) {
 }
 
 func TestDoCheckForUpdate(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	want := &CheckForUpdateResponse{}
 	d.SetResult(CheckForUpdate.String(), want)
 
@@ -72,7 +73,7 @@ func TestDoCheckForUpdate(t *testing.T) {
 }
 
 func TestDoUpdate(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.SetResult(Update.String(), nil)
 
 	err := DoUpdate(context.Background(), types.ChannelDefault, d, "beta")
@@ -86,7 +87,7 @@ func TestDoUpdate(t *testing.T) {
 }
 
 func TestDoReboot(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.SetResult(Reboot.String(), nil)
 
 	if err := DoReboot(context.Background(), d); err != nil {
@@ -99,7 +100,7 @@ func TestDoReboot(t *testing.T) {
 
 func TestGetDeviceInfo(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		want := &DeviceInfo{Id: "shellyplus1-abc", Product: Product{MacAddress: "AA:BB:CC:DD:EE:FF"}}
 		d.SetResult(getDeviceInfo.String(), want)
 
@@ -113,7 +114,7 @@ func TestGetDeviceInfo(t *testing.T) {
 	})
 
 	t.Run("missing id and mac is an error", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		d.SetResult(getDeviceInfo.String(), &DeviceInfo{})
 
 		_, err := GetDeviceInfo(context.Background(), d, types.ChannelDefault)
@@ -124,7 +125,7 @@ func TestGetDeviceInfo(t *testing.T) {
 }
 
 func TestGetSwitchesSummary(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.SetResult(GetComponents.String(), &ComponentsResponse{
 		Total: 1,
 		Config: Config{
@@ -150,7 +151,7 @@ func TestGetSwitchesSummary(t *testing.T) {
 }
 
 func TestGetSwitchesSummary_UnnamedSwitchDefaultsName(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.SetResult(GetComponents.String(), &ComponentsResponse{
 		Total: 1,
 		Config: Config{

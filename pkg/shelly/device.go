@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	_ "github.com/asnowfix/home-automation/internal/myhome/net"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/ratelimit"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
@@ -114,19 +112,61 @@ var (
 	deviceMqttRegistryMutex sync.RWMutex
 )
 
+// Summary is the minimal, serializable identity of a device — the shape a
+// caller already has on hand (e.g. a database row or an mDNS browse result)
+// before a live *Device is created for it. It deliberately excludes any
+// transport/session concern (CallE, MQTT channels, dialogs): those exist
+// only on *Device once initialized.
+//
+// Declared locally so pkg/shelly does not depend on the app's pkg/devices
+// package (see CLAUDE.md's Three-Tier Layer Rule): any type with these six
+// methods — including pkg/devices.Device — already satisfies it structurally.
+type Summary interface {
+	Manufacturer() string
+	Id() string
+	Name() string
+	Host() string
+	Ip() net.IP
+	Mac() net.HardwareAddr
+}
+
 type Device struct {
-	Id_         string              `json:"id"`
-	MacAddress_ net.HardwareAddr    `json:"-"`
-	Name_       string              `json:"name"`
-	Host_       net.IP              `json:"host"`
-	info        *shelly.DeviceInfo  `json:"-"`
-	config      *shelly.Config      `json:"-"`
-	status      *shelly.Status      `json:"-"`
-	mqtt        *DeviceMqttChannels `json:"-"` // MQTT channels (shared via registry, includes mutex for serialization)
-	dialogId    uint32              `json:"-"`
-	dialogs     sync.Map            `json:"-"` // map[uint32]bool
-	log         logr.Logger         `json:"-"`
-	modified    bool                `json:"-"`
+	id         string
+	macAddress net.HardwareAddr
+	name       string
+	host       net.IP
+	info       *shelly.DeviceInfo
+	config     *shelly.Config
+	status     *shelly.Status
+	mqtt       *DeviceMqttChannels // MQTT channels (shared via registry, includes mutex for serialization)
+	dialogId   uint32
+	dialogs    sync.Map // map[uint32]bool
+	log        logr.Logger
+	modified   bool
+}
+
+// deviceJSON is Device's wire format. Only the identity fields that were
+// historically exported (as Id_, Name_, Host_) round-trip; the MAC address
+// was already excluded from JSON, and the transport/cache fields never were.
+type deviceJSON struct {
+	Id   string `json:"id"`
+	Name string `json:"name"`
+	Host net.IP `json:"host"`
+}
+
+func (d *Device) MarshalJSON() ([]byte, error) {
+	return json.Marshal(deviceJSON{Id: d.id, Name: d.name, Host: d.host})
+}
+
+func (d *Device) UnmarshalJSON(data []byte) error {
+	var dto deviceJSON
+	if err := json.Unmarshal(data, &dto); err != nil {
+		return err
+	}
+	d.id = dto.Id
+	d.name = dto.Name
+	d.host = dto.Host
+	return nil
 }
 
 func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
@@ -212,10 +252,10 @@ func (d *Device) Manufacturer() string {
 }
 
 func (d *Device) Id() string {
-	if d.Id_ == "" || d.Id_ == "<nil>" {
+	if d.id == "" || d.id == "<nil>" {
 		return ""
 	}
-	return d.Id_
+	return d.id
 }
 
 func (d *Device) UpdateId(id string) {
@@ -223,19 +263,19 @@ func (d *Device) UpdateId(id string) {
 	if id == "" || id == "<nil>" || !deviceIdRe.MatchString(id) {
 		panic("invalid device id: " + id)
 	}
-	if d.Id_ == id {
+	if d.id == id {
 		return
 	}
-	d.Id_ = id
+	d.id = id
 	d.modified = true
 }
 
 func (d *Device) Host() string {
 
-	if d.Host_ == nil {
+	if d.host == nil {
 		return ""
 	}
-	return d.Host_.String()
+	return d.host.String()
 }
 
 func (d *Device) UpdateHost(host string) {
@@ -246,16 +286,16 @@ func (d *Device) UpdateHost(host string) {
 	if ip == nil {
 		return
 	}
-	if !ip.Equal(d.Host_) {
+	if !ip.Equal(d.host) {
 		d.modified = true
-		d.Host_ = ip
+		d.host = ip
 	}
 }
 
 func (d *Device) ClearHost() {
-	if d.Host_ != nil {
+	if d.host != nil {
 		d.modified = true
-		d.Host_ = nil
+		d.host = nil
 		d.log.Info("Cleared device host (HTTP channel will become not ready)", "device_id", d.Id())
 	}
 }
@@ -263,35 +303,35 @@ func (d *Device) ClearHost() {
 func (d *Device) Ip() net.IP {
 	if d.status != nil {
 		if d.status.Ethernet != nil {
-			d.Host_ = net.ParseIP(d.status.Ethernet.IP)
+			d.host = net.ParseIP(d.status.Ethernet.IP)
 		} else if d.status.Wifi != nil {
-			d.Host_ = net.ParseIP(d.status.Wifi.IP)
+			d.host = net.ParseIP(d.status.Wifi.IP)
 		}
 	}
-	return d.Host_
+	return d.host
 }
 
 func (d *Device) Name() string {
-	if d.Name_ == "" || d.Name_ == "<nil>" {
+	if d.name == "" || d.name == "<nil>" {
 		return ""
 	}
-	return d.Name_
+	return d.name
 }
 
 func (d *Device) UpdateName(name string) {
-	if name == "" || name == "<nil>" || name == d.Name_ {
+	if name == "" || name == "<nil>" || name == d.name {
 		return
 	}
-	d.Name_ = name
+	d.name = name
 	d.modified = true
 }
 
 func (d *Device) Mac() net.HardwareAddr {
-	return d.MacAddress_
+	return d.macAddress
 }
 
 func (d *Device) UpdateMac(mac string) {
-	if mac == d.MacAddress_.String() {
+	if mac == d.macAddress.String() {
 		return
 	}
 	if mac == "" || mac == "<nil>" {
@@ -305,7 +345,7 @@ func (d *Device) UpdateMac(mac string) {
 			d.log.Error(err, "Failed to parse MAC address", "mac", mac)
 			return
 		}
-		d.MacAddress_ = addr
+		d.macAddress = addr
 	}
 	d.modified = true
 }
@@ -548,10 +588,10 @@ func (d *Device) ReplyTo() string {
 	return d.mqtt.ReplyTo
 }
 
-func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) (devices.Device, error) {
+func NewDeviceFromIp(ctx context.Context, log logr.Logger, ip net.IP) (*Device, error) {
 	d := &Device{
-		Host_: ip,
-		log:   log,
+		host: ip,
+		log:  log,
 	}
 	err := d.init(ctx)
 	if err != nil {
@@ -585,7 +625,7 @@ func MacFromShellyID(id string) net.HardwareAddr {
 	return mac
 }
 
-func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devices.Device, error) {
+func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (*Device, error) {
 	if id == "" || id == "<nil>" {
 		return nil, fmt.Errorf("invalid device id: %s", id)
 	}
@@ -599,7 +639,7 @@ func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devic
 	return d, nil
 }
 
-func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.Device) (devices.Device, error) {
+func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary Summary) (*Device, error) {
 	if summary.Id() == "" {
 		return nil, fmt.Errorf("device summary has empty ID (name=%q, host=%q)", summary.Name(), summary.Host())
 	}
@@ -664,7 +704,7 @@ func (d *Device) initMqtt(ctx context.Context) error {
 	var err error
 	d.mqtt, err = d.mqtt.Init(ctx, d.Id())
 	if err != nil {
-		d.log.Error(err, "Unable to init MQTT channels", "device_id", d.Id_)
+		d.log.Error(err, "Unable to init MQTT channels", "device_id", d.id)
 		return err
 	}
 
@@ -730,7 +770,7 @@ func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
 // 	return nil
 // }
 
-type Do func(context.Context, logr.Logger, types.Channel, devices.Device, []string) (any, error)
+type Do func(context.Context, logr.Logger, types.Channel, Summary, []string) (any, error)
 
 func Print(log logr.Logger, d any) error {
 	buf, err := json.Marshal(d)
@@ -744,12 +784,12 @@ func Print(log logr.Logger, d any) error {
 
 // DeviceResult represents the result of an operation on a single device
 type DeviceResult struct {
-	Device devices.Device
+	Device Summary
 	Result any
 	Error  error
 }
 
-func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, via types.Channel, do Do, args []string) (any, error) {
+func Foreach(ctx context.Context, log logr.Logger, deviceList []Summary, via types.Channel, do Do, args []string) (any, error) {
 	log.Info("Running", "func_type", reflect.TypeOf(do), "args", args, "nb_devices", len(deviceList))
 
 	// Create channels for results
@@ -759,7 +799,7 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 	// Process each device in parallel
 	for _, dev := range deviceList {
 		wg.Add(1)
-		go func(devSummary devices.Device) {
+		go func(devSummary Summary) {
 			defer wg.Done()
 
 			// Skip devices whose ID is not yet known (partially discovered)
@@ -792,14 +832,7 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 			}
 
 			// Initialize device
-			sd, ok := device.(*Device)
-			if !ok {
-				err := fmt.Errorf("invalid device type %T", device)
-				log.Error(nil, "Invalid device type", "type", reflect.TypeOf(device))
-				results <- DeviceResult{Device: devSummary, Error: err}
-				return
-			}
-			err = sd.init(ctx)
+			err = device.init(ctx)
 			if err != nil {
 				log.Error(err, "Unable to init device", "device", device)
 				results <- DeviceResult{Device: devSummary, Error: err}

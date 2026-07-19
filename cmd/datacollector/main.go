@@ -100,15 +100,9 @@ func main() {
 		logger.Info("Testing device", "id", device.Id(), "name", device.Name())
 
 		// Create Shelly device instance
-		shellyDevice, err := shelly.NewDeviceFromSummary(ctx, logger, device)
+		sd, err := shelly.NewDeviceFromSummary(ctx, logger, device)
 		if err != nil {
 			logger.Error(err, "Failed to create Shelly device", "device_id", device.Id())
-			continue
-		}
-
-		sd, ok := shellyDevice.(*shelly.Device)
-		if !ok {
-			logger.Error(fmt.Errorf("not a Shelly device"), "Invalid device type", "device_id", device.Id())
 			continue
 		}
 

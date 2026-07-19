@@ -194,13 +194,10 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		// Ensure implementation is loaded and initialized
 		sd, ok := device.Impl().(*shelly.Device)
 		if !ok || sd == nil {
-			impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
+			var err error
+			sd, err = shelly.NewDeviceFromSummary(ctx, log, device)
 			if err != nil {
 				return nil, err
-			}
-			sd, ok = impl.(*shelly.Device)
-			if !ok {
-				return nil, fmt.Errorf("unexpected device implementation type: %T", impl)
 			}
 		}
 		// Initialize device (sets up MQTT channels if needed)
@@ -294,14 +291,11 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		// Get or create Shelly device implementation
 		sd, ok := device.Impl().(*shelly.Device)
 		if !ok || sd == nil {
-			impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
+			var err error
+			sd, err = shelly.NewDeviceFromSummary(ctx, log, device)
 			if err != nil {
 				log.Error(err, "Failed to create device for KVS update", "identifier", params.Identifier)
 				return nil, nil // DB update succeeded, KVS is best-effort
-			}
-			sd, ok = impl.(*shelly.Device)
-			if !ok {
-				return nil, nil
 			}
 		}
 
@@ -512,13 +506,9 @@ func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, 
 	// Get the Shelly device implementation
 	sd, ok := device.Impl().(*shelly.Device)
 	if !ok {
-		d, err := shelly.NewDeviceFromSummary(ctx, log, device)
-		if err != nil || d == nil {
-			err = fmt.Errorf("cannot auto-setup: failed to create Shelly device %s", deviceId)
-			panic(err)
-		}
-		sd, ok = d.(*shelly.Device)
-		if !ok || sd == nil {
+		var err error
+		sd, err = shelly.NewDeviceFromSummary(ctx, log, device)
+		if err != nil || sd == nil {
 			err = fmt.Errorf("cannot auto-setup: failed to create Shelly device %s", deviceId)
 			panic(err)
 		}
@@ -730,13 +720,10 @@ func (dm *DeviceManager) runReconciliationLoop(ctx context.Context, interval tim
 func (dm *DeviceManager) reconcileOneDevice(ctx context.Context, log logr.Logger, device *myhome.Device) {
 	sd, ok := device.Impl().(*shelly.Device)
 	if !ok || sd == nil {
-		impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
+		var err error
+		sd, err = shelly.NewDeviceFromSummary(ctx, log, device)
 		if err != nil {
 			log.Error(err, "Failed to create device for reconciliation", "device", device.Id())
-			return
-		}
-		sd, ok = impl.(*shelly.Device)
-		if !ok || sd == nil {
 			return
 		}
 	}
@@ -926,13 +913,10 @@ func classifyDoors(devices []*myhome.Device) []myhome.DoorInfo {
 func (dm *DeviceManager) GetShellyDevice(ctx context.Context, device *myhome.Device) (*shelly.Device, error) {
 	sd, ok := device.Impl().(*shelly.Device)
 	if !ok || sd == nil {
-		impl, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+		var err error
+		sd, err = shelly.NewDeviceFromSummary(ctx, dm.log, device)
 		if err != nil {
 			return nil, err
-		}
-		sd, ok = impl.(*shelly.Device)
-		if !ok {
-			return nil, fmt.Errorf("unexpected device implementation type: %T", impl)
 		}
 	}
 	return sd, nil

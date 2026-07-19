@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/typestest"
 	"github.com/go-logr/logr"
 )
 
 func TestShowJobs(t *testing.T) {
 	t.Run("happy path returns Scheduled", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		want := &Scheduled{Jobs: []Job{{JobId: JobId{Id: 1}}}}
 		d.SetResult(string(List), want)
 
@@ -28,7 +29,7 @@ func TestShowJobs(t *testing.T) {
 	})
 
 	t.Run("device error propagates", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		wantErr := errors.New("device unreachable")
 		d.SetError(string(List), wantErr)
 
@@ -40,7 +41,7 @@ func TestShowJobs(t *testing.T) {
 }
 
 func TestCancelJob(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.SetResult(string(List), &Scheduled{Jobs: []Job{{JobId: JobId{Id: 42}}}})
 	d.SetResult(string(Delete), &JobId{Id: 42})
 
@@ -66,7 +67,7 @@ func TestCancelJob(t *testing.T) {
 }
 
 func TestCancelJob_NoMatchingJob_NoDeleteCall(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.SetResult(string(List), &Scheduled{Jobs: []Job{{JobId: JobId{Id: 99}}}})
 
 	_, err := CancelJob(context.Background(), logr.Discard(), types.ChannelDefault, d, 42)
@@ -81,7 +82,7 @@ func TestCancelJob_NoMatchingJob_NoDeleteCall(t *testing.T) {
 }
 
 func TestCancelAllJobs(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.SetResult(string(DeleteAll), nil)
 	d.SetResult(string(List), &Scheduled{})
 
@@ -95,7 +96,7 @@ func TestCancelAllJobs(t *testing.T) {
 }
 
 func TestCancelAllJobs_DeleteAllError(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	wantErr := errors.New("delete-all failed")
 	d.SetError(string(DeleteAll), wantErr)
 

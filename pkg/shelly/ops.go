@@ -2,10 +2,10 @@ package shelly
 
 import (
 	"context"
+	"io/fs"
 	"reflect"
 	"time"
 
-	scripts "github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/pkg/shelly/ble"
 	"github.com/asnowfix/home-automation/pkg/shelly/ethernet"
 	"github.com/asnowfix/home-automation/pkg/shelly/input"
@@ -27,7 +27,14 @@ import (
 
 type empty struct{}
 
-func Init(log logr.Logger, mc mqtt.Client, timeout time.Duration, rateLimitInterval time.Duration) {
+// Init wires up every Shelly RPC sub-API (switches, KVS, scripts, WiFi,
+// etc.) against registrar and mc. scriptsFS, if non-nil, is an embedded
+// filesystem of house-specific automation scripts (garden, pool-pump,
+// front-door…) that script.Init uses for version tracking; callers outside
+// home-automation can pass nil to disable that feature entirely — pkg/shelly
+// itself must not embed any one house's scripts (see CLAUDE.md's Three-Tier
+// Layer Rule).
+func Init(log logr.Logger, mc mqtt.Client, timeout time.Duration, rateLimitInterval time.Duration, scriptsFS fs.FS) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath(), "rateLimit", rateLimitInterval)
 	registrar.Init(log)
 
@@ -44,7 +51,7 @@ func Init(log logr.Logger, mc mqtt.Client, timeout time.Duration, rateLimitInter
 	matter.Init(log, &registrar)
 	mqtt.Init(log, &registrar, mc, timeout)
 	schedule.Init(log, &registrar)
-	script.Init(log, &registrar, scripts.GetFS())
+	script.Init(log, &registrar, scriptsFS)
 	shttp.Init(log, &registrar)
 	sswitch.Init(log, &registrar)
 	system.Init(log, &registrar)

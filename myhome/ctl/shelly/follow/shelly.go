@@ -11,7 +11,6 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
@@ -161,7 +160,7 @@ Examples:
 }
 
 // doSetKVS is a helper function for setting KVS entries on Shelly devices
-func doSetKVS(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doSetKVS(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
@@ -173,7 +172,7 @@ func doSetKVS(ctx context.Context, log logr.Logger, via types.Channel, device de
 }
 
 // doDeleteKVS is a helper function for deleting KVS entries on Shelly devices
-func doDeleteKVS(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doDeleteKVS(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
@@ -184,7 +183,7 @@ func doDeleteKVS(ctx context.Context, log logr.Logger, via types.Channel, device
 }
 
 // uploadScript is a helper function to upload and start scripts on Shelly devices
-func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
@@ -205,7 +204,7 @@ func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, devic
 // listFollowedShellyDevices lists the Shelly devices followed by the given follower device
 func listFollowedShellyDevices(ctx context.Context, followerDevice string) error {
 	log := hlog.Logger
-	_, err := myhome.Foreach(ctx, log, followerDevice, options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+	_, err := myhome.Foreach(ctx, log, followerDevice, options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 		sd, ok := device.(*shelly.Device)
 		if !ok {
 			return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)
@@ -232,7 +231,7 @@ func listFollowedShellyDevices(ctx context.Context, followerDevice string) error
 }
 
 // deleteScript is a helper function to stop and delete scripts on Shelly devices
-func deleteScript(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func deleteScript(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)

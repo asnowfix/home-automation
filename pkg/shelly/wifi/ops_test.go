@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/typestest"
 )
 
 func TestDoGetConfig(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		want := &Config{}
 		d.SetResult(string(GetConfig), want)
 
@@ -24,7 +25,7 @@ func TestDoGetConfig(t *testing.T) {
 	})
 
 	t.Run("device error propagates", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		wantErr := errors.New("wifi config unavailable")
 		d.SetError(string(GetConfig), wantErr)
 
@@ -35,7 +36,7 @@ func TestDoGetConfig(t *testing.T) {
 	})
 
 	t.Run("unexpected result type", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		d.SetResult(string(GetConfig), "not-a-config")
 
 		_, err := DoGetConfig(context.Background(), types.ChannelDefault, d)
@@ -46,7 +47,7 @@ func TestDoGetConfig(t *testing.T) {
 }
 
 func TestDoSetConfig(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	want := &SetConfigResponse{}
 	d.SetResult(string(SetConfig), want)
 
@@ -64,7 +65,7 @@ func TestDoSetConfig(t *testing.T) {
 
 func TestDoGetStatus(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		want := &Status{SSID: "home-net"}
 		d.SetResult(GetStatus.String(), want)
 
@@ -78,7 +79,7 @@ func TestDoGetStatus(t *testing.T) {
 	})
 
 	t.Run("unexpected result type", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		d.SetResult(GetStatus.String(), "not-a-status")
 
 		_, err := DoGetStatus(context.Background(), types.ChannelDefault, d)

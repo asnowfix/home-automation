@@ -14,7 +14,6 @@ import (
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 )
@@ -85,7 +84,7 @@ func handleCall(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallTool
 	}
 
 	result, err := myhome.Foreach(ctx, hlog.Logger, deviceID, options.Via,
-		func(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, _ []string) (any, error) {
+		func(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, _ []string) (any, error) {
 			sd, ok := device.(*shelly.Device)
 			if !ok {
 				return nil, fmt.Errorf("device is not a Shelly: %v", reflect.TypeOf(device))

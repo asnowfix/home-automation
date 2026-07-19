@@ -6,7 +6,6 @@ import (
 	"net"
 	"testing"
 
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/go-logr/logr"
 )
@@ -18,7 +17,7 @@ func (f fakeResolverFunc) ResolveHost(ctx context.Context, mac net.HardwareAddr,
 	return f(ctx, mac, name)
 }
 
-// stubDevice is a minimal devices.Device for tests.
+// stubDevice is a minimal Summary for tests.
 type stubDevice struct {
 	id   string
 	name string
@@ -51,12 +50,12 @@ func TestNewDeviceFromSummary_ValidId_Succeeds(t *testing.T) {
 
 func TestForeach_SkipsEmptyIdDevice(t *testing.T) {
 	called := false
-	do := func(ctx context.Context, log logr.Logger, via types.Channel, dev devices.Device, args []string) (any, error) {
+	do := func(ctx context.Context, log logr.Logger, via types.Channel, dev Summary, args []string) (any, error) {
 		called = true
 		return nil, nil
 	}
 
-	deviceList := []devices.Device{
+	deviceList := []Summary{
 		stubDevice{id: "", name: "partial", host: "192.168.1.10"},
 	}
 
@@ -71,12 +70,12 @@ func TestForeach_SkipsEmptyIdDevice(t *testing.T) {
 
 func TestForeach_SkipsGen1Device(t *testing.T) {
 	called := false
-	do := func(ctx context.Context, log logr.Logger, via types.Channel, dev devices.Device, args []string) (any, error) {
+	do := func(ctx context.Context, log logr.Logger, via types.Channel, dev Summary, args []string) (any, error) {
 		called = true
 		return nil, nil
 	}
 
-	deviceList := []devices.Device{
+	deviceList := []Summary{
 		stubDevice{id: "shellyht-aabbccddeeff"},
 	}
 
@@ -91,12 +90,12 @@ func TestForeach_SkipsGen1Device(t *testing.T) {
 
 func TestForeach_SkipsBluDevice(t *testing.T) {
 	called := false
-	do := func(ctx context.Context, log logr.Logger, via types.Channel, dev devices.Device, args []string) (any, error) {
+	do := func(ctx context.Context, log logr.Logger, via types.Channel, dev Summary, args []string) (any, error) {
 		called = true
 		return nil, nil
 	}
 
-	deviceList := []devices.Device{
+	deviceList := []Summary{
 		stubDevice{id: "shellybluht3-aabbccddeeff"},
 	}
 
@@ -110,7 +109,7 @@ func TestForeach_SkipsBluDevice(t *testing.T) {
 }
 
 func TestForeach_EmptyList(t *testing.T) {
-	do := func(ctx context.Context, log logr.Logger, via types.Channel, dev devices.Device, args []string) (any, error) {
+	do := func(ctx context.Context, log logr.Logger, via types.Channel, dev Summary, args []string) (any, error) {
 		return nil, nil
 	}
 	_, err := Foreach(context.Background(), logr.Discard(), nil, types.ChannelDefault, do, nil)
@@ -213,7 +212,7 @@ func TestChannel_ResolvesHostWhenNeitherMqttNorHttpReady(t *testing.T) {
 		return nil, errors.New("not found")
 	}))
 
-	d := &Device{Id_: "shellyplus1pm-aabbccddeeff", log: logr.Discard()}
+	d := &Device{id: "shellyplus1pm-aabbccddeeff", log: logr.Discard()}
 
 	got := d.Channel(context.Background(), types.ChannelDefault)
 	if got != types.ChannelHttp {
@@ -228,7 +227,7 @@ func TestChannel_NoResolverStaysDiscarded(t *testing.T) {
 	t.Cleanup(func() { types.SetHostResolver(nil) })
 	types.SetHostResolver(nil)
 
-	d := &Device{Id_: "shellyplus1pm-aabbccddeeff", log: logr.Discard()}
+	d := &Device{id: "shellyplus1pm-aabbccddeeff", log: logr.Discard()}
 
 	got := d.Channel(context.Background(), types.ChannelDefault)
 	if got != types.ChannelDefault {
@@ -244,7 +243,7 @@ func TestChannel_MqttReadyDoesNotCallResolver(t *testing.T) {
 		return net.ParseIP("192.168.1.1"), nil
 	}))
 
-	d := &Device{Id_: "shellyplus1pm-aabbccddeeff", log: logr.Discard()}
+	d := &Device{id: "shellyplus1pm-aabbccddeeff", log: logr.Discard()}
 	d.mqtt = &DeviceMqttChannels{ReplyTo: "x", To: make(chan []byte, 1), From: make(chan []byte, 1)}
 
 	got := d.Channel(context.Background(), types.ChannelDefault)

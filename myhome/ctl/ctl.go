@@ -8,6 +8,7 @@ import (
 
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/myhome/ctl/blu"
 	"github.com/asnowfix/home-automation/myhome/ctl/config"
 	"github.com/asnowfix/home-automation/myhome/ctl/db"
@@ -83,7 +84,7 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		shellyPkg.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
+		shellyPkg.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit, scripts.GetFS())
 
 		// Start cleanup goroutine that closes MQTT client when context is cancelled OR on signal
 		// This ensures cleanup happens even when command returns an error or is interrupted

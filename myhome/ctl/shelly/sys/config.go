@@ -9,7 +9,6 @@ import (
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/system"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
@@ -67,7 +66,7 @@ Examples:
 	},
 }
 
-func oneDeviceConfig(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func oneDeviceConfig(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)

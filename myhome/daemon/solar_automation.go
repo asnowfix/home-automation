@@ -362,13 +362,9 @@ type shellyPumpController struct {
 // lifetime of ctx (the daemon context). Must be called after shelly.Init() and
 // the MQTT client have been set up.
 func newShellyPumpController(ctx context.Context, log logr.Logger, deviceID string) (*shellyPumpController, error) {
-	d, err := shellyapi.NewDeviceFromMqttId(ctx, log, deviceID)
+	sd, err := shellyapi.NewDeviceFromMqttId(ctx, log, deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("create device %s: %w", deviceID, err)
-	}
-	sd, ok := d.(*shellyapi.Device)
-	if !ok {
-		return nil, fmt.Errorf("unexpected device type %T", d)
 	}
 	if err := sd.Init(ctx); err != nil {
 		return nil, fmt.Errorf("init device %s: %w", deviceID, err)

@@ -13,7 +13,6 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/internal/myhome/accounts"
 	"github.com/asnowfix/home-automation/myhome/events"
-	"github.com/asnowfix/home-automation/myhome/storage"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/go-logr/logr"
 )
@@ -22,13 +21,13 @@ import (
 type HTMXHandler struct {
 	ctx              context.Context
 	log              logr.Logger
-	db               *storage.DeviceStorage
+	db               DeviceRegistry
 	eventsSvc        *events.Service
 	accountsRegistry *accounts.Registry
 }
 
 // NewHTMXHandler creates a new HTMX handler
-func NewHTMXHandler(ctx context.Context, log logr.Logger, db *storage.DeviceStorage, eventsSvc *events.Service, accountsRegistry *accounts.Registry) *HTMXHandler {
+func NewHTMXHandler(ctx context.Context, log logr.Logger, db DeviceRegistry, eventsSvc *events.Service, accountsRegistry *accounts.Registry) *HTMXHandler {
 	return &HTMXHandler{
 		ctx:              ctx,
 		log:              log,
@@ -252,7 +251,7 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	on, ok := res.(bool)
+	result, ok := res.(*myhome.SwitchResult)
 	if !ok {
 		http.Error(w, "invalid response", http.StatusInternalServerError)
 		return
@@ -264,7 +263,7 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 	data := map[string]interface{}{
 		"DeviceID": deviceID,
 		"SwitchID": switchID,
-		"On":       on,
+		"On":       result.On,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -473,6 +472,12 @@ func cardTemplateFuncs() template.FuncMap {
 			}
 			return fmt.Sprintf("%.1f/%.1f x/day", *achieved, *target)
 		},
+		"f1": func(f *float64) string {
+			if f == nil {
+				return ""
+			}
+			return fmt.Sprintf("%.1f", *f)
+		},
 	}
 }
 
@@ -487,7 +492,7 @@ const deviceCardsTemplate = `
         <span id="device-{{.Id}}-name">{{.Name}}</span>
         {{if .HasTemperatureSensor}}
           {{if .Temperature}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{printf "%.1f" .Temperature}}°C</span>
+            <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{f1 .Temperature}}°C</span>
           {{else}}
             <span class="tag is-light ml-2" id="sensor-{{.Id}}-temperature">--°C</span>
           {{end}}
@@ -515,7 +520,7 @@ const deviceCardsTemplate = `
         
         {{if .HasHumiditySensor}}
           {{if .Humidity}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{printf "%.1f" .Humidity}}%</span>
+            <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{f1 .Humidity}}%</span>
           {{else}}
             <span class="tag is-light ml-2" id="sensor-{{.Id}}-humidity">--%</span>
           {{end}}
@@ -606,7 +611,7 @@ const deviceCardTemplate = `
         <span id="device-{{.Id}}-name">{{.Name}}</span>
         {{if .HasTemperatureSensor}}
           {{if .Temperature}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{printf "%.1f" .Temperature}}°C</span>
+            <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{f1 .Temperature}}°C</span>
           {{else}}
             <span class="tag is-light ml-2" id="sensor-{{.Id}}-temperature">--°C</span>
           {{end}}
@@ -634,7 +639,7 @@ const deviceCardTemplate = `
         
         {{if .HasHumiditySensor}}
           {{if .Humidity}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{printf "%.1f" .Humidity}}%</span>
+            <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{f1 .Humidity}}%</span>
           {{else}}
             <span class="tag is-light ml-2" id="sensor-{{.Id}}-humidity">--%</span>
           {{end}}

@@ -43,22 +43,30 @@ func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, devi
 }
 
 func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, key string) (*GetResponse, error) {
+	if entry, ok := cacheGet(device.Id(), key); ok {
+		if entry.notFound {
+			log.V(1).Info("KVS cache hit (not found)", "device", device.Id(), "key", key)
+			return nil, fmt.Errorf("kvs: key %q not found on device %q (cached)", key, device.Id())
+		}
+		log.V(1).Info("KVS cache hit", "device", device.Id(), "key", key)
+		res := entry.value
+		return &res, nil
+	}
+
 	out, err := device.CallE(ctx, via, string(Get), &GetRequest{
 		Key: key,
 	})
 	if err != nil {
 		log.Info("Unable to get on key (continuing)", "key", key)
+		cachePutNotFound(device.Id(), key)
 		return nil, err
 	}
 	res, ok := out.(*GetResponse)
 	if !ok {
 		return nil, fmt.Errorf("expected %T, got %T", reflect.TypeOf(&GetResponse{}), out)
 	}
-	// s, err := json.Marshal(res)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// fmt.Print(string(s))
+
+	cachePut(device.Id(), key, *res)
 
 	return res, nil
 }
@@ -76,6 +84,10 @@ func SetKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device
 	if !ok {
 		return nil, fmt.Errorf("expected %T, got %T", reflect.TypeOf(&Status{}), out)
 	}
+
+	cacheInvalidate(device.Id(), key)
+	noteSelfWrite(device.Id())
+
 	return status, nil
 }
 
@@ -96,6 +108,9 @@ func DeleteKey(ctx context.Context, log logr.Logger, via types.Channel, device t
 		return nil, err
 	}
 	fmt.Print(string(s))
+
+	cacheInvalidate(device.Id(), key)
+	noteSelfWrite(device.Id())
 
 	return status, nil
 }

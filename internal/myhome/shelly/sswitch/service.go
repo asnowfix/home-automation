@@ -62,7 +62,7 @@ func (s *Service) HandleToggle(ctx context.Context, params *myhome.SwitchParams)
 		return nil, err
 	}
 
-	on := s.onValue(ctx, sd, params.SwitchId)
+	on := OnValue(ctx, s.log, sd, params.SwitchId)
 
 	result, err := pkgsswitch.Toggle(ctx, sd, types.ChannelDefault, params.SwitchId)
 	if err != nil {
@@ -79,7 +79,7 @@ func (s *Service) HandleOn(ctx context.Context, params *myhome.SwitchParams) (*m
 		return nil, err
 	}
 
-	on := s.onValue(ctx, sd, params.SwitchId)
+	on := OnValue(ctx, s.log, sd, params.SwitchId)
 
 	_, err = pkgsswitch.Set(ctx, sd, types.ChannelDefault, params.SwitchId, true)
 	if err != nil {
@@ -96,7 +96,7 @@ func (s *Service) HandleOff(ctx context.Context, params *myhome.SwitchParams) (*
 		return nil, err
 	}
 
-	on := s.onValue(ctx, sd, params.SwitchId)
+	on := OnValue(ctx, s.log, sd, params.SwitchId)
 
 	_, err = pkgsswitch.Set(ctx, sd, types.ChannelDefault, params.SwitchId, false)
 	if err != nil {
@@ -118,7 +118,7 @@ func (s *Service) HandleStatus(ctx context.Context, params *myhome.SwitchParams)
 		return nil, fmt.Errorf("failed to get switch status on device %s: %w", sd.Id(), err)
 	}
 
-	on := s.onValue(ctx, sd, params.SwitchId)
+	on := OnValue(ctx, s.log, sd, params.SwitchId)
 
 	return s.returnStatus(ctx, s.log.WithName("Status"), device, params.SwitchId, on, status.Output)
 }
@@ -178,11 +178,13 @@ func (s *Service) returnStatus(_ context.Context, log logr.Logger, device *myhom
 	return &sr, nil
 }
 
-// onValue checks the normally-closed KVS key to determine the "on" value for a device
-func (s *Service) onValue(ctx context.Context, sd *shelly.Device, switchId int) bool {
-	kv, err := kvs.GetValue(ctx, s.log, types.ChannelDefault, sd, string(myhome.NormallyClosedKey))
+// OnValue checks the normally-closed KVS key to determine the raw Output value
+// that represents "on" for the given switch (true unless the switch is
+// configured normally-closed via KVS).
+func OnValue(ctx context.Context, log logr.Logger, sd *shelly.Device, switchId int) bool {
+	kv, err := kvs.GetValue(ctx, log, types.ChannelDefault, sd, string(myhome.NormallyClosedKey))
 	if err != nil {
-		s.log.Info("Unable to get value", "key", string(myhome.NormallyClosedKey), "reason", err)
+		log.Info("Unable to get value", "key", string(myhome.NormallyClosedKey), "reason", err)
 		return true
 	}
 	if switchId == 0 {

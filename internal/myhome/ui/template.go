@@ -6,12 +6,11 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"sort"
 	"strings"
 	"text/template"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/myhome/storage"
+	sswitchsvc "github.com/asnowfix/home-automation/internal/myhome/shelly/sswitch"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	pkgshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
@@ -38,6 +37,19 @@ func StaticFileServer() (http.Handler, error) {
 		return nil, err
 	}
 	return http.FileServer(http.FS(sub)), nil
+}
+
+// DeviceRegistry is the device-lookup capability the UI layer needs to render
+// dashboards. It's defined here (rather than importing devices.DeviceRegistry)
+// so any live device source can be passed in without requiring unrelated
+// methods (Load, Flush, SetDeviceRoom, ...) that a live device manager may
+// not forward. Pass the in-memory device manager/cache here, not raw
+// storage — only a live source has each device's Impl()/Status attached,
+// which DeviceToView needs to show real switch Output state.
+type DeviceRegistry interface {
+	GetAllDevices(ctx context.Context) ([]*myhome.Device, error)
+	GetDeviceById(ctx context.Context, id string) (*myhome.Device, error)
+	GetDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, error)
 }
 
 // DeviceView represents a device for rendering in the UI
@@ -98,7 +110,6 @@ func applyPoolStatus(ctx context.Context, views []DeviceView) {
 // IndexData holds the data for rendering the index page
 type IndexData struct {
 	Version string
-	Devices []DeviceView
 }
 
 // index template and renderer
@@ -236,33 +247,42 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 
 		// Get device implementation to access status
 		var status *pkgshelly.Status
-		if sd, ok := d.Impl().(*shelly.Device); ok && sd != nil {
+		var sd *shelly.Device
+		if impl, ok := d.Impl().(*shelly.Device); ok && impl != nil {
+			sd = impl
 			status = sd.Status()
 		}
 
 		for _, sw := range []*sswitch.Config{d.Config.Switch0, d.Config.Switch1, d.Config.Switch2, d.Config.Switch3} {
 			if sw != nil {
-				isOn := false
+				output := false
 				// Get actual switch status if available
 				if status != nil {
 					switch sw.Id {
 					case 0:
 						if status.Switch0 != nil {
-							isOn = status.Switch0.Output
+							output = status.Switch0.Output
 						}
 					case 1:
 						if status.Switch1 != nil {
-							isOn = status.Switch1.Output
+							output = status.Switch1.Output
 						}
 					case 2:
 						if status.Switch2 != nil {
-							isOn = status.Switch2.Output
+							output = status.Switch2.Output
 						}
 					case 3:
 						if status.Switch3 != nil {
-							isOn = status.Switch3.Output
+							output = status.Switch3.Output
 						}
 					}
+				}
+
+				// Active/on color depends on the normally-closed KVS key when present:
+				// the raw Output only means "on" if it matches the device's configured on-value.
+				isOn := output
+				if sd != nil {
+					isOn = output == sswitchsvc.OnValue(ctx, log, sd, sw.Id)
 				}
 
 				switches[sw.Id] = pkgshelly.SwitchSummary{
@@ -280,6 +300,10 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 		if err != nil {
 			log.V(1).Info("Failed to get switches summary", "device", d.Id(), "error", err)
 		} else {
+			for id, ss := range switchSummary {
+				ss.On = ss.On == sswitchsvc.OnValue(ctx, log, sd, id)
+				switchSummary[id] = ss
+			}
 			switches = switchSummary
 			log.V(1).Info("Fetched switches from device", "device", d.Id(), "count", len(switches))
 		}
@@ -336,41 +360,25 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 
 // RenderEventLog renders the event log page.
 // It reuses the same index layout but injects the events table section.
-func RenderEventLog(ctx context.Context, db *storage.DeviceStorage, w io.Writer) error {
+// Device data is loaded separately by the client via hx-get="/htmx/devices"
+// (index.html/eventLogPageHTML never reference .Devices), so this does not
+// enumerate devices — that work would be discarded and was the dominant
+// cost of loading this page (see #390).
+func RenderEventLog(ctx context.Context, w io.Writer) error {
 	data := IndexData{
-		Devices: []DeviceView{},
 		Version: ctx.Value(global.VersionKey).(string),
-	}
-	if db != nil {
-		devices, err := db.GetAllDevices(ctx)
-		if err == nil {
-			for _, d := range devices {
-				data.Devices = append(data.Devices, DeviceToView(ctx, d))
-			}
-		}
 	}
 	return eventLogTmpl.Execute(w, data)
 }
 
-// RenderIndex renders the index page with device list
-// Sensor values are read from cache and updated via SSE when they change
-func RenderIndex(ctx context.Context, db *storage.DeviceStorage, w io.Writer) error {
+// RenderIndex renders the index page.
+// Device cards are loaded separately by the client via hx-get="/htmx/devices"
+// (see HTMXHandler.DeviceCards), so this does not enumerate devices itself —
+// that work would be discarded and was the dominant cost of loading this
+// page (see #390).
+func RenderIndex(ctx context.Context, w io.Writer) error {
 	data := IndexData{
-		Devices: []DeviceView{},
 		Version: ctx.Value(global.VersionKey).(string),
-	}
-	if db != nil {
-		devices, err := db.GetAllDevices(ctx)
-		if err != nil {
-			return indexTmpl.Execute(w, data)
-		}
-		for _, d := range devices {
-			data.Devices = append(data.Devices, DeviceToView(ctx, d))
-		}
-		sort.Slice(data.Devices, func(i, j int) bool {
-			return strings.ToLower(data.Devices[i].Name) < strings.ToLower(data.Devices[j].Name)
-		})
-		applyPoolStatus(ctx, data.Devices)
 	}
 	return indexTmpl.Execute(w, data)
 }

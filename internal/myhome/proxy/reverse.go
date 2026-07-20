@@ -19,13 +19,21 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/internal/myhome/ui/assets"
 	"github.com/asnowfix/home-automation/internal/myhome/ui/static"
-	"github.com/asnowfix/home-automation/myhome/storage"
 
 	"github.com/go-logr/logr"
 )
+
+// DeviceLookup is the minimal device-lookup capability the proxy needs to
+// resolve a host token to an IP. Defined locally (rather than importing
+// devices.DeviceRegistry) so a live device manager/cache can be passed in
+// without requiring unrelated methods it may not forward.
+type DeviceLookup interface {
+	GetDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, error)
+}
 
 // Handle proxies HTTP requests shaped like /devices/{hostToken}/...
 //
@@ -36,7 +44,7 @@ import (
 //
 // When upstreamProxy is empty, the host token is resolved to an IP and
 // the request is forwarded directly to the device on port 80 or 443.
-func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db *storage.DeviceStorage, upstreamProxy string, w http.ResponseWriter, r *http.Request) {
+func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db DeviceLookup, upstreamProxy string, w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	// Panic recovery to avoid blank pages
@@ -346,7 +354,7 @@ func (w *statusWriter) Flush() {
 	}
 }
 
-func resolveToIPv4(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db *storage.DeviceStorage, token string) (net.IP, error) {
+func resolveToIPv4(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db DeviceLookup, token string) (net.IP, error) {
 	// 1. If token is an IP, return it (prefer IPv4)
 	if ip := net.ParseIP(token); ip != nil {
 		if ip.To4() != nil {

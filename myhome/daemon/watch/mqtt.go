@@ -13,6 +13,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/devices"
 	"github.com/asnowfix/home-automation/myhome/mqtt"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 
@@ -143,6 +144,9 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqt
 			if err := json.Unmarshal(event.Params, status); err != nil {
 				log.Error(err, "Failed to unmarshal status", "event", event)
 				return err
+			}
+			if status.System != nil {
+				kvs.ObserveRevision(log, d.Id(), status.System.KvsRevision)
 			}
 			// TODO: Update device from status
 		}

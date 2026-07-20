@@ -16,7 +16,6 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome/ui/static"
 	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/asnowfix/home-automation/myhome/mqtt"
-	"github.com/asnowfix/home-automation/myhome/storage"
 
 	"github.com/go-logr/logr"
 )
@@ -29,7 +28,7 @@ import (
 // - an IPv4/IPv6 address
 // - a .local hostname
 // - any known identifier in the myhome database (name, id, mac, host)
-func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db *storage.DeviceStorage, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry) error {
+func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db DeviceRegistry, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry) error {
 	addr := fmt.Sprintf(":%d", listenPort)
 	srv := &http.Server{Addr: addr}
 
@@ -54,7 +53,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 
 		if path == "" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			if err := RenderIndex(ctx, db, w); err != nil {
+			if err := RenderIndex(ctx, w); err != nil {
 				log.Error(err, "failed to render index page")
 				http.Error(w, "unable to render index", http.StatusInternalServerError)
 			}
@@ -64,7 +63,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 
 		if path == "event-log" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			if err := RenderEventLog(ctx, db, w); err != nil {
+			if err := RenderEventLog(ctx, w); err != nil {
 				log.Error(err, "failed to render event log page")
 				http.Error(w, "unable to render event log", http.StatusInternalServerError)
 			}

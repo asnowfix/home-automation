@@ -79,7 +79,7 @@ func (c *Cache) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool)
 	defer c.mutex.Unlock()
 
 	for i, existing := range c.devices {
-		if existing.Id() == d.Id() || existing.MAC == d.MAC || existing.Host_ == d.Host_ || existing.Name() == d.Name() {
+		if sameDevice(existing, d) {
 			if !overwrite {
 				return false, fmt.Errorf("device already exists: %v", *d)
 			}
@@ -92,6 +92,26 @@ func (c *Cache) SetDevice(ctx context.Context, d *myhome.Device, overwrite bool)
 		return true, err
 	}
 	return c.db.SetDevice(ctx, d, overwrite)
+}
+
+// sameDevice reports whether existing and d identify the same physical
+// device. Empty-string fields (MAC/Host_ unresolved, e.g. for Gen1/BLU
+// devices) must never be compared for equality, or two unrelated devices
+// that both lack that field would be treated as duplicates of each other.
+func sameDevice(existing, d *myhome.Device) bool {
+	if existing.Id() == d.Id() {
+		return true
+	}
+	if existing.MAC != "" && existing.MAC == d.MAC {
+		return true
+	}
+	if existing.Host_ != "" && existing.Host_ == d.Host_ {
+		return true
+	}
+	if existing.Name() != "" && existing.Name() == d.Name() {
+		return true
+	}
+	return false
 }
 
 func (c *Cache) insert(d *myhome.Device) (*myhome.Device, error) {
@@ -186,8 +206,9 @@ func (c *Cache) GetAllDevices(ctx context.Context) ([]*myhome.Device, error) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	// TODO: use cache content
-	return c.db.GetAllDevices(ctx)
+	all := make([]*myhome.Device, len(c.devices))
+	copy(all, c.devices)
+	return all, nil
 }
 
 func (c *Cache) GetDevicesMatchingAny(ctx context.Context, name string) ([]*myhome.Device, error) {

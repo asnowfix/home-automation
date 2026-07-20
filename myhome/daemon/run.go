@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,27 @@ import (
 
 func defaultEventsDBPath() string {
 	return "events.db"
+}
+
+// loadConfigFile attempts to read myhome's YAML config into v (search paths
+// and env binding must already be configured on v). A missing file is
+// expected and benign — defaults/flags/env take over, matching the
+// documented "config file is optional" behavior. A file that exists but
+// fails to parse (e.g. a YAML syntax error) returns an error instead: a
+// previous version silently fell back to defaults in that case, logging the
+// same message as "no config file found" — which let a broken myhome.yaml
+// run for weeks with every config key quietly ignored (see pool/solar
+// options, which have no other way to be set short of CLI flags).
+func loadConfigFile(v *viper.Viper, log logr.Logger) error {
+	if err := v.ReadInConfig(); err == nil {
+		log.Info("Loaded config from", "file", v.ConfigFileUsed())
+		return nil
+	} else if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+		log.Info("No config file found, using defaults and flags")
+		return nil
+	} else {
+		return fmt.Errorf("config file %s exists but failed to parse: %w", v.ConfigFileUsed(), err)
+	}
 }
 
 var disableGen1Proxy bool
@@ -99,11 +121,8 @@ var runCmd = &cobra.Command{
 		v.AutomaticEnv()
 		v.SetDefault("beem.poll_interval", "60s")
 
-		// Try to read config file (optional)
-		if err := v.ReadInConfig(); err == nil {
-			log.Info("Loaded config from", "file", v.ConfigFileUsed())
-		} else {
-			log.Info("No config file found, using defaults and flags")
+		if err := loadConfigFile(v, log); err != nil {
+			return err
 		}
 
 		// Bind flags to viper (flags take precedence over config file)

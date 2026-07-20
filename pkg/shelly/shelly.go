@@ -1,9 +1,8 @@
 package shelly
 
 import (
+	"encoding/json"
 	"net"
-
-	"github.com/asnowfix/home-automation/pkg/devices"
 )
 
 // func Devices(ctx context.Context, log logr.Logger, devices []devices.Device) []*Device {
@@ -41,7 +40,20 @@ func (d ShellyDevice) Online() bool {
 }
 
 func (d ShellyDevice) MarshalJSON() ([]byte, error) {
-	return devices.MarshalJSON(d)
+	type marshallableDevice struct {
+		Id   string           `json:"id"`
+		Name string           `json:"name"`
+		Host string           `json:"host"`
+		Ip   net.IP           `json:"ip"`
+		Mac  net.HardwareAddr `json:"mac"`
+	}
+	return json.Marshal(marshallableDevice{
+		Id:   d.Id(),
+		Name: d.Name(),
+		Host: d.Host(),
+		Ip:   d.Ip(),
+		Mac:  d.Mac(),
+	})
 }
 
 func (d ShellyDevice) Manufacturer() string {

@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 
 	"github.com/go-logr/logr"
@@ -16,7 +16,16 @@ import (
 
 const MDNS_SHELLIES string = "_shelly._tcp."
 
-func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver devices.Resolver, entry *zeroconf.ServiceEntry) (devices.Device, error) {
+// Resolver is the narrow lookup surface NewDeviceFromZeroConfEntry accepts —
+// declared locally so pkg/shelly does not depend on the app's pkg/devices
+// package (see CLAUDE.md's Three-Tier Layer Rule). Any type satisfying these
+// two methods, including pkg/devices.Resolver, already implements it.
+type Resolver interface {
+	LookupHost(ctx context.Context, log logr.Logger, host string) (ips []net.IP, err error)
+	LookupService(ctx context.Context, service string) (*url.URL, error)
+}
+
+func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver Resolver, entry *zeroconf.ServiceEntry) (*Device, error) {
 	s, _ := json.Marshal(entry)
 	log.V(1).Info("Found", "entry", s)
 
@@ -44,8 +53,8 @@ func NewDeviceFromZeroConfEntry(ctx context.Context, log logr.Logger, resolver d
 	}
 
 	d := &Device{
-		Id_:   deviceId,
-		Name_: entry.Instance,
+		id:   deviceId,
+		name: entry.Instance,
 		info: &shelly.DeviceInfo{
 			Id: deviceId,
 			Product: shelly.Product{

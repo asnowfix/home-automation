@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
@@ -37,7 +36,7 @@ var configCmd = &cobra.Command{
 	},
 }
 
-func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func configOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device shellyapi.Summary, args []string) (any, error) {
 	sd, ok := device.(*shellyapi.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)

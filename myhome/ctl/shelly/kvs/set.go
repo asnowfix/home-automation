@@ -13,7 +13,6 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
@@ -35,7 +34,7 @@ var setCtl = &cobra.Command{
 	},
 }
 
-func setKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func setKeyValue(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)

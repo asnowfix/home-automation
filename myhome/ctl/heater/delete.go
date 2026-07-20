@@ -10,7 +10,6 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
@@ -31,7 +30,7 @@ var deleteCmd = &cobra.Command{
 	},
 }
 
-func doDelete(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doDelete(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)

@@ -14,7 +14,6 @@ import (
 	shellysetup "github.com/asnowfix/home-automation/internal/myhome/shelly/setup"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	mhmqtt "github.com/asnowfix/home-automation/myhome/mqtt"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/asnowfix/home-automation/pkg/shelly/wifi"
@@ -88,7 +87,7 @@ func getSetupConfig(ctx context.Context) (shellysetup.Config, error) {
 }
 
 // doSetup performs the actual setup logic for a single device
-func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device shellyapi.Summary, args []string) (any, error) {
 	sd, ok := device.(*shellyapi.Device)
 	if !ok {
 		return nil, fmt.Errorf("expected *shellyapi.Device, got %T", device)

@@ -14,7 +14,6 @@ import (
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/internal/tools"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	shellyscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
@@ -36,7 +35,7 @@ var flags struct {
 	Port int
 }
 
-func doScriptDebug(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doScriptDebug(ctx context.Context, log logr.Logger, via types.Channel, device shellyapi.Summary, args []string) (any, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("doScriptDebug requires [scriptName, true|false]")
 	}
@@ -207,7 +206,7 @@ var debugCtl = &cobra.Command{
 	},
 }
 
-func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doDebug(ctx context.Context, log logr.Logger, via types.Channel, device shellyapi.Summary, args []string) (any, error) {
 	sd, ok := device.(*shellyapi.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)

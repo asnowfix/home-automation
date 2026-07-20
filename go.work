@@ -58,6 +58,7 @@ use (
 	./pkg/shelly/sswitch
 	./pkg/shelly/system
 	./pkg/shelly/types
+	./pkg/shelly/typestest
 	./pkg/shelly/wifi
 	./pkg/tapo
 	./pkg/version

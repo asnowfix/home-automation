@@ -8,7 +8,6 @@ import (
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
@@ -94,7 +93,7 @@ func getDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, *sh
 	}
 	var sd *shelly.Device
 	var sdErr error
-	_, err = myhome.Foreach(ctx, hlog.Logger, d.Id(), types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, dev devices.Device, args []string) (any, error) {
+	_, err = myhome.Foreach(ctx, hlog.Logger, d.Id(), types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, dev shelly.Summary, args []string) (any, error) {
 		if s, ok := dev.(*shelly.Device); ok {
 			sd = s
 		} else {

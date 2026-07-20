@@ -1,14 +1,20 @@
-package types
+// Package typestest provides test doubles for pkg/shelly/types, following
+// the stdlib convention of a separate "test support" package (cf.
+// net/http/httptest) rather than shipping test-only code in the production
+// types package.
+package typestest
 
 import (
 	"context"
 	"fmt"
 	"net"
+
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 )
 
 // FakeDeviceCall records a single CallE invocation made against a FakeDevice.
 type FakeDeviceCall struct {
-	Via    Channel
+	Via    types.Channel
 	Method string
 	Params any
 }
@@ -56,7 +62,7 @@ func (f *FakeDevice) SetError(method string, err error) {
 // CallE implements Device. It records the call and returns whatever was
 // configured via SetResult/SetError; if nothing was configured for method it
 // returns an error naming the unconfigured method.
-func (f *FakeDevice) CallE(ctx context.Context, via Channel, method string, params any) (any, error) {
+func (f *FakeDevice) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
 	f.Calls = append(f.Calls, FakeDeviceCall{Via: via, Method: method, Params: params})
 	if err, ok := f.errs[method]; ok {
 		return nil, err
@@ -80,9 +86,9 @@ func (f *FakeDevice) From() <-chan []byte   { return nil }
 func (f *FakeDevice) StartDialog(ctx context.Context) uint32    { return 0 }
 func (f *FakeDevice) StopDialog(ctx context.Context, id uint32) {}
 
-func (f *FakeDevice) IsHttpReady() bool                                { return true }
-func (f *FakeDevice) IsMqttReady() bool                                { return true }
-func (f *FakeDevice) Channel(ctx context.Context, via Channel) Channel { return via }
+func (f *FakeDevice) IsHttpReady() bool                                            { return true }
+func (f *FakeDevice) IsMqttReady() bool                                            { return true }
+func (f *FakeDevice) Channel(ctx context.Context, via types.Channel) types.Channel { return via }
 
 func (f *FakeDevice) UpdateName(name string) { f.NameValue = name }
 func (f *FakeDevice) UpdateHost(host string) { f.HostValue = host }
@@ -93,4 +99,4 @@ func (f *FakeDevice) UpdateId(id string)     { f.IdValue = id }
 func (f *FakeDevice) IsModified() bool { return false }
 func (f *FakeDevice) ResetModified()   {}
 
-var _ Device = (*FakeDevice)(nil)
+var _ types.Device = (*FakeDevice)(nil)

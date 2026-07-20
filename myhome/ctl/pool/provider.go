@@ -6,7 +6,6 @@ import (
 
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
@@ -29,7 +28,7 @@ func (p *poolProvider) GetDeviceByAny(ctx context.Context, identifier string) (*
 	// Return the first matching device
 	device := (*devices)[0]
 
-	// Convert pkg/devices.Device to myhome.Device
+	// Convert pkg/shelly.Summary to myhome.Device
 	mac := ""
 	if device.Mac() != nil {
 		mac = device.Mac().String()
@@ -54,7 +53,7 @@ func (p *poolProvider) GetShellyDevice(ctx context.Context, device *myhome.Devic
 	var shellyDevice *shelly.Device
 	var deviceErr error
 
-	_, err := myhome.Foreach(ctx, hlog.Logger, device.Id(), types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, d devices.Device, args []string) (any, error) {
+	_, err := myhome.Foreach(ctx, hlog.Logger, device.Id(), types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, d shelly.Summary, args []string) (any, error) {
 		sd, ok := d.(*shelly.Device)
 		if !ok {
 			deviceErr = fmt.Errorf("device is not a Shelly device")

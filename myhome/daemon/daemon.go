@@ -13,6 +13,7 @@ import (
 	myhomesfr "github.com/asnowfix/home-automation/internal/myhome/sfr"
 	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
+	"github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	"github.com/asnowfix/home-automation/myhome/events"
@@ -161,7 +162,7 @@ func (d *daemon) Run() error {
 	}
 	defer mc.Close()
 
-	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
+	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit, scripts.GetFS())
 
 	// Start the main HTTP server (as a Mux), given to every other servers started below
 	// mux := http.NewServeMux()

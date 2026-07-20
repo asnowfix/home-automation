@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -30,7 +31,7 @@ func loadConfigFile(v *viper.Viper, log logr.Logger) error {
 	if err := v.ReadInConfig(); err == nil {
 		log.Info("Loaded config from", "file", v.ConfigFileUsed())
 		return nil
-	} else if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+	} else if notFound := (viper.ConfigFileNotFoundError{}); errors.As(err, &notFound) {
 		log.Info("No config file found, using defaults and flags")
 		return nil
 	} else {

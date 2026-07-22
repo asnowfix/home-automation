@@ -199,7 +199,9 @@ test: build check-boundaries
 #
 # RACE_SKIP_PACKAGES: packages with known, pre-existing data races surfaced
 # when the race job was introduced (#355), excluded from the root module's
-# `go test -race ./...` by import-path pattern. Each entry is tracked by a
+# `go test -race ./...` by exact import path (NOT a prefix — myhome/daemon's
+# own subpackage myhome/daemon/watch has no known race and must stay
+# covered, so the grep below anchors both ends). Each entry is tracked by a
 # dedicated bug; remove the entry when closing the bug:
 #   internal/shelly/scripts — #372 (script-emulator DeviceState maps)
 #   myhome/daemon           — #373 (mockPumpController.calls in solar tests)
@@ -209,8 +211,8 @@ test: build check-boundaries
 RACE_SKIP_PACKAGES := github.com/asnowfix/home-automation/internal/shelly/scripts github.com/asnowfix/home-automation/myhome/daemon
 
 test-race: build
-	@pattern=$$(echo "$(RACE_SKIP_PACKAGES)" | tr ' ' '|' | sed 's/|/\\|/g'); \
-	pkgs=$$($(GO) list ./... | grep -v -E "^($$pattern)(/|$$)"); \
+	@pattern=$$(echo "$(RACE_SKIP_PACKAGES)" | tr ' ' '|'); \
+	pkgs=$$($(GO) list ./... | grep -v -E "^($$pattern)$$"); \
 	$(GO) test -race $$pkgs
 	(cd pkg/shelly && $(GO) test -race ./...)
 	(cd pkg/sfr && $(GO) test -race ./...)

@@ -1417,7 +1417,7 @@ mac, err := blu.ResolveMac(ctx, identifier)
 
 ### Developer Tools
 
-One-off Go programs in `tools/`. Each is its own workspace module — always add new ones with `go work use ./tools/<name>`. Run from the repo root.
+One-off Go programs in `tools/`. Since the module collapse (#359), these are ordinary packages in the root module — no `go work use` needed for a new one. Run from the repo root.
 
 | Tool | Purpose |
 |---|---|
@@ -1556,8 +1556,10 @@ One paragraph.
 ### Go Test Suite
 
 `make test` is the canonical way to run the full test suite.  It runs
-`go test ./...` on the root module and then on every sub-module listed in
-`go.work`, so no module is silently skipped.
+`go test ./...` on the root module and then on each of the 3 standalone
+library modules (`pkg/shelly`, `pkg/sfr`, `pkg/beem` — see `go.work` and
+CLAUDE.md's "Go Workspace" section, #359), so no module is silently
+skipped.
 
 **Rule: any new test command must be wired up in both places:**
 

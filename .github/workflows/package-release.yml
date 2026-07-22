@@ -176,9 +176,11 @@ jobs:
           GOTOOLCHAIN: go1.25.3
       - name: Run go generate
         run: |
-          go generate -v ./internal/myhome/ui/...
-          go generate -v ./myhome/ctl/pool
-          go generate -v ./myhome/ctl/garden
+          # A single `go generate ./...` now covers every //go:generate
+          # directive in the tree: the module collapse (#359) folded
+          # internal/myhome/ui, myhome/ctl/pool and myhome/ctl/garden into the
+          # root module, so go generate's workspace-module recursion gap (see
+          # CLAUDE.md) no longer applies to them.
           go generate -v ./...
           if (Test-Path internal/myhome/ui/static/bulma.min.css) { ls internal/myhome/ui/static/bulma.min.css } else { Write-Host "bulma.min.css not found!" }
       - id: build

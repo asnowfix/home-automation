@@ -1,9 +1,10 @@
 # golangci-lint v2 configuration.
 #
-# The repo is a Go workspace (~59 modules under go.work). golangci-lint has
-# no built-in "loop over workspace modules" mode, so CI and `make lint` run
-# this same config once per module, mirroring the `make test` module loop
-# in the root Makefile.
+# The repo is a Go workspace with 4 modules under go.work: the root app
+# module plus 3 standalone library modules (pkg/shelly, pkg/sfr, pkg/beem —
+# see #359). golangci-lint has no built-in "loop over workspace modules"
+# mode, so CI and `make lint` run this same config once per module,
+# mirroring the `make test` module loop in the root Makefile (LIB_MODULES).
 #
 # Curated linter set per issue #355: catch mechanically-findable defects
 # (ignored errors, %v-wrapping, dead assignments, unused code, vet issues)

@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/go-logr/logr"
 )
 
 // buildTestServer returns an httptest.Server that serves one login response and
@@ -46,7 +48,7 @@ func summaryOK(solarW, dailyWh, monthlyWh float64) http.HandlerFunc {
 
 // newClientForTest creates a Client whose HTTP requests are redirected to srv.
 func newClientForTest(cfg ClientConfig, srv *httptest.Server) *Client {
-	c := NewClient(cfg)
+	c := NewClient(cfg, logr.Discard())
 	// Override the URLs so requests go to the test server.
 	c.http = *srv.Client()
 	return c
@@ -135,7 +137,7 @@ func TestPollSummary_401TriggersRelogin(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"})
+	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"}, logr.Discard())
 	c.http = *srv.Client()
 
 	origLogin, origSummary := loginURL, summaryURL
@@ -176,7 +178,7 @@ func TestTokenProactiveRefresh(t *testing.T) {
 	srv := buildTestServer(t, loginHandler, summaryOK(100, 200, 300))
 	defer srv.Close()
 
-	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"})
+	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"}, logr.Discard())
 	c.http = *srv.Client()
 
 	origLogin, origSummary := loginURL, summaryURL
@@ -322,7 +324,7 @@ func TestLogin_201CreatedRealWorldPayload(t *testing.T) {
 	srv := buildTestServer(t, loginHandler, summaryOK(100, 200, 300))
 	defer srv.Close()
 
-	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"})
+	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"}, logr.Discard())
 	c.http = *srv.Client()
 
 	origLogin, origSummary := loginURL, summaryURL
@@ -451,7 +453,7 @@ func TestGetDevices_401TriggersRelogin(t *testing.T) {
 	srv := buildDevicesTestServer(t, loginHandler, devicesHandler)
 	defer srv.Close()
 
-	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"})
+	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"}, logr.Discard())
 	c.http = *srv.Client()
 	defer patchDevicesURLs(srv)()
 

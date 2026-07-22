@@ -229,10 +229,19 @@ lint: build
 	golangci-lint run ./...
 	@rc=0; $(foreach m,$(LIB_MODULES),(cd $(m) && golangci-lint run ./...) || rc=1;) exit $$rc
 
+# cover: coverage is scoped to packages that actually have tests, matching
+# the pre-#359 module-collapse behavior where a submodule with zero
+# _test.go files was skipped by the module-loop entirely (and, being a
+# separate module, never entered root's own `./...` scan either). Now that
+# module boundaries are gone, untested leaf/CLI packages (myhome/ctl/*,
+# hlog, cmd/*, tools/*, etc.) would otherwise be silently pulled into the
+# coverage denominator by a plain `go test ./...`, deflating the ratio
+# without reflecting any real change in how well *tested* code is covered.
 cover: build
 	@mkdir -p coverage
-	$(GO) test -covermode=atomic -coverprofile=coverage/root.cov ./...
-	@rc=0; $(foreach m,$(LIB_MODULES),(cd $(m) && $(GO) test -covermode=atomic -coverprofile=$(CURDIR)/coverage/$(subst /,_,$(m)).cov ./...) || rc=1;) \
+	@pkgs="$$($(GO) list -f '{{if .TestGoFiles}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$')"; \
+	$(GO) test -covermode=atomic -coverprofile=coverage/root.cov $$pkgs
+	@rc=0; $(foreach m,$(LIB_MODULES),(cd $(m) && pkgs="$$($(GO) list -f '{{if .TestGoFiles}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$')" && $(GO) test -covermode=atomic -coverprofile=$(CURDIR)/coverage/$(subst /,_,$(m)).cov $$pkgs) || rc=1;) \
 	echo "mode: atomic" > coverage.txt; \
 	for f in coverage/*.cov; do grep -v "^mode:" "$$f" >> coverage.txt 2>/dev/null || true; done; \
 	exit $$rc

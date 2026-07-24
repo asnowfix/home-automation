@@ -195,6 +195,66 @@ if [ "$1" = "configure" ]; then
         systemctl restart "$timer"
     done
 
+    # -------------------------------------------------------------------
+    # Push the scripts bundled with this package to every Shelly device
+    # the daemon already knows about, so devices end up running the exact
+    # script versions shipped in this install/upgrade/downgrade.
+    #
+    # Script versioning is content-hash based (see
+    # internal/myhome/shelly/script/ops.go: UploadWithVersion compares a
+    # sha1 of the embedded script against a KVS-recorded hash on the
+    # device), not sequence-number based, so re-running this on a
+    # downgrade re-uploads scripts just as correctly as on an upgrade.
+    #
+    # `myhome ctl shelly script update '*'` only touches scripts already
+    # loaded on a device (see myhome/ctl/shelly/script/update.go), so
+    # devices never receive scripts they didn't already have.
+    # -------------------------------------------------------------------
+    MYHOME_BIN="/usr/bin/myhome"
+    if [ -x "$MYHOME_BIN" ]; then
+        echo "Waiting for $SERVICE to discover its known devices..."
+
+        POLL_INTERVAL=3
+        MAX_WAIT=90
+        elapsed=0
+        prev_count=-1
+        stable_polls=0
+        count=0
+
+        while [ "$elapsed" -lt "$MAX_WAIT" ]; do
+            count=$("$MYHOME_BIN" ctl --wait 5s list '*' --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)
+            case "$count" in ''|*[!0-9]*) count=0 ;; esac
+
+            # Stop as soon as the known-device count stops growing across
+            # two consecutive polls (device.match returns the daemon's
+            # DB-backed registry immediately, then fills in as retained
+            # MQTT messages and mDNS discovery catch up).
+            if [ "$count" -gt 0 ] && [ "$count" -eq "$prev_count" ]; then
+                stable_polls=$((stable_polls + 1))
+            else
+                stable_polls=0
+            fi
+            prev_count=$count
+
+            if [ "$stable_polls" -ge 2 ]; then
+                break
+            fi
+
+            sleep "$POLL_INTERVAL"
+            elapsed=$((elapsed + POLL_INTERVAL))
+        done
+
+        if [ "$count" -gt 0 ]; then
+            echo "Updating Shelly scripts on $count known device(s) (waited ${elapsed}s)..."
+            "$MYHOME_BIN" ctl --wait 180s shelly script update '*' || \
+                echo "Warning: script update did not complete cleanly on all devices; this does not affect package installation. Run 'myhome ctl shelly script update *' manually to retry." >&2
+        else
+            echo "No known devices found after ${elapsed}s; skipping script update. Run 'myhome ctl shelly script update *' manually once devices are reachable."
+        fi
+    else
+        echo "Warning: $MYHOME_BIN not found, skipping script update step" >&2
+    fi
+
     # Restart prometheus-mqtt-exporter to apply new configuration
     if systemctl list-unit-files prometheus-mqtt-exporter.service >/dev/null 2>&1; then
         if systemctl is-active --quiet prometheus-mqtt-exporter; then

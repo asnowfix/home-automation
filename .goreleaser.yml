@@ -3,9 +3,11 @@ version: 2
 project_name: myhome
 before:
   hooks:
-    - go generate ./internal/myhome/ui/...
-    - go generate ./myhome/ctl/pool
-    - go generate ./myhome/ctl/garden
+    # A single `go generate ./...` now covers every //go:generate directive in
+    # the tree (embedded UI assets, garden/pool defaults): the module collapse
+    # (#359) folded internal/myhome/ui, myhome/ctl/pool and myhome/ctl/garden
+    # into the root module, so go generate's workspace-module recursion gap
+    # (see CLAUDE.md) no longer applies to them.
     - go generate ./...
 builds:
   - env: [CGO_ENABLED=0]

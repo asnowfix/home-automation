@@ -4,63 +4,7 @@ toolchain go1.25.3
 
 use (
 	.
-	./hlog
-	./internal/debug
-	./internal/global
-	./internal/myhome
-	./internal/myhome/blu
-	./internal/myhome/net
-	./internal/myhome/ui
-	./internal/myip
-	./internal/myzone
-	./internal/shelly/scripts
-	./internal/tools
-	./myhome/ctl
-	./myhome/ctl/blu
-	./myhome/ctl/blu/follow
-	./myhome/ctl/db
-	./myhome/ctl/forget
-	./myhome/ctl/list
-	./myhome/ctl/mqtt
-	./myhome/ctl/open
-	./myhome/ctl/options
-	./myhome/ctl/sfr
-	./myhome/ctl/shelly
-	./myhome/ctl/shelly/follow
-	./myhome/ctl/show
-	./myhome/ctl/sswitch
-	./myhome/ctl/temperature
-	./myhome/daemon
-	./myhome/daemon/watch
-	./myhome/devices
-	./myhome/devices/impl
-	./myhome/events
-	./myhome/mqtt
-	./myhome/notice
-	./myhome/notify
-	./myhome/occupancy
-	./myhome/storage
-	./myhome/temperature
 	./pkg/beem
-	./pkg/devices
 	./pkg/sfr
 	./pkg/shelly
-	./pkg/shelly/blu
-	./pkg/shelly/ethernet
-	./pkg/shelly/gen1
-	./pkg/shelly/input
-	./pkg/shelly/kvs
-	./pkg/shelly/mqtt
-	./pkg/shelly/schedule
-	./pkg/shelly/script
-	./pkg/shelly/shelly
-	./pkg/shelly/shttp
-	./pkg/shelly/sswitch
-	./pkg/shelly/system
-	./pkg/shelly/types
-	./pkg/shelly/typestest
-	./pkg/shelly/wifi
-	./pkg/tapo
-	./pkg/version
-	./tools/classify-events
 )

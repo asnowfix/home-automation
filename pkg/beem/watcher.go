@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/asnowfix/home-automation/hlog"
-	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/go-logr/logr"
 )
 
@@ -14,6 +12,15 @@ const (
 	// MQTTTopic is the retained MQTT topic where Beem power samples are published.
 	MQTTTopic = "myhome/energy/beem/power"
 )
+
+// Publisher is the minimal MQTT capability the Watcher needs: publishing a
+// (possibly retained) payload to a topic. Declared locally, rather than
+// importing the app's MQTT client type, so pkg/beem stays a standalone
+// module with no dependency on the app module. Any richer MQTT client
+// (e.g. myhome/mqtt.Client) satisfies this interface as-is.
+type Publisher interface {
+	Publish(ctx context.Context, topic string, payload []byte, qos byte, retained bool, publisherName string) error
+}
 
 // Watcher polls the Beem Energy REST API and publishes power samples to MQTT.
 type Watcher struct {
@@ -25,22 +32,23 @@ type Watcher struct {
 	// without this package knowing anything about that concept.
 	OnResult func(err error)
 
-	client     *Client
-	mqttClient mqttclient.Client
-	powerCh    chan PowerSample
-	log        logr.Logger
+	client  *Client
+	pub     Publisher
+	powerCh chan PowerSample
+	log     logr.Logger
 }
 
 // NewWatcher creates a Watcher but does not start polling yet.
-// Call Start to begin the polling loop.
-func NewWatcher(ctx context.Context, cfg ClientConfig, mqttClient mqttclient.Client) *Watcher {
+// Call Start to begin the polling loop. log receives watcher activity; pass
+// logr.Discard() for no logging.
+func NewWatcher(ctx context.Context, cfg ClientConfig, pub Publisher, log logr.Logger) *Watcher {
 	ch := make(chan PowerSample, 16)
 	return &Watcher{
-		PowerCh:    ch,
-		client:     NewClient(cfg),
-		mqttClient: mqttClient,
-		powerCh:    ch,
-		log:        hlog.GetLogger("pkg/beem"),
+		PowerCh: ch,
+		client:  NewClient(cfg, log),
+		pub:     pub,
+		powerCh: ch,
+		log:     log,
 	}
 }
 
@@ -109,7 +117,7 @@ func (w *Watcher) poll(ctx context.Context) {
 		return
 	}
 
-	if err := w.mqttClient.Publish(ctx, MQTTTopic, payload, 0, true, "beem-watcher"); err != nil {
+	if err := w.pub.Publish(ctx, MQTTTopic, payload, 0, true, "beem-watcher"); err != nil {
 		w.log.Error(err, "Beem Energy: failed to publish to MQTT", "topic", MQTTTopic)
 		return
 	}

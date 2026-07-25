@@ -243,7 +243,7 @@ func (d *daemon) Run() error {
 			Password:     options.Flags.BeemPassword,
 			PollInterval: options.Flags.BeemPollInterval,
 		}
-		beemWatcher = beem.NewWatcher(d.ctx, beemCfg, mc)
+		beemWatcher = beem.NewWatcher(d.ctx, beemCfg, mc, log.WithName("pkg/beem"))
 		beemWatcher.OnResult = func(err error) { accountsRegistry.Report("beem", err) }
 		if err := beemWatcher.Start(d.ctx); err != nil {
 			log.Error(err, "Failed to start Beem watcher")

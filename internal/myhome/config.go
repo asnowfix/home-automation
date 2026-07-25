@@ -23,14 +23,12 @@ func ConfigureDevice(ctx context.Context, log logr.Logger, identifier string, na
 	log = log.WithName("ConfigureDevice")
 
 	// Get the device from the database using RPC
-	result, err := TheClient.CallE(ctx, DeviceShow, &DeviceShowParams{Identifier: identifier})
+	device, err := Call[*DeviceShowParams, *Device](ctx, TheClient, DeviceShow, &DeviceShowParams{Identifier: identifier})
 	if err != nil {
 		return fmt.Errorf("device not found: %w", err)
 	}
-
-	device, ok := result.(*Device)
-	if !ok {
-		return fmt.Errorf("unexpected result type: %T", result)
+	if device == nil {
+		return fmt.Errorf("device not found: %s", identifier)
 	}
 
 	log.Info("Found device", "id", device.Id(), "name", device.Name(), "manufacturer", device.Manufacturer())
@@ -48,7 +46,7 @@ func ConfigureDevice(ctx context.Context, log logr.Logger, identifier string, na
 	// Save to local database if modified
 	if modified {
 		// Use the device update RPC method
-		_, err = TheClient.CallE(ctx, DeviceUpdate, device)
+		_, err = Call[*Device, any](ctx, TheClient, DeviceUpdate, device)
 		if err != nil {
 			return fmt.Errorf("failed to update device in local database: %w", err)
 		}

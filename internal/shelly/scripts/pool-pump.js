@@ -913,13 +913,24 @@ function mapSpeedToSwitch(speed) {
 }
 
 // === OUTPUT CONTROL ===
-function turnOffAllSwitches(callback) {
-  for (var i = 0; i < STATE.outputs.length; i++) {
-    Shelly.call("Switch.Set", {id: STATE.outputs[i], on: false}, function(res, err) {
-      if (err && false) {}
-    });
+// Turns off outputs one at a time via the task queue. Dispatching Shelly.call from
+// inside a for loop fires all iterations before any response arrives, exhausting the
+// 5-concurrent-RPC budget (see AGENTS.md "Callback Depth Limits" — Cause B).
+function turnOffAllSwitchesNext(ids, index, callback) {
+  if (index >= ids.length) {
+    if (callback) callback();
+    return;
   }
-  if (callback) queueTask(callback);
+  var id = ids[index];
+  index++;
+  Shelly.call("Switch.Set", {id: id, on: false}, function(res, err) {
+    if (err && false) {}
+    queueTask(function() { turnOffAllSwitchesNext(ids, index, callback); });
+  });
+}
+
+function turnOffAllSwitches(callback) {
+  turnOffAllSwitchesNext(STATE.outputs, 0, callback);
 }
 
 function turnOffPro1(callback) {
@@ -939,9 +950,31 @@ function setOutput(outputId, on, callback) {
     if (callback) callback();
     return;
   }
-  
+
   log("Setting switch", outputId, "to", on);
   Shelly.call("Switch.Set", {id: outputId, on: on}, callback);
+}
+
+// Turns off every output except exceptId, one at a time via the task queue
+// (see turnOffAllSwitches above for why a for-loop of Shelly.call is unsafe here).
+function turnOffOtherOutputsNext(ids, index, exceptId, callback) {
+  if (index >= ids.length) {
+    if (callback) callback();
+    return;
+  }
+  var id = ids[index];
+  index++;
+  if (id === exceptId) {
+    turnOffOtherOutputsNext(ids, index, exceptId, callback);
+    return;
+  }
+  setOutput(id, false, function() {
+    queueTask(function() { turnOffOtherOutputsNext(ids, index, exceptId, callback); });
+  });
+}
+
+function turnOffOtherOutputs(exceptId, callback) {
+  turnOffOtherOutputsNext(STATE.outputs, 0, exceptId, callback);
 }
 
 // === SOFTWARE FUSE (ANTI-CYCLING PROTECTION) ===
@@ -1021,15 +1054,8 @@ function activateOutput(outputId, callback) {
 
   if (STATE.deviceType === "pro3") {
     safeActivatePro3(outputId, function() {
-      // Turn off all outputs simultaneously
-      for (var i = 0; i < STATE.outputs.length; i++) {
-        Shelly.call("Switch.Set", {id: STATE.outputs[i], on: false}, function(res, err) {
-          if (err && false) {}
-        });
-      }
-
-      // Use task queue instead of a one-shot timer to avoid consuming a timer slot
-      queueTask(function() {
+      // Turn off all outputs (one at a time via the task queue — see turnOffAllSwitches)
+      turnOffAllSwitches(function() {
         if (outputId !== -1) {
           setOutput(outputId, true, function() {
             STATE.activeOutput = outputId;
@@ -1185,14 +1211,9 @@ function handleSwitchEvent(info) {
   }
 
   if (STATE.deviceType === "pro3" && info.state === true) {
-    // Ensure only one output is on
+    // Ensure only one output is on (one at a time via the task queue — see turnOffOtherOutputs)
     var activatedOutput = info.id;
-    for (var i = 0; i < STATE.outputs.length; i++) {
-      var outputId = STATE.outputs[i];
-      if (outputId !== activatedOutput) {
-        setOutput(outputId, false);
-      }
-    }
+    turnOffOtherOutputs(activatedOutput);
     STATE.activeOutput = activatedOutput;
     saveState();
 

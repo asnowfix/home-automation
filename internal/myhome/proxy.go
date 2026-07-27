@@ -24,7 +24,7 @@ type Client interface {
 // parameter type, R the expected result type; both are normally inferred
 // from the arguments, so a call site reads:
 //
-//	rooms, err := myhome.Call[any, myhome.RoomListResult](ctx, myhome.TheClient, myhome.RoomList, nil)
+//	rooms, err := myhome.Call[any, *myhome.RoomListResult](ctx, myhome.TheClient, myhome.RoomList, nil)
 //
 // CallE itself stays untyped (it must satisfy the Client interface for every
 // verb), so Call is what gives callers their compile-time result type back.

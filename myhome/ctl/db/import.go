@@ -102,7 +102,7 @@ Examples:
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.DeviceUpdate, &device)
+				_, err := myhome.Call[*myhome.Device, any](ctx, myhome.TheClient, myhome.DeviceUpdate, &device)
 				if err != nil {
 					// Check if this is a context cancellation error
 					if ctx.Err() != nil {
@@ -126,7 +126,7 @@ Examples:
 					Kinds:  roomConfig.Kinds,
 					Levels: roomConfig.Levels,
 				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSet, params)
+				_, err := myhome.Call[*myhome.TemperatureSetParams, *myhome.TemperatureSetResult](ctx, myhome.TheClient, myhome.TemperatureSet, params)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "⚠ Failed to import room %s: %v\n", roomID, err)
 					continue
@@ -141,7 +141,7 @@ Examples:
 					Weekday: weekday,
 					DayType: dayType,
 				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSetWeekdayDefault, params)
+				_, err := myhome.Call[*myhome.TemperatureSetWeekdayDefaultParams, *myhome.TemperatureSetWeekdayDefaultResult](ctx, myhome.TheClient, myhome.TemperatureSetWeekdayDefault, params)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "⚠ Failed to import weekday default %d: %v\n", weekday, err)
 					continue
@@ -166,7 +166,7 @@ Examples:
 					DayType: schedule.DayType,
 					Ranges:  rangeStrs,
 				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSetKindSchedule, params)
+				_, err := myhome.Call[*myhome.TemperatureSetKindScheduleParams, *myhome.TemperatureSetKindScheduleResult](ctx, myhome.TheClient, myhome.TemperatureSetKindSchedule, params)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "⚠ Failed to import kind schedule %s/%s: %v\n", schedule.Kind, schedule.DayType, err)
 					continue

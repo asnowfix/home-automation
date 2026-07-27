@@ -48,14 +48,13 @@ var showShellyCmd = &cobra.Command{
 			// Fetch full device info for each matched device
 			fullDevices := make([]*myhome.Device, 0, len(*devices))
 			for _, dev := range *devices {
-				out, err := myhome.TheClient.CallE(ctx, myhome.DeviceShow, &myhome.DeviceShowParams{Identifier: dev.Id()})
+				device, err := myhome.Call[*myhome.DeviceShowParams, *myhome.Device](ctx, myhome.TheClient, myhome.DeviceShow, &myhome.DeviceShowParams{Identifier: dev.Id()})
 				if err != nil {
 					log.Error(err, "failed to fetch device details", "id", dev.Id())
 					continue
 				}
-				device, ok := out.(*myhome.Device)
-				if !ok {
-					log.Error(fmt.Errorf("unexpected type: expected *myhome.Device"), "id", dev.Id())
+				if device == nil {
+					log.Error(fmt.Errorf("nil device"), "id", dev.Id())
 					continue
 				}
 				fullDevices = append(fullDevices, device)

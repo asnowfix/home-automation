@@ -21,7 +21,7 @@ var clearCmd = &cobra.Command{
 			RoomId:     "", // Empty string clears the room
 		}
 
-		_, err := myhome.TheClient.CallE(cmd.Context(), myhome.DeviceSetRoom, params)
+		_, err := myhome.Call[*myhome.DeviceSetRoomParams, any](cmd.Context(), myhome.TheClient, myhome.DeviceSetRoom, params)
 		if err != nil {
 			return err
 		}

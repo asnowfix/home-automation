@@ -14,20 +14,20 @@ import (
 // myhome exposes no Unregister API, so when there was no prior registration
 // this intentionally leaves h registered afterward. Tests using this must
 // not call t.Parallel(), since the registry is a package-level global.
-func withRegisteredHandler(t *testing.T, verb myhome.Verb, h myhome.MethodHandler) {
+func withRegisteredHandler[P, R any](t *testing.T, verb myhome.Verb, h func(ctx context.Context, p P) (R, error)) {
 	t.Helper()
 	prev, err := myhome.Methods(verb)
-	myhome.RegisterMethodHandler(verb, h)
+	myhome.Register(verb, h)
 	t.Cleanup(func() {
 		if err == nil && prev != nil {
-			myhome.RegisterMethodHandler(verb, prev.ActionE)
+			myhome.RestoreMethod(verb, prev)
 		}
 	})
 }
 
 // TestOccupancyGetStatus_Dispatch verifies that RegisterHandlers wires
 // myhome.OccupancyGetStatus to handleGetStatus, and that dispatching through
-// the shared myhome.Methods/ActionE table (as the RPC server does) returns
+// the shared myhome.Methods/Action table (as the RPC server does) returns
 // the occupancy service's current status.
 func TestOccupancyGetStatus_Dispatch(t *testing.T) {
 	svc, _, cancel := newTestService(t, &fakeLanChecker{})
@@ -45,9 +45,9 @@ func TestOccupancyGetStatus_Dispatch(t *testing.T) {
 		t.Fatalf("Methods(OccupancyGetStatus): %v", err)
 	}
 
-	out, err := dispatched.ActionE(context.Background(), nil)
+	out, err := dispatched.Action(context.Background(), nil)
 	if err != nil {
-		t.Fatalf("ActionE: %v", err)
+		t.Fatalf("Action: %v", err)
 	}
 	result, ok := out.(*myhome.OccupancyStatusResult)
 	if !ok {
@@ -75,9 +75,9 @@ func TestOccupancyGetStatus_Dispatch_Occupied(t *testing.T) {
 		t.Fatalf("Methods(OccupancyGetStatus): %v", err)
 	}
 
-	out, err := dispatched.ActionE(context.Background(), nil)
+	out, err := dispatched.Action(context.Background(), nil)
 	if err != nil {
-		t.Fatalf("ActionE: %v", err)
+		t.Fatalf("Action: %v", err)
 	}
 	result, ok := out.(*myhome.OccupancyStatusResult)
 	if !ok {

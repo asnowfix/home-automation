@@ -57,12 +57,11 @@ func Methods(name Verb) (*Method, error) {
 // the runtime reflect.TypeOf check it required on the client: P is now
 // enforced by the compiler at every call site via the generic Call helper.
 //
-// Registering the same verb twice panics, matching the previous behavior of
-// RegisterMethodHandler.
+// Registering the same verb twice overwrites the previous registration
+// (matching the previous RegisterMethodHandler behavior); there is no
+// Unregister — tests that need to swap a handler just call Register again
+// and restore the previous *Method (via Methods) in t.Cleanup.
 func Register[P, R any](verb Verb, h func(ctx context.Context, p P) (R, error)) {
-	if _, exists := methods[verb]; exists {
-		panic(fmt.Errorf("method %s already registered", verb))
-	}
 	methods[verb] = &Method{
 		Name: verb,
 		Action: func(ctx context.Context, raw json.RawMessage) (any, error) {
@@ -78,3 +77,13 @@ func Register[P, R any](verb Verb, h func(ctx context.Context, p P) (R, error)) 
 }
 
 var methods = make(map[Verb]*Method)
+
+// RestoreMethod re-registers m verbatim under verb, bypassing the P/R
+// decode wrapper Register builds. It exists for test cleanup in packages
+// other than myhome itself: a test that swaps in a replacement handler via
+// Register can save the previous *Method (from Methods) and put it back
+// exactly via RestoreMethod in t.Cleanup, without needing to reconstruct a
+// typed Register call for a handler whose P/R it may not know.
+func RestoreMethod(verb Verb, m *Method) {
+	methods[verb] = m
+}

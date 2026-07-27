@@ -38,21 +38,11 @@ func NewService(log logr.Logger, provider DeviceProvider) *Service {
 
 // RegisterHandlers registers the switch RPC handlers
 func (s *Service) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.SwitchToggle, func(ctx context.Context, in any) (any, error) {
-		return s.HandleToggle(ctx, in.(*myhome.SwitchParams))
-	})
-	myhome.RegisterMethodHandler(myhome.SwitchOn, func(ctx context.Context, in any) (any, error) {
-		return s.HandleOn(ctx, in.(*myhome.SwitchParams))
-	})
-	myhome.RegisterMethodHandler(myhome.SwitchOff, func(ctx context.Context, in any) (any, error) {
-		return s.HandleOff(ctx, in.(*myhome.SwitchParams))
-	})
-	myhome.RegisterMethodHandler(myhome.SwitchStatus, func(ctx context.Context, in any) (any, error) {
-		return s.HandleStatus(ctx, in.(*myhome.SwitchParams))
-	})
-	myhome.RegisterMethodHandler(myhome.SwitchAll, func(ctx context.Context, in any) (any, error) {
-		return s.HandleAll(ctx, in.(*myhome.SwitchAllParams))
-	})
+	myhome.Register(myhome.SwitchToggle, s.HandleToggle)
+	myhome.Register(myhome.SwitchOn, s.HandleOn)
+	myhome.Register(myhome.SwitchOff, s.HandleOff)
+	myhome.Register(myhome.SwitchStatus, s.HandleStatus)
+	myhome.Register(myhome.SwitchAll, s.HandleAll)
 }
 
 // HandleToggle handles switch.toggle RPC method

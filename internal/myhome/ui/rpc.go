@@ -32,20 +32,11 @@ func RpcHandler(ctx context.Context, log logr.Logger) func(w http.ResponseWriter
 			return
 		}
 
-		// Decode params into the expected type for this method
-		params := mh.Signature.NewParams()
-		if len(req.Params) > 0 {
-			if err := json.Unmarshal(req.Params, &params); err != nil {
-				log.Error(err, "invalid params", "method", req.Method)
-				http.Error(w, "invalid params: "+err.Error(), http.StatusBadRequest)
-				return
-			}
-		}
-
-		var res any
-
-		// Call method
-		res, err = mh.ActionE(ctx, params)
+		// mh.Action decodes req.Params directly into the handler's declared
+		// parameter type — exactly the same raw-JSON entry point the server
+		// uses for a wire request, so there is no separate NewParams/Unmarshal
+		// step here anymore.
+		res, err := mh.Action(ctx, req.Params)
 		if err != nil {
 			log.Error(err, "method failed", "method", req.Method)
 			http.Error(w, err.Error(), http.StatusInternalServerError)

@@ -195,8 +195,7 @@ func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	params := mh.Signature.NewParams()
-	res, err := mh.ActionE(h.ctx, params)
+	res, err := mh.Call(h.ctx, nil)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -245,7 +244,7 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 		SwitchId:   sid,
 	}
 
-	res, err := mh.ActionE(h.ctx, params)
+	res, err := mh.Call(h.ctx, params)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

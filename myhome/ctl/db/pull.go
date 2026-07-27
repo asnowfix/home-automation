@@ -118,7 +118,7 @@ Examples:
 		// Import each device
 		imported := 0
 		for _, device := range devices {
-			_, err := myhome.TheClient.CallE(cmd.Context(), myhome.DeviceUpdate, &device)
+			_, err := myhome.Call[*myhome.Device, any](cmd.Context(), myhome.TheClient, myhome.DeviceUpdate, &device)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "⚠ Failed to import %s: %v\n", device.Id(), err)
 				continue

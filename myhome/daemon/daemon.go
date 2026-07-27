@@ -465,11 +465,7 @@ func (d *daemon) Run() error {
 
 		// Register EventList RPC handler if events service is running
 		if eventsStore != nil {
-			myhome.RegisterMethodHandler(myhome.EventList, func(ctx context.Context, in any) (any, error) {
-				req, ok := in.(*myhome.EventListRequest)
-				if !ok {
-					return nil, fmt.Errorf("unexpected param type: %T", in)
-				}
+			myhome.Register(myhome.EventList, func(ctx context.Context, req *myhome.EventListRequest) (*myhome.EventListResponse, error) {
 				q := events.Query{
 					DeviceID:  req.DeviceID,
 					EventType: req.EventType,

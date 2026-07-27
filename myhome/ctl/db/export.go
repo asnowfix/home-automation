@@ -77,27 +77,21 @@ Examples:
 		// Export temperature tables unless --devices-only is set
 		if !exportFlags.DevicesOnly {
 			// Get temperature rooms
-			roomsResult, err := myhome.TheClient.CallE(ctx, myhome.TemperatureList, nil)
-			if err == nil {
-				if rooms, ok := roomsResult.(*myhome.TemperatureRoomList); ok && len(*rooms) > 0 {
-					export.TemperatureRooms = *rooms
-				}
+			rooms, err := myhome.Call[any, *myhome.TemperatureRoomList](ctx, myhome.TheClient, myhome.TemperatureList, nil)
+			if err == nil && rooms != nil && len(*rooms) > 0 {
+				export.TemperatureRooms = *rooms
 			}
 
 			// Get weekday defaults
-			weekdayResult, err := myhome.TheClient.CallE(ctx, myhome.TemperatureGetWeekdayDefaults, &myhome.TemperatureGetWeekdayDefaultsParams{})
-			if err == nil {
-				if weekdayDefaults, ok := weekdayResult.(*myhome.TemperatureWeekdayDefaults); ok && len(weekdayDefaults.Defaults) > 0 {
-					export.WeekdayDefaults = weekdayDefaults.Defaults
-				}
+			weekdayDefaults, err := myhome.Call[*myhome.TemperatureGetWeekdayDefaultsParams, *myhome.TemperatureWeekdayDefaults](ctx, myhome.TheClient, myhome.TemperatureGetWeekdayDefaults, &myhome.TemperatureGetWeekdayDefaultsParams{})
+			if err == nil && weekdayDefaults != nil && len(weekdayDefaults.Defaults) > 0 {
+				export.WeekdayDefaults = weekdayDefaults.Defaults
 			}
 
 			// Get kind schedules
-			kindSchedulesResult, err := myhome.TheClient.CallE(ctx, myhome.TemperatureGetKindSchedules, &myhome.TemperatureGetKindSchedulesParams{})
-			if err == nil {
-				if kindSchedules, ok := kindSchedulesResult.(*myhome.TemperatureKindScheduleList); ok && len(*kindSchedules) > 0 {
-					export.KindSchedules = *kindSchedules
-				}
+			kindSchedules, err := myhome.Call[*myhome.TemperatureGetKindSchedulesParams, *myhome.TemperatureKindScheduleList](ctx, myhome.TheClient, myhome.TemperatureGetKindSchedules, &myhome.TemperatureGetKindSchedulesParams{})
+			if err == nil && kindSchedules != nil && len(*kindSchedules) > 0 {
+				export.KindSchedules = *kindSchedules
 			}
 		}
 

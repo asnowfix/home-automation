@@ -46,18 +46,34 @@ func TestRegister_KnownVerb(t *testing.T) {
 	}
 }
 
-// TestRegister_DuplicateVerb_Panics verifies that registering a handler for
-// a verb that already has one panics, matching the old
-// RegisterMethodHandler behavior for a conflicting registration.
-func TestRegister_DuplicateVerb_Panics(t *testing.T) {
+// TestRegister_DuplicateVerb_Overwrites verifies that registering a second
+// handler for a verb that already has one replaces it rather than panicking,
+// matching the old RegisterMethodHandler's overwrite behavior. Tests rely on
+// this to swap in a replacement handler without an Unregister API (see
+// withHandler and myhome/occupancy/rpc_test.go's withRegisteredHandler).
+func TestRegister_DuplicateVerb_Overwrites(t *testing.T) {
 	withHandler(t, TemperatureGet, nopHandler)
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for duplicate verb registration, but did not panic")
-		}
-	}()
-	Register(TemperatureGet, nopHandler)
+	called := false
+	Register(TemperatureGet, func(_ context.Context, _ any) (any, error) {
+		called = true
+		return "second", nil
+	})
+
+	m, err := Methods(TemperatureGet)
+	if err != nil {
+		t.Fatalf("Methods error: %v", err)
+	}
+	out, err := m.Action(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Action error: %v", err)
+	}
+	if !called {
+		t.Error("second registration's handler was not called; first handler was not overwritten")
+	}
+	if out != "second" {
+		t.Errorf("got %v, want %q", out, "second")
+	}
 }
 
 // TestMethods_Unregistered verifies that Methods returns an error (not a panic)

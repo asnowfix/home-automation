@@ -75,8 +75,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		sseBroadcaster: sseBroadcaster,
 	}
 
-	myhome.RegisterMethodHandler(myhome.DevicesMatch, func(ctx context.Context, in any) (any, error) {
-		name := in.(string)
+	myhome.Register(myhome.DevicesMatch, func(ctx context.Context, name string) (*[]devices.Device, error) {
 		devices := make([]devices.Device, 0)
 
 		var ds []*myhome.Device
@@ -100,9 +99,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		}
 		return &devices, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceLookup, func(ctx context.Context, in any) (any, error) {
-		name := in.(string)
-
+	myhome.Register(myhome.DeviceLookup, func(ctx context.Context, name string) (*[]devices.Device, error) {
 		devices := make([]devices.Device, 0)
 		device, err := dm.GetDeviceByAny(ctx, name)
 		if err == nil {
@@ -113,16 +110,14 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		return nil, fmt.Errorf("failed to get device by identifier: %w", err)
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceShow, func(ctx context.Context, in any) (any, error) {
-		params := in.(*myhome.DeviceShowParams)
+	myhome.Register(myhome.DeviceShow, func(ctx context.Context, params *myhome.DeviceShowParams) (*myhome.Device, error) {
 		return dm.GetDeviceByAny(ctx, params.Identifier)
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceForget, func(ctx context.Context, in any) (any, error) {
-		return nil, dm.ForgetDevice(ctx, in.(string))
+	myhome.Register(myhome.DeviceForget, func(ctx context.Context, identifier string) (any, error) {
+		return nil, dm.ForgetDevice(ctx, identifier)
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceRefresh, func(ctx context.Context, in any) (any, error) {
+	myhome.Register(myhome.DeviceRefresh, func(ctx context.Context, ident string) (*myhome.Device, error) {
 		log := dm.log.WithName("rpc/device.refresh")
-		ident := in.(string)
 		log.V(1).Info("New", "ident", ident)
 		device, err := dm.GetDeviceByAny(ctx, ident)
 		if err != nil {
@@ -162,8 +157,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		return device, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceSetup, func(ctx context.Context, in any) (any, error) {
-		params := in.(*myhome.DeviceSetupParams)
+	myhome.Register(myhome.DeviceSetup, func(ctx context.Context, params *myhome.DeviceSetupParams) (any, error) {
 		log := dm.log.WithName("rpc/device.setup")
 		log.V(1).Info("New", "params", params)
 		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
@@ -245,8 +239,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		log.V(1).Info("Setup complete", "device", device.Id())
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceUpdate, func(ctx context.Context, in any) (any, error) {
-		device := in.(*myhome.Device)
+	myhome.Register(myhome.DeviceUpdate, func(ctx context.Context, device *myhome.Device) (any, error) {
 		log := dm.log.WithName("rpc/device.update")
 		log.V(1).Info("New", "id", device.Id(), "name", device.Name())
 
@@ -264,10 +257,9 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceSetRoom, func(ctx context.Context, in any) (any, error) {
+	myhome.Register(myhome.DeviceSetRoom, func(ctx context.Context, params *myhome.DeviceSetRoomParams) (any, error) {
 		var err error
 
-		params := in.(*myhome.DeviceSetRoomParams)
 		log := dm.log.WithName("rpc/device.setroom")
 		log.V(1).Info("New", "identifier", params.Identifier, "room_id", params.RoomId)
 		// Save room to database
@@ -310,8 +302,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceListByRoom, func(ctx context.Context, in any) (any, error) {
-		params := in.(*myhome.DeviceListByRoomParams)
+	myhome.Register(myhome.DeviceListByRoom, func(ctx context.Context, params *myhome.DeviceListByRoomParams) (*myhome.DeviceListByRoomResult, error) {
 		log := dm.log.WithName("rpc/device.listbyroom")
 		log.V(1).Info("New", "room_id", params.RoomId)
 		devices, err := dm.dr.GetDevicesByRoom(ctx, params.RoomId)
@@ -321,10 +312,10 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		}
 		return &myhome.DeviceListByRoomResult{Devices: devices}, nil
 	})
-	myhome.RegisterMethodHandler(myhome.ThermometerList, func(ctx context.Context, in any) (any, error) {
+	myhome.Register(myhome.ThermometerList, func(ctx context.Context, _ any) (*myhome.ThermometerListResult, error) {
 		return dm.HandleThermometerList(ctx)
 	})
-	myhome.RegisterMethodHandler(myhome.DoorList, func(ctx context.Context, in any) (any, error) {
+	myhome.Register(myhome.DoorList, func(ctx context.Context, _ any) (*myhome.DoorListResult, error) {
 		return dm.HandleDoorList(ctx)
 	})
 
@@ -803,17 +794,11 @@ func (dm *DeviceManager) CallE(ctx context.Context, method myhome.Verb, params a
 	if err != nil {
 		return nil, err
 	}
-	// if mh.InType != reflect.TypeOf(params) {
-	// 	return nil, fmt.Errorf("invalid parameters for method %s: got %v, want %v", method, reflect.TypeOf(params), mh.InType)
-	// }
-	result, err := mh.ActionE(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	// if mh.OutType != reflect.TypeOf(result) {
-	// 	return nil, fmt.Errorf("invalid type for method %s: got %v, want %v", method, reflect.TypeOf(result), mh.OutType)
-	// }
-	return result, nil
+	// Method.Call marshals params once (mirroring the wire path) and
+	// delegates to the registered handler's generic Action, so this
+	// in-process short-circuit decodes through the exact same logic a real
+	// MQTT request would.
+	return mh.Call(ctx, params)
 }
 
 func (dm *DeviceManager) MethodE(method myhome.Verb) (*myhome.Method, error) {

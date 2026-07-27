@@ -50,12 +50,8 @@ func NewHeaterService(log logr.Logger, provider DeviceProvider) *HeaterService {
 
 // RegisterHandlers registers the heater RPC handlers
 func (s *HeaterService) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.HeaterGetConfig, func(ctx context.Context, in any) (any, error) {
-		return s.HandleGetConfig(ctx, in.(*myhome.HeaterGetConfigParams))
-	})
-	myhome.RegisterMethodHandler(myhome.HeaterSetConfig, func(ctx context.Context, in any) (any, error) {
-		return s.HandleSetConfig(ctx, in.(*myhome.HeaterSetConfigParams))
-	})
+	myhome.Register(myhome.HeaterGetConfig, s.HandleGetConfig)
+	myhome.Register(myhome.HeaterSetConfig, s.HandleSetConfig)
 }
 
 // HandleGetConfig returns the heater configuration for a device

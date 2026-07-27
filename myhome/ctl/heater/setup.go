@@ -122,7 +122,7 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device she
 			Identifier: sd.Id(),
 			RoomId:     setupFlags.RoomId,
 		}
-		_, err := myhome.TheClient.CallE(ctx, myhome.DeviceSetRoom, params)
+		_, err := myhome.Call[*myhome.DeviceSetRoomParams, any](ctx, myhome.TheClient, myhome.DeviceSetRoom, params)
 		if err != nil {
 			fmt.Printf("  ⚠ Failed to set device room in DB: %v\n", err)
 		} else {
@@ -205,12 +205,12 @@ func discoverDoorSensorsInRoom(ctx context.Context, roomId string) ([]string, er
 	params := &myhome.DeviceListByRoomParams{
 		RoomId: roomId,
 	}
-	result, err := myhome.TheClient.CallE(ctx, myhome.DeviceListByRoom, params)
+	result, err := myhome.Call[*myhome.DeviceListByRoomParams, *myhome.DeviceListByRoomResult](ctx, myhome.TheClient, myhome.DeviceListByRoom, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list devices in room: %w", err)
 	}
 
-	devices := result.(*myhome.DeviceListByRoomResult).Devices
+	devices := result.Devices
 	var topics []string
 
 	for _, d := range devices {

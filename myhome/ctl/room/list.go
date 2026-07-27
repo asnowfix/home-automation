@@ -24,12 +24,12 @@ If no room-id is provided, lists all devices that have a room assignment.`,
 				RoomId: roomId,
 			}
 
-			result, err := myhome.TheClient.CallE(cmd.Context(), myhome.DeviceListByRoom, params)
+			result, err := myhome.Call[*myhome.DeviceListByRoomParams, *myhome.DeviceListByRoomResult](cmd.Context(), myhome.TheClient, myhome.DeviceListByRoom, params)
 			if err != nil {
 				return err
 			}
 
-			devices := result.(*myhome.DeviceListByRoomResult).Devices
+			devices := result.Devices
 			if len(devices) == 0 {
 				fmt.Printf("No devices in room %s\n", roomId)
 				return nil
@@ -41,17 +41,15 @@ If no room-id is provided, lists all devices that have a room assignment.`,
 			}
 		} else {
 			// List all devices with room assignments via DevicesMatch
-			result, err := myhome.TheClient.CallE(cmd.Context(), myhome.DevicesMatch, "*")
+			devices, err := myhome.Call[string, []myhome.DeviceSummary](cmd.Context(), myhome.TheClient, myhome.DevicesMatch, "*")
 			if err != nil {
 				return err
 			}
 
-			devices := result.(*[]myhome.DeviceSummary)
-
 			// We need full device info to get room_id, so we'll list by room instead
 			// For now, just show a message
 			fmt.Println("Use 'myhome ctl room list <room-id>' to list devices in a specific room")
-			fmt.Printf("Found %d devices total\n", len(*devices))
+			fmt.Printf("Found %d devices total\n", len(devices))
 		}
 		return nil
 	},

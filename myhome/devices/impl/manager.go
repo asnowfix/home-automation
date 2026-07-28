@@ -372,7 +372,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
-	err = watch.StartMqttWatcher(ctx, dm.log, dm.mqttClient, dm, dm.dr)
+	err = watch.StartMqttWatcher(ctx, dm.log, dm.mqttClient, dm, dm.dr, options.Flags.EventsDir)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch MQTT events")
 		return err

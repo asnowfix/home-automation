@@ -114,7 +114,7 @@ func (d *daemon) Run() error {
 
 	var disableEmbeddedMqttBroker = len(options.Flags.MqttBroker) != 0
 
-	resolver := mynet.MyResolver(log.WithName("mynet.Resolver"))
+	resolver := mynet.MyResolver(log.WithName("mynet.Resolver"), options.Flags.MdnsTimeout)
 
 	// Conditionally start the embedded MQTT broker
 	var mqttBrokerAddr string
@@ -151,7 +151,7 @@ func (d *daemon) Run() error {
 	}
 
 	// Connect to the network's MQTT broker or use the embedded broker
-	err = mqtt.NewClientE(d.ctx, mqttBrokerAddr, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, false)
+	err = mqtt.NewClientE(d.ctx, mqttBrokerAddr, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, options.Flags.MqttWatchdogInterval, options.Flags.MqttWatchdogMaxFailures, false)
 	if err != nil {
 		log.Error(err, "Failed to initialize MQTT client")
 		return err

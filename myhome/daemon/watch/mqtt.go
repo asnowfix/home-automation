@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices"
 	"github.com/asnowfix/home-automation/myhome/mqtt"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
@@ -20,7 +19,11 @@ import (
 	"github.com/go-logr/logr"
 )
 
-func StartMqttWatcher(ctx context.Context, log logr.Logger, mc mqtt.Client, dm devices.Manager, dr devices.DeviceRegistry) error {
+// eventsDir, if non-empty, is the directory to persist each raw event
+// payload to as a JSON file (mirrors the former options.Flags.EventsDir
+// read; see #362 — internal/myhome/daemon/watch must not import the CLI's
+// options/viper package, so the caller passes its already-resolved value).
+func StartMqttWatcher(ctx context.Context, log logr.Logger, mc mqtt.Client, dm devices.Manager, dr devices.DeviceRegistry, eventsDir string) error {
 	log = log.WithName("MqttWatcher")
 	topic := "+/events/rpc"
 	ch, err := mc.SubscribeWithTopic(ctx, topic, 16, "daemon/watch")
@@ -30,12 +33,12 @@ func StartMqttWatcher(ctx context.Context, log logr.Logger, mc mqtt.Client, dm d
 	}
 
 	log.Info("Starting", "topic", topic)
-	go mqttWatcher(ctx, log, topic, dm, dr, ch)
+	go mqttWatcher(ctx, log, topic, dm, dr, ch, eventsDir)
 
 	return nil
 }
 
-func mqttWatcher(ctx context.Context, log logr.Logger, topic string, dm devices.Manager, dr devices.DeviceRegistry, ch <-chan mqtt.Message) {
+func mqttWatcher(ctx context.Context, log logr.Logger, topic string, dm devices.Manager, dr devices.DeviceRegistry, ch <-chan mqtt.Message, eventsDir string) {
 	log.Info("Started", "topic", topic)
 	for {
 		select {
@@ -61,7 +64,7 @@ func mqttWatcher(ctx context.Context, log logr.Logger, topic string, dm devices.
 			}
 
 			// If an events directory is configured, persist raw payload as a JSON file
-			if dir := options.Flags.EventsDir; dir != "" {
+			if dir := eventsDir; dir != "" {
 				if err := os.MkdirAll(dir, 0o755); err != nil {
 					log.Error(err, "Failed to create events directory", "dir", dir)
 				} else {

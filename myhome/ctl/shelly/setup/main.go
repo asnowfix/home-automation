@@ -59,7 +59,7 @@ func setupDevicesByName(ctx context.Context, client myhome.Client, pattern strin
 func getSetupConfig(ctx context.Context) (shellysetup.Config, error) {
 	cfg := shellysetup.Config{
 		MqttPort: 1883,
-		Resolver: mynet.MyResolver(hlog.Logger),
+		Resolver: mynet.MyResolver(hlog.Logger, options.Flags.MdnsTimeout),
 	}
 
 	// Use parent's --mqtt-broker flag if specified, otherwise use current process MQTT broker

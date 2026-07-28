@@ -28,7 +28,7 @@ func (f *fakeProvider) GetShellyDevice(ctx context.Context, device *myhome.Devic
 
 func TestGetDevice_DeviceNotFound(t *testing.T) {
 	wantErr := errors.New("no such device")
-	s := NewService(logr.Discard(), &fakeProvider{deviceErr: wantErr})
+	s := NewService(logr.Discard(), &fakeProvider{deviceErr: wantErr}, myhome.NewRegistry())
 
 	_, _, err := s.getDevice(context.Background(), "missing")
 	if err == nil {
@@ -44,7 +44,7 @@ func TestGetDevice_ShellyDeviceError(t *testing.T) {
 	s := NewService(logr.Discard(), &fakeProvider{
 		device: &myhome.Device{},
 		sdErr:  wantErr,
-	})
+	}, myhome.NewRegistry())
 
 	_, _, err := s.getDevice(context.Background(), "some-device")
 	if err == nil {

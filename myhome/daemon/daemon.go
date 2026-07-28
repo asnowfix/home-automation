@@ -35,6 +35,7 @@ import (
 type daemon struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
+	registry         *myhome.Registry
 	dm               *impl.DeviceManager
 	rpc              myhome.Server
 	occupancyService *occupancy.Service
@@ -73,8 +74,9 @@ func (m *reportingMailer) Send(ctx context.Context, subject, body string) error 
 func NewDaemon(ctx context.Context) *daemon {
 	ctx, cancel := context.WithCancel(ctx)
 	return &daemon{
-		ctx:    ctx,
-		cancel: cancel,
+		ctx:      ctx,
+		cancel:   cancel,
+		registry: myhome.NewRegistry(),
 	}
 }
 
@@ -437,7 +439,7 @@ func (d *daemon) Run() error {
 		}
 
 		// Start device manager
-		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc, sseBroadcaster)
+		d.dm = impl.NewDeviceManager(d.ctx, d.registry, storage, resolver, mc, sseBroadcaster)
 		d.dm.WithEventService(eventsSvc, eventsTracker)
 		err = d.dm.Start(d.ctx)
 		if err != nil {
@@ -466,7 +468,7 @@ func (d *daemon) Run() error {
 
 		// Register EventList RPC handler if events service is running
 		if eventsStore != nil {
-			myhome.Register(myhome.EventList, func(ctx context.Context, req *myhome.EventListRequest) (*myhome.EventListResponse, error) {
+			myhome.Register(d.registry, myhome.EventList, func(ctx context.Context, req *myhome.EventListRequest) (*myhome.EventListResponse, error) {
 				q := events.Query{
 					DeviceID:  req.DeviceID,
 					EventType: req.EventType,
@@ -509,7 +511,7 @@ func (d *daemon) Run() error {
 			}
 
 			// Create and register temperature method handlers, republishing temperature ranges at startup
-			tempHandlers := temperature.NewService(d.ctx, log, mc, tempStorage)
+			tempHandlers := temperature.NewService(d.ctx, log, d.registry, mc, tempStorage)
 			tempHandlers.RegisterHandlers()
 
 			log.Info("Temperature RPC methods registered")
@@ -520,7 +522,7 @@ func (d *daemon) Run() error {
 			log.Info("Registering occupancy RPC methods")
 
 			// Create and register occupancy RPC handler
-			occupancyHandler := occupancy.NewRPCHandler(log, d.occupancyService)
+			occupancyHandler := occupancy.NewRPCHandler(log, d.occupancyService, d.registry)
 			occupancyHandler.RegisterHandlers()
 
 			log.Info("Occupancy RPC methods registered")
@@ -530,7 +532,7 @@ func (d *daemon) Run() error {
 		// the UI and `ctl pool status`). Always registered — the signature
 		// exists regardless of pool tracking; handleGetStatus itself returns
 		// a clear error if poolNotices is nil (pool disabled/unreachable).
-		poolRPCHandler := NewPoolRPCHandler(log, poolNotices)
+		poolRPCHandler := NewPoolRPCHandler(log, poolNotices, d.registry)
 		poolRPCHandler.RegisterHandlers()
 
 		// Publish a hostname for the DeviceManager host: myhome.local
@@ -570,7 +572,7 @@ func (d *daemon) Run() error {
 		// Pass the live device manager (not raw storage) so the dashboard sees
 		// each device's in-memory Impl/Status rather than a DB snapshot with no
 		// live state attached.
-		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, d.dm, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy, accountsRegistry, global.PanicOnBugs); err != nil {
+		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, d.dm, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy, accountsRegistry, global.PanicOnBugs, d.registry); err != nil {
 			log.Error(err, "Failed to start UI server")
 			return err
 		}

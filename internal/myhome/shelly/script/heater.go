@@ -38,20 +38,22 @@ type DeviceProvider interface {
 type HeaterService struct {
 	log      logr.Logger
 	provider DeviceProvider
+	registry *myhome.Registry
 }
 
 // NewHeaterService creates a new heater service
-func NewHeaterService(log logr.Logger, provider DeviceProvider) *HeaterService {
+func NewHeaterService(log logr.Logger, provider DeviceProvider, registry *myhome.Registry) *HeaterService {
 	return &HeaterService{
 		log:      log.WithName("HeaterService"),
 		provider: provider,
+		registry: registry,
 	}
 }
 
 // RegisterHandlers registers the heater RPC handlers
 func (s *HeaterService) RegisterHandlers() {
-	myhome.Register(myhome.HeaterGetConfig, s.HandleGetConfig)
-	myhome.Register(myhome.HeaterSetConfig, s.HandleSetConfig)
+	myhome.Register(s.registry, myhome.HeaterGetConfig, s.HandleGetConfig)
+	myhome.Register(s.registry, myhome.HeaterSetConfig, s.HandleSetConfig)
 }
 
 // HandleGetConfig returns the heater configuration for a device

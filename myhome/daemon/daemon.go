@@ -28,6 +28,7 @@ import (
 	beem "github.com/asnowfix/home-automation/pkg/beem"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
+	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
 )
@@ -166,6 +167,12 @@ func (d *daemon) Run() error {
 	defer mc.Close()
 
 	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit, scripts.GetFS())
+	// Store mc in d.ctx for pkg/shelly's own mqtt.GetClient(ctx) callers
+	// (pkg/shelly/device.go, pkg/shelly/script/run.go) — see
+	// pkg/shelly/mqtt.NewContextWithClient's doc comment. Every subsequent
+	// use of d.ctx in this method and in goroutines spawned after this
+	// point sees the wrapped value.
+	d.ctx = shellymqtt.NewContextWithClient(d.ctx, mc)
 
 	// Start the main HTTP server (as a Mux), given to every other servers started below
 	// mux := http.NewServeMux()

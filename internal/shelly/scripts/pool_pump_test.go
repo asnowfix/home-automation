@@ -181,12 +181,10 @@ func pro1Schedules() []map[string]interface{} {
 func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mc),
 		10*time.Second,
 	)
 	defer cancel()
@@ -218,9 +216,7 @@ func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
 func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 
@@ -236,7 +232,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mc),
 		10*time.Second,
 	)
 	defer cancel()
@@ -290,9 +286,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 8)
 
@@ -305,7 +299,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mc),
 		15*time.Second,
 	)
 	defer cancel()
@@ -388,9 +382,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 8)
 
@@ -403,7 +395,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mc),
 		15*time.Second,
 	)
 	defer cancel()

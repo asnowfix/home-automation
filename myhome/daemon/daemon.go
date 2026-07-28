@@ -7,6 +7,7 @@ import (
 	_ "net/http/pprof"
 	"time"
 
+	"github.com/asnowfix/home-automation/internal/global"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/internal/myhome/accounts"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
@@ -569,7 +570,7 @@ func (d *daemon) Run() error {
 		// Pass the live device manager (not raw storage) so the dashboard sees
 		// each device's in-memory Impl/Status rather than a DB snapshot with no
 		// live state attached.
-		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, d.dm, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy, accountsRegistry); err != nil {
+		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, d.dm, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy, accountsRegistry, global.PanicOnBugs); err != nil {
 			log.Error(err, "Failed to start UI server")
 			return err
 		}

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/asnowfix/home-automation/internal/global"
 	"github.com/asnowfix/home-automation/internal/myhome/accounts"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/internal/myhome/proxy"
@@ -28,7 +27,7 @@ import (
 // - an IPv4/IPv6 address
 // - a .local hostname
 // - any known identifier in the myhome database (name, id, mac, host)
-func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db DeviceRegistry, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry) error {
+func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db DeviceRegistry, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry, panicOnBugs bool) error {
 	addr := fmt.Sprintf(":%d", listenPort)
 	srv := &http.Server{Addr: addr}
 
@@ -37,7 +36,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if !global.PanicOnBugs {
+		if !panicOnBugs {
 			// Panic recovery to avoid blank pages
 			defer func() {
 				if rec := recover(); rec != nil {
@@ -71,7 +70,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 			return
 		}
 
-		proxy.Handle(ctx, log, resolver, db, upstreamProxy, w, r)
+		proxy.Handle(ctx, log, resolver, db, upstreamProxy, panicOnBugs, w, r)
 
 	})
 

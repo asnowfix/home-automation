@@ -17,6 +17,11 @@ If room-id is provided, lists only devices in that room.
 If no room-id is provided, lists all devices that have a room assignment.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
 		if len(args) == 1 {
 			// List devices in specific room
 			roomId := args[0]
@@ -24,7 +29,7 @@ If no room-id is provided, lists all devices that have a room assignment.`,
 				RoomId: roomId,
 			}
 
-			result, err := myhome.Call[*myhome.DeviceListByRoomParams, *myhome.DeviceListByRoomResult](cmd.Context(), myhome.TheClient, myhome.DeviceListByRoom, params)
+			result, err := myhome.Call[*myhome.DeviceListByRoomParams, *myhome.DeviceListByRoomResult](cmd.Context(), client, myhome.DeviceListByRoom, params)
 			if err != nil {
 				return err
 			}
@@ -41,7 +46,7 @@ If no room-id is provided, lists all devices that have a room assignment.`,
 			}
 		} else {
 			// List all devices with room assignments via DevicesMatch
-			devices, err := myhome.Call[string, []myhome.DeviceSummary](cmd.Context(), myhome.TheClient, myhome.DevicesMatch, "*")
+			devices, err := myhome.Call[string, []myhome.DeviceSummary](cmd.Context(), client, myhome.DevicesMatch, "*")
 			if err != nil {
 				return err
 			}

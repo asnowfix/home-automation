@@ -29,7 +29,12 @@ var showCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doShow, nil)
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doShow, nil)
 		return err
 	},
 }

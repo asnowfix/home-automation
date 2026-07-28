@@ -252,18 +252,18 @@ func TestCallE_ContextCancelDuringSend_ReturnsPromptly(t *testing.T) {
 	}
 }
 
-// --- Bug 3: methods must call the receiver, not the TheClient global ---
+// --- Bug 3: methods must call the receiver, not a global client ---
 
-// TestLookupDevices_UsesReceiverNotGlobalTheClient poisons the package-level
-// TheClient singleton and drives LookupDevices on an independent *client
-// instance. If LookupDevices (or the CallE it invokes) referenced TheClient
-// instead of hc, this would nil-panic; recover() turns that into a test
-// failure with a clear message instead of crashing the process.
+// TestLookupDevices_UsesReceiverNotGlobalTheClient drives LookupDevices on
+// an independent *client instance and verifies it resolves the request
+// against that instance alone. This guards the historical bug where
+// LookupDevices (or the CallE it invokes) referenced a package-level
+// TheClient global instead of its receiver hc; now that TheClient no longer
+// exists (removed as part of #362's dependency-injection pass), that bug
+// class is structurally impossible — there is no global left to
+// accidentally reference — so this simply exercises the receiver-based call
+// path directly instead of poisoning a global first.
 func TestLookupDevices_UsesReceiverNotGlobalTheClient(t *testing.T) {
-	prevClient := TheClient
-	TheClient = nil
-	t.Cleanup(func() { TheClient = prevClient })
-
 	hc, fake := newTestClient(t, "client-c", 5*time.Second)
 	ctx := context.Background()
 
@@ -276,7 +276,7 @@ func TestLookupDevices_UsesReceiverNotGlobalTheClient(t *testing.T) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				done <- lookupOutcome{err: fmt.Errorf("panic (likely nil TheClient dereference): %v", r)}
+				done <- lookupOutcome{err: fmt.Errorf("panic in LookupDevices: %v", r)}
 			}
 		}()
 		out, err := hc.LookupDevices(ctx, "some-device")

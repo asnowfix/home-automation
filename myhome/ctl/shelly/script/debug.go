@@ -115,6 +115,11 @@ var debugCtl = &cobra.Command{
 			return err
 		}
 
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
 		if len(args) == 3 {
 			// Script-level debug via Script.Eval (no UDP needed)
 			scriptName := args[2]
@@ -123,7 +128,7 @@ var debugCtl = &cobra.Command{
 				evalArgState = "true"
 			}
 			// pass: [scriptName, true|false]
-			_, err := myhome.Foreach(tools.WithToken(cmd.Context()), hlog.Logger, device, options.Via, doScriptDebug, []string{scriptName, evalArgState})
+			_, err := myhome.Foreach(tools.WithToken(cmd.Context()), hlog.Logger, client, device, options.Via, doScriptDebug, []string{scriptName, evalArgState})
 			return err
 		}
 
@@ -193,7 +198,7 @@ var debugCtl = &cobra.Command{
 			args = []string{}
 		}
 
-		_, err = myhome.Foreach(tools.WithToken(ctx), log, device, options.Via, doDebug, args)
+		_, err = myhome.Foreach(tools.WithToken(ctx), log, client, device, options.Via, doDebug, args)
 		if err != nil {
 			return err
 		}

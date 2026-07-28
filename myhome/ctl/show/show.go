@@ -26,7 +26,12 @@ var Cmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 
-		device, err := myhome.Call[*myhome.DeviceShowParams, *myhome.Device](cmd.Context(), myhome.TheClient, myhome.DeviceShow, &myhome.DeviceShowParams{Identifier: args[0]})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		device, err := myhome.Call[*myhome.DeviceShowParams, *myhome.Device](cmd.Context(), client, myhome.DeviceShow, &myhome.DeviceShowParams{Identifier: args[0]})
 		if err != nil {
 			return err
 		}

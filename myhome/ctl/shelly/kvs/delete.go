@@ -29,7 +29,12 @@ var deleteCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
 		device := args[0]
-		_, err := myhome.Foreach(cmd.Context(), log, device, options.Via, doDeleteKeys, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), log, client, device, options.Via, doDeleteKeys, options.Args(args))
 		return err
 	},
 }

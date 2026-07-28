@@ -78,11 +78,16 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		myhome.TheClient, err = myhome.NewClientE(ctx, log, mc, options.Flags.MqttTimeout)
+		myHomeClient, err := myhome.NewClientE(ctx, log, mc, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome client")
 			return err
 		}
+		// Store the client in ctx so every subcommand's RunE can retrieve it
+		// via myhome.ClientFromContext(cmd.Context()) — see NewContextWithClient's
+		// doc comment for why context is used here instead of a package-level
+		// TheClient global.
+		ctx = myhome.NewContextWithClient(ctx, myHomeClient)
 
 		shellyPkg.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit, scripts.GetFS())
 

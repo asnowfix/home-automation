@@ -49,27 +49,32 @@ This command:
 4. Uploads blu-publisher.js script with version tracking`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
 		gatewayDevice := args[0]
 
 		// If no blu-device provided, enable "publish all" mode
 		if len(args) == 1 {
-			return enablePublishAll(cmd.Context(), gatewayDevice, clearFollows)
+			return enablePublishAll(cmd.Context(), client, gatewayDevice, clearFollows)
 		}
 
 		bluDevice := args[1]
 
 		// Resolve BLU device identifier to MAC address
-		mac, err := mhblu.ResolveMac(cmd.Context(), bluDevice)
+		mac, err := mhblu.ResolveMac(cmd.Context(), client, bluDevice)
 		if err != nil {
 			return fmt.Errorf("failed to resolve BLU device %q: %w", bluDevice, err)
 		}
 
 		// If gateway-device is "-", list all devices publishing this BLU MAC
 		if gatewayDevice == "-" {
-			return listDevicesPublishingBlu(cmd.Context(), mac)
+			return listDevicesPublishingBlu(cmd.Context(), client, mac)
 		}
 
-		return addDevicePublishingBlu(cmd.Context(), gatewayDevice, mac, clearFollows)
+		return addDevicePublishingBlu(cmd.Context(), client, gatewayDevice, mac, clearFollows)
 	},
 }
 
@@ -79,12 +84,12 @@ func init() {
 
 // enablePublishAll configures a Shelly device to publish ALL BLU events without filtering
 // An empty follows map in KVS means "publish all"
-func enablePublishAll(ctx context.Context, gatewayDevice string, clear bool) error {
+func enablePublishAll(ctx context.Context, client myhome.Client, gatewayDevice string, clear bool) error {
 	log := hlog.Logger
 
 	// Enable BLE observer/gateway
 	fmt.Printf("Enabling BLE gateway on %s...\n", gatewayDevice)
-	_, err := myhome.Foreach(ctx, log, gatewayDevice, options.Via, enableBleGateway, []string{})
+	_, err := myhome.Foreach(ctx, log, client, gatewayDevice, options.Via, enableBleGateway, []string{})
 	if err != nil {
 		return fmt.Errorf("failed to enable BLE gateway: %w", err)
 	}
@@ -92,7 +97,7 @@ func enablePublishAll(ctx context.Context, gatewayDevice string, clear bool) err
 	// Clear all existing publish/shelly-blu/* KVS entries if --clear flag is set
 	if clear {
 		fmt.Printf("Clearing existing BLU follow entries...\n")
-		_, err = myhome.Foreach(ctx, log, gatewayDevice, options.Via, clearBluFollows, []string{})
+		_, err = myhome.Foreach(ctx, log, client, gatewayDevice, options.Via, clearBluFollows, []string{})
 		if err != nil {
 			return fmt.Errorf("failed to clear BLU follows: %w", err)
 		}
@@ -103,7 +108,7 @@ func enablePublishAll(ctx context.Context, gatewayDevice string, clear bool) err
 	fmt.Printf("Uploading blu-publisher.js script...\n")
 	longCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	_, err = myhome.Foreach(longCtx, log, gatewayDevice, options.Via, uploadScript, []string{"blu-publisher.js"})
+	_, err = myhome.Foreach(longCtx, log, client, gatewayDevice, options.Via, uploadScript, []string{"blu-publisher.js"})
 	if err != nil {
 		return fmt.Errorf("failed to upload script: %w", err)
 	}
@@ -113,12 +118,12 @@ func enablePublishAll(ctx context.Context, gatewayDevice string, clear bool) err
 }
 
 // addDevicePublishingBlu configures a Shelly device to publish events from a BLU MAC address
-func addDevicePublishingBlu(ctx context.Context, gatewayDevice, mac string, clear bool) error {
+func addDevicePublishingBlu(ctx context.Context, client myhome.Client, gatewayDevice, mac string, clear bool) error {
 	log := hlog.Logger
 
 	// Enable BLE observer/gateway
 	fmt.Printf("Enabling BLE gateway on %s...\n", gatewayDevice)
-	_, err := myhome.Foreach(ctx, log, gatewayDevice, options.Via, enableBleGateway, []string{})
+	_, err := myhome.Foreach(ctx, log, client, gatewayDevice, options.Via, enableBleGateway, []string{})
 	if err != nil {
 		return fmt.Errorf("failed to enable BLE gateway: %w", err)
 	}
@@ -126,7 +131,7 @@ func addDevicePublishingBlu(ctx context.Context, gatewayDevice, mac string, clea
 	// Clear all existing publish/shelly-blu/* KVS entries if --clear flag is set
 	if clear {
 		fmt.Printf("Clearing existing BLU follow entries...\n")
-		_, err = myhome.Foreach(ctx, log, gatewayDevice, options.Via, clearBluFollows, []string{})
+		_, err = myhome.Foreach(ctx, log, client, gatewayDevice, options.Via, clearBluFollows, []string{})
 		if err != nil {
 			return fmt.Errorf("failed to clear BLU follows: %w", err)
 		}
@@ -143,7 +148,7 @@ func addDevicePublishingBlu(ctx context.Context, gatewayDevice, mac string, clea
 	kvKey := "publish/shelly-blu/" + mac
 
 	fmt.Printf("Configuring follow for BLU MAC %s...\n", mac)
-	_, err = myhome.Foreach(ctx, log, gatewayDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
+	_, err = myhome.Foreach(ctx, log, client, gatewayDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
 	if err != nil {
 		return err
 	}
@@ -152,7 +157,7 @@ func addDevicePublishingBlu(ctx context.Context, gatewayDevice, mac string, clea
 	fmt.Printf("Uploading blu-publisher.js script...\n")
 	longCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	_, err = myhome.Foreach(longCtx, log, gatewayDevice, options.Via, uploadScript, []string{"blu-publisher.js"})
+	_, err = myhome.Foreach(longCtx, log, client, gatewayDevice, options.Via, uploadScript, []string{"blu-publisher.js"})
 	if err != nil {
 		return fmt.Errorf("failed to upload script: %w", err)
 	}
@@ -162,12 +167,12 @@ func addDevicePublishingBlu(ctx context.Context, gatewayDevice, mac string, clea
 }
 
 // listDevicesPublishingBlu lists all Shelly devices that publish the given BLU MAC address
-func listDevicesPublishingBlu(ctx context.Context, mac string) error {
+func listDevicesPublishingBlu(ctx context.Context, client myhome.Client, mac string) error {
 	log := hlog.Logger
 	kvKey := "publish/shelly-blu/" + mac
 
 	// Query all known Shelly devices using "*" wildcard
-	_, err := myhome.Foreach(ctx, log, "*", options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
+	_, err := myhome.Foreach(ctx, log, client, "*", options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 		sd, ok := device.(*shelly.Device)
 		if !ok {
 			return nil, nil // Skip non-Shelly devices
@@ -332,32 +337,37 @@ Examples:
   myhome ctl blu unpublish gateway-device motion-sensor-hallway`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
 		gatewayDevice := args[0]
 
 		if len(args) == 1 {
-			return removePublishAll(cmd.Context(), gatewayDevice)
+			return removePublishAll(cmd.Context(), client, gatewayDevice)
 		}
 
-		mac, err := mhblu.ResolveMac(cmd.Context(), args[1])
+		mac, err := mhblu.ResolveMac(cmd.Context(), client, args[1])
 		if err != nil {
 			return fmt.Errorf("failed to resolve BLU device %q: %w", args[1], err)
 		}
-		return removeDevicePublishing(cmd.Context(), gatewayDevice, mac)
+		return removeDevicePublishing(cmd.Context(), client, gatewayDevice, mac)
 	},
 }
 
 // removePublishAll removes all BLU follow KVS entries and deletes blu-publisher.js
-func removePublishAll(ctx context.Context, gatewayDevice string) error {
+func removePublishAll(ctx context.Context, client myhome.Client, gatewayDevice string) error {
 	log := hlog.Logger
 
 	fmt.Printf("Clearing all BLU follow entries on %s...\n", gatewayDevice)
-	_, err := myhome.Foreach(ctx, log, gatewayDevice, options.Via, clearBluFollows, []string{})
+	_, err := myhome.Foreach(ctx, log, client, gatewayDevice, options.Via, clearBluFollows, []string{})
 	if err != nil {
 		return fmt.Errorf("failed to clear BLU follows: %w", err)
 	}
 
 	fmt.Printf("Removing blu-publisher.js script...\n")
-	_, err = myhome.Foreach(ctx, log, gatewayDevice, options.Via, deleteScript, []string{"blu-publisher.js"})
+	_, err = myhome.Foreach(ctx, log, client, gatewayDevice, options.Via, deleteScript, []string{"blu-publisher.js"})
 	if err != nil {
 		return fmt.Errorf("failed to remove script: %w", err)
 	}
@@ -367,18 +377,18 @@ func removePublishAll(ctx context.Context, gatewayDevice string) error {
 }
 
 // removeDevicePublishing removes a specific BLU follow KVS entry and deletes blu-publisher.js
-func removeDevicePublishing(ctx context.Context, gatewayDevice, mac string) error {
+func removeDevicePublishing(ctx context.Context, client myhome.Client, gatewayDevice, mac string) error {
 	log := hlog.Logger
 	kvKey := "publish/shelly-blu/" + mac
 
 	fmt.Printf("Removing follow entry for BLU MAC %s from %s...\n", mac, gatewayDevice)
-	_, err := myhome.Foreach(ctx, log, gatewayDevice, options.Via, doDeleteKVS, []string{kvKey})
+	_, err := myhome.Foreach(ctx, log, client, gatewayDevice, options.Via, doDeleteKVS, []string{kvKey})
 	if err != nil {
 		return err
 	}
 
 	fmt.Printf("Removing blu-publisher.js script...\n")
-	_, err = myhome.Foreach(ctx, log, gatewayDevice, options.Via, deleteScript, []string{"blu-publisher.js"})
+	_, err = myhome.Foreach(ctx, log, client, gatewayDevice, options.Via, deleteScript, []string{"blu-publisher.js"})
 	if err != nil {
 		return fmt.Errorf("failed to remove script: %w", err)
 	}

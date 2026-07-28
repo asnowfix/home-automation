@@ -16,12 +16,17 @@ var clearCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
 		params := &myhome.DeviceSetRoomParams{
 			Identifier: device,
 			RoomId:     "", // Empty string clears the room
 		}
 
-		_, err := myhome.Call[*myhome.DeviceSetRoomParams, any](cmd.Context(), myhome.TheClient, myhome.DeviceSetRoom, params)
+		_, err = myhome.Call[*myhome.DeviceSetRoomParams, any](cmd.Context(), client, myhome.DeviceSetRoom, params)
 		if err != nil {
 			return err
 		}

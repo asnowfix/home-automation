@@ -14,9 +14,11 @@ import (
 // The function should return a result and an error.
 // The Foreach function aggregates the results of all the function calls and returns a single result.
 // If any of the function calls return an error, the Foreach function will return that error.
-func Foreach(ctx context.Context, log logr.Logger, name string, via types.Channel, fn shelly.Do, args []string) (any, error) {
+// c is the RPC client used to look up matching devices; callers get it via
+// ClientFromContext(cmd.Context()) at the top of their cobra RunE.
+func Foreach(ctx context.Context, log logr.Logger, c Client, name string, via types.Channel, fn shelly.Do, args []string) (any, error) {
 	// Get a list of devices that match the given name.
-	found, err := TheClient.LookupDevices(ctx, name)
+	found, err := c.LookupDevices(ctx, name)
 	if err != nil {
 		return nil, err
 	}

@@ -33,7 +33,12 @@ var listCtl = &cobra.Command{
 			}
 			return options.PrintResult(scripts)
 		}
-		out, err := myhome.Foreach(cmd.Context(), log, args[0], options.Via, doList, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		out, err := myhome.Foreach(cmd.Context(), log, client, args[0], options.Via, doList, options.Args(args))
 		if err != nil {
 			return err
 		}

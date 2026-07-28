@@ -37,6 +37,11 @@ Examples:
   myhome ctl db pull http://myhome.local:8080 --dry-run`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		myHomeClient, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
 		remoteURL := args[0]
 
 		// Build the URL for the devices endpoint
@@ -118,7 +123,7 @@ Examples:
 		// Import each device
 		imported := 0
 		for _, device := range devices {
-			_, err := myhome.Call[*myhome.Device, any](cmd.Context(), myhome.TheClient, myhome.DeviceUpdate, &device)
+			_, err := myhome.Call[*myhome.Device, any](cmd.Context(), myHomeClient, myhome.DeviceUpdate, &device)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "⚠ Failed to import %s: %v\n", device.Id(), err)
 				continue

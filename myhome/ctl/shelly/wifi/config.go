@@ -51,7 +51,12 @@ var configCmd = &cobra.Command{
 	Short: "Get & set Shelly devices WiFi configuration",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, configOneDevice, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, configOneDevice, options.Args(args))
 		return err
 	},
 }

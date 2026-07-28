@@ -76,10 +76,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create myhome client: %v", err)
 	}
-	myhome.TheClient = client
 
 	// Get all devices
-	devices, err := myhome.TheClient.LookupDevices(ctx, "*")
+	devices, err := client.LookupDevices(ctx, "*")
 	if err != nil {
 		log.Fatalf("Failed to get devices: %v", err)
 	}

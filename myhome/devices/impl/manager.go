@@ -35,6 +35,7 @@ import (
 )
 
 type DeviceManager struct {
+	registry       *myhome.Registry
 	dr             mhd.DeviceRegistry
 	update         chan *myhome.Device
 	refreshed      chan *myhome.Device
@@ -59,13 +60,14 @@ type SSEBroadcaster interface {
 // to prevent goroutine leaks when mDNS or network operations are slow/blocked
 const maxConcurrentRefreshes = 10
 
-func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient mqtt.Client, sseBroadcaster SSEBroadcaster) *DeviceManager {
+func NewDeviceManager(ctx context.Context, registry *myhome.Registry, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient mqtt.Client, sseBroadcaster SSEBroadcaster) *DeviceManager {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
 	}
 
 	dm := &DeviceManager{
+		registry:       registry,
 		dr:             mhd.NewCache(ctx, s),
 		log:            log.WithName("DeviceManager"),
 		update:         make(chan *myhome.Device, 64), // TODO configurable buffer size
@@ -75,7 +77,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		sseBroadcaster: sseBroadcaster,
 	}
 
-	myhome.Register(myhome.DevicesMatch, func(ctx context.Context, name string) (*[]devices.Device, error) {
+	myhome.Register(dm.registry, myhome.DevicesMatch, func(ctx context.Context, name string) (*[]devices.Device, error) {
 		devices := make([]devices.Device, 0)
 
 		var ds []*myhome.Device
@@ -99,7 +101,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		}
 		return &devices, nil
 	})
-	myhome.Register(myhome.DeviceLookup, func(ctx context.Context, name string) (*[]devices.Device, error) {
+	myhome.Register(dm.registry, myhome.DeviceLookup, func(ctx context.Context, name string) (*[]devices.Device, error) {
 		devices := make([]devices.Device, 0)
 		device, err := dm.GetDeviceByAny(ctx, name)
 		if err == nil {
@@ -110,13 +112,13 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		return nil, fmt.Errorf("failed to get device by identifier: %w", err)
 	})
-	myhome.Register(myhome.DeviceShow, func(ctx context.Context, params *myhome.DeviceShowParams) (*myhome.Device, error) {
+	myhome.Register(dm.registry, myhome.DeviceShow, func(ctx context.Context, params *myhome.DeviceShowParams) (*myhome.Device, error) {
 		return dm.GetDeviceByAny(ctx, params.Identifier)
 	})
-	myhome.Register(myhome.DeviceForget, func(ctx context.Context, identifier string) (any, error) {
+	myhome.Register(dm.registry, myhome.DeviceForget, func(ctx context.Context, identifier string) (any, error) {
 		return nil, dm.ForgetDevice(ctx, identifier)
 	})
-	myhome.Register(myhome.DeviceRefresh, func(ctx context.Context, ident string) (*myhome.Device, error) {
+	myhome.Register(dm.registry, myhome.DeviceRefresh, func(ctx context.Context, ident string) (*myhome.Device, error) {
 		log := dm.log.WithName("rpc/device.refresh")
 		log.V(1).Info("New", "ident", ident)
 		device, err := dm.GetDeviceByAny(ctx, ident)
@@ -157,7 +159,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		return device, nil
 	})
-	myhome.Register(myhome.DeviceSetup, func(ctx context.Context, params *myhome.DeviceSetupParams) (any, error) {
+	myhome.Register(dm.registry, myhome.DeviceSetup, func(ctx context.Context, params *myhome.DeviceSetupParams) (any, error) {
 		log := dm.log.WithName("rpc/device.setup")
 		log.V(1).Info("New", "params", params)
 		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
@@ -239,7 +241,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		log.V(1).Info("Setup complete", "device", device.Id())
 		return nil, nil
 	})
-	myhome.Register(myhome.DeviceUpdate, func(ctx context.Context, device *myhome.Device) (any, error) {
+	myhome.Register(dm.registry, myhome.DeviceUpdate, func(ctx context.Context, device *myhome.Device) (any, error) {
 		log := dm.log.WithName("rpc/device.update")
 		log.V(1).Info("New", "id", device.Id(), "name", device.Name())
 
@@ -257,7 +259,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		return nil, nil
 	})
-	myhome.Register(myhome.DeviceSetRoom, func(ctx context.Context, params *myhome.DeviceSetRoomParams) (any, error) {
+	myhome.Register(dm.registry, myhome.DeviceSetRoom, func(ctx context.Context, params *myhome.DeviceSetRoomParams) (any, error) {
 		var err error
 
 		log := dm.log.WithName("rpc/device.setroom")
@@ -302,7 +304,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		return nil, nil
 	})
-	myhome.Register(myhome.DeviceListByRoom, func(ctx context.Context, params *myhome.DeviceListByRoomParams) (*myhome.DeviceListByRoomResult, error) {
+	myhome.Register(dm.registry, myhome.DeviceListByRoom, func(ctx context.Context, params *myhome.DeviceListByRoomParams) (*myhome.DeviceListByRoomResult, error) {
 		log := dm.log.WithName("rpc/device.listbyroom")
 		log.V(1).Info("New", "room_id", params.RoomId)
 		devices, err := dm.dr.GetDevicesByRoom(ctx, params.RoomId)
@@ -312,10 +314,10 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		}
 		return &myhome.DeviceListByRoomResult{Devices: devices}, nil
 	})
-	myhome.Register(myhome.ThermometerList, func(ctx context.Context, _ any) (*myhome.ThermometerListResult, error) {
+	myhome.Register(dm.registry, myhome.ThermometerList, func(ctx context.Context, _ any) (*myhome.ThermometerListResult, error) {
 		return dm.HandleThermometerList(ctx)
 	})
-	myhome.Register(myhome.DoorList, func(ctx context.Context, _ any) (*myhome.DoorListResult, error) {
+	myhome.Register(dm.registry, myhome.DoorList, func(ctx context.Context, _ any) (*myhome.DoorListResult, error) {
 		return dm.HandleDoorList(ctx)
 	})
 
@@ -358,11 +360,11 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	}
 
 	// Register heater service handlers
-	heaterService := shellyscript.NewHeaterService(dm.log, dm)
+	heaterService := shellyscript.NewHeaterService(dm.log, dm, dm.registry)
 	heaterService.RegisterHandlers()
 
 	// Register switch service handlers
-	switchService := mhswitch.NewService(dm.log, dm)
+	switchService := mhswitch.NewService(dm.log, dm, dm.registry)
 	switchService.RegisterHandlers()
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
@@ -370,7 +372,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
-	err = watch.StartMqttWatcher(ctx, dm.log, dm.mqttClient, dm, dm.dr)
+	err = watch.StartMqttWatcher(ctx, dm.log, dm.mqttClient, dm, dm.dr, options.Flags.EventsDir)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch MQTT events")
 		return err
@@ -790,7 +792,7 @@ func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwr
 func (dm *DeviceManager) CallE(ctx context.Context, method myhome.Verb, params any) (any, error) {
 	dm.log.Info("Calling method", "method", method, "params", params)
 	var err error
-	mh, err := myhome.Methods(method)
+	mh, err := dm.registry.Methods(method)
 	if err != nil {
 		return nil, err
 	}
@@ -802,7 +804,7 @@ func (dm *DeviceManager) CallE(ctx context.Context, method myhome.Verb, params a
 }
 
 func (dm *DeviceManager) MethodE(method myhome.Verb) (*myhome.Method, error) {
-	mh, err := myhome.Methods(method)
+	mh, err := dm.registry.Methods(method)
 	if err != nil {
 		return nil, err
 	}

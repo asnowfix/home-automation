@@ -48,6 +48,10 @@ var listCmd = &cobra.Command{
 	Short: "List recorded events",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 
 		since := 24 * time.Hour
 		if listSince != "" {
@@ -66,7 +70,7 @@ var listCmd = &cobra.Command{
 			Limit:     listLimit,
 		}
 
-		resp, err := myhome.Call[*myhome.EventListRequest, *myhome.EventListResponse](ctx, myhome.TheClient, myhome.EventList, req)
+		resp, err := myhome.Call[*myhome.EventListRequest, *myhome.EventListResponse](ctx, client, myhome.EventList, req)
 		if err != nil {
 			return err
 		}

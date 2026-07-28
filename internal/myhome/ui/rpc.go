@@ -10,7 +10,7 @@ import (
 	"github.com/go-logr/logr"
 )
 
-func RpcHandler(ctx context.Context, log logr.Logger) func(w http.ResponseWriter, r *http.Request) {
+func RpcHandler(ctx context.Context, log logr.Logger, registry *myhome.Registry) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Method myhome.Verb     `json:"method"`
@@ -25,7 +25,7 @@ func RpcHandler(ctx context.Context, log logr.Logger) func(w http.ResponseWriter
 		}
 
 		// Lookup method
-		mh, err := myhome.Methods(req.Method)
+		mh, err := registry.Methods(req.Method)
 		if err != nil {
 			log.Error(err, "method not found", "method", req.Method)
 			http.Error(w, err.Error(), http.StatusBadRequest)

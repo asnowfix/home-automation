@@ -27,11 +27,16 @@ var showShellyCmd = &cobra.Command{
 		var err error
 		ctx := cmd.Context()
 
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
 		identifier := args[0]
 		log := hlog.Logger
 
 		// Use LookupDevices to support glob patterns
-		devices, err := myhome.TheClient.LookupDevices(ctx, identifier)
+		devices, err := client.LookupDevices(ctx, identifier)
 		if err != nil {
 			return err
 		}
@@ -48,7 +53,7 @@ var showShellyCmd = &cobra.Command{
 			// Fetch full device info for each matched device
 			fullDevices := make([]*myhome.Device, 0, len(*devices))
 			for _, dev := range *devices {
-				device, err := myhome.Call[*myhome.DeviceShowParams, *myhome.Device](ctx, myhome.TheClient, myhome.DeviceShow, &myhome.DeviceShowParams{Identifier: dev.Id()})
+				device, err := myhome.Call[*myhome.DeviceShowParams, *myhome.Device](ctx, client, myhome.DeviceShow, &myhome.DeviceShowParams{Identifier: dev.Id()})
 				if err != nil {
 					log.Error(err, "failed to fetch device details", "id", dev.Id())
 					continue

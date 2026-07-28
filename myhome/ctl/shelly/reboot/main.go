@@ -22,7 +22,12 @@ var Cmd = &cobra.Command{
 	Short: "Reboot Shelly device",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, oneDeviceReboot, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, oneDeviceReboot, options.Args(args))
 		return err
 	},
 }

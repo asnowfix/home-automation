@@ -29,7 +29,12 @@ var enableCtl = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doEnableDisable, []string{"true"})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doEnableDisable, []string{"true"})
 		return err
 	},
 }
@@ -40,7 +45,12 @@ var disableCtl = &cobra.Command{
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doEnableDisable, []string{"false"})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doEnableDisable, []string{"false"})
 		return err
 	},
 }

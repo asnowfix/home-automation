@@ -206,7 +206,7 @@ func TestHandle_Health(t *testing.T) {
 	log := testr.New(t)
 	ctx := context.Background()
 
-	Handle(ctx, log, nil, nil, "", rec, req)
+	Handle(ctx, log, nil, nil, "", false, rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("want 200, got %d", rec.Code)
@@ -224,7 +224,7 @@ func TestHandle_UnknownRootPath(t *testing.T) {
 	log := testr.New(t)
 	ctx := context.Background()
 
-	Handle(ctx, log, nil, nil, "", rec, req)
+	Handle(ctx, log, nil, nil, "", false, rec, req)
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("want 404, got %d", rec.Code)
@@ -239,7 +239,7 @@ func TestHandle_DevicesPath_NoResolver(t *testing.T) {
 	log := testr.New(t)
 	ctx := context.Background()
 
-	Handle(ctx, log, nil, nil, "", rec, req)
+	Handle(ctx, log, nil, nil, "", false, rec, req)
 
 	if rec.Code != http.StatusBadGateway {
 		t.Errorf("want 502, got %d", rec.Code)
@@ -254,7 +254,7 @@ func TestHandle_UpstreamProxy_Malformed(t *testing.T) {
 	log := testr.New(t)
 	ctx := context.Background()
 
-	Handle(ctx, log, nil, nil, "://bad-url", rec, req)
+	Handle(ctx, log, nil, nil, "://bad-url", false, rec, req)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("want 500, got %d", rec.Code)

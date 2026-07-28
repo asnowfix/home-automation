@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/go-logr/logr"
 	"github.com/jmoiron/sqlx"
@@ -37,6 +38,6 @@ func newTestStorage(t *testing.T) *Storage {
 func newTestService(t *testing.T) (*Service, *mqtt.RecordingMockClient) {
 	t.Helper()
 	mc := mqtt.NewRecordingMockClient()
-	svc := NewService(context.Background(), logr.Discard(), mc, newTestStorage(t))
+	svc := NewService(context.Background(), logr.Discard(), myhome.NewRegistry(), mc, newTestStorage(t))
 	return svc, mc
 }

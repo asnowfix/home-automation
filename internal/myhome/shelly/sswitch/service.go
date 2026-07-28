@@ -26,23 +26,25 @@ type DeviceProvider interface {
 type Service struct {
 	log      logr.Logger
 	provider DeviceProvider
+	registry *myhome.Registry
 }
 
 // NewService creates a new switch service
-func NewService(log logr.Logger, provider DeviceProvider) *Service {
+func NewService(log logr.Logger, provider DeviceProvider, registry *myhome.Registry) *Service {
 	return &Service{
 		log:      log.WithName("Switch"),
 		provider: provider,
+		registry: registry,
 	}
 }
 
 // RegisterHandlers registers the switch RPC handlers
 func (s *Service) RegisterHandlers() {
-	myhome.Register(myhome.SwitchToggle, s.HandleToggle)
-	myhome.Register(myhome.SwitchOn, s.HandleOn)
-	myhome.Register(myhome.SwitchOff, s.HandleOff)
-	myhome.Register(myhome.SwitchStatus, s.HandleStatus)
-	myhome.Register(myhome.SwitchAll, s.HandleAll)
+	myhome.Register(s.registry, myhome.SwitchToggle, s.HandleToggle)
+	myhome.Register(s.registry, myhome.SwitchOn, s.HandleOn)
+	myhome.Register(s.registry, myhome.SwitchOff, s.HandleOff)
+	myhome.Register(s.registry, myhome.SwitchStatus, s.HandleStatus)
+	myhome.Register(s.registry, myhome.SwitchAll, s.HandleAll)
 }
 
 // HandleToggle handles switch.toggle RPC method

@@ -16,7 +16,12 @@ var Cmd = &cobra.Command{
 			name = args[0]
 		}
 
-		err := myhome.TheClient.ForgetDevices(cmd.Context(), name)
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		err = client.ForgetDevices(cmd.Context(), name)
 		if err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import (
 	_ "net/http/pprof"
 	"time"
 
+	"github.com/asnowfix/home-automation/internal/global"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/internal/myhome/accounts"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
@@ -27,6 +28,7 @@ import (
 	beem "github.com/asnowfix/home-automation/pkg/beem"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
+	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
 )
@@ -34,6 +36,7 @@ import (
 type daemon struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
+	registry         *myhome.Registry
 	dm               *impl.DeviceManager
 	rpc              myhome.Server
 	occupancyService *occupancy.Service
@@ -72,8 +75,9 @@ func (m *reportingMailer) Send(ctx context.Context, subject, body string) error 
 func NewDaemon(ctx context.Context) *daemon {
 	ctx, cancel := context.WithCancel(ctx)
 	return &daemon{
-		ctx:    ctx,
-		cancel: cancel,
+		ctx:      ctx,
+		cancel:   cancel,
+		registry: myhome.NewRegistry(),
 	}
 }
 
@@ -111,7 +115,7 @@ func (d *daemon) Run() error {
 
 	var disableEmbeddedMqttBroker = len(options.Flags.MqttBroker) != 0
 
-	resolver := mynet.MyResolver(log.WithName("mynet.Resolver"))
+	resolver := mynet.MyResolver(log.WithName("mynet.Resolver"), options.Flags.MdnsTimeout)
 
 	// Conditionally start the embedded MQTT broker
 	var mqttBrokerAddr string
@@ -148,7 +152,7 @@ func (d *daemon) Run() error {
 	}
 
 	// Connect to the network's MQTT broker or use the embedded broker
-	err = mqtt.NewClientE(d.ctx, mqttBrokerAddr, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, false)
+	err = mqtt.NewClientE(d.ctx, mqttBrokerAddr, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, options.Flags.MqttWatchdogInterval, options.Flags.MqttWatchdogMaxFailures, false)
 	if err != nil {
 		log.Error(err, "Failed to initialize MQTT client")
 		return err
@@ -163,6 +167,12 @@ func (d *daemon) Run() error {
 	defer mc.Close()
 
 	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit, scripts.GetFS())
+	// Store mc in d.ctx for pkg/shelly's own mqtt.GetClient(ctx) callers
+	// (pkg/shelly/device.go, pkg/shelly/script/run.go) — see
+	// pkg/shelly/mqtt.NewContextWithClient's doc comment. Every subsequent
+	// use of d.ctx in this method and in goroutines spawned after this
+	// point sees the wrapped value.
+	d.ctx = shellymqtt.NewContextWithClient(d.ctx, mc)
 
 	// Start the main HTTP server (as a Mux), given to every other servers started below
 	// mux := http.NewServeMux()
@@ -436,7 +446,7 @@ func (d *daemon) Run() error {
 		}
 
 		// Start device manager
-		d.dm = impl.NewDeviceManager(d.ctx, storage, resolver, mc, sseBroadcaster)
+		d.dm = impl.NewDeviceManager(d.ctx, d.registry, storage, resolver, mc, sseBroadcaster)
 		d.dm.WithEventService(eventsSvc, eventsTracker)
 		err = d.dm.Start(d.ctx)
 		if err != nil {
@@ -465,7 +475,7 @@ func (d *daemon) Run() error {
 
 		// Register EventList RPC handler if events service is running
 		if eventsStore != nil {
-			myhome.Register(myhome.EventList, func(ctx context.Context, req *myhome.EventListRequest) (*myhome.EventListResponse, error) {
+			myhome.Register(d.registry, myhome.EventList, func(ctx context.Context, req *myhome.EventListRequest) (*myhome.EventListResponse, error) {
 				q := events.Query{
 					DeviceID:  req.DeviceID,
 					EventType: req.EventType,
@@ -508,7 +518,7 @@ func (d *daemon) Run() error {
 			}
 
 			// Create and register temperature method handlers, republishing temperature ranges at startup
-			tempHandlers := temperature.NewService(d.ctx, log, mc, tempStorage)
+			tempHandlers := temperature.NewService(d.ctx, log, d.registry, mc, tempStorage)
 			tempHandlers.RegisterHandlers()
 
 			log.Info("Temperature RPC methods registered")
@@ -519,7 +529,7 @@ func (d *daemon) Run() error {
 			log.Info("Registering occupancy RPC methods")
 
 			// Create and register occupancy RPC handler
-			occupancyHandler := occupancy.NewRPCHandler(log, d.occupancyService)
+			occupancyHandler := occupancy.NewRPCHandler(log, d.occupancyService, d.registry)
 			occupancyHandler.RegisterHandlers()
 
 			log.Info("Occupancy RPC methods registered")
@@ -529,7 +539,7 @@ func (d *daemon) Run() error {
 		// the UI and `ctl pool status`). Always registered — the signature
 		// exists regardless of pool tracking; handleGetStatus itself returns
 		// a clear error if poolNotices is nil (pool disabled/unreachable).
-		poolRPCHandler := NewPoolRPCHandler(log, poolNotices)
+		poolRPCHandler := NewPoolRPCHandler(log, poolNotices, d.registry)
 		poolRPCHandler.RegisterHandlers()
 
 		// Publish a hostname for the DeviceManager host: myhome.local
@@ -569,7 +579,7 @@ func (d *daemon) Run() error {
 		// Pass the live device manager (not raw storage) so the dashboard sees
 		// each device's in-memory Impl/Status rather than a DB snapshot with no
 		// live state attached.
-		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, d.dm, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy, accountsRegistry); err != nil {
+		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, d.dm, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy, accountsRegistry, global.PanicOnBugs, d.registry); err != nil {
 			log.Error(err, "Failed to start UI server")
 			return err
 		}

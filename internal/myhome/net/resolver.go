@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/global"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
@@ -28,14 +27,24 @@ type Resolver interface {
 	PublishService(ctx context.Context, instance, service, domain string, port int, txt []string, ifaces []net.Interface) (*zeroconf.Server, error)
 }
 
-func MyResolver(log logr.Logger) Resolver {
+// MyResolver returns the process-wide mDNS/Zeroconf Resolver, constructing
+// it on first call with mdnsTimeout. mdnsTimeout is a constructor argument
+// rather than read from myhome/ctl/options directly: internal/* packages
+// must not import the CLI's options/viper package (see #362), so every
+// caller passes its own already-resolved timeout (from options.Flags at a
+// composition root, or from an already-configured value like the RPC
+// client's own timeout).
+//
+// Subsequent calls ignore mdnsTimeout and return the already-constructed
+// instance — see theResolver's doc comment for why this stays a singleton.
+func MyResolver(log logr.Logger, mdnsTimeout time.Duration) Resolver {
 	theResolverLock.Lock()
 	defer theResolverLock.Unlock()
 
 	if theResolver == nil {
 		theResolver = &resolver{
 			log:         log,
-			mdnsTimeout: options.Flags.MdnsTimeout,
+			mdnsTimeout: mdnsTimeout,
 		}
 	}
 	return theResolver
@@ -50,6 +59,14 @@ type resolver struct {
 	mdnsTimeout time.Duration
 }
 
+// theResolver is a package-level singleton, not yet converted to
+// constructor injection: mDNS/Zeroconf state (multicast sockets, browse
+// goroutines) is inherently process-wide, and every call site already goes
+// through MyResolver() rather than constructing a resolver directly. Noted
+// as a global outside #362's original inventory rather than addressed here;
+// a full conversion would mean threading a *Resolver through every
+// caller (device lookup, daemon startup, ctl setup) for a component that
+// has exactly one legitimate instance per process anyway.
 var theResolver *resolver
 
 var theResolverLock sync.Mutex

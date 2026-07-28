@@ -32,6 +32,12 @@ const (
 
 var registrar types.MethodsRegistrar
 
+// Init wires up the MQTT RPC channel and method handlers. mc is used only
+// to initialize mqttChannel (the RPC channel implementation) here; it is
+// NOT stored for later retrieval by GetClient — callers that need mc via
+// ctx must wrap their own root context with mqtt.NewContextWithClient(ctx,
+// mc) themselves, right after calling Init (see NewContextWithClient's doc
+// comment).
 func Init(log logr.Logger, r types.MethodsRegistrar, mc Client, timeout time.Duration) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	registrar = r
@@ -49,7 +55,6 @@ func Init(log logr.Logger, r types.MethodsRegistrar, mc Client, timeout time.Dur
 		HttpMethod: http.MethodPost,
 	})
 
-	SetClient(mc)
 	mqttChannel.Init(log, timeout)
 	registrar.RegisterDeviceCaller(types.ChannelMqtt, types.DeviceCaller(mqttChannel.CallDevice))
 }

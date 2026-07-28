@@ -8,7 +8,39 @@ import (
 	"github.com/asnowfix/home-automation/pkg/devices"
 )
 
-var TheClient Client
+// clientContextKey is the unexported type used to store a Client in a
+// context.Context via NewContextWithClient/ClientFromContext.
+type clientContextKey struct{}
+
+// NewContextWithClient returns a copy of ctx carrying c as the RPC client to
+// use for this command invocation. It replaces the former package-level
+// TheClient global.
+//
+// Cobra's command tree gives every subcommand's RunE the same signature
+// (func(cmd *cobra.Command, args []string) error), with no room for an
+// extra constructor-injected parameter — each *cobra.Command is a
+// package-level var built once at init() time. myhome/ctl/ctl.go (the CLI's
+// composition root) is the single place that constructs the RPC client; it
+// stores it here, mirroring how it already threads the logr.Logger via
+// logr.NewContext, and every command reads it back via ClientFromContext at
+// the top of its RunE. Everything below that boundary (Foreach,
+// ConfigureDevice, blu.ResolveMac, ...) takes the Client as a plain,
+// explicit function parameter instead of reaching back into ctx.
+func NewContextWithClient(ctx context.Context, c Client) context.Context {
+	return context.WithValue(ctx, clientContextKey{}, c)
+}
+
+// ClientFromContext returns the Client stored by NewContextWithClient. It
+// returns an error rather than panicking so a CLI command can report a
+// clear "myhome client not initialized" message instead of a nil-pointer
+// crash if ctl.go's PersistentPreRunE was somehow skipped.
+func ClientFromContext(ctx context.Context) (Client, error) {
+	c, ok := ctx.Value(clientContextKey{}).(Client)
+	if !ok || c == nil {
+		return nil, fmt.Errorf("myhome client not found in context (was NewContextWithClient called?)")
+	}
+	return c, nil
+}
 
 // InstanceName is the myhome server instance name used for RPC topics.
 // Default is "myhome". Can be changed to target a different server instance.
@@ -24,7 +56,7 @@ type Client interface {
 // parameter type, R the expected result type; both are normally inferred
 // from the arguments, so a call site reads:
 //
-//	rooms, err := myhome.Call[any, *myhome.RoomListResult](ctx, myhome.TheClient, myhome.RoomList, nil)
+//	rooms, err := myhome.Call[any, *myhome.RoomListResult](ctx, client, myhome.RoomList, nil)
 //
 // CallE itself stays untyped (it must satisfy the Client interface for every
 // verb), so Call is what gives callers their compile-time result type back.

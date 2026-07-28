@@ -69,9 +69,7 @@ func TestSmokeAllScripts(t *testing.T) {
 	// Leave empty to use the generic state below.
 	perScriptState := map[string]*script.DeviceState{}
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	entries, err := fs.ReadDir(GetFS(), ".")
 	if err != nil {
@@ -108,7 +106,7 @@ func TestSmokeAllScripts(t *testing.T) {
 			// and waiting for events. Only genuine JS exceptions or non-context
 			// errors cause the subtest to fail.
 			ctx, cancel := context.WithTimeout(
-				logr.NewContext(context.Background(), testr.New(t)),
+				mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mc),
 				smokeTimeout,
 			)
 			defer cancel()

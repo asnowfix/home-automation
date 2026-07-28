@@ -35,7 +35,12 @@ var Cmd = &cobra.Command{
 		if len(args) == 3 {
 			paramsArg = args[2]
 		}
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, deviceId, options.Via, callOneDevice, []string{method, paramsArg})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, deviceId, options.Via, callOneDevice, []string{method, paramsArg})
 		return err
 	},
 }

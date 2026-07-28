@@ -44,7 +44,12 @@ var toggleCmd = &cobra.Command{
 	Short: "Toggle device switch",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"toggle"})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doSwitchOneDevice, []string{"toggle"})
 		return err
 	},
 }
@@ -54,7 +59,12 @@ var onCmd = &cobra.Command{
 	Short: "Turn device switch on",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"on"})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doSwitchOneDevice, []string{"on"})
 		return err
 	},
 }
@@ -64,7 +74,12 @@ var offCmd = &cobra.Command{
 	Short: "Turn device switch off",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"off"})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doSwitchOneDevice, []string{"off"})
 		return err
 	},
 }
@@ -74,7 +89,12 @@ var statusCmd = &cobra.Command{
 	Short: "Display device switch status",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		out, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"status"})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		out, err := myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doSwitchOneDevice, []string{"status"})
 		if err != nil {
 			return err
 		}

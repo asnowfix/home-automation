@@ -16,8 +16,13 @@ import (
 type poolProvider struct{}
 
 func (p *poolProvider) GetDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, error) {
-	// Use myhome.TheClient.LookupDevices to find the device
-	devices, err := myhome.TheClient.LookupDevices(ctx, identifier)
+	client, err := myhome.ClientFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Use LookupDevices to find the device
+	devices, err := client.LookupDevices(ctx, identifier)
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup device %s: %w", identifier, err)
 	}
@@ -53,7 +58,12 @@ func (p *poolProvider) GetShellyDevice(ctx context.Context, device *myhome.Devic
 	var shellyDevice *shelly.Device
 	var deviceErr error
 
-	_, err := myhome.Foreach(ctx, hlog.Logger, device.Id(), types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, d shelly.Summary, args []string) (any, error) {
+	client, err := myhome.ClientFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = myhome.Foreach(ctx, hlog.Logger, client, device.Id(), types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, d shelly.Summary, args []string) (any, error) {
 		sd, ok := d.(*shelly.Device)
 		if !ok {
 			deviceErr = fmt.Errorf("device is not a Shelly device")

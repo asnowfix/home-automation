@@ -21,7 +21,12 @@ var Cmd = &cobra.Command{
 			name = args[0]
 		}
 
-		devices, err := myhome.TheClient.LookupDevices(cmd.Context(), name)
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		devices, err := client.LookupDevices(cmd.Context(), name)
 		if err != nil {
 			return err
 		}

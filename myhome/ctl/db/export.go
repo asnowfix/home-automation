@@ -56,6 +56,11 @@ Examples:
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
 		pattern := "*"
 		if len(args) == 1 {
 			pattern = args[0]
@@ -65,7 +70,7 @@ Examples:
 		deviceCount := 0
 
 		// Get devices matching pattern
-		devices, err := myhome.TheClient.LookupDevices(ctx, pattern)
+		devices, err := client.LookupDevices(ctx, pattern)
 		if err != nil {
 			return fmt.Errorf("failed to lookup devices: %w", err)
 		}
@@ -77,19 +82,19 @@ Examples:
 		// Export temperature tables unless --devices-only is set
 		if !exportFlags.DevicesOnly {
 			// Get temperature rooms
-			rooms, err := myhome.Call[any, *myhome.TemperatureRoomList](ctx, myhome.TheClient, myhome.TemperatureList, nil)
+			rooms, err := myhome.Call[any, *myhome.TemperatureRoomList](ctx, client, myhome.TemperatureList, nil)
 			if err == nil && rooms != nil && len(*rooms) > 0 {
 				export.TemperatureRooms = *rooms
 			}
 
 			// Get weekday defaults
-			weekdayDefaults, err := myhome.Call[*myhome.TemperatureGetWeekdayDefaultsParams, *myhome.TemperatureWeekdayDefaults](ctx, myhome.TheClient, myhome.TemperatureGetWeekdayDefaults, &myhome.TemperatureGetWeekdayDefaultsParams{})
+			weekdayDefaults, err := myhome.Call[*myhome.TemperatureGetWeekdayDefaultsParams, *myhome.TemperatureWeekdayDefaults](ctx, client, myhome.TemperatureGetWeekdayDefaults, &myhome.TemperatureGetWeekdayDefaultsParams{})
 			if err == nil && weekdayDefaults != nil && len(weekdayDefaults.Defaults) > 0 {
 				export.WeekdayDefaults = weekdayDefaults.Defaults
 			}
 
 			// Get kind schedules
-			kindSchedules, err := myhome.Call[*myhome.TemperatureGetKindSchedulesParams, *myhome.TemperatureKindScheduleList](ctx, myhome.TheClient, myhome.TemperatureGetKindSchedules, &myhome.TemperatureGetKindSchedulesParams{})
+			kindSchedules, err := myhome.Call[*myhome.TemperatureGetKindSchedulesParams, *myhome.TemperatureKindScheduleList](ctx, client, myhome.TemperatureGetKindSchedules, &myhome.TemperatureGetKindSchedulesParams{})
 			if err == nil && kindSchedules != nil && len(*kindSchedules) > 0 {
 				export.KindSchedules = *kindSchedules
 			}

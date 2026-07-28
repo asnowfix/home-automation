@@ -6,32 +6,19 @@ import (
 	"testing"
 )
 
-// withHandler registers h for verb v via Register and restores the previous
-// registration (if any) in t.Cleanup. Tests must NOT call t.Parallel()
-// because the methods map is a package-level global.
-func withHandler[P, R any](t *testing.T, v Verb, h func(ctx context.Context, p P) (R, error)) {
-	t.Helper()
-	prev := methods[v]
-	delete(methods, v) // Register panics on double-registration; clear any prior entry first.
-	Register(v, h)
-	t.Cleanup(func() {
-		if prev == nil {
-			delete(methods, v)
-		} else {
-			methods[v] = prev
-		}
-	})
-}
-
 // nopHandler is a minimal handler that returns a non-nil result.
 func nopHandler(_ context.Context, _ any) (any, error) { return "ok", nil }
 
 // TestRegister_KnownVerb verifies that a handler registered via Register is
-// stored and retrievable via Methods().
+// stored and retrievable via Methods(). Each test builds its own Registry
+// instead of sharing process-wide state, so these are safe to run with
+// t.Parallel().
 func TestRegister_KnownVerb(t *testing.T) {
-	withHandler(t, TemperatureGet, nopHandler)
+	t.Parallel()
+	r := NewRegistry()
+	Register(r, TemperatureGet, nopHandler)
 
-	m, err := Methods(TemperatureGet)
+	m, err := r.Methods(TemperatureGet)
 	if err != nil {
 		t.Fatalf("Methods(%v) error: %v", TemperatureGet, err)
 	}
@@ -47,20 +34,19 @@ func TestRegister_KnownVerb(t *testing.T) {
 }
 
 // TestRegister_DuplicateVerb_Overwrites verifies that registering a second
-// handler for a verb that already has one replaces it rather than panicking,
-// matching the old RegisterMethodHandler's overwrite behavior. Tests rely on
-// this to swap in a replacement handler without an Unregister API (see
-// withHandler and myhome/occupancy/rpc_test.go's withRegisteredHandler).
+// handler for a verb that already has one replaces it rather than panicking.
 func TestRegister_DuplicateVerb_Overwrites(t *testing.T) {
-	withHandler(t, TemperatureGet, nopHandler)
+	t.Parallel()
+	r := NewRegistry()
+	Register(r, TemperatureGet, nopHandler)
 
 	called := false
-	Register(TemperatureGet, func(_ context.Context, _ any) (any, error) {
+	Register(r, TemperatureGet, func(_ context.Context, _ any) (any, error) {
 		called = true
 		return "second", nil
 	})
 
-	m, err := Methods(TemperatureGet)
+	m, err := r.Methods(TemperatureGet)
 	if err != nil {
 		t.Fatalf("Methods error: %v", err)
 	}
@@ -76,19 +62,13 @@ func TestRegister_DuplicateVerb_Overwrites(t *testing.T) {
 	}
 }
 
-// TestMethods_Unregistered verifies that Methods returns an error (not a panic)
-// for a verb that has no registered handler.
+// TestMethods_Unregistered verifies that Methods returns an error (not a
+// panic) for a verb that has no registered handler.
 func TestMethods_Unregistered(t *testing.T) {
-	// Ensure the verb has no handler (save and clear).
-	prev := methods[TemperatureGet]
-	delete(methods, TemperatureGet)
-	t.Cleanup(func() {
-		if prev != nil {
-			methods[TemperatureGet] = prev
-		}
-	})
+	t.Parallel()
+	r := NewRegistry()
 
-	_, err := Methods(TemperatureGet)
+	_, err := r.Methods(TemperatureGet)
 	if err == nil {
 		t.Error("expected error for unregistered method, got nil")
 	}
@@ -97,9 +77,11 @@ func TestMethods_Unregistered(t *testing.T) {
 // TestMethods_Registered verifies that Methods returns the Method with the
 // correct name after registration.
 func TestMethods_Registered(t *testing.T) {
-	withHandler(t, TemperatureSet, nopHandler)
+	t.Parallel()
+	r := NewRegistry()
+	Register(r, TemperatureSet, nopHandler)
 
-	m, err := Methods(TemperatureSet)
+	m, err := r.Methods(TemperatureSet)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -108,11 +90,37 @@ func TestMethods_Registered(t *testing.T) {
 	}
 }
 
+// TestRestoreMethod_PutsBackExactMethod verifies that RestoreMethod on a
+// Registry re-installs a previously saved *Method verbatim, the pattern
+// callers use in t.Cleanup after swapping in a replacement handler.
+func TestRestoreMethod_PutsBackExactMethod(t *testing.T) {
+	t.Parallel()
+	r := NewRegistry()
+	Register(r, TemperatureSet, nopHandler)
+	original, err := r.Methods(TemperatureSet)
+	if err != nil {
+		t.Fatalf("Methods error: %v", err)
+	}
+
+	Register(r, TemperatureSet, func(_ context.Context, _ any) (any, error) { return "replaced", nil })
+	r.RestoreMethod(TemperatureSet, original)
+
+	m, err := r.Methods(TemperatureSet)
+	if err != nil {
+		t.Fatalf("Methods error: %v", err)
+	}
+	if m != original {
+		t.Error("expected RestoreMethod to reinstall the exact original *Method")
+	}
+}
+
 // TestRegister_ParamsDecodedExactlyOnce verifies that a request's raw JSON
 // params are decoded directly into the handler's declared parameter type,
 // with no double-unmarshal step, whether the method is invoked in-process
 // via Method.Call (typed params) or over the wire via Action (raw JSON).
 func TestRegister_ParamsDecodedExactlyOnce(t *testing.T) {
+	t.Parallel()
+	r := NewRegistry()
 	called := false
 	handler := func(_ context.Context, params *TemperatureGetParams) (*TemperatureRoomConfig, error) {
 		called = true
@@ -121,9 +129,9 @@ func TestRegister_ParamsDecodedExactlyOnce(t *testing.T) {
 		}
 		return &TemperatureRoomConfig{RoomID: "r1"}, nil
 	}
-	withHandler(t, TemperatureGet, handler)
+	Register(r, TemperatureGet, handler)
 
-	m, err := Methods(TemperatureGet)
+	m, err := r.Methods(TemperatureGet)
 	if err != nil {
 		t.Fatalf("Methods error: %v", err)
 	}

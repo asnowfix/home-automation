@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/asnowfix/home-automation/internal/global"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/internal/myhome/ui/assets"
@@ -44,11 +43,11 @@ type DeviceLookup interface {
 //
 // When upstreamProxy is empty, the host token is resolved to an IP and
 // the request is forwarded directly to the device on port 80 or 443.
-func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db DeviceLookup, upstreamProxy string, w http.ResponseWriter, r *http.Request) {
+func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db DeviceLookup, upstreamProxy string, panicOnBugs bool, w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	// Panic recovery to avoid blank pages
-	if !global.PanicOnBugs {
+	if !panicOnBugs {
 		defer func() {
 			if rec := recover(); rec != nil {
 				log.Error(fmt.Errorf("%v", rec), "panic recovered", "path", r.URL.Path, "stack", string(debug.Stack()))

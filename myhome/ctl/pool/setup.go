@@ -17,7 +17,11 @@ import (
 
 // getAllKnownDevices returns all myhome.Device entries from the server
 func getAllKnownDevices(ctx context.Context) ([]*myhome.Device, error) {
-	devices, err := myhome.TheClient.LookupDevices(ctx, "*")
+	client, err := myhome.ClientFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	devices, err := client.LookupDevices(ctx, "*")
 	if err != nil {
 		return nil, err
 	}

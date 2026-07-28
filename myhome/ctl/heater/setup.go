@@ -62,7 +62,12 @@ All other configuration values have defaults.`,
 			return fmt.Errorf("--room-id is required")
 		}
 
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doSetup, nil)
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doSetup, nil)
 		return err
 	},
 }
@@ -122,7 +127,11 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device she
 			Identifier: sd.Id(),
 			RoomId:     setupFlags.RoomId,
 		}
-		_, err := myhome.Call[*myhome.DeviceSetRoomParams, any](ctx, myhome.TheClient, myhome.DeviceSetRoom, params)
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		_, err = myhome.Call[*myhome.DeviceSetRoomParams, any](ctx, client, myhome.DeviceSetRoom, params)
 		if err != nil {
 			fmt.Printf("  ⚠ Failed to set device room in DB: %v\n", err)
 		} else {
@@ -205,7 +214,11 @@ func discoverDoorSensorsInRoom(ctx context.Context, roomId string) ([]string, er
 	params := &myhome.DeviceListByRoomParams{
 		RoomId: roomId,
 	}
-	result, err := myhome.Call[*myhome.DeviceListByRoomParams, *myhome.DeviceListByRoomResult](ctx, myhome.TheClient, myhome.DeviceListByRoom, params)
+	client, err := myhome.ClientFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result, err := myhome.Call[*myhome.DeviceListByRoomParams, *myhome.DeviceListByRoomResult](ctx, client, myhome.DeviceListByRoom, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list devices in room: %w", err)
 	}

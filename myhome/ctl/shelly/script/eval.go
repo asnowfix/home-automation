@@ -42,7 +42,12 @@ Examples:
   myhome ctl shelly script eval radiateur-salon-hiver heater.js "STATE"`,
 	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doEval, args[1:])
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doEval, args[1:])
 		return err
 	},
 }

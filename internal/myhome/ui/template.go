@@ -82,8 +82,8 @@ type DeviceView struct {
 // is exactly one configured pool device system-wide, so doing this inside
 // DeviceToView itself would trigger a redundant KVS/MQTT round trip for
 // every other device on each dashboard refresh.
-func applyPoolStatus(ctx context.Context, views []DeviceView) {
-	mh, err := myhome.Methods(myhome.PoolGetStatus)
+func applyPoolStatus(ctx context.Context, registry *myhome.Registry, views []DeviceView) {
+	mh, err := registry.Methods(myhome.PoolGetStatus)
 	if err != nil {
 		return // pool RPC not registered (pool tracking disabled)
 	}

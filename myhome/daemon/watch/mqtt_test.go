@@ -44,7 +44,7 @@ func TestMqttWatcherStopsOnChannelClose(t *testing.T) {
 	ch := make(chan mqtt.Message)
 	done := make(chan struct{})
 	go func() {
-		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch)
+		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch, "")
 		close(done)
 	}()
 
@@ -73,7 +73,7 @@ func TestMqttWatcherStopsOnContextCancel(t *testing.T) {
 	ch := make(chan mqtt.Message)
 	done := make(chan struct{})
 	go func() {
-		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch)
+		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch, "")
 		close(done)
 	}()
 

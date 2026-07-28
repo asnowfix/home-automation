@@ -127,7 +127,7 @@ func (hc *client) dispatch(from <-chan []byte) {
 
 func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.Device, error) {
 	if strings.HasSuffix(name, ".local") {
-		ips, err := mynet.MyResolver(hc.log).LookupHost(ctx, hc.log, strings.TrimSuffix(name, ".local"))
+		ips, err := mynet.MyResolver(hc.log, hc.timeout).LookupHost(ctx, hc.log, strings.TrimSuffix(name, ".local"))
 		if err != nil {
 			return nil, err
 		}

@@ -23,7 +23,12 @@ var Cmd = &cobra.Command{
 	Short: "Give Shelly components list, config & status",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doList, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doList, options.Args(args))
 		return err
 	},
 }

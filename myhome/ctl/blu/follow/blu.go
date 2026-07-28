@@ -103,22 +103,27 @@ Illuminance values can be specified as:
 Default illuminance_max is "10%" if not specified.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
 		// Scenario 1: List followed BLU devices on a specific device
 		if len(args) == 1 {
-			return listFollowedBluDevices(cmd.Context(), args[0])
+			return listFollowedBluDevices(cmd.Context(), client, args[0])
 		}
 
 		// Scenario 2: List all devices following a given BLU device
 		if args[0] == "-" || args[0] == "*" {
-			mac, err := mhblu.ResolveMac(cmd.Context(), args[1])
+			mac, err := mhblu.ResolveMac(cmd.Context(), client, args[1])
 			if err != nil {
 				return fmt.Errorf("failed to resolve BLU device %q: %w", args[1], err)
 			}
-			return listDevicesFollowingBlu(cmd.Context(), mac)
+			return listDevicesFollowingBlu(cmd.Context(), client, mac)
 		}
 
 		// Scenario 3: Configure a device to follow a BLU MAC
-		return configureBluFollow(cmd, args[0], args[1])
+		return configureBluFollow(cmd, client, args[0], args[1])
 	},
 }
 
@@ -132,8 +137,8 @@ func init() {
 }
 
 // configureBluFollow configures a Shelly device to follow a BLU device
-func configureBluFollow(cmd *cobra.Command, followerDevice, bluDevice string) error {
-	mac, err := mhblu.ResolveMac(cmd.Context(), bluDevice)
+func configureBluFollow(cmd *cobra.Command, client myhome.Client, followerDevice, bluDevice string) error {
+	mac, err := mhblu.ResolveMac(cmd.Context(), client, bluDevice)
 	if err != nil {
 		return fmt.Errorf("failed to resolve BLU device %q: %w", bluDevice, err)
 	}
@@ -159,7 +164,7 @@ func configureBluFollow(cmd *cobra.Command, followerDevice, bluDevice string) er
 	kvKey := "follow/shelly-blu/" + mac
 
 	// Set KVS configuration
-	_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
+	_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, followerDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
 	if err != nil {
 		return err
 	}
@@ -168,7 +173,7 @@ func configureBluFollow(cmd *cobra.Command, followerDevice, bluDevice string) er
 	fmt.Printf("\nUploading blu-listener.js script...\n")
 	longCtx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
 	defer cancel()
-	_, err = myhome.Foreach(longCtx, hlog.Logger, followerDevice, options.Via, uploadScript, []string{"blu-listener.js"})
+	_, err = myhome.Foreach(longCtx, hlog.Logger, client, followerDevice, options.Via, uploadScript, []string{"blu-listener.js"})
 	if err != nil {
 		return fmt.Errorf("failed to upload script: %w", err)
 	}
@@ -177,12 +182,12 @@ func configureBluFollow(cmd *cobra.Command, followerDevice, bluDevice string) er
 }
 
 // listDevicesFollowingBlu lists all Shelly devices that follow the given BLU MAC address
-func listDevicesFollowingBlu(ctx context.Context, mac string) error {
+func listDevicesFollowingBlu(ctx context.Context, client myhome.Client, mac string) error {
 	log := hlog.Logger
 	kvKey := "follow/shelly-blu/" + mac
 
 	// Query all known Shelly devices using "*" wildcard
-	_, err := myhome.Foreach(ctx, log, "*", options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
+	_, err := myhome.Foreach(ctx, log, client, "*", options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 		sd, ok := device.(*shelly.Device)
 		if !ok {
 			return nil, nil // Skip non-Shelly devices
@@ -277,23 +282,28 @@ Examples:
   myhome ctl blu unfollow hallway-light motion-sensor-hallway`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
 		followerDevice := args[0]
 		bluDevice := args[1]
 
-		mac, err := mhblu.ResolveMac(cmd.Context(), bluDevice)
+		mac, err := mhblu.ResolveMac(cmd.Context(), client, bluDevice)
 		if err != nil {
 			return fmt.Errorf("failed to resolve BLU device %q: %w", bluDevice, err)
 		}
 
 		kvKey := "follow/shelly-blu/" + mac
 
-		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, doDeleteKVS, []string{kvKey})
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, followerDevice, options.Via, doDeleteKVS, []string{kvKey})
 		if err != nil {
 			return err
 		}
 
 		fmt.Printf("\nRemoving blu-listener.js script...\n")
-		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, deleteScript, []string{"blu-listener.js"})
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, followerDevice, options.Via, deleteScript, []string{"blu-listener.js"})
 		if err != nil {
 			return fmt.Errorf("failed to remove script: %w", err)
 		}
@@ -303,9 +313,9 @@ Examples:
 }
 
 // listFollowedBluDevices lists the BLU devices followed by the specified follower device
-func listFollowedBluDevices(ctx context.Context, followerDevice string) error {
+func listFollowedBluDevices(ctx context.Context, client myhome.Client, followerDevice string) error {
 	log := hlog.Logger
-	_, err := myhome.Foreach(ctx, log, followerDevice, options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
+	_, err := myhome.Foreach(ctx, log, client, followerDevice, options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 		sd, ok := device.(*shelly.Device)
 		if !ok {
 			return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)

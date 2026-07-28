@@ -43,13 +43,17 @@ var getCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 		roomID := args[0]
 
 		params := &myhome.TemperatureGetParams{
 			RoomID: roomID,
 		}
 
-		config, err := myhome.Call[*myhome.TemperatureGetParams, *myhome.TemperatureRoomConfig](ctx, myhome.TheClient, myhome.TemperatureGet, params)
+		config, err := myhome.Call[*myhome.TemperatureGetParams, *myhome.TemperatureRoomConfig](ctx, client, myhome.TemperatureGet, params)
 		if err != nil {
 			return err
 		}
@@ -102,6 +106,10 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 		pattern := args[0]
 
 		// Get flag values
@@ -119,7 +127,7 @@ Examples:
 		awaySet := cmd.Flags().Changed("away")
 
 		// Get list of all rooms to find matches
-		allRooms, err := myhome.Call[any, *myhome.TemperatureRoomList](ctx, myhome.TheClient, myhome.TemperatureList, nil)
+		allRooms, err := myhome.Call[any, *myhome.TemperatureRoomList](ctx, client, myhome.TemperatureList, nil)
 		if err != nil {
 			return fmt.Errorf("failed to list rooms: %w", err)
 		}
@@ -139,7 +147,7 @@ Examples:
 				return err
 			}
 
-			setResult, err := myhome.Call[*myhome.TemperatureSetParams, *myhome.TemperatureSetResult](ctx, myhome.TheClient, myhome.TemperatureSet, params)
+			setResult, err := myhome.Call[*myhome.TemperatureSetParams, *myhome.TemperatureSetResult](ctx, client, myhome.TemperatureSet, params)
 			if err != nil {
 				return err
 			}
@@ -163,7 +171,7 @@ Examples:
 				return err
 			}
 
-			_, err = myhome.Call[*myhome.TemperatureSetParams, *myhome.TemperatureSetResult](ctx, myhome.TheClient, myhome.TemperatureSet, params)
+			_, err = myhome.Call[*myhome.TemperatureSetParams, *myhome.TemperatureSetResult](ctx, client, myhome.TemperatureSet, params)
 			if err != nil {
 				fmt.Printf("✗ Failed to update room %s: %v\n", roomID, err)
 				continue
@@ -185,8 +193,12 @@ var listCmd = &cobra.Command{
 	Short: "List all temperature configurations",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 
-		rooms, err := myhome.Call[any, *myhome.TemperatureRoomList](ctx, myhome.TheClient, myhome.TemperatureList, nil)
+		rooms, err := myhome.Call[any, *myhome.TemperatureRoomList](ctx, client, myhome.TemperatureList, nil)
 		if err != nil {
 			return err
 		}
@@ -225,13 +237,17 @@ var deleteCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 		roomID := args[0]
 
 		params := &myhome.TemperatureDeleteParams{
 			RoomID: roomID,
 		}
 
-		deleteResult, err := myhome.Call[*myhome.TemperatureDeleteParams, *myhome.TemperatureDeleteResult](ctx, myhome.TheClient, myhome.TemperatureDelete, params)
+		deleteResult, err := myhome.Call[*myhome.TemperatureDeleteParams, *myhome.TemperatureDeleteResult](ctx, client, myhome.TemperatureDelete, params)
 		if err != nil {
 			return err
 		}
@@ -258,6 +274,10 @@ Date format: YYYY-MM-DD (defaults to today if not specified)`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 		roomID := args[0]
 
 		params := &myhome.TemperatureGetScheduleParams{
@@ -270,7 +290,7 @@ Date format: YYYY-MM-DD (defaults to today if not specified)`,
 			params.Date = &date
 		}
 
-		schedule, err := myhome.Call[*myhome.TemperatureGetScheduleParams, *myhome.TemperatureScheduleResult](ctx, myhome.TheClient, myhome.TemperatureGetSchedule, params)
+		schedule, err := myhome.Call[*myhome.TemperatureGetScheduleParams, *myhome.TemperatureScheduleResult](ctx, client, myhome.TemperatureGetSchedule, params)
 		if err != nil {
 			return err
 		}
@@ -322,10 +342,14 @@ Examples:
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 
 		params := &myhome.TemperatureGetWeekdayDefaultsParams{}
 
-		defaults, err := myhome.Call[*myhome.TemperatureGetWeekdayDefaultsParams, *myhome.TemperatureWeekdayDefaults](ctx, myhome.TheClient, myhome.TemperatureGetWeekdayDefaults, params)
+		defaults, err := myhome.Call[*myhome.TemperatureGetWeekdayDefaultsParams, *myhome.TemperatureWeekdayDefaults](ctx, client, myhome.TemperatureGetWeekdayDefaults, params)
 		if err != nil {
 			return err
 		}
@@ -363,9 +387,13 @@ Examples:
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 
 		var weekday int
-		_, err := fmt.Sscanf(args[0], "%d", &weekday)
+		_, err = fmt.Sscanf(args[0], "%d", &weekday)
 		if err != nil || weekday < 0 || weekday > 6 {
 			return fmt.Errorf("invalid weekday: %s (must be 0-6)", args[0])
 		}
@@ -380,7 +408,7 @@ Examples:
 			DayType: dayType,
 		}
 
-		setResult, err := myhome.Call[*myhome.TemperatureSetWeekdayDefaultParams, *myhome.TemperatureSetWeekdayDefaultResult](ctx, myhome.TheClient, myhome.TemperatureSetWeekdayDefault, params)
+		setResult, err := myhome.Call[*myhome.TemperatureSetWeekdayDefaultParams, *myhome.TemperatureSetWeekdayDefaultResult](ctx, client, myhome.TemperatureSetWeekdayDefault, params)
 		if err != nil {
 			return err
 		}
@@ -418,6 +446,10 @@ Examples:
   myhome ctl temperature kind list --kind bedroom --day-type work-day`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 
 		kindStr, _ := cmd.Flags().GetString("kind")
 		dayTypeStr, _ := cmd.Flags().GetString("day-type")
@@ -434,7 +466,7 @@ Examples:
 			params.DayType = &dayType
 		}
 
-		schedules, err := myhome.Call[*myhome.TemperatureGetKindSchedulesParams, *myhome.TemperatureKindScheduleList](ctx, myhome.TheClient, myhome.TemperatureGetKindSchedules, params)
+		schedules, err := myhome.Call[*myhome.TemperatureGetKindSchedulesParams, *myhome.TemperatureKindScheduleList](ctx, client, myhome.TemperatureGetKindSchedules, params)
 		if err != nil {
 			return err
 		}
@@ -487,6 +519,10 @@ Examples:
 	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 
 		kind := myhome.RoomKind(args[0])
 		dayType := myhome.DayType(args[1])
@@ -521,7 +557,7 @@ Examples:
 			Ranges:  ranges,
 		}
 
-		setResult, err := myhome.Call[*myhome.TemperatureSetKindScheduleParams, *myhome.TemperatureSetKindScheduleResult](ctx, myhome.TheClient, myhome.TemperatureSetKindSchedule, params)
+		setResult, err := myhome.Call[*myhome.TemperatureSetKindScheduleParams, *myhome.TemperatureSetKindScheduleResult](ctx, client, myhome.TemperatureSetKindSchedule, params)
 		if err != nil {
 			return err
 		}

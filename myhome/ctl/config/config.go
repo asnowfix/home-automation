@@ -45,6 +45,11 @@ Examples:
 		ctx := cmd.Context()
 		log := hlog.Logger
 
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
 		identifier := args[0]
 
 		// Validate that at least one flag is set
@@ -59,7 +64,7 @@ Examples:
 		}
 
 		// Call the configuration update function
-		err := myhome.ConfigureDevice(ctx, log, identifier, flags.Name, ecoModePtr)
+		err = myhome.ConfigureDevice(ctx, log, client, identifier, flags.Name, ecoModePtr)
 		if err != nil {
 			return fmt.Errorf("failed to configure device: %w", err)
 		}

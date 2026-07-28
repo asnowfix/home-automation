@@ -47,7 +47,12 @@ with the real device after the file is written.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		_, err := myhome.Foreach(cmd.Context(), log, args[0], options.Via, doSnapshot, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), log, client, args[0], options.Via, doSnapshot, options.Args(args))
 		return err
 	},
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/ctl/temperature"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	shellyPkg "github.com/asnowfix/home-automation/pkg/shelly"
+	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
@@ -66,7 +67,7 @@ var Cmd = &cobra.Command{
 			myhome.InstanceName = options.Flags.InstanceName
 		}
 
-		err := mqttclient.NewClientE(ctx, options.Flags.MqttBroker, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, true)
+		err := mqttclient.NewClientE(ctx, options.Flags.MqttBroker, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, options.Flags.MqttWatchdogInterval, options.Flags.MqttWatchdogMaxFailures, true)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
@@ -78,13 +79,22 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		myhome.TheClient, err = myhome.NewClientE(ctx, log, mc, options.Flags.MqttTimeout)
+		myHomeClient, err := myhome.NewClientE(ctx, log, mc, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome client")
 			return err
 		}
+		// Store the client in ctx so every subcommand's RunE can retrieve it
+		// via myhome.ClientFromContext(cmd.Context()) — see NewContextWithClient's
+		// doc comment for why context is used here instead of a package-level
+		// TheClient global.
+		ctx = myhome.NewContextWithClient(ctx, myHomeClient)
 
 		shellyPkg.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit, scripts.GetFS())
+		// Store mc in ctx for pkg/shelly's own mqtt.GetClient(ctx) callers
+		// (pkg/shelly/device.go, pkg/shelly/script/run.go) — see
+		// pkg/shelly/mqtt.NewContextWithClient's doc comment.
+		ctx = shellymqtt.NewContextWithClient(ctx, mc)
 
 		// Start cleanup goroutine that closes MQTT client when context is cancelled OR on signal
 		// This ensures cleanup happens even when command returns an error or is interrupted

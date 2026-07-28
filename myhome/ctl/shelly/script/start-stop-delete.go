@@ -32,7 +32,12 @@ var uploadCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doUpload, []string{scriptName})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doUpload, []string{scriptName})
 		return err
 	},
 }
@@ -86,7 +91,12 @@ var startCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{pkgscript.Start.String(), scriptName})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doStartStopDelete, []string{pkgscript.Start.String(), scriptName})
 		return err
 	},
 }
@@ -102,7 +112,12 @@ var stopCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{pkgscript.Stop.String(), scriptName})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doStartStopDelete, []string{pkgscript.Stop.String(), scriptName})
 		return err
 	},
 }
@@ -118,7 +133,12 @@ var deleteCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{pkgscript.Delete.String(), scriptName})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doStartStopDelete, []string{pkgscript.Delete.String(), scriptName})
 		return err
 	},
 }

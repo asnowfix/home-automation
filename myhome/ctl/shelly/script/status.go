@@ -26,7 +26,12 @@ var statusCtl = &cobra.Command{
 	Short: "Report status of all scripts loaded on the given Shelly device(s)",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStatus, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doStatus, options.Args(args))
 		return err
 	},
 }

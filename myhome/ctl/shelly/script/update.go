@@ -38,7 +38,12 @@ var updateCtl = &cobra.Command{
 		if len(args) > 1 {
 			scriptArgs = []string{args[1]}
 		}
-		_, err := myhome.Foreach(cmd.Context(), log, device, options.Via, doUpdate, scriptArgs)
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), log, client, device, options.Via, doUpdate, scriptArgs)
 		return err
 	},
 }

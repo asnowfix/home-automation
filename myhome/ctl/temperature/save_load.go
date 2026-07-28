@@ -35,9 +35,13 @@ Examples:
   myhome ctl temperature save --json > temperature-config.json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 
 		// Get all rooms
-		rooms, err := myhome.Call[any, *myhome.TemperatureRoomList](ctx, myhome.TheClient, myhome.TemperatureList, nil)
+		rooms, err := myhome.Call[any, *myhome.TemperatureRoomList](ctx, client, myhome.TemperatureList, nil)
 		if err != nil {
 			return fmt.Errorf("failed to get rooms: %w", err)
 		}
@@ -46,7 +50,7 @@ Examples:
 		}
 
 		// Get weekday defaults
-		weekdayDefaults, err := myhome.Call[*myhome.TemperatureGetWeekdayDefaultsParams, *myhome.TemperatureWeekdayDefaults](ctx, myhome.TheClient, myhome.TemperatureGetWeekdayDefaults, &myhome.TemperatureGetWeekdayDefaultsParams{})
+		weekdayDefaults, err := myhome.Call[*myhome.TemperatureGetWeekdayDefaultsParams, *myhome.TemperatureWeekdayDefaults](ctx, client, myhome.TemperatureGetWeekdayDefaults, &myhome.TemperatureGetWeekdayDefaultsParams{})
 		if err != nil {
 			return fmt.Errorf("failed to get weekday defaults: %w", err)
 		}
@@ -55,7 +59,7 @@ Examples:
 		}
 
 		// Get kind schedules
-		kindSchedules, err := myhome.Call[*myhome.TemperatureGetKindSchedulesParams, *myhome.TemperatureKindScheduleList](ctx, myhome.TheClient, myhome.TemperatureGetKindSchedules, &myhome.TemperatureGetKindSchedulesParams{})
+		kindSchedules, err := myhome.Call[*myhome.TemperatureGetKindSchedulesParams, *myhome.TemperatureKindScheduleList](ctx, client, myhome.TemperatureGetKindSchedules, &myhome.TemperatureGetKindSchedulesParams{})
 		if err != nil {
 			return fmt.Errorf("failed to get kind schedules: %w", err)
 		}
@@ -90,6 +94,10 @@ Examples:
   myhome ctl temperature load < temperature-config.json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
 
 		// Read from stdin
 		data, err := io.ReadAll(os.Stdin)
@@ -117,7 +125,7 @@ Examples:
 				Kinds:  roomConfig.Kinds,
 				Levels: roomConfig.Levels,
 			}
-			_, err := myhome.Call[*myhome.TemperatureSetParams, *myhome.TemperatureSetResult](ctx, myhome.TheClient, myhome.TemperatureSet, params)
+			_, err := myhome.Call[*myhome.TemperatureSetParams, *myhome.TemperatureSetResult](ctx, client, myhome.TemperatureSet, params)
 			if err != nil {
 				return fmt.Errorf("failed to set room %s: %w", roomID, err)
 			}
@@ -131,7 +139,7 @@ Examples:
 				Weekday: weekday,
 				DayType: dayType,
 			}
-			_, err := myhome.Call[*myhome.TemperatureSetWeekdayDefaultParams, *myhome.TemperatureSetWeekdayDefaultResult](ctx, myhome.TheClient, myhome.TemperatureSetWeekdayDefault, params)
+			_, err := myhome.Call[*myhome.TemperatureSetWeekdayDefaultParams, *myhome.TemperatureSetWeekdayDefaultResult](ctx, client, myhome.TemperatureSetWeekdayDefault, params)
 			if err != nil {
 				return fmt.Errorf("failed to set weekday default for weekday %d: %w", weekday, err)
 			}
@@ -153,7 +161,7 @@ Examples:
 				DayType: schedule.DayType,
 				Ranges:  rangeStrs,
 			}
-			_, err := myhome.Call[*myhome.TemperatureSetKindScheduleParams, *myhome.TemperatureSetKindScheduleResult](ctx, myhome.TheClient, myhome.TemperatureSetKindSchedule, params)
+			_, err := myhome.Call[*myhome.TemperatureSetKindScheduleParams, *myhome.TemperatureSetKindScheduleResult](ctx, client, myhome.TemperatureSetKindSchedule, params)
 			if err != nil {
 				return fmt.Errorf("failed to set kind schedule for %s/%s: %w", schedule.Kind, schedule.DayType, err)
 			}

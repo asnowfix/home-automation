@@ -31,7 +31,12 @@ var getCtl = &cobra.Command{
 		if len(args) == 2 {
 			match = args[1]
 		}
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, get, []string{match})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, get, []string{match})
 		return err
 	},
 }

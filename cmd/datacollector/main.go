@@ -66,6 +66,14 @@ func main() {
 	ctx, cancel := options.CommandLineContext(ctx)
 	defer cancel()
 
+	// GetClientE requires a prior NewClientE (see #362): this standalone
+	// tool never goes through myhome/ctl's cobra flags, so pass the
+	// package's own defaults explicitly instead of reading options.Flags
+	// (which would still be its zero values here).
+	if err := mqtt.NewClientE(ctx, "", "datacollector", options.MDNS_LOOKUP_DEFAULT_TIMEOUT, options.MQTT_DEFAULT_TIMEOUT, options.MQTT_DEFAULT_GRACE, options.MQTT_RECONNECT_INTERVAL, options.MQTT_WATCHDOG_CHECK_INTERVAL, options.MQTT_WATCHDOG_MAX_FAILURES, true); err != nil {
+		log.Fatalf("Failed to initialize MQTT client: %v", err)
+	}
+
 	mc, err := mqtt.GetClientE(ctx)
 	if err != nil {
 		log.Fatalf("Failed to get MQTT client: %v", err)
@@ -76,10 +84,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create myhome client: %v", err)
 	}
-	myhome.TheClient = client
 
 	// Get all devices
-	devices, err := myhome.TheClient.LookupDevices(ctx, "*")
+	devices, err := client.LookupDevices(ctx, "*")
 	if err != nil {
 		log.Fatalf("Failed to get devices: %v", err)
 	}

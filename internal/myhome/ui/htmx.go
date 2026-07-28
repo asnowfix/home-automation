@@ -24,16 +24,18 @@ type HTMXHandler struct {
 	db               DeviceRegistry
 	eventsSvc        *events.Service
 	accountsRegistry *accounts.Registry
+	registry         *myhome.Registry
 }
 
 // NewHTMXHandler creates a new HTMX handler
-func NewHTMXHandler(ctx context.Context, log logr.Logger, db DeviceRegistry, eventsSvc *events.Service, accountsRegistry *accounts.Registry) *HTMXHandler {
+func NewHTMXHandler(ctx context.Context, log logr.Logger, db DeviceRegistry, eventsSvc *events.Service, accountsRegistry *accounts.Registry, registry *myhome.Registry) *HTMXHandler {
 	return &HTMXHandler{
 		ctx:              ctx,
 		log:              log,
 		db:               db,
 		eventsSvc:        eventsSvc,
 		accountsRegistry: accountsRegistry,
+		registry:         registry,
 	}
 }
 
@@ -142,7 +144,7 @@ func (h *HTMXHandler) DeviceCards(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(deviceViews, func(i, j int) bool {
 		return strings.ToLower(deviceViews[i].Name) < strings.ToLower(deviceViews[j].Name)
 	})
-	applyPoolStatus(h.ctx, deviceViews)
+	applyPoolStatus(h.ctx, h.registry, deviceViews)
 
 	h.log.Info("DeviceCards: rendering template", "device_count", len(deviceViews))
 
@@ -174,7 +176,7 @@ func (h *HTMXHandler) DeviceCard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	views := []DeviceView{DeviceToView(h.ctx, device)}
-	applyPoolStatus(h.ctx, views)
+	applyPoolStatus(h.ctx, h.registry, views)
 	dv := views[0]
 
 	tmpl := template.Must(template.New("device-card").Funcs(cardTemplateFuncs()).Parse(deviceCardTemplate))
@@ -189,7 +191,7 @@ func (h *HTMXHandler) DeviceCard(w http.ResponseWriter, r *http.Request) {
 // RoomsList renders the rooms list HTML fragment
 func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
 	// Call the temperature.list RPC method
-	mh, err := myhome.Methods(myhome.TemperatureList)
+	mh, err := h.registry.Methods(myhome.TemperatureList)
 	if err != nil {
 		http.Error(w, "method not found", http.StatusInternalServerError)
 		return
@@ -233,7 +235,7 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Call switch.toggle RPC
-	mh, err := myhome.Methods(myhome.SwitchToggle)
+	mh, err := h.registry.Methods(myhome.SwitchToggle)
 	if err != nil {
 		http.Error(w, "method not found", http.StatusInternalServerError)
 		return

@@ -70,8 +70,8 @@ func defaultZoneKVS() map[string]string {
 	return m
 }
 
-func getDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, *shelly.Device, error) {
-	devs, err := myhome.TheClient.LookupDevices(ctx, identifier)
+func getDeviceByAny(ctx context.Context, c myhome.Client, identifier string) (*myhome.Device, *shelly.Device, error) {
+	devs, err := c.LookupDevices(ctx, identifier)
 	if err != nil || len(*devs) == 0 {
 		return nil, nil, fmt.Errorf("device not found: %s", identifier)
 	}
@@ -93,7 +93,7 @@ func getDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, *sh
 	}
 	var sd *shelly.Device
 	var sdErr error
-	_, err = myhome.Foreach(ctx, hlog.Logger, d.Id(), types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, dev shelly.Summary, args []string) (any, error) {
+	_, err = myhome.Foreach(ctx, hlog.Logger, c, d.Id(), types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, dev shelly.Summary, args []string) (any, error) {
 		if s, ok := dev.(*shelly.Device); ok {
 			sd = s
 		} else {
@@ -128,10 +128,15 @@ to reflect real coverage.`,
 		ctx := cmd.Context()
 		identifier := args[0]
 
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
 		noMinify, _ := cmd.Flags().GetBool("no-minify")
 		force, _ := cmd.Flags().GetBool("force")
 
-		_, sd, err := getDeviceByAny(ctx, identifier)
+		_, sd, err := getDeviceByAny(ctx, client, identifier)
 		if err != nil {
 			return fmt.Errorf("device lookup failed: %w", err)
 		}

@@ -49,15 +49,20 @@ Examples:
   myhome ctl shelly follow hallway-light motion-sensor --auto-off=300`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
 		if len(args) == 1 {
-			return listFollowedShellyDevices(cmd.Context(), args[0])
+			return listFollowedShellyDevices(cmd.Context(), client, args[0])
 		}
 
 		followerDevice := args[0]
 		followedDevice := args[1]
 
 		// Lookup the followed device to get its ID
-		followedDevices, err := myhome.TheClient.LookupDevices(cmd.Context(), followedDevice)
+		followedDevices, err := client.LookupDevices(cmd.Context(), followedDevice)
 		if err != nil {
 			return fmt.Errorf("failed to lookup followed device: %w", err)
 		}
@@ -90,7 +95,7 @@ Examples:
 		kvKey := "follow/status/" + followedDeviceId
 
 		// Set KVS configuration
-		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, followerDevice, options.Via, doSetKVS, []string{kvKey, string(valueBytes)})
 		if err != nil {
 			return err
 		}
@@ -99,7 +104,7 @@ Examples:
 		fmt.Printf("\nUploading status-listener.js script...\n")
 		longCtx, cancel := context.WithTimeout(cmd.Context(), 2*time.Minute)
 		defer cancel()
-		_, err = myhome.Foreach(longCtx, hlog.Logger, followerDevice, options.Via, uploadScript, []string{"status-listener.js"})
+		_, err = myhome.Foreach(longCtx, hlog.Logger, client, followerDevice, options.Via, uploadScript, []string{"status-listener.js"})
 		if err != nil {
 			return fmt.Errorf("failed to upload script: %w", err)
 		}
@@ -127,10 +132,15 @@ Examples:
   myhome ctl shelly unfollow hallway-light office-switch`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
 		followerDevice := args[0]
 		followedDevice := args[1]
 
-		followedDevices, err := myhome.TheClient.LookupDevices(cmd.Context(), followedDevice)
+		followedDevices, err := client.LookupDevices(cmd.Context(), followedDevice)
 		if err != nil {
 			return fmt.Errorf("failed to lookup followed device: %w", err)
 		}
@@ -144,13 +154,13 @@ Examples:
 
 		kvKey := "follow/status/" + followedDeviceId
 
-		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, doDeleteKVS, []string{kvKey})
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, followerDevice, options.Via, doDeleteKVS, []string{kvKey})
 		if err != nil {
 			return err
 		}
 
 		fmt.Printf("\nRemoving status-listener.js script...\n")
-		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, followerDevice, options.Via, deleteScript, []string{"status-listener.js"})
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, followerDevice, options.Via, deleteScript, []string{"status-listener.js"})
 		if err != nil {
 			return fmt.Errorf("failed to remove script: %w", err)
 		}
@@ -202,9 +212,9 @@ func uploadScript(ctx context.Context, log logr.Logger, via types.Channel, devic
 }
 
 // listFollowedShellyDevices lists the Shelly devices followed by the given follower device
-func listFollowedShellyDevices(ctx context.Context, followerDevice string) error {
+func listFollowedShellyDevices(ctx context.Context, client myhome.Client, followerDevice string) error {
 	log := hlog.Logger
-	_, err := myhome.Foreach(ctx, log, followerDevice, options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
+	_, err := myhome.Foreach(ctx, log, client, followerDevice, options.Via, func(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 		sd, ok := device.(*shelly.Device)
 		if !ok {
 			return nil, fmt.Errorf("device is not a Shelly: %T %v", device, device)

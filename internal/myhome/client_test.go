@@ -103,10 +103,13 @@ func newTestClient(t *testing.T, id string, timeout time.Duration) (*client, *fa
 func mustDeviceSummaryResponse(t *testing.T, req request, deviceId string) []byte {
 	t.Helper()
 	result := []DeviceSummary{{DeviceIdentifier: DeviceIdentifier{Id_: deviceId}, Name_: deviceId}}
-	var resultAny any = result
+	resultRaw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal result: %v", err)
+	}
 	resp := response{
 		Dialog: Dialog{Id: req.Id, Src: InstanceName, Dst: req.Src},
-		Result: &resultAny,
+		Result: resultRaw,
 	}
 	b, err := json.Marshal(resp)
 	if err != nil {
@@ -157,8 +160,9 @@ func TestCallE_ConcurrentCalls_CorrelateResponsesByDialogID(t *testing.T) {
 	req1 := mustUnmarshalRequest(t, <-fake.reqCh)
 	req2 := mustUnmarshalRequest(t, <-fake.reqCh)
 
-	param1, _ := req1.Params.(string)
-	param2, _ := req2.Params.(string)
+	var param1, param2 string
+	_ = json.Unmarshal(req1.Params, &param1)
+	_ = json.Unmarshal(req2.Params, &param2)
 
 	resp1 := mustDeviceSummaryResponse(t, req1, param1)
 	resp2 := mustDeviceSummaryResponse(t, req2, param2)
@@ -176,12 +180,19 @@ func TestCallE_ConcurrentCalls_CorrelateResponsesByDialogID(t *testing.T) {
 		if r.err != nil {
 			t.Fatalf("%s: CallE error: %v", label, r.err)
 		}
-		ds, ok := r.out.(*[]DeviceSummary)
-		if !ok || ds == nil || len(*ds) != 1 {
-			t.Fatalf("%s: got %#v, want *[]DeviceSummary with 1 element", label, r.out)
+		raw, ok := r.out.(json.RawMessage)
+		if !ok {
+			t.Fatalf("%s: got %#v (%T), want json.RawMessage", label, r.out, r.out)
 		}
-		if (*ds)[0].Id_ != want {
-			t.Errorf("%s: got device id %q, want %q (response cross-wired to the wrong caller)", label, (*ds)[0].Id_, want)
+		var ds []DeviceSummary
+		if err := json.Unmarshal(raw, &ds); err != nil {
+			t.Fatalf("%s: unmarshal result: %v", label, err)
+		}
+		if len(ds) != 1 {
+			t.Fatalf("%s: got %d device summaries, want 1", label, len(ds))
+		}
+		if ds[0].Id_ != want {
+			t.Errorf("%s: got device id %q, want %q (response cross-wired to the wrong caller)", label, ds[0].Id_, want)
 		}
 	}
 	checkResult(t, "call A (device-a)", gotA, "device-a")

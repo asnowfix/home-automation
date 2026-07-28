@@ -76,11 +76,13 @@ No business logic in `myhome/ctl/`. No MyHome-specific code in `pkg/shelly/`. Ut
 
 ### RPC System
 
-All methods share one MQTT topic (`myhome/rpc`). Adding a method requires four steps in order:
+All methods share one MQTT topic (`myhome/rpc`). Adding a method requires two steps in order:
 1. Add `Verb` constant → `internal/myhome/const.go`
-2. Add request/response types → `internal/myhome/<service>.go`
-3. Add to `signatures` map → `internal/myhome/methods.go`
-4. Register via `myhome.RegisterMethodHandler()` — never create a separate MQTT subscription
+2. Add request/response types (if new) → `internal/myhome/<service>.go`, then register the handler via `myhome.Register(verb, handler)` — never create a separate MQTT subscription
+
+`Register[P, R any](verb Verb, h func(ctx context.Context, p P) (R, error))` (`internal/myhome/methods.go`) replaces the old `signatures` map + `RegisterMethodHandler` pair: P and R are normally inferred from `h`'s own signature, so most registrations are a one-line call passing a method reference directly, e.g. `myhome.Register(myhome.HeaterGetConfig, s.HandleGetConfig)`. The wire request's `Params` (and the response's `Result`) travel as `json.RawMessage` end to end and are decoded exactly once, directly into `P` — there is no more runtime `reflect.TypeOf` check and no marshal-then-unmarshal round trip. Registering the same verb twice overwrites the previous registration (there is no `Unregister`); tests that need to swap a handler save the previous `*Method` via `myhome.Methods(verb)` and restore it with `myhome.RestoreMethod` in `t.Cleanup`.
+
+On the caller side, `myhome.TheClient.CallE(ctx, verb, params)` stays untyped (it must satisfy the `Client` interface across the wire client, `FakeClient`, and `DeviceManager`'s in-process short-circuit alike) — use the generic wrapper instead: `result, err := myhome.Call[ParamsType, ResultType](ctx, myhome.TheClient, verb, params)`. For a handler with no meaningful params or result, use `any` for that type parameter (e.g. `myhome.Call[any, *myhome.PoolGetStatusResult](ctx, myhome.TheClient, myhome.PoolGetStatus, nil)`).
 
 ### Key Packages
 
@@ -111,7 +113,7 @@ was present for the discussion that led to filing it.
 
 - **CLI output**: `fmt.Printf()` for user-facing messages; `hlog` for internal/debug logging. Never `log.Info()` in CLI commands.
 - **Config options**: adding any new option requires updating 4 files — `options.go`, `run.go`, `docs/configuration.md`, `myhome-example.yaml`. Env var pattern: `MYHOME_<SECTION>_<KEY>`.
-- **RPC handler tests**: tests that call `myhome.RegisterMethodHandler()` must restore state in `t.Cleanup` and must not call `t.Parallel()` (shared package-level map).
+- **RPC handler tests**: tests that call `myhome.Register()` must restore state in `t.Cleanup` (via `myhome.RestoreMethod`, since there is no `Unregister`) and must not call `t.Parallel()` (shared package-level map).
 - **Database migrations**: Use `COUNT(*)` (returns int) not bool when checking SQLite column existence. See AGENTS.md "Database Patterns".
 - **SQLite database paths**: new databases use a plain relative filename (e.g. `"foo.db"`), matching `myhome.db`. Do not invent a new default directory (e.g. `~/.myhome/`, XDG paths) unless all existing databases already use it. If a flag or config key lets the user supply an absolute path, the `NewStorage` constructor must call `os.MkdirAll(filepath.Dir(path), 0o755)` before opening the file — SQLite cannot create missing parent directories.
 - **File moves**: always `git mv`, never delete-and-recreate (preserves `git log --follow` history).

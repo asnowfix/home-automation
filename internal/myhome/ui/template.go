@@ -87,7 +87,7 @@ func applyPoolStatus(ctx context.Context, views []DeviceView) {
 	if err != nil {
 		return // pool RPC not registered (pool tracking disabled)
 	}
-	res, err := mh.ActionE(ctx, nil)
+	res, err := mh.Call(ctx, nil)
 	if err != nil {
 		return // device unreachable / KVS misconfigured — leave fields blank
 	}

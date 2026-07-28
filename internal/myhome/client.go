@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -144,28 +143,21 @@ func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.De
 		return &[]devices.Device{device}, nil
 	}
 
-	var out any
-	var err error
-
+	verb := DeviceLookup
 	if strings.HasPrefix(name, "*") || strings.HasSuffix(name, "*") {
-		out, err = hc.CallE(ctx, DevicesMatch, name)
-	} else {
-		out, err = hc.CallE(ctx, DeviceLookup, name)
+		verb = DevicesMatch
 	}
+
+	mhd, err := Call[string, []DeviceSummary](ctx, hc, verb, name)
 	if err != nil {
 		return nil, err
 	}
 
-	mhd, ok := out.(*[]DeviceSummary)
-	if !ok {
-		return nil, fmt.Errorf("expected *[]myhome.DeviceSummary, got %T", out)
+	out := make([]devices.Device, len(mhd))
+	for i, d := range mhd {
+		out[i] = d
 	}
-
-	devices := make([]devices.Device, len(*mhd))
-	for i, d := range *mhd {
-		devices[i] = d
-	}
-	return &devices, nil
+	return &out, nil
 }
 
 func (hc *client) ForgetDevices(ctx context.Context, name string) error {
@@ -193,16 +185,14 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 		return nil, err
 	}
 
-	m, exists := signatures[method]
-	if !exists {
-		return nil, fmt.Errorf("unknown method %s", method)
+	// Params is encoded once, up front, into the wire envelope's raw-JSON
+	// field. There is no per-verb type to check here: the compiler already
+	// enforced it at the call site via the generic Call[P, R] helper.
+	paramsRaw, err := json.Marshal(params)
+	if err != nil {
+		return nil, fmt.Errorf("marshal params for %s: %w", method, err)
 	}
 
-	if reflect.TypeOf(params) != reflect.TypeOf(m.NewParams()) {
-		err := fmt.Errorf("invalid parameter type for method %s: got %v, should be %v", method, reflect.TypeOf(params), reflect.TypeOf(m.NewParams()))
-		hc.log.Error(err, "Invalid parameter type")
-		return nil, err
-	}
 	req := request{
 		Dialog: Dialog{
 			Id:  requestId,
@@ -210,7 +200,7 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 			Dst: InstanceName,
 		},
 		Method: method,
-		Params: params,
+		Params: paramsRaw,
 	}
 	reqStr, err := json.Marshal(req)
 	if err != nil {
@@ -270,22 +260,14 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 		return nil, err
 	}
 
-	rs, err := json.Marshal(res.Result)
-	if err != nil {
-		hc.log.Error(err, "Failed to re-marshal response.result", "result", res.Result)
-		return nil, err
-	}
-	result := m.NewResult()
-	hc.log.Info("Result", "type", reflect.TypeOf(result))
-	err = json.Unmarshal(rs, &result)
-	if err != nil {
-		hc.log.Error(err, "Failed to re-unmarshal response.result", "payload", rs)
-		return nil, err
-	}
-
 	if res.Error != nil {
 		return nil, fmt.Errorf("%v (code:%v)", res.Error.Message, res.Error.Code)
 	}
 
-	return result, nil
+	// res.Result is already the raw JSON result from the wire, decoded
+	// exactly once (as part of unmarshalling the envelope in dispatch). It is
+	// handed back as-is; Call[P, R] does the single, type-specific unmarshal
+	// into the caller's chosen result type — no marshal-then-unmarshal round
+	// trip through an intermediate `any`.
+	return res.Result, nil
 }

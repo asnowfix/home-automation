@@ -117,7 +117,7 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device she
 		// Save name to DB if provided (via RPC to daemon)
 		if targetName != "" && targetName != sd.Name() && myhome.TheClient != nil {
 			fmt.Printf("  . Updating device name in DB: %s\n", targetName)
-			_, err := myhome.TheClient.CallE(ctx, myhome.DeviceSetup, &myhome.DeviceSetupParams{
+			_, err := myhome.Call[*myhome.DeviceSetupParams, any](ctx, myhome.TheClient, myhome.DeviceSetup, &myhome.DeviceSetupParams{
 				Identifier: sd.Id(),
 				Name:       targetName,
 			})
@@ -215,7 +215,7 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device she
 
 	// Trigger device refresh via myhome RPC to sync DB (if client is available)
 	if myhome.TheClient != nil {
-		if _, refreshErr := myhome.TheClient.CallE(ctx, myhome.DeviceRefresh, sd.Id()); refreshErr != nil {
+		if _, refreshErr := myhome.Call[string, *myhome.Device](ctx, myhome.TheClient, myhome.DeviceRefresh, sd.Id()); refreshErr != nil {
 			log.V(1).Info("Could not trigger device refresh via RPC", "error", refreshErr)
 		} else {
 			fmt.Printf("  ✓ Device refresh triggered\n")

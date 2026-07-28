@@ -25,12 +25,12 @@ func NewRPCHandler(log logr.Logger, service *Service) *RPCHandler {
 
 // RegisterHandlers registers occupancy RPC methods
 func (h *RPCHandler) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.OccupancyGetStatus, h.handleGetStatus)
+	myhome.Register(myhome.OccupancyGetStatus, h.handleGetStatus)
 	h.log.Info("Occupancy RPC handler registered")
 }
 
 // handleGetStatus returns the current occupancy status
-func (h *RPCHandler) handleGetStatus(ctx context.Context, params any) (any, error) {
+func (h *RPCHandler) handleGetStatus(ctx context.Context, params any) (*myhome.OccupancyStatusResult, error) {
 	// Get occupancy status using the service's IsOccupied method
 	occupied := h.service.IsOccupied(ctx)
 

@@ -66,14 +66,12 @@ var listCmd = &cobra.Command{
 			Limit:     listLimit,
 		}
 
-		result, err := myhome.TheClient.CallE(ctx, myhome.EventList, req)
+		resp, err := myhome.Call[*myhome.EventListRequest, *myhome.EventListResponse](ctx, myhome.TheClient, myhome.EventList, req)
 		if err != nil {
 			return err
 		}
-
-		resp, ok := result.(*myhome.EventListResponse)
-		if !ok {
-			return fmt.Errorf("unexpected result type: %T", result)
+		if resp == nil {
+			return fmt.Errorf("unexpected nil result")
 		}
 
 		if listJSON || options.Flags.Json {

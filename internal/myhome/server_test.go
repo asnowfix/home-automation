@@ -23,8 +23,10 @@ func (s *stubServer) MethodE(_ Verb) (*Method, error) {
 	return s.method, s.err
 }
 
+// noopAction returns "ok" without inspecting params.
+func noopAction(_ context.Context, _ json.RawMessage) (any, error) { return "ok", nil }
+
 // newServerCtx returns a context with a discarded logr.Logger.
-// NewServerE panics if the context carries no logger.
 func newServerCtx() context.Context {
 	return logr.NewContext(context.Background(), logr.Discard())
 }
@@ -65,14 +67,7 @@ func TestNewServerE_SubscribesToServerTopic(t *testing.T) {
 
 	mc := mqtt.NewRecordingMockClient()
 	handler := &stubServer{
-		method: &Method{
-			Name: "test.noop",
-			Signature: MethodSignature{
-				NewParams: func() any { return nil },
-				NewResult: func() any { return nil },
-			},
-			ActionE: func(_ context.Context, _ any) (any, error) { return "ok", nil },
-		},
+		method: &Method{Name: "test.noop", Action: noopAction},
 	}
 
 	_, err := NewServerE(ctx, mc, handler)
@@ -97,16 +92,12 @@ func TestServer_DispatchKnownMethod(t *testing.T) {
 	defer cancel()
 
 	mc := mqtt.NewRecordingMockClient()
-	called := false
+	called := make(chan struct{}, 1)
 	handler := &stubServer{
 		method: &Method{
 			Name: "test.dispatch",
-			Signature: MethodSignature{
-				NewParams: func() any { return nil },
-				NewResult: func() any { return nil },
-			},
-			ActionE: func(_ context.Context, _ any) (any, error) {
-				called = true
+			Action: func(_ context.Context, _ json.RawMessage) (any, error) {
+				called <- struct{}{}
 				return "dispatched", nil
 			},
 		},
@@ -126,8 +117,10 @@ func TestServer_DispatchKnownMethod(t *testing.T) {
 
 	raw := waitPublished(t, mc, ClientTopic(src))
 
-	if !called {
-		t.Error("handler ActionE was not called")
+	select {
+	case <-called:
+	default:
+		t.Error("handler Action was not called")
 	}
 
 	var res response
@@ -277,4 +270,83 @@ func TestServer_ContextCancellation(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Error("Feed after context cancellation deadlocked")
 	}
+}
+
+// TestServer_SlowHandlerDoesNotBlockConcurrentRPC proves that the server
+// dispatches messages concurrently: a request whose handler blocks until
+// released must not delay the response to a second, unrelated, fast request
+// fed immediately afterward. Before per-message dispatch, the server
+// processed inMsg strictly sequentially in one goroutine, so a slow handler
+// head-of-line-blocked every other RPC (see #361).
+func TestServer_SlowHandlerDoesNotBlockConcurrentRPC(t *testing.T) {
+	ctx, cancel := context.WithCancel(newServerCtx())
+	defer cancel()
+
+	mc := mqtt.NewRecordingMockClient()
+
+	release := make(chan struct{})
+	slowStarted := make(chan struct{})
+	handler := &stubServer{
+		method: &Method{
+			Name: "test.slow-or-fast",
+			Action: func(ctx context.Context, raw json.RawMessage) (any, error) {
+				var p struct {
+					Slow bool `json:"slow"`
+				}
+				_ = json.Unmarshal(raw, &p)
+				if p.Slow {
+					close(slowStarted)
+					select {
+					case <-release:
+					case <-ctx.Done():
+					}
+					return "slow-done", nil
+				}
+				return "fast-done", nil
+			},
+		},
+	}
+
+	_, err := NewServerE(ctx, mc, handler)
+	if err != nil {
+		t.Fatalf("NewServerE: %v", err)
+	}
+
+	const slowSrc = "slow-client"
+	const fastSrc = "fast-client"
+
+	feedRequest(t, mc, request{
+		Dialog: Dialog{Id: "slow-1", Src: slowSrc, Dst: InstanceName},
+		Method: "test.slow-or-fast",
+		Params: json.RawMessage(`{"slow":true}`),
+	})
+
+	select {
+	case <-slowStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow handler never started")
+	}
+
+	feedRequest(t, mc, request{
+		Dialog: Dialog{Id: "fast-1", Src: fastSrc, Dst: InstanceName},
+		Method: "test.slow-or-fast",
+		Params: json.RawMessage(`{"slow":false}`),
+	})
+
+	// The fast response must arrive well before the slow handler is released.
+	fastRaw := waitPublished(t, mc, ClientTopic(fastSrc))
+	var fastRes response
+	if err := json.Unmarshal(fastRaw, &fastRes); err != nil {
+		t.Fatalf("unmarshal fast response: %v", err)
+	}
+	var fastResult string
+	if err := json.Unmarshal(fastRes.Result, &fastResult); err != nil {
+		t.Fatalf("unmarshal fast result: %v", err)
+	}
+	if fastResult != "fast-done" {
+		t.Errorf("fast result: got %q, want %q", fastResult, "fast-done")
+	}
+
+	close(release)
+	waitPublished(t, mc, ClientTopic(slowSrc))
 }

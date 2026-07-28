@@ -27,11 +27,11 @@ func NewPoolRPCHandler(log logr.Logger, pool *PoolNotices) *PoolRPCHandler {
 
 // RegisterHandlers registers the pool.getstatus RPC method.
 func (h *PoolRPCHandler) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.PoolGetStatus, h.handleGetStatus)
+	myhome.Register(myhome.PoolGetStatus, h.handleGetStatus)
 	h.log.Info("Pool RPC handler registered")
 }
 
-func (h *PoolRPCHandler) handleGetStatus(ctx context.Context, _ any) (any, error) {
+func (h *PoolRPCHandler) handleGetStatus(ctx context.Context, _ any) (*myhome.PoolGetStatusResult, error) {
 	if h.pool == nil {
 		return nil, fmt.Errorf("pool status unavailable: pool device not configured or unreachable")
 	}

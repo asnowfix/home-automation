@@ -423,6 +423,8 @@ func (s *PoolService) setComponentNames(ctx context.Context, via types.Channel, 
 var knownPoolPumpStateKeys = []string{
 	"script/pool-pump/active-output",
 	"script/pool-pump/schedule-mode",
+	"script/pool-pump/runtime-sec",    // runtime_today_sec: cumulative pump-on seconds today (#402)
+	"script/pool-pump/turnover-today", // turnover_today: today's achieved water-volume turnovers (#402)
 }
 
 // UpdateResult holds the outcome of auditing/updating a single device

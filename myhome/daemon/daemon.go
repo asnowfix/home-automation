@@ -347,7 +347,10 @@ func (d *daemon) Run() error {
 			log.Info("Notice service disabled")
 		}
 
-		// Initialize pool runtime tracker if enabled
+		// Initialize pool runtime tracker if enabled. Only SolarAutomation's
+		// daily-target/hard-ceiling checks depend on this now — PoolNotices
+		// (below) no longer needs it since #402 moved runtime/turnover
+		// tracking on-device (pool-pump.js mirrors both to KVS itself).
 		var poolTracker *PoolRuntimeTracker
 		if options.Flags.PoolEnabled && options.Flags.PoolDeviceID != "" && eventsStore != nil {
 			poolTracker = NewPoolRuntimeTracker(log.WithName("pool"), eventsStore, options.Flags.PoolDeviceID)
@@ -361,8 +364,8 @@ func (d *daemon) Run() error {
 		// Degraded mode: if the pool device can't be reached, NewPoolNotices
 		// returns nil and broadcastFn's poolNotices.OnEvent call is then a
 		// no-op — pump control itself is entirely unaffected either way.
-		if poolTracker != nil {
-			poolNotices = NewPoolNotices(d.ctx, log.WithName("pool"), eventsSvc, poolTracker, options.Flags.PoolDeviceID)
+		if options.Flags.PoolEnabled && options.Flags.PoolDeviceID != "" {
+			poolNotices = NewPoolNotices(d.ctx, log.WithName("pool"), eventsSvc, options.Flags.PoolDeviceID)
 		}
 
 		// Start solar automation if enabled

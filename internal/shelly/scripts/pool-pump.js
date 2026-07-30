@@ -357,10 +357,15 @@ function loadConfig(callback) {
 // Script.storage keys for continuously evolving values (survives reboots, synchronous)
 var STORAGE_KEYS = {
   forecastUrl:   "forecast-url",    // Open-Meteo forecast URL built from device location
-  scheduleMode:  "schedule-mode"    // "summer" or "winter" — moved here from KVS because
+  scheduleMode:  "schedule-mode",   // "summer" or "winter" — moved here from KVS because
                                     // Script.storage.getItem() is synchronous; KVS.Get is
                                     // async-only, so Shelly.call without a callback always
                                     // returns null and schedule mode was lost on every reboot
+  runtimeSec:    "runtime-sec",     // cumulative pump-on seconds today (checkpointed while
+                                    // running, see flushRuntimeCheckpoint), synchronous so a
+                                    // reboot mid-run only loses runtime since the last flush
+  runtimeDate:   "runtime-date"     // "YYYY-M-D" date the above count applies to, for
+                                    // day-rollover detection (see ensureRuntimeDay)
 };
 
 // State keys for KVS persistence (fire-and-forget writes only; reads use Script.storage)
@@ -442,6 +447,12 @@ var STATE = {
 
   // Schedule mode
   scheduleMode: null,         // "summer" or "winter"
+
+  // Runtime/turnover tracking (on-device, for ctl pool status — see #402)
+  runtimeTodaySec: 0,         // cumulative pump-on seconds today (completed intervals only)
+  runtimeDate: null,          // "YYYY-M-D" date runtimeTodaySec applies to
+  runStartTs: null,           // Date.now() when the current ON interval began; null when off
+  runtimeFlushTimer: null,    // Timer handle for periodic checkpointing while running
 
   // Initialization flag
   initializing: true          // Prevents KVS writes during init
@@ -539,6 +550,13 @@ function loadValue(key) {
   return null;
 }
 
+// Fractional-day-free "YYYY-M-D" date string, used for day-rollover checks
+// (forecast refresh, runtime/turnover day reset).
+function todayDateString() {
+  var now = new Date();
+  return now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+}
+
 // === WEATHER FORECAST FUNCTIONS (Memory-Optimized) ===
 function setForecastURL(lat, lon) {
   log('setForecastURL', lat, lon);
@@ -551,8 +569,7 @@ function setForecastURL(lat, lon) {
 }
 
 function shouldRefreshForecast() {
-  var now = new Date();
-  var today = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+  var today = todayDateString();
 
   if (STATE.lastForecastFetchDate === null || STATE.lastForecastFetchDate !== today) {
     return true;
@@ -617,8 +634,7 @@ function onForecast(result, error_code, error_message, cb) {
   }
   data = null;
 
-  var now = new Date();
-  STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+  STATE.lastForecastFetchDate = todayDateString();
   log('Forecast cached, max temp:', maxTemp);
 
   if (typeof cb === 'function') {
@@ -836,6 +852,17 @@ function applyComponentNames(callback) {
 function loadState() {
   log("Loading persisted state...");
 
+  // runtimeDate/runtimeTodaySec: Script.storage (synchronous), restored
+  // before enforceOutputState() decides whether to resume runtime accounting
+  // for a run already in progress. ensureRuntimeDay() resets the counter if
+  // the restored date is stale (previous day).
+  var savedRuntimeDate = loadStorageValue(STORAGE_KEYS.runtimeDate);
+  var savedRuntimeSec = loadStorageValue(STORAGE_KEYS.runtimeSec);
+  STATE.runtimeDate = (typeof savedRuntimeDate === "string") ? savedRuntimeDate : null;
+  STATE.runtimeTodaySec = (typeof savedRuntimeSec === "number") ? savedRuntimeSec : 0;
+  ensureRuntimeDay();
+  log("Restored runtime today:", STATE.runtimeTodaySec, "s for date:", STATE.runtimeDate);
+
   // activeOutput: KVS fire-and-forget write; read is skipped here because
   // enforceOutputState() reads the actual hardware switch state right after
   // this call — hardware truth overrides any stale KVS value.
@@ -871,6 +898,116 @@ function saveState() {
       storeValue("schedule-mode", STATE.scheduleMode);
     });
   }
+}
+
+// === RUNTIME/TURNOVER TRACKING (on-device, for ctl pool status — #402) ===
+// pool-pump.js is the only place that knows the string→RPM mapping for the
+// configured preferred speed (via computeFlowRate() below), so it computes
+// and persists today's cumulative runtime and achieved turnover itself;
+// the daemon (ctl pool status / pool.getstatus RPC) just reads the results
+// from KVS instead of re-deriving flow rate. Hooked into activateOutput() —
+// the single choke point where STATE.activeOutput actually transitions —
+// so every code path that starts/stops the pump (doStart, doStop,
+// handleWaterSupply, the button handler, the anti-cycling fuse) is covered
+// with zero duplication.
+
+// Resets the daily counter when the persisted date has rolled over. If a run
+// is currently open (runStartTs set) across the rollover, its start marker is
+// pulled forward to "now" so only post-midnight time accrues to the new day —
+// otherwise the next flush/stop would re-credit the whole pre-midnight run
+// (since Date.now() - runStartTs would still span back into yesterday).
+function ensureRuntimeDay() {
+  var today = todayDateString();
+  if (STATE.runtimeDate !== today) {
+    log("Runtime day rollover:", STATE.runtimeDate, "->", today);
+    STATE.runtimeDate = today;
+    STATE.runtimeTodaySec = 0;
+    if (STATE.runStartTs !== null) {
+      STATE.runStartTs = Date.now();
+    }
+    storeStorageValue(STORAGE_KEYS.runtimeDate, STATE.runtimeDate);
+    persistRuntimeState(STATE.runtimeTodaySec);
+  }
+}
+
+// Called (via activateOutput) when the pump transitions OFF -> ON.
+function startRuntimeAccounting() {
+  ensureRuntimeDay();
+  STATE.runStartTs = Date.now();
+  if (!STATE.runtimeFlushTimer) {
+    // Periodic checkpoint while running — counts against the 5-timer budget,
+    // but only exists while the pump is actually on (cleared in
+    // stopRuntimeAccounting), so it never competes with the task-queue timer
+    // during steady-state idle operation.
+    STATE.runtimeFlushTimer = Timer.set(60000, true, flushRuntimeCheckpoint);
+  }
+  log("Runtime accounting started, today so far:", STATE.runtimeTodaySec, "s");
+}
+
+// Called (via activateOutput) when the pump transitions ON -> OFF.
+function stopRuntimeAccounting() {
+  if (STATE.runStartTs !== null) {
+    STATE.runtimeTodaySec += (Date.now() - STATE.runStartTs) / 1000;
+    STATE.runStartTs = null;
+  }
+  if (STATE.runtimeFlushTimer) {
+    Timer.clear(STATE.runtimeFlushTimer);
+    STATE.runtimeFlushTimer = null;
+  }
+  persistRuntimeState(STATE.runtimeTodaySec);
+  log("Runtime accounting stopped, today total:", STATE.runtimeTodaySec, "s");
+}
+
+// Periodic checkpoint while the pump is running (recurring runtimeFlushTimer
+// tick): persists runtimeTodaySec plus the still-open interval's
+// elapsed-so-far, without clearing runStartTs — the run is still in
+// progress. This bounds crash/reboot data loss to at most one flush
+// interval instead of the whole run.
+function flushRuntimeCheckpoint() {
+  ensureRuntimeDay();
+  if (STATE.runStartTs === null) return;
+  var elapsedSec = (Date.now() - STATE.runStartTs) / 1000;
+  persistRuntimeState(STATE.runtimeTodaySec + elapsedSec);
+}
+
+// Persists sec (defaults to STATE.runtimeTodaySec) to Script.storage (sync,
+// boot-safe) and mirrors it — plus today's computed turnover — to KVS for
+// Go-side visibility (myhome/daemon/pool_notices.go ComputeTurnover).
+//
+// The Script.storage write is synchronous and always happens (cheap, no RPC).
+// The two KVS mirrors go through Shelly.call and are skipped during
+// STATE.initializing — same guard as saveState() — and queued via
+// queueTask() rather than fired back-to-back: an un-queued pair here,
+// repeated every 60s by flushRuntimeCheckpoint() while the pump runs and
+// possibly overlapping saveState()'s own KVS writes, is exactly the
+// "Too many calls in progress" crash PR #394 fixed (5-concurrent-RPC limit).
+// A skipped mirror during init is harmless — the next checkpoint or stop
+// re-persists it.
+function persistRuntimeState(overrideSec) {
+  var sec = (typeof overrideSec === "number") ? overrideSec : STATE.runtimeTodaySec;
+  storeStorageValue(STORAGE_KEYS.runtimeSec, sec);
+  if (STATE.initializing) {
+    return;
+  }
+  queueTask(function() {
+    storeValue("runtime-sec", Math.round(sec));
+  });
+  queueTask(function() {
+    storeValue("turnover-today", computeTurnoverToday(sec));
+  });
+}
+
+// Turnovers (pool volumes filtered) achieved today given sec seconds of
+// pump-on time at the currently configured preferred speed. Reuses
+// computeFlowRate() (defined below) so the string->RPM mapping is only
+// ever implemented once.
+function computeTurnoverToday(sec) {
+  var flowRate = computeFlowRate();
+  if (!flowRate || flowRate <= 0 || !CONFIG.poolVolume) {
+    return 0;
+  }
+  var turnover = (sec / 3600) * flowRate / CONFIG.poolVolume;
+  return Math.round(turnover * 100) / 100;
 }
 
 // === DEVICE ACTIVATION DECISION ===
@@ -1050,6 +1187,17 @@ function activateOutput(outputId, callback) {
   // Record actual state changes for fuse tracking
   if (outputId !== STATE.activeOutput) {
     fuseRecord();
+  }
+
+  // Runtime/turnover tracking (#402): STATE.activeOutput still holds the
+  // pre-transition value here, so this is the single place that sees every
+  // on/off transition regardless of caller (doStart, doStop,
+  // handleWaterSupply, button, anti-cycling fuse forced-off).
+  var wasRunning = STATE.activeOutput !== -1;
+  var willRun = outputId !== -1;
+  if (wasRunning !== willRun) {
+    if (willRun) startRuntimeAccounting();
+    else stopRuntimeAccounting();
   }
 
   if (STATE.deviceType === "pro3") {
@@ -1876,6 +2024,9 @@ function handleNightStart() {
 }
 
 function handleNightStop() {
+  // Belt-and-suspenders midnight reset, in addition to the lazy per-write
+  // check in persistRuntimeState/ensureRuntimeDay (#402).
+  ensureRuntimeDay();
   doStop('Night stop event');
 }
 
@@ -1914,6 +2065,18 @@ function enforceOutputState() {
   }
   
   log("Current active output:", STATE.activeOutput);
+
+  // If the pump was already running when the script (re)started, resume
+  // runtime accounting so an in-progress run keeps accruing across restarts
+  // (#402). Safe to call unconditionally here: when this path was reached
+  // via activateOutput() above (the "multiple outputs on" branch),
+  // STATE.activeOutput is still -1 at this point (that call's own state
+  // update is deferred to the task queue), so this is a no-op in that case
+  // and activateOutput()'s own on/off-transition hook accounts for the run
+  // once its callback lands.
+  if (STATE.activeOutput !== -1) {
+    startRuntimeAccounting();
+  }
 }
 
 function init() {

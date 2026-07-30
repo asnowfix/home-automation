@@ -265,12 +265,15 @@ All keys use prefix `script/pool-pump/` (≤ 32 chars total).
 |-----|-------|
 | `active-output` | `-1` or switch ID currently active |
 | `schedule-mode` | `"summer"` or `"winter"` |
+| `runtime-sec` | Cumulative pump-on seconds today (see #402) |
+| `turnover-today` | Pool-volume turnovers achieved today (see #402) |
 
 ### Script.storage (script-private)
 | Key | Notes |
 |-----|-------|
 | `forecast-url` | Open-Meteo URL built from GPS coordinates |
 | `my-device-id` | Cached device ID from `Shelly.getDeviceInfo().id` |
+| `runtime-date` / `runtime-sec` | Boot-safe mirror of today's runtime counter (see #402) |
 
 ---
 
@@ -301,8 +304,9 @@ Shelly scripts are limited to **5 timers**. Current usage:
 |-------|---------|---------|
 | `TASK_TIMER` | Task queue (200 ms recurring) | Only while queue is non-empty |
 | `STATE.graceTimer` | Inter-device grace delay | During switchover only |
+| `STATE.runtimeFlushTimer` | Runtime checkpoint (60 s recurring, see #402) | Only while the pump is running |
 
-Peak simultaneous: **2** (task queue + grace timer). Well within the 5-timer limit.
+Peak simultaneous: **3** (task queue + grace timer + runtime flush timer). Well within the 5-timer limit.
 
 ---
 
@@ -310,7 +314,7 @@ Peak simultaneous: **2** (task queue + grace timer). Well within the 5-timer lim
 
 | Resource | Limit | Used |
 |----------|-------|------|
-| Timers | 5 | ≤ 2 |
+| Timers | 5 | ≤ 3 |
 | Event subscriptions | 5 | 1 (`addEventHandler`) |
 | MQTT subscriptions | 10 | ≤ 4 (1 per peer switch topic) |
-| KVS keys | — | ≤ 20 config + 2 state |
+| KVS keys | — | ≤ 20 config + 4 state |

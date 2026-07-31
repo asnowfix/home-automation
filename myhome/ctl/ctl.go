@@ -22,6 +22,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/ctl/sfr"
 	"github.com/asnowfix/home-automation/myhome/ctl/shelly"
 	"github.com/asnowfix/home-automation/myhome/ctl/show"
+	"github.com/asnowfix/home-automation/myhome/ctl/solar"
 	"github.com/asnowfix/home-automation/myhome/ctl/sswitch"
 	"github.com/asnowfix/home-automation/myhome/ctl/temperature"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
@@ -158,6 +159,7 @@ func init() {
 	Cmd.AddCommand(temperature.Cmd)
 	Cmd.AddCommand(heater.Cmd)
 	Cmd.AddCommand(pool.PoolCmd())
+	Cmd.AddCommand(solar.SolarCmd())
 	Cmd.AddCommand(garden.GardenCmd())
 	Cmd.AddCommand(room.Cmd)
 	Cmd.AddCommand(eventsctl.Cmd)

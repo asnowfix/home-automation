@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	poolscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/events"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
@@ -16,12 +17,26 @@ import (
 // day). kvsKeyRuntimeToday and kvsKeyTurnoverToday are the on-device
 // runtime/turnover accumulators pool-pump.js maintains and mirrors to KVS
 // (see #402) — the Go side just reads them back instead of re-deriving flow
-// rate from the (non-numeric) preferred-speed KVS key.
+// rate from the (non-numeric) preferred-speed KVS key. kvsKeyActiveOutput is
+// the switch id (or -1 when off) the pump is currently driving, read back by
+// ActiveSpeed for the solar.claimerslist RPC (see #404/solar_rpc.go).
 const (
 	kvsKeyTurnover      = "script/pool-pump/turnover"
 	kvsKeyRuntimeToday  = "script/pool-pump/runtime-sec"
 	kvsKeyTurnoverToday = "script/pool-pump/turnover-today"
+	kvsKeyActiveOutput  = "script/pool-pump/active-output"
 )
+
+// defaultSpeedSwitchIDs are the eco/mid/high switch indices used when a
+// controller has no speed mapping configured in KVS yet. Mirrors
+// internal/myhome/shelly/script.defaultSpeedMappings (unexported there), so
+// ActiveSpeed's best-effort read degrades to the same fallback.
+var defaultSpeedSwitchIDs = map[string]int64{"eco": 0, "mid": 1, "high": 2}
+
+// speedNameOrder is the display order ActiveSpeed checks switch-id matches
+// in — only matters when a misconfiguration maps two speeds to the same
+// switch id, in which case the first match wins.
+var speedNameOrder = []string{"eco", "mid", "high"}
 
 // PoolNotices records a companion "pool.turnover_today" notice whenever the
 // pool pump stops — either via the device's own pool.pump_stop (schedule or
@@ -157,6 +172,46 @@ func (p *PoolNotices) WaterSupplyActive(ctx context.Context) (bool, error) {
 	}
 	active, _ := m["state"].(bool)
 	return active, nil
+}
+
+// ActiveSpeed reports whether the pool pump is currently running and, if so,
+// which named speed (eco/mid/high) its active switch output maps to. It is a
+// best-effort live read used to enrich the "pool-pump" entry in the
+// solar.claimerslist RPC (see solar_rpc.go) — callers should apply their own
+// timeout via ctx and treat a returned error as "unknown" rather than a
+// reason to fail the whole request. ActiveSpeed on a nil *PoolNotices is a
+// safe no-op (mirrors OnEvent), reporting inactive with no error.
+func (p *PoolNotices) ActiveSpeed(ctx context.Context) (active bool, speedName string, err error) {
+	if p == nil {
+		return false, "", nil
+	}
+
+	via := types.ChannelMqtt
+
+	activeOutput, err := readPoolKVSInt(ctx, p.log, p.device, via, kvsKeyActiveOutput)
+	if err != nil {
+		return false, "", fmt.Errorf("read active-output: %w", err)
+	}
+	if activeOutput < 0 {
+		return false, "", nil
+	}
+
+	for _, name := range speedNameOrder {
+		key := poolscript.PoolKVSKeys[name+"_speed"]
+		switchID, err := readPoolKVSInt(ctx, p.log, p.device, via, key)
+		if err != nil {
+			// Best-effort: fall back to the same default mapping
+			// internal/myhome/shelly/script uses when a controller has no
+			// speed mapping configured in KVS yet, rather than failing the
+			// whole lookup over one missing/unreachable key.
+			switchID = defaultSpeedSwitchIDs[name]
+		}
+		if switchID == activeOutput {
+			return true, name, nil
+		}
+	}
+
+	return true, fmt.Sprintf("switch-%d", activeOutput), nil
 }
 
 // roundTo rounds v to the given number of decimal places.

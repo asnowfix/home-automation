@@ -13,32 +13,37 @@ import (
 )
 
 // kvsKeyTurnover is the configured daily turnover target (pool volumes per
-// day), read alongside the runtime-target KVS keys already defined in
-// solar_automation.go (kvsKeyPoolVolume, kvsKeyMaxFlowRate, kvsKeyMaxRpm,
-// kvsKeySpeed) — pool-pump.js populates all of these for its own scheduling.
-const kvsKeyTurnover = "script/pool-pump/turnover"
+// day). kvsKeyRuntimeToday and kvsKeyTurnoverToday are the on-device
+// runtime/turnover accumulators pool-pump.js maintains and mirrors to KVS
+// (see #402) — the Go side just reads them back instead of re-deriving flow
+// rate from the (non-numeric) preferred-speed KVS key.
+const (
+	kvsKeyTurnover      = "script/pool-pump/turnover"
+	kvsKeyRuntimeToday  = "script/pool-pump/runtime-sec"
+	kvsKeyTurnoverToday = "script/pool-pump/turnover-today"
+)
 
 // PoolNotices records a companion "pool.turnover_today" notice whenever the
 // pool pump stops — either via the device's own pool.pump_stop (schedule or
 // manual) or the daemon's pool.solar_stop — reporting the water-volume
-// turnovers achieved today against the configured daily target. Neither
-// pool-pump.js nor SolarAutomation track this number: it combines runtime
-// accrued so far (PoolRuntimeTracker, events DB) with KVS configuration that
-// only the daemon reads.
+// turnovers achieved today against the configured daily target. Since #402,
+// pool-pump.js itself computes and persists today's cumulative runtime and
+// achieved turnover to KVS (it owns the string->RPM speed mapping); this
+// type just reads those pre-computed values back rather than re-deriving
+// flow rate here.
 type PoolNotices struct {
 	log      logr.Logger
 	events   *events.Service
-	tracker  *PoolRuntimeTracker
-	device   *shellyapi.Device
+	device   types.Device // types.Device (not concrete *shellyapi.Device) so tests can inject a fake KVS responder
 	deviceID string
 }
 
 // NewPoolNotices builds a PoolNotices, or returns nil if any dependency is
-// unavailable (events/tracker disabled, or the pool device can't be reached
+// unavailable (events service disabled, or the pool device can't be reached
 // over MQTT right now). OnEvent on a nil *PoolNotices is a safe no-op, so
 // daemon.go can wire it into the broadcast hook unconditionally.
-func NewPoolNotices(ctx context.Context, log logr.Logger, eventsSvc *events.Service, tracker *PoolRuntimeTracker, deviceID string) *PoolNotices {
-	if eventsSvc == nil || tracker == nil || deviceID == "" {
+func NewPoolNotices(ctx context.Context, log logr.Logger, eventsSvc *events.Service, deviceID string) *PoolNotices {
+	if eventsSvc == nil || deviceID == "" {
 		return nil
 	}
 
@@ -62,7 +67,6 @@ func NewPoolNotices(ctx context.Context, log logr.Logger, eventsSvc *events.Serv
 	return &PoolNotices{
 		log:      log,
 		events:   eventsSvc,
-		tracker:  tracker,
 		device:   sd,
 		deviceID: deviceID,
 	}
@@ -116,44 +120,27 @@ func (p *PoolNotices) recordTurnoverToday(ctx context.Context) {
 // volumes filtered so far today) against the configured daily target, plus
 // the runtime in seconds they were derived from. Shared by the
 // pool.turnover_today notice (recordTurnoverToday) and the pool.getstatus
-// RPC handler (PoolRPCHandler) so both read the same KVS values the same way.
+// RPC handler (PoolRPCHandler) so both read the same KVS values the same
+// way. As of #402, both achieved turnover and runtime are computed on-device
+// by pool-pump.js (which owns the preferred-speed -> RPM mapping) and
+// mirrored to KVS — this just reads them back.
 func (p *PoolNotices) ComputeTurnover(ctx context.Context) (achieved, target float64, runtimeSec int64, err error) {
-	runtimeSec, err = p.tracker.DailyRuntimeSec(ctx)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("read daily pump runtime: %w", err)
-	}
-
 	via := types.ChannelMqtt
-	poolVolume, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyPoolVolume)
+
+	runtimeSec, err = readPoolKVSInt(ctx, p.log, p.device, via, kvsKeyRuntimeToday)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("read pool volume: %w", err)
+		return 0, 0, 0, fmt.Errorf("read runtime today: %w", err)
 	}
-	maxFlowRate, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyMaxFlowRate)
+	achieved, err = readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyTurnoverToday)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("read max flow rate: %w", err)
-	}
-	maxRpm, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyMaxRpm)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("read max rpm: %w", err)
-	}
-	speed, err := readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeySpeed)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("read active speed: %w", err)
+		return 0, 0, 0, fmt.Errorf("read turnover today: %w", err)
 	}
 	target, err = readPoolKVSFloat(ctx, p.log, p.device, via, kvsKeyTurnover)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("read turnover target: %w", err)
 	}
-	if poolVolume <= 0 || maxFlowRate <= 0 || maxRpm <= 0 || speed <= 0 {
-		return 0, 0, 0, fmt.Errorf(
-			"invalid pool KVS values: pool_volume=%v max_flow_rate=%v max_rpm=%v speed=%v",
-			poolVolume, maxFlowRate, maxRpm, speed,
-		)
-	}
 
-	flowRate := maxFlowRate * (speed / maxRpm) // m3/h
-	achieved = roundTo(float64(runtimeSec)/3600*flowRate/poolVolume, 2)
-	return achieved, target, runtimeSec, nil
+	return roundTo(achieved, 2), target, runtimeSec, nil
 }
 
 // WaterSupplyActive reports whether the pool device's water-supply

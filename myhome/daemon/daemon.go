@@ -245,6 +245,23 @@ func (d *daemon) Run() error {
 		log.Info("Beem Energy integration disabled")
 	}
 
+	// Solar aggregator: sums whatever solar-energy sources are known (today:
+	// only Beem) and republishes the total on a retained MQTT topic for
+	// Shelly device scripts to consume directly. Generic and additive — no
+	// dependency on PoolDeviceID/pool tracking, so it is not gated behind any
+	// pool-related flag.
+	var solarAgg *SolarAggregator
+	if beemWatcher != nil {
+		solarAgg = NewSolarAggregator(log.WithName("solar"), mc, options.Flags.SolarStaleAfter,
+			newBeemSolarSource(beemWatcher),
+			// future: append additional SolarSource adapters here
+		)
+		solarAgg.Start(d.ctx)
+		log.Info("Solar aggregator started", "topic", SolarAvailableTopic, "stale_after", options.Flags.SolarStaleAfter)
+	} else {
+		log.Info("Solar aggregator disabled: no solar sources configured (Beem credentials absent)")
+	}
+
 	// SFR box: the device manager (below) starts a periodic refresh loop via
 	// myhomesfr.GetRouter regardless of credentials — auth is skipped
 	// internally when username/password are empty. Report status from every

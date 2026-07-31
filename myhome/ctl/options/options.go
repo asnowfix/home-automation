@@ -44,6 +44,11 @@ const MQTT_RECONNECT_INTERVAL time.Duration = 2 * time.Hour
 
 const SHELLY_DEFAULT_RATE_LIMIT time.Duration = 200 * time.Millisecond
 
+// SOLAR_STALE_AFTER is the default for --solar-stale-after: roughly 5x
+// Beem's default 60s poll interval, so one or two missed polls don't
+// immediately drop the source out of the aggregate sum.
+const SOLAR_STALE_AFTER time.Duration = 5 * time.Minute
+
 // ViperConfig holds the Viper configuration instance
 var ViperConfig *viper.Viper
 
@@ -87,6 +92,7 @@ var Flags struct {
 	BeemEmail                   string        // Beem Energy account email
 	BeemPassword                string        // Beem Energy account password
 	BeemPollInterval            time.Duration // Beem Energy poll interval
+	SolarStaleAfter             time.Duration // solar aggregator: a source's last reading older than this is excluded from the sum
 	SFRUsername                 string        // SFR box account username; from .env, never a flag
 	SFRPassword                 string        // SFR box account password; from .env, never a flag
 	PoolSolarEnabled            bool          // whether to enable solar-driven pool pump automation

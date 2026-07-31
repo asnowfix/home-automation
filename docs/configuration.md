@@ -534,6 +534,16 @@ Integration is enabled automatically when both `beem.email` and `beem.password` 
 | `beem.password` | `MYHOME_BEEM_PASSWORD` | — | Beem Energy account password |
 | `beem.poll_interval` | — | `60s` | How often to poll the Beem REST API (config file only) |
 
+## Solar Aggregator
+
+The daemon sums the last-known reading from every known solar-energy source (today: only Beem) and republishes the total, retained, to `myhome/energy/solar/available` — a source-agnostic signal that Shelly device scripts (e.g. `pool-pump.js`) subscribe to directly and act on themselves. This is a pure additive publisher: it has no dependency on `pool.device_id` and is not gated behind any pool-related flag. It starts automatically whenever at least one solar source is configured (today: Beem credentials); there is no separate enable flag.
+
+A source whose last reading is older than `solar.stale_after` is excluded from the sum but does not block other, fresher sources from being summed and republished.
+
+| Key | Env var | Flag | Default | Description |
+|-----|---------|------|---------|-------------|
+| `solar.stale_after` | `MYHOME_SOLAR_STALE_AFTER` | `--solar-stale-after` | `5m` | Exclude a source's last reading from the total once it is older than this |
+
 ## SFR Box
 
 Credentials for the SFR home gateway. Authentication is skipped when either value is empty.

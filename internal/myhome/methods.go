@@ -313,4 +313,12 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &PoolGetStatusResult{}
 		},
 	},
+	SolarClaimersList: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &SolarClaimersListResult{}
+		},
+	},
 }

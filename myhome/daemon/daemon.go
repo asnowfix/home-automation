@@ -10,6 +10,7 @@ import (
 	"github.com/asnowfix/home-automation/internal/global"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/internal/myhome/accounts"
+	"github.com/asnowfix/home-automation/internal/myhome/energy"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	myhomesfr "github.com/asnowfix/home-automation/internal/myhome/sfr"
 	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
@@ -368,6 +369,14 @@ func (d *daemon) Run() error {
 			poolNotices = NewPoolNotices(d.ctx, log.WithName("pool"), eventsSvc, options.Flags.PoolDeviceID)
 		}
 
+		// Minimal static identity registry of things that may claim solar
+		// energy (today: only the pool pump). Not a live-arbitration engine —
+		// see internal/myhome/energy and #401's follow-up "solar router" issue.
+		claimerRegistry := energy.NewRegistry()
+		if options.Flags.PoolDeviceID != "" {
+			claimerRegistry.Register("pool-pump", options.Flags.PoolDeviceID)
+		}
+
 		// Start solar automation if enabled
 		if options.Flags.PoolSolarEnabled && options.Flags.PoolDeviceID != "" && beemWatcher != nil {
 			if options.Flags.PoolSolarMaxVolumeTurnover < options.Flags.PoolSolarMinVolumeTurnover {
@@ -517,6 +526,12 @@ func (d *daemon) Run() error {
 		// a clear error if poolNotices is nil (pool disabled/unreachable).
 		poolRPCHandler := NewPoolRPCHandler(log, poolNotices)
 		poolRPCHandler.RegisterHandlers()
+
+		// Register Solar RPC methods (static energy-claimers registry).
+		// Always registered — claimerRegistry may simply be empty when no
+		// pool device is configured.
+		solarRPCHandler := NewSolarRPCHandler(log, claimerRegistry, poolNotices)
+		solarRPCHandler.RegisterHandlers()
 
 		// Publish a hostname for the DeviceManager host: myhome.local
 		if !options.Flags.NoMdnsPublish {

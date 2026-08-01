@@ -281,17 +281,17 @@ jobs:
           head_tag: ${{ github.ref }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download MyHome MSI from package-msi
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: msi_file
       - name: Download MyHome DEB ARM64 from package-deb
         id: deb_file_arm64
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deb_file_arm64
       - name: Download MyHome DEB AMD64 from package-deb
         id: deb_file_amd64
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deb_file_amd64
       - name: List files in workspace

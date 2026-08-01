@@ -16,7 +16,7 @@ jobs:
       - name: Show previous tag
         id: previous-tag
         run: |
-          echo "previous=$(git describe --tags --abbrev=0 HEAD^)" | tee -a "$GITHUB_OUTPUT"
+          echo "previous=$(git describe --tags --match 'v*' --abbrev=0 HEAD^)" | tee -a "$GITHUB_OUTPUT"
       - name: Setup Go
         uses: actions/setup-go@v6
         with:

@@ -239,7 +239,7 @@ generate:
 # If VERSION is not specified, uses git describe
 ifeq ($(OS),Linux)
 ARCH := $(shell dpkg --print-architecture 2>/dev/null || uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
-VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
+VERSION ?= $(shell git describe --tags --match 'v*' --always 2>/dev/null | sed 's/^v//')
 DEBPKG_DIR := .debpkg
 DEB_FILE := myhome_$(VERSION)_$(ARCH).deb
 
@@ -320,7 +320,7 @@ upload-release-notes:
 	@echo "Uploading release notes to GitHub..."
 	@echo "Fetching latest tags..."; \
 	git fetch --tags --quiet; \
-	VERSION=$${VERSION:-$$(git describe --tags --abbrev=0 2>/dev/null)}; \
+	VERSION=$${VERSION:-$$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null)}; \
 	if [ -z "$$VERSION" ]; then \
 		echo "Error: No version specified and no git tags found" >&2; \
 		exit 1; \

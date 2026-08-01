@@ -76,6 +76,7 @@ func init() {
 	runCmd.PersistentFlags().DurationVar(&options.Flags.EventsRetention, "events-retention", 90*24*time.Hour, "Retention period for event records (default 90 days)")
 	runCmd.PersistentFlags().BoolVar(&disableEventsService, "disable-events-service", false, "Disable the event recording service")
 	runCmd.PersistentFlags().StringVar(&options.Flags.RemoteProxy, "remote-proxy", "", "Forward /devices/... requests to a remote myhome daemon (e.g. http://home-pi:6080) instead of connecting directly")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.SolarStaleAfter, "solar-stale-after", options.SOLAR_STALE_AFTER, "Solar aggregator: exclude a source's reading from the total once it is older than this")
 	runCmd.PersistentFlags().StringVar(&options.Flags.PoolDeviceID, "pool-device-id", "", "Pool Shelly device ID")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolEnabled, "enable-pool", false, "Enable pool runtime tracking")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolSolarEnabled, "enable-pool-solar", false, "Enable solar-driven pool pump automation")
@@ -291,6 +292,11 @@ var runCmd = &cobra.Command{
 		options.Flags.BeemEmail = v.GetString("beem.email")
 		options.Flags.BeemPassword = v.GetString("beem.password")
 		options.Flags.BeemPollInterval = v.GetDuration("beem.poll_interval")
+
+		// Solar aggregator: generic, not gated behind pool/Beem-specific flags.
+		if v.IsSet("solar.stale_after") && !cmd.Flags().Changed("solar-stale-after") {
+			options.Flags.SolarStaleAfter = v.GetDuration("solar.stale_after")
+		}
 
 		// SFR box credentials — Viper reads MYHOME_SFR_USERNAME / MYHOME_SFR_PASSWORD
 		// from the environment or config file; auth is skipped if either is empty.

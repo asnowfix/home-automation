@@ -215,6 +215,17 @@ beem:
   password:      "secret"
   poll_interval: 60s
 
+# Solar aggregator: sums whatever solar-energy sources are known (today: only
+# Beem) and republishes the total, retained, to myhome/energy/solar/available
+# for Shelly device scripts (e.g. pool-pump.js) to subscribe to directly.
+# Starts automatically once at least one source is configured — no separate
+# enable flag. Not pool-specific: has no dependency on pool.device_id.
+solar:
+  # A source's last reading older than this is excluded from the total, but
+  # doesn't block other, fresher sources from being summed.
+  # Default: 5m
+  # stale_after: 5m
+
 # SFR box credentials — used to authenticate when the box requires a password.
 # Leave empty to skip authentication (works for boxes with no password policy).
 sfr:

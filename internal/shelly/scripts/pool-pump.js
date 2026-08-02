@@ -165,6 +165,54 @@ var CONFIG_SCHEMA = {
     key: "max-temp",
     default: 35,
     type: "number"
+  },
+  solarEnabled: {
+    description: "Enable solar-driven start/stop via the daemon's solar-available MQTT event",
+    key: "solar-enabled",
+    default: false,
+    type: "boolean"
+  },
+  solarStartThresholdW: {
+    description: "Available solar power (W) required to trigger a solar start",
+    key: "solar-start-w",
+    default: 500,
+    type: "number"
+  },
+  solarStopThresholdW: {
+    description: "Available solar power (W) below which a solar-driven run stops",
+    key: "solar-stop-w",
+    default: 200,
+    type: "number"
+  },
+  solarStartDelayMs: {
+    description: "Solar must hold above start threshold this long (ms) before starting",
+    key: "solar-start-delay",
+    default: 300000,
+    type: "number"
+  },
+  solarStopDelayMs: {
+    description: "Solar must hold below stop threshold this long (ms) before stopping",
+    key: "solar-stop-delay",
+    default: 600000,
+    type: "number"
+  },
+  solarMinTurnover: {
+    description: "Soft-stop target (pool volumes/day); solar keeps running past this while solar remains available",
+    key: "solar-min-turnover",
+    default: 5,
+    type: "number"
+  },
+  solarMaxTurnover: {
+    description: "Hard ceiling (pool volumes/day); pump always stops (and won't solar-start) once reached",
+    key: "solar-max-turnover",
+    default: 7,
+    type: "number"
+  },
+  solarStaleMs: {
+    description: "Treat myhome/energy/solar/available as stale (fall back to schedule only) after this long (ms) without a message",
+    key: "solar-stale-ms",
+    default: 300000,
+    type: "number"
   }
 };
 
@@ -1452,6 +1500,136 @@ function handleButtonEvent(info) {
   }
 }
 
+// === SOLAR-DRIVEN HYSTERESIS (#405) ===
+// Subscribes to the daemon's retained `myhome/energy/solar/available` topic
+// (see #403) and layers a start/stop hysteresis on top of the existing
+// forecast-driven schedule — never replacing it. Calls this script's own
+// doStart()/doStop() so the fuse, isMyTurnToRun(), and water-supply
+// protection remain in force for solar-triggered runs exactly as for
+// scheduled/manual runs.
+//
+// Staleness is judged from the payload's own `ts` field (unix-epoch-seconds,
+// set by the daemon when it computed the value), NOT from local message
+// receipt time. MQTT delivers retained messages to a new subscriber
+// immediately regardless of how old they are — if the daemon published a
+// value and then died, and this script reboots and re-subscribes hours or
+// days later, it receives that old retained message immediately. Recording
+// Date.now() as the freshness marker at *receipt* time would make a stale
+// value look perfectly fresh, defeating the whole point of the staleness
+// check. SOLAR.publishedTs (derived from data.ts) is what checkSolarHysteresis
+// actually compares against Date.now(); SOLAR.lastMsgTs is kept only for
+// debugging/visibility into when a message was last received at all.
+var SOLAR = {
+  availableW: 0,
+  lastMsgTs: 0,       // Date.now() at last MQTT message receipt (debugging only)
+  publishedTs: 0,     // data.ts converted to ms — the actual staleness clock
+  aboveStartSince: 0,
+  belowStopSince: 0,
+  tickTimer: null
+};
+
+function onSolarAvailable(topic, message) {
+  var data = null;
+  try {
+    data = JSON.parse(message);
+  } catch (e) {
+    if (e && false) {}
+    return;
+  }
+  if (!data || typeof data.available_w !== "number") return;
+
+  SOLAR.availableW = data.available_w;
+  SOLAR.lastMsgTs = Date.now();
+  // ts is unix-epoch-seconds; convert to ms to compare against Date.now().
+  // This is the field staleness decisions are based on — see comment above.
+  if (typeof data.ts === "number") {
+    SOLAR.publishedTs = data.ts * 1000;
+  }
+
+  checkSolarHysteresis();
+}
+
+function subscribeSolarAvailable() {
+  if (!CONFIG.solarEnabled) return;
+  MQTT.subscribe("myhome/energy/solar/available", onSolarAvailable);
+  log("Subscribed to myhome/energy/solar/available");
+}
+
+// Hard ceiling (pool volumes/day): pump always stops (and won't solar-start)
+// once reached, regardless of solar availability.
+function solarHardCeilingReached() {
+  var flowRate = computeFlowRate();
+  if (!flowRate || flowRate <= 0 || !CONFIG.poolVolume) return false;
+  var target = (CONFIG.poolVolume * CONFIG.solarMaxTurnover / flowRate) * 3600;
+  return STATE.runtimeTodaySec >= target;
+}
+
+// Soft-stop target (pool volumes/day): solar keeps running past this while
+// solar remains available, but stops once solar goes away.
+function solarSoftTargetReached() {
+  var flowRate = computeFlowRate();
+  if (!flowRate || flowRate <= 0 || !CONFIG.poolVolume) return false;
+  var target = (CONFIG.poolVolume * CONFIG.solarMinTurnover / flowRate) * 3600;
+  return STATE.runtimeTodaySec >= target;
+}
+
+// Solar start/stop hysteresis, re-evaluated on every solar MQTT message and
+// on a periodic tick (see SOLAR.tickTimer in continueInit()) so staleness is
+// still detected even if no further MQTT message ever arrives (e.g. the
+// daemon dies while idle mid-hold-delay).
+function checkSolarHysteresis() {
+  if (!CONFIG.solarEnabled) return;
+
+  // Staleness is judged from the payload's own ts (SOLAR.publishedTs), not
+  // from when we last received a message (SOLAR.lastMsgTs) — see the comment
+  // on the SOLAR var above for why that distinction matters.
+  if (SOLAR.publishedTs === 0 || (Date.now() - SOLAR.publishedTs) > CONFIG.solarStaleMs) {
+    SOLAR.aboveStartSince = 0;
+    SOLAR.belowStopSince = 0;
+    return; // stale/absent: existing forecast-driven schedule keeps running untouched
+  }
+
+  var running = STATE.activeOutput !== -1;
+  var now = Date.now();
+
+  if (!running) {
+    if (SOLAR.availableW >= CONFIG.solarStartThresholdW) {
+      if (SOLAR.aboveStartSince === 0) SOLAR.aboveStartSince = now;
+      if (now - SOLAR.aboveStartSince >= CONFIG.solarStartDelayMs) {
+        if (!solarHardCeilingReached()) {
+          doStart(CONFIG.preferredSpeed, 'Solar start: ' + SOLAR.availableW + 'W');
+        }
+        SOLAR.aboveStartSince = 0;
+      }
+    } else {
+      SOLAR.aboveStartSince = 0;
+    }
+    return;
+  }
+
+  if (solarHardCeilingReached()) {
+    doStop('Solar hard ceiling reached');
+    SOLAR.aboveStartSince = 0;
+    SOLAR.belowStopSince = 0;
+    return;
+  }
+  if (solarSoftTargetReached() && SOLAR.availableW < CONFIG.solarStartThresholdW) {
+    doStop('Solar soft stop: target met and solar gone');
+    SOLAR.aboveStartSince = 0;
+    SOLAR.belowStopSince = 0;
+    return;
+  }
+  if (SOLAR.availableW < CONFIG.solarStopThresholdW) {
+    if (SOLAR.belowStopSince === 0) SOLAR.belowStopSince = now;
+    if (now - SOLAR.belowStopSince >= CONFIG.solarStopDelayMs) {
+      doStop('Solar stop: ' + SOLAR.availableW + 'W');
+      SOLAR.belowStopSince = 0;
+    }
+  } else {
+    SOLAR.belowStopSince = 0;
+  }
+}
+
 // === MQTT SETUP ===
 
 // Parse a Shelly switch status payload and return the output boolean (or null on error)
@@ -1530,6 +1708,7 @@ function setupMQTT() {
   }
   subscribePro1Status();
   subscribePro3Status();
+  subscribeSolarAvailable();
 }
 
 // === SCHEDULE MANAGEMENT ===
@@ -2104,6 +2283,15 @@ function continueInit() {
   loadState();
   enforceOutputState();
   setupMQTT();
+
+  // Solar hysteresis (#405): re-evaluate periodically so staleness is
+  // detected even if the daemon dies mid-hold-delay and no further MQTT
+  // message ever arrives. This is at most the 4th concurrent timer
+  // (TASK_TIMER, STATE.graceTimer, STATE.runtimeFlushTimer) — see
+  // docs/pool-pump.md "Timer Budget".
+  if (CONFIG.solarEnabled) {
+    SOLAR.tickTimer = Timer.set(30000, true, checkSolarHysteresis);
+  }
 
   // Initialization complete - enable state persistence and flush initial state to KVS
   STATE.initializing = false;

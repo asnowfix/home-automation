@@ -791,3 +791,308 @@ func TestPoolPump_RuntimeAccounting_StaleDateResetsOnBoot(t *testing.T) {
 		t.Errorf("Storage runtime-sec = %v, want \"0\" (stale total must not carry over)", got)
 	}
 }
+
+// === Solar-driven hysteresis (#405) ===
+//
+// solarKVS extends controllerKVS() with solar hysteresis enabled and
+// near-zero start/stop delays, so tests can assert on hysteresis outcomes
+// without waiting out real-world delay windows. Individual tests override
+// specific keys (e.g. solar-max-turnover) via extra.
+func solarKVS(extra map[string]string) map[string]interface{} {
+	kvs := controllerKVS()
+	kvs["script/pool-pump/solar-enabled"] = "true"
+	kvs["script/pool-pump/solar-start-w"] = "500"
+	kvs["script/pool-pump/solar-stop-w"] = "200"
+	kvs["script/pool-pump/solar-start-delay"] = "0"
+	kvs["script/pool-pump/solar-stop-delay"] = "0"
+	kvs["script/pool-pump/solar-min-turnover"] = "5"
+	kvs["script/pool-pump/solar-max-turnover"] = "7"
+	kvs["script/pool-pump/solar-stale-ms"] = "300000"
+	for k, v := range extra {
+		kvs["script/pool-pump/"+k] = v
+	}
+	return kvs
+}
+
+// solarPayload builds the myhome/energy/solar/available JSON payload (see
+// #403's SolarAvailablePayload): available_w plus ts (unix-epoch-seconds —
+// the field pool-pump.js's staleness check is based on, not local receipt
+// time; see the SOLAR var comment in pool-pump.js).
+func solarPayload(availableW float64, tsUnixSec int64) []byte {
+	payload := map[string]interface{}{
+		"available_w": availableW,
+		"ts":          tsUnixSec,
+	}
+	data, _ := json.Marshal(payload)
+	return data
+}
+
+// TestPoolPump_SolarStartsAndStopsPump verifies the core hysteresis: a fresh,
+// above-threshold sample starts the pump (via doStart, so the fuse/
+// isMyTurnToRun/water-supply checks all still apply), and a subsequent fresh,
+// below-threshold sample stops it again. Zero start/stop delays (solarKVS)
+// mean both transitions should happen essentially immediately.
+func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mc := mqtt.NewMockClient()
+	mqtt.SetClient(mc)
+	t.Cleanup(mqtt.ResetClient)
+
+	deviceState := &script.DeviceState{
+		KVS:             solarKVS(nil),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(),
+		Schedules:       poolPumpSchedules(),
+	}
+
+	ctx, cancel := context.WithTimeout(
+		logr.NewContext(context.Background(), testr.New(t)),
+		20*time.Second,
+	)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		return exists
+	})
+	if !initDone {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	// Fresh (ts = now), above the 500W start threshold.
+	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+
+	started := waitFor(3*time.Second, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		return ok && v == "0" // eco switch, per controllerKVS()'s eco-speed=0
+	})
+	if !started {
+		cancel()
+		<-done
+		t.Fatalf("solar start: expected active-output=0, got %v", deviceState.KVS["script/pool-pump/active-output"])
+	}
+
+	// Fresh (ts = now), below the 200W stop threshold.
+	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(100, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+
+	stopped := waitFor(3*time.Second, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		return ok && v == "-1"
+	})
+
+	cancel()
+	<-done
+
+	if !stopped {
+		t.Fatalf("solar stop: expected active-output=-1, got %v", deviceState.KVS["script/pool-pump/active-output"])
+	}
+}
+
+// TestPoolPump_SolarRespectsHardCeiling verifies that a runtime baseline
+// already at/above the solar hard-ceiling target blocks a solar start even
+// with fresh, well-above-threshold availability. solar-max-turnover is
+// overridden to a tiny value so the ceiling is reachable by a modest
+// pre-seeded runtime-sec without waiting out the default target in real time.
+func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mc := mqtt.NewMockClient()
+	mqtt.SetClient(mc)
+	t.Cleanup(mqtt.ResetClient)
+
+	// Ceiling target = poolVolume(46) * solarMaxTurnover(0.001) / flowRate(≈21.38 m3/h) * 3600s ≈ 7.7s.
+	kvs := solarKVS(map[string]string{"solar-max-turnover": "0.001"})
+
+	deviceState := &script.DeviceState{
+		KVS: kvs,
+		Storage: map[string]interface{}{
+			"runtime-sec":  "3600", // 1h — comfortably exceeds the ~7.7s ceiling above
+			"runtime-date": dateString(time.Now()),
+		},
+		ComponentStatus: pro3ComponentStatus(), // pump off at boot
+		Schedules:       poolPumpSchedules(),
+	}
+
+	ctx, cancel := context.WithTimeout(
+		logr.NewContext(context.Background(), testr.New(t)),
+		15*time.Second,
+	)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		return exists
+	})
+	if !initDone {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	// Fresh, well above the start threshold, zero start delay — would start
+	// immediately if the hard ceiling weren't in effect.
+	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+
+	// Give checkSolarHysteresis time to run; the pump must not start.
+	time.Sleep(2 * time.Second)
+	cancel()
+	<-done
+
+	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "-1" {
+		t.Fatalf("solar hard ceiling: expected pump to stay off, got active-output=%v", v)
+	}
+}
+
+// TestPoolPump_SolarStaleFallsBackToSchedule verifies that solar hysteresis
+// being enabled but never having received a myhome/energy/solar/available
+// message (SOLAR.publishedTs stays 0 — the "absent" case) does not interfere
+// with the schedule-independent control path. This harness has no way to
+// fire a Schedule.Create'd handler directly (see the comment on
+// TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover), so a button
+// press stands in for "the existing forecast-driven schedule keeps running
+// as today" — both go through doStart()/activateOutput(), unaffected by
+// checkSolarHysteresis's early-return-on-stale/absent path.
+func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	injector := make(chan []byte, 4)
+
+	deviceState := &script.DeviceState{
+		KVS:             solarKVS(nil),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(),
+		Schedules:       poolPumpSchedules(),
+		EventInjector:   injector,
+	}
+
+	ctx, cancel := context.WithTimeout(
+		logr.NewContext(context.Background(), testr.New(t)),
+		15*time.Second,
+	)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		return exists
+	})
+	if !initDone {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	injector <- shellyButtonEvent()
+	started := waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		return ok && v == "0"
+	})
+
+	cancel()
+	<-done
+
+	if !started {
+		t.Fatalf("expected button press to start pump despite solar enabled/never-received, got active-output=%v",
+			deviceState.KVS["script/pool-pump/active-output"])
+	}
+}
+
+// TestPoolPump_SolarStaleTsFallsBackImmediately is the regression test for
+// the ts-based staleness correction (see #405 PR description / pool-pump.js
+// SOLAR var comment): the issue's own suggested onSolarAvailable() snippet
+// tracked Date.now() at *message-receipt* time as the freshness marker. MQTT
+// delivers retained messages to a new subscriber immediately regardless of
+// how old they are — if the daemon published a value and then died, and this
+// script rebooted and re-subscribed hours later, it would receive that old
+// retained message immediately, and a receipt-time freshness marker would
+// make it look perfectly fresh. This test publishes a message whose `ts` is
+// 1 hour old (well past the 5-minute default solar-stale-ms) and asserts the
+// pump does NOT solar-start, proving staleness is judged from the payload's
+// own `ts`, not from receipt time — the failure mode would otherwise start
+// the pump immediately (zero start delay, 600W above the 500W threshold).
+func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mc := mqtt.NewMockClient()
+	mqtt.SetClient(mc)
+	t.Cleanup(mqtt.ResetClient)
+
+	// solar-stale-ms defaults to 300000 (5 min) via CONFIG_SCHEMA — not
+	// overridden here, so this exercises the real default.
+	kvs := solarKVS(nil)
+
+	deviceState := &script.DeviceState{
+		KVS:             kvs,
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(),
+		Schedules:       poolPumpSchedules(),
+	}
+
+	ctx, cancel := context.WithTimeout(
+		logr.NewContext(context.Background(), testr.New(t)),
+		15*time.Second,
+	)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		return exists
+	})
+	if !initDone {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	staleTs := time.Now().Unix() - 3600 // 1h old — stale under the 5-minute solar-stale-ms
+	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(600, staleTs), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+
+	// Give onSolarAvailable/checkSolarHysteresis (called synchronously on
+	// message receipt) time to run. A receipt-time-based implementation
+	// would start the pump within this window; the ts-based implementation
+	// must not.
+	time.Sleep(2 * time.Second)
+	cancel()
+	<-done
+
+	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "-1" {
+		t.Fatalf("stale ts: expected pump to stay off (stale detected immediately on receipt), got active-output=%v", v)
+	}
+}

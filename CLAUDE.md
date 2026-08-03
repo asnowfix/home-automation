@@ -103,6 +103,13 @@ other source of information than what the issue itself contains. It may, and sho
 external sources (docs URLs) and/or other issue(s) and/or PR(s), but must not assume the reader
 was present for the discussion that led to filing it.
 
+**Every issue filed in this repo must be self-contained** per the above definition — this applies
+whether a human or a coding agent is the one filing it. Before creating an issue, write it as if
+handing it to a coding agent with a cold context window: no "as discussed above," no assuming the
+reader saw the same live-debugging session or chat history that motivated the issue. Cross-issue
+dependencies must be made explicit (e.g. "blocked by #123," "must land after #456") rather than
+implied by filing order or narrative context.
+
 ### Go
 
 - **CLI output**: `fmt.Printf()` for user-facing messages; `hlog` for internal/debug logging. Never `log.Info()` in CLI commands.

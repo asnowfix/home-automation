@@ -23,6 +23,8 @@ Sub-issues and their **current merge status**:
 | #405 | pool-pump.js solar-driven start/stop hysteresis | **Merged** — PR #419, commit `ae4c5da`, tag `campaign/401-solar-hysteresis` |
 | #406 | remove legacy `SolarAutomation` daemon code | **NOT STARTED — gated**, see below |
 | #407 | multi-consumer "solar router" | **Out of scope**, explicit follow-up, do not touch |
+| #421 | crash + missing restart catch-up found during live verification | **NOT STARTED** — new blocker for #406, see "Update 2026-08-03 evening" below |
+| #422 | standing real-device integration test campaign (spare Shelly Plus 1 `development`) | **NOT STARTED** — not a #406 blocker; #421's live re-verification is its first test case |
 
 **#406 is explicitly gated in the issue text**: it must not be started until #402/#403/#405 are
 verified working against the **real pool pump device**, not just CI green. That verification is
@@ -157,16 +159,73 @@ thing observed before this session was paused — it is NOT yet understood wheth
      `myhome/energy/solar/available` at all yet. Full live solar-hysteresis verification is
      therefore blocked on redeploying the daemon, not just the device script.
 
+## Update 2026-08-03 evening: live verification actually FAILED — script crash found, #406 still gated
+
+Resuming this session found `filtration-hiver` **crashed**, not just quiet: `Script.GetStatus` for
+id 2 (`pool-pump.js`) returned `running: false` with `error_msg: "Uncaught Error: Too many calls in
+progress"`, thrown from `storeValue("turnover-today", ...)` inside the task-queue dispatcher. The
+device had been running since 09:31:05 that morning; the script crashed at some point before the
+scheduled 18:14 evening-stop fired, so that schedule call was a no-op (script wasn't running to
+receive it) and the pump was found still on at ~19:34, over an hour late with no way to stop via
+schedule.
+
+Restarting the script (`Script.Stop` + `Script.Start`) brought it back, but it **crashed again
+within seconds** from a different call site (`saveState()`'s `storeValue(STATE_KEYS.activeOutput,
+...)` mirror) — same crash class, different trigger, confirming this is systemic rather than a
+one-off. The pump was manually confirmed off via `Switch.Set {id:0, on:false}` — though it turned
+out the crashed `handleEveningStop()` run had actually already turned it off correctly just before
+crashing on its own follow-up KVS write, so the manual call was a safety no-op, not what actually
+stopped the pump.
+
+**This is a new regression in the already-merged #402 accumulator (PR #410)**, filed as its own
+issue: **#421** — "fix(pool-pump): 'Too many calls in progress' crash kills script + no catch-up
+after restart". It covers two distinct bugs found together tonight:
+- **Bug A**: `queueTask`/`storeValue`'s fire-and-forget `Shelly.call` pattern has no notion of
+  calls-in-flight, so bursts of concurrent RPC calls (worst at boot, when `saveState()`,
+  `persistRuntimeState()`, and the `initSteps` sequence all queue/fire close together) can exceed the
+  real 5-concurrent-call device ceiling; an uncaught exception in one queued task kills the whole
+  script with no try/catch anywhere in `processTaskQueue`.
+- **Bug B**: `enforceOutputState()` on (re)start only mirrors the physical switch state — it never
+  checks whether *now* falls inside or outside today's schedule window, so a crash-recovery restart
+  between windows leaves a stale on/off state uncorrected until the next schedule tick (up to 24h
+  later).
+
+#421 also scopes in a **minimal slice of #250** (script emulator resource-limit enforcement, still
+open) as a prerequisite: the current emulator (`pkg/shelly/script/run.go`) has no concurrency
+ceiling or async delay at all, so the crash cannot be reproduced in a unit test without at least a
+per-VM in-flight-call counter + configurable delay in `DeviceTestMode`. Full test-first ordering is
+specified inside #421 — write the reproducing test before implementing either fix.
+
+Also discussed: the user has a spare Shelly Plus 1 named `development` available for safe
+integration testing of this crash/fix, without risking the real pump. Confirmed suitable with no
+script code changes needed — `pool-pump.js`'s device-type detection
+(`internal/shelly/scripts/pool-pump.js:321-331`) is purely by switch count, so a single-switch
+Plus 1 auto-detects the same code path as the Pro1. Only device-side config differs: point
+`script/pool-pump/preferred` at its own device ID, and use short-interval test `Schedule` jobs
+instead of daily ones. This is now filed as its own standing campaign issue, **#422** — "test:
+establish real-device integration test campaign using spare Shelly Plus 1 (development)" —
+covering the general process (device-availability precondition, a `docs/integration-tests.md`
+recording template) for repeatable real-hardware test cases going forward, not just this one crash.
+#421's own real-hardware re-verification step is registered as #422's first tracked test case
+(cross-linked from both issues). #422 is **not** a #406 blocker itself; #421 is.
+
+**#406 remains gated — more firmly than before.** The original gate was "not yet verified against
+real hardware"; tonight's session found the opposite of a clean verification (an active crash), so
+#421 must be fixed and re-verified live before #406 can be considered.
+
 ## Bottom line / what "done" looks like before #406 can start
 
-1. Confirm `filtration-hiver` is reachable again and running the new `pool-pump.js` cleanly
-   (id 2, started, no crash loop).
-2. Decide on and (if approved) execute a daemon redeploy to the NAS so `ctl pool status`,
+1. Fix **#421** (both bugs), with the reproducing test written and failing first, then passing after
+   the fix — per that issue's test plan.
+2. Confirm `filtration-hiver` (or the `development` Shelly Plus 1 first, as a safer dry run) is
+   reachable, running the new `pool-pump.js` cleanly (id 2, started, no crash loop) **including
+   surviving a normal boot and a mid-window restart without Bug A or Bug B recurring**.
+3. Decide on and (if approved) execute a daemon redeploy to the NAS so `ctl pool status`,
    `pool.turnover_today`, and the new `myhome/energy/solar/available` publisher are actually live
    — without this, solar hysteresis can never be observed end-to-end no matter what the device
    script does.
-3. With both device and daemon current, actually observe: pump status/turnover reads correctly via
+4. With both device and daemon current, actually observe: pump status/turnover reads correctly via
    `ctl pool status` (no parse error), and — if the user wants solar mode exercised — a real
    solar-triggered start/stop cycle, or at minimum clean startup with solar enabled and no crash.
-4. Only after the user explicitly confirms this looks right on real hardware, proceed to #406
+5. Only after the user explicitly confirms this looks right on real hardware, proceed to #406
    (delete `myhome/daemon/solar_automation.go` and related config/docs) as its own PR.

@@ -438,10 +438,12 @@ var STATE_KEYS = {
 // arguments it always did (trackCall forwards result/error_code/
 // error_message/userdata unchanged), so this is purely additive bookkeeping.
 var CALLS_IN_FLIGHT = 0;
+var CALLS_TRACKED = 0;       // lifetime count — proves tracking actually runs
 var MAX_CALLS_IN_FLIGHT = 4; // stay one below the real 5-call device ceiling
 
 function trackCall(onDone) {
   CALLS_IN_FLIGHT++;
+  CALLS_TRACKED++;
   return function (result, error_code, error_message, userdata) {
     // Decrement unconditionally before invoking onDone, so a slot is always
     // freed even if onDone itself throws (caught by processTaskQueue's
@@ -457,6 +459,73 @@ var RAW_SHELLY_CALL = Shelly.call;
 Shelly.call = function (method, params, callback, userdata) {
   return RAW_SHELLY_CALL(method, params, trackCall(callback), userdata);
 };
+
+// --- Self-check: fail LOUDLY, never silently (#421) ---------------------
+// This whole mechanism depends on reassigning a method on the native Shelly
+// object, which is not guaranteed to be permitted on every firmware. If the
+// assignment is ever rejected, CALLS_IN_FLIGHT stays 0 forever, the throttle
+// in processTaskQueue never engages, and the crash this fix exists to prevent
+// comes back — while every emulator test still passes, because goja allows
+// the reassignment that the device refused. That silent-inert failure is the
+// dangerous case, so it is asserted here rather than assumed.
+//
+// print() is used deliberately instead of log(): log() is gated on
+// CONFIG.enableLogging and would hide this exact message in production.
+// It also must not call log() at all — no hoisting on Espruino, and log() is
+// defined further down this file, so it does not exist yet at this point.
+// NOTE: the device truncates each UDP debug line at ~128 chars, so this
+// diagnostic is deliberately split into short lines — a single long print
+// loses exactly the part a reader needs (the cause and the issue pointer).
+function printWrapperFailure() {
+  print("[pool-pump] FATAL #421: Shelly.call wrapper did NOT install.");
+  print("[pool-pump] #421: in-flight RPC throttling is INERT.");
+  print("[pool-pump] #421: >5 concurrent calls => 'Too many calls in progress'.");
+  print("[pool-pump] #421: that error is uncaught and kills the WHOLE script.");
+  print("[pool-pump] #421: schedules stop firing; pump strands as-is.");
+  print("[pool-pump] #421: cause: firmware refused reassigning Shelly.call,");
+  print("[pool-pump] #421:   or refused calling it detached from Shelly.");
+  print("[pool-pump] #421: DO NOT re-investigate -- read issue #421 first.");
+  print("[pool-pump] #421: alt fix: add a completion callback to storeValue()");
+  print("[pool-pump] #421:   and advance processTaskQueue on completion,");
+  print("[pool-pump] #421:   instead of trusting a fixed 200ms timer tick.");
+}
+
+var WRAPPER_INSTALLED = (Shelly.call !== RAW_SHELLY_CALL);
+if (!WRAPPER_INSTALLED) {
+  printWrapperFailure();
+}
+
+// Runtime counterpart to the check above: the assignment can succeed while
+// tracking still never happens (e.g. something captured Shelly.call before
+// this point and calls the original directly). A healthy boot makes dozens of
+// KVS.Get calls, so CALLS_TRACKED must be well above zero by the end of init.
+// Called from continueInit(), by which time log()/Shelly.emitEvent() exist.
+function verifyCallTracking() {
+  if (!WRAPPER_INSTALLED) {
+    // Repeated here as well as at install time: the install-time prints fire
+    // before a debug capture attached after boot would see anything, so this
+    // guarantees the diagnostic is in the log of anyone watching a restart.
+    printWrapperFailure();
+    Shelly.emitEvent("pool.call_tracking_broken", {
+      reason: "Shelly.call wrapper did not install; #421 RPC throttling is inert",
+      calls_tracked: CALLS_TRACKED
+    });
+    return;
+  }
+  if (CALLS_TRACKED === 0) {
+    print("[pool-pump] FATAL #421: wrapper installed but tracked 0 calls.");
+    print("[pool-pump] #421: in-flight RPC throttling is INERT.");
+    print("[pool-pump] #421: something is calling the unwrapped Shelly.call,");
+    print("[pool-pump] #421:   captured before the wrapper was installed.");
+    print("[pool-pump] #421: DO NOT re-investigate -- read issue #421 first.");
+    Shelly.emitEvent("pool.call_tracking_broken", {
+      reason: "wrapper installed but CALLS_TRACKED==0 after init; #421 RPC throttling is inert",
+      calls_tracked: 0
+    });
+    return;
+  }
+  log("In-flight RPC tracking OK (#421): tracked", CALLS_TRACKED, "calls during init, max in flight", MAX_CALLS_IN_FLIGHT);
+}
 
 // === TASK QUEUE (SINGLE TIMER FOR ALL SEQUENTIAL OPERATIONS) ===
 var TASK_QUEUE = [];
@@ -2498,6 +2567,10 @@ function continueInit() {
       log('✓ All initialization steps complete - script is now running');
       log('Current mode:', STATE.scheduleMode || 'winter');
       log('Should I run?', isMyTurnToRun());
+      // #421: assert the in-flight RPC tracking this script's crash-safety
+      // depends on is actually live, and shout if it is not (see the
+      // self-check block near CALLS_IN_FLIGHT for why silence is dangerous).
+      verifyCallTracking();
       // #421 Bug B: correct any stale physical state against the current
       // schedule window immediately, before the (possibly hours-away) next
       // schedule tick or today's forecast-driven mode re-check.

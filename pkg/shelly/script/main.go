@@ -386,26 +386,24 @@ func doUpload(ctx context.Context, via types.Channel, device types.Device, name 
 		log.Info("Stopped script", "name", name, "id", id, "out", out)
 	}
 
-	// upload chunks of 2048
-	append := false // first chunk is a replacement
-	chunkSize := 2048
-	for i := 0; i < len(buf); i += chunkSize {
-		end := i + chunkSize
-		if end > len(buf) {
-			end = len(buf)
-		}
-		chunk := buf[i:end]
+	// Upload in chunks of at most 2048 bytes, cut on UTF-8 rune boundaries
+	// (never bisecting a multi-byte character — see issue #423).
+	const chunkSize = 2048
+	appendFlag := false // first chunk is a replacement
+	offset := 0
+	for i, chunk := range SplitChunks(buf, chunkSize) {
 		out, err := device.CallE(ctx, via, string(PutCode), &PutCodeRequest{
 			Id:     id,
 			Code:   string(chunk),
-			Append: append,
+			Append: appendFlag,
 		})
 		if err != nil {
-			log.Error(err, "Unable to upload script", "id", id, "name", name, "index", i, "device", device.Name())
+			log.Error(err, "Unable to upload script", "id", id, "name", name, "chunk", i, "offset", offset, "device", device.Name())
 			return 0, err
 		}
-		log.Info("Uploaded script chunk", "name", name, "id", id, "index", i, "out", out)
-		append = true
+		log.Info("Uploaded script chunk", "name", name, "id", id, "chunk", i, "offset", offset, "out", out)
+		appendFlag = true
+		offset += len(chunk)
 	}
 	log.Info("Uploaded script", "name", name, "id", id, "device", device.Name())
 

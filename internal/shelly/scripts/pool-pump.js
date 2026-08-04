@@ -438,26 +438,25 @@ var STATE_KEYS = {
 // arguments it always did (trackCall forwards result/error_code/
 // error_message/userdata unchanged), so this is purely additive bookkeeping.
 var CALLS_IN_FLIGHT = 0;
-var CALLS_TRACKED = 0;       // lifetime count — proves tracking actually runs
+var N_SEEN = 0;       // lifetime count — proves tracking actually runs
 var MAX_CALLS_IN_FLIGHT = 4; // stay one below the real 5-call device ceiling
 
-function trackCall(onDone) {
-  CALLS_IN_FLIGHT++;
-  CALLS_TRACKED++;
-  return function (result, error_code, error_message, userdata) {
-    // Decrement unconditionally before invoking onDone, so a slot is always
-    // freed even if onDone itself throws (caught by processTaskQueue's
-    // try/catch below, or by the script's top-level error handling).
-    CALLS_IN_FLIGHT--;
-    if (typeof onDone === 'function') {
-      onDone(result, error_code, error_message, userdata);
-    }
-  };
-}
-
-var RAW_SHELLY_CALL = Shelly.call;
+// trackCall's returned closure is inlined directly into the Shelly.call
+// wrapper below (one function, not two) — same bookkeeping, one less named
+// function object retained on the heap for the lifetime of the script.
+var RAW_CALL = Shelly.call;
 Shelly.call = function (method, params, callback, userdata) {
-  return RAW_SHELLY_CALL(method, params, trackCall(callback), userdata);
+  CALLS_IN_FLIGHT++;
+  N_SEEN++;
+  return RAW_CALL(method, params, function (result, error_code, error_message, userdata2) {
+    // Decrement unconditionally before invoking callback, so a slot is
+    // always freed even if callback itself throws (caught by
+    // processTaskQueue's try/catch below, or top-level error handling).
+    CALLS_IN_FLIGHT--;
+    if (typeof callback === 'function') {
+      callback(result, error_code, error_message, userdata2);
+    }
+  }, userdata);
 };
 
 // --- Self-check: fail LOUDLY, never silently (#421) ---------------------
@@ -473,58 +472,63 @@ Shelly.call = function (method, params, callback, userdata) {
 // CONFIG.enableLogging and would hide this exact message in production.
 // It also must not call log() at all — no hoisting on Espruino, and log() is
 // defined further down this file, so it does not exist yet at this point.
-// NOTE: the device truncates each UDP debug line at ~128 chars, so this
-// diagnostic is deliberately split into short lines — a single long print
-// loses exactly the part a reader needs (the cause and the issue pointer).
-function printWrapperFailure() {
-  print("[pool-pump] FATAL #421: Shelly.call wrapper did NOT install.");
-  print("[pool-pump] #421: in-flight RPC throttling is INERT.");
-  print("[pool-pump] #421: >5 concurrent calls => 'Too many calls in progress'.");
-  print("[pool-pump] #421: that error is uncaught and kills the WHOLE script.");
-  print("[pool-pump] #421: schedules stop firing; pump strands as-is.");
-  print("[pool-pump] #421: cause: firmware refused reassigning Shelly.call,");
-  print("[pool-pump] #421:   or refused calling it detached from Shelly.");
-  print("[pool-pump] #421: DO NOT re-investigate -- read issue #421 first.");
-  print("[pool-pump] #421: alt fix: add a completion callback to storeValue()");
-  print("[pool-pump] #421:   and advance processTaskQueue on completion,");
-  print("[pool-pump] #421:   instead of trusting a fixed 200ms timer tick.");
+// NOTE: the device truncates each UDP debug line at ~128 chars, so every
+// line below is kept short — text is factored through P421/printHit so the
+// two failure modes below share their common lines verbatim instead of
+// duplicating them (duplicated string literals cost real script memory).
+var P421 = "[pool-pump] #421: ";
+
+// Lines shared by both failure modes: what breaks, and the standing
+// instruction not to re-litigate the root cause each time this is seen.
+function printHit() {
+  print(P421 + "throttle INERT; >5 calls kills whole script as-is.");
+  print(P421 + "DO NOT re-investigate -- read issue #421 first.");
 }
 
-var WRAPPER_INSTALLED = (Shelly.call !== RAW_SHELLY_CALL);
-if (!WRAPPER_INSTALLED) {
-  printWrapperFailure();
+function printFail() {
+  print(P421 + "FATAL: Shelly.call wrapper did NOT install.");
+  printHit();
+  print(P421 + "alt fix: storeValue() callback should drive queue.");
+}
+
+var WRAP_OK = (Shelly.call !== RAW_CALL);
+if (!WRAP_OK) {
+  printFail();
+}
+
+// One shared emitter for both failure modes below — same event name/shape,
+// only the reason code differs (the print() diagnostics above/below already
+// carry the full English explanation; this event just needs to be machine-
+// detectable, so the reason strings stay short on purpose).
+function emitBroken(reason) {
+  Shelly.emitEvent("pool.call_tracking_broken", {
+    reason: reason,
+    calls_tracked: N_SEEN
+  });
 }
 
 // Runtime counterpart to the check above: the assignment can succeed while
 // tracking still never happens (e.g. something captured Shelly.call before
 // this point and calls the original directly). A healthy boot makes dozens of
-// KVS.Get calls, so CALLS_TRACKED must be well above zero by the end of init.
+// KVS.Get calls, so N_SEEN must be well above zero by the end of init.
 // Called from continueInit(), by which time log()/Shelly.emitEvent() exist.
-function verifyCallTracking() {
-  if (!WRAPPER_INSTALLED) {
+function checkTrack() {
+  if (!WRAP_OK) {
     // Repeated here as well as at install time: the install-time prints fire
     // before a debug capture attached after boot would see anything, so this
     // guarantees the diagnostic is in the log of anyone watching a restart.
-    printWrapperFailure();
-    Shelly.emitEvent("pool.call_tracking_broken", {
-      reason: "Shelly.call wrapper did not install; #421 RPC throttling is inert",
-      calls_tracked: CALLS_TRACKED
-    });
+    printFail();
+    emitBroken("wrapper-not-installed");
     return;
   }
-  if (CALLS_TRACKED === 0) {
-    print("[pool-pump] FATAL #421: wrapper installed but tracked 0 calls.");
-    print("[pool-pump] #421: in-flight RPC throttling is INERT.");
-    print("[pool-pump] #421: something is calling the unwrapped Shelly.call,");
-    print("[pool-pump] #421:   captured before the wrapper was installed.");
-    print("[pool-pump] #421: DO NOT re-investigate -- read issue #421 first.");
-    Shelly.emitEvent("pool.call_tracking_broken", {
-      reason: "wrapper installed but CALLS_TRACKED==0 after init; #421 RPC throttling is inert",
-      calls_tracked: 0
-    });
+  if (N_SEEN === 0) {
+    print(P421 + "FATAL: wrapper OK but tracked 0 calls -- something");
+    print(P421 + "calls the unwrapped Shelly.call, captured earlier.");
+    printHit();
+    emitBroken("zero-calls-tracked");
     return;
   }
-  log("In-flight RPC tracking OK (#421): tracked", CALLS_TRACKED, "calls during init, max in flight", MAX_CALLS_IN_FLIGHT);
+  log("Tracking OK (#421): seen", N_SEEN, "max", MAX_CALLS_IN_FLIGHT);
 }
 
 // === TASK QUEUE (SINGLE TIMER FOR ALL SEQUENTIAL OPERATIONS) ===
@@ -2354,7 +2358,7 @@ function handleNightStop() {
 // (e.g. still-symbolic "@sunrise" specs on a schedule that has never had
 // updateScheduleMode() compute real times for it yet) — those windows are
 // left alone rather than guessed at.
-function parseTimespecHM(timespec) {
+function parseHM(timespec) {
   if (!timespec || timespec.indexOf('@') === 0) return null;
   var parts = timespec.split(' ');
   if (parts.length < 3) return null;
@@ -2364,20 +2368,8 @@ function parseTimespecHM(timespec) {
   return h * 60 + m;
 }
 
-function nowMinutesOfDay() {
-  var d = new Date();
-  return d.getHours() * 60 + d.getMinutes();
-}
-
-// True if nowMin falls in [startMin, stopMin), handling windows that wrap
-// past midnight (e.g. the fixed winter night-run 23:15 -> 00:15).
-function isWithinWindow(nowMin, startMin, stopMin) {
-  if (startMin === null || stopMin === null) return false;
-  if (startMin <= stopMin) {
-    return nowMin >= startMin && nowMin < stopMin;
-  }
-  return nowMin >= startMin || nowMin < stopMin;
-}
+var RC = 'Restart catch-up: '; // shared log/reason prefix, factored out to
+                                // avoid repeating this literal at every call
 
 function restartCatchUp() {
   if (!isMyTurnToRun()) {
@@ -2393,13 +2385,12 @@ function restartCatchUp() {
   var stopCode = mode === 'summer' ? 'handleEveningStop()' : 'handleNightStop()';
 
   Shelly.call('Schedule.List', {}, function (result, err) {
-    if (err) {
-      log('Restart catch-up: Schedule.List failed, skipping:', err);
+    // A failed lookup or an empty schedule is not the "unresolvable
+    // timespec" case below — it just means there is nothing to catch up
+    // against, so bail out quietly rather than guessing.
+    if (err || !result || !result.jobs) {
+      log(RC + 'lookup failed');
       if (err && false) {}
-      return;
-    }
-    if (!result || !result.jobs) {
-      log('Restart catch-up: no schedules found, skipping');
       return;
     }
 
@@ -2410,29 +2401,36 @@ function restartCatchUp() {
       if (!job.enable || !job.calls || job.calls.length === 0) continue;
       var code = job.calls[0].params && job.calls[0].params.code;
       if (code === startCode) {
-        startMin = parseTimespecHM(job.timespec);
+        startMin = parseHM(job.timespec);
       } else if (code === stopCode) {
-        stopMin = parseTimespecHM(job.timespec);
+        stopMin = parseHM(job.timespec);
       }
     }
 
+    // Unresolvable timespec (e.g. still-symbolic "@sunrise", see parseHM
+    // above) — skip rather than act on a guess (#421 Bug B requirement).
     if (startMin === null || stopMin === null) {
-      log('Restart catch-up: could not resolve', mode, 'window, skipping');
+      log(RC + 'unresolved', mode);
       return;
     }
 
-    var nowMin = nowMinutesOfDay();
-    var shouldRun = isWithinWindow(nowMin, startMin, stopMin);
+    var d = new Date();
+    var nowMin = d.getHours() * 60 + d.getMinutes();
+    // Handles windows that wrap past midnight (the fixed winter night-run
+    // 23:15 -> 00:15) by treating a start > stop pair as wrapping.
+    var shouldRun = startMin <= stopMin
+      ? (nowMin >= startMin && nowMin < stopMin)
+      : (nowMin >= startMin || nowMin < stopMin);
     var isRunning = STATE.activeOutput !== -1;
 
-    log('Restart catch-up:', mode, 'now=', nowMin, 'window=[', startMin, ',', stopMin, ') shouldRun=', shouldRun, 'isRunning=', isRunning);
+    log(RC, mode, nowMin, startMin, stopMin, shouldRun, isRunning);
 
     if (shouldRun && !isRunning) {
-      doStart(CONFIG.preferredSpeed, 'Restart catch-up: inside scheduled window');
+      doStart(CONFIG.preferredSpeed, RC + 'inside window');
     } else if (!shouldRun && isRunning) {
-      doStop('Restart catch-up: outside scheduled window');
+      doStop(RC + 'outside window');
     } else {
-      log('Restart catch-up: state already consistent with schedule');
+      log(RC + 'state OK');
     }
   });
 }
@@ -2570,7 +2568,7 @@ function continueInit() {
       // #421: assert the in-flight RPC tracking this script's crash-safety
       // depends on is actually live, and shout if it is not (see the
       // self-check block near CALLS_IN_FLIGHT for why silence is dangerous).
-      verifyCallTracking();
+      checkTrack();
       // #421 Bug B: correct any stale physical state against the current
       // schedule window immediately, before the (possibly hours-away) next
       // schedule tick or today's forecast-driven mode re-check.

@@ -79,13 +79,6 @@ func init() {
 	runCmd.PersistentFlags().DurationVar(&options.Flags.SolarStaleAfter, "solar-stale-after", options.SOLAR_STALE_AFTER, "Solar aggregator: exclude a source's reading from the total once it is older than this")
 	runCmd.PersistentFlags().StringVar(&options.Flags.PoolDeviceID, "pool-device-id", "", "Pool Shelly device ID")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolEnabled, "enable-pool", false, "Enable pool runtime tracking")
-	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolSolarEnabled, "enable-pool-solar", false, "Enable solar-driven pool pump automation")
-	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarStartThresholdW, "pool-solar-start-threshold-w", 500, "Solar power threshold to start pump (W)")
-	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarStopThresholdW, "pool-solar-stop-threshold-w", 200, "Solar power threshold to stop pump (W)")
-	runCmd.PersistentFlags().DurationVar(&options.Flags.PoolSolarStartDelay, "pool-solar-start-delay", 5*time.Minute, "Solar must hold above start threshold for this long before starting pump")
-	runCmd.PersistentFlags().DurationVar(&options.Flags.PoolSolarStopDelay, "pool-solar-stop-delay", 10*time.Minute, "Solar must hold below stop threshold for this long before stopping pump")
-	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarMinVolumeTurnover, "pool-solar-min-volume-turnover", 5, "Soft-stop target: pool volumes filtered per day; pump keeps running past this while solar is still above start threshold")
-	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarMaxVolumeTurnover, "pool-solar-max-volume-turnover", 7, "Hard ceiling: pool volumes filtered per day; pump always stops (and won't be solar-started) once reached")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableNoticeService, "enable-notice-service", false, "Enable the notice service (motion rule + daily email digest); requires the events and occupancy services")
 	runCmd.PersistentFlags().StringVar(&options.Flags.NoticeNightStart, "notice-night-start", "22:00", "Night window start (HH:MM) used by the motion notice rule")
 	runCmd.PersistentFlags().StringVar(&options.Flags.NoticeNightEnd, "notice-night-end", "06:00", "Night window end (HH:MM) used by the motion notice rule")
@@ -303,29 +296,6 @@ var runCmd = &cobra.Command{
 		options.Flags.SFRUsername = v.GetString("sfr.username")
 		options.Flags.SFRPassword = v.GetString("sfr.password")
 		sfr.Init(options.Flags.SFRUsername, options.Flags.SFRPassword)
-
-		// Handle pool solar automation config from viper / flags
-		if v.IsSet("pool.solar.enabled") && !cmd.Flags().Changed("enable-pool-solar") {
-			options.Flags.PoolSolarEnabled = v.GetBool("pool.solar.enabled")
-		}
-		if v.IsSet("pool.solar.start_threshold_w") && !cmd.Flags().Changed("pool-solar-start-threshold-w") {
-			options.Flags.PoolSolarStartThresholdW = v.GetFloat64("pool.solar.start_threshold_w")
-		}
-		if v.IsSet("pool.solar.stop_threshold_w") && !cmd.Flags().Changed("pool-solar-stop-threshold-w") {
-			options.Flags.PoolSolarStopThresholdW = v.GetFloat64("pool.solar.stop_threshold_w")
-		}
-		if v.IsSet("pool.solar.start_delay") && !cmd.Flags().Changed("pool-solar-start-delay") {
-			options.Flags.PoolSolarStartDelay = v.GetDuration("pool.solar.start_delay")
-		}
-		if v.IsSet("pool.solar.stop_delay") && !cmd.Flags().Changed("pool-solar-stop-delay") {
-			options.Flags.PoolSolarStopDelay = v.GetDuration("pool.solar.stop_delay")
-		}
-		if v.IsSet("pool.solar.min_volume_turnover") && !cmd.Flags().Changed("pool-solar-min-volume-turnover") {
-			options.Flags.PoolSolarMinVolumeTurnover = v.GetFloat64("pool.solar.min_volume_turnover")
-		}
-		if v.IsSet("pool.solar.max_volume_turnover") && !cmd.Flags().Changed("pool-solar-max-volume-turnover") {
-			options.Flags.PoolSolarMaxVolumeTurnover = v.GetFloat64("pool.solar.max_volume_turnover")
-		}
 
 		// Store Viper instance in global options for daemon to use
 		options.ViperConfig = v

@@ -421,6 +421,43 @@ var STATE_KEYS = {
   activeOutput: "active-output"     // -1 (all off), 0, 1, 2 for pro3; 0 for pro1
 };
 
+// === IN-FLIGHT RPC TRACKING (#421 Bug A) ===
+// Real Gen2 firmware allows at most 5 concurrent Shelly.call RPCs per script
+// (see AGENTS.md "Per-script limits"); the 6th concurrent call raises an
+// uncaught "Too many calls in progress" exception that kills the ENTIRE
+// script, not just the offending call. processTaskQueue's 200ms tick (below)
+// only serialises *when* queued task functions run — it has no idea how many
+// of the underlying async RPCs those tasks fire are still in flight. That
+// gap is the root cause of two live crashes (persistRuntimeState's turnover
+// mirror, saveState's active-output mirror — both storeValue() fire-and-
+// forget writes) documented in issue #421.
+//
+// CALLS_IN_FLIGHT tracks every Shelly.call this script makes. It is wired up
+// once here by wrapping Shelly.call itself, rather than editing each of the
+// ~16 call sites in this file — every callback still receives exactly the
+// arguments it always did (trackCall forwards result/error_code/
+// error_message/userdata unchanged), so this is purely additive bookkeeping.
+var CALLS_IN_FLIGHT = 0;
+var MAX_CALLS_IN_FLIGHT = 4; // stay one below the real 5-call device ceiling
+
+function trackCall(onDone) {
+  CALLS_IN_FLIGHT++;
+  return function (result, error_code, error_message, userdata) {
+    // Decrement unconditionally before invoking onDone, so a slot is always
+    // freed even if onDone itself throws (caught by processTaskQueue's
+    // try/catch below, or by the script's top-level error handling).
+    CALLS_IN_FLIGHT--;
+    if (typeof onDone === 'function') {
+      onDone(result, error_code, error_message, userdata);
+    }
+  };
+}
+
+var RAW_SHELLY_CALL = Shelly.call;
+Shelly.call = function (method, params, callback, userdata) {
+  return RAW_SHELLY_CALL(method, params, trackCall(callback), userdata);
+};
+
 // === TASK QUEUE (SINGLE TIMER FOR ALL SEQUENTIAL OPERATIONS) ===
 var TASK_QUEUE = [];
 var TASK_INDEX = 0;
@@ -438,17 +475,37 @@ function processTaskQueue() {
     return;
   }
 
+  // Bug A root-cause fix (#421): don't dispatch another queued task while
+  // too many of this script's own Shelly.call RPCs are still in flight — a
+  // fixed 200ms tick is not a promise the device has actually kept up with.
+  // Skip this tick; TASK_INDEX is unchanged so the same task is retried on
+  // the next one, once a slot frees up.
+  if (CALLS_IN_FLIGHT >= MAX_CALLS_IN_FLIGHT) {
+    log('Task queue throttled, calls in flight:', CALLS_IN_FLIGHT);
+    return;
+  }
+
   // Execute next task; new tasks queued by the task itself extend TASK_QUEUE
   // and will be picked up on subsequent timer ticks.
   var task = TASK_QUEUE[TASK_INDEX];
   TASK_INDEX++;
-  task();
+
+  // Second, independent layer of defense (#421): one queued task throwing
+  // (whether from a call path the throttle above doesn't cover, or any
+  // other bug) must not be able to kill the entire script the way it did in
+  // the live incident this issue documents.
+  try {
+    task();
+  } catch (e) {
+    log('ERROR: queued task threw, continuing:', e);
+    if (e && false) {}
+  }
 }
 
 function queueTask(task) {
   // Simply append to queue
   TASK_QUEUE.push(task);
-  
+
   // Start timer only if not already running
   if (!TASK_TIMER) {
     TASK_TIMER = Timer.set(200, true, processTaskQueue);
@@ -2209,6 +2266,108 @@ function handleNightStop() {
   doStop('Night stop event');
 }
 
+// === RESTART CATCH-UP (#421 Bug B) ===
+// enforceOutputState() (below) only mirrors whatever physical state the
+// switch already has at boot — it never asks "should I actually be running
+// right now, given today's schedule window?". A restart (crash recovery,
+// script re-upload, device reboot) landing mid-window therefore silently
+// adopts a stale on/off state and only self-corrects whenever the next
+// schedule tick fires, which can be hours away. This is exactly what left a
+// live pump running hours past its scheduled evening-stop (see issue #421).
+// restartCatchUp() compares "now" against the currently active mode's
+// window — read straight from Schedule.List, the same source of truth
+// updateScheduleMode() writes to — and calls doStart()/doStop() immediately
+// if the physical state disagrees, instead of waiting for the next tick.
+
+// Parses the "M H" fields out of a Shelly cron timespec built by
+// makeTimespec() ("0 M H * * DAYS") or a fixed literal ("0 15 23 * * ...").
+// Returns minutes-since-midnight, or null for formats it can't resolve
+// (e.g. still-symbolic "@sunrise" specs on a schedule that has never had
+// updateScheduleMode() compute real times for it yet) — those windows are
+// left alone rather than guessed at.
+function parseTimespecHM(timespec) {
+  if (!timespec || timespec.indexOf('@') === 0) return null;
+  var parts = timespec.split(' ');
+  if (parts.length < 3) return null;
+  var m = Number(parts[1]);
+  var h = Number(parts[2]);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+function nowMinutesOfDay() {
+  var d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+// True if nowMin falls in [startMin, stopMin), handling windows that wrap
+// past midnight (e.g. the fixed winter night-run 23:15 -> 00:15).
+function isWithinWindow(nowMin, startMin, stopMin) {
+  if (startMin === null || stopMin === null) return false;
+  if (startMin <= stopMin) {
+    return nowMin >= startMin && nowMin < stopMin;
+  }
+  return nowMin >= startMin || nowMin < stopMin;
+}
+
+function restartCatchUp() {
+  if (!isMyTurnToRun()) {
+    return;
+  }
+
+  // Mode-aware on purpose: only one of these two job pairs is ever enabled
+  // at a time on a real device (updateScheduleMode() disables the other),
+  // so matching against the currently active mode avoids any ambiguity
+  // about which pair's timespec actually governs "now".
+  var mode = STATE.scheduleMode || 'winter';
+  var startCode = mode === 'summer' ? 'handleMorningStart()' : 'handleNightStart()';
+  var stopCode = mode === 'summer' ? 'handleEveningStop()' : 'handleNightStop()';
+
+  Shelly.call('Schedule.List', {}, function (result, err) {
+    if (err) {
+      log('Restart catch-up: Schedule.List failed, skipping:', err);
+      if (err && false) {}
+      return;
+    }
+    if (!result || !result.jobs) {
+      log('Restart catch-up: no schedules found, skipping');
+      return;
+    }
+
+    var startMin = null;
+    var stopMin = null;
+    for (var i = 0; i < result.jobs.length; i++) {
+      var job = result.jobs[i];
+      if (!job.enable || !job.calls || job.calls.length === 0) continue;
+      var code = job.calls[0].params && job.calls[0].params.code;
+      if (code === startCode) {
+        startMin = parseTimespecHM(job.timespec);
+      } else if (code === stopCode) {
+        stopMin = parseTimespecHM(job.timespec);
+      }
+    }
+
+    if (startMin === null || stopMin === null) {
+      log('Restart catch-up: could not resolve', mode, 'window, skipping');
+      return;
+    }
+
+    var nowMin = nowMinutesOfDay();
+    var shouldRun = isWithinWindow(nowMin, startMin, stopMin);
+    var isRunning = STATE.activeOutput !== -1;
+
+    log('Restart catch-up:', mode, 'now=', nowMin, 'window=[', startMin, ',', stopMin, ') shouldRun=', shouldRun, 'isRunning=', isRunning);
+
+    if (shouldRun && !isRunning) {
+      doStart(CONFIG.preferredSpeed, 'Restart catch-up: inside scheduled window');
+    } else if (!shouldRun && isRunning) {
+      doStop('Restart catch-up: outside scheduled window');
+    } else {
+      log('Restart catch-up: state already consistent with schedule');
+    }
+  });
+}
+
 // === INITIALIZATION ===
 function enforceOutputState() {
   log("Enforcing output state at startup...");
@@ -2339,6 +2498,10 @@ function continueInit() {
       log('✓ All initialization steps complete - script is now running');
       log('Current mode:', STATE.scheduleMode || 'winter');
       log('Should I run?', isMyTurnToRun());
+      // #421 Bug B: correct any stale physical state against the current
+      // schedule window immediately, before the (possibly hours-away) next
+      // schedule tick or today's forecast-driven mode re-check.
+      queueTask(restartCatchUp);
       queueTask(handleDailyCheck);
       return;
     }

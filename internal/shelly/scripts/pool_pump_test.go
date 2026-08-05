@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -179,6 +180,67 @@ func pro1Schedules() []map[string]interface{} {
 	}
 }
 
+// scheduleJob builds a Schedule.List job entry shaped like what
+// createSchedules()/updateScheduleMode() in pool-pump.js produce: a resolved
+// ("0 M H * * DAYS") timespec invoking the given handler via script.eval.
+func scheduleJob(id int, code string, at time.Time) map[string]interface{} {
+	return map[string]interface{}{
+		"id": id, "enable": true,
+		"timespec": fmt.Sprintf("0 %d %d * * SUN,MON,TUE,WED,THU,FRI,SAT", at.Minute(), at.Hour()),
+		"calls": []interface{}{map[string]interface{}{
+			"method": "script.eval",
+			"params": map[string]interface{}{"id": 1, "code": code},
+		}},
+	}
+}
+
+// poolPumpSchedulesInWindow is poolPumpSchedules() with the winter
+// handleNightStart()/handleNightStop() pair (ids 4/5) resolved to a window
+// running from start to stop instead of the real fixed 23:15/00:15 — so
+// pool-pump.js's isWithinRunWindow() (#436) sees a window the test controls
+// rather than the real wall-clock night hours. Tests that exercise the
+// water-supply restore path need this: that path now re-derives "should I
+// be running?" from the schedule instead of trusting a remembered value.
+func poolPumpSchedulesInWindow(start, stop time.Time) []map[string]interface{} {
+	s := poolPumpSchedules()
+	for i, job := range s {
+		switch job["id"] {
+		case 4:
+			s[i] = scheduleJob(4, "handleNightStart()", start)
+		case 5:
+			s[i] = scheduleJob(5, "handleNightStop()", stop)
+		}
+	}
+	return s
+}
+
+// pro1SchedulesInWindow is the Pro1 equivalent of poolPumpSchedulesInWindow.
+// pro1Schedules() only defines a handleNightStart() job (enough for
+// verifySchedules(), which just needs one recognized job to pass); this adds
+// the handleNightStop() companion isWithinRunWindow() needs to resolve a
+// window, both bracketing [start, stop).
+func pro1SchedulesInWindow(start, stop time.Time) []map[string]interface{} {
+	return []map[string]interface{}{
+		scheduleJob(1, "handleNightStart()", start),
+		scheduleJob(2, "handleNightStop()", stop),
+	}
+}
+
+// toKVSInt best-effort converts a Shelly.emitEvent() data field (exported by
+// goja as int64 or float64 depending on how the JS number was produced) to
+// an int, for asserting on captured event payloads in tests.
+func toKVSInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case int64:
+		return int(n), true
+	case int:
+		return n, true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
+}
+
 func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
@@ -225,15 +287,23 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 
 	injector := make(chan []byte, 4)
 
+	// controllerKVS() configures preferredSpeed="eco" with eco-speed="0", so
+	// the #436 fix's restore path (mapSpeedToSwitch(CONFIG.preferredSpeed))
+	// targets switch 0 — the pump must already be on switch 0 pre-protection
+	// for this test's "restored" assertion to hold.
 	cs := pro3ComponentStatus()
-	cs["switch:2"] = map[string]interface{}{"id": 2, "output": true}
+	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true}
 
+	now := time.Now()
 	deviceState := &script.DeviceState{
 		KVS:             controllerKVS(),
 		Storage:         make(map[string]interface{}),
 		ComponentStatus: cs,
-		Schedules:       poolPumpSchedules(),
-		EventInjector:   injector,
+		// #436: restore now re-derives "should I be running?" from the
+		// schedule window instead of trusting a remembered value, so the
+		// window must actually contain "now" for this test to see a restore.
+		Schedules:     poolPumpSchedulesInWindow(now.Add(-2*time.Minute), now.Add(30*time.Minute)),
+		EventInjector: injector,
 	}
 
 	// 20s ceiling: init (up to 9s) + two water-supply transitions (up to 5s
@@ -259,8 +329,8 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 		t.Fatalf("script did not complete init within timeout")
 	}
 
-	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "2" {
-		t.Fatalf("expected active-output=2 after init, got %v", v)
+	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "0" {
+		t.Fatalf("expected active-output=0 after init, got %v", v)
 	}
 
 	// 5s (not 2s): activateOutput() now also queues the #402 runtime/turnover
@@ -283,7 +353,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	injector <- shellyInputEvent(0, false)
 	restored := waitFor(5*time.Second, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
-		return ok && v == "2"
+		return ok && v == "0"
 	})
 
 	cancel()
@@ -404,12 +474,18 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 
 	injector := make(chan []byte, 8)
 
+	now := time.Now()
 	deviceState := &script.DeviceState{
 		KVS:             pro1KVS(),
 		Storage:         make(map[string]interface{}),
 		ComponentStatus: pro1ComponentStatus(),
-		Schedules:       pro1Schedules(),
-		EventInjector:   injector,
+		// #436: restore now re-derives "should I be running?" from the
+		// schedule window instead of trusting a remembered value, so the
+		// window must actually contain "now" for the restore assertion below
+		// to hold. pro1Schedules() only has a start job; the …InWindow variant
+		// adds the handleNightStop() companion the window check needs.
+		Schedules:     pro1SchedulesInWindow(now.Add(-2*time.Minute), now.Add(30*time.Minute)),
+		EventInjector: injector,
 	}
 
 	// 25s ceiling: init (up to 9s) + three button toggles (up to 2s each,
@@ -493,6 +569,268 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 
 	cancel()
 	<-done
+}
+
+// TestPoolPump_WaterSupplyRestoreSurvivesRestart reproduces #436: if
+// pool-pump.js restarts while water-supply protection is active, the pump
+// must still come back when the supply clears, instead of silently staying
+// off. Before the fix, boot's Step 2/4 re-arms the debounce flag by calling
+// handleWaterSupply(true) — but by then the physical switch is already off
+// (from the pre-restart protection) and enforceOutputState() has already
+// mirrored that, so STATE.savedOutput is captured as -1 and the later
+// restore is a no-op that still emits pool.water_supply_restored as if it
+// worked.
+//
+// The two script.RunWithDeviceState calls below share one *script.DeviceState
+// (KVS/Storage/ComponentStatus survive; only the JS VM's in-memory globals
+// reset) — the same thing a process restart or re-upload does to a real
+// device, and exactly what loses STATE.savedOutput.
+func TestPoolPump_WaterSupplyRestoreSurvivesRestart(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	now := time.Now()
+	// controllerKVS() -> preferredSpeed="eco", eco-speed="0": the fix's
+	// restore path targets switch 0, so the pump must already be there
+	// pre-protection for "restored" to mean "back to where it was".
+	cs := pro3ComponentStatus()
+	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true}
+
+	deviceState := &script.DeviceState{
+		KVS:             controllerKVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: cs,
+		Schedules:       poolPumpSchedulesInWindow(now.Add(-2*time.Minute), now.Add(30*time.Minute)),
+	}
+
+	// --- Phase 1: pump running inside the schedule window; water supply
+	// engages protection (savedOutput=0 in-memory, switch physically off).
+	injector1 := make(chan []byte, 4)
+	deviceState.EventInjector = injector1
+
+	ctx1, cancel1 := context.WithTimeout(
+		logr.NewContext(context.Background(), testr.New(t)),
+		15*time.Second,
+	)
+	done1 := make(chan error, 1)
+	go func() {
+		done1 <- script.RunWithDeviceState(ctx1, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		return exists
+	}) {
+		cancel1()
+		<-done1
+		t.Fatalf("phase 1: init did not complete")
+	}
+	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "0" {
+		cancel1()
+		<-done1
+		t.Fatalf("phase 1: expected active-output=0 after init, got %v", v)
+	}
+
+	injector1 <- shellyInputEvent(0, true)
+	if !waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		return ok && v == "-1"
+	}) {
+		cancel1()
+		<-done1
+		t.Fatalf("phase 1: pump did not stop after water supply ON; active-output = %v",
+			deviceState.KVS["script/pool-pump/active-output"])
+	}
+
+	cancel1()
+	<-done1
+
+	// --- Phase 2: "restart" the script (fresh JS VM, same underlying device
+	// state) while input:0 is still high — the exact sequence from #436.
+	// The physical switch is already off from phase 1's protection, so
+	// enforceOutputState() at this boot mirrors active-output=-1 again.
+	cs["input:0"] = map[string]interface{}{"id": 0, "state": true}
+
+	var mu sync.Mutex
+	var reArmed bool
+	var restoredEvent map[string]interface{}
+	deviceState.OnEvent = func(name string, data interface{}) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch name {
+		case "pool.water_supply_protected":
+			// Boot's Step 2/4 emits this synchronously right after
+			// re-arming WATER_SUPPLY_ACTIVE and capturing (the buggy, pre-fix)
+			// STATE.savedOutput — the exact moment #436 corrupts state.
+			// Waiting for it (below) avoids a race against clearing input:0
+			// before Step 2/4 has even run.
+			reArmed = true
+		case "pool.water_supply_restored":
+			if m, ok := data.(map[string]interface{}); ok {
+				restoredEvent = m
+			}
+		}
+	}
+
+	injector2 := make(chan []byte, 4)
+	deviceState.EventInjector = injector2
+
+	ctx2, cancel2 := context.WithTimeout(
+		logr.NewContext(context.Background(), testr.New(t)),
+		15*time.Second,
+	)
+	defer cancel2()
+	done2 := make(chan error, 1)
+	go func() {
+		done2 <- script.RunWithDeviceState(ctx2, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitFor(9*time.Second, 50*time.Millisecond, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return reArmed
+	}) {
+		cancel2()
+		<-done2
+		t.Fatalf("phase 2: boot never re-armed water-supply protection (pool.water_supply_protected not observed)")
+	}
+
+	// Sanity: still off after the simulated restart, exactly as reported live in #436.
+	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "-1" {
+		cancel2()
+		<-done2
+		t.Fatalf("phase 2: expected pump still off after restart with input:0 high, got active-output=%v", v)
+	}
+
+	// Water supply clears — the pump must run again. Before the fix this
+	// stays off forever (the bug): savedOutput was captured as -1 during
+	// boot's re-arm, so activateOutput(STATE.savedOutput) is a no-op.
+	injector2 <- shellyInputEvent(0, false)
+	restored := waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		return ok && v == "0"
+	})
+
+	cancel2()
+	<-done2
+
+	if !restored {
+		t.Fatalf("pump did not run again after water supply cleared post-restart; active-output = %v (want 0) — #436",
+			deviceState.KVS["script/pool-pump/active-output"])
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if restoredEvent == nil {
+		t.Fatalf("pool.water_supply_restored event was not observed")
+	}
+	if ro, ok := toKVSInt(restoredEvent["restored_output"]); !ok || ro != 0 {
+		t.Fatalf("pool.water_supply_restored reported restored_output=%v, want 0 (must match the output actually applied)",
+			restoredEvent["restored_output"])
+	}
+}
+
+// TestPoolPump_WaterSupplyClearOutsideWindowStaysOff covers the converse
+// case from #436: if the schedule window has already ended while the water
+// supply was active, clearing the supply must NOT start the pump — even
+// though it was running (and its output saved) when protection engaged.
+// Restoring a remembered value here would start a pump that should now be
+// off; the fix re-derives "should I be running now?" instead.
+func TestPoolPump_WaterSupplyClearOutsideWindowStaysOff(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	now := time.Now()
+	// Window already ended: ran from 3h ago to 1h ago.
+	schedules := poolPumpSchedulesInWindow(now.Add(-3*time.Hour), now.Add(-1*time.Hour))
+
+	injector := make(chan []byte, 4)
+	cs := pro3ComponentStatus()
+	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true} // running when supply engages
+
+	var mu sync.Mutex
+	var restoredEvent map[string]interface{}
+	deviceState := &script.DeviceState{
+		KVS:             controllerKVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: cs,
+		Schedules:       schedules,
+		EventInjector:   injector,
+		OnEvent: func(name string, data interface{}) {
+			if name != "pool.water_supply_restored" {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if m, ok := data.(map[string]interface{}); ok {
+				restoredEvent = m
+			}
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(
+		logr.NewContext(context.Background(), testr.New(t)),
+		20*time.Second,
+	)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		return exists
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("init did not complete")
+	}
+	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "0" {
+		cancel()
+		<-done
+		t.Fatalf("expected active-output=0 after init, got %v", v)
+	}
+
+	injector <- shellyInputEvent(0, true)
+	if !waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		return ok && v == "-1"
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("pump did not stop after water supply ON; active-output = %v", deviceState.KVS["script/pool-pump/active-output"])
+	}
+
+	injector <- shellyInputEvent(0, false)
+	// No waitFor target here on purpose: the assertion is that active-output
+	// stays at -1, so give the async schedule-window check + activateOutput
+	// chain time to run and then confirm nothing changed.
+	time.Sleep(2 * time.Second)
+
+	cancel()
+	<-done
+
+	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "-1" {
+		t.Fatalf("pump started after water supply cleared outside the schedule window; active-output = %v (want -1) — #436", v)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if restoredEvent == nil {
+		t.Fatalf("pool.water_supply_restored event was not observed")
+	}
+	if ro, ok := toKVSInt(restoredEvent["restored_output"]); !ok || ro != -1 {
+		t.Fatalf("pool.water_supply_restored reported restored_output=%v, want -1 (pump must stay off outside the window)",
+			restoredEvent["restored_output"])
+	}
 }
 
 // === Runtime/turnover tracking (#402) ===

@@ -130,6 +130,7 @@ func minifyEsbuild(name string, src []byte, opts MinifyOptions) (*MinifyResult, 
 	if !opts.MangleTopLevel {
 		result := api.Transform(string(src), api.TransformOptions{
 			Target:            api.ES5,
+			Charset:           api.CharsetUTF8,
 			MinifyWhitespace:  true,
 			MinifyIdentifiers: true,
 			MinifySyntax:      !opts.DisableSyntaxLowering,
@@ -171,6 +172,7 @@ func minifyEsbuild(name string, src []byte, opts MinifyOptions) (*MinifyResult, 
 
 	result := api.Transform(wrapped, api.TransformOptions{
 		Target:            api.ES5,
+		Charset:           api.CharsetUTF8,
 		MinifyWhitespace:  true,
 		MinifyIdentifiers: true,
 		MinifySyntax:      !opts.DisableSyntaxLowering,

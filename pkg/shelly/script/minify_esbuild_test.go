@@ -1,8 +1,10 @@
 package script
 
 import (
+	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 const esbuildTestScript = `
@@ -252,5 +254,53 @@ func TestMinifyOptions_ZeroValueIsTdewolff(t *testing.T) {
 	}
 	if res.Symbols != nil || res.SourceMap != nil {
 		t.Fatalf("zero-value MinifyOptions must never produce a symbol map or source map, got Symbols=%v SourceMap=%v", res.Symbols, res.SourceMap)
+	}
+}
+
+// TestMinifyWithOptions_EsbuildEmitsRawUTF8NotEscapes is a regression test for a
+// bug found only on real hardware: esbuild defaults to ASCII output and escapes
+// non-ASCII characters as \uXXXX, but Espruino rejects those outright with
+//
+//	Uncaught SyntaxError: \uXXXX literals are disallowed
+//
+// pool-pump.js contains a "✓" (U+2713) and several em dashes (U+2014) in log
+// strings, so the whole script failed to parse on a Shelly Plus 1 — while goja
+// and the rest of the test suite stayed green, because goja accepts \uXXXX
+// happily. Fixed by setting Charset: api.CharsetUTF8 on both api.Transform call
+// sites. This affects esbuild output with AND without top-level mangling, so
+// both paths are asserted here.
+func TestMinifyWithOptions_EsbuildEmitsRawUTF8NotEscapes(t *testing.T) {
+	src := []byte(`
+var CONFIG_SCHEMA = { tick: { description: "x", key: "tick", default: 1, type: "number" } };
+function handleTick() { print("✓ done — really"); }
+handleTick();
+`)
+
+	escape := regexp.MustCompile(`\\u[0-9a-fA-F]{4}`)
+
+	for _, tc := range []struct {
+		name   string
+		mangle bool
+	}{
+		{"no mangling", false},
+		{"top-level mangling", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := MinifyOptions{Engine: EngineEsbuild, MangleTopLevel: tc.mangle}
+			if tc.mangle {
+				opts.PreserveGlobals = []string{"handleTick"}
+			}
+			res, err := MinifyWithOptions("charset-test.js", src, opts)
+			if err != nil {
+				t.Fatalf("MinifyWithOptions: %v", err)
+			}
+			if got := escape.FindAllString(string(res.Code), -1); len(got) > 0 {
+				t.Errorf("esbuild emitted %d \\uXXXX escape(s) %v; Espruino rejects these "+
+					"(\"\\uXXXX literals are disallowed\") and the script will not parse on device", len(got), got)
+			}
+			if !utf8.Valid(res.Code) {
+				t.Error("minified output is not valid UTF-8")
+			}
+		})
 	}
 }

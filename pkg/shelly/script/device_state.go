@@ -5,14 +5,59 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/go-logr/logr"
 )
+
+// ExecutionMode controls how strictly the goja-based emulator enforces
+// Shelly Gen2 per-script resource limits (see AGENTS.md "Per-script
+// limits"). This is a minimal slice of issue #250 — only the concurrent
+// Shelly.call ceiling is modeled here; timer/event-handler/status-handler/
+// MQTT-subscription count limits are #250's remaining scope, not this one's.
+type ExecutionMode int
+
+const (
+	// DeviceTestMode is the zero value / default: the emulator mirrors the
+	// real device's concurrent-call ceiling, panicking with a message
+	// matching the real device's "Too many calls in progress" error once
+	// MaxConcurrentCalls calls are already in flight. Use for all unit
+	// tests exercising scripts against simulated device behavior.
+	DeviceTestMode ExecutionMode = iota
+	// DeviceExtensionMode disables the ceiling entirely, for daemon-side
+	// script execution that intentionally aggregates state across multiple
+	// devices and must not be constrained by any single device's per-script
+	// limits.
+	DeviceExtensionMode
+)
+
+// MaxConcurrentCalls mirrors the real Shelly Gen2 per-script ceiling on
+// in-flight Shelly.call RPCs (see AGENTS.md "Per-script limits"). Exceeding
+// it on real hardware raises an uncaught "Too many calls in progress"
+// exception that kills the entire script (see issue #421).
+const MaxConcurrentCalls = 5
 
 // DeviceState represents the persistent state of a Shelly device for testing
 type DeviceState struct {
 	KVS     map[string]interface{} `json:"kvs"`
 	Storage map[string]interface{} `json:"storage"`
+
+	// Mode selects resource-limit enforcement (see ExecutionMode). The zero
+	// value is DeviceTestMode, so existing callers that don't set this field
+	// keep getting strict enforcement by default.
+	Mode ExecutionMode `json:"-"`
+
+	// CallDelay, when non-zero and Mode is DeviceTestMode, artificially
+	// delays the *release* of a Shelly.call's in-flight slot (not the
+	// call's dispatch or its callback — those stay synchronous, preserving
+	// every script's existing callback-ordering assumptions). This lets a
+	// test create genuinely overlapping in-flight calls — e.g. several
+	// calls dispatched a fixed tick apart, each taking longer than that
+	// tick to "complete" from the device's perspective — to exercise the
+	// concurrent-call ceiling (see issue #421). Zero (default) preserves
+	// the emulator's original synchronous-release behavior. Ignored in
+	// DeviceExtensionMode.
+	CallDelay time.Duration `json:"-"`
 
 	// Schedules tracks jobs created via Schedule.Create during script execution.
 	// Each entry is the raw params map passed to Schedule.Create, plus an "id" field.

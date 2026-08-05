@@ -110,7 +110,17 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 			msg := value.Bytes()
 			handlerCountBefore := len(handlers)
 			if err := handlers[handlerIdx].Handle(ctx, vm, msg); err != nil {
-				log.Error(err, "Handler failed", "handler", handlerIdx)
+				// On real Shelly firmware, an uncaught exception in *any*
+				// script callback (timer tick, event handler, MQTT message)
+				// kills the entire script — not just that one callback.
+				// Mirror that here: a handler error is a full script crash,
+				// not a log-and-continue. Without this, Bug A's crash (see
+				// issue #421), which happens inside a Timer-driven
+				// processTaskQueue tick rather than the initial synchronous
+				// script evaluation, would be silently swallowed and the
+				// emulator could never observe it.
+				log.Error(err, "Handler failed - script crashed", "handler", handlerIdx)
+				return err
 			}
 			// Check if new handlers were added during Handle()
 			if len(handlers) != handlerCountBefore {
@@ -165,6 +175,16 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	timers := make(map[int]*timerHandler)
 	nextTimerHandle := 1
 
+	// callsInFlight tracks concurrent Shelly.call RPCs for this VM, enforced
+	// only in DeviceTestMode (see issue #421 / #250). Only ever read and
+	// mutated from the single goroutine that drives script execution: the
+	// initial synchronous vm.RunScript() call, or a later handler Handle()
+	// call from RunWithDeviceState's event loop — never concurrently, so no
+	// synchronization is needed even though its release (see CallDelay) may
+	// be scheduled from a timer-like goroutine that only ever *sends on a
+	// channel*, never touches this variable directly.
+	callsInFlight := 0
+
 	vm := goja.New()
 
 	// Shelly event handler system
@@ -189,7 +209,52 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		log.Info("Shelly.call()", "method", method, "params", params.Export())
 
 		if fn, ok := methods[method]; ok {
+			if deviceState.Mode == DeviceTestMode {
+				if callsInFlight >= MaxConcurrentCalls {
+					// Mirrors the real Gen2 firmware's uncaught exception
+					// when a script exceeds its concurrent-call budget (see
+					// AGENTS.md "Per-script limits", issue #421). Using
+					// vm.NewGoError (an *Object) rather than a plain Go
+					// panic keeps this catchable by a script-level
+					// try/catch, exactly like the real device's exception —
+					// necessary for testing pool-pump.js's own try/catch
+					// defense layer.
+					panic(vm.NewGoError(fmt.Errorf("Too many calls in progress")))
+				}
+				callsInFlight++
+			}
+
+			dispatch := func() {
+				_, err := fn(vm, method, params, callback, userdata)
+				if deviceState.Mode == DeviceTestMode {
+					callsInFlight--
+				}
+				if err != nil {
+					log.Error(err, "Shelly.call() failed (deferred)", "method", method)
+				}
+			}
+
+			if deviceState.Mode == DeviceTestMode && deviceState.CallDelay > 0 {
+				// Defer the entire dispatch — method execution AND its
+				// callback — by CallDelay, rather than just this call's
+				// internal in-flight accounting. A script's own real
+				// in-flight tracking (built from its callbacks, like the
+				// #421 fix) can only throttle against overlap it can
+				// actually observe; deferring just the accounting would be
+				// invisible to it. Shelly.call() always returns undefined
+				// on real hardware, so there's no synchronous result to
+				// preserve here (the one caller in this codebase that reads
+				// a return value, loadValue() in pool-pump.js, is unused
+				// dead code).
+				deferDispatch(handlers, deviceState.CallDelay, dispatch)
+				return goja.Undefined()
+			}
+
 			result, err := fn(vm, method, params, callback, userdata)
+			if deviceState.Mode == DeviceTestMode {
+				callsInFlight--
+			}
+
 			if err != nil {
 				log.Error(err, "Shelly.call() failed", "method", method)
 				return vm.ToValue(err)
@@ -757,6 +822,45 @@ type testEventForwarder struct {
 func (f *testEventForwarder) Wait() <-chan []byte { return f.ch }
 func (f *testEventForwarder) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
 	return f.eh.Handle(ctx, vm, msg)
+}
+
+// deferredCallHandler is a one-shot handler (same shape as a one-shot Timer,
+// see timerHandler below) that fires `dispatch` after `delay` elapses. It
+// exists solely to let DeviceState.CallDelay simulate a real RPC's async
+// round-trip: the method call and its callback both happen only once the
+// delay elapses, rather than synchronously (see issue #421). It never
+// errors itself — any error from `dispatch` (i.e. from the wrapped
+// Shelly.call) is handled by `dispatch` before it returns.
+type deferredCallHandler struct {
+	delay    time.Duration
+	dispatch func()
+	ch       chan []byte
+}
+
+func (h *deferredCallHandler) Wait() <-chan []byte {
+	if h.ch != nil {
+		return h.ch
+	}
+	h.ch = make(chan []byte)
+	go func() {
+		time.Sleep(h.delay)
+		h.ch <- []byte{}
+		close(h.ch)
+	}()
+	return h.ch
+}
+
+func (h *deferredCallHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
+	h.dispatch()
+	return nil
+}
+
+// deferDispatch registers a deferredCallHandler so `dispatch` fires once
+// `delay` has elapsed, driven by RunWithDeviceState's normal event loop (see
+// reflect.Select there) rather than a raw goroutine touching VM state
+// directly.
+func deferDispatch(handlers *[]handler, delay time.Duration, dispatch func()) {
+	*handlers = append(*handlers, &deferredCallHandler{delay: delay, dispatch: dispatch})
 }
 
 type methodFunc func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error)

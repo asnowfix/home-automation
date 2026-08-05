@@ -435,6 +435,36 @@ Use a **different port per device** so concurrent captures do not interleave int
 Note that `log()` in these scripts is gated on `CONFIG.enableLogging` — a diagnostic that must
 always be visible has to use `print()` directly.
 
+#### DANGER: a bad `Script.Eval` KILLS the running script
+
+`Script.Eval` runs in the script's own context, and an uncaught exception there terminates the
+**whole script** — the same failure class as #421. Evaluating an expression that names a symbol the
+installed version does not define is enough:
+
+```
+Uncaught ReferenceError: "SOLAR" is not defined
+ at line 1 col 11
+"W="+SOLAR.availableW+"|since="+SOLAR.aboveStartSince
+```
+
+That happened on the **production pool pump**: a diagnostic written for the solar-capable build was
+evaluated against v0.11.9 (which has no solar code at all) and killed the script. Because every
+device Schedule job uses `script.eval`, a dead script silently turns all of them into no-ops — the
+pump then never starts or stops on schedule.
+
+Rules:
+
+- **Guard every probe.** Prefer `typeof X !== "undefined" ? ... : "n/a"` over a bare reference, or
+  wrap the expression in `try/catch` (never an empty catch — reference `e`).
+- **Match the probe to the installed version.** Confirm which script is actually on the device
+  first; `mem_used`/`mem_peak`/`mem_free` from `Script.GetStatus` are a reliable fingerprint, and
+  `Script.GetCode` can be grepped for a version-specific identifier.
+- **Beware stale/queued diagnostics.** A probe scheduled before a script swap can fire after it, in
+  which case it is evaluated against the *new* script. Cancel pending background checks before
+  changing what is running on a device.
+- After any `Script.Eval` against a production device, re-check `Script.GetStatus` — an eval that
+  killed the script leaves it `running: false` and the pump uncontrolled.
+
 ### Script Lifecycle Logging
 
 Always add startup and stop logging to Shelly scripts:

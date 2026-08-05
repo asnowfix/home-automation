@@ -400,6 +400,41 @@ Severity is assigned by `internal/myhome/shelly/gen2/listener.go:severityFor()`.
 
 ---
 
+### Capturing live device debug output
+
+`myhome ctl shelly script debug <device> true` sends the script's `print()` output to a UDP
+listener. Three constraints, each of which has silently destroyed a capture:
+
+- **Debug lines truncate at ~128 characters.** A long `print()` is cut off mid-sentence, so the
+  actionable part of a diagnostic is exactly what gets lost. **Write on-device diagnostics as
+  several short lines (<80 chars each), never one long one.**
+- **Do not use netcat.** `nc -u -l -k <port>` silently stops recording after the first burst on
+  macOS 15.7.7, `-k` notwithstanding (verified with round-trip test datagrams). Use a small
+  dependency-free Python listener and prove it with a few test packets before trusting a long run:
+  ```python
+  import socket, sys
+  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+  s.bind(("0.0.0.0", int(sys.argv[1])))
+  with open(sys.argv[2], "ab", buffering=0) as f:
+      while True:
+          f.write(s.recvfrom(65535)[0])
+  ```
+- **Logs are NUL-separated**, not newline-separated. Read them with `tr '\0' '\n' < file`.
+
+If the dev machine has a VPN whose default route beats the LAN, `net.MainInterface()` picks the
+wrong callback address and the device sends debug packets nowhere. Fix it by setting the address
+explicitly, and note this needs no reboot (`restart_required: false`):
+
+```bash
+myhome ctl shelly call -B tcp://<broker>:1883 -T 60s <device> \
+  Sys.SetConfig '{"config":{"debug":{"udp":{"addr":"<lan-ip>:<port>"}}}}'
+```
+
+Use a **different port per device** so concurrent captures do not interleave into one file.
+
+Note that `log()` in these scripts is gated on `CONFIG.enableLogging` — a diagnostic that must
+always be visible has to use `print()` directly.
+
 ### Script Lifecycle Logging
 
 Always add startup and stop logging to Shelly scripts:
@@ -544,6 +579,63 @@ The number of scripts that can run simultaneously on a single device depends on 
 | Shelly 1 Mini G3 (`shelly1minig3`) | 3 |
 
 Other models are not yet catalogued here — add entries as you hit them. Attempting to enable a script beyond the limit returns: `"Reached the maximum N of enabled scripts"` (error code -108).
+
+### JS Heap Budget — the binding constraint on large scripts
+
+**The JS heap is ONE shared pool across every script on the device.** It is not per-script. Read it
+from any script's status; the numbers are device-wide:
+
+```bash
+myhome ctl shelly call -B tcp://<broker>:1883 -T 60s <device> Script.GetStatus '{"id":N}'
+# -> {"running":true,"mem_used":16632,"mem_peak":21350,"mem_free":6398}
+```
+
+`mem_used + mem_free` is the **total heap** — measured **23030 bytes** on both a Shelly Pro1
+(fw 2.0.0) and a Shelly Plus 1 (fw 1.7.5). A script that cannot start reports
+`{"running":false,"errors":["out_of_memory"]}`.
+
+**`mem_peak` decides survival — not `mem_used`, and not the source file size.** Measured for
+`pool-pump.js` on a Pro1 with `watchdog.js` resident alongside it:
+
+| version | minified | mem_peak | mem_free | result |
+|---|---|---|---|---|
+| v0.11.9 | 30409 | 17136 | 12068 | comfortable |
+| main (`ae4c5da`) | 36155 | 22330 | 10276 | runs, ~700 B peak headroom |
+| + #421 fix, first cut | 40002 | — | — | **out_of_memory** |
+| + static size trim (−1519 B) | 38483 | — | — | **out_of_memory** |
+| + fixed call-slot pool | ~38500 | 21350 | 6398 | runs |
+
+**Two lessons, both learned the hard way:**
+
+1. **Peak/transient allocation dominates static size.** Trimming 1519 minified bytes changed
+   nothing. Removing a *single per-call allocation* moved peak by ~1050 bytes and turned OOM into a
+   working script. Before optimising size, hunt per-call/per-tick allocation: a closure created per
+   RPC, an object literal built per call, string concatenation in a hot path.
+2. **Prefer a fixed pool to per-call allocation.** `pool-pump.js` tracks in-flight RPCs with
+   `CALL_SLOTS`: a small array of `{cb, ud, used}` records allocated **once** at load, claimed in
+   place, and passed through `Shelly.call`'s `userdata` to ONE shared completion handler. The
+   earlier version allocated a fresh closure on every `Shelly.call` (39 during init alone).
+
+**Rule of thumb**: aim for `mem_free` ≥ ~5 KB steady-state. A script that boots with 1–2 KB free is
+one allocation away from `out_of_memory` and will die unpredictably later.
+
+### Testing memory on a spare device — how to avoid a falsely-easy test
+
+A spare device is only a valid proxy if it is loaded **exactly** like production. Getting this wrong
+produced a green result on a spare device followed immediately by an OOM on the real one:
+
+1. **Match the resident scripts.** Stopping other scripts to "make room" invalidates the test — the
+   heap is shared. Production had `watchdog.js` resident; the spare had it stopped.
+2. **Match the KVS configuration — this is the big one.** With 5 `script/pool-pump/*` keys the
+   script used `mem_used 13748`; with production's 24 keys the identical code OOM'd. **~7.9 KB of
+   footprint was config-driven runtime state, not code.** Copy the real config across first:
+   ```bash
+   myhome ctl shelly call -B tcp://<broker>:1883 -T 60s <prod-device> KVS.GetMany '{"match":"script/<name>/*"}'
+   # then KVS.Set each key on the spare, overriding any device-id key to the spare's own id
+   ```
+3. **Record both firmware versions** (`Shelly.GetDeviceInfo` → `ver`). They may differ across the
+   fleet (Pro1 2.0.0 vs Plus 1 1.7.5). Firmware did NOT explain an OOM difference in practice —
+   record it, but don't reach for it as an explanation before checking scripts and KVS.
 
 ### KVS Key Naming Convention
 
@@ -1121,6 +1213,27 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 - `--no-minify`: Do not minify script before upload (recommended for Shelly)
 - `--force`: Force re-upload even if version hash matches
 - `--verbose`: Enable verbose logging
+
+#### Gotchas that cost real debugging time
+
+- **`SCRIPT` is a bare name resolved from the binary's embedded FS (`//go:embed *.js`), NOT a
+  filesystem path.** Passing a path fails with `Failed to read script <path>: file does not exist`
+  — that is `io/fs` wording, and the tell that it never touched the disk. Consequence: **the version
+  uploaded is whatever `internal/shelly/scripts/<name>.js` contained when that binary was built.**
+  To upload a different version, check that file out and rebuild (e.g. build from a tag's worktree).
+- **A reported upload failure is often a successful upload.** The chunked transfer completes, then a
+  post-upload RPC (`KVS.Get` version read, `Script.Start`) times out and the command exits non-zero
+  with `all 1 device(s) failed`. Seen on every attempt against a Pro1 at `-T 60s`, `90s` and `120s`.
+  **Always verify with `Script.GetStatus` before believing a failure** — see issue #428. Trusting a
+  false failure once produced a wrong conclusion about real hardware.
+- **`error_msg` is stale until the new script actually runs.** After uploading a new version, the
+  device still reports the *previous* crash. Cross-check the message against what the installed
+  source actually contains (`Script.GetCode` and grep for a version-specific identifier) before
+  believing it. A crash trace naming a function the installed version does not contain is stale.
+- **The device is briefly unresponsive to MQTT RPC right after `Script.Start`.** `Script.GetStatus`
+  has timed out at 14s and even 45s immediately after a start, then answered normally a minute
+  later. Use `-T 60s` and re-poll; do not conclude the device is wedged. The default `-T 14s` is too
+  short for the Pro1 generally.
 
 #### Examples
 

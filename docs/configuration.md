@@ -621,6 +621,71 @@ pool:
 | `pool.solar.min_volume_turnover` | `MYHOME_POOL_SOLAR_MIN_VOLUME_TURNOVER` | `--pool-solar-min-volume-turnover` | `5` | Soft-stop target: pool volumes filtered per day; pump keeps running past this while solar is still above the start threshold |
 | `pool.solar.max_volume_turnover` | `MYHOME_POOL_SOLAR_MAX_VOLUME_TURNOVER` | `--pool-solar-max-volume-turnover` | `7` | Hard ceiling: pool volumes filtered per day; pump always stops (and won't be solar-started) once reached |
 
+## Scripts (JS minifier)
+
+The daemon's automatic device setup path (triggered whenever it discovers an
+unconfigured Shelly device on the network) uploads `watchdog.js` with
+minification enabled and no human in the loop. These options select which
+minifier it uses. **Both default to today's exact, long-proven behavior** —
+`tdewolff`, no top-level identifier mangling — and must be changed
+explicitly; see the "Default OFF" rationale below.
+
+### Example
+
+```yaml
+scripts:
+  minifier_engine: "tdewolff"   # or "esbuild"
+  mangle_top_level: false        # esbuild only
+```
+
+### Options
+
+| Key | Env var | Flag | Default | Description |
+|-----|---------|------|---------|-------------|
+| `scripts.minifier_engine` | `MYHOME_SCRIPTS_MINIFIER_ENGINE` | `--script-minifier-engine` | `tdewolff` | JS minifier for the daemon's automatic watchdog.js upload: `tdewolff` (proven-safe, mangles local identifiers only) or `esbuild` (experimental; ES5-targeted, can also mangle top-level identifiers) |
+| `scripts.mangle_top_level` | `MYHOME_SCRIPTS_MANGLE_TOP_LEVEL` | `--script-mangle-top-level` | `false` | Also mangle top-level (module-scope) identifiers; only takes effect with `minifier_engine: esbuild`. Reduces output size further (measured ~19% smaller on pool-pump.js) but wraps the script in an IIFE, which makes internal top-level names (e.g. `STATE`, `CONFIG`) unreachable from a live `Script.Eval` session unless separately declared as debug-exports in code (see `internal/shelly/scripts/minify_config.go`) |
+
+### Why default OFF
+
+Both the `esbuild` engine and `mangle_top_level` are new (see the minifier
+work tracked from issue-derived exploration around pool-pump.js's JS-heap
+pressure). The daemon's auto-setup path
+(`myhome/devices/impl/manager.go` → `internal/myhome/shelly/setup.SetupDevice`)
+runs unattended the moment a new, unconfigured device shows up on the
+network — a minifier bug there would silently push a broken script to real
+hardware. Both options must be flipped on deliberately, by a human editing
+config or passing a flag, never by a version upgrade alone. `myhome ctl
+shelly setup` also accepts the same two flags for one-off manual setups.
+
+A related, per-script safety mechanism lives in code, not config: which
+top-level names must survive `mangle_top_level` as real globals (because a
+Shelly `Schedule` job calls them by name via `script.eval`) is a per-script
+list in `internal/shelly/scripts/minify_config.go`
+(`scriptMinifyOverrides`), not a global setting — get it wrong for a given
+script and that script's scheduled automation silently stops firing.
+
+### CLI: minify and demangle
+
+```bash
+# Minify an embedded script locally (no device involved) and report size:
+myhome ctl shelly script minify pool-pump.js --engine esbuild --mangle-top-level
+
+# Same, also writing the minified code and a symbol map:
+myhome ctl shelly script minify pool-pump.js --engine esbuild --mangle-top-level \
+  --out /tmp/pool-pump.min.js --symbol-map /tmp/pool-pump.symbols.json
+
+# Translate a Shelly crash message's mangled names back to source names:
+myhome ctl shelly script demangle /tmp/pool-pump.symbols.json \
+  'in function "t" called from t(n.count)'
+```
+
+The symbol map is a flat `mangled -> original` table for top-level symbols
+only (see the doc comment on `pkg/shelly/script.SymbolMap`) — it exists
+because Shelly crash traces give function names and code snippets but never
+a line/column, so an ordinary Source Map v3 (also generated, alongside the
+symbol map, when `--mangle-top-level` is set) cannot resolve them on its
+own.
+
 ## Notice & Email (SMTP)
 
 The notice service (see `docs/notice-events-plan.md`) curates a `notice` severity for events worth a human's attention — the daily pool/garden plans, solar pump on/off, and motion at night or while the home is unoccupied — and emails a daily digest. Unlike the events/occupancy/temperature services, it is **not** auto-enabled with the device manager: it depends on both the events and occupancy services already running, so an operator opts in explicitly with `notice.enabled: true` or `--enable-notice-service`.

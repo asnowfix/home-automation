@@ -340,16 +340,41 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 	return id, nil
 }
 
+// UploadWithOptions is like Upload but takes an explicit MinifyOptions
+// instead of a plain bool, so callers can select the minifier engine and
+// (opt-in) top-level mangling -- see MinifyOptions. Always minifies (there
+// is no "raw upload" mode here; use Upload with minify=false for that).
+func UploadWithOptions(ctx context.Context, via types.Channel, device types.Device, name string, code []byte, opts MinifyOptions) (uint32, error) {
+	var err error
+
+	if len(code) == 0 {
+		code, err = fs.ReadFile(scripts, name)
+		if err != nil {
+			log.Error(err, "Unknown script", "name", name, "device", device.Name())
+			return 0, err
+		}
+	}
+
+	return doUploadWithOptions(ctx, via, device, name, code, true, opts)
+}
+
 func doUpload(ctx context.Context, via types.Channel, device types.Device, name string, buf []byte, minify bool) (uint32, error) {
+	// MinifyOptions{} is the zero value: EngineTdewolff, no top-level
+	// mangling -- exactly today's behavior, so this preserves it precisely
+	// for every existing bool-based caller of Upload/doUpload.
+	return doUploadWithOptions(ctx, via, device, name, buf, minify, MinifyOptions{})
+}
+
+func doUploadWithOptions(ctx context.Context, via types.Channel, device types.Device, name string, buf []byte, minify bool, opts MinifyOptions) (uint32, error) {
 	// Minify before splitting and uploading (only if requested)
 	if minify {
 		origLen := len(buf)
-		if minified, err := minifyJS(buf); err != nil {
+		if res, err := MinifyWithOptions(name, buf, opts); err != nil {
 			log.Error(err, "Minify failed", "name", name)
 			return 0, err
 		} else {
-			buf = minified
-			log.Info("Minified script", "name", name, "from", origLen, "to", len(buf))
+			buf = res.Code
+			log.Info("Minified script", "name", name, "engine", opts.Engine, "mangle_top_level", opts.MangleTopLevel, "from", origLen, "to", len(buf))
 			// Downgrade ES6 template literals without interpolations to plain strings
 			before := len(buf)
 			buf = downgradeTemplates(buf)

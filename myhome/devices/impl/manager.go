@@ -30,6 +30,7 @@ import (
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/go-logr/logr"
 )
@@ -392,9 +393,18 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 		return err
 	}
 
-	// Configure auto-setup for new devices (used by device updater loop)
+	// Configure auto-setup for new devices (used by device updater loop).
+	// ScriptMinifierEngine/ScriptMangleTopLevel default to
+	// options.Flags' own defaults ("tdewolff", false) -- i.e. today's
+	// exact behavior -- unless a human explicitly sets
+	// --script-minifier-engine / --script-mangle-top-level or the
+	// equivalent scripts.* config keys. See CLAUDE.md's "Default OFF"
+	// requirement: this auto-setup path uploads watchdog.js to newly
+	// discovered devices with no human in the loop.
 	dm.setupConfig = shellysetup.Config{
-		Resolver: dm.resolver,
+		Resolver:             dm.resolver,
+		ScriptMinifierEngine: pkgscript.Engine(options.Flags.ScriptMinifierEngine),
+		ScriptMangleTopLevel: options.Flags.ScriptMangleTopLevel,
 	}
 	// Use the current process MQTT broker for auto-setup. DeviceServer()
 	// resolves a loopback address (e.g. the embedded broker's "localhost:1883")

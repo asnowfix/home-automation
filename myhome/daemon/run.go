@@ -92,6 +92,8 @@ func init() {
 	runCmd.PersistentFlags().IntVar(&options.Flags.NoticeDigestHour, "notice-digest-hour", 8, "Local hour (0-23) at which the daily notice digest email is sent")
 	runCmd.PersistentFlags().StringVar(&options.Flags.SMTPHost, "smtp-host", "smtp.gmail.com", "SMTP host for the notice digest email")
 	runCmd.PersistentFlags().IntVar(&options.Flags.SMTPPort, "smtp-port", 587, "SMTP port for the notice digest email (STARTTLS submission)")
+	runCmd.PersistentFlags().StringVar(&options.Flags.ScriptMinifierEngine, "script-minifier-engine", "tdewolff", "JS minifier engine for the daemon's automatic device setup uploads: \"tdewolff\" (default, proven-safe) or \"esbuild\" (experimental)")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.ScriptMangleTopLevel, "script-mangle-top-level", false, "Also mangle top-level JS identifiers (esbuild engine only); opt-in, reduces size further but sacrifices some Script.Eval debuggability -- see docs/configuration.md")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
@@ -325,6 +327,18 @@ var runCmd = &cobra.Command{
 		}
 		if v.IsSet("pool.solar.max_volume_turnover") && !cmd.Flags().Changed("pool-solar-max-volume-turnover") {
 			options.Flags.PoolSolarMaxVolumeTurnover = v.GetFloat64("pool.solar.max_volume_turnover")
+		}
+
+		// Handle script minifier config from viper / flags. Defaults
+		// ("tdewolff", MangleTopLevel=false) reproduce today's exact
+		// behavior -- a human must explicitly opt into the esbuild engine
+		// and/or top-level mangling, per CLAUDE.md's "Default OFF"
+		// requirement for this feature.
+		if v.IsSet("scripts.minifier_engine") && !cmd.Flags().Changed("script-minifier-engine") {
+			options.Flags.ScriptMinifierEngine = v.GetString("scripts.minifier_engine")
+		}
+		if v.IsSet("scripts.mangle_top_level") && !cmd.Flags().Changed("script-mangle-top-level") {
+			options.Flags.ScriptMangleTopLevel = v.GetBool("scripts.mangle_top_level")
 		}
 
 		// Store Viper instance in global options for daemon to use

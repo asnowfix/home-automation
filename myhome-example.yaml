@@ -232,6 +232,25 @@ sfr:
   username: ""
   password: ""
 
+# JS minifier used by the daemon's automatic device setup path (uploads
+# watchdog.js to newly-discovered devices with no human in the loop).
+# Both options default to today's exact, long-proven behavior and must be
+# changed deliberately -- see docs/configuration.md "Scripts (JS minifier)"
+# for why this stays off by default.
+scripts:
+  # "tdewolff" (default, proven-safe: mangles local identifiers only) or
+  # "esbuild" (experimental: ES5-targeted, can also mangle top-level
+  # identifiers -- see mangle_top_level below).
+  # Default: tdewolff
+  # minifier_engine: tdewolff
+
+  # Also mangle top-level (module-scope) identifiers; only takes effect
+  # with minifier_engine: esbuild. Smaller output, but internal top-level
+  # names (e.g. STATE, CONFIG) become unreachable from a live Script.Eval
+  # session unless explicitly listed as debug-exports in code.
+  # Default: false
+  # mangle_top_level: false
+
 # Notice service: curates a "notice" event severity (daily pool/garden plans,
 # solar pump on/off, motion at night or while absent) and emails a daily
 # digest. Unlike events/occupancy/temperature, this is NOT auto-enabled with

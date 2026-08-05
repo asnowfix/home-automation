@@ -906,6 +906,27 @@ When a script contains errors:
 
 **CRITICAL**: Every new feature MUST include incremental unit test cases.
 
+#### Sub-agents: do NOT background `make test` — commit first (see issue #432)
+
+`make test` is slow here (`internal/shelly/scripts` alone ~183s, full run several minutes), which
+tempts agents into `run_in_background: true`. **Do not do this if you are a sub-agent.** Observed 4
+times out of 8 agent runs: the agent backgrounds the test, ends its turn to wait for the completion
+notification, and never resumes — so its work is left **uncommitted** and its final report,
+measurements and caveats are lost, even though the tests passed.
+
+Rules for sub-agents:
+
+1. **Commit your work BEFORE running the full test suite.** Then a stall costs you the report, never
+   the code.
+2. **Run `make test` in the foreground** with a generous timeout. Use `go test ./path/...` on a
+   single package for fast iteration and save the full `make test` for the end.
+3. Do not end your turn waiting on a background task.
+
+If you are the **coordinating** agent and a sub-agent reports "waiting for the background test run",
+treat it as finished: review its worktree (`git -C <worktree> status` / `diff`), run the
+verification yourself, and commit on its behalf. Do not re-launch it — the work is usually already
+complete and correct.
+
 #### Testing Requirements
 
 1. **Write tests before or alongside implementation**

@@ -278,6 +278,10 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 
 		log.V(1).Info("Shelly.emitEvent", "event", event)
 
+		if deviceState.OnEvent != nil {
+			deviceState.OnEvent(event.Info.Event, event.Info.Data)
+		}
+
 		// Send event to channel (non-blocking)
 		select {
 		case eh.Broadcaster() <- vm.ToValue(event):

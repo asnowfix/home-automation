@@ -33,6 +33,13 @@ type DeviceState struct {
 	// This allows automatic persistence of state changes during script execution
 	OnModified func() `json:"-"`
 
+	// OnEvent, when non-nil, is called synchronously for every Shelly.emitEvent()
+	// the script makes, with the event name (e.g. "pool.water_supply_restored")
+	// and its data payload. Shelly.emitEvent() has no other observable return
+	// path into the Go test harness, so tests that need to assert on an
+	// emitted event's payload (see #436) set this hook.
+	OnEvent func(name string, data interface{}) `json:"-"`
+
 	nextScheduleID int
 }
 

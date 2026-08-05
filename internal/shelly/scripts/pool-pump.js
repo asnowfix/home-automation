@@ -1364,6 +1364,57 @@ function cycleOutputs() {
 // === WATER SUPPLY PROTECTION ===
 var WATER_SUPPLY_ACTIVE = false;  // debounce guard
 
+// Parses "M H" out of a resolved Shelly cron timespec ("0 M H * * DAYS", per
+// makeTimespec()); null for a still-symbolic spec ("@sunrise") with no
+// concrete time yet. Same shape as PR #426's restartCatchUp() helper of the
+// same name - reconcile the two when #426 lands.
+function parseHM(ts) {
+  if (!ts || ts.indexOf('@') === 0) return null;
+  var p = ts.split(' ');
+  if (p.length < 3) return null;
+  var m = Number(p[1]);
+  var h = Number(p[2]);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+// Answers "should the pump be running now?" from the active mode's
+// start/stop schedule window (Schedule.List) instead of a remembered value -
+// correct across a restart mid-protection and once the window has ended (#436).
+function isWithinRunWindow(cb) {
+  var mode = STATE.scheduleMode || 'winter';
+  var sc = mode === 'summer' ? 'handleMorningStart()' : 'handleNightStart()';
+  var ec = mode === 'summer' ? 'handleEveningStop()' : 'handleNightStop()';
+
+  Shelly.call('Schedule.List', {}, function(result, err) {
+    if (err && false) {}
+    if (err || !result || !result.jobs) { cb(false); return; }
+
+    var startMin = null;
+    var stopMin = null;
+    for (var i = 0; i < result.jobs.length; i++) {
+      var job = result.jobs[i];
+      if (!job.enable || !job.calls || job.calls.length === 0) continue;
+      var code = job.calls[0].params && job.calls[0].params.code;
+      if (code === sc) {
+        startMin = parseHM(job.timespec);
+      } else if (code === ec) {
+        stopMin = parseHM(job.timespec);
+      }
+    }
+
+    // Unresolved (still-symbolic) timespec: skip rather than guess.
+    if (startMin === null || stopMin === null) { cb(false); return; }
+
+    var now = new Date();
+    var nowMin = now.getHours() * 60 + now.getMinutes();
+    // A start > stop pair wraps past midnight (the fixed winter 23:15 -> 00:15 run).
+    cb(startMin <= stopMin
+      ? (nowMin >= startMin && nowMin < stopMin)
+      : (nowMin >= startMin || nowMin < stopMin));
+  });
+}
+
 function handleWaterSupply(waterSupplyActive) {
   log("Water supply active signal:", waterSupplyActive);
 
@@ -1384,12 +1435,22 @@ function handleWaterSupply(waterSupplyActive) {
       log("All pumps turned off for water supply protection");
     });
   } else {
-    // Water supply is OFF (signal is LOW after invert) - restore previous state
-    log("Water supply OFF - restoring output:", STATE.savedOutput);
+    // Water supply is OFF. Do NOT blindly restore STATE.savedOutput: if the
+    // script restarted while protection was active, boot's Step 2/4 re-arms
+    // this flag from a savedOutput that enforceOutputState() already zeroed
+    // (the physical switch was off), making the restore a silent no-op
+    // (#436). Instead, re-derive whether the pump should be running right
+    // now from the active schedule window - also correct if the window
+    // ended while the supply was active, when restoring savedOutput would
+    // wrongly start the pump.
+    isWithinRunWindow(function(shouldRun) {
+      var out = (shouldRun && isMyTurnToRun()) ? mapSpeedToSwitch(CONFIG.preferredSpeed) : -1;
+      log("Water supply OFF - restoring output:", out);
 
-    Shelly.emitEvent("pool.water_supply_restored", {restored_output: STATE.savedOutput});
-    activateOutput(STATE.savedOutput, function() {
-      log("Pump restored after water supply turned off");
+      Shelly.emitEvent("pool.water_supply_restored", {restored_output: out});
+      activateOutput(out, function() {
+        log("Pump restored after water supply turned off");
+      });
     });
   }
 }

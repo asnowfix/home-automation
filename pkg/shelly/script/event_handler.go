@@ -107,12 +107,17 @@ func (eh *eventsHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byt
 
 	log.Info("Processing event", "event", eventData)
 
-	// Call all registered event handlers
+	// Call all registered event handlers. On real Shelly firmware an
+	// uncaught exception in any callback kills the entire script — mirror
+	// that here (see the equivalent fix in RunWithDeviceState's event loop,
+	// issue #421) by stopping and propagating the first error instead of
+	// logging and continuing to the next handler.
 	for i, handler := range eh.handlers {
 		eh.log.Info("Calling event handler", "handler", i, "event", eventData)
 		_, err := handler.callback(goja.Undefined(), eventObj, handler.userdata)
 		if err != nil {
 			log.Error(err, "Event handler failed", "handler", i, "event", eventData)
+			return err
 		}
 	}
 

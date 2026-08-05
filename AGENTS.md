@@ -619,6 +619,38 @@ myhome ctl shelly call -B tcp://<broker>:1883 -T 60s <device> Script.GetStatus '
 **Rule of thumb**: aim for `mem_free` ≥ ~5 KB steady-state. A script that boots with 1–2 KB free is
 one allocation away from `out_of_memory` and will die unpredictably later.
 
+#### Measuring one script's footprint (differential method)
+
+Because the heap is shared, no API reports a single script's cost directly. Measure it by
+difference: read `mem_free`, stop the script, read `mem_free` again. Any script id returns the same
+device-wide numbers, so you can keep polling id 1 even while stopping id 2.
+
+```bash
+B="myhome ctl shelly call -B tcp://<broker>:1883 -T 60s <device>"
+$B Script.GetStatus '{"id":1}'        # baseline mem_free
+$B Script.Stop       '{"id":2}'
+$B Script.GetStatus  '{"id":1}'       # delta = script 2's footprint
+$B Script.Stop       '{"id":1}'
+$B Script.GetStatus  '{"id":1}'       # delta = script 1's footprint
+# ...then Script.Start both again to leave the device as you found it
+```
+
+Measured on a Shelly Plus 1 (fw 1.7.5) this way:
+
+| state | `mem_free` | implied footprint |
+|---|---|---|
+| `watchdog.js` + `myhome-link.js` running | 21350 | — |
+| `myhome-link.js` stopped | 23044 | `myhome-link.js` ≈ **1694 B** |
+| `watchdog.js` also stopped | 25200 | `watchdog.js` ≈ **2156 B** |
+
+Two caveats:
+
+- **`mem_used + mem_free` is not a constant.** It reads ~23030 while a script is running but
+  `mem_free` reaches ~25200 with all scripts stopped, so the running VM itself consumes roughly
+  2 KB. Treat "total heap" as approximate and always compare like-for-like states.
+- Always **restart what you stopped**. On a production device the resident scripts are load-bearing
+  (`watchdog.js` handles MQTT-failure reboots and firmware updates).
+
 ### Testing memory on a spare device — how to avoid a falsely-easy test
 
 A spare device is only a valid proxy if it is loaded **exactly** like production. Getting this wrong

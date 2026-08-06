@@ -21,52 +21,42 @@ import (
 const scriptName = "garden.js"
 const kvsPrefix = "script/garden/"
 
-// gardenKVSKeys maps logical field names to KVS keys.
-// All keys: prefix (14) + suffix ≤18 chars = ≤32 chars total.
-var gardenKVSKeys = map[string]string{
-	"logging":         kvsPrefix + "logging",
-	"mqtt-topic":      kvsPrefix + "mqtt-topic",
-	"earliest-start":  kvsPrefix + "earliest-start",
-	"lunch-start":     kvsPrefix + "lunch-start",
-	"lunch-end":       kvsPrefix + "lunch-end",
-	"evening-start":   kvsPrefix + "evening-start",
-	"evening-end":     kvsPrefix + "evening-end",
-	"fallback-start":  kvsPrefix + "fallback-start",
-	"frost-cutoff-c":  kvsPrefix + "frost-cutoff-c",
-	"rain-holdoff-mm": kvsPrefix + "rain-holdoff-mm",
-	"max-deficit-mm":  kvsPrefix + "max-deficit-mm",
-}
+// GardenKVSKeys (field name -> full KVS key) and ZoneFieldKeys (per-zone
+// struct field -> KVS key suffix) are generated from garden.schema.json —
+// see garden_defaults_generated.go and issue #439.
 
 // defaultGlobalKVS holds the initial KVS values to write on setup.
 // These match CONFIG_SCHEMA defaults in garden.js.
 var defaultGlobalKVS = map[string]string{
-	gardenKVSKeys["logging"]:         "true",
-	gardenKVSKeys["mqtt-topic"]:      "garden",
-	gardenKVSKeys["earliest-start"]:  fmt.Sprintf("%d", DefaultEarliestStartHour),
-	gardenKVSKeys["lunch-start"]:     fmt.Sprintf("%.1f", DefaultLunchStart),
-	gardenKVSKeys["lunch-end"]:       fmt.Sprintf("%.1f", DefaultLunchEnd),
-	gardenKVSKeys["evening-start"]:   fmt.Sprintf("%.1f", DefaultEveningStart),
-	gardenKVSKeys["evening-end"]:     fmt.Sprintf("%.1f", DefaultEveningEnd),
-	gardenKVSKeys["fallback-start"]:  fmt.Sprintf("%d", DefaultFallbackStartHour),
-	gardenKVSKeys["frost-cutoff-c"]:  fmt.Sprintf("%.1f", DefaultFrostCutoffC),
-	gardenKVSKeys["rain-holdoff-mm"]: fmt.Sprintf("%.1f", DefaultRainHoldoffMm),
-	gardenKVSKeys["max-deficit-mm"]:  fmt.Sprintf("%.1f", DefaultMaxDeficitMm),
+	GardenKVSKeys["enable_logging"]:      "true",
+	GardenKVSKeys["mqtt_topic_prefix"]:   "garden",
+	GardenKVSKeys["earliest_start_hour"]: fmt.Sprintf("%d", DefaultEarliestStartHour),
+	GardenKVSKeys["lunch_start"]:         fmt.Sprintf("%.1f", DefaultLunchStart),
+	GardenKVSKeys["lunch_end"]:           fmt.Sprintf("%.1f", DefaultLunchEnd),
+	GardenKVSKeys["evening_start"]:       fmt.Sprintf("%.1f", DefaultEveningStart),
+	GardenKVSKeys["evening_end"]:         fmt.Sprintf("%.1f", DefaultEveningEnd),
+	GardenKVSKeys["fallback_start_hour"]: fmt.Sprintf("%d", DefaultFallbackStartHour),
+	GardenKVSKeys["frost_cutoff_c"]:      fmt.Sprintf("%.1f", DefaultFrostCutoffC),
+	GardenKVSKeys["rain_holdoff_mm"]:     fmt.Sprintf("%.1f", DefaultRainHoldoffMm),
+	GardenKVSKeys["max_deficit_mm"]:      fmt.Sprintf("%.1f", DefaultMaxDeficitMm),
 }
 
-// defaultZoneKVS generates per-zone KVS key→value pairs from ZONE_DEFAULTS constants.
+// defaultZoneKVS generates per-zone KVS key→value pairs from ZONE_DEFAULTS
+// constants. Key suffixes come from the generated ZoneFieldKeys map (mirrors
+// garden.js's ZONE_KEY_SPECS) instead of hand-typed string literals.
 func defaultZoneKVS() map[string]string {
 	m := make(map[string]string)
 	for i, z := range defaultZoneDefaults {
 		pfx := kvsPrefix + fmt.Sprintf("zone%d-", i)
-		m[pfx+"name"] = z.name
-		m[pfx+"app-rate"] = fmt.Sprintf("%.1f", z.appRateMmH)
-		m[pfx+"kc"] = fmt.Sprintf("%.2f", z.kc)
-		m[pfx+"trigger-mm"] = fmt.Sprintf("%.1f", z.triggerMm)
-		m[pfx+"max-min"] = fmt.Sprintf("%d", z.maxMin)
-		m[pfx+"fallback-min"] = fmt.Sprintf("%d", z.fallbackMin)
-		m[pfx+"group"] = z.group
-		m[pfx+"interval"] = fmt.Sprintf("%d", z.intervalDays)
-		m[pfx+"enabled"] = fmt.Sprintf("%t", z.enabled)
+		m[pfx+ZoneFieldKeys["name"]] = z.name
+		m[pfx+ZoneFieldKeys["appRateMmH"]] = fmt.Sprintf("%.1f", z.appRateMmH)
+		m[pfx+ZoneFieldKeys["kc"]] = fmt.Sprintf("%.2f", z.kc)
+		m[pfx+ZoneFieldKeys["triggerMm"]] = fmt.Sprintf("%.1f", z.triggerMm)
+		m[pfx+ZoneFieldKeys["maxMin"]] = fmt.Sprintf("%d", z.maxMin)
+		m[pfx+ZoneFieldKeys["fallbackMin"]] = fmt.Sprintf("%d", z.fallbackMin)
+		m[pfx+ZoneFieldKeys["group"]] = z.group
+		m[pfx+ZoneFieldKeys["intervalDays"]] = fmt.Sprintf("%d", z.intervalDays)
+		m[pfx+ZoneFieldKeys["enabled"]] = fmt.Sprintf("%t", z.enabled)
 	}
 	return m
 }

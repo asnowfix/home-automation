@@ -1618,7 +1618,7 @@ One-off Go programs in `tools/`. Each is its own workspace module — always add
 | Tool | Purpose |
 |---|---|
 | `tools/classify-events/` | Classifies raw Shelly MQTT event dumps → test fixtures in `pkg/shelly/mqtt/testdata/` |
-| `tools/extract-pool-defaults/` | Code-gen: extracts pool-pump JS constants → `myhome/ctl/pool/pool_defaults_generated.go` |
+| `tools/genconfigschema/` | Code-gen: JSON schema → JS `CONFIG_SCHEMA` block (in place) + Go KVS-key maps/`Default*` constants |
 
 #### `tools/classify-events`
 
@@ -1635,14 +1635,20 @@ Output filenames follow the pattern:
 
 The testdata lives alongside `pkg/shelly/mqtt/` so it travels with that package when it is eventually extracted into its own repository.
 
-#### `tools/extract-pool-defaults`
+#### `tools/genconfigschema`
 
-Code-generation tool invoked by `//go:generate` in `myhome/ctl/pool/generate.go`. Parses `CONFIG_SCHEMA` from `internal/shelly/scripts/pool-pump.js` and writes typed Go constants to `myhome/ctl/pool/pool_defaults_generated.go`. Run via `make generate`, not directly.
+Code-generation tool invoked by `//go:generate` in `myhome/ctl/pool/generate.go`, `myhome/ctl/garden/generate.go`, and `internal/myhome/shelly/script/generate.go`. Reads a single JSON schema per script (`internal/shelly/scripts/pool-pump.schema.json`, `garden.schema.json`) — the source of truth for that script's configuration (issue #439) — and produces both:
+
+- the JS `CONFIG_SCHEMA` (and, for `garden.js`, `ZONE_KEY_SPECS`) block, regenerated **in place** inside the `.js` file between `// >>> GENERATED: ... >>>` / `// <<< GENERATED: ... <<<` marker comments — `description` is emitted as a `//` comment above each field, never as an object property, so it costs zero device heap;
+- Go KVS-key maps (`PoolKVSKeys`, `GardenKVSKeys`, `ZoneFieldKeys`) and `Default*` constants, replacing what used to be hand-maintained maps or regex-scraped from the `.js` source.
+
+The Shelly KVS key length limit is validated at generation time (fails the build) instead of relying on hand-counted `// NN chars ✓` comments. Run via `make generate`, not directly:
 
 ```bash
-go run ./tools/extract-pool-defaults \
-    internal/shelly/scripts/pool-pump.js \
-    myhome/ctl/pool/pool_defaults_generated.go
+go run ./tools/genconfigschema \
+    -schema internal/shelly/scripts/pool-pump.schema.json \
+    -js internal/shelly/scripts/pool-pump.js \
+    -go myhome/ctl/pool/pool_defaults_generated.go -go-package pool -consts
 ```
 
 ---

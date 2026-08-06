@@ -34,187 +34,181 @@ var SCRIPT_PREFIX = "[" + SCRIPT_NAME + "] ";
 // Configuration schema
 // Both Pro3 and Pro1 run this same script with shared KVS configuration
 // Script compares preferred_device_id against its own device ID to decide if it should run
+// >>> GENERATED: CONFIG_SCHEMA (source: schema JSON; regenerate via `make generate` — DO NOT EDIT BY HAND) >>>
 var CONFIG_SCHEMA = {
+  // Enable logging when true
   enableLogging: {
-    description: "Enable logging when true",
     key: "logging",
     default: true,
     type: "boolean"
   },
+  // MQTT topic prefix (written by CLI, not used by script)
   mqttTopicPrefix: {
-    description: "MQTT topic prefix (written by CLI, not used by script)",
     key: "mqtt-topic",
     default: "pool/pump",
     type: "string",
     cliOnly: true
   },
+  // Which device ID should run (actual Shelly device ID). Script compares this to its own ID
   preferredDeviceId: {
-    description: "Which device ID should run (actual Shelly device ID). Script compares this to its own ID",
     key: "preferred",
     default: null,
     type: "string",
     required: true
   },
+  // Pro3 device ID (for MQTT subscriptions - cross-device status tracking)
   pro3DeviceId: {
-    description: "Pro3 device ID (for MQTT subscriptions - cross-device status tracking)",
     key: "pro3-id",
     default: null,
-    type: "string",
-    required: false
+    type: "string"
   },
+  // Pro1 device ID (for MQTT subscriptions - cross-device status tracking)
   pro1DeviceId: {
-    description: "Pro1 device ID (for MQTT subscriptions - cross-device status tracking)",
     key: "pro1-id",
     default: null,
-    type: "string",
-    required: false
+    type: "string"
   },
+  // Speed: 'eco', 'mid', 'high', 'max'. Maps to switches based on device capabilities
   preferredSpeed: {
-    description: "Speed: 'eco', 'mid', 'high', 'max'. Maps to switches based on device capabilities",
     key: "speed",
     default: "eco",
-    type: "string",
-    required: false
+    type: "string"
   },
+  // Pro3 switch ID for eco/low speed (0, 1, or 2)
   ecoSpeed: {
-    description: "Pro3 switch ID for eco/low speed (0, 1, or 2)",
     key: "eco-speed",
     default: 2,
-    type: "number",
-    required: false
+    type: "number"
   },
+  // Pro3 switch ID for mid speed (0, 1, or 2)
   midSpeed: {
-    description: "Pro3 switch ID for mid speed (0, 1, or 2)",
     key: "mid-speed",
     default: 1,
-    type: "number",
-    required: false
+    type: "number"
   },
+  // Pro3 switch ID for high speed (0, 1, or 2)
   highSpeed: {
-    description: "Pro3 switch ID for high speed (0, 1, or 2)",
     key: "high-speed",
     default: 0,
-    type: "number",
-    required: false
+    type: "number"
   },
+  // Night run duration in ms (written by CLI, not used by script)
   nightRunDurationMs: {
-    description: "Night run duration in ms (written by CLI, not used by script)",
     key: "night-duration",
     default: 3600000,
     type: "number",
     cliOnly: true
   },
+  // Cross-device grace delay in ms (minimum 10000)
   graceDelayMs: {
-    description: "Cross-device grace delay in ms (minimum 10000)",
     key: "grace-delay",
     default: 10000,
-    type: "number",
-    required: false
+    type: "number"
   },
+  // Temperature threshold (°C) for summer mode (day schedule)
   temperatureThreshold: {
-    description: "Temperature threshold (°C) for summer mode (day schedule)",
     key: "temp-threshold",
     default: 20,
-    type: "number",
-    required: false
+    type: "number"
   },
+  // Pool volume in m³
   poolVolume: {
-    description: "Pool volume in m³",
     key: "pool-volume",
     default: 46,
     type: "number"
   },
+  // Daily turnover target (number of full pool volumes to filter per day)
   turnover: {
-    description: "Daily turnover target (number of full pool volumes to filter per day)",
     key: "turnover",
     default: 5,
     type: "number"
   },
+  // Pump max flow rate in m³/h at max RPM
   maxFlowRate: {
-    description: "Pump max flow rate in m³/h at max RPM",
     key: "max-flow-rate",
     default: 31,
     type: "number"
   },
+  // Pump rated max RPM
   maxRpm: {
-    description: "Pump rated max RPM",
     key: "max-rpm",
     default: 2900,
     type: "number"
   },
+  // Variator RPM setting for eco speed
   ecoRpm: {
-    description: "Variator RPM setting for eco speed",
     key: "eco-rpm",
     default: 2000,
     type: "number"
   },
+  // Variator RPM setting for mid speed
   midRpm: {
-    description: "Variator RPM setting for mid speed",
     key: "mid-rpm",
     default: 2600,
     type: "number"
   },
+  // Variator RPM setting for high speed
   highRpm: {
-    description: "Variator RPM setting for high speed",
     key: "high-rpm",
     default: 2900,
     type: "number"
   },
+  // Temperature (°C) at which run time reaches one full turnover
   maxTemp: {
-    description: "Temperature (°C) at which run time reaches one full turnover",
     key: "max-temp",
     default: 35,
     type: "number"
   },
+  // Enable solar-driven start/stop via the daemon's solar-available MQTT event
   solarEnabled: {
-    description: "Enable solar-driven start/stop via the daemon's solar-available MQTT event",
     key: "solar-enabled",
     default: false,
     type: "boolean"
   },
+  // Available solar power (W) required to trigger a solar start
   solarStartThresholdW: {
-    description: "Available solar power (W) required to trigger a solar start",
     key: "solar-start-w",
     default: 500,
     type: "number"
   },
+  // Available solar power (W) below which a solar-driven run stops
   solarStopThresholdW: {
-    description: "Available solar power (W) below which a solar-driven run stops",
     key: "solar-stop-w",
     default: 200,
     type: "number"
   },
+  // Solar must hold above start threshold this long (ms) before starting
   solarStartDelayMs: {
-    description: "Solar must hold above start threshold this long (ms) before starting",
     key: "solar-start-delay",
     default: 300000,
     type: "number"
   },
+  // Solar must hold below stop threshold this long (ms) before stopping
   solarStopDelayMs: {
-    description: "Solar must hold below stop threshold this long (ms) before stopping",
     key: "solar-stop-delay",
     default: 600000,
     type: "number"
   },
+  // Soft-stop target (pool volumes/day); solar keeps running past this while solar remains available
   solarMinTurnover: {
-    description: "Soft-stop target (pool volumes/day); solar keeps running past this while solar remains available",
     key: "solar-min-turnover",
     default: 5,
     type: "number"
   },
+  // Hard ceiling (pool volumes/day); pump always stops (and won't solar-start) once reached
   solarMaxTurnover: {
-    description: "Hard ceiling (pool volumes/day); pump always stops (and won't solar-start) once reached",
     key: "solar-max-turnover",
     default: 7,
     type: "number"
   },
+  // Treat myhome/energy/solar/available as stale (fall back to schedule only) after this long (ms) without a message
   solarStaleMs: {
-    description: "Treat myhome/energy/solar/available as stale (fall back to schedule only) after this long (ms) without a message",
     key: "solar-stale-ms",
     default: 300000,
     type: "number"
   }
 };
+// <<< GENERATED: CONFIG_SCHEMA <<<
 
 // Component names by device type (inputs are static; switch names are built
 // dynamically from CONFIG speed mapping — see buildSwitchNames)

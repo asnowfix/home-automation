@@ -16,41 +16,11 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// PoolKVSKeys maps configuration fields to KVS keys
-// Note: KVS keys must be < 42 characters (target: ≤32 chars)
-// Prefix: script/pool-pump/ (18 chars) + key name
-var PoolKVSKeys = map[string]string{
-	"preferred_device_id":   "script/pool-pump/preferred",      // 30 chars ✓
-	"preferred_speed":       "script/pool-pump/speed",          // 26 chars ✓
-	"pro3_device_id":        "script/pool-pump/pro3-id",        // 28 chars ✓
-	"pro1_device_id":        "script/pool-pump/pro1-id",        // 28 chars ✓
-	"mqtt_topic_prefix":     "script/pool-pump/mqtt-topic",     // 29 chars ✓
-	"enable_logging":        "script/pool-pump/logging",        // 26 chars ✓
-	"eco_speed":             "script/pool-pump/eco-speed",      // 28 chars ✓
-	"mid_speed":             "script/pool-pump/mid-speed",      // 28 chars ✓
-	"high_speed":            "script/pool-pump/high-speed",     // 29 chars ✓
-	"night_run_duration_ms": "script/pool-pump/night-duration", // 32 chars ✓
-	"grace_delay_ms":        "script/pool-pump/grace-delay",    // 30 chars ✓
-	"temperature_threshold": "script/pool-pump/temp-threshold", // 32 chars ✓
-	"pool_volume":           "script/pool-pump/pool-volume",    // 29 chars ✓
-	"turnover":              "script/pool-pump/turnover",       // 27 chars ✓
-	"max_flow_rate":         "script/pool-pump/max-flow-rate",  // 31 chars ✓
-	"max_rpm":               "script/pool-pump/max-rpm",        // 26 chars ✓
-	"eco_rpm":               "script/pool-pump/eco-rpm",        // 26 chars ✓
-	"mid_rpm":               "script/pool-pump/mid-rpm",        // 26 chars ✓
-	"high_rpm":              "script/pool-pump/high-rpm",       // 27 chars ✓
-	"max_temp":              "script/pool-pump/max-temp",       // 27 chars ✓
-
-	// Solar-driven hysteresis (#405)
-	"solar_enabled":           "script/pool-pump/solar-enabled",      // 30 chars ✓
-	"solar_start_threshold_w": "script/pool-pump/solar-start-w",      // 30 chars ✓
-	"solar_stop_threshold_w":  "script/pool-pump/solar-stop-w",       // 29 chars ✓
-	"solar_start_delay_ms":    "script/pool-pump/solar-start-delay",  // 34 chars ✓
-	"solar_stop_delay_ms":     "script/pool-pump/solar-stop-delay",   // 33 chars ✓
-	"solar_min_turnover":      "script/pool-pump/solar-min-turnover", // 35 chars ✓
-	"solar_max_turnover":      "script/pool-pump/solar-max-turnover", // 35 chars ✓
-	"solar_stale_ms":          "script/pool-pump/solar-stale-ms",     // 31 chars ✓
-}
+// PoolKVSKeys maps configuration fields to KVS keys. Generated from
+// internal/shelly/scripts/pool-pump.schema.json by
+// internal/myhome/shelly/script/generate.go (issue #439) — see
+// pool_kvs_generated.go. The Shelly KVS key length limit is validated at
+// generation time, not by hand-counted comments.
 
 // PoolService handles pool pump operations
 type PoolService struct {

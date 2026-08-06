@@ -161,6 +161,30 @@ func isSpaceByte(b byte) bool {
 // its original byte offsets so line/column-free callers can still reason
 // about position within the file.
 func maskStringsAndComments(src []byte) []byte {
+	return maskSource(src, true)
+}
+
+// maskComments returns a copy of src with only comment CONTENTS blanked out
+// (same string/comment recognition as maskStringsAndComments); STRING
+// literal contents are left completely intact. Used by FindUnicodeEscapes
+// in es5check.go: Espruino's tokenizer never re-lexes comment text for
+// escape sequences, so a comment merely mentioning `\uXXXX` as prose is not
+// a real device-fatal construct and must not be flagged, whereas the same
+// text inside a string literal is exactly the kind of thing that crashes
+// real hardware -- see FindUnicodeEscapes for the full story.
+func maskComments(src []byte) []byte {
+	return maskSource(src, false)
+}
+
+// maskSource is the shared scanner behind maskStringsAndComments and
+// maskComments. When maskStrings is true it reproduces
+// maskStringsAndComments' original behavior exactly (string contents AND
+// comment contents blanked); when false, string RECOGNITION (so `//` or
+// `/*` bytes inside a string aren't misread as starting a comment, and
+// escaped quotes don't end the string early) still happens, but string
+// bytes are left untouched in the output -- only comment contents are
+// blanked.
+func maskSource(src []byte, maskStrings bool) []byte {
 	out := make([]byte, len(src))
 	copy(out, src)
 
@@ -181,7 +205,7 @@ func maskStringsAndComments(src []byte) []byte {
 			} else if b == strQuote {
 				inStr = false
 			}
-			if b != '\n' {
+			if maskStrings && b != '\n' {
 				out[i] = ' '
 			}
 			continue
@@ -226,10 +250,13 @@ func maskStringsAndComments(src []byte) []byte {
 		if b == '\'' || b == '"' || b == '`' {
 			inStr = true
 			strQuote = b
-			// Keep the opening delimiter as a space too so a lone quote
-			// byte can't be misread as anything meaningful; only its
-			// position (not content) matters to callers.
-			out[i] = ' '
+			// Keep the opening delimiter as a space too (maskStrings mode
+			// only) so a lone quote byte can't be misread as anything
+			// meaningful; only its position (not content) matters to
+			// those callers.
+			if maskStrings {
+				out[i] = ' '
+			}
 			continue
 		}
 

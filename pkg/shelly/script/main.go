@@ -58,7 +58,14 @@ func minifyJS(src []byte) ([]byte, error) {
 // minify-safety (e.g. that catch blocks survive minification) before running a
 // script through the goja harness.
 func Minify(src []byte) ([]byte, error) {
-	return minifyJS(src)
+	out, err := minifyJS(src)
+	if err != nil {
+		return nil, err
+	}
+	if err := rejectUnicodeEscapes("minify", out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // downgradeTemplates converts ES6 template literals without interpolations (${...})

@@ -112,18 +112,37 @@ type MinifyResult struct {
 // error messages and to label the resulting SymbolMap; pass the script's
 // filename (e.g. "pool-pump.js").
 func MinifyWithOptions(name string, src []byte, opts MinifyOptions) (*MinifyResult, error) {
+	var result *MinifyResult
 	switch opts.Engine {
 	case "", EngineTdewolff:
 		out, err := minifyJS(src)
 		if err != nil {
 			return nil, err
 		}
-		return &MinifyResult{Code: out}, nil
+		result = &MinifyResult{Code: out}
 	case EngineEsbuild:
-		return minifyEsbuild(name, src, opts)
+		var err error
+		result, err = minifyEsbuild(name, src, opts)
+		if err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("minify %s: unknown minifier engine %q", name, opts.Engine)
 	}
+
+	// Device-fidelity guard: reject minifier OUTPUT containing a literal
+	// \uXXXX/\u{...} escape sequence -- real Shelly firmware refuses to
+	// parse those (see FindUnicodeEscapes doc for why this is NOT a
+	// non-ASCII check). This is exactly the esbuild-default-ASCII-charset
+	// bug that crashed pool-pump.js on a real Plus1; Charset:
+	// api.CharsetUTF8 above already prevents esbuild from introducing new
+	// escapes, but this check also catches the tdewolff path and any
+	// future minifier change that regresses it.
+	if err := rejectUnicodeEscapes(fmt.Sprintf("minify %s", name), result.Code); err != nil {
+		return nil, err
+	}
+
+	return result, nil
 }
 
 func minifyEsbuild(name string, src []byte, opts MinifyOptions) (*MinifyResult, error) {

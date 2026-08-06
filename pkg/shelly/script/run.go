@@ -39,6 +39,17 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 		}
 	}
 
+	// Device-fidelity guard: goja (this emulator) happily accepts \uXXXX
+	// escape sequences that real Shelly firmware's Espruino engine rejects
+	// at parse time -- see FindUnicodeEscapes doc for the full story and
+	// why this is deliberately NOT a raw-non-ASCII check. Catching it here
+	// means any test that runs a script through this emulator catches the
+	// bug class instead of only discovering it on real hardware.
+	if err := rejectUnicodeEscapes(fmt.Sprintf("script %s", name), buf); err != nil {
+		log.Error(err, "Script contains escape sequence(s) rejected by real Shelly firmware", "name", name)
+		return err
+	}
+
 	handlers := make([]handler, 0)
 
 	mc := mqtt.GetClient(ctx)

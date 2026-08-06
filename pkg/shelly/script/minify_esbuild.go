@@ -330,7 +330,43 @@ func buildSymbolMap(name string, engine Engine, topLevelNames []string, code []b
 	return &SymbolMap{Script: name, Engine: engine, Symbols: symbols}, nil
 }
 
+// utf16ColumnToByteOffset converts a Source Map v3 generated column into a
+// byte offset within line.
+//
+// Source Map v3 columns are counted in UTF-16 code units, not bytes. Go
+// strings are indexed by bytes, so the two only coincide while the generated
+// output is pure ASCII. esbuild's default Charset is ASCII (it escapes
+// non-ASCII as \uXXXX), which made them coincide by accident — until that
+// default had to be changed to CharsetUTF8, because Espruino rejects \uXXXX
+// literals outright (see the Charset setting above). With raw UTF-8 in the
+// output, every multi-byte character shifts byte offsets relative to columns,
+// and indexing a line by a column yields the wrong position — decoding, for
+// example, "handleMorningStart" as "andleMorningStart".
+//
+// Returns -1 if col lies beyond the end of the line.
+func utf16ColumnToByteOffset(line string, col int) int {
+	if col <= 0 {
+		return col // 0 -> 0; negative is rejected by the caller
+	}
+	units := 0
+	for i, r := range line {
+		if units >= col {
+			return i
+		}
+		if r > 0xFFFF {
+			units += 2 // encoded as a surrogate pair in UTF-16
+		} else {
+			units++
+		}
+	}
+	if units >= col {
+		return len(line)
+	}
+	return -1
+}
+
 func identifierAt(line string, col int) string {
+	col = utf16ColumnToByteOffset(line, col)
 	if col < 0 || col >= len(line) || !isIdentPart(line[col]) {
 		return ""
 	}

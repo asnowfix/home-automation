@@ -304,3 +304,61 @@ handleTick();
 		})
 	}
 }
+
+// TestUtf16ColumnToByteOffset is a regression test for a symbol-map decoding
+// bug exposed by the Charset: api.CharsetUTF8 fix.
+//
+// Source Map v3 columns count UTF-16 code units; Go strings index bytes. The
+// two coincide only while the generated output is pure ASCII, which esbuild's
+// default ASCII charset made true by accident. Once raw UTF-8 is emitted (as
+// it must be, since Espruino rejects \uXXXX literals) every multi-byte
+// character shifts byte offsets relative to columns, and indexing a line by a
+// column silently slices identifiers at the wrong place — "handleMorningStart"
+// decoded as "andleMorningStart". That corrupted the symbol map with bogus
+// entries (98 real symbols were reported as 184) and would have produced wrong
+// demangling of crash traces.
+func TestUtf16ColumnToByteOffset(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		line string
+		col  int
+		want int
+	}{
+		{"pure ascii is identity", "var abc=1;", 4, 4},
+		{"zero column", "✓var abc=1;", 0, 0},
+		// "✓" is 3 bytes but ONE UTF-16 unit, so column 1 is byte 3.
+		{"after a 3-byte rune", "✓var abc=1;", 1, 3},
+		{"identifier after a 3-byte rune", "✓var abc=1;", 5, 7},
+		// "—" (U+2014) is also 3 bytes / 1 unit; two of them shift by 4.
+		{"after two 3-byte runes", "—x—var abc=1;", 3, 7},
+		{"column at end of line", "abc", 3, 3},
+		{"column past end of line", "abc", 9, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := utf16ColumnToByteOffset(tc.line, tc.col); got != tc.want {
+				t.Errorf("utf16ColumnToByteOffset(%q, %d) = %d, want %d", tc.line, tc.col, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestIdentifierAt_AfterMultiByteRune asserts the decoder recovers a whole
+// identifier when a multi-byte character precedes it on the same line — the
+// exact shape of the "andleMorningStart" truncation.
+func TestIdentifierAt_AfterMultiByteRune(t *testing.T) {
+	line := `print("✓ ok");function handleMorningStart(){}`
+	col := 0
+	for i, r := range line {
+		if i > 0 && line[i:] != "" && len(line[i:]) >= len("handleMorningStart") && line[i:i+len("handleMorningStart")] == "handleMorningStart" {
+			break
+		}
+		if r > 0xFFFF {
+			col += 2
+		} else {
+			col++
+		}
+	}
+	if got := identifierAt(line, col); got != "handleMorningStart" {
+		t.Errorf("identifierAt = %q, want %q (byte-vs-UTF-16 column confusion)", got, "handleMorningStart")
+	}
+}

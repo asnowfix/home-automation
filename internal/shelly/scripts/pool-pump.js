@@ -34,182 +34,165 @@ var SCRIPT_PREFIX = "[" + SCRIPT_NAME + "] ";
 // Configuration schema
 // Both Pro3 and Pro1 run this same script with shared KVS configuration
 // Script compares preferred_device_id against its own device ID to decide if it should run
+//
+// NOTE (#421 peak-heap follow-up): "description" fields were deliberately
+// removed from every entry below. They were pure documentation — nothing in
+// this script or in tools/extract-pool-defaults/main.go (which regex-parses
+// this object at build time, matching on "key"/"default"/"type"/"cliOnly"
+// only) ever reads schema.description. CONFIG_SCHEMA stays fully allocated
+// on the heap for the entire async loadConfig() KVS round-trip sequence at
+// boot (freed only after the last key loads — see loadConfig below), so
+// every byte of dead weight here is retained heap for that whole window, not
+// just extra script size. If you need the human-readable text, see
+// docs/pool-pump.md, or `git log -p` this hunk to recover the old strings.
 var CONFIG_SCHEMA = {
   enableLogging: {
-    description: "Enable logging when true",
     key: "logging",
     default: true,
     type: "boolean"
   },
   mqttTopicPrefix: {
-    description: "MQTT topic prefix (written by CLI, not used by script)",
     key: "mqtt-topic",
     default: "pool/pump",
     type: "string",
     cliOnly: true
   },
   preferredDeviceId: {
-    description: "Which device ID should run (actual Shelly device ID). Script compares this to its own ID",
     key: "preferred",
     default: null,
     type: "string",
     required: true
   },
   pro3DeviceId: {
-    description: "Pro3 device ID (for MQTT subscriptions - cross-device status tracking)",
     key: "pro3-id",
     default: null,
     type: "string",
     required: false
   },
   pro1DeviceId: {
-    description: "Pro1 device ID (for MQTT subscriptions - cross-device status tracking)",
     key: "pro1-id",
     default: null,
     type: "string",
     required: false
   },
   preferredSpeed: {
-    description: "Speed: 'eco', 'mid', 'high', 'max'. Maps to switches based on device capabilities",
     key: "speed",
     default: "eco",
     type: "string",
     required: false
   },
   ecoSpeed: {
-    description: "Pro3 switch ID for eco/low speed (0, 1, or 2)",
     key: "eco-speed",
     default: 2,
     type: "number",
     required: false
   },
   midSpeed: {
-    description: "Pro3 switch ID for mid speed (0, 1, or 2)",
     key: "mid-speed",
     default: 1,
     type: "number",
     required: false
   },
   highSpeed: {
-    description: "Pro3 switch ID for high speed (0, 1, or 2)",
     key: "high-speed",
     default: 0,
     type: "number",
     required: false
   },
   nightRunDurationMs: {
-    description: "Night run duration in ms (written by CLI, not used by script)",
     key: "night-duration",
     default: 3600000,
     type: "number",
     cliOnly: true
   },
   graceDelayMs: {
-    description: "Cross-device grace delay in ms (minimum 10000)",
     key: "grace-delay",
     default: 10000,
     type: "number",
     required: false
   },
   temperatureThreshold: {
-    description: "Temperature threshold (°C) for summer mode (day schedule)",
     key: "temp-threshold",
     default: 20,
     type: "number",
     required: false
   },
   poolVolume: {
-    description: "Pool volume in m³",
     key: "pool-volume",
     default: 46,
     type: "number"
   },
   turnover: {
-    description: "Daily turnover target (number of full pool volumes to filter per day)",
     key: "turnover",
     default: 5,
     type: "number"
   },
   maxFlowRate: {
-    description: "Pump max flow rate in m³/h at max RPM",
     key: "max-flow-rate",
     default: 31,
     type: "number"
   },
   maxRpm: {
-    description: "Pump rated max RPM",
     key: "max-rpm",
     default: 2900,
     type: "number"
   },
   ecoRpm: {
-    description: "Variator RPM setting for eco speed",
     key: "eco-rpm",
     default: 2000,
     type: "number"
   },
   midRpm: {
-    description: "Variator RPM setting for mid speed",
     key: "mid-rpm",
     default: 2600,
     type: "number"
   },
   highRpm: {
-    description: "Variator RPM setting for high speed",
     key: "high-rpm",
     default: 2900,
     type: "number"
   },
   maxTemp: {
-    description: "Temperature (°C) at which run time reaches one full turnover",
     key: "max-temp",
     default: 35,
     type: "number"
   },
   solarEnabled: {
-    description: "Enable solar-driven start/stop via the daemon's solar-available MQTT event",
     key: "solar-enabled",
     default: false,
     type: "boolean"
   },
   solarStartThresholdW: {
-    description: "Available solar power (W) required to trigger a solar start",
     key: "solar-start-w",
     default: 500,
     type: "number"
   },
   solarStopThresholdW: {
-    description: "Available solar power (W) below which a solar-driven run stops",
     key: "solar-stop-w",
     default: 200,
     type: "number"
   },
   solarStartDelayMs: {
-    description: "Solar must hold above start threshold this long (ms) before starting",
     key: "solar-start-delay",
     default: 300000,
     type: "number"
   },
   solarStopDelayMs: {
-    description: "Solar must hold below stop threshold this long (ms) before stopping",
     key: "solar-stop-delay",
     default: 600000,
     type: "number"
   },
   solarMinTurnover: {
-    description: "Soft-stop target (pool volumes/day); solar keeps running past this while solar remains available",
     key: "solar-min-turnover",
     default: 5,
     type: "number"
   },
   solarMaxTurnover: {
-    description: "Hard ceiling (pool volumes/day); pump always stops (and won't solar-start) once reached",
     key: "solar-max-turnover",
     default: 7,
     type: "number"
   },
   solarStaleMs: {
-    description: "Treat myhome/energy/solar/available as stale (fall back to schedule only) after this long (ms) without a message",
     key: "solar-stale-ms",
     default: 300000,
     type: "number"
@@ -262,143 +245,187 @@ function initConfig() {
 // Initialize CONFIG with defaults immediately so logging works
 initConfig();
 
+// --- Config loading state (peak-heap follow-up to #421) ------------------
+// loadConfig() used to be one function containing a nested loadNextKey()
+// closure, itself creating a BRAND NEW anonymous KVS.Get callback closure on
+// every single iteration (one per config key — ~22 sequential KVS round
+// trips on a real boot). Each of those closures captured key/schema/kvsKey
+// freshly, and — since Espruino's GC is not run between every statement —
+// garbage from earlier iterations can still be sitting on the heap when
+// later iterations allocate theirs, so peak heap during this phase scales
+// with the NUMBER of configured keys, not just the code around it. (This
+// matches the live finding that identical code peaks ~7.9KB higher with a
+// 24-key KVS config than a 5-key one — see issue #421 discussion.)
+//
+// The four module-level CONFIG_LOAD_* vars below plus the two named
+// functions after them replace that pattern: exactly one callback function
+// exists for the whole load (defined once, not once per key), and per-key
+// context travels through Shelly.call's own userdata parameter (a string —
+// the key name — not a new object) rather than a fresh closure capture.
+var CONFIG_LOAD_KEYS = null;
+var CONFIG_LOAD_INDEX = 0;
+var CONFIG_LOAD_MISSING = null;
+var CONFIG_LOAD_DONE = null;
+
 // Load configuration from KVS and validate required fields
 function loadConfig(callback) {
   log("Loading configuration from KVS...");
-  
-  var missingRequired = [];
-  var configKeys = [];
-  
+
+  CONFIG_LOAD_MISSING = [];
+  CONFIG_LOAD_KEYS = [];
+
   // Build array of config keys to load (skip cliOnly — written by CLI, not needed at runtime)
   for (var key in CONFIG_SCHEMA) {
     if (!CONFIG_SCHEMA[key].cliOnly) {
-      configKeys.push(key);
+      CONFIG_LOAD_KEYS.push(key);
     }
   }
-  
-  var keyIndex = 0;
-  
-  // Process one key at a time using task queue
-  function loadNextKey() {
-    if (keyIndex >= configKeys.length) {
-      // All keys loaded, validate
-      if (missingRequired.length > 0) {
-        log("ERROR: Missing required configuration:");
-        for (var i = 0; i < missingRequired.length; i++) {
-          log("  -", missingRequired[i]);
-        }
-        log("Script cannot start without required configuration.");
-        log("Please run: ctl pool setup <pro3-device> --pro1 <pro1-device>");
-        callback(false);
-        return;
-      }
 
-      // Clamp grace delay to minimum safe value
-      if (CONFIG.graceDelayMs < 10000) {
-        log("WARNING: grace-delay below minimum (10000ms), clamping");
-        CONFIG.graceDelayMs = 10000;
-      }
+  CONFIG_LOAD_INDEX = 0;
+  CONFIG_LOAD_DONE = callback;
+  loadNextConfigKey();
+}
 
-      // Enumerate available outputs and inputs
-      var availableOutputs = [];
-      for (var oi = 0; oi < 4; oi++) {
-        var swSt = Shelly.getComponentStatus("switch:" + oi);
-        if (swSt && ("output" in swSt)) {
-          availableOutputs.push(oi);
-        }
-      }
-      STATE.outputs = availableOutputs;
-
-      var availableInputs = [];
-      for (var ii = 0; ii < 4; ii++) {
-        var inSt = Shelly.getComponentStatus("input:" + ii);
-        if (inSt && ("state" in inSt)) {
-          availableInputs.push(ii);
-        }
-      }
-      STATE.inputs = availableInputs;
-
-      // Detect device type based on switch count
-      if (availableOutputs.length >= 3) {
-        STATE.deviceType = "pro3";
-        log("Detected device type: Pro3 (3 switches)");
-      } else if (availableOutputs.length === 1) {
-        STATE.deviceType = "pro1";
-        log("Detected device type: Pro1 (1 switch)");
-      } else {
-        STATE.deviceType = "unknown";
-        log("WARNING: Could not detect device type");
-      }
-      log("Switches:", availableOutputs, "Inputs:", availableInputs);
-
-      // Cache my device ID
-      var deviceInfo = Shelly.getDeviceInfo();
-      if (deviceInfo && deviceInfo.id) {
-        STATE.myDeviceId = deviceInfo.id;
-        log("My device ID:", STATE.myDeviceId);
-      } else {
-        log("ERROR: Could not get device ID");
-        callback(false);
-        return;
-      }
-
-      log("Configuration loaded successfully");
-      // Free schema object — only needed during KVS loading, not at runtime
-      CONFIG_SCHEMA = null;
-      callback(true);
-      return;
+// Called once CONFIG_LOAD_INDEX reaches the end of CONFIG_LOAD_KEYS:
+// validates required fields, detects device type/ID, then hands control
+// back to loadConfig's caller.
+function finishLoadConfig() {
+  if (CONFIG_LOAD_MISSING.length > 0) {
+    log("ERROR: Missing required configuration:");
+    for (var i = 0; i < CONFIG_LOAD_MISSING.length; i++) {
+      log("  -", CONFIG_LOAD_MISSING[i]);
     }
-    
-    var key = configKeys[keyIndex];
-    var schema = CONFIG_SCHEMA[key];
-    var kvsKey = CONFIG_KEY_PREFIX + schema.key;
-    keyIndex++;
-    
-    // Load from KVS asynchronously
-    Shelly.call("KVS.Get", {key: kvsKey}, function(result, err) {
-      if (err) {
-        log("WARNING: KVS.Get failed for", kvsKey, ":", err, "- using default");
-        CONFIG[key] = schema.default;
-        if (schema.required && CONFIG[key] === null) {
-          missingRequired.push(key + " (" + kvsKey + ") - KVS error: " + err);
-        }
-        queueTask(loadNextKey);
-        return;
-      }
-
-      if (result && ("value" in result) && result.value !== null && result.value !== "") {
-        var value = result.value;
-        
-        // Parse value based on type
-        if (schema.type === "boolean") {
-          CONFIG[key] = value === "true" || value === true;
-        } else if (schema.type === "number") {
-          var num = Number(value);
-          if (!isNaN(num)) {
-            CONFIG[key] = num;
-          } else {
-            log("WARNING: Invalid number for", key, ":", value);
-            CONFIG[key] = schema.default;
-          }
-        } else {
-          CONFIG[key] = value;
-        }
-      } else {
-        // Use default
-        CONFIG[key] = schema.default;
-        
-        // Check if required
-        if (schema.required && CONFIG[key] === null) {
-          missingRequired.push(key + " (" + kvsKey + ")");
-        }
-      }
-      
-      // Queue next key
-      queueTask(loadNextKey);
-    });
+    log("Script cannot start without required configuration.");
+    log("Please run: ctl pool setup <pro3-device> --pro1 <pro1-device>");
+    CONFIG_LOAD_DONE(false);
+    return;
   }
-  
-  loadNextKey();
+
+  // Clamp grace delay to minimum safe value
+  if (CONFIG.graceDelayMs < 10000) {
+    log("WARNING: grace-delay below minimum (10000ms), clamping");
+    CONFIG.graceDelayMs = 10000;
+  }
+
+  // Enumerate available outputs and inputs
+  var availableOutputs = [];
+  for (var oi = 0; oi < 4; oi++) {
+    var swSt = Shelly.getComponentStatus("switch:" + oi);
+    if (swSt && ("output" in swSt)) {
+      availableOutputs.push(oi);
+    }
+  }
+  STATE.outputs = availableOutputs;
+
+  var availableInputs = [];
+  for (var ii = 0; ii < 4; ii++) {
+    var inSt = Shelly.getComponentStatus("input:" + ii);
+    if (inSt && ("state" in inSt)) {
+      availableInputs.push(ii);
+    }
+  }
+  STATE.inputs = availableInputs;
+
+  // Detect device type based on switch count
+  if (availableOutputs.length >= 3) {
+    STATE.deviceType = "pro3";
+    log("Detected device type: Pro3 (3 switches)");
+  } else if (availableOutputs.length === 1) {
+    STATE.deviceType = "pro1";
+    log("Detected device type: Pro1 (1 switch)");
+  } else {
+    STATE.deviceType = "unknown";
+    log("WARNING: Could not detect device type");
+  }
+  log("Switches:", availableOutputs, "Inputs:", availableInputs);
+
+  // Cache my device ID
+  var deviceInfo = Shelly.getDeviceInfo();
+  if (deviceInfo && deviceInfo.id) {
+    STATE.myDeviceId = deviceInfo.id;
+    log("My device ID:", STATE.myDeviceId);
+  } else {
+    log("ERROR: Could not get device ID");
+    CONFIG_LOAD_DONE(false);
+    return;
+  }
+
+  log("Configuration loaded successfully");
+  // Free schema object — only needed during KVS loading, not at runtime
+  CONFIG_SCHEMA = null;
+  var doneCb = CONFIG_LOAD_DONE;
+  // Release load-scoped state now that the load is over — same intent as
+  // freeing CONFIG_SCHEMA above, one line down: none of it is needed again
+  // for the lifetime of the script.
+  CONFIG_LOAD_KEYS = null;
+  CONFIG_LOAD_MISSING = null;
+  CONFIG_LOAD_DONE = null;
+  doneCb(true);
+}
+
+// Requests the next key in CONFIG_LOAD_KEYS from KVS, or finishes the load
+// if none remain. The key name (a string already held by CONFIG_LOAD_KEYS,
+// not a new allocation) travels to onConfigKVSResult via Shelly.call's own
+// userdata parameter instead of a fresh per-iteration closure capture.
+function loadNextConfigKey() {
+  if (CONFIG_LOAD_INDEX >= CONFIG_LOAD_KEYS.length) {
+    finishLoadConfig();
+    return;
+  }
+
+  var key = CONFIG_LOAD_KEYS[CONFIG_LOAD_INDEX];
+  CONFIG_LOAD_INDEX++;
+  var schema = CONFIG_SCHEMA[key];
+  Shelly.call("KVS.Get", {key: CONFIG_KEY_PREFIX + schema.key}, onConfigKVSResult, key);
+}
+
+// Single shared KVS.Get completion handler for every config key (defined
+// once, unlike the per-iteration closure it replaces). Re-derives schema
+// from CONFIG_SCHEMA[key] rather than having it passed alongside — one
+// string of userdata is enough context to do that lookup.
+function onConfigKVSResult(result, err, errMsg, key) {
+  var schema = CONFIG_SCHEMA[key];
+  var kvsKey = CONFIG_KEY_PREFIX + schema.key;
+
+  if (err) {
+    log("WARNING: KVS.Get failed for", kvsKey, ":", err, "- using default");
+    CONFIG[key] = schema.default;
+    if (schema.required && CONFIG[key] === null) {
+      CONFIG_LOAD_MISSING.push(key + " (" + kvsKey + ") - KVS error: " + err);
+    }
+    queueTask(loadNextConfigKey);
+    return;
+  }
+
+  if (result && ("value" in result) && result.value !== null && result.value !== "") {
+    var value = result.value;
+
+    // Parse value based on type
+    if (schema.type === "boolean") {
+      CONFIG[key] = value === "true" || value === true;
+    } else if (schema.type === "number") {
+      var num = Number(value);
+      if (!isNaN(num)) {
+        CONFIG[key] = num;
+      } else {
+        log("WARNING: Invalid number for", key, ":", value);
+        CONFIG[key] = schema.default;
+      }
+    } else {
+      CONFIG[key] = value;
+    }
+  } else {
+    // Use default
+    CONFIG[key] = schema.default;
+
+    // Check if required
+    if (schema.required && CONFIG[key] === null) {
+      CONFIG_LOAD_MISSING.push(key + " (" + kvsKey + ")");
+    }
+  }
+
+  // Queue next key
+  queueTask(loadNextConfigKey);
 }
 
 
@@ -421,6 +448,167 @@ var STATE_KEYS = {
   activeOutput: "active-output"     // -1 (all off), 0, 1, 2 for pro3; 0 for pro1
 };
 
+// === IN-FLIGHT RPC TRACKING (#421 Bug A) ===
+// Real Gen2 firmware allows at most 5 concurrent Shelly.call RPCs per script
+// (see AGENTS.md "Per-script limits"); the 6th concurrent call raises an
+// uncaught "Too many calls in progress" exception that kills the ENTIRE
+// script, not just the offending call. processTaskQueue's 200ms tick (below)
+// only serialises *when* queued task functions run — it has no idea how many
+// of the underlying async RPCs those tasks fire are still in flight. That
+// gap is the root cause of two live crashes (persistRuntimeState's turnover
+// mirror, saveState's active-output mirror — both storeValue() fire-and-
+// forget writes) documented in issue #421.
+//
+// CALLS_IN_FLIGHT tracks every Shelly.call this script makes. It is wired up
+// once here by wrapping Shelly.call itself, rather than editing each of the
+// ~16 call sites in this file — every callback still receives exactly the
+// arguments it always did, so this is purely additive bookkeeping.
+var CALLS_IN_FLIGHT = 0;
+var N_SEEN = 0;       // lifetime count — proves tracking actually runs
+var MAX_CALLS_IN_FLIGHT = 4; // stay one below the real 5-call device ceiling
+
+// --- Peak-heap follow-up to #421 ---------------------------------------
+// The original fix wrapped every Shelly.call in a brand-new closure (one
+// function object allocated per call, purely to decrement CALLS_IN_FLIGHT
+// and forward to the caller's own callback) — continuous allocation churn
+// on a device already ~700 bytes from its heap ceiling (see issue #421's
+// hardware measurements). CALL_SLOTS below is a small fixed pool of plain
+// {cb, ud, used} records, allocated ONCE at script load. Each Shelly.call
+// mutates a free slot in place instead of allocating a new closure or a new
+// {cb, ud} object — since at most MAX_CALLS_IN_FLIGHT calls are ever
+// in flight by design (plus a small margin for calls fired outside the task
+// queue's own throttle), a fixed pool sized one above the real device
+// ceiling can never run out in practice; acquireSlot() still falls back to
+// allocating a fresh record rather than dropping a callback if it ever did.
+var CALL_SLOTS = [];
+// Sized to the real 5-call device ceiling + 1 spare, not just
+// MAX_CALLS_IN_FLIGHT: calls fired directly from event/timer handlers
+// (not funneled through queueTask) are not subject to that throttle.
+for (var CALL_SLOT_INIT_I = 0; CALL_SLOT_INIT_I < 6; CALL_SLOT_INIT_I++) {
+  CALL_SLOTS.push({cb: null, ud: null, used: false});
+}
+
+function acquireCallSlot(cb, ud) {
+  for (var i = 0; i < CALL_SLOTS.length; i++) {
+    if (!CALL_SLOTS[i].used) {
+      CALL_SLOTS[i].used = true;
+      CALL_SLOTS[i].cb = cb;
+      CALL_SLOTS[i].ud = ud;
+      return CALL_SLOTS[i];
+    }
+  }
+  // Pool exhausted (should not happen — see sizing note above): fall back
+  // to a fresh record rather than losing the callback.
+  return {cb: cb, ud: ud, used: true};
+}
+
+// Shared completion handler for calls that passed a callback. Decrements
+// unconditionally before invoking the caller's callback, so a slot is
+// always freed even if the callback itself throws (caught by
+// processTaskQueue's try/catch below, or top-level error handling).
+function sharedCallDone(result, error_code, error_message, slot) {
+  CALLS_IN_FLIGHT--;
+  var cb = slot ? slot.cb : null;
+  var ud = slot ? slot.ud : null;
+  if (slot) {
+    slot.used = false;
+    slot.cb = null;
+    slot.ud = null;
+  }
+  if (typeof cb === 'function') {
+    cb(result, error_code, error_message, ud);
+  }
+}
+
+// Shared completion handler for fire-and-forget calls (storeValue() and
+// friends) — nothing to forward, so no slot is needed at all: this path
+// allocates nothing per call.
+function decrementOnlyCallDone() {
+  CALLS_IN_FLIGHT--;
+}
+
+var RAW_CALL = Shelly.call;
+Shelly.call = function (method, params, callback, userdata) {
+  CALLS_IN_FLIGHT++;
+  N_SEEN++;
+  if (typeof callback !== 'function') {
+    return RAW_CALL(method, params, decrementOnlyCallDone, null);
+  }
+  return RAW_CALL(method, params, sharedCallDone, acquireCallSlot(callback, userdata));
+};
+
+// --- Self-check: fail LOUDLY, never silently (#421) ---------------------
+// This whole mechanism depends on reassigning a method on the native Shelly
+// object, which is not guaranteed to be permitted on every firmware. If the
+// assignment is ever rejected, CALLS_IN_FLIGHT stays 0 forever, the throttle
+// in processTaskQueue never engages, and the crash this fix exists to prevent
+// comes back — while every emulator test still passes, because goja allows
+// the reassignment that the device refused. That silent-inert failure is the
+// dangerous case, so it is asserted here rather than assumed.
+//
+// print() is used deliberately instead of log(): log() is gated on
+// CONFIG.enableLogging and would hide this exact message in production.
+// It also must not call log() at all — no hoisting on Espruino, and log() is
+// defined further down this file, so it does not exist yet at this point.
+// NOTE: the device truncates each UDP debug line at ~128 chars, so every
+// line below is kept short — text is factored through P421/printHit so the
+// two failure modes below share their common lines verbatim instead of
+// duplicating them (duplicated string literals cost real script memory).
+var P421 = "[pool-pump] #421: ";
+
+// Lines shared by both failure modes: what breaks, and the standing
+// instruction not to re-litigate the root cause each time this is seen.
+function printHit() {
+  print(P421 + "throttle INERT; >5 calls kills whole script as-is.");
+  print(P421 + "DO NOT re-investigate -- read issue #421 first.");
+}
+
+function printFail() {
+  print(P421 + "FATAL: Shelly.call wrapper did NOT install.");
+  printHit();
+  print(P421 + "alt fix: storeValue() callback should drive queue.");
+}
+
+var WRAP_OK = (Shelly.call !== RAW_CALL);
+if (!WRAP_OK) {
+  printFail();
+}
+
+// One shared emitter for both failure modes below — same event name/shape,
+// only the reason code differs (the print() diagnostics above/below already
+// carry the full English explanation; this event just needs to be machine-
+// detectable, so the reason strings stay short on purpose).
+function emitBroken(reason) {
+  Shelly.emitEvent("pool.call_tracking_broken", {
+    reason: reason,
+    calls_tracked: N_SEEN
+  });
+}
+
+// Runtime counterpart to the check above: the assignment can succeed while
+// tracking still never happens (e.g. something captured Shelly.call before
+// this point and calls the original directly). A healthy boot makes dozens of
+// KVS.Get calls, so N_SEEN must be well above zero by the end of init.
+// Called from continueInit(), by which time log()/Shelly.emitEvent() exist.
+function checkTrack() {
+  if (!WRAP_OK) {
+    // Repeated here as well as at install time: the install-time prints fire
+    // before a debug capture attached after boot would see anything, so this
+    // guarantees the diagnostic is in the log of anyone watching a restart.
+    printFail();
+    emitBroken("wrapper-not-installed");
+    return;
+  }
+  if (N_SEEN === 0) {
+    print(P421 + "FATAL: wrapper OK but tracked 0 calls -- something");
+    print(P421 + "calls the unwrapped Shelly.call, captured earlier.");
+    printHit();
+    emitBroken("zero-calls-tracked");
+    return;
+  }
+  log("Tracking OK (#421): seen", N_SEEN, "max", MAX_CALLS_IN_FLIGHT);
+}
+
 // === TASK QUEUE (SINGLE TIMER FOR ALL SEQUENTIAL OPERATIONS) ===
 var TASK_QUEUE = [];
 var TASK_INDEX = 0;
@@ -438,17 +626,37 @@ function processTaskQueue() {
     return;
   }
 
+  // Bug A root-cause fix (#421): don't dispatch another queued task while
+  // too many of this script's own Shelly.call RPCs are still in flight — a
+  // fixed 200ms tick is not a promise the device has actually kept up with.
+  // Skip this tick; TASK_INDEX is unchanged so the same task is retried on
+  // the next one, once a slot frees up.
+  if (CALLS_IN_FLIGHT >= MAX_CALLS_IN_FLIGHT) {
+    log('Task queue throttled, calls in flight:', CALLS_IN_FLIGHT);
+    return;
+  }
+
   // Execute next task; new tasks queued by the task itself extend TASK_QUEUE
   // and will be picked up on subsequent timer ticks.
   var task = TASK_QUEUE[TASK_INDEX];
   TASK_INDEX++;
-  task();
+
+  // Second, independent layer of defense (#421): one queued task throwing
+  // (whether from a call path the throttle above doesn't cover, or any
+  // other bug) must not be able to kill the entire script the way it did in
+  // the live incident this issue documents.
+  try {
+    task();
+  } catch (e) {
+    log('ERROR: queued task threw, continuing:', e);
+    if (e && false) {}
+  }
 }
 
 function queueTask(task) {
   // Simply append to queue
   TASK_QUEUE.push(task);
-  
+
   // Start timer only if not already running
   if (!TASK_TIMER) {
     TASK_TIMER = Timer.set(200, true, processTaskQueue);
@@ -2209,6 +2417,102 @@ function handleNightStop() {
   doStop('Night stop event');
 }
 
+// === RESTART CATCH-UP (#421 Bug B) ===
+// enforceOutputState() (below) only mirrors whatever physical state the
+// switch already has at boot — it never asks "should I actually be running
+// right now, given today's schedule window?". A restart (crash recovery,
+// script re-upload, device reboot) landing mid-window therefore silently
+// adopts a stale on/off state and only self-corrects whenever the next
+// schedule tick fires, which can be hours away. This is exactly what left a
+// live pump running hours past its scheduled evening-stop (see issue #421).
+// restartCatchUp() compares "now" against the currently active mode's
+// window — read straight from Schedule.List, the same source of truth
+// updateScheduleMode() writes to — and calls doStart()/doStop() immediately
+// if the physical state disagrees, instead of waiting for the next tick.
+
+// Parses the "M H" fields out of a Shelly cron timespec built by
+// makeTimespec() ("0 M H * * DAYS") or a fixed literal ("0 15 23 * * ...").
+// Returns minutes-since-midnight, or null for formats it can't resolve
+// (e.g. still-symbolic "@sunrise" specs on a schedule that has never had
+// updateScheduleMode() compute real times for it yet) — those windows are
+// left alone rather than guessed at.
+function parseHM(timespec) {
+  if (!timespec || timespec.indexOf('@') === 0) return null;
+  var parts = timespec.split(' ');
+  if (parts.length < 3) return null;
+  var m = Number(parts[1]);
+  var h = Number(parts[2]);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+var RC = 'Restart catch-up: '; // shared log/reason prefix, factored out to
+                                // avoid repeating this literal at every call
+
+function restartCatchUp() {
+  if (!isMyTurnToRun()) {
+    return;
+  }
+
+  // Mode-aware on purpose: only one of these two job pairs is ever enabled
+  // at a time on a real device (updateScheduleMode() disables the other),
+  // so matching against the currently active mode avoids any ambiguity
+  // about which pair's timespec actually governs "now".
+  var mode = STATE.scheduleMode || 'winter';
+  var startCode = mode === 'summer' ? 'handleMorningStart()' : 'handleNightStart()';
+  var stopCode = mode === 'summer' ? 'handleEveningStop()' : 'handleNightStop()';
+
+  Shelly.call('Schedule.List', {}, function (result, err) {
+    // A failed lookup or an empty schedule is not the "unresolvable
+    // timespec" case below — it just means there is nothing to catch up
+    // against, so bail out quietly rather than guessing.
+    if (err || !result || !result.jobs) {
+      log(RC + 'lookup failed');
+      if (err && false) {}
+      return;
+    }
+
+    var startMin = null;
+    var stopMin = null;
+    for (var i = 0; i < result.jobs.length; i++) {
+      var job = result.jobs[i];
+      if (!job.enable || !job.calls || job.calls.length === 0) continue;
+      var code = job.calls[0].params && job.calls[0].params.code;
+      if (code === startCode) {
+        startMin = parseHM(job.timespec);
+      } else if (code === stopCode) {
+        stopMin = parseHM(job.timespec);
+      }
+    }
+
+    // Unresolvable timespec (e.g. still-symbolic "@sunrise", see parseHM
+    // above) — skip rather than act on a guess (#421 Bug B requirement).
+    if (startMin === null || stopMin === null) {
+      log(RC + 'unresolved', mode);
+      return;
+    }
+
+    var d = new Date();
+    var nowMin = d.getHours() * 60 + d.getMinutes();
+    // Handles windows that wrap past midnight (the fixed winter night-run
+    // 23:15 -> 00:15) by treating a start > stop pair as wrapping.
+    var shouldRun = startMin <= stopMin
+      ? (nowMin >= startMin && nowMin < stopMin)
+      : (nowMin >= startMin || nowMin < stopMin);
+    var isRunning = STATE.activeOutput !== -1;
+
+    log(RC, mode, nowMin, startMin, stopMin, shouldRun, isRunning);
+
+    if (shouldRun && !isRunning) {
+      doStart(CONFIG.preferredSpeed, RC + 'inside window');
+    } else if (!shouldRun && isRunning) {
+      doStop(RC + 'outside window');
+    } else {
+      log(RC + 'state OK');
+    }
+  });
+}
+
 // === INITIALIZATION ===
 function enforceOutputState() {
   log("Enforcing output state at startup...");
@@ -2339,6 +2643,14 @@ function continueInit() {
       log('✓ All initialization steps complete - script is now running');
       log('Current mode:', STATE.scheduleMode || 'winter');
       log('Should I run?', isMyTurnToRun());
+      // #421: assert the in-flight RPC tracking this script's crash-safety
+      // depends on is actually live, and shout if it is not (see the
+      // self-check block near CALLS_IN_FLIGHT for why silence is dangerous).
+      checkTrack();
+      // #421 Bug B: correct any stale physical state against the current
+      // schedule window immediately, before the (possibly hours-away) next
+      // schedule tick or today's forecast-driven mode re-check.
+      queueTask(restartCatchUp);
       queueTask(handleDailyCheck);
       return;
     }

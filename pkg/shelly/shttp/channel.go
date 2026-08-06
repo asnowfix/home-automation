@@ -23,6 +23,19 @@ type HttpChannel struct {
 
 var httpChannel HttpChannel
 
+// formatHost normalizes a device host for use in an RPC URL. host may be a
+// bare IPv4/IPv6 address, a hostname, or any of those with an explicit
+// ":port" suffix; IPv6 literals are bracketed as required by URL syntax.
+func formatHost(host string) string {
+	if h, port, err := net.SplitHostPort(host); err == nil {
+		return net.JoinHostPort(h, port)
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+		return fmt.Sprintf("[%s]", host)
+	}
+	return host
+}
+
 func (ch *HttpChannel) callE(ctx context.Context, device types.Device, verb types.MethodHandler, out any, params any) (any, error) {
 	var res *http.Response
 	var err error
@@ -33,17 +46,31 @@ func (ch *HttpChannel) callE(ctx context.Context, device types.Device, verb type
 	log = log.WithName("shelly.HttpChannel")
 	ctx = logr.NewContext(ctx, log)
 
-	switch verb.HttpMethod {
-	case http.MethodGet:
-		res, err = ch.getE(ctx, device.Host(), verb.Method, params)
-	default:
-		res, err = ch.postE(ctx, device.Host(), http.MethodPost, verb.Method, params)
+	dial := func() (*http.Response, error) {
+		switch verb.HttpMethod {
+		case http.MethodGet:
+			return ch.getE(ctx, device.Host(), verb.Method, params)
+		default:
+			return ch.postE(ctx, device.Host(), http.MethodPost, verb.Method, params)
+		}
 	}
 
+	res, err = dial()
 	if err != nil {
-		log.Error(err, "HTTP error - clearing device host to fallback to MQTT", "device_id", device.Id())
+		log.Error(err, "HTTP error - re-resolving host before falling back to MQTT", "device_id", device.Id())
 		device.ClearHost()
-		return nil, err
+
+		if ip, ok := types.ResolveHost(ctx, device.Mac(), device.Id()); ok {
+			log.Info("Re-resolved host, retrying once", "device_id", device.Id(), "ip", ip.String())
+			device.UpdateHost(ip.String())
+			res, err = dial()
+		}
+
+		if err != nil {
+			log.Error(err, "HTTP error after re-resolution - clearing device host to fallback to MQTT", "device_id", device.Id())
+			device.ClearHost()
+			return nil, err
+		}
 	}
 
 	err = json.NewDecoder(res.Body).Decode(&out)
@@ -85,12 +112,7 @@ func (ch *HttpChannel) getE(ctx context.Context, host string, cmd string, params
 		qs = fmt.Sprintf("?%s", values.Encode())
 	}
 
-	ip := net.ParseIP(host)
-	if ip.To4() == nil {
-		// v6
-		host = fmt.Sprintf("[%s]", host)
-	}
-	requestURL := fmt.Sprintf("http://%s/rpc/%s%s", host, cmd, qs)
+	requestURL := fmt.Sprintf("http://%s/rpc/%s%s", formatHost(host), cmd, qs)
 	log.Info("Calling", "method", http.MethodGet, "url", requestURL)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
@@ -141,12 +163,7 @@ func (ch *HttpChannel) postE(ctx context.Context, host string, hm string, cmd st
 		}
 		requestURL = fmt.Sprintf("http://%s/rpc", host)
 	} else {
-		ip := net.ParseIP(host)
-		if ip.To4() == nil {
-			// v6
-			host = fmt.Sprintf("[%s]", host)
-		}
-		requestURL = fmt.Sprintf("http://%s/rpc/%s", host, cmd)
+		requestURL = fmt.Sprintf("http://%s/rpc/%s", formatHost(host), cmd)
 		if params != nil {
 			jsonData, err = json.Marshal(params)
 			if err != nil {

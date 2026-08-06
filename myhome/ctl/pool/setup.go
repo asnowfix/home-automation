@@ -157,6 +157,15 @@ Schedules are only created on Pro3 devices (detected by switch count).`,
 			MidRpm:               DefaultMidRpm,
 			HighRpm:              DefaultHighRpm,
 			MaxTemp:              DefaultMaxTemp,
+
+			SolarEnabled:         DefaultSolarEnabled,
+			SolarStartThresholdW: DefaultSolarStartThresholdW,
+			SolarStopThresholdW:  DefaultSolarStopThresholdW,
+			SolarStartDelayMs:    DefaultSolarStartDelayMs,
+			SolarStopDelayMs:     DefaultSolarStopDelayMs,
+			SolarMinTurnover:     DefaultSolarMinTurnover,
+			SolarMaxTurnover:     DefaultSolarMaxTurnover,
+			SolarStaleMs:         DefaultSolarStaleMs,
 		}
 
 		fmt.Printf("Adding device %s to pool pump mesh...\n", dev.Name())

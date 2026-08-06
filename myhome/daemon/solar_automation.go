@@ -562,14 +562,30 @@ func computeRuntimeTargets(ctx context.Context, log logr.Logger, device *shellya
 }
 
 // readPoolKVSFloat reads a single numeric KVS value from the pool device.
-// KVS values are always stored as plain strings on Shelly devices.
-func readPoolKVSFloat(ctx context.Context, log logr.Logger, device *shellyapi.Device, via types.Channel, key string) (float64, error) {
+// KVS values are always stored as plain strings on Shelly devices. Takes
+// types.Device (not the concrete *shellyapi.Device) so tests can pass a
+// fake/stubbed KVS responder — see myhome/daemon/pool_notices_test.go.
+func readPoolKVSFloat(ctx context.Context, log logr.Logger, device types.Device, via types.Channel, key string) (float64, error) {
 	resp, err := kvs.GetValue(ctx, log, via, device, key)
 	if err != nil {
 		return 0, fmt.Errorf("KVS.Get %s: %w", key, err)
 	}
 	var v float64
 	if _, err := fmt.Sscanf(resp.Value, "%f", &v); err != nil {
+		return 0, fmt.Errorf("parse KVS %s=%q: %w", key, resp.Value, err)
+	}
+	return v, nil
+}
+
+// readPoolKVSInt reads a single integer KVS value from the pool device.
+// KVS values are always stored as plain strings on Shelly devices.
+func readPoolKVSInt(ctx context.Context, log logr.Logger, device types.Device, via types.Channel, key string) (int64, error) {
+	resp, err := kvs.GetValue(ctx, log, via, device, key)
+	if err != nil {
+		return 0, fmt.Errorf("KVS.Get %s: %w", key, err)
+	}
+	var v int64
+	if _, err := fmt.Sscanf(resp.Value, "%d", &v); err != nil {
 		return 0, fmt.Errorf("parse KVS %s=%q: %w", key, resp.Value, err)
 	}
 	return v, nil

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,27 @@ import (
 
 func defaultEventsDBPath() string {
 	return "events.db"
+}
+
+// loadConfigFile attempts to read myhome's YAML config into v (search paths
+// and env binding must already be configured on v). A missing file is
+// expected and benign — defaults/flags/env take over, matching the
+// documented "config file is optional" behavior. A file that exists but
+// fails to parse (e.g. a YAML syntax error) returns an error instead: a
+// previous version silently fell back to defaults in that case, logging the
+// same message as "no config file found" — which let a broken myhome.yaml
+// run for weeks with every config key quietly ignored (see pool/solar
+// options, which have no other way to be set short of CLI flags).
+func loadConfigFile(v *viper.Viper, log logr.Logger) error {
+	if err := v.ReadInConfig(); err == nil {
+		log.Info("Loaded config from", "file", v.ConfigFileUsed())
+		return nil
+	} else if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+		log.Info("No config file found, using defaults and flags")
+		return nil
+	} else {
+		return fmt.Errorf("config file %s exists but failed to parse: %w", v.ConfigFileUsed(), err)
+	}
 }
 
 var disableGen1Proxy bool
@@ -54,6 +76,7 @@ func init() {
 	runCmd.PersistentFlags().DurationVar(&options.Flags.EventsRetention, "events-retention", 90*24*time.Hour, "Retention period for event records (default 90 days)")
 	runCmd.PersistentFlags().BoolVar(&disableEventsService, "disable-events-service", false, "Disable the event recording service")
 	runCmd.PersistentFlags().StringVar(&options.Flags.RemoteProxy, "remote-proxy", "", "Forward /devices/... requests to a remote myhome daemon (e.g. http://home-pi:6080) instead of connecting directly")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.SolarStaleAfter, "solar-stale-after", options.SOLAR_STALE_AFTER, "Solar aggregator: exclude a source's reading from the total once it is older than this")
 	runCmd.PersistentFlags().StringVar(&options.Flags.PoolDeviceID, "pool-device-id", "", "Pool Shelly device ID")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolEnabled, "enable-pool", false, "Enable pool runtime tracking")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolSolarEnabled, "enable-pool-solar", false, "Enable solar-driven pool pump automation")
@@ -99,11 +122,8 @@ var runCmd = &cobra.Command{
 		v.AutomaticEnv()
 		v.SetDefault("beem.poll_interval", "60s")
 
-		// Try to read config file (optional)
-		if err := v.ReadInConfig(); err == nil {
-			log.Info("Loaded config from", "file", v.ConfigFileUsed())
-		} else {
-			log.Info("No config file found, using defaults and flags")
+		if err := loadConfigFile(v, log); err != nil {
+			return err
 		}
 
 		// Bind flags to viper (flags take precedence over config file)
@@ -272,6 +292,11 @@ var runCmd = &cobra.Command{
 		options.Flags.BeemEmail = v.GetString("beem.email")
 		options.Flags.BeemPassword = v.GetString("beem.password")
 		options.Flags.BeemPollInterval = v.GetDuration("beem.poll_interval")
+
+		// Solar aggregator: generic, not gated behind pool/Beem-specific flags.
+		if v.IsSet("solar.stale_after") && !cmd.Flags().Changed("solar-stale-after") {
+			options.Flags.SolarStaleAfter = v.GetDuration("solar.stale_after")
+		}
 
 		// SFR box credentials — Viper reads MYHOME_SFR_USERNAME / MYHOME_SFR_PASSWORD
 		// from the environment or config file; auth is skipped if either is empty.

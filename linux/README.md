@@ -47,7 +47,7 @@
 ```
 linux/
 ├── debian/           # Debian package scripts
-│   ├── postinst.sh   # Post-installation (enable & start services)
+│   ├── postinst.sh   # Post-installation (enable & start services, push scripts to known devices)
 │   ├── prerm.sh      # Pre-removal (stop services)
 │   └── postrm.sh     # Post-removal (disable services)
 ├── systemd/          # Systemd units and helper scripts

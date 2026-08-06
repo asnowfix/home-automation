@@ -52,5 +52,12 @@ func Init(log logr.Logger, mc mqtt.Client, timeout time.Duration, rateLimitInter
 }
 
 func (r *Registrar) CallE(ctx context.Context, d types.Device, via types.Channel, mh types.MethodHandler, params any) (any, error) {
-	return r.channels[d.Channel(via)](ctx, d, mh, mh.Allocate(), params)
+	return r.channels[d.Channel(ctx, via)](ctx, d, mh, mh.Allocate(), params)
+}
+
+// SetHostResolver installs the resolver used to (re-)resolve a device's IP
+// address when it is unknown, or immediately after an HTTP dial failure.
+// See types.HostResolver. Call once at daemon startup.
+func SetHostResolver(r types.HostResolver) {
+	types.SetHostResolver(r)
 }

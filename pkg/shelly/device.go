@@ -150,7 +150,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 
 	// Resolve the channel after MQTT initialization - this ensures MQTT-only devices
 	// (no known host) use MQTT instead of the discard caller for ChannelDefault
-	via = d.Channel(via)
+	via = d.Channel(ctx, via)
 
 	if d.Id() == "" {
 		err := d.initDeviceInfo(ctx, via)
@@ -420,13 +420,13 @@ func (d *Device) StopDialog(ctx context.Context, id uint32) {
 	d.mqtt.Unlock()
 }
 
-func (d *Device) Channel(via types.Channel) types.Channel {
+func (d *Device) Channel(ctx context.Context, via types.Channel) types.Channel {
 	switch via {
 	case types.ChannelDefault:
 		if d.IsMqttReady() {
 			return types.ChannelMqtt
 		}
-		if d.IsHttpReady() {
+		if d.IsHttpReady() || d.resolveHost(ctx) {
 			return types.ChannelHttp
 		}
 	case types.ChannelMqtt:
@@ -434,12 +434,24 @@ func (d *Device) Channel(via types.Channel) types.Channel {
 			return types.ChannelMqtt
 		}
 	case types.ChannelHttp:
-		if d.IsHttpReady() {
+		if d.IsHttpReady() || d.resolveHost(ctx) {
 			return types.ChannelHttp
 		}
 	}
 	// Auto discarded
 	return types.ChannelDefault
+}
+
+// resolveHost asks the injected types.HostResolver (if any) for the
+// device's current IP, keyed by MAC first and then by device ID (mDNS
+// hostname). On success it updates Host_ and returns true.
+func (d *Device) resolveHost(ctx context.Context) bool {
+	ip, ok := types.ResolveHost(ctx, d.Mac(), d.Id())
+	if !ok {
+		return false
+	}
+	d.UpdateHost(ip.String())
+	return true
 }
 
 var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", MDNS_SHELLIES))

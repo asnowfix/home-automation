@@ -165,6 +165,54 @@ var CONFIG_SCHEMA = {
     key: "max-temp",
     default: 35,
     type: "number"
+  },
+  solarEnabled: {
+    description: "Enable solar-driven start/stop via the daemon's solar-available MQTT event",
+    key: "solar-enabled",
+    default: false,
+    type: "boolean"
+  },
+  solarStartThresholdW: {
+    description: "Available solar power (W) required to trigger a solar start",
+    key: "solar-start-w",
+    default: 500,
+    type: "number"
+  },
+  solarStopThresholdW: {
+    description: "Available solar power (W) below which a solar-driven run stops",
+    key: "solar-stop-w",
+    default: 200,
+    type: "number"
+  },
+  solarStartDelayMs: {
+    description: "Solar must hold above start threshold this long (ms) before starting",
+    key: "solar-start-delay",
+    default: 300000,
+    type: "number"
+  },
+  solarStopDelayMs: {
+    description: "Solar must hold below stop threshold this long (ms) before stopping",
+    key: "solar-stop-delay",
+    default: 600000,
+    type: "number"
+  },
+  solarMinTurnover: {
+    description: "Soft-stop target (pool volumes/day); solar keeps running past this while solar remains available",
+    key: "solar-min-turnover",
+    default: 5,
+    type: "number"
+  },
+  solarMaxTurnover: {
+    description: "Hard ceiling (pool volumes/day); pump always stops (and won't solar-start) once reached",
+    key: "solar-max-turnover",
+    default: 7,
+    type: "number"
+  },
+  solarStaleMs: {
+    description: "Treat myhome/energy/solar/available as stale (fall back to schedule only) after this long (ms) without a message",
+    key: "solar-stale-ms",
+    default: 300000,
+    type: "number"
   }
 };
 
@@ -357,10 +405,15 @@ function loadConfig(callback) {
 // Script.storage keys for continuously evolving values (survives reboots, synchronous)
 var STORAGE_KEYS = {
   forecastUrl:   "forecast-url",    // Open-Meteo forecast URL built from device location
-  scheduleMode:  "schedule-mode"    // "summer" or "winter" — moved here from KVS because
+  scheduleMode:  "schedule-mode",   // "summer" or "winter" — moved here from KVS because
                                     // Script.storage.getItem() is synchronous; KVS.Get is
                                     // async-only, so Shelly.call without a callback always
                                     // returns null and schedule mode was lost on every reboot
+  runtimeSec:    "runtime-sec",     // cumulative pump-on seconds today (checkpointed while
+                                    // running, see flushRuntimeCheckpoint), synchronous so a
+                                    // reboot mid-run only loses runtime since the last flush
+  runtimeDate:   "runtime-date"     // "YYYY-M-D" date the above count applies to, for
+                                    // day-rollover detection (see ensureRuntimeDay)
 };
 
 // State keys for KVS persistence (fire-and-forget writes only; reads use Script.storage)
@@ -442,6 +495,12 @@ var STATE = {
 
   // Schedule mode
   scheduleMode: null,         // "summer" or "winter"
+
+  // Runtime/turnover tracking (on-device, for ctl pool status — see #402)
+  runtimeTodaySec: 0,         // cumulative pump-on seconds today (completed intervals only)
+  runtimeDate: null,          // "YYYY-M-D" date runtimeTodaySec applies to
+  runStartTs: null,           // Date.now() when the current ON interval began; null when off
+  runtimeFlushTimer: null,    // Timer handle for periodic checkpointing while running
 
   // Initialization flag
   initializing: true          // Prevents KVS writes during init
@@ -539,6 +598,13 @@ function loadValue(key) {
   return null;
 }
 
+// Fractional-day-free "YYYY-M-D" date string, used for day-rollover checks
+// (forecast refresh, runtime/turnover day reset).
+function todayDateString() {
+  var now = new Date();
+  return now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+}
+
 // === WEATHER FORECAST FUNCTIONS (Memory-Optimized) ===
 function setForecastURL(lat, lon) {
   log('setForecastURL', lat, lon);
@@ -551,8 +617,7 @@ function setForecastURL(lat, lon) {
 }
 
 function shouldRefreshForecast() {
-  var now = new Date();
-  var today = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+  var today = todayDateString();
 
   if (STATE.lastForecastFetchDate === null || STATE.lastForecastFetchDate !== today) {
     return true;
@@ -617,8 +682,7 @@ function onForecast(result, error_code, error_message, cb) {
   }
   data = null;
 
-  var now = new Date();
-  STATE.lastForecastFetchDate = now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+  STATE.lastForecastFetchDate = todayDateString();
   log('Forecast cached, max temp:', maxTemp);
 
   if (typeof cb === 'function') {
@@ -836,6 +900,17 @@ function applyComponentNames(callback) {
 function loadState() {
   log("Loading persisted state...");
 
+  // runtimeDate/runtimeTodaySec: Script.storage (synchronous), restored
+  // before enforceOutputState() decides whether to resume runtime accounting
+  // for a run already in progress. ensureRuntimeDay() resets the counter if
+  // the restored date is stale (previous day).
+  var savedRuntimeDate = loadStorageValue(STORAGE_KEYS.runtimeDate);
+  var savedRuntimeSec = loadStorageValue(STORAGE_KEYS.runtimeSec);
+  STATE.runtimeDate = (typeof savedRuntimeDate === "string") ? savedRuntimeDate : null;
+  STATE.runtimeTodaySec = (typeof savedRuntimeSec === "number") ? savedRuntimeSec : 0;
+  ensureRuntimeDay();
+  log("Restored runtime today:", STATE.runtimeTodaySec, "s for date:", STATE.runtimeDate);
+
   // activeOutput: KVS fire-and-forget write; read is skipped here because
   // enforceOutputState() reads the actual hardware switch state right after
   // this call — hardware truth overrides any stale KVS value.
@@ -871,6 +946,116 @@ function saveState() {
       storeValue("schedule-mode", STATE.scheduleMode);
     });
   }
+}
+
+// === RUNTIME/TURNOVER TRACKING (on-device, for ctl pool status — #402) ===
+// pool-pump.js is the only place that knows the string→RPM mapping for the
+// configured preferred speed (via computeFlowRate() below), so it computes
+// and persists today's cumulative runtime and achieved turnover itself;
+// the daemon (ctl pool status / pool.getstatus RPC) just reads the results
+// from KVS instead of re-deriving flow rate. Hooked into activateOutput() —
+// the single choke point where STATE.activeOutput actually transitions —
+// so every code path that starts/stops the pump (doStart, doStop,
+// handleWaterSupply, the button handler, the anti-cycling fuse) is covered
+// with zero duplication.
+
+// Resets the daily counter when the persisted date has rolled over. If a run
+// is currently open (runStartTs set) across the rollover, its start marker is
+// pulled forward to "now" so only post-midnight time accrues to the new day —
+// otherwise the next flush/stop would re-credit the whole pre-midnight run
+// (since Date.now() - runStartTs would still span back into yesterday).
+function ensureRuntimeDay() {
+  var today = todayDateString();
+  if (STATE.runtimeDate !== today) {
+    log("Runtime day rollover:", STATE.runtimeDate, "->", today);
+    STATE.runtimeDate = today;
+    STATE.runtimeTodaySec = 0;
+    if (STATE.runStartTs !== null) {
+      STATE.runStartTs = Date.now();
+    }
+    storeStorageValue(STORAGE_KEYS.runtimeDate, STATE.runtimeDate);
+    persistRuntimeState(STATE.runtimeTodaySec);
+  }
+}
+
+// Called (via activateOutput) when the pump transitions OFF -> ON.
+function startRuntimeAccounting() {
+  ensureRuntimeDay();
+  STATE.runStartTs = Date.now();
+  if (!STATE.runtimeFlushTimer) {
+    // Periodic checkpoint while running — counts against the 5-timer budget,
+    // but only exists while the pump is actually on (cleared in
+    // stopRuntimeAccounting), so it never competes with the task-queue timer
+    // during steady-state idle operation.
+    STATE.runtimeFlushTimer = Timer.set(60000, true, flushRuntimeCheckpoint);
+  }
+  log("Runtime accounting started, today so far:", STATE.runtimeTodaySec, "s");
+}
+
+// Called (via activateOutput) when the pump transitions ON -> OFF.
+function stopRuntimeAccounting() {
+  if (STATE.runStartTs !== null) {
+    STATE.runtimeTodaySec += (Date.now() - STATE.runStartTs) / 1000;
+    STATE.runStartTs = null;
+  }
+  if (STATE.runtimeFlushTimer) {
+    Timer.clear(STATE.runtimeFlushTimer);
+    STATE.runtimeFlushTimer = null;
+  }
+  persistRuntimeState(STATE.runtimeTodaySec);
+  log("Runtime accounting stopped, today total:", STATE.runtimeTodaySec, "s");
+}
+
+// Periodic checkpoint while the pump is running (recurring runtimeFlushTimer
+// tick): persists runtimeTodaySec plus the still-open interval's
+// elapsed-so-far, without clearing runStartTs — the run is still in
+// progress. This bounds crash/reboot data loss to at most one flush
+// interval instead of the whole run.
+function flushRuntimeCheckpoint() {
+  ensureRuntimeDay();
+  if (STATE.runStartTs === null) return;
+  var elapsedSec = (Date.now() - STATE.runStartTs) / 1000;
+  persistRuntimeState(STATE.runtimeTodaySec + elapsedSec);
+}
+
+// Persists sec (defaults to STATE.runtimeTodaySec) to Script.storage (sync,
+// boot-safe) and mirrors it — plus today's computed turnover — to KVS for
+// Go-side visibility (myhome/daemon/pool_notices.go ComputeTurnover).
+//
+// The Script.storage write is synchronous and always happens (cheap, no RPC).
+// The two KVS mirrors go through Shelly.call and are skipped during
+// STATE.initializing — same guard as saveState() — and queued via
+// queueTask() rather than fired back-to-back: an un-queued pair here,
+// repeated every 60s by flushRuntimeCheckpoint() while the pump runs and
+// possibly overlapping saveState()'s own KVS writes, is exactly the
+// "Too many calls in progress" crash PR #394 fixed (5-concurrent-RPC limit).
+// A skipped mirror during init is harmless — the next checkpoint or stop
+// re-persists it.
+function persistRuntimeState(overrideSec) {
+  var sec = (typeof overrideSec === "number") ? overrideSec : STATE.runtimeTodaySec;
+  storeStorageValue(STORAGE_KEYS.runtimeSec, sec);
+  if (STATE.initializing) {
+    return;
+  }
+  queueTask(function() {
+    storeValue("runtime-sec", Math.round(sec));
+  });
+  queueTask(function() {
+    storeValue("turnover-today", computeTurnoverToday(sec));
+  });
+}
+
+// Turnovers (pool volumes filtered) achieved today given sec seconds of
+// pump-on time at the currently configured preferred speed. Reuses
+// computeFlowRate() (defined below) so the string->RPM mapping is only
+// ever implemented once.
+function computeTurnoverToday(sec) {
+  var flowRate = computeFlowRate();
+  if (!flowRate || flowRate <= 0 || !CONFIG.poolVolume) {
+    return 0;
+  }
+  var turnover = (sec / 3600) * flowRate / CONFIG.poolVolume;
+  return Math.round(turnover * 100) / 100;
 }
 
 // === DEVICE ACTIVATION DECISION ===
@@ -913,13 +1098,24 @@ function mapSpeedToSwitch(speed) {
 }
 
 // === OUTPUT CONTROL ===
-function turnOffAllSwitches(callback) {
-  for (var i = 0; i < STATE.outputs.length; i++) {
-    Shelly.call("Switch.Set", {id: STATE.outputs[i], on: false}, function(res, err) {
-      if (err && false) {}
-    });
+// Turns off outputs one at a time via the task queue. Dispatching Shelly.call from
+// inside a for loop fires all iterations before any response arrives, exhausting the
+// 5-concurrent-RPC budget (see AGENTS.md "Callback Depth Limits" — Cause B).
+function turnOffAllSwitchesNext(ids, index, callback) {
+  if (index >= ids.length) {
+    if (callback) callback();
+    return;
   }
-  if (callback) queueTask(callback);
+  var id = ids[index];
+  index++;
+  Shelly.call("Switch.Set", {id: id, on: false}, function(res, err) {
+    if (err && false) {}
+    queueTask(function() { turnOffAllSwitchesNext(ids, index, callback); });
+  });
+}
+
+function turnOffAllSwitches(callback) {
+  turnOffAllSwitchesNext(STATE.outputs, 0, callback);
 }
 
 function turnOffPro1(callback) {
@@ -939,9 +1135,31 @@ function setOutput(outputId, on, callback) {
     if (callback) callback();
     return;
   }
-  
+
   log("Setting switch", outputId, "to", on);
   Shelly.call("Switch.Set", {id: outputId, on: on}, callback);
+}
+
+// Turns off every output except exceptId, one at a time via the task queue
+// (see turnOffAllSwitches above for why a for-loop of Shelly.call is unsafe here).
+function turnOffOtherOutputsNext(ids, index, exceptId, callback) {
+  if (index >= ids.length) {
+    if (callback) callback();
+    return;
+  }
+  var id = ids[index];
+  index++;
+  if (id === exceptId) {
+    turnOffOtherOutputsNext(ids, index, exceptId, callback);
+    return;
+  }
+  setOutput(id, false, function() {
+    queueTask(function() { turnOffOtherOutputsNext(ids, index, exceptId, callback); });
+  });
+}
+
+function turnOffOtherOutputs(exceptId, callback) {
+  turnOffOtherOutputsNext(STATE.outputs, 0, exceptId, callback);
 }
 
 // === SOFTWARE FUSE (ANTI-CYCLING PROTECTION) ===
@@ -1019,17 +1237,21 @@ function activateOutput(outputId, callback) {
     fuseRecord();
   }
 
+  // Runtime/turnover tracking (#402): STATE.activeOutput still holds the
+  // pre-transition value here, so this is the single place that sees every
+  // on/off transition regardless of caller (doStart, doStop,
+  // handleWaterSupply, button, anti-cycling fuse forced-off).
+  var wasRunning = STATE.activeOutput !== -1;
+  var willRun = outputId !== -1;
+  if (wasRunning !== willRun) {
+    if (willRun) startRuntimeAccounting();
+    else stopRuntimeAccounting();
+  }
+
   if (STATE.deviceType === "pro3") {
     safeActivatePro3(outputId, function() {
-      // Turn off all outputs simultaneously
-      for (var i = 0; i < STATE.outputs.length; i++) {
-        Shelly.call("Switch.Set", {id: STATE.outputs[i], on: false}, function(res, err) {
-          if (err && false) {}
-        });
-      }
-
-      // Use task queue instead of a one-shot timer to avoid consuming a timer slot
-      queueTask(function() {
+      // Turn off all outputs (one at a time via the task queue — see turnOffAllSwitches)
+      turnOffAllSwitches(function() {
         if (outputId !== -1) {
           setOutput(outputId, true, function() {
             STATE.activeOutput = outputId;
@@ -1185,14 +1407,9 @@ function handleSwitchEvent(info) {
   }
 
   if (STATE.deviceType === "pro3" && info.state === true) {
-    // Ensure only one output is on
+    // Ensure only one output is on (one at a time via the task queue — see turnOffOtherOutputs)
     var activatedOutput = info.id;
-    for (var i = 0; i < STATE.outputs.length; i++) {
-      var outputId = STATE.outputs[i];
-      if (outputId !== activatedOutput) {
-        setOutput(outputId, false);
-      }
-    }
+    turnOffOtherOutputs(activatedOutput);
     STATE.activeOutput = activatedOutput;
     saveState();
 
@@ -1283,6 +1500,136 @@ function handleButtonEvent(info) {
   }
 }
 
+// === SOLAR-DRIVEN HYSTERESIS (#405) ===
+// Subscribes to the daemon's retained `myhome/energy/solar/available` topic
+// (see #403) and layers a start/stop hysteresis on top of the existing
+// forecast-driven schedule — never replacing it. Calls this script's own
+// doStart()/doStop() so the fuse, isMyTurnToRun(), and water-supply
+// protection remain in force for solar-triggered runs exactly as for
+// scheduled/manual runs.
+//
+// Staleness is judged from the payload's own `ts` field (unix-epoch-seconds,
+// set by the daemon when it computed the value), NOT from local message
+// receipt time. MQTT delivers retained messages to a new subscriber
+// immediately regardless of how old they are — if the daemon published a
+// value and then died, and this script reboots and re-subscribes hours or
+// days later, it receives that old retained message immediately. Recording
+// Date.now() as the freshness marker at *receipt* time would make a stale
+// value look perfectly fresh, defeating the whole point of the staleness
+// check. SOLAR.publishedTs (derived from data.ts) is what checkSolarHysteresis
+// actually compares against Date.now(); SOLAR.lastMsgTs is kept only for
+// debugging/visibility into when a message was last received at all.
+var SOLAR = {
+  availableW: 0,
+  lastMsgTs: 0,       // Date.now() at last MQTT message receipt (debugging only)
+  publishedTs: 0,     // data.ts converted to ms — the actual staleness clock
+  aboveStartSince: 0,
+  belowStopSince: 0,
+  tickTimer: null
+};
+
+function onSolarAvailable(topic, message) {
+  var data = null;
+  try {
+    data = JSON.parse(message);
+  } catch (e) {
+    if (e && false) {}
+    return;
+  }
+  if (!data || typeof data.available_w !== "number") return;
+
+  SOLAR.availableW = data.available_w;
+  SOLAR.lastMsgTs = Date.now();
+  // ts is unix-epoch-seconds; convert to ms to compare against Date.now().
+  // This is the field staleness decisions are based on — see comment above.
+  if (typeof data.ts === "number") {
+    SOLAR.publishedTs = data.ts * 1000;
+  }
+
+  checkSolarHysteresis();
+}
+
+function subscribeSolarAvailable() {
+  if (!CONFIG.solarEnabled) return;
+  MQTT.subscribe("myhome/energy/solar/available", onSolarAvailable);
+  log("Subscribed to myhome/energy/solar/available");
+}
+
+// Hard ceiling (pool volumes/day): pump always stops (and won't solar-start)
+// once reached, regardless of solar availability.
+function solarHardCeilingReached() {
+  var flowRate = computeFlowRate();
+  if (!flowRate || flowRate <= 0 || !CONFIG.poolVolume) return false;
+  var target = (CONFIG.poolVolume * CONFIG.solarMaxTurnover / flowRate) * 3600;
+  return STATE.runtimeTodaySec >= target;
+}
+
+// Soft-stop target (pool volumes/day): solar keeps running past this while
+// solar remains available, but stops once solar goes away.
+function solarSoftTargetReached() {
+  var flowRate = computeFlowRate();
+  if (!flowRate || flowRate <= 0 || !CONFIG.poolVolume) return false;
+  var target = (CONFIG.poolVolume * CONFIG.solarMinTurnover / flowRate) * 3600;
+  return STATE.runtimeTodaySec >= target;
+}
+
+// Solar start/stop hysteresis, re-evaluated on every solar MQTT message and
+// on a periodic tick (see SOLAR.tickTimer in continueInit()) so staleness is
+// still detected even if no further MQTT message ever arrives (e.g. the
+// daemon dies while idle mid-hold-delay).
+function checkSolarHysteresis() {
+  if (!CONFIG.solarEnabled) return;
+
+  // Staleness is judged from the payload's own ts (SOLAR.publishedTs), not
+  // from when we last received a message (SOLAR.lastMsgTs) — see the comment
+  // on the SOLAR var above for why that distinction matters.
+  if (SOLAR.publishedTs === 0 || (Date.now() - SOLAR.publishedTs) > CONFIG.solarStaleMs) {
+    SOLAR.aboveStartSince = 0;
+    SOLAR.belowStopSince = 0;
+    return; // stale/absent: existing forecast-driven schedule keeps running untouched
+  }
+
+  var running = STATE.activeOutput !== -1;
+  var now = Date.now();
+
+  if (!running) {
+    if (SOLAR.availableW >= CONFIG.solarStartThresholdW) {
+      if (SOLAR.aboveStartSince === 0) SOLAR.aboveStartSince = now;
+      if (now - SOLAR.aboveStartSince >= CONFIG.solarStartDelayMs) {
+        if (!solarHardCeilingReached()) {
+          doStart(CONFIG.preferredSpeed, 'Solar start: ' + SOLAR.availableW + 'W');
+        }
+        SOLAR.aboveStartSince = 0;
+      }
+    } else {
+      SOLAR.aboveStartSince = 0;
+    }
+    return;
+  }
+
+  if (solarHardCeilingReached()) {
+    doStop('Solar hard ceiling reached');
+    SOLAR.aboveStartSince = 0;
+    SOLAR.belowStopSince = 0;
+    return;
+  }
+  if (solarSoftTargetReached() && SOLAR.availableW < CONFIG.solarStartThresholdW) {
+    doStop('Solar soft stop: target met and solar gone');
+    SOLAR.aboveStartSince = 0;
+    SOLAR.belowStopSince = 0;
+    return;
+  }
+  if (SOLAR.availableW < CONFIG.solarStopThresholdW) {
+    if (SOLAR.belowStopSince === 0) SOLAR.belowStopSince = now;
+    if (now - SOLAR.belowStopSince >= CONFIG.solarStopDelayMs) {
+      doStop('Solar stop: ' + SOLAR.availableW + 'W');
+      SOLAR.belowStopSince = 0;
+    }
+  } else {
+    SOLAR.belowStopSince = 0;
+  }
+}
+
 // === MQTT SETUP ===
 
 // Parse a Shelly switch status payload and return the output boolean (or null on error)
@@ -1361,6 +1708,7 @@ function setupMQTT() {
   }
   subscribePro1Status();
   subscribePro3Status();
+  subscribeSolarAvailable();
 }
 
 // === SCHEDULE MANAGEMENT ===
@@ -1855,6 +2203,9 @@ function handleNightStart() {
 }
 
 function handleNightStop() {
+  // Belt-and-suspenders midnight reset, in addition to the lazy per-write
+  // check in persistRuntimeState/ensureRuntimeDay (#402).
+  ensureRuntimeDay();
   doStop('Night stop event');
 }
 
@@ -1893,6 +2244,18 @@ function enforceOutputState() {
   }
   
   log("Current active output:", STATE.activeOutput);
+
+  // If the pump was already running when the script (re)started, resume
+  // runtime accounting so an in-progress run keeps accruing across restarts
+  // (#402). Safe to call unconditionally here: when this path was reached
+  // via activateOutput() above (the "multiple outputs on" branch),
+  // STATE.activeOutput is still -1 at this point (that call's own state
+  // update is deferred to the task queue), so this is a no-op in that case
+  // and activateOutput()'s own on/off-transition hook accounts for the run
+  // once its callback lands.
+  if (STATE.activeOutput !== -1) {
+    startRuntimeAccounting();
+  }
 }
 
 function init() {
@@ -1920,6 +2283,15 @@ function continueInit() {
   loadState();
   enforceOutputState();
   setupMQTT();
+
+  // Solar hysteresis (#405): re-evaluate periodically so staleness is
+  // detected even if the daemon dies mid-hold-delay and no further MQTT
+  // message ever arrives. This is at most the 4th concurrent timer
+  // (TASK_TIMER, STATE.graceTimer, STATE.runtimeFlushTimer) — see
+  // docs/pool-pump.md "Timer Budget".
+  if (CONFIG.solarEnabled) {
+    SOLAR.tickTimer = Timer.set(30000, true, checkSolarHysteresis);
+  }
 
   // Initialization complete - enable state persistence and flush initial state to KVS
   STATE.initializing = false;

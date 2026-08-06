@@ -19,13 +19,21 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
-	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/internal/myhome/ui/assets"
 	"github.com/asnowfix/home-automation/internal/myhome/ui/static"
 
 	"github.com/go-logr/logr"
 )
+
+// DeviceLookup is the minimal device-lookup capability the proxy needs to
+// resolve a host token to an IP. Defined locally (rather than importing
+// devices.DeviceRegistry) so a live device manager/cache can be passed in
+// without requiring unrelated methods it may not forward.
+type DeviceLookup interface {
+	GetDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, error)
+}
 
 // Handle proxies HTTP requests shaped like /devices/{hostToken}/...
 //
@@ -36,7 +44,7 @@ import (
 //
 // When upstreamProxy is empty, the host token is resolved to an IP and
 // the request is forwarded directly to the device on port 80 or 443.
-func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db *storage.DeviceStorage, upstreamProxy string, w http.ResponseWriter, r *http.Request) {
+func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db DeviceLookup, upstreamProxy string, w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 
 	// Panic recovery to avoid blank pages
@@ -348,7 +356,7 @@ func (w *statusWriter) Flush() {
 	}
 }
 
-func resolveToIPv4(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db *storage.DeviceStorage, token string) (net.IP, error) {
+func resolveToIPv4(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db DeviceLookup, token string) (net.IP, error) {
 	// 1. If token is an IP, return it (prefer IPv4)
 	if ip := net.ParseIP(token); ip != nil {
 		if ip.To4() != nil {
@@ -381,28 +389,26 @@ func resolveToIPv4(ctx context.Context, log logr.Logger, resolver mynet.Resolver
 		}
 	}
 
-	// 3. Try myhome database lookup
+	// 3. Try myhome database lookup. device.Host is no longer persisted
+	// (see #252 / docs/no-ip-address-plan.md), so this normally falls
+	// through to resolving by device ID — which is guaranteed to match the
+	// device's mDNS "<id>.local" name — then Name as a last resort.
 	if db != nil {
 		if d, err := db.GetDeviceByAny(ctx, token); err == nil {
-			// Prefer device.Host when present
-			host := d.Host()
-			if host == "" {
-				// Fallbacks
-				host = d.Name()
-				if host == "" {
-					host = d.Id()
+			for _, candidate := range []string{d.Host(), d.Id(), d.Name()} {
+				if candidate == "" {
+					continue
 				}
-			}
-			if net.ParseIP(host) != nil {
-				ip := net.ParseIP(host)
-				if v4 := ip.To4(); v4 != nil {
-					return v4, nil
+				if ip := net.ParseIP(candidate); ip != nil {
+					if v4 := ip.To4(); v4 != nil {
+						return v4, nil
+					}
+					continue
 				}
-			} else if resolver != nil {
-				q := host
-				if strings.HasSuffix(strings.ToLower(q), ".local") {
-					q = strings.TrimSuffix(q, ".local")
+				if resolver == nil {
+					continue
 				}
+				q := strings.TrimSuffix(strings.ToLower(candidate), ".local")
 				if ips, err := resolver.LookupHost(ctx, log, q); err == nil {
 					if ip := pickV4(ips); ip != nil {
 						return ip, nil

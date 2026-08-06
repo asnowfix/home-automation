@@ -40,6 +40,16 @@ var PoolKVSKeys = map[string]string{
 	"mid_rpm":               "script/pool-pump/mid-rpm",        // 26 chars ✓
 	"high_rpm":              "script/pool-pump/high-rpm",       // 27 chars ✓
 	"max_temp":              "script/pool-pump/max-temp",       // 27 chars ✓
+
+	// Solar-driven hysteresis (#405)
+	"solar_enabled":           "script/pool-pump/solar-enabled",      // 30 chars ✓
+	"solar_start_threshold_w": "script/pool-pump/solar-start-w",      // 30 chars ✓
+	"solar_stop_threshold_w":  "script/pool-pump/solar-stop-w",       // 29 chars ✓
+	"solar_start_delay_ms":    "script/pool-pump/solar-start-delay",  // 34 chars ✓
+	"solar_stop_delay_ms":     "script/pool-pump/solar-stop-delay",   // 33 chars ✓
+	"solar_min_turnover":      "script/pool-pump/solar-min-turnover", // 35 chars ✓
+	"solar_max_turnover":      "script/pool-pump/solar-max-turnover", // 35 chars ✓
+	"solar_stale_ms":          "script/pool-pump/solar-stale-ms",     // 31 chars ✓
 }
 
 // PoolService handles pool pump operations
@@ -75,8 +85,19 @@ type SetupOptions struct {
 	MidRpm               int
 	HighRpm              int
 	MaxTemp              float64
-	ForceUpload          bool
-	NoMinify             bool
+
+	// Solar-driven hysteresis (#405)
+	SolarEnabled         bool
+	SolarStartThresholdW int
+	SolarStopThresholdW  int
+	SolarStartDelayMs    int
+	SolarStopDelayMs     int
+	SolarMinTurnover     int
+	SolarMaxTurnover     int
+	SolarStaleMs         int
+
+	ForceUpload bool
+	NoMinify    bool
 }
 
 // Setup configures the pool pump system on all specified devices
@@ -163,6 +184,16 @@ func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *sh
 		PoolKVSKeys["mid_rpm"]:               fmt.Sprintf("%d", opts.MidRpm),
 		PoolKVSKeys["high_rpm"]:              fmt.Sprintf("%d", opts.HighRpm),
 		PoolKVSKeys["max_temp"]:              fmt.Sprintf("%.1f", opts.MaxTemp),
+
+		// Solar-driven hysteresis (#405)
+		PoolKVSKeys["solar_enabled"]:           fmt.Sprintf("%t", opts.SolarEnabled),
+		PoolKVSKeys["solar_start_threshold_w"]: fmt.Sprintf("%d", opts.SolarStartThresholdW),
+		PoolKVSKeys["solar_stop_threshold_w"]:  fmt.Sprintf("%d", opts.SolarStopThresholdW),
+		PoolKVSKeys["solar_start_delay_ms"]:    fmt.Sprintf("%d", opts.SolarStartDelayMs),
+		PoolKVSKeys["solar_stop_delay_ms"]:     fmt.Sprintf("%d", opts.SolarStopDelayMs),
+		PoolKVSKeys["solar_min_turnover"]:      fmt.Sprintf("%d", opts.SolarMinTurnover),
+		PoolKVSKeys["solar_max_turnover"]:      fmt.Sprintf("%d", opts.SolarMaxTurnover),
+		PoolKVSKeys["solar_stale_ms"]:          fmt.Sprintf("%d", opts.SolarStaleMs),
 	}
 
 	// Set KVS configuration values with delays to avoid overloading device
@@ -423,6 +454,8 @@ func (s *PoolService) setComponentNames(ctx context.Context, via types.Channel, 
 var knownPoolPumpStateKeys = []string{
 	"script/pool-pump/active-output",
 	"script/pool-pump/schedule-mode",
+	"script/pool-pump/runtime-sec",    // runtime_today_sec: cumulative pump-on seconds today (#402)
+	"script/pool-pump/turnover-today", // turnover_today: today's achieved water-volume turnovers (#402)
 }
 
 // UpdateResult holds the outcome of auditing/updating a single device
@@ -758,6 +791,14 @@ func (s *PoolService) RemoveDevice(ctx context.Context, via types.Channel, sd *s
 		PoolKVSKeys["mid_rpm"],
 		PoolKVSKeys["high_rpm"],
 		PoolKVSKeys["max_temp"],
+		PoolKVSKeys["solar_enabled"],
+		PoolKVSKeys["solar_start_threshold_w"],
+		PoolKVSKeys["solar_stop_threshold_w"],
+		PoolKVSKeys["solar_start_delay_ms"],
+		PoolKVSKeys["solar_stop_delay_ms"],
+		PoolKVSKeys["solar_min_turnover"],
+		PoolKVSKeys["solar_max_turnover"],
+		PoolKVSKeys["solar_stale_ms"],
 	}
 
 	for _, key := range kvsKeys {

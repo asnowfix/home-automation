@@ -232,6 +232,62 @@ Devices running a pre-#230 version of the script have a forecast URL without `da
 
 ---
 
+## Solar-Driven Hysteresis (#405)
+
+Layers a solar start/stop hysteresis on top of the existing forecast-driven schedule — **strictly additive**, never a replacement scheduler. When solar is disabled, absent, or stale, the schedule above runs exactly as if this feature didn't exist.
+
+### Data source
+
+The daemon publishes a retained MQTT topic `myhome/energy/solar/available` (see #403):
+```json
+{ "available_w": 1230, "ts": 1732650000, "sources": [{"name":"beem","watts":1230,"stale":false}] }
+```
+`ts` is unix-epoch-seconds — the time the daemon *computed* the value, not when this script received it. `sources` is optional debug detail the script ignores.
+
+### Staleness is judged from `ts`, not receipt time
+
+MQTT delivers retained messages to a new subscriber immediately, no matter how old they are. If the daemon published a value and then died, and this script rebooted and re-subscribed hours or days later, it would receive that stale retained message immediately on subscribe. Tracking `Date.now()` at *message-receipt* time as the freshness marker would make that stale value look perfectly fresh — defeating the entire point of a staleness check.
+
+Instead, `SOLAR.publishedTs` is derived from the payload's own `ts` field (converted to ms), and `checkSolarHysteresis()` compares `Date.now() - SOLAR.publishedTs` against `CONFIG.solarStaleMs`. `SOLAR.lastMsgTs` (receipt time) is tracked separately for debugging only and never feeds the staleness decision.
+
+### Hysteresis state machine
+
+Ported from the (now-deleted) Go `SolarAutomation.step()` state machine, but calling this script's own `doStart(speed, reason)` / `doStop(reason)` instead of a raw `Switch.Set` — so the fuse, `isMyTurnToRun()`, and water-supply protection remain in force for solar-triggered runs exactly as for scheduled/manual runs.
+
+| State | Trigger | Action |
+|-------|---------|--------|
+| Off, solar ≥ `solar-start-w` for `solar-start-delay` ms | and hard ceiling not reached | `doStart(preferredSpeed, ...)` |
+| On, hard ceiling reached | (any solar level) | `doStop(...)` — always wins |
+| On, soft target reached | and solar < `solar-start-w` | `doStop(...)` — solar gone after meeting the daily minimum |
+| On, solar < `solar-stop-w` for `solar-stop-delay` ms | | `doStop(...)` |
+| Topic stale or never received | | early return — schedule keeps running untouched |
+
+Re-evaluated on every solar MQTT message (`onSolarAvailable` calls `checkSolarHysteresis()` synchronously) **and** on a 30-second periodic tick (`SOLAR.tickTimer`, only allocated when `solarEnabled`), so staleness is detected even if the daemon dies mid-hold-delay and no further MQTT message ever arrives.
+
+### Soft-stop / hard-ceiling targets
+
+Both reuse `computeFlowRate()` (added by #402) so the speed→RPM mapping is only ever implemented once:
+```
+target = poolVolume × turnoverFraction / flowRate × 3600   (seconds)
+```
+- **Soft target** (`solar-min-turnover`, default 5): once reached, the pump keeps running while solar stays available, but stops as soon as solar drops below `solar-start-w`.
+- **Hard ceiling** (`solar-max-turnover`, default 7): the pump always stops (and won't solar-start) once reached, regardless of solar availability.
+
+### Config (KVS, all under `script/pool-pump/`)
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `solar-enabled` | `false` | Enables the whole feature; subscription and tick timer are only allocated when true |
+| `solar-start-w` | `500` | Available solar power (W) required to trigger a solar start |
+| `solar-stop-w` | `200` | Available solar power (W) below which a solar-driven run stops |
+| `solar-start-delay` | `300000` (5 min) | Solar must hold above the start threshold this long before starting |
+| `solar-stop-delay` | `600000` (10 min) | Solar must hold below the stop threshold this long before stopping |
+| `solar-min-turnover` | `5` | Soft-stop target (pool volumes/day) |
+| `solar-max-turnover` | `7` | Hard ceiling (pool volumes/day) |
+| `solar-stale-ms` | `300000` (5 min) | Treat the topic as stale (fall back to schedule only) after this long without a **fresh-`ts`** message |
+
+---
+
 ## KVS Layout
 
 All keys use prefix `script/pool-pump/` (≤ 32 chars total).
@@ -259,18 +315,29 @@ All keys use prefix `script/pool-pump/` (≤ 32 chars total).
 | `mid-rpm`        | `2600` | Variator RPM setting for mid speed |
 | `high-rpm`       | `2900` | Variator RPM setting for high speed |
 | `max-temp`       | `35`  | °C at which run time = one full turnover |
+| `solar-enabled`  | `false` | Enable solar-driven start/stop (see #405) |
+| `solar-start-w`  | `500` | Solar power (W) required to trigger a solar start |
+| `solar-stop-w`   | `200` | Solar power (W) below which a solar-driven run stops |
+| `solar-start-delay` | `300000` | Hold time (ms) above start threshold before starting |
+| `solar-stop-delay`  | `600000` | Hold time (ms) below stop threshold before stopping |
+| `solar-min-turnover` | `5` | Soft-stop target (pool volumes/day) |
+| `solar-max-turnover` | `7` | Hard ceiling (pool volumes/day) |
+| `solar-stale-ms` | `300000` | Treat solar topic as stale after this long without a fresh `ts` |
 
 ### State (managed by script, per device)
 | Key | Notes |
 |-----|-------|
 | `active-output` | `-1` or switch ID currently active |
 | `schedule-mode` | `"summer"` or `"winter"` |
+| `runtime-sec` | Cumulative pump-on seconds today (see #402) |
+| `turnover-today` | Pool-volume turnovers achieved today (see #402) |
 
 ### Script.storage (script-private)
 | Key | Notes |
 |-----|-------|
 | `forecast-url` | Open-Meteo URL built from GPS coordinates |
 | `my-device-id` | Cached device ID from `Shelly.getDeviceInfo().id` |
+| `runtime-date` / `runtime-sec` | Boot-safe mirror of today's runtime counter (see #402) |
 
 ---
 
@@ -301,8 +368,10 @@ Shelly scripts are limited to **5 timers**. Current usage:
 |-------|---------|---------|
 | `TASK_TIMER` | Task queue (200 ms recurring) | Only while queue is non-empty |
 | `STATE.graceTimer` | Inter-device grace delay | During switchover only |
+| `STATE.runtimeFlushTimer` | Runtime checkpoint (60 s recurring, see #402) | Only while the pump is running |
+| `SOLAR.tickTimer` | Solar hysteresis re-evaluation (30 s recurring, see #405) | Only while `solar-enabled` is true |
 
-Peak simultaneous: **2** (task queue + grace timer). Well within the 5-timer limit.
+Peak simultaneous: **4** (task queue + grace timer + runtime flush timer + solar tick timer, verified at implementation time). Well within the 5-timer limit.
 
 ---
 
@@ -310,7 +379,9 @@ Peak simultaneous: **2** (task queue + grace timer). Well within the 5-timer lim
 
 | Resource | Limit | Used |
 |----------|-------|------|
-| Timers | 5 | ≤ 2 |
+| Timers | 5 | ≤ 4 |
 | Event subscriptions | 5 | 1 (`addEventHandler`) |
-| MQTT subscriptions | 10 | ≤ 4 (1 per peer switch topic) |
-| KVS keys | — | ≤ 20 config + 2 state |
+| MQTT subscriptions | 10 | ≤ 5 (up to 4 peer switch-status topics — see note below — + 1 solar-available topic when `solar-enabled`) |
+| KVS keys | — | ≤ 28 config + 4 state |
+
+**Peer switch-status subscription count**: `ctl pool add`/`setupDevice()` writes *both* `pro3-id` and `pro1-id` KVS keys identically on every device in the mesh (including a device's own ID, when it is itself the pro3 or pro1). As a result, a Pro3 device subscribes to 1 pro1 topic *plus* 3 topics for its own switches (harmless but redundant self-subscription), and a Pro1 device subscribes to 3 pro3 topics *plus* 1 topic for its own switch — 4 peer subscriptions on either device type today, independent of this issue. Verified empirically at implementation time (not just estimated from the issue text, which assumed 2).

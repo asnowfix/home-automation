@@ -82,6 +82,12 @@ Read the skill before writing or reviewing any Shelly JavaScript, or before touc
 follows is only the set of rules whose violation has actually destroyed something — kept here
 because it must not depend on a skill triggering.
 
+**Reducing a script's heap footprint** is its own methodology, longer than fits here:
+`docs/shelly-heap-allocation.md` covers where the ~23 KB heap actually goes, allocation sources
+ranked by measured cost, and the differential measurement recipe. `docs/433-pool-pump-heap-proposal.md`
+is the dated, superseded worked example that methodology produced for `pool-pump.js` — read its status
+header before treating any of its numbers as current.
+
 ### The kill list
 
 Each of these has terminated a running script on real hardware. A dead script on

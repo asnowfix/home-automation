@@ -106,6 +106,40 @@ func pro3ComponentStatus() map[string]interface{} {
 	}
 }
 
+// Timeouts for the goja-backed pool-pump tests. These are deliberately
+// generous rather than tight: every waitFor() below returns the moment its
+// predicate holds, so a large budget costs nothing on a passing run and only
+// decides how much scheduler jitter the suite tolerates before calling a
+// working script broken.
+//
+// They were raised after TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover
+// failed under `make test`'s parallel workspace load (see #435 "Problem 2"):
+// init consumed ~7.7s of a 9s budget and the 3s post-event wait then elapsed
+// before the script had processed the injected input event, producing
+// "pump did not stop after water supply ON" — a timing verdict wearing a
+// behavioural failure's clothing. The same test passes 3/3 in isolation.
+const (
+	// initTimeout bounds the async KVS/schedule init chain reaching the point
+	// where the script has written schedule-mode.
+	initTimeout = 25 * time.Second
+	// eventTimeout bounds one injected event (input, MQTT, button) travelling
+	// through the script to its resulting KVS write.
+	eventTimeout = 10 * time.Second
+)
+
+// poolPumpRunContext bounds the script VM's lifetime. It is intentionally far
+// larger than any single test's phase budgets: the waitFor() calls are what
+// assert timing, and they produce precise failure messages. When this context
+// is the binding deadline instead, the VM is killed mid-test and whatever
+// assertion runs next reports a behavioural fault that never happened.
+func poolPumpRunContext(t *testing.T) (context.Context, context.CancelFunc) {
+	t.Helper()
+	return context.WithTimeout(
+		logr.NewContext(context.Background(), testr.New(t)),
+		2*time.Minute,
+	)
+}
+
 func waitFor(deadline time.Duration, pollInterval time.Duration, pred func() bool) bool {
 	end := time.Now().Add(deadline)
 	for time.Now().Before(end) {
@@ -189,10 +223,7 @@ func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
 	mqtt.SetClient(mqtt.NewMockClient())
 	t.Cleanup(mqtt.ResetClient)
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		10*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	deviceState := &script.DeviceState{
@@ -207,7 +238,7 @@ func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	ok := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	ok := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -241,10 +272,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 
 	// 20s ceiling: init (up to 9s) + two water-supply transitions (up to 5s
 	// each, see below) — generous headroom, not the expected runtime.
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		20*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -252,7 +280,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -274,7 +302,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	// under concurrent-package CI load (see AGENTS.md "stress-test before
 	// pushing timing-sensitive tests").
 	injector <- shellyInputEvent(0, true)
-	stopped := waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	})
@@ -284,7 +312,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	}
 
 	injector <- shellyInputEvent(0, false)
-	restored := waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+	restored := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "2"
 	})
@@ -317,10 +345,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -329,7 +354,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 	}()
 
 	// Wait for init.
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -346,7 +371,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 
 	// Press 1: off → 0
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0"
 	}) {
@@ -355,7 +380,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 
 	// Press 2: 0 → 1
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "1"
 	}) {
@@ -364,7 +389,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 
 	// Press 3: 1 → 2
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "2"
 	}) {
@@ -373,7 +398,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 
 	// Press 4: 2 → off (exercises turnOffAllSwitches)
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	}) {
@@ -419,10 +444,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	// unaffected by #402 — cycleOutputs() bypasses activateOutput()) + two
 	// water-supply transitions (up to 5s each, see below) — generous
 	// headroom, not the expected runtime.
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		25*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -431,7 +453,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	}()
 
 	// Wait for init.
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -448,7 +470,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 
 	// Button press: toggle ON
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0"
 	}) {
@@ -457,7 +479,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 
 	// Button press: toggle OFF (exercises turnOffAllSwitches on Pro1)
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	}) {
@@ -466,7 +488,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 
 	// Toggle ON again for water supply test.
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0"
 	}) {
@@ -478,7 +500,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	// transition's own active-output write — see the comment in
 	// TestPoolPump_WaterSupplyRestoresSpeed.
 	injector <- shellyInputEvent(0, true)
-	if !waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	}) {
@@ -487,7 +509,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 
 	// Water supply OFF → should restore switch:0.
 	injector <- shellyInputEvent(0, false)
-	if !waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0"
 	}) {
@@ -590,10 +612,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -601,7 +620,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -620,7 +639,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 
 	// Water supply ON stops the pump: activateOutput(-1, ...) -> stopRuntimeAccounting().
 	injector <- shellyInputEvent(0, true)
-	stopped := waitFor(3*time.Second, 50*time.Millisecond, func() bool {
+	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	})
@@ -682,10 +701,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -693,7 +709,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -708,7 +724,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	injector <- shellyInputEvent(0, true)
-	stopped := waitFor(3*time.Second, 50*time.Millisecond, func() bool {
+	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	})
@@ -765,10 +781,7 @@ func TestPoolPump_RuntimeAccounting_StaleDateResetsOnBoot(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		10*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -776,7 +789,7 @@ func TestPoolPump_RuntimeAccounting_StaleDateResetsOnBoot(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -850,10 +863,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		20*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -861,7 +871,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -876,7 +886,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		t.Fatalf("publish failed: %v", err)
 	}
 
-	started := waitFor(3*time.Second, 50*time.Millisecond, func() bool {
+	started := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0" // eco switch, per controllerKVS()'s eco-speed=0
 	})
@@ -891,7 +901,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		t.Fatalf("publish failed: %v", err)
 	}
 
-	stopped := waitFor(3*time.Second, 50*time.Millisecond, func() bool {
+	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	})
@@ -930,10 +940,7 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -941,7 +948,7 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -993,10 +1000,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1004,7 +1008,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -1015,7 +1019,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 	}
 
 	injector <- shellyButtonEvent()
-	started := waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	started := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0"
 	})
@@ -1061,10 +1065,7 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1072,7 +1073,7 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -1232,10 +1233,7 @@ func poolPumpRewriteResult(t *testing.T, deviceState *script.DeviceState, wantOu
 	mqtt.SetClient(mqtt.NewMockClient())
 	t.Cleanup(mqtt.ResetClient)
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		30*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	buf := readPoolPumpScript(t)

@@ -98,6 +98,15 @@ func zonePlanIDs(t *testing.T, raw string) map[int]int {
 func TestGarden_LawnFiresTogetherBedsIndependent(t *testing.T) {
 	vm := gardenVM(t)
 
+	// The lawn zones ship disabled (23e7307, "disable zone-0/1 by default, as
+	// KVS is not read (yet)"), and computeZonePlan() skips disabled zones
+	// before any grouping logic runs — so with the shipped defaults this test
+	// would assert nothing at all. Enable them explicitly: what is under test
+	// here is the grouping rule, not which zones happen to be switched on in
+	// production. TestGarden_DisabledZoneStaysOutOfPlan below covers the
+	// shipped default itself.
+	mustEval(t, vm, `ZONES[0].enabled = true; ZONES[1].enabled = true;`)
+
 	// Zone 0 above its 12mm trigger, zone 1 below it (but in the same "lawn"
 	// group as zone 0), zone 2 (massifs) below its 8mm trigger.
 	mustEval(t, vm, `storeStorageValue(deficitKey(0), 15);`)
@@ -125,6 +134,12 @@ func TestGarden_LawnFiresTogetherBedsIndependent(t *testing.T) {
 // the script's current default is instead of silently going stale.
 func TestGarden_GroupCadenceGate(t *testing.T) {
 	vm := gardenVM(t)
+
+	// Same reason as above: with the shipped defaults the lawn zones are
+	// disabled, which would make this test's two "lawn stays gated"
+	// assertions pass vacuously — they would hold even if cadence gating were
+	// completely broken. Enable them so the gate is actually exercised.
+	mustEval(t, vm, `ZONES[0].enabled = true; ZONES[1].enabled = true;`)
 
 	// All zones comfortably over trigger so deficit never gates the result —
 	// only the group-cadence check should determine inclusion/exclusion.
@@ -160,5 +175,44 @@ func TestGarden_GroupCadenceGate(t *testing.T) {
 	}
 	if _, ok := plan[2]; !ok {
 		t.Errorf("expected massifs (zone 2) to be due again, got %v", plan)
+	}
+}
+
+// TestGarden_DisabledZoneStaysOutOfPlan covers the shipped ZONE_DEFAULTS
+// directly: the lawn zones are disabled (23e7307, "disable zone-0/1 by
+// default, as KVS is not read (yet)"), so they must not appear in a plan even
+// when their deficit is far over trigger, while the enabled beds zone still
+// does.
+//
+// This exists so the default is asserted by a test whose subject it actually
+// is. Before this, the only thing standing on it was
+// TestGarden_LawnFiresTogetherBedsIndependent — a grouping test — which
+// simply started failing when the default flipped, blocking every PR into
+// main rather than reporting a garden regression.
+func TestGarden_DisabledZoneStaysOutOfPlan(t *testing.T) {
+	vm := gardenVM(t)
+
+	if enabled := mustEval(t, vm, `ZONES[0].enabled || ZONES[1].enabled`).ToBoolean(); enabled {
+		t.Fatalf("expected the shipped defaults to leave both lawn zones disabled; " +
+			"if that changed deliberately, update this test and the two above it")
+	}
+
+	// Every zone far over its trigger: only the enabled/disabled flag can
+	// decide who makes the plan.
+	mustEval(t, vm, `storeStorageValue(deficitKey(0), 25);`)
+	mustEval(t, vm, `storeStorageValue(deficitKey(1), 25);`)
+	mustEval(t, vm, `storeStorageValue(deficitKey(2), 25);`)
+
+	raw := mustEval(t, vm, `JSON.stringify(computeZonePlan())`).String()
+	plan := zonePlanIDs(t, raw)
+
+	if _, ok := plan[0]; ok {
+		t.Errorf("disabled lawn zone 0 must stay out of the plan, got %v", plan)
+	}
+	if _, ok := plan[1]; ok {
+		t.Errorf("disabled lawn zone 1 must stay out of the plan, got %v", plan)
+	}
+	if _, ok := plan[2]; !ok {
+		t.Errorf("enabled beds zone 2 should still be planned, got %v", plan)
 	}
 }

@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -103,6 +106,40 @@ func pro3ComponentStatus() map[string]interface{} {
 	}
 }
 
+// Timeouts for the goja-backed pool-pump tests. These are deliberately
+// generous rather than tight: every waitFor() below returns the moment its
+// predicate holds, so a large budget costs nothing on a passing run and only
+// decides how much scheduler jitter the suite tolerates before calling a
+// working script broken.
+//
+// They were raised after TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover
+// failed under `make test`'s parallel workspace load (see #435 "Problem 2"):
+// init consumed ~7.7s of a 9s budget and the 3s post-event wait then elapsed
+// before the script had processed the injected input event, producing
+// "pump did not stop after water supply ON" — a timing verdict wearing a
+// behavioural failure's clothing. The same test passes 3/3 in isolation.
+const (
+	// initTimeout bounds the async KVS/schedule init chain reaching the point
+	// where the script has written schedule-mode.
+	initTimeout = 25 * time.Second
+	// eventTimeout bounds one injected event (input, MQTT, button) travelling
+	// through the script to its resulting KVS write.
+	eventTimeout = 10 * time.Second
+)
+
+// poolPumpRunContext bounds the script VM's lifetime. It is intentionally far
+// larger than any single test's phase budgets: the waitFor() calls are what
+// assert timing, and they produce precise failure messages. When this context
+// is the binding deadline instead, the VM is killed mid-test and whatever
+// assertion runs next reports a behavioural fault that never happened.
+func poolPumpRunContext(t *testing.T) (context.Context, context.CancelFunc) {
+	t.Helper()
+	return context.WithTimeout(
+		logr.NewContext(context.Background(), testr.New(t)),
+		2*time.Minute,
+	)
+}
+
 func waitFor(deadline time.Duration, pollInterval time.Duration, pred func() bool) bool {
 	end := time.Now().Add(deadline)
 	for time.Now().Before(end) {
@@ -186,10 +223,7 @@ func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
 	mqtt.SetClient(mqtt.NewMockClient())
 	t.Cleanup(mqtt.ResetClient)
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		10*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	deviceState := &script.DeviceState{
@@ -204,7 +238,7 @@ func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	ok := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	ok := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -238,10 +272,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 
 	// 20s ceiling: init (up to 9s) + two water-supply transitions (up to 5s
 	// each, see below) — generous headroom, not the expected runtime.
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		20*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -249,7 +280,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -271,7 +302,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	// under concurrent-package CI load (see AGENTS.md "stress-test before
 	// pushing timing-sensitive tests").
 	injector <- shellyInputEvent(0, true)
-	stopped := waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	})
@@ -281,7 +312,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	}
 
 	injector <- shellyInputEvent(0, false)
-	restored := waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+	restored := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "2"
 	})
@@ -314,10 +345,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -326,7 +354,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 	}()
 
 	// Wait for init.
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -343,7 +371,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 
 	// Press 1: off → 0
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0"
 	}) {
@@ -352,7 +380,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 
 	// Press 2: 0 → 1
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "1"
 	}) {
@@ -361,7 +389,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 
 	// Press 3: 1 → 2
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "2"
 	}) {
@@ -370,7 +398,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 
 	// Press 4: 2 → off (exercises turnOffAllSwitches)
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	}) {
@@ -416,10 +444,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	// unaffected by #402 — cycleOutputs() bypasses activateOutput()) + two
 	// water-supply transitions (up to 5s each, see below) — generous
 	// headroom, not the expected runtime.
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		25*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -428,7 +453,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	}()
 
 	// Wait for init.
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -445,7 +470,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 
 	// Button press: toggle ON
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0"
 	}) {
@@ -454,7 +479,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 
 	// Button press: toggle OFF (exercises turnOffAllSwitches on Pro1)
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	}) {
@@ -463,7 +488,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 
 	// Toggle ON again for water supply test.
 	injector <- shellyButtonEvent()
-	if !waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0"
 	}) {
@@ -475,7 +500,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	// transition's own active-output write — see the comment in
 	// TestPoolPump_WaterSupplyRestoresSpeed.
 	injector <- shellyInputEvent(0, true)
-	if !waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	}) {
@@ -484,7 +509,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 
 	// Water supply OFF → should restore switch:0.
 	injector <- shellyInputEvent(0, false)
-	if !waitFor(5*time.Second, 50*time.Millisecond, func() bool {
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0"
 	}) {
@@ -587,10 +612,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -598,7 +620,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -617,7 +639,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 
 	// Water supply ON stops the pump: activateOutput(-1, ...) -> stopRuntimeAccounting().
 	injector <- shellyInputEvent(0, true)
-	stopped := waitFor(3*time.Second, 50*time.Millisecond, func() bool {
+	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	})
@@ -679,10 +701,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -690,7 +709,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -705,7 +724,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 	time.Sleep(1 * time.Second)
 
 	injector <- shellyInputEvent(0, true)
-	stopped := waitFor(3*time.Second, 50*time.Millisecond, func() bool {
+	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	})
@@ -762,10 +781,7 @@ func TestPoolPump_RuntimeAccounting_StaleDateResetsOnBoot(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		10*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -773,7 +789,7 @@ func TestPoolPump_RuntimeAccounting_StaleDateResetsOnBoot(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -847,10 +863,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		20*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -858,7 +871,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -873,7 +886,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		t.Fatalf("publish failed: %v", err)
 	}
 
-	started := waitFor(3*time.Second, 50*time.Millisecond, func() bool {
+	started := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0" // eco switch, per controllerKVS()'s eco-speed=0
 	})
@@ -888,7 +901,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		t.Fatalf("publish failed: %v", err)
 	}
 
-	stopped := waitFor(3*time.Second, 50*time.Millisecond, func() bool {
+	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "-1"
 	})
@@ -927,10 +940,7 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -938,7 +948,7 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -990,10 +1000,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1001,7 +1008,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -1012,7 +1019,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 	}
 
 	injector <- shellyButtonEvent()
-	started := waitFor(2*time.Second, 50*time.Millisecond, func() bool {
+	started := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVS["script/pool-pump/active-output"]
 		return ok && v == "0"
 	})
@@ -1058,10 +1065,7 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
-		15*time.Second,
-	)
+	ctx, cancel := poolPumpRunContext(t)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1069,7 +1073,7 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
-	initDone := waitFor(9*time.Second, 200*time.Millisecond, func() bool {
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
 		return exists
 	})
@@ -1094,5 +1098,336 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 
 	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "-1" {
 		t.Fatalf("stale ts: expected pump to stay off (stale detected immediately on receipt), got active-output=%v", v)
+	}
+}
+
+// === Schedule-rewrite re-evaluation (#441) ===
+//
+// updateScheduleMode() rewrites the morning-start / evening-stop schedule jobs
+// from the day's forecast. Before #441 nothing re-evaluated the pump
+// afterwards, so a rewrite that moved the start into the past silently skipped
+// the whole day's filtration: handleMorningStart() only ever fires at its
+// scheduled instant, and an instant that has already passed never fires. That
+// is exactly what happened on the production pump on 2026-08-06.
+//
+// These tests drive the real path — init → handleDailyCheck() →
+// performDailyModeCheck() → forecast → decideModeFromForecast() →
+// updateScheduleMode() — against a local forecast server, and assert on the
+// pump state that results.
+
+// poolPumpForecastServer serves an Open-Meteo response shaped the way
+// pool-pump.js's onForecast() parses it: 24 hourly temperatures whose index is
+// the hour of day (so the index of the maximum becomes STATE.peakForecastHour)
+// plus one daily sunrise/sunset pair, which decideModeFromForecast() turns
+// into the window's start floor (sunrise + 1h) and stop ceiling (sunset - 0.5h).
+//
+// Local on purpose: the forecast fetch is a plain Shelly.call("HTTP.GET"),
+// which the emulator executes for real. Pointing it at a test server keeps
+// these tests deterministic and offline.
+func poolPumpForecastServer(t *testing.T, peakHour int, sunrise, sunset string) *httptest.Server {
+	t.Helper()
+
+	temps := make([]float64, 24)
+	for i := range temps {
+		temps[i] = 25
+	}
+	// Above poolPumpWindowKVS's max-temp, so computeRunHours()'s temperature
+	// scale clamps to 1 and run hours land exactly on the configured base hours.
+	temps[peakHour] = 40
+
+	body, err := json.Marshal(map[string]interface{}{
+		"hourly": map[string]interface{}{"temperature_2m": temps},
+		"daily": map[string]interface{}{
+			"sunrise": []string{"2026-08-07T" + sunrise},
+			"sunset":  []string{"2026-08-07T" + sunset},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to build forecast body: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// poolPumpWindowKVS is pro1KVS() with the pool geometry rigged so
+// computeRunHours() returns exactly runHours: flow rate is
+// max-flow-rate × (eco-rpm / max-rpm) = 1 m³/h, and base hours are
+// pool-volume × turnover / flow = runHours.
+func poolPumpWindowKVS(runHours float64) map[string]interface{} {
+	kvs := pro1KVS()
+	kvs["script/pool-pump/pool-volume"] = strconv.FormatFloat(runHours, 'f', -1, 64)
+	kvs["script/pool-pump/turnover"] = "1"
+	kvs["script/pool-pump/max-flow-rate"] = "1"
+	kvs["script/pool-pump/eco-rpm"] = "2900"
+	kvs["script/pool-pump/max-rpm"] = "2900"
+	kvs["script/pool-pump/max-temp"] = "35"
+	kvs["script/pool-pump/temp-threshold"] = "20"
+	return kvs
+}
+
+// poolPumpTimespec renders the cron form makeTimespec() produces.
+func poolPumpTimespec(h, m int) string {
+	return fmt.Sprintf("0 %d %d * * SUN,MON,TUE,WED,THU,FRI,SAT", m, h)
+}
+
+// poolPumpSummerSchedules is a complete summer-mode job set: a daily check, a
+// morning/evening pair at the given times, and the two night jobs already
+// disabled — which is what summer mode looks like on a real device.
+func poolPumpSummerSchedules(start, stop time.Time) []map[string]interface{} {
+	job := func(id int, code, timespec string, enable bool) map[string]interface{} {
+		return map[string]interface{}{
+			"id": id, "enable": enable, "timespec": timespec,
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": 1, "code": code},
+			}},
+		}
+	}
+	return []map[string]interface{}{
+		job(1, "handleDailyCheck()", "@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT", true),
+		job(2, "handleMorningStart()", poolPumpTimespec(start.Hour(), start.Minute()), true),
+		job(3, "handleEveningStop()", poolPumpTimespec(stop.Hour(), stop.Minute()), true),
+		job(4, "handleNightStart()", poolPumpTimespec(23, 15), false),
+		job(5, "handleNightStop()", poolPumpTimespec(0, 15), false),
+	}
+}
+
+// poolPumpScheduleTimespec reads back the timespec currently on the job whose
+// script.eval code matches, so a test can prove the rewrite actually landed
+// before asserting on what the rewrite should have caused.
+func poolPumpScheduleTimespec(schedules []map[string]interface{}, code string) string {
+	for _, job := range schedules {
+		calls, ok := job["calls"].([]interface{})
+		if !ok || len(calls) == 0 {
+			continue
+		}
+		call, ok := calls[0].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		params, ok := call["params"].(map[string]interface{})
+		if !ok || params["code"] != code {
+			continue
+		}
+		if ts, ok := job["timespec"].(string); ok {
+			return ts
+		}
+	}
+	return ""
+}
+
+// poolPumpRewriteResult runs the script against the given fixture, waits for
+// the schedule rewrite to land, then reports the active-output the script
+// settled on. wantOutput is what the caller expects; the helper polls for it
+// so a passing test finishes quickly and a failing one still reports the
+// value actually reached.
+func poolPumpRewriteResult(t *testing.T, deviceState *script.DeviceState, wantOutput string) (string, []map[string]interface{}) {
+	t.Helper()
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	buf := readPoolPumpScript(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	// The rewrite has to land before the reconciliation it triggers can be
+	// judged, so wait for the morning job's timespec to change first.
+	initial := poolPumpScheduleTimespec(deviceState.Schedules, "handleMorningStart()")
+	if !waitFor(15*time.Second, 100*time.Millisecond, func() bool {
+		return poolPumpScheduleTimespec(deviceState.Schedules, "handleMorningStart()") != initial
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("schedule rewrite never happened (morning start still %q)", initial)
+	}
+
+	// Then give the reconciliation its own window to act — or to provably not.
+	waitFor(8*time.Second, 100*time.Millisecond, func() bool {
+		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		return ok && v == wantOutput
+	})
+
+	got, _ := deviceState.KVS["script/pool-pump/active-output"].(string)
+	schedules := deviceState.Schedules
+	cancel()
+	<-done
+	return got, schedules
+}
+
+// Two window shapes, both derived from the forecast by decideModeFromForecast():
+//
+//   - wide: sunrise 00:00 → start floor 01:00; sunset 23:59 → stop ceiling
+//     23:29; peak at noon with 22.48 run hours. The unclamped window starts
+//     before the floor, so it is pinned to [01:00, 23:29) — containing almost
+//     any "now".
+//   - narrow: peak at 02:00 with 0.1 run hours → [01:57, 02:03), excluding
+//     almost any "now".
+const (
+	poolPumpWideRunHours   = 22.48
+	poolPumpWidePeakHour   = 12
+	poolPumpWideStartMin   = 60   // 01:00
+	poolPumpWideStopMin    = 1409 // 23:29
+	poolPumpNarrowRunHours = 0.1
+	poolPumpNarrowPeakHour = 2
+	poolPumpNarrowStartMin = 117 // 01:57
+	poolPumpNarrowStopMin  = 123 // 02:03
+)
+
+// nowMinutes is the minutes-since-midnight value pool-pump.js's
+// isWithinRunWindow() computes from new Date().
+func nowMinutes() int {
+	now := time.Now()
+	return now.Hour()*60 + now.Minute()
+}
+
+// skipUnlessNowInside guards the one wall-clock dependency these tests cannot
+// design away: pool-pump.js derives the window from a real forecast and
+// compares it against the device's real clock, and its own clamps refuse to
+// schedule a start before 01:00 — so "now is inside the window" is simply not
+// expressible during the midnight hour.
+func skipUnlessNowInside(t *testing.T, startMin, stopMin int) {
+	t.Helper()
+	if n := nowMinutes(); n < startMin || n >= stopMin {
+		t.Skipf("local time %02d:%02d is outside the [%d, %d) minute window this scenario builds",
+			n/60, n%60, startMin, stopMin)
+	}
+}
+
+func skipIfNowInside(t *testing.T, startMin, stopMin int) {
+	t.Helper()
+	if n := nowMinutes(); n >= startMin && n < stopMin {
+		t.Skipf("local time %02d:%02d falls inside the [%d, %d) minute window this scenario builds",
+			n/60, n%60, startMin, stopMin)
+	}
+}
+
+// A rewrite that moves the morning start from the future into the past, with
+// "now" inside the new window, must start the pump. This is the 2026-08-06
+// production failure: without the fix the pump stays off for the whole day.
+func TestPoolPump_ScheduleRewriteIntoPastStartsPump(t *testing.T) {
+	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro1ComponentStatus(), // pump off
+		// Old window: the start is still ahead of us, so nothing was due yet.
+		Schedules: poolPumpSummerSchedules(now.Add(2*time.Hour), now.Add(4*time.Hour)),
+	}
+
+	got, schedules := poolPumpRewriteResult(t, deviceState, "0")
+
+	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 0) {
+		t.Fatalf("expected morning start rewritten to 01:00, got %q", ts)
+	}
+	if got != "0" {
+		t.Fatalf("rewrite moved the start into the past with now inside the new window: "+
+			"expected the pump to start (active-output=0), got %q", got)
+	}
+}
+
+// The sunrise case, with no restart involved: the previous window has already
+// elapsed, the daily re-forecast rewrites it to one containing "now", and the
+// pump must start even though no schedule job fires.
+func TestPoolPump_SunriseRewriteStartsPump(t *testing.T) {
+	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro1ComponentStatus(), // pump off, correctly so
+		// Yesterday's window, entirely behind us.
+		Schedules: poolPumpSummerSchedules(now.Add(-5*time.Hour), now.Add(-4*time.Hour)),
+	}
+
+	got, _ := poolPumpRewriteResult(t, deviceState, "0")
+	if got != "0" {
+		t.Fatalf("sunrise rewrite brought now inside the window: "+
+			"expected the pump to start (active-output=0), got %q", got)
+	}
+}
+
+// The converse: a rewrite that moves the window off "now" must stop a pump
+// that is currently running, rather than leave it running until an
+// evening-stop instant that no longer matches anything.
+func TestPoolPump_ScheduleRewriteAwayStopsPump(t *testing.T) {
+	skipIfNowInside(t, poolPumpNarrowStartMin, poolPumpNarrowStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpNarrowPeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	cs := pro1ComponentStatus()
+	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true} // running
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpNarrowRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: cs,
+		// Old window contains "now", which is why the pump is running.
+		Schedules: poolPumpSummerSchedules(now.Add(-1*time.Hour), now.Add(1*time.Hour)),
+	}
+
+	got, schedules := poolPumpRewriteResult(t, deviceState, "-1")
+
+	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 57) {
+		t.Fatalf("expected morning start rewritten to 01:57, got %q", ts)
+	}
+	if got != "-1" {
+		t.Fatalf("rewrite moved the window off now: "+
+			"expected the running pump to stop (active-output=-1), got %q", got)
+	}
+}
+
+// Regression guard: a rewrite that leaves the pump correctly off — "now" is
+// outside both the old and the new window — must not start it.
+func TestPoolPump_ScheduleRewriteOutsideWindowDoesNotStartPump(t *testing.T) {
+	skipIfNowInside(t, poolPumpNarrowStartMin, poolPumpNarrowStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpNarrowPeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpNarrowRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro1ComponentStatus(), // pump off
+		Schedules:       poolPumpSummerSchedules(now.Add(-5*time.Hour), now.Add(-4*time.Hour)),
+	}
+
+	// Ask for "0" so the helper spends its full budget looking for a start
+	// that must never come.
+	got, _ := poolPumpRewriteResult(t, deviceState, "0")
+	if got != "-1" {
+		t.Fatalf("now is outside the rewritten window: "+
+			"expected the pump to stay off (active-output=-1), got %q", got)
 	}
 }

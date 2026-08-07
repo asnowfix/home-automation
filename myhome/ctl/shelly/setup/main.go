@@ -12,6 +12,7 @@ import (
 	"github.com/asnowfix/home-automation/hlog"
 	shellysetup "github.com/asnowfix/home-automation/internal/myhome/shelly/setup"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	shellyscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	mhmqtt "github.com/asnowfix/home-automation/myhome/mqtt"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
@@ -42,6 +43,8 @@ func init() {
 	Cmd.Flags().StringVar(&sta1Passwd, "sta1-passwd", "", "STA1 Password")
 	Cmd.Flags().StringVar(&apPasswd, "ap-passwd", "", "AP Password")
 	Cmd.Flags().StringVar(&deviceNameOverride, "name", "", "Set device name (overrides auto-derivation)")
+	Cmd.Flags().StringVar(&options.Flags.ScriptMinifierEngine, "script-minifier-engine", "tdewolff", "JS minifier engine for the watchdog.js upload: \"tdewolff\" (default, proven-safe) or \"esbuild\" (experimental)")
+	Cmd.Flags().BoolVar(&options.Flags.ScriptMangleTopLevel, "script-mangle-top-level", false, "Also mangle top-level JS identifiers (esbuild engine only); opt-in, see docs/configuration.md")
 }
 
 // isTimeoutError checks if an error is a timeout error
@@ -71,8 +74,10 @@ func setupDevicesByName(ctx context.Context, pattern string) error {
 // unless overridden by command-line flag.
 func getSetupConfig(ctx context.Context) (shellysetup.Config, error) {
 	cfg := shellysetup.Config{
-		MqttPort: 1883,
-		Resolver: mynet.MyResolver(hlog.Logger),
+		MqttPort:             1883,
+		Resolver:             mynet.MyResolver(hlog.Logger),
+		ScriptMinifierEngine: shellyscript.Engine(options.Flags.ScriptMinifierEngine),
+		ScriptMangleTopLevel: options.Flags.ScriptMangleTopLevel,
 	}
 
 	// Use parent's --mqtt-broker flag if specified, otherwise use current process MQTT broker

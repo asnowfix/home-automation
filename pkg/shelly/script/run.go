@@ -761,6 +761,21 @@ func (f *testEventForwarder) Handle(ctx context.Context, vm *goja.Runtime, msg [
 
 type methodFunc func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error)
 
+// scheduleID normalises a job's "id" field to an int. Jobs reach
+// DeviceState.Schedules either from a Go test fixture (int), from JSON
+// (float64) or from AddSchedule (int), so a bare type assertion is not enough.
+func scheduleID(v interface{}) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	}
+	return -1
+}
+
 func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 	return map[string]methodFunc{
 		"shelly.detectlocation": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
@@ -948,6 +963,67 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
 					result := map[string]interface{}{"id": id}
+					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
+				}
+			}
+			return nil, nil
+		},
+
+		// Schedule.Update — merge the given fields into an existing job.
+		// https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Schedule#scheduleupdate
+		// Without this, Shelly.call('Schedule.Update', ...) fell through to the
+		// unknown-method path: the callback fired with a null result and the
+		// job was never modified, so a script that rewrites its own schedule
+		// (pool-pump.js updateScheduleMode) appeared to succeed while
+		// Schedule.List kept returning the old window — see #441.
+		"schedule.update": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
+			paramsObj := params.ToObject(vm)
+			id := int(paramsObj.Get("id").ToInteger())
+			updates, _ := params.Export().(map[string]interface{})
+
+			var updated map[string]interface{}
+			for _, job := range deviceState.Schedules {
+				if scheduleID(job["id"]) != id {
+					continue
+				}
+				for k, v := range updates {
+					if k == "id" {
+						continue
+					}
+					job[k] = v
+				}
+				updated = job
+				break
+			}
+
+			if updated == nil {
+				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+					if callable, ok := goja.AssertFunction(callback); ok {
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(-105),
+							vm.ToValue(fmt.Sprintf("no schedule with id %d", id)), userdata)
+					}
+				}
+				return nil, nil
+			}
+
+			// Keep the schedule:N component view in step with the job, the
+			// same way Schedule.Create does.
+			if deviceState.ComponentStatus != nil {
+				deviceState.ComponentStatus[fmt.Sprintf("schedule:%d", id)] = map[string]interface{}{
+					"id":       id,
+					"enable":   updated["enable"],
+					"timespec": updated["timespec"],
+					"calls":    updated["calls"],
+				}
+			}
+
+			if deviceState.OnModified != nil {
+				deviceState.OnModified()
+			}
+
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					result := map[string]interface{}{"rev": 1}
 					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 				}
 			}

@@ -110,6 +110,27 @@ reader saw the same live-debugging session or chat history that motivated the is
 dependencies must be made explicit (e.g. "blocked by #123," "must land after #456") rather than
 implied by filing order or narrative context.
 
+### Sub-agents
+
+**Every sub-agent must persist its progress outside its own context**, incrementally, as it works —
+not only in its final report. A sub-agent can die mid-task (API error, spend limit, stall) and its
+worktree may be auto-removed if it never committed, taking every finding with it.
+
+When launching a sub-agent, give it exactly one of these and say which:
+
+- **A progress file** at a path you define (e.g. `docs/<issue>-progress.md`, or a scratchpad path),
+  appended after each meaningful step: what was tried, what was measured, what was ruled out.
+- **Comments on the GitHub issue** it was given as its objective — preferred when the work is tied
+  to an issue, since the findings then survive for whoever picks it up next and satisfy the
+  self-contained-issue rule above.
+
+Live-device measurements (`mem_peak`, RPC responses, event-DB queries) and negative results must be
+written down as they are obtained. Re-deriving them means re-touching real hardware.
+
+Related sub-agent rules: commit before running the full test suite (backgrounded `make test` is a
+known stall mode, #432), and sub-agents must not `git push` or open PRs — the coordinator does that
+from the sub-agent's worktree.
+
 ### Go
 
 - **CLI output**: `fmt.Printf()` for user-facing messages; `hlog` for internal/debug logging. Never `log.Info()` in CLI commands.

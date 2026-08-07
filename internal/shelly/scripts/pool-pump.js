@@ -1761,6 +1761,71 @@ function makeTimespec(fractHours) {
   return '0 ' + m + ' ' + h + ' * * SUN,MON,TUE,WED,THU,FRI,SAT';
 }
 
+// Inverse of makeTimespec(): pulls the "M H" fields out of a Shelly cron
+// timespec built by makeTimespec() ("0 M H * * DAYS") or a fixed literal
+// ("0 15 23 * * ..."), and returns minutes since midnight. Returns null for a
+// spec that carries no concrete time yet — notably the symbolic
+// "@sunrise"/"@sunset" forms createSchedules() lays down before
+// updateScheduleMode() has ever rewritten them. Callers must treat null as
+// "unknown", never as a time.
+function parseHM(timespec) {
+  if (!timespec || timespec.indexOf('@') === 0) return null;
+  var parts = timespec.split(' ');
+  if (parts.length < 3) return null;
+  var m = Number(parts[1]);
+  var h = Number(parts[2]);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+// The single "should the pump be running right now?" predicate. Answers from
+// the active mode's start/stop pair read straight out of Schedule.List — the
+// same source of truth updateScheduleMode() writes to — rather than from any
+// remembered value, so it stays correct across a restart mid-window (#421) and
+// a schedule rewrite that moves the window under a running script (#441).
+//
+// Mode-aware on purpose: only one of the two job pairs is ever enabled at a
+// time on a real device (updateScheduleMode() disables the other), so matching
+// the currently active mode avoids any ambiguity about which pair governs "now".
+//
+// Calls back with true, false, or **null** when the window cannot be resolved
+// (Schedule.List failed, or the timespecs are still symbolic). null means
+// "don't know" and callers must not act on it — see reconcileRunState().
+function isWithinRunWindow(cb) {
+  var summer = STATE.scheduleMode === 'summer';
+  var sc = summer ? 'handleMorningStart()' : 'handleNightStart()';
+  var ec = summer ? 'handleEveningStop()' : 'handleNightStop()';
+
+  Shelly.call('Schedule.List', {}, function(result, err) {
+    if (err && false) {}
+    if (err || !result || !result.jobs) { cb(null); return; }
+
+    var a = null;
+    var b = null;
+    for (var i = 0; i < result.jobs.length; i++) {
+      var job = result.jobs[i];
+      if (!job.enable || !job.calls || job.calls.length === 0) continue;
+      var code = job.calls[0].params && job.calls[0].params.code;
+      if (code === sc) a = parseHM(job.timespec);
+      else if (code === ec) b = parseHM(job.timespec);
+    }
+
+    if (a === null || b === null) { cb(null); return; }
+
+    var d = new Date();
+    var n = d.getHours() * 60 + d.getMinutes();
+    // A start > stop pair wraps past midnight (the fixed winter 23:15 -> 00:15 run).
+    cb(a <= b ? (n >= a && n < b) : (n >= a || n < b));
+  });
+}
+
+// True when applying `upd` to the Schedule.List `job` it was built from would
+// actually move the run window — the job gets enabled or disabled, or it gets
+// a start/stop time different from the one already on the device.
+function moves(job, upd) {
+  return upd.enable !== job.enable || (!!upd.timespec && upd.timespec !== job.timespec);
+}
+
 function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
   var hasTimings = morningStartHours !== null && morningStartHours !== undefined;
   var modeChanged = STATE.scheduleMode !== newMode;
@@ -1793,6 +1858,12 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
     }
 
     var schedulesToUpdate = [];
+    // #441: set when this call actually moves the active run window (a job is
+    // enabled/disabled, or a start/stop time is rewritten to a different
+    // value). A no-op re-run — the common case at sunrise when the forecast
+    // yields the same window as yesterday — leaves it false so we don't
+    // re-reconcile for nothing.
+    var windowChanged = false;
     for (var i = 0; i < result.jobs.length; i++) {
       var job = result.jobs[i];
       if (job.calls && job.calls.length > 0) {
@@ -1802,15 +1873,19 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
           if (hasTimings && newMode === 'summer') {
             updM.timespec = makeTimespec(morningStartHours);
           }
+          if (moves(job, updM)) windowChanged = true;
           schedulesToUpdate.push(updM);
         } else if (code === 'handleEveningStop()') {
           var updE = {id: job.id, enable: newMode === 'summer', name: code};
           if (hasTimings && newMode === 'summer') {
             updE.timespec = makeTimespec(eveningStopHours);
           }
+          if (moves(job, updE)) windowChanged = true;
           schedulesToUpdate.push(updE);
         } else if (code === 'handleNightStart()' || code === 'handleNightStop()') {
-          schedulesToUpdate.push({id: job.id, enable: newMode === 'winter', name: code});
+          var updN = {id: job.id, enable: newMode === 'winter', name: code};
+          if (moves(job, updN)) windowChanged = true;
+          schedulesToUpdate.push(updN);
         }
       }
     }
@@ -1824,6 +1899,16 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
     function updateNext() {
       if (updateIndex >= schedulesToUpdate.length) {
         log('All schedules updated for', newMode, 'mode');
+        // #441: the window we just wrote may already contain (or no longer
+        // contain) "now" — e.g. the sunrise re-forecast moves the morning
+        // start into the past, or a restart re-runs this after the old
+        // window's start instant has passed. Nothing else re-evaluates:
+        // handleMorningStart()/handleEveningStop() only ever fire at their
+        // scheduled instant, and a schedule that was rewritten past that
+        // instant never fires at all — which is how the pool lost two whole
+        // days of filtration on 2026-08-05/06 under v0.11.10. Reconcile here,
+        // once, in the one place that knows the window moved.
+        if (windowChanged) queueTask(reconcileRunState);
         return;
       }
       var sched = schedulesToUpdate[updateIndex];
@@ -2008,99 +2093,50 @@ function handleNightStop() {
   doStop('Night stop event');
 }
 
-// === RESTART CATCH-UP (#421 Bug B) ===
+// === RUN-STATE RECONCILIATION (#421 Bug B, #441) ===
 // enforceOutputState() (below) only mirrors whatever physical state the
 // switch already has at boot — it never asks "should I actually be running
-// right now, given today's schedule window?". A restart (crash recovery,
-// script re-upload, device reboot) landing mid-window therefore silently
-// adopts a stale on/off state and only self-corrects whenever the next
-// schedule tick fires, which can be hours away. This is exactly what left a
-// live pump running hours past its scheduled evening-stop (see issue #421).
-// restartCatchUp() compares "now" against the currently active mode's
-// window — read straight from Schedule.List, the same source of truth
-// updateScheduleMode() writes to — and calls doStart()/doStop() immediately
-// if the physical state disagrees, instead of waiting for the next tick.
+// right now, given today's schedule window?". Two separate situations need
+// that question answered outside a schedule tick:
+//
+//   - #421 Bug B: a restart (crash recovery, script re-upload, device reboot)
+//     landing mid-window silently adopts a stale on/off state and only
+//     self-corrects at the next tick, which can be hours away. That left a
+//     live pump running hours past its scheduled evening-stop.
+//   - #441: updateScheduleMode() rewrites the window under a live script. If
+//     the new start instant is already in the past, its schedule job never
+//     fires at all — the pump simply never starts. That cost two full days of
+//     filtration on 2026-08-05/06 under v0.11.10.
+//
+// Both are the same question, so they share one predicate (isWithinRunWindow,
+// defined above next to makeTimespec) and one actuator (reconcileRunState).
 
-// Parses the "M H" fields out of a Shelly cron timespec built by
-// makeTimespec() ("0 M H * * DAYS") or a fixed literal ("0 15 23 * * ...").
-// Returns minutes-since-midnight, or null for formats it can't resolve
-// (e.g. still-symbolic "@sunrise" specs on a schedule that has never had
-// updateScheduleMode() compute real times for it yet) — those windows are
-// left alone rather than guessed at.
-function parseHM(timespec) {
-  if (!timespec || timespec.indexOf('@') === 0) return null;
-  var parts = timespec.split(' ');
-  if (parts.length < 3) return null;
-  var m = Number(parts[1]);
-  var h = Number(parts[2]);
-  if (isNaN(h) || isNaN(m)) return null;
-  return h * 60 + m;
+// Brings the physical pump state back in line with isWithinRunWindow().
+// Deliberately does nothing when the window is unresolvable (isWithinRunWindow
+// calls back null) or when the state already agrees — acting on a guess here
+// would start or stop the pump for no reason.
+//
+// `reason` is optional so this can be handed straight to queueTask(), which
+// invokes its tasks with no arguments.
+function reconcileRunState(reason) {
+  if (!isMyTurnToRun()) return;
+  var why = (reason || 'Schedule rewrite') + ': ';
+
+  isWithinRunWindow(function(shouldRun) {
+    var running = STATE.activeOutput !== -1;
+    if (shouldRun === null || shouldRun === running) {
+      log(why + 'no action', shouldRun, running);
+      return;
+    }
+    if (shouldRun) doStart(CONFIG.preferredSpeed, why + 'inside window');
+    else doStop(why + 'outside window');
+  });
 }
 
-var RC = 'Restart catch-up: '; // shared log/reason prefix
-
+// Named wrapper so init()'s call site keeps its #421 identity in the logs.
+// A closure at the call site would cost heap on every init; this does not.
 function restartCatchUp() {
-  if (!isMyTurnToRun()) {
-    return;
-  }
-
-  // Mode-aware on purpose: only one of these two job pairs is ever enabled
-  // at a time on a real device (updateScheduleMode() disables the other),
-  // so matching against the currently active mode avoids any ambiguity
-  // about which pair's timespec actually governs "now".
-  var mode = STATE.scheduleMode || 'winter';
-  var startCode = mode === 'summer' ? 'handleMorningStart()' : 'handleNightStart()';
-  var stopCode = mode === 'summer' ? 'handleEveningStop()' : 'handleNightStop()';
-
-  Shelly.call('Schedule.List', {}, function (result, err) {
-    // A failed lookup or an empty schedule is not the "unresolvable
-    // timespec" case below — it just means there is nothing to catch up
-    // against, so bail out quietly rather than guessing.
-    if (err || !result || !result.jobs) {
-      log(RC + 'lookup failed');
-      if (err && false) {}
-      return;
-    }
-
-    var startMin = null;
-    var stopMin = null;
-    for (var i = 0; i < result.jobs.length; i++) {
-      var job = result.jobs[i];
-      if (!job.enable || !job.calls || job.calls.length === 0) continue;
-      var code = job.calls[0].params && job.calls[0].params.code;
-      if (code === startCode) {
-        startMin = parseHM(job.timespec);
-      } else if (code === stopCode) {
-        stopMin = parseHM(job.timespec);
-      }
-    }
-
-    // Unresolvable timespec (e.g. still-symbolic "@sunrise", see parseHM
-    // above) — skip rather than act on a guess (#421 Bug B requirement).
-    if (startMin === null || stopMin === null) {
-      log(RC + 'unresolved', mode);
-      return;
-    }
-
-    var d = new Date();
-    var nowMin = d.getHours() * 60 + d.getMinutes();
-    // Handles windows that wrap past midnight (the fixed winter night-run
-    // 23:15 -> 00:15) by treating a start > stop pair as wrapping.
-    var shouldRun = startMin <= stopMin
-      ? (nowMin >= startMin && nowMin < stopMin)
-      : (nowMin >= startMin || nowMin < stopMin);
-    var isRunning = STATE.activeOutput !== -1;
-
-    log(RC, mode, nowMin, startMin, stopMin, shouldRun, isRunning);
-
-    if (shouldRun && !isRunning) {
-      doStart(CONFIG.preferredSpeed, RC + 'inside window');
-    } else if (!shouldRun && isRunning) {
-      doStop(RC + 'outside window');
-    } else {
-      log(RC + 'state OK');
-    }
-  });
+  reconcileRunState('Restart catch-up');
 }
 
 // === INITIALIZATION ===

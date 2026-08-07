@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -759,5 +762,339 @@ func TestPoolPump_RestartCatchUp_StopsOutsideScheduleWindow(t *testing.T) {
 	}
 	if on, _ := entry["output"].(bool); on {
 		t.Errorf("restart outside scheduled window: switch:0 still physically on after catch-up")
+	}
+}
+
+// === Schedule-rewrite re-evaluation (#441) ===
+//
+// updateScheduleMode() rewrites the morning-start / evening-stop schedule jobs
+// from the day's forecast. Before #441 nothing re-evaluated the pump
+// afterwards, so a rewrite that moved the start into the past silently skipped
+// the whole day's filtration: handleMorningStart() only ever fires at its
+// scheduled instant, and an instant that has already passed never fires. That
+// is exactly what happened on the production pump on 2026-08-06.
+//
+// These tests drive the real path — init → handleDailyCheck() →
+// performDailyModeCheck() → forecast → decideModeFromForecast() →
+// updateScheduleMode() — against a local forecast server, and assert on the
+// pump state that results.
+
+// poolPumpForecastServer serves an Open-Meteo response shaped the way
+// pool-pump.js's onForecast() parses it: 24 hourly temperatures whose index is
+// the hour of day (so the index of the maximum becomes STATE.peakForecastHour)
+// plus one daily sunrise/sunset pair, which decideModeFromForecast() turns
+// into the window's start floor (sunrise + 1h) and stop ceiling (sunset - 0.5h).
+//
+// Local on purpose: the forecast fetch is a plain Shelly.call("HTTP.GET"),
+// which the emulator executes for real. Pointing it at a test server keeps
+// these tests deterministic and offline.
+func poolPumpForecastServer(t *testing.T, peakHour int, sunrise, sunset string) *httptest.Server {
+	t.Helper()
+
+	temps := make([]float64, 24)
+	for i := range temps {
+		temps[i] = 25
+	}
+	// Above poolPumpWindowKVS's max-temp, so computeRunHours()'s temperature
+	// scale clamps to 1 and run hours land exactly on the configured base hours.
+	temps[peakHour] = 40
+
+	body, err := json.Marshal(map[string]interface{}{
+		"hourly": map[string]interface{}{"temperature_2m": temps},
+		"daily": map[string]interface{}{
+			"sunrise": []string{"2026-08-07T" + sunrise},
+			"sunset":  []string{"2026-08-07T" + sunset},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to build forecast body: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// poolPumpWindowKVS is pro1KVS() with the pool geometry rigged so
+// computeRunHours() returns exactly runHours: flow rate is
+// max-flow-rate × (eco-rpm / max-rpm) = 1 m³/h, and base hours are
+// pool-volume × turnover / flow = runHours.
+func poolPumpWindowKVS(runHours float64) map[string]interface{} {
+	kvs := pro1KVS()
+	kvs["script/pool-pump/pool-volume"] = strconv.FormatFloat(runHours, 'f', -1, 64)
+	kvs["script/pool-pump/turnover"] = "1"
+	kvs["script/pool-pump/max-flow-rate"] = "1"
+	kvs["script/pool-pump/eco-rpm"] = "2900"
+	kvs["script/pool-pump/max-rpm"] = "2900"
+	kvs["script/pool-pump/max-temp"] = "35"
+	kvs["script/pool-pump/temp-threshold"] = "20"
+	return kvs
+}
+
+// poolPumpTimespec renders the cron form makeTimespec() produces.
+func poolPumpTimespec(h, m int) string {
+	return fmt.Sprintf("0 %d %d * * SUN,MON,TUE,WED,THU,FRI,SAT", m, h)
+}
+
+// poolPumpSummerSchedules is a complete summer-mode job set: a daily check, a
+// morning/evening pair at the given times, and the two night jobs already
+// disabled — which is what summer mode looks like on a real device.
+func poolPumpSummerSchedules(start, stop time.Time) []map[string]interface{} {
+	job := func(id int, code, timespec string, enable bool) map[string]interface{} {
+		return map[string]interface{}{
+			"id": id, "enable": enable, "timespec": timespec,
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": 1, "code": code},
+			}},
+		}
+	}
+	return []map[string]interface{}{
+		job(1, "handleDailyCheck()", "@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT", true),
+		job(2, "handleMorningStart()", poolPumpTimespec(start.Hour(), start.Minute()), true),
+		job(3, "handleEveningStop()", poolPumpTimespec(stop.Hour(), stop.Minute()), true),
+		job(4, "handleNightStart()", poolPumpTimespec(23, 15), false),
+		job(5, "handleNightStop()", poolPumpTimespec(0, 15), false),
+	}
+}
+
+// poolPumpScheduleTimespec reads back the timespec currently on the job whose
+// script.eval code matches, so a test can prove the rewrite actually landed
+// before asserting on what the rewrite should have caused.
+func poolPumpScheduleTimespec(schedules []map[string]interface{}, code string) string {
+	for _, job := range schedules {
+		calls, ok := job["calls"].([]interface{})
+		if !ok || len(calls) == 0 {
+			continue
+		}
+		call, ok := calls[0].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		params, ok := call["params"].(map[string]interface{})
+		if !ok || params["code"] != code {
+			continue
+		}
+		if ts, ok := job["timespec"].(string); ok {
+			return ts
+		}
+	}
+	return ""
+}
+
+// poolPumpRewriteResult runs the script against the given fixture, waits for
+// the schedule rewrite to land, then reports the active-output the script
+// settled on. wantOutput is what the caller expects; the helper polls for it
+// so a passing test finishes quickly and a failing one still reports the
+// value actually reached.
+func poolPumpRewriteResult(t *testing.T, deviceState *script.DeviceState, wantOutput string) (string, []map[string]interface{}) {
+	t.Helper()
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	ctx, cancel := context.WithTimeout(
+		logr.NewContext(context.Background(), testr.New(t)),
+		30*time.Second,
+	)
+	defer cancel()
+
+	buf := readPoolPumpScript(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	// The rewrite has to land before the reconciliation it triggers can be
+	// judged, so wait for the morning job's timespec to change first.
+	initial := poolPumpScheduleTimespec(deviceState.Schedules, "handleMorningStart()")
+	if !waitFor(15*time.Second, 100*time.Millisecond, func() bool {
+		return poolPumpScheduleTimespec(deviceState.Schedules, "handleMorningStart()") != initial
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("schedule rewrite never happened (morning start still %q)", initial)
+	}
+
+	// Then give the reconciliation its own window to act — or to provably not.
+	waitFor(8*time.Second, 100*time.Millisecond, func() bool {
+		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		return ok && v == wantOutput
+	})
+
+	got, _ := deviceState.KVS["script/pool-pump/active-output"].(string)
+	schedules := deviceState.Schedules
+	cancel()
+	<-done
+	return got, schedules
+}
+
+// Two window shapes, both derived from the forecast by decideModeFromForecast():
+//
+//   - wide: sunrise 00:00 → start floor 01:00; sunset 23:59 → stop ceiling
+//     23:29; peak at noon with 22.48 run hours. The unclamped window starts
+//     before the floor, so it is pinned to [01:00, 23:29) — containing almost
+//     any "now".
+//   - narrow: peak at 02:00 with 0.1 run hours → [01:57, 02:03), excluding
+//     almost any "now".
+const (
+	poolPumpWideRunHours   = 22.48
+	poolPumpWidePeakHour   = 12
+	poolPumpWideStartMin   = 60   // 01:00
+	poolPumpWideStopMin    = 1409 // 23:29
+	poolPumpNarrowRunHours = 0.1
+	poolPumpNarrowPeakHour = 2
+	poolPumpNarrowStartMin = 117 // 01:57
+	poolPumpNarrowStopMin  = 123 // 02:03
+)
+
+// nowMinutes is the minutes-since-midnight value pool-pump.js's
+// isWithinRunWindow() computes from new Date().
+func nowMinutes() int {
+	now := time.Now()
+	return now.Hour()*60 + now.Minute()
+}
+
+// skipUnlessNowInside guards the one wall-clock dependency these tests cannot
+// design away: pool-pump.js derives the window from a real forecast and
+// compares it against the device's real clock, and its own clamps refuse to
+// schedule a start before 01:00 — so "now is inside the window" is simply not
+// expressible during the midnight hour.
+func skipUnlessNowInside(t *testing.T, startMin, stopMin int) {
+	t.Helper()
+	if n := nowMinutes(); n < startMin || n >= stopMin {
+		t.Skipf("local time %02d:%02d is outside the [%d, %d) minute window this scenario builds",
+			n/60, n%60, startMin, stopMin)
+	}
+}
+
+func skipIfNowInside(t *testing.T, startMin, stopMin int) {
+	t.Helper()
+	if n := nowMinutes(); n >= startMin && n < stopMin {
+		t.Skipf("local time %02d:%02d falls inside the [%d, %d) minute window this scenario builds",
+			n/60, n%60, startMin, stopMin)
+	}
+}
+
+// A rewrite that moves the morning start from the future into the past, with
+// "now" inside the new window, must start the pump. This is the 2026-08-06
+// production failure: without the fix the pump stays off for the whole day.
+func TestPoolPump_ScheduleRewriteIntoPastStartsPump(t *testing.T) {
+	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro1ComponentStatus(), // pump off
+		// Old window: the start is still ahead of us, so nothing was due yet.
+		Schedules: poolPumpSummerSchedules(now.Add(2*time.Hour), now.Add(4*time.Hour)),
+	}
+
+	got, schedules := poolPumpRewriteResult(t, deviceState, "0")
+
+	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 0) {
+		t.Fatalf("expected morning start rewritten to 01:00, got %q", ts)
+	}
+	if got != "0" {
+		t.Fatalf("rewrite moved the start into the past with now inside the new window: "+
+			"expected the pump to start (active-output=0), got %q", got)
+	}
+}
+
+// The sunrise case, with no restart involved: the previous window has already
+// elapsed, the daily re-forecast rewrites it to one containing "now", and the
+// pump must start even though no schedule job fires.
+func TestPoolPump_SunriseRewriteStartsPump(t *testing.T) {
+	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro1ComponentStatus(), // pump off, correctly so
+		// Yesterday's window, entirely behind us.
+		Schedules: poolPumpSummerSchedules(now.Add(-5*time.Hour), now.Add(-4*time.Hour)),
+	}
+
+	got, _ := poolPumpRewriteResult(t, deviceState, "0")
+	if got != "0" {
+		t.Fatalf("sunrise rewrite brought now inside the window: "+
+			"expected the pump to start (active-output=0), got %q", got)
+	}
+}
+
+// The converse: a rewrite that moves the window off "now" must stop a pump
+// that is currently running, rather than leave it running until an
+// evening-stop instant that no longer matches anything.
+func TestPoolPump_ScheduleRewriteAwayStopsPump(t *testing.T) {
+	skipIfNowInside(t, poolPumpNarrowStartMin, poolPumpNarrowStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpNarrowPeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	cs := pro1ComponentStatus()
+	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true} // running
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpNarrowRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: cs,
+		// Old window contains "now", which is why the pump is running.
+		Schedules: poolPumpSummerSchedules(now.Add(-1*time.Hour), now.Add(1*time.Hour)),
+	}
+
+	got, schedules := poolPumpRewriteResult(t, deviceState, "-1")
+
+	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 57) {
+		t.Fatalf("expected morning start rewritten to 01:57, got %q", ts)
+	}
+	if got != "-1" {
+		t.Fatalf("rewrite moved the window off now: "+
+			"expected the running pump to stop (active-output=-1), got %q", got)
+	}
+}
+
+// Regression guard: a rewrite that leaves the pump correctly off — "now" is
+// outside both the old and the new window — must not start it.
+func TestPoolPump_ScheduleRewriteOutsideWindowDoesNotStartPump(t *testing.T) {
+	skipIfNowInside(t, poolPumpNarrowStartMin, poolPumpNarrowStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpNarrowPeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpNarrowRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro1ComponentStatus(), // pump off
+		Schedules:       poolPumpSummerSchedules(now.Add(-5*time.Hour), now.Add(-4*time.Hour)),
+	}
+
+	// Ask for "0" so the helper spends its full budget looking for a start
+	// that must never come.
+	got, _ := poolPumpRewriteResult(t, deviceState, "0")
+	if got != "-1" {
+		t.Fatalf("now is outside the rewritten window: "+
+			"expected the pump to stay off (active-output=-1), got %q", got)
 	}
 }

@@ -1959,6 +1959,67 @@ function makeTimespec(fractHours) {
   return '0 ' + m + ' ' + h + ' * * SUN,MON,TUE,WED,THU,FRI,SAT';
 }
 
+// Inverse of makeTimespec(): pulls the "M H" fields out of a Shelly cron
+// timespec ("0 M H * * DAYS") and returns minutes since midnight. Returns
+// null for a spec that carries no concrete time yet — notably the symbolic
+// "@sunrise"/"@sunset" forms createSchedules() lays down before
+// updateScheduleMode() has ever rewritten them. Callers must treat null as
+// "unknown", never as a time.
+function parseHM(ts) {
+  if (!ts || ts.indexOf('@') === 0) return null;
+  var p = ts.split(' ');
+  if (p.length < 3) return null;
+  var m = Number(p[1]);
+  var h = Number(p[2]);
+  if (isNaN(h) || isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+// The single "should the pump be running right now?" predicate. Answers from
+// the active mode's start/stop pair read straight out of Schedule.List — the
+// same source of truth updateScheduleMode() writes to — rather than from any
+// remembered value, so it stays correct across a restart mid-window (#421), a
+// schedule rewrite that moves the window under a running script (#441), and a
+// water-supply clear after the window has ended (#436).
+//
+// Calls back with true, false, or **null** when the window cannot be resolved
+// (Schedule.List failed, or the timespecs are still symbolic). null means
+// "don't know" and callers must not act on it — see reconcileRunState().
+function isWithinRunWindow(cb) {
+  var summer = STATE.scheduleMode === 'summer';
+  var sc = summer ? 'handleMorningStart()' : 'handleNightStart()';
+  var ec = summer ? 'handleEveningStop()' : 'handleNightStop()';
+
+  Shelly.call('Schedule.List', {}, function(result, err) {
+    if (err && false) {}
+    if (err || !result || !result.jobs) { cb(null); return; }
+
+    var a = null;
+    var b = null;
+    for (var i = 0; i < result.jobs.length; i++) {
+      var job = result.jobs[i];
+      if (!job.enable || !job.calls || job.calls.length === 0) continue;
+      var code = job.calls[0].params && job.calls[0].params.code;
+      if (code === sc) a = parseHM(job.timespec);
+      else if (code === ec) b = parseHM(job.timespec);
+    }
+
+    if (a === null || b === null) { cb(null); return; }
+
+    var d = new Date();
+    var n = d.getHours() * 60 + d.getMinutes();
+    // A start > stop pair wraps past midnight (the fixed winter 23:15 -> 00:15 run).
+    cb(a <= b ? (n >= a && n < b) : (n >= a || n < b));
+  });
+}
+
+// True when applying `upd` to the Schedule.List `job` it was built from would
+// actually move the run window — the job gets enabled or disabled, or it gets
+// a start/stop time different from the one already on the device.
+function moves(job, upd) {
+  return upd.enable !== job.enable || (!!upd.timespec && upd.timespec !== job.timespec);
+}
+
 function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
   var hasTimings = morningStartHours !== null && morningStartHours !== undefined;
   var modeChanged = STATE.scheduleMode !== newMode;
@@ -1991,6 +2052,12 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
     }
 
     var schedulesToUpdate = [];
+    // #441: set when this call actually moves the active run window (a job is
+    // enabled/disabled, or a start/stop time is rewritten to a different
+    // value). A no-op re-run — the common case at sunrise when the forecast
+    // yields the same window as yesterday — leaves it false so we don't
+    // re-reconcile for nothing.
+    var windowChanged = false;
     for (var i = 0; i < result.jobs.length; i++) {
       var job = result.jobs[i];
       if (job.calls && job.calls.length > 0) {
@@ -2000,15 +2067,19 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
           if (hasTimings && newMode === 'summer') {
             updM.timespec = makeTimespec(morningStartHours);
           }
+          if (moves(job, updM)) windowChanged = true;
           schedulesToUpdate.push(updM);
         } else if (code === 'handleEveningStop()') {
           var updE = {id: job.id, enable: newMode === 'summer', name: code};
           if (hasTimings && newMode === 'summer') {
             updE.timespec = makeTimespec(eveningStopHours);
           }
+          if (moves(job, updE)) windowChanged = true;
           schedulesToUpdate.push(updE);
         } else if (code === 'handleNightStart()' || code === 'handleNightStop()') {
-          schedulesToUpdate.push({id: job.id, enable: newMode === 'winter', name: code});
+          var updN = {id: job.id, enable: newMode === 'winter', name: code};
+          if (moves(job, updN)) windowChanged = true;
+          schedulesToUpdate.push(updN);
         }
       }
     }
@@ -2022,6 +2093,16 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
     function updateNext() {
       if (updateIndex >= schedulesToUpdate.length) {
         log('All schedules updated for', newMode, 'mode');
+        // #441: the window we just wrote may already contain (or no longer
+        // contain) "now" — e.g. the sunrise re-forecast moves the morning
+        // start into the past, or a restart re-runs this after the old
+        // window's start instant has passed. Nothing else re-evaluates:
+        // handleMorningStart()/handleEveningStop() only ever fire at their
+        // scheduled instant, and a schedule that was rewritten past that
+        // instant never fires at all — which is how the pool lost a whole
+        // day of filtration on 2026-08-06. Reconcile here, once, in the one
+        // place that knows the window moved.
+        if (windowChanged) queueTask(reconcileRunState);
         return;
       }
       var sched = schedulesToUpdate[updateIndex];
@@ -2207,6 +2288,34 @@ function handleNightStop() {
   // check in persistRuntimeState/ensureRuntimeDay (#402).
   ensureRuntimeDay();
   doStop('Night stop event');
+}
+
+// Brings the physical pump state back in line with isWithinRunWindow() —
+// the shared reconciliation for every situation where the answer to "should
+// I be running?" changes without the corresponding schedule job firing:
+//
+//   - the script restarts part-way through a run window (#421),
+//   - updateScheduleMode() rewrites the window under a live script (#441),
+//   - water-supply protection clears after the window moved or ended (#436).
+//
+// Deliberately does nothing when the window is unresolvable (isWithinRunWindow
+// calls back null) or when the state already agrees — acting on a guess here
+// would start or stop the pump for no reason.
+//
+// `reason` is optional so this can be handed straight to queueTask().
+function reconcileRunState(reason) {
+  if (!isMyTurnToRun()) return;
+  var why = (reason || 'Schedule rewrite') + ': ';
+
+  isWithinRunWindow(function(shouldRun) {
+    var running = STATE.activeOutput !== -1;
+    if (shouldRun === null || shouldRun === running) {
+      log(why + 'no action', shouldRun, running);
+      return;
+    }
+    if (shouldRun) doStart(CONFIG.preferredSpeed, why + 'inside window');
+    else doStop(why + 'outside window');
+  });
 }
 
 // === INITIALIZATION ===

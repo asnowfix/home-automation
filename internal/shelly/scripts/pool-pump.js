@@ -1986,50 +1986,38 @@ function parseHM(ts) {
 // (Schedule.List failed, or the timespecs are still symbolic). null means
 // "don't know" and callers must not act on it — see reconcileRunState().
 function isWithinRunWindow(cb) {
-  var mode = STATE.scheduleMode || 'winter';
-  var sc = mode === 'summer' ? 'handleMorningStart()' : 'handleNightStart()';
-  var ec = mode === 'summer' ? 'handleEveningStop()' : 'handleNightStop()';
+  var summer = STATE.scheduleMode === 'summer';
+  var sc = summer ? 'handleMorningStart()' : 'handleNightStart()';
+  var ec = summer ? 'handleEveningStop()' : 'handleNightStop()';
 
   Shelly.call('Schedule.List', {}, function(result, err) {
     if (err && false) {}
     if (err || !result || !result.jobs) { cb(null); return; }
 
-    var startMin = null;
-    var stopMin = null;
+    var a = null;
+    var b = null;
     for (var i = 0; i < result.jobs.length; i++) {
       var job = result.jobs[i];
       if (!job.enable || !job.calls || job.calls.length === 0) continue;
       var code = job.calls[0].params && job.calls[0].params.code;
-      if (code === sc) {
-        startMin = parseHM(job.timespec);
-      } else if (code === ec) {
-        stopMin = parseHM(job.timespec);
-      }
+      if (code === sc) a = parseHM(job.timespec);
+      else if (code === ec) b = parseHM(job.timespec);
     }
 
-    if (startMin === null || stopMin === null) { cb(null); return; }
+    if (a === null || b === null) { cb(null); return; }
 
     var d = new Date();
-    var nowMin = d.getHours() * 60 + d.getMinutes();
+    var n = d.getHours() * 60 + d.getMinutes();
     // A start > stop pair wraps past midnight (the fixed winter 23:15 -> 00:15 run).
-    cb(startMin <= stopMin
-      ? (nowMin >= startMin && nowMin < stopMin)
-      : (nowMin >= startMin || nowMin < stopMin));
+    cb(a <= b ? (n >= a && n < b) : (n >= a || n < b));
   });
 }
 
 // True when applying `upd` to the Schedule.List `job` it was built from would
 // actually move the run window — the job gets enabled or disabled, or it gets
 // a start/stop time different from the one already on the device.
-function movesWindow(job, upd) {
-  if (upd.enable !== job.enable) return true;
-  return !!(upd.timespec && upd.timespec !== job.timespec);
-}
-
-// Queued (not called directly) from updateScheduleMode() once its
-// Schedule.Update calls have all landed — see the #441 comment there.
-function reconcileAfterRewrite() {
-  reconcileRunState('Schedule rewrite');
+function moves(job, upd) {
+  return upd.enable !== job.enable || (!!upd.timespec && upd.timespec !== job.timespec);
 }
 
 function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
@@ -2079,18 +2067,18 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
           if (hasTimings && newMode === 'summer') {
             updM.timespec = makeTimespec(morningStartHours);
           }
-          if (movesWindow(job, updM)) windowChanged = true;
+          if (moves(job, updM)) windowChanged = true;
           schedulesToUpdate.push(updM);
         } else if (code === 'handleEveningStop()') {
           var updE = {id: job.id, enable: newMode === 'summer', name: code};
           if (hasTimings && newMode === 'summer') {
             updE.timespec = makeTimespec(eveningStopHours);
           }
-          if (movesWindow(job, updE)) windowChanged = true;
+          if (moves(job, updE)) windowChanged = true;
           schedulesToUpdate.push(updE);
         } else if (code === 'handleNightStart()' || code === 'handleNightStop()') {
           var updN = {id: job.id, enable: newMode === 'winter', name: code};
-          if (movesWindow(job, updN)) windowChanged = true;
+          if (moves(job, updN)) windowChanged = true;
           schedulesToUpdate.push(updN);
         }
       }
@@ -2114,7 +2102,7 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // instant never fires at all — which is how the pool lost a whole
         // day of filtration on 2026-08-06. Reconcile here, once, in the one
         // place that knows the window moved.
-        if (windowChanged) queueTask(reconcileAfterRewrite);
+        if (windowChanged) queueTask(reconcileRunState);
         return;
       }
       var sched = schedulesToUpdate[updateIndex];
@@ -2313,24 +2301,20 @@ function handleNightStop() {
 // Deliberately does nothing when the window is unresolvable (isWithinRunWindow
 // calls back null) or when the state already agrees — acting on a guess here
 // would start or stop the pump for no reason.
+//
+// `reason` is optional so this can be handed straight to queueTask().
 function reconcileRunState(reason) {
   if (!isMyTurnToRun()) return;
+  var why = (reason || 'Schedule rewrite') + ': ';
 
   isWithinRunWindow(function(shouldRun) {
-    if (shouldRun === null) {
-      log(reason + ': window unresolved, leaving pump alone');
-      return;
-    }
     var running = STATE.activeOutput !== -1;
-    if (shouldRun === running) {
-      log(reason + ': state already correct');
+    if (shouldRun === null || shouldRun === running) {
+      log(why + 'no action', shouldRun, running);
       return;
     }
-    if (shouldRun) {
-      doStart(CONFIG.preferredSpeed, reason + ': inside window');
-    } else {
-      doStop(reason + ': outside window');
-    }
+    if (shouldRun) doStart(CONFIG.preferredSpeed, why + 'inside window');
+    else doStop(why + 'outside window');
   });
 }
 

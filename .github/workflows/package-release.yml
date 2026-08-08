@@ -179,6 +179,7 @@ jobs:
           go generate -v ./internal/myhome/ui/...
           go generate -v ./myhome/ctl/pool
           go generate -v ./myhome/ctl/garden
+          go generate -v ./internal/myhome/shelly/script
           go generate -v ./...
           if (Test-Path internal/myhome/ui/static/bulma.min.css) { ls internal/myhome/ui/static/bulma.min.css } else { Write-Host "bulma.min.css not found!" }
       - id: build

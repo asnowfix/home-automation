@@ -183,14 +183,37 @@ status-local-daemon:
 logs-local-daemon:
 	@tail -n 100 -f "$(LOCAL_DAEMON_LOG)"
 
+# TESTFLAGS is threaded through both test invocations so the race detector can
+# be switched on without editing this file:
+#
+#   make test-race          # or: make test TESTFLAGS=-race
+#
+# Races here are not merely flaky. The goja script emulator runs the script
+# under test on its own goroutine while tests poll DeviceState, and an
+# unsynchronised map read racing a write aborts the whole test binary with
+# "fatal error: concurrent map read and map write", losing every result in the
+# package rather than failing one test (#451).
+#
+# -race is ON by default (#453). These tests are wall-clock bound rather than
+# CPU bound — the emulator and the pollers spend their time waiting — so the
+# detector costs little, and it closes off a class of failure that is otherwise
+# very expensive to diagnose. Override with `make test TESTFLAGS=` if you need
+# a run without it.
+TESTFLAGS ?= -race
+
 test: build
-	$(GO) test ./...
+	$(GO) test $(TESTFLAGS) ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
-	    (cd $$dir && $(GO) test ./...) || rc=1; \
+	    (cd $$dir && $(GO) test $(TESTFLAGS) ./...) || rc=1; \
 	  fi; \
 	done; exit $$rc
+
+# test-race is kept as an explicit alias now that -race is the default, so
+# scripts and habits that name it keep working.
+test-race:
+	$(MAKE) test TESTFLAGS=-race
 
 cover: build
 	@mkdir -p coverage

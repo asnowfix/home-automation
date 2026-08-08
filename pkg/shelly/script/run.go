@@ -293,7 +293,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		component := call.Argument(0).String()
 		log.V(1).Info("Shelly.getComponentStatus", "component", component)
 		if deviceState.ComponentStatus != nil {
-			if v, ok := deviceState.ComponentStatus[component]; ok {
+			if v, ok := deviceState.ComponentStatusValue(component); ok {
 				return vm.ToValue(v)
 			}
 		}
@@ -637,8 +637,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	storageObj.Set("getItem", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()
 		log.V(1).Info("Script.storage.getItem", "key", key)
-		storage := deviceState.GetStorage()
-		if val, ok := storage[key]; ok {
+		if val, ok := deviceState.StorageValue(key); ok {
 			// If the stored value is nil, treat it as missing/NULL and return null
 			// without changing the underlying storage. This preserves "cooling-rate": null
 			// and similar entries in device.json instead of turning them into "<nil>".
@@ -651,7 +650,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 			strVal, ok := val.(string)
 			if !ok {
 				strVal = fmt.Sprint(val)
-				storage[key] = strVal
+				deviceState.SetStorageValue(key, strVal)
 			}
 			log.V(1).Info("Script.storage.getItem", "key", key, "value", strVal)
 			return vm.ToValue(strVal)
@@ -665,17 +664,15 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		// Script.storage follows the Web Storage API semantics and supports
 		// only string values. Coerce the value to string using JS semantics.
 		valueStr := call.Argument(1).String()
-		storage := deviceState.GetStorage()
-		storage[key] = valueStr
+		deviceState.SetStorageValue(key, valueStr)
 		// Keep length property roughly in sync with the underlying map.
-		storageObj.Set("length", len(storage))
+		storageObj.Set("length", deviceState.StorageLen())
 		log.Info("Script.storage.setItem", "key", key, "value", valueStr)
-		log.V(1).Info("Script.storage.setItem", "storage", storage)
+		log.V(1).Info("Script.storage.setItem", "storage_len", deviceState.StorageLen())
 		return goja.Undefined()
 	})
 	// Initialize length property to reflect existing storage contents.
-	storage := deviceState.GetStorage()
-	storageObj.Set("length", len(storage))
+	storageObj.Set("length", deviceState.StorageLen())
 	// Provide key(index) to enumerate stored keys, similar to the Web Storage API.
 	storageObj.Set("key", func(call goja.FunctionCall) goja.Value {
 		idx := int(call.Argument(0).ToInteger())
@@ -833,8 +830,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			paramsObj := params.ToObject(vm)
 			key := paramsObj.Get("key").String()
 
-			kvs := deviceState.GetKVS()
-			val, found := kvs[key]
+			val, found := deviceState.KVSValue(key)
 
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
@@ -852,7 +848,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 						return ret.Export(), nil
 					} else {
 						// Key not found - record it as nil so repeated calls don't mutate the map
-						kvs[key] = nil
+						deviceState.SetKVSValue(key, nil)
 						// Call callback with error code -114 (key not found)
 						callable(goja.Undefined(), goja.Null(), vm.ToValue(-114), vm.ToValue("Key not found"), userdata)
 						return nil, nil
@@ -905,9 +901,8 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			paramsObj := params.ToObject(vm)
 			key := paramsObj.Get("key").String()
 			value := paramsObj.Get("value").Export()
-			kvs := deviceState.GetKVS()
 			// KVS values are always stored as strings on real Shelly devices
-			kvs[key] = fmt.Sprintf("%v", value)
+			deviceState.SetKVSValue(key, fmt.Sprintf("%v", value))
 
 			// Trigger auto-save if callback is set
 			if deviceState.OnModified != nil {
@@ -928,7 +923,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
 					result := map[string]interface{}{
-						"jobs": deviceState.Schedules,
+						"jobs": deviceState.ScheduleJobs(),
 					}
 					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 				}
@@ -947,12 +942,12 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			// Also persist in ComponentStatus as schedule:N component
 			if deviceState.ComponentStatus != nil {
 				key := fmt.Sprintf("schedule:%d", id)
-				deviceState.ComponentStatus[key] = map[string]interface{}{
+				deviceState.SetComponentStatusValue(key, map[string]interface{}{
 					"id":       id,
 					"enable":   job["enable"],
 					"timespec": job["timespec"],
 					"calls":    job["calls"],
-				}
+				})
 			}
 
 			// Trigger auto-save if callback is set
@@ -981,22 +976,11 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			id := int(paramsObj.Get("id").ToInteger())
 			updates, _ := params.Export().(map[string]interface{})
 
-			var updated map[string]interface{}
-			for _, job := range deviceState.Schedules {
-				if scheduleID(job["id"]) != id {
-					continue
-				}
-				for k, v := range updates {
-					if k == "id" {
-						continue
-					}
-					job[k] = v
-				}
-				updated = job
-				break
-			}
+			// Merge under the write lock. Iterating ScheduleJobs() here would
+			// mutate copies and silently lose the update.
+			updated, found := deviceState.UpdateSchedule(id, updates)
 
-			if updated == nil {
+			if !found {
 				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 					if callable, ok := goja.AssertFunction(callback); ok {
 						callable(goja.Undefined(), goja.Null(), vm.ToValue(-105),
@@ -1009,12 +993,12 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			// Keep the schedule:N component view in step with the job, the
 			// same way Schedule.Create does.
 			if deviceState.ComponentStatus != nil {
-				deviceState.ComponentStatus[fmt.Sprintf("schedule:%d", id)] = map[string]interface{}{
+				deviceState.SetComponentStatusValue(fmt.Sprintf("schedule:%d", id), map[string]interface{}{
 					"id":       id,
 					"enable":   updated["enable"],
 					"timespec": updated["timespec"],
 					"calls":    updated["calls"],
-				}
+				})
 			}
 
 			if deviceState.OnModified != nil {
@@ -1039,7 +1023,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			// Also remove from ComponentStatus
 			if deviceState.ComponentStatus != nil {
 				key := fmt.Sprintf("schedule:%d", id)
-				delete(deviceState.ComponentStatus, key)
+				deviceState.DeleteComponentStatusValue(key)
 			}
 
 			// Trigger auto-save if callback is set
@@ -1062,12 +1046,10 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			on := paramsObj.Get("on").ToBoolean()
 			key := fmt.Sprintf("switch:%d", id)
 			if deviceState.ComponentStatus != nil {
-				if existing, ok := deviceState.ComponentStatus[key]; ok {
-					if m, ok := existing.(map[string]interface{}); ok {
-						m["output"] = on
-					}
-				} else {
-					deviceState.ComponentStatus[key] = map[string]interface{}{"id": id, "output": on}
+				// Mutate in place under the lock; a read-then-modify via
+				// ComponentStatusValue would only change the returned copy.
+				if !deviceState.SetComponentStatusField(key, "output", on) {
+					deviceState.SetComponentStatusValue(key, map[string]interface{}{"id": id, "output": on})
 				}
 			}
 

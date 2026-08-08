@@ -6,6 +6,7 @@ before:
     - go generate ./internal/myhome/ui/...
     - go generate ./myhome/ctl/pool
     - go generate ./myhome/ctl/garden
+    - go generate ./internal/myhome/shelly/script
     - go generate ./...
 builds:
   - env: [CGO_ENABLED=0]

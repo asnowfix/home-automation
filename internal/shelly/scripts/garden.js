@@ -18,75 +18,77 @@ var PAST_DAYS = 1; // past_days=1: daily[0]=yesterday, daily[1]=today; hourly[24
 
 // === CONFIG SCHEMA (global settings; zone config lives in ZONE_DEFAULTS) ===
 // KVS key lengths: prefix 14 chars + suffix ≤18 chars = ≤32 chars total
+// >>> GENERATED: CONFIG_SCHEMA (source: schema JSON; regenerate via `make generate` — DO NOT EDIT BY HAND) >>>
 var CONFIG_SCHEMA = {
+  // Enable debug logging
   enableLogging: {
-    description: "Enable debug logging",
     key: "logging",
     default: true,
     type: "boolean"
   },
+  // MQTT topic prefix (CLI metadata only, not used at runtime)
   mqttTopicPrefix: {
-    description: "MQTT topic prefix (CLI metadata only, not used at runtime)",
     key: "mqtt-topic",
     default: "garden",
     type: "string",
     cliOnly: true
   },
+  // Earliest allowed watering start (0-23)
   earliestStartHour: {
-    description: "Earliest allowed watering start (0-23)",
     key: "earliest-start",
     default: 3,
     type: "number"
   },
+  // Midday quiet window start (fractional hour)
   lunchStart: {
-    description: "Midday quiet window start (fractional hour)",
     key: "lunch-start",
-    default: 12.0,
+    default: 12,
     type: "number"
   },
+  // Midday quiet window end (fractional hour)
   lunchEnd: {
-    description: "Midday quiet window end (fractional hour)",
     key: "lunch-end",
-    default: 14.0,
+    default: 14,
     type: "number"
   },
+  // Evening quiet window start (fractional hour)
   eveningStart: {
-    description: "Evening quiet window start (fractional hour)",
     key: "evening-start",
-    default: 19.0,
+    default: 19,
     type: "number"
   },
+  // Evening quiet window end (fractional hour)
   eveningEnd: {
-    description: "Evening quiet window end (fractional hour)",
     key: "evening-end",
     default: 23.5,
     type: "number"
   },
+  // Start hour when forecast unavailable
   fallbackStartHour: {
-    description: "Start hour when forecast unavailable",
     key: "fallback-start",
     default: 5,
     type: "number"
   },
+  // Skip watering if forecast min temp in window < this (C)
   frostCutoffC: {
-    description: "Skip watering if forecast min temp in window < this (C)",
     key: "frost-cutoff-c",
     default: 2,
     type: "number"
   },
+  // Skip watering if today's forecast rain >= this value (mm)
   rainHoldoffMm: {
-    description: "Skip watering if today's forecast rain >= this value (mm)",
     key: "rain-holdoff-mm",
     default: 8,
     type: "number"
   },
+  // Maximum soil water deficit cap (mm)
   maxDeficitMm: {
-    description: "Maximum soil water deficit cap (mm)",
     key: "max-deficit-mm",
     default: 25,
     type: "number"
   }
 };
+// <<< GENERATED: CONFIG_SCHEMA <<<
 
 // Per-zone defaults — calibrate appRateMmH via 'ctl garden calibrate'
 // appRateMmH: water delivery rate (mm/h).
@@ -134,17 +136,19 @@ initConfig();
 var ZONES = [];
 
 // KVS key specs for a single zone (key suffix applied after "zoneN-")
+// >>> GENERATED: ZONE_KEY_SPECS (source: schema JSON; regenerate via `make generate` — DO NOT EDIT BY HAND) >>>
 var ZONE_KEY_SPECS = [
-  {field: "name",         key: "name",         type: "string"},
-  {field: "appRateMmH",   key: "app-rate",     type: "number"},
-  {field: "kc",           key: "kc",           type: "number"},
-  {field: "triggerMm",    key: "trigger-mm",   type: "number"},
-  {field: "maxMin",       key: "max-min",      type: "number"},
-  {field: "fallbackMin",  key: "fallback-min", type: "number"},
-  {field: "group",        key: "group",        type: "string"},
-  {field: "intervalDays", key: "interval",     type: "number"},
-  {field: "enabled",      key: "enabled",      type: "boolean"}
+  {field: "name", key: "name", type: "string"},
+  {field: "appRateMmH", key: "app-rate", type: "number"},
+  {field: "kc", key: "kc", type: "number"},
+  {field: "triggerMm", key: "trigger-mm", type: "number"},
+  {field: "maxMin", key: "max-min", type: "number"},
+  {field: "fallbackMin", key: "fallback-min", type: "number"},
+  {field: "group", key: "group", type: "string"},
+  {field: "intervalDays", key: "interval", type: "number"},
+  {field: "enabled", key: "enabled", type: "boolean"}
 ];
+// <<< GENERATED: ZONE_KEY_SPECS <<<
 
 function initZones() {
   for (var i = 0; i < ZONE_DEFAULTS.length; i++) {

@@ -76,7 +76,7 @@ func switchIsOn(deviceState *script.DeviceState, switchKey string) bool {
 	if deviceState.ComponentStatus == nil {
 		return false
 	}
-	v, ok := deviceState.ComponentStatus[switchKey]
+	v, ok := componentStatusValue(deviceState, switchKey)
 	if !ok {
 		return false
 	}
@@ -335,7 +335,9 @@ func TestBluListener_KVSReloadPicksUpNewFollow(t *testing.T) {
 		"switch_id": "switch:0",
 		"auto_off":  0,
 	})
-	state.KVS["follow/shelly-blu/"+mac] = string(v)
+	// Written through the accessor: the script goroutine is already running and
+	// reading KVS, so a direct map write here races it (#451).
+	state.SetKVSValue("follow/shelly-blu/"+mac, string(v))
 
 	// Inject KVS change event to trigger reload
 	kvsEvent, _ := json.Marshal(map[string]interface{}{

@@ -681,6 +681,62 @@ Two caveats:
 - Always **restart what you stopped**. On a production device the resident scripts are load-bearing
   (`watchdog.js` handles MQTT-failure reboots and firmware updates).
 
+### The cost of `HTTP.GET` + `JSON.parse` — about 4 bytes of heap per response byte
+
+Fetching and parsing an HTTP response is the single most expensive thing these scripts do per
+byte. Measured on `mezzanine` (Pro1, fw 2.0.0, 2026-08-08) with a purpose-built script that does
+nothing but `Shelly.call('HTTP.GET', ...)` and `JSON.parse(res.body)`, so its `mem_peak` is
+essentially the fetch's own transient. Each arm rebooted the device first — see the warning below.
+
+| arm | response | `mem_peak` |
+|---|---|---|
+| control, no fetch (39 B script) | — | 140 |
+| fetch + parse (285 B script) | 251 B | 1946 |
+| fetch + parse (285 B script) | 861 B | 4396 |
+
+Both fetch arms ran byte-identical code, so the difference is purely payload:
+
+- **~4.0 bytes of peak heap per byte of response**
+- **~940 bytes fixed** (the `HTTP.GET` machinery plus the small test script itself)
+
+The multiplier is because the response string and the parsed object graph exist simultaneously, and
+every number in a JSON array becomes its own JsVar. Predicted peaks: a 2 KB response ≈ 9 KB, a 5 KB
+response ≈ 21 KB — consistent in magnitude with the garden OOM recorded in #271, where ~5 KB peaked
+around 28 KB and ~2 KB survived at ~18.5 KB.
+
+**Practical consequences:**
+
+- Ask the API for the narrowest data you can. `forecast_days=1` versus `past_days=3` is not a
+  cosmetic difference; it is kilobytes of heap.
+- A response that would be fine on its own can still OOM a script whose *load* already peaked near
+  the ceiling. Check the free heap **after** load, not the total.
+- Conversely, a fetch cannot set a new peak if it fits in the heap left free after load. On
+  `pool-pump.js` the load peak is 22778 leaving ~9.6 KB free, and its ~861 B forecast needs ~4.4 KB —
+  so shrinking the payload does **not** lower that script's peak. This is why #271 does not unblock
+  #433.
+
+### `mem_peak` is a device-wide high-water mark — reboot between measurements
+
+`mem_peak` does not reset when you stop and restart a script, because the JS heap is one pool shared
+across every script on the device. Measure two variants back to back and the second inherits the
+first's high-water mark: **every arm returns the maximum of all arms so far**, which looks
+convincingly like "the change made no difference".
+
+Three consecutive measurements of different `pool-pump.js` configurations returned an identical
+22778 this way before the cause was spotted.
+
+The protocol that works, per arm:
+
+1. delete the script and force-upload it (`--force`; see the version-marker trap in #449),
+2. `Script.SetConfig {"id":N,"config":{"enable":false}}` so it does not auto-start,
+3. **`Shelly.Reboot`**, and wait for the device to come back,
+4. `Script.Start`, then sample.
+
+`myhome ctl shelly script probe <device> <script>` does the sampling part: it polls until the peak
+stops moving and refuses to report an unsettled run as a measurement. A single `Script.GetStatus`
+call is not a measurement — on a Pro1 `pool-pump.js` reaches its peak within ~400 ms of start, but
+lazily-parsed functions keep nudging it upward for tens of seconds as init exercises new code paths.
+
 ### Testing memory on a spare device — how to avoid a falsely-easy test
 
 A spare device is only a valid proxy if it is loaded **exactly** like production. Getting this wrong

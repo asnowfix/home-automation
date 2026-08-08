@@ -5,10 +5,10 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"path/filepath"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"path/filepath"
 
 	"github.com/go-logr/logr"
 )
@@ -56,14 +56,21 @@ func UploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, 
 		log.Info("Got KVS entry for script version", "key", kvsKey, "version", kvsVersion)
 	}
 
-	// Upload if forced or version changed
+	// The version marker records what was last uploaded, but it can outlive the
+	// script itself: deleting a script from the device's web UI, with a raw
+	// Script.Delete RPC, or by factory reset leaves the marker behind (only
+	// DeleteWithVersion below removes it). Trusting the marker alone then skips
+	// the upload and starts a script that is absent or empty, while reporting
+	// success — see #449. So confirm the script is really on the device before
+	// letting a matching version suppress the upload.
+	present := scriptIsLoaded(ctx, log, via, device, basename)
+
+	// Upload if forced, the version changed, or the device does not actually
+	// have the script.
 	var id uint32
-	if force || version != kvsVersion {
-		if force {
-			log.Info("Force flag set, uploading script", "name", name, "version", version)
-		} else {
-			log.Info("Script version is different, uploading new one", "name", name, "version", version)
-		}
+	upload, reason := shouldUpload(force, version, kvsVersion, present)
+	if upload {
+		log.Info(reason, "name", name, "version", version, "key", kvsKey, "device", device.Name())
 
 		// Upload the script using the generic pkg/shelly/script package
 		id, err = script.Upload(ctx, via, device, name, code, minify)
@@ -80,7 +87,7 @@ func UploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, 
 			log.Info("Set KVS entry for script version", "key", kvsKey, "version", version, "device", device.Name())
 		}
 	} else {
-		log.Info("Script version is the same, skipping upload", "name", name, "version", version)
+		log.Info(reason, "name", name, "version", version)
 	}
 
 	// Now start the script
@@ -91,6 +98,49 @@ func UploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, 
 	}
 
 	return id, nil
+}
+
+// shouldUpload decides whether the script's code must be sent to the device,
+// and returns the reason for the log line.
+//
+// The subtle case is the last one. A matching version marker is not on its own
+// evidence that the device still has the script: the marker lives in the
+// device's KVS and outlives any deletion that does not go through
+// DeleteWithVersion — the web UI, a raw Script.Delete RPC, another tool, a
+// factory reset. Skipping the upload then leaves UploadWithVersion starting a
+// script that is absent (an outright error) or, if something recreated it
+// empty, one that runs and does nothing while reporting success (#449).
+//
+// Kept as a pure function so this decision is testable without a device.
+func shouldUpload(force bool, wantVersion, kvsVersion string, present bool) (bool, string) {
+	switch {
+	case force:
+		return true, "Force flag set, uploading script"
+	case wantVersion != kvsVersion:
+		return true, "Script version is different, uploading new one"
+	case !present:
+		return true, "KVS records this version but the script is not on the device, uploading anyway"
+	default:
+		return false, "Script version is the same and the script is present, skipping upload"
+	}
+}
+
+// scriptIsLoaded reports whether the device currently has a script with this
+// name. A lookup failure is reported as "present" so a transient RPC error
+// cannot turn into a surprise re-upload: the version check then decides on its
+// own, exactly as it did before.
+func scriptIsLoaded(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, basename string) bool {
+	loaded, err := script.ListLoaded(ctx, via, device)
+	if err != nil {
+		log.Info("Unable to list loaded scripts, assuming the script is present", "name", basename, "device", device.Name())
+		return true
+	}
+	for _, l := range loaded {
+		if l.Name == basename {
+			return true
+		}
+	}
+	return false
 }
 
 // DeleteWithVersion deletes a script and removes its version from KVS

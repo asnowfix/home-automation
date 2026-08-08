@@ -212,7 +212,7 @@ func TestSolarAutomation_ContextCancelStopsPump(t *testing.T) {
 // exactly `seconds` for the rest of the test.
 func seedDailyRuntime(t *testing.T, s *events.Storage, deviceID string, seconds float64) {
 	t.Helper()
-	base := float64(time.Now().Truncate(24*time.Hour).Unix()) + 3600
+	base := localMidnightPlusHour(t)
 	insertSwitchEvent(t, s, deviceID, "switch.on", base)
 	insertSwitchEvent(t, s, deviceID, "switch.off", base+seconds)
 }

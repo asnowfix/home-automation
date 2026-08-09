@@ -194,13 +194,12 @@ logs-local-daemon:
 # "fatal error: concurrent map read and map write", losing every result in the
 # package rather than failing one test (#451).
 #
-# -race is not the default *yet* only because pkg/beem still races on its
-# package-level loginURL/summaryURL globals, which needs those URLs moved into
-# ClientConfig (see the issue filed alongside #451, and #362 on removing
-# package-level singletons). internal/shelly/scripts, pkg/shelly/script and
-# myhome/daemon are all clean under -race as of this change, so flipping the
-# default is a one-line change once pkg/beem follows.
-TESTFLAGS ?=
+# -race is ON by default (#453). These tests are wall-clock bound rather than
+# CPU bound — the emulator and the pollers spend their time waiting — so the
+# detector costs little, and it closes off a class of failure that is otherwise
+# very expensive to diagnose. Override with `make test TESTFLAGS=` if you need
+# a run without it.
+TESTFLAGS ?= -race
 
 test: build
 	$(GO) test $(TESTFLAGS) ./...
@@ -211,9 +210,8 @@ test: build
 	  fi; \
 	done; exit $$rc
 
-# test-race runs the same suite with the race detector. These tests are
-# wall-clock bound rather than CPU bound, so it costs little: the full run is
-# roughly 4-7 minutes either way.
+# test-race is kept as an explicit alias now that -race is the default, so
+# scripts and habits that name it keep working.
 test-race:
 	$(MAKE) test TESTFLAGS=-race
 

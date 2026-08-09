@@ -45,9 +45,15 @@ func summaryOK(solarW, dailyWh, monthlyWh float64) http.HandlerFunc {
 }
 
 // newClientForTest creates a Client whose HTTP requests are redirected to srv.
+//
+// The endpoints are set on this client's own config rather than on package
+// globals, so parallel tests cannot disturb each other and a Watcher goroutine
+// outliving its test cannot observe another test's URLs (#453).
 func newClientForTest(cfg ClientConfig, srv *httptest.Server) *Client {
+	cfg.LoginURL = srv.URL + "/beemapp/user/login"
+	cfg.SummaryURL = srv.URL + "/beemapp/box/summary"
+	cfg.DevicesURL = srv.URL + "/beemapp/devices"
 	c := NewClient(cfg)
-	// Override the URLs so requests go to the test server.
 	c.http = *srv.Client()
 	return c
 }
@@ -66,12 +72,6 @@ func TestPollSummary_HappyPath(t *testing.T) {
 		Password:     "secret",
 		PollInterval: 60 * time.Second,
 	}, srv)
-
-	// Patch URLs to point to our test server.
-	origLogin, origSummary := loginURL, summaryURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	summaryURL = srv.URL + "/beemapp/box/summary"
-	defer func() { loginURL = origLogin; summaryURL = origSummary }()
 
 	ctx := context.Background()
 	sample, err := c.PollSummary(ctx)
@@ -135,13 +135,7 @@ func TestPollSummary_401TriggersRelogin(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"})
-	c.http = *srv.Client()
-
-	origLogin, origSummary := loginURL, summaryURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	summaryURL = srv.URL + "/beemapp/box/summary"
-	defer func() { loginURL = origLogin; summaryURL = origSummary }()
+	c := newClientForTest(ClientConfig{Email: "u@example.com", Password: "pw"}, srv)
 
 	ctx := context.Background()
 	sample, err := c.PollSummary(ctx)
@@ -176,13 +170,7 @@ func TestTokenProactiveRefresh(t *testing.T) {
 	srv := buildTestServer(t, loginHandler, summaryOK(100, 200, 300))
 	defer srv.Close()
 
-	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"})
-	c.http = *srv.Client()
-
-	origLogin, origSummary := loginURL, summaryURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	summaryURL = srv.URL + "/beemapp/box/summary"
-	defer func() { loginURL = origLogin; summaryURL = origSummary }()
+	c := newClientForTest(ClientConfig{Email: "u@example.com", Password: "pw"}, srv)
 
 	// Pre-populate a nearly-expired token so refreshIfNeeded triggers re-login.
 	c.token = "tok-expiring"
@@ -213,11 +201,6 @@ func TestPollSummary_EmptyBoxList(t *testing.T) {
 
 	c := newClientForTest(ClientConfig{Email: "u@example.com", Password: "pw"}, srv)
 
-	origLogin, origSummary := loginURL, summaryURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	summaryURL = srv.URL + "/beemapp/box/summary"
-	defer func() { loginURL = origLogin; summaryURL = origSummary }()
-
 	ctx := context.Background()
 	if _, err := c.PollSummary(ctx); err == nil {
 		t.Fatal("PollSummary returned nil error for an empty box list, want an error")
@@ -241,11 +224,6 @@ func TestFetchSummary_RequestShape(t *testing.T) {
 	defer srv.Close()
 
 	c := newClientForTest(ClientConfig{Email: "u@example.com", Password: "pw"}, srv)
-
-	origLogin, origSummary := loginURL, summaryURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	summaryURL = srv.URL + "/beemapp/box/summary"
-	defer func() { loginURL = origLogin; summaryURL = origSummary }()
 
 	ctx := context.Background()
 	if _, err := c.PollSummary(ctx); err != nil {
@@ -282,11 +260,6 @@ func TestPollSummary_RealWorldSummaryPayload(t *testing.T) {
 
 	c := newClientForTest(ClientConfig{Email: "u@example.com", Password: "pw"}, srv)
 
-	origLogin, origSummary := loginURL, summaryURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	summaryURL = srv.URL + "/beemapp/box/summary"
-	defer func() { loginURL = origLogin; summaryURL = origSummary }()
-
 	ctx := context.Background()
 	sample, err := c.PollSummary(ctx)
 	if err != nil {
@@ -322,13 +295,7 @@ func TestLogin_201CreatedRealWorldPayload(t *testing.T) {
 	srv := buildTestServer(t, loginHandler, summaryOK(100, 200, 300))
 	defer srv.Close()
 
-	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"})
-	c.http = *srv.Client()
-
-	origLogin, origSummary := loginURL, summaryURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	summaryURL = srv.URL + "/beemapp/box/summary"
-	defer func() { loginURL = origLogin; summaryURL = origSummary }()
+	c := newClientForTest(ClientConfig{Email: "u@example.com", Password: "pw"}, srv)
 
 	ctx := context.Background()
 	if _, err := c.PollSummary(ctx); err != nil {
@@ -355,14 +322,6 @@ func devicesOK(payload DevicesResponse) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(payload)
 	}
-}
-
-// patchDevicesURLs points loginURL/devicesURL at srv and returns a restore func.
-func patchDevicesURLs(srv *httptest.Server) func() {
-	origLogin, origDevices := loginURL, devicesURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	devicesURL = srv.URL + "/beemapp/devices"
-	return func() { loginURL = origLogin; devicesURL = origDevices }
 }
 
 // TestGetDevices_HappyPath verifies that GetDevices parses a beembox with
@@ -394,7 +353,6 @@ func TestGetDevices_HappyPath(t *testing.T) {
 	defer srv.Close()
 
 	c := newClientForTest(ClientConfig{Email: "u@example.com", Password: "pw"}, srv)
-	defer patchDevicesURLs(srv)()
 
 	ctx := context.Background()
 	got, err := c.GetDevices(ctx)
@@ -451,9 +409,7 @@ func TestGetDevices_401TriggersRelogin(t *testing.T) {
 	srv := buildDevicesTestServer(t, loginHandler, devicesHandler)
 	defer srv.Close()
 
-	c := NewClient(ClientConfig{Email: "u@example.com", Password: "pw"})
-	c.http = *srv.Client()
-	defer patchDevicesURLs(srv)()
+	c := newClientForTest(ClientConfig{Email: "u@example.com", Password: "pw"}, srv)
 
 	ctx := context.Background()
 	got, err := c.GetDevices(ctx)
@@ -490,7 +446,6 @@ func TestGetDevices_RealWorldPayload(t *testing.T) {
 	defer srv.Close()
 
 	c := newClientForTest(ClientConfig{Email: "u@example.com", Password: "pw"}, srv)
-	defer patchDevicesURLs(srv)()
 
 	ctx := context.Background()
 	got, err := c.GetDevices(ctx)

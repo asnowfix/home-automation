@@ -183,14 +183,39 @@ status-local-daemon:
 logs-local-daemon:
 	@tail -n 100 -f "$(LOCAL_DAEMON_LOG)"
 
+# TESTFLAGS is threaded through both test invocations so the race detector can
+# be switched on without editing this file:
+#
+#   make test-race          # or: make test TESTFLAGS=-race
+#
+# Races here are not merely flaky. The goja script emulator runs the script
+# under test on its own goroutine while tests poll DeviceState, and an
+# unsynchronised map read racing a write aborts the whole test binary with
+# "fatal error: concurrent map read and map write", losing every result in the
+# package rather than failing one test (#451).
+#
+# -race is not the default *yet* only because pkg/beem still races on its
+# package-level loginURL/summaryURL globals, which needs those URLs moved into
+# ClientConfig (see the issue filed alongside #451, and #362 on removing
+# package-level singletons). internal/shelly/scripts, pkg/shelly/script and
+# myhome/daemon are all clean under -race as of this change, so flipping the
+# default is a one-line change once pkg/beem follows.
+TESTFLAGS ?=
+
 test: build
-	$(GO) test ./...
+	$(GO) test $(TESTFLAGS) ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
-	    (cd $$dir && $(GO) test ./...) || rc=1; \
+	    (cd $$dir && $(GO) test $(TESTFLAGS) ./...) || rc=1; \
 	  fi; \
 	done; exit $$rc
+
+# test-race runs the same suite with the race detector. These tests are
+# wall-clock bound rather than CPU bound, so it costs little: the full run is
+# roughly 4-7 minutes either way.
+test-race:
+	$(MAKE) test TESTFLAGS=-race
 
 cover: build
 	@mkdir -p coverage

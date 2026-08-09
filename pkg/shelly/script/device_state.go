@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/go-logr/logr"
 )
@@ -34,20 +35,224 @@ type DeviceState struct {
 	OnModified func() `json:"-"`
 
 	nextScheduleID int
+
+	// mu guards every map and slice above. The emulator mutates them from the
+	// goroutine running the script while tests poll them from the test
+	// goroutine, which without this is a data race — and an unsynchronised map
+	// read racing a write is not merely flaky: Go aborts the whole test binary
+	// with "fatal error: concurrent map read and map write", losing every
+	// result in the package rather than failing one test (#451).
+	//
+	// Access the fields through the accessors below rather than directly.
+	// The exported fields remain exported only so DeviceState can still be
+	// JSON-marshalled for snapshots; treat them as private otherwise.
+	mu sync.RWMutex
 }
 
-// GetKVS implements the DeviceState interface
+// KVSValue returns one KVS entry under the read lock.
+func (d *DeviceState) KVSValue(key string) (interface{}, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	v, ok := d.KVS[key]
+	return v, ok
+}
+
+// KVSString returns one KVS entry as a string. The second result is false when
+// the key is absent or the value is not a string, so callers can distinguish
+// "not set yet" from "set to something unexpected".
+func (d *DeviceState) KVSString(key string) (string, bool) {
+	v, ok := d.KVSValue(key)
+	if !ok {
+		return "", false
+	}
+	s, ok := v.(string)
+	return s, ok
+}
+
+// SetKVSValue writes one KVS entry under the write lock.
+func (d *DeviceState) SetKVSValue(key string, value interface{}) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.KVS == nil {
+		d.KVS = make(map[string]interface{})
+	}
+	d.KVS[key] = value
+}
+
+// DeleteKVSValue removes one KVS entry under the write lock.
+func (d *DeviceState) DeleteKVSValue(key string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.KVS, key)
+}
+
+// KVSSnapshot returns a copy of the whole KVS map. A copy, not the live map:
+// handing back the original would just move the race into the caller.
+func (d *DeviceState) KVSSnapshot() map[string]interface{} {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	out := make(map[string]interface{}, len(d.KVS))
+	for k, v := range d.KVS {
+		out[k] = v
+	}
+	return out
+}
+
+// StorageValue returns one Script.storage entry under the read lock.
+func (d *DeviceState) StorageValue(key string) (interface{}, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	v, ok := d.Storage[key]
+	return v, ok
+}
+
+// SetStorageValue writes one Script.storage entry under the write lock.
+func (d *DeviceState) SetStorageValue(key string, value interface{}) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.Storage == nil {
+		d.Storage = make(map[string]interface{})
+	}
+	d.Storage[key] = value
+}
+
+// DeleteStorageValue removes one Script.storage entry under the write lock.
+func (d *DeviceState) DeleteStorageValue(key string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.Storage, key)
+}
+
+// ComponentStatusValue returns one component's status under the read lock.
+//
+// When the status is a map — which it is for every real component — a copy is
+// returned. Handing back the live inner map would defeat the lock entirely: the
+// caller would hold a reference it could read or mutate while the script
+// goroutine writes the same map, which is precisely the race this type exists
+// to prevent. Callers that need to change a field must use
+// SetComponentStatusField.
+func (d *DeviceState) ComponentStatusValue(name string) (interface{}, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	v, ok := d.ComponentStatus[name]
+	if !ok {
+		return nil, false
+	}
+	if m, isMap := v.(map[string]interface{}); isMap {
+		cp := make(map[string]interface{}, len(m))
+		for k, mv := range m {
+			cp[k] = mv
+		}
+		return cp, true
+	}
+	return v, true
+}
+
+// SetComponentStatusField sets one field on a component's status map in place,
+// under the write lock, and reports whether the component existed and was a
+// map. This is the safe form of the read-then-mutate pattern: doing it via
+// ComponentStatusValue would only mutate the copy.
+func (d *DeviceState) SetComponentStatusField(name, field string, value interface{}) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	existing, ok := d.ComponentStatus[name]
+	if !ok {
+		return false
+	}
+	m, isMap := existing.(map[string]interface{})
+	if !isMap {
+		return false
+	}
+	m[field] = value
+	return true
+}
+
+// SetComponentStatusValue writes one component's status under the write lock.
+func (d *DeviceState) SetComponentStatusValue(name string, value interface{}) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.ComponentStatus == nil {
+		d.ComponentStatus = make(map[string]interface{})
+	}
+	d.ComponentStatus[name] = value
+}
+
+// DeleteComponentStatusValue removes one component's status under the write lock.
+func (d *DeviceState) DeleteComponentStatusValue(name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.ComponentStatus, name)
+}
+
+// StorageLen reports how many Script.storage entries exist.
+func (d *DeviceState) StorageLen() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return len(d.Storage)
+}
+
+// ScheduleJobs returns a copy of the schedule list, with each job map copied
+// one level deep. Tests read fields out of individual jobs (timespec, enable),
+// so returning the live job maps would leave the race in place.
+func (d *DeviceState) ScheduleJobs() []map[string]interface{} {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	out := make([]map[string]interface{}, 0, len(d.Schedules))
+	for _, job := range d.Schedules {
+		cp := make(map[string]interface{}, len(job))
+		for k, v := range job {
+			cp[k] = v
+		}
+		out = append(out, cp)
+	}
+	return out
+}
+
+// UpdateSchedule merges updates into the job with the given id and reports
+// whether it existed. Held under the write lock so a concurrent ScheduleJobs()
+// cannot observe a half-applied update.
+func (d *DeviceState) UpdateSchedule(id int, updates map[string]interface{}) (map[string]interface{}, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for _, job := range d.Schedules {
+		if scheduleID(job["id"]) != id {
+			continue
+		}
+		for k, v := range updates {
+			if k == "id" {
+				continue
+			}
+			job[k] = v
+		}
+		cp := make(map[string]interface{}, len(job))
+		for k, v := range job {
+			cp[k] = v
+		}
+		return cp, true
+	}
+	return nil, false
+}
+
+// GetKVS returns a snapshot of the KVS map. It is a copy: see KVSSnapshot.
 func (d *DeviceState) GetKVS() map[string]interface{} {
-	return d.KVS
+	return d.KVSSnapshot()
 }
 
-// GetStorage implements the DeviceState interface
+// GetStorage returns a snapshot of the Script.storage map.
 func (d *DeviceState) GetStorage() map[string]interface{} {
-	return d.Storage
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	out := make(map[string]interface{}, len(d.Storage))
+	for k, v := range d.Storage {
+		out[k] = v
+	}
+	return out
 }
 
 // AddSchedule appends a schedule and returns its assigned ID (1-based).
 func (d *DeviceState) AddSchedule(job map[string]interface{}) int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.nextScheduleID++
 	id := d.nextScheduleID
 	job["id"] = id
@@ -57,6 +262,8 @@ func (d *DeviceState) AddSchedule(job map[string]interface{}) int {
 
 // DeleteSchedule removes the schedule with the given ID.
 func (d *DeviceState) DeleteSchedule(id int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	filtered := d.Schedules[:0]
 	for _, s := range d.Schedules {
 		if s["id"] != id {

@@ -8,24 +8,47 @@ import (
 
 	"github.com/asnowfix/home-automation/myhome/events"
 	beem "github.com/asnowfix/home-automation/pkg/beem"
+	"sync"
+
 	"github.com/go-logr/logr"
 )
 
-// mockPumpController records SetPump calls so tests can assert pump state transitions.
+// mockPumpController records SetPump calls so tests can assert pump state
+// transitions.
+//
+// SetPump is invoked on SolarAutomation's own goroutine while the test
+// goroutine reads the record, so the slice needs a lock: without it `go test
+// -race` reports a genuine race, and an unlucky interleaving can corrupt the
+// slice header rather than merely returning a stale value (#451).
 type mockPumpController struct {
+	mu    sync.Mutex
 	calls []bool // true=on, false=off
 }
 
 func (m *mockPumpController) SetPump(_ context.Context, on bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, on)
 	return nil
 }
 
 func (m *mockPumpController) lastCall() (on bool, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if len(m.calls) == 0 {
 		return false, false
 	}
 	return m.calls[len(m.calls)-1], true
+}
+
+// callsSnapshot returns a copy for assertion messages, so formatting a failure
+// does not itself race with the automation goroutine.
+func (m *mockPumpController) callsSnapshot() []bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]bool, len(m.calls))
+	copy(out, m.calls)
+	return out
 }
 
 // flakyPumpController simulates a flaky MQTT link by failing the first
@@ -33,16 +56,28 @@ func (m *mockPumpController) lastCall() (on bool, ok bool) {
 // succeeding, so tests can assert the retry-on-failure behavior of the
 // state machine without depending on shellyPumpController's own retry loop.
 type flakyPumpController struct {
+	mu        sync.Mutex
 	failCount int
 	calls     []bool
 }
 
 func (m *flakyPumpController) SetPump(_ context.Context, on bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.calls = append(m.calls, on)
 	if len(m.calls) <= m.failCount {
 		return fmt.Errorf("simulated dropped Switch.Set (MQTT not retained)")
 	}
 	return nil
+}
+
+// callsSnapshot returns a copy for assertion messages; see mockPumpController.
+func (m *flakyPumpController) callsSnapshot() []bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]bool, len(m.calls))
+	copy(out, m.calls)
+	return out
 }
 
 // send pushes a sample to ch and gives the goroutine time to process it.
@@ -51,11 +86,25 @@ func send(ch chan<- beem.PowerSample, w float64) {
 	time.Sleep(20 * time.Millisecond)
 }
 
-// mockRuntimeTracker implements RuntimeTracker with a fixed runtime value for tests.
-type mockRuntimeTracker struct{ runtimeSec int64 }
+// mockRuntimeTracker implements RuntimeTracker with a fixed runtime value for
+// tests. Guarded because tests change the value mid-run while
+// SolarAutomation's goroutine is reading it (#451).
+type mockRuntimeTracker struct {
+	mu         sync.Mutex
+	runtimeSec int64
+}
 
 func (m *mockRuntimeTracker) DailyRuntimeSec(_ context.Context) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.runtimeSec, nil
+}
+
+// setRuntimeSec updates the reported runtime from the test goroutine.
+func (m *mockRuntimeTracker) setRuntimeSec(v int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.runtimeSec = v
 }
 
 func defaultCfg() SolarConfig {
@@ -85,14 +134,14 @@ func TestSolarAutomation_ImmediateStartStop(t *testing.T) {
 	send(ch, 600)
 	on, ok := pump.lastCall()
 	if !ok || !on {
-		t.Fatalf("expected pump ON after first sample above threshold; calls=%v", pump.calls)
+		t.Fatalf("expected pump ON after first sample above threshold; calls=%v", pump.callsSnapshot())
 	}
 
 	// Sample below stop threshold → pump should turn off.
 	send(ch, 100)
 	on, ok = pump.lastCall()
 	if !ok || on {
-		t.Fatalf("expected pump OFF after sample below stop threshold; calls=%v", pump.calls)
+		t.Fatalf("expected pump OFF after sample below stop threshold; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -108,7 +157,7 @@ func TestSolarAutomation_StayRunningBetweenThresholds(t *testing.T) {
 	sa.Start(ctx)
 
 	send(ch, 600) // start pump
-	if n := len(pump.calls); n != 1 {
+	if n := len(pump.callsSnapshot()); n != 1 {
 		t.Fatalf("expected 1 call after start, got %d", n)
 	}
 
@@ -116,8 +165,8 @@ func TestSolarAutomation_StayRunningBetweenThresholds(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		send(ch, 350)
 	}
-	if n := len(pump.calls); n != 1 {
-		t.Errorf("expected no change in hysteresis band; calls=%v", pump.calls)
+	if n := len(pump.callsSnapshot()); n != 1 {
+		t.Errorf("expected no change in hysteresis band; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -137,8 +186,8 @@ func TestSolarAutomation_StartDelayPreventsEarlyStart(t *testing.T) {
 
 	// Single sample above threshold — delay not elapsed yet.
 	send(ch, 600)
-	if len(pump.calls) != 0 {
-		t.Errorf("pump should not start before start delay elapses; calls=%v", pump.calls)
+	if len(pump.callsSnapshot()) != 0 {
+		t.Errorf("pump should not start before start delay elapses; calls=%v", pump.callsSnapshot())
 	}
 
 	// Drop below threshold — resets the timer.
@@ -146,8 +195,8 @@ func TestSolarAutomation_StartDelayPreventsEarlyStart(t *testing.T) {
 
 	// Back above threshold — still no start since delay is 10s.
 	send(ch, 600)
-	if len(pump.calls) != 0 {
-		t.Errorf("pump should not start after threshold reset; calls=%v", pump.calls)
+	if len(pump.callsSnapshot()) != 0 {
+		t.Errorf("pump should not start after threshold reset; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -166,20 +215,20 @@ func TestSolarAutomation_StopDelayPreventsEarlyStop(t *testing.T) {
 	sa.Start(ctx)
 
 	send(ch, 600) // start pump
-	if n := len(pump.calls); n != 1 || !pump.calls[0] {
-		t.Fatalf("expected pump ON; calls=%v", pump.calls)
+	if n := len(pump.callsSnapshot()); n != 1 || !pump.callsSnapshot()[0] {
+		t.Fatalf("expected pump ON; calls=%v", pump.callsSnapshot())
 	}
 
 	// Brief dip below stop threshold — stop delay hasn't elapsed.
 	send(ch, 50)
-	if n := len(pump.calls); n != 1 {
-		t.Errorf("pump should not stop before stop delay elapses; calls=%v", pump.calls)
+	if n := len(pump.callsSnapshot()); n != 1 {
+		t.Errorf("pump should not stop before stop delay elapses; calls=%v", pump.callsSnapshot())
 	}
 
 	// Recovery above stop threshold — stop timer should reset.
 	send(ch, 400)
-	if n := len(pump.calls); n != 1 {
-		t.Errorf("pump should not stop after solar recovery; calls=%v", pump.calls)
+	if n := len(pump.callsSnapshot()); n != 1 {
+		t.Errorf("pump should not stop after solar recovery; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -194,8 +243,8 @@ func TestSolarAutomation_ContextCancelStopsPump(t *testing.T) {
 	sa.Start(ctx)
 
 	send(ch, 600) // start pump
-	if len(pump.calls) == 0 || !pump.calls[0] {
-		t.Fatalf("expected pump ON; calls=%v", pump.calls)
+	if len(pump.callsSnapshot()) == 0 || !pump.callsSnapshot()[0] {
+		t.Fatalf("expected pump ON; calls=%v", pump.callsSnapshot())
 	}
 
 	cancel() // cancel context → goroutine should emit an OFF command
@@ -203,7 +252,7 @@ func TestSolarAutomation_ContextCancelStopsPump(t *testing.T) {
 
 	on, ok := pump.lastCall()
 	if !ok || on {
-		t.Errorf("expected pump OFF after context cancel; calls=%v", pump.calls)
+		t.Errorf("expected pump OFF after context cancel; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -238,15 +287,15 @@ func TestSolarAutomation_SoftStopWhenTargetReachedAndSolarGone(t *testing.T) {
 	sa.Start(ctx)
 
 	send(ch, 600) // runtime (4000s) < ceiling (7200s) → solar start permitted
-	if n := len(pump.calls); n != 1 || !pump.calls[0] {
-		t.Fatalf("expected pump ON; calls=%v", pump.calls)
+	if n := len(pump.callsSnapshot()); n != 1 || !pump.callsSnapshot()[0] {
+		t.Fatalf("expected pump ON; calls=%v", pump.callsSnapshot())
 	}
 
 	// Solar drops below the start threshold while the soft target is already met.
 	send(ch, 400)
 	on, ok := pump.lastCall()
 	if !ok || on {
-		t.Errorf("expected soft stop (target reached + solar below start threshold); calls=%v", pump.calls)
+		t.Errorf("expected soft stop (target reached + solar below start threshold); calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -271,16 +320,16 @@ func TestSolarAutomation_KeepsRunningPastSoftTargetWhileSolarHigh(t *testing.T) 
 	sa.Start(ctx)
 
 	send(ch, 600) // start
-	if n := len(pump.calls); n != 1 {
-		t.Fatalf("expected pump to start; calls=%v", pump.calls)
+	if n := len(pump.callsSnapshot()); n != 1 {
+		t.Fatalf("expected pump to start; calls=%v", pump.callsSnapshot())
 	}
 
 	// Soft target already met, but solar stays well above the start threshold.
 	for i := 0; i < 3; i++ {
 		send(ch, 700)
 	}
-	if n := len(pump.calls); n != 1 {
-		t.Errorf("expected pump to keep running past the soft target while solar is high; calls=%v", pump.calls)
+	if n := len(pump.callsSnapshot()); n != 1 {
+		t.Errorf("expected pump to keep running past the soft target while solar is high; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -309,7 +358,7 @@ func TestSolarAutomation_HardCeilingStopsRegardlessOfSolar(t *testing.T) {
 	}
 	on, ok := pump.lastCall()
 	if !ok || on {
-		t.Errorf("expected pump OFF on hard ceiling; calls=%v", pump.calls)
+		t.Errorf("expected pump OFF on hard ceiling; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -341,8 +390,8 @@ func TestSolarAutomation_HardCeilingRetriesStopOnSetPumpFailure(t *testing.T) {
 	if state != pumpIdle {
 		t.Errorf("expected the retried stop to land and reach IDLE; state=%v", state)
 	}
-	if len(pump.calls) != 2 || pump.calls[0] != false || pump.calls[1] != false {
-		t.Errorf("expected two OFF attempts (one dropped, one landing); calls=%v", pump.calls)
+	if len(pump.callsSnapshot()) != 2 || pump.callsSnapshot()[0] != false || pump.callsSnapshot()[1] != false {
+		t.Errorf("expected two OFF attempts (one dropped, one landing); calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -366,8 +415,8 @@ func TestSolarAutomation_CannotStartPastHardCeiling(t *testing.T) {
 	sa.Start(ctx)
 
 	send(ch, 900) // well above the start threshold, but the ceiling is already reached
-	if len(pump.calls) != 0 {
-		t.Errorf("expected no solar start once the hard ceiling is reached; calls=%v", pump.calls)
+	if len(pump.callsSnapshot()) != 0 {
+		t.Errorf("expected no solar start once the hard ceiling is reached; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -385,8 +434,8 @@ func TestSolarAutomation_NoPumpStartWhenIdle(t *testing.T) {
 	cancel()
 	time.Sleep(50 * time.Millisecond)
 
-	if len(pump.calls) != 0 {
-		t.Errorf("no pump calls expected when cancelling from idle; calls=%v", pump.calls)
+	if len(pump.callsSnapshot()) != 0 {
+		t.Errorf("no pump calls expected when cancelling from idle; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -407,8 +456,8 @@ func TestSolarAutomation_HardCeilingPreventsStart(t *testing.T) {
 
 	// Solar is well above start threshold, but ceiling is already reached.
 	send(ch, 800)
-	if len(pump.calls) != 0 {
-		t.Errorf("pump should not start when hard ceiling is already reached; calls=%v", pump.calls)
+	if len(pump.callsSnapshot()) != 0 {
+		t.Errorf("pump should not start when hard ceiling is already reached; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -429,16 +478,16 @@ func TestSolarAutomation_HardCeilingStopsPump(t *testing.T) {
 
 	send(ch, 800) // start pump
 	if on, ok := pump.lastCall(); !ok || !on {
-		t.Fatalf("expected pump ON; calls=%v", pump.calls)
+		t.Fatalf("expected pump ON; calls=%v", pump.callsSnapshot())
 	}
 
 	// Simulate ceiling reached during the next sample.
-	tracker.runtimeSec = 3600
+	tracker.setRuntimeSec(3600)
 	send(ch, 800) // still high solar, but ceiling hit → must stop
 
 	on, ok := pump.lastCall()
 	if !ok || on {
-		t.Errorf("expected pump OFF when hard ceiling reached; calls=%v", pump.calls)
+		t.Errorf("expected pump OFF when hard ceiling reached; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -460,16 +509,16 @@ func TestSolarAutomation_SoftStopKeepsRunningWithSolar(t *testing.T) {
 
 	send(ch, 800) // start pump
 	if on, ok := pump.lastCall(); !ok || !on {
-		t.Fatalf("expected pump ON; calls=%v", pump.calls)
+		t.Fatalf("expected pump ON; calls=%v", pump.callsSnapshot())
 	}
 
 	// Target reached, but solar still above StartThresholdW → must keep running.
-	tracker.runtimeSec = 3600
+	tracker.setRuntimeSec(3600)
 	send(ch, 800)
 
 	on, ok := pump.lastCall()
 	if !ok || !on {
-		t.Errorf("expected pump to keep running when target met but solar still up; calls=%v", pump.calls)
+		t.Errorf("expected pump to keep running when target met but solar still up; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -491,15 +540,15 @@ func TestSolarAutomation_SoftStopWhenSolarGone(t *testing.T) {
 
 	send(ch, 800) // start pump
 	if on, ok := pump.lastCall(); !ok || !on {
-		t.Fatalf("expected pump ON; calls=%v", pump.calls)
+		t.Fatalf("expected pump ON; calls=%v", pump.callsSnapshot())
 	}
 
 	// Target reached AND solar below StartThresholdW → soft stop must fire.
-	tracker.runtimeSec = 3600
+	tracker.setRuntimeSec(3600)
 	send(ch, 300) // 300 W: above StopThresholdW (200) but below StartThresholdW (500)
 
 	on, ok := pump.lastCall()
 	if !ok || on {
-		t.Errorf("expected pump OFF (soft stop: target met, solar gone); calls=%v", pump.calls)
+		t.Errorf("expected pump OFF (soft stop: target met, solar gone); calls=%v", pump.callsSnapshot())
 	}
 }

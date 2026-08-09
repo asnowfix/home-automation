@@ -13,11 +13,13 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// loginURL, summaryURL and devicesURL are vars so tests can redirect to a local httptest.Server.
-var (
-	loginURL   = "https://api-x.beem.energy/beemapp/user/login"
-	summaryURL = "https://api-x.beem.energy/beemapp/box/summary"
-	devicesURL = "https://api-x.beem.energy/beemapp/devices"
+// Public Beem API endpoints, used when ClientConfig leaves the corresponding
+// field empty. Constants rather than vars: a test that needs different
+// endpoints sets them on its own ClientConfig (see ClientConfig.LoginURL).
+const (
+	defaultLoginURL   = "https://api-x.beem.energy/beemapp/user/login"
+	defaultSummaryURL = "https://api-x.beem.energy/beemapp/box/summary"
+	defaultDevicesURL = "https://api-x.beem.energy/beemapp/devices"
 )
 
 const (
@@ -107,7 +109,18 @@ type Client struct {
 }
 
 // NewClient returns a new Beem API client using the supplied configuration.
+// Endpoint URLs left empty in cfg are resolved to the public Beem endpoints
+// here, once, so request paths never consult mutable shared state.
 func NewClient(cfg ClientConfig) *Client {
+	if cfg.LoginURL == "" {
+		cfg.LoginURL = defaultLoginURL
+	}
+	if cfg.SummaryURL == "" {
+		cfg.SummaryURL = defaultSummaryURL
+	}
+	if cfg.DevicesURL == "" {
+		cfg.DevicesURL = defaultDevicesURL
+	}
 	return &Client{
 		cfg: cfg,
 		log: hlog.GetLogger("pkg/beem"),
@@ -126,7 +139,7 @@ func (c *Client) login(ctx context.Context) error {
 		return fmt.Errorf("beem: marshal login request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, loginURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.LoginURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("beem: create login request: %w", err)
 	}
@@ -201,7 +214,7 @@ func (c *Client) fetchSummary(ctx context.Context) (PowerSample, int, error) {
 		return PowerSample{}, 0, fmt.Errorf("beem: marshal summary request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, summaryURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.SummaryURL, bytes.NewReader(body))
 	if err != nil {
 		return PowerSample{}, 0, fmt.Errorf("beem: create summary request: %w", err)
 	}
@@ -271,7 +284,7 @@ func (c *Client) GetDevices(ctx context.Context) (DevicesResponse, error) {
 // fetchDevices performs the actual GET /beemapp/devices request.
 // It returns the parsed topology, the HTTP status code, and any error.
 func (c *Client) fetchDevices(ctx context.Context) (DevicesResponse, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, devicesURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.DevicesURL, nil)
 	if err != nil {
 		return DevicesResponse{}, 0, fmt.Errorf("beem: create devices request: %w", err)
 	}

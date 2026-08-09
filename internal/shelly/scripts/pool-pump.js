@@ -959,24 +959,40 @@ function computeTurnoverToday(sec) {
   return Math.round(turnover * 100) / 100;
 }
 
+// The speed this device will actually run at.
+//
+// A Pro1 is on/off: its single stage is 'max'. Whatever speed the KVS carries —
+// a Pro3-era 'eco', say — the pump physically runs at max RPM, so the whole
+// script must agree on that. Resolving it only in mapSpeedToSwitch() would fix
+// the switching and leave the arithmetic lying: computeFlowRate() scales
+// maxFlowRate by rpm/maxRpm, so 'eco' on a Pro1 would model 2000/2900 = 69% of
+// the real flow, underestimate turnover per day by a third, and make
+// computeRunHours() demand a longer window than the pool needs.
+//
+// Normalising rather than refusing also means a device still configured from
+// the Pro3 era keeps filtering instead of stranding.
+function effectiveSpeed(speed) {
+  if (!speed || speed === 'off') return 'off';
+  if (STATE.deviceType === 'pro1') return 'max';
+  return speed;
+}
+
 function mapSpeedToSwitch(speed) {
   // Map a semantic speed to a physical switch ID.
   // speed: 'eco', 'day', 'max' (or 'off')
   // Returns switch ID, or -1 for off.
 
-  if (!speed || speed === 'off') {
+  var eff = effectiveSpeed(speed);
+  if (eff === 'off') {
     return -1;
   }
 
   if (STATE.deviceType === 'pro3') {
     // Pro3 drives three speed stages.
-    if (speed === 'eco') return CONFIG.ecoSpeed;
-    if (speed === 'day') return CONFIG.daySpeed;
-    if (speed === 'max') return CONFIG.maxSpeed;
+    if (eff === 'eco') return CONFIG.ecoSpeed;
+    if (eff === 'day') return CONFIG.daySpeed;
+    if (eff === 'max') return CONFIG.maxSpeed;
   } else if (STATE.deviceType === 'pro1') {
-    // Pro1 is on/off: its single stage is 'max', and any configured speed
-    // resolves to it. Rejecting 'eco' here would strand a device whose KVS
-    // still carries a Pro3-era speed, so map rather than refuse.
     return 0;
   }
 
@@ -1689,10 +1705,12 @@ function lpad2(n) {
   return n < 10 ? '0' + n : String(n);
 }
 
-// Flow rate (m3/h) at the currently configured preferred speed
+// Flow rate (m3/h) at the speed this device actually runs at — see
+// effectiveSpeed(): on a Pro1 that is always 'max', regardless of what the KVS
+// says, because the pump has one stage.
 function computeFlowRate() {
   var speedRpms = {eco: CONFIG.ecoRpm, day: CONFIG.dayRpm, max: CONFIG.maxRpm};
-  var rpm = speedRpms[CONFIG.preferredSpeed];
+  var rpm = speedRpms[effectiveSpeed(CONFIG.preferredSpeed)];
   if (!rpm) rpm = CONFIG.maxRpm;
   return CONFIG.maxFlowRate * (rpm / CONFIG.maxRpm);
 }
@@ -1984,8 +2002,11 @@ function doStart(speed, reason) {
     return;
   }
 
-  log('Starting pump at speed:', speed, '-> switch:', switchId);
-  Shelly.emitEvent("pool.pump_start", {speed: speed, switch_id: switchId, reason: reason || "start"});
+  // Report the speed actually run, not the one configured: on a Pro1 those
+  // differ, and the event feeds the daily-turnover accounting.
+  var eff = effectiveSpeed(speed);
+  log('Starting pump at speed:', eff, '-> switch:', switchId);
+  Shelly.emitEvent("pool.pump_start", {speed: eff, switch_id: switchId, reason: reason || "start"});
   activateOutput(switchId);
 }
 

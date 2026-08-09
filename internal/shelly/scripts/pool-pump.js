@@ -406,18 +406,101 @@ function acquireCallSlot(cb, ud) {
 // unconditionally before invoking the caller's callback, so a slot is always
 // freed even if the callback itself throws (caught by processTaskQueue's
 // try/catch below, or top-level error handling).
+// Completions waiting to be delivered from the task queue, and the index of
+// the next one. A head index rather than [].shift(), which Espruino lacks.
+var PENDING_DONE = [];
+var PENDING_DONE_HEAD = 0;
+
+// Deliver one queued completion. Runs from processTaskQueue, i.e. on a fresh
+// stack, which is the whole point — see sharedCallDone.
+function runPendingCallback() {
+  if (PENDING_DONE_HEAD >= PENDING_DONE.length) return;
+  var slot = PENDING_DONE[PENDING_DONE_HEAD];
+  PENDING_DONE[PENDING_DONE_HEAD] = null;
+  PENDING_DONE_HEAD++;
+  if (PENDING_DONE_HEAD >= PENDING_DONE.length) {
+    PENDING_DONE = [];
+    PENDING_DONE_HEAD = 0;
+  }
+  if (!slot) return;
+
+  var cb = slot.cb;
+  var ud = slot.ud;
+  var r = slot.r;
+  var ec = slot.ec;
+  var em = slot.em;
+  // Release the slot before invoking, so a callback that issues another call
+  // can reuse it.
+  slot.used = false;
+  slot.cb = null;
+  slot.ud = null;
+  slot.r = null;
+  slot.em = null;
+  if (typeof cb === 'function') {
+    cb(r, ec, em, ud);
+  }
+}
+
+// Shared completion handler for calls that passed a callback.
+//
+// The callback is delivered from the task queue, NOT inline (#450). Shelly.call
+// is reassigned to a JS wrapper, and the firmware invokes this handler from
+// inside the call it is completing; invoking the caller's callback here meant a
+// callback that issues another call nested inside the previous completion
+// instead of unwinding. A loop of dependent calls — turnOffAllSwitches issuing
+// one Switch.Set per output, or activateOutput chaining setOutput — therefore
+// accumulated stack depth with no recursion anywhere in the source, until
+// acquireCallSlot (a plain for loop) ran out of stack:
+//
+//   Uncaught Error: Too much recursion - the stack is about to overflow
+//    in function "acquireCallSlot" ... "call" ... "turnOffAllSwitches"
+//
+// That killed the production pump twice in three days, each time silently
+// turning every schedule job into a no-op.
+//
+// Only chains deeper than MAX_CALL_DEPTH are deferred. Deferring every
+// completion would be simpler, but it adds a task-queue tick to every single
+// RPC, which slows init and the schedule handlers noticeably for no benefit:
+// a short chain cannot overflow anything. Bounding the depth keeps the common
+// path exactly as fast as before and makes the failure impossible regardless
+// of which caller drives it.
+//
+// The result is stashed on the slot the call already owns rather than in a new
+// object: this runs on every RPC, and per-call allocation is what the heap on
+// this device can least afford.
+var CALL_DEPTH = 0;
+var MAX_CALL_DEPTH = 3;
+
 function sharedCallDone(result, error_code, error_message, slot) {
   CALLS_IN_FLIGHT--;
-  var cb = slot ? slot.cb : null;
-  var ud = slot ? slot.ud : null;
-  if (slot) {
+  if (!slot) return;
+  if (typeof slot.cb !== 'function') {
     slot.used = false;
     slot.cb = null;
     slot.ud = null;
+    return;
   }
-  if (typeof cb === 'function') {
-    cb(result, error_code, error_message, ud);
+
+  if (CALL_DEPTH >= MAX_CALL_DEPTH) {
+    slot.r = result;
+    slot.ec = error_code;
+    slot.em = error_message;
+    PENDING_DONE.push(slot);
+    queueTask(runPendingCallback);
+    return;
   }
+
+  var cb = slot.cb;
+  var ud = slot.ud;
+  slot.used = false;
+  slot.cb = null;
+  slot.ud = null;
+
+  // If cb throws, the decrement is skipped and every later completion is
+  // deferred instead of nested. Degraded but safe: slower, never deeper.
+  CALL_DEPTH++;
+  cb(result, error_code, error_message, ud);
+  CALL_DEPTH--;
 }
 
 // Shared completion handler for fire-and-forget calls (storeValue() and

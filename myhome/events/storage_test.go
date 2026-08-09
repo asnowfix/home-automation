@@ -23,18 +23,18 @@ func TestRecordAndQuery(t *testing.T) {
 	ctx := context.Background()
 
 	e1 := Event{
-		Ts:       1700000000.0,
-		DeviceID: "dev-1",
+		Ts:        1700000000.0,
+		DeviceID:  "dev-1",
 		Component: "switch:0",
-		Event:    "switch.on",
-		Severity: "info",
+		Event:     "switch.on",
+		Severity:  "info",
 	}
 	e2 := Event{
-		Ts:       1700000001.0,
-		DeviceID: "dev-2",
+		Ts:        1700000001.0,
+		DeviceID:  "dev-2",
 		Component: "switch:0",
-		Event:    "switch.off",
-		Severity: "info",
+		Event:     "switch.off",
+		Severity:  "info",
 	}
 
 	if err := s.Record(ctx, e1); err != nil {
@@ -76,7 +76,7 @@ func TestOnDurationSec(t *testing.T) {
 
 	today := time.Now().Format("2006-01-02")
 	// Use a base timestamp that falls on today's date.
-	base := float64(time.Now().Truncate(24*time.Hour).Unix()) + 3600 // 01:00 today
+	base := localMidnightPlusHour(t) // 01:00 local today
 
 	record := func(deviceID, component, event string, ts float64) {
 		t.Helper()
@@ -144,7 +144,7 @@ func TestOnDurationSec_WrongDay(t *testing.T) {
 
 	yesterday := time.Now().Add(-24 * time.Hour).Format("2006-01-02")
 	today := time.Now().Format("2006-01-02")
-	baseYesterday := float64(time.Now().Add(-24*time.Hour).Truncate(24*time.Hour).Unix()) + 3600
+	baseYesterday := localMidnightPlusHour(t) - 24*3600 // 01:00 local yesterday
 
 	if err := s.Record(ctx, Event{Ts: baseYesterday, DeviceID: "pump", Component: "switch:0", Event: "switch.on", Severity: "info"}); err != nil {
 		t.Fatal(err)
@@ -207,4 +207,19 @@ func TestPurge(t *testing.T) {
 	if remaining[0].DeviceID != "dev-fresh" {
 		t.Errorf("wrong remaining event: %s", remaining[0].DeviceID)
 	}
+}
+
+// localMidnightPlusHour returns 01:00 local time today, as a Unix timestamp.
+//
+// Not time.Now().Truncate(24*time.Hour): Truncate works on absolute time since
+// the zero instant, so it aligns to UTC midnight, not local midnight. In a
+// UTC+2 zone that is 02:00 local — which means that between local midnight and
+// 02:00, "today" computed this way is still yesterday, the fixture events land
+// on the previous local day, and every test that counts "today's" runtime sees
+// zero. Deterministically broken for two hours every night rather than flaky.
+func localMidnightPlusHour(t *testing.T) float64 {
+	t.Helper()
+	now := time.Now()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	return float64(midnight.Add(time.Hour).Unix())
 }

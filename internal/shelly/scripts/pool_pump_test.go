@@ -239,7 +239,7 @@ func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
 	}()
 
 	ok := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
 	})
 	cancel()
@@ -281,7 +281,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	}()
 
 	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
 	})
 	if !initDone {
@@ -290,7 +290,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 		t.Fatalf("script did not complete init within timeout")
 	}
 
-	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "2" {
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "2" {
 		t.Fatalf("expected active-output=2 after init, got %v", v)
 	}
 
@@ -303,17 +303,17 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	// pushing timing-sensitive tests").
 	injector <- shellyInputEvent(0, true)
 	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "-1"
 	})
 	if !stopped {
 		t.Fatalf("pump did not stop after water supply ON; active-output = %v",
-			deviceState.KVS["script/pool-pump/active-output"])
+			kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	injector <- shellyInputEvent(0, false)
 	restored := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "2"
 	})
 
@@ -322,7 +322,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 
 	if !restored {
 		t.Fatalf("pump speed not restored after water supply OFF; active-output = %v",
-			deviceState.KVS["script/pool-pump/active-output"])
+			kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 }
 
@@ -355,7 +355,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 
 	// Wait for init.
 	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
 	})
 	if !initDone {
@@ -365,50 +365,50 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 	}
 
 	// Start from off.
-	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "-1" {
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
 		t.Fatalf("expected active-output=-1 before button presses, got %v", v)
 	}
 
 	// Press 1: off → 0
 	injector <- shellyButtonEvent()
 	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "0"
 	}) {
-		t.Fatalf("button press 1: expected active-output=0, got %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("button press 1: expected active-output=0, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	// Press 2: 0 → 1
 	injector <- shellyButtonEvent()
 	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "1"
 	}) {
-		t.Fatalf("button press 2: expected active-output=1, got %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("button press 2: expected active-output=1, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	// Press 3: 1 → 2
 	injector <- shellyButtonEvent()
 	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "2"
 	}) {
-		t.Fatalf("button press 3: expected active-output=2, got %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("button press 3: expected active-output=2, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	// Press 4: 2 → off (exercises turnOffAllSwitches)
 	injector <- shellyButtonEvent()
 	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "-1"
 	}) {
-		t.Fatalf("button press 4: expected active-output=-1, got %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("button press 4: expected active-output=-1, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	// Verify all switches are off.
 	for i := 0; i < 3; i++ {
 		key := fmt.Sprintf("switch:%d", i)
-		if entry, ok := deviceState.ComponentStatus[key]; ok {
+		if entry, ok := componentStatusValue(deviceState, key); ok {
 			if m, ok := entry.(map[string]interface{}); ok {
 				if on, _ := m["output"].(bool); on {
 					t.Errorf("switch %d still on after cycling to off", i)
@@ -454,7 +454,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 
 	// Wait for init.
 	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
 	})
 	if !initDone {
@@ -464,35 +464,35 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	}
 
 	// Should start off.
-	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "-1" {
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
 		t.Fatalf("Pro1: expected active-output=-1 after init, got %v", v)
 	}
 
 	// Button press: toggle ON
 	injector <- shellyButtonEvent()
 	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "0"
 	}) {
-		t.Fatalf("Pro1 toggle on: expected active-output=0, got %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("Pro1 toggle on: expected active-output=0, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	// Button press: toggle OFF (exercises turnOffAllSwitches on Pro1)
 	injector <- shellyButtonEvent()
 	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "-1"
 	}) {
-		t.Fatalf("Pro1 toggle off: expected active-output=-1, got %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("Pro1 toggle off: expected active-output=-1, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	// Toggle ON again for water supply test.
 	injector <- shellyButtonEvent()
 	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "0"
 	}) {
-		t.Fatalf("Pro1 toggle on (2): expected active-output=0, got %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("Pro1 toggle on (2): expected active-output=0, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	// Water supply ON → should turn off. 5s (not 2s): activateOutput() now
@@ -501,19 +501,19 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	// TestPoolPump_WaterSupplyRestoresSpeed.
 	injector <- shellyInputEvent(0, true)
 	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "-1"
 	}) {
-		t.Fatalf("Pro1 water supply ON: expected active-output=-1, got %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("Pro1 water supply ON: expected active-output=-1, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	// Water supply OFF → should restore switch:0.
 	injector <- shellyInputEvent(0, false)
 	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "0"
 	}) {
-		t.Fatalf("Pro1 water supply OFF: expected active-output=0, got %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("Pro1 water supply OFF: expected active-output=0, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	cancel()
@@ -553,7 +553,7 @@ func dateString(t time.Time) string {
 
 func parseKVSInt(t *testing.T, deviceState *script.DeviceState, key string) int64 {
 	t.Helper()
-	raw, ok := deviceState.KVS[key]
+	raw, ok := deviceState.KVSValue(key)
 	if !ok {
 		t.Fatalf("KVS key %q not present", key)
 	}
@@ -567,7 +567,7 @@ func parseKVSInt(t *testing.T, deviceState *script.DeviceState, key string) int6
 
 func parseKVSFloat(t *testing.T, deviceState *script.DeviceState, key string) float64 {
 	t.Helper()
-	raw, ok := deviceState.KVS[key]
+	raw, ok := deviceState.KVSValue(key)
 	if !ok {
 		t.Fatalf("KVS key %q not present", key)
 	}
@@ -621,7 +621,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 	}()
 
 	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
 	})
 	if !initDone {
@@ -640,7 +640,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 	// Water supply ON stops the pump: activateOutput(-1, ...) -> stopRuntimeAccounting().
 	injector <- shellyInputEvent(0, true)
 	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "-1"
 	})
 	elapsed := time.Since(runStart)
@@ -648,7 +648,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 	<-done
 
 	if !stopped {
-		t.Fatalf("pump did not stop after water supply ON; active-output = %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("pump did not stop after water supply ON; active-output = %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	runtimeSec := parseKVSInt(t, deviceState, "script/pool-pump/runtime-sec")
@@ -710,7 +710,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 	}()
 
 	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
 	})
 	if !initDone {
@@ -725,14 +725,14 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 
 	injector <- shellyInputEvent(0, true)
 	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "-1"
 	})
 	cancel()
 	<-done
 
 	if !stopped {
-		t.Fatalf("pump did not stop after water supply ON; active-output = %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("pump did not stop after water supply ON; active-output = %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	runtimeSec := parseKVSInt(t, deviceState, "script/pool-pump/runtime-sec")
@@ -790,7 +790,7 @@ func TestPoolPump_RuntimeAccounting_StaleDateResetsOnBoot(t *testing.T) {
 	}()
 
 	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
 	})
 	cancel()
@@ -800,10 +800,10 @@ func TestPoolPump_RuntimeAccounting_StaleDateResetsOnBoot(t *testing.T) {
 		t.Fatalf("init timeout")
 	}
 
-	if got := deviceState.Storage["runtime-date"]; got != dateString(time.Now()) {
+	if got := storageValue(deviceState, "runtime-date"); got != dateString(time.Now()) {
 		t.Errorf("Storage runtime-date = %v, want today (%s)", got, dateString(time.Now()))
 	}
-	if got := deviceState.Storage["runtime-sec"]; got != "0" {
+	if got := storageValue(deviceState, "runtime-sec"); got != "0" {
 		t.Errorf("Storage runtime-sec = %v, want \"0\" (stale total must not carry over)", got)
 	}
 }
@@ -872,7 +872,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 	}()
 
 	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
 	})
 	if !initDone {
@@ -887,13 +887,13 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 	}
 
 	started := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "0" // eco switch, per controllerKVS()'s eco-speed=0
 	})
 	if !started {
 		cancel()
 		<-done
-		t.Fatalf("solar start: expected active-output=0, got %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("solar start: expected active-output=0, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	// Fresh (ts = now), below the 200W stop threshold.
@@ -902,7 +902,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 	}
 
 	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "-1"
 	})
 
@@ -910,7 +910,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 	<-done
 
 	if !stopped {
-		t.Fatalf("solar stop: expected active-output=-1, got %v", deviceState.KVS["script/pool-pump/active-output"])
+		t.Fatalf("solar stop: expected active-output=-1, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 }
 
@@ -949,7 +949,7 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 	}()
 
 	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
 	})
 	if !initDone {
@@ -969,7 +969,7 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 	cancel()
 	<-done
 
-	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "-1" {
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
 		t.Fatalf("solar hard ceiling: expected pump to stay off, got active-output=%v", v)
 	}
 }
@@ -1009,7 +1009,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 	}()
 
 	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
 	})
 	if !initDone {
@@ -1020,7 +1020,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 
 	injector <- shellyButtonEvent()
 	started := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "0"
 	})
 
@@ -1029,7 +1029,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 
 	if !started {
 		t.Fatalf("expected button press to start pump despite solar enabled/never-received, got active-output=%v",
-			deviceState.KVS["script/pool-pump/active-output"])
+			kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 }
 
@@ -1074,7 +1074,7 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 	}()
 
 	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVS["script/pool-pump/schedule-mode"]
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
 	})
 	if !initDone {
@@ -1096,7 +1096,7 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 	cancel()
 	<-done
 
-	if v := deviceState.KVS["script/pool-pump/active-output"]; v != "-1" {
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
 		t.Fatalf("stale ts: expected pump to stay off (stale detected immediately on receipt), got active-output=%v", v)
 	}
 }
@@ -1244,9 +1244,9 @@ func poolPumpRewriteResult(t *testing.T, deviceState *script.DeviceState, wantOu
 
 	// The rewrite has to land before the reconciliation it triggers can be
 	// judged, so wait for the morning job's timespec to change first.
-	initial := poolPumpScheduleTimespec(deviceState.Schedules, "handleMorningStart()")
+	initial := poolPumpScheduleTimespec(deviceState.ScheduleJobs(), "handleMorningStart()")
 	if !waitFor(15*time.Second, 100*time.Millisecond, func() bool {
-		return poolPumpScheduleTimespec(deviceState.Schedules, "handleMorningStart()") != initial
+		return poolPumpScheduleTimespec(deviceState.ScheduleJobs(), "handleMorningStart()") != initial
 	}) {
 		cancel()
 		<-done
@@ -1255,12 +1255,12 @@ func poolPumpRewriteResult(t *testing.T, deviceState *script.DeviceState, wantOu
 
 	// Then give the reconciliation its own window to act — or to provably not.
 	waitFor(8*time.Second, 100*time.Millisecond, func() bool {
-		v, ok := deviceState.KVS["script/pool-pump/active-output"]
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == wantOutput
 	})
 
-	got, _ := deviceState.KVS["script/pool-pump/active-output"].(string)
-	schedules := deviceState.Schedules
+	got, _ := kvsValue(deviceState, "script/pool-pump/active-output").(string)
+	schedules := deviceState.ScheduleJobs()
 	cancel()
 	<-done
 	return got, schedules
@@ -1430,4 +1430,30 @@ func TestPoolPump_ScheduleRewriteOutsideWindowDoesNotStartPump(t *testing.T) {
 		t.Fatalf("now is outside the rewritten window: "+
 			"expected the pump to stay off (active-output=-1), got %q", got)
 	}
+}
+
+// Locked read helpers for DeviceState (#451).
+//
+// The emulator mutates DeviceState's maps from the goroutine running the
+// script while these tests poll them from the test goroutine. Reading the maps
+// directly is a data race, and an unsynchronised map read racing a write does
+// not merely flake — Go aborts the whole test binary with "fatal error:
+// concurrent map read and map write", losing every result in the package.
+//
+// These wrappers keep the call sites as terse as the direct indexing they
+// replace, so a predicate reads much as it did before, but every read now goes
+// through DeviceState's RWMutex.
+
+func kvsValue(d *script.DeviceState, key string) interface{} {
+	v, _ := d.KVSValue(key)
+	return v
+}
+
+func storageValue(d *script.DeviceState, key string) interface{} {
+	v, _ := d.StorageValue(key)
+	return v
+}
+
+func componentStatusValue(d *script.DeviceState, key string) (interface{}, bool) {
+	return d.ComponentStatusValue(key)
 }

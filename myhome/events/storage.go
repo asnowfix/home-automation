@@ -240,7 +240,16 @@ func (s *Storage) LoadTodayStats(ctx context.Context, date string) ([]DailyStat,
 }
 
 // OnDurationSec returns the total seconds a component spent in the "on" state
-// on the given date (YYYY-MM-DD format).  Each off→on transition contributes
+// on the given date (YYYY-MM-DD format), interpreted in the **local** time
+// zone — the same zone callers use when they derive that date from
+// time.Now().Format("2006-01-02").
+//
+// The date filter therefore converts with 'localtime'. Without it SQLite's
+// date(ts,'unixepoch') yields the UTC date, which disagrees with the caller's
+// local date for the whole UTC offset every night: in CEST (UTC+2), between
+// local 00:00 and 02:00 the caller asks for today while the query still
+// matches yesterday, and daily runtime comes back as 0. "Today's filtration"
+// means the household's today, so both sides align on local days.  Each off→on transition contributes
 // (next_off.ts - on.ts) to the sum; if no off event follows the most recent on
 // (component is currently active), the open interval is measured to now.
 // Consecutive on events without an intervening off are deduplicated — only the
@@ -261,7 +270,7 @@ FROM events e1
 WHERE e1.device_id = ?
   AND e1.component = ?
   AND e1.event     = ?
-  AND date(e1.ts, 'unixepoch') = ?
+  AND date(e1.ts, 'unixepoch', 'localtime') = ?
   AND COALESCE(
       (SELECT e0.event FROM events e0
        WHERE e0.device_id = e1.device_id
@@ -273,11 +282,11 @@ WHERE e1.device_id = ?
   ) = ?`
 	var sec float64
 	err := s.db.QueryRowContext(ctx, q,
-		offEvent,                   // correlated subquery: min off.ts after this on
+		offEvent,                           // correlated subquery: min off.ts after this on
 		deviceID, component, onEvent, date, // outer WHERE
-		onEvent, offEvent,          // previous-event lookup: on OR off
-		offEvent,                   // COALESCE default: no prior event → treat as off
-		offEvent,                   // final equality: previous must be off
+		onEvent, offEvent, // previous-event lookup: on OR off
+		offEvent, // COALESCE default: no prior event → treat as off
+		offEvent, // final equality: previous must be off
 	).Scan(&sec)
 	if err != nil {
 		return 0, err

@@ -36,7 +36,7 @@ func TestPoolTracker_DailyRuntimeSec(t *testing.T) {
 	s := newTestEventsStorage(t)
 	tracker := NewPoolRuntimeTracker(logr.Discard(), s, "pool-device")
 
-	base := float64(time.Now().Truncate(24*time.Hour).Unix()) + 3600
+	base := localMidnightPlusHour(t)
 
 	insertSwitchEvent(t, s, "pool-device", "switch.on", base)
 	insertSwitchEvent(t, s, "pool-device", "switch.off", base+300) // 5 min
@@ -56,7 +56,7 @@ func TestPoolTracker_RemainingRuntimeSec(t *testing.T) {
 	s := newTestEventsStorage(t)
 	tracker := NewPoolRuntimeTracker(logr.Discard(), s, "pool-device")
 
-	base := float64(time.Now().Truncate(24*time.Hour).Unix()) + 3600
+	base := localMidnightPlusHour(t)
 	insertSwitchEvent(t, s, "pool-device", "switch.on", base)
 	insertSwitchEvent(t, s, "pool-device", "switch.off", base+3600) // 1 h
 
@@ -76,4 +76,19 @@ func TestPoolTracker_RemainingRuntimeSec(t *testing.T) {
 	if done != 0 {
 		t.Errorf("want 0 when target met, got %d", done)
 	}
+}
+
+// localMidnightPlusHour returns 01:00 local time today, as a Unix timestamp.
+//
+// Not time.Now().Truncate(24*time.Hour): Truncate works on absolute time since
+// the zero instant, so it aligns to UTC midnight, not local midnight. In a
+// UTC+2 zone that is 02:00 local — which means that between local midnight and
+// 02:00, "today" computed this way is still yesterday, the fixture events land
+// on the previous local day, and every test that counts "today's" runtime sees
+// zero. Deterministically broken for two hours every night rather than flaky.
+func localMidnightPlusHour(t *testing.T) float64 {
+	t.Helper()
+	now := time.Now()
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	return float64(midnight.Add(time.Hour).Unix())
 }

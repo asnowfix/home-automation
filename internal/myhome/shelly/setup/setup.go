@@ -14,6 +14,7 @@ import (
 
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
+	embeddedscripts "github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/input"
@@ -37,6 +38,17 @@ type Config struct {
 	MqttPort int
 	// Resolver is used for DNS lookups
 	Resolver mynet.Resolver
+	// ScriptMinifierEngine selects the JS minifier used when uploading
+	// watchdog.js during automatic setup. Defaults to pkgscript.EngineTdewolff
+	// (today's proven-safe behavior) via DefaultConfig -- see CLAUDE.md's
+	// "Default OFF" requirement: this must never silently change without a
+	// human opting in via config/flag, because SetupDevice runs
+	// unattended whenever the daemon discovers a new device.
+	ScriptMinifierEngine pkgscript.Engine
+	// ScriptMangleTopLevel additionally enables esbuild's top-level
+	// identifier mangling (ignored when ScriptMinifierEngine is not
+	// EngineEsbuild). Opt-in, default false.
+	ScriptMangleTopLevel bool
 }
 
 // WifiConfig holds WiFi configuration options for device setup
@@ -51,8 +63,10 @@ type WifiConfig struct {
 // DefaultConfig returns a Config with default values
 func DefaultConfig() Config {
 	return Config{
-		MqttBroker: "mqtt.local",
-		MqttPort:   1883,
+		MqttBroker:           "mqtt.local",
+		MqttPort:             1883,
+		ScriptMinifierEngine: pkgscript.EngineTdewolff,
+		ScriptMangleTopLevel: false,
 	}
 }
 
@@ -298,7 +312,8 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 			log.Error(err, "Failed to read watchdog script", "device", deviceId)
 			return fmt.Errorf("failed to read watchdog script: %w", err)
 		}
-		id, err := mhscript.UploadWithVersion(ctx, log, via, sd, "watchdog.js", buf, true, false)
+		minifyOpts := embeddedscripts.MinifyOptionsFor("watchdog.js", cfg.ScriptMinifierEngine, cfg.ScriptMangleTopLevel, false)
+		id, err := mhscript.UploadWithVersionAndOptions(ctx, log, via, sd, "watchdog.js", buf, minifyOpts, false)
 		if err != nil {
 			log.Error(err, "Failed to upload watchdog script", "device", deviceId)
 			return fmt.Errorf("failed to upload watchdog script: %w", err)

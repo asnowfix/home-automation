@@ -36,6 +36,34 @@ func UploadNamedScript(ctx context.Context, log logr.Logger, via types.Channel, 
 // UploadWithVersion uploads a script and tracks its version in KVS
 // This is MyHome-specific business logic that combines script upload with version tracking
 func UploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, name string, code []byte, minify bool, force bool) (uint32, error) {
+	return uploadWithVersion(ctx, log, via, device, name, code, force, func() (uint32, error) {
+		return script.Upload(ctx, via, device, name, code, minify)
+	})
+}
+
+// UploadWithVersionAndOptions is like UploadWithVersion but takes an
+// explicit script.MinifyOptions instead of a plain bool, so a caller can
+// select the minifier engine and opt into top-level mangling for a specific
+// script. Always minifies -- there is no "raw upload" mode here.
+//
+// This exists specifically so the daemon's automatic per-device setup path
+// (SetupDevice -> here, for watchdog.js) can be switched to the new
+// esbuild engine via a config option, without touching the signature or
+// behavior of UploadWithVersion/Upload, which every other caller
+// (CLI commands, garden/heater/pool setup) keeps using unchanged. See
+// CLAUDE.md's "Default OFF" requirement: pass
+// script.MinifyOptions{Engine: script.EngineTdewolff} (or the zero value)
+// here to reproduce today's exact behavior.
+func UploadWithVersionAndOptions(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, name string, code []byte, opts script.MinifyOptions, force bool) (uint32, error) {
+	return uploadWithVersion(ctx, log, via, device, name, code, force, func() (uint32, error) {
+		return script.UploadWithOptions(ctx, via, device, name, code, opts)
+	})
+}
+
+// uploadWithVersion holds the version-check/KVS-bookkeeping/start logic
+// shared by UploadWithVersion and UploadWithVersionAndOptions; doUpload
+// performs the actual (already-configured) upload call.
+func uploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, name string, code []byte, force bool, doUpload func() (uint32, error)) (uint32, error) {
 	// Calculate version hash
 	h := sha1.New()
 	h.Write(code)
@@ -73,7 +101,7 @@ func UploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, 
 		log.Info(reason, "name", name, "version", version, "key", kvsKey, "device", device.Name())
 
 		// Upload the script using the generic pkg/shelly/script package
-		id, err = script.Upload(ctx, via, device, name, code, minify)
+		id, err = doUpload()
 		if err != nil {
 			return 0, err
 		}

@@ -112,6 +112,8 @@ var Flags struct {
 	SMTPPassword                string        // SMTP auth password (e.g. a Gmail App Password); from .env, never a flag
 	SMTPFrom                    string        // envelope/header From address; empty disables email entirely
 	SMTPTo                      string        // recipient address, or comma-separated list of addresses
+	ScriptMinifierEngine        string        // the value taken by --script-minifier-engine: "tdewolff" (default) or "esbuild"
+	ScriptMangleTopLevel        bool          // the value taken by --script-mangle-top-level; only meaningful with the esbuild engine
 }
 
 var Via types.Channel

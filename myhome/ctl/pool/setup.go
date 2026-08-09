@@ -101,39 +101,15 @@ Schedules are only created on Pro3 devices (detected by switch count).`,
 			return fmt.Errorf("failed to get shelly device: %w", err)
 		}
 
-		// Get all currently running pool-pump devices to determine peer IDs
+		// Controllers do not coordinate, so there are no peers to discover.
+		// An already-configured device is still worth reading for its speed, so
+		// adding a second controller inherits the setting rather than silently
+		// resetting it to the default.
 		existingDevices, _ := getPoolDevices(ctx)
 
-		// Build full device ID list: new device first, then existing peers
-		allIDs := []string{dev.Id()}
-		for _, existing := range existingDevices {
-			if existing.Id() != dev.Id() {
-				allIDs = append(allIDs, existing.Id())
-			}
-		}
-
-		// Simple heuristic: first = pro3, second = pro1
-		var pro3ID, pro1ID string
-		if len(allIDs) > 0 {
-			pro3ID = allIDs[0]
-		}
-		if len(allIDs) > 1 {
-			pro1ID = allIDs[1]
-		}
-
-		// Default preferred settings
-		currentPreferred := pro3ID
-		if currentPreferred == "" {
-			currentPreferred = dev.Id()
-		}
 		currentSpeed := "eco"
-
-		// If there are existing devices, read current preferred from one of them
 		via := types.ChannelMqtt
 		if len(existingDevices) > 0 {
-			if pref, err := getKVSValue(ctx, existingDevices[0], via, "script/pool-pump/preferred"); err == nil && pref != "" {
-				currentPreferred = pref
-			}
 			if speed, err := getKVSValue(ctx, existingDevices[0], via, "script/pool-pump/speed"); err == nil && speed != "" {
 				currentSpeed = speed
 			}
@@ -141,21 +117,18 @@ Schedules are only created on Pro3 devices (detected by switch count).`,
 
 		service := mhscript.NewPoolService(hlog.Logger, provider)
 		opts := mhscript.SetupOptions{
-			PreferredDeviceID:    currentPreferred,
 			PreferredSpeed:       currentSpeed,
 			NightRunDurationMs:   int(DefaultNightRunDuration.Milliseconds()),
-			GraceDelayMs:         int(DefaultGraceDelay.Milliseconds()),
 			EcoSpeed:             DefaultEcoSpeed,
-			MidSpeed:             DefaultMidSpeed,
-			HighSpeed:            DefaultHighSpeed,
+			DaySpeed:             DefaultDaySpeed,
+			MaxSpeed:             DefaultMaxSpeed,
 			TemperatureThreshold: DefaultTemperatureThreshold,
 			PoolVolume:           DefaultPoolVolume,
 			Turnover:             DefaultTurnover,
 			MaxFlowRate:          DefaultMaxFlowRate,
 			MaxRpm:               DefaultMaxRpm,
 			EcoRpm:               DefaultEcoRpm,
-			MidRpm:               DefaultMidRpm,
-			HighRpm:              DefaultHighRpm,
+			DayRpm:               DefaultDayRpm,
 			MaxTemp:              DefaultMaxTemp,
 
 			SolarEnabled:         DefaultSolarEnabled,
@@ -168,38 +141,35 @@ Schedules are only created on Pro3 devices (detected by switch count).`,
 			SolarStaleMs:         DefaultSolarStaleMs,
 		}
 
-		fmt.Printf("Adding device %s to pool pump mesh...\n", dev.Name())
-		if err := service.AddDevice(ctx, via, sd, dev.Id(), pro3ID, pro1ID, allIDs, opts); err != nil {
+		fmt.Printf("Configuring %s as a pool pump controller...\n", dev.Name())
+		if err := service.AddDevice(ctx, via, sd, dev.Id(), opts); err != nil {
 			return fmt.Errorf("failed to add device: %w", err)
 		}
 
-		fmt.Printf("✓ Device %s added to pool pump mesh\n", dev.Name())
-		fmt.Printf("  Total devices in mesh: %d\n", len(allIDs))
-		fmt.Printf("  Preferred: %s (speed: %s)\n", currentPreferred, currentSpeed)
+		fmt.Printf("✓ %s configured as a pool pump controller (speed: %s)\n", dev.Name(), currentSpeed)
 		return nil
 	},
 }
 
 var preferredCmd = &cobra.Command{
-	Use:   "preferred <device-id> <speed>",
-	Short: "Set the preferred device and speed on all devices",
-	Long: `Sets preferred_device_id and preferred_speed KVS values on ALL devices
-in the pool pump mesh. The specified device will activate at the given speed.
+	Use:   "speed <speed>",
+	Short: "Set the speed the pump controller starts at",
+	Long: `Sets the preferred_speed KVS value on every configured pool pump controller.
 
 Speed values:
-  eco  - Low speed
-  mid  - Medium speed (Pro3 only)
-  high - High speed (Pro3 only)
-  max  - Maximum speed`,
-	Args: cobra.ExactArgs(2),
+  eco - Low speed (Pro3 only)
+  day - Day speed (Pro3 only)
+  max - Maximum speed (the only stage a Pro1 has)
+
+A Pro1 is on/off, so any speed resolves to its single stage.`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		preferredID := args[0]
-		speed := args[1]
+		speed := args[0]
 
-		validSpeeds := map[string]bool{"eco": true, "mid": true, "high": true, "max": true}
+		validSpeeds := map[string]bool{"eco": true, "day": true, "max": true}
 		if !validSpeeds[speed] {
-			return fmt.Errorf("invalid speed: %s (must be eco, mid, high, or max)", speed)
+			return fmt.Errorf("invalid speed: %s (must be eco, day or max)", speed)
 		}
 
 		devices, err := getPoolDevices(ctx)
@@ -210,34 +180,21 @@ Speed values:
 			return fmt.Errorf("no devices running pool-pump.js. Run 'ctl pool add <device>' first")
 		}
 
-		// Verify preferred device is in the mesh
-		found := false
-		for _, sd := range devices {
-			if sd.Id() == preferredID || sd.Name() == preferredID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("device %s is not in the pool pump mesh", preferredID)
-		}
-
 		provider := &poolProvider{}
 		service := mhscript.NewPoolService(hlog.Logger, provider)
 		via := types.ChannelMqtt
 
-		fmt.Printf("Setting preferred device to %s (speed: %s) on %d devices...\n",
-			preferredID, speed, len(devices))
+		fmt.Printf("Setting pump speed to %s on %d controller(s)...\n", speed, len(devices))
 
 		for _, sd := range devices {
-			if err := service.SetPreferred(ctx, via, sd, preferredID, speed); err != nil {
+			if err := service.SetSpeed(ctx, via, sd, speed); err != nil {
 				fmt.Printf("  ⚠ Failed to update %s: %v\n", sd.Name(), err)
 				continue
 			}
 			fmt.Printf("  ✓ Updated %s\n", sd.Name())
 		}
 
-		fmt.Printf("\n✓ Preferred device set to %s (speed: %s)\n", preferredID, speed)
+		fmt.Printf("\n✓ Pump speed set to %s\n", speed)
 		return nil
 	},
 }

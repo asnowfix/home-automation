@@ -378,6 +378,230 @@ var STATE_KEYS = {
   activeOutput: "active-output"     // -1 (all off), 0, 1, 2 for pro3; 0 for pro1
 };
 
+// === IN-FLIGHT RPC TRACKING (#421 Bug A) ===
+// Real Gen2 firmware allows at most 5 concurrent Shelly.call RPCs per script
+// (see CLAUDE.md "Per-script limits"); the 6th concurrent call raises an
+// uncaught "Too many calls in progress" exception that kills the ENTIRE
+// script, not just the offending call. processTaskQueue's 200ms tick (below)
+// only serialises *when* queued task functions run — it has no idea how many
+// of the underlying async RPCs those tasks fire are still in flight. That gap
+// is the root cause of the live crash (saveState's active-output mirror, a
+// storeValue() fire-and-forget write) documented in issue #421.
+//
+// CALLS_IN_FLIGHT tracks every Shelly.call this script makes. It is wired up
+// once here by wrapping Shelly.call itself, rather than editing every call
+// site in this file — every callback still receives exactly the arguments it
+// always did, so this is purely additive bookkeeping.
+var CALLS_IN_FLIGHT = 0;
+var N_SEEN = 0;               // lifetime count — proves tracking actually runs
+var MAX_CALLS_IN_FLIGHT = 4;  // stay one below the real 5-call device ceiling
+
+// CALL_SLOTS is a small fixed pool of plain {cb, ud, used} records, allocated
+// ONCE at script load. Each Shelly.call claims a free slot in place instead
+// of allocating a brand-new closure per call — a per-call closure measurably
+// raised peak heap on real hardware in issue #421's reference fix. Sized to
+// the real 5-call device ceiling + 1 spare, not just MAX_CALLS_IN_FLIGHT:
+// calls fired directly from event/timer handlers (not funneled through
+// queueTask) are not subject to that throttle.
+var CALL_SLOTS = [];
+for (var CALL_SLOT_INIT_I = 0; CALL_SLOT_INIT_I < 6; CALL_SLOT_INIT_I++) {
+  CALL_SLOTS.push({cb: null, ud: null, used: false});
+}
+
+function acquireCallSlot(cb, ud) {
+  for (var i = 0; i < CALL_SLOTS.length; i++) {
+    if (!CALL_SLOTS[i].used) {
+      CALL_SLOTS[i].used = true;
+      CALL_SLOTS[i].cb = cb;
+      CALL_SLOTS[i].ud = ud;
+      return CALL_SLOTS[i];
+    }
+  }
+  // Pool exhausted (should not happen — see sizing note above): fall back
+  // to a fresh record rather than losing the callback.
+  return {cb: cb, ud: ud, used: true};
+}
+
+// Shared completion handler for calls that passed a callback. Decrements
+// unconditionally before invoking the caller's callback, so a slot is always
+// freed even if the callback itself throws (caught by processTaskQueue's
+// try/catch below, or top-level error handling).
+// Completions waiting to be delivered from the task queue, and the index of
+// the next one. A head index rather than [].shift(), which Espruino lacks.
+var PENDING_DONE = [];
+var PENDING_DONE_HEAD = 0;
+
+// Deliver one queued completion. Runs from processTaskQueue, i.e. on a fresh
+// stack, which is the whole point — see sharedCallDone.
+function runPendingCallback() {
+  if (PENDING_DONE_HEAD >= PENDING_DONE.length) return;
+  var slot = PENDING_DONE[PENDING_DONE_HEAD];
+  PENDING_DONE[PENDING_DONE_HEAD] = null;
+  PENDING_DONE_HEAD++;
+  if (PENDING_DONE_HEAD >= PENDING_DONE.length) {
+    PENDING_DONE = [];
+    PENDING_DONE_HEAD = 0;
+  }
+  if (!slot) return;
+
+  var cb = slot.cb;
+  var ud = slot.ud;
+  var r = slot.r;
+  var ec = slot.ec;
+  var em = slot.em;
+  // Release the slot before invoking, so a callback that issues another call
+  // can reuse it.
+  slot.used = false;
+  slot.cb = null;
+  slot.ud = null;
+  slot.r = null;
+  slot.em = null;
+  if (typeof cb === 'function') {
+    cb(r, ec, em, ud);
+  }
+}
+
+// Shared completion handler for calls that passed a callback.
+//
+// The callback is delivered from the task queue, NOT inline (#450). Shelly.call
+// is reassigned to a JS wrapper, and the firmware invokes this handler from
+// inside the call it is completing; invoking the caller's callback here meant a
+// callback that issues another call nested inside the previous completion
+// instead of unwinding. A loop of dependent calls — turnOffAllSwitches issuing
+// one Switch.Set per output, or activateOutput chaining setOutput — therefore
+// accumulated stack depth with no recursion anywhere in the source, until
+// acquireCallSlot (a plain for loop) ran out of stack:
+//
+//   Uncaught Error: Too much recursion - the stack is about to overflow
+//    in function "acquireCallSlot" ... "call" ... "turnOffAllSwitches"
+//
+// That killed the production pump twice in three days, each time silently
+// turning every schedule job into a no-op.
+//
+// Only chains deeper than MAX_CALL_DEPTH are deferred. Deferring every
+// completion would be simpler, but it adds a task-queue tick to every single
+// RPC, which slows init and the schedule handlers noticeably for no benefit:
+// a short chain cannot overflow anything. Bounding the depth keeps the common
+// path exactly as fast as before and makes the failure impossible regardless
+// of which caller drives it.
+//
+// The result is stashed on the slot the call already owns rather than in a new
+// object: this runs on every RPC, and per-call allocation is what the heap on
+// this device can least afford.
+var CALL_DEPTH = 0;
+var MAX_CALL_DEPTH = 3;
+
+function sharedCallDone(result, error_code, error_message, slot) {
+  CALLS_IN_FLIGHT--;
+  if (!slot) return;
+  if (typeof slot.cb !== 'function') {
+    slot.used = false;
+    slot.cb = null;
+    slot.ud = null;
+    return;
+  }
+
+  if (CALL_DEPTH >= MAX_CALL_DEPTH) {
+    slot.r = result;
+    slot.ec = error_code;
+    slot.em = error_message;
+    PENDING_DONE.push(slot);
+    queueTask(runPendingCallback);
+    return;
+  }
+
+  var cb = slot.cb;
+  var ud = slot.ud;
+  slot.used = false;
+  slot.cb = null;
+  slot.ud = null;
+
+  // If cb throws, the decrement is skipped and every later completion is
+  // deferred instead of nested. Degraded but safe: slower, never deeper.
+  CALL_DEPTH++;
+  cb(result, error_code, error_message, ud);
+  CALL_DEPTH--;
+}
+
+// Shared completion handler for fire-and-forget calls (storeValue() and
+// friends) — nothing to forward, so no slot is needed at all.
+function decrementOnlyCallDone() {
+  CALLS_IN_FLIGHT--;
+}
+
+var RAW_CALL = Shelly.call;
+Shelly.call = function (method, params, callback, userdata) {
+  CALLS_IN_FLIGHT++;
+  N_SEEN++;
+  if (typeof callback !== 'function') {
+    return RAW_CALL(method, params, decrementOnlyCallDone, null);
+  }
+  return RAW_CALL(method, params, sharedCallDone, acquireCallSlot(callback, userdata));
+};
+
+// --- Self-check: fail LOUDLY, never silently (#421) ---------------------
+// This depends on reassigning a method on the native Shelly object, which is
+// not guaranteed to be permitted on every firmware. If the assignment is
+// ever rejected, CALLS_IN_FLIGHT stays 0 forever, the throttle below never
+// engages, and the crash this fix exists to prevent comes back — while every
+// emulator test still passes, because goja allows a reassignment a device
+// might refuse. That silent-inert failure is the dangerous case, so it is
+// asserted here rather than assumed.
+//
+// print() is used deliberately instead of log(): log() is gated on
+// CONFIG.enableLogging and would hide this exact message in production, and
+// log() is defined later in this file (no hoisting on Espruino) so it does
+// not exist yet at this point anyway.
+// The device truncates each UDP debug line at ~128 chars, so every line
+// below is kept short.
+var P421 = "[pool-pump] #421: ";
+
+function printHit() {
+  print(P421 + "throttle INERT; >5 calls kills whole script as-is.");
+  print(P421 + "DO NOT re-investigate -- read issue #421 first.");
+}
+
+function printFail() {
+  print(P421 + "FATAL: Shelly.call wrapper did NOT install.");
+  printHit();
+  print(P421 + "alt fix: storeValue() callback should drive queue.");
+}
+
+var WRAP_OK = (Shelly.call !== RAW_CALL);
+if (!WRAP_OK) {
+  printFail();
+}
+
+function emitBroken(reason) {
+  Shelly.emitEvent("pool.call_tracking_broken", {
+    reason: reason,
+    calls_tracked: N_SEEN
+  });
+}
+
+// Runtime counterpart to the check above: the assignment can succeed while
+// tracking still never happens (e.g. something captured Shelly.call before
+// this point and calls the original directly). A healthy boot makes many
+// KVS.Get calls, so N_SEEN must be well above zero by the end of init.
+// Called from continueInit(), by which time log()/Shelly.emitEvent() exist.
+function checkTrack() {
+  if (!WRAP_OK) {
+    // Repeated here as well as at install time: the install-time prints fire
+    // before a debug capture attached after boot would see anything.
+    printFail();
+    emitBroken("wrapper-not-installed");
+    return;
+  }
+  if (N_SEEN === 0) {
+    print(P421 + "FATAL: wrapper OK but tracked 0 calls -- something");
+    print(P421 + "calls the unwrapped Shelly.call, captured earlier.");
+    printHit();
+    emitBroken("zero-calls-tracked");
+    return;
+  }
+  log("Tracking OK (#421): seen", N_SEEN, "max", MAX_CALLS_IN_FLIGHT);
+}
+
 // === TASK QUEUE (SINGLE TIMER FOR ALL SEQUENTIAL OPERATIONS) ===
 var TASK_QUEUE = [];
 var TASK_INDEX = 0;
@@ -2218,6 +2442,9 @@ function continueInit() {
   function runNextStep() {
     if (stepIndex >= initSteps.length) {
       log('✓ All initialization steps complete - script is now running');
+      // #421: assert the in-flight RPC tracking this script's crash-safety
+      // depends on is actually live, and shout if it is not.
+      checkTrack();
       log('Current mode:', STATE.scheduleMode || 'winter');
       queueTask(handleDailyCheck);
       return;

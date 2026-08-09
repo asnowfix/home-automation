@@ -1,15 +1,17 @@
 // pool-pump.js
 // ------------
 //
-// Unified pool pump control — same script runs on all devices in the mesh.
-// Each device compares CONFIG.preferredDeviceId to its own ID to decide if it
-// should be the active pump controller.
+// Unified pool pump control. Exactly ONE controller is wired to the pump at a
+// time, and it never coordinates with, checks for, or commands another: having
+// one controller drive another is an electrical anti-pattern. The multi-output
+// design is kept because a Pro3 drives three speed stages, but only one device
+// is ever connected.
 //
 // Pro3 (3-switch variator):
 //   - Input 0: Water supply sensor (inverted: HIGH = water supply ON → turn off pumps)
 //   - Input 1: High-water sensor (MQTT notification)
-//   - Input 2: Max speed active from other device (MQTT notification)
-//   - Switch 0-2: Pump speed stages (eco/mid/high, configurable via KVS)
+//   - Input 2: Max speed active (MQTT notification)
+//   - Switch 0-2: Pump speed stages (eco/day/max, configurable via KVS)
 //   - Button: Cycles through speeds
 //
 // Pro1 (1-switch):
@@ -49,26 +51,7 @@ var CONFIG_SCHEMA = {
     type: "string",
     cliOnly: true
   },
-  // Which device ID should run (actual Shelly device ID). Script compares this to its own ID
-  preferredDeviceId: {
-    key: "preferred",
-    default: null,
-    type: "string",
-    required: true
-  },
-  // Pro3 device ID (for MQTT subscriptions - cross-device status tracking)
-  pro3DeviceId: {
-    key: "pro3-id",
-    default: null,
-    type: "string"
-  },
-  // Pro1 device ID (for MQTT subscriptions - cross-device status tracking)
-  pro1DeviceId: {
-    key: "pro1-id",
-    default: null,
-    type: "string"
-  },
-  // Speed: 'eco', 'mid', 'high', 'max'. Maps to switches based on device capabilities
+  // Speed: 'eco', 'day', 'max', 'max'. Maps to switches based on device capabilities
   preferredSpeed: {
     key: "speed",
     default: "eco",
@@ -80,15 +63,15 @@ var CONFIG_SCHEMA = {
     default: 2,
     type: "number"
   },
-  // Pro3 switch ID for mid speed (0, 1, or 2)
-  midSpeed: {
-    key: "mid-speed",
+  // Pro3 switch ID for day speed (0, 1, or 2)
+  daySpeed: {
+    key: "day-speed",
     default: 1,
     type: "number"
   },
-  // Pro3 switch ID for high speed (0, 1, or 2)
-  highSpeed: {
-    key: "high-speed",
+  // Pro3 switch ID for max speed (0, 1, or 2)
+  maxSpeed: {
+    key: "max-speed",
     default: 0,
     type: "number"
   },
@@ -98,12 +81,6 @@ var CONFIG_SCHEMA = {
     default: 3600000,
     type: "number",
     cliOnly: true
-  },
-  // Cross-device grace delay in ms (minimum 10000)
-  graceDelayMs: {
-    key: "grace-delay",
-    default: 10000,
-    type: "number"
   },
   // Temperature threshold (°C) for summer mode (day schedule)
   temperatureThreshold: {
@@ -141,16 +118,10 @@ var CONFIG_SCHEMA = {
     default: 2000,
     type: "number"
   },
-  // Variator RPM setting for mid speed
-  midRpm: {
-    key: "mid-rpm",
+  // Variator RPM setting for day speed
+  dayRpm: {
+    key: "day-rpm",
     default: 2600,
-    type: "number"
-  },
-  // Variator RPM setting for high speed
-  highRpm: {
-    key: "high-rpm",
-    default: 2900,
     type: "number"
   },
   // Temperature (°C) at which run time reaches one full turnover
@@ -234,8 +205,8 @@ function buildSwitchNames() {
   if (STATE.deviceType === "pro3") {
     var names = [];
     names.push({id: CONFIG.ecoSpeed, name: "pump-eco"});
-    names.push({id: CONFIG.midSpeed, name: "pump-mid"});
-    names.push({id: CONFIG.highSpeed, name: "pump-high"});
+    names.push({id: CONFIG.daySpeed, name: "pump-day"});
+    names.push({id: CONFIG.maxSpeed, name: "pump-max"});
     return names;
   } else if (STATE.deviceType === "pro1") {
     return [{id: 0, name: "pump-max"}];
@@ -282,15 +253,9 @@ function loadConfig(callback) {
           log("  -", missingRequired[i]);
         }
         log("Script cannot start without required configuration.");
-        log("Please run: ctl pool setup <pro3-device> --pro1 <pro1-device>");
+        log("Please run: ctl pool setup <device>");
         callback(false);
         return;
-      }
-
-      // Clamp grace delay to minimum safe value
-      if (CONFIG.graceDelayMs < 10000) {
-        log("WARNING: grace-delay below minimum (10000ms), clamping");
-        CONFIG.graceDelayMs = 10000;
       }
 
       // Enumerate available outputs and inputs
@@ -328,8 +293,6 @@ function loadConfig(callback) {
       // Cache my device ID
       var deviceInfo = Shelly.getDeviceInfo();
       if (deviceInfo && deviceInfo.id) {
-        STATE.myDeviceId = deviceInfo.id;
-        log("My device ID:", STATE.myDeviceId);
       } else {
         log("ERROR: Could not get device ID");
         callback(false);
@@ -453,7 +416,6 @@ function queueTask(task) {
 var STATE = {
   // Device configuration (auto-detected at startup)
   deviceType: null,           // "pro3" or "pro1"
-  myDeviceId: null,           // My Shelly device ID from Shelly.getDeviceInfo().id
   outputs: [],                // Array of available output IDs
   inputs: [],                 // Array of available input IDs
 
@@ -469,12 +431,6 @@ var STATE = {
   graceTimer: null,
   graceActive: false,
 
-  // Tracked pro1 switch:0 state (updated via MQTT status subscription, controller only)
-  pro1On: false,
-
-  // Tracked pro3 switch states (updated via MQTT status subscription, bootstrap only)
-  // Key: switch id (0,1,2), value: true/false
-  pro3SwitchStates: {},
   
   // MQTT connection
   mqttConnected: false,
@@ -735,55 +691,6 @@ function ensureForecastUrl(cb) {
 
   log('Forecast URL not found, detecting location...');
   Shelly.call('Shelly.DetectLocation', {}, onDeviceLocation, cb);
-}
-
-// === INTER-DEVICE SAFETY (Grace Delay Guards) ===
-// Uses STATE.graceTimer — a single one-shot timer that occupies one timer slot only while
-// a transition is in progress (never running during steady-state operation).
-
-function startGraceDelay(delayMs, callback) {
-  if (STATE.graceActive) {
-    log("Grace delay already active, queueing continuation");
-    queueTask(function() { startGraceDelay(delayMs, callback); });
-    return;
-  }
-  STATE.graceActive = true;
-  log("Grace delay started:", delayMs, "ms");
-  STATE.graceTimer = Timer.set(delayMs, false, function() {
-    STATE.graceTimer = null;
-    STATE.graceActive = false;
-    log("Grace delay complete");
-    if (callback) callback();
-  });
-}
-
-// Called when pro3 (controller) wants to activate one of its own outputs (pump variator).
-// If pro1 is currently on, turn it off first and wait graceDelayMs.
-function safeActivatePro3(targetOutputId, callback) {
-  if (STATE.deviceType !== "pro3") {
-    if (callback) callback();
-    return;
-  }
-
-  if (targetOutputId === -1) {
-    // Turning everything off — no guard needed
-    if (callback) callback();
-    return;
-  }
-
-  // Use MQTT-tracked pro1 state (kept current by subscribePro1Status).
-  if (!STATE.pro1On) {
-    if (callback) callback();
-    return;
-  }
-
-  log("pro1 is on — turning off before activating pro3 (grace:", CONFIG.graceDelayMs, "ms)");
-  turnOffPro1(function(err) {
-    if (err) {
-      log("WARNING: turnOffPro1 failed during safeActivatePro3:", err);
-    }
-    startGraceDelay(CONFIG.graceDelayMs, callback);
-  });
 }
 
 // === COMPONENT NAMING ===
@@ -1052,38 +959,40 @@ function computeTurnoverToday(sec) {
   return Math.round(turnover * 100) / 100;
 }
 
-// === DEVICE ACTIVATION DECISION ===
-function isMyTurnToRun() {
-  // Compare preferred device ID against my device ID
-  var preferredId = CONFIG.preferredDeviceId;
-  var myId = STATE.myDeviceId;
-
-  if (!preferredId || !myId) {
-    log("ERROR: Cannot determine activation - missing device ID");
-    return false;
-  }
-
-  var shouldRun = preferredId === myId;
-  log("Activation check: preferred=" + preferredId + ", me=" + myId + ", shouldRun=" + shouldRun);
-  return shouldRun;
+// The speed this device will actually run at.
+//
+// A Pro1 is on/off: its single stage is 'max'. Whatever speed the KVS carries —
+// a Pro3-era 'eco', say — the pump physically runs at max RPM, so the whole
+// script must agree on that. Resolving it only in mapSpeedToSwitch() would fix
+// the switching and leave the arithmetic lying: computeFlowRate() scales
+// maxFlowRate by rpm/maxRpm, so 'eco' on a Pro1 would model 2000/2900 = 69% of
+// the real flow, underestimate turnover per day by a third, and make
+// computeRunHours() demand a longer window than the pool needs.
+//
+// Normalising rather than refusing also means a device still configured from
+// the Pro3 era keeps filtering instead of stranding.
+function effectiveSpeed(speed) {
+  if (!speed || speed === 'off') return 'off';
+  if (STATE.deviceType === 'pro1') return 'max';
+  return speed;
 }
 
 function mapSpeedToSwitch(speed) {
-  // Map semantic speed to physical switch ID based on device type
-  // speed: 'eco', 'mid', 'high', 'max'
-  // Returns switch ID or -1 for off
+  // Map a semantic speed to a physical switch ID.
+  // speed: 'eco', 'day', 'max' (or 'off')
+  // Returns switch ID, or -1 for off.
 
-  if (!speed || speed === 'off') {
+  var eff = effectiveSpeed(speed);
+  if (eff === 'off') {
     return -1;
   }
 
   if (STATE.deviceType === 'pro3') {
-    // Pro3: 3 switches
-    if (speed === 'eco') return CONFIG.ecoSpeed;
-    if (speed === 'mid') return CONFIG.midSpeed;
-    if (speed === 'high' || speed === 'max') return CONFIG.highSpeed;
+    // Pro3 drives three speed stages.
+    if (eff === 'eco') return CONFIG.ecoSpeed;
+    if (eff === 'day') return CONFIG.daySpeed;
+    if (eff === 'max') return CONFIG.maxSpeed;
   } else if (STATE.deviceType === 'pro1') {
-    // Pro1: only 1 switch, all speeds map to switch:0
     return 0;
   }
 
@@ -1110,17 +1019,6 @@ function turnOffAllSwitchesNext(ids, index, callback) {
 
 function turnOffAllSwitches(callback) {
   turnOffAllSwitchesNext(STATE.outputs, 0, callback);
-}
-
-function turnOffPro1(callback) {
-  if (!CONFIG.pro1DeviceId) {
-    log("WARNING: pro1 device ID not configured");
-    if (callback) callback("no pro1 device ID");
-    return;
-  }
-  log("Sending turn-off command to pro1");
-  MQTT.publish(CONFIG.pro1DeviceId + "/command/switch:0", "off", 0, false);
-  if (callback) queueTask(function() { callback(null); });
 }
 
 function setOutput(outputId, on, callback) {
@@ -1243,7 +1141,7 @@ function activateOutput(outputId, callback) {
   }
 
   if (STATE.deviceType === "pro3") {
-    safeActivatePro3(outputId, function() {
+    (function(next) { next(); })(function() {
       // Turn off all outputs (one at a time via the task queue — see turnOffAllSwitches)
       turnOffAllSwitches(function() {
         if (outputId !== -1) {
@@ -1407,46 +1305,7 @@ function handleSwitchEvent(info) {
     STATE.activeOutput = activatedOutput;
     saveState();
 
-    // Inter-device safety: if pro1 is on (any source, including manual), turn it off.
-    // The grace delay is NOT applied here because pro3 turning on means variator is
-    // now active — pro1 must be off immediately; pro3 is already on.
-    // Note: cannot pre-intercept; this is the earliest reactive point.
-    if (STATE.pro1On) {
-      log("pro3 switch turned on but pro1 is on — sending turn-off to pro1");
-      turnOffPro1(function(err) {
-        if (err) {
-          log("WARNING: failed to turn off pro1 after pro3 switch on:", err);
-        }
-      });
-    }
-
   } else if (STATE.deviceType === "pro1" && info.state === true) {
-    // Inter-device safety: if any pro3 switch is on, immediately turn ourselves off
-    // and queue a re-activation after the grace delay.
-    var anyPro3On = false;
-    for (var k in STATE.pro3SwitchStates) {
-      if (STATE.pro3SwitchStates[k]) {
-        anyPro3On = true;
-        break;
-      }
-    }
-    if (anyPro3On) {
-      log("pro1 switch turned on but pro3 is on — turning off immediately, will retry after grace delay");
-      setOutput(0, false, function() {
-        STATE.activeOutput = -1;
-        saveState();
-        startGraceDelay(CONFIG.graceDelayMs, function() {
-          log("Grace delay complete — re-activating pro1");
-          setOutput(0, true, function() {
-            STATE.activeOutput = 0;
-
-            saveState();
-          });
-        });
-      });
-      return;
-    }
-
     STATE.activeOutput = 0;
     saveState();
 
@@ -1498,8 +1357,8 @@ function handleButtonEvent(info) {
 // Subscribes to the daemon's retained `myhome/energy/solar/available` topic
 // (see #403) and layers a start/stop hysteresis on top of the existing
 // forecast-driven schedule — never replacing it. Calls this script's own
-// doStart()/doStop() so the fuse, isMyTurnToRun(), and water-supply
-// protection remain in force for solar-triggered runs exactly as for
+// doStart()/doStop() so the fuse and water-supply protection remain in
+// force for solar-triggered runs exactly as for
 // scheduled/manual runs.
 //
 // Staleness is judged from the payload's own `ts` field (unix-epoch-seconds,
@@ -1626,72 +1485,6 @@ function checkSolarHysteresis() {
 
 // === MQTT SETUP ===
 
-// Parse a Shelly switch status payload and return the output boolean (or null on error)
-function parseSwitchStatus(message) {
-  var data = null;
-  try {
-    data = JSON.parse(message);
-  } catch (e) {
-    if (e && false) {}
-    return null;
-  }
-  if (!data || !("output" in data)) return null;
-  return data.output;
-}
-
-// --- Controller (pro3): track pro1 switch:0 ---
-function onPro1StatusMessage(topic, message) {
-  var on = parseSwitchStatus(message);
-  if (on === null) return;
-  if (STATE.pro1On !== on) {
-    log("pro1 switch:0 state updated via MQTT:", on);
-    STATE.pro1On = on;
-  }
-}
-
-function subscribePro1Status() {
-  // Subscribe to Pro1 status for cross-device protection
-  if (!CONFIG.pro1DeviceId) return;
-  var topic = CONFIG.pro1DeviceId + "/status/switch:0";
-  MQTT.subscribe(topic, onPro1StatusMessage);
-  log("Subscribed to pro1 status topic:", topic);
-  // Request current state immediately — status topics are NOT retained
-  MQTT.publish(CONFIG.pro1DeviceId + "/command/switch:0", "status_update", 0, false);
-  log("Requested pro1 switch:0 status_update");
-}
-
-// --- Bootstrap (pro1): track pro3 switch:0, switch:1, switch:2 ---
-function onPro3StatusMessage(topic, message) {
-  var on = parseSwitchStatus(message);
-  if (on === null) return;
-  // Extract switch id from topic suffix "…/status/switch:<id>"
-  var id = -1;
-  var parts = topic.split(":");
-  if (parts.length >= 2) {
-    var n = Number(parts[parts.length - 1]);
-    if (!isNaN(n)) id = n;
-  }
-  if (id < 0) return;
-  var prev = (id in STATE.pro3SwitchStates) ? STATE.pro3SwitchStates[id] : null;
-  if (prev !== on) {
-    log("pro3 switch:" + id + " state updated via MQTT:", on);
-    STATE.pro3SwitchStates[id] = on;
-  }
-}
-
-function subscribePro3Status() {
-  // Subscribe to Pro3 status for cross-device protection
-  if (!CONFIG.pro3DeviceId) return;
-  for (var i = 0; i < 3; i++) {
-    var topic = CONFIG.pro3DeviceId + "/status/switch:" + i;
-    MQTT.subscribe(topic, onPro3StatusMessage);
-    log("Subscribed to pro3 status topic:", topic);
-    // Request current state immediately — status topics are NOT retained
-    MQTT.publish(CONFIG.pro3DeviceId + "/command/switch:" + i, "status_update", 0, false);
-  }
-  log("Requested pro3 switch status_update for all 3 channels");
-}
-
 function setupMQTT() {
   var mqttStatus = Shelly.getComponentStatus("mqtt");
   if (mqttStatus && mqttStatus.connected) {
@@ -1700,8 +1493,6 @@ function setupMQTT() {
   } else {
     log("MQTT not connected");
   }
-  subscribePro1Status();
-  subscribePro3Status();
   subscribeSolarAvailable();
 }
 
@@ -1914,11 +1705,13 @@ function lpad2(n) {
   return n < 10 ? '0' + n : String(n);
 }
 
-// Flow rate (m3/h) at the currently configured preferred speed
+// Flow rate (m3/h) at the speed this device actually runs at — see
+// effectiveSpeed(): on a Pro1 that is always 'max', regardless of what the KVS
+// says, because the pump has one stage.
 function computeFlowRate() {
-  var speedRpms = {eco: CONFIG.ecoRpm, mid: CONFIG.midRpm, high: CONFIG.highRpm, max: CONFIG.highRpm};
-  var rpm = speedRpms[CONFIG.preferredSpeed];
-  if (!rpm) rpm = CONFIG.highRpm;
+  var speedRpms = {eco: CONFIG.ecoRpm, day: CONFIG.dayRpm, max: CONFIG.maxRpm};
+  var rpm = speedRpms[effectiveSpeed(CONFIG.preferredSpeed)];
+  if (!rpm) rpm = CONFIG.maxRpm;
   return CONFIG.maxFlowRate * (rpm / CONFIG.maxRpm);
 }
 
@@ -2195,17 +1988,6 @@ function decideModeFromForecast() {
 function doStart(speed, reason) {
   log(reason || 'Start pump');
 
-  // Check if this device should run
-  if (!isMyTurnToRun()) {
-    log('Not my turn to run (preferred device: ' + CONFIG.preferredDeviceId + ', me: ' + STATE.myDeviceId + ')');
-    // Ensure I'm off if I'm not the preferred device
-    if (STATE.activeOutput !== -1) {
-      log('Turning off as I am not the preferred device');
-      activateOutput(-1);
-    }
-    return;
-  }
-
   var input0 = Shelly.getComponentStatus('input:0');
   if (input0 && input0.state) {
     log('Water supply protection active, ignoring start request');
@@ -2220,17 +2002,20 @@ function doStart(speed, reason) {
     return;
   }
 
-  log('Starting pump at speed:', speed, '-> switch:', switchId);
-  Shelly.emitEvent("pool.pump_start", {speed: speed, switch_id: switchId, reason: reason || "start"});
+  // Report the speed actually run, not the one configured: on a Pro1 those
+  // differ, and the event feeds the daily-turnover accounting.
+  var eff = effectiveSpeed(speed);
+  log('Starting pump at speed:', eff, '-> switch:', switchId);
+  Shelly.emitEvent("pool.pump_start", {speed: eff, switch_id: switchId, reason: reason || "start"});
   activateOutput(switchId);
 }
 
 function doStop(reason) {
   log(reason || 'Stop pump');
 
-  // Only stop if I'm currently the one running
-  if (!isMyTurnToRun() && STATE.activeOutput === -1) {
-    log('Not running and not preferred device, nothing to do');
+  // Nothing to stop if the pump is already off.
+  if (STATE.activeOutput === -1) {
+    log('Not running, nothing to do');
     return;
   }
 
@@ -2247,7 +2032,6 @@ function doStop(reason) {
 }
 
 // === SCHEDULE EVENT HANDLERS ===
-// Schedules only execute on the preferred device (determined by isMyTurnToRun check in doStart/doStop)
 function handleDailyCheck() {
   log('Daily check event');
 
@@ -2257,10 +2041,7 @@ function handleDailyCheck() {
     return;
   }
 
-  // Summer/winter mode check only runs on preferred device
-  if (isMyTurnToRun()) {
-    performDailyModeCheck();
-  }
+  performDailyModeCheck();
 }
 
 function handleMorningStart() {
@@ -2298,7 +2079,6 @@ function handleNightStop() {
 //
 // `reason` is optional so this can be handed straight to queueTask().
 function reconcileRunState(reason) {
-  if (!isMyTurnToRun()) return;
   var why = (reason || 'Schedule rewrite') + ': ';
 
   isWithinRunWindow(function(shouldRun) {
@@ -2379,8 +2159,6 @@ function continueInit() {
   // Device type and ID are already detected in loadConfig
   // Just log them here for confirmation
   log('Device type:', STATE.deviceType);
-  log('Device ID:', STATE.myDeviceId);
-  log('Preferred device:', CONFIG.preferredDeviceId);
 
   configureComponentNames();
   loadState();
@@ -2441,7 +2219,6 @@ function continueInit() {
     if (stepIndex >= initSteps.length) {
       log('✓ All initialization steps complete - script is now running');
       log('Current mode:', STATE.scheduleMode || 'winter');
-      log('Should I run?', isMyTurnToRun());
       queueTask(handleDailyCheck);
       return;
     }

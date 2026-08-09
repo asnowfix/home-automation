@@ -38,22 +38,19 @@ func NewPoolService(log logr.Logger, provider DeviceProvider) *PoolService {
 
 // SetupOptions contains configuration for pool setup
 type SetupOptions struct {
-	DeviceIDs            []string // All device IDs to set up
-	PreferredDeviceID    string   // Which device ID should run
-	PreferredSpeed       string   // "eco", "mid", "high", "max"
+	DeviceIDs            []string // Device IDs to set up
+	PreferredSpeed       string   // "eco", "day" or "max" ("max" is the only stage a Pro1 has)
 	NightRunDurationMs   int
-	GraceDelayMs         int
 	EcoSpeed             int
-	MidSpeed             int
-	HighSpeed            int
+	DaySpeed             int
+	MaxSpeed             int
 	TemperatureThreshold float64
 	PoolVolume           int
 	Turnover             int
 	MaxFlowRate          int
 	MaxRpm               int
 	EcoRpm               int
-	MidRpm               int
-	HighRpm              int
+	DayRpm               int
 	MaxTemp              float64
 
 	// Solar-driven hysteresis (#405)
@@ -70,12 +67,17 @@ type SetupOptions struct {
 	NoMinify    bool
 }
 
-// Setup configures the pool pump system on all specified devices
+// Setup configures the pool pump controller(s).
+//
+// One controller is wired to the pump at a time; several may be configured (a
+// Pro3 kept as a spare for a Pro1, say), but they never coordinate — each acts
+// solely on its own schedule. There is therefore no minimum device count and no
+// election.
 func (s *PoolService) Setup(ctx context.Context, opts SetupOptions) error {
-	s.log.Info("Setting up pool pump system", "devices", len(opts.DeviceIDs), "preferred", opts.PreferredDeviceID)
+	s.log.Info("Setting up pool pump", "devices", len(opts.DeviceIDs))
 
-	if len(opts.DeviceIDs) < 2 {
-		return fmt.Errorf("at least 2 devices required, got %d", len(opts.DeviceIDs))
+	if len(opts.DeviceIDs) < 1 {
+		return fmt.Errorf("at least 1 device required, got %d", len(opts.DeviceIDs))
 	}
 
 	// Resolve all device IDs
@@ -101,58 +103,39 @@ func (s *PoolService) Setup(ctx context.Context, opts SetupOptions) error {
 		}{InputID: id, ID: dev.Id(), SD: sd})
 	}
 
-	// Find Pro3 and Pro1 IDs for cross-device tracking
-	var pro3ID, pro1ID string
-	for _, info := range deviceInfos {
-		// Check switch count to determine device type
-		// We can't query the device here, so we rely on the user providing at least one Pro3
-		// The script will auto-detect device type at runtime
-		// For now, just use the first device as Pro3 and second as Pro1 if not specified
-		if pro3ID == "" {
-			pro3ID = info.ID
-		} else if pro1ID == "" {
-			pro1ID = info.ID
-		}
-	}
-
 	// Use MQTT channel for KVS operations
 	via := types.ChannelMqtt
 
 	// Setup each device with the same configuration
 	for _, info := range deviceInfos {
-		if err := s.setupDevice(ctx, via, info.SD, info.ID, pro3ID, pro1ID, opts); err != nil {
+		if err := s.setupDevice(ctx, via, info.SD, info.ID, opts); err != nil {
 			return fmt.Errorf("failed to setup device %s: %w", info.ID, err)
 		}
 	}
 
-	s.log.Info("Pool pump setup complete", "device_count", len(deviceInfos), "preferred", opts.PreferredDeviceID)
+	s.log.Info("Pool pump setup complete", "device_count", len(deviceInfos))
 	return nil
 }
 
-func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *shelly.Device, deviceID, pro3ID, pro1ID string, opts SetupOptions) error {
+func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *shelly.Device, deviceID string, opts SetupOptions) error {
 	s.log.Info("Setting up device", "device", sd.Name(), "id", deviceID)
 
 	// All devices get the same KVS configuration
 	kvsConfig := map[string]string{
 		PoolKVSKeys["enable_logging"]:        "true",
 		PoolKVSKeys["mqtt_topic_prefix"]:     "pool/pump",
-		PoolKVSKeys["preferred_device_id"]:   opts.PreferredDeviceID,
 		PoolKVSKeys["preferred_speed"]:       opts.PreferredSpeed,
-		PoolKVSKeys["pro3_device_id"]:        pro3ID,
-		PoolKVSKeys["pro1_device_id"]:        pro1ID,
 		PoolKVSKeys["eco_speed"]:             fmt.Sprintf("%d", opts.EcoSpeed),
-		PoolKVSKeys["mid_speed"]:             fmt.Sprintf("%d", opts.MidSpeed),
-		PoolKVSKeys["high_speed"]:            fmt.Sprintf("%d", opts.HighSpeed),
+		PoolKVSKeys["day_speed"]:             fmt.Sprintf("%d", opts.DaySpeed),
+		PoolKVSKeys["max_speed"]:             fmt.Sprintf("%d", opts.MaxSpeed),
 		PoolKVSKeys["night_run_duration_ms"]: fmt.Sprintf("%d", opts.NightRunDurationMs),
-		PoolKVSKeys["grace_delay_ms"]:        fmt.Sprintf("%d", opts.GraceDelayMs),
 		PoolKVSKeys["temperature_threshold"]: fmt.Sprintf("%.1f", opts.TemperatureThreshold),
 		PoolKVSKeys["pool_volume"]:           fmt.Sprintf("%d", opts.PoolVolume),
 		PoolKVSKeys["turnover"]:              fmt.Sprintf("%d", opts.Turnover),
 		PoolKVSKeys["max_flow_rate"]:         fmt.Sprintf("%d", opts.MaxFlowRate),
 		PoolKVSKeys["max_rpm"]:               fmt.Sprintf("%d", opts.MaxRpm),
 		PoolKVSKeys["eco_rpm"]:               fmt.Sprintf("%d", opts.EcoRpm),
-		PoolKVSKeys["mid_rpm"]:               fmt.Sprintf("%d", opts.MidRpm),
-		PoolKVSKeys["high_rpm"]:              fmt.Sprintf("%d", opts.HighRpm),
+		PoolKVSKeys["day_rpm"]:               fmt.Sprintf("%d", opts.DayRpm),
 		PoolKVSKeys["max_temp"]:              fmt.Sprintf("%.1f", opts.MaxTemp),
 
 		// Solar-driven hysteresis (#405)
@@ -695,36 +678,28 @@ func (s *PoolService) Stop(ctx context.Context, deviceID string) error {
 }
 
 // AddDevice adds a single device to the pool pump mesh
-func (s *PoolService) AddDevice(ctx context.Context, via types.Channel, sd *shelly.Device, deviceID, pro3ID, pro1ID string, allDeviceIDs []string, opts SetupOptions) error {
-	s.log.Info("Adding device to pool pump mesh", "device", sd.Name(), "id", deviceID)
+// AddDevice configures one pump controller. There is no mesh and no peer list:
+// exactly one controller is wired to the pump at a time and never coordinates
+// with another.
+func (s *PoolService) AddDevice(ctx context.Context, via types.Channel, sd *shelly.Device, deviceID string, opts SetupOptions) error {
+	s.log.Info("Configuring pool pump controller", "device", sd.Name(), "id", deviceID)
 
-	// Build peer device list for KVS (all devices except this one)
-	peerIDs := []string{}
-	for _, id := range allDeviceIDs {
-		if id != deviceID {
-			peerIDs = append(peerIDs, id)
-		}
-	}
-
-	// Use the unified setupDevice function
-	return s.setupDevice(ctx, via, sd, deviceID, pro3ID, pro1ID, opts)
+	return s.setupDevice(ctx, via, sd, deviceID, opts)
 }
 
 // SetPreferred sets the preferred device ID and speed on a device
-func (s *PoolService) SetPreferred(ctx context.Context, via types.Channel, sd *shelly.Device, preferredID, speed string) error {
-	s.log.Info("Setting preferred device", "device", sd.Name(), "preferred", preferredID, "speed", speed)
+// SetSpeed sets the speed a controller uses when it starts the pump.
+//
+// There is no longer a preferred *device* to set: exactly one controller is
+// wired at a time, so a device runs on its own schedule with no election.
+func (s *PoolService) SetSpeed(ctx context.Context, via types.Channel, sd *shelly.Device, speed string) error {
+	s.log.Info("Setting pump speed", "device", sd.Name(), "speed", speed)
 
-	// Set preferred device ID
-	if _, err := kvs.SetKeyValue(ctx, s.log, via, sd, PoolKVSKeys["preferred_device_id"], preferredID); err != nil {
-		return fmt.Errorf("failed to set preferred_device_id: %w", err)
-	}
-
-	// Set preferred speed
 	if _, err := kvs.SetKeyValue(ctx, s.log, via, sd, PoolKVSKeys["preferred_speed"], speed); err != nil {
 		return fmt.Errorf("failed to set preferred_speed: %w", err)
 	}
 
-	s.log.Info("Preferred device set successfully", "device", sd.Name())
+	s.log.Info("Pump speed set", "device", sd.Name(), "speed", speed)
 	return nil
 }
 

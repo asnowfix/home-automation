@@ -10,25 +10,20 @@ import (
 // proves the schema-driven generator reproduces every one of its 28 entries
 // byte-for-byte, so the refactor provably changes no runtime behaviour.
 var wantPoolKVSKeys = map[string]string{
-	"preferred_device_id":   "script/pool-pump/preferred",
 	"preferred_speed":       "script/pool-pump/speed",
-	"pro3_device_id":        "script/pool-pump/pro3-id",
-	"pro1_device_id":        "script/pool-pump/pro1-id",
 	"mqtt_topic_prefix":     "script/pool-pump/mqtt-topic",
 	"enable_logging":        "script/pool-pump/logging",
 	"eco_speed":             "script/pool-pump/eco-speed",
-	"mid_speed":             "script/pool-pump/mid-speed",
-	"high_speed":            "script/pool-pump/high-speed",
+	"day_speed":             "script/pool-pump/day-speed",
+	"max_speed":             "script/pool-pump/max-speed",
 	"night_run_duration_ms": "script/pool-pump/night-duration",
-	"grace_delay_ms":        "script/pool-pump/grace-delay",
 	"temperature_threshold": "script/pool-pump/temp-threshold",
 	"pool_volume":           "script/pool-pump/pool-volume",
 	"turnover":              "script/pool-pump/turnover",
 	"max_flow_rate":         "script/pool-pump/max-flow-rate",
 	"max_rpm":               "script/pool-pump/max-rpm",
 	"eco_rpm":               "script/pool-pump/eco-rpm",
-	"mid_rpm":               "script/pool-pump/mid-rpm",
-	"high_rpm":              "script/pool-pump/high-rpm",
+	"day_rpm":               "script/pool-pump/day-rpm",
 	"max_temp":              "script/pool-pump/max-temp",
 
 	"solar_enabled":           "script/pool-pump/solar-enabled",
@@ -46,18 +41,16 @@ var wantPoolKVSKeys = map[string]string{
 // keyed by the schema field name.
 var wantPoolDefaults = map[string]any{
 	"ecoSpeed":             2.0,
-	"midSpeed":             1.0,
-	"highSpeed":            0.0,
+	"daySpeed":             1.0,
+	"maxSpeed":            0.0,
 	"nightRunDurationMs":   3600000.0, // -> DefaultNightRunDuration (time.Duration, ms*time.Millisecond)
-	"graceDelayMs":         10000.0,   // -> DefaultGraceDelay
 	"temperatureThreshold": 20.0,
 	"poolVolume":           46.0,
 	"turnover":             5.0,
 	"maxFlowRate":          31.0,
 	"maxRpm":               2900.0,
 	"ecoRpm":               2000.0,
-	"midRpm":               2600.0,
-	"highRpm":              2900.0,
+	"dayRpm":               2600.0,
 	"maxTemp":              35.0,
 	"solarEnabled":         false,
 	"solarStartThresholdW": 500.0,
@@ -123,8 +116,8 @@ func TestRegression_PoolPumpSchemaMatchesToday(t *testing.T) {
 		t.Fatalf("LoadSchema: %v", err)
 	}
 
-	if len(schema.Fields) != 28 {
-		t.Fatalf("got %d fields, want 28", len(schema.Fields))
+	if len(schema.Fields) != 23 {
+		t.Fatalf("got %d fields, want 23", len(schema.Fields))
 	}
 
 	gotKVSKeys := map[string]string{}

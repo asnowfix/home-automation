@@ -11,23 +11,18 @@ func TestCamelToSnake(t *testing.T) {
 	cases := map[string]string{
 		"enableLogging":        "enable_logging",
 		"mqttTopicPrefix":      "mqtt_topic_prefix",
-		"preferredDeviceId":    "preferred_device_id",
-		"pro3DeviceId":         "pro3_device_id",
-		"pro1DeviceId":         "pro1_device_id",
 		"preferredSpeed":       "preferred_speed",
 		"ecoSpeed":             "eco_speed",
-		"midSpeed":             "mid_speed",
-		"highSpeed":            "high_speed",
+		"daySpeed":             "day_speed",
+		"maxSpeed":            "max_speed",
 		"nightRunDurationMs":   "night_run_duration_ms",
-		"graceDelayMs":         "grace_delay_ms",
 		"temperatureThreshold": "temperature_threshold",
 		"poolVolume":           "pool_volume",
 		"turnover":             "turnover",
 		"maxFlowRate":          "max_flow_rate",
 		"maxRpm":               "max_rpm",
 		"ecoRpm":               "eco_rpm",
-		"midRpm":               "mid_rpm",
-		"highRpm":              "high_rpm",
+		"dayRpm":               "day_rpm",
 		"maxTemp":              "max_temp",
 		"solarEnabled":         "solar_enabled",
 		"solarStartThresholdW": "solar_start_threshold_w",
@@ -130,8 +125,8 @@ func TestLoadSchema_PoolPump(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSchema: %v", err)
 	}
-	if len(s.Fields) != 28 {
-		t.Errorf("pool-pump.schema.json: got %d fields, want 28", len(s.Fields))
+	if len(s.Fields) != 23 {
+		t.Errorf("pool-pump.schema.json: got %d fields, want 23", len(s.Fields))
 	}
 }
 

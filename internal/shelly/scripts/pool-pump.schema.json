@@ -19,30 +19,8 @@
       "cliOnly": true
     },
     {
-      "name": "preferredDeviceId",
-      "description": "Which device ID should run (actual Shelly device ID). Script compares this to its own ID",
-      "key": "preferred",
-      "default": null,
-      "type": "string",
-      "required": true
-    },
-    {
-      "name": "pro3DeviceId",
-      "description": "Pro3 device ID (for MQTT subscriptions - cross-device status tracking)",
-      "key": "pro3-id",
-      "default": null,
-      "type": "string"
-    },
-    {
-      "name": "pro1DeviceId",
-      "description": "Pro1 device ID (for MQTT subscriptions - cross-device status tracking)",
-      "key": "pro1-id",
-      "default": null,
-      "type": "string"
-    },
-    {
       "name": "preferredSpeed",
-      "description": "Speed: 'eco', 'mid', 'high', 'max'. Maps to switches based on device capabilities",
+      "description": "Speed: 'eco', 'day', 'max', 'max'. Maps to switches based on device capabilities",
       "key": "speed",
       "default": "eco",
       "type": "string"
@@ -56,17 +34,17 @@
       "goConst": true
     },
     {
-      "name": "midSpeed",
-      "description": "Pro3 switch ID for mid speed (0, 1, or 2)",
-      "key": "mid-speed",
+      "name": "daySpeed",
+      "description": "Pro3 switch ID for day speed (0, 1, or 2)",
+      "key": "day-speed",
       "default": 1,
       "type": "number",
       "goConst": true
     },
     {
-      "name": "highSpeed",
-      "description": "Pro3 switch ID for high speed (0, 1, or 2)",
-      "key": "high-speed",
+      "name": "maxSpeed",
+      "description": "Pro3 switch ID for max speed (0, 1, or 2)",
+      "key": "max-speed",
       "default": 0,
       "type": "number",
       "goConst": true
@@ -83,18 +61,8 @@
       "goConstType": "time.Duration"
     },
     {
-      "name": "graceDelayMs",
-      "description": "Cross-device grace delay in ms (minimum 10000)",
-      "key": "grace-delay",
-      "default": 10000,
-      "type": "number",
-      "goConst": true,
-      "goConstName": "GraceDelay",
-      "goConstType": "time.Duration"
-    },
-    {
       "name": "temperatureThreshold",
-      "description": "Temperature threshold (°C) for summer mode (day schedule)",
+      "description": "Temperature threshold (\u00b0C) for summer mode (day schedule)",
       "key": "temp-threshold",
       "default": 20,
       "type": "number",
@@ -102,7 +70,7 @@
     },
     {
       "name": "poolVolume",
-      "description": "Pool volume in m³",
+      "description": "Pool volume in m\u00b3",
       "key": "pool-volume",
       "default": 46,
       "type": "number",
@@ -118,7 +86,7 @@
     },
     {
       "name": "maxFlowRate",
-      "description": "Pump max flow rate in m³/h at max RPM",
+      "description": "Pump max flow rate in m\u00b3/h at max RPM",
       "key": "max-flow-rate",
       "default": 31,
       "type": "number",
@@ -141,24 +109,16 @@
       "goConst": true
     },
     {
-      "name": "midRpm",
-      "description": "Variator RPM setting for mid speed",
-      "key": "mid-rpm",
+      "name": "dayRpm",
+      "description": "Variator RPM setting for day speed",
+      "key": "day-rpm",
       "default": 2600,
       "type": "number",
       "goConst": true
     },
     {
-      "name": "highRpm",
-      "description": "Variator RPM setting for high speed",
-      "key": "high-rpm",
-      "default": 2900,
-      "type": "number",
-      "goConst": true
-    },
-    {
       "name": "maxTemp",
-      "description": "Temperature (°C) at which run time reaches one full turnover",
+      "description": "Temperature (\u00b0C) at which run time reaches one full turnover",
       "key": "max-temp",
       "default": 35,
       "type": "number",

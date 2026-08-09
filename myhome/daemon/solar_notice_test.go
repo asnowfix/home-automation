@@ -110,12 +110,12 @@ func TestSolarAutomation_RecordsHardCeilingStopNotice(t *testing.T) {
 	sa.Start(ctx)
 
 	send(ch, 800) // start pump
-	tracker.runtimeSec = 3600
+	tracker.setRuntimeSec(3600)
 	send(ch, 800) // still high solar, but ceiling hit → must stop
 
 	rows := queryNoticeEvents(t, store, "pool.solar_stop")
 	if len(rows) != 1 {
-		t.Fatalf("pool.solar_stop rows = %d, want 1; calls=%v", len(rows), pump.calls)
+		t.Fatalf("pool.solar_stop rows = %d, want 1; calls=%v", len(rows), pump.callsSnapshot())
 	}
 	if want := `"reason":"hard_ceiling"`; !strings.Contains(*rows[0].Data, want) {
 		t.Errorf("Data = %q, want substring %q", *rows[0].Data, want)
@@ -172,7 +172,7 @@ func TestSolarAutomation_RecordNoticeFailureDoesNotBlockPump(t *testing.T) {
 
 	on, ok := pump.lastCall()
 	if !ok || !on {
-		t.Fatalf("expected pump ON despite events store being closed; calls=%v", pump.calls)
+		t.Fatalf("expected pump ON despite events store being closed; calls=%v", pump.callsSnapshot())
 	}
 }
 
@@ -204,6 +204,6 @@ func TestSolarAutomation_NoNoticesWithoutWithEvents(t *testing.T) {
 
 	on, ok := pump.lastCall()
 	if !ok || on {
-		t.Fatalf("expected pump OFF; calls=%v", pump.calls)
+		t.Fatalf("expected pump OFF; calls=%v", pump.callsSnapshot())
 	}
 }

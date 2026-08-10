@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/asnowfix/home-automation/hlog"
-	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
@@ -84,9 +84,12 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 
 		fmt.Printf("  . Checking %s...\n", scriptName)
 
-		// Try to upload the script (this will check version hash and skip if up-to-date)
-		// If the script is not available in embedded scripts, Upload will return an error
-		buf, err := pkgscript.ReadEmbeddedFile(scriptName)
+		// Resolve the script: a same-named file in --local-scripts-dir shadows
+		// the embedded copy (unless --no-local-scripts is set), falling back
+		// silently to embedded when absent. This is also the fleet-upload path
+		// the .deb postinst runs unattended (`script update '*'`), so the
+		// default here MUST stay disabled — see issue #457.
+		buf, source, err := mhscript.LoadScript(log, localScriptsDirEffective(), scriptName)
 		if err != nil {
 			fmt.Printf("  ✗ Failed to read script %s: %v\n", scriptName, err)
 			updateResults = append(updateResults, UpdateResult{
@@ -97,6 +100,7 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 			})
 			continue
 		}
+		fmt.Printf("    . Source: %s\n", source)
 
 		id, err := mhscript.UploadWithVersion(ctx, log, via, sd, scriptName, buf, !updateNoMinify, updateForce)
 		if err != nil {

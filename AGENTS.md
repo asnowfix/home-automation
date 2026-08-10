@@ -1352,14 +1352,29 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 - `--no-minify`: Do not minify script before upload (recommended for Shelly)
 - `--force`: Force re-upload even if version hash matches
 - `--verbose`: Enable verbose logging
+- `--local-scripts-dir <dir>` (on `script upload` / `script update`, issue #457): load `<dir>/<name>`
+  instead of the embedded copy when a same-named file exists there, so a one-line edit can be
+  uploaded without a full `go build`. Flat directory only — no subdirectories, no path traversal.
+  Falls back silently to the embedded copy when the file is absent, so an empty/unset `dir` (the
+  default everywhere, including the packaged service) changes nothing. Every resolution logs its
+  source (`local` or `embedded`) at INFO — check the log if a stale local file is ever suspected.
+- `--no-local-scripts`: force embedded-only loading, overriding `--local-scripts-dir` even if it is
+  set. Local script content is never schema-checked (see #439/#457 design note): it can change
+  script *logic* freely, but if it renames or adds `CONFIG_SCHEMA` keys, `internal/myhome/shelly/script/pool.go`'s
+  generated Go constants go out of sync with what the script actually reads/writes — that still
+  needs a rebuild.
 
 #### Gotchas that cost real debugging time
 
 - **`SCRIPT` is a bare name resolved from the binary's embedded FS (`//go:embed *.js`), NOT a
-  filesystem path.** Passing a path fails with `Failed to read script <path>: file does not exist`
-  — that is `io/fs` wording, and the tell that it never touched the disk. Consequence: **the version
-  uploaded is whatever `internal/shelly/scripts/<name>.js` contained when that binary was built.**
-  To upload a different version, check that file out and rebuild (e.g. build from a tag's worktree).
+  filesystem path**, unless `--local-scripts-dir` (issue #457) is given and the directory contains a
+  same-named file — a plain `script upload`/`script update` with no such flag reads only the
+  embedded copy, and a path like `./scripts/pool-pump.js` still fails with
+  `Failed to read script <path>: file does not exist` (`io/fs` wording, the tell that it never
+  touched the disk — `LoadScript` requires a flat name, not a path). Without `--local-scripts-dir`,
+  **the version uploaded is whatever `internal/shelly/scripts/<name>.js` contained when that binary
+  was built**; to upload a different version without rebuilding, point `--local-scripts-dir` at the
+  directory holding the edited file instead.
 - **A reported upload failure is often a successful upload.** The chunked transfer completes, then a
   post-upload RPC (`KVS.Get` version read, `Script.Start`) times out and the command exits non-zero
   with `all 1 device(s) failed`. Seen on every attempt against a Pro1 at `-T 60s`, `90s` and `120s`.

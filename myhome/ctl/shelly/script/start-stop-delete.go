@@ -48,8 +48,11 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 	scriptName := args[0]
 	fmt.Printf(". Uploading %s to %s...\n", scriptName, sd.Name())
 
-	// Read the embedded script file
-	buf, err := pkgscript.ReadEmbeddedFile(scriptName)
+	// Resolve the script: a same-named file in --local-scripts-dir shadows
+	// the embedded copy (unless --no-local-scripts is set), falling back
+	// silently to embedded when absent. See LoadScript for the precedence
+	// rule and issue #457 for the motivation.
+	buf, source, err := mhscript.LoadScript(log, localScriptsDirEffective(), scriptName)
 	if err != nil {
 		fmt.Printf("✗ Failed to read script %s: %v\n", scriptName, err)
 
@@ -64,6 +67,7 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 
 		return nil, err
 	}
+	fmt.Printf("  . Source: %s\n", source)
 
 	// Upload with version tracking
 	id, err := mhscript.UploadWithVersion(ctx, log, via, sd, scriptName, buf, !noMinify, forceUpload)

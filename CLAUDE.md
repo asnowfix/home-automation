@@ -24,6 +24,8 @@ go test ./internal/myhome/...                    # single package
 go test -v -run TestName ./path/to/package       # specific test
 go test -race ./...                              # with race detector
 
+# NOTE: pass a BARE FILENAME relative to the current directory. An absolute path fails with a
+# misleading "file does not exist" even when the file is plainly there.
 go run ./myhome ctl shelly script upload <device> <script.js> --no-minify
 go run ./myhome ctl shelly script update <device>
 go run ./myhome ctl shelly script debug <device> true
@@ -109,6 +111,21 @@ handing it to a coding agent with a cold context window: no "as discussed above,
 reader saw the same live-debugging session or chat history that motivated the issue. Cross-issue
 dependencies must be made explicit (e.g. "blocked by #123," "must land after #456") rather than
 implied by filing order or narrative context.
+
+**Close an issue only on empirical evidence, and put that evidence in the closing comment.** A fix
+that is present in the source is *not* verified — run the thing. For a data race, that means the
+race detector's output on the affected package; for a device bug, a live measurement; for a crash,
+a regression test that fails without the fix. An issue whose fix has been confirmed only by reading
+the diff stays **open**, with a note saying so.
+
+Grep alone is not evidence. Verifying a claim against `origin/main` while sitting on a feature
+branch — mixing `git grep <rev>` with working-tree greps — silently produces contradictory answers.
+Pick one and say which.
+
+**Keep the umbrella issue of a long campaign current.** For multi-week work, the top-level issue is
+the status board: post an update whenever a gate opens or closes, a measurement lands, or a release
+decision changes, using explicit state words (new / pending / implementing / verifying / discarded /
+closed-by-PR / blocked). Do not post when nothing changed.
 
 ### Sub-agents
 

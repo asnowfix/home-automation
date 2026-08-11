@@ -408,6 +408,7 @@ var knownPoolPumpStateKeys = []string{
 	"script/pool-pump/active-output",
 	"script/pool-pump/schedule-mode",
 	"script/pool-pump/runtime-sec",    // runtime_today_sec: cumulative pump-on seconds today (#402)
+	"script/pool-pump/runtime-ts",     // epoch second STATE.runtimeTodaySec applies to; KVS recovery path (#469)
 	"script/pool-pump/turnover-today", // turnover_today: today's achieved water-volume turnovers (#402)
 }
 

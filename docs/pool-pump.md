@@ -330,6 +330,7 @@ All keys use prefix `script/pool-pump/` (≤ 32 chars total).
 | `active-output` | `-1` or switch ID currently active |
 | `schedule-mode` | `"summer"` or `"winter"` |
 | `runtime-sec` | Cumulative pump-on seconds today (see #402) |
+| `runtime-ts` | Epoch second `runtime-sec` applies to; KVS recovery path if `Script.storage` is lost, e.g. a script reinstall (see #469) |
 | `turnover-today` | Pool-volume turnovers achieved today (see #402) |
 
 ### Script.storage (script-private)
@@ -337,7 +338,7 @@ All keys use prefix `script/pool-pump/` (≤ 32 chars total).
 |-----|-------|
 | `forecast-url` | Open-Meteo URL built from GPS coordinates |
 | `my-device-id` | Cached device ID from `Shelly.getDeviceInfo().id` |
-| `runtime-date` / `runtime-sec` | Boot-safe mirror of today's runtime counter (see #402) |
+| `runtime` | Boot-safe mirror of today's runtime counter, as one JSON object `{sec, ts}` (see #402, #469). The day is derived from `ts` (epoch seconds), never from a stored date string — a pre-#469 device may still have the legacy `runtime-sec` / `runtime-date` scalar pair, migrated to `runtime` once on first boot after upgrade. |
 
 ---
 

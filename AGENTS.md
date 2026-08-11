@@ -1871,6 +1871,12 @@ For visibility without needing to run anything locally:
 3. **Monitor logs**: Debug output goes to stdout (not hlog)
 4. **Disable debug**: `go run . ctl shelly script debug device-name false`
 
+**Never reboot the device after enabling UDP debug.** `ctl shelly script debug <device> true`
+calls `Sys.SetConfig` and only reboots if the device itself reports `RestartRequired` — do not
+add a manual reboot around this command. Always disable debug again once you're done
+(`... false`); leaving UDP debug on permanently is not a valid workflow — it degrades device
+performance and causes crashes/reboots on its own within a fairly short time.
+
 ### Launch Configurations
 
 The project includes VS Code launch configurations in `.vscode/launch.json`:

@@ -24,6 +24,8 @@ go test ./internal/myhome/...                    # single package
 go test -v -run TestName ./path/to/package       # specific test
 go test -race ./...                              # with race detector
 
+# NOTE: pass a BARE FILENAME relative to the current directory. An absolute path fails with a
+# misleading "file does not exist" even when the file is plainly there.
 go run ./myhome ctl shelly script upload <device> <script.js> --no-minify
 go run ./myhome ctl shelly script update <device>
 go run ./myhome ctl shelly script debug <device> true
@@ -102,6 +104,95 @@ memory of a prior conversation or session — anyone (agent or human) can pick i
 other source of information than what the issue itself contains. It may, and should, reference
 external sources (docs URLs) and/or other issue(s) and/or PR(s), but must not assume the reader
 was present for the discussion that led to filing it.
+
+**Every issue filed in this repo must be self-contained** per the above definition — this applies
+whether a human or a coding agent is the one filing it. Before creating an issue, write it as if
+handing it to a coding agent with a cold context window: no "as discussed above," no assuming the
+reader saw the same live-debugging session or chat history that motivated the issue. Cross-issue
+dependencies must be made explicit (e.g. "blocked by #123," "must land after #456") rather than
+implied by filing order or narrative context.
+
+**Close an issue only on empirical evidence, and put that evidence in the closing comment.** A fix
+that is present in the source is *not* verified — run the thing. For a data race, that means the
+race detector's output on the affected package; for a device bug, a live measurement; for a crash,
+a regression test that fails without the fix. An issue whose fix has been confirmed only by reading
+the diff stays **open**, with a note saying so.
+
+Grep alone is not evidence. Verifying a claim against `origin/main` while sitting on a feature
+branch — mixing `git grep <rev>` with working-tree greps — silently produces contradictory answers.
+Pick one and say which.
+
+**Keep the umbrella issue of a long campaign current.** For multi-week work, the top-level issue is
+the status board: post an update whenever a gate opens or closes, a measurement lands, or a release
+decision changes, using explicit state words (new / pending / implementing / verifying / discarded /
+closed-by-PR / blocked). Do not post when nothing changed.
+
+### Sub-agents
+
+**Every sub-agent must persist its progress outside its own context**, incrementally, as it works —
+not only in its final report. A sub-agent can die mid-task (API error, spend limit, stall) and its
+worktree may be auto-removed if it never committed, taking every finding with it.
+
+When launching a sub-agent, give it exactly one of these and say which:
+
+- **A progress file** at a path you define (e.g. `docs/<issue>-progress.md`, or a scratchpad path),
+  appended after each meaningful step: what was tried, what was measured, what was ruled out.
+- **Comments on the GitHub issue** it was given as its objective — preferred when the work is tied
+  to an issue, since the findings then survive for whoever picks it up next and satisfy the
+  self-contained-issue rule above.
+
+Live-device measurements (`mem_peak`, RPC responses, event-DB queries) and negative results must be
+written down as they are obtained. Re-deriving them means re-touching real hardware.
+
+Sub-agents must not `git push` or open PRs — the coordinator does that from the sub-agent's worktree.
+
+#### Running tests in a sub-agent
+
+**Commit first, then run tests.** A sub-agent that dies mid-run loses everything uncommitted, and its
+worktree may be auto-removed.
+
+**Never run the test suite in the foreground.** Go test output under `-race`, with the script
+emulator's per-call logging, is large enough to consume a sub-agent's context before it can act on
+the result.
+
+**Never end a turn in order to wait for a test run.** This is the #432 stall mode. Ending a turn
+terminates the sub-agent, and nothing re-invokes it when its background job finishes — so an agent
+that signs off with "waiting for the test run, will resume when notified" is simply gone.
+
+Measured directly on 2026-08-11 with a throwaway agent that backgrounded a 200-second job and then
+ended its turn:
+
+- the agent stopped after **9.8 s**, reported by the harness as `completed`;
+- its child kept running and finished normally **3.5 minutes later**;
+- the agent received **no** automatic notification of that completion — confirmed by asking the
+  agent itself after resuming it;
+- the agent's own completion notification fired **immediately**, while its child was still alive.
+
+Two consequences worth acting on:
+
+- **The child's work is not lost, only orphaned.** Before re-running anything for a stalled agent,
+  look for its output on disk — a completed `make test` costs ~6 minutes to repeat for nothing.
+- **A stalled agent can be resumed** by the coordinator with `SendMessage`, picking up its
+  transcript. That is a recovery, not the design; the agent must not plan around it.
+
+Do not treat "the agent's notification arrived" as meaning its background work has finished — the
+observed behaviour above shows the two are unrelated.
+
+The required pattern is: **background the run, then poll it to completion inside the same turn.**
+
+1. Start the suite with `run_in_background`, writing to a file.
+2. Loop: check the output file periodically until the run finishes or the timeout expires.
+3. Read results by **grepping the file** (`^(--- FAIL|FAIL|ok )`), never by inhaling it whole.
+4. **Report the wall-clock duration of the test run** in the final report, alongside pass/fail.
+
+The coordinator **must give an overall timeout at agent startup** — the agent stops polling and
+reports what it has when that budget is exhausted, rather than looping forever. Choose it from the
+measured suite duration with headroom: a full `make test` on `origin/main` took **5 min 47 s**
+(346.67 s wall clock) on 2026-08-11, so ~15 minutes is a reasonable default budget. These tests are
+known to slow down under CPU contention (#393), and several agents may share the machine.
+
+Duration reporting is not bookkeeping: it is how the suite's cost stays visible, so the budget above
+is re-derived from measurement rather than guessed.
 
 ### Go
 

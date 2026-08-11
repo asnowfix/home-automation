@@ -687,6 +687,15 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 // real device reusing the same on-flash storage.
 func runPoolPumpPhase(t *testing.T, buf []byte, deviceState *script.DeviceState) (stop func()) {
 	t.Helper()
+	// KVS (unlike Storage) is deliberately NOT reset between phases either —
+	// but that means "schedule-mode" is already present in deviceState.KVS
+	// the instant a second phase starts, left over from the previous phase's
+	// own saveState() write. Left alone, the waitFor below would return
+	// immediately on a stale key instead of waiting for *this* run's init to
+	// reach the same point, racing the very state restore under test. Clear
+	// it first so the predicate can only be satisfied by a fresh write.
+	deviceState.DeleteKVSValue("script/pool-pump/schedule-mode")
+
 	ctx, cancel := poolPumpRunContext(t)
 	done := make(chan error, 1)
 	go func() {

@@ -127,9 +127,38 @@ When launching a sub-agent, give it exactly one of these and say which:
 Live-device measurements (`mem_peak`, RPC responses, event-DB queries) and negative results must be
 written down as they are obtained. Re-deriving them means re-touching real hardware.
 
-Related sub-agent rules: commit before running the full test suite (backgrounded `make test` is a
-known stall mode, #432), and sub-agents must not `git push` or open PRs — the coordinator does that
-from the sub-agent's worktree.
+Sub-agents must not `git push` or open PRs — the coordinator does that from the sub-agent's worktree.
+
+#### Running tests in a sub-agent
+
+**Commit first, then run tests.** A sub-agent that dies mid-run loses everything uncommitted, and its
+worktree may be auto-removed.
+
+**Never run the test suite in the foreground.** Go test output under `-race`, with the script
+emulator's per-call logging, is large enough to consume a sub-agent's context before it can act on
+the result.
+
+**Never end a turn in order to wait for a test run.** This is the #432 stall mode. Ending a turn
+terminates the sub-agent; the completion notification then has no live turn to land in, so an agent
+that signs off with "waiting for the test run, will resume when notified" is simply gone. Nothing
+re-invokes it. (A stalled agent can still be resumed by the coordinator with `SendMessage`, but
+that is a recovery, not the design.)
+
+The required pattern is: **background the run, then poll it to completion inside the same turn.**
+
+1. Start the suite with `run_in_background`, writing to a file.
+2. Loop: check the output file periodically until the run finishes or the timeout expires.
+3. Read results by **grepping the file** (`^(--- FAIL|FAIL|ok )`), never by inhaling it whole.
+4. **Report the wall-clock duration of the test run** in the final report, alongside pass/fail.
+
+The coordinator **must give an overall timeout at agent startup** — the agent stops polling and
+reports what it has when that budget is exhausted, rather than looping forever. Choose it from the
+measured suite duration with headroom: a full `make test` on `origin/main` took **5 min 47 s**
+(346.67 s wall clock) on 2026-08-11, so ~15 minutes is a reasonable default budget. These tests are
+known to slow down under CPU contention (#393), and several agents may share the machine.
+
+Duration reporting is not bookkeeping: it is how the suite's cost stays visible, so the budget above
+is re-derived from measurement rather than guessed.
 
 ### Go
 

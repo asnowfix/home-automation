@@ -676,39 +676,31 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 // running). Asserts runtime-sec continues accumulating from the persisted
 // baseline instead of resetting to 0 — the crash/reboot resilience #402
 // point 6 exists for.
-func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
-	buf := readPoolPumpScript(t)
-
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
-
-	injector := make(chan []byte, 4)
-
-	cs := pro3ComponentStatus()
-	cs["switch:2"] = map[string]interface{}{"id": 2, "output": true} // pump left "on" across the simulated reboot
-
-	const baselineSec = 3600 // 1h of runtime accrued before the "reboot"
-
-	deviceState := &script.DeviceState{
-		KVS: controllerKVS(),
-		Storage: map[string]interface{}{
-			"runtime-sec":  fmt.Sprintf("%d", baselineSec),
-			"runtime-date": dateString(time.Now()),
-		},
-		ComponentStatus: cs,
-		Schedules:       poolPumpSchedules(),
-		EventInjector:   injector,
-	}
+// runPoolPumpPhase starts pool-pump.js against deviceState in the
+// background and returns once init has completed (schedule-mode written to
+// KVS), leaving the script running. Call the returned stop() to cancel the
+// script and wait for it to fully exit before starting a second phase
+// against the *same* deviceState — reusing the same DeviceState pointer
+// across two phases is what makes a two-phase test a genuine restart:
+// Script.storage isn't reset between phases, only whatever the running
+// script itself wrote to it, exactly like Script.Stop/Script.Start on a
+// real device reusing the same on-flash storage.
+func runPoolPumpPhase(t *testing.T, buf []byte, deviceState *script.DeviceState) (stop func()) {
+	t.Helper()
+	// KVS (unlike Storage) is deliberately NOT reset between phases either —
+	// but that means "schedule-mode" is already present in deviceState.KVS
+	// the instant a second phase starts, left over from the previous phase's
+	// own saveState() write. Left alone, the waitFor below would return
+	// immediately on a stale key instead of waiting for *this* run's init to
+	// reach the same point, racing the very state restore under test. Clear
+	// it first so the predicate can only be satisfied by a fresh write.
+	deviceState.DeleteKVSValue("script/pool-pump/schedule-mode")
 
 	ctx, cancel := poolPumpRunContext(t)
-	defer cancel()
-
 	done := make(chan error, 1)
 	go func() {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
-
 	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists
@@ -718,53 +710,269 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 		<-done
 		t.Fatalf("init timeout")
 	}
+	return func() {
+		cancel()
+		<-done
+	}
+}
 
-	// Short real wait, then stop, to confirm accumulation continues from the
-	// restored baseline rather than resetting to 0.
-	time.Sleep(1 * time.Second)
+// runtimeStorageState mirrors the JSON object pool-pump.js persists at
+// Script.storage["runtime"] (see STORAGE_KEYS.runtime, #469): {sec, ts}.
+type runtimeStorageState struct {
+	Sec float64 `json:"sec"`
+	Ts  float64 `json:"ts"`
+}
 
+// readRuntimeStorage reads and JSON-decodes Script.storage["runtime"],
+// failing the test if it is absent, not a string (Script.storage only ever
+// holds strings — Web Storage semantics), or not valid JSON. This is the
+// "assert the value and type come back intact" check #469 asked for: unlike
+// the pre-#469 loose scalars, a malformed round trip fails loudly here
+// instead of silently coercing to 0/null.
+func readRuntimeStorage(t *testing.T, d *script.DeviceState) runtimeStorageState {
+	t.Helper()
+	raw, ok := d.StorageValue("runtime")
+	if !ok {
+		t.Fatalf(`Script.storage["runtime"] not present`)
+	}
+	s, ok := raw.(string)
+	if !ok {
+		t.Fatalf(`Script.storage["runtime"] = %v (%T), want a string (Web Storage semantics)`, raw, raw)
+	}
+	var out runtimeStorageState
+	if err := json.Unmarshal([]byte(s), &out); err != nil {
+		t.Fatalf(`Script.storage["runtime"] = %q is not valid JSON: %v`, s, err)
+	}
+	return out
+}
+
+// seedRuntimeStorage directly overwrites Script.storage["runtime"] between
+// two runPoolPumpPhase phases, to force a scenario a real clock can't
+// produce inside a unit test (a specific past day, or corruption).
+func seedRuntimeStorage(d *script.DeviceState, sec float64, ts int64) {
+	raw, _ := json.Marshal(runtimeStorageState{Sec: sec, Ts: float64(ts)})
+	d.SetStorageValue("runtime", string(raw))
+}
+
+// localDayNumber mirrors pool-pump.js's localDayNumber(epochSec): a
+// comparable YYYYMMDD integer in local time, so Go-side assertions about
+// "which day" a persisted ts belongs to use the same representation as the
+// script itself, rather than a separately-formatted date string.
+func localDayNumber(epochSec int64) int64 {
+	tm := time.Unix(epochSec, 0)
+	return int64(tm.Year())*10000 + int64(tm.Month())*100 + int64(tm.Day())
+}
+
+// TestPoolPump_RuntimeAccounting_ContinuesAfterReboot is the storage
+// round-trip test #469 asked for, and a rewrite of the pre-#469 test of the
+// same name: that version seeded Script.storage directly with Go-string
+// values, bypassing the script's own storeStorageValue()/loadStorageValue()
+// write-read path entirely — which is exactly why it kept passing while the
+// bug was live, and why #469 asked for it to be fixed, not just supplemented.
+// This version does NOT seed Script.storage directly: phase 1 runs the pump
+// for real and lets its own stop-event handler persist a nonzero runtime
+// through the actual storeStorageValue()/JSON.stringify code path; phase 2
+// is a genuine second script instance (new goja VM, same DeviceState) that
+// must restore that exact value through loadStorageObject()/JSON.parse —
+// proving the round trip is intact end to end, and that a same-day restart
+// carries the count forward instead of resetting it.
+func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	injector := make(chan []byte, 4)
+	cs := pro3ComponentStatus()
+	cs["switch:2"] = map[string]interface{}{"id": 2, "output": true} // pump on at boot
+
+	deviceState := &script.DeviceState{
+		KVS:             controllerKVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: cs,
+		Schedules:       poolPumpSchedules(),
+		EventInjector:   injector,
+	}
+
+	// --- Phase 1: pump runs briefly, then a real water-supply-ON event
+	// stops it, which calls stopRuntimeAccounting() -> persistRuntimeState()
+	// -> the script's own storeStorageValue() write. ---
+	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	time.Sleep(1200 * time.Millisecond)
 	injector <- shellyInputEvent(0, true)
 	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
 		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
 		return ok && v == "-1"
 	})
-	cancel()
-	<-done
-
+	stop1()
 	if !stopped {
-		t.Fatalf("pump did not stop after water supply ON; active-output = %v", kvsValue(deviceState, "script/pool-pump/active-output"))
+		t.Fatalf("pump did not stop after water supply ON in phase 1; active-output = %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
-	runtimeSec := parseKVSInt(t, deviceState, "script/pool-pump/runtime-sec")
-	if runtimeSec <= baselineSec {
-		t.Fatalf("runtime-sec %d did not increase past persisted baseline %d — accounting reset instead of continuing",
-			runtimeSec, baselineSec)
+	phase1Sec := parseKVSInt(t, deviceState, "script/pool-pump/runtime-sec")
+	if phase1Sec <= 0 {
+		t.Fatalf("phase 1 KVS runtime-sec = %d, want > 0 (the real write path never ran)", phase1Sec)
+	}
+	phase1Storage := readRuntimeStorage(t, deviceState)
+	if phase1Storage.Sec <= 0 {
+		t.Fatalf(`phase 1 Script.storage["runtime"].sec = %v, want > 0`, phase1Storage.Sec)
 	}
 
-	turnoverToday := parseKVSFloat(t, deviceState, "script/pool-pump/turnover-today")
-	wantTurnover := expectedTurnover(float64(runtimeSec))
-	if math.Abs(turnoverToday-wantTurnover) > 0.01 {
-		t.Errorf("turnover-today = %v, want ~%v (runtime_sec=%d)", turnoverToday, wantTurnover, runtimeSec)
+	// --- Phase 2: a fresh script instance (new VM) against the SAME
+	// DeviceState. Water supply is still "on" so the pump stays off; this
+	// isolates the restore itself from any further accumulation. ---
+	cs2 := pro3ComponentStatus()
+	cs2["input:0"] = map[string]interface{}{"id": 0, "state": true}
+	deviceState.ComponentStatus = cs2
+
+	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	defer stop2()
+
+	restoredSec := parseKVSInt(t, deviceState, "script/pool-pump/runtime-sec")
+	if restoredSec < phase1Sec {
+		t.Fatalf("phase 2 KVS runtime-sec = %d, want >= phase 1's %d (round trip lost data, #469)", restoredSec, phase1Sec)
+	}
+
+	restoredStorage := readRuntimeStorage(t, deviceState)
+	if restoredStorage.Sec < phase1Storage.Sec {
+		t.Fatalf(`phase 2 Script.storage["runtime"].sec = %v, want >= phase 1's %v (#469)`, restoredStorage.Sec, phase1Storage.Sec)
+	}
+	if localDayNumber(int64(restoredStorage.Ts)) != localDayNumber(time.Now().Unix()) {
+		t.Fatalf(`phase 2 Script.storage["runtime"].ts = %v, want today`, restoredStorage.Ts)
 	}
 }
 
-// TestPoolPump_RuntimeAccounting_StaleDateResetsOnBoot verifies
-// ensureRuntimeDay()'s day-rollover reset: Script.storage is pre-seeded with
-// a runtime-date from "yesterday" plus a large leftover runtime-sec — as if
-// the device was left running overnight and only rebooted the next day (or
-// the daemon never stopped it before midnight). At boot, loadState() must
-// discard the stale total (reset to 0) rather than carry it into today,
-// which is the same reset path exercised — for an in-progress run instead of
-// at boot — by the flushRuntimeCheckpoint()/handleNightStop() mid-run
-// rollover fix (ensureRuntimeDay() pulling STATE.runStartTs forward to
-// Date.now() so a still-open run doesn't re-credit its pre-midnight time to
-// the new day). That exact mid-run interleaving isn't independently
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartResets verifies the
+// day-rollover reset using the current {sec, ts} format end to end across a
+// genuine two-phase restart (unlike TestPoolPump_RuntimeAccounting_
+// LegacyMigrationDiscardsStaleDate below, which single-run-seeds the
+// pre-#469 legacy pair). Phase 1 persists a real baseline; between phases
+// the test backdates Script.storage["runtime"].ts to yesterday — standing in
+// for a device that sat idle overnight, since this Go harness can't fast-
+// forward goja's Date() past a real midnight. Phase 2 must reset the count
+// to 0 rather than carrying yesterday's total into today.
+func TestPoolPump_RuntimeAccounting_PreviousDayRestartResets(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	deviceState := &script.DeviceState{
+		KVS:             controllerKVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(), // pump off throughout
+		Schedules:       poolPumpSchedules(),
+	}
+
+	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1()
+
+	yesterday := time.Now().AddDate(0, 0, -1)
+	seedRuntimeStorage(deviceState, 43200, yesterday.Unix()) // 12h — clearly stale if carried over
+
+	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	defer stop2()
+
+	got := readRuntimeStorage(t, deviceState)
+	if got.Sec != 0 {
+		t.Errorf(`Script.storage["runtime"].sec after cross-day restart = %v, want 0 (stale total must not carry over, #469)`, got.Sec)
+	}
+	if localDayNumber(int64(got.Ts)) != localDayNumber(time.Now().Unix()) {
+		t.Errorf(`Script.storage["runtime"].ts after cross-day restart = %v, want today`, got.Ts)
+	}
+}
+
+// TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS exercises the
+// KVS recovery path (#469 design point 5): phase 1 persists a real baseline
+// to both Script.storage and its KVS mirrors (runtime-sec, runtime-ts).
+// Between phases, Script.storage["runtime"] is corrupted (not valid JSON) —
+// standing in for a script reinstall wiping Script.storage while KVS,
+// external to the script package, survives. Phase 2 must recover the KVS
+// baseline instead of resetting to 0, exercising the async loadValueAsync/
+// loadRuntimeStateFromKVS path that loadStorageObject() alone cannot reach.
+func TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	injector := make(chan []byte, 4)
+	cs := pro3ComponentStatus()
+	cs["switch:2"] = map[string]interface{}{"id": 2, "output": true}
+
+	deviceState := &script.DeviceState{
+		KVS:             controllerKVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: cs,
+		Schedules:       poolPumpSchedules(),
+		EventInjector:   injector,
+	}
+
+	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	time.Sleep(1200 * time.Millisecond)
+	injector <- shellyInputEvent(0, true)
+	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "-1"
+	})
+	stop1()
+	if !stopped {
+		t.Fatalf("pump did not stop after water supply ON in phase 1")
+	}
+
+	kvsSecBefore := parseKVSInt(t, deviceState, "script/pool-pump/runtime-sec")
+	if kvsSecBefore <= 0 {
+		t.Fatalf("phase 1 KVS runtime-sec = %d, want > 0", kvsSecBefore)
+	}
+	if _, ok := deviceState.KVSValue("script/pool-pump/runtime-ts"); !ok {
+		t.Fatalf("phase 1 did not write KVS runtime-ts")
+	}
+
+	deviceState.SetStorageValue("runtime", "not valid json")
+
+	cs2 := pro3ComponentStatus()
+	cs2["input:0"] = map[string]interface{}{"id": 0, "state": true}
+	deviceState.ComponentStatus = cs2
+
+	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	defer stop2()
+
+	// applyRuntimeState() re-persists to Script.storage synchronously as
+	// part of the same init chain runPoolPumpPhase already waited for
+	// (finishLoadState/onDone only fires after the KVS fallback resolves),
+	// so this is safe to read immediately.
+	recovered := readRuntimeStorage(t, deviceState)
+	if recovered.Sec < float64(kvsSecBefore) {
+		t.Fatalf(`after corrupt Script.storage, recovered Script.storage["runtime"].sec = %v, want >= phase 1's KVS baseline %d (KVS fallback must carry forward, not reset, #469)`, recovered.Sec, kvsSecBefore)
+	}
+}
+
+// TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate verifies
+// migrateLegacyRuntimeState()'s one-time upgrade path for a pre-#469 device
+// that only has the old loose-scalar pair (runtime-sec + runtime-date), in
+// the specific case where that legacy date is stale: as if the device was
+// left running overnight and only rebooted the next day (or the daemon
+// never stopped it before midnight). At boot, the migrated total must be
+// discarded (reset to 0) rather than carried into today.
+//
+// This is a single-run, directly-seeded test (unlike the two-phase tests
+// above) because it is specifically about migrating a value the *test*
+// plants in the legacy format, not about round-tripping through the
+// script's own write path — migrateLegacyRuntimeState() only ever reads
+// runtime-sec/runtime-date, it never writes them again once migrated.
+//
+// The exact mid-run rollover interleaving (ensureRuntimeDay() pulling
+// STATE.runStartTs forward to Date.now() so a still-open run doesn't
+// re-credit its pre-midnight time to the new day) isn't independently
 // reproducible from this Go harness: Date.now()/Timer.set are tied to the
 // real system clock with no injectable virtual clock, so there's no
-// deterministic way to force STATE.runtimeDate stale while STATE.runStartTs
-// is non-null without a real device restart in between (which always goes
+// deterministic way to force a stale restored ts while STATE.runStartTs is
+// non-null without a real device restart in between (which always goes
 // through this same boot-time reset path).
-func TestPoolPump_RuntimeAccounting_StaleDateResetsOnBoot(t *testing.T) {
+func TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
 	mqtt.ResetClient()
@@ -781,30 +989,15 @@ func TestPoolPump_RuntimeAccounting_StaleDateResetsOnBoot(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
-	defer cancel()
+	stop := runPoolPumpPhase(t, buf, deviceState)
+	stop()
 
-	done := make(chan error, 1)
-	go func() {
-		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
-	}()
-
-	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
-		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
-		return exists
-	})
-	cancel()
-	<-done
-
-	if !initDone {
-		t.Fatalf("init timeout")
+	got := readRuntimeStorage(t, deviceState)
+	if got.Sec != 0 {
+		t.Errorf(`Script.storage["runtime"].sec after migrating a stale legacy date = %v, want 0 (stale total must not carry over)`, got.Sec)
 	}
-
-	if got := storageValue(deviceState, "runtime-date"); got != dateString(time.Now()) {
-		t.Errorf("Storage runtime-date = %v, want today (%s)", got, dateString(time.Now()))
-	}
-	if got := storageValue(deviceState, "runtime-sec"); got != "0" {
-		t.Errorf("Storage runtime-sec = %v, want \"0\" (stale total must not carry over)", got)
+	if localDayNumber(int64(got.Ts)) != localDayNumber(time.Now().Unix()) {
+		t.Errorf(`Script.storage["runtime"].ts after migrating a stale legacy date = %v, want today`, got.Ts)
 	}
 }
 

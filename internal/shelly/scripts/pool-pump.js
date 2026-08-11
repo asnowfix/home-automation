@@ -366,16 +366,25 @@ var STORAGE_KEYS = {
                                     // Script.storage.getItem() is synchronous; KVS.Get is
                                     // async-only, so Shelly.call without a callback always
                                     // returns null and schedule mode was lost on every reboot
-  runtimeSec:    "runtime-sec",     // cumulative pump-on seconds today (checkpointed while
-                                    // running, see flushRuntimeCheckpoint), synchronous so a
-                                    // reboot mid-run only loses runtime since the last flush
-  runtimeDate:   "runtime-date"     // "YYYY-M-D" date the above count applies to, for
-                                    // day-rollover detection (see ensureRuntimeDay)
+  runtime:       "runtime",         // #469: single JSON object {sec, ts} — cumulative pump-on
+                                    // seconds today plus the epoch second of the last update.
+                                    // Replaces the old loose-scalar pair below: a serialised
+                                    // object cannot be silently misparsed as a number, and the
+                                    // day a count belongs to is derived from ts, never stored
+                                    // or parsed as a date string.
+  runtimeSecLegacy:  "runtime-sec",  // pre-#469 format, read once for migration then unused
+  runtimeDateLegacy: "runtime-date"  // pre-#469 format, read once for migration then unused
 };
 
-// State keys for KVS persistence (fire-and-forget writes only; reads use Script.storage)
+// State keys for KVS persistence (fire-and-forget writes only; reads use Script.storage,
+// except runtimeSec/runtimeTs below, which loadRuntimeState() reads back asynchronously
+// as a recovery path when Script.storage itself yields nothing valid — see #469)
 var STATE_KEYS = {
-  activeOutput: "active-output"     // -1 (all off), 0, 1, 2 for pro3; 0 for pro1
+  activeOutput: "active-output",    // -1 (all off), 0, 1, 2 for pro3; 0 for pro1
+  runtimeSec:   "runtime-sec",      // mirrors STATE.runtimeTodaySec, rounded (also read by
+                                    // the Go daemon, see myhome/daemon/pool_notices.go)
+  runtimeTs:    "runtime-ts"        // epoch second STATE.runtimeTodaySec applies to; KVS
+                                    // survives script reinstalls and can be hand-repaired
 };
 
 // === IN-FLIGHT RPC TRACKING (#421 Bug A) ===
@@ -672,7 +681,9 @@ var STATE = {
 
   // Runtime/turnover tracking (on-device, for ctl pool status — see #402)
   runtimeTodaySec: 0,         // cumulative pump-on seconds today (completed intervals only)
-  runtimeDate: null,          // "YYYY-M-D" date runtimeTodaySec applies to
+  runtimeTs: null,            // epoch second (Date.now()/1000) runtimeTodaySec applies to —
+                              // #469: the calendar day is derived from this, never from a
+                              // stored date string (see reconcileRuntimeState)
   runStartTs: null,           // Date.now() when the current ON interval began; null when off
   runtimeFlushTimer: null,    // Timer handle for periodic checkpointing while running
 
@@ -701,7 +712,14 @@ function log() {
   print(SCRIPT_PREFIX, s);
 }
 
-// === SCRIPT.STORAGE HELPERS (for forecast URL) ===
+// === SCRIPT.STORAGE HELPERS ===
+// #469: loadStorageValue() used to guess a value's type (Number, then
+// JSON.parse, then raw string) and callers silently accepted whatever came
+// back. A restore that landed on the wrong type (e.g. a date string
+// misparsed as a number) became null/0 with no warning, and the daily pump
+// runtime accounting reset itself on every ordinary script restart. Callers
+// now say what type they expect via loadStorageNumber/String/Object, and
+// every fallback to a default is logged.
 function storeStorageValue(key, value) {
   var valueStr;
   if (typeof value === "undefined" || value === null) {
@@ -716,24 +734,46 @@ function storeStorageValue(key, value) {
   Script.storage.setItem(key, valueStr);
 }
 
-function loadStorageValue(key) {
+// Returns a number, or null (with a warning) if the key is absent or does
+// not hold a valid number.
+function loadStorageNumber(key) {
   var v = Script.storage.getItem(key);
-  if (v === null || v === undefined) return null;
-  if (v === "null" || v === "undefined") return null;
-  if (v === "true") return true;
-  if (v === "false") return false;
-  try {
-    var num = Number(v);
-    if (!isNaN(num)) return num;
-  } catch (e) {
-    // Espruino throws "String too big to convert to float" on long strings
-    if (e && false) {}
+  if (v === null || v === undefined || v === "null") return null;
+  var num = Number(v);
+  if (isNaN(num)) {
+    log("WARNING: Script.storage[" + key + "] expected a number, got:", v);
+    return null;
   }
+  return num;
+}
+
+// Returns the raw string, or null (with a warning) if the key is absent.
+// Script.storage follows Web Storage semantics — getItem() always returns
+// either a string or null, so no type-guessing is needed or attempted here.
+function loadStorageString(key) {
+  var v = Script.storage.getItem(key);
+  if (v === null || v === undefined || v === "null") return null;
+  if (typeof v !== "string") {
+    log("WARNING: Script.storage[" + key + "] expected a string, got:", v);
+    return null;
+  }
+  return v;
+}
+
+// Returns a parsed JSON object, or null (with a warning) if the key is
+// absent, not valid JSON, or parses to a non-object (e.g. a bare number).
+function loadStorageObject(key) {
+  var v = Script.storage.getItem(key);
+  if (v === null || v === undefined || v === "null") return null;
   try {
-    return JSON.parse(v);
+    var obj = JSON.parse(v);
+    if (obj !== null && typeof obj === "object") return obj;
+    log("WARNING: Script.storage[" + key + "] expected an object, got:", v);
+    return null;
   } catch (e) {
+    log("WARNING: Script.storage[" + key + "] failed to parse as JSON:", v);
     if (e && false) {}
-    return v;
+    return null;
   }
 }
 
@@ -753,23 +793,29 @@ function storeValue(key, value) {
   Shelly.call("KVS.Set", {key: CONFIG_KEY_PREFIX + key, value: valueStr});
 }
 
-function loadValue(key) {
-  var result = Shelly.call("KVS.Get", {key: CONFIG_KEY_PREFIX + key});
-  if (result && ("value" in result)) {
-    var v = result.value;
-    if (v === "null" || v === "undefined") return null;
-    if (v === "true") return true;
-    if (v === "false") return false;
-    var num = Number(v);
-    if (!isNaN(num)) return num;
-    try {
-      return JSON.parse(v);
-    } catch (e) {
-      if (e && false) {}
-      return v;
+// Async KVS read (KVS.Get has no synchronous form — Shelly.call without a
+// callback returns null on real firmware, see STORAGE_KEYS.scheduleMode
+// comment below). cb receives (value) — a number if the stored string
+// parses as one, else the raw string, or null if the key is missing/errored.
+function loadValueAsync(key, cb) {
+  Shelly.call("KVS.Get", {key: CONFIG_KEY_PREFIX + key}, function (result, error_code, error_message) {
+    if (error_code !== 0 || !result || !("value" in result)) {
+      if (error_message && false) {}
+      cb(null);
+      return;
     }
-  }
-  return null;
+    var v = result.value;
+    if (v === "null" || v === "undefined") {
+      cb(null);
+      return;
+    }
+    var num = Number(v);
+    if (!isNaN(num)) {
+      cb(num);
+      return;
+    }
+    cb(v);
+  });
 }
 
 // Fractional-day-free "YYYY-M-D" date string, used for day-rollover checks
@@ -777,6 +823,15 @@ function loadValue(key) {
 function todayDateString() {
   var now = new Date();
   return now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
+}
+
+// Comparable local-calendar-day number (e.g. 20260811) for a given epoch
+// second. Used instead of a formatted/parsed date string (#469) so day
+// comparisons never depend on round-tripping a string through
+// Script.storage — only the number ts itself is persisted.
+function localDayNumber(epochSec) {
+  var d = new Date(epochSec * 1000);
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
 }
 
 // === WEATHER FORECAST FUNCTIONS (Memory-Optimized) ===
@@ -865,7 +920,7 @@ function onForecast(result, error_code, error_message, cb) {
 }
 
 function fetchAndCacheForecast(cb) {
-  var url = STATE.forecastUrl || loadStorageValue(STORAGE_KEYS.forecastUrl);
+  var url = STATE.forecastUrl || loadStorageString(STORAGE_KEYS.forecastUrl);
   if (!url) {
     log('Forecast URL not configured. Skipping.');
     if (typeof cb === 'function') queueTask(function() { cb(); });
@@ -905,7 +960,7 @@ function ensureForecastUrl(cb) {
     return;
   }
 
-  var storedUrl = loadStorageValue(STORAGE_KEYS.forecastUrl);
+  var storedUrl = loadStorageString(STORAGE_KEYS.forecastUrl);
   if (storedUrl && storedUrl.indexOf('daily=') !== -1) {
     STATE.forecastUrl = storedUrl;
     log('Loaded forecast URL from storage');
@@ -1022,34 +1077,61 @@ function applyComponentNames(callback) {
 }
 
 // === STATE PERSISTENCE ===
-function loadState() {
+// loadState(onDone) restores STATE from persisted storage and calls onDone()
+// when finished. It is synchronous in the common case (Script.storage has a
+// valid {sec, ts} object) and calls onDone() immediately, before returning.
+// It only goes truly asynchronous when Script.storage yields nothing usable
+// at all, in which case it falls back to an async KVS read before calling
+// onDone() (#469) — see loadRuntimeStateFromStorage/FromKVS below.
+function loadState(onDone) {
   log("Loading persisted state...");
 
-  // runtimeDate/runtimeTodaySec: Script.storage (synchronous), restored
-  // before enforceOutputState() decides whether to resume runtime accounting
-  // for a run already in progress. ensureRuntimeDay() resets the counter if
-  // the restored date is stale (previous day).
-  var savedRuntimeDate = loadStorageValue(STORAGE_KEYS.runtimeDate);
-  var savedRuntimeSec = loadStorageValue(STORAGE_KEYS.runtimeSec);
-  STATE.runtimeDate = (typeof savedRuntimeDate === "string") ? savedRuntimeDate : null;
-  STATE.runtimeTodaySec = (typeof savedRuntimeSec === "number") ? savedRuntimeSec : 0;
-  ensureRuntimeDay();
-  log("Restored runtime today:", STATE.runtimeTodaySec, "s for date:", STATE.runtimeDate);
+  // runtimeTodaySec/runtimeTs: restored before enforceOutputState() decides
+  // whether to resume runtime accounting for a run already in progress.
+  var fromStorage = loadRuntimeStateFromStorage();
+  if (fromStorage !== null) {
+    applyRuntimeState(reconcileRuntimeState(fromStorage.sec, fromStorage.ts, "Script.storage"));
+    finishLoadState(onDone);
+    return;
+  }
 
+  log("WARNING: Script.storage has no valid runtime state, falling back to KVS (#469)");
+  loadRuntimeStateFromKVS(function (kvsSec, kvsTs) {
+    applyRuntimeState(reconcileRuntimeState(kvsSec, kvsTs, "KVS"));
+    finishLoadState(onDone);
+  });
+}
+
+// Commits a reconciled {sec, ts} result to STATE and re-persists it in the
+// current (Script.storage) format immediately — this stabilizes a migrated
+// legacy value or a KVS-recovered value on disk without waiting for the next
+// checkpoint.
+function applyRuntimeState(state) {
+  STATE.runtimeTodaySec = state.sec;
+  STATE.runtimeTs = state.ts;
+  persistRuntimeState(STATE.runtimeTodaySec);
+  log("Restored runtime today:", STATE.runtimeTodaySec, "s, ts:", STATE.runtimeTs);
+}
+
+// Remainder of loadState() that does not depend on the runtime-restore path
+// taken above (sync vs. async KVS fallback).
+function finishLoadState(onDone) {
   // activeOutput: KVS fire-and-forget write; read is skipped here because
   // enforceOutputState() reads the actual hardware switch state right after
   // this call — hardware truth overrides any stale KVS value.
 
   // scheduleMode: use Script.storage (synchronous getItem/setItem) so that
   // the correct mode survives a reboot without needing an async callback chain.
-  var savedMode = loadStorageValue(STORAGE_KEYS.scheduleMode);
-  if (savedMode !== null && (savedMode === "summer" || savedMode === "winter")) {
+  var savedMode = loadStorageString(STORAGE_KEYS.scheduleMode);
+  if (savedMode === "summer" || savedMode === "winter") {
     STATE.scheduleMode = savedMode;
     log("Restored schedule mode:", STATE.scheduleMode);
   } else {
     STATE.scheduleMode = "winter";
     log("No saved schedule mode, defaulting to winter");
   }
+
+  if (typeof onDone === "function") onDone();
 }
 
 function saveState() {
@@ -1084,21 +1166,118 @@ function saveState() {
 // handleWaterSupply, the button handler, the anti-cycling fuse) is covered
 // with zero duplication.
 
-// Resets the daily counter when the persisted date has rolled over. If a run
-// is currently open (runStartTs set) across the rollover, its start marker is
-// pulled forward to "now" so only post-midnight time accrues to the new day —
-// otherwise the next flush/stop would re-credit the whole pre-midnight run
-// (since Date.now() - runStartTs would still span back into yesterday).
+// Restores {sec, ts} from Script.storage: prefers the current single-object
+// format, falling back once to the pre-#469 loose-scalar pair for a device
+// upgrading in place. Returns null if neither is present/valid, so the
+// caller (loadState) can fall back further to KVS.
+function loadRuntimeStateFromStorage() {
+  var obj = loadStorageObject(STORAGE_KEYS.runtime);
+  if (obj !== null) {
+    if (typeof obj.sec === "number" && typeof obj.ts === "number") {
+      return {sec: obj.sec, ts: obj.ts};
+    }
+    log("WARNING: Script.storage[" + STORAGE_KEYS.runtime + "] is malformed:", JSON.stringify(obj));
+  }
+  return migrateLegacyRuntimeState();
+}
+
+// One-time migration for devices that only have the pre-#469 loose-scalar
+// pair (runtime-sec + runtime-date). The date string is parsed here, and
+// only here — this is the one legacy compatibility path, not the ongoing
+// day-rollover logic, which never stores or parses a date string (#469).
+// applyRuntimeState() re-persists the result in the new object format
+// immediately, so this path is not taken again on the next restart.
+function migrateLegacyRuntimeState() {
+  var legacySec = loadStorageNumber(STORAGE_KEYS.runtimeSecLegacy);
+  if (legacySec === null) {
+    return null; // nothing to migrate; a genuinely fresh device
+  }
+  var legacyDateStr = loadStorageString(STORAGE_KEYS.runtimeDateLegacy);
+  var legacyTs = epochSecondsForDateString(legacyDateStr);
+  if (legacyTs === null) {
+    log("WARNING: legacy runtime-date missing/unparseable during migration ('" + legacyDateStr + "'), assuming today");
+    legacyTs = Math.floor(Date.now() / 1000);
+  }
+  log("Migrating legacy runtime state (#469): sec=" + legacySec + " date=" + legacyDateStr);
+  return {sec: legacySec, ts: legacyTs};
+}
+
+// Parses a legacy "YYYY-M-D" date string into the epoch second of local noon
+// on that day (noon avoids DST-transition edge cases at midnight). Returns
+// null if s is missing or not that shape. Migration-only — see above.
+function epochSecondsForDateString(s) {
+  if (typeof s !== "string") return null;
+  var parts = s.split('-');
+  if (parts.length !== 3) return null;
+  var y = Number(parts[0]);
+  var m = Number(parts[1]);
+  var d = Number(parts[2]);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
+  var dt = new Date(y, m - 1, d, 12, 0, 0);
+  return Math.floor(dt.getTime() / 1000);
+}
+
+// Recovery path (#469): only reached when Script.storage yields nothing
+// usable for either format — e.g. a fresh Script.storage after a script
+// reinstall. KVS survives reinstalls. cb(sec, ts) receives numbers, or null
+// for whichever half is missing/invalid. KVS.Get is async-only (Shelly.call
+// without a callback returns null on real firmware — see the
+// STORAGE_KEYS.scheduleMode comment above), so this chains two sequential
+// calls rather than reading synchronously.
+function loadRuntimeStateFromKVS(cb) {
+  loadValueAsync(STATE_KEYS.runtimeSec, function (secVal) {
+    var sec = (typeof secVal === "number") ? secVal : null;
+    loadValueAsync(STATE_KEYS.runtimeTs, function (tsVal) {
+      var ts = (typeof tsVal === "number") ? tsVal : null;
+      cb(sec, ts);
+    });
+  });
+}
+
+// Decides the day's starting {sec, ts} from a restored (sec, ts) pair.
+// Zeroes the count ONLY when ts is valid and demonstrably belongs to an
+// earlier calendar day than today (a genuine rollover). Anything else —
+// missing state, a sec with no valid ts, a ts that fails to parse — carries
+// the count forward with a loud warning instead of resetting it: an
+// over-counted day wastes energy, but a zeroed day causes real
+// over-filtration, which is the harm #469 was filed over.
+function reconcileRuntimeState(sec, ts, sourceLabel) {
+  var nowSec = Math.floor(Date.now() / 1000);
+  if (sec === null) {
+    log("WARNING: no valid runtime state from " + sourceLabel + " — starting today's count at 0s rather than assuming a reset (#469)");
+    return {sec: 0, ts: nowSec};
+  }
+  if (ts === null) {
+    log("WARNING: runtime state from " + sourceLabel + " has a count but no valid timestamp, cannot verify which day it belongs to — carrying forward", sec, "s as today's total");
+    return {sec: sec, ts: nowSec};
+  }
+  var restoredDay = localDayNumber(ts);
+  var today = localDayNumber(nowSec);
+  if (restoredDay < today) {
+    log("Runtime day rollover:", restoredDay, "->", today);
+    return {sec: 0, ts: nowSec};
+  }
+  if (restoredDay > today) {
+    log("WARNING: runtime state from " + sourceLabel + " has a future timestamp (day " + restoredDay + " > today " + today + ") — carrying forward", sec, "s rather than trusting or discarding it");
+  }
+  return {sec: sec, ts: ts};
+}
+
+// Re-derives STATE.runtimeTs's day against "now" mid-run (called from
+// startRuntimeAccounting/flushRuntimeCheckpoint) and resets the counter on a
+// genuine rollover. If a run is currently open (runStartTs set) across the
+// rollover, its start marker is pulled forward to "now" so only
+// post-midnight time accrues to the new day — otherwise the next
+// flush/stop would re-credit the whole pre-midnight run (since
+// Date.now() - runStartTs would still span back into yesterday).
 function ensureRuntimeDay() {
-  var today = todayDateString();
-  if (STATE.runtimeDate !== today) {
-    log("Runtime day rollover:", STATE.runtimeDate, "->", today);
-    STATE.runtimeDate = today;
-    STATE.runtimeTodaySec = 0;
+  var reconciled = reconcileRuntimeState(STATE.runtimeTodaySec, STATE.runtimeTs, "in-memory state");
+  if (reconciled.sec !== STATE.runtimeTodaySec || reconciled.ts !== STATE.runtimeTs) {
+    STATE.runtimeTodaySec = reconciled.sec;
+    STATE.runtimeTs = reconciled.ts;
     if (STATE.runStartTs !== null) {
       STATE.runStartTs = Date.now();
     }
-    storeStorageValue(STORAGE_KEYS.runtimeDate, STATE.runtimeDate);
     persistRuntimeState(STATE.runtimeTodaySec);
   }
 }
@@ -1143,27 +1322,35 @@ function flushRuntimeCheckpoint() {
   persistRuntimeState(STATE.runtimeTodaySec + elapsedSec);
 }
 
-// Persists sec (defaults to STATE.runtimeTodaySec) to Script.storage (sync,
-// boot-safe) and mirrors it — plus today's computed turnover — to KVS for
-// Go-side visibility (myhome/daemon/pool_notices.go ComputeTurnover).
+// Persists sec (defaults to STATE.runtimeTodaySec) plus the current epoch
+// second to Script.storage as one object (sync, boot-safe — #469: a
+// serialised {sec, ts} object cannot be silently misparsed as a number the
+// way the old loose scalars could) and mirrors sec, ts, and today's computed
+// turnover to KVS for Go-side visibility (myhome/daemon/pool_notices.go
+// ComputeTurnover) and as a recovery path if Script.storage is ever lost
+// (e.g. a script reinstall — see loadRuntimeStateFromKVS).
 //
 // The Script.storage write is synchronous and always happens (cheap, no RPC).
-// The two KVS mirrors go through Shelly.call and are skipped during
+// The KVS mirrors go through Shelly.call and are skipped during
 // STATE.initializing — same guard as saveState() — and queued via
-// queueTask() rather than fired back-to-back: an un-queued pair here,
-// repeated every 60s by flushRuntimeCheckpoint() while the pump runs and
-// possibly overlapping saveState()'s own KVS writes, is exactly the
-// "Too many calls in progress" crash PR #394 fixed (5-concurrent-RPC limit).
-// A skipped mirror during init is harmless — the next checkpoint or stop
-// re-persists it.
+// queueTask() rather than fired back-to-back: un-queued calls here, repeated
+// every 60s by flushRuntimeCheckpoint() while the pump runs and possibly
+// overlapping saveState()'s own KVS writes, is exactly the "Too many calls
+// in progress" crash PR #394 fixed (5-concurrent-RPC limit). A skipped
+// mirror during init is harmless — the next checkpoint or stop re-persists it.
 function persistRuntimeState(overrideSec) {
   var sec = (typeof overrideSec === "number") ? overrideSec : STATE.runtimeTodaySec;
-  storeStorageValue(STORAGE_KEYS.runtimeSec, sec);
+  var ts = Math.floor(Date.now() / 1000);
+  STATE.runtimeTs = ts;
+  storeStorageValue(STORAGE_KEYS.runtime, {sec: sec, ts: ts});
   if (STATE.initializing) {
     return;
   }
   queueTask(function() {
-    storeValue("runtime-sec", Math.round(sec));
+    storeValue(STATE_KEYS.runtimeSec, Math.round(sec));
+  });
+  queueTask(function() {
+    storeValue(STATE_KEYS.runtimeTs, ts);
   });
   queueTask(function() {
     storeValue("turnover-today", computeTurnoverToday(sec));
@@ -2385,7 +2572,15 @@ function continueInit() {
   log('Device type:', STATE.deviceType);
 
   configureComponentNames();
-  loadState();
+  // loadState() is synchronous in the common case (Script.storage has valid
+  // data) and calls finishContinueInit() immediately, before returning here
+  // — so this is not a behavior change for a healthy device. It only goes
+  // truly async when Script.storage yields nothing usable and it falls back
+  // to an async KVS read (#469); the rest of init correctly waits for that.
+  loadState(finishContinueInit);
+}
+
+function finishContinueInit() {
   enforceOutputState();
   setupMQTT();
 

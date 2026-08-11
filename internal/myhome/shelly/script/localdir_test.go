@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/asnowfix/home-automation/internal/shelly/scripts"
@@ -192,5 +193,36 @@ func TestLoadScript_NoLocalScriptsDisablesEvenWhenFilePresent(t *testing.T) {
 	}
 	if string(code) != string(want) {
 		t.Errorf("code does not match embedded content")
+	}
+}
+
+// TestLoadScript_RejectsAbsolutePath is the regression test for the
+// "related observation" in issue #428: `script upload` given an absolute
+// path (e.g. `$(pwd)/pool-pump.js`) must be rejected with a clear,
+// actionable message, not one that misleadingly claims the file is missing
+// when it plainly exists on disk. validateFlatScriptName rejects any name
+// that is not its own basename — including absolute paths — before any
+// filesystem access is attempted, so the error is always the flat-name
+// complaint, never an fs.ErrNotExist-flavoured "file does not exist".
+func TestLoadScript_RejectsAbsolutePath(t *testing.T) {
+	log := testr.New(t)
+	dir := t.TempDir()
+
+	// The file genuinely exists at this absolute path — proves the
+	// rejection is about the name shape, not a failed lookup.
+	absPath := filepath.Join(dir, embeddedScriptName)
+	if err := os.WriteFile(absPath, []byte("// present on disk\n"), 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	_, _, err := LoadScript(log, "", absPath)
+	if err == nil {
+		t.Fatal("expected an error for an absolute path, got nil")
+	}
+	if strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "no such file") {
+		t.Errorf("error message misleadingly suggests the file is missing (it exists at %s): %v", absPath, err)
+	}
+	if !strings.Contains(err.Error(), "flat file name") {
+		t.Errorf("expected the flat-file-name error, got: %v", err)
 	}
 }

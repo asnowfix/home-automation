@@ -171,8 +171,11 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	// Shelly event handler system
 	eh := NewEventsHandler(ctx, vm)
 
-	// Define methods map with access to deviceState
-	methods := createMethodsMap(deviceState)
+	// Define methods map with access to deviceState. ctx/vm/eh let Switch.Set
+	// deliver a test-armed nested event (see DeviceState.pendingNestedEvent
+	// and #450) synchronously from inside the call, before invoking the
+	// script's own callback.
+	methods := createMethodsMap(ctx, eh, deviceState)
 
 	// Shelly object with all APIs from https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shelly-apis
 	shellyObj := vm.NewObject()
@@ -774,7 +777,8 @@ func scheduleID(v interface{}) int {
 	return -1
 }
 
-func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
+func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *DeviceState) map[string]methodFunc {
+	log, _ := logr.FromContext(ctx)
 	return map[string]methodFunc{
 		"shelly.detectlocation": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellydetectlocation
@@ -1057,6 +1061,22 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			// Trigger auto-save if callback is set
 			if deviceState.OnModified != nil {
 				deviceState.OnModified()
+			}
+
+			// #450: if a test armed a nested event (DeviceState.pendingNestedEvent),
+			// deliver it to the script's event handlers now — synchronously,
+			// nested inside this very Switch.Set call and BEFORE its own
+			// callback fires. This reproduces a real device's ability to
+			// dispatch a fresh system event while a previous RPC's native
+			// completion handler is still on the stack, which the ordinary
+			// event loop (a Go `select` over EventInjector) cannot: that loop
+			// only ever dequeues the next event after the previous handler has
+			// fully returned. See DeviceState.pendingNestedEvent for the full
+			// rationale.
+			if nested, ok := deviceState.TakePendingNestedEvent(); ok {
+				if err := eh.Handle(ctx, vm, nested); err != nil {
+					log.Error(err, "Nested event dispatch failed (#450 test hook)")
+				}
 			}
 
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {

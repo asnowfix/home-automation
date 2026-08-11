@@ -34,6 +34,28 @@ type DeviceState struct {
 	// This allows automatic persistence of state changes during script execution
 	OnModified func() `json:"-"`
 
+	// pendingNestedEvent, when set via SetPendingNestedEvent, is delivered to
+	// the script's own event handlers synchronously from INSIDE the next
+	// Switch.Set() call, immediately before that call's completion callback
+	// fires — i.e. nested inside the Shelly.call the script itself issued.
+	//
+	// This exists to reproduce a real Shelly device's event interleaving,
+	// which the default emulator event loop (a Go `select` over
+	// EventInjector and friends in run.go) cannot: that loop only dequeues
+	// the next event after the previous one's handler has fully returned, so
+	// two events sent back-to-back on EventInjector are always processed
+	// strictly in sequence, never nested. On real firmware, a fresh system
+	// event (e.g. input:0 flapping) CAN be dispatched while a previous RPC's
+	// native completion handler is still executing on the interpreter stack
+	// — that is the exact mechanism behind the #450 crash ("Too much
+	// recursion" in pool-pump.js's water-supply handling, triggered by
+	// input:0 flapping faster than a Switch.Set round-trip). Without this
+	// hook, no emulator test can reproduce that interleaving at all.
+	//
+	// Consumed exactly once per Switch.Set call (cleared by
+	// TakePendingNestedEvent) so it targets a single call, not every one.
+	pendingNestedEvent []byte
+
 	nextScheduleID int
 
 	// mu guards every map and slice above. The emulator mutates them from the
@@ -236,6 +258,31 @@ func (d *DeviceState) UpdateSchedule(id int, updates map[string]interface{}) (ma
 // GetKVS returns a snapshot of the KVS map. It is a copy: see KVSSnapshot.
 func (d *DeviceState) GetKVS() map[string]interface{} {
 	return d.KVSSnapshot()
+}
+
+// SetPendingNestedEvent arms the next Switch.Set() call to deliver this raw
+// JSON device event to the script's own event handlers synchronously, nested
+// inside that call — see pendingNestedEvent's doc comment for why this
+// exists (#450). Tests only; nil (the zero value) in normal operation.
+func (d *DeviceState) SetPendingNestedEvent(event []byte) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.pendingNestedEvent = event
+}
+
+// TakePendingNestedEvent returns and clears the pending nested event, if any.
+// Called by the Switch.Set emulation in run.go; consuming it here (rather
+// than leaving it for the caller to clear) guarantees it fires at most once
+// even if TakePendingNestedEvent is called from more than one nested call.
+func (d *DeviceState) TakePendingNestedEvent() ([]byte, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.pendingNestedEvent == nil {
+		return nil, false
+	}
+	event := d.pendingNestedEvent
+	d.pendingNestedEvent = nil
+	return event, true
 }
 
 // GetStorage returns a snapshot of the Script.storage map.

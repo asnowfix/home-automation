@@ -102,14 +102,32 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 		}
 		fmt.Printf("    . Source: %s\n", source)
 
-		id, err := mhscript.UploadWithVersion(ctx, log, via, sd, scriptName, buf, !updateNoMinify, updateForce)
+		id, status, err := mhscript.UploadWithVersionDetailed(ctx, log, via, sd, scriptName, buf, !updateNoMinify, updateForce)
 		if err != nil {
+			// The code transfer itself did not complete: a genuine
+			// failure. See issue #428.
 			fmt.Printf("  ✗ Failed to update %s: %v\n", scriptName, err)
 			updateResults = append(updateResults, UpdateResult{
 				ScriptName: scriptName,
 				ScriptId:   loadedScript.Id,
 				Status:     "error",
 				Message:    fmt.Sprintf("Update failed: %v", err),
+			})
+			continue
+		}
+
+		if status == mhscript.StatusIndeterminate {
+			// Code confirmed on the device; a follow-up confirmation step
+			// (enable/start) did not respond even after retrying. Not a
+			// failure — re-uploading would be wasted work — so this does
+			// not count against the device's overall result.
+			fmt.Printf("  ⚠ %s uploaded (id: %d) but could not confirm it started/enabled — re-run `script status` rather than re-uploading\n", scriptName, id)
+			updateResults = append(updateResults, UpdateResult{
+				ScriptName: scriptName,
+				ScriptId:   loadedScript.Id,
+				NewId:      id,
+				Status:     "indeterminate",
+				Message:    "Code uploaded and confirmed; could not confirm start/enable",
 			})
 			continue
 		}

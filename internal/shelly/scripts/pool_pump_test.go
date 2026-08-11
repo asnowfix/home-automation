@@ -1878,6 +1878,75 @@ func TestPoolPump_ScheduleRewriteOutsideWindowDoesNotStartPump(t *testing.T) {
 	}
 }
 
+// TestPoolPump_DailyCheckRunsDuringWaterSupplyProtection is the aftermath
+// defect noted alongside the #450 crash: after the live crash-restart on
+// 2026-08-11, the script logged 'Current mode: winter', then 'Daily check
+// event' -> 'Water supply protection active, ignoring event' — the daily
+// check that would have restored 'summer' mode was skipped outright because
+// handleDailyCheck() bailed out whenever input:0 was active, leaving the
+// device on a winter schedule on an August evening until a LATER restart
+// happened to find protection cleared.
+//
+// handleDailyCheck() runs automatically once, at the very end of init()
+// (continueInit()'s queueTask(handleDailyCheck)), so booting this device
+// with water-supply protection ALREADY active (input:0.state=true in the
+// very first ComponentStatus read) reproduces exactly that shape without
+// needing a live crash: if the guard removed by this fix were still in
+// place, performDailyModeCheck() would never run and schedule-mode would
+// stay 'winter' forever despite a forecast hot enough for 'summer'.
+func TestPoolPump_DailyCheckRunsDuringWaterSupplyProtection(t *testing.T) {
+	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	cs := pro1ComponentStatus()
+	cs["input:0"] = map[string]interface{}{"id": 0, "state": true} // protected from boot
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			// No schedule-mode seeded: loadState() defaults to "winter",
+			// matching the live device's post-crash state.
+			"forecast-url": srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: cs,
+		Schedules:       poolPumpSummerSchedules(now.Add(2*time.Hour), now.Add(4*time.Hour)),
+	}
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	buf := readPoolPumpScript(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	ok := waitFor(initTimeout, 200*time.Millisecond, func() bool {
+		v, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
+		return exists && v == "summer"
+	})
+	cancel()
+	<-done
+
+	if !ok {
+		t.Fatalf("schedule-mode never became 'summer' while water-supply protection was active at boot "+
+			"(hot forecast, threshold exceeded); got %v — handleDailyCheck() is (again) silently skipping "+
+			"performDailyModeCheck() during protection instead of only refusing pump actuation",
+			kvsValue(deviceState, "script/pool-pump/schedule-mode"))
+	}
+
+	// Protection must still be respected: with input:0 active throughout,
+	// the pump itself must never have been started by the mode change.
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
+		t.Errorf("pump was started (active-output=%v) while water-supply protection was active — "+
+			"doStart()'s own live input:0 check should have refused this regardless of the daily-check fix", v)
+	}
+}
+
 // Locked read helpers for DeviceState (#451).
 //
 // The emulator mutates DeviceState's maps from the goroutine running the

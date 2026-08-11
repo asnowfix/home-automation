@@ -1457,3 +1457,431 @@ func storageValue(d *script.DeviceState, key string) interface{} {
 func componentStatusValue(d *script.DeviceState, key string) (interface{}, bool) {
 	return d.ComponentStatusValue(key)
 }
+
+// === CALL-SLOT MACHINERY REGRESSION TESTS (#421, #450) ===
+//
+// pool-pump.js's CALL_SLOTS pool, acquireCallSlot(), sharedCallDone() and the
+// MAX_CALL_DEPTH deferral (lines ~399-540 of pool-pump.js as of origin/main
+// 84133f8) had no test coverage before this file: `go test -run
+// 'CallSlot|TooMany|Queue|Catchup|Restart'` returned "no tests to run". That
+// machinery is exactly where the still-open #450 live crash surfaces
+// ("Too much recursion ... in function acquireCallSlot"), so it is the
+// highest-value thing to pin down here.
+//
+// RunWithDeviceState does not expose the running goja VM to Go tests (see
+// the comment on TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover
+// above), so there is no way to call acquireCallSlot()/inspect CALL_SLOTS
+// from Go directly. Instead, callSlotTestHarnessJS is appended (in Go, at
+// test time, never on disk) to an unmodified copy of pool-pump.js's own
+// source. Appending only adds new top-level functions/vars after
+// pool-pump.js's closing `init();` call and registers one more
+// Shelly.addEventHandler — pool-pump.js's own code, and the CALL_SLOTS /
+// acquireCallSlot / sharedCallDone / queueTask machinery it installs, are
+// completely unmodified. The harness drives that real, unmodified machinery
+// through the same Shelly.call wrapper pool-pump.js installs, and publishes
+// results via KVS.Set (fire-and-forget, so it never itself touches
+// CALL_SLOTS) so the Go test can observe them the same way every other test
+// in this file observes KVS.
+//
+// callSlotTestHarnessJS relies on two facts verified by reading run.go
+// (pkg/shelly/script): every emulated Shelly.call method (KVS.Set,
+// Schedule.Update, etc.) invokes its callback synchronously, inline, before
+// RAW_CALL returns to the JS caller — there is no goroutine-backed
+// concurrency in the emulator. That means CALL_SLOTS never holds more than
+// one slot "in flight" per call chain UNLESS sharedCallDone defers a
+// completion (CALL_DEPTH >= MAX_CALL_DEPTH == 3): a deferred completion's
+// slot stays marked used until queueTask's 200ms timer drains it via
+// runPendingCallback(), which is the only way multiple slots are held open
+// at once in this emulator. callSlotTestHarnessJS exploits exactly that: a
+// 4-level-deep nested Shelly.call chain (csChain) always defers its 4th
+// completion, so firing N independent chains back-to-back leaves N slots
+// "stuck" simultaneously — more than CALL_SLOTS' fixed pool of 6 once N > 6
+// — without needing any real concurrency.
+const callSlotTestHarnessJS = `
+// === CALL-SLOT REGRESSION TEST HARNESS (test-only; appended by
+// pool_pump_test.go; never written to pool-pump.js, never shipped) ===
+var CS_COMPLETED = 0;
+var CS_CHAIN_LOG = [];
+
+function csCountUsedSlots() {
+  var n = 0;
+  for (var i = 0; i < CALL_SLOTS.length; i++) {
+    if (CALL_SLOTS[i].used) n++;
+  }
+  return n;
+}
+
+function csPublish(key, value) {
+  // Fire-and-forget (no callback): Shelly.call routes this through
+  // decrementOnlyCallDone, not acquireCallSlot, so publishing a result never
+  // perturbs the CALL_SLOTS state being measured.
+  Shelly.call("KVS.Set", {key: "test/callslot/" + key, value: String(value)});
+}
+
+// One chain of 4 nested Shelly.call completions, using the exact same
+// Shelly.call pool-pump.js reassigned at load time. MAX_CALL_DEPTH is 3, so
+// the 4th nested completion is always deferred via PENDING_DONE/queueTask
+// instead of being invoked from inside the 3rd completion's stack frame —
+// that deferral is the #450 fix under test.
+function csChain(tag, onDone) {
+  Shelly.call("KVS.Set", {key: "test/callslot/d1", value: "1"}, function(r1, ec1) {
+    if (ec1 && false) {}
+    CS_CHAIN_LOG.push(tag + ":1");
+    Shelly.call("KVS.Set", {key: "test/callslot/d2", value: "1"}, function(r2, ec2) {
+      if (ec2 && false) {}
+      CS_CHAIN_LOG.push(tag + ":2");
+      Shelly.call("KVS.Set", {key: "test/callslot/d3", value: "1"}, function(r3, ec3) {
+        if (ec3 && false) {}
+        CS_CHAIN_LOG.push(tag + ":3");
+        Shelly.call("KVS.Set", {key: "test/callslot/d4", value: "1"}, function(r4, ec4) {
+          if (ec4 && false) {}
+          CS_CHAIN_LOG.push(tag + ":4");
+          CS_COMPLETED++;
+          csPublish("completed", CS_COMPLETED);
+          csPublish("used-now", csCountUsedSlots());
+          csPublish("chain-log-len", CS_CHAIN_LOG.length);
+          if (onDone) onDone();
+        });
+      });
+    });
+  });
+}
+
+// Fires N independent chains back-to-back, synchronously (a plain for loop —
+// no queueTask between chains). Each chain leaves exactly one deferred
+// (4th-level) completion in flight, so N > CALL_SLOTS.length (6) forces
+// acquireCallSlot's pool-exhausted fallback path (a fresh unpooled record)
+// for the overflow. Snapshots are published immediately after the
+// synchronous burst, before any queueTask tick has run, so they capture true
+// peak concurrency rather than whatever has already drained.
+function csRunBurst(n) {
+  csPublish("pool-size", CALL_SLOTS.length);
+  for (var i = 0; i < n; i++) {
+    csChain("burst" + i, null);
+  }
+  csPublish("used-after-burst", csCountUsedSlots());
+  csPublish("pending-after-burst", PENDING_DONE.length - PENDING_DONE_HEAD);
+  csPublish("burst-fired", n);
+}
+
+function csRunSingleChain() {
+  csChain("solo", null);
+  // Published synchronously, in the same stack frame that fired the chain:
+  // if the #450 fix were reverted (defer removed), the 4th level would
+  // recurse inline and this would already read 4, not 3.
+  csPublish("solo-log-len-immediate", CS_CHAIN_LOG.length);
+}
+
+// Schedule.Update on a non-existent schedule id always errors (-105),
+// synchronously, at CALL_DEPTH 0 (not deferred) — exercises sharedCallDone's
+// non-deferred branch specifically on the error path.
+function csRunErrorCheck() {
+  var before = csCountUsedSlots();
+  Shelly.call("Schedule.Update", {id: 999999, enable: true}, function(res, ec, em) {
+    if (res && false) {}
+    if (em && false) {}
+    csPublish("error-code", ec);
+    csPublish("slots-before", before);
+    csPublish("slots-after", csCountUsedSlots());
+    csPublish("error-check-done", 1);
+  });
+}
+
+Shelly.addEventHandler(function(event) {
+  if (!event || !event.info) return;
+  var info = event.info;
+  if (info.event === "test.callslot.run-burst") {
+    csRunBurst(info.n || 10);
+  } else if (info.event === "test.callslot.run-single-chain") {
+    csRunSingleChain();
+  } else if (info.event === "test.callslot.run-error-check") {
+    csRunErrorCheck();
+  }
+});
+`
+
+// callSlotEvent builds a synthetic device event routed to every registered
+// Shelly.addEventHandler callback — pool-pump.js's own (which ignores it,
+// same as any event it doesn't recognise) and callSlotTestHarnessJS's
+// (which dispatches on info.event).
+func callSlotEvent(action string, n int) []byte {
+	event := map[string]interface{}{
+		"info": map[string]interface{}{
+			"event": action,
+			"n":     n,
+		},
+	}
+	data, _ := json.Marshal(event)
+	return data
+}
+
+func newCallSlotDeviceState(injector chan []byte) *script.DeviceState {
+	return &script.DeviceState{
+		KVS:             controllerKVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(),
+		Schedules:       poolPumpSchedules(),
+		EventInjector:   injector,
+	}
+}
+
+func waitPoolPumpInit(t *testing.T, deviceState *script.DeviceState) bool {
+	t.Helper()
+	return waitFor(initTimeout, 200*time.Millisecond, func() bool {
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
+		return exists
+	})
+}
+
+// TestPoolPump_CallSlotBurstExhaustsPoolButSurvives pins down #421/#450
+// item 1 ("slot exhaustion is survivable"): firing more concurrent deferred
+// completions (10) than CALL_SLOTS holds (6) must not crash the script or
+// silently drop work. Before the #450 fix (deferral removed, or the
+// pool-exhausted fallback in acquireCallSlot removed), this either recurses
+// past MAX_CALL_DEPTH's guard or loses every call past the 6th.
+func TestPoolPump_CallSlotBurstExhaustsPoolButSurvives(t *testing.T) {
+	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	injector := make(chan []byte, 4)
+	deviceState := newCallSlotDeviceState(injector)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	const n = 10 // > CALL_SLOTS' fixed pool of 6
+	injector <- callSlotEvent("test.callslot.run-burst", n)
+
+	if !waitFor(eventTimeout, 20*time.Millisecond, func() bool {
+		_, ok := deviceState.KVSValue("test/callslot/used-after-burst")
+		return ok
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("burst never ran (harness event handler not wired up)")
+	}
+
+	poolSize := parseKVSInt(t, deviceState, "test/callslot/pool-size")
+	usedAfterBurst := parseKVSInt(t, deviceState, "test/callslot/used-after-burst")
+	pendingAfterBurst := parseKVSInt(t, deviceState, "test/callslot/pending-after-burst")
+
+	if poolSize != 6 {
+		t.Fatalf("CALL_SLOTS pool size = %d, want 6 (pool-pump.js line ~407)", poolSize)
+	}
+	if usedAfterBurst > poolSize {
+		t.Fatalf("CALL_SLOTS reports %d used slots but the pool only holds %d — pool grew unbounded", usedAfterBurst, poolSize)
+	}
+	if usedAfterBurst != poolSize {
+		t.Fatalf("expected the pool fully exhausted (%d used) after a %d-chain burst, got %d used", poolSize, n, usedAfterBurst)
+	}
+	if pendingAfterBurst != n {
+		t.Fatalf("expected all %d deferred completions still pending immediately after the burst, got %d — work was dropped instead of overflowing to the fallback path", n, pendingAfterBurst)
+	}
+
+	// The whole point of the fallback path: work beyond the 6-slot pool must
+	// still complete, just via unpooled records instead of CALL_SLOTS.
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		return kvsValue(deviceState, "test/callslot/completed") == strconv.Itoa(n)
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("burst did not fully drain; completed = %v, want %d — queued work was silently dropped",
+			kvsValue(deviceState, "test/callslot/completed"), n)
+	}
+
+	cancel()
+	<-done
+}
+
+// TestPoolPump_CallSlotsReleaseAfterBurst pins down #421/#450 item 2 ("slots
+// are released"): once a burst that exhausted CALL_SLOTS has fully drained,
+// every slot must be back to used:false — no permanent leak — and the pool
+// must still be healthy enough for pool-pump.js's own, unrelated business
+// logic (a button press cycling the pump speed) to work normally afterwards.
+func TestPoolPump_CallSlotsReleaseAfterBurst(t *testing.T) {
+	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	injector := make(chan []byte, 4)
+	deviceState := newCallSlotDeviceState(injector)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	const n = 10
+	injector <- callSlotEvent("test.callslot.run-burst", n)
+
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		return kvsValue(deviceState, "test/callslot/completed") == strconv.Itoa(n)
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("burst did not fully drain; completed = %v, want %d", kvsValue(deviceState, "test/callslot/completed"), n)
+	}
+
+	// "used-now" is republished by every one of the n completions; the last
+	// one published is from the n-th (final) drain, i.e. the pool's
+	// steady-state after every deferred completion has run.
+	if v := parseKVSInt(t, deviceState, "test/callslot/used-now"); v != 0 {
+		t.Fatalf("CALL_SLOTS still reports %d used slots after the burst fully drained — leak", v)
+	}
+
+	// Prove the pool is not just numerically empty but actually usable:
+	// pool-pump.js's own button handler (unrelated to the harness) must
+	// still work, exactly as in TestPoolPump_ButtonCyclesPro3.
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
+		t.Fatalf("expected active-output=-1 before button press, got %v", v)
+	}
+	injector <- shellyButtonEvent()
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0"
+	}) {
+		t.Fatalf("button press after burst: expected active-output=0, got %v — pool left unusable after exhaustion",
+			kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+
+	cancel()
+	<-done
+}
+
+// TestPoolPump_CallSlotDeepChainDefersInsteadOfRecursing pins down #421/#450
+// item 3 ("deep call chains defer rather than recurse"): a chain nested
+// deeper than MAX_CALL_DEPTH (3) must not invoke its next completion inline
+// — that inline invocation is exactly the unbounded stack growth #450's live
+// crash trace shows ("Too much recursion ... in function acquireCallSlot").
+// The deferred completion must still run, just later, off the task queue.
+func TestPoolPump_CallSlotDeepChainDefersInsteadOfRecursing(t *testing.T) {
+	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	injector := make(chan []byte, 4)
+	deviceState := newCallSlotDeviceState(injector)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	injector <- callSlotEvent("test.callslot.run-single-chain", 0)
+
+	// Published synchronously, in the same call stack that fired the chain.
+	if !waitFor(eventTimeout, 20*time.Millisecond, func() bool {
+		_, ok := deviceState.KVSValue("test/callslot/solo-log-len-immediate")
+		return ok
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("single chain never ran (harness event handler not wired up)")
+	}
+	if v := parseKVSInt(t, deviceState, "test/callslot/solo-log-len-immediate"); v != 3 {
+		t.Fatalf("expected only 3 nested completions to run inline before the 4th is deferred (MAX_CALL_DEPTH=3), got %d — "+
+			"the 4th level recursed synchronously instead of deferring, which is the #450 stack-overflow crash", v)
+	}
+
+	// The deferred 4th completion must still run — later, off the task queue.
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		return kvsValue(deviceState, "test/callslot/chain-log-len") == "4"
+	}) {
+		t.Fatalf("deferred completion never ran; chain-log-len = %v, want 4 — deferred work was dropped, not just delayed",
+			kvsValue(deviceState, "test/callslot/chain-log-len"))
+	}
+
+	cancel()
+	<-done
+}
+
+// TestPoolPump_CallSlotErrorPathReleasesSlot pins down #421/#450 item 4
+// ("error paths release their slot"): sharedCallDone's non-deferred branch
+// releases a call's slot unconditionally, before invoking the caller's
+// callback, regardless of whether the RPC succeeded or errored. This drives
+// a call (Schedule.Update on a non-existent schedule id) that always returns
+// error -105, at CALL_DEPTH 0 so it takes the non-deferred branch, and
+// checks the slot count is identical immediately before and after.
+func TestPoolPump_CallSlotErrorPathReleasesSlot(t *testing.T) {
+	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	injector := make(chan []byte, 4)
+	deviceState := newCallSlotDeviceState(injector)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	injector <- callSlotEvent("test.callslot.run-error-check", 0)
+
+	if !waitFor(eventTimeout, 20*time.Millisecond, func() bool {
+		return kvsValue(deviceState, "test/callslot/error-check-done") == "1"
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("error-path check never completed")
+	}
+
+	errorCode := parseKVSInt(t, deviceState, "test/callslot/error-code")
+	if errorCode == 0 {
+		t.Fatalf("expected a non-zero error code from Schedule.Update on an unknown id, got %d — test didn't exercise the error path", errorCode)
+	}
+	before := parseKVSInt(t, deviceState, "test/callslot/slots-before")
+	after := parseKVSInt(t, deviceState, "test/callslot/slots-after")
+	if after != before {
+		t.Fatalf("used-slot count changed from %d to %d across an errored call — slot leaked on the error path", before, after)
+	}
+
+	cancel()
+	<-done
+}

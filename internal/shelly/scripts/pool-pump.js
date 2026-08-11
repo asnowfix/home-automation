@@ -1665,7 +1665,42 @@ function cycleOutputs() {
 }
 
 // === WATER SUPPLY PROTECTION ===
-var WATER_SUPPLY_ACTIVE = false;  // debounce guard
+var WATER_SUPPLY_ACTIVE = false;  // debounce guard, and latest observed input:0 state
+
+// #450: re-entrancy guards for handleWaterSupply. input:0 can flap faster
+// than a Switch.Set round-trip (protect -> restore -> protect, or the
+// reverse, within milliseconds). handleWaterSupply used to call
+// activateOutput()/setOutput() unconditionally on every event; a second
+// event arriving before the first transition's Shelly.call callback had
+// fired called activateOutput() again while the first call was still in
+// flight. On real hardware that nests a fresh Shelly.call inside the native
+// completion handler of the one before it -- invisible to CALL_DEPTH, which
+// only bounds the RPC *completion* path (sharedCallDone), not this *event*
+// entry point -- and the nesting grows until acquireCallSlot's plain for
+// loop runs out of interpreter stack:
+//
+//   Uncaught Error: Too much recursion - the stack is about to overflow
+//    in function "acquireCallSlot" ... "setOutput" ... "activateOutput"
+//    ... "handleWaterSupply" ... "handleInputEvent" ... called from system
+//
+// That crashed the production pump (#450), leaving it running with
+// protection "active" and no script left to enforce it.
+//
+// WATER_SUPPLY_TRANSITION_PENDING is true from the moment a transition
+// starts until its activateOutput() callback has run. While true, a new
+// event does not call activateOutput() again -- it only records that a
+// newer input state exists (WATER_SUPPLY_PENDING_APPLY) and returns
+// immediately, so no second Shelly.call chain is ever nested inside the
+// first. WATER_SUPPLY_ACTIVE already holds the latest observed state (set
+// synchronously below, before the pending check), so nothing is lost: once
+// the in-flight transition's callback runs, finishWaterSupplyTransition()
+// applies that latest state via queueTask -- never inline -- so the
+// follow-up transition runs from a fresh stack, not nested inside the
+// callback that discovered it. A flap that ends "protection active" leaves
+// the pump off; one that ends "clear" leaves it restored -- matching the
+// LAST observed input, never the first.
+var WATER_SUPPLY_TRANSITION_PENDING = false;
+var WATER_SUPPLY_PENDING_APPLY = false;
 
 function handleWaterSupply(waterSupplyActive) {
   log("Water supply active signal:", waterSupplyActive);
@@ -1677,6 +1712,25 @@ function handleWaterSupply(waterSupplyActive) {
   }
   WATER_SUPPLY_ACTIVE = waterSupplyActive;
 
+  if (WATER_SUPPLY_TRANSITION_PENDING) {
+    // A previous transition's Shelly.call has not completed yet. Do NOT
+    // call activateOutput() here -- see the block comment above. Record
+    // that a newer state must be applied once the in-flight transition
+    // settles.
+    log("Water supply transition in flight, deferring to latest state:", waterSupplyActive);
+    WATER_SUPPLY_PENDING_APPLY = true;
+    return;
+  }
+
+  startWaterSupplyTransition(waterSupplyActive);
+}
+
+// Applies one water-supply transition (protect or restore) and, on
+// completion, hands off to finishWaterSupplyTransition to check whether a
+// newer input state arrived while it was running.
+function startWaterSupplyTransition(waterSupplyActive) {
+  WATER_SUPPLY_TRANSITION_PENDING = true;
+
   if (waterSupplyActive) {
     // Water supply is ON (signal is HIGH after invert) - save current state and turn off all pumps
     STATE.savedOutput = STATE.activeOutput;
@@ -1685,6 +1739,7 @@ function handleWaterSupply(waterSupplyActive) {
     Shelly.emitEvent("pool.water_supply_protected", {saved_output: STATE.savedOutput});
     activateOutput(-1, function() {
       log("All pumps turned off for water supply protection");
+      finishWaterSupplyTransition();
     });
   } else {
     // Water supply is OFF (signal is LOW after invert) - restore previous state
@@ -1693,8 +1748,28 @@ function handleWaterSupply(waterSupplyActive) {
     Shelly.emitEvent("pool.water_supply_restored", {restored_output: STATE.savedOutput});
     activateOutput(STATE.savedOutput, function() {
       log("Pump restored after water supply turned off");
+      finishWaterSupplyTransition();
     });
   }
+}
+
+// Runs when a water-supply transition's activateOutput() callback fires. If
+// a newer input state arrived while that transition was in flight (see
+// handleWaterSupply), applies it next -- via queueTask, so the follow-up
+// transition runs on a fresh stack instead of nesting inside this callback,
+// which would just move the #450 recursion one level deeper. Otherwise
+// clears the in-flight flag so the next event is handled immediately.
+function finishWaterSupplyTransition() {
+  if (!WATER_SUPPLY_PENDING_APPLY) {
+    WATER_SUPPLY_TRANSITION_PENDING = false;
+    return;
+  }
+  WATER_SUPPLY_PENDING_APPLY = false;
+  // Stay "pending" across the queueTask hop: a flap arriving before the
+  // queued transition actually starts must defer again (coalescing into
+  // this same follow-up), not race it.
+  var latest = WATER_SUPPLY_ACTIVE;
+  queueTask(function() { startWaterSupplyTransition(latest); });
 }
 
 // === EVENT HANDLERS ===
@@ -2446,12 +2521,23 @@ function doStop(reason) {
 function handleDailyCheck() {
   log('Daily check event');
 
-  var input0 = Shelly.getComponentStatus('input:0');
-  if (input0 && input0.state) {
-    log('Water supply protection active, ignoring event');
-    return;
-  }
-
+  // #450: this used to skip performDailyModeCheck() entirely while
+  // water-supply protection was active. That silently skipped the
+  // summer/winter MODE decision too, not just pump actuation -- observed
+  // live on 2026-08-11: the script crashed and restarted with protection
+  // still active, the next daily check hit this guard and left the device
+  // on 'winter' scheduling on an August evening, and it only self-corrected
+  // on a LATER restart/daily-check once protection had cleared.
+  //
+  // performDailyModeCheck() -> updateScheduleMode() only reads the forecast
+  // and rewrites Schedule.List jobs; it does not touch the physical output
+  // directly. The one place it can indirectly move the pump --
+  // reconcileRunState(), called only if the window actually changed --
+  // already goes through doStart()/doStop(), and BOTH already re-check
+  // live water-supply state themselves: doStart() refuses to start while
+  // protected, doStop() always proceeds. So running the daily check during
+  // protection is safe; skipping it just delayed a correct decision for no
+  // safety benefit.
   performDailyModeCheck();
 }
 

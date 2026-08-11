@@ -520,6 +520,259 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	<-done
 }
 
+// === Water-supply flap re-entrancy regression (#450) ===
+//
+// The live crash trace (issue #450, 2026-08-11 18:42 CEST comment) showed
+// input:0 flapping faster than a Switch.Set round-trip: handleWaterSupply
+// was re-entered from a fresh handleInputEvent while the PREVIOUS
+// transition's Shelly.call callback had not yet fired, nesting a second
+// activateOutput()/setOutput() chain inside the first and eventually
+// overflowing the interpreter stack on real hardware ("Too much recursion
+// ... in function acquireCallSlot").
+//
+// The emulator's default event loop (a Go `select` over EventInjector, see
+// run.go) cannot reproduce that interleaving on its own: it always runs one
+// event's JS handler fully to completion — including every synchronous
+// nested Shelly.call/callback chain — before dequeuing the next, so two
+// events sent back-to-back on the injector are processed strictly in
+// sequence, never nested. That is a real emulator fidelity gap: without a
+// change here, no test could ever exercise this race (matching the
+// class of gap already on record for this file — missing Schedule.Update,
+// Switch.Set emitting no events, KVS.List's signature, unsynchronised state
+// maps).
+//
+// DeviceState.SetPendingNestedEvent (pkg/shelly/script/device_state.go)
+// closes that gap: it arms the emulator's Switch.Set emulation to deliver
+// one more raw device event to the script's event handlers SYNCHRONOUSLY,
+// nested inside the very Switch.Set call the script issued — exactly where
+// the live crash trace shows the second event landing.
+//
+// Before the #450 fix, handleWaterSupply called activateOutput()
+// unconditionally on every event. With the nested event landing inside the
+// first Switch.Set, this reproduces the documented symptom
+// without needing a literal stack overflow (goja's Go-native call stack
+// does not overflow at this shallow a nesting depth the way Espruino's
+// interpreter stack does): the two nested completions race to write
+// STATE.activeOutput/KVS active-output, and whichever happens to unwind
+// LAST wins — which is not necessarily the one matching the physical
+// Switch.Set applied last, so the script's own bookkeeping ends up out of
+// sync with the hardware it just set. After the fix, the second event is
+// deferred instead of acted on immediately (no nested activateOutput() call
+// happens at all), and the coalesced follow-up transition — dispatched via
+// queueTask once the first settles — leaves output in the state matching
+// the LAST observed input, with bookkeeping and hardware agreeing.
+
+// poolPumpWaterSupplyFlapDeviceState returns a Pro1 DeviceState (single
+// output, the device type on which #450 was observed live) wired up for
+// event injection.
+func poolPumpWaterSupplyFlapDeviceState(injector chan []byte) *script.DeviceState {
+	return &script.DeviceState{
+		KVS:             pro1KVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro1ComponentStatus(),
+		Schedules:       pro1Schedules(),
+		EventInjector:   injector,
+	}
+}
+
+// assertSwitchOutput fails the test if switch:0's physical output does not
+// match want. Used to check the #450 symptom directly: the script's own
+// active-output bookkeeping diverging from the hardware state it just set.
+func assertSwitchOutput(t *testing.T, deviceState *script.DeviceState, want bool, context string) {
+	t.Helper()
+	entry, ok := componentStatusValue(deviceState, "switch:0")
+	if !ok {
+		t.Errorf("%s: switch:0 component status missing", context)
+		return
+	}
+	m, ok := entry.(map[string]interface{})
+	if !ok {
+		t.Errorf("%s: switch:0 component status not a map: %#v", context, entry)
+		return
+	}
+	on, _ := m["output"].(bool)
+	if on != want {
+		t.Errorf("%s: switch:0 physically %v, want %v — script bookkeeping diverged from hardware state (the #450 race)", context, on, want)
+	}
+}
+
+// TestPoolPump_WaterSupplyFlapFalseThenTrue drives input:0 false -> true
+// (restore starts, then protection re-engages before the restore's
+// Switch.Set completes) and asserts the pump ends OFF, matching the LAST
+// observed input (true = protected) — not the first (false = clear), and
+// not some interleaved mix of the two.
+func TestPoolPump_WaterSupplyFlapFalseThenTrue(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	injector := make(chan []byte, 8)
+	deviceState := poolPumpWaterSupplyFlapDeviceState(injector)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	// Get the pump running so there is something to protect and restore.
+	injector <- shellyButtonEvent()
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0"
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("setup: pump did not start, active-output = %v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+
+	// Enter protection normally (no flap yet) so there is a saved_output to
+	// restore from.
+	injector <- shellyInputEvent(0, true)
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "-1"
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("setup: pump did not stop for protection, active-output = %v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+
+	// Arm the nested event: while the upcoming restore's Switch.Set is in
+	// flight, deliver a SECOND input:0 event (back to true / protect)
+	// nested inside it, before the restore's own callback fires. This is
+	// the live crash's exact shape: a restore in flight, protection
+	// re-arriving before it completes.
+	deviceState.SetPendingNestedEvent(shellyInputEvent(0, true))
+
+	// Fire the flap: input:0 -> false (restore starts; the armed nested
+	// event above fires the second leg from inside the restore's own
+	// Switch.Set call).
+	injector <- shellyInputEvent(0, false)
+
+	// This flap starts AND ends "protected" (active-output=-1 both before
+	// and after), matching the live incident exactly: input:0 dipped low
+	// and came straight back high. That means a plain waitFor() for
+	// active-output==-1 would return on its very FIRST poll — matching the
+	// stale pre-flap value — without ever giving the queued follow-up
+	// transition (dispatched via queueTask once the in-flight one settles)
+	// a chance to run, so it would pass unconditionally regardless of
+	// whether the fix works. Settle explicitly instead: several task-queue
+	// ticks (200ms each) is enough for the synchronous nested chain plus
+	// every queued follow-up to fully drain in both the fixed and the
+	// unfixed script.
+	settlePoolPumpTaskQueue(t)
+
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
+		cancel()
+		<-done
+		t.Fatalf("false->true flap: expected active-output=-1 (matching last input=protected) after settling, got %v — "+
+			"without the #450 fix this settles on the WRONG value because the nested transition's completion "+
+			"races the outer one instead of being deferred",
+			v)
+	}
+
+	assertSwitchOutput(t, deviceState, false, "false->true flap")
+
+	cancel()
+	<-done
+}
+
+// TestPoolPump_WaterSupplyFlapTrueThenFalse drives input:0 true -> false
+// (protection starts, then clears before the protect's Switch.Set
+// completes) and asserts the pump ends restored, matching the LAST observed
+// input (false = clear) — not the first (true = protected).
+func TestPoolPump_WaterSupplyFlapTrueThenFalse(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	injector := make(chan []byte, 8)
+	deviceState := poolPumpWaterSupplyFlapDeviceState(injector)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	// Get the pump running: this becomes savedOutput once protection
+	// engages below, and must be what gets restored at the end.
+	injector <- shellyButtonEvent()
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0"
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("setup: pump did not start, active-output = %v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+
+	// Arm the nested event: while the upcoming protect's Switch.Set is in
+	// flight, deliver a SECOND input:0 event (back to false / clear) nested
+	// inside it, before the protect's own callback fires.
+	deviceState.SetPendingNestedEvent(shellyInputEvent(0, false))
+
+	// Fire the flap: input:0 -> true (protection starts; the armed nested
+	// event above fires the second leg from inside the protect's own
+	// Switch.Set call).
+	injector <- shellyInputEvent(0, true)
+
+	// As in the false->true test above, this flap starts AND ends
+	// "restored" (active-output=0 both before and after) — a plain
+	// waitFor() for active-output==0 would match the stale pre-flap value
+	// on its first poll and never observe whether the queued follow-up
+	// transition actually ran (or ran correctly). Settle explicitly first.
+	settlePoolPumpTaskQueue(t)
+
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "0" {
+		cancel()
+		<-done
+		t.Fatalf("true->false flap: expected active-output=0 (matching last input=clear) after settling, got %v — "+
+			"without the #450 fix this settles on the WRONG value because the nested transition's completion "+
+			"races the outer one instead of being deferred",
+			v)
+	}
+
+	assertSwitchOutput(t, deviceState, true, "true->false flap")
+
+	cancel()
+	<-done
+}
+
+// settlePoolPumpTaskQueue waits long enough for pool-pump.js's TASK_QUEUE
+// (a single 200ms-period Timer, see queueTask() in pool-pump.js) to fully
+// drain a multi-step follow-up chain: the deferred transition itself, plus
+// its own saveState() write, is at most a handful of queued tasks deep.
+// Generous rather than tight, like initTimeout/eventTimeout elsewhere in
+// this file — the point of the flap tests below is to observe the SETTLED
+// final state, not the first state a poll happens to see, so a fixed wait
+// is used instead of waitFor().
+func settlePoolPumpTaskQueue(t *testing.T) {
+	t.Helper()
+	time.Sleep(2 * time.Second)
+}
+
 // === Runtime/turnover tracking (#402) ===
 //
 // controllerKVS() sets preferred speed "eco" and doesn't override

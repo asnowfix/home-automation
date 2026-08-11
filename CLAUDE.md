@@ -156,10 +156,27 @@ emulator's per-call logging, is large enough to consume a sub-agent's context be
 the result.
 
 **Never end a turn in order to wait for a test run.** This is the #432 stall mode. Ending a turn
-terminates the sub-agent; the completion notification then has no live turn to land in, so an agent
-that signs off with "waiting for the test run, will resume when notified" is simply gone. Nothing
-re-invokes it. (A stalled agent can still be resumed by the coordinator with `SendMessage`, but
-that is a recovery, not the design.)
+terminates the sub-agent, and nothing re-invokes it when its background job finishes — so an agent
+that signs off with "waiting for the test run, will resume when notified" is simply gone.
+
+Measured directly on 2026-08-11 with a throwaway agent that backgrounded a 200-second job and then
+ended its turn:
+
+- the agent stopped after **9.8 s**, reported by the harness as `completed`;
+- its child kept running and finished normally **3.5 minutes later**;
+- the agent received **no** automatic notification of that completion — confirmed by asking the
+  agent itself after resuming it;
+- the agent's own completion notification fired **immediately**, while its child was still alive.
+
+Two consequences worth acting on:
+
+- **The child's work is not lost, only orphaned.** Before re-running anything for a stalled agent,
+  look for its output on disk — a completed `make test` costs ~6 minutes to repeat for nothing.
+- **A stalled agent can be resumed** by the coordinator with `SendMessage`, picking up its
+  transcript. That is a recovery, not the design; the agent must not plan around it.
+
+Do not treat "the agent's notification arrived" as meaning its background work has finished — the
+observed behaviour above shows the two are unrelated.
 
 The required pattern is: **background the run, then poll it to completion inside the same turn.**
 

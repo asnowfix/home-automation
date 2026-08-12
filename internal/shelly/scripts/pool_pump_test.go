@@ -273,15 +273,41 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 
 	injector := make(chan []byte, 4)
 
-	// "max" maps to high-speed = switch 2 on a Pro3, so the policy wants
-	// switch:2 whenever the window contains now.
+	// "max" speed must map to switch 2 unambiguously. controllerKVS() only
+	// sets eco-speed (to 0); day-speed/max-speed fall back to their schema
+	// defaults (1 and 0), which collides eco and max on switch 0 — pin
+	// max-speed explicitly so the policy wants switch:2 whenever the window
+	// contains now, matching this test's assertions below.
 	kvs := controllerKVS()
 	kvs["script/pool-pump/speed"] = "max"
+	kvs["script/pool-pump/max-speed"] = "2"
+
+	// handleDailyCheck() runs automatically at the end of init (#476: it must
+	// still run under water-supply protection, see the comment on
+	// handleDailyCheck() itself) and, given a reachable forecast URL, its
+	// Open-Meteo fetch can succeed against the real network in a sandbox with
+	// internet access — silently rewriting the run window mid-test via
+	// updateScheduleMode(), racing the assertions below (observed live
+	// 2026-08-12: it rewrote the window to 15:09-18:51 and stopped a pump
+	// this test had just started). A local server returning a body with no
+	// "hourly" field makes onForecast() bail with "Invalid forecast
+	// structure" and getMaxForecastTemp() stay null, so
+	// decideModeFromForecast() returns before touching the window
+	// (pool-pump.js:2430-2436) — deterministic regardless of what network
+	// access the test environment happens to have.
+	brokenForecast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(brokenForecast.Close)
 
 	now := time.Now()
 	deviceState := &script.DeviceState{
-		KVS:             kvs,
-		Storage:         map[string]interface{}{"schedule-mode": "summer"},
+		KVS: kvs,
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  brokenForecast.URL + "?daily=sunrise,sunset",
+		},
 		ComponentStatus: pro3ComponentStatus(),
 		Schedules:       poolPumpSummerSchedules(now.Add(-1*time.Hour), now.Add(1*time.Hour)),
 		EventInjector:   injector,

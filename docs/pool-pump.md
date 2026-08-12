@@ -285,7 +285,7 @@ target = poolVolume × turnoverFraction / flowRate × 3600   (seconds)
 | `solar-min-turnover` | `5` | Soft-stop target (pool volumes/day) |
 | `solar-max-turnover` | `7` | Hard ceiling (pool volumes/day) |
 | `solar-stale-ms` | `300000` (5 min) | Treat the topic as stale (fall back to schedule only) after this long without a **fresh-`ts`** message |
-| `override-ms` | `3600000` (1 h) | How long a manual override (button press, or an out-of-band `switch:N` change) holds the pump against the schedule/solar policy. The reconciler would otherwise revert a hand-made change within one 200 ms task-queue tick |
+| `override-ms` | `7200000` (2 h) | How long a manual override (button press, or an out-of-band `switch:N` change) holds the pump against the schedule/solar policy. The reconciler would otherwise revert a hand-made change within one 200 ms task-queue tick |
 
 ---
 
@@ -324,7 +324,7 @@ All keys use prefix `script/pool-pump/` (≤ 32 chars total).
 | `solar-min-turnover` | `5` | Soft-stop target (pool volumes/day) |
 | `solar-max-turnover` | `7` | Hard ceiling (pool volumes/day) |
 | `solar-stale-ms` | `300000` | Treat solar topic as stale after this long without a fresh `ts` |
-| `override-ms` | `3600000` | How long a manual override holds against the policy |
+| `override-ms` | `7200000` | How long a manual override holds against the policy |
 
 ### State (managed by script, per device)
 | Key | Notes |

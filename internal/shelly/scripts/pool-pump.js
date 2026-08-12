@@ -181,7 +181,7 @@ var CONFIG_SCHEMA = {
   // How long a manual override (button press, or an out-of-band switch change) holds the pump against the schedule/solar policy (ms)
   overrideMs: {
     key: "override-ms",
-    default: 3600000,
+    default: 7200000,
     type: "number"
   }
 };

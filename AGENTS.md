@@ -364,6 +364,65 @@ function loadData(callback) {
 }
 ```
 
+#### Interpreter Stack Depth at Init — "Too much recursion"
+
+**Distinct from the callback-depth-limit and call-slot issues above.** This is the raw Espruino
+interpreter call stack overflowing, not the 5-concurrent-RPC budget or nested-anonymous-function
+parsing limit — and it can happen with plenty of heap still free.
+
+**Error Symptom**:
+```
+Uncaught Error: Too much recursion - the stack is about to overflow
+```
+
+**Mechanism**: a script's `init()` is typically a long synchronous call chain
+(`init -> loadConfig(cb) -> continueInit -> loadState -> finishContinueInit -> ...`) that never
+returns to the event loop between steps, because each stage happens to complete synchronously (a
+cache hit, a value already in `Script.storage`, etc.). Every function in that chain adds a frame.
+On a Pro1 the frame budget runs out partway through init, and whichever function happens to be the
+deepest — not the most "expensive" one — is where the crash is reported. `pool-pump.js` hit this
+twice during the #476 reconciler rewrite, at two unrelated call sites reached from the same
+synchronous chain:
+
+- `subscribeSolarAvailable()`'s `log()` call, reached via `finishContinueInit() -> setupMQTT()`
+  when `solar-enabled=true` (#474, `mezzanine` Pro1, 2026-08-12).
+- `reconcileRuntimeState()`'s `log()` call, reached via
+  `finishContinueInit() -> enforceOutputState() -> startRuntimeAccounting() -> ensureRuntimeDay()`
+  when the pump/light was already on at script restart (found live on the same device, same day,
+  during #476's device revalidation).
+
+Both crashed with double-digit KB of heap still free — a heap-exhaustion diagnosis for this error
+message is very likely wrong. A **wrong fix that looked plausible**: reordering statements so
+`log()` is called *before* rather than after the deepest RPC call in the chain. This changes the
+byte layout of what's on the stack at the moment of the deepest call but not the chain's actual
+depth, and was measured to still crash on a real device (`mezzanine`, 2026-08-12) — see the #474
+issue history for the full retraction. Do not use call-order-within-a-function as the fix.
+
+**The actual fix**: break the synchronous chain with `queueTask()` *before* the point that turns
+out to be too deep, so the risky continuation runs on a fresh stack from the task-queue timer
+instead of as a continuation of `init()`. Pass a **named** function reference, never an anonymous
+closure (queueTask itself is on the hot init path and an allocation there is its own, smaller,
+cost — see "Solution 1: Task Queue Pattern" above).
+
+```javascript
+function finishContinueInit() {
+  enforceOutputState();
+  // Do NOT call setupMQTT() inline here — see AGENTS.md "Interpreter Stack
+  // Depth at Init". queueTask() takes a NAMED function, so this allocates no
+  // closure.
+  queueTask(setupMQTT);
+}
+```
+
+There is no way to predict from source alone how deep is "too deep" — it depends on the actual
+compiled frame sizes and the specific device's remaining stack at that point in boot, and it moves
+every time code earlier in the chain changes. **The emulator cannot catch this class of bug**: goja
+(the Go JS engine backing the `internal/shelly/scripts` test suite) has no interpreter stack limit
+of its own, so a chain that overflows a real Pro1 runs to completion in every emulator test. Any fix
+or regression here can only be confirmed by measurement on a real device — see "Testing memory on a
+spare device" below (the same device/process, since `Script.GetStatus`'s `error_msg` reports the
+crash and `mem_free` at the moment it happened).
+
 #### Observability: Script Event Emissions
 
 Scripts must call `Shelly.emitEvent(name, data)` for any change a human operator might want to know about — schedule decisions, safety actions, pump start/stop, mode changes. These flow through the device's standard `NotifyEvent` MQTT notification (`<device_id>/events/rpc`), are picked up by the daemon's Gen2 listener (`internal/myhome/shelly/gen2/listener.go`), and are stored in the events database where the web UI and `myhome ctl events` can display them.

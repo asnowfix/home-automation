@@ -1,6 +1,8 @@
 package scripts
 
 import (
+	"encoding/json"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -245,6 +247,7 @@ func TestPoolPump_ScheduleEdgeClearsManualOverride(t *testing.T) {
 	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false)
 	injector := make(chan []byte, 4)
 	d.EventInjector = injector
+	d.ScheduleEvalInjector = make(chan []byte, 4)
 	stop := runPoolPump(t, d)
 	defer stop()
 
@@ -323,15 +326,41 @@ func TestPoolPump_NestedEventDuringActuationProducesOneChain(t *testing.T) {
 	assertSwitchOutput(t, d, false, "nested event during actuation")
 }
 
+// evalPoolPumpSchedule fires a Schedule job's code against the running
+// script, the same way a real device's Schedule.eval -> Script.Eval(id, code)
+// would when the job's timespec comes due. The emulator does not track
+// wall-clock time against Schedules (Schedule.List/.Create/.Update in run.go
+// are pure storage — see ScheduleEvalInjector's doc comment in
+// device_state.go), so tests that need a specific job's handler to run send
+// its code here instead of waiting on real time.
+//
+// The caller must have set d.ScheduleEvalInjector before starting the script
+// (runPoolPump reads deviceState.ScheduleEvalInjector when wiring handlers).
+// A returned error means the request could not be sent, not that the code
+// itself failed to evaluate — exactly like injecting a raw device event.
+func evalPoolPumpSchedule(d *script.DeviceState, code string) error {
+	if d.ScheduleEvalInjector == nil {
+		return fmt.Errorf("device state has no ScheduleEvalInjector; set it before runPoolPump")
+	}
+	b, err := json.Marshal(map[string]string{"code": code})
+	if err != nil {
+		return err
+	}
+	d.ScheduleEvalInjector <- b
+	return nil
+}
+
 // shellySwitchEvent builds the raw device event a switch:N state change emits.
 func shellySwitchEvent(id int, state bool) []byte {
-	return mustJSON(map[string]interface{}{
+	event := map[string]interface{}{
 		"info": map[string]interface{}{
-			"component": "switch:" + itoa(id),
+			"component": fmt.Sprintf("switch:%d", id),
 			"id":        id,
 			"state":     state,
 		},
-	})
+	}
+	data, _ := json.Marshal(event)
+	return data
 }
 
 // === small helpers ===

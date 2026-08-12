@@ -30,6 +30,17 @@ type DeviceState struct {
 	//   {"info": {"event": "pool-pump/night-stop"}}
 	EventInjector chan []byte `json:"-"`
 
+	// ScheduleEvalInjector, when non-nil, lets a test fire a Schedule job's
+	// code the way a real device does: Schedule.eval on the schedule's due
+	// instant calls Script.Eval(id, code) against the already-running
+	// script's global scope. The emulator does not itself track wall-clock
+	// time against Schedules' timespecs (see Schedule.List/.Create/.Update in
+	// run.go — pure storage, never fired automatically), so a test that needs
+	// a specific job's handler (e.g. "handleEveningStop()") to run sends a
+	// JSON object {"code": "handleEveningStop()"} on this channel instead of
+	// waiting on real time.
+	ScheduleEvalInjector chan []byte `json:"-"`
+
 	// OnModified is called whenever the device state is modified (KVS.Set, config changes, etc.)
 	// This allows automatic persistence of state changes during script execution
 	OnModified func() `json:"-"`

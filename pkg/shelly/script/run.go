@@ -2,6 +2,7 @@ package script
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -743,6 +744,16 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		})
 	}
 
+	// If the caller provided a schedule-eval-injection channel (for tests),
+	// wire it up so a JSON {"code": "..."} sent to it is run against the
+	// script's global scope, exactly as a real device's Schedule.eval ->
+	// Script.Eval(id, code) would run a due job's code.
+	if deviceState.ScheduleEvalInjector != nil {
+		*handlers = append(*handlers, &scheduleEvalForwarder{
+			ch: deviceState.ScheduleEvalInjector,
+		})
+	}
+
 	return vm, nil
 }
 
@@ -758,6 +769,29 @@ type testEventForwarder struct {
 func (f *testEventForwarder) Wait() <-chan []byte { return f.ch }
 func (f *testEventForwarder) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
 	return f.eh.Handle(ctx, vm, msg)
+}
+
+// scheduleEvalForwarder is a handler that reads {"code": "..."} requests from
+// a test-controlled channel and runs the code against the running script's
+// global scope, on the same goroutine as every other VM access — mirroring
+// Schedule.eval's real Script.Eval(id, code) RPC without needing a real
+// device or an emulated wall-clock scheduler.
+type scheduleEvalForwarder struct {
+	ch <-chan []byte
+}
+
+func (f *scheduleEvalForwarder) Wait() <-chan []byte { return f.ch }
+func (f *scheduleEvalForwarder) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(msg, &req); err != nil {
+		return fmt.Errorf("scheduleEvalForwarder: decode request: %w", err)
+	}
+	if _, err := vm.RunString(req.Code); err != nil {
+		return fmt.Errorf("scheduleEvalForwarder: eval %q: %w", req.Code, err)
+	}
+	return nil
 }
 
 type methodFunc func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error)

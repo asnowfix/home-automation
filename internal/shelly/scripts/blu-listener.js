@@ -71,9 +71,15 @@ function processTaskQueue() {
     TASK_INDEX = 0;
     return;
   }
+  // #480: an uncaught throw inside a queued task used to kill the whole
+  // script. Wrapping this single call site protects every queueTask() call.
   var task = TASK_QUEUE[TASK_INDEX];
   TASK_INDEX++;
-  task();
+  try {
+    task();
+  } catch (e) {
+    log("queued task error:", e);
+  }
 }
 
 function queueTask(task) {

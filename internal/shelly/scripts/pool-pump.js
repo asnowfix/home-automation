@@ -630,9 +630,17 @@ function processTaskQueue() {
 
   // Execute next task; new tasks queued by the task itself extend TASK_QUEUE
   // and will be picked up on subsequent timer ticks.
+  // #480: an uncaught throw inside a queued task used to kill the whole
+  // script (verified live on mezzanine: queueTask(function(){ null.x })
+  // stopped the script). Wrapping this single call site protects every
+  // queueTask() call in the script.
   var task = TASK_QUEUE[TASK_INDEX];
   TASK_INDEX++;
-  task();
+  try {
+    task();
+  } catch (e) {
+    log("queued task error:", e);
+  }
 }
 
 function queueTask(task) {
@@ -2056,6 +2064,19 @@ function clearNonUpdateSchedules(callback) {
   });
 }
 
+// #480: every script.eval payload a schedule job carries must be wrapped —
+// an uncaught throw inside an unwrapped handler kills the whole script
+// (verified live on mezzanine: an ad-hoc bad Script.Eval killed the running
+// script with a ReferenceError). Route every registration through this one
+// helper so a future schedule job can never be added unwrapped. The wrapped
+// source always contains handlerCall verbatim, so code that later reads the
+// `code` field back off a live Schedule.List (isWithinRunWindow,
+// updateScheduleMode, verifySchedules below) matches on substring
+// containment rather than exact/prefix equality.
+function wrapScheduleCall(handlerCall) {
+  return "(function(){try{" + handlerCall + "}catch(e){log('schedule handler error:',e)}})()";
+}
+
 function createSchedules(callback) {
   log('Creating pool pump schedules...');
 
@@ -2069,7 +2090,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleDailyCheck()'
+          code: wrapScheduleCall('handleDailyCheck()')
         }
       }]
     },
@@ -2080,7 +2101,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleMorningStart()'
+          code: wrapScheduleCall('handleMorningStart()')
         }
       }]
     },
@@ -2091,7 +2112,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleEveningStop()'
+          code: wrapScheduleCall('handleEveningStop()')
         }
       }]
     },
@@ -2102,7 +2123,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleNightStart()'
+          code: wrapScheduleCall('handleNightStart()')
         }
       }]
     },
@@ -2113,7 +2134,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleNightStop()'
+          code: wrapScheduleCall('handleNightStop()')
         }
       }]
     }
@@ -2160,7 +2181,10 @@ function verifySchedules(cb) {
         var job = result.jobs[i];
         if (job.calls && job.calls.length > 0 && job.calls[0].method === 'script.eval') {
           var code = job.calls[0].params && job.calls[0].params.code;
-          if (code && (code.indexOf('handleNight') === 0 || code.indexOf('handleDaily') === 0 || code.indexOf('handleMorning') === 0 || code.indexOf('handleEvening') === 0)) {
+          // #480: code carries wrapScheduleCall()'s wrapper boilerplate, not
+          // just the bare handler call, so match by containment rather than
+          // by prefix.
+          if (code && (code.indexOf('handleNight') !== -1 || code.indexOf('handleDaily') !== -1 || code.indexOf('handleMorning') !== -1 || code.indexOf('handleEvening') !== -1)) {
             hasPoolSchedules = true;
             break;
           }
@@ -2281,8 +2305,10 @@ function isWithinRunWindow(cb) {
       var job = result.jobs[i];
       if (!job.enable || !job.calls || job.calls.length === 0) continue;
       var code = job.calls[0].params && job.calls[0].params.code;
-      if (code === sc) a = parseHM(job.timespec);
-      else if (code === ec) b = parseHM(job.timespec);
+      // #480: code is wrapScheduleCall()'s wrapped source, not the bare
+      // handler call, so match by containment rather than exact equality.
+      if (code && code.indexOf(sc) !== -1) a = parseHM(job.timespec);
+      else if (code && code.indexOf(ec) !== -1) b = parseHM(job.timespec);
     }
 
     if (a === null || b === null) { cb(null); return; }
@@ -2343,22 +2369,26 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
       var job = result.jobs[i];
       if (job.calls && job.calls.length > 0) {
         var code = job.calls[0].params && job.calls[0].params.code;
-        if (code === 'handleMorningStart()') {
-          var updM = {id: job.id, enable: newMode === 'summer', name: code};
+        // #480: code is wrapScheduleCall()'s wrapped source, not the bare
+        // handler call, so match by containment. `name` is set to the short
+        // handler literal (not the matched `code`) so log lines stay
+        // readable instead of printing the whole wrapper.
+        if (code && code.indexOf('handleMorningStart()') !== -1) {
+          var updM = {id: job.id, enable: newMode === 'summer', name: 'handleMorningStart()'};
           if (hasTimings && newMode === 'summer') {
             updM.timespec = makeTimespec(morningStartHours);
           }
           if (moves(job, updM)) windowChanged = true;
           schedulesToUpdate.push(updM);
-        } else if (code === 'handleEveningStop()') {
-          var updE = {id: job.id, enable: newMode === 'summer', name: code};
+        } else if (code && code.indexOf('handleEveningStop()') !== -1) {
+          var updE = {id: job.id, enable: newMode === 'summer', name: 'handleEveningStop()'};
           if (hasTimings && newMode === 'summer') {
             updE.timespec = makeTimespec(eveningStopHours);
           }
           if (moves(job, updE)) windowChanged = true;
           schedulesToUpdate.push(updE);
-        } else if (code === 'handleNightStart()' || code === 'handleNightStop()') {
-          var updN = {id: job.id, enable: newMode === 'winter', name: code};
+        } else if (code && (code.indexOf('handleNightStart()') !== -1 || code.indexOf('handleNightStop()') !== -1)) {
+          var updN = {id: job.id, enable: newMode === 'winter', name: code.indexOf('handleNightStart()') !== -1 ? 'handleNightStart()' : 'handleNightStop()'};
           if (moves(job, updN)) windowChanged = true;
           schedulesToUpdate.push(updN);
         }

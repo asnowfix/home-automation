@@ -177,6 +177,12 @@ var CONFIG_SCHEMA = {
     key: "solar-stale-ms",
     default: 300000,
     type: "number"
+  },
+  // How long a manual override (button press, or an out-of-band switch change) holds the pump against the schedule/solar policy (ms)
+  overrideMs: {
+    key: "override-ms",
+    default: 3600000,
+    type: "number"
   }
 };
 // <<< GENERATED: CONFIG_SCHEMA <<<
@@ -1531,6 +1537,156 @@ function fuseAllowOn() {
   return true;
 }
 
+// === LAYER 1: FACTS (#476) ===
+//
+// One preallocated scalar per observed fact, exactly ONE writer each. No
+// event objects, no event queues, no per-event strings: a fact is written in
+// place and the reconciler is asked to converge. That is what makes an input
+// flapping faster than a Switch.Set round trip free — there is no work to
+// accumulate, only a value to overwrite.
+var F_WATER      = false;  // input:0 state           — written only by setWater()
+var F_SOLAR_WANT = false;  // solar hysteresis opinion — written only by checkSolarHysteresis()
+var F_WIN_START  = -1;     // run-window start, minutes since midnight — written only by setWindow()
+var F_WIN_STOP   = -1;     // run-window stop,  minutes since midnight — written only by setWindow()
+var F_OVR_WANT   = -2;     // manual override: -2 none, -1 off, >=0 switch id — setOverride()/clearOverride()
+var F_OVR_UNTIL  = 0;      // override expiry, ms epoch                      — setOverride()/clearOverride()
+
+function setWater(active) {
+  if (active === F_WATER) return;
+  F_WATER = active;
+  Shelly.emitEvent(active ? "pool.water_supply_protected" : "pool.water_supply_restored",
+                   {output: STATE.activeOutput});
+  reconcile(active ? "water supply on" : "water supply off");
+}
+
+function setWindow(startMin, stopMin) {
+  if (startMin === F_WIN_START && stopMin === F_WIN_STOP) return;
+  log("window:", F_WIN_START, "-", F_WIN_STOP, "->", startMin, "-", stopMin);
+  F_WIN_START = startMin;
+  F_WIN_STOP = stopMin;
+  reconcile("window moved");
+}
+
+// A reconciler reverts an out-of-band relay change that contradicts the
+// policy — a web-UI toggle or a button press would be undone within one
+// 200ms task-queue tick. An override is therefore REQUIRED, not optional:
+// it makes "a human moved this" a fact the policy can see, bounded by
+// CONFIG.overrideMs and cleared at the next schedule edge, whichever is
+// sooner.
+function setOverride(want) {
+  F_OVR_WANT = want;
+  F_OVR_UNTIL = Date.now() + CONFIG.overrideMs;
+  log("override:", want, "for", CONFIG.overrideMs, "ms");
+}
+
+function clearOverride() {
+  if (F_OVR_WANT === -2) return;
+  log("override cleared");
+  F_OVR_WANT = -2;
+  F_OVR_UNTIL = 0;
+}
+
+function withinWindow() {
+  if (F_WIN_START < 0 || F_WIN_STOP < 0) return false;
+  var d = new Date();
+  var n = d.getHours() * 60 + d.getMinutes();
+  if (F_WIN_START <= F_WIN_STOP) return n >= F_WIN_START && n < F_WIN_STOP;
+  return n >= F_WIN_START || n < F_WIN_STOP;   // wraps midnight (winter run)
+}
+
+// === LAYER 2: THE POLICY (#476) ===
+//
+// Pure function of the facts above. Returns an output id, -1 for off, or
+// **-2 for "no opinion — leave the relay alone"**.
+//
+// The -2 is not decoration. A level-triggered controller with a two-valued
+// desired state turns "I cannot tell" into "off", which would stop a running
+// pump because a Schedule.List call failed. That is the lesson of #441/#436
+// encoded in the return type.
+//
+// THE ORDER OF THESE LINES IS THE CONTROL POLICY and should be reviewed as
+// such. Before this change the equivalent ordering was an accident of call
+// order across seven functions.
+//
+// FUSE_TRIPPED is deliberately NOT consulted here. The fuse is applied by
+// reconcileNow() instead, because fuseAllowOn() is also what clears the trip
+// when the cooldown expires: short-circuiting to -1 here would mean
+// fuseAllowOn() never runs again and the fuse would latch forever.
+function desiredOutput() {
+  if (F_WATER) return -1;                                        // safety first, always
+  if (F_OVR_WANT !== -2 && Date.now() < F_OVR_UNTIL) return F_OVR_WANT;
+  if (CONFIG.solarEnabled && solarHardCeilingReached()) return -1;
+  if (F_SOLAR_WANT) return mapSpeedToSwitch(CONFIG.preferredSpeed);
+  if (F_WIN_START < 0) return -2;                                // window unknown: do not act
+  if (withinWindow()) return mapSpeedToSwitch(CONFIG.preferredSpeed);
+  return -1;
+}
+
+// === THE RUN WINDOW AS A FACT ===
+//
+// The window used to be re-read from Schedule.List on every decision
+// (isWithinRunWindow), which is an RPC per decision and a race per rewrite
+// (#441). It is now read once at init and thereafter owned by setWindow():
+// updateScheduleMode() is the only thing that moves it, and it re-reads
+// straight after writing.
+//
+// Named callback, so no closure is allocated per call.
+function onWindowJobs(result, err) {
+  if (err && false) {}
+  if (err || !result || !result.jobs) return;   // unresolvable: leave the facts alone (-2 path)
+  var summer = STATE.scheduleMode === 'summer';
+  var sc = summer ? 'handleMorningStart()' : 'handleNightStart()';
+  var ec = summer ? 'handleEveningStop()' : 'handleNightStop()';
+  var a = -1;
+  var b = -1;
+  for (var i = 0; i < result.jobs.length; i++) {
+    var job = result.jobs[i];
+    if (!job.enable || !job.calls || job.calls.length === 0) continue;
+    var code = job.calls[0].params && job.calls[0].params.code;
+    if (code === sc) {
+      var ma = parseHM(job.timespec);
+      if (ma !== null) a = ma;
+    } else if (code === ec) {
+      var mb = parseHM(job.timespec);
+      if (mb !== null) b = mb;
+    }
+  }
+  if (a < 0 || b < 0) return;                   // still symbolic (@sunrise): unknown, not "off"
+  setWindow(a, b);
+}
+
+function readWindow() {
+  Shelly.call('Schedule.List', {}, onWindowJobs);
+}
+
+// === STEP 3 SCAFFOLDING: SHADOW MODE (#476) ===
+//
+// TEMPORARY. This computes what desiredOutput() would have done and records
+// it, but never acts. Every divergence from the live logic must be explained
+// before step 4 flips reconcile() over to actually driving the relay. Deleted
+// in step 4 together with this comment.
+//
+// The trail is written to Script.storage (synchronous, no RPC, no heap churn
+// beyond the string itself) so an emulator test can read the whole decision
+// history back out without needing an event sink.
+var SHADOW_TRAIL = "";
+
+function shadowRecord(tag) {
+  var want = desiredOutput();
+  var e = (tag || "?") + "=" + want + "|" + STATE.activeOutput;
+  if (want !== -2 && want !== STATE.activeOutput) {
+    log("SHADOW DIVERGENCE", e);
+    e = e + "!";
+  }
+  if (SHADOW_TRAIL.length < 1200) SHADOW_TRAIL = SHADOW_TRAIL + e + ";";
+  storeStorageValue("shadow", SHADOW_TRAIL);
+}
+
+// Step 3: observe only. Step 4 replaces this body with the real reconciler.
+function reconcile(reason) {
+  shadowRecord(reason || "-");
+}
+
 // === THE SINGLE SERIALISED ACTUATOR (#476) ===
 //
 // applyOutput()/applyDone() are the ONLY code in this script permitted to
@@ -1584,11 +1740,16 @@ function applyPending() {
 function applyDone() {
   var was = STATE.activeOutput;
   STATE.activeOutput = RC_TARGET;
-  saveState();
 
-  // Runtime/turnover tracking (#402).
+  // Runtime/turnover tracking (#402), BEFORE saveState(): both enqueue their
+  // KVS mirrors on the same 200ms task queue, and callers (and tests) treat
+  // the active-output write as the "transition finished" marker. Queueing the
+  // runtime mirrors first keeps active-output last, so observing it means the
+  // runtime figures for that interval are already persisted.
   if (was === -1 && RC_TARGET !== -1) startRuntimeAccounting();
   else if (was !== -1 && RC_TARGET === -1) stopRuntimeAccounting();
+
+  saveState();
 
   RC_BUSY = false;
   var cb = RC_CB;
@@ -1612,8 +1773,13 @@ function applyOutput(target, callback) {
   RC_CB = callback || null;
   if (target !== STATE.activeOutput) fuseRecord();
   log("apply:", STATE.activeOutput, "->", target);
+  shadowRecord("apply>" + target);
 
   if (target === -1) {
+    // A Pro1 has exactly one output: drive it directly rather than through
+    // turnOffAllSwitches(), whose per-output queueTask hop would add a
+    // needless 200ms to every stop on the device that actually runs the pump.
+    if (STATE.deviceType !== "pro3") { setOutput(0, false, applyDone); return; }
     turnOffAllSwitches(applyDone);
     return;
   }
@@ -1659,6 +1825,7 @@ function cycleOutputs() {
 
   var nextOutput = nextCycleOutput();
   log("Cycling from", STATE.activeOutput, "to", nextOutput);
+  setOverride(nextOutput);
   // #475 defect 1: this used to call setOutput()/turnOffAllSwitches()
   // directly and assign STATE.activeOutput itself, so a button-driven run
   // accrued no runtime and recorded no fuse change. Routed through the
@@ -1792,6 +1959,19 @@ function handleSwitchEvent(info) {
     return;
   }
 
+  // An out-of-band switch change (web UI, daemon, physical toggle) that
+  // contradicts the policy is adopted as a manual override, so the
+  // reconciler does not undo it on the next tick. A switch event that
+  // merely echoes our own actuation agrees with the policy by construction
+  // and sets no override; neither does one arriving while an actuation is
+  // still in flight.
+  var observed = info.state ? info.id : -1;
+  if (!RC_BUSY) {
+    var want = desiredOutput();
+    if (want !== -2 && want !== observed) setOverride(observed);
+  }
+  reconcile("switch event");
+
   if (STATE.deviceType === "pro3" && info.state === true) {
     // Ensure only one output is on (one at a time via the task queue — see turnOffOtherOutputs)
     var activatedOutput = info.id;
@@ -1825,9 +2005,10 @@ function handleSwitchEvent(info) {
 
 function handleInputEvent(info) {
   log("Input event:", info);
-  
+
   // Handle input:0 (water-supply)
   if (info.id === 0) {
+    setWater(info.state);
     handleWaterSupply(info.state);
   }
   // Input:1 (high-water) and input:2 (max-speed-active) are just notifications
@@ -1932,7 +2113,72 @@ function solarSoftTargetReached() {
 // on a periodic tick (see SOLAR.tickTimer in continueInit()) so staleness is
 // still detected even if no further MQTT message ever arrives (e.g. the
 // daemon dies while idle mid-hold-delay).
+// #476: keeps its hold-delay logic but is now a FACT PRODUCER. It writes
+// F_SOLAR_WANT (its own latched opinion, no longer the physical relay state)
+// and asks the reconciler to converge; it never drives the relay itself.
+//
+// Reading the *physical* state here was subtly wrong: a window-driven run
+// made `running` true, so solar skipped its start hysteresis entirely and
+// went straight to its stop branch — meaning "solar went away" cut a
+// scheduled run short. docs/pool-pump.md says solar layers on top of the
+// forecast schedule and "never replac[es] it"; with a latched opinion that
+// is finally true.
+function checkSolarWant() {
+  if (!CONFIG.solarEnabled) return F_SOLAR_WANT;
+
+  // Staleness is judged from the payload's own ts (SOLAR.publishedTs), not
+  // from when we last received a message (SOLAR.lastMsgTs) — see the comment
+  // on the SOLAR var above for why that distinction matters.
+  var now = Date.now();
+  if (SOLAR.publishedTs === 0 || (now - SOLAR.publishedTs) > CONFIG.solarStaleMs) {
+    SOLAR.aboveStartSince = 0;
+    SOLAR.belowStopSince = 0;
+    return false;   // stale/absent: the forecast-driven window decides alone
+  }
+
+  if (!F_SOLAR_WANT) {
+    if (SOLAR.availableW >= CONFIG.solarStartThresholdW) {
+      if (SOLAR.aboveStartSince === 0) SOLAR.aboveStartSince = now;
+      if (now - SOLAR.aboveStartSince >= CONFIG.solarStartDelayMs) {
+        SOLAR.aboveStartSince = 0;
+        return true;
+      }
+    } else {
+      SOLAR.aboveStartSince = 0;
+    }
+    return false;
+  }
+
+  if (solarSoftTargetReached() && SOLAR.availableW < CONFIG.solarStartThresholdW) {
+    SOLAR.belowStopSince = 0;
+    return false;
+  }
+  if (SOLAR.availableW < CONFIG.solarStopThresholdW) {
+    if (SOLAR.belowStopSince === 0) SOLAR.belowStopSince = now;
+    if (now - SOLAR.belowStopSince >= CONFIG.solarStopDelayMs) {
+      SOLAR.belowStopSince = 0;
+      return false;
+    }
+    return true;
+  }
+  SOLAR.belowStopSince = 0;
+  return true;
+}
+
 function checkSolarHysteresis() {
+  if (!CONFIG.solarEnabled) return;
+  var want = checkSolarWant();
+  if (want !== F_SOLAR_WANT) {
+    F_SOLAR_WANT = want;
+    reconcile(want ? "solar available" : "solar gone");
+  } else {
+    // The hard ceiling can be crossed without F_SOLAR_WANT moving.
+    reconcile(null);
+  }
+  legacyCheckSolarHysteresis();
+}
+
+function legacyCheckSolarHysteresis() {
   if (!CONFIG.solarEnabled) return;
 
   // Staleness is judged from the payload's own ts (SOLAR.publishedTs), not
@@ -2315,6 +2561,7 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
 
   if (!modeChanged && !hasTimings) {
     log('Mode already:', newMode, '- no changes needed');
+    queueTask(readWindow);   // #476: the window is still a fact we must own
     return;
   }
 
@@ -2392,6 +2639,10 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // day of filtration on 2026-08-06. Reconcile here, once, in the one
         // place that knows the window moved.
         if (windowChanged) queueTask(reconcileRunState);
+        // #476: the window is a fact with one writer. Re-read what we just
+        // wrote (named function, no closure) so setWindow() owns it from
+        // here on, instead of every decision paying its own Schedule.List.
+        queueTask(readWindow);
         return;
       }
       var sched = schedulesToUpdate[updateIndex];
@@ -2557,17 +2808,24 @@ function handleDailyCheck() {
   performDailyModeCheck();
 }
 
+// A schedule edge is the natural expiry for a manual override: whatever the
+// maintainer wanted by hand, they did not mean it to survive the next
+// scheduled start or stop.
 function handleMorningStart() {
-  // Morning start uses preferred_speed from KVS
+  clearOverride();
+  reconcile('morning start');
   doStart(CONFIG.preferredSpeed, 'Morning start event');
 }
 
 function handleEveningStop() {
+  clearOverride();
+  reconcile('evening stop');
   doStop('Evening stop event');
 }
 
 function handleNightStart() {
-  // Night start uses preferred_speed from KVS
+  clearOverride();
+  reconcile('night start');
   doStart(CONFIG.preferredSpeed, 'Night start event');
 }
 
@@ -2575,6 +2833,8 @@ function handleNightStop() {
   // Belt-and-suspenders midnight reset, in addition to the lazy per-write
   // check in persistRuntimeState/ensureRuntimeDay (#402).
   ensureRuntimeDay();
+  clearOverride();
+  reconcile('night stop');
   doStop('Night stop event');
 }
 
@@ -2731,6 +2991,7 @@ function finishContinueInit() {
       log('Step 2/4: Checking water supply status...');
       var input0 = Shelly.getComponentStatus('input:0');
       if (input0 && input0.state) {
+        setWater(true);
         handleWaterSupply(true);
       }
       next();
@@ -2743,6 +3004,9 @@ function finishContinueInit() {
       log('Step 4/4: Verifying schedules...');
       // Only Pro3 has schedules, but all devices verify
       verifySchedules(next);
+      // #476: seed the run-window fact once. From here on it is owned by
+      // setWindow(), rewritten only by updateScheduleMode().
+      queueTask(readWindow);
     }
   ];
 

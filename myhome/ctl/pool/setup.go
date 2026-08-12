@@ -139,6 +139,8 @@ Schedules are only created on Pro3 devices (detected by switch count).`,
 			SolarMinTurnover:     DefaultSolarMinTurnover,
 			SolarMaxTurnover:     DefaultSolarMaxTurnover,
 			SolarStaleMs:         DefaultSolarStaleMs,
+
+			OverrideMs: DefaultOverrideMs,
 		}
 
 		fmt.Printf("Configuring %s as a pool pump controller...\n", dev.Name())

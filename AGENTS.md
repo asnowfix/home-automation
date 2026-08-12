@@ -491,6 +491,71 @@ Rules:
 - After any `Script.Eval` against a production device, re-check `Script.GetStatus` — an eval that
   killed the script leaves it `running: false` and the pump uncontrolled.
 
+#### MANDATORY: never register a bare `script.eval` payload, never send an unwrapped `Script.Eval`
+
+This is the general form of the rule above, and issue #480 made it non-optional after measuring the
+same failure mode in two more places on `mezzanine`:
+
+```
+queueTask(function(){ null.x })            -> script DEAD
+Script.Eval with a bad expression          -> script DEAD ("FACTS" is not defined)
+```
+
+Wrapping loses nothing — the return value survives:
+
+```
+(function(){ try { return String(2+2) } catch(e) { return "ERR:"+e } })()  ->  "4"
+```
+
+So there is no case where skipping the wrapper is justified, including a "quick" ad-hoc probe.
+
+- **Every `Schedule.Create`/`Schedule.Update` job's `code` field must be built by a shared per-script
+  wrapper**, e.g. `pool-pump.js` and `garden.js`'s `wrapScheduleCall(handlerCall)`:
+
+  ```javascript
+  function wrapScheduleCall(handlerCall) {
+    return "(function(){try{" + handlerCall + "}catch(e){log('schedule handler error:',e)}})()";
+  }
+  // ...
+  code: wrapScheduleCall('handleMorningStart()')
+  ```
+
+  Route every registration through that one helper — never build a `code` string by hand at the call
+  site — so a schedule job added later can't slip through unwrapped. If code elsewhere reads the
+  `code` field back off a live `Schedule.List` (to identify which job is which), match by
+  **substring containment** (`code.indexOf('handleX()') !== -1`), not exact equality or prefix —
+  the wrapped field no longer equals the bare handler call.
+
+- **Every queued-task dispatcher must wrap the call it invokes.** Any script defining a `queueTask`/
+  `processTaskQueue` pair (`pool-pump.js`, `garden.js`, `blu-listener.js`) must wrap the single
+  `task()` invocation inside `processTaskQueue`, not each call site — this protects every
+  `queueTask()` caller at once:
+
+  ```javascript
+  var task = TASK_QUEUE[TASK_INDEX];
+  TASK_INDEX++;
+  try {
+    task();
+  } catch (e) {
+    log("queued task error:", e);
+  }
+  ```
+
+- **Never send an unwrapped ad-hoc `Script.Eval` to a live device, including for debugging.** A typo
+  in a throwaway diagnostic expression is exactly as fatal as a bug in production code. Wrap every
+  probe the same way: `(function(){ try { return <expr> } catch(e) { return "ERR:"+e } })()`.
+
+- **Every `Shelly.addEventHandler`/`Shelly.addStatusHandler`/`MQTT.subscribe` callback must be
+  wrapped too** — verified empirically on `mezzanine` (#480): an uncaught throw inside any of these
+  kills the whole script exactly like the unwrapped `queueTask`/`script.eval` cases above. Wrap the
+  callback's body **in place** — `try { ...existing body... } catch (e) { log(...) }` inside the
+  same function — rather than via a wrapping higher-order function. A HOF that returns a new
+  `function(x){ try{fn(x)}catch(e){...} }` adds one call frame to *every* dispatch through it, and
+  the main event dispatcher is typically the busiest handler in a script; on a device already close
+  to its stack ceiling (see the Callback Depth Limits section above), that extra frame can matter.
+  In-place wrapping adds zero call-stack depth. If the callback is a named function rather than an
+  inline one, wrap that function's own body directly.
+
 ### Script Lifecycle Logging
 
 Always add startup and stop logging to Shelly scripts:

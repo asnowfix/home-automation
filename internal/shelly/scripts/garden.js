@@ -192,9 +192,15 @@ function processTaskQueue() {
     TASK_INDEX = 0;
     return;
   }
+  // #480: an uncaught throw inside a queued task used to kill the whole
+  // script. Wrapping this single call site protects every queueTask() call.
   var task = TASK_QUEUE[TASK_INDEX];
   TASK_INDEX++;
-  task();
+  try {
+    task();
+  } catch (e) {
+    log("queued task error:", e);
+  }
 }
 
 function queueTask(task) {
@@ -739,6 +745,18 @@ function loadWateringQueue() {
 }
 
 // === SCHEDULE MANAGEMENT ===
+
+// #480: every script.eval payload a schedule job carries must be wrapped —
+// an uncaught throw inside an unwrapped handler kills the whole script.
+// Route every registration through this one helper so a future schedule job
+// can never be added unwrapped. The wrapped source always contains
+// handlerCall verbatim, so code that later reads the `code` field back off a
+// live Schedule.List (updatePlanSchedule, verifySchedules below) matches on
+// substring containment rather than exact equality.
+function wrapScheduleCall(handlerCall) {
+  return "(function(){try{" + handlerCall + "}catch(e){log('schedule handler error:',e)}})()";
+}
+
 function updatePlanSchedule(startH) {
   var ts = makeTimespec(startH);
   log("Updating watering schedule to " + ts);
@@ -754,7 +772,9 @@ function updatePlanSchedule(startH) {
       var job = result.jobs[i];
       if (job.calls && job.calls.length > 0) {
         var code = job.calls[0].params && job.calls[0].params.code;
-        if (code === "handleWateringStart()") {
+        // #480: code is wrapScheduleCall()'s wrapped source, not the bare
+        // handler call, so match by containment rather than exact equality.
+        if (code && code.indexOf("handleWateringStart()") !== -1) {
           jobId = job.id;
           break;
         }
@@ -827,12 +847,12 @@ function createSchedules(callback) {
     {
       enable: true,
       timespec: "0 30 0 * * SUN,MON,TUE,WED,THU,FRI,SAT",
-      calls: [{method: "script.eval", params: {id: scriptId, code: "handlePlan()"}}]
+      calls: [{method: "script.eval", params: {id: scriptId, code: wrapScheduleCall("handlePlan()")}}]
     },
     {
       enable: true,
       timespec: fallbackTs,
-      calls: [{method: "script.eval", params: {id: scriptId, code: "handleWateringStart()"}}]
+      calls: [{method: "script.eval", params: {id: scriptId, code: wrapScheduleCall("handleWateringStart()")}}]
     }
   ];
   var sIdx = 0;
@@ -868,8 +888,10 @@ function verifySchedules(cb) {
         var job = result.jobs[i];
         if (job.calls && job.calls.length > 0) {
           var code = job.calls[0].params && job.calls[0].params.code;
-          if (code === "handlePlan()") hasPlan = true;
-          if (code === "handleWateringStart()") hasWater = true;
+          // #480: code is wrapScheduleCall()'s wrapped source, not the bare
+          // handler call, so match by containment rather than exact equality.
+          if (code && code.indexOf("handlePlan()") !== -1) hasPlan = true;
+          if (code && code.indexOf("handleWateringStart()") !== -1) hasWater = true;
         }
       }
     }
@@ -1341,19 +1363,25 @@ function init() {
 }
 
 // === EVENT SUBSCRIPTION ===
+// #480 part 4: an uncaught throw inside this handler kills the whole script
+// (verified live on mezzanine). Wrapped in place -- no new call frame added.
 Shelly.addEventHandler(function(event) {
-  if (!event || !event.info) return;
-  var info = event.info;
-  if (info.event === "script_stop") {
-    log("Script stopping");
-    return;
-  }
-  if (typeof info.component === "string") {
-    if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
-      handleSwitchEvent(info);
-    } else if (info.component === "sys" && info.event === "sys_btn_push") {
-      cycleOutputs();
+  try {
+    if (!event || !event.info) return;
+    var info = event.info;
+    if (info.event === "script_stop") {
+      log("Script stopping");
+      return;
     }
+    if (typeof info.component === "string") {
+      if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
+        handleSwitchEvent(info);
+      } else if (info.component === "sys" && info.event === "sys_btn_push") {
+        cycleOutputs();
+      }
+    }
+  } catch (e) {
+    log("event handler error:", e);
   }
 });
 

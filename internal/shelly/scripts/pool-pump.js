@@ -630,9 +630,17 @@ function processTaskQueue() {
 
   // Execute next task; new tasks queued by the task itself extend TASK_QUEUE
   // and will be picked up on subsequent timer ticks.
+  // #480: an uncaught throw inside a queued task used to kill the whole
+  // script (verified live on mezzanine: queueTask(function(){ null.x })
+  // stopped the script). Wrapping this single call site protects every
+  // queueTask() call in the script.
   var task = TASK_QUEUE[TASK_INDEX];
   TASK_INDEX++;
-  task();
+  try {
+    task();
+  } catch (e) {
+    log("queued task error:", e);
+  }
 }
 
 function queueTask(task) {
@@ -1867,25 +1875,33 @@ var SOLAR = {
   tickTimer: null
 };
 
+// #480 part 4: an uncaught throw inside an MQTT.subscribe callback kills the
+// whole script (verified live on mezzanine with a real publish to a test
+// topic). Wrapped in place -- same function, no new call frame, so dispatch
+// isn't deeper than before.
 function onSolarAvailable(topic, message) {
-  var data = null;
   try {
-    data = JSON.parse(message);
+    var data = null;
+    try {
+      data = JSON.parse(message);
+    } catch (e) {
+      if (e && false) {}
+      return;
+    }
+    if (!data || typeof data.available_w !== "number") return;
+
+    SOLAR.availableW = data.available_w;
+    SOLAR.lastMsgTs = Date.now();
+    // ts is unix-epoch-seconds; convert to ms to compare against Date.now().
+    // This is the field staleness decisions are based on — see comment above.
+    if (typeof data.ts === "number") {
+      SOLAR.publishedTs = data.ts * 1000;
+    }
+
+    checkSolarHysteresis();
   } catch (e) {
-    if (e && false) {}
-    return;
+    log("mqtt handler error:", e);
   }
-  if (!data || typeof data.available_w !== "number") return;
-
-  SOLAR.availableW = data.available_w;
-  SOLAR.lastMsgTs = Date.now();
-  // ts is unix-epoch-seconds; convert to ms to compare against Date.now().
-  // This is the field staleness decisions are based on — see comment above.
-  if (typeof data.ts === "number") {
-    SOLAR.publishedTs = data.ts * 1000;
-  }
-
-  checkSolarHysteresis();
 }
 
 function subscribeSolarAvailable() {
@@ -2056,6 +2072,19 @@ function clearNonUpdateSchedules(callback) {
   });
 }
 
+// #480: every script.eval payload a schedule job carries must be wrapped —
+// an uncaught throw inside an unwrapped handler kills the whole script
+// (verified live on mezzanine: an ad-hoc bad Script.Eval killed the running
+// script with a ReferenceError). Route every registration through this one
+// helper so a future schedule job can never be added unwrapped. The wrapped
+// source always contains handlerCall verbatim, so code that later reads the
+// `code` field back off a live Schedule.List (isWithinRunWindow,
+// updateScheduleMode, verifySchedules below) matches on substring
+// containment rather than exact/prefix equality.
+function wrapScheduleCall(handlerCall) {
+  return "(function(){try{" + handlerCall + "}catch(e){log('schedule handler error:',e)}})()";
+}
+
 function createSchedules(callback) {
   log('Creating pool pump schedules...');
 
@@ -2069,7 +2098,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleDailyCheck()'
+          code: wrapScheduleCall('handleDailyCheck()')
         }
       }]
     },
@@ -2080,7 +2109,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleMorningStart()'
+          code: wrapScheduleCall('handleMorningStart()')
         }
       }]
     },
@@ -2091,7 +2120,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleEveningStop()'
+          code: wrapScheduleCall('handleEveningStop()')
         }
       }]
     },
@@ -2102,7 +2131,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleNightStart()'
+          code: wrapScheduleCall('handleNightStart()')
         }
       }]
     },
@@ -2113,7 +2142,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleNightStop()'
+          code: wrapScheduleCall('handleNightStop()')
         }
       }]
     }
@@ -2160,7 +2189,10 @@ function verifySchedules(cb) {
         var job = result.jobs[i];
         if (job.calls && job.calls.length > 0 && job.calls[0].method === 'script.eval') {
           var code = job.calls[0].params && job.calls[0].params.code;
-          if (code && (code.indexOf('handleNight') === 0 || code.indexOf('handleDaily') === 0 || code.indexOf('handleMorning') === 0 || code.indexOf('handleEvening') === 0)) {
+          // #480: code carries wrapScheduleCall()'s wrapper boilerplate, not
+          // just the bare handler call, so match by containment rather than
+          // by prefix.
+          if (code && (code.indexOf('handleNight') !== -1 || code.indexOf('handleDaily') !== -1 || code.indexOf('handleMorning') !== -1 || code.indexOf('handleEvening') !== -1)) {
             hasPoolSchedules = true;
             break;
           }
@@ -2281,8 +2313,10 @@ function isWithinRunWindow(cb) {
       var job = result.jobs[i];
       if (!job.enable || !job.calls || job.calls.length === 0) continue;
       var code = job.calls[0].params && job.calls[0].params.code;
-      if (code === sc) a = parseHM(job.timespec);
-      else if (code === ec) b = parseHM(job.timespec);
+      // #480: code is wrapScheduleCall()'s wrapped source, not the bare
+      // handler call, so match by containment rather than exact equality.
+      if (code && code.indexOf(sc) !== -1) a = parseHM(job.timespec);
+      else if (code && code.indexOf(ec) !== -1) b = parseHM(job.timespec);
     }
 
     if (a === null || b === null) { cb(null); return; }
@@ -2343,22 +2377,26 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
       var job = result.jobs[i];
       if (job.calls && job.calls.length > 0) {
         var code = job.calls[0].params && job.calls[0].params.code;
-        if (code === 'handleMorningStart()') {
-          var updM = {id: job.id, enable: newMode === 'summer', name: code};
+        // #480: code is wrapScheduleCall()'s wrapped source, not the bare
+        // handler call, so match by containment. `name` is set to the short
+        // handler literal (not the matched `code`) so log lines stay
+        // readable instead of printing the whole wrapper.
+        if (code && code.indexOf('handleMorningStart()') !== -1) {
+          var updM = {id: job.id, enable: newMode === 'summer', name: 'handleMorningStart()'};
           if (hasTimings && newMode === 'summer') {
             updM.timespec = makeTimespec(morningStartHours);
           }
           if (moves(job, updM)) windowChanged = true;
           schedulesToUpdate.push(updM);
-        } else if (code === 'handleEveningStop()') {
-          var updE = {id: job.id, enable: newMode === 'summer', name: code};
+        } else if (code && code.indexOf('handleEveningStop()') !== -1) {
+          var updE = {id: job.id, enable: newMode === 'summer', name: 'handleEveningStop()'};
           if (hasTimings && newMode === 'summer') {
             updE.timespec = makeTimespec(eveningStopHours);
           }
           if (moves(job, updE)) windowChanged = true;
           schedulesToUpdate.push(updE);
-        } else if (code === 'handleNightStart()' || code === 'handleNightStop()') {
-          var updN = {id: job.id, enable: newMode === 'winter', name: code};
+        } else if (code && (code.indexOf('handleNightStart()') !== -1 || code.indexOf('handleNightStop()') !== -1)) {
+          var updN = {id: job.id, enable: newMode === 'winter', name: code.indexOf('handleNightStart()') !== -1 ? 'handleNightStart()' : 'handleNightStop()'};
           if (moves(job, updN)) windowChanged = true;
           schedulesToUpdate.push(updN);
         }
@@ -2751,30 +2789,41 @@ function finishContinueInit() {
 }
 
 // === EVENT SUBSCRIPTION ===
+// #480 part 4: an uncaught throw inside this handler kills the whole script
+// (verified live on mezzanine: a throwing addEventHandler callback, triggered
+// by a real Switch.Set, crashed the script identically to the unwrapped
+// queueTask/script.eval cases). Wrapped in place -- no extra function layer
+// around the callback, so dispatch adds no new call frame; every event still
+// goes through exactly the frames it did before, just with a try/catch
+// around the existing body.
 Shelly.addEventHandler(function(event) {
-  if (!event || !event.info) return;
-  
-  var info = event.info;
-  
-  // Handle script stop event
-  if (info.event === "script_stop") {
-    log("Script stopping");
-    return;
-  }
-  
-  // Handle component events
-  if (typeof info.component === "string") {
-    if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
-      handleSwitchEvent(info);
-    } else if (info.component.indexOf("input:") === 0 && typeof info.state === "boolean") {
-      handleInputEvent(info);
-    } else if (info.component === "sys" && info.event === "sys_btn_push") {
-      handleButtonEvent(info);
-    } else {
-      log("Unhandled component event:", JSON.stringify(info));
+  try {
+    if (!event || !event.info) return;
+
+    var info = event.info;
+
+    // Handle script stop event
+    if (info.event === "script_stop") {
+      log("Script stopping");
+      return;
     }
-  } else {
-    log("Unhandled event:", JSON.stringify(info));
+
+    // Handle component events
+    if (typeof info.component === "string") {
+      if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
+        handleSwitchEvent(info);
+      } else if (info.component.indexOf("input:") === 0 && typeof info.state === "boolean") {
+        handleInputEvent(info);
+      } else if (info.component === "sys" && info.event === "sys_btn_push") {
+        handleButtonEvent(info);
+      } else {
+        log("Unhandled component event:", JSON.stringify(info));
+      }
+    } else {
+      log("Unhandled event:", JSON.stringify(info));
+    }
+  } catch (e) {
+    log("event handler error:", e);
   }
 });
 

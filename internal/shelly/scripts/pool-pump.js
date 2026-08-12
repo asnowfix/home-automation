@@ -1890,8 +1890,16 @@ function onSolarAvailable(topic, message) {
 
 function subscribeSolarAvailable() {
   if (!CONFIG.solarEnabled) return;
+  // Log BEFORE the subscribe, never after. Calling log() on the line
+  // immediately following MQTT.subscribe() reliably kills the script with
+  // "Too much recursion - the stack is about to overflow" on a Pro1, even
+  // with ~23 KB of heap free (#474). Measured on `mezzanine` 2026-08-12:
+  // this exact call after the subscribe crashes init every time; the same
+  // call one line earlier runs fine. log() is only ever the innermost
+  // frame, not the cause -- it is simply the first thing to touch the
+  // stack on return from the subscribe.
+  log("Subscribing to myhome/energy/solar/available");
   MQTT.subscribe("myhome/energy/solar/available", onSolarAvailable);
-  log("Subscribed to myhome/energy/solar/available");
 }
 
 // Hard ceiling (pool volumes/day): pump always stops (and won't solar-start)

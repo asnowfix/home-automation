@@ -135,6 +135,32 @@ Shelly devices run a **modified version of Espruino** JavaScript interpreter. Es
    - ⚠️ `let`/`const` - Supported in Espruino v2.14+, but `var` is safer for compatibility
    - **Recommendation**: Use `var` for maximum compatibility
 
+3. **Never call anything on the line after `MQTT.subscribe()` - CRITICAL**
+   - ⚠️ Calling a function immediately after `MQTT.subscribe()` returns reliably kills the script
+     with `Too much recursion - the stack is about to overflow`, **even with ~23 KB of heap free**
+   - The failing call is only ever the innermost frame in the trace, not the cause. It is simply
+     the first thing to touch the stack on return from the subscribe
+   - Measured on a Pro1 (`mezzanine`, 2026-08-12, issue #474), three controlled arms on
+     byte-verified code:
+
+   ```javascript
+   // BROKEN - crashes init every time, with solar-enabled=true
+   MQTT.subscribe("myhome/energy/solar/available", onSolarAvailable);
+   log("Subscribed to myhome/energy/solar/available");
+
+   // WORKS - the same log call, one line earlier
+   log("Subscribing to myhome/energy/solar/available");
+   MQTT.subscribe("myhome/energy/solar/available", onSolarAvailable);
+
+   // ALSO WORKS - no call after the subscribe at all
+   MQTT.subscribe("myhome/energy/solar/available", onSolarAvailable);
+   ```
+
+   - This cost a full day of production filtration: the pump ran with solar disabled because the
+     script would not start. The emulator cannot catch it - goja has no such stack limit
+   - **Rule**: put any logging *before* the subscribe, and make `MQTT.subscribe()` the last
+     statement in its function
+
 3. **Function Definition Order - CRITICAL**
    - ⚠️ **No hoisting**: Functions must be defined BEFORE they are used
    - This applies to ALL function references, including those passed to callbacks

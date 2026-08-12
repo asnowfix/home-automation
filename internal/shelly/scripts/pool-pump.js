@@ -1542,8 +1542,8 @@ var F_WATER      = false;  // input:0 state           — written only by setWat
 var F_SOLAR_WANT = false;  // solar hysteresis opinion — written only by checkSolarHysteresis()
 var F_WIN_START  = -1;     // run-window start, minutes since midnight — written only by setWindow()
 var F_WIN_STOP   = -1;     // run-window stop,  minutes since midnight — written only by setWindow()
-var F_OVR_WANT   = -2;     // manual override: -2 none, -1 off, >=0 switch id — setOverride()/clearOverride()
-var F_OVR_UNTIL  = 0;      // override expiry, ms epoch                      — setOverride()/clearOverride()
+var F_OVR_WANT   = -2;     // manual override: -2 none, -1 off, >=0 switch id — cycleOutputs()/handleSwitchEvent()/clearOverride()
+var F_OVR_UNTIL  = 0;      // override expiry, ms epoch                      — same three writers
 
 function setWater(active) {
   if (active === F_WATER) return;
@@ -1567,25 +1567,11 @@ function setWindow(startMin, stopMin) {
 // it makes "a human moved this" a fact the policy can see, bounded by
 // CONFIG.overrideMs and cleared at the next schedule edge, whichever is
 // sooner.
-function setOverride(want) {
-  F_OVR_WANT = want;
-  F_OVR_UNTIL = Date.now() + CONFIG.overrideMs;
-  log("override:", want, "for", CONFIG.overrideMs, "ms");
-}
-
 function clearOverride() {
   if (F_OVR_WANT === -2) return;
   log("override cleared");
   F_OVR_WANT = -2;
   F_OVR_UNTIL = 0;
-}
-
-function withinWindow() {
-  if (F_WIN_START < 0 || F_WIN_STOP < 0) return false;
-  var d = new Date();
-  var n = d.getHours() * 60 + d.getMinutes();
-  if (F_WIN_START <= F_WIN_STOP) return n >= F_WIN_START && n < F_WIN_STOP;
-  return n >= F_WIN_START || n < F_WIN_STOP;   // wraps midnight (winter run)
 }
 
 // === LAYER 2: THE POLICY (#476) ===
@@ -1611,8 +1597,14 @@ function desiredOutput() {
   if (F_OVR_WANT !== -2 && Date.now() < F_OVR_UNTIL) return F_OVR_WANT;
   if (CONFIG.solarEnabled && solarHardCeilingReached()) return -1;
   if (F_SOLAR_WANT) return mapSpeedToSwitch(CONFIG.preferredSpeed);
-  if (F_WIN_START < 0) return -2;                                // window unknown: do not act
-  if (withinWindow()) return mapSpeedToSwitch(CONFIG.preferredSpeed);
+  if (F_WIN_START < 0 || F_WIN_STOP < 0) return -2;              // window unknown: do not act
+  var d = new Date();
+  var n = d.getHours() * 60 + d.getMinutes();
+  // A start > stop pair wraps past midnight (the fixed winter 23:15 -> 00:15 run).
+  var inside = F_WIN_START <= F_WIN_STOP
+    ? (n >= F_WIN_START && n < F_WIN_STOP)
+    : (n >= F_WIN_START || n < F_WIN_STOP);
+  if (inside) return mapSpeedToSwitch(CONFIG.preferredSpeed);
   return -1;
 }
 
@@ -1691,7 +1683,7 @@ function reconcileNow() {
   }
 
   if (want === STATE.activeOutput) return;
-  applyOutput(want, null);
+  applyOutput(want);
 }
 
 // === THE SINGLE SERIALISED ACTUATOR (#476) ===
@@ -1721,7 +1713,6 @@ function reconcileNow() {
 // a fresh stack.
 var RC_BUSY = false;      // an actuation is in flight
 var RC_TARGET = -1;       // the output the in-flight actuation drives towards
-var RC_CB = null;         // continuation for the in-flight actuation
 
 function applyOutputOn() {
   setOutput(RC_TARGET, true, applyDone);
@@ -1751,14 +1742,11 @@ function applyDone() {
   saveState();
 
   RC_BUSY = false;
-  var cb = RC_CB;
-  RC_CB = null;
-  if (cb) cb();
   // Converge: the facts may have moved while we were busy.
   reconcile(null);
 }
 
-function applyOutput(target, callback) {
+function applyOutput(target) {
   if (RC_BUSY) {
     // Never nest a second Switch.Set chain inside the first (#450). The
     // reconciler will re-evaluate from applyDone().
@@ -1769,7 +1757,6 @@ function applyOutput(target, callback) {
 
   RC_BUSY = true;
   RC_TARGET = target;
-  RC_CB = callback || null;
   if (target !== STATE.activeOutput) fuseRecord();
   log("apply:", STATE.activeOutput, "->", target);
 
@@ -1790,16 +1777,6 @@ function applyOutput(target, callback) {
 }
 
 // === BUTTON HANDLING ===
-// Returns the output the button should cycle to next, given the current one.
-// Pro3 cycles all-off -> 0 -> 1 -> 2 -> all-off; a Pro1 simply toggles.
-function nextCycleOutput() {
-  if (STATE.deviceType !== "pro3") return STATE.activeOutput === -1 ? 0 : -1;
-  if (STATE.activeOutput === -1) return 0;
-  if (STATE.activeOutput === 0) return 1;
-  if (STATE.activeOutput === 1) return 2;
-  return -1;
-}
-
 function cycleOutputs() {
   log("Button pressed, cycling outputs");
 
@@ -1810,7 +1787,13 @@ function cycleOutputs() {
     return;
   }
 
-  var nextOutput = nextCycleOutput();
+  // Pro3 cycles all-off -> 0 -> 1 -> 2 -> all-off; a Pro1 simply toggles.
+  var nextOutput = -1;
+  if (STATE.deviceType !== "pro3") {
+    if (STATE.activeOutput === -1) nextOutput = 0;
+  } else if (STATE.activeOutput === -1) nextOutput = 0;
+  else if (STATE.activeOutput === 0) nextOutput = 1;
+  else if (STATE.activeOutput === 1) nextOutput = 2;
   log("Cycling from", STATE.activeOutput, "to", nextOutput);
   // #475 defect 1: this used to call setOutput()/turnOffAllSwitches()
   // directly and assign STATE.activeOutput itself, so a button-driven run
@@ -1818,7 +1801,8 @@ function cycleOutputs() {
   // a manual override — and lets the reconciler drive the relay, so a button
   // run is accounted for exactly like a scheduled one and an ON is refused
   // while the fuse is tripped.
-  setOverride(nextOutput);
+  F_OVR_WANT = nextOutput;
+  F_OVR_UNTIL = Date.now() + CONFIG.overrideMs;
   reconcile("button");
 }
 
@@ -1840,7 +1824,11 @@ function handleSwitchEvent(info) {
   // and sets no override; neither does one arriving mid-actuation.
   if (!RC_BUSY) {
     var want = desiredOutput();
-    if (want !== -2 && want !== observed) setOverride(observed);
+    if (want !== -2 && want !== observed) {
+      log("override: adopting out-of-band", observed);
+      F_OVR_WANT = observed;
+      F_OVR_UNTIL = Date.now() + CONFIG.overrideMs;
+    }
   }
 
   STATE.activeOutput = observed;
@@ -1966,8 +1954,18 @@ function solarSoftTargetReached() {
 // scheduled run short. docs/pool-pump.md says solar layers on top of the
 // forecast schedule and "never replac[es] it"; with a latched opinion that
 // is finally true.
-function checkSolarWant() {
-  if (!CONFIG.solarEnabled) return F_SOLAR_WANT;
+function solarWant(want) {
+  if (want === F_SOLAR_WANT) {
+    // The hard ceiling can be crossed without F_SOLAR_WANT moving.
+    reconcile(null);
+    return;
+  }
+  F_SOLAR_WANT = want;
+  reconcile(want ? "solar available" : "solar gone");
+}
+
+function checkSolarHysteresis() {
+  if (!CONFIG.solarEnabled) return;
 
   // Staleness is judged from the payload's own ts (SOLAR.publishedTs), not
   // from when we last received a message (SOLAR.lastMsgTs) — see the comment
@@ -1976,48 +1974,43 @@ function checkSolarWant() {
   if (SOLAR.publishedTs === 0 || (now - SOLAR.publishedTs) > CONFIG.solarStaleMs) {
     SOLAR.aboveStartSince = 0;
     SOLAR.belowStopSince = 0;
-    return false;   // stale/absent: the forecast-driven window decides alone
+    solarWant(false);   // stale/absent: the forecast-driven window decides alone
+    return;
   }
 
   if (!F_SOLAR_WANT) {
-    if (SOLAR.availableW >= CONFIG.solarStartThresholdW) {
-      if (SOLAR.aboveStartSince === 0) SOLAR.aboveStartSince = now;
-      if (now - SOLAR.aboveStartSince >= CONFIG.solarStartDelayMs) {
-        SOLAR.aboveStartSince = 0;
-        return true;
-      }
-    } else {
+    if (SOLAR.availableW < CONFIG.solarStartThresholdW) {
       SOLAR.aboveStartSince = 0;
+      solarWant(false);
+      return;
     }
-    return false;
+    if (SOLAR.aboveStartSince === 0) SOLAR.aboveStartSince = now;
+    if (now - SOLAR.aboveStartSince < CONFIG.solarStartDelayMs) {
+      solarWant(false);
+      return;
+    }
+    SOLAR.aboveStartSince = 0;
+    solarWant(true);
+    return;
   }
 
   if (solarSoftTargetReached() && SOLAR.availableW < CONFIG.solarStartThresholdW) {
     SOLAR.belowStopSince = 0;
-    return false;
+    solarWant(false);
+    return;
   }
-  if (SOLAR.availableW < CONFIG.solarStopThresholdW) {
-    if (SOLAR.belowStopSince === 0) SOLAR.belowStopSince = now;
-    if (now - SOLAR.belowStopSince >= CONFIG.solarStopDelayMs) {
-      SOLAR.belowStopSince = 0;
-      return false;
-    }
-    return true;
+  if (SOLAR.availableW >= CONFIG.solarStopThresholdW) {
+    SOLAR.belowStopSince = 0;
+    solarWant(true);
+    return;
+  }
+  if (SOLAR.belowStopSince === 0) SOLAR.belowStopSince = now;
+  if (now - SOLAR.belowStopSince < CONFIG.solarStopDelayMs) {
+    solarWant(true);
+    return;
   }
   SOLAR.belowStopSince = 0;
-  return true;
-}
-
-function checkSolarHysteresis() {
-  if (!CONFIG.solarEnabled) return;
-  var want = checkSolarWant();
-  if (want !== F_SOLAR_WANT) {
-    F_SOLAR_WANT = want;
-    reconcile(want ? "solar available" : "solar gone");
-  } else {
-    // The hard ceiling can be crossed without F_SOLAR_WANT moving.
-    reconcile(null);
-  }
+  solarWant(false);
 }
 
 // === MQTT SETUP ===
@@ -2218,6 +2211,12 @@ function verifySchedules(cb) {
     }
 
     log('Pool pump schedules verified');
+    // #476: seed the run-window fact from the jobs we already have in hand.
+    // A separate Schedule.List at init cost ~670 bytes of mem_peak on a Pro1
+    // (measured on `mezzanine` 2026-08-12) purely to parse the same response
+    // twice. From here on the window is owned by setWindow(), rewritten only
+    // by updateScheduleMode().
+    onWindowJobs(result, null);
     if (typeof cb === 'function') queueTask(function() { cb(); });
   });
 }
@@ -2312,8 +2311,7 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
 
   if (!modeChanged && !hasTimings) {
     log('Mode already:', newMode, '- no changes needed');
-    queueTask(readWindow);   // #476: the window is still a fact we must own
-    return;
+    return;   // nothing written, so the window fact cannot have moved
   }
 
   if (modeChanged) {
@@ -2390,11 +2388,14 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // day of filtration on 2026-08-06. Reconcile here, once, in the one
         // place that knows the window moved.
         // #476: the window is a fact with one writer. Re-read what we just
-        // wrote (named function, no closure) so setWindow() owns it from
-        // here on, instead of every decision paying its own Schedule.List.
-        // setWindow() reconciles only when the window actually moved, which
-        // is what the old `windowChanged` bookkeeping existed to decide.
-        queueTask(readWindow);
+        // wrote (named function reference, so no closure is allocated) so
+        // setWindow() owns it from here on, instead of every decision paying
+        // its own Schedule.List. Gated on windowChanged: a no-op re-run --
+        // the common case at sunrise when the forecast yields yesterday's
+        // window -- must not buy a Schedule.List response parse for nothing.
+        // Measured on `mezzanine` 2026-08-12: an ungated re-read lands on top
+        // of the Open-Meteo JSON.parse and costs ~670 bytes of mem_peak.
+        if (windowChanged) queueTask(readWindow);
         return;
       }
       var sched = schedulesToUpdate[updateIndex];
@@ -2682,9 +2683,6 @@ function finishContinueInit() {
       log('Step 4/4: Verifying schedules...');
       // Only Pro3 has schedules, but all devices verify
       verifySchedules(next);
-      // #476: seed the run-window fact once. From here on it is owned by
-      // setWindow(), rewritten only by updateScheduleMode().
-      queueTask(readWindow);
     }
   ];
 

@@ -545,6 +545,17 @@ So there is no case where skipping the wrapper is justified, including a "quick"
   in a throwaway diagnostic expression is exactly as fatal as a bug in production code. Wrap every
   probe the same way: `(function(){ try { return <expr> } catch(e) { return "ERR:"+e } })()`.
 
+- **Every `Shelly.addEventHandler`/`Shelly.addStatusHandler`/`MQTT.subscribe` callback must be
+  wrapped too** — verified empirically on `mezzanine` (#480): an uncaught throw inside any of these
+  kills the whole script exactly like the unwrapped `queueTask`/`script.eval` cases above. Wrap the
+  callback's body **in place** — `try { ...existing body... } catch (e) { log(...) }` inside the
+  same function — rather than via a wrapping higher-order function. A HOF that returns a new
+  `function(x){ try{fn(x)}catch(e){...} }` adds one call frame to *every* dispatch through it, and
+  the main event dispatcher is typically the busiest handler in a script; on a device already close
+  to its stack ceiling (see the Callback Depth Limits section above), that extra frame can matter.
+  In-place wrapping adds zero call-stack depth. If the callback is a named function rather than an
+  inline one, wrap that function's own body directly.
+
 ### Script Lifecycle Logging
 
 Always add startup and stop logging to Shelly scripts:

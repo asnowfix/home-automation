@@ -1875,25 +1875,33 @@ var SOLAR = {
   tickTimer: null
 };
 
+// #480 part 4: an uncaught throw inside an MQTT.subscribe callback kills the
+// whole script (verified live on mezzanine with a real publish to a test
+// topic). Wrapped in place -- same function, no new call frame, so dispatch
+// isn't deeper than before.
 function onSolarAvailable(topic, message) {
-  var data = null;
   try {
-    data = JSON.parse(message);
+    var data = null;
+    try {
+      data = JSON.parse(message);
+    } catch (e) {
+      if (e && false) {}
+      return;
+    }
+    if (!data || typeof data.available_w !== "number") return;
+
+    SOLAR.availableW = data.available_w;
+    SOLAR.lastMsgTs = Date.now();
+    // ts is unix-epoch-seconds; convert to ms to compare against Date.now().
+    // This is the field staleness decisions are based on — see comment above.
+    if (typeof data.ts === "number") {
+      SOLAR.publishedTs = data.ts * 1000;
+    }
+
+    checkSolarHysteresis();
   } catch (e) {
-    if (e && false) {}
-    return;
+    log("mqtt handler error:", e);
   }
-  if (!data || typeof data.available_w !== "number") return;
-
-  SOLAR.availableW = data.available_w;
-  SOLAR.lastMsgTs = Date.now();
-  // ts is unix-epoch-seconds; convert to ms to compare against Date.now().
-  // This is the field staleness decisions are based on — see comment above.
-  if (typeof data.ts === "number") {
-    SOLAR.publishedTs = data.ts * 1000;
-  }
-
-  checkSolarHysteresis();
 }
 
 function subscribeSolarAvailable() {
@@ -2781,30 +2789,41 @@ function finishContinueInit() {
 }
 
 // === EVENT SUBSCRIPTION ===
+// #480 part 4: an uncaught throw inside this handler kills the whole script
+// (verified live on mezzanine: a throwing addEventHandler callback, triggered
+// by a real Switch.Set, crashed the script identically to the unwrapped
+// queueTask/script.eval cases). Wrapped in place -- no extra function layer
+// around the callback, so dispatch adds no new call frame; every event still
+// goes through exactly the frames it did before, just with a try/catch
+// around the existing body.
 Shelly.addEventHandler(function(event) {
-  if (!event || !event.info) return;
-  
-  var info = event.info;
-  
-  // Handle script stop event
-  if (info.event === "script_stop") {
-    log("Script stopping");
-    return;
-  }
-  
-  // Handle component events
-  if (typeof info.component === "string") {
-    if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
-      handleSwitchEvent(info);
-    } else if (info.component.indexOf("input:") === 0 && typeof info.state === "boolean") {
-      handleInputEvent(info);
-    } else if (info.component === "sys" && info.event === "sys_btn_push") {
-      handleButtonEvent(info);
-    } else {
-      log("Unhandled component event:", JSON.stringify(info));
+  try {
+    if (!event || !event.info) return;
+
+    var info = event.info;
+
+    // Handle script stop event
+    if (info.event === "script_stop") {
+      log("Script stopping");
+      return;
     }
-  } else {
-    log("Unhandled event:", JSON.stringify(info));
+
+    // Handle component events
+    if (typeof info.component === "string") {
+      if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
+        handleSwitchEvent(info);
+      } else if (info.component.indexOf("input:") === 0 && typeof info.state === "boolean") {
+        handleInputEvent(info);
+      } else if (info.component === "sys" && info.event === "sys_btn_push") {
+        handleButtonEvent(info);
+      } else {
+        log("Unhandled component event:", JSON.stringify(info));
+      }
+    } else {
+      log("Unhandled event:", JSON.stringify(info));
+    }
+  } catch (e) {
+    log("event handler error:", e);
   }
 });
 

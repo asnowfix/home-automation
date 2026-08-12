@@ -354,8 +354,15 @@ function onSwitchSetOnResponse(idx, follow, mac, resp, err) {
   else log("Turned on", follow.switchIdStr, "for", mac, "auto_off=", follow.autoOff, "s");
 }
 
+// #480 part 4: an uncaught throw inside an MQTT.subscribe callback kills the
+// whole script (verified live on mezzanine). Wrapped in place -- same
+// function, no new call frame.
 function onMqttMessage(t, m, r) {
-  handleBluEvent(t, m);
+  try {
+    handleBluEvent(t, m);
+  } catch (e) {
+    log("mqtt handler error:", e);
+  }
 }
 
 function subscribeMqtt() {

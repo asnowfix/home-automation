@@ -1363,19 +1363,25 @@ function init() {
 }
 
 // === EVENT SUBSCRIPTION ===
+// #480 part 4: an uncaught throw inside this handler kills the whole script
+// (verified live on mezzanine). Wrapped in place -- no new call frame added.
 Shelly.addEventHandler(function(event) {
-  if (!event || !event.info) return;
-  var info = event.info;
-  if (info.event === "script_stop") {
-    log("Script stopping");
-    return;
-  }
-  if (typeof info.component === "string") {
-    if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
-      handleSwitchEvent(info);
-    } else if (info.component === "sys" && info.event === "sys_btn_push") {
-      cycleOutputs();
+  try {
+    if (!event || !event.info) return;
+    var info = event.info;
+    if (info.event === "script_stop") {
+      log("Script stopping");
+      return;
     }
+    if (typeof info.component === "string") {
+      if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
+        handleSwitchEvent(info);
+      } else if (info.component === "sys" && info.event === "sys_btn_push") {
+        cycleOutputs();
+      }
+    }
+  } catch (e) {
+    log("event handler error:", e);
   }
 });
 

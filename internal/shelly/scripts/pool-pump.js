@@ -2591,8 +2591,22 @@ function enforceOutputState() {
   // deliberately: a crash-restart OUTSIDE the run window now stops a pump
   // that was running by hand, because no switch:N event survives a restart
   // to have set an override. Stopping is the safe direction.
+  //
+  // #474 class: startRuntimeAccounting() must NOT run inline here either.
+  // enforceOutputState() is itself called synchronously at the top of
+  // finishContinueInit(), i.e. still inside the fully synchronous
+  // init -> loadConfig(cb) -> continueInit -> loadState -> finishContinueInit
+  // chain that #474 already found the interpreter stack has no headroom
+  // left for by the time it reaches this depth. Calling
+  // startRuntimeAccounting() -> ensureRuntimeDay() -> reconcileRuntimeState()
+  // -> log() inline crashed at init on `mezzanine` (Pro1) 2026-08-12 with
+  // "Too much recursion" whenever the pump/light was already ON at script
+  // restart (STATE.activeOutput !== -1) -- exactly the #474 mechanism, at a
+  // second call site the reconciler refactor introduced. Deferred the same
+  // way as setupMQTT(): a named function passed to queueTask allocates no
+  // closure and runs on a fresh stack.
   if (STATE.activeOutput !== -1) {
-    startRuntimeAccounting();
+    queueTask(startRuntimeAccounting);
   }
 }
 

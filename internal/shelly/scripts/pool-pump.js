@@ -1514,7 +1514,12 @@ function fuseAllowOn() {
         (FUSE_COOLDOWN_MS / 1000) + "s");
     FUSE_TRIPPED = true;
     FUSE_TRIP_TIME = now;
-    turnOffAllSwitches();
+    // A trip is a FACT, not an action. This used to call
+    // turnOffAllSwitches() here — from inside activateOutput(), which then
+    // returned false and went on to issue its OWN off-chain, so two
+    // overlapping Switch.Set sequences ran on the same outputs. Returning
+    // false is enough: the caller forces the target to -1 and the single
+    // actuator drives that one chain.
     Shelly.emitEvent("pool.fuse_tripped", {
       changes: FUSE_CHANGES.length,
       window_s: FUSE_WINDOW_MS / 1000,
@@ -1526,73 +1531,122 @@ function fuseAllowOn() {
   return true;
 }
 
-function activateOutput(outputId, callback) {
-  log("Activating output:", outputId);
+// === THE SINGLE SERIALISED ACTUATOR (#476) ===
+//
+// applyOutput()/applyDone() are the ONLY code in this script permitted to
+// drive the pump relay. Everything that wants the pump in a different state
+// goes through applyOutput(); nothing else calls setOutput()/
+// turnOffAllSwitches()/turnOffOtherOutputs() on the pump outputs.
+//
+// Why: before this, TWELVE paths reached the hardware (see #475), four of
+// them assigning STATE.activeOutput and calling setOutput() directly. Two
+// consequences, both observed in production:
+//
+//   - a second event arriving inside an in-flight Switch.Set started a
+//     second chain nested in the first, and the nesting grew until the
+//     interpreter stack overflowed (#450);
+//   - button- and web-UI-driven runs accrued NO runtime and recorded NO
+//     fuse change, because startRuntimeAccounting()/fuseRecord() were only
+//     reachable from activateOutput() (#475 defect 1).
+//
+// RC_BUSY is true from the moment an actuation starts until its final
+// Switch.Set callback has run. A request arriving while it is set is not
+// executed inline (that is exactly the #450 nesting); it is recorded in
+// RC_PENDING and dispatched from applyDone() via queueTask, i.e. on a fresh
+// interpreter stack. Requests coalesce: only the LATEST pending target
+// survives, which is the correct answer for a level-triggered controller —
+// an input flapping faster than a Switch.Set round trip must settle on the
+// last observed state, not replay every intermediate one.
+var RC_BUSY = false;      // an actuation is in flight
+var RC_TARGET = -1;       // the output the in-flight actuation drives towards
+var RC_CB = null;         // continuation for the in-flight actuation
+var RC_PENDING = -3;      // -3 = nothing pending; otherwise a queued target
+var RC_PENDING_CB = null;
 
-  // Software fuse: always allow OFF (-1), check fuse for ON activations
+function applyOutputOn() {
+  setOutput(RC_TARGET, true, applyDone);
+}
+
+// Dispatched via queueTask from applyDone(), never called inline, so a
+// follow-up actuation always starts from a fresh stack.
+function applyPending() {
+  var target = RC_PENDING;
+  var cb = RC_PENDING_CB;
+  RC_PENDING = -3;
+  RC_PENDING_CB = null;
+  if (target === -3) return;
+  applyOutput(target, cb);
+}
+
+// Edge-triggered side effects live here and ONLY here: this is the one
+// place that sees every on/off transition, for every caller, after the
+// hardware has actually moved.
+function applyDone() {
+  var was = STATE.activeOutput;
+  STATE.activeOutput = RC_TARGET;
+  saveState();
+
+  // Runtime/turnover tracking (#402).
+  if (was === -1 && RC_TARGET !== -1) startRuntimeAccounting();
+  else if (was !== -1 && RC_TARGET === -1) stopRuntimeAccounting();
+
+  RC_BUSY = false;
+  var cb = RC_CB;
+  RC_CB = null;
+  if (RC_PENDING !== -3) queueTask(applyPending);
+  if (cb) cb();
+}
+
+function applyOutput(target, callback) {
+  if (RC_BUSY) {
+    // Coalesce onto the in-flight actuation instead of nesting a second
+    // Switch.Set chain inside it (#450).
+    log("apply: deferring", target, "- actuation in flight");
+    RC_PENDING = target;
+    RC_PENDING_CB = callback || null;
+    return;
+  }
+
+  RC_BUSY = true;
+  RC_TARGET = target;
+  RC_CB = callback || null;
+  if (target !== STATE.activeOutput) fuseRecord();
+  log("apply:", STATE.activeOutput, "->", target);
+
+  if (target === -1) {
+    turnOffAllSwitches(applyDone);
+    return;
+  }
+  if (STATE.deviceType === "pro3") {
+    // Break-before-make: every other stage off first, then the target on.
+    turnOffOtherOutputs(target, applyOutputOn);
+    return;
+  }
+  applyOutputOn();
+}
+
+// Thin policy-free wrapper kept for the callers that still phrase their
+// intent as "activate this output": applies the software fuse, then hands
+// the (possibly forced-off) target to the single actuator.
+function activateOutput(outputId, callback) {
   if (outputId !== -1 && !fuseAllowOn()) {
     log("FUSE: activation refused, forcing off");
     outputId = -1;
   }
-
-  // Record actual state changes for fuse tracking
-  if (outputId !== STATE.activeOutput) {
-    fuseRecord();
-  }
-
-  // Runtime/turnover tracking (#402): STATE.activeOutput still holds the
-  // pre-transition value here, so this is the single place that sees every
-  // on/off transition regardless of caller (doStart, doStop,
-  // handleWaterSupply, button, anti-cycling fuse forced-off).
-  var wasRunning = STATE.activeOutput !== -1;
-  var willRun = outputId !== -1;
-  if (wasRunning !== willRun) {
-    if (willRun) startRuntimeAccounting();
-    else stopRuntimeAccounting();
-  }
-
-  if (STATE.deviceType === "pro3") {
-    (function(next) { next(); })(function() {
-      // Turn off all outputs (one at a time via the task queue — see turnOffAllSwitches)
-      turnOffAllSwitches(function() {
-        if (outputId !== -1) {
-          setOutput(outputId, true, function() {
-            STATE.activeOutput = outputId;
-
-            saveState();
-            if (callback) callback();
-          });
-        } else {
-          STATE.activeOutput = -1;
-          saveState();
-          if (callback) callback();
-        }
-      });
-    });
-  } else {
-    // Pro1: guard against activating while pro3 is on
-    var on = outputId === 0;
-    if (!on) {
-      // Turning off — no guard needed
-      setOutput(0, false, function() {
-        STATE.activeOutput = -1;
-        saveState();
-        if (callback) callback();
-      });
-      return;
-    }
-
-    // For Pro1 turning on: check if Pro3 is active, wait grace delay
-    // (This is handled by the cross-device protection logic)
-    setOutput(0, true, function() {
-      STATE.activeOutput = 0;
-      saveState();
-      if (callback) callback();
-    });
-  }
+  applyOutput(outputId, callback);
 }
 
 // === BUTTON HANDLING ===
+// Returns the output the button should cycle to next, given the current one.
+// Pro3 cycles all-off -> 0 -> 1 -> 2 -> all-off; a Pro1 simply toggles.
+function nextCycleOutput() {
+  if (STATE.deviceType !== "pro3") return STATE.activeOutput === -1 ? 0 : -1;
+  if (STATE.activeOutput === -1) return 0;
+  if (STATE.activeOutput === 0) return 1;
+  if (STATE.activeOutput === 1) return 2;
+  return -1;
+}
+
 function cycleOutputs() {
   log("Button pressed, cycling outputs");
 
@@ -1603,65 +1657,14 @@ function cycleOutputs() {
     return;
   }
 
-  if (STATE.deviceType === "pro3") {
-    // Cycle: all off → 0 → 1 → 2 → all off
-    var nextOutput;
-    if (STATE.activeOutput === -1) {
-      nextOutput = 0;
-    } else if (STATE.activeOutput === 0) {
-      nextOutput = 1;
-    } else if (STATE.activeOutput === 1) {
-      nextOutput = 2;
-    } else {
-      nextOutput = -1;
-    }
-
-    log("Cycling from", STATE.activeOutput, "to", nextOutput);
-
-    if (nextOutput === -1) {
-      // Target is OFF: turn off all speeds
-      log("Power off: turning off all speeds");
-      turnOffAllSwitches(function() {
-        STATE.activeOutput = -1;
-        saveState();
-      });
-    } else if (STATE.activeOutput === -1) {
-      // From OFF to speed: just turn on target speed
-      log("Power on: starting speed", nextOutput);
-      setOutput(nextOutput, true, function() {
-        STATE.activeOutput = nextOutput;
-        saveState();
-      });
-    } else {
-      // Speed-to-speed: make-before-break (turn ON new, then OFF old)
-      var prevOutput = STATE.activeOutput;
-      log("Speed change: ON speed", nextOutput, "then OFF speed", prevOutput);
-      setOutput(nextOutput, true, function() {
-        // New speed is now on, turn off the old speed
-        setOutput(prevOutput, false, function() {
-          STATE.activeOutput = nextOutput;
-          saveState();
-        });
-      });
-    }
-  } else {
-    // Pro1: simple toggle
-    var nextOutput = STATE.activeOutput === -1 ? 0 : -1;
-    log("Toggling from", STATE.activeOutput, "to", nextOutput);
-    if (nextOutput === -1) {
-      // Turning off
-      turnOffAllSwitches(function() {
-        STATE.activeOutput = -1;
-        saveState();
-      });
-    } else {
-      // Turning on
-      setOutput(0, true, function() {
-        STATE.activeOutput = 0;
-        saveState();
-      });
-    }
-  }
+  var nextOutput = nextCycleOutput();
+  log("Cycling from", STATE.activeOutput, "to", nextOutput);
+  // #475 defect 1: this used to call setOutput()/turnOffAllSwitches()
+  // directly and assign STATE.activeOutput itself, so a button-driven run
+  // accrued no runtime and recorded no fuse change. Routed through the
+  // single actuator, a button run is accounted for exactly like a
+  // scheduled one, and an ON is refused while the fuse is tripped.
+  activateOutput(nextOutput);
 }
 
 // === WATER SUPPLY PROTECTION ===
@@ -1776,11 +1779,16 @@ function finishWaterSupplyTransition() {
 function handleSwitchEvent(info) {
   log("Switch event:", info);
 
-  // Ignore switch events during water supply protection
+  // An out-of-band ON while water-supply protection is active must be
+  // undone. #475 defect 1: this used to call setOutput() directly, so the
+  // forced-off never recorded a fuse change and never closed a runtime
+  // interval. Route it through the single actuator instead — and never
+  // inline while one is already in flight (#450).
   var input0 = Shelly.getComponentStatus("input:0");
   if (input0 && input0.state && info.state === true) {
     log("Water supply protection active, turning off switch", info.id);
-    setOutput(info.id, false);
+    STATE.activeOutput = info.id;
+    activateOutput(-1);
     return;
   }
 
@@ -2676,7 +2684,19 @@ function continueInit() {
 
 function finishContinueInit() {
   enforceOutputState();
-  setupMQTT();
+  // #474: setupMQTT() must NOT run inline here. init -> loadConfig(cb) ->
+  // continueInit -> loadState -> finishLoadState -> finishContinueInit is a
+  // fully synchronous chain that never returns to the event loop, and
+  // subscribeSolarAvailable()'s log() call at the bottom of it overflows the
+  // Espruino interpreter stack -- with 23044 bytes of heap still free.
+  // Measured on `mezzanine` (Pro1) 2026-08-12: identical bytes crash with
+  // solar-enabled=true and run with this one line changed to queueTask
+  // (mem_peak 20636, mem_free 7392, same peak as the solar-off arm, so the
+  // solar path costs no heap at all). With solar-enabled=false the crash
+  // never showed because subscribeSolarAvailable() returns before reaching
+  // log() -- which is the only reason the bug looked solar-specific.
+  // queueTask takes a NAMED function, so this allocates no closure.
+  queueTask(setupMQTT);
 
   // Solar hysteresis (#405): re-evaluate periodically so staleness is
   // detected even if the daemon dies mid-hold-delay and no further MQTT

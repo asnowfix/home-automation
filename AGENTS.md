@@ -675,6 +675,11 @@ myhome ctl shelly call -B tcp://<broker>:1883 -T 60s <device> Script.GetStatus '
 **Rule of thumb**: aim for `mem_free` ≥ ~5 KB steady-state. A script that boots with 1–2 KB free is
 one allocation away from `out_of_memory` and will die unpredictably later.
 
+**Full guide**: `docs/shelly-heap-allocation.md` — where the heap goes, allocation sources ranked by
+cost, the preallocate-at-load technique, ES5-legal before/after snippets, a Q&A, and the open
+questions that still need hardware. `docs/433-pool-pump-heap-proposal.md` applies it to
+`pool-pump.js` as a prioritised change list.
+
 #### Measuring one script's footprint (differential method)
 
 Because the heap is shared, no API reports a single script's cost directly. Measure it by

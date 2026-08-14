@@ -1629,6 +1629,19 @@ function desiredOutput() {
 // straight after writing.
 //
 // Named callback, so no closure is allocated per call.
+//
+// Matches job code by CONTAINMENT, not exact equality (#480/#479-followup):
+// createSchedules() wraps every job's code in
+// (function(){try{...}catch(e){...}})() so a throw inside the handler can't
+// kill the script, so job.calls[0].params.code is never exactly
+// "handleMorningStart()" on a device that has been through that wrapping —
+// only the unwrapped bare call would ever match "===". Without this, a and b
+// never leave -1, this function returns on the "still symbolic" guard below,
+// setWindow() never runs, and desiredOutput() returns -2 ("no opinion")
+// forever: the pump silently never starts or stops on schedule again. This
+// is exactly the fix origin/main already carries in the now-superseded
+// isWithinRunWindow() (kept here as dead code, not called by this
+// reconciler) — ported to the function this branch actually uses.
 function onWindowJobs(result, err) {
   if (err && false) {}
   if (err || !result || !result.jobs) return;   // unresolvable: leave the facts alone (-2 path)
@@ -1641,10 +1654,10 @@ function onWindowJobs(result, err) {
     var job = result.jobs[i];
     if (!job.enable || !job.calls || job.calls.length === 0) continue;
     var code = job.calls[0].params && job.calls[0].params.code;
-    if (code === sc) {
+    if (code && code.indexOf(sc) !== -1) {
       var ma = parseHM(job.timespec);
       if (ma !== null) a = ma;
-    } else if (code === ec) {
+    } else if (code && code.indexOf(ec) !== -1) {
       var mb = parseHM(job.timespec);
       if (mb !== null) b = mb;
     }

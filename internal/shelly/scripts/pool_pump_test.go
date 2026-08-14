@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -247,6 +248,96 @@ func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
 
 	if !ok {
 		t.Fatalf("timed out waiting for init to complete")
+	}
+}
+
+// poolPumpSchedulesWrapped is poolPumpSchedules with every job's code field
+// passed through poolPumpWrapScheduleCall — the shape a real device carries
+// once createSchedules() has registered #480-wrapped jobs.
+func poolPumpSchedulesWrapped() []map[string]interface{} {
+	scriptID := 1
+	wrap := func(code string) string { return poolPumpWrapScheduleCall(code) }
+	return []map[string]interface{}{
+		{
+			"id": 1, "enable": true,
+			"timespec": "@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT",
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": scriptID, "code": wrap("handleDailyCheck()")},
+			}},
+		},
+		{
+			"id": 2, "enable": true,
+			"timespec": "@sunrise+3h * * SUN,MON,TUE,WED,THU,FRI,SAT",
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": scriptID, "code": wrap("handleMorningStart()")},
+			}},
+		},
+		{
+			"id": 3, "enable": true,
+			"timespec": "@sunset * * SUN,MON,TUE,WED,THU,FRI,SAT",
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": scriptID, "code": wrap("handleEveningStop()")},
+			}},
+		},
+		{
+			"id": 4, "enable": true,
+			"timespec": "0 15 23 * * SUN,MON,TUE,WED,THU,FRI,SAT",
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": scriptID, "code": wrap("handleNightStart()")},
+			}},
+		},
+		{
+			"id": 5, "enable": true,
+			"timespec": "0 15 0 * * SUN,MON,TUE,WED,THU,FRI,SAT",
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": scriptID, "code": wrap("handleNightStop()")},
+			}},
+		},
+	}
+}
+
+// TestPoolPump_InitVerifiesWrappedSchedules is TestPoolPump_InitVerifiesSchedules
+// with #480-wrapped schedule code. verifySchedules() is the last of init's four
+// steps (finishContinueInit()'s initSteps) and init stalls forever if it fails
+// to recognize the wrapped jobs, so this fails by timeout if the substring
+// match in verifySchedules() regresses back to the old prefix-equality check.
+func TestPoolPump_InitVerifiesWrappedSchedules(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	deviceState := &script.DeviceState{
+		KVS:             controllerKVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(),
+		Schedules:       poolPumpSchedulesWrapped(),
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	ok := waitFor(initTimeout, 200*time.Millisecond, func() bool {
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
+		return exists
+	})
+	cancel()
+	<-done
+
+	if !ok {
+		t.Fatalf("timed out waiting for init to complete with wrapped schedule code -- " +
+			"verifySchedules() likely regressed from substring match back to exact/prefix match")
 	}
 }
 
@@ -1690,9 +1781,15 @@ func poolPumpSummerSchedules(start, stop time.Time) []map[string]interface{} {
 }
 
 // poolPumpScheduleTimespec reads back the timespec currently on the job whose
-// script.eval code matches, so a test can prove the rewrite actually landed
-// before asserting on what the rewrite should have caused.
-func poolPumpScheduleTimespec(schedules []map[string]interface{}, code string) string {
+// script.eval code contains handlerCall, so a test can prove the rewrite
+// actually landed before asserting on what the rewrite should have caused.
+//
+// Matches by substring, not equality: #480 wraps every registered code field
+// in wrapScheduleCall()'s try/catch boilerplate, so a live (or
+// wrapped-fixture) job's code is never exactly "handleMorningStart()" — it
+// contains it. Plain unwrapped fixtures used elsewhere still match, since a
+// string trivially contains itself.
+func poolPumpScheduleTimespec(schedules []map[string]interface{}, handlerCall string) string {
 	for _, job := range schedules {
 		calls, ok := job["calls"].([]interface{})
 		if !ok || len(calls) == 0 {
@@ -1703,7 +1800,11 @@ func poolPumpScheduleTimespec(schedules []map[string]interface{}, code string) s
 			continue
 		}
 		params, ok := call["params"].(map[string]interface{})
-		if !ok || params["code"] != code {
+		if !ok {
+			continue
+		}
+		code, ok := params["code"].(string)
+		if !ok || !strings.Contains(code, handlerCall) {
 			continue
 		}
 		if ts, ok := job["timespec"].(string); ok {
@@ -1711,6 +1812,37 @@ func poolPumpScheduleTimespec(schedules []map[string]interface{}, code string) s
 		}
 	}
 	return ""
+}
+
+// poolPumpWrapScheduleCall mirrors pool-pump.js's wrapScheduleCall() exactly,
+// so Go fixtures can seed Schedule.List with the same wrapped source a live
+// device carries after #480 — proving isWithinRunWindow(),
+// updateScheduleMode() and verifySchedules() still recognize handler jobs by
+// substring once the code field is no longer the bare handler call.
+func poolPumpWrapScheduleCall(handlerCall string) string {
+	return "(function(){try{" + handlerCall + "}catch(e){log('schedule handler error:',e)}})()"
+}
+
+// poolPumpSummerSchedulesWrapped is poolPumpSummerSchedules with every job's
+// code field passed through poolPumpWrapScheduleCall — the shape a real
+// device carries once createSchedules() has registered #480-wrapped jobs.
+func poolPumpSummerSchedulesWrapped(start, stop time.Time) []map[string]interface{} {
+	job := func(id int, code, timespec string, enable bool) map[string]interface{} {
+		return map[string]interface{}{
+			"id": id, "enable": enable, "timespec": timespec,
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": 1, "code": poolPumpWrapScheduleCall(code)},
+			}},
+		}
+	}
+	return []map[string]interface{}{
+		job(1, "handleDailyCheck()", "@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT", true),
+		job(2, "handleMorningStart()", poolPumpTimespec(start.Hour(), start.Minute()), true),
+		job(3, "handleEveningStop()", poolPumpTimespec(stop.Hour(), stop.Minute()), true),
+		job(4, "handleNightStart()", poolPumpTimespec(23, 15), false),
+		job(5, "handleNightStop()", poolPumpTimespec(0, 15), false),
+	}
 }
 
 // poolPumpRewriteResult runs the script against the given fixture, waits for
@@ -1921,6 +2053,80 @@ func TestPoolPump_ScheduleRewriteOutsideWindowDoesNotStartPump(t *testing.T) {
 	if got != "-1" {
 		t.Fatalf("now is outside the rewritten window: "+
 			"expected the pump to stay off (active-output=-1), got %q", got)
+	}
+}
+
+// #480 regression guards: everything above this point seeds Schedule.List
+// with bare handler-name code strings. A live device running the wrapped
+// createSchedules() never has that — every code field is
+// wrapScheduleCall()'s try/catch boilerplate around the handler call. These
+// two tests are TestPoolPump_ScheduleRewriteIntoPastStartsPump and
+// TestPoolPump_ScheduleRewriteAwayStopsPump verbatim, except the fixture is
+// poolPumpSummerSchedulesWrapped instead of poolPumpSummerSchedules — proving
+// isWithinRunWindow() (the #441 predicate) and updateScheduleMode()'s job
+// matching both still resolve a real answer, not null, once matching moved
+// from exact/prefix equality to substring containment. If either regresses
+// back to exact-match, isWithinRunWindow() silently returns null ("don't
+// know") for every job and these tests fail by leaving the pump in the wrong
+// state instead of erroring loudly — exactly the #441 failure shape.
+func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStartsPump(t *testing.T) {
+	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro1ComponentStatus(), // pump off
+		// Old window: the start is still ahead of us, so nothing was due yet.
+		Schedules: poolPumpSummerSchedulesWrapped(now.Add(2*time.Hour), now.Add(4*time.Hour)),
+	}
+
+	got, schedules := poolPumpRewriteResult(t, deviceState, "0")
+
+	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 0) {
+		t.Fatalf("updateScheduleMode() failed to find/rewrite the wrapped morning-start job: "+
+			"expected 01:00, got %q", ts)
+	}
+	if got != "0" {
+		t.Fatalf("isWithinRunWindow() failed to resolve a wrapped-code schedule: "+
+			"expected the pump to start (active-output=0), got %q", got)
+	}
+}
+
+func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStopsPump(t *testing.T) {
+	skipIfNowInside(t, poolPumpNarrowStartMin, poolPumpNarrowStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpNarrowPeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	cs := pro1ComponentStatus()
+	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true} // running
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpNarrowRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: cs,
+		// Old window contains "now", which is why the pump is running.
+		Schedules: poolPumpSummerSchedulesWrapped(now.Add(-1*time.Hour), now.Add(1*time.Hour)),
+	}
+
+	got, schedules := poolPumpRewriteResult(t, deviceState, "-1")
+
+	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 57) {
+		t.Fatalf("updateScheduleMode() failed to find/rewrite the wrapped morning-start job: "+
+			"expected 01:57, got %q", ts)
+	}
+	if got != "-1" {
+		t.Fatalf("isWithinRunWindow() failed to resolve a wrapped-code schedule: "+
+			"expected the running pump to stop (active-output=-1), got %q", got)
 	}
 }
 

@@ -69,6 +69,17 @@ type DeviceState struct {
 
 	nextScheduleID int
 
+	// emittedEvents records every Shelly.emitEvent(name, data) call the
+	// script makes, in order. Shelly.emitEvent only loops the event back to
+	// the script's OWN Shelly.addEventHandler callback (see run.go) — it is
+	// not published over MQTT or otherwise visible outside the running
+	// script — so without this a test cannot tell whether a given event was
+	// actually emitted, as opposed to merely inferring it from a side effect
+	// that might have another cause. Populated unconditionally; cheap
+	// (append to a slice) and nothing reads it unless a test calls
+	// EmittedEvents()/EmittedEventCount().
+	emittedEvents []EmittedEvent
+
 	// mu guards every map and slice above. The emulator mutates them from the
 	// goroutine running the script while tests poll them from the test
 	// goroutine, which without this is a data race — and an unsynchronised map
@@ -294,6 +305,44 @@ func (d *DeviceState) TakePendingNestedEvent() ([]byte, bool) {
 	event := d.pendingNestedEvent
 	d.pendingNestedEvent = nil
 	return event, true
+}
+
+// EmittedEvent is one recorded Shelly.emitEvent(name, data) call.
+type EmittedEvent struct {
+	Name string
+	Data interface{}
+}
+
+// RecordEmittedEvent appends one Shelly.emitEvent(name, data) call. Called
+// from run.go's Shelly.emitEvent implementation; not for test use.
+func (d *DeviceState) RecordEmittedEvent(name string, data interface{}) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.emittedEvents = append(d.emittedEvents, EmittedEvent{Name: name, Data: data})
+}
+
+// EmittedEvents returns a copy of every Shelly.emitEvent call recorded so
+// far, in order.
+func (d *DeviceState) EmittedEvents() []EmittedEvent {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	out := make([]EmittedEvent, len(d.emittedEvents))
+	copy(out, d.emittedEvents)
+	return out
+}
+
+// EmittedEventCount returns how many times the script called
+// Shelly.emitEvent(name, ...), for any data.
+func (d *DeviceState) EmittedEventCount(name string) int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	n := 0
+	for _, e := range d.emittedEvents {
+		if e.Name == name {
+			n++
+		}
+	}
+	return n
 }
 
 // GetStorage returns a snapshot of the Script.storage map.

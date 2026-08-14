@@ -303,6 +303,18 @@ func TestPoolPump_FuseRefusesButtonOnAfterRapidCycling(t *testing.T) {
 // protect must not start a second Switch.Set chain. SetPendingNestedEvent is
 // the only way to reproduce the real device's nesting (see the long comment
 // on the flap tests).
+//
+// It also pins the fix for the #479-review finding-2 race: handleSwitchEvent()
+// writes STATE.activeOutput from the relay's own switch:0 status-change event
+// OUTSIDE its RC_BUSY guard, so if that event (the nested one injected below)
+// is delivered before applyDone() runs, STATE.activeOutput already holds the
+// post-transition value by the time applyDone() used to re-read it there.
+// Both edge branches were then skipped: no startRuntimeAccounting()/
+// stopRuntimeAccounting() call and no pool.pump_start/pump_stop event, while
+// the final active-output value and switch output settle correctly either
+// way -- which is exactly why the assertions below, not just settled state,
+// are needed to see the bug. applyOutput() now captures the pre-transition
+// output into RC_WAS at dispatch time, before any event can race it.
 func TestPoolPump_NestedEventDuringActuationProducesOneChain(t *testing.T) {
 	d := poolPumpWindowNow(t, -1*time.Hour, 1*time.Hour, false)
 	injector := make(chan []byte, 8)
@@ -313,9 +325,37 @@ func TestPoolPump_NestedEventDuringActuationProducesOneChain(t *testing.T) {
 	if !waitActiveOutput(t, d, "0") {
 		t.Fatalf("setup: the window contains now, the pump should be running")
 	}
+	if got := d.EmittedEventCount("pool.pump_start"); got != 1 {
+		t.Fatalf("setup: expected exactly one pool.pump_start from the initial OFF->ON transition, got %d", got)
+	}
+	// persistRuntimeState()'s KVS mirror is skipped while STATE.initializing
+	// is true (same guard as saveState()), and the initial OFF->ON transition
+	// above runs as part of init -- so script/pool-pump/runtime-sec has no
+	// real value yet (KVSValue reports it "present" but nil: run.go's kvs.get
+	// emulation caches a failed lookup as an explicit nil so repeated reads
+	// don't keep mutating the map — see run.go's "Key not found" comment).
+	// Confirmed empirically, 2026-08-14: the raw KVSValue() read at this point
+	// is (nil, true), not (_, false). Checked here so the >=1 assertion below
+	// can only be explained by stopRuntimeAccounting()'s persistRuntimeState()
+	// call, not by anything residual from setup.
+	if v, ok := d.KVSValue("script/pool-pump/runtime-sec"); ok && v != nil {
+		t.Fatalf("setup: expected no real runtime-sec KVS value yet (persistRuntimeState() "+
+			"is skipped during init), got %v -- test assumption changed, fix the accounting "+
+			"assertion below to compare against this baseline instead of presence", v)
+	}
+
+	// Let a full second of runtime accrue before triggering the stop, so
+	// that IF stopRuntimeAccounting() runs, runtime-sec deterministically
+	// lands on >=1 -- Math.round() of >=1s of elapsed time is never 0.
+	// Without this, a stop landing within the same second as the start would
+	// round to 0 even with the fix present, making the assertion below flaky
+	// rather than a clean bug detector.
+	time.Sleep(1100 * time.Millisecond)
 
 	// While the protect's Switch.Set is in flight, deliver a switch:0 event
-	// nested inside it — the shape that overflowed the interpreter stack.
+	// nested inside it — the shape that overflowed the interpreter stack,
+	// and (per the #479 finding-2 comment above) the shape that raced
+	// applyDone()'s belief about the pre-transition output.
 	d.SetPendingNestedEvent(shellySwitchEvent(0, false))
 	injector <- shellyInputEvent(0, true)
 
@@ -324,6 +364,24 @@ func TestPoolPump_NestedEventDuringActuationProducesOneChain(t *testing.T) {
 		t.Fatalf("water-supply protection with a nested switch event must settle OFF, got %v", v)
 	}
 	assertSwitchOutput(t, d, false, "nested event during actuation")
+
+	// The two assertions the #450 regression test alone could not make: the
+	// ON->OFF transition's accounting ran, and its event fired exactly once.
+	// Both are silently skipped if the race in finding 2 reintroduces itself,
+	// while the two assertions above keep passing regardless.
+	if got := d.EmittedEventCount("pool.pump_stop"); got != 1 {
+		t.Fatalf("expected exactly one pool.pump_stop from the ON->OFF transition, got %d "+
+			"(0 means stopRuntimeAccounting()/the emit were skipped because applyDone() "+
+			"believed the transition had already happened -- #479 finding 2)", got)
+	}
+	// settlePoolPumpTaskQueue() already waited out the 200ms task-queue tick
+	// that queueTask()s the KVS mirror writes inside persistRuntimeState(), so
+	// this need not poll further.
+	secAfterStop := parseKVSInt(t, d, "script/pool-pump/runtime-sec")
+	if secAfterStop < 1 {
+		t.Fatalf("expected runtime-sec >= 1 once stopRuntimeAccounting() ran after >=1s of "+
+			"runtime, got %d -- accounting was skipped (#479 finding 2)", secAfterStop)
+	}
 }
 
 // evalPoolPumpSchedule fires a Schedule job's code against the running

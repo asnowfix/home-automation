@@ -281,6 +281,10 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		event.Info.Data = call.Argument(1).Export()
 		event.Info.Timestamp = time.Unix(0, int64(event.Now*1e6))
 
+		if deviceState != nil {
+			deviceState.RecordEmittedEvent(event.Info.Event, event.Info.Data)
+		}
+
 		log.V(1).Info("Shelly.emitEvent", "event", event)
 
 		// Send event to channel (non-blocking)

@@ -636,9 +636,17 @@ function processTaskQueue() {
 
   // Execute next task; new tasks queued by the task itself extend TASK_QUEUE
   // and will be picked up on subsequent timer ticks.
+  // #480: an uncaught throw inside a queued task used to kill the whole
+  // script (verified live on mezzanine: queueTask(function(){ null.x })
+  // stopped the script). Wrapping this single call site protects every
+  // queueTask() call in the script.
   var task = TASK_QUEUE[TASK_INDEX];
   TASK_INDEX++;
-  task();
+  try {
+    task();
+  } catch (e) {
+    log("queued task error:", e);
+  }
 }
 
 function queueTask(task) {
@@ -1435,7 +1443,11 @@ function turnOffAllSwitches(callback) {
 function setOutput(outputId, on, callback) {
   if (STATE.outputs.indexOf(outputId) === -1) {
     log("ERROR: Invalid output ID:", outputId);
-    if (callback) callback();
+    // Distinguish this from a real Switch.Set success: callers (applyDone)
+    // key off a truthy error_code to tell a failure from an actual completion.
+    // Calling back with no arguments at all used to make the two
+    // indistinguishable.
+    if (callback) callback(null, -1, "invalid output id");
     return;
   }
 
@@ -1713,6 +1725,19 @@ function reconcileNow() {
 // a fresh stack.
 var RC_BUSY = false;      // an actuation is in flight
 var RC_TARGET = -1;       // the output the in-flight actuation drives towards
+// The output STATE.activeOutput held at the moment applyOutput() dispatched
+// the in-flight actuation. applyDone() used to re-read STATE.activeOutput
+// itself, AFTER the Switch.Set round trip, to recover this. But
+// handleSwitchEvent() writes that same variable from the relay's own
+// switch:0 status-change event, and only its override-adoption block is
+// guarded by RC_BUSY -- the write is not. If that event is delivered before
+// this actuation's Switch.Set completion callback, STATE.activeOutput
+// already holds the post-transition value by the time applyDone() reads it,
+// both edge branches below are skipped, and that transition's runtime
+// accounting and pool.pump_start/pump_stop event are silently lost. Capturing
+// the pre-transition value here, at dispatch time, removes the dependency on
+// delivery order entirely.
+var RC_WAS = -1;
 
 function applyOutputOn() {
   setOutput(RC_TARGET, true, applyDone);
@@ -1721,8 +1746,26 @@ function applyOutputOn() {
 // Edge-triggered side effects live here and ONLY here: this is the one
 // place that sees every on/off transition, for every caller, after the
 // hardware has actually moved.
-function applyDone() {
-  var was = STATE.activeOutput;
+//
+// Invoked as a Shelly.call/setOutput completion: (result, error_code,
+// error_message). A failed actuation must NOT be believed as if it
+// succeeded -- STATE.activeOutput stays at RC_WAS, not RC_TARGET, so
+// reconcileNow()'s "want === STATE.activeOutput" check still disagrees with
+// reality and queues a retry on the next tick. Without this check, a failed
+// ON left the reconciler believing the pump had started (no retry, pool
+// silently stops filtering) and a failed OFF left it believing the pump had
+// stopped while it kept running.
+function applyDone(result, error_code, error_message) {
+  if (error_code) {
+    log("apply: FAILED, output", RC_TARGET, "error", error_code, error_message);
+    RC_BUSY = false;
+    // Converge: retry from the facts as they stand now. Belief was never
+    // updated, so this is a genuine retry, not a no-op.
+    reconcile(null);
+    return;
+  }
+
+  var was = RC_WAS;
   STATE.activeOutput = RC_TARGET;
 
   // Runtime/turnover tracking (#402), BEFORE saveState(): both enqueue their
@@ -1757,6 +1800,9 @@ function applyOutput(target) {
 
   RC_BUSY = true;
   RC_TARGET = target;
+  // Captured NOW, not re-read from STATE.activeOutput inside applyDone()
+  // after the RPC round trip -- see the comment on RC_WAS above.
+  RC_WAS = STATE.activeOutput;
   if (target !== STATE.activeOutput) fuseRecord();
   log("apply:", STATE.activeOutput, "->", target);
 
@@ -1887,25 +1933,33 @@ var SOLAR = {
   tickTimer: null
 };
 
+// #480 part 4: an uncaught throw inside an MQTT.subscribe callback kills the
+// whole script (verified live on mezzanine with a real publish to a test
+// topic). Wrapped in place -- same function, no new call frame, so dispatch
+// isn't deeper than before.
 function onSolarAvailable(topic, message) {
-  var data = null;
   try {
-    data = JSON.parse(message);
+    var data = null;
+    try {
+      data = JSON.parse(message);
+    } catch (e) {
+      if (e && false) {}
+      return;
+    }
+    if (!data || typeof data.available_w !== "number") return;
+
+    SOLAR.availableW = data.available_w;
+    SOLAR.lastMsgTs = Date.now();
+    // ts is unix-epoch-seconds; convert to ms to compare against Date.now().
+    // This is the field staleness decisions are based on — see comment above.
+    if (typeof data.ts === "number") {
+      SOLAR.publishedTs = data.ts * 1000;
+    }
+
+    checkSolarHysteresis();
   } catch (e) {
-    if (e && false) {}
-    return;
+    log("mqtt handler error:", e);
   }
-  if (!data || typeof data.available_w !== "number") return;
-
-  SOLAR.availableW = data.available_w;
-  SOLAR.lastMsgTs = Date.now();
-  // ts is unix-epoch-seconds; convert to ms to compare against Date.now().
-  // This is the field staleness decisions are based on — see comment above.
-  if (typeof data.ts === "number") {
-    SOLAR.publishedTs = data.ts * 1000;
-  }
-
-  checkSolarHysteresis();
 }
 
 function subscribeSolarAvailable() {
@@ -2092,6 +2146,19 @@ function clearNonUpdateSchedules(callback) {
   });
 }
 
+// #480: every script.eval payload a schedule job carries must be wrapped —
+// an uncaught throw inside an unwrapped handler kills the whole script
+// (verified live on mezzanine: an ad-hoc bad Script.Eval killed the running
+// script with a ReferenceError). Route every registration through this one
+// helper so a future schedule job can never be added unwrapped. The wrapped
+// source always contains handlerCall verbatim, so code that later reads the
+// `code` field back off a live Schedule.List (isWithinRunWindow,
+// updateScheduleMode, verifySchedules below) matches on substring
+// containment rather than exact/prefix equality.
+function wrapScheduleCall(handlerCall) {
+  return "(function(){try{" + handlerCall + "}catch(e){log('schedule handler error:',e)}})()";
+}
+
 function createSchedules(callback) {
   log('Creating pool pump schedules...');
 
@@ -2105,7 +2172,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleDailyCheck()'
+          code: wrapScheduleCall('handleDailyCheck()')
         }
       }]
     },
@@ -2116,7 +2183,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleMorningStart()'
+          code: wrapScheduleCall('handleMorningStart()')
         }
       }]
     },
@@ -2127,7 +2194,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleEveningStop()'
+          code: wrapScheduleCall('handleEveningStop()')
         }
       }]
     },
@@ -2138,7 +2205,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleNightStart()'
+          code: wrapScheduleCall('handleNightStart()')
         }
       }]
     },
@@ -2149,7 +2216,7 @@ function createSchedules(callback) {
         method: 'script.eval',
         params: {
           id: scriptId,
-          code: 'handleNightStop()'
+          code: wrapScheduleCall('handleNightStop()')
         }
       }]
     }
@@ -2196,7 +2263,10 @@ function verifySchedules(cb) {
         var job = result.jobs[i];
         if (job.calls && job.calls.length > 0 && job.calls[0].method === 'script.eval') {
           var code = job.calls[0].params && job.calls[0].params.code;
-          if (code && (code.indexOf('handleNight') === 0 || code.indexOf('handleDaily') === 0 || code.indexOf('handleMorning') === 0 || code.indexOf('handleEvening') === 0)) {
+          // #480: code carries wrapScheduleCall()'s wrapper boilerplate, not
+          // just the bare handler call, so match by containment rather than
+          // by prefix.
+          if (code && (code.indexOf('handleNight') !== -1 || code.indexOf('handleDaily') !== -1 || code.indexOf('handleMorning') !== -1 || code.indexOf('handleEvening') !== -1)) {
             hasPoolSchedules = true;
             break;
           }
@@ -2298,6 +2368,46 @@ function parseHM(ts) {
   return h * 60 + m;
 }
 
+// The single "should the pump be running right now?" predicate. Answers from
+// the active mode's start/stop pair read straight out of Schedule.List — the
+// same source of truth updateScheduleMode() writes to — rather than from any
+// remembered value, so it stays correct across a restart mid-window (#421), a
+// schedule rewrite that moves the window under a running script (#441), and a
+// water-supply clear after the window has ended (#436).
+//
+// Calls back with true, false, or **null** when the window cannot be resolved
+// (Schedule.List failed, or the timespecs are still symbolic). null means
+// "don't know" and callers must not act on it — see reconcileRunState().
+function isWithinRunWindow(cb) {
+  var summer = STATE.scheduleMode === 'summer';
+  var sc = summer ? 'handleMorningStart()' : 'handleNightStart()';
+  var ec = summer ? 'handleEveningStop()' : 'handleNightStop()';
+
+  Shelly.call('Schedule.List', {}, function(result, err) {
+    if (err && false) {}
+    if (err || !result || !result.jobs) { cb(null); return; }
+
+    var a = null;
+    var b = null;
+    for (var i = 0; i < result.jobs.length; i++) {
+      var job = result.jobs[i];
+      if (!job.enable || !job.calls || job.calls.length === 0) continue;
+      var code = job.calls[0].params && job.calls[0].params.code;
+      // #480: code is wrapScheduleCall()'s wrapped source, not the bare
+      // handler call, so match by containment rather than exact equality.
+      if (code && code.indexOf(sc) !== -1) a = parseHM(job.timespec);
+      else if (code && code.indexOf(ec) !== -1) b = parseHM(job.timespec);
+    }
+
+    if (a === null || b === null) { cb(null); return; }
+
+    var d = new Date();
+    var n = d.getHours() * 60 + d.getMinutes();
+    // A start > stop pair wraps past midnight (the fixed winter 23:15 -> 00:15 run).
+    cb(a <= b ? (n >= a && n < b) : (n >= a || n < b));
+  });
+}
+
 // True when applying `upd` to the Schedule.List `job` it was built from would
 // actually move the run window — the job gets enabled or disabled, or it gets
 // a start/stop time different from the one already on the device.
@@ -2347,22 +2457,26 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
       var job = result.jobs[i];
       if (job.calls && job.calls.length > 0) {
         var code = job.calls[0].params && job.calls[0].params.code;
-        if (code === 'handleMorningStart()') {
-          var updM = {id: job.id, enable: newMode === 'summer', name: code};
+        // #480: code is wrapScheduleCall()'s wrapped source, not the bare
+        // handler call, so match by containment. `name` is set to the short
+        // handler literal (not the matched `code`) so log lines stay
+        // readable instead of printing the whole wrapper.
+        if (code && code.indexOf('handleMorningStart()') !== -1) {
+          var updM = {id: job.id, enable: newMode === 'summer', name: 'handleMorningStart()'};
           if (hasTimings && newMode === 'summer') {
             updM.timespec = makeTimespec(morningStartHours);
           }
           if (moves(job, updM)) windowChanged = true;
           schedulesToUpdate.push(updM);
-        } else if (code === 'handleEveningStop()') {
-          var updE = {id: job.id, enable: newMode === 'summer', name: code};
+        } else if (code && code.indexOf('handleEveningStop()') !== -1) {
+          var updE = {id: job.id, enable: newMode === 'summer', name: 'handleEveningStop()'};
           if (hasTimings && newMode === 'summer') {
             updE.timespec = makeTimespec(eveningStopHours);
           }
           if (moves(job, updE)) windowChanged = true;
           schedulesToUpdate.push(updE);
-        } else if (code === 'handleNightStart()' || code === 'handleNightStop()') {
-          var updN = {id: job.id, enable: newMode === 'winter', name: code};
+        } else if (code && (code.indexOf('handleNightStart()') !== -1 || code.indexOf('handleNightStop()') !== -1)) {
+          var updN = {id: job.id, enable: newMode === 'winter', name: code.indexOf('handleNightStart()') !== -1 ? 'handleNightStart()' : 'handleNightStop()'};
           if (moves(job, updN)) windowChanged = true;
           schedulesToUpdate.push(updN);
         }
@@ -2725,30 +2839,41 @@ function finishContinueInit() {
 }
 
 // === EVENT SUBSCRIPTION ===
+// #480 part 4: an uncaught throw inside this handler kills the whole script
+// (verified live on mezzanine: a throwing addEventHandler callback, triggered
+// by a real Switch.Set, crashed the script identically to the unwrapped
+// queueTask/script.eval cases). Wrapped in place -- no extra function layer
+// around the callback, so dispatch adds no new call frame; every event still
+// goes through exactly the frames it did before, just with a try/catch
+// around the existing body.
 Shelly.addEventHandler(function(event) {
-  if (!event || !event.info) return;
-  
-  var info = event.info;
-  
-  // Handle script stop event
-  if (info.event === "script_stop") {
-    log("Script stopping");
-    return;
-  }
-  
-  // Handle component events
-  if (typeof info.component === "string") {
-    if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
-      handleSwitchEvent(info);
-    } else if (info.component.indexOf("input:") === 0 && typeof info.state === "boolean") {
-      handleInputEvent(info);
-    } else if (info.component === "sys" && info.event === "sys_btn_push") {
-      handleButtonEvent(info);
-    } else {
-      log("Unhandled component event:", JSON.stringify(info));
+  try {
+    if (!event || !event.info) return;
+
+    var info = event.info;
+
+    // Handle script stop event
+    if (info.event === "script_stop") {
+      log("Script stopping");
+      return;
     }
-  } else {
-    log("Unhandled event:", JSON.stringify(info));
+
+    // Handle component events
+    if (typeof info.component === "string") {
+      if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
+        handleSwitchEvent(info);
+      } else if (info.component.indexOf("input:") === 0 && typeof info.state === "boolean") {
+        handleInputEvent(info);
+      } else if (info.component === "sys" && info.event === "sys_btn_push") {
+        handleButtonEvent(info);
+      } else {
+        log("Unhandled component event:", JSON.stringify(info));
+      }
+    } else {
+      log("Unhandled event:", JSON.stringify(info));
+    }
+  } catch (e) {
+    log("event handler error:", e);
   }
 });
 

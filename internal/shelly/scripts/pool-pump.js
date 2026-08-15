@@ -1455,6 +1455,20 @@ function setOutput(outputId, on, callback) {
   Shelly.call("Switch.Set", {id: outputId, on: on}, callback);
 }
 
+// Called when one of the break-before-make off-steps below fails. Belief
+// must come from observation, never from intent (same rule applyDone()
+// follows for the final on-step): the target output must NOT be turned on
+// while another stage may still be energized, so this aborts the whole
+// transition rather than pressing on to applyOutputOn(). STATE.activeOutput
+// is left untouched and RC_BUSY is cleared so reconcile()'s "want ===
+// STATE.activeOutput" check still disagrees with reality and retries on the
+// next tick (#479 review finding 4).
+function turnOffOtherOutputsFailed(id, error_code, error_message) {
+  log("break-before-make: output", id, "off FAILED, error", error_code, error_message);
+  RC_BUSY = false;
+  reconcile(null);
+}
+
 // Turns off every output except exceptId, one at a time via the task queue
 // (see turnOffAllSwitches above for why a for-loop of Shelly.call is unsafe here).
 function turnOffOtherOutputsNext(ids, index, exceptId, callback) {
@@ -1468,7 +1482,11 @@ function turnOffOtherOutputsNext(ids, index, exceptId, callback) {
     turnOffOtherOutputsNext(ids, index, exceptId, callback);
     return;
   }
-  setOutput(id, false, function() {
+  setOutput(id, false, function(result, error_code, error_message) {
+    if (error_code) {
+      turnOffOtherOutputsFailed(id, error_code, error_message);
+      return;
+    }
     queueTask(function() { turnOffOtherOutputsNext(ids, index, exceptId, callback); });
   });
 }

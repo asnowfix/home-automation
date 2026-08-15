@@ -384,6 +384,90 @@ func TestPoolPump_NestedEventDuringActuationProducesOneChain(t *testing.T) {
 	}
 }
 
+// TestPoolPump_BreakBeforeMakeOffStepFailureAbortsTransition is the #479
+// review finding-4 regression: turnOffOtherOutputsNext() used to ignore each
+// off-step's error_code and always proceed to turn the target output on. A
+// silent failure there could leave TWO Pro3 stages energized at once —
+// exactly what break-before-make exists to prevent, and exactly the failure
+// mode applyOutput() as the single trusted actuator (#476) is supposed to
+// make impossible: there is nothing downstream of it to catch a bad
+// actuation.
+//
+// applyOutput(1) is invoked directly via evalPoolPumpSchedule rather than
+// through a button press: a button-driven, reconciler-retried path keeps
+// re-dispatching the same failing transition every 200ms task-queue tick,
+// and applyOutput() records a fuse change on every dispatch regardless of
+// whether it succeeds — a handful of retries alone (unrelated to this fix)
+// trips the anti-cycling fuse and forces the pump off through
+// turnOffAllSwitches(), a different code path with its own pre-existing
+// error-handling gap (out of scope here; see turnOffOtherOutputsNext's
+// sibling turnOffAllSwitchesNext). Calling applyOutput(1) once, directly,
+// isolates the one behaviour this fix changes.
+func TestPoolPump_BreakBeforeMakeOffStepFailureAbortsTransition(t *testing.T) {
+	injector := make(chan []byte, 8)
+	d := &script.DeviceState{
+		KVS:                  controllerKVS(),
+		Storage:              make(map[string]interface{}),
+		ComponentStatus:      pro3ComponentStatus(),
+		Schedules:            poolPumpSchedules(),
+		EventInjector:        injector,
+		ScheduleEvalInjector: make(chan []byte, 4),
+	}
+	stop := runPoolPump(t, d)
+	defer stop()
+
+	// Button press: off -> output 0.
+	injector <- shellyButtonEvent()
+	if !waitActiveOutput(t, d, "0") {
+		t.Fatalf("setup: expected active-output=0 after button press, got %v",
+			kvsValue(d, "script/pool-pump/active-output"))
+	}
+
+	// Arm output 0's off-step to fail, then drive the single actuator
+	// directly towards output 1. The break-before-make sequence for target=1
+	// tries to turn off outputs 0 and 2 first; output 0's off-command will
+	// report a failure.
+	d.FailSwitchSet(0, -114, "simulated relay fault")
+	if err := evalPoolPumpSchedule(d, "applyOutput(1)"); err != nil {
+		t.Fatalf("could not drive applyOutput(1): %v", err)
+	}
+
+	settlePoolPumpTaskQueue(t)
+
+	if v := kvsValue(d, "script/pool-pump/active-output"); v != "0" {
+		t.Fatalf("a failed break-before-make off-step must leave active-output unchanged "+
+			"(belief comes from observation, never intent), got %v", v)
+	}
+	// The physical outcome, not just the bookkeeping: output 0 must still be
+	// on (its off-command failed) and output 1 must NOT have been turned on
+	// — the whole point of break-before-make is that both are never
+	// simultaneously energized.
+	requirePro3SwitchOutput(t, d, 0, true, "after failed off-step: output 0")
+	requirePro3SwitchOutput(t, d, 1, false, "after failed off-step: output 1 must not have been energized")
+	requirePro3SwitchOutput(t, d, 2, false, "after failed off-step: output 2 unaffected")
+}
+
+// requirePro3SwitchOutput fails the test if switchId's physical output does
+// not match want. Unlike assertSwitchOutput (hardcoded to switch:0 for the
+// Pro1 tests), this takes the switch id, since break-before-make only
+// applies to Pro3's multiple outputs.
+func requirePro3SwitchOutput(t *testing.T, d *script.DeviceState, switchId int, want bool, context string) {
+	t.Helper()
+	key := fmt.Sprintf("switch:%d", switchId)
+	entry, ok := componentStatusValue(d, key)
+	if !ok {
+		t.Fatalf("%s: %s component status missing", context, key)
+	}
+	m, ok := entry.(map[string]interface{})
+	if !ok {
+		t.Fatalf("%s: %s component status not a map: %#v", context, key, entry)
+	}
+	on, _ := m["output"].(bool)
+	if on != want {
+		t.Fatalf("%s: %s physically %v, want %v", context, key, on, want)
+	}
+}
+
 // evalPoolPumpSchedule fires a Schedule job's code against the running
 // script, the same way a real device's Schedule.eval -> Script.Eval(id, code)
 // would when the job's timespec comes due. The emulator does not track

@@ -1087,6 +1087,21 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			paramsObj := params.ToObject(vm)
 			id := int(paramsObj.Get("id").ToInteger())
 			on := paramsObj.Get("on").ToBoolean()
+
+			// Test hook (PR #479 review finding 4): a test can arm this id to
+			// fail via DeviceState.FailSwitchSet, to reproduce a real relay
+			// that doesn't actually respond to the command. Checked before any
+			// state mutation, so a failed call has no side effect — matching a
+			// real device where the switch never moved.
+			if code, message, failed := deviceState.SwitchSetFailure(id); failed {
+				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+					if callable, ok := goja.AssertFunction(callback); ok {
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(code), vm.ToValue(message), userdata)
+					}
+				}
+				return nil, nil
+			}
+
 			key := fmt.Sprintf("switch:%d", id)
 			if deviceState.ComponentStatus != nil {
 				// Mutate in place under the lock; a read-then-modify via

@@ -67,6 +67,17 @@ type DeviceState struct {
 	// TakePendingNestedEvent) so it targets a single call, not every one.
 	pendingNestedEvent []byte
 
+	// switchSetFailures, when populated via FailSwitchSet, makes every
+	// subsequent Switch.Set(id=...) call for that output id fail with the
+	// given error_code/message instead of succeeding — used by tests to
+	// reproduce a break-before-make off-step failing (PR #479 review finding
+	// 4). Unlike pendingNestedEvent this is NOT single-use: pool-pump.js's
+	// reconciler retries a failed actuation on the very next task-queue tick
+	// (reconcile() re-drives applyOutput()), so a one-shot hook would race
+	// that retry and make the test's timing, not the fix, decide the
+	// outcome. It stays armed until ClearSwitchSetFailure removes it.
+	switchSetFailures map[int]switchSetFailure
+
 	nextScheduleID int
 
 	// emittedEvents records every Shelly.emitEvent(name, data) call the
@@ -305,6 +316,48 @@ func (d *DeviceState) TakePendingNestedEvent() ([]byte, bool) {
 	event := d.pendingNestedEvent
 	d.pendingNestedEvent = nil
 	return event, true
+}
+
+// switchSetFailure is the error a test wants a Switch.Set(id=...) call to
+// fail with — see switchSetFailures' doc comment on DeviceState.
+type switchSetFailure struct {
+	code    int
+	message string
+}
+
+// FailSwitchSet arms every subsequent Switch.Set call for outputId to fail
+// with the given error_code/message, until ClearSwitchSetFailure removes it.
+// Tests only; see switchSetFailures' doc comment for why this is not
+// single-use.
+func (d *DeviceState) FailSwitchSet(outputId int, code int, message string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.switchSetFailures == nil {
+		d.switchSetFailures = make(map[int]switchSetFailure)
+	}
+	d.switchSetFailures[outputId] = switchSetFailure{code: code, message: message}
+}
+
+// ClearSwitchSetFailure disarms a failure previously armed by FailSwitchSet,
+// so the next Switch.Set call for outputId succeeds again.
+func (d *DeviceState) ClearSwitchSetFailure(outputId int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.switchSetFailures, outputId)
+}
+
+// SwitchSetFailure reports whether outputId is currently armed to fail, and
+// the error_code/message it should fail with. Called by the Switch.Set
+// emulation in run.go before it mutates ComponentStatus or invokes the
+// callback.
+func (d *DeviceState) SwitchSetFailure(outputId int) (code int, message string, failed bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	f, ok := d.switchSetFailures[outputId]
+	if !ok {
+		return 0, "", false
+	}
+	return f.code, f.message, true
 }
 
 // EmittedEvent is one recorded Shelly.emitEvent(name, data) call.

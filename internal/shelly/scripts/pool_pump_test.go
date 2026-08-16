@@ -1404,6 +1404,149 @@ func TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate(t *testing.
 	}
 }
 
+// TestPoolPump_RuntimeAccounting_AnchorDoesNotDriftAcrossCheckpoints is the
+// regression test for #502's actual root cause: persistRuntimeState() used
+// to re-stamp Script.storage["runtime"].ts with Date.now() on EVERY call --
+// including flushRuntimeCheckpoint()'s 60s-recurring checkpoint while the
+// pump runs -- rather than persisting the unchanged day anchor
+// (STATE.runtimeTs). That is exactly how a total accumulated over several
+// idle days on `mezzanine` kept looking freshly written: ts always read
+// "just now" because every persist stamped it fresh, never the day the sec
+// total actually started accruing for.
+//
+// Unlike the round-1 regression test (which pinned STATE directly and read
+// a downstream decision, bypassing the persist path entirely), this test
+// calls the REAL flushRuntimeCheckpoint() -- the exact production call site
+// -- repeatedly at different real wall-clock instants and asserts
+// Script.storage["runtime"].ts stays pinned to the anchor set at boot,
+// rather than drifting toward whatever moment each checkpoint happened to
+// run at.
+func TestPoolPump_RuntimeAccounting_AnchorDoesNotDriftAcrossCheckpoints(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	evalCh := make(chan []byte, 4)
+	cs := pro3ComponentStatus()
+	cs["switch:2"] = map[string]interface{}{"id": 2, "output": true} // pump on at boot -> real startRuntimeAccounting()
+
+	deviceState := &script.DeviceState{
+		KVS:                  controllerKVS(),
+		Storage:              make(map[string]interface{}),
+		ComponentStatus:      cs,
+		Schedules:            poolPumpSchedules(),
+		ScheduleEvalInjector: evalCh,
+	}
+
+	stop := runPoolPumpPhase(t, buf, deviceState)
+	defer stop()
+
+	// Boot itself already performed one real persistRuntimeState() call
+	// (applyRuntimeState() at load); this is the anchor every later
+	// checkpoint must keep agreeing with.
+	anchorTs := int64(readRuntimeStorage(t, deviceState).Ts)
+
+	for i := 0; i < 3; i++ {
+		time.Sleep(300 * time.Millisecond) // a real, different wall-clock instant each time
+		if err := evalPoolPumpSchedule(deviceState, "flushRuntimeCheckpoint()"); err != nil {
+			t.Fatalf("checkpoint %d: failed to inject: %v", i, err)
+		}
+		time.Sleep(100 * time.Millisecond) // let the injected eval land
+		got := readRuntimeStorage(t, deviceState)
+		if int64(got.Ts) != anchorTs {
+			t.Fatalf("checkpoint %d: anchor drifted from %v to %v (now=%v) -- ts must stay pinned to the "+
+				"day it was set, not the time of the last write (#502)", i, anchorTs, got.Ts, time.Now().Unix())
+		}
+	}
+}
+
+// TestPoolPump_RuntimeAccounting_StopRightAfterMidnightDoesNotCreditWholeRun
+// is the regression test for the second #502-class gap found while building
+// this test: stopRuntimeAccounting() -- unlike its siblings
+// startRuntimeAccounting() and flushRuntimeCheckpoint() -- never called
+// ensureRuntimeDay(). A stop landing exactly at a day boundary, before the
+// next 60s flushRuntimeCheckpoint() tick gets a chance to split pre/post-
+// midnight time, would blindly add the WHOLE elapsed span (spanning both
+// yesterday and today) to "today's" total.
+//
+// A single continuous run with its 60s checkpoint ticking normally through
+// a real midnight is NOT actually broken by either bug: reconcileRuntimeState()
+// compares calendar days, not elapsed duration, so an in-day anchor drift
+// never fools it, and the very next tick after midnight always detects the
+// rollover correctly regardless of exactly when within the previous day the
+// anchor was last touched. The genuine failure mode is specifically "stop
+// fires before any checkpoint had a chance to see the new day" -- which
+// this test reproduces by stopping the pump immediately after pinning a
+// pre-midnight state, with no intervening flushRuntimeCheckpoint() call.
+//
+// This harness cannot fast-forward goja's Date()/Timer.set past a real
+// midnight (same limitation noted on
+// TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate), so it
+// pins the two markers a real midnight crossing would leave stale
+// (STATE.runtimeTs, STATE.runStartTs) via ScheduleEvalInjector, then stops
+// the pump for real -- exercising the actual, production stopRuntimeAccounting()
+// -> persistRuntimeState() call chain, not a Go-side Storage overwrite.
+func TestPoolPump_RuntimeAccounting_StopRightAfterMidnightDoesNotCreditWholeRun(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	evalCh := make(chan []byte, 4)
+	injector := make(chan []byte, 4)
+	cs := pro3ComponentStatus()
+	cs["switch:2"] = map[string]interface{}{"id": 2, "output": true} // pump "running since before midnight"
+
+	deviceState := &script.DeviceState{
+		KVS:                  controllerKVS(),
+		Storage:              make(map[string]interface{}),
+		ComponentStatus:      cs,
+		Schedules:            poolPumpSchedules(),
+		EventInjector:        injector,
+		ScheduleEvalInjector: evalCh,
+	}
+
+	stop := runPoolPumpPhase(t, buf, deviceState)
+	defer stop()
+
+	// Stand in for "this run started yesterday and had accrued 20000s by
+	// the moment a real midnight passed, with no checkpoint tick in
+	// between": pin the anchor and the open interval's start marker to
+	// yesterday.
+	yesterday := time.Now().AddDate(0, 0, -1)
+	pin := fmt.Sprintf("STATE.runtimeTodaySec = 20000; STATE.runtimeTs = %d; STATE.runStartTs = %d;",
+		yesterday.Unix(), yesterday.UnixMilli())
+	if err := evalPoolPumpSchedule(deviceState, pin); err != nil {
+		t.Fatalf("failed to inject pre-midnight state: %v", err)
+	}
+	time.Sleep(150 * time.Millisecond)
+
+	// Stop the pump for real, immediately -- no flushRuntimeCheckpoint() has
+	// run since the pin, so stopRuntimeAccounting()'s OWN day check (or lack
+	// of one) is what's under test.
+	injector <- shellyInputEvent(0, true) // water supply ON stops the pump
+	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "-1"
+	})
+	if !stopped {
+		t.Fatalf("pump did not stop after water supply ON")
+	}
+
+	final := readRuntimeStorage(t, deviceState)
+	if final.Sec >= 20000 {
+		t.Fatalf(`Script.storage["runtime"].sec after a stop landing at a day boundary = %v, want well `+
+			`under 20000 (yesterday's 20000s must not be credited to today just because the stop event, `+
+			`not a periodic checkpoint, was what observed the rollover)`, final.Sec)
+	}
+	if localDayNumber(int64(final.Ts)) != localDayNumber(time.Now().Unix()) {
+		t.Fatalf(`Script.storage["runtime"].ts after a stop landing at a day boundary = %v, want today`, final.Ts)
+	}
+}
+
 // === Solar-driven hysteresis (#405) ===
 //
 // solarKVS extends controllerKVS() with solar hysteresis enabled and

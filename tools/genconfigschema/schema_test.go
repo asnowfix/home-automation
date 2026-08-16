@@ -125,8 +125,8 @@ func TestLoadSchema_PoolPump(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSchema: %v", err)
 	}
-	if len(s.Fields) != 23 {
-		t.Errorf("pool-pump.schema.json: got %d fields, want 23", len(s.Fields))
+	if len(s.Fields) != 24 {
+		t.Errorf("pool-pump.schema.json: got %d fields, want 24", len(s.Fields))
 	}
 }
 

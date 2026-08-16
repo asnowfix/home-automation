@@ -177,6 +177,12 @@ var CONFIG_SCHEMA = {
     key: "solar-stale-ms",
     default: 300000,
     type: "number"
+  },
+  // How long a manual override (button press, or an out-of-band switch change) holds the pump against the schedule/solar policy (ms)
+  overrideMs: {
+    key: "override-ms",
+    default: 7200000,
+    type: "number"
   }
 };
 // <<< GENERATED: CONFIG_SCHEMA <<<
@@ -477,7 +483,7 @@ function runPendingCallback() {
 // inside the call it is completing; invoking the caller's callback here meant a
 // callback that issues another call nested inside the previous completion
 // instead of unwinding. A loop of dependent calls — turnOffAllSwitches issuing
-// one Switch.Set per output, or activateOutput chaining setOutput — therefore
+// one Switch.Set per output, or applyOutput chaining setOutput — therefore
 // accumulated stack depth with no recursion anywhere in the source, until
 // acquireCallSlot (a plain for loop) ran out of stack:
 //
@@ -666,13 +672,7 @@ var STATE = {
 
   // Current state
   activeOutput: -1,           // Current active output (-1 = all off)
-  savedOutput: -1,            // Saved output before water-supply protection
 
-  // Cross-device safety (grace delay during switchover)
-  graceTimer: null,
-  graceActive: false,
-
-  
   // MQTT connection
   mqttConnected: false,
   
@@ -1168,10 +1168,10 @@ function saveState() {
 // configured preferred speed (via computeFlowRate() below), so it computes
 // and persists today's cumulative runtime and achieved turnover itself;
 // the daemon (ctl pool status / pool.getstatus RPC) just reads the results
-// from KVS instead of re-deriving flow rate. Hooked into activateOutput() —
-// the single choke point where STATE.activeOutput actually transitions —
-// so every code path that starts/stops the pump (doStart, doStop,
-// handleWaterSupply, the button handler, the anti-cycling fuse) is covered
+// from KVS instead of re-deriving flow rate. Hooked into applyDone() — the
+// single actuator's completion, i.e. the one place where the relay has
+// actually moved — so every path that starts or stops the pump (schedule,
+// solar, water supply, button, web UI, the anti-cycling fuse) is covered
 // with zero duplication.
 
 // Restores {sec, ts} from Script.storage: prefers the current single-object
@@ -1290,7 +1290,7 @@ function ensureRuntimeDay() {
   }
 }
 
-// Called (via activateOutput) when the pump transitions OFF -> ON.
+// Called (via applyDone) when the pump transitions OFF -> ON.
 function startRuntimeAccounting() {
   ensureRuntimeDay();
   STATE.runStartTs = Date.now();
@@ -1304,7 +1304,7 @@ function startRuntimeAccounting() {
   log("Runtime accounting started, today so far:", STATE.runtimeTodaySec, "s");
 }
 
-// Called (via activateOutput) when the pump transitions ON -> OFF.
+// Called (via applyDone) when the pump transitions ON -> OFF.
 function stopRuntimeAccounting() {
   if (STATE.runStartTs !== null) {
     STATE.runtimeTodaySec += (Date.now() - STATE.runStartTs) / 1000;
@@ -1443,12 +1443,30 @@ function turnOffAllSwitches(callback) {
 function setOutput(outputId, on, callback) {
   if (STATE.outputs.indexOf(outputId) === -1) {
     log("ERROR: Invalid output ID:", outputId);
-    if (callback) callback();
+    // Distinguish this from a real Switch.Set success: callers (applyDone)
+    // key off a truthy error_code to tell a failure from an actual completion.
+    // Calling back with no arguments at all used to make the two
+    // indistinguishable.
+    if (callback) callback(null, -1, "invalid output id");
     return;
   }
 
   log("Setting switch", outputId, "to", on);
   Shelly.call("Switch.Set", {id: outputId, on: on}, callback);
+}
+
+// Called when one of the break-before-make off-steps below fails. Belief
+// must come from observation, never from intent (same rule applyDone()
+// follows for the final on-step): the target output must NOT be turned on
+// while another stage may still be energized, so this aborts the whole
+// transition rather than pressing on to applyOutputOn(). STATE.activeOutput
+// is left untouched and RC_BUSY is cleared so reconcile()'s "want ===
+// STATE.activeOutput" check still disagrees with reality and retries on the
+// next tick (#479 review finding 4).
+function turnOffOtherOutputsFailed(id, error_code, error_message) {
+  log("break-before-make: output", id, "off FAILED, error", error_code, error_message);
+  RC_BUSY = false;
+  reconcile(null);
 }
 
 // Turns off every output except exceptId, one at a time via the task queue
@@ -1464,7 +1482,11 @@ function turnOffOtherOutputsNext(ids, index, exceptId, callback) {
     turnOffOtherOutputsNext(ids, index, exceptId, callback);
     return;
   }
-  setOutput(id, false, function() {
+  setOutput(id, false, function(result, error_code, error_message) {
+    if (error_code) {
+      turnOffOtherOutputsFailed(id, error_code, error_message);
+      return;
+    }
     queueTask(function() { turnOffOtherOutputsNext(ids, index, exceptId, callback); });
   });
 }
@@ -1522,7 +1544,12 @@ function fuseAllowOn() {
         (FUSE_COOLDOWN_MS / 1000) + "s");
     FUSE_TRIPPED = true;
     FUSE_TRIP_TIME = now;
-    turnOffAllSwitches();
+    // A trip is a FACT, not an action. This used to call
+    // turnOffAllSwitches() here — from inside an in-flight actuation, which
+    // then returned false and went on to issue its OWN off-chain, so two
+    // overlapping Switch.Set sequences ran on the same outputs. Returning
+    // false is enough: the caller forces the target to -1 and the single
+    // actuator drives that one chain.
     Shelly.emitEvent("pool.fuse_tripped", {
       changes: FUSE_CHANGES.length,
       window_s: FUSE_WINDOW_MS / 1000,
@@ -1534,70 +1561,296 @@ function fuseAllowOn() {
   return true;
 }
 
-function activateOutput(outputId, callback) {
-  log("Activating output:", outputId);
+// === LAYER 1: FACTS (#476) ===
+//
+// One preallocated scalar per observed fact, exactly ONE writer each. No
+// event objects, no event queues, no per-event strings: a fact is written in
+// place and the reconciler is asked to converge. That is what makes an input
+// flapping faster than a Switch.Set round trip free — there is no work to
+// accumulate, only a value to overwrite.
+var F_WATER      = false;  // input:0 state           — written only by setWater()
+var F_SOLAR_WANT = false;  // solar hysteresis opinion — written only by checkSolarHysteresis()
+var F_WIN_START  = -1;     // run-window start, minutes since midnight — written only by setWindow()
+var F_WIN_STOP   = -1;     // run-window stop,  minutes since midnight — written only by setWindow()
+var F_OVR_WANT   = -2;     // manual override: -2 none, -1 off, >=0 switch id — cycleOutputs()/handleSwitchEvent()/clearOverride()
+var F_OVR_UNTIL  = 0;      // override expiry, ms epoch                      — same three writers
 
-  // Software fuse: always allow OFF (-1), check fuse for ON activations
-  if (outputId !== -1 && !fuseAllowOn()) {
-    log("FUSE: activation refused, forcing off");
-    outputId = -1;
-  }
+function setWater(active) {
+  if (active === F_WATER) return;
+  F_WATER = active;
+  Shelly.emitEvent(active ? "pool.water_supply_protected" : "pool.water_supply_restored",
+                   {output: STATE.activeOutput});
+  reconcile(active ? "water supply on" : "water supply off");
+}
 
-  // Record actual state changes for fuse tracking
-  if (outputId !== STATE.activeOutput) {
-    fuseRecord();
-  }
+function setWindow(startMin, stopMin) {
+  if (startMin === F_WIN_START && stopMin === F_WIN_STOP) return;
+  log("window:", F_WIN_START, "-", F_WIN_STOP, "->", startMin, "-", stopMin);
+  F_WIN_START = startMin;
+  F_WIN_STOP = stopMin;
+  reconcile("window moved");
+}
 
-  // Runtime/turnover tracking (#402): STATE.activeOutput still holds the
-  // pre-transition value here, so this is the single place that sees every
-  // on/off transition regardless of caller (doStart, doStop,
-  // handleWaterSupply, button, anti-cycling fuse forced-off).
-  var wasRunning = STATE.activeOutput !== -1;
-  var willRun = outputId !== -1;
-  if (wasRunning !== willRun) {
-    if (willRun) startRuntimeAccounting();
-    else stopRuntimeAccounting();
-  }
+// A reconciler reverts an out-of-band relay change that contradicts the
+// policy — a web-UI toggle or a button press would be undone within one
+// 200ms task-queue tick. An override is therefore REQUIRED, not optional:
+// it makes "a human moved this" a fact the policy can see, bounded by
+// CONFIG.overrideMs and cleared at the next schedule edge, whichever is
+// sooner.
+function clearOverride() {
+  if (F_OVR_WANT === -2) return;
+  log("override cleared");
+  F_OVR_WANT = -2;
+  F_OVR_UNTIL = 0;
+}
 
-  if (STATE.deviceType === "pro3") {
-    (function(next) { next(); })(function() {
-      // Turn off all outputs (one at a time via the task queue — see turnOffAllSwitches)
-      turnOffAllSwitches(function() {
-        if (outputId !== -1) {
-          setOutput(outputId, true, function() {
-            STATE.activeOutput = outputId;
+// === LAYER 2: THE POLICY (#476) ===
+//
+// Pure function of the facts above. Returns an output id, -1 for off, or
+// **-2 for "no opinion — leave the relay alone"**.
+//
+// The -2 is not decoration. A level-triggered controller with a two-valued
+// desired state turns "I cannot tell" into "off", which would stop a running
+// pump because a Schedule.List call failed. That is the lesson of #441/#436
+// encoded in the return type.
+//
+// THE ORDER OF THESE LINES IS THE CONTROL POLICY and should be reviewed as
+// such. Before this change the equivalent ordering was an accident of call
+// order across seven functions.
+//
+// FUSE_TRIPPED is deliberately NOT consulted here. The fuse is applied by
+// reconcileNow() instead, because fuseAllowOn() is also what clears the trip
+// when the cooldown expires: short-circuiting to -1 here would mean
+// fuseAllowOn() never runs again and the fuse would latch forever.
+function desiredOutput() {
+  if (F_WATER) return -1;                                        // safety first, always
+  if (F_OVR_WANT !== -2 && Date.now() < F_OVR_UNTIL) return F_OVR_WANT;
+  if (CONFIG.solarEnabled && solarHardCeilingReached()) return -1;
+  if (F_SOLAR_WANT) return mapSpeedToSwitch(CONFIG.preferredSpeed);
+  if (F_WIN_START < 0 || F_WIN_STOP < 0) return -2;              // window unknown: do not act
+  var d = new Date();
+  var n = d.getHours() * 60 + d.getMinutes();
+  // A start > stop pair wraps past midnight (the fixed winter 23:15 -> 00:15 run).
+  var inside = F_WIN_START <= F_WIN_STOP
+    ? (n >= F_WIN_START && n < F_WIN_STOP)
+    : (n >= F_WIN_START || n < F_WIN_STOP);
+  if (inside) return mapSpeedToSwitch(CONFIG.preferredSpeed);
+  return -1;
+}
 
-            saveState();
-            if (callback) callback();
-          });
-        } else {
-          STATE.activeOutput = -1;
-          saveState();
-          if (callback) callback();
-        }
-      });
-    });
-  } else {
-    // Pro1: guard against activating while pro3 is on
-    var on = outputId === 0;
-    if (!on) {
-      // Turning off — no guard needed
-      setOutput(0, false, function() {
-        STATE.activeOutput = -1;
-        saveState();
-        if (callback) callback();
-      });
-      return;
+// === THE RUN WINDOW AS A FACT ===
+//
+// The window used to be re-read from Schedule.List on every decision
+// (isWithinRunWindow), which is an RPC per decision and a race per rewrite
+// (#441). It is now read once at init and thereafter owned by setWindow():
+// updateScheduleMode() is the only thing that moves it, and it re-reads
+// straight after writing.
+//
+// Named callback, so no closure is allocated per call.
+//
+// Matches job code by CONTAINMENT, not exact equality (#480/#479-followup):
+// createSchedules() wraps every job's code in
+// (function(){try{...}catch(e){...}})() so a throw inside the handler can't
+// kill the script, so job.calls[0].params.code is never exactly
+// "handleMorningStart()" on a device that has been through that wrapping —
+// only the unwrapped bare call would ever match "===". Without this, a and b
+// never leave -1, this function returns on the "still symbolic" guard below,
+// setWindow() never runs, and desiredOutput() returns -2 ("no opinion")
+// forever: the pump silently never starts or stops on schedule again. This
+// is exactly the fix origin/main already carries in the now-superseded
+// isWithinRunWindow() (kept here as dead code, not called by this
+// reconciler) — ported to the function this branch actually uses.
+function onWindowJobs(result, err) {
+  if (err && false) {}
+  if (err || !result || !result.jobs) return;   // unresolvable: leave the facts alone (-2 path)
+  var summer = STATE.scheduleMode === 'summer';
+  var sc = summer ? 'handleMorningStart()' : 'handleNightStart()';
+  var ec = summer ? 'handleEveningStop()' : 'handleNightStop()';
+  var a = -1;
+  var b = -1;
+  for (var i = 0; i < result.jobs.length; i++) {
+    var job = result.jobs[i];
+    if (!job.enable || !job.calls || job.calls.length === 0) continue;
+    var code = job.calls[0].params && job.calls[0].params.code;
+    if (code && code.indexOf(sc) !== -1) {
+      var ma = parseHM(job.timespec);
+      if (ma !== null) a = ma;
+    } else if (code && code.indexOf(ec) !== -1) {
+      var mb = parseHM(job.timespec);
+      if (mb !== null) b = mb;
     }
-
-    // For Pro1 turning on: check if Pro3 is active, wait grace delay
-    // (This is handled by the cross-device protection logic)
-    setOutput(0, true, function() {
-      STATE.activeOutput = 0;
-      saveState();
-      if (callback) callback();
-    });
   }
+  if (a < 0 || b < 0) return;                   // still symbolic (@sunrise): unknown, not "off"
+  setWindow(a, b);
+}
+
+function readWindow() {
+  Shelly.call('Schedule.List', {}, onWindowJobs);
+}
+
+// === LAYER 3: THE RECONCILER (#476) ===
+//
+// Every entry point in this script is "write the fact, call reconcile(),
+// return". reconcile() never acts inline: it sets a dirty bit and defers to
+// the task queue, passing a NAMED function so no closure is allocated per
+// event (#421 measured one per-call closure at ~1050 bytes of mem_peak).
+//
+// Coalescing is by construction. The queue is one boolean, not a list, so
+// any number of events arriving before the next 200 ms tick collapse into a
+// single pass over the current facts. An input flapping faster than a
+// Switch.Set round trip therefore costs nothing and cannot accumulate work —
+// which is the #450 crash removed at the root rather than guarded.
+var RC_DIRTY = false;
+
+function reconcile(reason) {
+  if (reason) log("reconcile:", reason);
+  if (RC_DIRTY) return;
+  RC_DIRTY = true;
+  queueTask(reconcileNow);
+}
+
+function reconcileNow() {
+  RC_DIRTY = false;
+  if (RC_BUSY) { reconcile(null); return; }
+
+  var want = desiredOutput();
+  if (want === -2) return;                       // unknown: never guess
+
+  // The fuse is applied here, not in desiredOutput(), because fuseAllowOn()
+  // is also what clears the trip once the cooldown expires — see the note on
+  // desiredOutput(). A refused ON degrades to "off" and is driven by the same
+  // single actuation, so a trip can never produce two overlapping chains.
+  if (want !== -1 && !fuseAllowOn()) {
+    log("FUSE: activation refused, forcing off");
+    want = -1;
+  }
+
+  if (want === STATE.activeOutput) return;
+  applyOutput(want);
+}
+
+// === THE SINGLE SERIALISED ACTUATOR (#476) ===
+//
+// applyOutput()/applyDone() are the ONLY code in this script permitted to
+// drive the pump relay. Everything that wants the pump in a different state
+// goes through applyOutput(); nothing else calls setOutput()/
+// turnOffAllSwitches()/turnOffOtherOutputs() on the pump outputs.
+//
+// Why: before this, TWELVE paths reached the hardware (see #475), four of
+// them assigning STATE.activeOutput and calling setOutput() directly. Two
+// consequences, both observed in production:
+//
+//   - a second event arriving inside an in-flight Switch.Set started a
+//     second chain nested in the first, and the nesting grew until the
+//     interpreter stack overflowed (#450);
+//   - button- and web-UI-driven runs accrued NO runtime and recorded NO
+//     fuse change, because startRuntimeAccounting()/fuseRecord() were only
+//     reachable from the old activateOutput() (#475 defect 1).
+//
+// RC_BUSY is true from the moment an actuation starts until its final
+// Switch.Set callback has run. Nothing may start a second actuation while it
+// is set — that is exactly the #450 nesting, where a second event's
+// Shelly.call landed inside the native completion handler of the first and
+// the nesting grew until the interpreter stack overflowed. applyDone() goes
+// back through reconcile(), i.e. through queueTask, so any follow-up runs on
+// a fresh stack.
+var RC_BUSY = false;      // an actuation is in flight
+var RC_TARGET = -1;       // the output the in-flight actuation drives towards
+// The output STATE.activeOutput held at the moment applyOutput() dispatched
+// the in-flight actuation. applyDone() used to re-read STATE.activeOutput
+// itself, AFTER the Switch.Set round trip, to recover this. But
+// handleSwitchEvent() writes that same variable from the relay's own
+// switch:0 status-change event, and only its override-adoption block is
+// guarded by RC_BUSY -- the write is not. If that event is delivered before
+// this actuation's Switch.Set completion callback, STATE.activeOutput
+// already holds the post-transition value by the time applyDone() reads it,
+// both edge branches below are skipped, and that transition's runtime
+// accounting and pool.pump_start/pump_stop event are silently lost. Capturing
+// the pre-transition value here, at dispatch time, removes the dependency on
+// delivery order entirely.
+var RC_WAS = -1;
+
+function applyOutputOn() {
+  setOutput(RC_TARGET, true, applyDone);
+}
+
+// Edge-triggered side effects live here and ONLY here: this is the one
+// place that sees every on/off transition, for every caller, after the
+// hardware has actually moved.
+//
+// Invoked as a Shelly.call/setOutput completion: (result, error_code,
+// error_message). A failed actuation must NOT be believed as if it
+// succeeded -- STATE.activeOutput stays at RC_WAS, not RC_TARGET, so
+// reconcileNow()'s "want === STATE.activeOutput" check still disagrees with
+// reality and queues a retry on the next tick. Without this check, a failed
+// ON left the reconciler believing the pump had started (no retry, pool
+// silently stops filtering) and a failed OFF left it believing the pump had
+// stopped while it kept running.
+function applyDone(result, error_code, error_message) {
+  if (error_code) {
+    log("apply: FAILED, output", RC_TARGET, "error", error_code, error_message);
+    RC_BUSY = false;
+    // Converge: retry from the facts as they stand now. Belief was never
+    // updated, so this is a genuine retry, not a no-op.
+    reconcile(null);
+    return;
+  }
+
+  var was = RC_WAS;
+  STATE.activeOutput = RC_TARGET;
+
+  // Runtime/turnover tracking (#402), BEFORE saveState(): both enqueue their
+  // KVS mirrors on the same 200ms task queue, and callers (and tests) treat
+  // the active-output write as the "transition finished" marker. Queueing the
+  // runtime mirrors first keeps active-output last, so observing it means the
+  // runtime figures for that interval are already persisted.
+  if (was === -1 && RC_TARGET !== -1) {
+    startRuntimeAccounting();
+    Shelly.emitEvent("pool.pump_start",
+                     {speed: effectiveSpeed(CONFIG.preferredSpeed), switch_id: RC_TARGET});
+  } else if (was !== -1 && RC_TARGET === -1) {
+    stopRuntimeAccounting();
+    Shelly.emitEvent("pool.pump_stop", {reason: F_WATER ? "water supply" : "policy"});
+  }
+
+  saveState();
+
+  RC_BUSY = false;
+  // Converge: the facts may have moved while we were busy.
+  reconcile(null);
+}
+
+function applyOutput(target) {
+  if (RC_BUSY) {
+    // Never nest a second Switch.Set chain inside the first (#450). The
+    // reconciler will re-evaluate from applyDone().
+    log("apply: deferring", target, "- actuation in flight");
+    reconcile(null);
+    return;
+  }
+
+  RC_BUSY = true;
+  RC_TARGET = target;
+  // Captured NOW, not re-read from STATE.activeOutput inside applyDone()
+  // after the RPC round trip -- see the comment on RC_WAS above.
+  RC_WAS = STATE.activeOutput;
+  if (target !== STATE.activeOutput) fuseRecord();
+  log("apply:", STATE.activeOutput, "->", target);
+
+  if (target === -1) {
+    // A Pro1 has exactly one output: drive it directly rather than through
+    // turnOffAllSwitches(), whose per-output queueTask hop would add a
+    // needless 200ms to every stop on the device that actually runs the pump.
+    if (STATE.deviceType !== "pro3") { setOutput(0, false, applyDone); return; }
+    turnOffAllSwitches(applyDone);
+    return;
+  }
+  if (STATE.deviceType === "pro3") {
+    // Break-before-make: every other stage off first, then the target on.
+    turnOffOtherOutputs(target, applyOutputOn);
+    return;
+  }
+  applyOutputOn();
 }
 
 // === BUTTON HANDLING ===
@@ -1611,224 +1864,61 @@ function cycleOutputs() {
     return;
   }
 
-  if (STATE.deviceType === "pro3") {
-    // Cycle: all off → 0 → 1 → 2 → all off
-    var nextOutput;
-    if (STATE.activeOutput === -1) {
-      nextOutput = 0;
-    } else if (STATE.activeOutput === 0) {
-      nextOutput = 1;
-    } else if (STATE.activeOutput === 1) {
-      nextOutput = 2;
-    } else {
-      nextOutput = -1;
-    }
-
-    log("Cycling from", STATE.activeOutput, "to", nextOutput);
-
-    if (nextOutput === -1) {
-      // Target is OFF: turn off all speeds
-      log("Power off: turning off all speeds");
-      turnOffAllSwitches(function() {
-        STATE.activeOutput = -1;
-        saveState();
-      });
-    } else if (STATE.activeOutput === -1) {
-      // From OFF to speed: just turn on target speed
-      log("Power on: starting speed", nextOutput);
-      setOutput(nextOutput, true, function() {
-        STATE.activeOutput = nextOutput;
-        saveState();
-      });
-    } else {
-      // Speed-to-speed: make-before-break (turn ON new, then OFF old)
-      var prevOutput = STATE.activeOutput;
-      log("Speed change: ON speed", nextOutput, "then OFF speed", prevOutput);
-      setOutput(nextOutput, true, function() {
-        // New speed is now on, turn off the old speed
-        setOutput(prevOutput, false, function() {
-          STATE.activeOutput = nextOutput;
-          saveState();
-        });
-      });
-    }
-  } else {
-    // Pro1: simple toggle
-    var nextOutput = STATE.activeOutput === -1 ? 0 : -1;
-    log("Toggling from", STATE.activeOutput, "to", nextOutput);
-    if (nextOutput === -1) {
-      // Turning off
-      turnOffAllSwitches(function() {
-        STATE.activeOutput = -1;
-        saveState();
-      });
-    } else {
-      // Turning on
-      setOutput(0, true, function() {
-        STATE.activeOutput = 0;
-        saveState();
-      });
-    }
-  }
-}
-
-// === WATER SUPPLY PROTECTION ===
-var WATER_SUPPLY_ACTIVE = false;  // debounce guard, and latest observed input:0 state
-
-// #450: re-entrancy guards for handleWaterSupply. input:0 can flap faster
-// than a Switch.Set round-trip (protect -> restore -> protect, or the
-// reverse, within milliseconds). handleWaterSupply used to call
-// activateOutput()/setOutput() unconditionally on every event; a second
-// event arriving before the first transition's Shelly.call callback had
-// fired called activateOutput() again while the first call was still in
-// flight. On real hardware that nests a fresh Shelly.call inside the native
-// completion handler of the one before it -- invisible to CALL_DEPTH, which
-// only bounds the RPC *completion* path (sharedCallDone), not this *event*
-// entry point -- and the nesting grows until acquireCallSlot's plain for
-// loop runs out of interpreter stack:
-//
-//   Uncaught Error: Too much recursion - the stack is about to overflow
-//    in function "acquireCallSlot" ... "setOutput" ... "activateOutput"
-//    ... "handleWaterSupply" ... "handleInputEvent" ... called from system
-//
-// That crashed the production pump (#450), leaving it running with
-// protection "active" and no script left to enforce it.
-//
-// WATER_SUPPLY_TRANSITION_PENDING is true from the moment a transition
-// starts until its activateOutput() callback has run. While true, a new
-// event does not call activateOutput() again -- it only records that a
-// newer input state exists (WATER_SUPPLY_PENDING_APPLY) and returns
-// immediately, so no second Shelly.call chain is ever nested inside the
-// first. WATER_SUPPLY_ACTIVE already holds the latest observed state (set
-// synchronously below, before the pending check), so nothing is lost: once
-// the in-flight transition's callback runs, finishWaterSupplyTransition()
-// applies that latest state via queueTask -- never inline -- so the
-// follow-up transition runs from a fresh stack, not nested inside the
-// callback that discovered it. A flap that ends "protection active" leaves
-// the pump off; one that ends "clear" leaves it restored -- matching the
-// LAST observed input, never the first.
-var WATER_SUPPLY_TRANSITION_PENDING = false;
-var WATER_SUPPLY_PENDING_APPLY = false;
-
-function handleWaterSupply(waterSupplyActive) {
-  log("Water supply active signal:", waterSupplyActive);
-
-  // Debounce: ignore duplicate events for the same state
-  if (waterSupplyActive === WATER_SUPPLY_ACTIVE) {
-    log("Water supply state unchanged, ignoring duplicate");
-    return;
-  }
-  WATER_SUPPLY_ACTIVE = waterSupplyActive;
-
-  if (WATER_SUPPLY_TRANSITION_PENDING) {
-    // A previous transition's Shelly.call has not completed yet. Do NOT
-    // call activateOutput() here -- see the block comment above. Record
-    // that a newer state must be applied once the in-flight transition
-    // settles.
-    log("Water supply transition in flight, deferring to latest state:", waterSupplyActive);
-    WATER_SUPPLY_PENDING_APPLY = true;
-    return;
-  }
-
-  startWaterSupplyTransition(waterSupplyActive);
-}
-
-// Applies one water-supply transition (protect or restore) and, on
-// completion, hands off to finishWaterSupplyTransition to check whether a
-// newer input state arrived while it was running.
-function startWaterSupplyTransition(waterSupplyActive) {
-  WATER_SUPPLY_TRANSITION_PENDING = true;
-
-  if (waterSupplyActive) {
-    // Water supply is ON (signal is HIGH after invert) - save current state and turn off all pumps
-    STATE.savedOutput = STATE.activeOutput;
-    log("Water supply ON - saving current output:", STATE.savedOutput);
-
-    Shelly.emitEvent("pool.water_supply_protected", {saved_output: STATE.savedOutput});
-    activateOutput(-1, function() {
-      log("All pumps turned off for water supply protection");
-      finishWaterSupplyTransition();
-    });
-  } else {
-    // Water supply is OFF (signal is LOW after invert) - restore previous state
-    log("Water supply OFF - restoring output:", STATE.savedOutput);
-
-    Shelly.emitEvent("pool.water_supply_restored", {restored_output: STATE.savedOutput});
-    activateOutput(STATE.savedOutput, function() {
-      log("Pump restored after water supply turned off");
-      finishWaterSupplyTransition();
-    });
-  }
-}
-
-// Runs when a water-supply transition's activateOutput() callback fires. If
-// a newer input state arrived while that transition was in flight (see
-// handleWaterSupply), applies it next -- via queueTask, so the follow-up
-// transition runs on a fresh stack instead of nesting inside this callback,
-// which would just move the #450 recursion one level deeper. Otherwise
-// clears the in-flight flag so the next event is handled immediately.
-function finishWaterSupplyTransition() {
-  if (!WATER_SUPPLY_PENDING_APPLY) {
-    WATER_SUPPLY_TRANSITION_PENDING = false;
-    return;
-  }
-  WATER_SUPPLY_PENDING_APPLY = false;
-  // Stay "pending" across the queueTask hop: a flap arriving before the
-  // queued transition actually starts must defer again (coalescing into
-  // this same follow-up), not race it.
-  var latest = WATER_SUPPLY_ACTIVE;
-  queueTask(function() { startWaterSupplyTransition(latest); });
+  // Pro3 cycles all-off -> 0 -> 1 -> 2 -> all-off; a Pro1 simply toggles.
+  var nextOutput = -1;
+  if (STATE.deviceType !== "pro3") {
+    if (STATE.activeOutput === -1) nextOutput = 0;
+  } else if (STATE.activeOutput === -1) nextOutput = 0;
+  else if (STATE.activeOutput === 0) nextOutput = 1;
+  else if (STATE.activeOutput === 1) nextOutput = 2;
+  log("Cycling from", STATE.activeOutput, "to", nextOutput);
+  // #475 defect 1: this used to call setOutput()/turnOffAllSwitches()
+  // directly and assign STATE.activeOutput itself, so a button-driven run
+  // accrued no runtime and recorded no fuse change. It now writes a fact —
+  // a manual override — and lets the reconciler drive the relay, so a button
+  // run is accounted for exactly like a scheduled one and an ON is refused
+  // while the fuse is tripped.
+  F_OVR_WANT = nextOutput;
+  F_OVR_UNTIL = Date.now() + CONFIG.overrideMs;
+  reconcile("button");
 }
 
 // === EVENT HANDLERS ===
+// Every handler is "write the fact, reconcile, return". None of them
+// contains any decision about the relay: that lives in desiredOutput()
+// alone, so there is nothing here for a second event to re-enter (#450).
 function handleSwitchEvent(info) {
   log("Switch event:", info);
 
-  // Ignore switch events during water supply protection
-  var input0 = Shelly.getComponentStatus("input:0");
-  if (input0 && input0.state && info.state === true) {
-    log("Water supply protection active, turning off switch", info.id);
-    setOutput(info.id, false);
-    return;
-  }
+  // The relay moved. Believe the hardware — this is the only place
+  // STATE.activeOutput is written outside applyDone().
+  var observed = info.state ? info.id : -1;
 
-  if (STATE.deviceType === "pro3" && info.state === true) {
-    // Ensure only one output is on (one at a time via the task queue — see turnOffOtherOutputs)
-    var activatedOutput = info.id;
-    turnOffOtherOutputs(activatedOutput);
-    STATE.activeOutput = activatedOutput;
-    saveState();
-
-  } else if (STATE.deviceType === "pro1" && info.state === true) {
-    STATE.activeOutput = 0;
-    saveState();
-
-  } else if (STATE.deviceType === "pro1" && info.state === false) {
-    STATE.activeOutput = -1;
-    saveState();
-  } else if (STATE.deviceType === "pro3" && info.state === false) {
-    // Track when all pro3 outputs are off
-    var anyStillOn = false;
-    for (var j = 0; j < STATE.outputs.length; j++) {
-      var st = Shelly.getComponentStatus("switch:" + STATE.outputs[j]);
-      if (st && st.output) {
-        anyStillOn = true;
-        break;
-      }
-    }
-    if (!anyStillOn) {
-      STATE.activeOutput = -1;
-      saveState();
+  // An out-of-band change (web UI, daemon, physical toggle) that
+  // contradicts the policy is adopted as a manual override, so the
+  // reconciler does not undo it on the next 200ms tick. An event that
+  // merely echoes our own actuation agrees with the policy by construction
+  // and sets no override; neither does one arriving mid-actuation.
+  if (!RC_BUSY) {
+    var want = desiredOutput();
+    if (want !== -2 && want !== observed) {
+      log("override: adopting out-of-band", observed);
+      F_OVR_WANT = observed;
+      F_OVR_UNTIL = Date.now() + CONFIG.overrideMs;
     }
   }
+
+  STATE.activeOutput = observed;
+  saveState();
+  reconcile("switch event");
 }
 
 function handleInputEvent(info) {
   log("Input event:", info);
-  
+
   // Handle input:0 (water-supply)
   if (info.id === 0) {
-    handleWaterSupply(info.state);
+    setWater(info.state);
   }
   // Input:1 (high-water) and input:2 (max-speed-active) are just notifications
 }
@@ -1851,9 +1941,8 @@ function handleButtonEvent(info) {
 // Subscribes to the daemon's retained `myhome/energy/solar/available` topic
 // (see #403) and layers a start/stop hysteresis on top of the existing
 // forecast-driven schedule — never replacing it. Calls this script's own
-// doStart()/doStop() so the fuse and water-supply protection remain in
-// force for solar-triggered runs exactly as for
-// scheduled/manual runs.
+// desiredOutput(), so the fuse and water-supply protection remain in force
+// for solar-triggered runs exactly as for scheduled/manual runs.
 //
 // Staleness is judged from the payload's own `ts` field (unix-epoch-seconds,
 // set by the daemon when it computed the value), NOT from local message
@@ -1940,57 +2029,73 @@ function solarSoftTargetReached() {
 // on a periodic tick (see SOLAR.tickTimer in continueInit()) so staleness is
 // still detected even if no further MQTT message ever arrives (e.g. the
 // daemon dies while idle mid-hold-delay).
+// #476: keeps its hold-delay logic but is now a FACT PRODUCER. It writes
+// F_SOLAR_WANT (its own latched opinion, no longer the physical relay state)
+// and asks the reconciler to converge; it never drives the relay itself.
+//
+// Reading the *physical* state here was subtly wrong: a window-driven run
+// made `running` true, so solar skipped its start hysteresis entirely and
+// went straight to its stop branch — meaning "solar went away" cut a
+// scheduled run short. docs/pool-pump.md says solar layers on top of the
+// forecast schedule and "never replac[es] it"; with a latched opinion that
+// is finally true.
+function solarWant(want) {
+  if (want === F_SOLAR_WANT) {
+    // The hard ceiling can be crossed without F_SOLAR_WANT moving.
+    reconcile(null);
+    return;
+  }
+  F_SOLAR_WANT = want;
+  reconcile(want ? "solar available" : "solar gone");
+}
+
 function checkSolarHysteresis() {
   if (!CONFIG.solarEnabled) return;
 
   // Staleness is judged from the payload's own ts (SOLAR.publishedTs), not
   // from when we last received a message (SOLAR.lastMsgTs) — see the comment
   // on the SOLAR var above for why that distinction matters.
-  if (SOLAR.publishedTs === 0 || (Date.now() - SOLAR.publishedTs) > CONFIG.solarStaleMs) {
-    SOLAR.aboveStartSince = 0;
-    SOLAR.belowStopSince = 0;
-    return; // stale/absent: existing forecast-driven schedule keeps running untouched
-  }
-
-  var running = STATE.activeOutput !== -1;
   var now = Date.now();
+  if (SOLAR.publishedTs === 0 || (now - SOLAR.publishedTs) > CONFIG.solarStaleMs) {
+    SOLAR.aboveStartSince = 0;
+    SOLAR.belowStopSince = 0;
+    solarWant(false);   // stale/absent: the forecast-driven window decides alone
+    return;
+  }
 
-  if (!running) {
-    if (SOLAR.availableW >= CONFIG.solarStartThresholdW) {
-      if (SOLAR.aboveStartSince === 0) SOLAR.aboveStartSince = now;
-      if (now - SOLAR.aboveStartSince >= CONFIG.solarStartDelayMs) {
-        if (!solarHardCeilingReached()) {
-          doStart(CONFIG.preferredSpeed, 'Solar start: ' + SOLAR.availableW + 'W');
-        }
-        SOLAR.aboveStartSince = 0;
-      }
-    } else {
+  if (!F_SOLAR_WANT) {
+    if (SOLAR.availableW < CONFIG.solarStartThresholdW) {
       SOLAR.aboveStartSince = 0;
+      solarWant(false);
+      return;
     }
+    if (SOLAR.aboveStartSince === 0) SOLAR.aboveStartSince = now;
+    if (now - SOLAR.aboveStartSince < CONFIG.solarStartDelayMs) {
+      solarWant(false);
+      return;
+    }
+    SOLAR.aboveStartSince = 0;
+    solarWant(true);
     return;
   }
 
-  if (solarHardCeilingReached()) {
-    doStop('Solar hard ceiling reached');
-    SOLAR.aboveStartSince = 0;
-    SOLAR.belowStopSince = 0;
-    return;
-  }
   if (solarSoftTargetReached() && SOLAR.availableW < CONFIG.solarStartThresholdW) {
-    doStop('Solar soft stop: target met and solar gone');
-    SOLAR.aboveStartSince = 0;
     SOLAR.belowStopSince = 0;
+    solarWant(false);
     return;
   }
-  if (SOLAR.availableW < CONFIG.solarStopThresholdW) {
-    if (SOLAR.belowStopSince === 0) SOLAR.belowStopSince = now;
-    if (now - SOLAR.belowStopSince >= CONFIG.solarStopDelayMs) {
-      doStop('Solar stop: ' + SOLAR.availableW + 'W');
-      SOLAR.belowStopSince = 0;
-    }
-  } else {
+  if (SOLAR.availableW >= CONFIG.solarStopThresholdW) {
     SOLAR.belowStopSince = 0;
+    solarWant(true);
+    return;
   }
+  if (SOLAR.belowStopSince === 0) SOLAR.belowStopSince = now;
+  if (now - SOLAR.belowStopSince < CONFIG.solarStopDelayMs) {
+    solarWant(true);
+    return;
+  }
+  SOLAR.belowStopSince = 0;
+  solarWant(false);
 }
 
 // === MQTT SETUP ===
@@ -2207,6 +2312,12 @@ function verifySchedules(cb) {
     }
 
     log('Pool pump schedules verified');
+    // #476: seed the run-window fact from the jobs we already have in hand.
+    // A separate Schedule.List at init cost ~670 bytes of mem_peak on a Pro1
+    // (measured on `mezzanine` 2026-08-12) purely to parse the same response
+    // twice. From here on the window is owned by setWindow(), rewritten only
+    // by updateScheduleMode().
+    onWindowJobs(result, null);
     if (typeof cb === 'function') queueTask(function() { cb(); });
   });
 }
@@ -2341,7 +2452,7 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
 
   if (!modeChanged && !hasTimings) {
     log('Mode already:', newMode, '- no changes needed');
-    return;
+    return;   // nothing written, so the window fact cannot have moved
   }
 
   if (modeChanged) {
@@ -2421,7 +2532,15 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // instant never fires at all — which is how the pool lost a whole
         // day of filtration on 2026-08-06. Reconcile here, once, in the one
         // place that knows the window moved.
-        if (windowChanged) queueTask(reconcileRunState);
+        // #476: the window is a fact with one writer. Re-read what we just
+        // wrote (named function reference, so no closure is allocated) so
+        // setWindow() owns it from here on, instead of every decision paying
+        // its own Schedule.List. Gated on windowChanged: a no-op re-run --
+        // the common case at sunrise when the forecast yields yesterday's
+        // window -- must not buy a Schedule.List response parse for nothing.
+        // Measured on `mezzanine` 2026-08-12: an ungated re-read lands on top
+        // of the Open-Meteo JSON.parse and costs ~670 bytes of mem_peak.
+        if (windowChanged) queueTask(readWindow);
         return;
       }
       var sched = schedulesToUpdate[updateIndex];
@@ -2515,54 +2634,6 @@ function decideModeFromForecast() {
   updateScheduleMode(newMode, startHour, stopHour);
 }
 
-// === UNIFIED START/STOP FUNCTIONS ===
-// Both devices run same script. Each checks if it should activate based on preferred_device_id.
-function doStart(speed, reason) {
-  log(reason || 'Start pump');
-
-  var input0 = Shelly.getComponentStatus('input:0');
-  if (input0 && input0.state) {
-    log('Water supply protection active, ignoring start request');
-    return;
-  }
-
-  // Map speed to physical switch
-  var switchId = mapSpeedToSwitch(speed);
-  if (switchId === -1) {
-    log('Invalid speed or off requested, turning off');
-    activateOutput(-1);
-    return;
-  }
-
-  // Report the speed actually run, not the one configured: on a Pro1 those
-  // differ, and the event feeds the daily-turnover accounting.
-  var eff = effectiveSpeed(speed);
-  log('Starting pump at speed:', eff, '-> switch:', switchId);
-  Shelly.emitEvent("pool.pump_start", {speed: eff, switch_id: switchId, reason: reason || "start"});
-  activateOutput(switchId);
-}
-
-function doStop(reason) {
-  log(reason || 'Stop pump');
-
-  // Nothing to stop if the pump is already off.
-  if (STATE.activeOutput === -1) {
-    log('Not running, nothing to do');
-    return;
-  }
-
-  var input0 = Shelly.getComponentStatus('input:0');
-  if (input0 && input0.state) {
-    log('Water supply protection active, still turning off');
-    // Continue to turn off even with water supply active
-  }
-
-  Shelly.emitEvent("pool.pump_stop", {reason: reason || "stop"});
-  activateOutput(-1, function() {
-    log('Pump stopped');
-  });
-}
-
 // === SCHEDULE EVENT HANDLERS ===
 function handleDailyCheck() {
   log('Daily check event');
@@ -2577,63 +2648,40 @@ function handleDailyCheck() {
   //
   // performDailyModeCheck() -> updateScheduleMode() only reads the forecast
   // and rewrites Schedule.List jobs; it does not touch the physical output
-  // directly. The one place it can indirectly move the pump --
-  // reconcileRunState(), called only if the window actually changed --
-  // already goes through doStart()/doStop(), and BOTH already re-check
-  // live water-supply state themselves: doStart() refuses to start while
-  // protected, doStop() always proceeds. So running the daily check during
-  // protection is safe; skipping it just delayed a correct decision for no
-  // safety benefit.
+  // directly. The one way it can move the pump is by moving the run-window
+  // FACT (setWindow), and the policy checks F_WATER first, so a reconcile
+  // during protection can only ever settle on "off". Running the daily
+  // check during protection is therefore safe; skipping it just delayed a
+  // correct decision for no safety benefit.
   performDailyModeCheck();
 }
 
+// A schedule edge is the natural expiry for a manual override: whatever the
+// maintainer wanted by hand, they did not mean it to survive the next
+// scheduled start or stop.
 function handleMorningStart() {
-  // Morning start uses preferred_speed from KVS
-  doStart(CONFIG.preferredSpeed, 'Morning start event');
+  clearOverride();
+  reconcile('morning start');
 }
 
 function handleEveningStop() {
-  doStop('Evening stop event');
+  clearOverride();
+  reconcile('evening stop');
 }
 
 function handleNightStart() {
-  // Night start uses preferred_speed from KVS
-  doStart(CONFIG.preferredSpeed, 'Night start event');
+  clearOverride();
+  reconcile('night start');
 }
 
 function handleNightStop() {
   // Belt-and-suspenders midnight reset, in addition to the lazy per-write
   // check in persistRuntimeState/ensureRuntimeDay (#402).
   ensureRuntimeDay();
-  doStop('Night stop event');
+  clearOverride();
+  reconcile('night stop');
 }
 
-// Brings the physical pump state back in line with isWithinRunWindow() —
-// the shared reconciliation for every situation where the answer to "should
-// I be running?" changes without the corresponding schedule job firing:
-//
-//   - the script restarts part-way through a run window (#421),
-//   - updateScheduleMode() rewrites the window under a live script (#441),
-//   - water-supply protection clears after the window moved or ended (#436).
-//
-// Deliberately does nothing when the window is unresolvable (isWithinRunWindow
-// calls back null) or when the state already agrees — acting on a guess here
-// would start or stop the pump for no reason.
-//
-// `reason` is optional so this can be handed straight to queueTask().
-function reconcileRunState(reason) {
-  var why = (reason || 'Schedule rewrite') + ': ';
-
-  isWithinRunWindow(function(shouldRun) {
-    var running = STATE.activeOutput !== -1;
-    if (shouldRun === null || shouldRun === running) {
-      log(why + 'no action', shouldRun, running);
-      return;
-    }
-    if (shouldRun) doStart(CONFIG.preferredSpeed, why + 'inside window');
-    else doStop(why + 'outside window');
-  });
-}
 
 // === INITIALIZATION ===
 function enforceOutputState() {
@@ -2651,8 +2699,13 @@ function enforceOutputState() {
     }
     
     if (onOutputs.length > 1) {
-      log("Multiple outputs on, keeping first:", onOutputs[0]);
-      activateOutput(onOutputs[0]);
+      // Do not actuate from here — nothing outside the actuator may. Record
+      // the state as "not a valid single output" and let the reconciler
+      // repair it: whatever desiredOutput() returns, applyOutput() breaks
+      // before it makes, so exactly one stage ends up on.
+      log("Multiple outputs on:", onOutputs[0], "and others - reconciler will resolve");
+      STATE.activeOutput = -1;
+      saveState();
     } else if (onOutputs.length === 1) {
       STATE.activeOutput = onOutputs[0];
       saveState();
@@ -2673,14 +2726,32 @@ function enforceOutputState() {
 
   // If the pump was already running when the script (re)started, resume
   // runtime accounting so an in-progress run keeps accruing across restarts
-  // (#402). Safe to call unconditionally here: when this path was reached
-  // via activateOutput() above (the "multiple outputs on" branch),
-  // STATE.activeOutput is still -1 at this point (that call's own state
-  // update is deferred to the task queue), so this is a no-op in that case
-  // and activateOutput()'s own on/off-transition hook accounts for the run
-  // once its callback lands.
+  // (#402). If the policy then decides the pump should not be running, the
+  // reconciler stops it and applyDone() closes the interval properly, so
+  // the seconds between restart and that decision are still counted.
+  //
+  // #476: nothing is adopted as an override here. A restart re-derives the
+  // relay from the policy, which is the whole point of #421/#441 — a
+  // remembered value must never outrank the run window. The cost, recorded
+  // deliberately: a crash-restart OUTSIDE the run window now stops a pump
+  // that was running by hand, because no switch:N event survives a restart
+  // to have set an override. Stopping is the safe direction.
+  //
+  // #474 class: startRuntimeAccounting() must NOT run inline here either.
+  // enforceOutputState() is itself called synchronously at the top of
+  // finishContinueInit(), i.e. still inside the fully synchronous
+  // init -> loadConfig(cb) -> continueInit -> loadState -> finishContinueInit
+  // chain that #474 already found the interpreter stack has no headroom
+  // left for by the time it reaches this depth. Calling
+  // startRuntimeAccounting() -> ensureRuntimeDay() -> reconcileRuntimeState()
+  // -> log() inline crashed at init on `mezzanine` (Pro1) 2026-08-12 with
+  // "Too much recursion" whenever the pump/light was already ON at script
+  // restart (STATE.activeOutput !== -1) -- exactly the #474 mechanism, at a
+  // second call site the reconciler refactor introduced. Deferred the same
+  // way as setupMQTT(): a named function passed to queueTask allocates no
+  // closure and runs on a fresh stack.
   if (STATE.activeOutput !== -1) {
-    startRuntimeAccounting();
+    queueTask(startRuntimeAccounting);
   }
 }
 
@@ -2714,12 +2785,24 @@ function continueInit() {
 
 function finishContinueInit() {
   enforceOutputState();
-  setupMQTT();
+  // #474: setupMQTT() must NOT run inline here. init -> loadConfig(cb) ->
+  // continueInit -> loadState -> finishLoadState -> finishContinueInit is a
+  // fully synchronous chain that never returns to the event loop, and
+  // subscribeSolarAvailable()'s log() call at the bottom of it overflows the
+  // Espruino interpreter stack -- with 23044 bytes of heap still free.
+  // Measured on `mezzanine` (Pro1) 2026-08-12: identical bytes crash with
+  // solar-enabled=true and run with this one line changed to queueTask
+  // (mem_peak 20636, mem_free 7392, same peak as the solar-off arm, so the
+  // solar path costs no heap at all). With solar-enabled=false the crash
+  // never showed because subscribeSolarAvailable() returns before reaching
+  // log() -- which is the only reason the bug looked solar-specific.
+  // queueTask takes a NAMED function, so this allocates no closure.
+  queueTask(setupMQTT);
 
   // Solar hysteresis (#405): re-evaluate periodically so staleness is
   // detected even if the daemon dies mid-hold-delay and no further MQTT
   // message ever arrives. This is at most the 4th concurrent timer
-  // (TASK_TIMER, STATE.graceTimer, STATE.runtimeFlushTimer) — see
+  // (TASK_TIMER, STATE.runtimeFlushTimer) — see
   // docs/pool-pump.md "Timer Budget".
   if (CONFIG.solarEnabled) {
     SOLAR.tickTimer = Timer.set(30000, true, checkSolarHysteresis);
@@ -2748,9 +2831,7 @@ function finishContinueInit() {
     function(next) {
       log('Step 2/4: Checking water supply status...');
       var input0 = Shelly.getComponentStatus('input:0');
-      if (input0 && input0.state) {
-        handleWaterSupply(true);
-      }
+      if (input0 && input0.state) setWater(true);
       next();
     },
     function(next) {

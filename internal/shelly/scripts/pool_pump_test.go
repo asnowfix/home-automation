@@ -341,6 +341,20 @@ func TestPoolPump_InitVerifiesWrappedSchedules(t *testing.T) {
 	}
 }
 
+// TestPoolPump_WaterSupplyRestoresSpeed asserts that water-supply protection
+// removes a running speed and that the speed comes back when protection
+// clears.
+//
+// #476 changed WHAT comes back. This test used to boot a Pro3 with switch:2
+// already on, outside any run window, and assert it was still on after init —
+// i.e. that a remembered boot-time relay state outranks the run window. Under
+// the level-triggered reconciler it does not: a restart re-derives the relay
+// from the policy, which is the whole point of #421/#441 (see also
+// TestPoolPump_ScheduleRewriteAwayStopsPump, which already pinned "a running
+// pump whose window moves away must stop"). The premise, not the intent, is
+// what changed, so the test now establishes the running speed the way a real
+// device does — from a run window that contains "now" — and asserts the same
+// protect/restore behaviour against it.
 func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
@@ -350,14 +364,43 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 
 	injector := make(chan []byte, 4)
 
-	cs := pro3ComponentStatus()
-	cs["switch:2"] = map[string]interface{}{"id": 2, "output": true}
+	// "max" speed must map to switch 2 unambiguously. controllerKVS() only
+	// sets eco-speed (to 0); day-speed/max-speed fall back to their schema
+	// defaults (1 and 0), which collides eco and max on switch 0 — pin
+	// max-speed explicitly so the policy wants switch:2 whenever the window
+	// contains now, matching this test's assertions below.
+	kvs := controllerKVS()
+	kvs["script/pool-pump/speed"] = "max"
+	kvs["script/pool-pump/max-speed"] = "2"
 
+	// handleDailyCheck() runs automatically at the end of init (#476: it must
+	// still run under water-supply protection, see the comment on
+	// handleDailyCheck() itself) and, given a reachable forecast URL, its
+	// Open-Meteo fetch can succeed against the real network in a sandbox with
+	// internet access — silently rewriting the run window mid-test via
+	// updateScheduleMode(), racing the assertions below (observed live
+	// 2026-08-12: it rewrote the window to 15:09-18:51 and stopped a pump
+	// this test had just started). A local server returning a body with no
+	// "hourly" field makes onForecast() bail with "Invalid forecast
+	// structure" and getMaxForecastTemp() stay null, so
+	// decideModeFromForecast() returns before touching the window
+	// (pool-pump.js:2430-2436) — deterministic regardless of what network
+	// access the test environment happens to have.
+	brokenForecast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(brokenForecast.Close)
+
+	now := time.Now()
 	deviceState := &script.DeviceState{
-		KVS:             controllerKVS(),
-		Storage:         make(map[string]interface{}),
-		ComponentStatus: cs,
-		Schedules:       poolPumpSchedules(),
+		KVS: kvs,
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  brokenForecast.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro3ComponentStatus(),
+		Schedules:       poolPumpSummerSchedules(now.Add(-1*time.Hour), now.Add(1*time.Hour)),
 		EventInjector:   injector,
 	}
 
@@ -381,8 +424,17 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 		t.Fatalf("script did not complete init within timeout")
 	}
 
-	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "2" {
-		t.Fatalf("expected active-output=2 after init, got %v", v)
+	// The window contains "now", so the reconciler starts the pump at the
+	// preferred speed without any event at all (#441: nothing used to ask
+	// "should I be running?" unless a schedule rewrite happened to move).
+	if !waitFor(eventTimeout, 100*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "2"
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("expected the reconciler to start switch:2 inside the run window, got %v",
+			kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
 	// 5s (not 2s): activateOutput() now also queues the #402 runtime/turnover
@@ -419,6 +471,19 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 
 // TestPoolPump_ButtonCyclesPro3 verifies that sys_btn_push events cycle
 // through speeds: off → 0 → 1 → 2 → off (the last transition exercises turnOffAllSwitches).
+//
+// #479 review: this test flaked CI-only (never locally) with "button press 4:
+// expected active-output=-1, got 2" after ~19.85s -- eventTimeout (10s)
+// expiring. Root cause was NOT in the reconciler: pool-pump.js's daily
+// forecast fetch (Shelly.call("HTTP.GET", {url: api.open-meteo.com...}))
+// runs on the exact same task queue as the button-cycle chain, and the
+// emulator used to make that a real, synchronous, BLOCKING network call on
+// the single goroutine driving the whole script's event loop -- so a slow
+// real network round trip (intermittent on CI, essentially never on a fast
+// home connection) stalled every other event, including this test's own
+// active-output write. Fixed in pkg/shelly/script/run.go by making the
+// emulator's "http.get" async like Timer.set/MQTT.subscribe already are --
+// see that file's "http.get" method for the full writeup and reproduction.
 func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
@@ -568,23 +633,17 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 		t.Fatalf("Pro1 toggle on: expected active-output=0, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
 
-	// Button press: toggle OFF (exercises turnOffAllSwitches on Pro1)
-	injector <- shellyButtonEvent()
-	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
-		return ok && v == "-1"
-	}) {
-		t.Fatalf("Pro1 toggle off: expected active-output=-1, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
-	}
-
-	// Toggle ON again for water supply test.
-	injector <- shellyButtonEvent()
-	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
-		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
-		return ok && v == "0"
-	}) {
-		t.Fatalf("Pro1 toggle on (2): expected active-output=0, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
-	}
+	// #476: the middle "toggle OFF then ON again" pair that used to sit here
+	// has been removed, and its removal is the point. Button presses now go
+	// through the single actuator, so they record fuse changes like every
+	// other actuation — which they did NOT before (#475 defect 1: a
+	// button-driven run bypassed both the fuse and runtime accounting). Five
+	// relay changes inside ten seconds legitimately trips the anti-cycling
+	// fuse (4 changes / 2 min), so the old sequence now ends with the restore
+	// refused. That is correct behaviour, not a regression; the toggle-off
+	// path is covered by TestPoolPump_ButtonCyclesPro3, and the fuse now
+	// covering button presses is asserted by
+	// TestPoolPump_FuseRefusesButtonOnAfterRapidCycling.
 
 	// Water supply ON → should turn off. 5s (not 2s): activateOutput() now
 	// also queues the #402 runtime/turnover KVS mirror writes ahead of this

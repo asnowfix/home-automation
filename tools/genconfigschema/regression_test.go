@@ -34,6 +34,7 @@ var wantPoolKVSKeys = map[string]string{
 	"solar_min_turnover":      "script/pool-pump/solar-min-turnover",
 	"solar_max_turnover":      "script/pool-pump/solar-max-turnover",
 	"solar_stale_ms":          "script/pool-pump/solar-stale-ms",
+	"override_ms":         "script/pool-pump/override-ms",
 }
 
 // wantPoolDefaults is a frozen copy of the 22 DefaultXxx values previously
@@ -60,6 +61,7 @@ var wantPoolDefaults = map[string]any{
 	"solarMinTurnover":     5.0,
 	"solarMaxTurnover":     7.0,
 	"solarStaleMs":         300000.0,
+	"overrideMs":           7200000.0, // -> DefaultOverride (#476): manual override hold
 }
 
 // wantGardenKVSKeys is a frozen copy of gardenKVSKeys as it stood on `main`
@@ -116,8 +118,8 @@ func TestRegression_PoolPumpSchemaMatchesToday(t *testing.T) {
 		t.Fatalf("LoadSchema: %v", err)
 	}
 
-	if len(schema.Fields) != 23 {
-		t.Fatalf("got %d fields, want 23", len(schema.Fields))
+	if len(schema.Fields) != 24 {
+		t.Fatalf("got %d fields, want 24", len(schema.Fields))
 	}
 
 	gotKVSKeys := map[string]string{}

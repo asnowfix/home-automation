@@ -55,9 +55,13 @@ rediscover.
 4. **Define functions before use.** There is no hoisting. This applies to callback references too.
 5. **Never write an empty `catch (e) {}`.** The minifier turns it into `catch {}`, which the engine
    rejects. Reference the parameter: `catch (e) { if (e && false) {} }`.
-6. **`mem_peak` is a device-wide high-water mark.** It does not reset when you restart a script, so
-   consecutive measurements each return the maximum of all arms so far — which looks exactly like
-   "the change made no difference". Reboot between arms.
+6. **`mem_peak` DOES reset when the script restarts — but it is only a measurement once init has
+   settled.** Measured 2026-08-16 on two Pro1s, restarting the script made `mem_peak` *decrease*
+   (mezzanine 21644 → 21420, filtration-hiver 21644 → 21448), which a monotonic high-water mark
+   cannot do. It then climbs back through init and settles ~20 s later, **above** where it started
+   (21602 and 21826). So a reading at +5 s understates the peak, and a pre-restart reading is not
+   comparable with a post-restart one unless both are settled. Reboot between arms anyway — it is
+   still the only way to clear other scripts' drift from the shared pool.
 7. **Debug output truncates at ~128 characters and is NUL-separated.** Write on-device diagnostics
    as several short lines. Do not use `netcat` to capture it — it silently stops recording.
 8. **UDP debug degrades the device and causes crashes on its own.** Enable it around a specific

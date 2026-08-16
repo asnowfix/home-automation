@@ -96,15 +96,36 @@ Two caveats:
 
 ---
 
-## mem_peak is a high-water mark — reboot between arms
+## mem_peak resets on restart, but only settles seconds later — reboot between arms anyway
 
-`mem_peak` does not reset when you stop and restart a script, because the heap is one device-wide
-pool. Measure two variants back to back and the second inherits the first's high-water mark:
-**every arm returns the maximum of all arms so far**, which looks convincingly like "the change made
-no difference".
+**Corrected 2026-08-16.** This section previously stated that `mem_peak` does not reset when you stop
+and restart a script. That is wrong, and it was measured wrong in both directions.
 
-Three consecutive measurements of different `pool-pump.js` configurations returned an identical
-22778 this way before the cause was spotted.
+Restarting the script makes `mem_peak` **decrease** — which a monotonic high-water mark cannot do —
+and it then climbs back through init, settling ~20 s later *above* where it started. Measured on two
+Pro1 devices the same evening, same build:
+
+| | before restart | t+5 s | t+20 s (settled) |
+|---|---|---|---|
+| `mezzanine` | 21644 | **21420** | 21602 |
+| `filtration-hiver` | 21644 | **21448** | 21826 |
+
+Two consequences, and the second is the one that bites:
+
+- A **pre-restart reading is not comparable with a post-restart one** unless both are settled. The
+  21644 above was itself taken too early, right after a deployment — the true settled peak for that
+  build on `filtration-hiver` is **21826**, 182 bytes higher.
+- **A single `Script.GetStatus` is still not a measurement**, for the reason given below: the peak
+  keeps nudging upward for tens of seconds as init exercises lazily-parsed code paths.
+
+The old claim was inferred from three consecutive measurements of different `pool-pump.js`
+configurations all returning an identical 22778. That observation stands; the explanation does not.
+The likeliest cause is sampling before the peak settled, or three arms that genuinely peaked alike —
+not a mark that survives a restart.
+
+**Reboot between arms regardless.** A restart clears the script's own peak but not other resident
+scripts' contribution to the shared pool, and the heap is one device-wide pool. The protocol below
+remains correct.
 
 The protocol that works, **per arm**:
 

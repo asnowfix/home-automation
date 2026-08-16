@@ -1570,6 +1570,101 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 	}
 }
 
+// TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart is the
+// regression test for #502: a device with ZERO Schedule.List jobs at all
+// (Schedules is nil, mirroring `mezzanine`'s "only a firmware-update job"
+// reality) whose in-flight runtime accounting is still pinned to a stale
+// day, purely because the script has been running continuously with no
+// restart -- exactly the catch-22 that left mezzanine stuck at 42002s
+// against a 37393s ceiling: the ceiling blocks solar, solar staying off
+// means the pump never runs either, and with no schedule job and no
+// restart, nothing else ever re-checks the day.
+//
+// The goja harness has no injectable virtual clock (Date.now()/Timer.set
+// are tied to the real system clock -- see the comment on
+// TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate), so a
+// real day boundary crossing mid-run cannot be produced by waiting. Instead
+// this uses ScheduleEvalInjector -- the same mechanism a real device's
+// Schedule.eval -> Script.Eval(id, code) uses to run a due job's code
+// against the live script -- to directly overwrite the *in-memory*
+// STATE.runtimeTs/runtimeTodaySec the way a real midnight rollover would,
+// without going through loadState() (which already resets correctly on any
+// fresh boot -- see TestPoolPump_RuntimeAccounting_PreviousDayRestartResets
+// -- and would therefore mask a regression in the *other* reset path this
+// test targets: solarHardCeilingReached()'s own ensureRuntimeDay() call).
+func TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mc := mqtt.NewMockClient()
+	mqtt.SetClient(mc)
+	t.Cleanup(mqtt.ResetClient)
+
+	// Same tiny ceiling override as TestPoolPump_SolarRespectsHardCeiling
+	// (~7.7s target), so a modest injected sec total blocks solar start.
+	kvs := solarKVS(map[string]string{"solar-max-turnover": "0.001"})
+
+	evalCh := make(chan []byte, 4)
+	deviceState := &script.DeviceState{
+		KVS:                  kvs,
+		Storage:              make(map[string]interface{}),
+		ComponentStatus:      pro3ComponentStatus(), // pump off at boot
+		Schedules:            nil,                   // #502: the mezzanine case -- no pool schedules at all
+		ScheduleEvalInjector: evalCh,
+	}
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	initDone := waitFor(initTimeout, 200*time.Millisecond, func() bool {
+		_, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
+		return exists
+	})
+	if !initDone {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	// Pin the running script's in-memory runtime state to "yesterday, way
+	// over the ceiling" -- standing in for many idle days spent stuck
+	// against the ceiling with no restart, since the script's own boot-time
+	// reset (loadState) already ran moments ago on a fresh (today) total.
+	yesterday := time.Now().AddDate(0, 0, -1).Unix()
+	stale := fmt.Sprintf("STATE.runtimeTs = %d; STATE.runtimeTodaySec = 3600;", yesterday)
+	if err := evalPoolPumpSchedule(deviceState, stale); err != nil {
+		t.Fatalf("failed to inject stale runtime state: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond) // let the injected eval land
+
+	// Fresh, well above the start threshold, zero start delay: would stay
+	// blocked forever by the stale (yesterday's) ceiling if nothing but a
+	// restart could ever re-check the day -- there is no restart here, and
+	// no schedule job to fall back on either.
+	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+
+	started := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0" // eco switch, per controllerKVS()'s eco-speed=0
+	})
+
+	cancel()
+	<-done
+
+	if !started {
+		t.Fatalf("expected solar start after an in-flight day rollover with no restart and no schedule "+
+			"jobs, got active-output=%v (the stale ceiling was never re-checked)",
+			kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+}
+
 // TestPoolPump_SolarStaleFallsBackToSchedule verifies that solar hysteresis
 // being enabled but never having received a myhome/energy/solar/available
 // message (SOLAR.publishedTs stays 0 — the "absent" case) does not interfere

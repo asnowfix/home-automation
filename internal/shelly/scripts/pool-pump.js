@@ -1262,7 +1262,7 @@ function reconcileRuntimeState(sec, ts, sourceLabel) {
   var restoredDay = localDayNumber(ts);
   var today = localDayNumber(nowSec);
   if (restoredDay < today) {
-    log("Runtime day rollover:", restoredDay, "->", today);
+    log("Runtime day rollover: discarding", sec, "s from", restoredDay);
     return {sec: 0, ts: nowSec};
   }
   if (restoredDay > today) {
@@ -2009,7 +2009,16 @@ function subscribeSolarAvailable() {
 
 // Hard ceiling (pool volumes/day): pump always stops (and won't solar-start)
 // once reached, regardless of solar availability.
+//
+// #502: ensureRuntimeDay() runs here, not only at load/init, because this is
+// the read site a device with zero Schedule.List jobs (mezzanine) still
+// reaches -- via desiredOutput() on every reconcile(), itself driven
+// periodically by SOLAR.tickTimer even with no schedule at all. Without
+// this, a long-running script that never restarts and never solar-starts
+// (because the stale ceiling blocks it) never re-checks the day either --
+// the exact catch-22 that left mezzanine stuck at 42002s.
 function solarHardCeilingReached() {
+  ensureRuntimeDay();
   var flowRate = computeFlowRate();
   if (!flowRate || flowRate <= 0 || !CONFIG.poolVolume) return false;
   var target = (CONFIG.poolVolume * CONFIG.solarMaxTurnover / flowRate) * 3600;
@@ -2018,7 +2027,9 @@ function solarHardCeilingReached() {
 
 // Soft-stop target (pool volumes/day): solar keeps running past this while
 // solar remains available, but stops once solar goes away.
+// #502: same reasoning as solarHardCeilingReached() above.
 function solarSoftTargetReached() {
+  ensureRuntimeDay();
   var flowRate = computeFlowRate();
   if (!flowRate || flowRate <= 0 || !CONFIG.poolVolume) return false;
   var target = (CONFIG.poolVolume * CONFIG.solarMinTurnover / flowRate) * 3600;
@@ -2637,6 +2648,12 @@ function decideModeFromForecast() {
 // === SCHEDULE EVENT HANDLERS ===
 function handleDailyCheck() {
   log('Daily check event');
+
+  // #502: this @sunrise job runs every day in both summer and winter mode,
+  // unlike handleNightStop()'s midnight reset (winter-only). It is the
+  // reset site that actually fired on filtration-hiver while the counter
+  // stayed stale -- because this function never called ensureRuntimeDay().
+  ensureRuntimeDay();
 
   // #450: this used to skip performDailyModeCheck() entirely while
   // water-supply protection was active. That silently skipped the

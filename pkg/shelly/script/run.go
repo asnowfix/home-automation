@@ -176,7 +176,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	// deliver a test-armed nested event (see DeviceState.pendingNestedEvent
 	// and #450) synchronously from inside the call, before invoking the
 	// script's own callback.
-	methods := createMethodsMap(ctx, eh, deviceState)
+	methods := createMethodsMap(ctx, eh, deviceState, handlers)
 
 	// Shelly object with all APIs from https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shelly-apis
 	shellyObj := vm.NewObject()
@@ -815,7 +815,7 @@ func scheduleID(v interface{}) int {
 	return -1
 }
 
-func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *DeviceState) map[string]methodFunc {
+func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *DeviceState, handlers *[]handler) map[string]methodFunc {
 	log, _ := logr.FromContext(ctx)
 	return map[string]methodFunc{
 		"shelly.detectlocation": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
@@ -1161,69 +1161,48 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			return nil, nil
 		},
 
+		// http.get emulates https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/HTTP#httpget
+		// params: { url: string, timeout: number }.
+		//
+		// #479-buttoncycles-ci: on real firmware, HTTP.GET is asynchronous --
+		// it never blocks the script's OTHER event processing (timers, button
+		// presses, switch RPCs) while the request is in flight; only the
+		// script's own callback waits for it. The previous implementation here
+		// called http.DefaultClient.Do() SYNCHRONOUSLY on the same goroutine
+		// that runs the whole script's single-threaded event loop
+		// (RunWithDeviceState's reflect.Select loop), so a slow or unreachable
+		// real network endpoint (e.g. pool-pump.js's daily forecast fetch to
+		// api.open-meteo.com, queued onto the exact same TASK_QUEUE as the
+		// button-cycle reconciler) stalled EVERYTHING else the script was
+		// doing for up to the full request timeout. Confirmed by direct local
+		// reproduction: inserting an artificial delay at the top of this
+		// function reproduced TestPoolPump_ButtonCyclesPro3's CI-only failure
+		// byte-for-byte (same assertion, same ~19.85s duration) -- see
+		// /Users/fix/campaign-401/dev-479-buttoncycles-progress.md.
+		//
+		// Fixed the same way Timer.set/MQTT.subscribe already handle
+		// long-lived async work in this file: the actual request runs on its
+		// own goroutine and delivers its result back through the shared event
+		// loop as a one-shot `handler`, exactly like a one-shot Timer.set(...,
+		// false, ...). The calling goroutine (the VM's) is never blocked.
 		"http.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
-			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/HTTP#httpget
-			// params: { url: string, timeout: number }
 			paramsObj := params.ToObject(vm)
 			url := paramsObj.Get("url").String()
 			timeout := int(paramsObj.Get("timeout").ToInteger())
 
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-			defer cancel()
-
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-			if err != nil {
-				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-					if callable, ok := goja.AssertFunction(callback); ok {
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()), userdata)
-					}
-				}
-				return nil, err
+			if goja.IsUndefined(callback) || goja.IsNull(callback) {
+				// Nothing to deliver the result to -- do not bother making the
+				// request at all (the old code made it anyway and discarded
+				// the result).
+				return nil, nil
+			}
+			callable, ok := goja.AssertFunction(callback)
+			if !ok {
+				return nil, nil
 			}
 
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-					if callable, ok := goja.AssertFunction(callback); ok {
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()), userdata)
-					}
-				}
-				return nil, err
-			}
-			defer resp.Body.Close()
-
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-					if callable, ok := goja.AssertFunction(callback); ok {
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()), userdata)
-					}
-				}
-				return nil, err
-			}
-
-			headers := make(map[string]string)
-			for k, v := range resp.Header {
-				if len(v) > 0 {
-					headers[k] = v[0]
-				}
-			}
-
-			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
-					result := map[string]interface{}{
-						"body":    string(body),
-						"headers": headers,
-						"status":  resp.StatusCode,
-					}
-					// Call: callback(result, error_code, error_message)
-					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
-					if err != nil {
-						return nil, err
-					}
-					return ret.Export(), nil
-				}
-			}
+			h := newHTTPGetHandler(ctx, url, timeout, callable, userdata)
+			*handlers = append(*handlers, h)
 			return nil, nil
 		},
 	}
@@ -1293,6 +1272,120 @@ func (mh *mqttHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte)
 		return err
 	}
 	return nil
+}
+
+// httpGetHandler delivers an HTTP.GET result back through the script's
+// single-threaded event loop without ever blocking it (#479-buttoncycles-ci
+// -- see the long comment on the "http.get" method entry above). The actual
+// request runs on its own goroutine (run()); Handle() -- which touches the
+// goja VM and so must only ever be called from the event loop's own
+// goroutine -- reads the fields run() wrote only after receiving on ch,
+// which is what makes reading them from Handle() race-free (the channel
+// send/receive is the memory barrier).
+//
+// One-shot, exactly like a non-repeating Timer.set(...): sends a single
+// value then closes ch, so the event loop's normal "channel closed, remove
+// handler" path (run.go's main loop) cleans it up after Handle() runs once.
+type httpGetHandler struct {
+	callable goja.Callable
+	userdata goja.Value
+	ch       chan []byte
+
+	// Written by run() before it sends on ch; read by Handle() after it
+	// receives from ch. Never accessed concurrently.
+	result  map[string]interface{}
+	hasErr  bool
+	errCode int
+	errMsg  string
+}
+
+func newHTTPGetHandler(ctx context.Context, url string, timeoutSec int, callable goja.Callable, userdata goja.Value) *httpGetHandler {
+	h := &httpGetHandler{
+		callable: callable,
+		userdata: userdata,
+		ch:       make(chan []byte, 1),
+	}
+	go h.run(ctx, url, timeoutSec)
+	return h
+}
+
+func (h *httpGetHandler) run(parent context.Context, url string, timeoutSec int) {
+	// Bounded by the RPC's own `timeout` param, same as before, but also
+	// cancelled early if the script's context ends (e.g. the test finishes)
+	// so this goroutine never outlives its script.
+	ctx, cancel := context.WithTimeout(parent, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+
+	body, headers, status, err := doHTTPGet(ctx, url)
+	if err != nil {
+		h.hasErr = true
+		h.errCode = -1
+		h.errMsg = err.Error()
+	} else {
+		h.result = map[string]interface{}{
+			"body":    body,
+			"headers": headers,
+			"status":  status,
+		}
+	}
+
+	h.ch <- []byte{}
+	close(h.ch)
+}
+
+func doHTTPGet(ctx context.Context, url string) (body string, headers map[string]string, status int, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", nil, 0, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", nil, 0, err
+	}
+
+	headers = make(map[string]string)
+	for k, v := range resp.Header {
+		if len(v) > 0 {
+			headers[k] = v[0]
+		}
+	}
+
+	return string(bodyBytes), headers, resp.StatusCode, nil
+}
+
+func (h *httpGetHandler) Wait() <-chan []byte {
+	return h.ch
+}
+
+func (h *httpGetHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return err
+	}
+
+	var resultVal, errCodeVal, errMsgVal goja.Value
+	if h.hasErr {
+		log.Info("HTTP.GET callback", "error_code", h.errCode, "error_message", h.errMsg)
+		resultVal = goja.Null()
+		errCodeVal = vm.ToValue(h.errCode)
+		errMsgVal = vm.ToValue(h.errMsg)
+	} else {
+		log.Info("HTTP.GET callback", "status", h.result["status"])
+		resultVal = vm.ToValue(h.result)
+		errCodeVal = vm.ToValue(0)
+		errMsgVal = goja.Null()
+	}
+
+	// Call: callback(result, error_code, error_message, userdata)
+	_, err = h.callable(goja.Undefined(), resultVal, errCodeVal, errMsgVal, h.userdata)
+	return err
 }
 
 // Timer handler implementation

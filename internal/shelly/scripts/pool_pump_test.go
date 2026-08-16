@@ -471,6 +471,19 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 
 // TestPoolPump_ButtonCyclesPro3 verifies that sys_btn_push events cycle
 // through speeds: off → 0 → 1 → 2 → off (the last transition exercises turnOffAllSwitches).
+//
+// #479 review: this test flaked CI-only (never locally) with "button press 4:
+// expected active-output=-1, got 2" after ~19.85s -- eventTimeout (10s)
+// expiring. Root cause was NOT in the reconciler: pool-pump.js's daily
+// forecast fetch (Shelly.call("HTTP.GET", {url: api.open-meteo.com...}))
+// runs on the exact same task queue as the button-cycle chain, and the
+// emulator used to make that a real, synchronous, BLOCKING network call on
+// the single goroutine driving the whole script's event loop -- so a slow
+// real network round trip (intermittent on CI, essentially never on a fast
+// home connection) stalled every other event, including this test's own
+// active-output write. Fixed in pkg/shelly/script/run.go by making the
+// emulator's "http.get" async like Timer.set/MQTT.subscribe already are --
+// see that file's "http.get" method for the full writeup and reproduction.
 func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 	buf := readPoolPumpScript(t)
 

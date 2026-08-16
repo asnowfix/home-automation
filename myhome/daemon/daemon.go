@@ -18,6 +18,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	"github.com/asnowfix/home-automation/myhome/events"
+	"github.com/asnowfix/home-automation/myhome/fetchproxy"
 	"github.com/asnowfix/home-automation/myhome/metrics"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	mqttserver "github.com/asnowfix/home-automation/myhome/mqtt"
@@ -525,6 +526,20 @@ func (d *daemon) Run() error {
 
 			log.Info("Temperature RPC methods registered")
 		}
+
+		// Register the fetch-and-transform proxy (#465). Always registered —
+		// like the Pool/Solar RPC handlers below, there is nothing to
+		// disable: with zero subscriptions it is an idle MQTT subscriber and
+		// an empty fetch.list.
+		log.Info("Initializing fetch-and-transform proxy")
+		fetchStorage, err := fetchproxy.NewStorage(log, storage.DB())
+		if err != nil {
+			log.Error(err, "Failed to initialize fetch-and-transform proxy storage")
+			return err
+		}
+		fetchService := fetchproxy.NewService(d.ctx, log, mc, fetchStorage)
+		fetchService.RegisterHandlers()
+		log.Info("Fetch-and-transform proxy RPC methods registered")
 
 		// Register Occupancy RPC methods if enabled
 		if options.Flags.EnableOccupancyService && d.occupancyService != nil {

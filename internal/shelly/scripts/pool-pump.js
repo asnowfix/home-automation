@@ -1262,7 +1262,7 @@ function reconcileRuntimeState(sec, ts, sourceLabel) {
   var restoredDay = localDayNumber(ts);
   var today = localDayNumber(nowSec);
   if (restoredDay < today) {
-    log("Runtime day rollover:", restoredDay, "->", today);
+    log("Runtime day rollover: discarding", sec, "s from", restoredDay);
     return {sec: 0, ts: nowSec};
   }
   if (restoredDay > today) {
@@ -1306,6 +1306,14 @@ function startRuntimeAccounting() {
 
 // Called (via applyDone) when the pump transitions ON -> OFF.
 function stopRuntimeAccounting() {
+  // #502: without this, a stop landing exactly at a day boundary -- before
+  // the next 60s flushRuntimeCheckpoint() tick has a chance to split it --
+  // would blindly add the WHOLE pre+post-midnight elapsed span below to
+  // "today's" total instead of only the post-midnight portion. This mirrors
+  // the same call already present in startRuntimeAccounting() and
+  // flushRuntimeCheckpoint(); stopRuntimeAccounting() was the one caller
+  // missing it.
+  ensureRuntimeDay();
   if (STATE.runStartTs !== null) {
     STATE.runtimeTodaySec += (Date.now() - STATE.runStartTs) / 1000;
     STATE.runStartTs = null;
@@ -1330,13 +1338,28 @@ function flushRuntimeCheckpoint() {
   persistRuntimeState(STATE.runtimeTodaySec + elapsedSec);
 }
 
-// Persists sec (defaults to STATE.runtimeTodaySec) plus the current epoch
-// second to Script.storage as one object (sync, boot-safe — #469: a
-// serialised {sec, ts} object cannot be silently misparsed as a number the
-// way the old loose scalars could) and mirrors sec, ts, and today's computed
-// turnover to KVS for Go-side visibility (myhome/daemon/pool_notices.go
-// ComputeTurnover) and as a recovery path if Script.storage is ever lost
-// (e.g. a script reinstall — see loadRuntimeStateFromKVS).
+// Persists sec (defaults to STATE.runtimeTodaySec) plus the current day
+// anchor (STATE.runtimeTs) to Script.storage as one object (sync, boot-safe
+// — #469: a serialised {sec, ts} object cannot be silently misparsed as a
+// number the way the old loose scalars could) and mirrors sec, ts, and
+// today's computed turnover to KVS for Go-side visibility
+// (myhome/daemon/pool_notices.go ComputeTurnover) and as a recovery path if
+// Script.storage is ever lost (e.g. a script reinstall — see
+// loadRuntimeStateFromKVS).
+//
+// #502: ts is STATE.runtimeTs, NEVER Date.now(). ts means "which calendar
+// day does sec belong to", not "when was this record last written" — every
+// earlier version of this function recomputed ts = Date.now() on every call
+// (flushRuntimeCheckpoint every 60s while running, every stop, every load),
+// so a total accumulated over several idle days always looked freshly
+// written and reconcileRuntimeState() never saw a stale day to reset
+// against — confirmed live on `mezzanine`: Script.storage["runtime"] read
+// {"sec":42002.2,"ts":<the exact second of the last restart>}, days after
+// that sec total was last genuinely accrued. The anchor is only ever
+// allowed to move where reconcileRuntimeState() decides a genuine rollover
+// (or "no valid data") occurred; every caller that wants to move it sets
+// STATE.runtimeTs itself BEFORE calling this function — see
+// applyRuntimeState() and ensureRuntimeDay().
 //
 // The Script.storage write is synchronous and always happens (cheap, no RPC).
 // The KVS mirrors go through Shelly.call and are skipped during
@@ -1348,8 +1371,10 @@ function flushRuntimeCheckpoint() {
 // mirror during init is harmless — the next checkpoint or stop re-persists it.
 function persistRuntimeState(overrideSec) {
   var sec = (typeof overrideSec === "number") ? overrideSec : STATE.runtimeTodaySec;
-  var ts = Math.floor(Date.now() / 1000);
-  STATE.runtimeTs = ts;
+  // Defensive fallback only: every real call site sets STATE.runtimeTs to a
+  // number before reaching here (see #502 note above), so this should never
+  // actually be exercised on a healthy device.
+  var ts = (typeof STATE.runtimeTs === "number") ? STATE.runtimeTs : Math.floor(Date.now() / 1000);
   storeStorageValue(STORAGE_KEYS.runtime, {sec: sec, ts: ts});
   if (STATE.initializing) {
     return;
@@ -2009,7 +2034,21 @@ function subscribeSolarAvailable() {
 
 // Hard ceiling (pool volumes/day): pump always stops (and won't solar-start)
 // once reached, regardless of solar availability.
+//
+// #502: ensureRuntimeDay() runs here, not only at load/init, because this is
+// the read site a device with zero Schedule.List jobs (mezzanine) still
+// reaches -- via desiredOutput() on every reconcile(), itself driven
+// periodically by SOLAR.tickTimer even with no schedule at all. Even with a
+// correct day anchor (see the #502 note on persistRuntimeState()), a device
+// that never restarts and never runs the pump -- because the very ceiling
+// it needs to reset is what's blocking it -- has no OTHER trigger that ever
+// re-derives "today" against that anchor: loadState() only runs at boot,
+// and startRuntimeAccounting/flushRuntimeCheckpoint only run while the pump
+// is on. This is what actually breaks the catch-22 that left mezzanine
+// stuck at 42002s; it is independent of, and still needed after, the
+// anchor-persistence fix on persistRuntimeState() above.
 function solarHardCeilingReached() {
+  ensureRuntimeDay();
   var flowRate = computeFlowRate();
   if (!flowRate || flowRate <= 0 || !CONFIG.poolVolume) return false;
   var target = (CONFIG.poolVolume * CONFIG.solarMaxTurnover / flowRate) * 3600;
@@ -2018,7 +2057,9 @@ function solarHardCeilingReached() {
 
 // Soft-stop target (pool volumes/day): solar keeps running past this while
 // solar remains available, but stops once solar goes away.
+// #502: same reasoning as solarHardCeilingReached() above.
 function solarSoftTargetReached() {
+  ensureRuntimeDay();
   var flowRate = computeFlowRate();
   if (!flowRate || flowRate <= 0 || !CONFIG.poolVolume) return false;
   var target = (CONFIG.poolVolume * CONFIG.solarMinTurnover / flowRate) * 3600;
@@ -2637,6 +2678,12 @@ function decideModeFromForecast() {
 // === SCHEDULE EVENT HANDLERS ===
 function handleDailyCheck() {
   log('Daily check event');
+
+  // #502: this @sunrise job runs every day in both summer and winter mode,
+  // unlike handleNightStop()'s midnight reset (winter-only). It is the
+  // reset site that actually fired on filtration-hiver while the counter
+  // stayed stale -- because this function never called ensureRuntimeDay().
+  ensureRuntimeDay();
 
   // #450: this used to skip performDailyModeCheck() entirely while
   // water-supply protection was active. That silently skipped the

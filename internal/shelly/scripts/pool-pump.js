@@ -1252,11 +1252,11 @@ function loadRuntimeStateFromKVS(cb) {
 function reconcileRuntimeState(sec, ts, sourceLabel) {
   var nowSec = Math.floor(Date.now() / 1000);
   if (sec === null) {
-    log("WARNING: no valid runtime state from " + sourceLabel + " — starting today's count at 0s rather than assuming a reset (#469)");
+    log("WARNING: no valid runtime state from " + sourceLabel + " - starting today's count at 0s rather than assuming a reset (#469)");
     return {sec: 0, ts: nowSec};
   }
   if (ts === null) {
-    log("WARNING: runtime state from " + sourceLabel + " has a count but no valid timestamp, cannot verify which day it belongs to — carrying forward", sec, "s as today's total");
+    log("WARNING: runtime state from " + sourceLabel + " has a count but no valid timestamp, cannot verify which day it belongs to - carrying forward", sec, "s as today's total");
     return {sec: sec, ts: nowSec};
   }
   var restoredDay = localDayNumber(ts);
@@ -1266,7 +1266,7 @@ function reconcileRuntimeState(sec, ts, sourceLabel) {
     return {sec: 0, ts: nowSec};
   }
   if (restoredDay > today) {
-    log("WARNING: runtime state from " + sourceLabel + " has a future timestamp (day " + restoredDay + " > today " + today + ") — carrying forward", sec, "s rather than trusting or discarding it");
+    log("WARNING: runtime state from " + sourceLabel + " has a future timestamp (day " + restoredDay + " > today " + today + ") - carrying forward", sec, "s rather than trusting or discarding it");
   }
   return {sec: sec, ts: ts};
 }
@@ -1539,7 +1539,7 @@ function fuseAllowOn() {
 
   // Check threshold
   if (FUSE_CHANGES.length >= FUSE_MAX_CHANGES) {
-    log("FUSE: TRIPPED — " + FUSE_CHANGES.length + " state changes in " +
+    log("FUSE: TRIPPED - " + FUSE_CHANGES.length + " state changes in " +
         (FUSE_WINDOW_MS / 1000) + "s window. Blocking ON activations for " +
         (FUSE_COOLDOWN_MS / 1000) + "s");
     FUSE_TRIPPED = true;
@@ -2588,7 +2588,7 @@ function decideModeFromForecast() {
     return;
   }
 
-  log('Forecast max temp:', maxTemp + '°C', '(threshold:', CONFIG.temperatureThreshold + '°C)');
+  log('Forecast max temp:', maxTemp + 'C', '(threshold:', CONFIG.temperatureThreshold + 'C)');
   var newMode = maxTemp > CONFIG.temperatureThreshold ? 'summer' : 'winter';
   log('Selected mode:', newMode, maxTemp > CONFIG.temperatureThreshold ? '(above threshold)' : '(below threshold)');
 
@@ -2849,7 +2849,7 @@ function finishContinueInit() {
 
   function runNextStep() {
     if (stepIndex >= initSteps.length) {
-      log('✓ All initialization steps complete - script is now running');
+      log('OK: All initialization steps complete - script is now running');
       // #421: assert the in-flight RPC tracking this script's crash-safety
       // depends on is actually live, and shout if it is not.
       checkTrack();

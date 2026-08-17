@@ -1725,6 +1725,19 @@ function onWindowJobs(result, err) {
   setWindow(a, b);
 }
 
+// #512 review round 1: the ONE remaining path that resolves the window from
+// its own dedicated Schedule.List rather than a response already in hand --
+// updateScheduleMode()'s "mode already correct, no timings" early return.
+// That call site is reached immediately after fetchAndCacheForecast()'s
+// Open-Meteo HTTP.GET/JSON.parse, on a device that has ALREADY failed once to
+// seed the window (that's the only reason this line runs at all) -- i.e. the
+// worst possible moment, stack- and heap-wise, to also issue a synchronous
+// RPC inline. Named top-level callback, no closure, so calling it does not
+// itself add a frame; queueTask() below is what buys the fresh stack.
+function readWindowFromSchedule() {
+  Shelly.call('Schedule.List', {}, onWindowJobs);
+}
+
 // === LAYER 3: THE RECONCILER (#476) ===
 //
 // Every entry point in this script is "write the fact, call reconcile(),
@@ -2513,7 +2526,16 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
     // ever reaching the schedulesToUpdate tail below. One Schedule.List read
     // here, gated on the window genuinely being unknown so it costs nothing
     // once resolved, is cheaper than a pump idle until the next mode change.
-    if (F_WIN_START < 0 || F_WIN_STOP < 0) Shelly.call('Schedule.List', {}, onWindowJobs);
+    //
+    // #512 review round 1: this call site is reached right after
+    // decideModeFromForecast() has just run fetchAndCacheForecast()'s
+    // Open-Meteo HTTP.GET/JSON.parse -- the exact stacking #509 exists to
+    // remove -- and only on a device that has already failed once to seed
+    // the window, i.e. one already in a degraded state. Deferred via
+    // queueTask() onto a named top-level helper (readWindowFromSchedule, no
+    // closure) so the RPC runs on a fresh task-queue tick instead of landing
+    // on top of the forecast parse peak.
+    if (F_WIN_START < 0 || F_WIN_STOP < 0) queueTask(readWindowFromSchedule);
     return;   // nothing written, so the window fact cannot have moved
   }
 

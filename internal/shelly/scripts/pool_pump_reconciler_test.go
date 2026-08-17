@@ -80,7 +80,7 @@ func TestPoolPump_NoClosureAllocatedPerReconcile(t *testing.T) {
 // poolPumpWindowNow builds a Pro1 device whose winter night jobs bracket
 // "now", so the policy wants the pump running from the moment the window fact
 // is seeded. Winter is the mode a device with no forecast falls back to, and
-// the night pair is the one readWindow() reads in that mode.
+// the night pair is the one onWindowJobs() resolves in that mode.
 func poolPumpWindowNow(t *testing.T, offsetStart, offsetStop time.Duration, switchOn bool) *script.DeviceState {
 	t.Helper()
 	now := time.Now()

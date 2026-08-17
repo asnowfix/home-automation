@@ -1667,10 +1667,25 @@ function desiredOutput() {
 //
 // The window used to be re-read from Schedule.List on every decision
 // (isWithinRunWindow), which is an RPC per decision and a race per rewrite
-// (#441). It is now read once at init and thereafter owned by setWindow():
-// updateScheduleMode() is the only thing that moves it, and (#509) derives
-// the new window straight from the Schedule.List response it already has in
-// hand, rather than issuing a second one after writing.
+// (#441). setWindow() is now the only writer, and it is fed from two call
+// sites, both passing a Schedule.List response the caller already has in
+// hand rather than issuing a purpose-built read:
+//
+//   - verifySchedules(), at init (#476) — the Schedule.List it needs anyway
+//     to confirm pool schedules exist doubles as the seed for the window.
+//   - updateScheduleMode()'s tail (#509/#512), every time the daily check
+//     runs — not only when it rewrites something. A previous version of this
+//     comment claimed the window "is now read once at init," which was true
+//     of the *call site* but not of what could go wrong: if verifySchedules()
+//     ever failed to resolve it (a transient Schedule.List error, or
+//     STATE.scheduleMode not yet settled when it ran), nothing retried unless
+//     that day's forecast also happened to *move* the schedule — leaving the
+//     pump idle for the rest of the day even with correct, enabled jobs
+//     already on the device (#512). updateScheduleMode() now re-derives the
+//     window from its own Schedule.List response whenever the window is
+//     still unresolved, in addition to whenever it moved, so a restart is
+//     never more than one daily-check tick from a populated window — at zero
+//     extra RPC or allocation cost, since that response is already in hand.
 //
 // Named callback, so no closure is allocated per call.
 //
@@ -2490,6 +2505,15 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
 
   if (!modeChanged && !hasTimings) {
     log('Mode already:', newMode, '- no changes needed');
+    // #512: this branch (winter, mode unchanged) writes nothing at all, so it
+    // never touches Schedule.List -- normally fine, since the window fact
+    // cannot have moved. But if it is still unresolved (verifySchedules() at
+    // init never got a chance, or its Schedule.List failed) there is no
+    // later chance either: no timings means this path runs every day without
+    // ever reaching the schedulesToUpdate tail below. One Schedule.List read
+    // here, gated on the window genuinely being unknown so it costs nothing
+    // once resolved, is cheaper than a pump idle until the next mode change.
+    if (F_WIN_START < 0 || F_WIN_STOP < 0) Shelly.call('Schedule.List', {}, onWindowJobs);
     return;   // nothing written, so the window fact cannot have moved
   }
 
@@ -2585,6 +2609,25 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // a no-op re-run -- the common case at sunrise when the forecast
         // yields yesterday's window -- must not buy any extra work at all.
         //
+        // #512: ALSO run when the window is still unresolved (F_WIN_START/
+        // F_WIN_STOP < 0), even though nothing moved. verifySchedules() at
+        // init is the normal way the window gets seeded, but it has exactly
+        // one shot at it; if that Schedule.List failed, or STATE.scheduleMode
+        // was not yet settled when it ran, nothing ever gave the window a
+        // second chance unless the schedule itself changed shape -- which it
+        // usually doesn't, because the common case is exactly "today's
+        // forecast recomputes yesterday's already-correct window." That
+        // composition -- an unresolved window plus a no-op rewrite -- is what
+        // left the pump idle for a full day on `filtration-hiver` on
+        // 2026-08-17 even though the enabled schedule jobs on the device were
+        // correct the whole time. handleDailyCheck() runs once, unconditionally,
+        // at the end of every init (see the init tail), so this is at most one
+        // daily-check tick away from a populated window on any restart -- and
+        // since the check below reads facts already written by setWindow(),
+        // not anything this call is about to change, it cannot mask a
+        // genuinely-still-symbolic window: onWindowJobs() below preserves its
+        // own "still symbolic" guard regardless of why it was invoked.
+        //
         // #509: this used to re-read via queueTask(readWindow), a second
         // Schedule.List landing on top of whatever forecast parse just ran.
         // Measured ~670 bytes of mem_peak for that alone on `mezzanine`
@@ -2597,7 +2640,7 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // already IS the post-update state. Pass it straight to onWindowJobs
         // (named function reference, no closure) instead of re-fetching and
         // re-parsing it.
-        if (windowChanged) onWindowJobs(result, null);
+        if (windowChanged || F_WIN_START < 0 || F_WIN_STOP < 0) onWindowJobs(result, null);
         return;
       }
       var sched = schedulesToUpdate[updateIndex];

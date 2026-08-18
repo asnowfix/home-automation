@@ -733,9 +733,16 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 				}
 
 				subscribers := value.([]*subscriber)
-				dropping := make([]int, 0)
 
-				// Transform and distribute to all subscribers
+				// Transform and distribute to all subscribers. A full queue drops
+				// only THIS message for the affected subscriber (#517) -- it used
+				// to cancel and permanently remove the subscriber instead, which
+				// silently killed every future message on the topic (for every
+				// device sharing a wildcard subscription such as "+/events/rpc")
+				// until the process restarted, with no automatic re-subscribe.
+				// A momentary burst (e.g. several devices' NotifyStatus/NotifyEvent
+				// landing in the same instant) should cost one dropped message,
+				// not the whole feed for the rest of the day.
 				transformed := transform(msg)
 				log.Info("distribute: distributing to subscribers", "topic", topic, "subscriber_count", len(subscribers))
 				for i, ch := range subscribers {
@@ -746,29 +753,10 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 					case ch.queue <- transformed:
 						log.V(1).Info("distribute: sent to subscriber", "topic", topic, "index", i, "subscriber", ch.name)
 					default:
-						// Channel full - mark for removal but don't close yet
-						// The channel will be closed by the cancellation goroutine
-						c.log.Error(nil, "Subscriber channel full, dropping subscriber", "topic", topic, "index", i, "subscriber", ch.name)
-						dropping = append(dropping, i)
-					}
-				}
-
-				// Remove dropped subscribers (iterate in reverse to maintain indices)
-				if len(dropping) > 0 {
-					for i := len(dropping) - 1; i >= 0; i-- {
-						idx := dropping[i]
-						err := fmt.Errorf("subscriber channel full topic %s index %d subscriber %s", topic, idx, subscribers[idx].name)
-						c.log.Error(err, "Dropping subscriber")
-						// Cancel the subscriber context - this will trigger channel closure
-						subscribers[idx].cancel()
-						subscribers = append(subscribers[:idx], subscribers[idx+1:]...)
-					}
-					if len(subscribers) == 0 {
-						// All subscribers dropped - delete topic entry so next Subscribe() will re-register at MQTT level
-						c.log.Info("All subscribers dropped, resetting topic subscription state", "topic", topic)
-						c.subscribers.Delete(topic)
-					} else {
-						c.subscribers.Store(topic, subscribers)
+						// Channel full - drop this one message for this subscriber
+						// and move on. The subscriber stays registered and keeps
+						// receiving subsequent messages once it drains.
+						c.log.Error(nil, "Subscriber channel full, dropping message", "topic", topic, "index", i, "subscriber", ch.name)
 					}
 				}
 			}(c.log.WithName("distribute"))

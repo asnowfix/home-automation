@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -329,6 +330,18 @@ func TestDistribute_FullQueueDropsMessageNotSubscriber(t *testing.T) {
 		t.Fatalf("expected subscriber to survive a full queue, got %d subscribers left", got)
 	}
 
+	// The dropped message must be counted (#517/#518 F2) -- this is what
+	// answers "did we lose events today, and how many" instead of leaving
+	// only a per-message log line (or, before this PR, a permanently dead
+	// subscriber and total silence).
+	counterI, ok := c.dropCounts.Load(topic + "|subscriber")
+	if !ok {
+		t.Fatal("expected a drop counter to have been created")
+	}
+	if got := counterI.(*atomic.Uint64).Load(); got != 1 {
+		t.Fatalf("expected drop count 1, got %d", got)
+	}
+
 	// Drain the one message that made it through, then confirm the
 	// subscriber is still live by delivering a third message to it.
 	select {
@@ -346,6 +359,38 @@ func TestDistribute_FullQueueDropsMessageNotSubscriber(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("subscriber did not receive message after surviving a full queue")
+	}
+}
+
+// TestRecordDrop_AccumulatesPerTopicSubscriber verifies recordDrop()'s
+// counting in isolation from distribute()'s goroutine timing: repeated
+// drops on the same (topic, subscriber) accumulate on one counter, a
+// different subscriber on the same topic gets its own counter, and the
+// reporter goroutine is started (dropLogOnce) without panicking or blocking
+// -- it only exercises the "first drop ever" path here since
+// dropCountReportInterval (5m) is far longer than this test should run.
+func TestRecordDrop_AccumulatesPerTopicSubscriber(t *testing.T) {
+	c := newTestClient(t)
+
+	c.recordDrop("t1", "subA")
+	c.recordDrop("t1", "subA")
+	c.recordDrop("t1", "subA")
+	c.recordDrop("t1", "subB")
+
+	got, ok := c.dropCounts.Load("t1|subA")
+	if !ok {
+		t.Fatal("expected a counter for t1|subA")
+	}
+	if n := got.(*atomic.Uint64).Load(); n != 3 {
+		t.Fatalf("expected 3 drops for t1|subA, got %d", n)
+	}
+
+	got, ok = c.dropCounts.Load("t1|subB")
+	if !ok {
+		t.Fatal("expected a counter for t1|subB")
+	}
+	if n := got.(*atomic.Uint64).Load(); n != 1 {
+		t.Fatalf("expected 1 drop for t1|subB, got %d", n)
 	}
 }
 

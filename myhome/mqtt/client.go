@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/global"
@@ -98,6 +99,8 @@ type client struct {
 	handlers             sync.Map                       // Map topic => mqtt.MessageHandler for re-registration
 	pendingSubscriptions map[string]mqtt.MessageHandler // Subscriptions to apply on connect
 	pendingMutex         sync.Mutex                     // Protects pendingSubscriptions
+	dropCounts           sync.Map                       // Map "topic|subscriber" => *atomic.Uint64, dropped-message totals (#517/#518 F2)
+	dropLogOnce          sync.Once                      // Starts the periodic drop-count reporter on the first drop, not unconditionally
 }
 
 const BROKER_DEFAULT_NAME = "mqtt"
@@ -756,7 +759,17 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 						// Channel full - drop this one message for this subscriber
 						// and move on. The subscriber stays registered and keeps
 						// receiving subsequent messages once it drains.
-						c.log.Error(nil, "Subscriber channel full, dropping message", "topic", topic, "index", i, "subscriber", ch.name)
+						//
+						// This used to be an unconditional c.log.Error() per dropped
+						// message -- a bounded failure (one Error, then permanent
+						// silence, before #517) turned into an unbounded one (one
+						// Error line per message, forever, on a topic like
+						// "+/events/rpc" that #499 alone pushes ~660 transitions/day
+						// through). recordDrop() below is the answer both problems
+						// share: a counter that can actually say "how many", logged
+						// as a periodic aggregate instead of a per-message flood.
+						c.recordDrop(topic, ch.name)
+						c.log.V(1).Info("Subscriber channel full, dropping message", "topic", topic, "index", i, "subscriber", ch.name)
 					}
 				}
 			}(c.log.WithName("distribute"))
@@ -799,4 +812,60 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 	}(c.log.WithName(s.name))
 
 	return s.queue, nil
+}
+
+// dropCountReportInterval is how often recordDrop's background reporter logs
+// accumulated per-(topic,subscriber) drop totals. Chosen for same-day
+// visibility (someone reading logs a few hours into an incident sees
+// numbers) without competing for attention with per-message logging.
+const dropCountReportInterval = 5 * time.Minute
+
+// recordDrop increments the dropped-message counter for (topic, subscriber)
+// and, on the very first drop this client ever sees, starts a goroutine that
+// periodically logs the accumulated totals (#517/#518 F2). The reporter is
+// started lazily -- via dropLogOnce, not unconditionally at client
+// construction -- so a client that never drops a message never pays for a
+// ticker goroutine.
+//
+// This is the answer to two problems that pull in opposite directions: a
+// per-message log line at Error is an unbounded flood on a busy wildcard
+// topic, while dropping to silence (the pre-#517 behavior, applied to the
+// whole subscriber rather than one message) leaves nobody able to say "how
+// many". A counter, reported periodically, answers both at once.
+func (c *client) recordDrop(topic, subscriberName string) {
+	key := topic + "|" + subscriberName
+	counterI, _ := c.dropCounts.LoadOrStore(key, new(atomic.Uint64))
+	counterI.(*atomic.Uint64).Add(1)
+
+	c.dropLogOnce.Do(func() {
+		go c.reportDropCounts()
+	})
+}
+
+// reportDropCounts logs the current dropped-message totals every
+// dropCountReportInterval, until the client's process-wide context is done.
+// Silent (no log line) when nothing has been dropped since the last report --
+// the common case -- so this cannot itself become a periodic-but-empty log
+// flood.
+func (c *client) reportDropCounts() {
+	ticker := time.NewTicker(dropCountReportInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			totals := make(map[string]uint64)
+			c.dropCounts.Range(func(key, value interface{}) bool {
+				if n := value.(*atomic.Uint64).Load(); n > 0 {
+					totals[key.(string)] = n
+				}
+				return true
+			})
+			if len(totals) > 0 {
+				c.log.Info("MQTT dropped-message totals since client start", "counts", totals)
+			}
+		}
+	}
 }

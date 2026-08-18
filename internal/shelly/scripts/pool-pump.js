@@ -1668,8 +1668,9 @@ function desiredOutput() {
 // The window used to be re-read from Schedule.List on every decision
 // (isWithinRunWindow), which is an RPC per decision and a race per rewrite
 // (#441). It is now read once at init and thereafter owned by setWindow():
-// updateScheduleMode() is the only thing that moves it, and it re-reads
-// straight after writing.
+// updateScheduleMode() is the only thing that moves it, and (#509) derives
+// the new window straight from the Schedule.List response it already has in
+// hand, rather than issuing a second one after writing.
 //
 // Named callback, so no closure is allocated per call.
 //
@@ -1707,10 +1708,6 @@ function onWindowJobs(result, err) {
   }
   if (a < 0 || b < 0) return;                   // still symbolic (@sunrise): unknown, not "off"
   setWindow(a, b);
-}
-
-function readWindow() {
-  Shelly.call('Schedule.List', {}, onWindowJobs);
 }
 
 // === LAYER 3: THE RECONCILER (#476) ===
@@ -2539,6 +2536,13 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
             updM.timespec = makeTimespec(morningStartHours);
           }
           if (moves(job, updM)) windowChanged = true;
+          // #509: mutate the job already in hand to the value we are about to
+          // write, instead of allocating anything new. `result.jobs` then
+          // already reflects the post-update state, which is what lets
+          // updateNext()'s completion below derive the window without a
+          // second Schedule.List.
+          job.enable = updM.enable;
+          if (updM.timespec) job.timespec = updM.timespec;
           schedulesToUpdate.push(updM);
         } else if (code && code.indexOf('handleEveningStop()') !== -1) {
           var updE = {id: job.id, enable: newMode === 'summer', name: 'handleEveningStop()'};
@@ -2546,10 +2550,14 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
             updE.timespec = makeTimespec(eveningStopHours);
           }
           if (moves(job, updE)) windowChanged = true;
+          job.enable = updE.enable;
+          if (updE.timespec) job.timespec = updE.timespec;
           schedulesToUpdate.push(updE);
         } else if (code && (code.indexOf('handleNightStart()') !== -1 || code.indexOf('handleNightStop()') !== -1)) {
           var updN = {id: job.id, enable: newMode === 'winter', name: code.indexOf('handleNightStart()') !== -1 ? 'handleNightStart()' : 'handleNightStop()'};
           if (moves(job, updN)) windowChanged = true;
+          job.enable = updN.enable;
+          if (updN.timespec) job.timespec = updN.timespec;
           schedulesToUpdate.push(updN);
         }
       }
@@ -2573,15 +2581,23 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // instant never fires at all — which is how the pool lost a whole
         // day of filtration on 2026-08-06. Reconcile here, once, in the one
         // place that knows the window moved.
-        // #476: the window is a fact with one writer. Re-read what we just
-        // wrote (named function reference, so no closure is allocated) so
-        // setWindow() owns it from here on, instead of every decision paying
-        // its own Schedule.List. Gated on windowChanged: a no-op re-run --
-        // the common case at sunrise when the forecast yields yesterday's
-        // window -- must not buy a Schedule.List response parse for nothing.
-        // Measured on `mezzanine` 2026-08-12: an ungated re-read lands on top
-        // of the Open-Meteo JSON.parse and costs ~670 bytes of mem_peak.
-        if (windowChanged) queueTask(readWindow);
+        // #476: the window is a fact with one writer. Gated on windowChanged:
+        // a no-op re-run -- the common case at sunrise when the forecast
+        // yields yesterday's window -- must not buy any extra work at all.
+        //
+        // #509: this used to re-read via queueTask(readWindow), a second
+        // Schedule.List landing on top of whatever forecast parse just ran.
+        // Measured ~670 bytes of mem_peak for that alone on `mezzanine`
+        // 2026-08-12, and on `filtration-hiver` 2026-08-17 -- with only
+        // ~1.2 KB of heap headroom left -- it reclaimed the whole script with
+        // no trace, mid schedule-rewrite. The information onWindowJobs()
+        // needs is already in hand: the loop above just mutated `job.enable`
+        // / `job.timespec` on every job in `result.jobs` to the exact values
+        // `schedulesToUpdate` wrote via Schedule.Update, so result.jobs
+        // already IS the post-update state. Pass it straight to onWindowJobs
+        // (named function reference, no closure) instead of re-fetching and
+        // re-parsing it.
+        if (windowChanged) onWindowJobs(result, null);
         return;
       }
       var sched = schedulesToUpdate[updateIndex];

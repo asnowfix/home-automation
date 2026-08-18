@@ -91,6 +91,18 @@ type DeviceState struct {
 	// EmittedEvents()/EmittedEventCount().
 	emittedEvents []EmittedEvent
 
+	// rpcCalls records every Shelly.call(method, ...) the script issues, in
+	// order, by lower-cased method name (e.g. "schedule.list") — recorded at
+	// the single dispatch point in run.go's Shelly.call implementation, so
+	// it covers every RPC method without a per-method hook. Exists because
+	// #509's headline done-criterion ("the daily-check path issues one
+	// Schedule.List, not two") shipped with nothing asserting it — verified
+	// only by a human reading an RPC log — which is exactly why a later
+	// change could reintroduce the second read without any test objecting
+	// (#512/#515). Populated unconditionally; nothing reads it unless a test
+	// calls RPCCalls()/RPCCallCount().
+	rpcCalls []string
+
 	// mu guards every map and slice above. The emulator mutates them from the
 	// goroutine running the script while tests poll them from the test
 	// goroutine, which without this is a data race — and an unsynchronised map
@@ -392,6 +404,40 @@ func (d *DeviceState) EmittedEventCount(name string) int {
 	n := 0
 	for _, e := range d.emittedEvents {
 		if e.Name == name {
+			n++
+		}
+	}
+	return n
+}
+
+// RecordRPCCall appends one Shelly.call(method, ...) invocation. Called from
+// run.go's Shelly.call dispatcher for every method, not for test use.
+func (d *DeviceState) RecordRPCCall(method string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.rpcCalls = append(d.rpcCalls, method)
+}
+
+// RPCCalls returns a copy of every Shelly.call method name recorded so far,
+// in order, lower-cased (e.g. "schedule.list").
+func (d *DeviceState) RPCCalls() []string {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	out := make([]string, len(d.rpcCalls))
+	copy(out, d.rpcCalls)
+	return out
+}
+
+// RPCCallCount returns how many times the script called Shelly.call(method, ...)
+// so far, for the given lower-cased method name — e.g. RPCCallCount("schedule.list").
+// Used to pin an exact call count on a code path (see rpcCalls' doc comment),
+// rather than inferring it from a side effect or an RPC log read by eye.
+func (d *DeviceState) RPCCallCount(method string) int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	n := 0
+	for _, m := range d.rpcCalls {
+		if m == method {
 			n++
 		}
 	}

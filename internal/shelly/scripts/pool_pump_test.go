@@ -2724,6 +2724,7 @@ func TestPoolPump_InitWindowUnresolvedGetsPopulatedByDailyCheckNoOp(t *testing.T
 	got := kvsValue(deviceState, "script/pool-pump/active-output")
 	schedules := deviceState.ScheduleJobs()
 	modeGot := kvsValue(deviceState, "script/pool-pump/schedule-mode")
+	scheduleListCalls := deviceState.RPCCallCount("schedule.list")
 	cancel()
 	<-done
 
@@ -2741,6 +2742,21 @@ func TestPoolPump_InitWindowUnresolvedGetsPopulatedByDailyCheckNoOp(t *testing.T
 	}
 	if ts := poolPumpScheduleTimespec(schedules, "handleEveningStop()"); ts != poolPumpTimespec(23, 29) {
 		t.Fatalf("schedule should not have needed rewriting: evening-stop timespec is now %q", ts)
+	}
+	// #509/#515: pins the headline done-criterion that #510 shipped with
+	// nothing asserting it — "the daily-check path issues one Schedule.List,
+	// not two". This is the "normal tail" path (modeChanged is true here,
+	// since Storage's schedule-mode was seeded wrong): updateScheduleMode()
+	// takes exactly one Schedule.List at the top of the function and derives
+	// the window straight from that response, with no second read. Total
+	// across the whole run is exactly 2: verifySchedules() at init (1) plus
+	// that one daily-check read (1). A regression reintroducing a second
+	// read inside updateScheduleMode() — #509's original defect, and the
+	// shape review round 1 caught reappearing on the winter path below —
+	// would push this to 3 without any other assertion here noticing.
+	if scheduleListCalls != 2 {
+		t.Fatalf("expected exactly 2 Schedule.List calls (1 at init, 1 in the daily check's "+
+			"normal tail, 0 extra), got %d: %v", scheduleListCalls, deviceState.RPCCalls())
 	}
 }
 
@@ -2890,12 +2906,29 @@ func TestPoolPump_InitWindowStaysUnknownWithSymbolicNightTimespec(t *testing.T) 
 	waitFor(8*time.Second, 100*time.Millisecond, func() bool { return false })
 
 	got := kvsValue(deviceState, "script/pool-pump/active-output")
+	scheduleListCalls := deviceState.RPCCallCount("schedule.list")
 	cancel()
 	<-done
 
 	if got != "0" {
 		t.Fatalf("a symbolic, unresolvable night timespec must leave the window unknown (-2 'no opinion'), "+
 			"not force the already-running pump off: active-output=%v", got)
+	}
+	// #509/#515: pins the call count on the OTHER path this fix touches — the
+	// winter `!modeChanged && !hasTimings` early return, where
+	// updateScheduleMode() itself never reaches its own top-of-function
+	// Schedule.List (this Storage is already "winter", matching the
+	// forecast) but the window is still unresolved, so the deferred
+	// readWindowFromSchedule() (queueTask, added in review round 1) fires
+	// once. Expected total is 2, not 0: verifySchedules() at init (1) plus
+	// that one deferred repair read (1) — a real read is legitimately
+	// needed here, unlike the pre-#512 code which issued none on this path
+	// and left the window stuck. It must also not be 3: that would be
+	// review round 1's finding reappearing (an inline call stacking on the
+	// Open-Meteo parse peak instead of a single deferred one).
+	if scheduleListCalls != 2 {
+		t.Fatalf("expected exactly 2 Schedule.List calls (1 at init, 1 deferred repair read on the "+
+			"winter early-return path, 0 extra), got %d: %v", scheduleListCalls, deviceState.RPCCalls())
 	}
 }
 

@@ -1667,25 +1667,34 @@ function desiredOutput() {
 //
 // The window used to be re-read from Schedule.List on every decision
 // (isWithinRunWindow), which is an RPC per decision and a race per rewrite
-// (#441). setWindow() is now the only writer, and it is fed from two call
-// sites, both passing a Schedule.List response the caller already has in
-// hand rather than issuing a purpose-built read:
+// (#441). setWindow() is now the only writer, fed from three call sites:
 //
 //   - verifySchedules(), at init (#476) — the Schedule.List it needs anyway
 //     to confirm pool schedules exist doubles as the seed for the window.
 //   - updateScheduleMode()'s tail (#509/#512), every time the daily check
-//     runs — not only when it rewrites something. A previous version of this
-//     comment claimed the window "is now read once at init," which was true
-//     of the *call site* but not of what could go wrong: if verifySchedules()
-//     ever failed to resolve it (a transient Schedule.List error, or
-//     STATE.scheduleMode not yet settled when it ran), nothing retried unless
-//     that day's forecast also happened to *move* the schedule — leaving the
-//     pump idle for the rest of the day even with correct, enabled jobs
-//     already on the device (#512). updateScheduleMode() now re-derives the
-//     window from its own Schedule.List response whenever the window is
-//     still unresolved, in addition to whenever it moved, so a restart is
-//     never more than one daily-check tick from a populated window — at zero
-//     extra RPC or allocation cost, since that response is already in hand.
+//     rewrites the schedule OR finds it already matching the forecast — a
+//     FREE resolution, since it passes the Schedule.List response the
+//     caller already has in hand rather than issuing a purpose-built read.
+//   - handleDailyCheck() (#512 review round 2), unconditionally at the top
+//     of every daily check, via a queued, self-guarded call to
+//     readWindowFromSchedule() — the one path that costs a genuine extra
+//     RPC, and only when the window is still unresolved by the time its
+//     queued tick arrives (i.e. the other two paths didn't already handle
+//     it). This exists because updateScheduleMode()'s free resolution is
+//     only reachable through some of its branches: decideModeFromForecast()
+//     can return before ever calling it (forecast unavailable), and
+//     updateScheduleMode() itself has three early returns inside its own
+//     Schedule.List callback (RPC error, no jobs, no jobs matched) that skip
+//     straight past the tail. A previous version of this comment claimed the
+//     window "is now read once at init," which was true of the call site but
+//     not of what could silently go wrong there: if verifySchedules() ever
+//     failed to resolve it, nothing retried unless that day's forecast also
+//     happened to *move* the schedule — leaving the pump idle for the rest
+//     of the day even with correct, enabled jobs already on the device
+//     (#512). Between the free tail resolution and the hoisted backstop, a
+//     restart is now never more than one daily-check tick from a populated
+//     window, regardless of which branch that check's forecast/schedule
+//     state happens to take.
 //
 // Named callback, so no closure is allocated per call.
 //
@@ -1703,7 +1712,22 @@ function desiredOutput() {
 // reconciler) — ported to the function this branch actually uses.
 function onWindowJobs(result, err) {
   if (err && false) {}
-  if (err || !result || !result.jobs) return;   // unresolvable: leave the facts alone (-2 path)
+  if (err || !result || !result.jobs) {
+    // #512 review round 2 (F1): this exact state -- window unresolved,
+    // desiredOutput() stuck on -2, running:true -- cost a full day of
+    // filtration on 2026-08-17 and was found only by a hand-written
+    // Script.Eval probe hours after the window had closed. One event per
+    // failed resolution attempt turns that into a row in the events DB
+    // instead of nothing at all. See severityFor() in listener.go for the
+    // "warn" mapping this event needs. No "reason" field here (unlike the
+    // guard below, which has a/b to report): distinguishing "RPC failed" from
+    // "still symbolic" costs a string literal neither guard strictly needs to
+    // be useful, and this file's heap headroom is the campaign's blocking
+    // gate (#433) -- byte cost not measured on hardware for this change, see
+    // the PR description.
+    Shelly.emitEvent("pool.window_unresolved", {mode: STATE.scheduleMode});
+    return;   // unresolvable: leave the facts alone (-2 path)
+  }
   var summer = STATE.scheduleMode === 'summer';
   var sc = summer ? 'handleMorningStart()' : 'handleNightStart()';
   var ec = summer ? 'handleEveningStop()' : 'handleNightStop()';
@@ -1721,20 +1745,32 @@ function onWindowJobs(result, err) {
       if (mb !== null) b = mb;
     }
   }
-  if (a < 0 || b < 0) return;                   // still symbolic (@sunrise): unknown, not "off"
+  if (a < 0 || b < 0) {
+    // a/b stay -1 for whichever of the morning/evening (or night) pair
+    // failed to match/parse -- carrying both, not just a boolean, tells a
+    // reader of the events DB which half is missing without a live probe.
+    Shelly.emitEvent("pool.window_unresolved", {mode: STATE.scheduleMode, a: a, b: b});
+    return;                   // still symbolic (@sunrise): unknown, not "off"
+  }
   setWindow(a, b);
 }
 
-// #512 review round 1: the ONE remaining path that resolves the window from
-// its own dedicated Schedule.List rather than a response already in hand --
-// updateScheduleMode()'s "mode already correct, no timings" early return.
-// That call site is reached immediately after fetchAndCacheForecast()'s
-// Open-Meteo HTTP.GET/JSON.parse, on a device that has ALREADY failed once to
-// seed the window (that's the only reason this line runs at all) -- i.e. the
-// worst possible moment, stack- and heap-wise, to also issue a synchronous
-// RPC inline. Named top-level callback, no closure, so calling it does not
-// itself add a frame; queueTask() below is what buys the fresh stack.
+// #512: the one place that resolves the window from its own dedicated
+// Schedule.List rather than a response already in hand. Always reached via
+// queueTask() -- handleDailyCheck() hoists the decision to queue this (F2/F3,
+// review round 2), so it never runs synchronously inline on top of the
+// Open-Meteo HTTP.GET/JSON.parse peak the way an earlier version of this fix
+// did (review round 1). Named top-level callback, no closure, so calling it
+// does not itself add a frame.
+//
+// Self-guards against a redundant read: by the time this queued task's tick
+// arrives, updateScheduleMode() may already have resolved the window for
+// free from data it had in hand (the common case, when its own Schedule.List
+// round-trip finishes first). Checking again here, rather than only at the
+// moment this was queued, is what keeps the two mechanisms from both paying
+// for an RPC on the same daily check.
 function readWindowFromSchedule() {
+  if (F_WIN_START >= 0 && F_WIN_STOP >= 0) return;   // already resolved meanwhile
   Shelly.call('Schedule.List', {}, onWindowJobs);
 }
 
@@ -2519,23 +2555,11 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
   if (!modeChanged && !hasTimings) {
     log('Mode already:', newMode, '- no changes needed');
     // #512: this branch (winter, mode unchanged) writes nothing at all, so it
-    // never touches Schedule.List -- normally fine, since the window fact
-    // cannot have moved. But if it is still unresolved (verifySchedules() at
-    // init never got a chance, or its Schedule.List failed) there is no
-    // later chance either: no timings means this path runs every day without
-    // ever reaching the schedulesToUpdate tail below. One Schedule.List read
-    // here, gated on the window genuinely being unknown so it costs nothing
-    // once resolved, is cheaper than a pump idle until the next mode change.
-    //
-    // #512 review round 1: this call site is reached right after
-    // decideModeFromForecast() has just run fetchAndCacheForecast()'s
-    // Open-Meteo HTTP.GET/JSON.parse -- the exact stacking #509 exists to
-    // remove -- and only on a device that has already failed once to seed
-    // the window, i.e. one already in a degraded state. Deferred via
-    // queueTask() onto a named top-level helper (readWindowFromSchedule, no
-    // closure) so the RPC runs on a fresh task-queue tick instead of landing
-    // on top of the forecast parse peak.
-    if (F_WIN_START < 0 || F_WIN_STOP < 0) queueTask(readWindowFromSchedule);
+    // never touches Schedule.List. Round 1 of this fix put a retry for an
+    // unresolved window right here; round 2 (F2/F3) moved it up to
+    // handleDailyCheck(), which runs unconditionally before this function is
+    // even called, so it covers this branch (and every other exit from this
+    // function) without a per-branch patch. Nothing to do here now.
     return;   // nothing written, so the window fact cannot have moved
   }
 
@@ -2635,18 +2659,21 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // F_WIN_STOP < 0), even though nothing moved. verifySchedules() at
         // init is the normal way the window gets seeded, but it has exactly
         // one shot at it; if that Schedule.List failed, or STATE.scheduleMode
-        // was not yet settled when it ran, nothing ever gave the window a
-        // second chance unless the schedule itself changed shape -- which it
-        // usually doesn't, because the common case is exactly "today's
-        // forecast recomputes yesterday's already-correct window." That
-        // composition -- an unresolved window plus a no-op rewrite -- is what
-        // left the pump idle for a full day on `filtration-hiver` on
-        // 2026-08-17 even though the enabled schedule jobs on the device were
-        // correct the whole time. handleDailyCheck() runs once, unconditionally,
-        // at the end of every init (see the init tail), so this is at most one
-        // daily-check tick away from a populated window on any restart -- and
-        // since the check below reads facts already written by setWindow(),
-        // not anything this call is about to change, it cannot mask a
+        // was not yet settled when it ran, the common case -- today's
+        // forecast recomputing yesterday's already-correct window, so nothing
+        // moves -- would otherwise never give it a second chance. That
+        // composition is what left the pump idle for a full day on
+        // `filtration-hiver` on 2026-08-17 despite correct, enabled schedule
+        // jobs on the device the whole time. This is the FREE path: the data
+        // is already in hand from the Schedule.List above, so resolving it
+        // here costs nothing further. The actual guarantee -- at most one
+        // daily-check tick away from a populated window on any restart, no
+        // matter which branch of this function runs or whether it runs at
+        // all -- comes from handleDailyCheck() hoisting an equivalent,
+        // self-guarded retry (review round 2, F2/F3); this check just means
+        // that retry usually has nothing left to do by the time its own tick
+        // arrives. Since it reads facts already written by setWindow(), not
+        // anything this call is about to change, it cannot mask a
         // genuinely-still-symbolic window: onWindowJobs() below preserves its
         // own "still symbolic" guard regardless of why it was invoked.
         //
@@ -2759,6 +2786,22 @@ function decideModeFromForecast() {
 // === SCHEDULE EVENT HANDLERS ===
 function handleDailyCheck() {
   log('Daily check event');
+
+  // #512 review round 2 (F2/F3): hoisted here, once per check, independent
+  // of every downstream branch -- unlike updateScheduleMode()'s own
+  // resolution (free, but only reachable through modeChanged/hasTimings and
+  // a successful Schedule.List) this runs even when
+  // decideModeFromForecast() bails out before ever calling
+  // updateScheduleMode() (forecast unavailable, F2), and even when
+  // updateScheduleMode()'s own Schedule.List errors, returns no jobs, or
+  // matches none (F3). readWindowFromSchedule() self-guards against a
+  // redundant read: if updateScheduleMode() already resolved the window for
+  // free by the time this queued task runs, it is a no-op. This is what
+  // makes "at most one daily-check tick away from a populated window on any
+  // restart" (see the block comment above onWindowJobs()) true regardless
+  // of which downstream branch fires, not just the ones this file happened
+  // to patch individually.
+  if (F_WIN_START < 0 || F_WIN_STOP < 0) queueTask(readWindowFromSchedule);
 
   // #502: this @sunrise job runs every day in both summer and winter mode,
   // unlike handleNightStop()'s midnight reset (winter-only). It is the

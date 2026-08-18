@@ -2745,18 +2745,31 @@ func TestPoolPump_InitWindowUnresolvedGetsPopulatedByDailyCheckNoOp(t *testing.T
 	}
 	// #509/#515: pins the headline done-criterion that #510 shipped with
 	// nothing asserting it — "the daily-check path issues one Schedule.List,
-	// not two". This is the "normal tail" path (modeChanged is true here,
-	// since Storage's schedule-mode was seeded wrong): updateScheduleMode()
-	// takes exactly one Schedule.List at the top of the function and derives
-	// the window straight from that response, with no second read. Total
-	// across the whole run is exactly 2: verifySchedules() at init (1) plus
-	// that one daily-check read (1). A regression reintroducing a second
-	// read inside updateScheduleMode() — #509's original defect, and the
-	// shape review round 1 caught reappearing on the winter path below —
-	// would push this to 3 without any other assertion here noticing.
-	if scheduleListCalls != 2 {
-		t.Fatalf("expected exactly 2 Schedule.List calls (1 at init, 1 in the daily check's "+
-			"normal tail, 0 extra), got %d: %v", scheduleListCalls, deviceState.RPCCalls())
+	// not two" WITHIN updateScheduleMode() itself. This is the "normal tail"
+	// path (modeChanged is true here, since Storage's schedule-mode was
+	// seeded wrong): updateScheduleMode() takes exactly one Schedule.List at
+	// the top of the function and derives the window straight from that
+	// response, with no second read of its own.
+	//
+	// Total across the whole run is deterministically 3, not 2, once
+	// handleDailyCheck()'s hoisted retry (review round 2, F2/F3) is counted:
+	// verifySchedules() at init (1); the hoisted, self-guarded
+	// readWindowFromSchedule() (1) — it fires and fails to resolve, because
+	// its queued tick consistently arrives before updateScheduleMode() has
+	// corrected STATE.scheduleMode from the wrong seeded value (verified by
+	// running this test with -count=3: identical call sequence every time,
+	// not a flaky race); and updateScheduleMode()'s own successful
+	// resolution (1). That third call is a deliberate, bounded cost of F2/F3
+	// coverage (an unresolved window that reaches a path with no free
+	// resolution, e.g. a forecast fetch failure, still gets exactly one
+	// repair attempt) — not a reintroduction of #509's defect, which was
+	// specifically a SECOND read inside updateScheduleMode() itself. A
+	// regression that reintroduced #509's own second read, on top of this,
+	// would push the total to 4 without any other assertion here noticing.
+	if scheduleListCalls != 3 {
+		t.Fatalf("expected exactly 3 Schedule.List calls (1 at init, 1 hoisted safety-net "+
+			"attempt, 1 in the daily check's normal tail, 0 more), got %d: %v",
+			scheduleListCalls, deviceState.RPCCalls())
 	}
 }
 
@@ -2907,6 +2920,7 @@ func TestPoolPump_InitWindowStaysUnknownWithSymbolicNightTimespec(t *testing.T) 
 
 	got := kvsValue(deviceState, "script/pool-pump/active-output")
 	scheduleListCalls := deviceState.RPCCallCount("schedule.list")
+	unresolvedEvents := deviceState.EmittedEventCount("pool.window_unresolved")
 	cancel()
 	<-done
 
@@ -2918,17 +2932,27 @@ func TestPoolPump_InitWindowStaysUnknownWithSymbolicNightTimespec(t *testing.T) 
 	// winter `!modeChanged && !hasTimings` early return, where
 	// updateScheduleMode() itself never reaches its own top-of-function
 	// Schedule.List (this Storage is already "winter", matching the
-	// forecast) but the window is still unresolved, so the deferred
-	// readWindowFromSchedule() (queueTask, added in review round 1) fires
-	// once. Expected total is 2, not 0: verifySchedules() at init (1) plus
-	// that one deferred repair read (1) — a real read is legitimately
-	// needed here, unlike the pre-#512 code which issued none on this path
-	// and left the window stuck. It must also not be 3: that would be
-	// review round 1's finding reappearing (an inline call stacking on the
+	// forecast) and has nothing of its own to contribute. handleDailyCheck()'s
+	// hoisted, self-guarded retry (review round 2, F2/F3) is the ONLY
+	// mechanism that can resolve the window on this path, and it fires
+	// exactly once per check. Expected total is 2, not 0: verifySchedules()
+	// at init (1) plus that one hoisted repair read (1) — a real read is
+	// legitimately needed here, unlike the pre-#512 code which issued none on
+	// this path and left the window stuck. It must also not be 3: that would
+	// be review round 1's finding reappearing (an inline call stacking on the
 	// Open-Meteo parse peak instead of a single deferred one).
 	if scheduleListCalls != 2 {
 		t.Fatalf("expected exactly 2 Schedule.List calls (1 at init, 1 deferred repair read on the "+
 			"winter early-return path, 0 extra), got %d: %v", scheduleListCalls, deviceState.RPCCalls())
+	}
+	// #512 review round 2 (F1): a genuinely unresolvable window (symbolic
+	// night timespec, never fixed) must be visible somewhere other than a
+	// hand-written probe -- both onWindowJobs() calls here (init's
+	// verifySchedules() and the hoisted repair read) hit the "still symbolic"
+	// guard, so both should have emitted pool.window_unresolved.
+	if unresolvedEvents < 2 {
+		t.Fatalf("expected at least 2 pool.window_unresolved events (one per failed resolution "+
+			"attempt: init + the hoisted repair read), got %d", unresolvedEvents)
 	}
 }
 

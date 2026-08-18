@@ -430,3 +430,46 @@ func TestPoolPump_SymbolicWinterWindowLeavesRunningPumpAlone(t *testing.T) {
 		t.Fatalf("forecast was never fetched")
 	}
 }
+
+// TestPoolPump_WindowIsResolvableByHandTheWholeTime is the control for the two
+// red tests above, and it passes on unmodified main.
+//
+// It runs the identical fixture, then does by injection exactly what the
+// maintainer did on the live pump at 16:33:27 on 2026-08-17 — one
+// Shelly.call("Schedule.List", {}, onWindowJobs) — and shows the window
+// resolving instantly to the same 01:00/23:29 the jobs had carried since boot.
+//
+// Without this, a reader could not tell whether
+// TestPoolPump_WindowResolvesAfterNoOpDailyCheck fails because the script
+// never asks, or because 60/1409 is simply the wrong expectation. It is the
+// right expectation: it is what the script's own onWindowJobs() computes from
+// the jobs already on the device.
+//
+// It stays valid after the fix — a fix resolves the window before the
+// injection, which then re-derives the same pair and setWindow() returns early
+// on the unchanged values.
+func TestPoolPump_WindowIsResolvableByHandTheWholeTime(t *testing.T) {
+	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	d := poolPumpWinterDefaultSummerDevice(t, srv.URL, false)
+
+	stopScript := runPoolPump(t, d)
+	defer stopScript()
+
+	waitPoolPumpDailyCheckDecidedSummer(t, d)
+	assertPoolPumpScheduleUntouched(t, d)
+
+	if err := evalPoolPumpSchedule(d, "Shelly.call('Schedule.List', {}, onWindowJobs);"); err != nil {
+		t.Fatalf("could not inject the by-hand window resolution: %v", err)
+	}
+
+	ws, we := waitPoolPumpWindowResolved(t, d, eventTimeout)
+	if ws != poolPumpWideStartMin || we != poolPumpWideStopMin {
+		t.Fatalf("one hand-called Schedule.List -> onWindowJobs must resolve the window from "+
+			"the jobs sitting on the device, but F_WIN_START/F_WIN_STOP = %d/%d (%s - %s), "+
+			"want %d/%d (%s - %s). If this fails, the fixture — not the script — is wrong, "+
+			"and the expectations in the #512 red tests cannot be trusted.",
+			ws, we, poolPumpHM(ws), poolPumpHM(we),
+			poolPumpWideStartMin, poolPumpWideStopMin,
+			poolPumpHM(poolPumpWideStartMin), poolPumpHM(poolPumpWideStopMin))
+	}
+}

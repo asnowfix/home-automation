@@ -2725,6 +2725,7 @@ func TestPoolPump_InitWindowUnresolvedGetsPopulatedByDailyCheckNoOp(t *testing.T
 	schedules := deviceState.ScheduleJobs()
 	modeGot := kvsValue(deviceState, "script/pool-pump/schedule-mode")
 	scheduleListCalls := deviceState.RPCCallCount("schedule.list")
+	unresolvedEvents := deviceState.EmittedEventCount("pool.window_unresolved")
 	cancel()
 	<-done
 
@@ -2770,6 +2771,17 @@ func TestPoolPump_InitWindowUnresolvedGetsPopulatedByDailyCheckNoOp(t *testing.T
 		t.Fatalf("expected exactly 3 Schedule.List calls (1 at init, 1 hoisted safety-net "+
 			"attempt, 1 in the daily check's normal tail, 0 more), got %d: %v",
 			scheduleListCalls, deviceState.RPCCalls())
+	}
+	// #512 review round 3 (blocker 2): this is exactly the race that used to
+	// make pool.window_unresolved fire on a healthy, self-healing check --
+	// the hoisted retry above fails first (that's the 2nd Schedule.List
+	// call), then the free tail resolves the window a moment later (the 3rd).
+	// If the event still fired here, it could no longer distinguish that from
+	// the genuine 2026-08-17 failure it exists to report. Nothing should have
+	// been emitted on this path at all.
+	if unresolvedEvents != 0 {
+		t.Fatalf("pool.window_unresolved must not fire on a daily check that resolves the window "+
+			"successfully (even via a losing retry attempt along the way), got %d", unresolvedEvents)
 	}
 }
 
@@ -2837,6 +2849,7 @@ func TestPoolPump_InitWindowUnresolvedInsideWinterWindowStartsPumpSameRun(t *tes
 	})
 	got := kvsValue(deviceState, "script/pool-pump/active-output")
 	modeGot := kvsValue(deviceState, "script/pool-pump/schedule-mode")
+	unresolvedEvents := deviceState.EmittedEventCount("pool.window_unresolved")
 	cancel()
 	<-done
 
@@ -2846,6 +2859,13 @@ func TestPoolPump_InitWindowUnresolvedInsideWinterWindowStartsPumpSameRun(t *tes
 	}
 	if modeGot != "winter" {
 		t.Fatalf("daily check should have corrected schedule-mode to 'winter'; got %v", modeGot)
+	}
+	// #512 review round 3 (blocker 2): same self-healing shape as the summer
+	// test above (a losing retry attempt followed by the free tail resolving
+	// the window moments later) — must not be reported as a failure.
+	if unresolvedEvents != 0 {
+		t.Fatalf("pool.window_unresolved must not fire on a daily check that resolves the window "+
+			"successfully, got %d", unresolvedEvents)
 	}
 }
 
@@ -2945,14 +2965,20 @@ func TestPoolPump_InitWindowStaysUnknownWithSymbolicNightTimespec(t *testing.T) 
 		t.Fatalf("expected exactly 2 Schedule.List calls (1 at init, 1 deferred repair read on the "+
 			"winter early-return path, 0 extra), got %d: %v", scheduleListCalls, deviceState.RPCCalls())
 	}
-	// #512 review round 2 (F1): a genuinely unresolvable window (symbolic
-	// night timespec, never fixed) must be visible somewhere other than a
-	// hand-written probe -- both onWindowJobs() calls here (init's
-	// verifySchedules() and the hoisted repair read) hit the "still symbolic"
-	// guard, so both should have emitted pool.window_unresolved.
-	if unresolvedEvents < 2 {
-		t.Fatalf("expected at least 2 pool.window_unresolved events (one per failed resolution "+
-			"attempt: init + the hoisted repair read), got %d", unresolvedEvents)
+	// #512 review round 3 (blocker 2): a genuinely unresolvable window
+	// (symbolic night timespec, never fixed) must still be visible somewhere
+	// other than a hand-written probe -- but reporting moved from "once per
+	// failed onWindowJobs() attempt" (round 2, F1) to a latch queued once per
+	// daily check by handleDailyCheck() (reportWindowUnresolved()), which
+	// waits out a bounded grace period for any resolution path to catch up
+	// before emitting. Since nothing on this device can ever resolve the
+	// window (parseHM() never returns a value for "@sunset"), exactly one
+	// emission is expected for the one daily check this run performs -- not
+	// one per failed attempt anymore, and not zero.
+	if unresolvedEvents != 1 {
+		t.Fatalf("expected exactly 1 pool.window_unresolved event (the latched report after the "+
+			"daily check's grace period expires with the window still unresolved), got %d",
+			unresolvedEvents)
 	}
 }
 

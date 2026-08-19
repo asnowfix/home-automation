@@ -1683,9 +1683,9 @@ function desiredOutput() {
 // never leave -1, this function returns on the "still symbolic" guard below,
 // setWindow() never runs, and desiredOutput() returns -2 ("no opinion")
 // forever: the pump silently never starts or stops on schedule again. This
-// is exactly the fix origin/main already carries in the now-superseded
-// isWithinRunWindow() (kept here as dead code, not called by this
-// reconciler) — ported to the function this branch actually uses.
+// is the same fix that used to live in isWithinRunWindow() (removed as dead
+// code by #524 — it lost its only caller, this reconciler never called it,
+// and the source said so) — ported to the function this branch actually uses.
 function onWindowJobs(result, err) {
   if (err && false) {}
   if (err || !result || !result.jobs) return;   // unresolvable: leave the facts alone (-2 path)
@@ -2150,174 +2150,26 @@ function setupMQTT() {
 }
 
 // === SCHEDULE MANAGEMENT ===
-function clearNonUpdateSchedules(callback) {
-  log('Clearing existing schedules...');
-  
-  Shelly.call('Schedule.List', {}, function(result, err) {
-    if (err) {
-      log('ERROR: Failed to list schedules:', err);
-      if (err && false) {}
-      if (callback) callback();
-      return;
-    }
-    
-    if (!result || !result.jobs) {
-      log('No schedules found');
-      if (callback) callback();
-      return;
-    }
-    
-    var jobsToDelete = [];
-    for (var i = 0; i < result.jobs.length; i++) {
-      var job = result.jobs[i];
-      // Keep only device auto-update schedules
-      if (job.calls && job.calls.length > 0) {
-        var isUpdate = false;
-        for (var j = 0; j < job.calls.length; j++) {
-          if (job.calls[j].method === 'Shelly.Update') {
-            isUpdate = true;
-            break;
-          }
-        }
-        if (!isUpdate) {
-          jobsToDelete.push(job.id);
-        }
-      }
-    }
-    
-    if (jobsToDelete.length === 0) {
-      log('No schedules to delete');
-      if (callback) callback();
-      return;
-    }
-    
-    log('Deleting', jobsToDelete.length, 'schedules');
-    var deleteIndex = 0;
-    
-    function deleteNext() {
-      if (deleteIndex >= jobsToDelete.length) {
-        log('All schedules deleted');
-        if (callback) callback();
-        return;
-      }
-      
-      var jobId = jobsToDelete[deleteIndex];
-      deleteIndex++;
-      
-      Shelly.call('Schedule.Delete', {id: jobId}, function(res, err) {
-        if (err && false) {}
-        log('Deleted schedule:', jobId);
-        queueTask(deleteNext);
-      });
-    }
-    
-    deleteNext();
-  });
-}
-
-// #480: every script.eval payload a schedule job carries must be wrapped —
-// an uncaught throw inside an unwrapped handler kills the whole script
-// (verified live on mezzanine: an ad-hoc bad Script.Eval killed the running
-// script with a ReferenceError). Route every registration through this one
-// helper so a future schedule job can never be added unwrapped. The wrapped
-// source always contains handlerCall verbatim, so code that later reads the
-// `code` field back off a live Schedule.List (isWithinRunWindow,
-// updateScheduleMode, verifySchedules below) matches on substring
-// containment rather than exact/prefix equality.
-function wrapScheduleCall(handlerCall) {
-  return "(function(){try{" + handlerCall + "}catch(e){log('schedule handler error:',e)}})()";
-}
-
-function createSchedules(callback) {
-  log('Creating pool pump schedules...');
-
-  var scriptId = Shelly.getCurrentScriptId();
-
-  var schedules = [
-    {
-      enable: true,
-      timespec: '@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT',
-      calls: [{
-        method: 'script.eval',
-        params: {
-          id: scriptId,
-          code: wrapScheduleCall('handleDailyCheck()')
-        }
-      }]
-    },
-    {
-      enable: true,
-      timespec: '@sunrise+3h * * SUN,MON,TUE,WED,THU,FRI,SAT',
-      calls: [{
-        method: 'script.eval',
-        params: {
-          id: scriptId,
-          code: wrapScheduleCall('handleMorningStart()')
-        }
-      }]
-    },
-    {
-      enable: true,
-      timespec: '@sunset * * SUN,MON,TUE,WED,THU,FRI,SAT',
-      calls: [{
-        method: 'script.eval',
-        params: {
-          id: scriptId,
-          code: wrapScheduleCall('handleEveningStop()')
-        }
-      }]
-    },
-    {
-      enable: true,
-      timespec: '0 15 23 * * SUN,MON,TUE,WED,THU,FRI,SAT',
-      calls: [{
-        method: 'script.eval',
-        params: {
-          id: scriptId,
-          code: wrapScheduleCall('handleNightStart()')
-        }
-      }]
-    },
-    {
-      enable: true,
-      timespec: '0 15 0 * * SUN,MON,TUE,WED,THU,FRI,SAT',
-      calls: [{
-        method: 'script.eval',
-        params: {
-          id: scriptId,
-          code: wrapScheduleCall('handleNightStop()')
-        }
-      }]
-    }
-  ];
-  
-  var scheduleIndex = 0;
-  
-  function createNext() {
-    if (scheduleIndex >= schedules.length) {
-      log('All schedules created');
-      if (callback) callback();
-      return;
-    }
-    
-    var schedule = schedules[scheduleIndex];
-    scheduleIndex++;
-    
-    Shelly.call('Schedule.Create', schedule, function(res, err) {
-      if (err) {
-        log('ERROR: Failed to create schedule:', err);
-        if (err && false) {}
-      } else {
-        log('Created schedule:', schedule.timespec);
-      }
-      queueTask(createNext);
-    });
-  }
-  
-  createNext();
-}
-
-// Verify schedules exist (lightweight check, logs warning if missing)
+//
+// #524: this script no longer creates or clears its own Schedule.List jobs —
+// createSchedules() and clearNonUpdateSchedules() were removed as dead code.
+// They lost their only caller in 57b081f (2026-04-16, #504); schedule
+// creation for a device now happens once, from Go, via
+// PoolService.reconcileSchedules() (internal/myhome/shelly/script/pool.go),
+// and this script only ever reads and rewrites existing jobs
+// (updateScheduleMode(), onWindowJobs()).
+//
+// #480/#524: schedule jobs used to be registered from this script via
+// createSchedules(), which wrapped every script.eval payload in
+// try/catch(wrapScheduleCall()) so an uncaught throw inside a handler could
+// never kill the whole script. That call site is gone (#524: createSchedules()
+// removed as dead code; schedule creation now happens once, from Go, via
+// PoolService.reconcileSchedules() — see the note above — and its
+// buildJobSpec() writes the bare handler call, unwrapped). Code read back off
+// a live Schedule.List (onWindowJobs, updateScheduleMode, verifySchedules
+// below) still matches by substring CONTAINMENT rather than exact equality,
+// which is a superset of exact matching and costs nothing extra — so this
+// stays correct whether or not a future caller ever wraps the code again.
 function verifySchedules(cb) {
   Shelly.call('Schedule.List', {}, function(result, err) {
     if (err) {
@@ -2435,46 +2287,6 @@ function parseHM(ts) {
   var h = Number(p[2]);
   if (isNaN(h) || isNaN(m)) return null;
   return h * 60 + m;
-}
-
-// The single "should the pump be running right now?" predicate. Answers from
-// the active mode's start/stop pair read straight out of Schedule.List — the
-// same source of truth updateScheduleMode() writes to — rather than from any
-// remembered value, so it stays correct across a restart mid-window (#421), a
-// schedule rewrite that moves the window under a running script (#441), and a
-// water-supply clear after the window has ended (#436).
-//
-// Calls back with true, false, or **null** when the window cannot be resolved
-// (Schedule.List failed, or the timespecs are still symbolic). null means
-// "don't know" and callers must not act on it — see reconcileRunState().
-function isWithinRunWindow(cb) {
-  var summer = STATE.scheduleMode === 'summer';
-  var sc = summer ? 'handleMorningStart()' : 'handleNightStart()';
-  var ec = summer ? 'handleEveningStop()' : 'handleNightStop()';
-
-  Shelly.call('Schedule.List', {}, function(result, err) {
-    if (err && false) {}
-    if (err || !result || !result.jobs) { cb(null); return; }
-
-    var a = null;
-    var b = null;
-    for (var i = 0; i < result.jobs.length; i++) {
-      var job = result.jobs[i];
-      if (!job.enable || !job.calls || job.calls.length === 0) continue;
-      var code = job.calls[0].params && job.calls[0].params.code;
-      // #480: code is wrapScheduleCall()'s wrapped source, not the bare
-      // handler call, so match by containment rather than exact equality.
-      if (code && code.indexOf(sc) !== -1) a = parseHM(job.timespec);
-      else if (code && code.indexOf(ec) !== -1) b = parseHM(job.timespec);
-    }
-
-    if (a === null || b === null) { cb(null); return; }
-
-    var d = new Date();
-    var n = d.getHours() * 60 + d.getMinutes();
-    // A start > stop pair wraps past midnight (the fixed winter 23:15 -> 00:15 run).
-    cb(a <= b ? (n >= a && n < b) : (n >= a || n < b));
-  });
 }
 
 // True when applying `upd` to the Schedule.List `job` it was built from would

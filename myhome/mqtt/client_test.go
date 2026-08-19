@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -251,6 +252,145 @@ func TestSubscribe_ConcurrentSubscriptions(t *testing.T) {
 	}
 	if got := reflect.ValueOf(value).Len(); got != n {
 		t.Errorf("expected %d subscribers, got %d (race condition lost some)", n, got)
+	}
+}
+
+// fakePahoMessage implements pahomqtt.Message for tests that drive the
+// stored "distribute" handler directly, as the broker would.
+type fakePahoMessage struct {
+	topic   string
+	payload []byte
+}
+
+func (m *fakePahoMessage) Duplicate() bool   { return false }
+func (m *fakePahoMessage) Qos() byte         { return 0 }
+func (m *fakePahoMessage) Retained() bool    { return false }
+func (m *fakePahoMessage) Topic() string     { return m.topic }
+func (m *fakePahoMessage) MessageID() uint16 { return 0 }
+func (m *fakePahoMessage) Payload() []byte   { return m.payload }
+func (m *fakePahoMessage) Ack()              {}
+
+// TestDistribute_FullQueueDropsMessageNotSubscriber is a regression test for
+// #517: a burst of messages that fills a subscriber's bounded queue must
+// drop only the messages that don't fit, not the subscriber itself. Before
+// this fix, one full-queue moment permanently removed the subscriber from
+// the topic's fan-out list -- with no automatic re-subscribe -- so every
+// later message on that topic (e.g. every device sharing a wildcard
+// subscription such as "+/events/rpc") was silently lost until the process
+// restarted.
+func TestDistribute_FullQueueDropsMessageNotSubscriber(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+	const topic = "test/overflow"
+
+	ch, err := c.Subscribe(ctx, topic, 1, "subscriber") // qlen=1: easy to overflow
+	if err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+
+	handlerI, ok := c.handlers.Load(topic)
+	if !ok {
+		t.Fatal("no distribute handler registered for topic")
+	}
+	handler := handlerI.(pahomqtt.MessageHandler)
+
+	// distribute() does its real work in a goroutine spawned per handler()
+	// call, so waiting for effects means polling rather than assuming
+	// synchronous completion.
+	waitFor := func(what string, done func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if done() {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for: %s", what)
+	}
+
+	// First message fills the qlen=1 buffer -- poll for the buffered
+	// length to actually reach 1, which is a real (not assumed) signal
+	// that this call's distribute() goroutine has run.
+	handler(nil, &fakePahoMessage{topic: topic, payload: []byte("first")})
+	waitFor("first message buffered", func() bool { return len(ch) == 1 })
+
+	// Second message finds the buffer full and must be dropped -- as
+	// "queue full", not as "remove the subscriber". Give its goroutine
+	// (serialized after the first on the same per-topic mutex) a moment to
+	// run, well beyond what trivial in-memory map/channel work needs.
+	handler(nil, &fakePahoMessage{topic: topic, payload: []byte("second")})
+	time.Sleep(100 * time.Millisecond)
+
+	value, ok := c.subscribers.Load(topic)
+	if !ok {
+		t.Fatal("subscriber list missing for topic")
+	}
+	if got := reflect.ValueOf(value).Len(); got != 1 {
+		t.Fatalf("expected subscriber to survive a full queue, got %d subscribers left", got)
+	}
+
+	// The dropped message must be counted (#517/#518 F2) -- this is what
+	// answers "did we lose events today, and how many" instead of leaving
+	// only a per-message log line (or, before this PR, a permanently dead
+	// subscriber and total silence).
+	counterI, ok := c.dropCounts.Load(topic + "|subscriber")
+	if !ok {
+		t.Fatal("expected a drop counter to have been created")
+	}
+	if got := counterI.(*atomic.Uint64).Load(); got != 1 {
+		t.Fatalf("expected drop count 1, got %d", got)
+	}
+
+	// Drain the one message that made it through, then confirm the
+	// subscriber is still live by delivering a third message to it.
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first message")
+	}
+
+	handler(nil, &fakePahoMessage{topic: topic, payload: []byte("third")})
+
+	select {
+	case got := <-ch:
+		if string(got) != "third" {
+			t.Fatalf("expected %q, got %q", "third", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("subscriber did not receive message after surviving a full queue")
+	}
+}
+
+// TestRecordDrop_AccumulatesPerTopicSubscriber verifies recordDrop()'s
+// counting in isolation from distribute()'s goroutine timing: repeated
+// drops on the same (topic, subscriber) accumulate on one counter, a
+// different subscriber on the same topic gets its own counter, and the
+// reporter goroutine is started (dropLogOnce) without panicking or blocking
+// -- it only exercises the "first drop ever" path here since
+// dropCountReportInterval (5m) is far longer than this test should run.
+func TestRecordDrop_AccumulatesPerTopicSubscriber(t *testing.T) {
+	c := newTestClient(t)
+
+	c.recordDrop("t1", "subA")
+	c.recordDrop("t1", "subA")
+	c.recordDrop("t1", "subA")
+	c.recordDrop("t1", "subB")
+
+	got, ok := c.dropCounts.Load("t1|subA")
+	if !ok {
+		t.Fatal("expected a counter for t1|subA")
+	}
+	if n := got.(*atomic.Uint64).Load(); n != 3 {
+		t.Fatalf("expected 3 drops for t1|subA, got %d", n)
+	}
+
+	got, ok = c.dropCounts.Load("t1|subB")
+	if !ok {
+		t.Fatal("expected a counter for t1|subB")
+	}
+	if n := got.(*atomic.Uint64).Load(); n != 1 {
+		t.Fatalf("expected 1 drop for t1|subB, got %d", n)
 	}
 }
 

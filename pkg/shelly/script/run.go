@@ -192,6 +192,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		}
 
 		log.Info("Shelly.call()", "method", method, "params", params.Export())
+		deviceState.RecordRPCCall(method)
 
 		if fn, ok := methods[method]; ok {
 			result, err := fn(vm, method, params, callback, userdata)

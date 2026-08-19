@@ -2658,6 +2658,330 @@ func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T
 	}
 }
 
+// === #512: verifySchedules() at init (#476) has exactly one shot at
+// resolving the run window, and its match depends on STATE.scheduleMode
+// already being correct (it selects which pair of handler codes to look
+// for). If that one attempt fails to resolve it -- for any reason, e.g.
+// Script.storage's schedule-mode key not yet reflecting reality the way it
+// evidently didn't on `filtration-hiver` on 2026-08-17 -- nothing used to
+// retry unless that day's daily check also happened to *move* the schedule.
+// The common case (today's forecast recomputing yesterday's already-correct
+// window) never does, which is exactly the composition that left the pump
+// idle for a full day despite correct, enabled schedule jobs on the device
+// the whole time. These three tests pin the fix: updateScheduleMode() now
+// re-derives the window whenever it is still unresolved, not only when it
+// moved, using the Schedule.List response it already has in hand.
+
+// TestPoolPump_InitWindowUnresolvedGetsPopulatedByDailyCheckNoOp is the
+// exact case that failed live: the schedule already carries the window the
+// forecast recomputes, so updateScheduleMode() finds nothing to write
+// (windowChanged stays false). Script.storage's schedule-mode is seeded as
+// "winter" even though the device's actual schedule is already
+// summer-shaped, reproducing whatever left STATE.scheduleMode stale by the
+// time verifySchedules() ran: init's own onWindowJobs() call looks for the
+// (disabled) night jobs instead of the enabled morning/evening pair and
+// cannot resolve the window. Without the fix nothing ever gives it a second
+// chance; with it, updateScheduleMode()'s own Schedule.List response
+// resolves the window as soon as the daily check corrects
+// STATE.scheduleMode to "summer".
+func TestPoolPump_InitWindowUnresolvedGetsPopulatedByDailyCheckNoOp(t *testing.T) {
+	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	now := time.Now()
+	start := time.Date(now.Year(), now.Month(), now.Day(), 1, 0, 0, 0, now.Location())
+	stop := time.Date(now.Year(), now.Month(), now.Day(), 23, 29, 0, 0, now.Location())
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			// Wrong on purpose: see the block comment above.
+			"schedule-mode": "winter",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro1ComponentStatus(), // pump off at boot
+		Schedules:       poolPumpSummerSchedules(start, stop),
+	}
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	buf := readPoolPumpScript(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	started := waitFor(initTimeout, 100*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0"
+	})
+
+	got := kvsValue(deviceState, "script/pool-pump/active-output")
+	schedules := deviceState.ScheduleJobs()
+	modeGot := kvsValue(deviceState, "script/pool-pump/schedule-mode")
+	scheduleListCalls := deviceState.RPCCallCount("schedule.list")
+	unresolvedEvents := deviceState.EmittedEventCount("pool.window_unresolved")
+	cancel()
+	<-done
+
+	if !started {
+		t.Fatalf("pump never started even though the schedule already matched the forecast-derived "+
+			"window and 'now' is inside it — the window was left unresolved: active-output=%v", got)
+	}
+	if modeGot != "summer" {
+		t.Fatalf("daily check should have corrected schedule-mode to 'summer'; got %v", modeGot)
+	}
+	// The window must have been populated by the retry, not by an actual
+	// rewrite: the schedule already matched, so nothing should have moved.
+	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 0) {
+		t.Fatalf("schedule should not have needed rewriting: morning-start timespec is now %q", ts)
+	}
+	if ts := poolPumpScheduleTimespec(schedules, "handleEveningStop()"); ts != poolPumpTimespec(23, 29) {
+		t.Fatalf("schedule should not have needed rewriting: evening-stop timespec is now %q", ts)
+	}
+	// #509/#515: pins the headline done-criterion that #510 shipped with
+	// nothing asserting it — "the daily-check path issues one Schedule.List,
+	// not two" WITHIN updateScheduleMode() itself. This is the "normal tail"
+	// path (modeChanged is true here, since Storage's schedule-mode was
+	// seeded wrong): updateScheduleMode() takes exactly one Schedule.List at
+	// the top of the function and derives the window straight from that
+	// response, with no second read of its own.
+	//
+	// Total across the whole run is deterministically 3, not 2, once
+	// handleDailyCheck()'s hoisted retry (review round 2, F2/F3) is counted:
+	// verifySchedules() at init (1); the hoisted, self-guarded
+	// readWindowFromSchedule() (1) — it fires and fails to resolve, because
+	// its queued tick consistently arrives before updateScheduleMode() has
+	// corrected STATE.scheduleMode from the wrong seeded value (verified by
+	// running this test with -count=3: identical call sequence every time,
+	// not a flaky race); and updateScheduleMode()'s own successful
+	// resolution (1). That third call is a deliberate, bounded cost of F2/F3
+	// coverage (an unresolved window that reaches a path with no free
+	// resolution, e.g. a forecast fetch failure, still gets exactly one
+	// repair attempt) — not a reintroduction of #509's defect, which was
+	// specifically a SECOND read inside updateScheduleMode() itself. A
+	// regression that reintroduced #509's own second read, on top of this,
+	// would push the total to 4 without any other assertion here noticing.
+	if scheduleListCalls != 3 {
+		t.Fatalf("expected exactly 3 Schedule.List calls (1 at init, 1 hoisted safety-net "+
+			"attempt, 1 in the daily check's normal tail, 0 more), got %d: %v",
+			scheduleListCalls, deviceState.RPCCalls())
+	}
+	// #512 review round 3 (blocker 2): this is exactly the race that used to
+	// make pool.window_unresolved fire on a healthy, self-healing check --
+	// the hoisted retry above fails first (that's the 2nd Schedule.List
+	// call), then the free tail resolves the window a moment later (the 3rd).
+	// If the event still fired here, it could no longer distinguish that from
+	// the genuine 2026-08-17 failure it exists to report. Nothing should have
+	// been emitted on this path at all.
+	if unresolvedEvents != 0 {
+		t.Fatalf("pool.window_unresolved must not fire on a daily check that resolves the window "+
+			"successfully (even via a losing retry attempt along the way), got %d", unresolvedEvents)
+	}
+}
+
+// TestPoolPump_InitWindowUnresolvedInsideWinterWindowStartsPumpSameRun
+// covers the winter side of the same fix, with the window bracketing "now"
+// by construction (night-job timespecs set relative to the test's own
+// clock, mirroring TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow)
+// rather than depending on the wall clock landing inside a wide daytime
+// window. Script.storage claims "summer" even though the device's actual
+// schedule is already winter-shaped, so verifySchedules() at init looks for
+// the (disabled) morning/evening pair and leaves the window unresolved;
+// updateScheduleMode()'s own switch to "winter" must resolve it from the
+// same Schedule.List response, in the same restart — proving the pump
+// starts without waiting for a later day's forecast to move anything.
+func TestPoolPump_InitWindowUnresolvedInsideWinterWindowStartsPumpSameRun(t *testing.T) {
+	srv := poolPumpWinterForecastServer(t)
+	now := time.Now()
+
+	job := func(id int, code, timespec string, enable bool) map[string]interface{} {
+		return map[string]interface{}{
+			"id": id, "enable": enable, "timespec": timespec,
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": 1, "code": code},
+			}},
+		}
+	}
+
+	nightStart := now.Add(-1 * time.Hour)
+	nightStop := now.Add(1 * time.Hour)
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			// Wrong on purpose, same mechanism as the summer test above.
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro1ComponentStatus(), // pump off at boot
+		Schedules: []map[string]interface{}{
+			job(1, "handleDailyCheck()", "@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT", true),
+			job(2, "handleMorningStart()", poolPumpTimespec(now.Add(2*time.Hour).Hour(), now.Add(2*time.Hour).Minute()), false),
+			job(3, "handleEveningStop()", poolPumpTimespec(now.Add(4*time.Hour).Hour(), now.Add(4*time.Hour).Minute()), false),
+			job(4, "handleNightStart()", poolPumpTimespec(nightStart.Hour(), nightStart.Minute()), true),
+			job(5, "handleNightStop()", poolPumpTimespec(nightStop.Hour(), nightStop.Minute()), true),
+		},
+	}
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	buf := readPoolPumpScript(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	started := waitFor(initTimeout, 100*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0"
+	})
+	got := kvsValue(deviceState, "script/pool-pump/active-output")
+	modeGot := kvsValue(deviceState, "script/pool-pump/schedule-mode")
+	unresolvedEvents := deviceState.EmittedEventCount("pool.window_unresolved")
+	cancel()
+	<-done
+
+	if !started {
+		t.Fatalf("pump never started even though the already-enabled night jobs bracket 'now' — "+
+			"the winter window was left unresolved: active-output=%v", got)
+	}
+	if modeGot != "winter" {
+		t.Fatalf("daily check should have corrected schedule-mode to 'winter'; got %v", modeGot)
+	}
+	// #512 review round 3 (blocker 2): same self-healing shape as the summer
+	// test above (a losing retry attempt followed by the free tail resolving
+	// the window moments later) — must not be reported as a failure.
+	if unresolvedEvents != 0 {
+		t.Fatalf("pool.window_unresolved must not fire on a daily check that resolves the window "+
+			"successfully, got %d", unresolvedEvents)
+	}
+}
+
+// TestPoolPump_InitWindowStaysUnknownWithSymbolicNightTimespec is the guard
+// this issue must not weaken: a symbolic timespec (e.g. @sunrise) that
+// parseHM() cannot resolve must leave the window unknown — and the relay
+// untouched — rather than being coerced to "off". Night-job timespecs are
+// never rewritten by updateScheduleMode() (only their enable flag is), so a
+// symbolic value there survives every schedule-mode pass untouched, exactly
+// like a hand-edited or corrupted job would on a real device. The window
+// must therefore stay unresolved through every retry this fix adds —
+// including the "already <mode>, no changes needed" early return, which now
+// issues its own Schedule.List when the window is still unresolved.
+func TestPoolPump_InitWindowStaysUnknownWithSymbolicNightTimespec(t *testing.T) {
+	srv := poolPumpWinterForecastServer(t)
+
+	job := func(id int, code, timespec string, enable bool) map[string]interface{} {
+		return map[string]interface{}{
+			"id": id, "enable": enable, "timespec": timespec,
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": 1, "code": code},
+			}},
+		}
+	}
+
+	cs := pro1ComponentStatus()
+	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true} // already running
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "winter", // already correct, matches the forecast
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: cs,
+		Schedules: []map[string]interface{}{
+			job(1, "handleDailyCheck()", "@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT", true),
+			job(2, "handleMorningStart()", poolPumpTimespec(10, 0), false),
+			job(3, "handleEveningStop()", poolPumpTimespec(16, 0), false),
+			// Symbolic on purpose: parseHM() returns null for a '@'-prefixed
+			// timespec, and updateScheduleMode() never rewrites a night
+			// job's timespec (only its enable flag) — so this can never
+			// resolve, matching onWindowJobs()'s "still symbolic" guard.
+			job(4, "handleNightStart()", "@sunset * * SUN,MON,TUE,WED,THU,FRI,SAT", true),
+			job(5, "handleNightStop()", poolPumpTimespec(0, 15), true),
+		},
+	}
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	ctx, cancel := poolPumpRunContext(t)
+	defer cancel()
+
+	buf := readPoolPumpScript(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	// Give the daily check (and its new "still unresolved" retry) their own
+	// window to (not) act on the unresolvable window.
+	waitFor(8*time.Second, 100*time.Millisecond, func() bool { return false })
+
+	got := kvsValue(deviceState, "script/pool-pump/active-output")
+	scheduleListCalls := deviceState.RPCCallCount("schedule.list")
+	unresolvedEvents := deviceState.EmittedEventCount("pool.window_unresolved")
+	cancel()
+	<-done
+
+	if got != "0" {
+		t.Fatalf("a symbolic, unresolvable night timespec must leave the window unknown (-2 'no opinion'), "+
+			"not force the already-running pump off: active-output=%v", got)
+	}
+	// #509/#515: pins the call count on the OTHER path this fix touches — the
+	// winter `!modeChanged && !hasTimings` early return, where
+	// updateScheduleMode() itself never reaches its own top-of-function
+	// Schedule.List (this Storage is already "winter", matching the
+	// forecast) and has nothing of its own to contribute. handleDailyCheck()'s
+	// hoisted, self-guarded retry (review round 2, F2/F3) is the ONLY
+	// mechanism that can resolve the window on this path, and it fires
+	// exactly once per check. Expected total is 2, not 0: verifySchedules()
+	// at init (1) plus that one hoisted repair read (1) — a real read is
+	// legitimately needed here, unlike the pre-#512 code which issued none on
+	// this path and left the window stuck. It must also not be 3: that would
+	// be review round 1's finding reappearing (an inline call stacking on the
+	// Open-Meteo parse peak instead of a single deferred one).
+	if scheduleListCalls != 2 {
+		t.Fatalf("expected exactly 2 Schedule.List calls (1 at init, 1 deferred repair read on the "+
+			"winter early-return path, 0 extra), got %d: %v", scheduleListCalls, deviceState.RPCCalls())
+	}
+	// #512 review round 3 (blocker 2): a genuinely unresolvable window
+	// (symbolic night timespec, never fixed) must still be visible somewhere
+	// other than a hand-written probe -- but reporting moved from "once per
+	// failed onWindowJobs() attempt" (round 2, F1) to a latch queued once per
+	// daily check by handleDailyCheck() (reportWindowUnresolved()), which
+	// waits out a bounded grace period for any resolution path to catch up
+	// before emitting. Since nothing on this device can ever resolve the
+	// window (parseHM() never returns a value for "@sunset"), exactly one
+	// emission is expected for the one daily check this run performs -- not
+	// one per failed attempt anymore, and not zero.
+	if unresolvedEvents != 1 {
+		t.Fatalf("expected exactly 1 pool.window_unresolved event (the latched report after the "+
+			"daily check's grace period expires with the window still unresolved), got %d",
+			unresolvedEvents)
+	}
+}
+
 // TestPoolPump_DailyCheckRunsDuringWaterSupplyProtection is the aftermath
 // defect noted alongside the #450 crash: after the live crash-restart on
 // 2026-08-11, the script logged 'Current mode: winter', then 'Daily check

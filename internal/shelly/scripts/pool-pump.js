@@ -1331,11 +1331,18 @@ function stopRuntimeAccounting() {
 // elapsed-so-far, without clearing runStartTs — the run is still in
 // progress. This bounds crash/reboot data loss to at most one flush
 // interval instead of the whole run.
+//
+// #524: also the periodic boundary check for a #524-extended window (or the
+// hard ceiling, or the original stop) once solar is disabled and nothing
+// else ticks reconcile() while running -- reconcile() is always safe to call
+// (see "THE RECONCILER" above) and this timer already exists and already
+// runs only while the pump is on, so no new timer is added.
 function flushRuntimeCheckpoint() {
   ensureRuntimeDay();
   if (STATE.runStartTs === null) return;
   var elapsedSec = (Date.now() - STATE.runStartTs) / 1000;
   persistRuntimeState(STATE.runtimeTodaySec + elapsedSec);
+  reconcile(null);
 }
 
 // Persists sec (defaults to STATE.runtimeTodaySec) plus the current day
@@ -1605,6 +1612,9 @@ function setWater(active) {
   F_WATER = active;
   Shelly.emitEvent(active ? "pool.water_supply_protected" : "pool.water_supply_restored",
                    {output: STATE.activeOutput});
+  // #524: on release, recover whatever this interruption cost before
+  // reconciling -- extendWindowForShortfall() is a no-op if nothing is owed.
+  if (!active) extendWindowForShortfall();
   reconcile(active ? "water supply on" : "water supply off");
 }
 
@@ -1614,6 +1624,35 @@ function setWindow(startMin, stopMin) {
   F_WIN_START = startMin;
   F_WIN_STOP = stopMin;
   reconcile("window moved");
+}
+
+// #524: recovers time the pump lost to a non-filtering interval (typically
+// the water-supply interlock) by pushing the window's stop bound later,
+// through setWindow() -- the fact's one writer (#476) -- so achieved runtime
+// converges on computeRunHours()'s intent for the day instead of losing
+// whatever the interruption cost. Pure arithmetic over facts that already
+// exist: STATE.runtimeTodaySec (every second the pump has actually run
+// today, including any solar-triggered running outside the window --
+// desiredOutput() checks F_SOLAR_WANT before the window -- so a solar-heavy
+// morning already shrinks or erases the shortfall computed here) and
+// STATE.maxForecastTemp (this morning's forecast, unchanged since
+// decideModeFromForecast() set it). No new tracking structure.
+//
+// Bounded like decideModeFromForecast()'s own window: stopCeil is the same
+// sunset-minus-half-hour ceiling, so recovery can push the stop later but
+// never past it -- the pump does not run into the night.
+function extendWindowForShortfall() {
+  if (STATE.scheduleMode !== 'summer') return;
+  if (STATE.maxForecastTemp === null) return;
+  if (F_WIN_START < 0 || F_WIN_STOP < 0) return;
+  var shortfallSec = computeRunHours(STATE.maxForecastTemp) * 3600 - STATE.runtimeTodaySec;
+  if (shortfallSec <= 0) return;
+  var d = new Date();
+  var nowMin = d.getHours() * 60 + d.getMinutes();
+  var stopCeilMin = ((STATE.sunsetHour !== null ? STATE.sunsetHour : 21) - 0.5) * 60;
+  var targetStopMin = nowMin + Math.ceil(shortfallSec / 60);
+  if (targetStopMin > stopCeilMin) targetStopMin = stopCeilMin;
+  if (targetStopMin > F_WIN_STOP) setWindow(F_WIN_START, targetStopMin);
 }
 
 // A reconciler reverts an out-of-band relay change that contradicts the
@@ -2540,6 +2579,10 @@ function handleMorningStart() {
 }
 
 function handleEveningStop() {
+  // #524: the window's natural end is exactly where a shortfall must be
+  // recovered or lost outright -- extend before reconciling so today's
+  // achieved runtime still has a chance to reach computeRunHours()'s intent.
+  extendWindowForShortfall();
   clearOverride();
   reconcile('evening stop');
 }

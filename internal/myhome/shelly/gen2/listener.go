@@ -270,7 +270,7 @@ func severityFor(event string) string {
 	case "smoke.alarm", "smoke.alarm_test", "smoke.alarm_off":
 		return "alarm"
 	case "battery.low", "ota_error", "switch.active_power_change",
-		"pool.fuse_tripped":
+		"pool.fuse_tripped", "pool.window_unresolved":
 		return "warn"
 	case "pool.run_window", "pool.pump_start", "pool.pump_stop",
 		"pool.water_supply_protected", "pool.water_supply_restored", "pool.turnover_today",

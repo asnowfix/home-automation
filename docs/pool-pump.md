@@ -74,6 +74,42 @@ absence is not evidence of absence.
   it stale — see #523.
 
 
+### Priority: water supply overrides everything, including solar
+
+Running dry can destroy the pump, so the water-supply level is an **absolute** override — not one
+input among several. `desiredOutput()` encodes this as the first line of the policy:
+
+```js
+if (F_WATER) return -1;      // safety first, always
+```
+
+Nothing below it — manual override, solar, the run window — can re-enable the pump while the supply
+is low. **Any change to the policy ordering must keep this first.**
+
+### Solar accumulates *through* a resupply, and starts the pump when it ends
+
+The solar opinion is deliberately independent of the pump's physical state. `checkSolarHysteresis()`
+runs on every solar MQTT message and on its own periodic tick, and it is **not** gated on `F_WATER`,
+so while the pump is held off for a refill:
+
+- solar readings keep arriving and keep being evaluated;
+- `SOLAR.aboveStartSince` keeps accumulating toward `solarStartDelayMs`;
+- `F_SOLAR_WANT` can therefore *become* true during the hold.
+
+When the gauge releases, `setWater(false)` calls `reconcile("water supply off")`, and
+`desiredOutput()` — now past the `F_WATER` guard — reaches `if (F_SOLAR_WANT) return
+mapSpeedToSwitch(...)`. **The pump starts immediately at the end of the resupply**, with no wait for
+the next solar evaluation and no re-arming of the start delay.
+
+This is a consequence of #476 making `F_SOLAR_WANT` a *latched opinion* rather than a reading of the
+relay. The comment there records why: reading physical state meant a window-driven run suppressed
+solar's start hysteresis, so "solar went away" could cut a scheduled run short.
+
+**Status: correct by construction, not yet proven by test.** There is no emulator test covering
+"solar rises during a water hold, pump starts on release". Until there is, this section describes the
+intended design and a reading of the code — not verified behaviour. See #524.
+
+
 ## Button Handling (Power Cycling)
 
 The system button (`sys_btn_push` event) on both devices provides manual pump control.

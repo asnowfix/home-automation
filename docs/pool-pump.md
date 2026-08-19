@@ -29,6 +29,51 @@
 
 ---
 
+## Water Supply Input — a LEVEL, not an event
+
+**This is normal operation. Do not troubleshoot it as a fault.** It has cost more than one
+investigation already.
+
+`input:0` on the pump device is the **water-supply level** reported by a water gauge. The gauge fills
+the pool up to a target level and then stops. The device surfaces changes as *events*, and
+`handleInputEvent()` → `setWater()` consumes them as edges, but the underlying signal is a **level**,
+not an edge — that distinction is what makes the observed behaviour make sense.
+
+### What this looks like in normal operation
+
+Running the pump draws the level down, the gauge trips, the pump stops until the gauge has refilled
+to target, then the pump resumes. Measured on `filtration-hiver`:
+
+| date | pump ran | protected | released | protection lasted |
+|---|---|---|---|---|
+| 2026-08-18 | 11:12:44 | 11:20:50 | 11:47:54 | ~27 min |
+| 2026-08-19 | 12:17:01 | 12:23:29 | 12:43:47 | ~20 min |
+
+So a mid-window stop of roughly 20–30 minutes, a few minutes after the pump starts, with
+`pool.pump_stop {"reason":"water supply"}`, **is the interlock working**. The durations vary because
+they track the refill, not a timer.
+
+### Two ways this has already misled an investigation
+
+1. **`F_WATER` is a latch that clears.** Probing it hours after the event shows `false` and looks
+   like protection never fired. It reflects *now*, not the day.
+2. **`Switch.GetStatus.input.state` and `F_WATER` can legitimately disagree**, because one is the
+   instantaneous level and the other is the last edge the script consumed. A single disagreeing
+   sample is not evidence of a bug.
+
+If the pump appears to stop mid-window for no reason, **look for `pool.water_supply_protected` in the
+events DB first** — and remember events can be lost when the device's MQTT link flaps (#499), so
+absence is not evidence of absence.
+
+### What *is* worth acting on
+
+- The pump not reaching its turnover target because protection eats the window — that is a **supply**
+  matter (flow rate, gauge target, refill time), not a code defect. See #524 for the software half:
+  the run window is a fixed clock interval and does not compensate for time lost.
+- `F_WATER` being maintained from edges only, with no level reconciliation, so a missed event leaves
+  it stale — see #523.
+
+
 ## Button Handling (Power Cycling)
 
 The system button (`sys_btn_push` event) on both devices provides manual pump control.

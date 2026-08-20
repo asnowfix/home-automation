@@ -1631,12 +1631,27 @@ function setWindow(startMin, stopMin) {
 // through setWindow() -- the fact's one writer (#476) -- so achieved runtime
 // converges on computeRunHours()'s intent for the day instead of losing
 // whatever the interruption cost. Pure arithmetic over facts that already
-// exist: STATE.runtimeTodaySec (every second the pump has actually run
-// today, including any solar-triggered running outside the window --
+// exist: STATE.runtimeTodaySec (only CLOSED intervals -- see its own
+// declaration above, "completed intervals only" -- so a still-open run must
+// be added in below) plus any still-running interval, and STATE.maxForecastTemp
+// (this morning's forecast, unchanged since decideModeFromForecast() set it).
+// No new tracking structure. Any solar-triggered running outside the window
+// already folds into STATE.runtimeTodaySec once its interval closes --
 // desiredOutput() checks F_SOLAR_WANT before the window -- so a solar-heavy
-// morning already shrinks or erases the shortfall computed here) and
-// STATE.maxForecastTemp (this morning's forecast, unchanged since
-// decideModeFromForecast() set it). No new tracking structure.
+// morning already shrinks or erases the shortfall computed here.
+//
+// #524 review (silent-failure pass): the first version of this function used
+// STATE.runtimeTodaySec alone. handleEveningStop() -- one of this function's
+// two call sites -- fires with the pump still RUNNING (that open interval is
+// exactly what handleEveningStop()'s own reconcile() is about to stop), so at
+// that instant runtimeTodaySec excluded the entire in-progress run. On the
+// issue's own measured day that turned a real 1099s shortfall into a computed
+// 19052s one and extended to stopCeil regardless of the true gap -- and on a
+// day with NO interruption at all it was worse, firing unconditionally with
+// the whole day's intent as "owed". Adding the open interval here is what
+// makes the two call sites agree: setWindow(false)'s call site already saw a
+// closed interval (stopRuntimeAccounting() ran first), so it was never wrong;
+// this makes handleEveningStop()'s call site correct the same way.
 //
 // Bounded like decideModeFromForecast()'s own window: stopCeil is the same
 // sunset-minus-half-hour ceiling, so recovery can push the stop later but
@@ -1645,13 +1660,18 @@ function extendWindowForShortfall() {
   if (STATE.scheduleMode !== 'summer') return;
   if (STATE.maxForecastTemp === null) return;
   if (F_WIN_START < 0 || F_WIN_STOP < 0) return;
-  var shortfallSec = computeRunHours(STATE.maxForecastTemp) * 3600 - STATE.runtimeTodaySec;
+  var achievedSec = STATE.runtimeTodaySec;
+  if (STATE.runStartTs !== null) achievedSec += (Date.now() - STATE.runStartTs) / 1000;
+  var shortfallSec = computeRunHours(STATE.maxForecastTemp) * 3600 - achievedSec;
   if (shortfallSec <= 0) return;
   var d = new Date();
   var nowMin = d.getHours() * 60 + d.getMinutes();
-  var stopCeilMin = ((STATE.sunsetHour !== null ? STATE.sunsetHour : 21) - 0.5) * 60;
+  var stopCeilMin = Math.floor(((STATE.sunsetHour !== null ? STATE.sunsetHour : 21) - 0.5) * 60);
   var targetStopMin = nowMin + Math.ceil(shortfallSec / 60);
-  if (targetStopMin > stopCeilMin) targetStopMin = stopCeilMin;
+  if (targetStopMin > stopCeilMin) {
+    log("recovery clamped to stopCeil:", targetStopMin, "->", stopCeilMin);
+    targetStopMin = stopCeilMin;
+  }
   if (targetStopMin > F_WIN_STOP) setWindow(F_WIN_START, targetStopMin);
 }
 
@@ -2432,9 +2452,7 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // instant never fires at all — which is how the pool lost a whole
         // day of filtration on 2026-08-06. Reconcile here, once, in the one
         // place that knows the window moved.
-        // #476: the window is a fact with one writer. Gated on windowChanged:
-        // a no-op re-run -- the common case at sunrise when the forecast
-        // yields yesterday's window -- must not buy any extra work at all.
+        // #476: the window is a fact with one writer.
         //
         // #509: this used to re-read via queueTask(readWindow), a second
         // Schedule.List landing on top of whatever forecast parse just ran.
@@ -2448,7 +2466,27 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // already IS the post-update state. Pass it straight to onWindowJobs
         // (named function reference, no closure) instead of re-fetching and
         // re-parsing it.
-        if (windowChanged) onWindowJobs(result, null);
+        //
+        // #524 review (silent-failure pass): this call USED to be gated on
+        // windowChanged -- "a no-op re-run must not buy any extra work at
+        // all" -- which was sound when F_WIN_STOP had exactly one writer
+        // (setWindow() via this same onWindowJobs() call). extendWindowForShortfall()
+        // is now a second writer that can move F_WIN_STOP without touching any
+        // schedule job, so fact and schedule can diverge. Gating this call on
+        // windowChanged meant that on any morning whose recomputed window
+        // matched the jobs already on the device -- the common case at
+        // sunrise -- onWindowJobs() never ran, and a leftover extension from
+        // the day before silently carried into today: since extension only
+        // ever moves the stop forward, F_WIN_STOP would ratchet toward
+        // stopCeil across days with nothing to pull it back (and sunset drifts
+        // 1-2 min/day, so a leaked stop could even end up ABOVE today's
+        // stopCeil, which is only enforced on a freshly computed value).
+        // Calling onWindowJobs() unconditionally re-seeds F_WIN_STOP from the
+        // schedule every single time this runs -- once/day via
+        // handleDailyCheck() -- which costs one extra no-op reconcile() on the
+        // common no-rewrite day and nothing else: no RPC, since result.jobs is
+        // already in hand (the #509 fix above).
+        onWindowJobs(result, null);
         return;
       }
       var sched = schedulesToUpdate[updateIndex];

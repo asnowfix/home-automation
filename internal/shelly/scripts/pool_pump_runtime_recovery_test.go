@@ -546,15 +546,18 @@ func TestPoolPump_RuntimeRecovery_DailyCheckReseedsLeakedExtension(t *testing.T)
 	}
 
 	// Re-run the daily check against the SAME (unchanged) forecast -- a
-	// genuine no-op rewrite, windowChanged stays false.
+	// genuine no-op rewrite, windowChanged stays false. Two overlapping
+	// updateScheduleMode() runs can be in flight here (init's own automatic
+	// handleDailyCheck(), queued once at the end of init, plus this explicit
+	// re-fire -- both against a REAL working forecast server, unlike the
+	// broken-forecast fixtures elsewhere in this file), each dispatching a
+	// handful of serialized Schedule.Update RPCs, so waiting on the
+	// observable (F_WIN_STOP actually settling) rather than a fixed sleep is
+	// required here, not just preferred: a diagnostic run confirmed a fixed
+	// 2s settlePoolPumpTaskQueue() was measured too short under this
+	// interleaving even though the arithmetic itself was already correct.
 	if err := evalPoolPumpSchedule(d, "handleDailyCheck()"); err != nil {
 		t.Fatalf("failed to re-fire handleDailyCheck(): %v", err)
 	}
-	settlePoolPumpTaskQueue(t)
-
-	if got := readPoolPumpWindowStop(t, d); got != int64(poolPumpWideStopMin) {
-		t.Fatalf("F_WIN_STOP = %d after a no-op daily check, want it pulled back to the schedule's own "+
-			"stop %d -- a leaked extension from a prior day must not survive an unchanged forecast",
-			got, poolPumpWideStopMin)
-	}
+	waitForWindowSeeded(t, d, int64(poolPumpWideStopMin))
 }

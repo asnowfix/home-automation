@@ -1287,6 +1287,77 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartResets(t *testing.T) {
 	}
 }
 
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit
+// is #530's regression test. It seeds the exact condition confirmed live on
+// `filtration-hiver` before it was hand-defused (a runtime record whose ts is
+// yesterday's), but — unlike
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartResets above — runs with
+// logging ENABLED, so log()'s full body (the argument-formatting loop that
+// the crash trace on hardware shows overflowing: `typeof n === "object" ?
+// e+=JSON.stringify(n) : e+=String(n)`) actually executes on the rollover
+// path instead of returning immediately at its `if (!CONFIG.enableLogging)
+// return;` guard. controllerKVS() sets logging=false for every other test in
+// this file (output noise), which means
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartResets — despite seeding
+// the identical scenario — never once calls into the code that crashed on
+// hardware; confirmed by running it, unmodified, against the pre-#530 code:
+// it passes (see the #530 PR description for the exact command and result).
+//
+// IMPORTANT — what this test does and does not prove: goja does not enforce
+// a call-stack depth limit the way Espruino's firmware does (that gap is
+// #496), so this test CANNOT fail on the pre-#530 code and must not be read
+// as reproducing the "Too much recursion" crash. What it verifies is the
+// logic #530 requires to survive the fix: that deferring reconcileRuntimeState's
+// log() calls via queueTask() does not change the {sec, ts} decision (the
+// counter is still zeroed and ts still re-anchored to today, exactly as
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartResets checks) and that
+// init still reaches completion (schedule-mode written to KVS) even with the
+// exact log() call path that overflows on real hardware fully exercised. A
+// genuine hardware-equivalent regression test needs #496's calibrated
+// goja.SetMaxCallStackSize; until that lands, hardware verification is the
+// only thing that can actually catch a reintroduced version of this bug.
+func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	kvs := controllerKVS()
+	kvs["script/pool-pump/logging"] = "true"
+
+	deviceState := &script.DeviceState{
+		KVS:             kvs,
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(), // pump off throughout
+		Schedules:       poolPumpSchedules(),
+	}
+
+	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1()
+
+	yesterday := time.Now().AddDate(0, 0, -1)
+	seedRuntimeStorage(deviceState, 18341, yesterday.Unix()) // matches the live filtration-hiver reading in #530
+
+	// runPoolPumpPhase() itself already fails the test (via waitFor's init
+	// timeout) if init never reaches the schedule-mode KVS write below — the
+	// only way that write is skipped is if something between loadState() and
+	// finishContinueInit() throws or hangs, so a regression that breaks the
+	// deferred-log path (e.g. a reference error in one of the queued
+	// closures) still fails this test even though goja cannot reproduce the
+	// stack overflow itself.
+	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	defer stop2()
+
+	got := readRuntimeStorage(t, deviceState)
+	if got.Sec != 0 {
+		t.Errorf(`Script.storage["runtime"].sec after cross-day restart (logging on) = %v, want 0 (stale total must not carry over, #469/#530)`, got.Sec)
+	}
+	if localDayNumber(int64(got.Ts)) != localDayNumber(time.Now().Unix()) {
+		t.Errorf(`Script.storage["runtime"].ts after cross-day restart (logging on) = %v, want today`, got.Ts)
+	}
+}
+
 // TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS exercises the
 // KVS recovery path (#469 design point 5): phase 1 persists a real baseline
 // to both Script.storage and its KVS mirrors (runtime-sec, runtime-ts).

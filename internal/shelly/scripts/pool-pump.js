@@ -1249,24 +1249,55 @@ function loadRuntimeStateFromKVS(cb) {
 // the count forward with a loud warning instead of resetting it: an
 // over-counted day wastes energy, but a zeroed day causes real
 // over-filtration, which is the harm #469 was filed over.
+//
+// #530: every log() call below is deferred via queueTask() instead of called
+// inline. loadState() reaches this function synchronously from the tail of
+// the LAST KVS.Get callback inside loadConfig() (loadNextKey() resolves and
+// calls callback(true) directly, with no queueTask boundary in between) —
+// init -> loadConfig's last KVS.Get callback -> loadNextKey -> callback(true)
+// -> continueInit -> configureComponentNames -> loadState ->
+// reconcileRuntimeState. #474 and #476/#480 already found this exact chain
+// has no interpreter stack headroom left for an inline log() call by the
+// time it reaches DOWNSTREAM of loadState() (setupMQTT,
+// startRuntimeAccounting) and fixed both by deferring via queueTask(); this
+// is the same mechanism, one step further UP the same chain, inside
+// loadState() itself. It stayed invisible until now because every other
+// branch below is silent on an ordinary same-day boot (restoredDay === today
+// returns with no log() call at all) — a runtime record from yesterday is
+// the everyday case after any midnight, not a corrupted-state edge case, so
+// this is the normal daily path, not a rare one.
+//
+// Only the string formatting and print() inside log() move off this stack;
+// the {sec, ts} decision itself — including zeroing the counter and
+// re-anchoring ts on a genuine rollover — stays fully synchronous, so
+// ensureRuntimeDay()'s mid-run callers (already running on a fresh stack)
+// and #502 (ts is never re-stamped except on a real rollover) are unaffected.
 function reconcileRuntimeState(sec, ts, sourceLabel) {
   var nowSec = Math.floor(Date.now() / 1000);
   if (sec === null) {
-    log("WARNING: no valid runtime state from " + sourceLabel + " - starting today's count at 0s rather than assuming a reset (#469)");
+    queueTask(function() {
+      log("WARNING: no valid runtime state from " + sourceLabel + " - starting today's count at 0s rather than assuming a reset (#469)");
+    });
     return {sec: 0, ts: nowSec};
   }
   if (ts === null) {
-    log("WARNING: runtime state from " + sourceLabel + " has a count but no valid timestamp, cannot verify which day it belongs to - carrying forward", sec, "s as today's total");
+    queueTask(function() {
+      log("WARNING: runtime state from " + sourceLabel + " has a count but no valid timestamp, cannot verify which day it belongs to - carrying forward", sec, "s as today's total");
+    });
     return {sec: sec, ts: nowSec};
   }
   var restoredDay = localDayNumber(ts);
   var today = localDayNumber(nowSec);
   if (restoredDay < today) {
-    log("Runtime day rollover: discarding", sec, "s from", restoredDay);
+    queueTask(function() {
+      log("Runtime day rollover: discarding", sec, "s from", restoredDay);
+    });
     return {sec: 0, ts: nowSec};
   }
   if (restoredDay > today) {
-    log("WARNING: runtime state from " + sourceLabel + " has a future timestamp (day " + restoredDay + " > today " + today + ") - carrying forward", sec, "s rather than trusting or discarding it");
+    queueTask(function() {
+      log("WARNING: runtime state from " + sourceLabel + " has a future timestamp (day " + restoredDay + " > today " + today + ") - carrying forward", sec, "s rather than trusting or discarding it");
+    });
   }
   return {sec: sec, ts: ts};
 }

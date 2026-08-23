@@ -44,6 +44,25 @@ package install.
 
 ---
 
+## Domain fact: the pool pump's water-supply input is a LEVEL
+
+`input:0` on `filtration-hiver` is a **water-supply level** from a gauge that refills to a target and
+stops — not a fault signal, and not really an edge even though the device reports changes as events.
+
+Normal operation therefore looks like this: the pump runs a few minutes, the level drops, the gauge
+trips, `pool.pump_stop {"reason":"water supply"}` fires, and the pump resumes 20–30 minutes later
+once refilled. **This is the interlock working. Do not spend a session troubleshooting it.**
+
+Two traps it has already sprung:
+
+- `F_WATER` is a latch that clears, so probing hours later shows `false` and looks like it never
+  fired.
+- `Switch.GetStatus.input.state` (instantaneous level) and `F_WATER` (last consumed edge) can
+  legitimately disagree; one disagreeing sample proves nothing.
+
+Full detail, including measured timings: `docs/pool-pump.md`, "Water Supply Input".
+
+
 ## One experiment per device
 
 **Never run two things against one device.** Two workstreams on `mezzanine`, and two `make test` runs

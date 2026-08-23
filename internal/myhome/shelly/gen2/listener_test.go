@@ -67,6 +67,7 @@ func TestSeverityFor(t *testing.T) {
 		{"smoke.alarm", "alarm"},
 		{"battery.low", "warn"},
 		{"pool.fuse_tripped", "warn"},
+		{"pool.window_unresolved", "warn"},
 		{"pool.run_window", "notice"},
 		{"pool.pump_start", "notice"},
 		{"pool.pump_stop", "notice"},

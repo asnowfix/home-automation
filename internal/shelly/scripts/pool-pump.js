@@ -223,15 +223,11 @@ function buildSwitchNames() {
 // Runtime configuration values (initialized from defaults)
 var CONFIG = {};
 
-// Initialize CONFIG with default values
-function initConfig() {
-  for (var key in CONFIG_SCHEMA) {
-    CONFIG[key] = CONFIG_SCHEMA[key].default;
-  }
+// Initialize CONFIG with defaults immediately so logging works.
+// (initConfig() inlined -- single call site, measure/inline-single-callsite.)
+for (var initConfigKey in CONFIG_SCHEMA) {
+  CONFIG[initConfigKey] = CONFIG_SCHEMA[initConfigKey].default;
 }
-
-// Initialize CONFIG with defaults immediately so logging works
-initConfig();
 
 // Load configuration from KVS and validate required fields
 function loadConfig(callback) {
@@ -853,15 +849,6 @@ function setForecastURL(lat, lon) {
   }
 }
 
-function shouldRefreshForecast() {
-  var today = todayDateString();
-
-  if (STATE.lastForecastFetchDate === null || STATE.lastForecastFetchDate !== today) {
-    return true;
-  }
-  return false;
-}
-
 function onForecast(result, error_code, error_message, cb) {
   if (error_code !== 0) {
     log('Forecast fetch error code:', error_code, 'message:', error_message);
@@ -927,25 +914,6 @@ function onForecast(result, error_code, error_message, cb) {
   }
 }
 
-function fetchAndCacheForecast(cb) {
-  var url = STATE.forecastUrl || loadStorageString(STORAGE_KEYS.forecastUrl);
-  if (!url) {
-    log('Forecast URL not configured. Skipping.');
-    if (typeof cb === 'function') queueTask(function() { cb(); });
-    return;
-  }
-
-  log('Fetching forecast...');
-  Shelly.call("HTTP.GET", {
-    url: url,
-    timeout: 10
-  }, onForecast, cb);
-}
-
-function getMaxForecastTemp() {
-  return STATE.maxForecastTemp;
-}
-
 function onDeviceLocation(result, error_code, error_message, cb) {
   if (error_code === 0 && result) {
     if (result.lat !== null && result.lon !== null) {
@@ -960,24 +928,6 @@ function onDeviceLocation(result, error_code, error_message, cb) {
     log('Location detection error:', error_code, error_message);
     if (typeof cb === 'function') queueTask(function() { cb(); });
   }
-}
-
-function ensureForecastUrl(cb) {
-  if (STATE.forecastUrl) {
-    if (typeof cb === 'function') queueTask(function() { cb(); });
-    return;
-  }
-
-  var storedUrl = loadStorageString(STORAGE_KEYS.forecastUrl);
-  if (storedUrl && storedUrl.indexOf('daily=') !== -1) {
-    STATE.forecastUrl = storedUrl;
-    log('Loaded forecast URL from storage');
-    if (typeof cb === 'function') queueTask(function() { cb(); });
-    return;
-  }
-
-  log('Forecast URL not found, detecting location...');
-  Shelly.call('Shelly.DetectLocation', {}, onDeviceLocation, cb);
 }
 
 // === COMPONENT NAMING ===
@@ -1186,16 +1136,15 @@ function loadRuntimeStateFromStorage() {
     }
     log("WARNING: Script.storage[" + STORAGE_KEYS.runtime + "] is malformed:", JSON.stringify(obj));
   }
-  return migrateLegacyRuntimeState();
-}
-
-// One-time migration for devices that only have the pre-#469 loose-scalar
-// pair (runtime-sec + runtime-date). The date string is parsed here, and
-// only here — this is the one legacy compatibility path, not the ongoing
-// day-rollover logic, which never stores or parses a date string (#469).
-// applyRuntimeState() re-persists the result in the new object format
-// immediately, so this path is not taken again on the next restart.
-function migrateLegacyRuntimeState() {
+  // (migrateLegacyRuntimeState() inlined -- single call site, and this was
+  // already the tail statement of loadRuntimeStateFromStorage, so its early
+  // "return null" below is equivalent to returning it from here directly.)
+  // One-time migration for devices that only have the pre-#469 loose-scalar
+  // pair (runtime-sec + runtime-date). The date string is parsed here, and
+  // only here — this is the one legacy compatibility path, not the ongoing
+  // day-rollover logic, which never stores or parses a date string (#469).
+  // applyRuntimeState() re-persists the result in the new object format
+  // immediately, so this path is not taken again on the next restart.
   var legacySec = loadStorageNumber(STORAGE_KEYS.runtimeSecLegacy);
   if (legacySec === null) {
     return null; // nothing to migrate; a genuinely fresh device
@@ -1424,21 +1373,20 @@ function persistRuntimeState(overrideSec) {
     storeValue(STATE_KEYS.runtimeTs, ts);
   });
   queueTask(function() {
-    storeValue("turnover-today", computeTurnoverToday(sec));
+    // (computeTurnoverToday() inlined -- single call site. Hoisted to a
+    // temporary before the storeValue() call rather than folded into its
+    // argument list -- see #530/#537 on argument-position call nesting.)
+    // Turnovers (pool volumes filtered) achieved today given sec seconds of
+    // pump-on time at the currently configured preferred speed. Reuses
+    // computeFlowRate() so the string->RPM mapping is only ever implemented
+    // once.
+    var turnoverToday = 0;
+    var flowRate = computeFlowRate();
+    if (flowRate && flowRate > 0 && CONFIG.poolVolume) {
+      turnoverToday = Math.round((sec / 3600) * flowRate / CONFIG.poolVolume * 100) / 100;
+    }
+    storeValue("turnover-today", turnoverToday);
   });
-}
-
-// Turnovers (pool volumes filtered) achieved today given sec seconds of
-// pump-on time at the currently configured preferred speed. Reuses
-// computeFlowRate() (defined below) so the string->RPM mapping is only
-// ever implemented once.
-function computeTurnoverToday(sec) {
-  var flowRate = computeFlowRate();
-  if (!flowRate || flowRate <= 0 || !CONFIG.poolVolume) {
-    return 0;
-  }
-  var turnover = (sec / 3600) * flowRate / CONFIG.poolVolume;
-  return Math.round(turnover * 100) / 100;
 }
 
 // The speed this device will actually run at.
@@ -1526,12 +1474,6 @@ function setOutput(outputId, on, callback) {
 // is left untouched and RC_BUSY is cleared so reconcile()'s "want ===
 // STATE.activeOutput" check still disagrees with reality and retries on the
 // next tick (#479 review finding 4).
-function turnOffOtherOutputsFailed(id, error_code, error_message) {
-  log("break-before-make: output", id, "off FAILED, error", error_code, error_message);
-  RC_BUSY = false;
-  reconcile(null);
-}
-
 // Turns off every output except exceptId, one at a time via the task queue
 // (see turnOffAllSwitches above for why a for-loop of Shelly.call is unsafe here).
 function turnOffOtherOutputsNext(ids, index, exceptId, callback) {
@@ -1547,16 +1489,19 @@ function turnOffOtherOutputsNext(ids, index, exceptId, callback) {
   }
   setOutput(id, false, function(result, error_code, error_message) {
     if (error_code) {
-      turnOffOtherOutputsFailed(id, error_code, error_message);
+      // (turnOffOtherOutputsFailed() inlined -- single call site; tail
+      // position of this branch.)
+      log("break-before-make: output", id, "off FAILED, error", error_code, error_message);
+      RC_BUSY = false;
+      reconcile(null);
       return;
     }
     queueTask(function() { turnOffOtherOutputsNext(ids, index, exceptId, callback); });
   });
 }
 
-function turnOffOtherOutputs(exceptId, callback) {
-  turnOffOtherOutputsNext(STATE.outputs, 0, exceptId, callback);
-}
+// (turnOffOtherOutputs() inlined at its one call site in applyOutput() --
+// single call site, trivial one-statement wrapper.)
 
 // === SOFTWARE FUSE (ANTI-CYCLING PROTECTION) ===
 // Prevents rapid relay cycling that generates repeated motor inrush currents
@@ -1571,9 +1516,8 @@ var FUSE_CHANGES = [];            // timestamps of recent state changes
 var FUSE_TRIPPED = false;
 var FUSE_TRIP_TIME = 0;
 
-function fuseRecord() {
-  FUSE_CHANGES.push(Date.now());
-}
+// (fuseRecord() inlined at its one call site in applyOutput() -- single
+// call site, trivial one-statement wrapper.)
 
 function fuseAllowOn() {
   var now = Date.now();
@@ -1946,7 +1890,7 @@ function applyOutput(target) {
   // Captured NOW, not re-read from STATE.activeOutput inside applyDone()
   // after the RPC round trip -- see the comment on RC_WAS above.
   RC_WAS = STATE.activeOutput;
-  if (target !== STATE.activeOutput) fuseRecord();
+  if (target !== STATE.activeOutput) FUSE_CHANGES.push(Date.now());
   log("apply:", STATE.activeOutput, "->", target);
 
   if (target === -1) {
@@ -1959,7 +1903,7 @@ function applyOutput(target) {
   }
   if (STATE.deviceType === "pro3") {
     // Break-before-make: every other stage off first, then the target on.
-    turnOffOtherOutputs(target, applyOutputOn);
+    turnOffOtherOutputsNext(STATE.outputs, 0, target, applyOutputOn);
     return;
   }
   applyOutputOn();
@@ -2025,29 +1969,10 @@ function handleSwitchEvent(info) {
   reconcile("switch event");
 }
 
-function handleInputEvent(info) {
-  log("Input event:", info);
-
-  // Handle input:0 (water-supply)
-  if (info.id === 0) {
-    setWater(info.state);
-  }
-  // Input:1 (high-water) and input:2 (max-speed-active) are just notifications
-}
-
-function handleButtonEvent(info) {
-  log("Button event:", info);
-  
-  // System button events (component="sys"):
-  // - sys_btn_down: Button pressed down
-  // - sys_btn_up: Button released
-  // - sys_btn_push: Complete brief push (down + up)
-  // - brief_btn_down: Legacy event (deprecated, use sys_btn_push instead)
-  
-  if (info.component === "sys" && info.event === "sys_btn_push") {
-    cycleOutputs();
-  }
-}
+// (handleInputEvent()/handleButtonEvent() inlined into the event dispatcher
+// below -- each had exactly one call site, and both branches already carry
+// the guard conditions that were checked again inside the old function
+// bodies.)
 
 // === SOLAR-DRIVEN HYSTERESIS (#405) ===
 // Subscribes to the daemon's retained `myhome/energy/solar/available` topic
@@ -2256,51 +2181,11 @@ function setupMQTT() {
 // removed as dead code; schedule creation now happens once, from Go, via
 // PoolService.reconcileSchedules() — see the note above — and its
 // buildJobSpec() writes the bare handler call, unwrapped). Code read back off
-// a live Schedule.List (onWindowJobs, updateScheduleMode, verifySchedules
-// below) still matches by substring CONTAINMENT rather than exact equality,
+// a live Schedule.List (onWindowJobs, updateScheduleMode, and the "verify
+// schedules" init step below -- verifySchedules() inlined there, single call
+// site) still matches by substring CONTAINMENT rather than exact equality,
 // which is a superset of exact matching and costs nothing extra — so this
 // stays correct whether or not a future caller ever wraps the code again.
-function verifySchedules(cb) {
-  Shelly.call('Schedule.List', {}, function(result, err) {
-    if (err) {
-      log('WARNING: Cannot verify schedules:', err);
-      if (typeof cb === 'function') queueTask(function() { cb(); });
-      return;
-    }
-
-    var hasPoolSchedules = false;
-    if (result && result.jobs) {
-      for (var i = 0; i < result.jobs.length; i++) {
-        var job = result.jobs[i];
-        if (job.calls && job.calls.length > 0 && job.calls[0].method === 'script.eval') {
-          var code = job.calls[0].params && job.calls[0].params.code;
-          // #480: code carries wrapScheduleCall()'s wrapper boilerplate, not
-          // just the bare handler call, so match by containment rather than
-          // by prefix.
-          if (code && (code.indexOf('handleNight') !== -1 || code.indexOf('handleDaily') !== -1 || code.indexOf('handleMorning') !== -1 || code.indexOf('handleEvening') !== -1)) {
-            hasPoolSchedules = true;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!hasPoolSchedules) {
-      log('FATAL: No pool pump schedules found. Run: ctl pool setup');
-      // Stop script - schedules are required for operation
-      return;
-    }
-
-    log('Pool pump schedules verified');
-    // #476: seed the run-window fact from the jobs we already have in hand.
-    // A separate Schedule.List at init cost ~670 bytes of mem_peak on a Pro1
-    // (measured on `mezzanine` 2026-08-12) purely to parse the same response
-    // twice. From here on the window is owned by setWindow(), rewritten only
-    // by updateScheduleMode().
-    onWindowJobs(result, null);
-    if (typeof cb === 'function') queueTask(function() { cb(); });
-  });
-}
 
 // === SCHEDULE MODE MANAGEMENT ===
 
@@ -2543,22 +2428,56 @@ function performDailyModeCheck() {
   log('Performing daily mode check...');
 
   // Ensure forecast URL is configured
-  ensureForecastUrl(function() {
+  // (ensureForecastUrl() inlined -- single call site; was the tail
+  // statement of performDailyModeCheck, so its early returns below are
+  // equivalent to returning from performDailyModeCheck itself.)
+  var ensureForecastUrlCb = function() {
     // Fetch or use cached forecast
-    if (shouldRefreshForecast()) {
+    // (shouldRefreshForecast() inlined -- single call site.)
+    if (STATE.lastForecastFetchDate === null || STATE.lastForecastFetchDate !== todayDateString()) {
       log('Fetching fresh forecast for mode check...');
-      fetchAndCacheForecast(function() {
+      // (fetchAndCacheForecast() inlined -- single call site; tail
+      // position within this branch.)
+      var fetchAndCacheForecastCb = function() {
         decideModeFromForecast();
-      });
+      };
+      var url = STATE.forecastUrl || loadStorageString(STORAGE_KEYS.forecastUrl);
+      if (!url) {
+        log('Forecast URL not configured. Skipping.');
+        if (typeof fetchAndCacheForecastCb === 'function') queueTask(function() { fetchAndCacheForecastCb(); });
+        return;
+      }
+      log('Fetching forecast...');
+      Shelly.call("HTTP.GET", {
+        url: url,
+        timeout: 10
+      }, onForecast, fetchAndCacheForecastCb);
     } else {
       log('Using cached forecast for mode check');
       decideModeFromForecast();
     }
-  });
+  };
+
+  if (STATE.forecastUrl) {
+    if (typeof ensureForecastUrlCb === 'function') queueTask(function() { ensureForecastUrlCb(); });
+    return;
+  }
+
+  var storedUrl = loadStorageString(STORAGE_KEYS.forecastUrl);
+  if (storedUrl && storedUrl.indexOf('daily=') !== -1) {
+    STATE.forecastUrl = storedUrl;
+    log('Loaded forecast URL from storage');
+    if (typeof ensureForecastUrlCb === 'function') queueTask(function() { ensureForecastUrlCb(); });
+    return;
+  }
+
+  log('Forecast URL not found, detecting location...');
+  Shelly.call('Shelly.DetectLocation', {}, onDeviceLocation, ensureForecastUrlCb);
 }
 
 function decideModeFromForecast() {
-  var maxTemp = getMaxForecastTemp();
+  // (getMaxForecastTemp() inlined -- single call site.)
+  var maxTemp = STATE.maxForecastTemp;
 
   if (maxTemp === null) {
     log('No forecast data available, keeping mode:', STATE.scheduleMode || 'winter');
@@ -2828,7 +2747,47 @@ function finishContinueInit() {
     function(next) {
       log('Step 4/4: Verifying schedules...');
       // Only Pro3 has schedules, but all devices verify
-      verifySchedules(next);
+      // (verifySchedules() inlined -- single call site, and its whole body
+      // was already one statement: this Shelly.call.)
+      Shelly.call('Schedule.List', {}, function(result, err) {
+        if (err) {
+          log('WARNING: Cannot verify schedules:', err);
+          if (typeof next === 'function') queueTask(function() { next(); });
+          return;
+        }
+
+        var hasPoolSchedules = false;
+        if (result && result.jobs) {
+          for (var i = 0; i < result.jobs.length; i++) {
+            var job = result.jobs[i];
+            if (job.calls && job.calls.length > 0 && job.calls[0].method === 'script.eval') {
+              var code = job.calls[0].params && job.calls[0].params.code;
+              // #480: code carries wrapScheduleCall()'s wrapper boilerplate, not
+              // just the bare handler call, so match by containment rather than
+              // by prefix.
+              if (code && (code.indexOf('handleNight') !== -1 || code.indexOf('handleDaily') !== -1 || code.indexOf('handleMorning') !== -1 || code.indexOf('handleEvening') !== -1)) {
+                hasPoolSchedules = true;
+                break;
+              }
+            }
+          }
+        }
+
+        if (!hasPoolSchedules) {
+          log('FATAL: No pool pump schedules found. Run: ctl pool setup');
+          // Stop script - schedules are required for operation
+          return;
+        }
+
+        log('Pool pump schedules verified');
+        // #476: seed the run-window fact from the jobs we already have in hand.
+        // A separate Schedule.List at init cost ~670 bytes of mem_peak on a Pro1
+        // (measured on `mezzanine` 2026-08-12) purely to parse the same response
+        // twice. From here on the window is owned by setWindow(), rewritten only
+        // by updateScheduleMode().
+        onWindowJobs(result, null);
+        if (typeof next === 'function') queueTask(function() { next(); });
+      });
     }
   ];
 
@@ -2881,9 +2840,17 @@ Shelly.addEventHandler(function(event) {
       if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
         handleSwitchEvent(info);
       } else if (info.component.indexOf("input:") === 0 && typeof info.state === "boolean") {
-        handleInputEvent(info);
+        // (handleInputEvent() inlined -- single call site.)
+        log("Input event:", info);
+        // Handle input:0 (water-supply)
+        if (info.id === 0) {
+          setWater(info.state);
+        }
+        // Input:1 (high-water) and input:2 (max-speed-active) are just notifications
       } else if (info.component === "sys" && info.event === "sys_btn_push") {
-        handleButtonEvent(info);
+        // (handleButtonEvent() inlined -- single call site.)
+        log("Button event:", info);
+        cycleOutputs();
       } else {
         log("Unhandled component event:", JSON.stringify(info));
       }

@@ -1358,6 +1358,64 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t
 	}
 }
 
+// TestPoolPump_RuntimeAccounting_RolloverPersistsDiscardedFigure is the
+// regression test for #533 item 3: the discarded-runtime figure must survive
+// a lost log message. Before #533, the rollover branch of
+// reconcileRuntimeState() announced the discarded sec total only via a
+// deferred, best-effort log() call — nothing else recorded it, so if init
+// aborted for an unrelated reason before the queued task ran, or the script
+// was stopped, the number was gone even though the {sec:0, ts:today} reset
+// itself remained recoverable from Script.storage. #533 adds a
+// storeValue("runtime-last-rollover-discarded", sec) call alongside the log,
+// mirroring the figure to KVS so it survives independently of the log line.
+//
+// This seeds the same cross-day scenario as
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartResets and additionally
+// asserts the KVS mirror. Like that test, it says nothing about the #530
+// stack-depth defect itself (goja does not model call-stack depth, #496) —
+// it only proves the persisted-figure semantics.
+func TestPoolPump_RuntimeAccounting_RolloverPersistsDiscardedFigure(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	deviceState := &script.DeviceState{
+		KVS:             controllerKVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(), // pump off throughout
+		Schedules:       poolPumpSchedules(),
+	}
+
+	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1()
+
+	yesterday := time.Now().AddDate(0, 0, -1)
+	const discardedSec = 18341 // matches the live filtration-hiver reading in #530
+	seedRuntimeStorage(deviceState, discardedSec, yesterday.Unix())
+
+	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	defer stop2()
+
+	// The rollover's log()/storeValue() pair is deferred via queueTask() (the
+	// task-queue timer ticks every 200ms), and runPoolPumpPhase only waits for
+	// the earlier, synchronous schedule-mode KVS write -- so the deferred
+	// mirror may not have landed yet the instant init is observed complete.
+	wrote := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		_, ok := deviceState.KVSValue("script/pool-pump/runtime-last-rollover-discarded")
+		return ok
+	})
+	if !wrote {
+		t.Fatalf(`KVS "runtime-last-rollover-discarded" was never written after a cross-day restart`)
+	}
+
+	got := parseKVSFloat(t, deviceState, "script/pool-pump/runtime-last-rollover-discarded")
+	if got != discardedSec {
+		t.Errorf(`KVS "runtime-last-rollover-discarded" = %v, want %v (the discarded sec total)`, got, discardedSec)
+	}
+}
+
 // TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS exercises the
 // KVS recovery path (#469 design point 5): phase 1 persists a real baseline
 // to both Script.storage and its KVS mirrors (runtime-sec, runtime-ts).

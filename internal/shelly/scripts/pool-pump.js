@@ -1098,14 +1098,21 @@ function loadState(onDone) {
   // whether to resume runtime accounting for a run already in progress.
   var fromStorage = loadRuntimeStateFromStorage();
   if (fromStorage !== null) {
-    applyRuntimeState(reconcileRuntimeState(fromStorage.sec, fromStorage.ts, "Script.storage"));
+    // #533: hoisted out of applyRuntimeState()'s argument list -- on an
+    // AST-walking interpreter, evaluating reconcileRuntimeState() as an
+    // argument expression runs it one frame deeper than a plain statement at
+    // the same nominal call depth (see ensureRuntimeDay() below, which
+    // already does this and has never crashed).
+    var reconciledFromStorage = reconcileRuntimeState(fromStorage.sec, fromStorage.ts, "Script.storage");
+    applyRuntimeState(reconciledFromStorage);
     finishLoadState(onDone);
     return;
   }
 
   log("WARNING: Script.storage has no valid runtime state, falling back to KVS (#469)");
   loadRuntimeStateFromKVS(function (kvsSec, kvsTs) {
-    applyRuntimeState(reconcileRuntimeState(kvsSec, kvsTs, "KVS"));
+    var reconciledFromKVS = reconcileRuntimeState(kvsSec, kvsTs, "KVS");
+    applyRuntimeState(reconciledFromKVS);
     finishLoadState(onDone);
   });
 }
@@ -1184,7 +1191,13 @@ function loadRuntimeStateFromStorage() {
     if (typeof obj.sec === "number" && typeof obj.ts === "number") {
       return {sec: obj.sec, ts: obj.ts};
     }
-    log("WARNING: Script.storage[" + STORAGE_KEYS.runtime + "] is malformed:", JSON.stringify(obj));
+    // #533: deferred like reconcileRuntimeState()'s own log() calls above --
+    // this still runs inline on the same synchronous loadState() chain, at
+    // the same depth as the frame that crashed in #530, with an extra nested
+    // JSON.stringify() call in its argument list.
+    queueTask(function() {
+      log("WARNING: Script.storage[" + STORAGE_KEYS.runtime + "] is malformed:", JSON.stringify(obj));
+    });
   }
   return migrateLegacyRuntimeState();
 }
@@ -1203,10 +1216,18 @@ function migrateLegacyRuntimeState() {
   var legacyDateStr = loadStorageString(STORAGE_KEYS.runtimeDateLegacy);
   var legacyTs = epochSecondsForDateString(legacyDateStr);
   if (legacyTs === null) {
-    log("WARNING: legacy runtime-date missing/unparseable during migration ('" + legacyDateStr + "'), assuming today");
+    // #533: deferred -- this path runs one frame deeper than
+    // reconcileRuntimeState() (loadState -> loadRuntimeStateFromStorage ->
+    // migrateLegacyRuntimeState -> log), strictly deeper than a frame that
+    // has already proven fatal.
+    queueTask(function() {
+      log("WARNING: legacy runtime-date missing/unparseable during migration ('" + legacyDateStr + "'), assuming today");
+    });
     legacyTs = Math.floor(Date.now() / 1000);
   }
-  log("Migrating legacy runtime state (#469): sec=" + legacySec + " date=" + legacyDateStr);
+  queueTask(function() {
+    log("Migrating legacy runtime state (#469): sec=" + legacySec + " date=" + legacyDateStr);
+  });
   return {sec: legacySec, ts: legacyTs};
 }
 
@@ -1289,8 +1310,16 @@ function reconcileRuntimeState(sec, ts, sourceLabel) {
   var restoredDay = localDayNumber(ts);
   var today = localDayNumber(nowSec);
   if (restoredDay < today) {
+    // #533: the discarded sec figure is announced only by this deferred,
+    // best-effort log() call -- if init aborts for a different reason within
+    // the ~200ms before the task queue tick runs, or the script is stopped,
+    // the message (and the number) is lost with nothing else recording it.
+    // Mirroring it to KVS survives that: the {sec:0, ts:today} zeroing below
+    // is already recoverable from Script.storage, but the discarded amount
+    // itself was not, until now.
     queueTask(function() {
       log("Runtime day rollover: discarding", sec, "s from", restoredDay);
+      storeValue("runtime-last-rollover-discarded", sec);
     });
     return {sec: 0, ts: nowSec};
   }

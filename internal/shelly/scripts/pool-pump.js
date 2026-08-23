@@ -1399,11 +1399,18 @@ function stopRuntimeAccounting() {
 // elapsed-so-far, without clearing runStartTs — the run is still in
 // progress. This bounds crash/reboot data loss to at most one flush
 // interval instead of the whole run.
+//
+// #524: also the periodic boundary check for a #524-extended window (or the
+// hard ceiling, or the original stop) once solar is disabled and nothing
+// else ticks reconcile() while running -- reconcile() is always safe to call
+// (see "THE RECONCILER" above) and this timer already exists and already
+// runs only while the pump is on, so no new timer is added.
 function flushRuntimeCheckpoint() {
   ensureRuntimeDay();
   if (STATE.runStartTs === null) return;
   var elapsedSec = (Date.now() - STATE.runStartTs) / 1000;
   persistRuntimeState(STATE.runtimeTodaySec + elapsedSec);
+  reconcile(null);
 }
 
 // Persists sec (defaults to STATE.runtimeTodaySec) plus the current day
@@ -1673,6 +1680,9 @@ function setWater(active) {
   F_WATER = active;
   Shelly.emitEvent(active ? "pool.water_supply_protected" : "pool.water_supply_restored",
                    {output: STATE.activeOutput});
+  // #524: on release, recover whatever this interruption cost before
+  // reconciling -- extendWindowForShortfall() is a no-op if nothing is owed.
+  if (!active) extendWindowForShortfall();
   reconcile(active ? "water supply on" : "water supply off");
 }
 
@@ -1682,6 +1692,55 @@ function setWindow(startMin, stopMin) {
   F_WIN_START = startMin;
   F_WIN_STOP = stopMin;
   reconcile("window moved");
+}
+
+// #524: recovers time the pump lost to a non-filtering interval (typically
+// the water-supply interlock) by pushing the window's stop bound later,
+// through setWindow() -- the fact's one writer (#476) -- so achieved runtime
+// converges on computeRunHours()'s intent for the day instead of losing
+// whatever the interruption cost. Pure arithmetic over facts that already
+// exist: STATE.runtimeTodaySec (only CLOSED intervals -- see its own
+// declaration above, "completed intervals only" -- so a still-open run must
+// be added in below) plus any still-running interval, and STATE.maxForecastTemp
+// (this morning's forecast, unchanged since decideModeFromForecast() set it).
+// No new tracking structure. Any solar-triggered running outside the window
+// already folds into STATE.runtimeTodaySec once its interval closes --
+// desiredOutput() checks F_SOLAR_WANT before the window -- so a solar-heavy
+// morning already shrinks or erases the shortfall computed here.
+//
+// #524 review (silent-failure pass): the first version of this function used
+// STATE.runtimeTodaySec alone. handleEveningStop() -- one of this function's
+// two call sites -- fires with the pump still RUNNING (that open interval is
+// exactly what handleEveningStop()'s own reconcile() is about to stop), so at
+// that instant runtimeTodaySec excluded the entire in-progress run. On the
+// issue's own measured day that turned a real 1099s shortfall into a computed
+// 19052s one and extended to stopCeil regardless of the true gap -- and on a
+// day with NO interruption at all it was worse, firing unconditionally with
+// the whole day's intent as "owed". Adding the open interval here is what
+// makes the two call sites agree: setWindow(false)'s call site already saw a
+// closed interval (stopRuntimeAccounting() ran first), so it was never wrong;
+// this makes handleEveningStop()'s call site correct the same way.
+//
+// Bounded like decideModeFromForecast()'s own window: stopCeil is the same
+// sunset-minus-half-hour ceiling, so recovery can push the stop later but
+// never past it -- the pump does not run into the night.
+function extendWindowForShortfall() {
+  if (STATE.scheduleMode !== 'summer') return;
+  if (STATE.maxForecastTemp === null) return;
+  if (F_WIN_START < 0 || F_WIN_STOP < 0) return;
+  var achievedSec = STATE.runtimeTodaySec;
+  if (STATE.runStartTs !== null) achievedSec += (Date.now() - STATE.runStartTs) / 1000;
+  var shortfallSec = computeRunHours(STATE.maxForecastTemp) * 3600 - achievedSec;
+  if (shortfallSec <= 0) return;
+  var d = new Date();
+  var nowMin = d.getHours() * 60 + d.getMinutes();
+  var stopCeilMin = Math.floor(((STATE.sunsetHour !== null ? STATE.sunsetHour : 21) - 0.5) * 60);
+  var targetStopMin = nowMin + Math.ceil(shortfallSec / 60);
+  if (targetStopMin > stopCeilMin) {
+    log("recovery clamped to stopCeil:", targetStopMin, "->", stopCeilMin);
+    targetStopMin = stopCeilMin;
+  }
+  if (targetStopMin > F_WIN_STOP) setWindow(F_WIN_START, targetStopMin);
 }
 
 // A reconciler reverts an out-of-band relay change that contradicts the
@@ -1751,9 +1810,9 @@ function desiredOutput() {
 // never leave -1, this function returns on the "still symbolic" guard below,
 // setWindow() never runs, and desiredOutput() returns -2 ("no opinion")
 // forever: the pump silently never starts or stops on schedule again. This
-// is exactly the fix origin/main already carries in the now-superseded
-// isWithinRunWindow() (kept here as dead code, not called by this
-// reconciler) — ported to the function this branch actually uses.
+// is the same fix that used to live in isWithinRunWindow() (removed as dead
+// code by #524 — it lost its only caller, this reconciler never called it,
+// and the source said so) — ported to the function this branch actually uses.
 function onWindowJobs(result, err) {
   if (err && false) {}
   if (err || !result || !result.jobs) return;   // unresolvable: leave the facts alone (-2 path)
@@ -2218,174 +2277,26 @@ function setupMQTT() {
 }
 
 // === SCHEDULE MANAGEMENT ===
-function clearNonUpdateSchedules(callback) {
-  log('Clearing existing schedules...');
-  
-  Shelly.call('Schedule.List', {}, function(result, err) {
-    if (err) {
-      log('ERROR: Failed to list schedules:', err);
-      if (err && false) {}
-      if (callback) callback();
-      return;
-    }
-    
-    if (!result || !result.jobs) {
-      log('No schedules found');
-      if (callback) callback();
-      return;
-    }
-    
-    var jobsToDelete = [];
-    for (var i = 0; i < result.jobs.length; i++) {
-      var job = result.jobs[i];
-      // Keep only device auto-update schedules
-      if (job.calls && job.calls.length > 0) {
-        var isUpdate = false;
-        for (var j = 0; j < job.calls.length; j++) {
-          if (job.calls[j].method === 'Shelly.Update') {
-            isUpdate = true;
-            break;
-          }
-        }
-        if (!isUpdate) {
-          jobsToDelete.push(job.id);
-        }
-      }
-    }
-    
-    if (jobsToDelete.length === 0) {
-      log('No schedules to delete');
-      if (callback) callback();
-      return;
-    }
-    
-    log('Deleting', jobsToDelete.length, 'schedules');
-    var deleteIndex = 0;
-    
-    function deleteNext() {
-      if (deleteIndex >= jobsToDelete.length) {
-        log('All schedules deleted');
-        if (callback) callback();
-        return;
-      }
-      
-      var jobId = jobsToDelete[deleteIndex];
-      deleteIndex++;
-      
-      Shelly.call('Schedule.Delete', {id: jobId}, function(res, err) {
-        if (err && false) {}
-        log('Deleted schedule:', jobId);
-        queueTask(deleteNext);
-      });
-    }
-    
-    deleteNext();
-  });
-}
-
-// #480: every script.eval payload a schedule job carries must be wrapped —
-// an uncaught throw inside an unwrapped handler kills the whole script
-// (verified live on mezzanine: an ad-hoc bad Script.Eval killed the running
-// script with a ReferenceError). Route every registration through this one
-// helper so a future schedule job can never be added unwrapped. The wrapped
-// source always contains handlerCall verbatim, so code that later reads the
-// `code` field back off a live Schedule.List (isWithinRunWindow,
-// updateScheduleMode, verifySchedules below) matches on substring
-// containment rather than exact/prefix equality.
-function wrapScheduleCall(handlerCall) {
-  return "(function(){try{" + handlerCall + "}catch(e){log('schedule handler error:',e)}})()";
-}
-
-function createSchedules(callback) {
-  log('Creating pool pump schedules...');
-
-  var scriptId = Shelly.getCurrentScriptId();
-
-  var schedules = [
-    {
-      enable: true,
-      timespec: '@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT',
-      calls: [{
-        method: 'script.eval',
-        params: {
-          id: scriptId,
-          code: wrapScheduleCall('handleDailyCheck()')
-        }
-      }]
-    },
-    {
-      enable: true,
-      timespec: '@sunrise+3h * * SUN,MON,TUE,WED,THU,FRI,SAT',
-      calls: [{
-        method: 'script.eval',
-        params: {
-          id: scriptId,
-          code: wrapScheduleCall('handleMorningStart()')
-        }
-      }]
-    },
-    {
-      enable: true,
-      timespec: '@sunset * * SUN,MON,TUE,WED,THU,FRI,SAT',
-      calls: [{
-        method: 'script.eval',
-        params: {
-          id: scriptId,
-          code: wrapScheduleCall('handleEveningStop()')
-        }
-      }]
-    },
-    {
-      enable: true,
-      timespec: '0 15 23 * * SUN,MON,TUE,WED,THU,FRI,SAT',
-      calls: [{
-        method: 'script.eval',
-        params: {
-          id: scriptId,
-          code: wrapScheduleCall('handleNightStart()')
-        }
-      }]
-    },
-    {
-      enable: true,
-      timespec: '0 15 0 * * SUN,MON,TUE,WED,THU,FRI,SAT',
-      calls: [{
-        method: 'script.eval',
-        params: {
-          id: scriptId,
-          code: wrapScheduleCall('handleNightStop()')
-        }
-      }]
-    }
-  ];
-  
-  var scheduleIndex = 0;
-  
-  function createNext() {
-    if (scheduleIndex >= schedules.length) {
-      log('All schedules created');
-      if (callback) callback();
-      return;
-    }
-    
-    var schedule = schedules[scheduleIndex];
-    scheduleIndex++;
-    
-    Shelly.call('Schedule.Create', schedule, function(res, err) {
-      if (err) {
-        log('ERROR: Failed to create schedule:', err);
-        if (err && false) {}
-      } else {
-        log('Created schedule:', schedule.timespec);
-      }
-      queueTask(createNext);
-    });
-  }
-  
-  createNext();
-}
-
-// Verify schedules exist (lightweight check, logs warning if missing)
+//
+// #524: this script no longer creates or clears its own Schedule.List jobs —
+// createSchedules() and clearNonUpdateSchedules() were removed as dead code.
+// They lost their only caller in 57b081f (2026-04-16, #504); schedule
+// creation for a device now happens once, from Go, via
+// PoolService.reconcileSchedules() (internal/myhome/shelly/script/pool.go),
+// and this script only ever reads and rewrites existing jobs
+// (updateScheduleMode(), onWindowJobs()).
+//
+// #480/#524: schedule jobs used to be registered from this script via
+// createSchedules(), which wrapped every script.eval payload in
+// try/catch(wrapScheduleCall()) so an uncaught throw inside a handler could
+// never kill the whole script. That call site is gone (#524: createSchedules()
+// removed as dead code; schedule creation now happens once, from Go, via
+// PoolService.reconcileSchedules() — see the note above — and its
+// buildJobSpec() writes the bare handler call, unwrapped). Code read back off
+// a live Schedule.List (onWindowJobs, updateScheduleMode, verifySchedules
+// below) still matches by substring CONTAINMENT rather than exact equality,
+// which is a superset of exact matching and costs nothing extra — so this
+// stays correct whether or not a future caller ever wraps the code again.
 function verifySchedules(cb) {
   Shelly.call('Schedule.List', {}, function(result, err) {
     if (err) {
@@ -2505,46 +2416,6 @@ function parseHM(ts) {
   return h * 60 + m;
 }
 
-// The single "should the pump be running right now?" predicate. Answers from
-// the active mode's start/stop pair read straight out of Schedule.List — the
-// same source of truth updateScheduleMode() writes to — rather than from any
-// remembered value, so it stays correct across a restart mid-window (#421), a
-// schedule rewrite that moves the window under a running script (#441), and a
-// water-supply clear after the window has ended (#436).
-//
-// Calls back with true, false, or **null** when the window cannot be resolved
-// (Schedule.List failed, or the timespecs are still symbolic). null means
-// "don't know" and callers must not act on it — see reconcileRunState().
-function isWithinRunWindow(cb) {
-  var summer = STATE.scheduleMode === 'summer';
-  var sc = summer ? 'handleMorningStart()' : 'handleNightStart()';
-  var ec = summer ? 'handleEveningStop()' : 'handleNightStop()';
-
-  Shelly.call('Schedule.List', {}, function(result, err) {
-    if (err && false) {}
-    if (err || !result || !result.jobs) { cb(null); return; }
-
-    var a = null;
-    var b = null;
-    for (var i = 0; i < result.jobs.length; i++) {
-      var job = result.jobs[i];
-      if (!job.enable || !job.calls || job.calls.length === 0) continue;
-      var code = job.calls[0].params && job.calls[0].params.code;
-      // #480: code is wrapScheduleCall()'s wrapped source, not the bare
-      // handler call, so match by containment rather than exact equality.
-      if (code && code.indexOf(sc) !== -1) a = parseHM(job.timespec);
-      else if (code && code.indexOf(ec) !== -1) b = parseHM(job.timespec);
-    }
-
-    if (a === null || b === null) { cb(null); return; }
-
-    var d = new Date();
-    var n = d.getHours() * 60 + d.getMinutes();
-    // A start > stop pair wraps past midnight (the fixed winter 23:15 -> 00:15 run).
-    cb(a <= b ? (n >= a && n < b) : (n >= a || n < b));
-  });
-}
-
 // True when applying `upd` to the Schedule.List `job` it was built from would
 // actually move the run window — the job gets enabled or disabled, or it gets
 // a start/stop time different from the one already on the device.
@@ -2649,9 +2520,7 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // instant never fires at all — which is how the pool lost a whole
         // day of filtration on 2026-08-06. Reconcile here, once, in the one
         // place that knows the window moved.
-        // #476: the window is a fact with one writer. Gated on windowChanged:
-        // a no-op re-run -- the common case at sunrise when the forecast
-        // yields yesterday's window -- must not buy any extra work at all.
+        // #476: the window is a fact with one writer.
         //
         // #509: this used to re-read via queueTask(readWindow), a second
         // Schedule.List landing on top of whatever forecast parse just ran.
@@ -2665,7 +2534,27 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
         // already IS the post-update state. Pass it straight to onWindowJobs
         // (named function reference, no closure) instead of re-fetching and
         // re-parsing it.
-        if (windowChanged) onWindowJobs(result, null);
+        //
+        // #524 review (silent-failure pass): this call USED to be gated on
+        // windowChanged -- "a no-op re-run must not buy any extra work at
+        // all" -- which was sound when F_WIN_STOP had exactly one writer
+        // (setWindow() via this same onWindowJobs() call). extendWindowForShortfall()
+        // is now a second writer that can move F_WIN_STOP without touching any
+        // schedule job, so fact and schedule can diverge. Gating this call on
+        // windowChanged meant that on any morning whose recomputed window
+        // matched the jobs already on the device -- the common case at
+        // sunrise -- onWindowJobs() never ran, and a leftover extension from
+        // the day before silently carried into today: since extension only
+        // ever moves the stop forward, F_WIN_STOP would ratchet toward
+        // stopCeil across days with nothing to pull it back (and sunset drifts
+        // 1-2 min/day, so a leaked stop could even end up ABOVE today's
+        // stopCeil, which is only enforced on a freshly computed value).
+        // Calling onWindowJobs() unconditionally re-seeds F_WIN_STOP from the
+        // schedule every single time this runs -- once/day via
+        // handleDailyCheck() -- which costs one extra no-op reconcile() on the
+        // common no-rewrite day and nothing else: no RPC, since result.jobs is
+        // already in hand (the #509 fix above).
+        onWindowJobs(result, null);
         return;
       }
       var sched = schedulesToUpdate[updateIndex];
@@ -2796,6 +2685,10 @@ function handleMorningStart() {
 }
 
 function handleEveningStop() {
+  // #524: the window's natural end is exactly where a shortfall must be
+  // recovered or lost outright -- extend before reconciling so today's
+  // achieved runtime still has a chance to reach computeRunHours()'s intent.
+  extendWindowForShortfall();
   clearOverride();
   reconcile('evening stop');
 }

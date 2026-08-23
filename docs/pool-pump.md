@@ -53,6 +53,31 @@ So a mid-window stop of roughly 20–30 minutes, a few minutes after the pump st
 `pool.pump_stop {"reason":"water supply"}`, **is the interlock working**. The durations vary because
 they track the refill, not a timer.
 
+### The supply is a TANK, and rain refills it
+
+**Maintainer, 2026-08-23.** The water the gauge tops the pool up from is a **tank**, not an unlimited
+mains feed. So how often the interlock fires tracks the tank level, which tracks recent rainfall.
+
+This is the difference between two readings of the same observation:
+
+| dates | interlock | why |
+|---|---|---|
+| 2026-08-18, 08-19 | tripped a few minutes into every window, ~20–30 min each | tank low |
+| 2026-08-21, 08-22 | **did not fire at all** | a rain storm had refilled the tank |
+
+**So the absence of trips is not evidence that anything was fixed.** It means it rained. I recorded
+"the interruption did not recur, so my earlier framing over-generalised" — that was half right: it is
+not a daily certainty, but the reason is the tank, not chance. It will return in dry weather.
+
+**The consequence worth thinking about:** a dry spell lowers the tank, which makes the interlock fire
+more often, which costs filtration time — during exactly the weather when evaporation is highest and
+the pool most needs filtering. The failure mode is self-reinforcing rather than random, and that is
+the case #524's runtime recovery is really for.
+
+Unknown and not assumed here: whether the tank also has a mains top-up, what its capacity is, and
+what refill rate the gauge achieves. Anyone tuning thresholds should establish those first rather
+than inferring them from pump behaviour.
+
 ### Two ways this has already misled an investigation
 
 1. **`F_WATER` is a latch that clears.** Probing it hours after the event shows `false` and looks

@@ -786,6 +786,14 @@ function loadStorageObject(key) {
 }
 
 // === KVS HELPERS ===
+// key is a bare suffix; the full KVS key is CONFIG_KEY_PREFIX + key
+// ("script/pool-pump/" + key, 17 chars). Real Shelly firmware rejects any
+// KVS key of 42 chars or more (-103 "length should be less than 42!"),
+// confirmed on hardware (#537) -- so key must stay <= 24 chars for the full
+// name to stay <= 41. This is not checked at runtime (no spare heap for
+// live validation on this script, see CLAUDE.md); see
+// TestPoolPump_KVSKeyLengthsUnderFirmwareLimit in pool_pump_test.go for the
+// build/test-time guard instead.
 function storeValue(key, value) {
   var valueStr;
   if (typeof value === "undefined" || value === null) {
@@ -1319,7 +1327,7 @@ function reconcileRuntimeState(sec, ts, sourceLabel) {
     // itself was not, until now.
     queueTask(function() {
       log("Runtime day rollover: discarding", sec, "s from", restoredDay);
-      storeValue("runtime-last-rollover-discarded", sec);
+      storeValue("rollover-discarded", sec);
     });
     return {sec: 0, ts: nowSec};
   }

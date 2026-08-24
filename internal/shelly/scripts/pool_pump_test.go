@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -1355,6 +1356,76 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t
 	}
 	if localDayNumber(int64(got.Ts)) != localDayNumber(time.Now().Unix()) {
 		t.Errorf(`Script.storage["runtime"].ts after cross-day restart (logging on) = %v, want today`, got.Ts)
+	}
+}
+
+// TestPoolPump_RuntimeAccounting_RolloverPersistsDiscardedFigure is the
+// regression test for #533 item 3: the discarded-runtime figure must survive
+// a lost log message. Before #533, the rollover branch of
+// reconcileRuntimeState() announced the discarded sec total only via a
+// deferred, best-effort log() call — nothing else recorded it, so if init
+// aborted for an unrelated reason before the queued task ran, or the script
+// was stopped, the number was gone even though the {sec:0, ts:today} reset
+// itself remained recoverable from Script.storage. #533 adds a
+// storeValue("rollover-discarded", sec) call alongside the log, mirroring
+// the figure to KVS so it survives independently of the log line. (The key
+// was originally "runtime-last-rollover-discarded", 48 chars including the
+// "script/pool-pump/" prefix -- rejected outright by real firmware, which
+// caps KVS keys at 41 chars; renamed post-hoc, see #537.)
+//
+// This seeds the same cross-day scenario as
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartResets and additionally
+// asserts the KVS mirror. Like that test, it says nothing about the #530
+// stack-depth defect itself (goja does not model call-stack depth, #496) —
+// it only proves the persisted-figure semantics.
+func TestPoolPump_RuntimeAccounting_RolloverPersistsDiscardedFigure(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	deviceState := &script.DeviceState{
+		KVS:             controllerKVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(), // pump off throughout
+		Schedules:       poolPumpSchedules(),
+	}
+
+	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1()
+
+	yesterday := time.Now().AddDate(0, 0, -1)
+	const discardedSec = 18341 // matches the live filtration-hiver reading in #530
+	seedRuntimeStorage(deviceState, discardedSec, yesterday.Unix())
+
+	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	defer stop2()
+
+	// The rollover's log()/storeValue() pair is deferred via queueTask() (the
+	// task-queue timer ticks every 200ms), and runPoolPumpPhase only waits for
+	// the earlier, synchronous schedule-mode KVS write -- so the deferred
+	// mirror may not have landed yet the instant init is observed complete.
+	//
+	// Key name: "script/pool-pump/rollover-discarded", not
+	// "...runtime-last-rollover-discarded" as originally shipped -- the longer
+	// name is 48 chars and real Shelly Pro1 firmware rejects any KVS key of 42
+	// chars or more (-103 "length should be less than 42!"), confirmed on
+	// hardware. The goja emulator driving this test does not model that limit
+	// (like it doesn't model call-stack depth, #496), so this test alone would
+	// have passed against the rejected key name -- see
+	// TestPoolPump_KVSKeyLengthsUnderFirmwareLimit below for the static guard.
+	wrote := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		_, ok := deviceState.KVSValue("script/pool-pump/rollover-discarded")
+		return ok
+	})
+	if !wrote {
+		t.Fatalf(`KVS "rollover-discarded" was never written after a cross-day restart`)
+	}
+
+	got := parseKVSFloat(t, deviceState, "script/pool-pump/rollover-discarded")
+	if got != discardedSec {
+		t.Errorf(`KVS "rollover-discarded" = %v, want %v (the discarded sec total)`, got, discardedSec)
 	}
 }
 
@@ -3250,4 +3321,69 @@ func TestPoolPump_CallSlotErrorPathReleasesSlot(t *testing.T) {
 
 	cancel()
 	<-done
+}
+
+// TestPoolPump_KVSKeyLengthsUnderFirmwareLimit is a static guard for #537:
+// real Shelly firmware rejects any KVS key of 42 chars or more (-103
+// "length should be less than 42!"), confirmed on hardware against the
+// "runtime-last-rollover-discarded" suffix (48 chars including the
+// "script/pool-pump/" prefix) shipped in an earlier revision of #533. The
+// goja emulator that drives every other test in this file does not model
+// that limit -- like it doesn't model call-stack depth (#496) -- so a normal
+// behavioral test can pass against a key name real firmware would reject
+// outright (KVS.Set fails, KVS.List never lists it). This test instead
+// statically extracts every KVS key suffix the script can write or read
+// (storeValue()/loadValueAsync() literal args, STATE_KEYS values, and
+// CONFIG_SCHEMA "key" entries) straight from the source and checks each
+// full key ("script/" + SCRIPT_NAME + "/" + suffix) against the limit, so a
+// future long key name fails here instead of silently on the pump.
+func TestPoolPump_KVSKeyLengthsUnderFirmwareLimit(t *testing.T) {
+	const firmwareKVSKeyLimit = 42 // device error: "length should be less than 42!"
+
+	src := string(readPoolPumpScript(t))
+
+	scriptNameRe := regexp.MustCompile(`var SCRIPT_NAME = "([^"]+)"`)
+	m := scriptNameRe.FindStringSubmatch(src)
+	if m == nil {
+		t.Fatalf("could not find SCRIPT_NAME in pool-pump.js — test assumptions stale")
+	}
+	prefix := "script/" + m[1] + "/"
+
+	suffixes := map[string]string{} // suffix -> where it was found, for error messages
+
+	storeOrLoadRe := regexp.MustCompile(`(?:storeValue|loadValueAsync)\("([a-z0-9-]+)"`)
+	for _, sm := range storeOrLoadRe.FindAllStringSubmatch(src, -1) {
+		suffixes[sm[1]] = "storeValue()/loadValueAsync() literal argument"
+	}
+
+	stateKeysBlockRe := regexp.MustCompile(`(?s)var STATE_KEYS = \{(.*?)\n\};`)
+	if bm := stateKeysBlockRe.FindStringSubmatch(src); bm != nil {
+		fieldRe := regexp.MustCompile(`\w+:\s*"([a-z0-9-]+)"`)
+		for _, fm := range fieldRe.FindAllStringSubmatch(bm[1], -1) {
+			suffixes[fm[1]] = "STATE_KEYS"
+		}
+	} else {
+		t.Fatalf("could not find STATE_KEYS block in pool-pump.js — test assumptions stale")
+	}
+
+	schemaBlockRe := regexp.MustCompile(`(?s)var CONFIG_SCHEMA = \{(.*?)\n\};`)
+	if bm := schemaBlockRe.FindStringSubmatch(src); bm != nil {
+		keyRe := regexp.MustCompile(`key:\s*"([a-z0-9-]+)"`)
+		for _, km := range keyRe.FindAllStringSubmatch(bm[1], -1) {
+			suffixes[km[1]] = "CONFIG_SCHEMA"
+		}
+	} else {
+		t.Fatalf("could not find CONFIG_SCHEMA block in pool-pump.js — test assumptions stale")
+	}
+
+	if len(suffixes) < 5 {
+		t.Fatalf("only found %d KVS key suffixes — extraction regexes are likely broken, not that the script shrank", len(suffixes))
+	}
+
+	for suffix, source := range suffixes {
+		full := prefix + suffix
+		if len(full) >= firmwareKVSKeyLimit {
+			t.Errorf("KVS key %q (from %s) is %d chars, >= the firmware limit of %d — real devices reject this key outright", full, source, len(full), firmwareKVSKeyLimit)
+		}
+	}
 }

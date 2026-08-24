@@ -5,6 +5,21 @@ Base commit: `origin/main` `07ce00c1` (2026-08-23). Every function defined in
 inline on this branch. This is an experiment, not a proposal — see the branch/PR description
 for the measured hypothesis this tests.
 
+**Updated 2026-08-24**: branch merged with `origin/main` `39815c12` (#533/#537, three commits
+ahead of the original base) to reconcile with upstream changes to the same two functions this
+census flags as inlined/deferred — `migrateLegacyRuntimeState` (inlined here) and
+`loadRuntimeStateFromStorage` (deferred here, unaffected as a candidate). #533/#537 wrapped
+several `log()` calls inside those functions in `queueTask(...)` to keep them off the synchronous
+`loadState()` chain (#530). The merge (via `git merge`, auto-resolved with no textual conflicts)
+preserves those deferrals inside the already-inlined body — see the code comments at
+`loadRuntimeStateFromStorage()` for the reconciled result. No entry in the table below changed:
+the same 13 functions are inlined, the same set is deferred/flagged/never-inlinable, and the
+`#530` stack-depth reasoning that kept `loadRuntimeStateFromKVS` untouched is unaffected. The
+inlining of `migrateLegacyRuntimeState` now *removes* one call frame from its own two deferred
+warnings' effective depth (they used to run one frame deeper than
+`reconcileRuntimeState`'s own logging; after inlining there is no separate frame to be deeper
+than) — a headroom improvement, not a regression.
+
 ## Method
 
 A naive `grep -c functionName` overcounts (matches comments, doc references) and undercounts

@@ -1173,10 +1173,15 @@ function loadRuntimeStateFromStorage() {
   var legacyDateStr = loadStorageString(STORAGE_KEYS.runtimeDateLegacy);
   var legacyTs = epochSecondsForDateString(legacyDateStr);
   if (legacyTs === null) {
-    // #533: deferred -- this path runs one frame deeper than
+    // #533: deferred -- this used to run one frame deeper than
     // reconcileRuntimeState() (loadState -> loadRuntimeStateFromStorage ->
-    // migrateLegacyRuntimeState -> log), strictly deeper than a frame that
-    // has already proven fatal.
+    // migrateLegacyRuntimeState -> log). measure/inline-single-callsite
+    // inlined migrateLegacyRuntimeState() into loadRuntimeStateFromStorage
+    // (single call site, tail position -- see the note above), which removes
+    // that frame: this queueTask() now runs at the same depth as the
+    // malformed-obj warning above, not deeper. Left deferred anyway --
+    // shallower is a strict improvement over #533's measurement, not a
+    // reason to make it synchronous again.
     queueTask(function() {
       log("WARNING: legacy runtime-date missing/unparseable during migration ('" + legacyDateStr + "'), assuming today");
     });

@@ -260,18 +260,44 @@ Mode is determined daily at sunrise via Open-Meteo forecast, stored in KVS (`sch
 
 ---
 
-## Weather Forecast (Memory-Optimized)
+## Weather Forecast — MQTT Fetch-and-Transform Proxy (#465)
 
-- URL built from device GPS coordinates via `Shelly.DetectLocation` and stored in `Script.storage`
-- Fetched once per day (date-gated)
-- Only the **max temperature** is retained in `STATE.maxForecastTemp`; the full array is discarded immediately to save memory
-- On error, forecast is skipped and current schedule mode is preserved
+The script no longer fetches Open-Meteo itself. It used to (`Shelly.call("HTTP.GET", ...)` +
+`JSON.parse`), which was the single biggest peak-heap cost in this file — measured at ~4 bytes of
+transient heap per byte of response plus ~940 bytes fixed (see the `shelly` skill's
+`references/memory.md`), and the mechanism behind the `out_of_memory` crashes tracked in #433.
+
+Instead, the script declares what it wants to the daemon's fetch-and-transform proxy
+(`myhome/fetchproxy`, #465/PR #507) and receives back only the few reduced fields it actually
+uses:
+
+- URL built from device GPS coordinates via `Shelly.DetectLocation` and stored in
+  `Script.storage` (unchanged) — this is still built on-device because the daemon does not know
+  a device's location; only the fetch/parse moved.
+- At init, the device publishes a subscription (URL, a small JS reduction — see
+  `FORECAST_TRANSFORM` in `pool-pump.js` — poll interval, and its own result topic) to the shared
+  `myhome/fetch/subscribe` topic. Re-published every boot (no re-assertion timer — the daemon
+  skips the write if nothing changed).
+- The daemon does the `HTTP.GET` and the `JSON.parse`, runs the transform in a sandboxed `goja`
+  runtime, and publishes the reduced result — `{max_temp_c, peak_hour, sunrise_h, sunset_h, ts}`
+  — retained, to `myhome/fetch/<deviceId>/pool-forecast`. The device subscribes to that topic and
+  caches the fields in `STATE` (`onForecastResult()`); it never sees the raw Open-Meteo response.
+- **Degraded mode (daemon-optional, #465)**: if the daemon never answers, `STATE.maxForecastTemp`
+  stays `null` (or the retained value ages past `FETCH_STALE_MS` = 3h with no fresh push) and
+  `decideModeFromForecast()` takes the "No forecast data available, keeping mode" branch — the
+  pump keeps filtering on the last known summer/winter decision, never stops. Unchanged from
+  before this migration; only the trigger (push vs. on-device pull) changed.
+- **Cold-start catch-up**: the daily mode decision still runs once/day, from `handleDailyCheck()`
+  — unchanged cadence. If that boot-time check runs before this device's very first subscription
+  has ever been fetched by the daemon, `onForecastResult()` re-runs the decision itself the one
+  time `maxForecastTemp` goes from `null` to a real value, so the pump does not wait until
+  tomorrow's sunrise to catch up. It does not re-decide on every later refresh.
 
 ---
 
 ## Temperature-Proportional Scheduling
 
-Every morning at sunrise, `handleDailyCheck()` fetches the Open-Meteo forecast (which includes `hourly=temperature_2m&daily=sunrise,sunset`), computes how many hours the pump should run today, centres that window on the hottest forecast hour, and calls `Schedule.Update` to write absolute `HH:MM` timespecs for the morning-start and evening-stop schedules.
+Every morning at sunrise, `handleDailyCheck()` reads whatever forecast the daemon's fetch-and-transform proxy has most recently pushed (see "Weather Forecast" above — `hourly=temperature_2m&daily=sunrise,sunset` is still the requested Open-Meteo query, just fetched off-device now), computes how many hours the pump should run today, centres that window on the hottest forecast hour, and calls `Schedule.Update` to write absolute `HH:MM` timespecs for the morning-start and evening-stop schedules.
 
 This replaces the old fixed `@sunrise+3h` / `@sunset` timespecs. The algorithm only applies in summer mode (above `temp-threshold`). Winter mode is unchanged.
 
@@ -330,7 +356,7 @@ At high speed (2900 rpm, 31 m³/h): `baseHours` = (46 × 5) / 31 ≈ 7.4 h — s
 | `sunriseHour` not available | 06:00 |
 | `sunsetHour` not available | 21:00 |
 | Flow rate zero or invalid config | 8 h fixed |
-| Forecast fetch fails | schedule unchanged, mode preserved |
+| Daemon never publishes a result, or the retained value is stale (> 3h) | schedule unchanged, mode preserved |
 
 ### Upgrade note — forecast URL migration
 
@@ -490,7 +516,7 @@ Peak simultaneous: **4** (task queue + grace timer + runtime flush timer + solar
 |----------|-------|------|
 | Timers | 5 | ≤ 4 |
 | Event subscriptions | 5 | 1 (`addEventHandler`) |
-| MQTT subscriptions | 10 | ≤ 5 (up to 4 peer switch-status topics — see note below — + 1 solar-available topic when `solar-enabled`) |
+| MQTT subscriptions | 10 | ≤ 6 (up to 4 peer switch-status topics — see note below — + 1 solar-available topic when `solar-enabled` + 1 fetch-proxy forecast-result topic, #465) |
 | KVS keys | — | ≤ 28 config + 4 state |
 
 **Peer switch-status subscription count**: `ctl pool add`/`setupDevice()` writes *both* `pro3-id` and `pro1-id` KVS keys identically on every device in the mesh (including a device's own ID, when it is itself the pro3 or pro1). As a result, a Pro3 device subscribes to 1 pro1 topic *plus* 3 topics for its own switches (harmless but redundant self-subscription), and a Pro1 device subscribes to 3 pro3 topics *plus* 1 topic for its own switch — 4 peer subscriptions on either device type today, independent of this issue. Verified empirically at implementation time (not just estimated from the issue text, which assumed 2).

@@ -296,9 +296,11 @@ function loadConfig(callback) {
       }
       log("Switches:", availableOutputs, "Inputs:", availableInputs);
 
-      // Cache my device ID
+      // Cache my device ID (needed to build a per-device fetch-proxy topic —
+      // see "MQTT FETCH-AND-TRANSFORM PROXY" below, #465)
       var deviceInfo = Shelly.getDeviceInfo();
       if (deviceInfo && deviceInfo.id) {
+        STATE.deviceId = deviceInfo.id;
       } else {
         log("ERROR: Could not get device ID");
         callback(false);
@@ -663,6 +665,8 @@ function queueTask(task) {
 var STATE = {
   // Device configuration (auto-detected at startup)
   deviceType: null,           // "pro3" or "pro1"
+  deviceId: null,             // Shelly.getDeviceInfo().id — used to build this device's
+                              // fetch-proxy result topic (#465)
   outputs: [],                // Array of available output IDs
   inputs: [],                 // Array of available input IDs
 
@@ -675,11 +679,20 @@ var STATE = {
 
   // MQTT connection
   mqttConnected: false,
-  
-  // Forecast cache (in-memory, refreshed daily) - cleared after use to save memory
-  forecastUrl: null,          // Open-Meteo forecast URL
+
+  // Forecast cache (#465: populated by onForecastResult() from the daemon's
+  // MQTT fetch-and-transform proxy, NOT by an on-device HTTP.GET+JSON.parse
+  // any more — see "MQTT FETCH-AND-TRANSFORM PROXY" below). Same shape as
+  // before so decideModeFromForecast() is unchanged.
+  forecastUrl: null,          // Open-Meteo forecast URL (still built on-device: the daemon
+                              // fetches whatever URL it is given, it does not know this
+                              // device's location)
   maxForecastTemp: null,      // Only store max temp, not full array (memory optimization)
-  lastForecastFetchDate: null,// Date string (YYYY-M-D) of last fetch
+  forecastPublishedTs: 0,     // data.ts (ms) from the last onForecastResult message — the
+                              // staleness clock, same pattern as SOLAR.publishedTs below:
+                              // judged from the payload's own timestamp, not receipt time,
+                              // because a retained message can be old the moment it arrives
+                              // (#465 decision 5, "age it out via ts").
   peakForecastHour: null,      // Hour-of-day (0-23) of max temperature in today's forecast
   sunriseHour: null,           // Fractional hour of today's sunrise (from forecast API)
   sunsetHour: null,            // Fractional hour of today's sunset (from forecast API)
@@ -834,13 +847,6 @@ function loadValueAsync(key, cb) {
   });
 }
 
-// Fractional-day-free "YYYY-M-D" date string, used for day-rollover checks
-// (forecast refresh, runtime/turnover day reset).
-function todayDateString() {
-  var now = new Date();
-  return now.getFullYear() + '-' + (now.getMonth() + 1) + '-' + now.getDate();
-}
-
 // Comparable local-calendar-day number (e.g. 20260811) for a given epoch
 // second. Used instead of a formatted/parsed date string (#469) so day
 // comparisons never depend on round-tripping a string through
@@ -850,7 +856,79 @@ function localDayNumber(epochSec) {
   return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
 }
 
-// === WEATHER FORECAST FUNCTIONS (Memory-Optimized) ===
+// === WEATHER FORECAST — MQTT FETCH-AND-TRANSFORM PROXY (#465) ===
+//
+// pool-pump.js used to issue its own Shelly.call("HTTP.GET", ...) against
+// Open-Meteo and JSON.parse the response on-device — measured at ~4 bytes of
+// transient heap per byte of response plus ~940 bytes fixed (see the
+// "shelly" skill's memory.md), which is the single biggest peak-heap cost in
+// this script and the thing #433's out_of_memory crashes kept landing on.
+//
+// This device now only DECLARES what it wants (the same Open-Meteo URL, plus
+// a small JS reduction) to the daemon's fetch-and-transform proxy
+// (myhome/fetchproxy — #465, PR #507) over one shared MQTT topic, and
+// receives back only the few fields it actually uses, retained, on its own
+// topic. The daemon does the HTTP.GET and the JSON.parse; this script never
+// touches the raw response at all.
+//
+// Degraded mode (CLAUDE.md "daemon-optional per device", #465 "the pump must
+// still filter when the forecast cannot be obtained"): if the daemon never
+// answers — down, unreachable, or this is a brand new subscription it has
+// not fetched yet — STATE.maxForecastTemp stays null and
+// decideModeFromForecast() takes the pre-existing "No forecast data
+// available, keeping mode" branch, holding the last known summer/winter
+// decision (or the safe "winter" default on a device that has never decided
+// at all). It never stops filtering; it just stops adjusting the window.
+// Once the daemon (re)appears, the next retained publish reaches
+// onForecastResult() below and the pump catches up — see the "cold-start
+// catch-up" comment on onForecastResult().
+var FETCH_SUBSCRIBE_TOPIC = "myhome/fetch/subscribe";
+var FETCH_NAME = "pool-forecast";
+var FETCH_INTERVAL_SECONDS = 3600; // matches the daemon's own default poll interval (#465)
+var FETCH_STALE_MS = 3 * 3600 * 1000; // #465 decision 4: consumers treat a retained value
+                                      // older than 3h as stale, same shape as solar-stale-ms
+
+// Transform text, evaluated by the daemon in a bare goja runtime with no
+// network/filesystem/host objects reachable from it (#465) — this is NOT
+// Espruino code and is not subject to this file's own ES5/no-hoisting rules.
+// Mirrors the field extraction the old onForecast()/parseHourFromISO() did
+// on-device: peak hourly temperature (+ its index as the peak hour) and the
+// fractional hour-of-day of sunrise/sunset. Built with string concatenation
+// using double-quoted JS string literals inside so JSON.stringify() (used to
+// publish the subscription below) never has to escape anything.
+var FORECAST_TRANSFORM =
+  'function(body){' +
+  'var out={max_temp_c:null,peak_hour:null,sunrise_h:null,sunset_h:null};' +
+  'var d;' +
+  'try{d=JSON.parse(body);}catch(e){return out;}' +
+  'if(d&&d.hourly&&d.hourly.temperature_2m&&d.hourly.temperature_2m.length>0){' +
+  'var temps=d.hourly.temperature_2m;' +
+  'var maxTemp=null,peakHour=12;' +
+  'for(var i=0;i<temps.length;i++){' +
+  'var t=temps[i];' +
+  'if(t!==null&&(maxTemp===null||t>maxTemp)){maxTemp=t;peakHour=i;}' +
+  '}' +
+  'out.max_temp_c=maxTemp;' +
+  'out.peak_hour=peakHour;' +
+  '}' +
+  'function hourFromIso(s){' +
+  'if(!s)return null;' +
+  'var ti=s.indexOf("T");' +
+  'if(ti<0)return null;' +
+  'var tp=s.slice(ti+1);' +
+  'var ci=tp.indexOf(":");' +
+  'if(ci<0)return Number(tp);' +
+  'var h=Number(tp.slice(0,ci));' +
+  'var m=Number(tp.slice(ci+1,ci+3));' +
+  'if(isNaN(h))return null;' +
+  'if(isNaN(m))m=0;' +
+  'return h+m/60;' +
+  '}' +
+  'if(d&&d.daily&&d.daily.sunrise&&d.daily.sunrise.length>0){out.sunrise_h=hourFromIso(d.daily.sunrise[0]);}' +
+  'if(d&&d.daily&&d.daily.sunset&&d.daily.sunset.length>0){out.sunset_h=hourFromIso(d.daily.sunset[0]);}' +
+  'return out;' +
+  '}';
+
 function setForecastURL(lat, lon) {
   log('setForecastURL', lat, lon);
   if (lat !== null && lon !== null) {
@@ -861,97 +939,17 @@ function setForecastURL(lat, lon) {
   }
 }
 
-function shouldRefreshForecast() {
-  var today = todayDateString();
-
-  if (STATE.lastForecastFetchDate === null || STATE.lastForecastFetchDate !== today) {
-    return true;
-  }
-  return false;
-}
-
-function onForecast(result, error_code, error_message, cb) {
-  if (error_code !== 0) {
-    log('Forecast fetch error code:', error_code, 'message:', error_message);
-    if (typeof cb === 'function') queueTask(function() { cb(); });
-    return;
-  }
-
-  if (!result || !result.body) {
-    log('No forecast data in response');
-    if (typeof cb === 'function') queueTask(function() { cb(); });
-    return;
-  }
-
-  var data = null;
-  try {
-    data = JSON.parse(result.body);
-  } catch (e) {
-    log('JSON parse error');
-    if (e && false) {}
-    if (typeof cb === 'function') queueTask(function() { cb(); });
-    return;
-  }
-
-  // Clear result to free memory immediately
-  result = null;
-
-  if (!data || !data.hourly || !data.hourly.temperature_2m || data.hourly.temperature_2m.length === 0) {
-    log('Invalid forecast structure');
-    data = null;
-    if (typeof cb === 'function') queueTask(function() { cb(); });
-    return;
-  }
-
-  // Extract peak hour and max temp from hourly data; discard array immediately after
-  var temps = data.hourly.temperature_2m;
-  var maxTemp = null;
-  var peakHour = 12;
-  for (var i = 0; i < temps.length; i++) {
-    var temp = temps[i];
-    if (temp !== null && (maxTemp === null || temp > maxTemp)) {
-      maxTemp = temp;
-      peakHour = i;
-    }
-  }
-  temps = null;
-  STATE.maxForecastTemp = maxTemp;
-  STATE.peakForecastHour = peakHour;
-
-  // Parse sunrise/sunset from daily section (added to URL for schedule centering)
-  if (data.daily && data.daily.sunrise && data.daily.sunrise.length > 0) {
-    STATE.sunriseHour = parseHourFromISO(data.daily.sunrise[0]);
-  }
-  if (data.daily && data.daily.sunset && data.daily.sunset.length > 0) {
-    STATE.sunsetHour = parseHourFromISO(data.daily.sunset[0]);
-  }
-  data = null;
-
-  STATE.lastForecastFetchDate = todayDateString();
-  log('Forecast cached, max temp:', maxTemp);
-
-  if (typeof cb === 'function') {
-    queueTask(function() { cb(); });
-  }
-}
-
-function fetchAndCacheForecast(cb) {
-  var url = STATE.forecastUrl || loadStorageString(STORAGE_KEYS.forecastUrl);
-  if (!url) {
-    log('Forecast URL not configured. Skipping.');
-    if (typeof cb === 'function') queueTask(function() { cb(); });
-    return;
-  }
-
-  log('Fetching forecast...');
-  Shelly.call("HTTP.GET", {
-    url: url,
-    timeout: 10
-  }, onForecast, cb);
-}
-
 function getMaxForecastTemp() {
   return STATE.maxForecastTemp;
+}
+
+// #465 decision 4/"solar-stale-ms shape": judged from the payload's own `ts`
+// (set by the daemon when it ran the fetch), never from local receipt time —
+// same reasoning as SOLAR.publishedTs below. A value that has never arrived
+// at all (forecastPublishedTs still 0) counts as stale.
+function forecastIsStale() {
+  if (STATE.forecastPublishedTs === 0) return true;
+  return (Date.now() - STATE.forecastPublishedTs) > FETCH_STALE_MS;
 }
 
 function onDeviceLocation(result, error_code, error_message, cb) {
@@ -986,6 +984,104 @@ function ensureForecastUrl(cb) {
 
   log('Forecast URL not found, detecting location...');
   Shelly.call('Shelly.DetectLocation', {}, onDeviceLocation, cb);
+}
+
+// This device's own retained result topic — one per (device, name), matching
+// myhome/fetchproxy's storage key (#465).
+function forecastResultTopic() {
+  return "myhome/fetch/" + STATE.deviceId + "/" + FETCH_NAME;
+}
+
+// #465 decision 6: the daemon owns serialisation and always publishes an
+// object with a "ts" (unix seconds) field added. Never throws on a malformed
+// payload — the retained value this script already has (or null) is left
+// exactly as it was, matching "never publish/accept a bad payload".
+function onForecastResult(topic, message) {
+  try {
+    var data = null;
+    try {
+      data = JSON.parse(message);
+    } catch (e) {
+      if (e && false) {}
+      return;
+    }
+    if (!data) return;
+
+    // Cold-start catch-up: the daily forecast decision only runs from
+    // handleDailyCheck() (once/day, unchanged cadence from before #465). If
+    // that ran before this device's very first subscription had ever been
+    // fetched by the daemon, it took the "No forecast data available,
+    // keeping mode" branch and nothing else will re-run it until tomorrow's
+    // sunrise. Catch that up here, the one time maxForecastTemp goes from
+    // null to non-null — not on every later refresh, which would turn a
+    // once/day decision into an hourly one for no benefit.
+    var hadNoData = STATE.maxForecastTemp === null;
+
+    if (typeof data.max_temp_c === "number") STATE.maxForecastTemp = data.max_temp_c;
+    if (typeof data.peak_hour === "number") STATE.peakForecastHour = data.peak_hour;
+    if (typeof data.sunrise_h === "number") STATE.sunriseHour = data.sunrise_h;
+    if (typeof data.sunset_h === "number") STATE.sunsetHour = data.sunset_h;
+    if (typeof data.ts === "number") STATE.forecastPublishedTs = data.ts * 1000;
+
+    log("Forecast updated, max temp:", STATE.maxForecastTemp);
+
+    // Deferred via the task queue, not called inline: decideModeFromForecast()
+    // -> updateScheduleMode() issues a Shelly.call('Schedule.List', ...)
+    // directly, and this handler is itself invoked from inside the MQTT
+    // message dispatch — same reasoning as reconcile() never acting inline
+    // from an event handler. queueTask() gives it a fresh stack frame instead
+    // of extending whatever depth MQTT dispatch already used.
+    if (hadNoData && STATE.maxForecastTemp !== null) {
+      queueTask(decideModeFromForecast);
+    }
+  } catch (e) {
+    log("forecast mqtt handler error:", e);
+  }
+}
+
+function subscribeForecastResult() {
+  // Log BEFORE the subscribe, never after — see subscribeSolarAvailable()
+  // above for the measured reason (#474): the first call after
+  // MQTT.subscribe() returns reliably overflows the stack.
+  log("Subscribing to forecast result topic");
+  MQTT.subscribe(forecastResultTopic(), onForecastResult);
+}
+
+// Publishes this device's fetch-and-transform subscription (#465). Fire-and-
+// forget, NOT retained: re-sent every script boot (init already re-runs this
+// via initForecastFetch() below), which is the "no re-assertion timer"
+// design — the daemon skips the storage write when the change-detection hash
+// is unchanged, so re-publishing on a device whose subscription has not
+// changed costs one MQTT publish and nothing else.
+function registerFetchSubscription() {
+  if (!STATE.forecastUrl || !STATE.deviceId) return;
+  var payload = JSON.stringify({
+    device_id: STATE.deviceId,
+    name: FETCH_NAME,
+    url: STATE.forecastUrl,
+    transform: FORECAST_TRANSFORM,
+    interval_seconds: FETCH_INTERVAL_SECONDS,
+    topic: forecastResultTopic()
+  });
+  log("Registering fetch subscription:", FETCH_NAME);
+  MQTT.publish(FETCH_SUBSCRIBE_TOPIC, payload, 0, false);
+}
+
+// Named (not anonymous) so ensureForecastUrl()'s queueTask(cb) call allocates
+// no per-call closure for this leg of the chain.
+function afterForecastUrlReady() {
+  // Two separate queued tasks, not two calls in the same one: each of
+  // registerFetchSubscription()/subscribeForecastResult() must be the last
+  // thing that runs in its own call chain (the MQTT.subscribe stack trap,
+  // #474 — see subscribeForecastResult()'s own comment). Queuing them
+  // separately gives each a fresh stack on its own task-queue tick.
+  queueTask(registerFetchSubscription);
+  queueTask(subscribeForecastResult);
+}
+
+// Entry point, queued once from finishContinueInit() alongside setupMQTT().
+function initForecastFetch() {
+  ensureForecastUrl(afterForecastUrlReady);
 }
 
 // === COMPONENT NAMING ===
@@ -2340,20 +2436,11 @@ function verifySchedules(cb) {
 }
 
 // === SCHEDULE MODE MANAGEMENT ===
-
-// Parse fractional hour from Open-Meteo ISO timestamp ("2025-07-15T06:15")
-function parseHourFromISO(isoStr) {
-  var tIdx = isoStr.indexOf('T');
-  if (tIdx < 0) return null;
-  var timePart = isoStr.slice(tIdx + 1);
-  var colonIdx = timePart.indexOf(':');
-  if (colonIdx < 0) return Number(timePart);
-  var h = Number(timePart.slice(0, colonIdx));
-  var m = Number(timePart.slice(colonIdx + 1, colonIdx + 3));
-  if (isNaN(h)) return null;
-  if (isNaN(m)) m = 0;
-  return h + m / 60;
-}
+//
+// Fractional-hour parsing of Open-Meteo's sunrise/sunset ISO timestamps used
+// to happen here (parseHourFromISO) — it now happens inside FORECAST_TRANSFORM
+// (hourFromIso), on the daemon side, before the value ever reaches this
+// script (#465).
 
 function lpad2(n) {
   return n < 10 ? '0' + n : String(n);
@@ -2576,28 +2663,22 @@ function updateScheduleMode(newMode, morningStartHours, eveningStopHours) {
   });
 }
 
+// #465: no longer fetches — the forecast is whatever onForecastResult() has
+// already cached from the daemon's retained MQTT push (or nothing, on a
+// cold start with no daemon answer yet; see decideModeFromForecast()'s
+// staleness check and the "MQTT FETCH-AND-TRANSFORM PROXY" comment above).
 function performDailyModeCheck() {
   log('Performing daily mode check...');
-
-  // Ensure forecast URL is configured
-  ensureForecastUrl(function() {
-    // Fetch or use cached forecast
-    if (shouldRefreshForecast()) {
-      log('Fetching fresh forecast for mode check...');
-      fetchAndCacheForecast(function() {
-        decideModeFromForecast();
-      });
-    } else {
-      log('Using cached forecast for mode check');
-      decideModeFromForecast();
-    }
-  });
+  decideModeFromForecast();
 }
 
 function decideModeFromForecast() {
   var maxTemp = getMaxForecastTemp();
 
-  if (maxTemp === null) {
+  // #465: a stale or never-received forecast is treated exactly like "no
+  // data" was before — same degraded path, same log line, same effect
+  // (keep filtering on the last known window, never stop).
+  if (maxTemp === null || forecastIsStale()) {
     log('No forecast data available, keeping mode:', STATE.scheduleMode || 'winter');
     return;
   }
@@ -2822,6 +2903,12 @@ function finishContinueInit() {
   // log() -- which is the only reason the bug looked solar-specific.
   // queueTask takes a NAMED function, so this allocates no closure.
   queueTask(setupMQTT);
+
+  // #465: same deferral reasoning as setupMQTT() just above — this ends in
+  // ensureForecastUrl()'s cb chain, which can itself reach MQTT.subscribe()
+  // (subscribeForecastResult, via afterForecastUrlReady). Must not run
+  // inline in this synchronous init chain.
+  queueTask(initForecastFetch);
 
   // Solar hysteresis (#405): re-evaluate periodically so staleness is
   // detected even if the daemon dies mid-hold-delay and no further MQTT

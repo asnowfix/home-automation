@@ -268,33 +268,194 @@ func TestPoolPump_ScheduleEdgeClearsManualOverride(t *testing.T) {
 	}
 }
 
-// TestPoolPump_FuseRefusesButtonOnAfterRapidCycling: routing the button
-// through the single actuator means button-driven runs finally record fuse
-// changes. Before #476 they did not, so a human could cycle the relay
-// arbitrarily fast and the anti-cycling protection never saw it.
-func TestPoolPump_FuseRefusesButtonOnAfterRapidCycling(t *testing.T) {
+// TestPoolPump_ButtonChangesDoNotAccumulateInFuseWindow supersedes what used
+// to be TestPoolPump_FuseRefusesButtonOnAfterRapidCycling. #476 routed the
+// button through the single actuator, which made button-driven runs record
+// fuse changes for the first time — closing #475 defect 1 (a human could
+// cycle the relay arbitrarily fast and the fuse never saw it) but opening
+// #549: overnight evidence on filtration-hiver during a real backwash showed
+// the fuse and the button's own override FIGHTING each other — override
+// wants ON, fuse forces OFF, cooldown expires, override still wants ON,
+// repeat — producing exactly the cycling the fuse exists to prevent. Per the
+// maintainer's explicit decision ("manual button push does not count against
+// the fuse"), a button-driven transition must never accumulate in the fuse's
+// window at all, so there is nothing left for the fuse to ever act on from
+// button activity alone.
+func TestPoolPump_ButtonChangesDoNotAccumulateInFuseWindow(t *testing.T) {
 	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false)
 	injector := make(chan []byte, 16)
 	d.EventInjector = injector
 	stop := runPoolPump(t, d)
 	defer stop()
 
-	// FUSE_MAX_CHANGES is 4 in a 2-minute window. Four presses = four relay
-	// changes; the fifth ON must be refused.
-	want := []string{"0", "-1", "0", "-1"}
+	// FUSE_MAX_CHANGES is 4 in a 2-minute window. Six rapid presses — more
+	// than any other source is ever allowed — must ALL take effect: #549
+	// requires that a button-driven change never counts toward the fuse's
+	// window, so the fuse has nothing to trip on here.
+	want := []string{"0", "-1", "0", "-1", "0", "-1"}
 	for i, w := range want {
 		injector <- shellyButtonEvent()
 		if !waitActiveOutput(t, d, w) {
-			t.Fatalf("press %d: expected active-output=%s, got %v", i+1, w,
+			t.Fatalf("press %d: expected active-output=%s, got %v — a button press must never be "+
+				"refused by the fuse (#549), even after more presses than FUSE_MAX_CHANGES", i+1, w,
 				kvsValue(d, "script/pool-pump/active-output"))
 		}
+	}
+	if got := d.EmittedEventCount("pool.fuse_tripped"); got != 0 {
+		t.Fatalf("expected the fuse to never trip from button-only activity (#549: a button-driven "+
+			"change must not count toward the fuse's window), got %d pool.fuse_tripped events", got)
+	}
+}
+
+// TestPoolPump_ButtonBypassesFuseRefusalAfterTrip is the #549 hardware trace,
+// reproduced deterministically: the fuse trips from NON-button activity (a
+// rapid sequence of schedule-driven window changes, standing in for the
+// solar/schedule churn that can legitimately trip it), and the very next
+// event is a physical button press wanting the pump ON. Before #549 this was
+// refused — worse, the override held and re-fought the fuse every time the
+// cooldown expired (the overnight 21:51-22:06 trace on filtration-hiver).
+// Per the maintainer's decision, the button must win outright: F_WATER (not
+// exercised here — see TestPoolPump_WaterInterlockRefusesButtonPress) is the
+// only fact allowed to override a manual press.
+func TestPoolPump_ButtonBypassesFuseRefusalAfterTrip(t *testing.T) {
+	d := poolPumpWindowNow(t, -1*time.Hour, 1*time.Hour, false) // window contains "now": pump starts on its own
+	d.ScheduleEvalInjector = make(chan []byte, 8)
+	buttonInjector := make(chan []byte, 4)
+	d.EventInjector = buttonInjector
+	stop := runPoolPump(t, d)
+	defer stop()
+
+	if !waitActiveOutput(t, d, "0") {
+		t.Fatalf("setup: window contains now, pump should have started on its own")
+	}
+
+	// Three more schedule-driven window moves — four relay changes in total
+	// counting the automatic start above — prime the fuse without a single
+	// button press. setWindow() is the window fact's one writer (#476) and
+	// calls reconcile() itself, so each move drives a real reconciler-path
+	// actuation (through fuseAllowOn(), unlike a direct applyOutput() call).
+	now := time.Now()
+	nowMin := now.Hour()*60 + now.Minute()
+	outStart := (nowMin + 120) % 1440
+	outStop := (outStart + 1) % 1440
+	inStart := (nowMin - 30 + 1440) % 1440
+	inStop := (nowMin + 30) % 1440
+	moves := []struct {
+		startMin, stopMin int
+		want              string
+	}{
+		{outStart, outStop, "-1"}, // change #2: leaves the window, stops
+		{inStart, inStop, "0"},    // change #3: re-enters, starts
+		{outStart, outStop, "-1"}, // change #4: leaves again, stops
+	}
+	for i, mv := range moves {
+		if err := evalPoolPumpSchedule(d, fmt.Sprintf("setWindow(%d, %d)", mv.startMin, mv.stopMin)); err != nil {
+			t.Fatalf("move %d: could not move the schedule window: %v", i+2, err)
+		}
+		if !waitActiveOutput(t, d, mv.want) {
+			t.Fatalf("move %d: expected active-output=%s, got %v", i+2, mv.want,
+				kvsValue(d, "script/pool-pump/active-output"))
+		}
+	}
+
+	// The fuse now holds 4 changes in its 2-minute window and the pump is
+	// off. A physical button press (Pro1: off -> 0) must be applied
+	// regardless — the very act of evaluating it is what trips the fuse
+	// (fuseAllowOn() is only ever consulted on an ON attempt), and #549
+	// requires the button win that race, not lose it.
+	buttonInjector <- shellyButtonEvent()
+	if !waitActiveOutput(t, d, "0") {
+		t.Fatalf("a physical button press must never be refused by the anti-cycling fuse (#549), "+
+			"even immediately after 4 non-button changes tripped it; active-output = %v",
+			kvsValue(d, "script/pool-pump/active-output"))
+	}
+	if got := d.EmittedEventCount("pool.fuse_tripped"); got < 1 {
+		t.Fatalf("setup invariant broken: expected the fuse to have actually tripped from the "+
+			"non-button changes, got %d pool.fuse_tripped events — this test is not exercising "+
+			"the refused case", got)
+	}
+}
+
+// TestPoolPump_ScheduleDrivenChangesStillTripFuse is the fuse's control: #549
+// changes ONLY the button's relationship with the fuse. A rapid sequence of
+// schedule-driven changes (standing in for schedule/solar churn — no button
+// anywhere in this test) must still trip the fuse and still be refused,
+// exactly as before.
+func TestPoolPump_ScheduleDrivenChangesStillTripFuse(t *testing.T) {
+	d := poolPumpWindowNow(t, -1*time.Hour, 1*time.Hour, false) // window contains "now": pump starts on its own
+	d.ScheduleEvalInjector = make(chan []byte, 8)
+	stop := runPoolPump(t, d)
+	defer stop()
+
+	if !waitActiveOutput(t, d, "0") {
+		t.Fatalf("setup: window contains now, pump should have started on its own")
+	}
+
+	now := time.Now()
+	nowMin := now.Hour()*60 + now.Minute()
+	outStart := (nowMin + 120) % 1440
+	outStop := (outStart + 1) % 1440
+	inStart := (nowMin - 30 + 1440) % 1440
+	inStop := (nowMin + 30) % 1440
+	moves := []struct {
+		startMin, stopMin int
+		want              string
+	}{
+		{outStart, outStop, "-1"}, // change #2
+		{inStart, inStop, "0"},    // change #3
+		{outStart, outStop, "-1"}, // change #4
+	}
+	for i, mv := range moves {
+		if err := evalPoolPumpSchedule(d, fmt.Sprintf("setWindow(%d, %d)", mv.startMin, mv.stopMin)); err != nil {
+			t.Fatalf("move %d: could not move the schedule window: %v", i+2, err)
+		}
+		if !waitActiveOutput(t, d, mv.want) {
+			t.Fatalf("move %d: expected active-output=%s, got %v", i+2, mv.want,
+				kvsValue(d, "script/pool-pump/active-output"))
+		}
+	}
+
+	// A 5th, still non-button, ON attempt must be refused: 4 changes already
+	// sit in the fuse's 2-minute window and nothing here is a button press.
+	if err := evalPoolPumpSchedule(d, fmt.Sprintf("setWindow(%d, %d)", inStart, inStop)); err != nil {
+		t.Fatalf("could not move the schedule window back inside: %v", err)
+	}
+	settlePoolPumpTaskQueue(t)
+	if v := kvsValue(d, "script/pool-pump/active-output"); v != "-1" {
+		t.Fatalf("the 5th non-button ON attempt must be refused by the anti-cycling fuse, but "+
+			"active-output = %v — #549 must not weaken the fuse for anything but a button press", v)
+	}
+	if got := d.EmittedEventCount("pool.fuse_tripped"); got < 1 {
+		t.Fatalf("expected at least one pool.fuse_tripped event once the 5th non-button ON was "+
+			"attempted, got %d", got)
+	}
+}
+
+// TestPoolPump_WaterInterlockRefusesButtonPress pins the one exception #549
+// explicitly preserves: "the only thing that may override a manual press is
+// the water-supply interlock." desiredOutput()'s first line,
+// `if (F_WATER) return -1;`, is unconditional and ahead of the override
+// branch — untouched by this fix — so a button press while water protection
+// is active must still be ignored outright, not merely "refused by the
+// fuse".
+func TestPoolPump_WaterInterlockRefusesButtonPress(t *testing.T) {
+	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false)
+	d.ComponentStatus["input:0"] = map[string]interface{}{"id": 0, "state": true} // water supply active from boot
+	injector := make(chan []byte, 4)
+	d.EventInjector = injector
+	stop := runPoolPump(t, d)
+	defer stop()
+
+	settlePoolPumpTaskQueue(t)
+	if v := kvsValue(d, "script/pool-pump/active-output"); v != nil && v != "-1" {
+		t.Fatalf("setup: expected active-output=-1 with water supply already active, got %v", v)
 	}
 
 	injector <- shellyButtonEvent()
 	settlePoolPumpTaskQueue(t)
 	if v := kvsValue(d, "script/pool-pump/active-output"); v != "-1" {
-		t.Fatalf("the 5th rapid button press must be refused by the anti-cycling fuse, "+
-			"but active-output = %v — button presses are bypassing the fuse again (#475 defect 1)", v)
+		t.Fatalf("a button press during water-supply protection must still be refused; "+
+			"active-output = %v — #549's fuse exemption must not weaken the water interlock", v)
 	}
 }
 

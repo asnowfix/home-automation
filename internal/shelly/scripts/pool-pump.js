@@ -1623,6 +1623,16 @@ var F_WIN_START  = -1;     // run-window start, minutes since midnight — writt
 var F_WIN_STOP   = -1;     // run-window stop,  minutes since midnight — written only by setWindow()
 var F_OVR_WANT   = -2;     // manual override: -2 none, -1 off, >=0 switch id — cycleOutputs()/handleSwitchEvent()/clearOverride()
 var F_OVR_UNTIL  = 0;      // override expiry, ms epoch                      — same three writers
+// #549: which of F_OVR_WANT's two setters produced the CURRENTLY ACTIVE
+// override. true only while the override is a physical button press
+// (cycleOutputs()); false for an out-of-band adoption (handleSwitchEvent(),
+// e.g. web UI/cloud/another controller) and reset by clearOverride(). This is
+// what lets reconcileNow() and applyOutput() tell "a human pressed the
+// button" apart from "something else moved the relay" — the distinction the
+// maintainer decided the fuse must respect (#549): a button press is never
+// refused by the fuse, and never counted toward its window either; an
+// out-of-band change keeps the fuse exactly as before.
+var F_OVR_IS_BUTTON = false;
 
 function setWater(active) {
   if (active === F_WATER) return;
@@ -1703,6 +1713,20 @@ function clearOverride() {
   log("override cleared");
   F_OVR_WANT = -2;
   F_OVR_UNTIL = 0;
+  F_OVR_IS_BUTTON = false;
+}
+
+// #549: true only while the CURRENTLY ACTIVE override is a physical button
+// press, mirroring the exact two conditions desiredOutput() uses to decide
+// whether F_OVR_WANT is in force right now -- so this can never disagree with
+// what desiredOutput() is about to return. Read from reconcileNow(), once per
+// pass, rather than re-derived inside applyOutput(): by the time applyOutput()
+// runs, F_OVR_UNTIL may already have ticked past "now" (button/schedule
+// events and applyOutput()'s own dispatch are not atomic), which would flip
+// this function's answer between the two call sites for the very same
+// transition.
+function overrideIsButton() {
+  return F_OVR_WANT !== -2 && Date.now() < F_OVR_UNTIL && F_OVR_IS_BUTTON;
 }
 
 // === LAYER 2: THE POLICY (#476) ===
@@ -1814,11 +1838,26 @@ function reconcileNow() {
   var want = desiredOutput();
   if (want === -2) return;                       // unknown: never guess
 
+  // #549: captured HERE, once per pass, and consumed by applyOutput() below
+  // via the module-level flag -- see its declaration for why applyOutput()
+  // must not re-derive this itself. Water supply is unaffected: F_WATER is
+  // checked first, unconditionally, inside desiredOutput() above, so a
+  // button override never even reaches this point while water protection is
+  // active.
+  RC_BUTTON_DRIVEN = overrideIsButton();
+
   // The fuse is applied here, not in desiredOutput(), because fuseAllowOn()
   // is also what clears the trip once the cooldown expires — see the note on
   // desiredOutput(). A refused ON degrades to "off" and is driven by the same
   // single actuation, so a trip can never produce two overlapping chains.
-  if (want !== -1 && !fuseAllowOn()) {
+  //
+  // #549: fuseAllowOn() still runs unconditionally for every ON attempt --
+  // its cooldown-clearing side effect must keep firing on schedule regardless
+  // of who wants the pump on, or the fuse would latch forever the next time a
+  // non-button caller needs it. Only the REFUSAL is skipped for a
+  // button-driven want: the maintainer's decision that a physical press must
+  // never be refused by the fuse.
+  if (want !== -1 && !fuseAllowOn() && !RC_BUTTON_DRIVEN) {
     log("FUSE: activation refused, forcing off");
     want = -1;
   }
@@ -1854,6 +1893,13 @@ function reconcileNow() {
 // a fresh stack.
 var RC_BUSY = false;      // an actuation is in flight
 var RC_TARGET = -1;       // the output the in-flight actuation drives towards
+// #549: whether the in-flight (or about-to-be-dispatched) actuation is
+// button-driven, as decided by reconcileNow() -- the one place that knows
+// WHY applyOutput() is about to be called. applyOutput() reads this instead
+// of calling overrideIsButton() itself so both call sites agree on a single
+// decision made at a single instant, rather than risking F_OVR_UNTIL ticking
+// past "now" between reconcileNow()'s decision and applyOutput()'s dispatch.
+var RC_BUTTON_DRIVEN = false;
 // The output STATE.activeOutput held at the moment applyOutput() dispatched
 // the in-flight actuation. applyDone() used to re-read STATE.activeOutput
 // itself, AFTER the Switch.Set round trip, to recover this. But
@@ -1932,7 +1978,14 @@ function applyOutput(target) {
   // Captured NOW, not re-read from STATE.activeOutput inside applyDone()
   // after the RPC round trip -- see the comment on RC_WAS above.
   RC_WAS = STATE.activeOutput;
-  if (target !== STATE.activeOutput) FUSE_CHANGES.push(Date.now());
+  // #549: a button-driven transition must not count toward the fuse window
+  // either -- only refusing the ON and still recording it would let a
+  // backwash's OWN presses eventually trip the fuse anyway, defeating the
+  // "never refused" guarantee in reconcileNow() above. RC_BUTTON_DRIVEN was
+  // decided there, once, for exactly this dispatch. Everything else
+  // (schedule, solar, water-supply, out-of-band) keeps recording exactly as
+  // before.
+  if (target !== STATE.activeOutput && !RC_BUTTON_DRIVEN) FUSE_CHANGES.push(Date.now());
   log("apply:", STATE.activeOutput, "->", target);
 
   if (target === -1) {
@@ -1974,10 +2027,21 @@ function cycleOutputs() {
   // directly and assign STATE.activeOutput itself, so a button-driven run
   // accrued no runtime and recorded no fuse change. It now writes a fact —
   // a manual override — and lets the reconciler drive the relay, so a button
-  // run is accounted for exactly like a scheduled one and an ON is refused
-  // while the fuse is tripped.
+  // run is accounted for exactly like a scheduled one.
+  //
+  // #549: F_OVR_IS_BUTTON marks this override as PHYSICAL-BUTTON-ORIGINATED,
+  // which is what makes reconcileNow() never refuse it for the fuse and
+  // applyOutput() never count its transition toward the fuse's window either
+  // -- the maintainer's explicit decision: "manual button push does not
+  // count against the fuse." Overnight evidence on filtration-hiver showed
+  // the fuse and the override fighting each other (override wants ON, fuse
+  // forces OFF, cooldown expires, override still wants ON, repeat) producing
+  // the exact cycling the fuse exists to prevent. The one thing that still
+  // overrides a button press is the water-supply interlock, unconditionally
+  // ahead of the override branch in desiredOutput() -- untouched here.
   F_OVR_WANT = nextOutput;
   F_OVR_UNTIL = Date.now() + CONFIG.overrideMs;
+  F_OVR_IS_BUTTON = true;
   reconcile("button");
 }
 
@@ -2003,6 +2067,14 @@ function handleSwitchEvent(info) {
       log("override: adopting out-of-band", observed);
       F_OVR_WANT = observed;
       F_OVR_UNTIL = Date.now() + CONFIG.overrideMs;
+      // #549: NOT a button press -- an out-of-band change (web UI, cloud,
+      // another controller, a physical toggle wired separately from the
+      // sys button) keeps the fuse exactly as before. Explicit, not merely
+      // "leave F_OVR_IS_BUTTON alone", because this is the ONLY other writer
+      // of F_OVR_WANT and a stale true here (left over from an earlier
+      // button-driven override that a later out-of-band change replaces)
+      // would silently exempt an out-of-band transition from the fuse.
+      F_OVR_IS_BUTTON = false;
     }
   }
 

@@ -562,6 +562,12 @@ func TestPoolPump_OutOfBandTransitionCreditsRuntime(t *testing.T) {
 			"transition — the #550 defect)", got)
 	}
 
+	// waitActiveOutput() only guarantees active-output's OWN queued KVS write
+	// has landed; persistRuntimeState()'s runtime-sec/runtime-ts/turnover-today
+	// mirrors are three separate, earlier-queued queueTask() calls that can
+	// still be draining. Give them the same settle margin used elsewhere.
+	settlePoolPumpTaskQueue(t)
+
 	runtimeSec := parseKVSInt(t, d, "script/pool-pump/runtime-sec")
 	if runtimeSec < 1 {
 		t.Fatalf("expected runtime-sec >= 1 after a >=1s out-of-band run, got %d — "+
@@ -616,6 +622,13 @@ func TestPoolPump_ScheduleDrivenRunCreditsExactlyOnce(t *testing.T) {
 		t.Fatalf("expected exactly one pool.pump_stop from the schedule-driven stop, got %d "+
 			"(#550: the shared noteRelayTransition() guard must not double-count)", got)
 	}
+
+	// waitActiveOutput() above only guarantees active-output's OWN queued KVS
+	// write has landed; persistRuntimeState()'s runtime-sec/runtime-ts/
+	// turnover-today mirrors are three separate queueTask() calls (one 200ms
+	// task-queue tick each) that can still be in flight at that instant.
+	// Give them the same settle margin the rest of this file uses.
+	settlePoolPumpTaskQueue(t)
 
 	runtimeSec := parseKVSInt(t, d, "script/pool-pump/runtime-sec")
 	if runtimeSec < 1 {

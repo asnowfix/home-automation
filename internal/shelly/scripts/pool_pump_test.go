@@ -23,6 +23,11 @@ import (
 
 const poolPumpScriptPath = "pool-pump.js"
 
+// runStartStorageKey mirrors pool-pump.js's STORAGE_KEYS.runStart (#550): the
+// Script.storage key holding the epoch-ms of the currently-open run
+// interval, or "null" when none is open.
+const runStartStorageKey = "run-start"
+
 func readPoolPumpScript(t *testing.T) []byte {
 	t.Helper()
 	buf, err := os.ReadFile(poolPumpScriptPath)
@@ -1244,6 +1249,84 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 	}
 	if localDayNumber(int64(restoredStorage.Ts)) != localDayNumber(time.Now().Unix()) {
 		t.Fatalf(`phase 2 Script.storage["runtime"].ts = %v, want today`, restoredStorage.Ts)
+	}
+}
+
+// TestPoolPump_MissedStopReconciledAtNextBoot is #550's lost-event closer:
+// a transition can only be missed while the script itself is not running
+// (noteRelayTransition() sees every transition the instant the script is up
+// — see its comment above applyDone()), so the whole class is closed by
+// reconciling against real hardware at the NEXT boot, in enforceOutputState(),
+// rather than by any in-run polling loop.
+//
+// Phase 1 starts with the relay already on (enforceOutputState()'s existing
+// resume path opens an interval and — per #550 — mirrors STATE.runStartTs to
+// Script.storage["run-start"]). The script is then killed via context
+// cancellation, NOT a real stop event — simulating a crash: nothing ever
+// calls stopRuntimeAccounting(), so the "run-start" marker is left set.
+// Phase 2 starts with the relay OFF (as if it were switched off, or the
+// device itself rebooted, during the outage) against the SAME DeviceState.
+// enforceOutputState() must see hardware OFF but a still-open "run-start"
+// marker, credit the elapsed span, and clear the marker.
+func TestPoolPump_MissedStopReconciledAtNextBoot(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mqtt.ResetClient()
+	mqtt.SetClient(mqtt.NewMockClient())
+	t.Cleanup(mqtt.ResetClient)
+
+	cs := pro1ComponentStatus()
+	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true} // pump on at boot
+
+	deviceState := &script.DeviceState{
+		KVS:             pro1KVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: cs,
+		Schedules:       pro1Schedules(),
+	}
+
+	// --- Phase 1: pump resumes at boot (already on), runs briefly so
+	// startRuntimeAccounting() persists Script.storage["run-start"], then the
+	// script is killed by cancelling its context — no stop event, no
+	// stopRuntimeAccounting(), the marker is never cleared. ---
+	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	time.Sleep(1200 * time.Millisecond)
+	stop1()
+
+	runStartRaw, ok := deviceState.StorageValue(runStartStorageKey)
+	if !ok {
+		t.Fatalf("setup: phase 1 never persisted Script.storage[%q]", runStartStorageKey)
+	}
+	if runStartRaw == "null" || runStartRaw == nil {
+		t.Fatalf("setup: phase 1's Script.storage[%q] = %v, want an open (non-null) marker", runStartStorageKey, runStartRaw)
+	}
+
+	// --- Phase 2: a fresh script instance, relay now OFF (the missed stop),
+	// same DeviceState so Script.storage["run-start"] survives untouched. ---
+	cs2 := pro1ComponentStatus()
+	cs2["switch:0"] = map[string]interface{}{"id": 0, "output": false}
+	deviceState.ComponentStatus = cs2
+
+	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	defer stop2()
+
+	// Give the queueTask() chain (activeOutput write, scheduleMode write,
+	// THEN reconcileMissedStop() — one queued task drains per 200ms tick, and
+	// this one is queued after the others from the same enforceOutputState()
+	// call) time to fully settle, not just reach the schedule-mode KVS write
+	// runPoolPumpPhase() already waited for.
+	settlePoolPumpTaskQueue(t)
+
+	runtimeSec := parseKVSInt(t, deviceState, "script/pool-pump/runtime-sec")
+	if runtimeSec < 1 {
+		t.Fatalf("expected runtime-sec >= 1 after reconciling a missed stop, got %d — "+
+			"a transition missed during a script outage was never recovered at the next boot (#550)", runtimeSec)
+	}
+
+	afterRaw, ok := deviceState.StorageValue(runStartStorageKey)
+	if !ok || afterRaw != "null" {
+		t.Fatalf(`expected Script.storage[%q] cleared to "null" once the missed stop was reconciled, got %v (ok=%v)`,
+			runStartStorageKey, afterRaw, ok)
 	}
 }
 

@@ -375,7 +375,12 @@ var STORAGE_KEYS = {
                                     // day a count belongs to is derived from ts, never stored
                                     // or parsed as a date string.
   runtimeSecLegacy:  "runtime-sec",  // pre-#469 format, read once for migration then unused
-  runtimeDateLegacy: "runtime-date"  // pre-#469 format, read once for migration then unused
+  runtimeDateLegacy: "runtime-date", // pre-#469 format, read once for migration then unused
+  runStart:      "run-start"        // #550: epoch ms of the currently-open run interval, or
+                                    // "null" when none is open. Mirrors STATE.runStartTs so a
+                                    // script outage spanning a transition can be reconciled
+                                    // against real hardware at the NEXT boot -- see
+                                    // enforceOutputState()/reconcileMissedStop().
 };
 
 // State keys for KVS persistence (fire-and-forget writes only; reads use Script.storage,
@@ -1307,15 +1312,24 @@ function ensureRuntimeDay() {
     STATE.runtimeTs = reconciled.ts;
     if (STATE.runStartTs !== null) {
       STATE.runStartTs = Date.now();
+      storeStorageValue(STORAGE_KEYS.runStart, STATE.runStartTs);
     }
     persistRuntimeState(STATE.runtimeTodaySec);
   }
 }
 
-// Called (via applyDone) when the pump transitions OFF -> ON.
+// Called (via noteRelayTransition) when the pump transitions OFF -> ON.
 function startRuntimeAccounting() {
   ensureRuntimeDay();
   STATE.runStartTs = Date.now();
+  // #550: mirrored to Script.storage (cheap, synchronous, same pattern as
+  // scheduleMode) so a script outage that swallows the matching stop can be
+  // reconciled against real hardware at the NEXT boot -- see
+  // enforceOutputState()/reconcileMissedStop(). STATE.runStartTs itself is
+  // never restored as belief (a restart always re-derives from hardware
+  // truth); this mirror exists ONLY to recover the seconds an outage would
+  // otherwise silently drop.
+  storeStorageValue(STORAGE_KEYS.runStart, STATE.runStartTs);
   if (!STATE.runtimeFlushTimer) {
     // Periodic checkpoint while running — counts against the 5-timer budget,
     // but only exists while the pump is actually on (cleared in
@@ -1326,7 +1340,7 @@ function startRuntimeAccounting() {
   log("Runtime accounting started, today so far:", STATE.runtimeTodaySec, "s");
 }
 
-// Called (via applyDone) when the pump transitions ON -> OFF.
+// Called (via noteRelayTransition) when the pump transitions ON -> OFF.
 function stopRuntimeAccounting() {
   // #502: without this, a stop landing exactly at a day boundary -- before
   // the next 60s flushRuntimeCheckpoint() tick has a chance to split it --
@@ -1339,6 +1353,9 @@ function stopRuntimeAccounting() {
   if (STATE.runStartTs !== null) {
     STATE.runtimeTodaySec += (Date.now() - STATE.runStartTs) / 1000;
     STATE.runStartTs = null;
+    // #550: this stop was OBSERVED (this function only runs while the script
+    // is up), so the outage-recovery marker is cleared cleanly.
+    storeStorageValue(STORAGE_KEYS.runStart, null);
   }
   if (STATE.runtimeFlushTimer) {
     Timer.clear(STATE.runtimeFlushTimer);
@@ -2681,6 +2698,48 @@ function handleNightStop() {
 }
 
 
+// === #550: RECONCILE A TRANSITION MISSED WHILE THE SCRIPT WAS DOWN ===
+//
+// noteRelayTransition() covers every transition observed WHILE the script is
+// running -- that channel cannot be beaten by delivery order (see its
+// comment above applyDone()). The one window it cannot see through is the
+// script not running at all: if the script is up, its event handler
+// receives every relay transition (that is the whole premise #550 relies on
+// to close the web-UI gap); if it is down, it cannot do accounting at any
+// point during the outage regardless of design. That whole class is closed
+// here, not with a periodic re-check: enforceOutputState() already reads
+// real hardware truth right after boot ("hardware truth overrides any stale
+// KVS value" — see finishLoadState()'s comment), which is exactly the
+// reconciliation point needed.
+//
+// MISSED_STOP_TS carries the one value reconcileMissedStop() needs across
+// the queueTask() hop below without allocating a closure — same pattern as
+// RC_TARGET for applyOutputOn().
+var MISSED_STOP_TS = null;
+
+function reconcileMissedStop() {
+  var restoredStartTs = MISSED_STOP_TS;
+  MISSED_STOP_TS = null;
+  if (restoredStartTs === null) return;
+  ensureRuntimeDay();
+  // #550: the relay is OFF now but Script.storage still remembers an open
+  // interval from before this boot -- the matching stop transition happened
+  // while the script could not have observed it. We do not know exactly when
+  // the relay actually went off during the outage, only that it is off now,
+  // so the credited span runs to "now" -- the same "credit to now, not to an
+  // earlier guess" choice enforceOutputState() already makes for a missed
+  // START below, applied to the missed-STOP mirror. This can over-credit the
+  // outage window if the relay went off well before this restart (#550's
+  // PR body states which way that errs, together with #547).
+  var elapsedSec = (Date.now() - restoredStartTs) / 1000;
+  if (elapsedSec > 0) {
+    STATE.runtimeTodaySec += elapsedSec;
+  }
+  persistRuntimeState(STATE.runtimeTodaySec);
+  storeStorageValue(STORAGE_KEYS.runStart, null);
+  log("#550: recovered a stop missed during a script outage, credited", elapsedSec, "s");
+}
+
 // === INITIALIZATION ===
 function enforceOutputState() {
   log("Enforcing output state at startup...");
@@ -2747,9 +2806,25 @@ function enforceOutputState() {
   // restart (STATE.activeOutput !== -1) -- exactly the #474 mechanism, at a
   // second call site the reconciler refactor introduced. Deferred the same
   // way as setupMQTT(): a named function passed to queueTask allocates no
-  // closure and runs on a fresh stack.
+  // closure and runs on a fresh stack. reconcileMissedStop() below is
+  // deferred for the identical reason -- same call site, same depth.
+  //
+  // #550: the mirror case. STATE.activeOutput above is real hardware truth;
+  // restoredRunStart is what Script.storage last remembered about an
+  // interval that may still be open. Relay ON always wins the race to
+  // "start fresh at init time" regardless of restoredRunStart (the exact
+  // pre-restart start instant is unrecoverable either way, so there is
+  // nothing more precise to do than the branch above already does). The new
+  // case is relay OFF with restoredRunStart still set: the matching stop
+  // happened while the script could not observe it (see
+  // reconcileMissedStop()'s comment above for why that can only happen
+  // across an outage of the script itself, never while it is running).
+  var restoredRunStart = loadStorageNumber(STORAGE_KEYS.runStart);
   if (STATE.activeOutput !== -1) {
     queueTask(startRuntimeAccounting);
+  } else if (restoredRunStart !== null) {
+    MISSED_STOP_TS = restoredRunStart;
+    queueTask(reconcileMissedStop);
   }
 }
 

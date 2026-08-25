@@ -594,11 +594,18 @@ func TestPoolPump_ScheduleDrivenRunCreditsExactlyOnce(t *testing.T) {
 
 	time.Sleep(1100 * time.Millisecond)
 
-	// Move the window fully into the past — setWindow() is the window fact's
-	// one writer (#476) and calls reconcile() itself — so desiredOutput()
-	// switches from "inside" to "outside" and the reconciler stops the pump,
-	// exactly as a real evening-stop schedule edge would.
-	if err := evalPoolPumpSchedule(d, "setWindow(-120, -60)"); err != nil {
+	// Move the window to a 1-minute slot two hours from now — setWindow() is
+	// the window fact's one writer (#476) and calls reconcile() itself — so
+	// desiredOutput() switches from "inside" to "outside" and the reconciler
+	// stops the pump, exactly as a real evening-stop schedule edge would.
+	// Negative bounds are deliberately avoided: desiredOutput() treats any
+	// negative F_WIN_START/F_WIN_STOP as "unknown" (-2, "do not act"), not
+	// "outside" — see its "window unknown: do not act" guard.
+	now := time.Now()
+	nowMin := now.Hour()*60 + now.Minute()
+	farStart := (nowMin + 120) % 1440
+	farStop := (farStart + 1) % 1440
+	if err := evalPoolPumpSchedule(d, fmt.Sprintf("setWindow(%d, %d)", farStart, farStop)); err != nil {
 		t.Fatalf("could not move the schedule window: %v", err)
 	}
 	if !waitActiveOutput(t, d, "-1") {

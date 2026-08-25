@@ -199,7 +199,20 @@ logs-local-daemon:
 # detector costs little, and it closes off a class of failure that is otherwise
 # very expensive to diagnose. Override with `make test TESTFLAGS=` if you need
 # a run without it.
-TESTFLAGS ?= -race
+# -timeout is derived from MEASUREMENT, not guesswork: it is the slowest
+# package's last successful duration plus 10% headroom. See CLAUDE.md's
+# "Test timeout" rule for how and when to update it.
+#
+# Note Go applies -timeout PER PACKAGE (per test binary), not to the whole
+# run, so the number that matters is the slowest package -- currently
+# internal/shelly/scripts -- and not `make test`'s overall wall clock.
+#
+#   2026-08-25  internal/shelly/scripts  626.598s under -race  ->  690s
+#
+# History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
+# (08-25). It crossed Go's 600s default on 08-25 and every PR touching the
+# package started failing at exactly 600.65s (#552).
+TESTFLAGS ?= -race -timeout=690s
 
 test: build
 	$(GO) test $(TESTFLAGS) ./...

@@ -38,6 +38,28 @@ To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call`
 
 `make test` is canonical — never bare `go test ./...` (it skips workspace sub-modules). New CI test commands must also invoke `make test`, not go directly to `go test`.
 
+### Test timeout — derived from measurement, never guessed
+
+`TESTFLAGS` in the root `Makefile` carries an explicit `-timeout`. **Whenever a full `make test`
+succeeds, set the timeout to the slowest package's measured duration plus 10%** (`N + N×0.1`), and
+record the measurement in the comment above `TESTFLAGS` with its date.
+
+The timeout then tracks what the suite actually costs instead of drifting until it silently fails.
+
+Two things to get right:
+
+- **Go applies `-timeout` per package** (per test binary), not to the whole run. So `N` is the
+  **slowest package**, currently `internal/shelly/scripts`, not `make test`'s overall wall clock.
+- **Only a successful run may set it.** A run that timed out tells you nothing about how long the
+  suite needs; raising the timeout from a failed run's duration just guesses again, more slowly.
+
+Why this rule exists: that package grew 507s → 591s → 627s in three days and crossed Go's **600s
+default** on 2026-08-25, after which `make test` could not pass for anyone. Two runs failed at
+600.654s and 600.651s — agreeing to within 3ms — which is what finally identified a fixed limit
+rather than the CPU contention everyone had assumed (#552).
+
+**When two runs fail at the same duration to within milliseconds, suspect a limit, not load.**
+
 **`go generate` sub-module gap**: `go generate ./...` from the workspace root does NOT recurse into Go workspace sub-modules. Adding a new `//go:generate` directive to any package under `myhome/ctl/` requires registering it explicitly in **all four** of these places, or CI will fail with "undefined: DefaultXxx" compile errors:
 1. Root `Makefile` — `generate` target (already has explicit lines for `pool` and `garden`)
 2. `.goreleaser.yml` — `before.hooks` list

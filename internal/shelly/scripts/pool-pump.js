@@ -2724,20 +2724,36 @@ function reconcileMissedStop() {
   ensureRuntimeDay();
   // #550: the relay is OFF now but Script.storage still remembers an open
   // interval from before this boot -- the matching stop transition happened
-  // while the script could not have observed it. We do not know exactly when
-  // the relay actually went off during the outage, only that it is off now,
-  // so the credited span runs to "now" -- the same "credit to now, not to an
-  // earlier guess" choice enforceOutputState() already makes for a missed
-  // START below, applied to the missed-STOP mirror. This can over-credit the
-  // outage window if the relay went off well before this restart (#550's
-  // PR body states which way that errs, together with #547).
-  var elapsedSec = (Date.now() - restoredStartTs) / 1000;
-  if (elapsedSec > 0) {
-    STATE.runtimeTodaySec += elapsedSec;
-  }
-  persistRuntimeState(STATE.runtimeTodaySec);
+  // while the script could not have observed it.
+  //
+  // This is NOT the mirror of the missed-START branch below, and crediting
+  // "now - restoredStartTs" here (an earlier version of this function did
+  // exactly that) is a bug that inverts the safety direction, not a harmless
+  // symmetry:
+  //
+  //   - missed START: the relay is ON, so the interval is opened AT INIT
+  //     TIME. The real start was earlier than that, so this credits LESS
+  //     than reality -- under-credit, bounded, safe.
+  //   - missed STOP: the relay is OFF now, but the real stop happened at
+  //     some unknown point DURING the outage, strictly before "now". Crediting
+  //     up to "now" credits MORE than reality, by an amount equal to however
+  //     long the pump was actually off before this restart -- an outage of
+  //     hours or days (#530 saw days) turns into hours or days of pure
+  //     over-credit. #526's runtime recovery would then believe the day's
+  //     filtration is satisfied when it is not, and SKIP filtration the pool
+  //     actually needs -- silently, which is strictly worse than the
+  //     under-credit direction (#526 just runs the pump a little more; a
+  //     cost in electricity, not in water quality).
+  //
+  // Nothing anywhere records when the relay actually went off during the
+  // outage -- persistRuntimeState()'s last-flushed {sec, ts} already
+  // contains everything known up to the last checkpoint or stop, and that is
+  // genuinely all there is. So this interval's duration is unrecoverable,
+  // and the only safe choice is to credit ZERO: clear the marker, log the
+  // gap, and let the day under-count rather than invent a number.
   storeStorageValue(STORAGE_KEYS.runStart, null);
-  log("#550: recovered a stop missed during a script outage, credited", elapsedSec, "s");
+  log("#550: reconciling a stop missed during a script outage (relay OFF, " +
+      "open marker from", restoredStartTs, ") - duration unrecoverable, crediting 0s");
 }
 
 // === INITIALIZATION ===
@@ -2809,16 +2825,24 @@ function enforceOutputState() {
   // closure and runs on a fresh stack. reconcileMissedStop() below is
   // deferred for the identical reason -- same call site, same depth.
   //
-  // #550: the mirror case. STATE.activeOutput above is real hardware truth;
+  // #550: the second reconciliation case -- NOT a mirror of the branch
+  // above, despite the superficial symmetry (see reconcileMissedStop()'s
+  // comment for why crediting the two the same way is a bug, not a
+  // simplification). STATE.activeOutput above is real hardware truth;
   // restoredRunStart is what Script.storage last remembered about an
-  // interval that may still be open. Relay ON always wins the race to
-  // "start fresh at init time" regardless of restoredRunStart (the exact
-  // pre-restart start instant is unrecoverable either way, so there is
-  // nothing more precise to do than the branch above already does). The new
-  // case is relay OFF with restoredRunStart still set: the matching stop
+  // interval that may still be open.
+  //
+  // Relay ON always wins the race to "start fresh at init time" regardless
+  // of restoredRunStart: the exact pre-restart start instant is
+  // unrecoverable either way, and starting fresh under-credits by
+  // construction (safe -- see reconcileMissedStop()).
+  //
+  // Relay OFF with restoredRunStart still set means the matching stop
   // happened while the script could not observe it (see
-  // reconcileMissedStop()'s comment above for why that can only happen
-  // across an outage of the script itself, never while it is running).
+  // reconcileMissedStop()'s comment for why that can only happen across an
+  // outage of the script itself, never while it is running) -- and unlike
+  // the ON case, there is no safe "credit to now" here: reconcileMissedStop()
+  // credits zero rather than guess.
   var restoredRunStart = loadStorageNumber(STORAGE_KEYS.runStart);
   if (STATE.activeOutput !== -1) {
     queueTask(startRuntimeAccounting);

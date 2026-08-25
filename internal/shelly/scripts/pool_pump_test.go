@@ -1266,8 +1266,21 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 // calls stopRuntimeAccounting(), so the "run-start" marker is left set.
 // Phase 2 starts with the relay OFF (as if it were switched off, or the
 // device itself rebooted, during the outage) against the SAME DeviceState.
+//
 // enforceOutputState() must see hardware OFF but a still-open "run-start"
-// marker, credit the elapsed span, and clear the marker.
+// marker and clear it -- crediting NOTHING for the outage span. An earlier
+// version of reconcileMissedStop() credited "now - restoredStartTs", which
+// is the wrong direction: the real stop happened at some unknown point
+// DURING the outage, strictly before "now", so crediting up to "now" always
+// over-credits, by an amount equal to however long the pump was actually off
+// before this restart. That is unbounded (an outage can last hours or days,
+// #530 saw days) and silently teaches #526's runtime recovery that the day's
+// filtration is already satisfied when it may not be -- the failure mode
+// #550's PR body discusses under #547. Crediting zero instead makes the
+// worst case a bounded UNDER-credit (a cost in electricity, not water
+// quality), which is why this test asserts NO growth in
+// Script.storage["runtime"].sec across the reconciliation, not a specific
+// positive amount.
 func TestPoolPump_MissedStopReconciledAtNextBoot(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
@@ -1300,6 +1313,12 @@ func TestPoolPump_MissedStopReconciledAtNextBoot(t *testing.T) {
 	if runStartRaw == "null" || runStartRaw == nil {
 		t.Fatalf("setup: phase 1's Script.storage[%q] = %v, want an open (non-null) marker", runStartStorageKey, runStartRaw)
 	}
+	// startRuntimeAccounting() never itself calls persistRuntimeState() (only
+	// a genuine day-rollover inside ensureRuntimeDay() would), so this is
+	// whatever loadState() wrote during phase 1's own init — before any real
+	// elapsed time could have accrued to it. This is the "before" figure the
+	// fix must not grow across phase 2's reconciliation.
+	phase1Storage := readRuntimeStorage(t, deviceState)
 
 	// --- Phase 2: a fresh script instance, relay now OFF (the missed stop),
 	// same DeviceState so Script.storage["run-start"] survives untouched. ---
@@ -1317,16 +1336,17 @@ func TestPoolPump_MissedStopReconciledAtNextBoot(t *testing.T) {
 	// runPoolPumpPhase() already waited for.
 	settlePoolPumpTaskQueue(t)
 
-	runtimeSec := parseKVSInt(t, deviceState, "script/pool-pump/runtime-sec")
-	if runtimeSec < 1 {
-		t.Fatalf("expected runtime-sec >= 1 after reconciling a missed stop, got %d — "+
-			"a transition missed during a script outage was never recovered at the next boot (#550)", runtimeSec)
-	}
-
 	afterRaw, ok := deviceState.StorageValue(runStartStorageKey)
 	if !ok || afterRaw != "null" {
 		t.Fatalf(`expected Script.storage[%q] cleared to "null" once the missed stop was reconciled, got %v (ok=%v)`,
 			runStartStorageKey, afterRaw, ok)
+	}
+
+	restoredStorage := readRuntimeStorage(t, deviceState)
+	if restoredStorage.Sec != phase1Storage.Sec {
+		t.Fatalf(`Script.storage["runtime"].sec grew from %v to %v across a missed-stop reconciliation -- `+
+			`the outage span was credited instead of discarded, reintroducing the over-credit bug`,
+			phase1Storage.Sec, restoredStorage.Sec)
 	}
 }
 

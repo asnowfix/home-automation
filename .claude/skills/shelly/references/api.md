@@ -144,6 +144,45 @@ Embedded scripts live in `internal/shelly/scripts/`. KVS version hashes are stor
 `script/<name>/version` and checked before upload to avoid unnecessary re-uploads — note the
 version-marker trap in #449 when force-uploading for a measurement.
 
+### `upload` ignores the file you name unless you tell it not to
+
+**This took the production pool pump down on 2026-08-23.** By default `upload` resolves the script
+by *name* against the copy **embedded in the binary you are running**, not against the path you
+typed. If that binary is old, you silently deploy an old script — and the device is left with the
+script **stopped**.
+
+The only warning is one line of output:
+
+```
+. Source: embedded      <-- the binary's copy, however stale that binary is
+. Source: local         <-- the file you actually named
+```
+
+To upload the file in front of you:
+
+```bash
+go run ./myhome ctl shelly script upload --force \
+    --local-scripts-dir "$PWD" <device> pool-pump.js
+```
+
+Three things must all be right:
+
+- **`--local-scripts-dir <dir>`** — without it, local loading is disabled entirely and the embedded
+  copy always wins. The flag's own help calls this "dev convenience"; it is closer to a safety
+  requirement whenever you are deploying something that is not the binary's own build.
+- **`--force`** — the KVS version hash check will otherwise skip the upload as unnecessary.
+- **a bare filename relative to your cwd** — an absolute path fails with a misleading
+  `file does not exist` even when the file is plainly there.
+
+A prebuilt CLI kept around for convenience (rather than `go run` from the current checkout) carries
+whatever scripts were embedded on the day it was built. Treat its embedded copies as stale by
+definition.
+
+**Always confirm what landed**, rather than trusting the success tick: grep the output for
+`Source: local`, then check `Script.GetStatus` reports `"running": true` and that `mem_used` is
+consistent with the build you meant to deploy. Identifying a build from its bytes is covered in
+`field-discipline.md`.
+
 ---
 
 ## BLU devices

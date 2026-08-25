@@ -1599,6 +1599,15 @@ function fuseAllowOn() {
     // overlapping Switch.Set sequences ran on the same outputs. Returning
     // false is enough: the caller forces the target to -1 and the single
     // actuator drives that one chain.
+    //
+    // #549: this event records that the fuse TRIPPED, not that the caller's
+    // activation was REFUSED — the two used to be the same thing, but are
+    // not anymore. A button-driven want can be the very call that flips
+    // FUSE_TRIPPED to true (fuseAllowOn() still runs unconditionally for
+    // every ON attempt, see reconcileNow()) and still proceed anyway,
+    // because reconcileNow() ignores a false return for a button-driven
+    // want. Do not read a pool.fuse_tripped event as "the pump stayed off" —
+    // check the actual relay state/active-output for that.
     Shelly.emitEvent("pool.fuse_tripped", {
       changes: FUSE_CHANGES.length,
       window_s: FUSE_WINDOW_MS / 1000,

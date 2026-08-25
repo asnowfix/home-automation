@@ -459,6 +459,116 @@ func TestPoolPump_WaterInterlockRefusesButtonPress(t *testing.T) {
 	}
 }
 
+// TestPoolPump_OutOfBandAdoptionAfterButtonLosesFuseImmunity is the review
+// follow-up filed against #555: F_OVR_IS_BUTTON's only OTHER writer besides
+// cycleOutputs() (the button) is handleSwitchEvent()'s out-of-band-adoption
+// block, which must explicitly reset it to false. Without that explicit
+// reset, a stale `true` left over from an earlier button-driven override
+// would silently exempt a LATER out-of-band override from the fuse -- i.e.
+// the fuse's protection would leak away from exactly the case it exists to
+// catch (a web-UI/cloud/other-controller actor cycling the relay, not a
+// human at the panel).
+//
+// This asserts on OBSERVABLE behaviour (fuse refusal and FUSE_CHANGES
+// accumulation via forced actuations), not on the internal F_OVR_IS_BUTTON
+// flag, so it still means something if the implementation is refactored:
+//
+//  1. two button presses establish a button-originated override, ending
+//     with the pump OFF (button-driven; must not itself accumulate in the
+//     fuse window -- covered by TestPoolPump_ButtonChangesDoNotAccumulateInFuseWindow,
+//     not re-asserted here);
+//  2. ONE standalone out-of-band switch event -- no button, no schedule,
+//     nothing this script dispatched -- adopts a NEW override wanting ON.
+//     This is the exact call that must reset F_OVR_IS_BUTTON to false;
+//  3. water-supply flaps force real actuations while this out-of-band
+//     override is in force: F_WATER always wins over any override
+//     (desiredOutput()'s first line, unconditional), so each flap is a real
+//     relay transition regardless of which override is active -- the
+//     forcing function used to observe the fuse, not the thing under test.
+//     If F_OVR_IS_BUTTON had leaked true, these would be silently exempted
+//     from the fuse exactly like a real button press (#549); with the fix,
+//     they accumulate and the fuse genuinely trips, refusing the final
+//     restore.
+func TestPoolPump_OutOfBandAdoptionAfterButtonLosesFuseImmunity(t *testing.T) {
+	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false) // outside window: nothing auto-actuates
+	injector := make(chan []byte, 32)
+	d.EventInjector = injector
+	stop := runPoolPump(t, d)
+	defer stop()
+
+	// Two button presses: off -> on -> off. Both button-driven internally;
+	// neither is asserted here to be fuse-exempt (that is
+	// TestPoolPump_ButtonChangesDoNotAccumulateInFuseWindow's job) -- this
+	// setup only needs to end with an ACTIVE button-originated override.
+	injector <- shellyButtonEvent()
+	if !waitActiveOutput(t, d, "0") {
+		t.Fatalf("setup: 1st button press did not turn the pump on, got %v",
+			kvsValue(d, "script/pool-pump/active-output"))
+	}
+	injector <- shellyButtonEvent()
+	if !waitActiveOutput(t, d, "-1") {
+		t.Fatalf("setup: 2nd button press did not turn the pump off, got %v",
+			kvsValue(d, "script/pool-pump/active-output"))
+	}
+
+	// A single standalone out-of-band switch event. desiredOutput() currently
+	// wants -1 (the button override above); reporting the relay ON disagrees
+	// with that, so handleSwitchEvent() ADOPTS a new override wanting ON --
+	// the exact call that must reset F_OVR_IS_BUTTON to false.
+	injector <- shellySwitchEvent(0, true)
+	if !waitActiveOutput(t, d, "0") {
+		t.Fatalf("setup: the out-of-band ON was not adopted, got %v",
+			kvsValue(d, "script/pool-pump/active-output"))
+	}
+
+	// Two full water-supply flaps: each ON forces the relay off (always
+	// passes -- OFF activations never consult the fuse); each OFF asks the
+	// reconciler to restore the override's ON, which DOES consult the fuse.
+	// Four real, non-button actuations accumulate in FUSE_CHANGES here if
+	// (and only if) F_OVR_IS_BUTTON correctly reads false throughout.
+	for i := 0; i < 2; i++ {
+		injector <- shellyInputEvent(0, true)
+		if !waitActiveOutput(t, d, "-1") {
+			t.Fatalf("water flap %d: water-supply ON did not force the pump off, got %v",
+				i+1, kvsValue(d, "script/pool-pump/active-output"))
+		}
+		injector <- shellyInputEvent(0, false)
+		if !waitActiveOutput(t, d, "0") {
+			t.Fatalf("water flap %d: water-supply OFF did not restore the pump, got %v -- if "+
+				"this is refused already, FUSE_MAX_CHANGES may have changed and this test's "+
+				"cycle count needs adjusting", i+1, kvsValue(d, "script/pool-pump/active-output"))
+		}
+	}
+
+	// A 5th transition (another forced OFF, always passes) primes the fuse's
+	// window at 5 non-button entries -- one past FUSE_MAX_CHANGES.
+	injector <- shellyInputEvent(0, true)
+	if !waitActiveOutput(t, d, "-1") {
+		t.Fatalf("final water-supply ON did not force the pump off, got %v",
+			kvsValue(d, "script/pool-pump/active-output"))
+	}
+
+	// The restore attempt: if F_OVR_IS_BUTTON had leaked true from the
+	// earlier button presses, this out-of-band override would wrongly
+	// bypass the fuse refusal here exactly like a real button press does
+	// (#549) -- the pump would turn back on. With the fix, it is refused:
+	// the fuse has genuinely accumulated 5 non-button transitions in its
+	// 2-minute window and this override gets no special treatment.
+	injector <- shellyInputEvent(0, false)
+	settlePoolPumpTaskQueue(t)
+	if v := kvsValue(d, "script/pool-pump/active-output"); v != "-1" {
+		t.Fatalf("the water-supply restore must be refused by the anti-cycling fuse once it has "+
+			"genuinely tripped, but active-output = %v -- F_OVR_IS_BUTTON leaked from the earlier "+
+			"button-driven override into this out-of-band one (handleSwitchEvent()'s adoption "+
+			"branch must reset it to false)", v)
+	}
+	if got := d.EmittedEventCount("pool.fuse_tripped"); got < 1 {
+		t.Fatalf("setup invariant broken: expected the fuse to have genuinely tripped from the "+
+			"water-forced non-button transitions, got %d pool.fuse_tripped events -- this test "+
+			"is not exercising the refused case", got)
+	}
+}
+
 // TestPoolPump_NestedEventDuringActuationProducesOneChain is the #450 shape
 // generalised: a schedule edge arriving INSIDE an in-flight water-supply
 // protect must not start a second Switch.Set chain. SetPendingNestedEvent is

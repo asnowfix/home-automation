@@ -30,6 +30,7 @@ import (
 	beem "github.com/asnowfix/home-automation/pkg/beem"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
+	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
 )
@@ -154,6 +155,11 @@ func (d *daemon) Run() error {
 		return err
 	}
 	defer mc.Close()
+
+	// Composition root: wrap d.ctx with the MQTT client exactly once, so
+	// everything downstream (pkg/shelly/mqtt.GetClient) can retrieve it from
+	// ctx instead of a process-global. See pkg/shelly/mqtt/client.go.
+	d.ctx = shellymqtt.NewContextWithClient(d.ctx, mc)
 
 	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 

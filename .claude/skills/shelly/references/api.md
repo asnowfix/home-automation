@@ -125,7 +125,7 @@ Two traps worth repeating here:
 ## Script management CLI
 
 ```bash
-# Upload (always --no-minify while debugging)
+# Upload (--no-minify while debugging, IF the script fits — see below)
 go run ./myhome ctl shelly script upload <device> <script.js> --no-minify
 go run ./myhome ctl shelly script upload <device> <script.js> --force   # bypass hash check
 
@@ -143,6 +143,33 @@ go run ./myhome ctl shelly script probe  <device> <script>     # settled mem_pea
 Embedded scripts live in `internal/shelly/scripts/`. KVS version hashes are stored under
 `script/<name>/version` and checked before upload to avoid unnecessary re-uploads — note the
 version-marker trap in #449 when force-uploading for a measurement.
+
+### `--no-minify` does not always work — the device has a source-length limit
+
+The device rejects any script whose source exceeds **65535 bytes** (`pkg/shelly/script.MaxSourceBytes`
+— a single named constant, documented there as unverified against firmware/the official docs from
+this environment; correct it if a device is ever found to accept or reject a different length). Since
+`--no-minify` sends the source as-is, it can only work when the script itself is under that limit.
+
+The upload path (`pkg/shelly/script.Upload` / `doUpload`, used by both `script upload` and
+`script update`) checks the length **before** attempting any RPC and refuses with a clear error
+naming the limit and the actual size — it does not let the device reject it after the fact, and it
+does not silently report success while doing something else (#538, #553).
+
+**`pool-pump.js` does not fit unminified.** Measured directly via `pkg/shelly/script.Minify`
+(2026-08-26): **137673 bytes unminified, 35928 bytes minified.** It has been over the limit for a
+while — nobody noticed because every recent deployment used the default minified path (#553). It can
+only be deployed minified.
+
+Practical consequence: **on-device debugging of `pool-pump.js` now works against minified source**,
+with mangled local variable names. A stack trace, `Script.GetStatus` error message, or breakpoint
+line number will not map cleanly back to a readable name or line in the repository — expect to
+correlate by structure and log strings (see `field-discipline.md`) rather than by name. Recovering
+readable on-device debugging (e.g. a minifier mode that preserves top-level names) is tracked
+separately in #430, and shrinking the script itself in #542/#544; neither is done by #553.
+
+Any other script under `internal/shelly/scripts/` should be checked the same way before assuming
+`--no-minify` will work for it — the CLI now tells you plainly if it will not.
 
 ### `upload` ignores the file you name unless you tell it not to
 

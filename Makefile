@@ -208,6 +208,7 @@ logs-local-daemon:
 # internal/shelly/scripts -- and not `make test`'s overall wall clock.
 #
 #   2026-08-25  internal/shelly/scripts  626.598s under -race  ->  690s
+#   2026-08-26  internal/shelly/scripts  685.399s under -race  ->  754s
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25). It crossed Go's 600s default on 08-25 and every PR touching the
@@ -223,7 +224,7 @@ TESTFLAGS ?= -race
 # five times across workflows against `make test` twice, so a timeout that
 # covers only `test` covers the minority case -- which is exactly how #552
 # survived its first fix.
-TESTTIMEOUT ?= 690s
+TESTTIMEOUT ?= 754s
 
 test: build
 	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...

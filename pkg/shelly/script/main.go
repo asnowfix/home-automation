@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io/fs"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"io/fs"
 	"reflect"
 	"strconv"
 
@@ -321,7 +321,28 @@ func Download(ctx context.Context, via types.Channel, device types.Device, name 
 	return res.Data, nil
 }
 
-// For MyHome-specific version tracking, use internal/myhome/shelly/script.UploadWithVersionAndStart instead
+// PostUploadConfigError reports that the chunked code transfer completed —
+// every PutCode chunk was sent and acknowledged, so the script's code is on
+// the device — but the follow-up Script.SetConfig call (which enables the
+// script for autostart) did not get a confirmed response. This is a
+// confirmation gap, not an upload failure: see issue #428, where a device
+// that goes briefly unresponsive right after the last chunk turned a
+// successful upload into a reported failure.
+//
+// Id is still populated so a caller can act on the script it just uploaded
+// (e.g. retry just the confirmation) instead of treating the id as unknown.
+type PostUploadConfigError struct {
+	Id  uint32
+	Err error
+}
+
+func (e *PostUploadConfigError) Error() string {
+	return fmt.Sprintf("script code uploaded (id %d) but enabling it did not confirm: %v", e.Id, e.Err)
+}
+
+func (e *PostUploadConfigError) Unwrap() error { return e.Err }
+
+// For MyHome-specific version tracking, use internal/myhome/shelly/script.UploadWithVersion instead
 func Upload(ctx context.Context, via types.Channel, device types.Device, name string, code []byte, minify bool) (uint32, error) {
 	var err error
 
@@ -335,7 +356,11 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 
 	id, err := doUpload(ctx, via, device, name, code, minify)
 	if err != nil {
-		return 0, err
+		// Preserve id: a *PostUploadConfigError carries the id of a script
+		// whose code is confirmed on the device, so callers that check for it
+		// (see internal/myhome/shelly/script.UploadWithVersionDetailed) need
+		// it rather than a bare 0.
+		return id, err
 	}
 	return id, nil
 }
@@ -357,6 +382,16 @@ func doUpload(ctx context.Context, via types.Channel, device types.Device, name 
 				log.Info("Downgraded template literals in minified script", "name", name)
 			}
 		}
+	}
+
+	// Reject before any RPC is attempted: the device will refuse a script
+	// over MaxSourceBytes anyway (out_of_codespace), but only after chunks
+	// have already gone out, and that failure can be as unclear as a bare
+	// RPC error. Catching it here — ahead of isLoaded/Create/Stop/PutCode —
+	// covers every caller of doUpload, not just the `--no-minify` CLI path.
+	// See issue #553.
+	if err := checkSourceLength(name, buf, minify); err != nil {
+		return 0, err
 	}
 
 	id, err := isLoaded(ctx, via, device, name)
@@ -416,8 +451,11 @@ func doUpload(ctx context.Context, via types.Channel, device types.Device, name 
 		},
 	})
 	if err != nil {
-		log.Error(err, "Unable to configure script", "id", id, "name", name, "device", device.Name())
-		return 0, err
+		// Every chunk above was acknowledged, so the code is on the device;
+		// only this housekeeping call did not confirm. Report it as such
+		// (see PostUploadConfigError) instead of as an upload failure.
+		log.Error(err, "Script code uploaded but enabling it did not confirm", "id", id, "name", name, "device", device.Name())
+		return id, &PostUploadConfigError{Id: id, Err: err}
 	}
 	log.Info("Configured script", "name", name, "id", id, "out", out)
 

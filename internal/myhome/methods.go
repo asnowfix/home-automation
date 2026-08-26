@@ -321,4 +321,20 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &SolarClaimersListResult{}
 		},
 	},
+	FetchList: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &FetchListResult{}
+		},
+	},
+	FetchDelete: {
+		NewParams: func() any {
+			return &FetchDeleteParams{}
+		},
+		NewResult: func() any {
+			return &FetchDeleteResult{}
+		},
+	},
 }

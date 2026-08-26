@@ -49,6 +49,8 @@ const (
 	EventList                     Verb = "event.list"
 	PoolGetStatus                 Verb = "pool.getstatus"
 	SolarClaimersList             Verb = "solar.claimerslist"
+	FetchList                     Verb = "fetch.list"
+	FetchDelete                   Verb = "fetch.delete"
 )
 
 type Key string

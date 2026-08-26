@@ -24,6 +24,8 @@ go test ./internal/myhome/...                    # single package
 go test -v -run TestName ./path/to/package       # specific test
 go test -race ./...                              # with race detector
 
+# NOTE: pass a BARE FILENAME relative to the current directory. An absolute path fails with a
+# misleading "file does not exist" even when the file is plainly there.
 go run ./myhome ctl shelly script upload <device> <script.js> --no-minify
 go run ./myhome ctl shelly script update <device>
 go run ./myhome ctl shelly script debug <device> true
@@ -35,6 +37,55 @@ go run ./tools/classify-events [events-dir] [testdata-dir]   # classify raw even
 To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call` tools). It is pre-configured in `.mcp.json` with MQTT broker `tcp://192.168.1.2:1883` and approved via `enabledMcpjsonServers` in `.claude/settings.json`. The `.mcp.json` command automatically runs `go generate ./internal/myhome/ui/...` on first use in a fresh worktree (fetches CSS/JS assets required to compile); this needs internet access once per worktree. Restart Claude Code to activate.
 
 `make test` is canonical — never bare `go test ./...` (it skips workspace sub-modules). New CI test commands must also invoke `make test`, not go directly to `go test`.
+
+### Test timeout — derived from measurement, never guessed
+
+`TESTFLAGS` in the root `Makefile` carries an explicit `-timeout`. **Whenever a full `make test`
+succeeds, set the timeout to the slowest package's measured duration plus 10%** (`N + N×0.1`), and
+record the measurement in the comment above `TESTFLAGS` with its date.
+
+The timeout then tracks what the suite actually costs instead of drifting until it silently fails.
+
+Two things to get right:
+
+- **Go applies `-timeout` per package** (per test binary), not to the whole run. So `N` is the
+  **slowest package**, currently `internal/shelly/scripts`, not `make test`'s overall wall clock.
+- **Apply it to every target that runs the suite**, and keep it in its own variable
+  (`TESTTIMEOUT`), not folded into `TESTFLAGS`. CI calls `make cover` five times across workflows
+  against `make test` twice, and `test-race` overrides `TESTFLAGS` — a timeout folded into the flags
+  is silently dropped by both. That is how #552 survived its own first fix.
+- **Only a successful run may set it.** A run that timed out tells you nothing about how long the
+  suite needs; raising the timeout from a failed run's duration just guesses again, more slowly.
+
+Why this rule exists: that package grew 507s → 591s → 627s in three days and crossed Go's **600s
+default** on 2026-08-25, after which `make test` could not pass for anyone. Two runs failed at
+600.654s and 600.651s — agreeing to within 3ms — which is what finally identified a fixed limit
+rather than the CPU contention everyone had assumed (#552).
+
+**When two runs fail at the same duration to within milliseconds, suspect a limit, not load.**
+
+#### The suite now outlives a foreground command — background it or lose the agent
+
+There are **two independent 600-second ceilings**, and this suite crossed both at once:
+
+| limit | value | what it kills |
+|---|---|---|
+| Go's default `-timeout` | 600 s | the test run itself (#552) |
+| the agent harness's max foreground `Bash` timeout | 600 s | **the agent waiting on it** |
+
+Raising the Go timeout fixes the first and makes the second *worse*: a foreground `make test` now
+runs long enough to guarantee the caller is killed first, mid-run, leaving uncommitted work and no
+report.
+
+So **never run the suite in the foreground** — not merely because the log floods context, which was
+the original reason, but because **the run outlives the command**. Background it to a file with
+`run_in_background`, then poll that file in **separate, short** `Bash` calls within the same turn: a
+single poll loop is itself a foreground command and dies at the same 600 s mark. (Observed
+2026-08-26: a poll loop was killed at exactly 10m00s while waiting on CI.)
+
+This is also the strongest argument that raising the timeout is a stopgap. The real fix — splitting
+the package or sharing emulator state (#552) — is what brings the suite back under the ceilings
+rather than negotiating with one of them.
 
 **`go generate` sub-module gap**: `go generate ./...` from the workspace root does NOT recurse into Go workspace sub-modules. Adding a new `//go:generate` directive to any package under `myhome/ctl/` requires registering it explicitly in **all four** of these places, or CI will fail with "undefined: DefaultXxx" compile errors:
 1. Root `Makefile` — `generate` target (already has explicit lines for `pool` and `garden`)
@@ -102,6 +153,95 @@ memory of a prior conversation or session — anyone (agent or human) can pick i
 other source of information than what the issue itself contains. It may, and should, reference
 external sources (docs URLs) and/or other issue(s) and/or PR(s), but must not assume the reader
 was present for the discussion that led to filing it.
+
+**Every issue filed in this repo must be self-contained** per the above definition — this applies
+whether a human or a coding agent is the one filing it. Before creating an issue, write it as if
+handing it to a coding agent with a cold context window: no "as discussed above," no assuming the
+reader saw the same live-debugging session or chat history that motivated the issue. Cross-issue
+dependencies must be made explicit (e.g. "blocked by #123," "must land after #456") rather than
+implied by filing order or narrative context.
+
+**Close an issue only on empirical evidence, and put that evidence in the closing comment.** A fix
+that is present in the source is *not* verified — run the thing. For a data race, that means the
+race detector's output on the affected package; for a device bug, a live measurement; for a crash,
+a regression test that fails without the fix. An issue whose fix has been confirmed only by reading
+the diff stays **open**, with a note saying so.
+
+Grep alone is not evidence. Verifying a claim against `origin/main` while sitting on a feature
+branch — mixing `git grep <rev>` with working-tree greps — silently produces contradictory answers.
+Pick one and say which.
+
+**Keep the umbrella issue of a long campaign current.** For multi-week work, the top-level issue is
+the status board: post an update whenever a gate opens or closes, a measurement lands, or a release
+decision changes, using explicit state words (new / pending / implementing / verifying / discarded /
+closed-by-PR / blocked). Do not post when nothing changed.
+
+### Sub-agents
+
+**Every sub-agent must persist its progress outside its own context**, incrementally, as it works —
+not only in its final report. A sub-agent can die mid-task (API error, spend limit, stall) and its
+worktree may be auto-removed if it never committed, taking every finding with it.
+
+When launching a sub-agent, give it exactly one of these and say which:
+
+- **A progress file** at a path you define (e.g. `docs/<issue>-progress.md`, or a scratchpad path),
+  appended after each meaningful step: what was tried, what was measured, what was ruled out.
+- **Comments on the GitHub issue** it was given as its objective — preferred when the work is tied
+  to an issue, since the findings then survive for whoever picks it up next and satisfy the
+  self-contained-issue rule above.
+
+Live-device measurements (`mem_peak`, RPC responses, event-DB queries) and negative results must be
+written down as they are obtained. Re-deriving them means re-touching real hardware.
+
+Sub-agents must not `git push` or open PRs — the coordinator does that from the sub-agent's worktree.
+
+#### Running tests in a sub-agent
+
+**Commit first, then run tests.** A sub-agent that dies mid-run loses everything uncommitted, and its
+worktree may be auto-removed.
+
+**Never run the test suite in the foreground.** Go test output under `-race`, with the script
+emulator's per-call logging, is large enough to consume a sub-agent's context before it can act on
+the result.
+
+**Never end a turn in order to wait for a test run.** This is the #432 stall mode. Ending a turn
+terminates the sub-agent, and nothing re-invokes it when its background job finishes — so an agent
+that signs off with "waiting for the test run, will resume when notified" is simply gone.
+
+Measured directly on 2026-08-11 with a throwaway agent that backgrounded a 200-second job and then
+ended its turn:
+
+- the agent stopped after **9.8 s**, reported by the harness as `completed`;
+- its child kept running and finished normally **3.5 minutes later**;
+- the agent received **no** automatic notification of that completion — confirmed by asking the
+  agent itself after resuming it;
+- the agent's own completion notification fired **immediately**, while its child was still alive.
+
+Two consequences worth acting on:
+
+- **The child's work is not lost, only orphaned.** Before re-running anything for a stalled agent,
+  look for its output on disk — a completed `make test` costs ~6 minutes to repeat for nothing.
+- **A stalled agent can be resumed** by the coordinator with `SendMessage`, picking up its
+  transcript. That is a recovery, not the design; the agent must not plan around it.
+
+Do not treat "the agent's notification arrived" as meaning its background work has finished — the
+observed behaviour above shows the two are unrelated.
+
+The required pattern is: **background the run, then poll it to completion inside the same turn.**
+
+1. Start the suite with `run_in_background`, writing to a file.
+2. Loop: check the output file periodically until the run finishes or the timeout expires.
+3. Read results by **grepping the file** (`^(--- FAIL|FAIL|ok )`), never by inhaling it whole.
+4. **Report the wall-clock duration of the test run** in the final report, alongside pass/fail.
+
+The coordinator **must give an overall timeout at agent startup** — the agent stops polling and
+reports what it has when that budget is exhausted, rather than looping forever. Choose it from the
+measured suite duration with headroom: a full `make test` on `origin/main` took **5 min 47 s**
+(346.67 s wall clock) on 2026-08-11, so ~15 minutes is a reasonable default budget. These tests are
+known to slow down under CPU contention (#393), and several agents may share the machine.
+
+Duration reporting is not bookkeeping: it is how the suite's cost stays visible, so the budget above
+is re-derived from measurement rather than guessed.
 
 ### Go
 

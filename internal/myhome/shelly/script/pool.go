@@ -63,6 +63,10 @@ type SetupOptions struct {
 	SolarMaxTurnover     int
 	SolarStaleMs         int
 
+	// Manual override (#476): how long a button press or an out-of-band
+	// switch change holds the pump against the schedule/solar policy.
+	OverrideMs int
+
 	ForceUpload bool
 	NoMinify    bool
 }
@@ -147,6 +151,9 @@ func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *sh
 		PoolKVSKeys["solar_min_turnover"]:      fmt.Sprintf("%d", opts.SolarMinTurnover),
 		PoolKVSKeys["solar_max_turnover"]:      fmt.Sprintf("%d", opts.SolarMaxTurnover),
 		PoolKVSKeys["solar_stale_ms"]:          fmt.Sprintf("%d", opts.SolarStaleMs),
+
+		// Manual override (#476)
+		PoolKVSKeys["override_ms"]: fmt.Sprintf("%d", opts.OverrideMs),
 	}
 
 	// Set KVS configuration values with delays to avoid overloading device
@@ -408,6 +415,7 @@ var knownPoolPumpStateKeys = []string{
 	"script/pool-pump/active-output",
 	"script/pool-pump/schedule-mode",
 	"script/pool-pump/runtime-sec",    // runtime_today_sec: cumulative pump-on seconds today (#402)
+	"script/pool-pump/runtime-ts",     // epoch second STATE.runtimeTodaySec applies to; KVS recovery path (#469)
 	"script/pool-pump/turnover-today", // turnover_today: today's achieved water-volume turnovers (#402)
 }
 
@@ -744,6 +752,7 @@ func (s *PoolService) RemoveDevice(ctx context.Context, via types.Channel, sd *s
 		PoolKVSKeys["solar_min_turnover"],
 		PoolKVSKeys["solar_max_turnover"],
 		PoolKVSKeys["solar_stale_ms"],
+		PoolKVSKeys["override_ms"],
 	}
 
 	for _, key := range kvsKeys {

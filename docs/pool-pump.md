@@ -477,16 +477,23 @@ Shelly scripts are limited to **5 timers**. Current usage:
 |-------|---------|---------|
 | `TASK_TIMER` | Task queue (200 ms recurring) | Only while queue is non-empty |
 | `STATE.graceTimer` | Inter-device grace delay | During switchover only |
+| `STATE.runtimeFlushTimer` | Runtime checkpoint (60 s, see #402/#547) | Only while the pump is running |
 | `SOLAR.tickTimer` | Solar hysteresis re-evaluation (30 s recurring, see #405) | Only while `solar-enabled` is true |
 
-Peak simultaneous: **3** (task queue + grace timer + solar tick timer). Well within the 5-timer
-limit.
+Peak simultaneous: **4** (task queue + grace timer + runtime flush timer + solar tick timer). Well
+within the 5-timer limit.
 
-**#547**: the runtime checkpoint (60 s, see #402) used to hold its own recurring
-`Timer.set(60000, true, ...)` here. On a 7h32m production run that timer returned a live handle but
-never fired again — the whole run's accrual survived only in RAM until the stop. It is no longer a
-timer at all: `runtimeFlushTick()` self-requeues on the task queue's existing 200 ms drain and checks
-elapsed time itself, so it costs zero entries in this table while the pump runs.
+**#547**: `STATE.runtimeFlushTimer` used to be a single recurring `Timer.set(60000, true, ...)`.
+On a 7h32m production run that timer returned a live handle but never fired again — the whole
+run's accrual survived only in RAM until the stop. A first fix attempt moved it onto the task
+queue's 200 ms drain via a self-requeuing task, but that leaks one `TASK_QUEUE` entry per tick for
+as long as the pump runs (`processTaskQueue()` only compacts the array once it fully drains, which
+a task that always re-queues itself before returning never allows) — a likely OOM on a long run.
+It now re-arms a **fresh one-shot** `Timer.set(60000, false, ...)` at the end of every checkpoint
+(`runtimeFlushFire()`) instead of relying on `repeat = true` to keep firing unattended for hours —
+still exactly one timer slot, held only while the pump runs, same as before #547.
+`STATE.runtimeFlushCount`/`runtimeFlushLastTs` let a hardware probe observe the chain is still
+advancing, rather than only inferring it from `STATE.runStartTs` staying put.
 
 ---
 
@@ -494,7 +501,7 @@ elapsed time itself, so it costs zero entries in this table while the pump runs.
 
 | Resource | Limit | Used |
 |----------|-------|------|
-| Timers | 5 | ≤ 3 |
+| Timers | 5 | ≤ 4 |
 | Event subscriptions | 5 | 1 (`addEventHandler`) |
 | MQTT subscriptions | 10 | ≤ 5 (up to 4 peer switch-status topics — see note below — + 1 solar-available topic when `solar-enabled`) |
 | KVS keys | — | ≤ 28 config + 4 state |

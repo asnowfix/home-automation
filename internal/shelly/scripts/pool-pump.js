@@ -694,7 +694,28 @@ var STATE = {
                               // #469: the calendar day is derived from this, never from a
                               // stored date string (see reconcileRuntimeState)
   runStartTs: null,           // Date.now() when the current ON interval began; null when off
-  runtimeFlushTimer: null,    // Timer handle for periodic checkpointing while running
+  // #547 round 2: periodic checkpointing while running used to ride a
+  // dedicated Timer.set(60000, true, ...) -- on a 7h32m production run that
+  // timer returned a live handle but never fired again, so the whole run's
+  // accrual survived only in RAM until the stop. A first attempt moved this
+  // onto the task queue's 200ms drain via an unconditionally self-requeuing
+  // task, but that leaks one TASK_QUEUE entry per 200ms tick for as long as
+  // the pump runs (processTaskQueue() only compacts the array once
+  // TASK_INDEX catches up to TASK_QUEUE.length, which a task that always
+  // pushes its own replacement before returning never allows) -- ~135000
+  // entries over a 7h32m run on a device with single-digit KB of free heap,
+  // a likely OOM that would silently reproduce this exact bug. It now
+  // re-arms a fresh ONE-SHOT Timer.set(60000, false, ...) at the end of
+  // every checkpoint instead -- see runtimeFlushFire() -- rather than
+  // relying on repeat=true to keep firing for hours unattended.
+  runtimeFlushTimer: null,    // Timer handle for the pending one-shot re-arm
+  runtimeFlushCount: 0,       // incremented on every checkpoint that actually
+                              // persists -- a hardware probe reading this can
+                              // observe the chain is alive, rather than only
+                              // inferring it from STATE.runStartTs staying
+                              // put (which is how #547 went undetected for
+                              // 7h32m in the first place)
+  runtimeFlushLastTs: null,   // Date.now() of the last successful checkpoint
 
   // Initialization flag
   initializing: true          // Prevents KVS writes during init
@@ -1318,6 +1339,9 @@ function ensureRuntimeDay() {
   }
 }
 
+// #547: checkpoint cadence, in ms. Read by runtimeFlushFire() below.
+var RUNTIME_FLUSH_INTERVAL_MS = 60000;
+
 // Called (via noteRelayTransition) when the pump transitions OFF -> ON.
 function startRuntimeAccounting() {
   ensureRuntimeDay();
@@ -1331,11 +1355,11 @@ function startRuntimeAccounting() {
   // otherwise silently drop.
   storeStorageValue(STORAGE_KEYS.runStart, STATE.runStartTs);
   if (!STATE.runtimeFlushTimer) {
-    // Periodic checkpoint while running — counts against the 5-timer budget,
-    // but only exists while the pump is actually on (cleared in
-    // stopRuntimeAccounting), so it never competes with the task-queue timer
-    // during steady-state idle operation.
-    STATE.runtimeFlushTimer = Timer.set(60000, true, flushRuntimeCheckpoint);
+    // #547 round 2: arms the FIRST one-shot checkpoint -- see
+    // runtimeFlushFire() below, which re-arms itself. Only exists while the
+    // pump is actually on (cleared in stopRuntimeAccounting), so it never
+    // competes with the task-queue timer during steady-state idle operation.
+    STATE.runtimeFlushTimer = Timer.set(RUNTIME_FLUSH_INTERVAL_MS, false, runtimeFlushFire);
   }
   log("Runtime accounting started, today so far:", STATE.runtimeTodaySec, "s");
 }
@@ -1358,6 +1382,9 @@ function stopRuntimeAccounting() {
     storeStorageValue(STORAGE_KEYS.runStart, null);
   }
   if (STATE.runtimeFlushTimer) {
+    // Cancels the pending one-shot re-arm outright rather than letting it
+    // fire once more into an early return -- frees the timer slot
+    // immediately instead of up to RUNTIME_FLUSH_INTERVAL_MS late.
     Timer.clear(STATE.runtimeFlushTimer);
     STATE.runtimeFlushTimer = null;
   }
@@ -1365,8 +1392,8 @@ function stopRuntimeAccounting() {
   log("Runtime accounting stopped, today total:", STATE.runtimeTodaySec, "s");
 }
 
-// Periodic checkpoint while the pump is running (recurring runtimeFlushTimer
-// tick): persists runtimeTodaySec plus the still-open interval's
+// Periodic checkpoint while the pump is running (driven by runtimeFlushFire()
+// below): persists runtimeTodaySec plus the still-open interval's
 // elapsed-so-far, without clearing runStartTs — the run is still in
 // progress. This bounds crash/reboot data loss to at most one flush
 // interval instead of the whole run.
@@ -1376,12 +1403,51 @@ function stopRuntimeAccounting() {
 // else ticks reconcile() while running -- reconcile() is always safe to call
 // (see "THE RECONCILER" above) and this timer already exists and already
 // runs only while the pump is on, so no new timer is added.
+//
+// #547 round 2: STATE.runtimeFlushCount/runtimeFlushLastTs are updated here
+// (not in the scheduling wrapper) so a direct call from a test or a
+// Script.Eval probe -- the exact mechanism the original #547 evidence was
+// gathered with -- observes the same liveness signal production does. A
+// stalled chain now shows up as a count that stops advancing, rather than
+// only as STATE.runStartTs/the persisted total staying put, which is how
+// #547 went unnoticed for 7h32m in the first place.
 function flushRuntimeCheckpoint() {
   ensureRuntimeDay();
   if (STATE.runStartTs === null) return;
   var elapsedSec = (Date.now() - STATE.runStartTs) / 1000;
   persistRuntimeState(STATE.runtimeTodaySec + elapsedSec);
+  STATE.runtimeFlushCount++;
+  STATE.runtimeFlushLastTs = Date.now();
   reconcile(null);
+}
+
+// #547 round 2: fires flushRuntimeCheckpoint() then re-arms a FRESH one-shot
+// Timer.set(RUNTIME_FLUSH_INTERVAL_MS, false, ...) rather than relying on a
+// single Timer.set(period, true, ...) to keep firing unattended for hours.
+//
+// On the production run that motivated #547, a repeat=true timer returned a
+// live handle but never fired again. A first fix attempt assumed the task
+// queue's 200ms timer -- proven reliable all day in that same run -- would
+// be a safe replacement rail, but that timer is not actually one long-lived
+// instance either: processTaskQueue() clears/nulls it every time the queue
+// drains empty, and queueTask() creates a brand new Timer.set(200, true, ...)
+// on next use. What ran reliably all day was therefore a SEQUENCE of
+// short-lived timers, never a single one spanning hours -- which is exactly
+// what this function now does explicitly for the 60s checkpoint, without
+// touching TASK_QUEUE or any other shared structure at all.
+//
+// STATE.runtimeFlushTimer is nulled FIRST, before the re-arm: if
+// flushRuntimeCheckpoint() or reconcile() somehow synchronously drove a stop
+// (they do not today -- reconcile() always defers through the task queue --
+// but this ordering makes that safe even if it ever did), stopRuntimeAccounting()
+// finding the field already null simply skips its own Timer.clear(), rather
+// than clearing a handle that this function is about to overwrite anyway.
+function runtimeFlushFire() {
+  STATE.runtimeFlushTimer = null;
+  if (STATE.runStartTs === null) return;   // stopRuntimeAccounting() already cancelled us
+  flushRuntimeCheckpoint();
+  if (STATE.runStartTs === null) return;    // the checkpoint itself observed a stop; do not re-arm
+  STATE.runtimeFlushTimer = Timer.set(RUNTIME_FLUSH_INTERVAL_MS, false, runtimeFlushFire);
 }
 
 // Persists sec (defaults to STATE.runtimeTodaySec) plus the current day
@@ -2983,9 +3049,9 @@ function finishContinueInit() {
 
   // Solar hysteresis (#405): re-evaluate periodically so staleness is
   // detected even if the daemon dies mid-hold-delay and no further MQTT
-  // message ever arrives. This is at most the 4th concurrent timer
-  // (TASK_TIMER, STATE.runtimeFlushTimer) — see
-  // docs/pool-pump.md "Timer Budget".
+  // message ever arrives. This is at most the 3rd concurrent Timer.set()
+  // (TASK_TIMER, STATE.runtimeFlushTimer -- one-shot, re-armed on every
+  // checkpoint, see #547) — see docs/pool-pump.md "Timer Budget".
   if (CONFIG.solarEnabled) {
     SOLAR.tickTimer = Timer.set(30000, true, checkSolarHysteresis);
   }

@@ -1,4 +1,15 @@
-package scripts
+// Package smoke minify-and-run-checks every embedded Shelly script. It was
+// split out of the scripts package (#552) so it runs as its own test
+// binary — go test parallelises across packages by default, so this
+// converts what used to be ~90s of dead-serial time in the scripts package
+// into wall clock that overlaps with everything else. Each per-script
+// subtest additionally calls t.Parallel(): they share one already-fixed
+// mqtt.MockClient set once before the loop (see mqtt.SetClient below) and
+// never swapped again, so concurrent use is safe — unlike most of the
+// scripts package's tests, which swap the mqtt package's single global
+// client per test and therefore cannot run in parallel with each other
+// (see the scripts package's own tests and #552's PR description).
+package smoke
 
 import (
 	"context"
@@ -8,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	scripts "github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 
@@ -73,7 +85,7 @@ func TestSmokeAllScripts(t *testing.T) {
 	mqtt.SetClient(mqtt.NewMockClient())
 	t.Cleanup(mqtt.ResetClient)
 
-	entries, err := fs.ReadDir(GetFS(), ".")
+	entries, err := fs.ReadDir(scripts.GetFS(), ".")
 	if err != nil {
 		t.Fatalf("failed to read embedded script FS: %v", err)
 	}
@@ -85,7 +97,9 @@ func TestSmokeAllScripts(t *testing.T) {
 		name := entry.Name()
 
 		t.Run(name, func(t *testing.T) {
-			rawBuf, err := fs.ReadFile(GetFS(), name)
+			t.Parallel()
+
+			rawBuf, err := fs.ReadFile(scripts.GetFS(), name)
 			if err != nil {
 				t.Fatalf("read embedded script: %v", err)
 			}

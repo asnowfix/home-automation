@@ -1,12 +1,18 @@
-package scripts
+// Package blu holds the blu-listener.js emulator tests. It was split out of
+// the scripts package (#552) so it runs as its own test binary — go test
+// parallelises across packages by default, so this converts what used to be
+// dead-serial time in the scripts package into wall clock that overlaps with
+// everything else.
+package blu
 
 import (
 	"context"
 	"encoding/json"
-	"os"
+	"io/fs"
 	"testing"
 	"time"
 
+	scripts "github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 
@@ -16,13 +22,32 @@ import (
 
 const bluListenerScriptPath = "blu-listener.js"
 
+// readBluListenerScript reads via the embedded FS (scripts.GetFS()) rather
+// than a bare relative path: `go test` sets the working directory to this
+// package's own directory, not the parent scripts/ directory where the .js
+// files live.
 func readBluListenerScript(t *testing.T) []byte {
 	t.Helper()
-	buf, err := os.ReadFile(bluListenerScriptPath)
+	buf, err := fs.ReadFile(scripts.GetFS(), bluListenerScriptPath)
 	if err != nil {
 		t.Fatalf("failed to read %s: %v", bluListenerScriptPath, err)
 	}
 	return buf
+}
+
+// waitFor polls pred until it returns true or deadline elapses. Duplicated
+// from the scripts package's own waitFor (pool_pump_test.go) rather than
+// shared: it is eight lines with no dependency of its own, and extracting a
+// shared testutil package for it is not worth the added indirection.
+func waitFor(deadline time.Duration, pollInterval time.Duration, pred func() bool) bool {
+	end := time.Now().Add(deadline)
+	for time.Now().Before(end) {
+		if pred() {
+			return true
+		}
+		time.Sleep(pollInterval)
+	}
+	return false
 }
 
 func bluFollowKVS(mac, switchID string, autoOff float64) map[string]interface{} {
@@ -76,7 +101,7 @@ func switchIsOn(deviceState *script.DeviceState, switchKey string) bool {
 	if deviceState.ComponentStatus == nil {
 		return false
 	}
-	v, ok := componentStatusValue(deviceState, switchKey)
+	v, ok := deviceState.ComponentStatusValue(switchKey)
 	if !ok {
 		return false
 	}

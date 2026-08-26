@@ -176,6 +176,28 @@ the status board: post an update whenever a gate opens or closes, a measurement 
 decision changes, using explicit state words (new / pending / implementing / verifying / discarded /
 closed-by-PR / blocked). Do not post when nothing changed.
 
+### Merging: "LGTM" or "/merge" means merge it
+
+The maintainer **cannot approve these pull requests**. An agent working on their behalf opens PRs
+under their own account, and GitHub does not allow self-approval — so the review-approval route does
+not exist here, and waiting for it deadlocks.
+
+**When the maintainer says "LGTM" or "/merge" — in a PR comment or in conversation — that is the
+instruction to merge that PR.** It carries authorisation to clear whatever is blocking it, including
+using `--admin` to pass the `merge-policy` size gate, which is otherwise on the ask-every-time list.
+
+Two things it does **not** waive, because they are about the change being correct rather than about
+permission:
+
+- **A red build still blocks.** "LGTM" approves the change, not a failing CI run. Fix the failure or
+  say why it is unrelated, then merge.
+- **Hardware verification still applies** where this repo requires it. A green suite is not evidence
+  that a device script runs — see the emulator gaps in #496 and the three defects that passed CI and
+  failed on hardware in August 2026.
+
+Why this is written down: #551 sat blocked for a day on a size gate while its author waited for an
+approval that could never arrive.
+
 ### Sub-agents
 
 **Every sub-agent must persist its progress outside its own context**, incrementally, as it works —

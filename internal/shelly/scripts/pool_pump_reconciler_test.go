@@ -569,6 +569,53 @@ func TestPoolPump_OutOfBandAdoptionAfterButtonLosesFuseImmunity(t *testing.T) {
 	}
 }
 
+// TestPoolPump_ButtonDrivenRunCreditsRuntimeDespiteFuseImmunity closes review
+// requirement 5 from #555's post-#551-merge round: RC_BUTTON_DRIVEN (#549)
+// only ever gates two things -- reconcileNow()'s fuse refusal and
+// applyOutput()'s FUSE_CHANGES.push() -- and must NOT accidentally skip
+// runtime accounting. Accounting now lives entirely in noteRelayTransition()
+// (#550/#551), called unconditionally from applyDone() regardless of
+// RC_BUTTON_DRIVEN, so a button-driven run must credit exactly like any
+// other. This pins that with a real button-driven start+stop cycle.
+func TestPoolPump_ButtonDrivenRunCreditsRuntimeDespiteFuseImmunity(t *testing.T) {
+	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false) // outside window: only the button drives this
+	injector := make(chan []byte, 4)
+	d.EventInjector = injector
+	stop := runPoolPump(t, d)
+	defer stop()
+
+	injector <- shellyButtonEvent()
+	if !waitActiveOutput(t, d, "0") {
+		t.Fatalf("setup: button press did not start the pump, got %v",
+			kvsValue(d, "script/pool-pump/active-output"))
+	}
+	if got := d.EmittedEventCount("pool.pump_start"); got != 1 {
+		t.Fatalf("expected exactly one pool.pump_start from the button-driven start, got %d", got)
+	}
+
+	// Let at least a full second of runtime accrue before the stop, so
+	// Math.round() of the elapsed interval can never land on 0 -- same
+	// rationale as TestPoolPump_NestedEventDuringActuationProducesOneChain.
+	time.Sleep(1100 * time.Millisecond)
+
+	injector <- shellyButtonEvent()
+	if !waitActiveOutput(t, d, "-1") {
+		t.Fatalf("2nd button press did not stop the pump, got %v",
+			kvsValue(d, "script/pool-pump/active-output"))
+	}
+	if got := d.EmittedEventCount("pool.pump_stop"); got != 1 {
+		t.Fatalf("expected exactly one pool.pump_stop from the button-driven stop, got %d", got)
+	}
+
+	settlePoolPumpTaskQueue(t)
+	runtimeSec := parseKVSInt(t, d, "script/pool-pump/runtime-sec")
+	if runtimeSec < 1 {
+		t.Fatalf("expected runtime-sec >= 1 after a >=1s button-driven run, got %d -- "+
+			"RC_BUTTON_DRIVEN's fuse-window exemption (#549) must not skip accounting via "+
+			"noteRelayTransition() (#550/#551)", runtimeSec)
+	}
+}
+
 // TestPoolPump_NestedEventDuringActuationProducesOneChain is the #450 shape
 // generalised: a schedule edge arriving INSIDE an in-flight water-supply
 // protect must not start a second Switch.Set chain. SetPendingNestedEvent is

@@ -119,9 +119,18 @@ $B Script.GetStatus '{"id":N}'      # running? mem_used/mem_peak/mem_free — al
 $B Script.List      '{}'            # which scripts exist, and their ids
 $B Schedule.List    '{}'            # a script with no schedule jobs will never fire
 
-myhome ctl shelly script upload <device> <script.js> --no-minify   # always --no-minify when debugging
+myhome ctl shelly script upload <device> <script.js> --no-minify   # only if the script fits — see below
 myhome ctl shelly script probe  <device> <script>                  # settled mem_peak measurement
 ```
+
+**`--no-minify` only works if the source fits in 65535 bytes** — the device's script-length limit
+(`pkg/shelly/script.MaxSourceBytes`, unverified against firmware docs; correct it there if a device
+proves it wrong). The upload path checks this before sending and refuses with a clear error naming
+the limit and the actual size, rather than letting the device reject it after the fact (#553).
+**`pool-pump.js` does not fit** (measured at 137673 bytes unminified vs. 35928 bytes minified,
+2026-08-26) — it can only be uploaded minified. On-device debugging of that script therefore works
+against minified source with mangled local names: a stack trace or error string will not map back
+to a readable name in the repo. See `references/api.md` for what that means in practice.
 
 `KVS.Get` and `KVS.GetMany` **cannot unmarshal numeric or boolean values** (#468) — read them out of
 the error payload.

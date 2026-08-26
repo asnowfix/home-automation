@@ -209,10 +209,18 @@ logs-local-daemon:
 #
 #   2026-08-25  internal/shelly/scripts  626.598s under -race  ->  690s
 #   2026-08-26  internal/shelly/scripts  685.399s under -race  ->  754s
+#   2026-08-26  internal/shelly/scripts  592.565s under -race  ->  652s  (#552 package split)
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
-# (08-25). It crossed Go's 600s default on 08-25 and every PR touching the
-# package started failing at exactly 600.65s (#552).
+# (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
+# 08-25 and every PR touching the package started failing at exactly 600.65s
+# (#552). The 08-26 drop to 592.565s is scripts_smoke_test.go and
+# blu_listener_test.go moving into their own packages (internal/shelly/
+# scripts/smoke, internal/shelly/scripts/blu) so they run in parallel with
+# the rest instead of adding to its serial total -- the growth trend itself
+# is not addressed: pool_pump_test.go / pool_pump_reconciler_test.go /
+# pool_pump_runtime_recovery_test.go remain one dead-serial package at
+# ~590s (86% of the pre-split total) and are the next real target.
 TESTFLAGS ?= -race
 
 # TESTTIMEOUT is deliberately SEPARATE from TESTFLAGS so that overriding the
@@ -224,7 +232,7 @@ TESTFLAGS ?= -race
 # five times across workflows against `make test` twice, so a timeout that
 # covers only `test` covers the minority case -- which is exactly how #552
 # survived its first fix.
-TESTTIMEOUT ?= 754s
+TESTTIMEOUT ?= 652s
 
 test: build
 	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...

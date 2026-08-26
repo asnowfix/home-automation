@@ -212,14 +212,25 @@ logs-local-daemon:
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25). It crossed Go's 600s default on 08-25 and every PR touching the
 # package started failing at exactly 600.65s (#552).
-TESTFLAGS ?= -race -timeout=690s
+TESTFLAGS ?= -race
+
+# TESTTIMEOUT is deliberately SEPARATE from TESTFLAGS so that overriding the
+# flags cannot silently drop the timeout -- `test-race` passes TESTFLAGS=-race,
+# and the comment above invites `make test TESTFLAGS=`, both of which would
+# otherwise reset it to Go's 600s default and reintroduce #552.
+#
+# It must be applied to EVERY target that runs the suite. CI calls `make cover`
+# five times across workflows against `make test` twice, so a timeout that
+# covers only `test` covers the minority case -- which is exactly how #552
+# survived its first fix.
+TESTTIMEOUT ?= 690s
 
 test: build
-	$(GO) test $(TESTFLAGS) ./...
+	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
-	    (cd $$dir && $(GO) test $(TESTFLAGS) ./...) || rc=1; \
+	    (cd $$dir && $(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...) || rc=1; \
 	  fi; \
 	done; exit $$rc
 
@@ -230,12 +241,12 @@ test-race:
 
 cover: build
 	@mkdir -p coverage
-	$(GO) test -covermode=atomic -coverprofile=coverage/root.cov ./...
+	$(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=coverage/root.cov ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
 	    sdir=$$(echo $$dir | tr '/' '_'); \
-	    (cd $$dir && $(GO) test -covermode=atomic -coverprofile=$(CURDIR)/coverage/$$sdir.cov ./...) || rc=1; \
+	    (cd $$dir && $(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=$(CURDIR)/coverage/$$sdir.cov ./...) || rc=1; \
 	  fi; \
 	done; \
 	echo "mode: atomic" > coverage.txt; \

@@ -50,6 +50,10 @@ Two things to get right:
 
 - **Go applies `-timeout` per package** (per test binary), not to the whole run. So `N` is the
   **slowest package**, currently `internal/shelly/scripts`, not `make test`'s overall wall clock.
+- **Apply it to every target that runs the suite**, and keep it in its own variable
+  (`TESTTIMEOUT`), not folded into `TESTFLAGS`. CI calls `make cover` five times across workflows
+  against `make test` twice, and `test-race` overrides `TESTFLAGS` — a timeout folded into the flags
+  is silently dropped by both. That is how #552 survived its own first fix.
 - **Only a successful run may set it.** A run that timed out tells you nothing about how long the
   suite needs; raising the timeout from a failed run's duration just guesses again, more slowly.
 

@@ -505,6 +505,137 @@ func shellySwitchEvent(id int, state bool) []byte {
 	return data
 }
 
+// === #550: accounting driven by the observed relay transition ===
+//
+// TestPoolPump_OutOfBandTransitionCreditsRuntime reproduces the hardware
+// trace #550 was filed over: a relay transition that this script never
+// dispatched itself (a raw switch:N event, standing in for a web-UI toggle —
+// the emulator cannot originate one on its own, see #496) used to accrue NO
+// runtime at all, because applyOutput()/applyDone() — the only place
+// startRuntimeAccounting()/stopRuntimeAccounting() used to be called — are
+// never invoked for a change reconcileNow() already agrees with once
+// handleSwitchEvent() has adopted it as a fact. #550's live trace: 75s of
+// pump running, runStartTs stayed null, runtimeTodaySec stayed 0.
+//
+// This test is outside the run window (the reconciler has no opinion of its
+// own to interfere with what the injected events say) and never touches the
+// button or a schedule job — the ONLY driver of the transition below is the
+// injected switch:N event, exactly modelling a source this script did not
+// initiate.
+func TestPoolPump_OutOfBandTransitionCreditsRuntime(t *testing.T) {
+	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false)
+	injector := make(chan []byte, 8)
+	d.EventInjector = injector
+	stop := runPoolPump(t, d)
+	defer stop()
+
+	// Out-of-band ON (e.g. web UI). No button, no schedule edge, no
+	// Shelly.call this script issued — handleSwitchEvent() is the only path
+	// that can possibly see this and must be the one driving accounting.
+	injector <- shellySwitchEvent(0, true)
+	if !waitActiveOutput(t, d, "0") {
+		t.Fatalf("out-of-band ON did not update active-output; got %v",
+			kvsValue(d, "script/pool-pump/active-output"))
+	}
+	if got := d.EmittedEventCount("pool.pump_start"); got != 1 {
+		t.Fatalf("expected exactly one pool.pump_start from the out-of-band ON, got %d", got)
+	}
+
+	// Let at least a full second of runtime accrue before the OFF, so
+	// Math.round() of the elapsed interval can never land on 0 — see the
+	// identical rationale in TestPoolPump_NestedEventDuringActuationProducesOneChain.
+	time.Sleep(1100 * time.Millisecond)
+
+	// Out-of-band OFF (e.g. web UI again). Before #550 this is exactly the
+	// case that left runStartTs/runtimeTodaySec untouched: reconcileNow()'s
+	// "want === STATE.activeOutput" guard short-circuits once
+	// handleSwitchEvent() has already adopted -1 as the fact, so
+	// applyOutput()/applyDone() are never reached.
+	injector <- shellySwitchEvent(0, false)
+	if !waitActiveOutput(t, d, "-1") {
+		t.Fatalf("out-of-band OFF did not update active-output; got %v",
+			kvsValue(d, "script/pool-pump/active-output"))
+	}
+	if got := d.EmittedEventCount("pool.pump_stop"); got != 1 {
+		t.Fatalf("expected exactly one pool.pump_stop from the out-of-band OFF, got %d "+
+			"(0 means accounting is still keyed off applyDone() rather than the observed "+
+			"transition — the #550 defect)", got)
+	}
+
+	// waitActiveOutput() only guarantees active-output's OWN queued KVS write
+	// has landed; persistRuntimeState()'s runtime-sec/runtime-ts/turnover-today
+	// mirrors are three separate, earlier-queued queueTask() calls that can
+	// still be draining. Give them the same settle margin used elsewhere.
+	settlePoolPumpTaskQueue(t)
+
+	runtimeSec := parseKVSInt(t, d, "script/pool-pump/runtime-sec")
+	if runtimeSec < 1 {
+		t.Fatalf("expected runtime-sec >= 1 after a >=1s out-of-band run, got %d — "+
+			"a web-UI-driven (out-of-band) run accrued no runtime, reproducing #550", runtimeSec)
+	}
+}
+
+// TestPoolPump_ScheduleDrivenRunCreditsExactlyOnce is the regression guard
+// #550 requires: a schedule-driven start and stop must still credit runtime
+// exactly as before, with accounting firing exactly once per transition now
+// that applyDone() and handleSwitchEvent() both feed the same
+// noteRelayTransition() decision point instead of applyDone() deciding
+// unilaterally. The emulator never auto-generates a switch:N event for a
+// self-driven Switch.Set (#496), so this test's ONLY transition signal is the
+// applyDone() channel — exercising exactly the channel that must keep working
+// unaided when the observation channel is silent, as it always is in this
+// harness.
+func TestPoolPump_ScheduleDrivenRunCreditsExactlyOnce(t *testing.T) {
+	d := poolPumpWindowNow(t, -1*time.Hour, 1*time.Hour, false)
+	d.ScheduleEvalInjector = make(chan []byte, 4)
+	stop := runPoolPump(t, d)
+	defer stop()
+
+	if !waitActiveOutput(t, d, "0") {
+		t.Fatalf("setup: window contains now, pump should have started on its own")
+	}
+	if got := d.EmittedEventCount("pool.pump_start"); got != 1 {
+		t.Fatalf("expected exactly one pool.pump_start from the schedule-driven start, got %d", got)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+
+	// Move the window to a 1-minute slot two hours from now — setWindow() is
+	// the window fact's one writer (#476) and calls reconcile() itself — so
+	// desiredOutput() switches from "inside" to "outside" and the reconciler
+	// stops the pump, exactly as a real evening-stop schedule edge would.
+	// Negative bounds are deliberately avoided: desiredOutput() treats any
+	// negative F_WIN_START/F_WIN_STOP as "unknown" (-2, "do not act"), not
+	// "outside" — see its "window unknown: do not act" guard.
+	now := time.Now()
+	nowMin := now.Hour()*60 + now.Minute()
+	farStart := (nowMin + 120) % 1440
+	farStop := (farStart + 1) % 1440
+	if err := evalPoolPumpSchedule(d, fmt.Sprintf("setWindow(%d, %d)", farStart, farStop)); err != nil {
+		t.Fatalf("could not move the schedule window: %v", err)
+	}
+	if !waitActiveOutput(t, d, "-1") {
+		t.Fatalf("schedule-driven stop did not settle; active-output = %v",
+			kvsValue(d, "script/pool-pump/active-output"))
+	}
+	if got := d.EmittedEventCount("pool.pump_stop"); got != 1 {
+		t.Fatalf("expected exactly one pool.pump_stop from the schedule-driven stop, got %d "+
+			"(#550: the shared noteRelayTransition() guard must not double-count)", got)
+	}
+
+	// waitActiveOutput() above only guarantees active-output's OWN queued KVS
+	// write has landed; persistRuntimeState()'s runtime-sec/runtime-ts/
+	// turnover-today mirrors are three separate queueTask() calls (one 200ms
+	// task-queue tick each) that can still be in flight at that instant.
+	// Give them the same settle margin the rest of this file uses.
+	settlePoolPumpTaskQueue(t)
+
+	runtimeSec := parseKVSInt(t, d, "script/pool-pump/runtime-sec")
+	if runtimeSec < 1 {
+		t.Fatalf("expected runtime-sec >= 1 after a >=1s schedule-driven run, got %d", runtimeSec)
+	}
+}
+
 // === small helpers ===
 
 var jsLineComment = regexp.MustCompile(`(?m)//.*$`)

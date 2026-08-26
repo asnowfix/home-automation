@@ -375,7 +375,12 @@ var STORAGE_KEYS = {
                                     // day a count belongs to is derived from ts, never stored
                                     // or parsed as a date string.
   runtimeSecLegacy:  "runtime-sec",  // pre-#469 format, read once for migration then unused
-  runtimeDateLegacy: "runtime-date"  // pre-#469 format, read once for migration then unused
+  runtimeDateLegacy: "runtime-date", // pre-#469 format, read once for migration then unused
+  runStart:      "run-start"        // #550: epoch ms of the currently-open run interval, or
+                                    // "null" when none is open. Mirrors STATE.runStartTs so a
+                                    // script outage spanning a transition can be reconciled
+                                    // against real hardware at the NEXT boot -- see
+                                    // enforceOutputState()/reconcileMissedStop().
 };
 
 // State keys for KVS persistence (fire-and-forget writes only; reads use Script.storage,
@@ -1307,15 +1312,24 @@ function ensureRuntimeDay() {
     STATE.runtimeTs = reconciled.ts;
     if (STATE.runStartTs !== null) {
       STATE.runStartTs = Date.now();
+      storeStorageValue(STORAGE_KEYS.runStart, STATE.runStartTs);
     }
     persistRuntimeState(STATE.runtimeTodaySec);
   }
 }
 
-// Called (via applyDone) when the pump transitions OFF -> ON.
+// Called (via noteRelayTransition) when the pump transitions OFF -> ON.
 function startRuntimeAccounting() {
   ensureRuntimeDay();
   STATE.runStartTs = Date.now();
+  // #550: mirrored to Script.storage (cheap, synchronous, same pattern as
+  // scheduleMode) so a script outage that swallows the matching stop can be
+  // reconciled against real hardware at the NEXT boot -- see
+  // enforceOutputState()/reconcileMissedStop(). STATE.runStartTs itself is
+  // never restored as belief (a restart always re-derives from hardware
+  // truth); this mirror exists ONLY to recover the seconds an outage would
+  // otherwise silently drop.
+  storeStorageValue(STORAGE_KEYS.runStart, STATE.runStartTs);
   if (!STATE.runtimeFlushTimer) {
     // Periodic checkpoint while running — counts against the 5-timer budget,
     // but only exists while the pump is actually on (cleared in
@@ -1326,7 +1340,7 @@ function startRuntimeAccounting() {
   log("Runtime accounting started, today so far:", STATE.runtimeTodaySec, "s");
 }
 
-// Called (via applyDone) when the pump transitions ON -> OFF.
+// Called (via noteRelayTransition) when the pump transitions ON -> OFF.
 function stopRuntimeAccounting() {
   // #502: without this, a stop landing exactly at a day boundary -- before
   // the next 60s flushRuntimeCheckpoint() tick has a chance to split it --
@@ -1339,6 +1353,9 @@ function stopRuntimeAccounting() {
   if (STATE.runStartTs !== null) {
     STATE.runtimeTodaySec += (Date.now() - STATE.runStartTs) / 1000;
     STATE.runStartTs = null;
+    // #550: this stop was OBSERVED (this function only runs while the script
+    // is up), so the outage-recovery marker is cleared cleanly.
+    storeStorageValue(STORAGE_KEYS.runStart, null);
   }
   if (STATE.runtimeFlushTimer) {
     Timer.clear(STATE.runtimeFlushTimer);
@@ -1854,36 +1871,89 @@ function reconcileNow() {
 // a fresh stack.
 var RC_BUSY = false;      // an actuation is in flight
 var RC_TARGET = -1;       // the output the in-flight actuation drives towards
-// The output STATE.activeOutput held at the moment applyOutput() dispatched
-// the in-flight actuation. applyDone() used to re-read STATE.activeOutput
-// itself, AFTER the Switch.Set round trip, to recover this. But
-// handleSwitchEvent() writes that same variable from the relay's own
-// switch:0 status-change event, and only its override-adoption block is
-// guarded by RC_BUSY -- the write is not. If that event is delivered before
-// this actuation's Switch.Set completion callback, STATE.activeOutput
-// already holds the post-transition value by the time applyDone() reads it,
-// both edge branches below are skipped, and that transition's runtime
-// accounting and pool.pump_start/pump_stop event are silently lost. Capturing
-// the pre-transition value here, at dispatch time, removes the dependency on
-// delivery order entirely.
-var RC_WAS = -1;
 
 function applyOutputOn() {
   setOutput(RC_TARGET, true, applyDone);
 }
 
-// Edge-triggered side effects live here and ONLY here: this is the one
-// place that sees every on/off transition, for every caller, after the
-// hardware has actually moved.
+// === RELAY-TRANSITION-DRIVEN ACCOUNTING (#550) ===
 //
+// #550: runtime accounting used to live entirely in applyDone(), keyed off
+// this script's OWN belief (was it the one that just actuated?) rather than
+// what the relay actually did. That made accounting a function of WHO
+// actuated, not of WHAT happened -- a physical button press went through
+// applyOutput()/applyDone() and counted; a web-UI change wrote
+// STATE.activeOutput directly in handleSwitchEvent() and never reached
+// applyOutput() at all (reconcileNow()'s "want === STATE.activeOutput" guard
+// short-circuits once the fact already agrees), so it never counted. Confirmed
+// on hardware 2026-08-25: a 75s web-driven run left runStartTs null and
+// runtimeTodaySec at 0.
+//
+// noteRelayTransition() is now the ONLY place that calls
+// startRuntimeAccounting()/stopRuntimeAccounting() or emits
+// pool.pump_start/pool.pump_stop. Both applyDone() (this script's own
+// actuation completing) and handleSwitchEvent() (the switch:N status-change
+// notification firmware sends for EVERY relay transition, including this
+// script's own -- the previous RC_WAS comment already relied on this fact to
+// fix #479 finding 2) feed it the newly-observed output. It compares against
+// STATE.activeOutput as it stands *right now* and only acts on a genuine
+// -1<->non-1 edge:
+//
+//   - if the caller is the FIRST channel to report a given transition, the
+//     edge is real (STATE.activeOutput still holds the pre-transition value)
+//     and the hooks fire;
+//   - if the caller is the SECOND channel to report the SAME transition
+//     (e.g. the switch:N event that a self-driven Switch.Set also produces,
+//     arriving after applyDone() already processed the RPC completion, or
+//     vice versa if it arrives nested before), STATE.activeOutput already
+//     equals what it is reporting and the call is a deliberate, silent no-op.
+//
+// This makes a transition counted EXACTLY ONCE regardless of delivery order,
+// with no dependency on which of the two channels happens to observe it
+// first -- and it is what closes #550: applyOutput()/applyDone() are never
+// invoked at all for a web-UI (or any other out-of-band) change, so
+// handleSwitchEvent() is the ONLY channel that ever reports one, and it now
+// drives accounting exactly like it already drove STATE.activeOutput.
+//
+// Risk (see #550's PR description for the full writeup): applyDone() is
+// deterministic for every path this script itself drives (schedule, solar,
+// button, water-supply) -- it is a direct callback of the Shelly.call this
+// script issued, not a notification that could be dropped in transit. So
+// those paths keep exactly today's reliability even if the corresponding
+// switch:N notification is ever lost on real firmware. The one channel that
+// COULD go missing with no backstop is a genuinely out-of-band transition
+// (web UI, cloud, another script) whose notification never arrives at all --
+// there is no reconciliation elsewhere in this file that would notice
+// STATE.runStartTs disagreeing with STATE.activeOutput and self-heal it. A
+// lost START leaves that interval simply uncredited (matches today's
+// behaviour for the untracked case, #550 was filed over); a lost STOP leaves
+// runStartTs open, which is under-credited today (#547: the 60s checkpoint
+// never fires, so nothing is credited until the next stop overwrites it) and
+// would become over-credited once #547 is fixed (a live checkpoint crediting
+// elapsed time while the pump is actually off) -- exactly the interaction
+// #550 was filed to flag, not to resolve.
+function noteRelayTransition(newOutput) {
+  var was = STATE.activeOutput;
+  STATE.activeOutput = newOutput;
+  if (was === newOutput) return;   // already accounted for by the other channel
+  if (was === -1 && newOutput !== -1) {
+    startRuntimeAccounting();
+    Shelly.emitEvent("pool.pump_start",
+                     {speed: effectiveSpeed(CONFIG.preferredSpeed), switch_id: newOutput});
+  } else if (was !== -1 && newOutput === -1) {
+    stopRuntimeAccounting();
+    Shelly.emitEvent("pool.pump_stop", {reason: F_WATER ? "water supply" : "policy"});
+  }
+}
+
 // Invoked as a Shelly.call/setOutput completion: (result, error_code,
 // error_message). A failed actuation must NOT be believed as if it
-// succeeded -- STATE.activeOutput stays at RC_WAS, not RC_TARGET, so
-// reconcileNow()'s "want === STATE.activeOutput" check still disagrees with
-// reality and queues a retry on the next tick. Without this check, a failed
-// ON left the reconciler believing the pump had started (no retry, pool
-// silently stops filtering) and a failed OFF left it believing the pump had
-// stopped while it kept running.
+// succeeded -- STATE.activeOutput is left untouched (noteRelayTransition() is
+// not called at all), so reconcileNow()'s "want === STATE.activeOutput" check
+// still disagrees with reality and queues a retry on the next tick. Without
+// this check, a failed ON left the reconciler believing the pump had started
+// (no retry, pool silently stops filtering) and a failed OFF left it
+// believing the pump had stopped while it kept running.
 function applyDone(result, error_code, error_message) {
   if (error_code) {
     log("apply: FAILED, output", RC_TARGET, "error", error_code, error_message);
@@ -1894,22 +1964,16 @@ function applyDone(result, error_code, error_message) {
     return;
   }
 
-  var was = RC_WAS;
-  STATE.activeOutput = RC_TARGET;
-
-  // Runtime/turnover tracking (#402), BEFORE saveState(): both enqueue their
-  // KVS mirrors on the same 200ms task queue, and callers (and tests) treat
-  // the active-output write as the "transition finished" marker. Queueing the
-  // runtime mirrors first keeps active-output last, so observing it means the
-  // runtime figures for that interval are already persisted.
-  if (was === -1 && RC_TARGET !== -1) {
-    startRuntimeAccounting();
-    Shelly.emitEvent("pool.pump_start",
-                     {speed: effectiveSpeed(CONFIG.preferredSpeed), switch_id: RC_TARGET});
-  } else if (was !== -1 && RC_TARGET === -1) {
-    stopRuntimeAccounting();
-    Shelly.emitEvent("pool.pump_stop", {reason: F_WATER ? "water supply" : "policy"});
-  }
+  // #550: STATE.activeOutput write and runtime/turnover accounting both now
+  // happen inside noteRelayTransition() -- see its comment above -- so this
+  // actuation's completion and an out-of-band observation of the very same
+  // transition can never double-count. BEFORE saveState(): persistRuntimeState()
+  // (inside start/stopRuntimeAccounting) enqueues its KVS mirror on the same
+  // 200ms task queue, and callers (and tests) treat the active-output write as
+  // the "transition finished" marker. Queueing the runtime mirrors first keeps
+  // active-output last, so observing it means the runtime figures for that
+  // interval are already persisted.
+  noteRelayTransition(RC_TARGET);
 
   saveState();
 
@@ -1929,9 +1993,6 @@ function applyOutput(target) {
 
   RC_BUSY = true;
   RC_TARGET = target;
-  // Captured NOW, not re-read from STATE.activeOutput inside applyDone()
-  // after the RPC round trip -- see the comment on RC_WAS above.
-  RC_WAS = STATE.activeOutput;
   if (target !== STATE.activeOutput) FUSE_CHANGES.push(Date.now());
   log("apply:", STATE.activeOutput, "->", target);
 
@@ -1989,7 +2050,10 @@ function handleSwitchEvent(info) {
   log("Switch event:", info);
 
   // The relay moved. Believe the hardware — this is the only place
-  // STATE.activeOutput is written outside applyDone().
+  // STATE.activeOutput is written outside applyDone(), and (#550) the only
+  // place a genuinely out-of-band transition ever reaches
+  // noteRelayTransition() at all, since applyOutput()/applyDone() are never
+  // invoked for one.
   var observed = info.state ? info.id : -1;
 
   // An out-of-band change (web UI, daemon, physical toggle) that
@@ -2006,7 +2070,10 @@ function handleSwitchEvent(info) {
     }
   }
 
-  STATE.activeOutput = observed;
+  // #550: was a direct "STATE.activeOutput = observed" write. Runtime
+  // accounting now rides along on the same observation -- see
+  // noteRelayTransition()'s comment above applyDone().
+  noteRelayTransition(observed);
   saveState();
   reconcile("switch event");
 }
@@ -2631,6 +2698,64 @@ function handleNightStop() {
 }
 
 
+// === #550: RECONCILE A TRANSITION MISSED WHILE THE SCRIPT WAS DOWN ===
+//
+// noteRelayTransition() covers every transition observed WHILE the script is
+// running -- that channel cannot be beaten by delivery order (see its
+// comment above applyDone()). The one window it cannot see through is the
+// script not running at all: if the script is up, its event handler
+// receives every relay transition (that is the whole premise #550 relies on
+// to close the web-UI gap); if it is down, it cannot do accounting at any
+// point during the outage regardless of design. That whole class is closed
+// here, not with a periodic re-check: enforceOutputState() already reads
+// real hardware truth right after boot ("hardware truth overrides any stale
+// KVS value" — see finishLoadState()'s comment), which is exactly the
+// reconciliation point needed.
+//
+// MISSED_STOP_TS carries the one value reconcileMissedStop() needs across
+// the queueTask() hop below without allocating a closure — same pattern as
+// RC_TARGET for applyOutputOn().
+var MISSED_STOP_TS = null;
+
+function reconcileMissedStop() {
+  var restoredStartTs = MISSED_STOP_TS;
+  MISSED_STOP_TS = null;
+  if (restoredStartTs === null) return;
+  ensureRuntimeDay();
+  // #550: the relay is OFF now but Script.storage still remembers an open
+  // interval from before this boot -- the matching stop transition happened
+  // while the script could not have observed it.
+  //
+  // This is NOT the mirror of the missed-START branch below, and crediting
+  // "now - restoredStartTs" here (an earlier version of this function did
+  // exactly that) is a bug that inverts the safety direction, not a harmless
+  // symmetry:
+  //
+  //   - missed START: the relay is ON, so the interval is opened AT INIT
+  //     TIME. The real start was earlier than that, so this credits LESS
+  //     than reality -- under-credit, bounded, safe.
+  //   - missed STOP: the relay is OFF now, but the real stop happened at
+  //     some unknown point DURING the outage, strictly before "now". Crediting
+  //     up to "now" credits MORE than reality, by an amount equal to however
+  //     long the pump was actually off before this restart -- an outage of
+  //     hours or days (#530 saw days) turns into hours or days of pure
+  //     over-credit. #526's runtime recovery would then believe the day's
+  //     filtration is satisfied when it is not, and SKIP filtration the pool
+  //     actually needs -- silently, which is strictly worse than the
+  //     under-credit direction (#526 just runs the pump a little more; a
+  //     cost in electricity, not in water quality).
+  //
+  // Nothing anywhere records when the relay actually went off during the
+  // outage -- persistRuntimeState()'s last-flushed {sec, ts} already
+  // contains everything known up to the last checkpoint or stop, and that is
+  // genuinely all there is. So this interval's duration is unrecoverable,
+  // and the only safe choice is to credit ZERO: clear the marker, log the
+  // gap, and let the day under-count rather than invent a number.
+  storeStorageValue(STORAGE_KEYS.runStart, null);
+  log("#550: reconciling a stop missed during a script outage (relay OFF, " +
+      "open marker from", restoredStartTs, ") - duration unrecoverable, crediting 0s");
+}
+
 // === INITIALIZATION ===
 function enforceOutputState() {
   log("Enforcing output state at startup...");
@@ -2697,9 +2822,33 @@ function enforceOutputState() {
   // restart (STATE.activeOutput !== -1) -- exactly the #474 mechanism, at a
   // second call site the reconciler refactor introduced. Deferred the same
   // way as setupMQTT(): a named function passed to queueTask allocates no
-  // closure and runs on a fresh stack.
+  // closure and runs on a fresh stack. reconcileMissedStop() below is
+  // deferred for the identical reason -- same call site, same depth.
+  //
+  // #550: the second reconciliation case -- NOT a mirror of the branch
+  // above, despite the superficial symmetry (see reconcileMissedStop()'s
+  // comment for why crediting the two the same way is a bug, not a
+  // simplification). STATE.activeOutput above is real hardware truth;
+  // restoredRunStart is what Script.storage last remembered about an
+  // interval that may still be open.
+  //
+  // Relay ON always wins the race to "start fresh at init time" regardless
+  // of restoredRunStart: the exact pre-restart start instant is
+  // unrecoverable either way, and starting fresh under-credits by
+  // construction (safe -- see reconcileMissedStop()).
+  //
+  // Relay OFF with restoredRunStart still set means the matching stop
+  // happened while the script could not observe it (see
+  // reconcileMissedStop()'s comment for why that can only happen across an
+  // outage of the script itself, never while it is running) -- and unlike
+  // the ON case, there is no safe "credit to now" here: reconcileMissedStop()
+  // credits zero rather than guess.
+  var restoredRunStart = loadStorageNumber(STORAGE_KEYS.runStart);
   if (STATE.activeOutput !== -1) {
     queueTask(startRuntimeAccounting);
+  } else if (restoredRunStart !== null) {
+    MISSED_STOP_TS = restoredRunStart;
+    queueTask(reconcileMissedStop);
   }
 }
 

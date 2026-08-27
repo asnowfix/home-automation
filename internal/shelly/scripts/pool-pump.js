@@ -1437,6 +1437,14 @@ function stopRuntimeAccounting() {
 // only as STATE.runStartTs/the persisted total staying put, which is how
 // #547 went unnoticed for 7h32m in the first place.
 function flushRuntimeCheckpoint() {
+  // #523: this tick only exists while the pump is running -- exactly the
+  // window where a missed "protected" edge would leave F_WATER stuck false
+  // and the interlock defeated while the relay keeps turning. Reconciling
+  // here bounds that dangerous direction to at most one 60s interval instead
+  // of surviving until a restart. The other direction (F_WATER stuck true,
+  // pump idle) cannot be caught here -- this tick does not run while the
+  // pump is off -- see handleDailyCheck() for that half.
+  // TEMP-DISABLED reconcileWaterLevel();
   ensureRuntimeDay();
   if (STATE.runStartTs === null) return;
   var elapsedSec = (Date.now() - STATE.runStartTs) / 1000;
@@ -1760,6 +1768,29 @@ function setWater(active) {
   // reconciling -- extendWindowForShortfall() is a no-op if nothing is owed.
   if (!active) extendWindowForShortfall();
   reconcile(active ? "water supply on" : "water supply off");
+}
+
+// #523: F_WATER used to be written ONLY from handleInputEvent() -- if an
+// edge is ever missed, the fact stays wrong forever, in either direction:
+// stuck true (pump idle, costs filtration) or stuck false (the interlock
+// defeated while the pump keeps running -- the dangerous direction, since
+// F_WATER is checked first in desiredOutput(), ahead of everything
+// including solar). This re-derives the fact from the same local call
+// enforceOutputState()/init() already use for the boot-time read, so a
+// missed edge self-corrects instead of surviving until a restart.
+//
+// setWater() is the fact's one writer (see F_WATER's declaration above) and
+// is already a no-op when the level agrees, so calling this on every tick
+// of an already-running timer costs one local getComponentStatus() call and
+// nothing else in the common case -- no new object, no new closure.
+//
+// No new timer: this is called from two ticks that already exist -- see
+// their own call sites for why each is the natural home for its half of the
+// bound (docs/pool-pump.md "Timer Budget" -- adding a 5th timer here would
+// exhaust the budget for no benefit over reusing the two that already run).
+function reconcileWaterLevel() {
+  var input0 = Shelly.getComponentStatus('input:0');
+  if (input0 && ("state" in input0)) setWater(input0.state);
 }
 
 function setWindow(startMin, stopMin) {
@@ -2818,6 +2849,18 @@ function decideModeFromForecast() {
 // === SCHEDULE EVENT HANDLERS ===
 function handleDailyCheck() {
   log('Daily check event');
+
+  // #523: unlike flushRuntimeCheckpoint()'s 60s tick (see its own comment),
+  // this job runs once a day regardless of whether the pump is on -- the
+  // only tick in the script that is unconditional in that sense -- so it is
+  // the natural home for the OTHER direction: F_WATER stuck true (pump idle,
+  // no flush timer running to catch it), which costs filtration silently
+  // rather than defeating a safety interlock. Runs before the mode check
+  // below for the same reason performDailyModeCheck() itself already runs
+  // during protection (see the comment on that call): a stale fact must not
+  // block today's mode decision, which touches the window via setWindow(),
+  // not the relay directly.
+  // TEMP-DISABLED reconcileWaterLevel();
 
   // #502: this @sunrise job runs every day in both summer and winter mode,
   // unlike handleNightStop()'s midnight reset (winter-only). It is the

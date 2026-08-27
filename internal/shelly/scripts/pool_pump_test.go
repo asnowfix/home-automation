@@ -920,6 +920,226 @@ func settlePoolPumpTaskQueue(t *testing.T) {
 	time.Sleep(2 * time.Second)
 }
 
+// === #523: F_WATER level reconciliation ===
+//
+// F_WATER used to be written ONLY from handleInputEvent() — a missed edge
+// left it wrong until the next edge arrived, or forever. These two tests
+// simulate a missed edge directly (mutating ComponentStatus without
+// delivering the matching input:0 event — the emulator's equivalent of the
+// device seeing a level change its script never got told about) and prove
+// each direction self-corrects at the production call site
+// reconcileWaterLevel() is wired into, not via a synthetic test-only hook.
+//
+// Both tests share the same forecast-server trick as
+// TestPoolPump_WaterSupplyRestoresSpeed: handleDailyCheck() fires
+// automatically once at the end of init AND is invoked a second time
+// on-demand below, and a forecast body with no "hourly" field makes
+// onForecast() bail out before touching the run window, so neither call can
+// race these tests by rewriting the window out from under them.
+func poolPumpBrokenForecastServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestPoolPump_WaterLevelReconciliation_StuckUnprotectedSelfCorrects is the
+// dangerous direction: a missed "protected" edge leaves F_WATER stuck false
+// while the physical level says the supply IS protected, defeating the
+// interlock — desiredOutput()'s `if (F_WATER) return -1` never fires because
+// F_WATER itself is wrong — and the pump keeps running. Without
+// reconcileWaterLevel() wired into flushRuntimeCheckpoint() (the 60s
+// checkpoint tick that already runs for as long as the pump is on, see that
+// function's own comment), nothing but a restart would ever notice.
+func TestPoolPump_WaterLevelReconciliation_StuckUnprotectedSelfCorrects(t *testing.T) {
+	buf := readPoolPumpScript(t)
+	mc := mqtt.NewMockClient()
+
+	kvs := controllerKVS()
+	kvs["script/pool-pump/speed"] = "max"
+	kvs["script/pool-pump/max-speed"] = "2"
+
+	brokenForecast := poolPumpBrokenForecastServer(t)
+
+	now := time.Now()
+	deviceState := &script.DeviceState{
+		KVS: kvs,
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  brokenForecast.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus:      pro3ComponentStatus(),
+		Schedules:            poolPumpSummerSchedules(now.Add(-1*time.Hour), now.Add(1*time.Hour)),
+		ScheduleEvalInjector: make(chan []byte, 4),
+	}
+
+	ctx, cancel := poolPumpRunContext(t, mc)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	// The window contains "now" and F_WATER starts false, so the reconciler
+	// starts the pump at boot with no event at all (#441).
+	if !waitFor(eventTimeout, 100*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "2"
+	}) {
+		cancel()
+		<-done
+		t.Fatalf("setup: pump did not start inside the run window, active-output = %v",
+			kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+
+	// Simulate a MISSED "protected" edge: the physical level changes, but no
+	// input:0 event is delivered to the script — mutating ComponentStatus
+	// directly, instead of injecting an event, is the whole point.
+	if !deviceState.SetComponentStatusField("input:0", "state", true) {
+		t.Fatalf("setup: input:0 component status missing")
+	}
+
+	// Confirm the missed edge really is invisible without reconciliation —
+	// otherwise this test would not be exercising what it claims to.
+	time.Sleep(300 * time.Millisecond)
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "2" {
+		cancel()
+		<-done
+		t.Fatalf("test setup broken: pump stopped without any event or reconciliation tick, active-output = %v", v)
+	}
+
+	// Fire the exact tick flushRuntimeCheckpoint() runs on every 60s while
+	// the pump is on — the production call site, not a synthetic hook.
+	if err := evalPoolPumpSchedule(deviceState, "flushRuntimeCheckpoint()"); err != nil {
+		cancel()
+		<-done
+		t.Fatalf("failed to inject flushRuntimeCheckpoint(): %v", err)
+	}
+
+	corrected := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "-1"
+	})
+
+	cancel()
+	<-done
+
+	if !corrected {
+		t.Fatalf("pump did not stop after flushRuntimeCheckpoint() reconciled the water level — "+
+			"F_WATER stayed stuck false (interlock defeated) despite input:0.state=true; active-output = %v",
+			kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+}
+
+// TestPoolPump_WaterLevelReconciliation_StuckProtectedSelfCorrects is the
+// other direction: a missed "restored" edge leaves F_WATER stuck true while
+// the physical level says the supply has cleared, so the pump sits idle —
+// costing filtration silently, not a safety violation, but the interlock
+// this campaign built is supposed to clear itself once the supply allows it.
+// This direction happens while the pump is OFF, exactly when
+// flushRuntimeCheckpoint()'s tick does not run (it only exists while the
+// pump is on) — exercising handleDailyCheck() instead, the other half of the
+// #523 fix.
+func TestPoolPump_WaterLevelReconciliation_StuckProtectedSelfCorrects(t *testing.T) {
+	buf := readPoolPumpScript(t)
+	mc := mqtt.NewMockClient()
+
+	kvs := controllerKVS()
+	kvs["script/pool-pump/speed"] = "max"
+	kvs["script/pool-pump/max-speed"] = "2"
+
+	brokenForecast := poolPumpBrokenForecastServer(t)
+
+	cs := pro3ComponentStatus()
+	cs["input:0"] = map[string]interface{}{"id": 0, "state": true} // protected from boot
+
+	now := time.Now()
+	deviceState := &script.DeviceState{
+		KVS: kvs,
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  brokenForecast.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus:      cs,
+		Schedules:            poolPumpSummerSchedules(now.Add(-1*time.Hour), now.Add(1*time.Hour)),
+		ScheduleEvalInjector: make(chan []byte, 4),
+	}
+
+	ctx, cancel := poolPumpRunContext(t, mc)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	// waitPoolPumpInit only waits for the EARLY "schedule-mode" KVS write
+	// finishContinueInit() makes before the four-step initSteps chain (sys
+	// config, water-supply check, component names, schedule verification)
+	// even starts -- see continueInit()/finishContinueInit() in pool-pump.js.
+	// Mutating ComponentStatus before that chain reaches its own Step 2 water
+	// check would flip the level out from under it BEFORE F_WATER is ever
+	// set true at boot, which is not the scenario this test is for (a missed
+	// edge AFTER a correctly-observed protected boot). settlePoolPumpTaskQueue
+	// lets the whole chain -- and the automatic first handleDailyCheck() it
+	// queues at the end -- finish first.
+	settlePoolPumpTaskQueue(t)
+
+	// Protected from boot: the window is open, but the pump must not have
+	// started while input:0.state is true.
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
+		cancel()
+		<-done
+		t.Fatalf("setup: pump started despite input:0.state=true at boot, active-output = %v", v)
+	}
+
+	// Simulate a MISSED "restored" edge: the physical level clears, but no
+	// input:0 event is delivered — mutating ComponentStatus directly.
+	if !deviceState.SetComponentStatusField("input:0", "state", false) {
+		t.Fatalf("setup: input:0 component status missing")
+	}
+
+	// Confirm the missed edge really is invisible without reconciliation.
+	settlePoolPumpTaskQueue(t)
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
+		cancel()
+		<-done
+		t.Fatalf("test setup broken: pump started without any event or reconciliation tick, active-output = %v", v)
+	}
+
+	// Fire the exact @sunrise job handleDailyCheck() runs once a day — the
+	// production call site, not a synthetic hook.
+	if err := evalPoolPumpSchedule(deviceState, "handleDailyCheck()"); err != nil {
+		cancel()
+		<-done
+		t.Fatalf("failed to inject handleDailyCheck(): %v", err)
+	}
+
+	corrected := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "2"
+	})
+
+	cancel()
+	<-done
+
+	if !corrected {
+		t.Fatalf("pump did not start after handleDailyCheck() reconciled the water level — "+
+			"F_WATER stayed stuck true despite input:0.state=false; active-output = %v",
+			kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+}
+
 // === Runtime/turnover tracking (#402) ===
 //
 // controllerKVS() sets preferred speed "eco" and doesn't override

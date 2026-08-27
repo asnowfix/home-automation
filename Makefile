@@ -217,6 +217,13 @@ logs-local-daemon:
 #                                                                          land in the hot package
 #                                                                          itself, unlike #568's
 #                                                                          separate parallel package)
+#   2026-08-27  internal/shelly/scripts  599.953s under -race  ->  660s  (#523's reconcileWaterLevel()
+#                                                                          and its two tests removed
+#                                                                          per #576 review -- one of
+#                                                                          the three new tests, plus
+#                                                                          TestPoolPump_WaterSupplyOverridesSolar,
+#                                                                          remains and lands here close
+#                                                                          to the #552-split baseline)
 #   2026-08-30  internal/shelly/scripts  591.484s under -race  ->  652s  (unchanged: #421's
 #               TestPoolPump_TaskQueueThrottlesOnCallsInFlight is a source-level regex check, no
 #               emulator run, negligible added time)
@@ -242,7 +249,7 @@ TESTFLAGS ?= -race
 # five times across workflows against `make test` twice, so a timeout that
 # covers only `test` covers the minority case -- which is exactly how #552
 # survived its first fix.
-TESTTIMEOUT ?= 685s
+TESTTIMEOUT ?= 660s
 
 test: build
 	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...

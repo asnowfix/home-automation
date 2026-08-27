@@ -87,7 +87,9 @@ func Regions(src []byte) ([]Region, error) {
 		return nil, fmt.Errorf("jstarget: failed to load vendored acorn: %w", err)
 	}
 
-	vm.Set("__jstargetSrc", string(src))
+	if err := vm.Set("__jstargetSrc", string(src)); err != nil {
+		return nil, fmt.Errorf("jstarget: failed to bind source into goja VM: %w", err)
+	}
 	parseResult, err := vm.RunString(jstargetParseScript)
 	if err != nil {
 		return nil, fmt.Errorf("jstarget: acorn parse failed: %w", err)

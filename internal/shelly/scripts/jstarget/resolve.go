@@ -227,20 +227,24 @@ func identifierName(n any) (string, bool) {
 // -- in particular if one Region's Start falls strictly inside another's
 // [Start, End) span, which is what a "@target daemon" construct nested
 // inside another "@target daemon" (or any other target) construct produces.
+//
+// Checking only adjacent pairs is sufficient: since sortedRegions is sorted
+// by Start, if a Region overlaps any later Region, it necessarily overlaps
+// its immediate successor too (the successor's Start is the smallest of all
+// the later Starts, so it is the first to fall inside the earlier Region's
+// span, if any does).
 func checkNesting(sortedRegions []Region) error {
-	for i := 0; i < len(sortedRegions); i++ {
+	for i := 0; i+1 < len(sortedRegions); i++ {
 		outer := sortedRegions[i]
-		for j := i + 1; j < len(sortedRegions); j++ {
-			inner := sortedRegions[j]
-			if inner.Start >= outer.End {
-				break // sorted by Start: no later region can be nested in outer
-			}
-			return fmt.Errorf(
-				"jstarget: nested @target annotation: %q [%d,%d) target=%s contains %q [%d,%d) target=%s",
-				outer.Name, outer.Start, outer.End, outer.Target,
-				inner.Name, inner.Start, inner.End, inner.Target,
-			)
+		inner := sortedRegions[i+1]
+		if inner.Start >= outer.End {
+			continue
 		}
+		return fmt.Errorf(
+			"jstarget: nested @target annotation: %q [%d,%d) target=%s contains %q [%d,%d) target=%s",
+			outer.Name, outer.Start, outer.End, outer.Target,
+			inner.Name, inner.Start, inner.End, inner.Target,
+		)
 	}
 	return nil
 }

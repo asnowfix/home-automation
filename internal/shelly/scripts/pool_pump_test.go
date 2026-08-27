@@ -139,10 +139,15 @@ const (
 // assert timing, and they produce precise failure messages. When this context
 // is the binding deadline instead, the VM is killed mid-test and whatever
 // assertion runs next reports a behavioural fault that never happened.
-func poolPumpRunContext(t *testing.T) (context.Context, context.CancelFunc) {
+//
+// mc is the MQTT client the script's ctx carries (pkg/shelly/mqtt.GetClient) —
+// see pkg/shelly/mqtt/client.go. Each caller supplies its own, so tests no
+// longer share process-global MQTT client state and never need a Reset
+// between runs.
+func poolPumpRunContext(t *testing.T, mc mqtt.Client) (context.Context, context.CancelFunc) {
 	t.Helper()
 	return context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mc),
 		2*time.Minute,
 	)
 }
@@ -226,11 +231,9 @@ func pro1Schedules() []map[string]interface{} {
 func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	deviceState := &script.DeviceState{
@@ -315,11 +318,9 @@ func poolPumpSchedulesWrapped() []map[string]interface{} {
 func TestPoolPump_InitVerifiesWrappedSchedules(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	deviceState := &script.DeviceState{
@@ -364,9 +365,7 @@ func TestPoolPump_InitVerifiesWrappedSchedules(t *testing.T) {
 func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 
@@ -412,7 +411,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 
 	// 20s ceiling: init (up to 9s) + two water-supply transitions (up to 5s
 	// each, see below) — generous headroom, not the expected runtime.
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -493,9 +492,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 8)
 
@@ -507,7 +504,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -588,9 +585,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 8)
 
@@ -606,7 +601,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	// unaffected by #402 — cycleOutputs() bypasses activateOutput()) + two
 	// water-supply transitions (up to 5s each, see below) — generous
 	// headroom, not the expected runtime.
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -760,14 +755,12 @@ func assertSwitchOutput(t *testing.T, deviceState *script.DeviceState, want bool
 func TestPoolPump_WaterSupplyFlapFalseThenTrue(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 8)
 	deviceState := poolPumpWaterSupplyFlapDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -851,14 +844,12 @@ func TestPoolPump_WaterSupplyFlapFalseThenTrue(t *testing.T) {
 func TestPoolPump_WaterSupplyFlapTrueThenFalse(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 8)
 	deviceState := poolPumpWaterSupplyFlapDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1004,9 +995,7 @@ func parseKVSFloat(t *testing.T, deviceState *script.DeviceState, key string) fl
 func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 
@@ -1021,7 +1010,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1094,7 +1083,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 // Script.storage isn't reset between phases, only whatever the running
 // script itself wrote to it, exactly like Script.Stop/Script.Start on a
 // real device reusing the same on-flash storage.
-func runPoolPumpPhase(t *testing.T, buf []byte, deviceState *script.DeviceState) (stop func()) {
+func runPoolPumpPhase(t *testing.T, buf []byte, deviceState *script.DeviceState, mc mqtt.Client) (stop func()) {
 	t.Helper()
 	// KVS (unlike Storage) is deliberately NOT reset between phases either —
 	// but that means "schedule-mode" is already present in deviceState.KVS
@@ -1105,7 +1094,7 @@ func runPoolPumpPhase(t *testing.T, buf []byte, deviceState *script.DeviceState)
 	// it first so the predicate can only be satisfied by a fresh write.
 	deviceState.DeleteKVSValue("script/pool-pump/schedule-mode")
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	done := make(chan error, 1)
 	go func() {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
@@ -1188,9 +1177,7 @@ func localDayNumber(epochSec int64) int64 {
 func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	cs := pro3ComponentStatus()
@@ -1207,7 +1194,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 	// --- Phase 1: pump runs briefly, then a real water-supply-ON event
 	// stops it, which calls stopRuntimeAccounting() -> persistRuntimeState()
 	// -> the script's own storeStorageValue() write. ---
-	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
 	time.Sleep(1200 * time.Millisecond)
 	injector <- shellyInputEvent(0, true)
 	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
@@ -1235,7 +1222,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 	cs2["input:0"] = map[string]interface{}{"id": 0, "state": true}
 	deviceState.ComponentStatus = cs2
 
-	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop2()
 
 	restoredSec := parseKVSInt(t, deviceState, "script/pool-pump/runtime-sec")
@@ -1284,9 +1271,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 func TestPoolPump_MissedStopReconciledAtNextBoot(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	cs := pro1ComponentStatus()
 	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true} // pump on at boot
@@ -1302,7 +1287,7 @@ func TestPoolPump_MissedStopReconciledAtNextBoot(t *testing.T) {
 	// startRuntimeAccounting() persists Script.storage["run-start"], then the
 	// script is killed by cancelling its context — no stop event, no
 	// stopRuntimeAccounting(), the marker is never cleared. ---
-	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
 	time.Sleep(1200 * time.Millisecond)
 	stop1()
 
@@ -1326,7 +1311,7 @@ func TestPoolPump_MissedStopReconciledAtNextBoot(t *testing.T) {
 	cs2["switch:0"] = map[string]interface{}{"id": 0, "output": false}
 	deviceState.ComponentStatus = cs2
 
-	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop2()
 
 	// Give the queueTask() chain (activeOutput write, scheduleMode write,
@@ -1362,9 +1347,7 @@ func TestPoolPump_MissedStopReconciledAtNextBoot(t *testing.T) {
 func TestPoolPump_RuntimeAccounting_PreviousDayRestartResets(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	deviceState := &script.DeviceState{
 		KVS:             controllerKVS(),
@@ -1373,13 +1356,13 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartResets(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
 	stop1()
 
 	yesterday := time.Now().AddDate(0, 0, -1)
 	seedRuntimeStorage(deviceState, 43200, yesterday.Unix()) // 12h — clearly stale if carried over
 
-	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop2()
 
 	got := readRuntimeStorage(t, deviceState)
@@ -1423,9 +1406,7 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartResets(t *testing.T) {
 func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	kvs := controllerKVS()
 	kvs["script/pool-pump/logging"] = "true"
@@ -1437,7 +1418,7 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t
 		Schedules:       poolPumpSchedules(),
 	}
 
-	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
 	stop1()
 
 	yesterday := time.Now().AddDate(0, 0, -1)
@@ -1450,7 +1431,7 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t
 	// deferred-log path (e.g. a reference error in one of the queued
 	// closures) still fails this test even though goja cannot reproduce the
 	// stack overflow itself.
-	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop2()
 
 	got := readRuntimeStorage(t, deviceState)
@@ -1484,9 +1465,7 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t
 func TestPoolPump_RuntimeAccounting_RolloverPersistsDiscardedFigure(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	deviceState := &script.DeviceState{
 		KVS:             controllerKVS(),
@@ -1495,14 +1474,14 @@ func TestPoolPump_RuntimeAccounting_RolloverPersistsDiscardedFigure(t *testing.T
 		Schedules:       poolPumpSchedules(),
 	}
 
-	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
 	stop1()
 
 	yesterday := time.Now().AddDate(0, 0, -1)
 	const discardedSec = 18341 // matches the live filtration-hiver reading in #530
 	seedRuntimeStorage(deviceState, discardedSec, yesterday.Unix())
 
-	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop2()
 
 	// The rollover's log()/storeValue() pair is deferred via queueTask() (the
@@ -1543,9 +1522,7 @@ func TestPoolPump_RuntimeAccounting_RolloverPersistsDiscardedFigure(t *testing.T
 func TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	cs := pro3ComponentStatus()
@@ -1559,7 +1536,7 @@ func TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
 	time.Sleep(1200 * time.Millisecond)
 	injector <- shellyInputEvent(0, true)
 	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
@@ -1585,7 +1562,7 @@ func TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS(t *testing.T) {
 	cs2["input:0"] = map[string]interface{}{"id": 0, "state": true}
 	deviceState.ComponentStatus = cs2
 
-	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop2()
 
 	// applyRuntimeState() re-persists to Script.storage synchronously as
@@ -1623,9 +1600,7 @@ func TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS(t *testing.T) {
 func TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	deviceState := &script.DeviceState{
 		KVS: controllerKVS(),
@@ -1637,7 +1612,7 @@ func TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate(t *testing.
 		Schedules:       poolPumpSchedules(),
 	}
 
-	stop := runPoolPumpPhase(t, buf, deviceState)
+	stop := runPoolPumpPhase(t, buf, deviceState, mc)
 	stop()
 
 	got := readRuntimeStorage(t, deviceState)
@@ -1669,9 +1644,7 @@ func TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate(t *testing.
 func TestPoolPump_RuntimeAccounting_AnchorDoesNotDriftAcrossCheckpoints(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	evalCh := make(chan []byte, 4)
 	cs := pro3ComponentStatus()
@@ -1685,7 +1658,7 @@ func TestPoolPump_RuntimeAccounting_AnchorDoesNotDriftAcrossCheckpoints(t *testi
 		ScheduleEvalInjector: evalCh,
 	}
 
-	stop := runPoolPumpPhase(t, buf, deviceState)
+	stop := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop()
 
 	// Boot itself already performed one real persistRuntimeState() call
@@ -1736,9 +1709,7 @@ func TestPoolPump_RuntimeAccounting_AnchorDoesNotDriftAcrossCheckpoints(t *testi
 func TestPoolPump_RuntimeAccounting_StopRightAfterMidnightDoesNotCreditWholeRun(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	evalCh := make(chan []byte, 4)
 	injector := make(chan []byte, 4)
@@ -1754,7 +1725,7 @@ func TestPoolPump_RuntimeAccounting_StopRightAfterMidnightDoesNotCreditWholeRun(
 		ScheduleEvalInjector: evalCh,
 	}
 
-	stop := runPoolPumpPhase(t, buf, deviceState)
+	stop := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop()
 
 	// Stand in for "this run started yesterday and had accrued 20000s by
@@ -1835,10 +1806,7 @@ func solarPayload(availableW float64, tsUnixSec int64) []byte {
 func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	mqtt.SetClient(mc)
-	t.Cleanup(mqtt.ResetClient)
 
 	deviceState := &script.DeviceState{
 		KVS:             solarKVS(nil),
@@ -1847,7 +1815,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1906,10 +1874,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	mqtt.SetClient(mc)
-	t.Cleanup(mqtt.ResetClient)
 
 	// Ceiling target = poolVolume(46) * solarMaxTurnover(0.001) / flowRate(≈21.38 m3/h) * 3600s ≈ 7.7s.
 	kvs := solarKVS(map[string]string{"solar-max-turnover": "0.001"})
@@ -1924,7 +1889,7 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1983,10 +1948,7 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 func TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	mqtt.SetClient(mc)
-	t.Cleanup(mqtt.ResetClient)
 
 	// Same tiny ceiling override as TestPoolPump_SolarRespectsHardCeiling
 	// (~7.7s target), so a modest injected sec total blocks solar start.
@@ -2001,7 +1963,7 @@ func TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart(t *testing.
 		ScheduleEvalInjector: evalCh,
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -2065,9 +2027,7 @@ func TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart(t *testing.
 func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 
@@ -2079,7 +2039,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -2128,10 +2088,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	mqtt.SetClient(mc)
-	t.Cleanup(mqtt.ResetClient)
 
 	// solar-stale-ms defaults to 300000 (5 min) via CONFIG_SCHEMA — not
 	// overridden here, so this exercises the real default.
@@ -2144,7 +2101,7 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -2349,11 +2306,9 @@ func poolPumpSummerSchedulesWrapped(start, stop time.Time) []map[string]interfac
 func poolPumpRewriteResult(t *testing.T, deviceState *script.DeviceState, wantOutput string) (string, []map[string]interface{}) {
 	t.Helper()
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	buf := readPoolPumpScript(t)
@@ -2700,11 +2655,9 @@ func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testi
 		Schedules:       poolPumpSummerSchedules(start, stop),
 	}
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	buf := readPoolPumpScript(t)
@@ -2787,11 +2740,9 @@ func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
 		},
 	}
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	buf := readPoolPumpScript(t)
@@ -2867,11 +2818,9 @@ func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T
 		},
 	}
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	buf := readPoolPumpScript(t)
@@ -2937,11 +2886,9 @@ func TestPoolPump_DailyCheckRunsDuringWaterSupplyProtection(t *testing.T) {
 		Schedules:       poolPumpSummerSchedules(now.Add(2*time.Hour), now.Add(4*time.Hour)),
 	}
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	buf := readPoolPumpScript(t)
@@ -3182,14 +3129,12 @@ func waitPoolPumpInit(t *testing.T, deviceState *script.DeviceState) bool {
 func TestPoolPump_CallSlotBurstExhaustsPoolButSurvives(t *testing.T) {
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	deviceState := newCallSlotDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -3255,14 +3200,12 @@ func TestPoolPump_CallSlotBurstExhaustsPoolButSurvives(t *testing.T) {
 func TestPoolPump_CallSlotsReleaseAfterBurst(t *testing.T) {
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	deviceState := newCallSlotDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -3322,14 +3265,12 @@ func TestPoolPump_CallSlotsReleaseAfterBurst(t *testing.T) {
 func TestPoolPump_CallSlotDeepChainDefersInsteadOfRecursing(t *testing.T) {
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	deviceState := newCallSlotDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -3381,14 +3322,12 @@ func TestPoolPump_CallSlotDeepChainDefersInsteadOfRecursing(t *testing.T) {
 func TestPoolPump_CallSlotErrorPathReleasesSlot(t *testing.T) {
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	deviceState := newCallSlotDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)

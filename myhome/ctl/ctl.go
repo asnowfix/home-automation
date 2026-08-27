@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/signal"
 	shellyPkg "github.com/asnowfix/home-automation/pkg/shelly"
+	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"runtime/pprof"
 	"syscall"
@@ -77,6 +78,11 @@ var Cmd = &cobra.Command{
 		}
 
 		shellyPkg.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
+
+		// Composition root: wrap ctx with the MQTT client exactly once, so
+		// everything downstream (pkg/shelly/mqtt.GetClient) can retrieve it
+		// from ctx instead of a process-global. See pkg/shelly/mqtt/client.go.
+		ctx = shellymqtt.NewContextWithClient(ctx, mc)
 
 		// Start cleanup goroutine that closes MQTT client when context is cancelled OR on signal
 		// This ensures cleanup happens even when command returns an error or is interrupted

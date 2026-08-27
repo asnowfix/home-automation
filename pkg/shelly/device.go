@@ -82,6 +82,9 @@ func (m *DeviceMqttChannels) Init(ctx context.Context, deviceId string) (*Device
 	}
 
 	mc := mqtt.GetClient(ctx)
+	if mc == nil {
+		return nil, fmt.Errorf("MQTT client not initialized (ctx carries no pkg/shelly/mqtt.Client — composition root never wrapped it)")
+	}
 	replyTo := fmt.Sprintf("%s_%s", mc.Id(), deviceId)
 
 	// Use larger buffer (64) to handle concurrent refresh operations without dropping responses

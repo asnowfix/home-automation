@@ -289,6 +289,7 @@ generate:
 	$(GO) generate ./myhome/ctl/pool
 	$(GO) generate ./myhome/ctl/garden
 	$(GO) generate ./internal/myhome/shelly/script
+	$(GO) generate ./internal/shelly/scripts/jstarget
 	$(GO) generate ./...
 
 # Build Debian package for current OS/ARCH (Linux only)

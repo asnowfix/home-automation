@@ -384,6 +384,16 @@ func doUpload(ctx context.Context, via types.Channel, device types.Device, name 
 		}
 	}
 
+	// Reject before any RPC is attempted: the device will refuse a script
+	// over MaxSourceBytes anyway (out_of_codespace), but only after chunks
+	// have already gone out, and that failure can be as unclear as a bare
+	// RPC error. Catching it here — ahead of isLoaded/Create/Stop/PutCode —
+	// covers every caller of doUpload, not just the `--no-minify` CLI path.
+	// See issue #553.
+	if err := checkSourceLength(name, buf, minify); err != nil {
+		return 0, err
+	}
+
 	id, err := isLoaded(ctx, via, device, name)
 	if err != nil {
 		// Script not loaded: create a new one

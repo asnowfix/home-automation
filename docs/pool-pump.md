@@ -95,12 +95,14 @@ absence is not evidence of absence.
 - The pump not reaching its turnover target because protection eats the window — that is a **supply**
   matter (flow rate, gauge target, refill time), not a code defect. See #524 for the software half:
   the run window is a fixed clock interval and does not compensate for time lost.
-- ~~`F_WATER` being maintained from edges only, with no level reconciliation, so a missed event leaves
-  it stale~~ — fixed by #523: `reconcileWaterLevel()` re-derives `F_WATER` from
-  `Shelly.getComponentStatus('input:0')` on two existing ticks (no new timer) —
-  `flushRuntimeCheckpoint()`'s 60s tick, which only runs while the pump is on, for the dangerous
-  stuck-false direction, and `handleDailyCheck()`'s once-daily tick, which runs regardless of pump
-  state, for the stuck-true direction.
+- `F_WATER` is maintained from edges only (plus a one-time read at init) — **deliberately, not as a
+  gap**. A periodic reconciler was proposed and implemented in #523, then withdrawn: the only
+  evidence on record is one 2026-08-19 sample in the *opposite* direction from the one a safety
+  argument needs, and the issue itself says a single sample cannot distinguish a missed edge from a
+  genuine input flap. On this supply's ~30-minute flip/flop cadence, a missed edge self-corrects at
+  the next transition well before any periodic tick would fire, and no lost *protecting* edge has
+  ever been observed. See #523 for the full argument; it is relabelled `blocked-diagnosis` and stays
+  open pending real evidence rather than a hypothesis.
 
 
 ### Priority: water supply overrides everything, including solar

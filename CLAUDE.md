@@ -54,11 +54,14 @@ Two things to get right:
   (`TESTTIMEOUT`), not folded into `TESTFLAGS`. CI calls `make cover` five times across workflows
   against `make test` twice, and `test-race` overrides `TESTFLAGS` — a timeout folded into the flags
   is silently dropped by both. That is how #552 survived its own first fix.
-- **Measure under the SLOWEST configuration, which is `cover` — not `test`.** `make cover` runs
-  without `-race` but *with* coverage instrumentation, and that costs more than the race detector on
-  this suite: the failure behind #552 timed out `cover` at 600.016s while `-race` was measuring 592s.
-  CI calls `make cover` five times across workflows against `make test` twice, so a timeout derived
-  from a `-race` run is derived from the wrong number and will fail in the target that matters most.
+- **Measure under the SLOWEST configuration, which is `-race` — not `cover`.** Same-job evidence
+  2026-08-27 (GitHub Actions run `33041300536`, job `98417041803`) measured `cover` at 583.150s (PR
+  branch) and 583.390s (base `main`), both *faster* than 592.565s under `-race`. The #556 failure
+  that looked like the opposite — `cover` timing out at exactly 600.016s — was Go's default 600s
+  `-timeout` ceiling firing before `-timeout` was wired into `cover`, not a real measurement of its
+  cost; it is wired in today (`Makefile`'s `cover` target). CI calls `make cover` five times across
+  workflows against `make test` twice, so the measurement must still be taken under whichever
+  configuration is currently slowest, which today is `-race`.
 - **Only a successful run may set it.** A run that timed out tells you nothing about how long the
   suite needs; raising the timeout from a failed run's duration just guesses again, more slowly.
 

@@ -213,6 +213,10 @@ logs-local-daemon:
 #   2026-08-27  internal/shelly/scripts  592.456s under -race  ->  652s  (unchanged: #568 added
 #               internal/shelly/scripts/jstarget as its own package -- a separate test binary run
 #               in parallel, so it does not add to this package's serial total)
+#   2026-08-27  internal/shelly/scripts  622.644s under -race  ->  685s  (#523's three new tests
+#                                                                          land in the hot package
+#                                                                          itself, unlike #568's
+#                                                                          separate parallel package)
 #   2026-08-30  internal/shelly/scripts  591.484s under -race  ->  652s  (unchanged: #421's
 #               TestPoolPump_TaskQueueThrottlesOnCallsInFlight is a source-level regex check, no
 #               emulator run, negligible added time)
@@ -238,7 +242,7 @@ TESTFLAGS ?= -race
 # five times across workflows against `make test` twice, so a timeout that
 # covers only `test` covers the minority case -- which is exactly how #552
 # survived its first fix.
-TESTTIMEOUT ?= 652s
+TESTTIMEOUT ?= 685s
 
 test: build
 	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...

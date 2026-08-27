@@ -3,6 +3,7 @@ package script
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/asnowfix/home-automation/pkg/shelly"
@@ -251,6 +252,23 @@ func getDesiredSchedules(scriptId int) []scheduleDefinition {
 	}
 }
 
+// wrapScheduleJobCode wraps a schedule job's handler call in the standard
+// (function(){try{...}catch(e){...}})() form (AGENTS.md kill list rule 1),
+// so an uncaught throw inside the handler is contained instead of killing
+// the whole script -- a schedule job dispatches through script.eval exactly
+// like the ad-hoc probes that rule targets. This restores the protection
+// that pool-pump.js's own wrapScheduleCall() used to provide before it
+// became dead code (createSchedules() lost its only caller in #504) and was
+// removed in #526: schedule creation moved to Go, but the wrapping did not
+// move with it until now (#528).
+//
+// The catch binding is referenced via "if(e&&false){}" rather than left
+// empty -- AGENTS.md kill list rule 5: the minifier reduces an empty
+// "catch (e) {}" to "catch {}", a syntax error on Espruino.
+func wrapScheduleJobCode(code string) string {
+	return "(function(){try{" + code + "}catch(e){if(e&&false){}}})()"
+}
+
 // buildJobSpec creates a JobSpec from a schedule definition
 func buildJobSpec(scriptId int, def scheduleDefinition) schedule.JobSpec {
 	return schedule.JobSpec{
@@ -260,10 +278,45 @@ func buildJobSpec(scriptId int, def scheduleDefinition) schedule.JobSpec {
 			Method: "script.eval",
 			Params: map[string]interface{}{
 				"id":   scriptId,
-				"code": def.Code,
+				"code": wrapScheduleJobCode(def.Code),
 			},
 		}},
 	}
+}
+
+// poolPumpScheduleHandlerNames returns the bare handler-call strings (e.g.
+// "handleDailyCheck()") that make up every desired schedule job's code --
+// the same list getDesiredSchedules() draws from, kept as the single
+// authority for "which handler names identify a pool-pump schedule" so
+// isPoolPumpScheduleCode below can't drift from it.
+func poolPumpScheduleHandlerNames() []string {
+	defs := getDesiredSchedules(0) // scriptId is not used to derive Code
+	names := make([]string, len(defs))
+	for i, def := range defs {
+		names[i] = def.Code
+	}
+	return names
+}
+
+// isPoolPumpScheduleCode reports whether a Schedule.List job's code field
+// belongs to a pool-pump schedule, matching by containment rather than
+// equality (mirroring the JS side's onWindowJobs()/updateScheduleMode()/
+// verifySchedules() -- see the comment above buildJobSpec). Containment is
+// required so this recognizes pool-pump schedules regardless of whether
+// their code is bare (devices provisioned before #528) or wrapped (devices
+// provisioned after it) -- otherwise a re-provisioning run would fail to
+// find and delete a device's already-wrapped jobs before recreating them,
+// leaving duplicates behind.
+func isPoolPumpScheduleCode(code string) bool {
+	if code == "" {
+		return false
+	}
+	for _, name := range poolPumpScheduleHandlerNames() {
+		if strings.Contains(code, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // reconcileSchedules deletes all pool-pump schedules and recreates them
@@ -302,9 +355,9 @@ func (s *PoolService) reconcileSchedules(ctx context.Context, via types.Channel,
 			continue
 		}
 
-		// Check if this is a pool-pump schedule by code pattern
-		if code == "" || !(code == "handleDailyCheck()" || code == "handleMorningStart()" ||
-			code == "handleEveningStop()" || code == "handleNightStart()" || code == "handleNightStop()") {
+		// Check if this is a pool-pump schedule by code pattern (bare or
+		// wrapped -- see isPoolPumpScheduleCode).
+		if !isPoolPumpScheduleCode(code) {
 			continue
 		}
 

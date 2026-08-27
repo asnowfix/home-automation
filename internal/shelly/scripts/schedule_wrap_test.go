@@ -14,15 +14,21 @@ import (
 var wrapScheduleCallCallRe = regexp.MustCompile(`wrapScheduleCall\(\s*['"]([^'"]+)['"]\s*\)`)
 
 // quotedHandlerNameRe extracts every single-quoted "handleXxx()" literal from
-// a script's source -- the handler names its containment-matching functions
-// (onWindowJobs, updateScheduleMode, verifySchedules in pool-pump.js) compare
-// a live Schedule.List job's `code` field against. Used instead of
-// wrapScheduleCallCallRe for pool-pump.js since #524: that script no longer
-// registers its own schedule jobs (createSchedules()/wrapScheduleCall()
-// removed as dead code -- schedule creation moved to Go, see
-// internal/myhome/shelly/script/pool.go), so it never calls
-// wrapScheduleCall() at all, but the collision invariant below still applies
-// to every handler name its matching functions compare by substring.
+// a script's source. In pool-pump.js this finds exactly the four handler
+// names that participate in onWindowJobs()'s/updateScheduleMode()'s
+// by-name field renaming (handleMorningStart, handleEveningStop,
+// handleNightStart, handleNightStop) -- NOT the fifth pool-pump schedule,
+// handleDailyCheck(), which is deliberately never written as a quoted
+// 'handleDailyCheck()' literal: it doesn't participate in window-mode
+// toggling, so verifySchedules() only ever needs to detect its *presence*
+// via the truncated, unquoted prefix "handleDaily" (see pool-pump.js), never
+// an exact quoted match. Do not "fix" this regex to also match
+// handleDailyCheck() -- there is nothing in the source for it to match; the
+// authoritative, complete list of all five pool-pump handler names lives in
+// Go now (getDesiredSchedules(), internal/myhome/shelly/script/pool.go,
+// #524/#528) and is checked in full there, not here -- see
+// TestScheduleHandlerNamesDontCollide in
+// internal/myhome/shelly/script/pool_test.go.
 var quotedHandlerNameRe = regexp.MustCompile(`'(handle[A-Za-z]+\(\))'`)
 
 // registeredHandlerCalls reads path and returns every handlerCall string
@@ -128,15 +134,35 @@ func assertNoHandlerNameCollisions(t *testing.T, scriptName string, handlerCalls
 }
 
 // TestScheduleWrap_PoolPumpHandlerNamesDontCollide is the #480 no-collision
-// guard for pool-pump.js's five schedule.eval jobs (handleDailyCheck,
-// handleMorningStart, handleEveningStop, handleNightStart, handleNightStop).
-// #524: pool-pump.js no longer registers these jobs itself (createSchedules()
-// removed as dead code -- see internal/myhome/shelly/script/pool.go), so the
-// handler names are extracted from the 'handleXxx()' literals its
-// containment-matching functions still compare a live job's `code` against,
-// not from wrapScheduleCall(...) call sites.
+// guard for the four pool-pump.js handler names that appear as quoted
+// 'handleXxx()' literals: handleMorningStart, handleEveningStop,
+// handleNightStart, handleNightStop -- the ones onWindowJobs()'s and
+// updateScheduleMode()'s by-name field renaming compare a live job's `code`
+// against. #524: pool-pump.js no longer registers these jobs itself
+// (createSchedules() removed as dead code -- see
+// internal/myhome/shelly/script/pool.go), so the handler names are extracted
+// from the source rather than from wrapScheduleCall(...) call sites.
+//
+// This intentionally does NOT cover handleDailyCheck() -- see the comment on
+// quotedHandlerNameRe for why that name is never quoted this way in the
+// source. The full five-handler collision check, against the actual
+// authority for "which handlers exist" (getDesiredSchedules()), lives in
+// TestScheduleHandlerNamesDontCollide, internal/myhome/shelly/script/pool_test.go
+// (#528). A prior version of this test's doc comment claimed to cover five
+// handlers while quotedHandlerNameRe only ever matched four -- fixed here by
+// being explicit about the four this extraction method actually finds.
 func TestScheduleWrap_PoolPumpHandlerNamesDontCollide(t *testing.T) {
 	handlers := quotedHandlerNames(t, poolPumpScriptPath)
+
+	const wantCount = 4
+	if len(handlers) != wantCount {
+		t.Fatalf("expected exactly %d quoted 'handleXxx()' literals in %s, got %d (%v) -- "+
+			"if this changed, re-check whether it's still true that handleDailyCheck() never "+
+			"appears quoted this way (see quotedHandlerNameRe), and update the five-handler "+
+			"authority check in internal/myhome/shelly/script/pool_test.go if the handler set itself changed",
+			wantCount, poolPumpScriptPath, len(handlers), handlers)
+	}
+
 	assertNoHandlerNameCollisions(t, "pool-pump.js", handlers)
 }
 

@@ -1629,7 +1629,6 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t
 	mc := mqtt.NewMockClient()
 
 	kvs := controllerKVS()
-	kvs["script/pool-pump/logging"] = "true"
 
 	deviceState := &script.DeviceState{
 		KVS:             kvs,
@@ -2140,6 +2139,79 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 
 	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
 		t.Fatalf("solar hard ceiling: expected pump to stay off, got active-output=%v", v)
+	}
+}
+
+// TestPoolPump_WaterSupplyOverridesSolar is #527's safety-critical assertion:
+// F_WATER true must block a solar start unconditionally, regardless of how
+// far above threshold the available power is. desiredOutput() checks F_WATER
+// first, ahead of solar and everything else (see the comment on that
+// function) -- this pins that ordering down with a test, so a reordering
+// that looks harmless fails loudly instead of silently defeating the
+// interlock solar is not allowed to override.
+//
+// Scope note (#527): this is the one assertion from that issue cheap to add
+// alongside #523's work, since it reuses solarKVS/solarPayload and the exact
+// shape of TestPoolPump_SolarRespectsHardCeiling above. The other two tests
+// #527 asks for (solar accumulating through a hold, and starting immediately
+// on release) are not included here -- they need their own hold/release
+// sequencing and are left to #527 itself.
+func TestPoolPump_WaterSupplyOverridesSolar(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mc := mqtt.NewMockClient()
+
+	kvs := solarKVS(nil)
+	kvs["script/pool-pump/logging"] = "true"
+
+	cs := pro3ComponentStatus()
+	cs["input:0"] = map[string]interface{}{"id": 0, "state": true} // protected from boot
+
+	deviceState := &script.DeviceState{
+		KVS:             kvs,
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: cs,
+		Schedules:       poolPumpSchedules(),
+	}
+
+	ctx, cancel := poolPumpRunContext(t, mc)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	// waitPoolPumpInit only waits for the EARLY "schedule-mode" KVS write
+	// finishContinueInit() makes before the four-step initSteps chain (which
+	// includes the Step 2 water-supply check that actually sets F_WATER) even
+	// starts -- same gap TestPoolPump_WaterLevelReconciliation_
+	// StuckProtectedSelfCorrects hit. Publishing the solar message before
+	// that chain reaches Step 2 races checkSolarHysteresis's reconcile()
+	// against F_WATER still being its false default, starting the pump for a
+	// reason that has nothing to do with the assertion under test. Settle
+	// first so F_WATER is genuinely true before solar is introduced.
+	settlePoolPumpTaskQueue(t)
+
+	// Fresh, well above the start threshold, zero start delay -- would start
+	// immediately via solar if water-supply protection weren't in effect.
+	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+
+	// Give checkSolarHysteresis time to run; the pump must stay off.
+	time.Sleep(2 * time.Second)
+	cancel()
+	<-done
+
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
+		t.Fatalf("water supply must override solar: expected pump to stay off despite input:0.state=true, got active-output=%v", v)
 	}
 }
 

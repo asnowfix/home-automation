@@ -1444,7 +1444,7 @@ function flushRuntimeCheckpoint() {
   // of surviving until a restart. The other direction (F_WATER stuck true,
   // pump idle) cannot be caught here -- this tick does not run while the
   // pump is off -- see handleDailyCheck() for that half.
-  // TEMP-DISABLED reconcileWaterLevel();
+  reconcileWaterLevel();
   ensureRuntimeDay();
   if (STATE.runStartTs === null) return;
   var elapsedSec = (Date.now() - STATE.runStartTs) / 1000;
@@ -2860,7 +2860,7 @@ function handleDailyCheck() {
   // during protection (see the comment on that call): a stale fact must not
   // block today's mode decision, which touches the window via setWindow(),
   // not the relay directly.
-  // TEMP-DISABLED reconcileWaterLevel();
+  reconcileWaterLevel();
 
   // #502: this @sunrise job runs every day in both summer and winter mode,
   // unlike handleNightStop()'s midnight reset (winter-only). It is the

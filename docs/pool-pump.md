@@ -95,8 +95,12 @@ absence is not evidence of absence.
 - The pump not reaching its turnover target because protection eats the window — that is a **supply**
   matter (flow rate, gauge target, refill time), not a code defect. See #524 for the software half:
   the run window is a fixed clock interval and does not compensate for time lost.
-- `F_WATER` being maintained from edges only, with no level reconciliation, so a missed event leaves
-  it stale — see #523.
+- ~~`F_WATER` being maintained from edges only, with no level reconciliation, so a missed event leaves
+  it stale~~ — fixed by #523: `reconcileWaterLevel()` re-derives `F_WATER` from
+  `Shelly.getComponentStatus('input:0')` on two existing ticks (no new timer) —
+  `flushRuntimeCheckpoint()`'s 60s tick, which only runs while the pump is on, for the dangerous
+  stuck-false direction, and `handleDailyCheck()`'s once-daily tick, which runs regardless of pump
+  state, for the stuck-true direction.
 
 
 ### Priority: water supply overrides everything, including solar
@@ -110,6 +114,11 @@ if (F_WATER) return -1;      // safety first, always
 
 Nothing below it — manual override, solar, the run window — can re-enable the pump while the supply
 is low. **Any change to the policy ordering must keep this first.**
+
+**Now covered by `TestPoolPump_WaterSupplyOverridesSolar`** (#523, split off #527's Test 3): boots
+protected (`input:0.state=true`), publishes solar availability well above `solarStartThresholdW`
+with zero start delay, and asserts the pump stays off. Verified as a real regression check by
+temporarily removing the `if (F_WATER) return -1;` line — the test fails without it.
 
 ### Solar accumulates *through* a resupply, and starts the pump when it ends
 

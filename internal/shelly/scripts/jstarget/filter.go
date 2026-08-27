@@ -80,7 +80,7 @@ type FilterResult struct {
 // never reintroduces this repo's "// >>> GENERATED: ... >>>" marker
 // convention (rejected during #544's design, see that issue). The returned
 // Device is always the thing a human reads, edits, uploads with
-// --no-minify, and debugges -- minus daemon-only material, nothing added
+// --no-minify, and debugs -- minus daemon-only material, nothing added
 // beyond the one optional hash header line documented on FilterResult.
 //
 // Filter must run before minification: it depends on the JSDoc comments

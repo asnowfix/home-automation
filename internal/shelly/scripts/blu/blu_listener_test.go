@@ -140,15 +140,11 @@ func runBluListener(ctx context.Context, t *testing.T, buf []byte, state *script
 // followed MAC turns on the configured switch.
 func TestBluListener_MotionTurnsOnSwitch(t *testing.T) {
 	buf := readBluListenerScript(t)
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
-
 	mac := "aa:bb:cc:dd:ee:ff"
 	state := newBluListenerState(bluFollowKVS(mac, "switch:0", 0))
 
 	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mqtt.NewMockClient()),
 		10*time.Second,
 	)
 	defer cancel()
@@ -172,15 +168,11 @@ func TestBluListener_MotionTurnsOnSwitch(t *testing.T) {
 // does not turn on the switch.
 func TestBluListener_NoMotionNoAction(t *testing.T) {
 	buf := readBluListenerScript(t)
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
-
 	mac := "aa:bb:cc:dd:ee:01"
 	state := newBluListenerState(bluFollowKVS(mac, "switch:0", 0))
 
 	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mqtt.NewMockClient()),
 		5*time.Second,
 	)
 	defer cancel()
@@ -202,16 +194,12 @@ func TestBluListener_NoMotionNoAction(t *testing.T) {
 // and turns the switch off after the configured duration.
 func TestBluListener_AutoOffTurnsOffSwitch(t *testing.T) {
 	buf := readBluListenerScript(t)
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
-
 	mac := "11:22:33:44:55:66"
 	// 0.3 s auto-off to keep the test fast
 	state := newBluListenerState(bluFollowKVS(mac, "switch:0", 0.3))
 
 	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mqtt.NewMockClient()),
 		10*time.Second,
 	)
 	defer cancel()
@@ -244,15 +232,11 @@ func TestBluListener_AutoOffTurnsOffSwitch(t *testing.T) {
 // the switch is NOT turned on.
 func TestBluListener_IlluminanceTooHigh(t *testing.T) {
 	buf := readBluListenerScript(t)
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
-
 	mac := "aa:11:bb:22:cc:33"
 	state := newBluListenerState(bluFollowKVSWithBounds(mac, "switch:0", 0, nil, 100))
 
 	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mqtt.NewMockClient()),
 		5*time.Second,
 	)
 	defer cancel()
@@ -275,15 +259,11 @@ func TestBluListener_IlluminanceTooHigh(t *testing.T) {
 // the switch is NOT turned on.
 func TestBluListener_IlluminanceTooLow(t *testing.T) {
 	buf := readBluListenerScript(t)
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
-
 	mac := "aa:11:bb:22:cc:44"
 	state := newBluListenerState(bluFollowKVSWithBounds(mac, "switch:0", 0, 50, nil))
 
 	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mqtt.NewMockClient()),
 		5*time.Second,
 	)
 	defer cancel()
@@ -306,16 +286,12 @@ func TestBluListener_IlluminanceTooLow(t *testing.T) {
 // configured lux bounds does trigger the switch.
 func TestBluListener_IlluminanceWithinBoundsTurnsOn(t *testing.T) {
 	buf := readBluListenerScript(t)
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
-
 	mac := "aa:11:bb:22:cc:55"
 	// min=20, max=100 → illuminance=60 should pass
 	state := newBluListenerState(bluFollowKVSWithBounds(mac, "switch:0", 0, 20, 100))
 
 	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mqtt.NewMockClient()),
 		10*time.Second,
 	)
 	defer cancel()
@@ -339,15 +315,11 @@ func TestBluListener_IlluminanceWithinBoundsTurnsOn(t *testing.T) {
 // event, a newly configured follow MAC becomes active.
 func TestBluListener_KVSReloadPicksUpNewFollow(t *testing.T) {
 	buf := readBluListenerScript(t)
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
-
 	// Start with no follows
 	state := newBluListenerState(map[string]interface{}{})
 
 	ctx, cancel := context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mqtt.NewMockClient()),
 		10*time.Second,
 	)
 	defer cancel()

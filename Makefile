@@ -210,6 +210,9 @@ logs-local-daemon:
 #   2026-08-25  internal/shelly/scripts  626.598s under -race  ->  690s
 #   2026-08-26  internal/shelly/scripts  685.399s under -race  ->  754s
 #   2026-08-26  internal/shelly/scripts  592.565s under -race  ->  652s  (#552 package split)
+#   2026-08-27  internal/shelly/scripts  592.456s under -race  ->  652s  (unchanged: #568 added
+#               internal/shelly/scripts/jstarget as its own package -- a separate test binary run
+#               in parallel, so it does not add to this package's serial total)
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
@@ -289,6 +292,7 @@ generate:
 	$(GO) generate ./myhome/ctl/pool
 	$(GO) generate ./myhome/ctl/garden
 	$(GO) generate ./internal/myhome/shelly/script
+	$(GO) generate ./internal/shelly/scripts/jstarget
 	$(GO) generate ./...
 
 # Build Debian package for current OS/ARCH (Linux only)

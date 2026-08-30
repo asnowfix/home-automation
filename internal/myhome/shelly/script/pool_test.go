@@ -1,6 +1,9 @@
 package script
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestGetDesiredSchedules(t *testing.T) {
 	defs := getDesiredSchedules(7)
@@ -30,7 +33,13 @@ func TestGetDesiredSchedules(t *testing.T) {
 	}
 }
 
-func TestBuildJobSpec(t *testing.T) {
+// TestBuildJobSpec_WrapsCode is the #528 regression test: buildJobSpec() must
+// not write def.Code bare into the job's script.eval params. An unwrapped
+// eval means an uncaught throw inside the handler kills the whole script
+// (AGENTS.md kill list rule 1) -- exactly what happened via #509/#530 once
+// pool-pump.js's own wrapScheduleCall() became dead code and was removed in
+// #526.
+func TestBuildJobSpec_WrapsCode(t *testing.T) {
 	def := scheduleDefinition{Enable: true, Timespec: "@sunrise * * *", Code: "handleDailyCheck()"}
 	spec := buildJobSpec(42, def)
 
@@ -51,8 +60,95 @@ func TestBuildJobSpec(t *testing.T) {
 	if params["id"] != 42 {
 		t.Errorf("expected id 42, got %v", params["id"])
 	}
-	if params["code"] != "handleDailyCheck()" {
-		t.Errorf("expected code 'handleDailyCheck()', got %v", params["code"])
+
+	code, ok := params["code"].(string)
+	if !ok {
+		t.Fatalf("expected code to be a string, got %T", params["code"])
+	}
+
+	// The bare handler call must not appear unwrapped -- it must be wrapped
+	// in try/catch, and the code must not be the bare handler call itself.
+	if code == def.Code {
+		t.Fatalf("code was written bare (unwrapped): %q -- an uncaught throw in this eval "+
+			"would kill the whole script (AGENTS.md kill list rule 1)", code)
+	}
+	if !strings.Contains(code, "try{"+def.Code) && !strings.Contains(code, "try {"+def.Code) {
+		t.Errorf("expected code to wrap %q in a try block, got %q", def.Code, code)
+	}
+	if !strings.Contains(code, "catch") {
+		t.Errorf("expected code to contain a catch block, got %q", code)
+	}
+	// The catch binding must be referenced -- an empty "catch (e) {}" is
+	// reduced by the minifier to "catch {}", a syntax error on Espruino
+	// (AGENTS.md kill list rule 5).
+	if strings.Contains(code, "catch(e){}") || strings.Contains(code, "catch (e) {}") {
+		t.Errorf("catch block does not reference its binding, would minify to a syntax error: %q", code)
+	}
+
+	// The containment matching the JS side relies on (indexOf('handleDailyCheck()')) must
+	// still find the handler name inside the wrapped code.
+	if !strings.Contains(code, def.Code) {
+		t.Errorf("expected wrapped code to still contain the bare handler call %q for the JS "+
+			"side's containment matching, got %q", def.Code, code)
+	}
+}
+
+// TestIsPoolPumpScheduleCode_MatchesBareAndWrapped is the #528 regression
+// test for reconcileSchedules()'s delete pass: it must recognize a
+// pool-pump job's code whether it is bare (a device provisioned before
+// #528) or wrapped (one provisioned after it), or a second provisioning run
+// would never find and delete its own previously-created jobs and would
+// pile up duplicates instead of replacing them.
+func TestIsPoolPumpScheduleCode_MatchesBareAndWrapped(t *testing.T) {
+	for _, name := range poolPumpScheduleHandlerNames() {
+		if !isPoolPumpScheduleCode(name) {
+			t.Errorf("isPoolPumpScheduleCode(%q) (bare) = false, want true", name)
+		}
+		wrapped := wrapScheduleJobCode(name)
+		if !isPoolPumpScheduleCode(wrapped) {
+			t.Errorf("isPoolPumpScheduleCode(%q) (wrapped) = false, want true", wrapped)
+		}
+	}
+
+	for _, code := range []string{"", "someOtherScriptsHandler()", "(function(){try{someOtherScriptsHandler()}catch(e){if(e&&false){}}})()"} {
+		if isPoolPumpScheduleCode(code) {
+			t.Errorf("isPoolPumpScheduleCode(%q) = true, want false", code)
+		}
+	}
+}
+
+// TestScheduleHandlerNamesDontCollide is the #480 no-collision invariant
+// (see internal/shelly/scripts/schedule_wrap_test.go), re-checked here
+// against its actual authority: getDesiredSchedules() is now what decides
+// which five handler names identify a pool-pump schedule (#524 moved
+// schedule creation from pool-pump.js's own wrapScheduleCall() call sites to
+// Go), so this is where the invariant has to hold. The JS side's
+// containment matching (onWindowJobs()/updateScheduleMode()/
+// verifySchedules() in pool-pump.js) only identifies the right job if no
+// handler name is a substring of another, and if wrapScheduleJobCode()'s own
+// boilerplate never happens to contain a handler name.
+func TestScheduleHandlerNamesDontCollide(t *testing.T) {
+	names := poolPumpScheduleHandlerNames()
+	if len(names) < 2 {
+		t.Fatalf("expected at least 2 distinct handler names to make this check meaningful, got %d (%v)",
+			len(names), names)
+	}
+
+	for i, a := range names {
+		for j, b := range names {
+			if i == j {
+				continue
+			}
+			if strings.Contains(a, b) {
+				t.Errorf("handler name %q contains %q as a substring -- containment-based "+
+					"Schedule.List matching cannot tell these two handlers' jobs apart", a, b)
+			}
+		}
+		if wrapped := wrapScheduleJobCode(""); strings.Contains(wrapped, a) {
+			t.Errorf("wrapScheduleJobCode()'s boilerplate itself contains handler name %q -- "+
+				"every job's code field would match this handler regardless of which handler "+
+				"it actually calls", a)
+		}
 	}
 }
 

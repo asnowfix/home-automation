@@ -115,12 +115,10 @@ func poolPumpWindowNow(t *testing.T, offsetStart, offsetStop time.Duration, swit
 // returned stop().
 func runPoolPump(t *testing.T, d *script.DeviceState) (stop func()) {
 	t.Helper()
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	buf := readPoolPumpScript(t)
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	done := make(chan error, 1)
 	go func() {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, d)

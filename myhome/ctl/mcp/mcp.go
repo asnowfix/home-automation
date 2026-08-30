@@ -16,6 +16,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
+	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 )
 
@@ -49,8 +50,36 @@ var Cmd = &cobra.Command{
 			handleCall,
 		)
 
-		return server.ServeStdio(srv)
+		// ServeStdio builds its own root context internally
+		// (context.WithCancel(context.Background()), tied to SIGTERM/SIGINT)
+		// rather than deriving one from cmd.Context() — so the MQTT client
+		// injected into cmd.Context() by ctl.Cmd's PersistentPreRunE (see
+		// pkg/shelly/mqtt/client.go's NewContextWithClient) never reaches it.
+		// Every shelly_call/shelly_list against a Gen2 device then hit a nil
+		// mqtt.GetClient(ctx) in pkg/shelly/device.go. WithStdioContextFunc
+		// runs once per stdio session on the server's own (cancellable) ctx;
+		// carryMqttClient carries just the client value over from
+		// cmd.Context() rather than replacing the ctx outright, so
+		// SIGTERM/SIGINT cancellation is kept.
+		return server.ServeStdio(srv, server.WithStdioContextFunc(carryMqttClient(cmd.Context())))
 	},
+}
+
+// carryMqttClient returns a server.StdioContextFunc that, given the stdio
+// server's own per-session ctx, injects the pkg/shelly/mqtt.Client found on
+// rootCtx (the composition root's already-wrapped ctx — see
+// myhome/ctl.Cmd's PersistentPreRunE) via mqtt.NewContextWithClient. If
+// rootCtx carries no client (composition root never ran, or ran without one
+// — e.g. a future caller that skips ctl.Cmd's PersistentPreRunE), it is a
+// no-op: ctx is returned unchanged and downstream code fails with the clean
+// error pkg/shelly/device.go now returns instead of dereferencing nil.
+func carryMqttClient(rootCtx context.Context) server.StdioContextFunc {
+	return func(ctx context.Context) context.Context {
+		if mc := shellymqtt.GetClient(rootCtx); mc != nil {
+			ctx = shellymqtt.NewContextWithClient(ctx, mc)
+		}
+		return ctx
+	}
 }
 
 func handleList(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {

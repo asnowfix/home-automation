@@ -23,16 +23,40 @@ type candidate struct {
 // leading "*" continuation markers and other tags.
 var targetTagRE = regexp.MustCompile(`@target\s+(\S+)`)
 
+// resolvedRegion is a Region together with the byte offset of the JSDoc
+// comment that produced it. Regions() never exposes the comment span --
+// callers resolve a Region back to source via Start/End only, per its own
+// doc comment -- but the subtractive filter (filter.go) needs it too, to
+// remove the annotation comment along with the construct it annotates.
+type resolvedRegion struct {
+	Region
+	commentStart, commentEnd int
+}
+
 // resolve matches every JSDoc "@target" comment against the AST's
 // candidates and returns the resolved, validated Regions in source order.
 func resolve(src []byte, ast map[string]any, comments []comment) ([]Region, error) {
+	resolved, err := resolveWithComments(src, ast, comments)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Region, len(resolved))
+	for i, r := range resolved {
+		out[i] = r.Region
+	}
+	return out, nil
+}
+
+// resolveWithComments is resolve's full result, retaining each Region's
+// annotating comment span. See resolvedRegion.
+func resolveWithComments(src []byte, ast map[string]any, comments []comment) ([]resolvedRegion, error) {
 	candidates := collectCandidates(ast)
 	byStart := make(map[int]candidate, len(candidates))
 	for _, c := range candidates {
 		byStart[c.start] = c
 	}
 
-	var regions []Region
+	var regions []resolvedRegion
 	for _, cm := range comments {
 		if cm.Type != "Block" || !strings.HasPrefix(cm.Value, "*") {
 			// Not a JSDoc block: acorn's onComment strips the "/*"/"*/"
@@ -58,12 +82,20 @@ func resolve(src []byte, ast map[string]any, comments []comment) ([]Region, erro
 			return nil, fmt.Errorf("jstarget: @target %s annotation (byte offset %d) does not annotate a recognised construct", raw, cm.Start)
 		}
 
-		regions = append(regions, Region{Target: target, Start: c.start, End: c.end, Name: c.name})
+		regions = append(regions, resolvedRegion{
+			Region:       Region{Target: target, Start: c.start, End: c.end, Name: c.name},
+			commentStart: cm.Start,
+			commentEnd:   cm.End,
+		})
 	}
 
 	sort.Slice(regions, func(i, j int) bool { return regions[i].Start < regions[j].Start })
 
-	if err := checkNesting(regions); err != nil {
+	plain := make([]Region, len(regions))
+	for i, r := range regions {
+		plain[i] = r.Region
+	}
+	if err := checkNesting(plain); err != nil {
 		return nil, err
 	}
 

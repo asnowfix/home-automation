@@ -99,7 +99,10 @@ Aim for `mem_free` ≥ ~5 KB steady state; a script that boots with 1–2 KB fre
 dying unpredictably later. Details and the measurement protocol: `references/memory.md`.
 
 **The interpreter's stack is shallow and its concurrency budget is 5.** Five timers, five event
-subscriptions, five concurrent RPCs, ten MQTT subscriptions. Nested anonymous functions beyond 2–3
+subscriptions, five concurrent RPCs, ten MQTT subscriptions. **And a device runs at most 3 scripts** —
+a 4th upload enables with `-108 Reached the maximum 3 of enabled scripts`, and with 3 already
+running a 4th `Script.Start` fails too (measured on `development`, 2026-08-30). The code and id are
+still written, so a refused enable leaves a real, startable script behind. Nested anonymous functions beyond 2–3
 levels crash. `Shelly.call` in a `for` loop exhausts the RPC budget with zero nesting depth, because
 it returns immediately and the loop dispatches every iteration before any response arrives. The
 answer to almost all of this is the **task queue**: one recurring timer draining a FIFO, which

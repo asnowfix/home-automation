@@ -19,7 +19,7 @@ dies there costs a day of filtration, because every Schedule job on the device d
 
 ## Standing authorizations
 
-Granted by the maintainer, no expiry, on **`filtration-hiver` and `mezzanine` only** — without
+Granted by the maintainer, no expiry, on **`filtration-hiver` and `mezzanine`** — without
 asking:
 
 1. Upload any script build, minified or not. **State explicitly when the two devices are not running
@@ -32,6 +32,17 @@ asking:
    - `mezzanine`: unrestricted.
 5. Revert any experimental setting and restore last known-good, any hour, if a script crashes twice
    or the pump is left unsafe.
+
+### `development` — test bed, granted 2026-08-30
+
+`development` (`shellyplus1-08b61fd98f44`) is a **test device**, granted by the maintainer on
+2026-08-30 for script experiments: upload, start, stop and delete scripts, and write KVS under the
+script's own prefix.
+
+**Restoration is a hard obligation.** Its baseline is `watchdog.js` (id 1) **running**,
+`myhome-link.js` (id 2) **loaded and stopped**, `pool-pump.js` (id 3) **running**. Put it back
+exactly, delete every probe script and every KVS key you added, and verify with `script list` before
+you finish — it runs `pool-pump.js` and emits real `pool.*` events into `events.db`.
 
 **Not authorized:** any other device; network, MQTT or firmware configuration; unmasking
 `myhome-update.timer`; the pool's physical safety interlocks.

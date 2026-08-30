@@ -184,6 +184,53 @@ the status board: post an update whenever a gate opens or closes, a measurement 
 decision changes, using explicit state words (new / pending / implementing / verifying / discarded /
 closed-by-PR / blocked). Do not post when nothing changed.
 
+### `events.db` is the long-term record — query it before asserting a rate
+
+The daemon persists every device event to a SQLite database, so **how often something actually
+happened is a query, not a guess** — weeks or months after the fact, with no need to have been
+watching at the time. Treat it as the first place to look whenever a claim depends on a frequency,
+a duration, or "does this ever happen?".
+
+**Where it lives.** `events.db`, a plain relative filename by default, next to `myhome.db`.
+Overridable with `--events-db`, `MYHOME_EVENTS_DB`, or the `events.db` config key; `ctl events` falls
+back to `~/.myhome/events.db`.
+
+⚠️ **Retention is 90 days by default, and the daemon enforces it hourly** (`myhome/events/service.go`
+tickers once an hour and purges everything older than `--events-retention`). It is long-term, not
+permanent. **Anything you may want beyond that window must be snapshotted before it ages out** — copy
+the file; there is no archive.
+
+**Schema** — one `events` table: `ts`, `received_at`, `device_id`, `component`, `event`, `severity`,
+`data` (JSON), with indexes on `ts`, `device_id`, `event` and `severity`, so filtering by any of those
+is cheap. `sensor_daily_stats` holds pre-aggregated per-day sensor min/max/sum.
+
+**How to query.** `myhome ctl events list` and `... follow` for browsing. For anything analytical, go
+at the file with `sqlite3` directly — aggregation is the whole point:
+
+```sql
+-- does this event pair up, or are edges being lost? group by day against a restart proxy
+SELECT date(ts,'unixepoch','localtime') d,
+       SUM(event='config_changed')              AS cfg,
+       SUM(event='pool.water_supply_protected') AS prot,
+       SUM(event='pool.water_supply_restored')  AS rest
+FROM events WHERE device_id='shellypro1-ec62608c0230'
+GROUP BY d HAVING prot>0 OR rest>0 ORDER BY d;
+```
+
+**Worked example, #523 (2026-08-27).** An issue claimed a safety fact could go stale "indefinitely"
+because an input edge might be missed, and a fix was designed, briefed, implemented, reviewed and
+nearly merged on that premise. One query over 71 days settled it: on **every** day without
+configuration activity the edges paired **1:1 with zero exceptions**, and every unpaired event fell on
+a day with restarts, where init legitimately re-asserts state. The same query showed the real cadence
+— one episode per day lasting 15–25 minutes — and pinned the single observation the issue was built
+on to **92 seconds into an ordinary episode**, i.e. the fact was correct and the cross-check was the
+anomaly. The issue closed as *not a defect*; the code was deleted.
+
+**The rule that follows:** a change proposing to mitigate a failure must state **the observed rate of
+that failure**, or say "never observed" explicitly. Consequence alone justifies nothing on a device
+with ~7 KB of free heap. If the failure would emit an event, that rate is already in `events.db` and
+costs one query — and "nobody looked" is how unnecessary code reaches review.
+
 ### Sub-agents
 
 **Every sub-agent must persist its progress outside its own context**, incrementally, as it works —

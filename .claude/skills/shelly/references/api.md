@@ -258,3 +258,33 @@ go run ./myhome ctl shelly mqtt status <device>
 
 Long-running or remote invocations generally want explicit broker and timeout flags:
 `-B tcp://<broker>:1883 -T 60s`.
+
+## Script lifecycle: how to tell a crash from a clean stop
+
+Measured on `development` (`shellyplus1-08b61fd98f44`), 2026-08-30.
+
+**A crashing script raises no event that any other script can see.** `script_stop` is delivered
+**only to the script that is stopping** — which is how every script in this repo uses it, as self
+cleanup. Verified with a positive control, not inferred from silence: a bystander's
+`Shelly.addEventHandler` *did* receive a `Shelly.emitEvent("probe_ping")` raised by another script
+(`{"n":1,"c":"script:5","e":"probe_ping"}`), and then received **nothing** when that same script died
+on an uncaught throw. The probe wrote a KVS boot marker to prove it was alive and that `KVS.Set`
+worked, so the silence was real.
+
+**So supervision must poll.** `Script.List` + `Script.GetStatus` on a tick, drained through the task
+queue — never a `for` loop of `Shelly.call`, which exhausts the 5-RPC budget.
+
+`Script.GetStatus` is the discriminator:
+
+| case | response |
+|---|---|
+| **crashed** | `{"id":5,"running":false,"mem_free":13972,"errors":["error"],"error_msg":"Uncaught Error: Cannot read property 'boom' of null\n at …in function called from system"}` |
+| **stopped cleanly** | `{"id":1,"running":false,"mem_free":13944}` |
+
+So `enable && !running && errors` is a sound "it failed" test, and `error_msg` carries the message
+and stack — the only place the reason survives, since nothing is published off-device. Both fields
+exist in `pkg/shelly/script/types.go` as `Errors` and `ErrorMessage`.
+
+⚠️ A **stopped** script's status omits `mem_used` and `mem_peak` entirely. Anything reading them must
+tolerate their absence rather than treating 0 as a measurement.
+

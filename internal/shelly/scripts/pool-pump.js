@@ -398,16 +398,22 @@ var STATE_KEYS = {
 // Real Gen2 firmware allows at most 5 concurrent Shelly.call RPCs per script
 // (see CLAUDE.md "Per-script limits"); the 6th concurrent call raises an
 // uncaught "Too many calls in progress" exception that kills the ENTIRE
-// script, not just the offending call. processTaskQueue's 200ms tick (below)
+// script, not just the offending call. processTaskQueue's 200ms tick alone
 // only serialises *when* queued task functions run — it has no idea how many
-// of the underlying async RPCs those tasks fire are still in flight. That gap
-// is the root cause of the live crash (saveState's active-output mirror, a
-// storeValue() fire-and-forget write) documented in issue #421.
+// of the underlying async RPCs those tasks fire are still in flight, unless
+// it actually checks CALLS_IN_FLIGHT before dispatching (see the gate near
+// the top of processTaskQueue() below). That gap is the root cause of the
+// live crash (saveState's active-output mirror, a storeValue() fire-and-forget
+// write) documented in issue #421 -- and it recurred a second time, on this
+// exact call site, after the bookkeeping below was ported to main WITHOUT
+// that gate (see the comment in processTaskQueue() for the history).
 //
 // CALLS_IN_FLIGHT tracks every Shelly.call this script makes. It is wired up
 // once here by wrapping Shelly.call itself, rather than editing every call
 // site in this file — every callback still receives exactly the arguments it
-// always did, so this is purely additive bookkeeping.
+// always did, so this is purely additive bookkeeping. It only becomes an
+// actual budget once something reads it back and defers -- that is
+// processTaskQueue()'s job, not this block's.
 var CALLS_IN_FLIGHT = 0;
 var N_SEEN = 0;               // lifetime count — proves tracking actually runs
 var MAX_CALLS_IN_FLIGHT = 4;  // stay one below the real 5-call device ceiling
@@ -632,6 +638,25 @@ function processTaskQueue() {
     }
     TASK_QUEUE = [];
     TASK_INDEX = 0;
+    return;
+  }
+
+  // #421 root-cause fix, restored: don't dispatch another queued task while
+  // too many of this script's own Shelly.call RPCs are still in flight -- a
+  // fixed 200ms tick is not a promise the device has actually kept up with,
+  // and a single scheduled stop can legitimately fan out several
+  // fire-and-forget KVS writes (saveState's activeOutput mirror plus
+  // persistRuntimeState's runtimeSec/runtimeTs/turnover-today) faster than
+  // real KVS flash writes complete. CALLS_IN_FLIGHT/MAX_CALLS_IN_FLIGHT were
+  // introduced by #421's original fix and have been tracked correctly the
+  // whole time, but this gate -- the only thing that ever turns that count
+  // into an actual budget -- was dropped when the machinery was ported from
+  // the v0.11.x release line to main (2d542cc1), and the crash recurred
+  // through the dispatch line just below this comment on 2026-08-12. Do NOT
+  // advance the task index here: the same task is retried on the next tick,
+  // once a slot frees up, rather than being skipped or reordered.
+  if (CALLS_IN_FLIGHT >= MAX_CALLS_IN_FLIGHT) {
+    log("Task queue throttled, calls in flight:", CALLS_IN_FLIGHT);
     return;
   }
 

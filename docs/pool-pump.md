@@ -95,8 +95,14 @@ absence is not evidence of absence.
 - The pump not reaching its turnover target because protection eats the window — that is a **supply**
   matter (flow rate, gauge target, refill time), not a code defect. See #524 for the software half:
   the run window is a fixed clock interval and does not compensate for time lost.
-- `F_WATER` being maintained from edges only, with no level reconciliation, so a missed event leaves
-  it stale — see #523.
+- `F_WATER` is maintained from edges only (plus a one-time read at init) — **deliberately, not as a
+  gap**. A periodic reconciler was proposed and implemented in #523, then withdrawn: the only
+  evidence on record is one 2026-08-19 sample in the *opposite* direction from the one a safety
+  argument needs, and the issue itself says a single sample cannot distinguish a missed edge from a
+  genuine input flap. On this supply's ~30-minute flip/flop cadence, a missed edge self-corrects at
+  the next transition well before any periodic tick would fire, and no lost *protecting* edge has
+  ever been observed. See #523 for the full argument; it is relabelled `blocked-diagnosis` and stays
+  open pending real evidence rather than a hypothesis.
 
 
 ### Priority: water supply overrides everything, including solar
@@ -110,6 +116,11 @@ if (F_WATER) return -1;      // safety first, always
 
 Nothing below it — manual override, solar, the run window — can re-enable the pump while the supply
 is low. **Any change to the policy ordering must keep this first.**
+
+**Now covered by `TestPoolPump_WaterSupplyOverridesSolar`** (#523, split off #527's Test 3): boots
+protected (`input:0.state=true`), publishes solar availability well above `solarStartThresholdW`
+with zero start delay, and asserts the pump stays off. Verified as a real regression check by
+temporarily removing the `if (F_WATER) return -1;` line — the test fails without it.
 
 ### Solar accumulates *through* a resupply, and starts the pump when it ends
 

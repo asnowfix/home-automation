@@ -213,6 +213,9 @@ logs-local-daemon:
 #   2026-08-27  internal/shelly/scripts  592.456s under -race  ->  652s  (unchanged: #568 added
 #               internal/shelly/scripts/jstarget as its own package -- a separate test binary run
 #               in parallel, so it does not add to this package's serial total)
+#   2026-08-30  internal/shelly/scripts  591.484s under -race  ->  652s  (unchanged: #421's
+#               TestPoolPump_TaskQueueThrottlesOnCallsInFlight is a source-level regex check, no
+#               emulator run, negligible added time)
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on

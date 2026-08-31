@@ -3429,3 +3429,87 @@ func TestPoolPump_KVSKeyLengthsUnderFirmwareLimit(t *testing.T) {
 		}
 	}
 }
+
+// TestPoolPump_TaskQueueThrottlesOnCallsInFlight is a source-level regression
+// test for #421's second recurrence: the bookkeeping (CALLS_IN_FLIGHT /
+// MAX_CALLS_IN_FLIGHT, the Shelly.call wrapper, CALL_SLOTS/MAX_CALL_DEPTH)
+// was fixed and tested by PR #466 (TestPoolPump_CallSlot*), but that
+// machinery only defends against synchronous re-entrant nesting depth (the
+// #450 stack-overflow crash). The actual #421 budget -- deferring a newly
+// dispatched queued task while too many RPCs are already in flight on the
+// real device -- lived only in processTaskQueue() itself. That gate was
+// present on the v0.11.x release line (PR #426/#434, commit c444f9c0) but
+// was silently dropped when the surrounding machinery was ported to main in
+// commit 2d542cc1 ("bring the proven call-safety machinery to main"), which
+// touched everything else in this block but never modified
+// processTaskQueue(). The crash recurred in production on 2026-08-12,
+// through this exact code path (storeValue() dispatched from the task
+// queue), on a build where every existing #421/#450 emulator test passed.
+//
+// This cannot be reproduced dynamically against this package's emulator:
+// pkg/shelly/script's Shelly.call implementation (run.go) invokes every
+// method's JS callback synchronously and inline, before Shelly.call()
+// returns control to the calling script -- there is no async/goroutine
+// completion model and no artificial per-call delay (no DeviceTestMode /
+// CallDelay on main; that capability was added to the release-line emulator
+// by the same c444f9c0 commit but was never ported to main either). So
+// CALLS_IN_FLIGHT can never be observed above 1 while a queued task runs,
+// and any test that tried to drive it past MAX_CALLS_IN_FLIGHT and assert
+// deferral would pass trivially, on both the buggy and the fixed source --
+// exactly the emulator gap #496 exists to close.
+//
+// So this test instead asserts the one thing that actually distinguishes
+// "ported bookkeeping" from "ported budget": that processTaskQueue()'s own
+// source checks CALLS_IN_FLIGHT against MAX_CALLS_IN_FLIGHT, and does so
+// BEFORE the line that dispatches a task (TASK_INDEX++ followed by task()).
+// Static, deterministic, and it fails against the exact commit (2d542cc1)
+// that dropped the gate the first time.
+func TestPoolPump_TaskQueueThrottlesOnCallsInFlight(t *testing.T) {
+	src := string(readPoolPumpScript(t))
+
+	fnRe := regexp.MustCompile(`(?s)function processTaskQueue\(\)\s*\{(.*?)\n\}\n`)
+	m := fnRe.FindStringSubmatch(src)
+	if m == nil {
+		t.Fatalf("could not find processTaskQueue() in pool-pump.js — test assumptions stale")
+	}
+	body := m[1]
+
+	// Capture the gate's own if-block, not just the comparison, so the
+	// "must not touch TASK_INDEX" check below only looks inside the gate
+	// itself rather than at unrelated code (including this test's own
+	// explanatory comments in pool-pump.js, which legitimately mention
+	// TASK_INDEX in prose).
+	gateRe := regexp.MustCompile(`(?s)if\s*\(\s*CALLS_IN_FLIGHT\s*>=\s*MAX_CALLS_IN_FLIGHT\s*\)\s*\{(.*?)\n(\s*)\}\n`)
+	gateMatch := gateRe.FindStringSubmatchIndex(body)
+	if gateMatch == nil {
+		t.Fatalf("processTaskQueue() does not check CALLS_IN_FLIGHT >= MAX_CALLS_IN_FLIGHT anywhere in its body — " +
+			"the #421 in-flight-RPC budget is tracked (CALLS_IN_FLIGHT/MAX_CALLS_IN_FLIGHT exist) but never enforced, " +
+			"which is exactly the gap that let the 'Too many calls in progress' crash recur in production on " +
+			"2026-08-12 through this function (see issue #421)")
+	}
+	gateStart, gateEnd := gateMatch[0], gateMatch[1]
+	gateBlockBody := body[gateMatch[2]:gateMatch[3]]
+
+	dispatchRe := regexp.MustCompile(`TASK_INDEX\+\+`)
+	dispatchLoc := dispatchRe.FindStringIndex(body)
+	if dispatchLoc == nil {
+		t.Fatalf("could not find the TASK_INDEX++ dispatch line in processTaskQueue() — test assumptions stale")
+	}
+
+	if gateStart > dispatchLoc[0] {
+		t.Fatalf("processTaskQueue() checks CALLS_IN_FLIGHT >= MAX_CALLS_IN_FLIGHT AFTER dispatching the task " +
+			"(TASK_INDEX++) instead of before it — the gate must run before a task is dispatched, or it never " +
+			"prevents the over-budget call from firing in the first place")
+	}
+	if gateEnd > dispatchLoc[0] {
+		t.Fatalf("the CALLS_IN_FLIGHT gate's if-block overlaps the dispatch line — the gate must return/skip " +
+			"the tick entirely before reaching the dispatch code")
+	}
+
+	// The gate's own block must not advance TASK_INDEX: the same task should
+	// be retried on the next tick once a slot frees up, never skipped.
+	if strings.Contains(gateBlockBody, "TASK_INDEX") {
+		t.Fatalf("the CALLS_IN_FLIGHT gate's if-block touches TASK_INDEX — " +
+			"the throttled tick must leave TASK_INDEX untouched so the deferred task is retried, not skipped or reordered")
+	}
+}

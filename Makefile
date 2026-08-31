@@ -227,12 +227,15 @@ logs-local-daemon:
 #   2026-08-30  internal/shelly/scripts  591.484s under -race  ->  652s  (unchanged: #421's
 #               TestPoolPump_TaskQueueThrottlesOnCallsInFlight is a source-level regex check, no
 #               emulator run, negligible added time)
-#   2026-08-30  internal/shelly/scripts  601.005s under -race  ->  662s  (#576 rebased onto main
-#                                                                          past #567/#575/#577/#579/#581;
+#   2026-08-31  internal/shelly/scripts  602.122s under -race  ->  663s  (#576 rebased onto main a
+#                                                                          second time, past #582's
+#                                                                          CALLS_IN_FLIGHT restore
+#                                                                          and its own new test;
 #                                                                          re-measured fresh per the
-#                                                                          rule -- only a successful run
-#                                                                          may set this, not arithmetic
-#                                                                          on the prior 599.953s figure)
+#                                                                          rule -- only a successful
+#                                                                          run may set this, not
+#                                                                          arithmetic on the prior
+#                                                                          601.005s figure)
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
@@ -255,7 +258,7 @@ TESTFLAGS ?= -race
 # five times across workflows against `make test` twice, so a timeout that
 # covers only `test` covers the minority case -- which is exactly how #552
 # survived its first fix.
-TESTTIMEOUT ?= 662s
+TESTTIMEOUT ?= 663s
 
 test: build
 	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...

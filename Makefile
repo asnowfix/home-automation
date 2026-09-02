@@ -236,6 +236,17 @@ logs-local-daemon:
 #                                                                          run may set this, not
 #                                                                          arithmetic on the prior
 #                                                                          601.005s figure)
+#   2026-09-01  internal/shelly/scripts  600.488s under -race  ->  661s  (#425 rebased onto main --
+#                                                                          193 commits, including
+#                                                                          #582's CALLS_IN_FLIGHT
+#                                                                          fix that gated #425 in
+#                                                                          the first place; #425
+#                                                                          itself touches no file
+#                                                                          under this package, so
+#                                                                          the small drop from
+#                                                                          602.122s is run-to-run
+#                                                                          variance, not a code
+#                                                                          change)
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
@@ -258,7 +269,7 @@ TESTFLAGS ?= -race
 # five times across workflows against `make test` twice, so a timeout that
 # covers only `test` covers the minority case -- which is exactly how #552
 # survived its first fix.
-TESTTIMEOUT ?= 663s
+TESTTIMEOUT ?= 661s
 
 test: build
 	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...

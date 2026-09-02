@@ -9,6 +9,7 @@ import (
 	poolscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/events"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/go-logr/logr"
 )
@@ -39,13 +40,14 @@ var defaultSpeedSwitchIDs = map[string]int64{"eco": 0, "mid": 1, "high": 2}
 var speedNameOrder = []string{"eco", "mid", "high"}
 
 // PoolNotices records a companion "pool.turnover_today" notice whenever the
-// pool pump stops — either via the device's own pool.pump_stop (schedule or
-// manual) or the daemon's pool.solar_stop — reporting the water-volume
-// turnovers achieved today against the configured daily target. Since #402,
-// pool-pump.js itself computes and persists today's cumulative runtime and
-// achieved turnover to KVS (it owns the string->RPM speed mapping); this
-// type just reads those pre-computed values back rather than re-deriving
-// flow rate here.
+// pool pump stops, via the device's own pool.pump_stop — emitted for
+// schedule, manual, and (since #405) solar-triggered stops alike, since all
+// three now flow through pool-pump.js's own doStop — reporting the
+// water-volume turnovers achieved today against the configured daily target.
+// Since #402, pool-pump.js itself computes and persists today's cumulative
+// runtime and achieved turnover to KVS (it owns the string->RPM speed
+// mapping); this type just reads those pre-computed values back rather than
+// re-deriving flow rate here.
 type PoolNotices struct {
 	log      logr.Logger
 	events   *events.Service
@@ -89,13 +91,13 @@ func NewPoolNotices(ctx context.Context, log logr.Logger, eventsSvc *events.Serv
 
 // OnEvent is wired into the daemon's event broadcast hook (see daemon.go
 // broadcastFn) alongside notice.Service.OnEvent. It reacts only to
-// pool.pump_stop (device-emitted, schedule/manual) and pool.solar_stop
-// (daemon-emitted) — every other event is a no-op.
+// pool.pump_stop (device-emitted; covers schedule, manual, and — since #405
+// — solar-triggered stops alike) — every other event is a no-op.
 func (p *PoolNotices) OnEvent(ctx context.Context, e events.Event) {
 	if p == nil {
 		return
 	}
-	if e.Event != "pool.pump_stop" && e.Event != "pool.solar_stop" {
+	if e.Event != "pool.pump_stop" {
 		return
 	}
 	p.recordTurnoverToday(ctx)
@@ -224,4 +226,36 @@ func roundTo(v float64, places int) float64 {
 		return float64(int64(v*pow+0.5)) / pow
 	}
 	return float64(int64(v*pow-0.5)) / pow
+}
+
+// readPoolKVSFloat reads a single numeric KVS value from the pool device.
+// KVS values are always stored as plain strings on Shelly devices. Takes
+// types.Device (not the concrete *shellyapi.Device) so tests can pass a
+// fake/stubbed KVS responder — see myhome/daemon/pool_notices_test.go.
+// Formerly lived in the now-deleted solar_automation.go (see #406); moved
+// here because ComputeTurnover is its only remaining caller.
+func readPoolKVSFloat(ctx context.Context, log logr.Logger, device types.Device, via types.Channel, key string) (float64, error) {
+	resp, err := kvs.GetValue(ctx, log, via, device, key)
+	if err != nil {
+		return 0, fmt.Errorf("KVS.Get %s: %w", key, err)
+	}
+	var v float64
+	if _, err := fmt.Sscanf(resp.Value, "%f", &v); err != nil {
+		return 0, fmt.Errorf("parse KVS %s=%q: %w", key, resp.Value, err)
+	}
+	return v, nil
+}
+
+// readPoolKVSInt reads a single integer KVS value from the pool device.
+// KVS values are always stored as plain strings on Shelly devices.
+func readPoolKVSInt(ctx context.Context, log logr.Logger, device types.Device, via types.Channel, key string) (int64, error) {
+	resp, err := kvs.GetValue(ctx, log, via, device, key)
+	if err != nil {
+		return 0, fmt.Errorf("KVS.Get %s: %w", key, err)
+	}
+	var v int64
+	if _, err := fmt.Sscanf(resp.Value, "%d", &v); err != nil {
+		return 0, fmt.Errorf("parse KVS %s=%q: %w", key, resp.Value, err)
+	}
+	return v, nil
 }

@@ -112,13 +112,11 @@ With a device identifier, operates on that specific device only.`,
 				fmt.Printf("  ✓ pool-pump.js is up to date\n")
 			}
 
-			// Schedule reconciliation (Pro3 only)
-			if result.DeviceType == "pro3" {
-				if result.SchedulesReconciled {
-					fmt.Printf("  ✓ schedules reconciled\n")
-				} else {
-					fmt.Printf("  ⚠ schedule reconciliation failed (see errors)\n")
-				}
+			// Schedule reconciliation (every device -- Pro1 and Pro3 alike, #589)
+			if result.SchedulesReconciled {
+				fmt.Printf("  ✓ schedules reconciled\n")
+			} else {
+				fmt.Printf("  ⚠ schedule reconciliation failed (see errors)\n")
 			}
 
 			// Any errors from the service

@@ -324,6 +324,32 @@ Two consequences worth acting on:
 Do not treat "the agent's notification arrived" as meaning its background work has finished — the
 observed behaviour above shows the two are unrelated.
 
+**And do not treat a *missing* notification as meaning the agent died.** The inverse error is just as
+costly and easier to make, because the stall mode above primes you to expect it.
+
+Observed 2026-09-03: an agent's progress file ended at *"Next: full `make test`"* and no completion
+notification had arrived after ~14 hours of wall clock, so it was declared stalled. It had not
+stalled — the coordinating session had itself been suspended repeatedly, inflating the agent's
+apparent elapsed time. The agent was still running, finished normally with a **green full suite**, and
+held a **commit that was never pushed** because the coordinator had already "recovered" its work. A
+pull request was opened stating, as fact, that the agent died mid-suite and that CI would be the first
+verification. Both were false, and the error was caught only because the agent flagged the discrepancy
+itself in its final report.
+
+**An agent that is busy and an agent that is dead are both silent.** So do not infer either from
+silence — look at what the work itself shows, in this order, before concluding anything:
+
+1. `git log` on its branch, and whether the branch head has moved since you last looked;
+2. its worktree (`git -C <worktree> status`);
+3. its progress file's modification time, not just its contents — a file whose last line reads
+   "next: X" may simply mean X is in progress.
+
+**Wall-clock duration is not a usable liveness signal when the coordinator can be suspended.** A
+90-minute budget can legitimately span many hours of real time. If you need to know, check the branch.
+
+**If you do conclude an agent is dead, say so as an inference and not as fact** — especially in a pull
+request description, which outlives the session and will be read as evidence by whoever reviews it.
+
 The required pattern is: **background the run, then poll it to completion inside the same turn.**
 
 1. Start the suite with `run_in_background`, writing to a file.

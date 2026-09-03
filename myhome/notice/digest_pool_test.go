@@ -72,16 +72,16 @@ func TestHumanizePoolData(t *testing.T) {
 			want:  []string{"resumed"},
 		},
 		{
-			name:  "solar_start",
-			event: "pool.solar_start",
-			data:  `{"solar_w":650,"threshold_w":500,"held_for_s":120}`,
-			want:  []string{"650W", "500W"},
+			name:  "solar-triggered pump_start carries a solar reason",
+			event: "pool.pump_start",
+			data:  `{"speed":"eco","switch_id":0,"reason":"solar 650W >= 500W threshold"}`,
+			want:  []string{"speed eco", "solar 650W >= 500W threshold"},
 		},
 		{
-			name:  "solar_stop",
-			event: "pool.solar_stop",
-			data:  `{"reason":"hard_ceiling","runtime_sec":7200}`,
-			want:  []string{"hard_ceiling"},
+			name:  "solar-triggered pump_stop carries a solar reason",
+			event: "pool.pump_stop",
+			data:  `{"reason":"solar hard_ceiling"}`,
+			want:  []string{"solar hard_ceiling"},
 		},
 	}
 	for _, c := range cases {

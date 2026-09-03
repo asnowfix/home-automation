@@ -93,18 +93,6 @@ func humanizePoolData(event string, data *string) string {
 
 	case "pool.water_supply_restored":
 		return "water supply cleared, pump resumed"
-
-	case "pool.solar_start":
-		solarW, _ := m["solar_w"].(float64)
-		thresholdW, _ := m["threshold_w"].(float64)
-		return fmt.Sprintf("solar %.0fW ≥ %.0fW threshold", solarW, thresholdW)
-
-	case "pool.solar_stop":
-		reason, _ := m["reason"].(string)
-		if reason == "" {
-			reason = "unknown"
-		}
-		return fmt.Sprintf("reason: %s", reason)
 	}
 
 	return raw

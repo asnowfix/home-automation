@@ -82,33 +82,45 @@ type Region struct {
 // TargetBoth region for code that carries no annotation. That default
 // belongs to the (not-yet-built) subtractive filter, not to this parser.
 func Regions(src []byte) ([]Region, error) {
+	ast, comments, err := parseSource(src)
+	if err != nil {
+		return nil, err
+	}
+	return resolve(src, ast, comments)
+}
+
+// parseSource runs the vendored acorn parser inside goja and decodes its
+// output into a generic AST plus the full comment list. Both Regions() and
+// the subtractive filter (filter.go) build on this -- the filter needs the
+// same comment list as resolve() to also strip each annotation's own JSDoc
+// comment, not just the construct it resolves to.
+func parseSource(src []byte) (ast map[string]any, comments []comment, err error) {
 	vm := goja.New()
 	if _, err := vm.RunString(acornJS); err != nil {
-		return nil, fmt.Errorf("jstarget: failed to load vendored acorn: %w", err)
+		return nil, nil, fmt.Errorf("jstarget: failed to load vendored acorn: %w", err)
 	}
 
 	if err := vm.Set("__jstargetSrc", string(src)); err != nil {
-		return nil, fmt.Errorf("jstarget: failed to bind source into goja VM: %w", err)
+		return nil, nil, fmt.Errorf("jstarget: failed to bind source into goja VM: %w", err)
 	}
 	parseResult, err := vm.RunString(jstargetParseScript)
 	if err != nil {
-		return nil, fmt.Errorf("jstarget: acorn parse failed: %w", err)
+		return nil, nil, fmt.Errorf("jstarget: acorn parse failed: %w", err)
 	}
 
 	var out parseOutput
 	if err := json.Unmarshal([]byte(parseResult.String()), &out); err != nil {
-		return nil, fmt.Errorf("jstarget: failed to decode acorn output: %w", err)
+		return nil, nil, fmt.Errorf("jstarget: failed to decode acorn output: %w", err)
 	}
 	if out.Error != "" {
-		return nil, fmt.Errorf("jstarget: %s", out.Error)
+		return nil, nil, fmt.Errorf("jstarget: %s", out.Error)
 	}
 
-	var ast map[string]any
 	if err := json.Unmarshal(out.AST, &ast); err != nil {
-		return nil, fmt.Errorf("jstarget: failed to decode acorn AST: %w", err)
+		return nil, nil, fmt.Errorf("jstarget: failed to decode acorn AST: %w", err)
 	}
 
-	return resolve(src, ast, out.Comments)
+	return ast, out.Comments, nil
 }
 
 // jstargetParseScript runs inside the goja VM. It parses __jstargetSrc with

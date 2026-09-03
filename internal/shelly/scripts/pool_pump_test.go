@@ -1409,7 +1409,6 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t
 	mc := mqtt.NewMockClient()
 
 	kvs := controllerKVS()
-	kvs["script/pool-pump/logging"] = "true"
 
 	deviceState := &script.DeviceState{
 		KVS:             kvs,
@@ -1920,6 +1919,79 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 
 	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
 		t.Fatalf("solar hard ceiling: expected pump to stay off, got active-output=%v", v)
+	}
+}
+
+// TestPoolPump_WaterSupplyOverridesSolar is #527's safety-critical assertion:
+// F_WATER true must block a solar start unconditionally, regardless of how
+// far above threshold the available power is. desiredOutput() checks F_WATER
+// first, ahead of solar and everything else (see the comment on that
+// function) -- this pins that ordering down with a test, so a reordering
+// that looks harmless fails loudly instead of silently defeating the
+// interlock solar is not allowed to override.
+//
+// Scope note (#527): this is the one assertion from that issue cheap to add
+// alongside #523's work, since it reuses solarKVS/solarPayload and the exact
+// shape of TestPoolPump_SolarRespectsHardCeiling above. The other two tests
+// #527 asks for (solar accumulating through a hold, and starting immediately
+// on release) are not included here -- they need their own hold/release
+// sequencing and are left to #527 itself.
+func TestPoolPump_WaterSupplyOverridesSolar(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mc := mqtt.NewMockClient()
+
+	kvs := solarKVS(nil)
+	kvs["script/pool-pump/logging"] = "true"
+
+	cs := pro3ComponentStatus()
+	cs["input:0"] = map[string]interface{}{"id": 0, "state": true} // protected from boot
+
+	deviceState := &script.DeviceState{
+		KVS:             kvs,
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: cs,
+		Schedules:       poolPumpSchedules(),
+	}
+
+	ctx, cancel := poolPumpRunContext(t, mc)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	// waitPoolPumpInit only waits for the EARLY "schedule-mode" KVS write
+	// finishContinueInit() makes before the four-step initSteps chain (which
+	// includes the Step 2 water-supply check that actually sets F_WATER) even
+	// starts -- a test mutating state right after that early marker can beat
+	// Step 2 and pass or fail for the wrong reason. Publishing the solar
+	// message before that chain reaches Step 2 races checkSolarHysteresis's
+	// reconcile() against F_WATER still being its false default, starting the
+	// pump for a reason that has nothing to do with the assertion under test.
+	// Settle first so F_WATER is genuinely true before solar is introduced.
+	settlePoolPumpTaskQueue(t)
+
+	// Fresh, well above the start threshold, zero start delay -- would start
+	// immediately via solar if water-supply protection weren't in effect.
+	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+
+	// Give checkSolarHysteresis time to run; the pump must stay off.
+	time.Sleep(2 * time.Second)
+	cancel()
+	<-done
+
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
+		t.Fatalf("water supply must override solar: expected pump to stay off despite input:0.state=true, got active-output=%v", v)
 	}
 }
 
@@ -3427,5 +3499,89 @@ func TestPoolPump_KVSKeyLengthsUnderFirmwareLimit(t *testing.T) {
 		if len(full) >= firmwareKVSKeyLimit {
 			t.Errorf("KVS key %q (from %s) is %d chars, >= the firmware limit of %d — real devices reject this key outright", full, source, len(full), firmwareKVSKeyLimit)
 		}
+	}
+}
+
+// TestPoolPump_TaskQueueThrottlesOnCallsInFlight is a source-level regression
+// test for #421's second recurrence: the bookkeeping (CALLS_IN_FLIGHT /
+// MAX_CALLS_IN_FLIGHT, the Shelly.call wrapper, CALL_SLOTS/MAX_CALL_DEPTH)
+// was fixed and tested by PR #466 (TestPoolPump_CallSlot*), but that
+// machinery only defends against synchronous re-entrant nesting depth (the
+// #450 stack-overflow crash). The actual #421 budget -- deferring a newly
+// dispatched queued task while too many RPCs are already in flight on the
+// real device -- lived only in processTaskQueue() itself. That gate was
+// present on the v0.11.x release line (PR #426/#434, commit c444f9c0) but
+// was silently dropped when the surrounding machinery was ported to main in
+// commit 2d542cc1 ("bring the proven call-safety machinery to main"), which
+// touched everything else in this block but never modified
+// processTaskQueue(). The crash recurred in production on 2026-08-12,
+// through this exact code path (storeValue() dispatched from the task
+// queue), on a build where every existing #421/#450 emulator test passed.
+//
+// This cannot be reproduced dynamically against this package's emulator:
+// pkg/shelly/script's Shelly.call implementation (run.go) invokes every
+// method's JS callback synchronously and inline, before Shelly.call()
+// returns control to the calling script -- there is no async/goroutine
+// completion model and no artificial per-call delay (no DeviceTestMode /
+// CallDelay on main; that capability was added to the release-line emulator
+// by the same c444f9c0 commit but was never ported to main either). So
+// CALLS_IN_FLIGHT can never be observed above 1 while a queued task runs,
+// and any test that tried to drive it past MAX_CALLS_IN_FLIGHT and assert
+// deferral would pass trivially, on both the buggy and the fixed source --
+// exactly the emulator gap #496 exists to close.
+//
+// So this test instead asserts the one thing that actually distinguishes
+// "ported bookkeeping" from "ported budget": that processTaskQueue()'s own
+// source checks CALLS_IN_FLIGHT against MAX_CALLS_IN_FLIGHT, and does so
+// BEFORE the line that dispatches a task (TASK_INDEX++ followed by task()).
+// Static, deterministic, and it fails against the exact commit (2d542cc1)
+// that dropped the gate the first time.
+func TestPoolPump_TaskQueueThrottlesOnCallsInFlight(t *testing.T) {
+	src := string(readPoolPumpScript(t))
+
+	fnRe := regexp.MustCompile(`(?s)function processTaskQueue\(\)\s*\{(.*?)\n\}\n`)
+	m := fnRe.FindStringSubmatch(src)
+	if m == nil {
+		t.Fatalf("could not find processTaskQueue() in pool-pump.js — test assumptions stale")
+	}
+	body := m[1]
+
+	// Capture the gate's own if-block, not just the comparison, so the
+	// "must not touch TASK_INDEX" check below only looks inside the gate
+	// itself rather than at unrelated code (including this test's own
+	// explanatory comments in pool-pump.js, which legitimately mention
+	// TASK_INDEX in prose).
+	gateRe := regexp.MustCompile(`(?s)if\s*\(\s*CALLS_IN_FLIGHT\s*>=\s*MAX_CALLS_IN_FLIGHT\s*\)\s*\{(.*?)\n(\s*)\}\n`)
+	gateMatch := gateRe.FindStringSubmatchIndex(body)
+	if gateMatch == nil {
+		t.Fatalf("processTaskQueue() does not check CALLS_IN_FLIGHT >= MAX_CALLS_IN_FLIGHT anywhere in its body — " +
+			"the #421 in-flight-RPC budget is tracked (CALLS_IN_FLIGHT/MAX_CALLS_IN_FLIGHT exist) but never enforced, " +
+			"which is exactly the gap that let the 'Too many calls in progress' crash recur in production on " +
+			"2026-08-12 through this function (see issue #421)")
+	}
+	gateStart, gateEnd := gateMatch[0], gateMatch[1]
+	gateBlockBody := body[gateMatch[2]:gateMatch[3]]
+
+	dispatchRe := regexp.MustCompile(`TASK_INDEX\+\+`)
+	dispatchLoc := dispatchRe.FindStringIndex(body)
+	if dispatchLoc == nil {
+		t.Fatalf("could not find the TASK_INDEX++ dispatch line in processTaskQueue() — test assumptions stale")
+	}
+
+	if gateStart > dispatchLoc[0] {
+		t.Fatalf("processTaskQueue() checks CALLS_IN_FLIGHT >= MAX_CALLS_IN_FLIGHT AFTER dispatching the task " +
+			"(TASK_INDEX++) instead of before it — the gate must run before a task is dispatched, or it never " +
+			"prevents the over-budget call from firing in the first place")
+	}
+	if gateEnd > dispatchLoc[0] {
+		t.Fatalf("the CALLS_IN_FLIGHT gate's if-block overlaps the dispatch line — the gate must return/skip " +
+			"the tick entirely before reaching the dispatch code")
+	}
+
+	// The gate's own block must not advance TASK_INDEX: the same task should
+	// be retried on the next tick once a slot frees up, never skipped.
+	if strings.Contains(gateBlockBody, "TASK_INDEX") {
+		t.Fatalf("the CALLS_IN_FLIGHT gate's if-block touches TASK_INDEX — " +
+			"the throttled tick must leave TASK_INDEX untouched so the deferred task is retried, not skipped or reordered")
 	}
 }

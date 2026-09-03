@@ -213,6 +213,40 @@ logs-local-daemon:
 #   2026-08-27  internal/shelly/scripts  592.456s under -race  ->  652s  (unchanged: #568 added
 #               internal/shelly/scripts/jstarget as its own package -- a separate test binary run
 #               in parallel, so it does not add to this package's serial total)
+#   2026-08-27  internal/shelly/scripts  622.644s under -race  ->  685s  (#523's three new tests
+#                                                                          land in the hot package
+#                                                                          itself, unlike #568's
+#                                                                          separate parallel package)
+#   2026-08-27  internal/shelly/scripts  599.953s under -race  ->  660s  (#523's reconcileWaterLevel()
+#                                                                          and its two tests removed
+#                                                                          per #576 review -- one of
+#                                                                          the three new tests, plus
+#                                                                          TestPoolPump_WaterSupplyOverridesSolar,
+#                                                                          remains and lands here close
+#                                                                          to the #552-split baseline)
+#   2026-08-30  internal/shelly/scripts  591.484s under -race  ->  652s  (unchanged: #421's
+#               TestPoolPump_TaskQueueThrottlesOnCallsInFlight is a source-level regex check, no
+#               emulator run, negligible added time)
+#   2026-08-31  internal/shelly/scripts  602.122s under -race  ->  663s  (#576 rebased onto main a
+#                                                                          second time, past #582's
+#                                                                          CALLS_IN_FLIGHT restore
+#                                                                          and its own new test;
+#                                                                          re-measured fresh per the
+#                                                                          rule -- only a successful
+#                                                                          run may set this, not
+#                                                                          arithmetic on the prior
+#                                                                          601.005s figure)
+#   2026-09-01  internal/shelly/scripts  600.488s under -race  ->  661s  (#425 rebased onto main --
+#                                                                          193 commits, including
+#                                                                          #582's CALLS_IN_FLIGHT
+#                                                                          fix that gated #425 in
+#                                                                          the first place; #425
+#                                                                          itself touches no file
+#                                                                          under this package, so
+#                                                                          the small drop from
+#                                                                          602.122s is run-to-run
+#                                                                          variance, not a code
+#                                                                          change)
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
@@ -235,7 +269,7 @@ TESTFLAGS ?= -race
 # five times across workflows against `make test` twice, so a timeout that
 # covers only `test` covers the minority case -- which is exactly how #552
 # survived its first fix.
-TESTTIMEOUT ?= 652s
+TESTTIMEOUT ?= 661s
 
 test: build
 	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...

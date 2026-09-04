@@ -231,6 +231,48 @@ that failure**, or say "never observed" explicitly. Consequence alone justifies 
 with ~7 KB of free heap. If the failure would emit an event, that rate is already in `events.db` and
 costs one query — and "nobody looked" is how unnecessary code reaches review.
 
+### Live devices: capture before-state, and never trust a command's name for its blast radius
+
+**A provisioning command's name, `--help`, and the issue that queues it all understate what it
+writes.** Read its implementation before running it against a device in service. Worked example,
+2026-09-02 (#589): the queued task was "re-provision to verify #528", and reading the code first
+found that `ctl pool update` **skips schedules entirely on a Pro1** (gated on `pro3`), that
+`ctl pool add` rewrites **24 KVS keys** rather than just schedules, and that `pool add`'s own help
+text contradicts its code. A fourth defect appeared only at runtime: the speed lookup reads from
+*another* pool device, that device timed out, and the code **fell through to a hardcoded default**,
+silently rewriting the running pump's speed from `max` to `eco`. A guard written specifically to
+prevent a silent reset failed open.
+
+The discipline that made this recoverable:
+
+- **Capture the complete before-state to a file first** — `Schedule.List` *and* the full KVS map
+  (`KVS.GetMany`, which truncates at ~22 items over MQTT, so page it). "I'll put it back" means
+  nothing without it.
+- **Shelly etags are content-derived, so they prove restoration.** After restoring a value, compare
+  its etag to the one captured before: a match is proof of *exact* restoration, not merely an
+  equivalent-looking value. This is the cheapest verification available and nothing else gives it.
+- **Diff before/after programmatically**, and report which fields are identical rather than eyeballing
+  a listing.
+- **Re-read the facts a live experiment mutated** on the next session rather than trusting the comment
+  that says they were restored. One read-only RPC; the failure it guards against is silent.
+
+### NAS operational facts
+
+- **`myhome.service` restarts every 6 hours by design** — the packaged unit sets
+  `RuntimeMaxSec=21600`. So `NRestarts` climbing is expected, not a crash loop; check
+  `ExecMainStatus`/`Result` before treating it as one. Each restart triggers a rediscovery burst of
+  ~41 `device.online` events, roughly **164/day**, which is a large share of what #499 investigates.
+- **The journal is `Storage=volatile`** and the daemon is chatty enough to rotate it away within
+  ~15 minutes. **NAS post-mortem evidence does not survive** — use `events.db` (see above), which does.
+- **`sqlite3` is not installed on the NAS.** Query `events.db` with `python3`'s `sqlite3` module
+  against `file:/var/lib/myhome/events.db?mode=ro` instead.
+- **`myhome-update.timer`** installs whatever `releases/latest` resolves to, nightly. `update.sh` only
+  fetches the `.deb` and `dpkg -i` — it does **not** rewrite device scripts. Pool provisioning
+  (`Setup`/`AddDevice`/`UpdateDevice`) is reachable **only** from `myhome/ctl/pool/`, never from the
+  daemon; the daemon's auto-setup applies solely to devices lacking `watchdog.js` as script #1. A
+  `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst tries to
+  enable it, systemd refuses, everything before that has already succeeded.
+
 ### Sub-agents
 
 **Every sub-agent must persist its progress outside its own context**, incrementally, as it works —
@@ -281,6 +323,32 @@ Two consequences worth acting on:
 
 Do not treat "the agent's notification arrived" as meaning its background work has finished — the
 observed behaviour above shows the two are unrelated.
+
+**And do not treat a *missing* notification as meaning the agent died.** The inverse error is just as
+costly and easier to make, because the stall mode above primes you to expect it.
+
+Observed 2026-09-03: an agent's progress file ended at *"Next: full `make test`"* and no completion
+notification had arrived after ~14 hours of wall clock, so it was declared stalled. It had not
+stalled — the coordinating session had itself been suspended repeatedly, inflating the agent's
+apparent elapsed time. The agent was still running, finished normally with a **green full suite**, and
+held a **commit that was never pushed** because the coordinator had already "recovered" its work. A
+pull request was opened stating, as fact, that the agent died mid-suite and that CI would be the first
+verification. Both were false, and the error was caught only because the agent flagged the discrepancy
+itself in its final report.
+
+**An agent that is busy and an agent that is dead are both silent.** So do not infer either from
+silence — look at what the work itself shows, in this order, before concluding anything:
+
+1. `git log` on its branch, and whether the branch head has moved since you last looked;
+2. its worktree (`git -C <worktree> status`);
+3. its progress file's modification time, not just its contents — a file whose last line reads
+   "next: X" may simply mean X is in progress.
+
+**Wall-clock duration is not a usable liveness signal when the coordinator can be suspended.** A
+90-minute budget can legitimately span many hours of real time. If you need to know, check the branch.
+
+**If you do conclude an agent is dead, say so as an inference and not as fact** — especially in a pull
+request description, which outlives the session and will be read as evidence by whoever reviews it.
 
 The required pattern is: **background the run, then poll it to completion inside the same turn.**
 

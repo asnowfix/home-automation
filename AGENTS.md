@@ -90,7 +90,13 @@ dispatches through `script.eval` and silently becomes a no-op.
 
 1. **Never send an unwrapped `Script.Eval`**, including ad-hoc debug probes. Always
    `(function(){try{ ... }catch(e){return "ERR:"+e}})()` — the return value survives wrapping, so
-   there is no case where skipping it is justified.
+   there is no case where skipping it is justified. Wrapping genuinely contains a `ReferenceError`
+   from an undefined identifier, not just a thrown value — measured 2026-09-02 on **both** Plus1/1.7.5
+   and **Pro1/2.0.0 (the production pump)**, where the error came back as a return value and the script
+   stayed alive. An earlier note claiming a `ReferenceError` escapes the `try`/`catch` does not
+   reproduce; see `.claude/skills/shelly/references/scripting.md`. Prefer the `typeof`-guarded,
+   quote-free probe form documented there, so a probe pointed at the wrong build degrades instead of
+   throwing.
 2. **Never leave a callback unwrapped.** A throw inside any `addEventHandler`, `addStatusHandler`,
    `MQTT.subscribe` callback or queued task kills the script the same way. Wrap the body *in place*,
    not via a higher-order function — an extra call frame per dispatch matters on these devices.

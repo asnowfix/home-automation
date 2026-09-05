@@ -3,7 +3,31 @@ package script
 import (
 	"strings"
 	"testing"
+
+	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
 )
+
+// poolPumpJob builds a schedule.Job shaped like what Schedule.List actually
+// returns for a pool-pump schedule: a single script.eval call whose params
+// carry "id" as a float64 (JSON-decoded numbers are always float64) and
+// "code" containing the handler call, matching preservedScheduleState's and
+// isPoolPumpScheduleCode's parsing.
+func poolPumpJob(id uint32, scriptId int, enable bool, timespec string, code string) schedule.Job {
+	return schedule.Job{
+		JobId: schedule.JobId{Id: id},
+		JobSpec: schedule.JobSpec{
+			Enable:   enable,
+			Timespec: timespec,
+			Calls: []schedule.JobCall{{
+				Method: "script.eval",
+				Params: map[string]interface{}{
+					"id":   float64(scriptId),
+					"code": code,
+				},
+			}},
+		},
+	}
+}
 
 func TestGetDesiredSchedules(t *testing.T) {
 	defs := getDesiredSchedules(7)
@@ -257,4 +281,127 @@ func TestApplyEnvironmentKVSValues(t *testing.T) {
 			t.Errorf("expected MaxRpm to remain 42 on parse failure, got %d", env.MaxRpm)
 		}
 	})
+}
+
+// TestPreservedScheduleState_CapturesExistingEnableAndTimespec is the #589
+// part-2 regression test: preservedScheduleState must report each existing
+// pool-pump job's on-device Enable/Timespec, keyed by handler name, so
+// reconcileSchedules can carry it forward instead of overwriting it with
+// getDesiredSchedules()'s fresh-install defaults.
+func TestPreservedScheduleState_CapturesExistingEnableAndTimespec(t *testing.T) {
+	scriptId := 7
+	existing := []schedule.Job{
+		poolPumpJob(1, scriptId, true, "@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT", "handleDailyCheck()"),
+		poolPumpJob(2, scriptId, true, "0 3 13 * * SUN,MON,TUE,WED,THU,FRI,SAT", "handleMorningStart()"),
+		poolPumpJob(3, scriptId, true, "0 57 16 * * SUN,MON,TUE,WED,THU,FRI,SAT", "handleEveningStop()"),
+		poolPumpJob(4, scriptId, false, "0 15 23 * * SUN,MON,TUE,WED,THU,FRI,SAT", "handleNightStart()"),
+		poolPumpJob(5, scriptId, false, "0 15 0 * * SUN,MON,TUE,WED,THU,FRI,SAT", "handleNightStop()"),
+		// A different script's job -- must not be picked up.
+		poolPumpJob(6, scriptId+1, true, "0 0 12 * * *", "handleMorningStart()"),
+		// A non-pool-pump job -- must not be picked up.
+		{JobId: schedule.JobId{Id: 7}, JobSpec: schedule.JobSpec{Enable: true, Timespec: "0 0 3 * * *", Calls: []schedule.JobCall{{Method: "Shelly.Update"}}}},
+	}
+
+	preserved := preservedScheduleState(existing, scriptId)
+
+	want := map[string]scheduleState{
+		"handleDailyCheck()":   {Enable: true, Timespec: "@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT"},
+		"handleMorningStart()": {Enable: true, Timespec: "0 3 13 * * SUN,MON,TUE,WED,THU,FRI,SAT"},
+		"handleEveningStop()":  {Enable: true, Timespec: "0 57 16 * * SUN,MON,TUE,WED,THU,FRI,SAT"},
+		"handleNightStart()":   {Enable: false, Timespec: "0 15 23 * * SUN,MON,TUE,WED,THU,FRI,SAT"},
+		"handleNightStop()":    {Enable: false, Timespec: "0 15 0 * * SUN,MON,TUE,WED,THU,FRI,SAT"},
+	}
+	if len(preserved) != len(want) {
+		t.Fatalf("expected %d preserved handlers, got %d: %+v", len(want), len(preserved), preserved)
+	}
+	for name, w := range want {
+		got, ok := preserved[name]
+		if !ok {
+			t.Errorf("expected preserved state for %q, found none", name)
+			continue
+		}
+		if got != w {
+			t.Errorf("preserved[%q] = %+v, want %+v", name, got, w)
+		}
+	}
+}
+
+// TestReconcile_PreservesEnableAndTimespec_OnAlreadyProvisionedDevice
+// reproduces the exact production incident from #589 part 2: an
+// operational pump has morning/evening jobs enabled (summer mode) and
+// night jobs disabled -- the opposite of getDesiredSchedules()'s
+// fresh-install winter defaults. Reconciling must not flip them; only the
+// job code (e.g. the #528 try/catch wrapping) should change.
+func TestReconcile_PreservesEnableAndTimespec_OnAlreadyProvisionedDevice(t *testing.T) {
+	scriptId := 3
+	// State observed on filtration-hiver, 2026-09-02, per #589's table.
+	existing := []schedule.Job{
+		poolPumpJob(2, scriptId, true, "@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT", "handleDailyCheck()"),
+		poolPumpJob(3, scriptId, true, "0 3 13 * * SUN,MON,TUE,WED,THU,FRI,SAT", "handleMorningStart()"),
+		poolPumpJob(4, scriptId, true, "0 57 16 * * SUN,MON,TUE,WED,THU,FRI,SAT", "handleEveningStop()"),
+		poolPumpJob(5, scriptId, false, "0 15 23 * * SUN,MON,TUE,WED,THU,FRI,SAT", "handleNightStart()"),
+		poolPumpJob(6, scriptId, false, "0 15 0 * * SUN,MON,TUE,WED,THU,FRI,SAT", "handleNightStop()"),
+	}
+
+	// This is the exact merge reconcileSchedules performs before its
+	// delete/create passes -- exercised directly here since reconcile
+	// itself talks to a live device via sd.CallE, which this package has
+	// no fake/mock transport for.
+	desired := getDesiredSchedules(scriptId)
+	preserved := preservedScheduleState(existing, scriptId)
+	for i := range desired {
+		if state, ok := preserved[desired[i].Code]; ok {
+			desired[i].Enable = state.Enable
+			desired[i].Timespec = state.Timespec
+		}
+	}
+
+	byCode := make(map[string]scheduleDefinition, len(desired))
+	for _, def := range desired {
+		byCode[def.Code] = def
+	}
+
+	// Morning start and evening stop must stay enabled -- getDesiredSchedules()
+	// alone would disable them.
+	if !byCode["handleMorningStart()"].Enable {
+		t.Errorf("handleMorningStart() must stay enabled (operational summer state), reconcile would disable it")
+	}
+	if byCode["handleMorningStart()"].Timespec != "0 3 13 * * SUN,MON,TUE,WED,THU,FRI,SAT" {
+		t.Errorf("handleMorningStart() timespec changed: got %q", byCode["handleMorningStart()"].Timespec)
+	}
+	if !byCode["handleEveningStop()"].Enable {
+		t.Errorf("handleEveningStop() must stay enabled (operational summer state), reconcile would disable it")
+	}
+
+	// Night jobs must stay disabled -- getDesiredSchedules() alone would
+	// enable them, arming an unauthorized 23:15 pump run (#589).
+	if byCode["handleNightStart()"].Enable {
+		t.Errorf("handleNightStart() must stay disabled, reconcile would arm an unauthorized 23:15 run")
+	}
+	if byCode["handleNightStop()"].Enable {
+		t.Errorf("handleNightStop() must stay disabled")
+	}
+}
+
+// TestReconcile_NewHandler_GetsDesiredDefault covers the other side of
+// #589 part 2: a handler with no existing job on the device (e.g. a
+// genuinely new device, or a schedule that was manually deleted) must
+// still get getDesiredSchedules()'s default, not an empty/zero state.
+func TestReconcile_NewHandler_GetsDesiredDefault(t *testing.T) {
+	scriptId := 9
+	desired := getDesiredSchedules(scriptId)
+	preserved := preservedScheduleState(nil, scriptId) // no existing jobs at all
+	for i := range desired {
+		if state, ok := preserved[desired[i].Code]; ok {
+			desired[i].Enable = state.Enable
+			desired[i].Timespec = state.Timespec
+		}
+	}
+
+	want := getDesiredSchedules(scriptId)
+	for i := range desired {
+		if desired[i] != want[i] {
+			t.Errorf("desired[%d] = %+v, want unmodified default %+v", i, desired[i], want[i])
+		}
+	}
 }

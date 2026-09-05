@@ -247,6 +247,13 @@ logs-local-daemon:
 #                                                                          602.122s is run-to-run
 #                                                                          variance, not a code
 #                                                                          change)
+#   2026-09-03  internal/shelly/scripts  600.824s under -race  ->  661s  (#589 touches only
+#                                                                          internal/myhome/shelly/script
+#                                                                          and myhome/ctl/pool, neither
+#                                                                          under this package; 600.824s
+#                                                                          is run-to-run variance around
+#                                                                          the 600.488s baseline, and
+#                                                                          661s already covers it)
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on

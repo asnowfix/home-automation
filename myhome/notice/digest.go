@@ -70,18 +70,10 @@ func humanizePoolData(event string, data *string) string {
 
 	case "pool.pump_start":
 		speed, _ := m["speed"].(string)
-		reason, _ := m["reason"].(string)
-		if reason == "" {
-			reason = "unknown"
-		}
-		return fmt.Sprintf("speed %s, reason: %s", speed, reason)
+		return fmt.Sprintf("speed %s, reason: %s", speed, reasonText(m["reason"]))
 
 	case "pool.pump_stop":
-		reason, _ := m["reason"].(string)
-		if reason == "" {
-			reason = "unknown"
-		}
-		return fmt.Sprintf("reason: %s", reason)
+		return fmt.Sprintf("reason: %s", reasonText(m["reason"]))
 
 	case "pool.turnover_today":
 		achieved, _ := m["turnover_achieved"].(float64)
@@ -96,6 +88,40 @@ func humanizePoolData(event string, data *string) string {
 	}
 
 	return raw
+}
+
+// reasonCodeNames maps pool-pump.js's RC_REASON integer codes (#587) to the
+// same words the daemon has always rendered for a "reason" field. Keep this
+// in exact sync with the REASON_* constants declared next to RC_REASON in
+// internal/shelly/scripts/pool-pump.js — the device emits the number instead
+// of these strings because it is far cheaper on a heap with ~7 KB free
+// (see #587), and this is the one place that translates it back.
+var reasonCodeNames = map[int]string{
+	0: "water supply",
+	1: "button",
+	2: "override",
+	3: "solar",
+	4: "window",
+}
+
+// reasonText renders a pool.pump_start/pool.pump_stop "reason" field. The
+// device (#587) emits it as a small integer code; a plain string is also
+// accepted, since older recordings and any other producer (tests, a future
+// bridge) may still carry free text. Anything else — missing, empty, an
+// unrecognized code — renders as "unknown" rather than failing the notice.
+func reasonText(v any) string {
+	switch r := v.(type) {
+	case string:
+		if r == "" {
+			return "unknown"
+		}
+		return r
+	case float64:
+		if name, ok := reasonCodeNames[int(r)]; ok {
+			return name
+		}
+	}
+	return "unknown"
 }
 
 // hoursToClock renders a fractional hour (e.g. 11.9) as "HH:MM", wrapping at

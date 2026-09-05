@@ -254,6 +254,16 @@ logs-local-daemon:
 #                                                                          is run-to-run variance around
 #                                                                          the 600.488s baseline, and
 #                                                                          661s already covers it)
+#   2026-09-05  internal/shelly/scripts  612.403s under -race  ->  674s  (#587 adds five reason
+#                                                                          assertions plus
+#                                                                          TestPoolPump_SolarStartAndStopSurvivesOwnEcho
+#                                                                          to this package. The +11.6s
+#                                                                          over 600.824s is NOT variance:
+#                                                                          the new echo test measures
+#                                                                          12.877s standalone under -race,
+#                                                                          which accounts for the whole
+#                                                                          delta. Real added cost, so the
+#                                                                          timeout moves with it.)
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
@@ -276,7 +286,7 @@ TESTFLAGS ?= -race
 # five times across workflows against `make test` twice, so a timeout that
 # covers only `test` covers the minority case -- which is exactly how #552
 # survived its first fix.
-TESTTIMEOUT ?= 661s
+TESTTIMEOUT ?= 674s
 
 test: build
 	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...

@@ -1846,6 +1846,11 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		<-done
 		t.Fatalf("solar start: expected active-output=0, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
+	// #587: this is the campaign's central question -- a solar-driven start
+	// must be distinguishable in the record from a scheduled one.
+	if reason, ok := lastEventReason(t, deviceState, "pool.pump_start"); !ok || reason != reasonSolar {
+		t.Fatalf("expected pool.pump_start reason=solar(%d), got %d (ok=%v)", reasonSolar, reason, ok)
+	}
 
 	// Fresh (ts = now), below the 200W stop threshold.
 	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(100, time.Now().Unix()), 0, true, "test"); err != nil {
@@ -1862,6 +1867,13 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 
 	if !stopped {
 		t.Fatalf("solar stop: expected active-output=-1, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+	// #587: the stop must read as "solar" too, not the generic "window"
+	// fallthrough -- this run's window was never the reason it was on (see
+	// RC_ACTIVE_REASON's declaration in pool-pump.js for why the plain
+	// fallthrough alone cannot tell these apart).
+	if reason, ok := lastEventReason(t, deviceState, "pool.pump_stop"); !ok || reason != reasonSolar {
+		t.Fatalf("expected pool.pump_stop reason=solar(%d), got %d (ok=%v)", reasonSolar, reason, ok)
 	}
 }
 

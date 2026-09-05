@@ -590,6 +590,11 @@ func TestPoolPump_ButtonDrivenRunCreditsRuntimeDespiteFuseImmunity(t *testing.T)
 	if got := d.EmittedEventCount("pool.pump_start"); got != 1 {
 		t.Fatalf("expected exactly one pool.pump_start from the button-driven start, got %d", got)
 	}
+	// #587: a button-driven start must be distinguishable in the record from
+	// a schedule/solar/override one.
+	if reason, ok := lastEventReason(t, d, "pool.pump_start"); !ok || reason != reasonButton {
+		t.Fatalf("expected pool.pump_start reason=button(%d), got %d (ok=%v)", reasonButton, reason, ok)
+	}
 
 	// Let at least a full second of runtime accrue before the stop, so
 	// Math.round() of the elapsed interval can never land on 0 -- same
@@ -603,6 +608,9 @@ func TestPoolPump_ButtonDrivenRunCreditsRuntimeDespiteFuseImmunity(t *testing.T)
 	}
 	if got := d.EmittedEventCount("pool.pump_stop"); got != 1 {
 		t.Fatalf("expected exactly one pool.pump_stop from the button-driven stop, got %d", got)
+	}
+	if reason, ok := lastEventReason(t, d, "pool.pump_stop"); !ok || reason != reasonButton {
+		t.Fatalf("expected pool.pump_stop reason=button(%d), got %d (ok=%v)", reasonButton, reason, ok)
 	}
 
 	settlePoolPumpTaskQueue(t)
@@ -643,6 +651,10 @@ func TestPoolPump_NestedEventDuringActuationProducesOneChain(t *testing.T) {
 	}
 	if got := d.EmittedEventCount("pool.pump_start"); got != 1 {
 		t.Fatalf("setup: expected exactly one pool.pump_start from the initial OFF->ON transition, got %d", got)
+	}
+	// #587: a schedule-driven start inside the run window.
+	if reason, ok := lastEventReason(t, d, "pool.pump_start"); !ok || reason != reasonWindow {
+		t.Fatalf("expected pool.pump_start reason=window(%d), got %d (ok=%v)", reasonWindow, reason, ok)
 	}
 	// persistRuntimeState()'s KVS mirror is skipped while STATE.initializing
 	// is true (same guard as saveState()), and the initial OFF->ON transition
@@ -689,6 +701,12 @@ func TestPoolPump_NestedEventDuringActuationProducesOneChain(t *testing.T) {
 		t.Fatalf("expected exactly one pool.pump_stop from the ON->OFF transition, got %d "+
 			"(0 means stopRuntimeAccounting()/the emit were skipped because applyDone() "+
 			"believed the transition had already happened -- #479 finding 2)", got)
+	}
+	// #587: the water-supply interlock must remain distinguishable, even
+	// though this stop was observed via the nested out-of-band switch event
+	// rather than this script's own applyDone() completion.
+	if reason, ok := lastEventReason(t, d, "pool.pump_stop"); !ok || reason != reasonWater {
+		t.Fatalf("expected pool.pump_stop reason=water(%d), got %d (ok=%v)", reasonWater, reason, ok)
 	}
 	// settlePoolPumpTaskQueue() already waited out the 200ms task-queue tick
 	// that queueTask()s the KVS mirror writes inside persistRuntimeState(), so
@@ -856,6 +874,11 @@ func TestPoolPump_OutOfBandTransitionCreditsRuntime(t *testing.T) {
 	if got := d.EmittedEventCount("pool.pump_start"); got != 1 {
 		t.Fatalf("expected exactly one pool.pump_start from the out-of-band ON, got %d", got)
 	}
+	// #587: an out-of-band start (web UI/cloud/other) must read as "override",
+	// distinct from a button press.
+	if reason, ok := lastEventReason(t, d, "pool.pump_start"); !ok || reason != reasonOverride {
+		t.Fatalf("expected pool.pump_start reason=override(%d), got %d (ok=%v)", reasonOverride, reason, ok)
+	}
 
 	// Let at least a full second of runtime accrue before the OFF, so
 	// Math.round() of the elapsed interval can never land on 0 — see the
@@ -876,6 +899,9 @@ func TestPoolPump_OutOfBandTransitionCreditsRuntime(t *testing.T) {
 		t.Fatalf("expected exactly one pool.pump_stop from the out-of-band OFF, got %d "+
 			"(0 means accounting is still keyed off applyDone() rather than the observed "+
 			"transition — the #550 defect)", got)
+	}
+	if reason, ok := lastEventReason(t, d, "pool.pump_stop"); !ok || reason != reasonOverride {
+		t.Fatalf("expected pool.pump_stop reason=override(%d), got %d (ok=%v)", reasonOverride, reason, ok)
 	}
 
 	// waitActiveOutput() only guarantees active-output's OWN queued KVS write
@@ -913,6 +939,9 @@ func TestPoolPump_ScheduleDrivenRunCreditsExactlyOnce(t *testing.T) {
 	if got := d.EmittedEventCount("pool.pump_start"); got != 1 {
 		t.Fatalf("expected exactly one pool.pump_start from the schedule-driven start, got %d", got)
 	}
+	if reason, ok := lastEventReason(t, d, "pool.pump_start"); !ok || reason != reasonWindow {
+		t.Fatalf("expected pool.pump_start reason=window(%d), got %d (ok=%v)", reasonWindow, reason, ok)
+	}
 
 	time.Sleep(1100 * time.Millisecond)
 
@@ -938,6 +967,12 @@ func TestPoolPump_ScheduleDrivenRunCreditsExactlyOnce(t *testing.T) {
 		t.Fatalf("expected exactly one pool.pump_stop from the schedule-driven stop, got %d "+
 			"(#550: the shared noteRelayTransition() guard must not double-count)", got)
 	}
+	// #587: a genuine schedule-ended stop (no solar involved) must still read
+	// as "window", not get relabeled by the RC_ACTIVE_REASON correction meant
+	// for a solar-carried run -- see noteRelayTransition()'s comment.
+	if reason, ok := lastEventReason(t, d, "pool.pump_stop"); !ok || reason != reasonWindow {
+		t.Fatalf("expected pool.pump_stop reason=window(%d), got %d (ok=%v)", reasonWindow, reason, ok)
+	}
 
 	// waitActiveOutput() above only guarantees active-output's OWN queued KVS
 	// write has landed; persistRuntimeState()'s runtime-sec/runtime-ts/
@@ -950,6 +985,47 @@ func TestPoolPump_ScheduleDrivenRunCreditsExactlyOnce(t *testing.T) {
 	if runtimeSec < 1 {
 		t.Fatalf("expected runtime-sec >= 1 after a >=1s schedule-driven run, got %d", runtimeSec)
 	}
+}
+
+// === #587: reason codes on pool.pump_start/pool.pump_stop ===
+//
+// REASON_* mirrors pool-pump.js's own constants exactly (RC_REASON's
+// declaration) -- duplicated here, not imported, because the emulator reads
+// JS source, not Go.
+const (
+	reasonWater    = 0
+	reasonButton   = 1
+	reasonOverride = 2
+	reasonSolar    = 3
+	reasonWindow   = 4
+)
+
+// lastEventReason returns the "reason" field of the most recently emitted
+// event named eventName, as an int, and whether one was found at all. The
+// goja runtime exports a JS integer as either int64 or float64 depending on
+// how it was produced internally, so both are handled here rather than
+// assuming one.
+func lastEventReason(t *testing.T, d *script.DeviceState, eventName string) (int, bool) {
+	t.Helper()
+	events := d.EmittedEvents()
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Name != eventName {
+			continue
+		}
+		m, ok := events[i].Data.(map[string]interface{})
+		if !ok {
+			return 0, false
+		}
+		switch r := m["reason"].(type) {
+		case int64:
+			return int(r), true
+		case float64:
+			return int(r), true
+		default:
+			return 0, false
+		}
+	}
+	return 0, false
 }
 
 // === small helpers ===

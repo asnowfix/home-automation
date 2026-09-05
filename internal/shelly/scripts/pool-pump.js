@@ -1751,6 +1751,32 @@ var F_OVR_UNTIL  = 0;      // override expiry, ms epoch                      —
 // out-of-band change keeps the fuse exactly as before.
 var F_OVR_IS_BUTTON = false;
 
+// #587: WHY the pump last started/stopped, as a small integer rather than
+// four+ string literals — cost it before building it (heap is ~7 KB free on
+// filtration-hiver). RC_REASON is written as a side effect of desiredOutput()
+// itself (one branch, one assignment, right before its return) so the reason
+// can never disagree with the decision that produced it, and is read once by
+// noteRelayTransition() when it emits pool.pump_start/pool.pump_stop. The
+// daemon (myhome/notice/digest.go) humanises the code; events.db stores the
+// number, which is exactly as queryable.
+var REASON_WATER    = 0;  // safety interlock (F_WATER) — always wins
+var REASON_BUTTON   = 1;  // physical button press (an override with F_OVR_IS_BUTTON)
+var REASON_OVERRIDE = 2;  // any other manual/out-of-band override (web UI, cloud, ...)
+var REASON_SOLAR    = 3;  // solar: hard-ceiling stop, or a solar-driven start
+var REASON_WINDOW   = 4;  // the scheduled run window: in it (start) or out of it (stop)
+var RC_REASON = REASON_WINDOW;
+// RC_ACTIVE_REASON is the reason of the last "on" verdict desiredOutput()
+// gave, refreshed on every call that returns on -- not only at a transition.
+// It exists for exactly one correction: the window branch's plain "outside,
+// nothing else claims it" fallthrough (RC_REASON = REASON_WINDOW) is
+// ambiguous by construction -- it fires whether the schedule itself just
+// ended OR solar just released a run the schedule had nothing to do with
+// (the evidence case #587 was filed over: both edges outside the window).
+// noteRelayTransition() resolves that ambiguity for a STOP by preferring
+// whatever more specific reason was actually propping the pump up a moment
+// before, over the generic "window" default.
+var RC_ACTIVE_REASON = REASON_WINDOW;
+
 function setWater(active) {
   if (active === F_WATER) return;
   F_WATER = active;
@@ -1864,11 +1890,25 @@ function overrideIsButton() {
 // reconcileNow() instead, because fuseAllowOn() is also what clears the trip
 // when the cooldown expires: short-circuiting to -1 here would mean
 // fuseAllowOn() never runs again and the fuse would latch forever.
+// #587: each branch sets RC_REASON immediately before its own return, so the
+// reason recorded for a later transition can never name a different branch
+// than the one that actually decided it. The -2 ("no opinion") branch is the
+// one exception -- it produces no transition, so it leaves RC_REASON alone.
+// Every branch that returns an ON verdict also refreshes RC_ACTIVE_REASON --
+// see its declaration for why noteRelayTransition() needs that separately.
 function desiredOutput() {
-  if (F_WATER) return -1;                                        // safety first, always
-  if (F_OVR_WANT !== -2 && Date.now() < F_OVR_UNTIL) return F_OVR_WANT;
-  if (CONFIG.solarEnabled && solarHardCeilingReached()) return -1;
-  if (F_SOLAR_WANT) return mapSpeedToSwitch(CONFIG.preferredSpeed);
+  if (F_WATER) { RC_REASON = REASON_WATER; return -1; }          // safety first, always
+  if (F_OVR_WANT !== -2 && Date.now() < F_OVR_UNTIL) {
+    RC_REASON = F_OVR_IS_BUTTON ? REASON_BUTTON : REASON_OVERRIDE;
+    if (F_OVR_WANT !== -1) RC_ACTIVE_REASON = RC_REASON;
+    return F_OVR_WANT;
+  }
+  if (CONFIG.solarEnabled && solarHardCeilingReached()) { RC_REASON = REASON_SOLAR; return -1; }
+  if (F_SOLAR_WANT) {
+    RC_REASON = REASON_SOLAR;
+    RC_ACTIVE_REASON = REASON_SOLAR;
+    return mapSpeedToSwitch(CONFIG.preferredSpeed);
+  }
   if (F_WIN_START < 0 || F_WIN_STOP < 0) return -2;              // window unknown: do not act
   var d = new Date();
   var n = d.getHours() * 60 + d.getMinutes();
@@ -1876,7 +1916,11 @@ function desiredOutput() {
   var inside = F_WIN_START <= F_WIN_STOP
     ? (n >= F_WIN_START && n < F_WIN_STOP)
     : (n >= F_WIN_START || n < F_WIN_STOP);
-  if (inside) return mapSpeedToSwitch(CONFIG.preferredSpeed);
+  RC_REASON = REASON_WINDOW;
+  if (inside) {
+    RC_ACTIVE_REASON = REASON_WINDOW;
+    return mapSpeedToSwitch(CONFIG.preferredSpeed);
+  }
   return -1;
 }
 
@@ -2088,11 +2132,25 @@ function noteRelayTransition(newOutput) {
   if (was === newOutput) return;   // already accounted for by the other channel
   if (was === -1 && newOutput !== -1) {
     startRuntimeAccounting();
+    // #587: reason is RC_REASON, last set by the desiredOutput() branch (or
+    // the out-of-band override adoption in handleSwitchEvent()) that decided
+    // THIS transition -- see RC_REASON's declaration for why it can never be
+    // stale here.
     Shelly.emitEvent("pool.pump_start",
-                     {speed: effectiveSpeed(CONFIG.preferredSpeed), switch_id: newOutput});
+                     {speed: effectiveSpeed(CONFIG.preferredSpeed), switch_id: newOutput, reason: RC_REASON});
   } else if (was !== -1 && newOutput === -1) {
     stopRuntimeAccounting();
-    Shelly.emitEvent("pool.pump_stop", {reason: F_WATER ? "water supply" : "policy"});
+    // #587: RC_REASON's generic window fallthrough ("nothing claims it")
+    // cannot itself tell a schedule ending from solar releasing a run the
+    // schedule had nothing to do with -- see RC_ACTIVE_REASON's declaration.
+    // Prefer the more specific reason that was actually propping the pump up
+    // a moment ago; every other branch already names its own cause exactly,
+    // so this is a no-op for water/override/button/hard-ceiling stops.
+    var stopReason = RC_REASON;
+    if (stopReason === REASON_WINDOW && RC_ACTIVE_REASON !== REASON_WINDOW) {
+      stopReason = RC_ACTIVE_REASON;
+    }
+    Shelly.emitEvent("pool.pump_stop", {reason: stopReason});
   }
 }
 
@@ -2231,6 +2289,18 @@ function handleSwitchEvent(info) {
   // and sets no override; neither does one arriving mid-actuation.
   if (!RC_BUSY) {
     var want = desiredOutput();
+    // #587: desiredOutput() just set RC_REASON from whatever the policy
+    // currently thinks (possibly -2, "no opinion yet"). Overwrite it
+    // unconditionally, AFTER that call: this transition arrived via a raw
+    // switch:N event, not through applyOutput(), so by construction it is
+    // out-of-band regardless of whether the policy happens to already agree
+    // or has no opinion at all -- the exact gap that let a race during init
+    // (window fact not yet resolved) mislabel an out-of-band start "window"
+    // instead of "override". Also refresh RC_ACTIVE_REASON on an ON, so a
+    // later ambiguous stop (see its declaration) can still trace back to
+    // this out-of-band run.
+    RC_REASON = REASON_OVERRIDE;
+    if (observed !== -1) RC_ACTIVE_REASON = REASON_OVERRIDE;
     if (want !== -2 && want !== observed) {
       log("override: adopting out-of-band", observed);
       F_OVR_WANT = observed;

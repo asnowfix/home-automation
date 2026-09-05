@@ -2289,18 +2289,33 @@ function handleSwitchEvent(info) {
   // and sets no override; neither does one arriving mid-actuation.
   if (!RC_BUSY) {
     var want = desiredOutput();
-    // #587: desiredOutput() just set RC_REASON from whatever the policy
-    // currently thinks (possibly -2, "no opinion yet"). Overwrite it
-    // unconditionally, AFTER that call: this transition arrived via a raw
-    // switch:N event, not through applyOutput(), so by construction it is
-    // out-of-band regardless of whether the policy happens to already agree
-    // or has no opinion at all -- the exact gap that let a race during init
-    // (window fact not yet resolved) mislabel an out-of-band start "window"
-    // instead of "override". Also refresh RC_ACTIVE_REASON on an ON, so a
-    // later ambiguous stop (see its declaration) can still trace back to
-    // this out-of-band run.
-    RC_REASON = REASON_OVERRIDE;
-    if (observed !== -1) RC_ACTIVE_REASON = REASON_OVERRIDE;
+    // #587 (review round 1 caught this): relabelling must NOT be
+    // unconditional here. On real firmware a switch:N notification also
+    // fires for THIS SCRIPT'S OWN actuation completing -- the exact echo the
+    // comment above already accounts for ("agrees with the policy by
+    // construction and sets no override"). desiredOutput() just recomputed
+    // the policy's current opinion into RC_REASON/RC_ACTIVE_REASON; when
+    // that opinion already matches what was observed (want === observed),
+    // this IS that echo, and the reason it just set is already correct
+    // (e.g. solar) -- relabelling it REASON_OVERRIDE here would corrupt
+    // RC_ACTIVE_REASON and silently mislabel a later solar-released stop as
+    // "override" (that corruption is invisible to the emulator: nothing here
+    // ever synthesises a self-actuation echo, only an explicitly armed
+    // nested event -- see TestPoolPump_SolarStartAndStopSurvivesOwnEcho).
+    // Only relabel when the policy does NOT already agree with what was
+    // observed -- i.e. this is genuinely out-of-band, not an echo.
+    //
+    // Deliberately NOT the same condition as the "adopt an override fact"
+    // check below (which additionally excludes want === -2): a -2 "no
+    // opinion yet" policy can never equal a real observed switch id or -1,
+    // so dropping that term here still relabels the window-unresolved-at-init
+    // race correctly, without an explicit -2 special case. Do not merge the
+    // two conditions -- adopting a manual override fact and labelling the
+    // reason are different questions that happen to overlap only here.
+    if (want !== observed) {
+      RC_REASON = REASON_OVERRIDE;
+      if (observed !== -1) RC_ACTIVE_REASON = REASON_OVERRIDE;
+    }
     if (want !== -2 && want !== observed) {
       log("override: adopting out-of-band", observed);
       F_OVR_WANT = observed;

@@ -1877,6 +1877,95 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 	}
 }
 
+// TestPoolPump_SolarStartAndStopSurvivesOwnEcho is the review-round-1 (#587)
+// regression: on real firmware, a switch:N status-change notification also
+// fires for THIS SCRIPT'S OWN actuation completing, not only for a genuine
+// out-of-band change -- handleSwitchEvent()'s own comment already accounts
+// for this ("An event that merely echoes our own actuation agrees with the
+// policy by construction and sets no override"). TestPoolPump_
+// SolarStartsAndStopsPump never exercises that echo at all: the emulator
+// only ever synthesises a switch:N event when a test explicitly arms one via
+// SetPendingNestedEvent or (as here) an EventInjector send -- Switch.Set
+// never has that side effect on its own (#496). That is precisely why this
+// test's absence hid the defect: the emulator's own structural gap (no
+// implicit echo) is not evidence a solar start/stop survives one on
+// hardware.
+//
+// This injects the echo explicitly between the solar-driven start and the
+// solar-driven stop, reproducing the exact sequence a real Pro3 would
+// deliver, and asserts the stop still reads "solar" rather than being
+// mislabelled "override" by a relabelling rule that cannot tell an echo of
+// its own actuation from a genuine out-of-band change.
+func TestPoolPump_SolarStartAndStopSurvivesOwnEcho(t *testing.T) {
+	buf := readPoolPumpScript(t)
+	mc := mqtt.NewMockClient()
+	injector := make(chan []byte, 4)
+
+	deviceState := &script.DeviceState{
+		KVS:             solarKVS(nil),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(),
+		Schedules:       poolPumpSchedules(),
+		EventInjector:   injector,
+	}
+
+	stop := runPoolPumpPhase(t, buf, deviceState, mc)
+	defer stop()
+
+	// Fresh (ts = now), above the 500W start threshold -- solar drives the
+	// start, exactly like TestPoolPump_SolarStartsAndStopsPump.
+	if err := mc.Publish(context.Background(), "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0"
+	}) {
+		t.Fatalf("solar start: expected active-output=0, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+	if reason, ok := lastEventReason(t, deviceState, "pool.pump_start"); !ok || reason != reasonSolar {
+		t.Fatalf("setup: expected pool.pump_start reason=solar(%d), got %d (ok=%v)", reasonSolar, reason, ok)
+	}
+
+	// The firmware echo: a switch:0 status-change notification reporting
+	// EXACTLY the output this script's own Switch.Set just drove -- RC_BUSY
+	// is false again by the time this arrives (applyDone() already ran), so
+	// this reaches handleSwitchEvent()'s !RC_BUSY branch exactly like a
+	// genuine out-of-band event would, and must be told apart from one.
+	//
+	// Deliberately NOT settling the task queue here: reconcile("switch
+	// event") only queues a reconcileNow() pass for the NEXT 200ms tick, and
+	// while F_SOLAR_WANT is still true that pass would independently
+	// refresh RC_ACTIVE_REASON back to solar, self-healing a corrupted value
+	// before the drop below ever runs -- exactly the "may usually be
+	// overwritten" case noted in review. Publishing the low reading
+	// immediately, before that tick fires, coalesces both facts into the
+	// SAME reconcile pass (F_SOLAR_WANT already false by the time it runs),
+	// which is what actually exposes the defect.
+	injector <- shellySwitchEvent(0, true)
+
+	// Fresh (ts = now), below the 200W stop threshold -- solar releases.
+	if err := mc.Publish(context.Background(), "myhome/energy/solar/available", solarPayload(100, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "-1"
+	}) {
+		t.Fatalf("solar stop: expected active-output=-1, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+	// The defect this test exists to catch: an unconditional relabelling in
+	// handleSwitchEvent() clobbers RC_ACTIVE_REASON on the echo above, so
+	// this stop -- genuinely solar-released -- comes back "override" instead
+	// of "solar". Against the pre-fix commit this assertion fails exactly
+	// that way.
+	if reason, ok := lastEventReason(t, deviceState, "pool.pump_stop"); !ok || reason != reasonSolar {
+		t.Fatalf("expected pool.pump_stop reason=solar(%d) even after surviving its own actuation's "+
+			"switch:0 echo, got %d (ok=%v) -- handleSwitchEvent() must not relabel an event that merely "+
+			"echoes the policy's own current opinion", reasonSolar, reason, ok)
+	}
+}
+
 // TestPoolPump_SolarRespectsHardCeiling verifies that a runtime baseline
 // already at/above the solar hard-ceiling target blocks a solar start even
 // with fresh, well-above-threshold availability. solar-max-turnover is

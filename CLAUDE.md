@@ -24,6 +24,11 @@ go test ./internal/myhome/...                    # single package
 go test -v -run TestName ./path/to/package       # specific test
 go test -race ./...                              # with race detector
 
+# NOTE: <device> addressed by ".local" name or IP resolves directly, no daemon needed
+# (mDNS / net.ParseIP in LookupDevices()). A bare name (no ".local", not an IP) needs a
+# daemon reachable on --instance to resolve via the device.lookup RPC — with none running,
+# ctl fails after a multi-second timeout. Prefer "<device>.local" or its IP. See issue #599.
+
 # NOTE: pass a BARE FILENAME relative to the current directory. An absolute path fails with a
 # misleading "file does not exist" even when the file is plainly there.
 go run ./myhome ctl shelly script upload <device> <script.js> --no-minify

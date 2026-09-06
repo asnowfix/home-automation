@@ -127,23 +127,40 @@ Environment gotchas that affect every test case run from a macOS dev machine on 
   reachable from this read-only refresh session's checks (not probed — out of scope for this pass;
   all `mezzanine` figures below are sourced to their originating issue/PR comment, not re-measured).
 
-## Known blocker — `ctl shelly script upload` / the `shelly` MCP server require a running daemon
+## Device addressing — use a `.local` name or an IP, never a bare device name
 
-**As of 2026-09-06, this blocks running any new device test case that needs an upload, KVS write, or
-`Switch.Set` from this environment.** `ctl shelly script upload` and the `shelly` MCP server both
-resolve devices through a daemon on instance `local` (`myhome-local.sh` execs `ctl --instance
-local`), and none is running — calls fail with `timeout waiting for response to method
-device.lookup after 14s (dst: local)`.
+**`ctl` resolves a device without any daemon, provided you address it by `.local` name or IP.**
+`internal/myhome/client.go`'s `LookupDevices()` short-circuits before it ever contacts a daemon: a
+`.local` suffix is resolved via mDNS to an address, and an address is handed straight to
+`shelly.NewDeviceFromIp()`. Only a **bare name** falls through to `hc.start(ctx)` and the
+`device.lookup` RPC, which needs a running daemon on the instance `ctl` was told to use.
 
-Starting a local daemon is **not** a free workaround: it also publishes
-`myhome/energy/solar/available`, a second voice into the live pump's solar input, alongside whatever
-device-management side effects daemon startup has. Read-only checks avoid this entirely by going
-straight over HTTP: `curl http://<device>.local/rpc/<Method>` (or by IP — see `development`'s
-mDNS-unreliability note above, which reproduced again during this session: `development.local`
-resolved via `ping` but not via `curl`, needing `192.168.1.30` directly).
+Verified 2026-09-06, no daemon running:
 
-This is why this refresh session's own device checks (above) are `curl`-only, and why several test
-cases below are recorded from campaign #401's own comments rather than re-run here.
+```
+$ ./myhome-local.sh shelly script list filtration-hiver.local    # works
+$ ./myhome-local.sh shelly script list 192.168.1.21              # works
+$ ./myhome-local.sh shelly script list filtration-hiver          # FAILS
+timeout waiting for response to method device.lookup after 14s (dst: local)
+```
+
+So an upload, KVS write or `Switch.Set` from this environment is **not** blocked — address the device
+by `.local` name or IP. Earlier revisions of this document recorded the bare-name failure as a blanket
+"no working upload path"; that was wrong, and it was wrong in a way that would have deterred hardware
+testing that is in fact available.
+
+**Do not start a local daemon merely to make a bare name resolve.** It publishes
+`myhome/energy/solar/available`, a second voice into the live pool pump's solar input, alongside
+whatever device-management side effects daemon startup has. The addressing fix above is free; the
+daemon is not.
+
+**mDNS is not uniformly reliable here**, so keep the IP to hand as a fallback: during this session
+`development.local` resolved via `ping` but not via `curl`, needing `192.168.1.30` directly. Read-only
+checks can also bypass `ctl` entirely — `curl http://<device>.local/rpc/<Method>`.
+
+This session's own device checks (above) are `curl`-only, and several test cases below are recorded
+from campaign #401's own comments rather than re-run here — a scheduling choice, not a tooling
+limitation.
 
 ---
 

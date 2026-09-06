@@ -3,9 +3,13 @@
 A practical guide to fitting scripts into a Shelly Gen2 device's JavaScript heap, grounded in this
 repo's own hardware measurements (issues #421, #429, #433; PRs #426, #430).
 
-**Companion document**: [`433-pool-pump-heap-proposal.md`](433-pool-pump-heap-proposal.md) — a dated
-snapshot of the concrete, prioritised change list this guide's method produced for `pool-pump.js`;
-read its status header before treating any of its figures as current.
+**The worked example this method produced** was a prioritised change list for `pool-pump.js`, written
+2026-08-06 while #433 (`out_of_memory` on enabling solar) was an open crisis. That crisis is over —
+solar runs on-device on `filtration-hiver` with the heap fitting — so the change list is **not**
+carried here as a document; keeping a spent plan in `docs/` invites a cold reader to follow it. Its
+outcome, item by item against what actually shipped, is recorded on
+[issue #433](https://github.com/asnowfix/home-automation/issues/433), which is where the remaining
+work is tracked. Two of its items are cited below as measured evidence.
 
 **Prerequisites**: the `shelly` skill (`.claude/skills/shelly/`), specifically `references/memory.md`
 (the JS heap, and the differential/spare-device measurement method — this guide's §6 restates it with
@@ -55,14 +59,38 @@ reading of `{"mem_used":16632,"mem_peak":21350,"mem_free":6398}` in the `shelly`
 `references/memory.md`.)
 
 So **~5.1 KB of source bought ~1.8 KB of resident and only ~0.6 KB of peak** — a static→resident
-conversion ratio of roughly **0.34**, and a static→peak ratio of roughly **0.13**. Use 0.34 as the
-default multiplier when estimating what a size cut is worth, and expect the peak effect to be
-about a quarter of that again.
+ratio of roughly **0.34** and a static→peak ratio of roughly **0.13** *for that change*.
 
-Caveat worth knowing: mangling shortens *identifiers*, which the engine may store once and
-reference repeatedly. **Unique literal data — long string constants — plausibly converts closer to
-1:1**, so removing 2 KB of string literals is likely worth more than removing 2 KB of identifiers.
-This is inferred, not measured; §7 gives the experiment that settles it.
+> ### ⚠️ Do not use a single multiplier. Corrected 2026-09-06.
+>
+> An earlier revision of this section told you to use 0.34 as the default multiplier for any size
+> cut. **That is wrong, and the error is large enough to change decisions.** The conversion ratio
+> depends on *what kind of bytes* you remove, and the spread is roughly an order of magnitude:
+>
+> | kind of change | measured conversion | source |
+> |---|---|---|
+> | shortening **identifiers** (top-level mangling) | ~0.34 resident / ~0.13 peak | PR #430, the table above |
+> | deleting **unreachable code** | as low as **~0.15** of byte delta in resident | #570/#569 calibration |
+> | deleting **string literals** | close to **1:1** | P1, below |
+> | **inlining** a single-call function | as high as **~1.67** — i.e. it can cost more than the bytes suggest | #570/#569 calibration |
+>
+> **The worked case.** "P1" of the 2026-08-06 `pool-pump.js` change list (recorded on #433) proposed
+> deleting `description:`
+> strings from `CONFIG_SCHEMA` and estimated **−1200 B** using the 0.34 multiplier. Implemented via
+> #439/PR #447, it measured **`mem_peak` 22778 → 19194 = −3584 B** — **3× the estimate**.
+>
+> **This document predicted its own error and then failed to apply it.** The paragraph below already
+> said unique literal data "plausibly converts closer to 1:1", and §8.1 already noted that the engine's
+> identity was worth a **~3× swing** for exactly this case. Both were right. The estimate used the
+> generic multiplier anyway.
+>
+> **So: classify the bytes before you multiply, and treat any estimate as a lower bound on a string
+> deletion and an upper bound on an inline.** Better still, follow §6 and measure.
+
+Why identifiers and literals differ: mangling shortens *identifiers*, which the engine may store once
+and reference repeatedly. **Unique literal data — long string constants — converts close to 1:1.**
+This was inferred when first written; **it is now measured** (P1 above), and §8.1 explains the
+mechanism: Espruino owns its strings on the heap.
 
 ### 1.2 Retained state (the live set)
 
@@ -713,16 +741,22 @@ enclosing scope.
 No device access was available while writing this. Everything below is a claim this document
 *relies on* but could not verify. Each has a cheap, non-destructive experiment.
 
-### 8.1 Which engine is it?
-**Why it matters**: decides whether string literals are foreign pointers into bytecode (mJS, cheap)
-or owned heap strings (Espruino, expensive) — a ~3× swing in what removing 1.5 KB of `description:`
-strings is worth.
-**Experiment**: one `Script.Eval` — `typeof ffi` (mJS-only global) and `typeof E` / `typeof
-process` (Espruino-only). Read-only, no state change.
+### 8.1 Which engine is it? — **ANSWERED: Espruino**
+**Resolved 2026-09-06.** `CLAUDE.md` states it directly: *"Shelly runs a modified Espruino (ES5, no
+hoisting, limited ES6)"*, and every rule in that section — no hoisting, `var` over `let`/`const`, the
+2–3 level nested-callback ceiling, optional-catch-binding being unparseable — is Espruino behaviour.
+No experiment was needed; the answer was already in the repo.
+
+**What it implies, and it is the most consequential entry in this section**: string literals are
+**owned heap strings, not cheap foreign pointers into bytecode**. So removing string literals converts
+close to 1:1, while removing identifiers does not — the ~3× swing this question was posed to resolve.
+That is exactly the 3× by which P1's `description:` deletion beat its estimate (−1200 B predicted,
+−3584 B measured). See the correction box in §1.1.
 
 ### 8.2 Does `mem_used` include bytecode, and at what rate?
-**Why it matters**: the 0.34 static→resident ratio in §1.1 is a single data point extrapolated to
-every size estimate in this repo.
+**Why it matters**: the 0.34 static→resident ratio in §1.1 is a single data point that was, for a
+while, extrapolated to every size estimate in this repo — see the correction box there. This
+experiment is how the per-kind table gets real numbers instead of two measured corners.
 **Experiment**: upload a variant with 4 KB of pure string-literal padding in a never-referenced
 top-level `var`; diff `mem_used`. Then a control variant with 4 KB of extra *comments* (stripped by
 the minifier), which must show zero change.

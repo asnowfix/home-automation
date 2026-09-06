@@ -83,10 +83,12 @@ follows is only the set of rules whose violation has actually destroyed somethin
 because it must not depend on a skill triggering.
 
 **Reducing a script's heap footprint** is its own methodology, longer than fits here:
-`docs/shelly-heap-allocation.md` covers where the ~23 KB heap actually goes, allocation sources
-ranked by measured cost, and the differential measurement recipe. `docs/433-pool-pump-heap-proposal.md`
-is the dated, superseded worked example that methodology produced for `pool-pump.js` — read its status
-header before treating any of its numbers as current.
+`docs/shelly-heap-allocation.md` covers where the ~23 KB heap actually goes, allocation sources ranked
+by measured cost, and the differential measurement recipe. Its one-line summary — **hunt allocation,
+not bytes** — is measured, not theorised: trimming 1519 minified bytes moved `mem_peak` by zero, while
+replacing one per-call closure with a fixed pool moved it ~1050 bytes and turned an `out_of_memory`
+into a working script. Note especially the correction box in its §1.1: **there is no single
+static→heap multiplier**, and using one underestimated a string deletion by 3×.
 
 ### The kill list
 

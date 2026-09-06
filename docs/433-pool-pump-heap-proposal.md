@@ -1,5 +1,50 @@
 # Heap Proposal for `pool-pump.js` — closing issue #433
 
+> ## Status, added 2026-09-06 — this is a snapshot, not a live plan
+>
+> **Everything below was written 2026-08-06**, at the peak of #433 as a blocking crisis: enabling
+> solar on the production Pro1 exhausted the JS heap and it was not clear allocation work alone
+> could close the gap. **That constraint has since been met on hardware.** Campaign #401 closed
+> 2026-09-04; solar-driven pool-pump control runs on-device on `filtration-hiver`
+> (`shellypro1-ec62608c0230`, Pro1, fw 2.0.0). Read direct over HTTP 2026-09-05 09:58 CEST (recorded
+> in #594): `mem_free` **7280**, `mem_peak` **22918**, script running, unchanged for two days.
+>
+> **What actually happened, item by item, checked against `main` on 2026-09-06:**
+>
+> | item | this doc's estimate | outcome |
+> |---|---|---|
+> | **P1** — drop `description:` from `CONFIG_SCHEMA` | −1200 B (range −700…−2300) | **Shipped**, via #439/PR #447 (commit `7fb64f7`; `CONFIG_SCHEMA` is now generated from `pool-pump.schema.json`, no `description` field emitted). Measured effect, per #433's 2026-08-09 comment: `mem_peak` 22778 → 19194, **−3584 B** — well above even the optimistic end of this doc's range. |
+> | **P4** — drop `sources` from the solar payload (daemon-side) | −150 B | **Not implemented.** `SolarAvailablePayload.Sources` is still present in `myhome/daemon/solar_aggregate.go` today. |
+> | **P2** — stop `JSON.parse`ing switch-status payloads | −500 B | **Moot, not merely pending.** #458/#504 deleted the entire Pro1/Pro3 cooperating-device mesh this item targeted (`parseSwitchStatus`, `subscribePro1Status`, `subscribePro3Status` no longer exist in any form). |
+> | **P3** — remove the per-call literal in `computeFlowRate()` | −200 B | **Not implemented.** `computeFlowRate()` in current `main` still builds `{eco:…, day:…, max:…}` on every call (the speed set changed from four to three since PR #458's controller consolidation, but the pattern is unchanged). |
+> | **P5** — parse only two fields from the solar payload | −150 B | **Not implemented.** `onSolarAvailable()` still `JSON.parse`s the full message. |
+> | **P8** — delete unreachable `createSchedules`/`clearNonUpdateSchedules`/`loadValue` | −350 B | **Shipped**, via commit `4beff37f` (PR #526, part of #524). Measured effect per that commit's own message: **−2530 B minified** — a static-size measurement, not `mem_peak`. |
+> | **P6/S2** (do-not-do items: pool the parsed solar object; split solar into a second script) | rejected | **Correctly rejected** — neither was done, both remain the right call under the shipped design (see below). |
+> | S1 (fallback: daemon publishes a decision, device just obeys) | recommended fallback if measurement fell short | **Not the path taken.** #401 shipped the *opposite* of S1: the daemon publishes `myhome/energy/solar/available`, a **measurement** (retained wattage + timestamp), and the device runs its own hysteresis to decide. This doc's own preferred lever (P1) plus PR #458's unrelated single-controller consolidation closed the gap without needing the structural fallback. |
+>
+> **The headline open question — "it is not established where the peak actually occurs" (§5.5) — was
+> answered, and reversed twice, all on #433's thread:** 2026-08-08 first measurement suggested the
+> peak climbs ~30 s after init; a same-day re-measurement (rebooting between arms, which the first
+> attempt had not done) retracted that and found the peak reached **within 400 ms of script start**,
+> attributed to functions being parsed lazily on first execution rather than to any late allocation;
+> a follow-up isolated the Open-Meteo fetch's own cost at **~4.4 KB transient against ~9.6 KB free
+> after load**, too small to set a new peak, closing the question. The §5.5 "poll every 2 s for 60 s"
+> experiment recommended below is exactly what settled it — it just needed a reboot between arms to
+> be trustworthy, which the first attempt lacked.
+>
+> **One number in wider circulation could not be corroborated.** Issue #594's status table describes
+> this PR as carrying "a costed heap proposal later confirmed to within 12%". The only match found
+> for that figure is a local, never-pushed, never-reviewed branch (`docs/heap-reconciliation`,
+> 2026-08-20) claiming "P8 estimate (−350 B) vs. campaign measurement (−392 B, 12% error)" — but that
+> −392 B figure does not match P8's actual implementing commit (`4beff37f`, which reports −2530 B
+> minified, no `mem_peak` figure at all), and no other sourced measurement of −392 B was found
+> anywhere in the issue or PR history. Treat "confirmed to within 12%" as **unconfirmed**, not as
+> fact, until someone produces the measurement it is supposed to describe.
+>
+> **A reader arriving cold**: everything from here down is the original 2026-08-06 analysis,
+> unedited except where a specific figure is corrected inline. Do not treat any "do it first" /
+> "recommended sequence" language below as current guidance — read the table above first.
+
 **Purpose**: a prioritised, specific change list that makes `internal/shelly/scripts/pool-pump.js`
 fit the Shelly Pro1's JS heap **with the #405 solar path enabled**, which is what issue #433 blocks
 on today.

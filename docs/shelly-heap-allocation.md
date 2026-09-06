@@ -3,13 +3,17 @@
 A practical guide to fitting scripts into a Shelly Gen2 device's JavaScript heap, grounded in this
 repo's own hardware measurements (issues #421, #429, #433; PRs #426, #430).
 
-**Companion document**: [`433-pool-pump-heap-proposal.md`](433-pool-pump-heap-proposal.md) — the
-concrete, prioritised change list for `pool-pump.js` that this guide's method produced.
+**Companion document**: [`433-pool-pump-heap-proposal.md`](433-pool-pump-heap-proposal.md) — a dated
+snapshot of the concrete, prioritised change list this guide's method produced for `pool-pump.js`;
+read its status header before treating any of its figures as current.
 
-**Prerequisites**: `AGENTS.md` sections "JS Heap Budget", "Measuring one script's footprint
-(differential method)", "Testing memory on a spare device", "Resource Limits", "Resource Limit
-Workarounds", "Data Storage Patterns"; `CLAUDE.md` "Shelly JavaScript" for the ES5/engine
-constraints every snippet here obeys.
+**Prerequisites**: the `shelly` skill (`.claude/skills/shelly/`), specifically `references/memory.md`
+(the JS heap, and the differential/spare-device measurement method — this guide's §6 restates it with
+more detail), `references/scripting.md` (the ES5/engine constraints every snippet here obeys) and
+`references/storage.md` (where retained state belongs). Corrected 2026-09-06: this content used to
+live directly in `AGENTS.md` under headings this guide originally cited by name ("JS Heap Budget",
+"Testing memory on a spare device", etc.); those headings no longer exist there — `AGENTS.md` now
+points at the skill instead, and every reference below has been repointed accordingly.
 
 ---
 
@@ -47,7 +51,8 @@ The conversion rate is poor. From PR #430's esbuild top-level mangling on `pool-
 | **delta** | **−5145** | **−644** | **+1764** | **−1764** |
 
 (`mem_used` is derived: `mem_used + mem_free` reads ~23030 at any instant, confirmed by a raw
-reading of `{"mem_used":16632,"mem_peak":21350,"mem_free":6398}` in `AGENTS.md`.)
+reading of `{"mem_used":16632,"mem_peak":21350,"mem_free":6398}` in the `shelly` skill's
+`references/memory.md`.)
 
 So **~5.1 KB of source bought ~1.8 KB of resident and only ~0.6 KB of peak** — a static→resident
 conversion ratio of roughly **0.34**, and a static→peak ratio of roughly **0.13**. Use 0.34 as the
@@ -73,8 +78,8 @@ Two non-obvious contributors dominate here in practice:
   alive for the entire duration of the async KVS load — i.e. exactly during the peak window — and
   only then set to `null`.
 - **KVS key count.** Measured on a Plus 1 running identical code: **5 keys → `mem_used` 13748; 24
-  keys → `out_of_memory`. ~7.9 KB of footprint was config-driven, not code-driven** (AGENTS.md
-  "Testing memory on a spare device"). 19 extra `CONFIG` properties and their value strings account
+  keys → `out_of_memory`. ~7.9 KB of footprint was config-driven, not code-driven** (`.claude/skills/shelly/references/memory.md`
+  "Testing on a spare device"). 19 extra `CONFIG` properties and their value strings account
   for maybe 600 bytes. The other ~7.3 KB is discussed in §1.4 — and it is the single most important
   number in this document.
 
@@ -201,7 +206,7 @@ String(v)}` is one object, two properties, and two fresh strings, every write.
 
 A timer callback registered once at load costs once. A timer *created per operation* costs per
 operation — and the 5-timer limit means you cannot do that anyway. The single-recurring-timer +
-task-queue pattern in `AGENTS.md` is already the right shape; the residual cost is that **every
+task-queue pattern in `references/scripting.md` is already the right shape; the residual cost is that **every
 `queueTask(function () { ... })` call site allocates a closure**, and `pool-pump.js` has ~20 of
 them, several on recurring paths.
 
@@ -525,7 +530,7 @@ queueTask(storeTurnover, sec);
 ```
 
 `processTaskQueue` then calls `task(TASK_ARGS[TASK_INDEX])` and must clear both arrays together on
-drain. Keep `AGENTS.md`'s manual-shift rule in mind: `[].shift()` is unavailable, and the existing
+drain. Keep the `shelly` skill's manual-shift rule in mind: `[].shift()` is unavailable, and the existing
 index-based drain is already the right shape.
 
 ### 5.7 The free subset of 5.6 — trampolines that wrap nothing
@@ -560,11 +565,11 @@ That is unverified — see §7.4 before relying on it.
 ## 6. Measurement recipe
 
 Nothing in §2–§5 should be believed on this hardware until it has been measured. The method is the
-differential one from `AGENTS.md`, with the discipline that makes it trustworthy.
+differential one from `references/memory.md`, with the discipline that makes it trustworthy.
 
 ### 6.1 Set up a valid proxy
 
-Per `AGENTS.md` "Testing memory on a spare device", a spare device is only valid if it is loaded
+Per `references/memory.md` "Testing on a spare device", a spare device is only valid if it is loaded
 **exactly** like production:
 
 1. **Match the resident scripts.** The heap is shared. Stopping `watchdog.js` "to make room"
@@ -589,8 +594,16 @@ $B Script.GetStatus '{"id":2}'
 ```
 
 Any script id returns the same device-wide numbers, so you can keep polling id 1 while stopping
-id 2. `mem_peak` is a high-water mark **since the script started** — always `Script.Stop` +
-`Script.Start` before a measurement run, or you are reading a stale peak from a previous build.
+id 2.
+
+**Correction, 2026-09-06 (`.claude/skills/shelly/references/memory.md`, corrected 2026-08-16):**
+`Script.Stop` + `Script.Start` is not enough. `mem_peak` *does* reset on restart — it briefly
+**drops**, then climbs back through init and keeps settling for **tens of seconds** as lazily-parsed
+code paths run for the first time; a reading taken right after restart can be measured **hundreds of
+bytes below** the build's true settled peak. Reboot the device between arms
+(`Shelly.Reboot`, then `Script.Start`), and poll until the peak stops moving —
+`myhome ctl shelly script probe` does this and refuses to report an unsettled run. A single
+`Script.GetStatus` call right after `Script.Start` is not a measurement.
 
 ### 6.3 Isolate one script's footprint
 
@@ -613,7 +626,7 @@ This is where most of the value is, and where #421's two false starts came from.
   it run through one.
 - **Change one variable per run.** A run that changes two optimisations tells you their sum and
   nothing else — and if they cancel, it tells you they did nothing.
-- **Keep a table.** `AGENTS.md` "JS Heap Budget" and issue #433 both carry one; add rows rather
+- **Keep a table.** `.claude/skills/shelly/references/memory.md` and issue #433 both carry one; add rows rather
   than starting a new table, because the value of these numbers is entirely in comparability.
 
 ### 6.5 Decide what you are looking at
@@ -622,7 +635,7 @@ This is where most of the value is, and where #421's two false starts came from.
 |---|---|---|
 | `mem_used` high, `mem_peak` ≈ `mem_used` + small | **size/retention problem** | §1.1 minification, §4 retained state, dead code |
 | `mem_peak` ≫ `mem_used` | **allocation problem** | §2, §3 — pools, `userdata`, no per-call literals |
-| `mem_free` < ~5 KB at idle | one allocation from death | both; `AGENTS.md` rule of thumb is ≥5 KB |
+| `mem_free` < ~5 KB at idle | one allocation from death | both; `references/memory.md` rule of thumb is ≥5 KB |
 | Runs on the spare, dies in production | proxy invalid | §6.1 — KVS keys and resident scripts first |
 | Size cut produced no peak change | you had an allocation problem | stop trimming, go to §2 |
 
@@ -686,7 +699,7 @@ Upload with `--no-minify` while debugging (`go run ./myhome ctl shelly script up
 `pool-pump.js` — use PR #430's symbol map and `myhome ctl shelly script demangle`.
 
 **Is it Espruino or mJS?**
-`AGENTS.md:77` says "a modified version of Espruino". PR #426's own hardware log says "Wrapper
+`.claude/skills/shelly/references/scripting.md` says "a modified Espruino". PR #426's own hardware log says "Wrapper
 installs on mJS". The documented constraints (no `[].shift()`/`unshift()`, `let`/`const` unsafe,
 `Array.prototype.slice.call(arguments)` unreliable) match mJS, not Espruino. This matters for
 estimating §1.1, so §7.1 below gives the experiment. Everything else in this guide holds either way:

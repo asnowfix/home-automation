@@ -52,6 +52,19 @@ is a point-in-time snapshot, not live truth.
   two scripts are left running. **Any future test case that uploads a script close to or above
   ~20 KB minified onto `development` must first stop `watchdog.js`/`myhome-link.js` to free enough
   heap**, and must restart them afterward.
+- **Update, 2026-09-06 (re-verified read-only via `curl http://192.168.1.30/rpc/...` for this doc's
+  refresh)**: the "Restore steps... have NOT been run" note below and test case #1's "Device end
+  state" section describe this device as left with `pool-pump.js` crashed and not running. That is
+  **no longer current** — a later campaign (#401) session reused this same rig, and as of today
+  `Script.List` shows id 1 `watchdog.js` running, id 2 `myhome-link.js` **stopped**
+  (`Script.GetStatus` reports `errors: ["out_of_memory"]`), and id 3 `pool-pump.js` **running**
+  (`mem_used 15232`, `mem_peak 20608`, `mem_free 7798`). The shared-heap total implied by these
+  numbers (`7798 + 2142 + 15232 ≈ 25172` bytes) still agrees with the ~25 KB figure recorded in
+  2026-08 — that part of the finding holds. The specific device state (which script is running,
+  which script id currently plays `pool-pump.js`) is not this PR's history to rewrite; treat this
+  note, not the stale "Device end state" text above, as the last known state before starting any new
+  test case here, and re-run `Script.List`/`Script.GetStatus` yourself regardless — this file is a
+  point-in-time snapshot, per the header.
 
 Environment gotchas that affect every test case run from a macOS dev machine on this network:
 
@@ -80,6 +93,57 @@ Environment gotchas that affect every test case run from a macOS dev machine on 
   binary (`make generate && make build`) — there is no way to point the uploader at an arbitrary
   file. Use `--force` to re-upload when the on-device KVS version hash already matches the content
   you're pushing (it will, on a repeat upload of unchanged content).
+
+## Device availability — `filtration-hiver` (production pump — read-only checks only, by default)
+
+- **Name**: `filtration-hiver`
+- **Shelly device ID**: `shellypro1-ec62608c0230`
+- **Hardware**: Shelly **Pro1** (single relay), a different app *and* firmware major from
+  `development`'s Plus1/1.7.5 — a build that runs on `development` is not evidence it runs here.
+- **Firmware**: `2.0.0` (`fw_id: 20260710-101206/2.0.0-g87fbfa4`), confirmed via
+  `curl http://filtration-hiver.local/rpc/Shelly.GetDeviceInfo` on 2026-09-06.
+- **Role**: **the real pool pump.** Standing authorization for hardware campaign work exists (see
+  the coordinator's own memory), but this refresh session was scoped to **read-only checks only** —
+  `Script.GetStatus`, `Switch.GetStatus`, `Shelly.GetDeviceInfo`, `Schedule.List` — no upload, no KVS
+  write, no `Switch.Set`. Any test case below sourced from campaign #401 that ran writes against this
+  device did so under that campaign's own authorization, in an earlier session; this doc only records
+  the outcome.
+- **There is no Pro1-on-2.0.0 test bed other than this device.** `development` (Plus1/1.7.5) and
+  `mezzanine` (Pro1, but see below) are both used as proxies in various test cases; neither is
+  equivalent to `filtration-hiver` for firmware-major-specific behaviour (see the `ReferenceError`
+  test case below for a worked example of a "hard rule" that held on one platform and not the other
+  until actually measured on both).
+
+## Device availability — `mezzanine`
+
+- **Name**: `mezzanine`
+- **Shelly device ID**: `shellypro1-30c6f782d274`
+- **Hardware**: Shelly **Pro1** — same hardware family as `filtration-hiver`, used in campaign #401
+  as an isolation harness for `pool-pump.js` changes that should not touch the live pump. Several
+  #401 test cases below configured it with production's full `script/pool-pump/*` KVS set
+  specifically so it would be a valid proxy — see the "spare device is only a valid proxy if
+  configuration matches" finding under `development`'s section above, which applies here too.
+- **Role**: campaign-owned test bed, per the standing device-test-bed authorization. Not currently
+  reachable from this read-only refresh session's checks (not probed — out of scope for this pass;
+  all `mezzanine` figures below are sourced to their originating issue/PR comment, not re-measured).
+
+## Known blocker — `ctl shelly script upload` / the `shelly` MCP server require a running daemon
+
+**As of 2026-09-06, this blocks running any new device test case that needs an upload, KVS write, or
+`Switch.Set` from this environment.** `ctl shelly script upload` and the `shelly` MCP server both
+resolve devices through a daemon on instance `local` (`myhome-local.sh` execs `ctl --instance
+local`), and none is running — calls fail with `timeout waiting for response to method
+device.lookup after 14s (dst: local)`.
+
+Starting a local daemon is **not** a free workaround: it also publishes
+`myhome/energy/solar/available`, a second voice into the live pump's solar input, alongside whatever
+device-management side effects daemon startup has. Read-only checks avoid this entirely by going
+straight over HTTP: `curl http://<device>.local/rpc/<Method>` (or by IP — see `development`'s
+mDNS-unreliability note above, which reproduced again during this session: `development.local`
+resolved via `ping` but not via `curl`, needing `192.168.1.30` directly).
+
+This is why this refresh session's own device checks (above) are `curl`-only, and why several test
+cases below are recorded from campaign #401's own comments rather than re-run here.
 
 ---
 
@@ -461,3 +525,248 @@ crash `error_msg`.
 - **As of this doc's last edit, the Python capture (PID 23594) is still running.** Stop it with
   `kill 23594` (or `pgrep -f udp_capture.py` if the session has moved on) once no longer needed —
   it has no `-k`-style gotcha, so it's safe to leave running indefinitely.
+
+---
+
+## Test case #2 — Gate 3, solar extension and stop, full-day production run
+
+- **Script/version under test**: `pool-pump.js` at commit `39815c12` (post-#402/#403/#405, `main` at
+  the time), running as script id 2 on `filtration-hiver`.
+
+- **Purpose**: verify, on the real production pump, that `solar-enabled = true` lets solar hold the
+  pump running past its scheduled stop and release it cleanly when generation fades — the core
+  capability #401 was opened to deliver, and one that cannot be observed any other way (there is no
+  Pro1-on-2.0.0 test bed; see the device-availability note above).
+
+- **Preconditions**: `solar-enabled = true` on `filtration-hiver`; a clear-enough day for solar
+  output to exceed the (lowered, for this run) 200 W start / 150 W stop thresholds after the
+  scheduled window closes; continuous 5-minute manual monitoring for the full day (no automated
+  monitor tool was trusted for this — `tools/monitor-solar.sh`, #546, is separately documented as
+  having produced zero bytes of output for 1h44m during a later session, see the ReferenceError test
+  case below).
+
+- **Steps**: set `solar-enabled = true`, restart the script, let the daily schedule run normally,
+  observe `Script.GetStatus`/relay state/solar feed manually through and past the scheduled stop
+  time, until solar itself releases the pump.
+
+- **Pass/fail criteria**:
+  - **Pass**: relay stays on past the scheduled stop while solar remains above the stop threshold,
+    releases within one 10-minute confirmation delay of solar dropping below it, actual runtime
+    lands within the day's required-hours/turnover band, zero script crashes, no rapid relay
+    cycling.
+  - **Fail**: crash, cycling (fuse trip), or turnover band missed.
+
+- **Originating issue**: #401 (campaign), addresses the Gate 3 "extension and stop" half of the
+  campaign's stated objective.
+
+- **Last run**: **2026-08-24**, `filtration-hiver` (Pro1, fw 2.0.0). **Result: PASSED.**
+  `solar-enabled = true` from 05:33 CEST. Scheduled window 10:48–15:12 (4.40 h required by
+  `computeRunHours(28.9°C)`); solar crossed the (lowered) 200 W start threshold ~11:04, peaked at
+  840 W at 12:49; scheduled stop at 15:12 was overridden by solar; solar dropped below the 150 W
+  stop threshold at 18:20 (after a 10-minute confirmation delay) and the pump stopped cleanly.
+  **Actual runtime 7.53 h (27096 s credited) against 4.40 h required — solar extension +3.13 h.**
+  Turnover landed inside the 5–7 band (`solarHardCeilingReached = false`). **0 script crashes, 2
+  relay transitions** (one on, one off — no cycling), water-supply interlock never fired, heap flat
+  all day (`mem_used`/`mem_free` 16128/6174, no leak on the per-message solar path). Source: issue
+  #401, comment posted 2026-08-24T17:34:45Z.
+  - **Not exercised by this run**: the solar *start* path — the schedule, not solar, started the
+    pump at 10:48 that day (structural: `handleDailyCheck()` sizes the run window from mid-morning,
+    so on a clear day the schedule starts the pump before solar crosses the threshold). See test
+    case #3.
+
+---
+
+## Test case #3 — Gate 3, solar start, production run
+
+- **Script/version under test**: `pool-pump.js` current at the time (`main`, post-#476 reconciler),
+  script id on `filtration-hiver`.
+
+- **Purpose**: verify that solar alone — with no other branch of `desiredOutput()` able to have done
+  it — can start the pump on the real production device. This is the half of Gate 3 that test case
+  #2 above explicitly did not exercise, and it could not be exercised passively: `handleDailyCheck()`
+  sizes the run window from mid-morning, so on an ordinary clear day the **schedule** starts the pump
+  before solar crosses the threshold, making a naturally-occurring solar-only start structurally
+  unreachable without intervention.
+
+- **Preconditions**: a day with solar available before the scheduled window would normally open;
+  `F_WIN_START` deliberately pushed **beyond** the expected solar-crossing time (not simply disabling
+  `handleMorningStart()` — that method was tried and rejected first, see Result below, because window
+  membership is itself a level that the #476 reconciler drives independently of the schedule job);
+  the solar start threshold temporarily lowered if the live solar feed's noise band sits close to the
+  configured default (see the "500 W default is a trough, not a mean" finding below); abort criteria
+  from test case #2 unchanged (two relay transitions inside 5 minutes trips the fuse; treat as an
+  abort signal).
+
+- **Steps**: push `F_WIN_START` past the point solar is expected to cross the (lowered) start
+  threshold; wait for `F_SOLAR_WANT` to flip to `true` and the relay to close; confirm via
+  `desiredOutput()`'s three branches (override, solar-want, window-membership) that only the
+  solar-want branch could have fired; restore `F_WIN_START`, the threshold, and
+  `handleMorningStart()`'s enable flag afterward.
+
+- **Pass/fail criteria**:
+  - **Pass**: relay closes while override is inactive and window-membership is false, i.e. the
+    solar-want branch is the only one that could have produced the transition; no fuse trip; runtime
+    accounting unaffected.
+  - **Fail**: pump starts via the schedule/window branch (proves nothing about solar) or does not
+    start at all within the observation window.
+
+- **Originating issue**: #401 (campaign), addresses the Gate 3 "start" half.
+
+- **Last run**: **2026-08-30 12:53:54 CEST**, `filtration-hiver` (Pro1, fw 2.0.0). **Result: PASSED**
+  — first success in four attempts. `F_WIN_START` pushed to 960 (16:00); at 12:53:53 `F_SOLAR_WANT`
+  flipped to `true` (solar 420 W, threshold lowered to 300 W); `switch.on` fired one second later, at
+  12:53:54. At that instant: override branch inactive (`F_OVR_WANT = -2`); window-membership branch
+  false (`F_WIN_START = 960` i.e. 16:00, clock read 12:53); solar-want branch was therefore the
+  **only** branch that could have produced the transition. Relay transitions 13 min 32 s apart (abort
+  criterion "<5 min between transitions" not tripped); `turnover_today` showed no filtration at risk.
+  Source: issue #401, comment posted 2026-08-30T10:55:54Z.
+  - **Design finding from this run, more consequential than the pass itself**: the live solar feed
+    alternated 360↔420 W every ~45 s. The start-side code (`if (SOLAR.availableW <
+    CONFIG.solarStartThresholdW) { SOLAR.aboveStartSince = 0; ... }`) resets its 5-minute
+    accumulation hold on **any single sample** below threshold, with no debounce or averaging. A
+    threshold sitting inside the feed's noise band (e.g. the shipped default of 500 W against an
+    observed ~390 W mean with a 360 W trough) is therefore **structurally unreachable** — the hold
+    can never accumulate 5 uninterrupted minutes. Lowering the threshold to 300 W, below the observed
+    trough, let every sample clear it. **The threshold is a trough setting, not a "how much sun do
+    you want" mean setting**, and this is not currently documented anywhere the config schema
+    explains it.
+  - **Method correction, recorded because it is reusable**: the originally-planned method (disable
+    `handleMorningStart()` and see if solar starts the pump on its own) was tried first and does
+    **not** isolate solar — with the job verifiably disabled, the pump still started at 11:49:24
+    (the exact window-start minute) with `F_SOLAR_WANT = false`, because window membership is a level
+    the #476 reconciler drives independently of any schedule job. The valid method is to push
+    `F_WIN_START` itself past the expected solar crossing.
+
+---
+
+## Test case #4 — `ReferenceError` inside `try`/`catch`: containment corrected on both platforms
+
+- **Script/version under test**: `pool-pump.js` post-#574 (mandatory `try`/`catch` wrapping around
+  `script.eval`-dispatched schedule jobs, per #528's fix).
+
+- **Purpose**: settle whether a `ReferenceError` thrown inside a wrapped `try` block is actually
+  caught on this firmware, or escapes and kills the script. This directly overturned a previously
+  recorded "hard rule" (issue #559 §7) that argued *against* the wrapping #574 shipped — a concrete
+  instance of why this log needs to exist rather than trusting an unreproduced incident write-up (see
+  CLAUDE.md's `events.db` section, "worked example, #523").
+
+- **Preconditions**: none beyond a script already running the `try`/`catch`-wrapped dispatch code;
+  a safe way to reference a non-existent identifier without crashing the *caller* — the
+  `typeof`-guarded, quote-free probe form (`typeof X === typeof u` with `var u` left undefined) was
+  used precisely because it needs no string escaping when passed through `Script.Eval`'s JSON
+  argument, avoiding an unrelated failure mode.
+
+- **Steps**: from a live `Script.Eval` call (both a direct call form and a bare-reference form),
+  reference an identifier that does not exist inside code already wrapped in a mandatory
+  `try`/`catch`; observe whether the script survives and what value the `catch` receives.
+
+- **Pass/fail criteria**:
+  - **Pass (containment holds)**: the script remains `running: true` after the throw; the error
+    surfaces as an ordinary value inside the catch handler (e.g. returned/logged), not as a script
+    crash.
+  - **Fail (matches the old #559 §7 rule)**: the script dies (`running: false`), i.e. the
+    `ReferenceError` escaped the `try`.
+
+- **Originating issue**: #401 (campaign); corrects #559 §7 (superseded by #594, which records this
+  finding); the operator-induced incident that originally motivated #559 §7 is separately noted as
+  unreproduced below.
+
+- **Last run**: **2026-09-02**, run on **both** `development` (Plus1, fw 1.7.5, call and
+  bare-reference forms) and `filtration-hiver` (Pro1, fw 2.0.0, production). **Result: PASSED on
+  both** — the `ReferenceError` (`ReferenceError: "to" is not defined` on `filtration-hiver`) was
+  returned as a value with the script remaining alive, on both platforms. Source: issue #594's body
+  (which supersedes #559, closed) and issue #401 comment 2026-09-02T18:34:37Z ("#559 §7 recorded the
+  opposite as a hard rule, from the 2026-08-30 incident. It does not reproduce.").
+  - **Correction this test case makes to prior documentation**: #559 §7 had recorded, as a hard
+    kill-list rule from one 2026-08-30 incident (an operator probe that killed the script, restarted
+    10:14:16, settled `mem_free` 7420), that a `ReferenceError` escapes `try`/`catch` on this
+    firmware. **That rule is wrong and does not reproduce.** What actually killed the script on
+    2026-08-30 remains open (the reference in that incident probably sat outside the `try`, not
+    inside it) — the rule as stated, "wrap nothing, it won't help," was backwards, and would have
+    argued against the exact wrapping (#574) this test case shows works.
+
+---
+
+## Test case #5 — Shelly KVS key length limit (42 characters, error `-103`)
+
+- **Script/version under test**: PR #537's `storeValue("runtime-last-rollover-discarded", sec)` call
+  (`internal/shelly/scripts/pool-pump.js`), which built the KVS key
+  `script/pool-pump/runtime-last-rollover-discarded` — 48 characters.
+
+- **Purpose**: verify empirically whether Shelly Pro1 firmware enforces a KVS key length limit, after
+  a `make test`-green, code-reviewed PR's `storeValue()` write was suspected of silently failing
+  (issue #540) because `storeValue()` has no error handling on the underlying `KVS.Set` RPC.
+
+- **Preconditions**: `mezzanine` (Shelly Pro1, `shellypro1-30c6f782d274`) online, running the build
+  under test.
+
+- **Steps**: attempt the write both through the script's own `storeValue()` call and through a
+  direct `KVS.Set` RPC with an explicit callback that surfaces the RPC error; follow with `KVS.List`
+  to check whether the key exists at all.
+
+- **Pass/fail criteria**:
+  - **Fail (bug present)**: `KVS.Set` returns an RPC error and/or `KVS.List` never shows the key,
+    despite `storeValue()` (or `make test`, or code review) reporting no problem.
+  - **Pass**: key appears in `KVS.List` with the expected value.
+
+- **Originating issue**: #540, hardware-verified as part of #401.
+
+- **Last run**: **2026-08-23**, `mezzanine` (Pro1). **Result: FAIL — confirmed bug.** Both the
+  script's own write and a direct `KVS.Set` with an explicit callback returned:
+  ```
+  -103: "Invalid argument 'key': length should be less than 42!"
+  ```
+  reproduced twice. `KVS.List` confirmed the key was **permanently absent** — the write had a 0%
+  success rate on every attempt, silently, because `storeValue()` discards the RPC error. `make
+  test` was green throughout (the goja emulator models neither firmware key limits nor stack depth,
+  #496) and a code review passed the PR — neither safety net could have caught this; only the
+  device's own `KVS.List` did. Source: issue #540, comment 2026-08-23T13:13:23Z.
+  - **Rule that follows, applicable to any future `storeValue()`/`KVS.Set` addition**: count the
+    **full** key including its `script/pool-pump/` prefix (17 characters) before writing the code —
+    `<name>` must stay at or under 24 characters — and verify the key actually appears in `KVS.List`
+    on a device afterward. A successful-looking call from `storeValue()` is not evidence; it is
+    exactly the same trap class as the `ctl shelly script upload` embedded-copy trap documented
+    above (the tool reports success while doing nothing).
+
+---
+
+## What is NOT verified on hardware — first-class, not a footnote
+
+A reader of this log needs to be able to see, at a glance, which merged changes are still unproven
+on real devices. This section exists for exactly that; add an entry here at merge time for any
+device-script or daemon change that has not yet had a hardware run, and move it up into a numbered
+test case once one happens.
+
+### PR #587 / commit `f380a143` — pump event reason codes — **never run on any device**
+
+- **What merged**: `internal/shelly/scripts/pool-pump.js`'s `pool.pump_start`/`pool.pump_stop`
+  events gained a `reason` field, so `events.db` can distinguish a solar-driven start/stop from a
+  scheduled or override-driven one (issue #587). Merged 2026-09-05 as PR #595, commit `f380a143`.
+- **Why it matters that this is unproven**: this is precisely the kind of change #401 exists to
+  catch — #540, #530, #547, #550 were all changes that passed `make test` and code review and then
+  failed (or silently no-op'd) on real hardware, because the goja emulator models neither firmware
+  key limits nor interpreter stack depth (#496).
+- **What is known instead of a hardware run — a byte proxy, not a heap figure**: pre-deployment
+  baseline read over HTTP from `filtration-hiver` 2026-09-05 09:58 CEST — `mem_free` **7280**,
+  `mem_peak` **22918**, script id 2 running. Minified size grew **36038 → 36674 bytes (+636)** from
+  the change. **No `mem_used`/`mem_free` reading has been taken with this build actually running.**
+  A minified-byte delta is not a heap measurement — see the #570/#569 "heap calibration" finding
+  recorded elsewhere in this campaign (source bytes and resident heap cost do not correlate
+  linearly; deletions have measured as low as 15% of their byte delta in resident cost, and single-
+  call-function inlining has measured as high as 167%). **Do not infer this change's resident cost
+  from +636 bytes.**
+- **What would close this entry**: a `Script.GetStatus` reading against a device actually running
+  the post-#587 build (heap after ~30s settle, per the "only settled readings are measurements" rule
+  from #594), and at least one real `pool.pump_start`/`pool.pump_stop` event observed in `events.db`
+  with a non-empty `reason` field.
+
+---
+
+## Sourcing note for this refresh (2026-09-06)
+
+Test cases #2–#5 above were mined from campaign #401's own issue-comment history (issues #401, #540,
+#559, #587, #594) rather than re-run in this session — this refresh's own device interaction was
+limited to the read-only `curl` checks noted under each device's availability section. Every figure
+above is either dated-and-sourced to a specific issue comment, or explicitly marked as not yet
+measured. No figure from the original PR #427 content, or from campaign #401, was carried forward
+without a citation.

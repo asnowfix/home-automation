@@ -44,9 +44,17 @@ func ListAvailable() ([]string, error) {
 	return scripts, nil
 }
 
+// jsMinifierVersion pins the tdewolff minifier to ES5 (2009) so it can never
+// emit constructs the Shelly Espruino engine can't parse — e.g. optional
+// catch binding (`catch {}`, ES2019) or template literals with interpolation
+// (ES2015). See CLAUDE.md's "Never empty catch blocks" rule: without this,
+// the minifier silently turns a safe `catch (e) {}` into `catch {}`, which is
+// a syntax error on-device.
+const jsMinifierVersion = 2009
+
 func minifyJS(src []byte) ([]byte, error) {
 	m := minify.New()
-	m.AddFunc("text/javascript", mjs.Minify)
+	m.Add("text/javascript", &mjs.Minifier{Version: jsMinifierVersion})
 	var out bytes.Buffer
 	if err := m.Minify("text/javascript", &out, bytes.NewReader(src)); err != nil {
 		return nil, err

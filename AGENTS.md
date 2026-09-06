@@ -521,6 +521,10 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
   has timed out at 14s and even 45s immediately after a start, then answered normally a minute
   later. Use `-T 60s` and re-poll; do not conclude the device is wedged. The default `-T 14s` is too
   short for the Pro1 generally.
+- **A bare `<device>` name needs a daemon; `.local` or an IP does not.** `LookupDevices()` resolves
+  `.local` names via mDNS and IPs directly — neither touches the daemon. A bare name only resolves
+  via the `device.lookup` RPC, which times out with no daemon running. See the `<device>` addressing
+  note in `CLAUDE.md`'s Commands section, and issue #599.
 
 #### Examples
 

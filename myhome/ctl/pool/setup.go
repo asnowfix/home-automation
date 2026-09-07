@@ -43,31 +43,52 @@ func getAllKnownDevices(ctx context.Context) ([]*myhome.Device, error) {
 }
 
 // getPoolDevices returns all Shelly devices currently running pool-pump.js,
-// discovered dynamically from the server's device registry.
-func getPoolDevices(ctx context.Context) ([]*shelly.Device, error) {
+// discovered dynamically from the server's device registry. It also
+// returns the identifiers of devices whose pool-pump.js status could not
+// be determined (e.g. an RPC timeout talking to that device) — as opposed
+// to devices that were checked and definitively found not running it.
+//
+// This distinction exists so a caller that infers "no already-configured
+// pool device exists" from an empty result can tell that apart from "some
+// device didn't answer, so we don't actually know" (#589 part 3): treating
+// the two as equivalent is what let an unrelated device's Script.List
+// timeout (filtration-piscine-ete) silently look like "no existing pool
+// devices" while probing for filtration-hiver, which does exist and was
+// running pool-pump.js the whole time.
+func getPoolDevices(ctx context.Context) ([]*shelly.Device, []string, error) {
 	provider := &poolProvider{}
 
 	allDevices, err := getAllKnownDevices(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list devices: %w", err)
+		return nil, nil, fmt.Errorf("failed to list devices: %w", err)
 	}
 
 	var poolDevices []*shelly.Device
+	var unresolved []string
 	via := types.ChannelMqtt
 
 	for _, dev := range allDevices {
 		sd, err := provider.GetShellyDevice(ctx, dev)
 		if err != nil {
+			// Not a Shelly device (or otherwise not resolvable) -- not a
+			// probe failure, just not a candidate.
 			continue
 		}
 		status, err := pkgscript.ScriptStatus(ctx, sd, via, "pool-pump.js")
-		if err != nil || status == nil {
+		if err != nil {
+			// Could not determine whether this device runs pool-pump.js
+			// (e.g. RPC timeout) -- unlike "checked, and it doesn't run
+			// it", this device's pool-pump status is unknown.
+			unresolved = append(unresolved, dev.Id())
+			continue
+		}
+		if status == nil {
 			continue
 		}
 		poolDevices = append(poolDevices, sd)
 	}
 
-	return poolDevices, nil
+	return poolDevices, unresolved, nil
 }
 
 // getKVSValue retrieves a single KVS value from a device
@@ -79,13 +100,49 @@ func getKVSValue(ctx context.Context, sd *shelly.Device, via types.Channel, key 
 	return val.Value, nil
 }
 
+// defaultPreferredSpeed is the speed a genuinely new pool pump controller
+// starts at, when there is no already-configured device to inherit from.
+const defaultPreferredSpeed = "eco"
+
+// resolveInheritedSpeed decides the PreferredSpeed to configure on a device
+// being added, given the outcome of probing for an already-configured
+// peer device to inherit from. It is a pure function, decoupled from any
+// device I/O, so the #589 part-3 rule -- "a read that fails must not
+// become a silent write of a default" -- is directly testable without a
+// live device.
+//
+// peerFound reports whether an already-configured pool device was located.
+// peerSpeed is that device's speed (only meaningful if peerFound). readErr
+// is any error encountered while trying to determine peerFound/peerSpeed
+// (enumerating devices, or reading the peer's KVS speed value). unresolved
+// is the number of devices whose pool-pump.js status could not be
+// determined during enumeration (see getPoolDevices) -- if none was found
+// AND some devices were unresolved, we cannot tell "genuinely first setup"
+// from "an unrelated device's RPC timeout hid the existing one", so this
+// refuses to guess rather than silently default.
+func resolveInheritedSpeed(peerFound bool, peerSpeed string, readErr error, unresolved int) (string, error) {
+	if readErr != nil {
+		return "", fmt.Errorf("failed to read the existing preferred_speed from an already-configured pool pump device: %w -- refusing to silently reset it to a default; retry once the device is reachable", readErr)
+	}
+	if peerFound {
+		return peerSpeed, nil
+	}
+	if unresolved > 0 {
+		return "", fmt.Errorf("could not confirm whether an already-configured pool pump device exists: %d device(s) did not respond while discovering pool devices -- refusing to guess a default preferred_speed; retry once they are reachable", unresolved)
+	}
+	return defaultPreferredSpeed, nil
+}
+
 var addCmd = &cobra.Command{
 	Use:   "add <device-identifier>",
 	Short: "Add a device to the pool pump mesh",
 	Long: `Upload pool-pump.js script to a device and configure it with KVS values.
 
 Membership is defined by the script running on a device — no local registry is used.
-Schedules are only created on Pro3 devices (detected by switch count).`,
+Schedules are created on every device, Pro1 and Pro3 alike. Re-running this against an
+already-configured device preserves each schedule job's existing enable flag and timespec —
+only its code is updated (e.g. to pick up a wrapping fix) — so re-provisioning does not
+change when the pump runs.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
@@ -104,15 +161,25 @@ Schedules are only created on Pro3 devices (detected by switch count).`,
 		// Controllers do not coordinate, so there are no peers to discover.
 		// An already-configured device is still worth reading for its speed, so
 		// adding a second controller inherits the setting rather than silently
-		// resetting it to the default.
-		existingDevices, _ := getPoolDevices(ctx)
+		// resetting it to the default. If that read cannot be completed with
+		// confidence, resolveInheritedSpeed refuses rather than guessing (#589
+		// part 3) -- on production, an unrelated device's Script.List timeout
+		// during discovery silently produced "eco" here, overwriting a running
+		// pump's speed of "max".
+		existingDevices, unresolved, err := getPoolDevices(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to discover existing pool pump devices: %w", err)
+		}
 
-		currentSpeed := "eco"
 		via := types.ChannelMqtt
+		var peerSpeed string
+		var speedErr error
 		if len(existingDevices) > 0 {
-			if speed, err := getKVSValue(ctx, existingDevices[0], via, "script/pool-pump/speed"); err == nil && speed != "" {
-				currentSpeed = speed
-			}
+			peerSpeed, speedErr = getKVSValue(ctx, existingDevices[0], via, "script/pool-pump/speed")
+		}
+		currentSpeed, err := resolveInheritedSpeed(len(existingDevices) > 0, peerSpeed, speedErr, len(unresolved))
+		if err != nil {
+			return err
 		}
 
 		service := mhscript.NewPoolService(hlog.Logger, provider)
@@ -174,7 +241,7 @@ A Pro1 is on/off, so any speed resolves to its single stage.`,
 			return fmt.Errorf("invalid speed: %s (must be eco, day or max)", speed)
 		}
 
-		devices, err := getPoolDevices(ctx)
+		devices, _, err := getPoolDevices(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to discover pool pump devices: %w", err)
 		}
@@ -238,7 +305,7 @@ var listCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		devices, err := getPoolDevices(ctx)
+		devices, _, err := getPoolDevices(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to discover pool pump devices: %w", err)
 		}

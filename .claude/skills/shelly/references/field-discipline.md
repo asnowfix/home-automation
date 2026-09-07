@@ -44,6 +44,19 @@ script's own prefix.
 exactly, delete every probe script and every KVS key you added, and verify with `script list` before
 you finish — it runs `pool-pump.js` and emits real `pool.*` events into `events.db`.
 
+⚠️ **`development` is NOT equivalent to the production pump.** Measured 2026-09-02:
+
+| | `development` | `filtration-hiver` (production) |
+|---|---|---|
+| app | **Plus1** (`SNSW-001X16EU`) | **Pro1** (`SPSW-201XE16EU`) |
+| firmware | **1.7.5** (`20260311-…`) | **2.0.0** (`20260710-…`) |
+
+Different application **and a different firmware major**, four months apart. Interpreter semantics,
+heap headroom and exception behaviour are exactly the things that can differ across that gap, so
+"it worked on `development`" is **not** evidence for the pool pump. Say which device a measurement
+came from, always. There is currently **no** Pro1-on-2.0.0 test bed; `filtration-hiver` is the only
+one and it is production.
+
 **Not authorized:** any other device; network, MQTT or firmware configuration; unmasking
 `myhome-update.timer`; the pool's physical safety interlocks.
 

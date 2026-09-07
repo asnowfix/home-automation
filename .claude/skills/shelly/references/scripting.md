@@ -231,6 +231,41 @@ Two further traps:
 After any `Script.Eval` against a production device, re-check `Script.GetStatus`. An eval that killed
 the script leaves it `running: false` and the pump uncontrolled.
 
+#### The wrapper *does* contain a `ReferenceError` — measured, 2026-09-02
+
+Wrapping is not merely a hedge against thrown values. A `ReferenceError` from an undefined identifier
+raised **inside** the `try` is caught, on both platforms in the fleet:
+
+| device | app / firmware | probe | result |
+|---|---|---|---|
+| `development` | Plus1 / 1.7.5 | `(function(){try{NOSUCH()}catch(e){if(e&&false){}}})()` | caught, script alive |
+| `development` | Plus1 / 1.7.5 | `(function(){try{return NOSUCH}catch(e){if(e&&false){}}})()` | caught, script alive |
+| `filtration-hiver` | **Pro1 / 2.0.0 (production)** | wrapped ref to an undefined name | **caught**, returned `ReferenceError: "to" is not defined` as a value, script alive |
+
+This matters because a 2026-08-30 incident was written up as *"a `ReferenceError` escapes the
+`try`/`catch` on this firmware"*, and that framing argues against wrapping — including against #574,
+which wraps every schedule job's code and is now verified in production. **That claim does not
+reproduce.** Whatever killed the script that day, the reference most likely sat somewhere the `try`
+did not cover, or something else ended the script.
+
+So: rule 1 stands and is *stronger* than it looked. Wrapping buys real containment, including against
+the most likely handler failure — a renamed or missing function.
+
+#### The safe probe form
+
+Still use it. It is cheap, and it makes a probe survive being pointed at the wrong build:
+
+```js
+(function(){try{var u;var o={};
+  o.water=(typeof F_WATER===typeof u)?null:F_WATER;
+  o.win=(typeof F_WIN_START===typeof u)?null:F_WIN_START;
+  return JSON.stringify(o)}catch(e){return String(e)}})()
+```
+
+`typeof X === typeof u` (with `var u` left undefined) tests existence **without naming a value**, and
+the form uses **no quote characters at all**, so the surrounding JSON needs no escaping. Both traps —
+version mismatch and quote escaping — disappear together.
+
 ---
 
 ## Callback depth and the 5-RPC limit

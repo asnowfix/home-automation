@@ -150,6 +150,21 @@ func (r *resolver) waitForStart(ctx context.Context) {
 	r.Unlock()
 }
 
+// mdnsQueryName normalizes host into a well-formed mDNS query name ending in
+// exactly one ".local" suffix, regardless of what shape host arrived in.
+//
+// Callers (e.g. myhome/daemon/watch/zeroconf.go) may pass raw discovery-library
+// fields that already carry a trailing dot (the canonical FQDN form, e.g.
+// "filtration-hiver.local.") and/or an existing ".local" suffix. Appending
+// ".local" unconditionally on top of that produces a malformed query name such
+// as "filtration-hiver.local..local", which never gets an mDNS response and
+// burns the full lookup timeout before failing (see #462).
+func mdnsQueryName(host string) string {
+	host = strings.TrimSuffix(host, ".")
+	host = strings.TrimSuffix(host, ".local")
+	return host + ".local"
+}
+
 func (r *resolver) LookupHost(ctx context.Context, log logr.Logger, host string) ([]net.IP, error) {
 	r.start(ctx)
 	r.waitForStart(ctx)
@@ -194,7 +209,7 @@ func (r *resolver) LookupHost(ctx context.Context, log logr.Logger, host string)
 	}
 
 	log.Info("Did not find host: looking up via mDNS", "host", host)
-	localHost := host + ".local"
+	localHost := mdnsQueryName(host)
 
 	// Try mDNS lookup with its own timeout
 	mdnsCtx, mdnsCancel := context.WithTimeout(ctx, r.mdnsTimeout)

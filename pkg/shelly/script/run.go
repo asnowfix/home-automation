@@ -320,6 +320,10 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 
 		log.Info("Shelly.getComponentConfig()", "component", component, "id", id)
 
+		if v, ok := deviceState.ComponentConfigValue(component); ok {
+			return vm.ToValue(v)
+		}
+
 		// Return component-specific configuration
 		var config map[string]interface{}
 
@@ -637,6 +641,39 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		return vm.ToValue(true)
 	})
 	vm.Set("MQTT", mqttObj)
+
+	// BLE.Scanner: just enough for gateway scripts to start a scan and
+	// subscribe. Starts are counted (DeviceState.BLEScannerStarts) so a test
+	// can tell whether the script got as far as starting the scanner. No scan
+	// results are ever delivered.
+	// https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#blescanner
+	bleScannerObj := vm.NewObject()
+	bleScannerObj.Set("SCAN_RESULT", 1)
+	bleScannerObj.Set("INFINITE_SCAN", -1)
+	bleScannerObj.Set("isRunning", func(call goja.FunctionCall) goja.Value {
+		deviceState.mu.RLock()
+		defer deviceState.mu.RUnlock()
+		return vm.ToValue(deviceState.bleScannerRunning)
+	})
+	bleScannerObj.Set("Start", func(call goja.FunctionCall) goja.Value {
+		deviceState.mu.Lock()
+		deviceState.bleScannerStarts++
+		deviceState.bleScannerRunning = true
+		deviceState.mu.Unlock()
+		return call.Argument(0)
+	})
+	bleScannerObj.Set("Stop", func(call goja.FunctionCall) goja.Value {
+		deviceState.mu.Lock()
+		deviceState.bleScannerRunning = false
+		deviceState.mu.Unlock()
+		return goja.Undefined()
+	})
+	bleScannerObj.Set("Subscribe", func(call goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	})
+	bleObj := vm.NewObject()
+	bleObj.Set("Scanner", bleScannerObj)
+	vm.Set("BLE", bleObj)
 
 	// Script object
 	scriptObj := vm.NewObject()

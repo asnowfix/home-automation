@@ -699,8 +699,9 @@ function initBLEScanner() {
   //get the config of ble component
   const BLEConfig = Shelly.getComponentConfig("ble");
 
-  //exit if the BLE isn't enabled
-  if (!BLEConfig.enable) {
+  //exit if the BLE is explicitly disabled. Firmware 2.1.0 (S2PMG3) reports no
+  //"enable" key at all, which must not be read as disabled: BLE scanning works there.
+  if ("enable" in BLEConfig && !BLEConfig.enable) {
     log("Error: The Bluetooth is not enabled, please enable it from settings");
     return;
   }

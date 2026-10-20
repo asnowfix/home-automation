@@ -195,13 +195,19 @@ func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, 
 		if *data.Motion == 1 {
 			eventName = "motion.detected"
 		}
+		// Illuminance (0x05) rides along in the same packet; keep it so
+		// illuminance-gated followers (e.g. lumiere-parking) can be diagnosed.
+		motionData := map[string]any{"motion": *data.Motion, "address": data.Address, "rssi": data.RSSI}
+		if data.Illuminance != nil {
+			motionData["illuminance"] = *data.Illuminance
+		}
 		if err := eventSvc.Record(ctx, events.Event{
 			Ts:        ts,
 			DeviceID:  deviceID,
 			Component: "motion:0",
 			Event:     eventName,
 			Severity:  "info",
-			Data:      bluData(map[string]any{"motion": *data.Motion, "address": data.Address, "rssi": data.RSSI}),
+			Data:      bluData(motionData),
 		}); err != nil {
 			log.Error(err, "Failed to record motion event", "device_id", deviceID)
 		}

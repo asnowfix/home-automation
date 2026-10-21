@@ -271,12 +271,25 @@ The discipline that made this recoverable:
   ~15 minutes. **NAS post-mortem evidence does not survive** — use `events.db` (see above), which does.
 - **`sqlite3` is not installed on the NAS.** Query `events.db` with `python3`'s `sqlite3` module
   against `file:/var/lib/myhome/events.db?mode=ro` instead.
-- **`myhome-update.timer`** installs whatever `releases/latest` resolves to, nightly. `update.sh` only
-  fetches the `.deb` and `dpkg -i` — it does **not** rewrite device scripts. Pool provisioning
-  (`Setup`/`AddDevice`/`UpdateDevice`) is reachable **only** from `myhome/ctl/pool/`, never from the
-  daemon; the daemon's auto-setup applies solely to devices lacking `watchdog.js` as script #1. A
-  `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst tries to
-  enable it, systemd refuses, everything before that has already succeeded.
+- **`myhome-update.timer`** installs whatever `releases/latest` resolves to, nightly (00:00), so a
+  hand-installed binary or a draft release is overwritten — with a *downgrade* if `releases/latest`
+  is older (measured 2026-10-20: a hand-built 0.12.4-lux1 was replaced by 0.12.4 at midnight). To
+  keep a different build on the NAS, disable (or mask) the timer first and re-enable it once that
+  build is the published latest.
+- **`dpkg -i` runs the package's postinst, and that is not just a binary swap.** `update.sh` itself
+  only fetches the `.deb` and runs `dpkg -i`, but the postinst then (a) runs
+  `myhome ctl shelly script update '*'`, pushing the packaged scripts to **every known device that
+  already has the script loaded** whose KVS version marker (`script/<name>` = sha1 of the packaged
+  source) differs — that includes the production pool pump if it carries a hand-deployed build;
+  (b) `systemctl reenable`s **both** timers, so a merely *disabled* update timer comes back (a
+  *masked* one makes postinst fail, see below); (c) prompts for credentials and rewrites
+  `/var/lib/myhome/.env` when stdin is a tty and `DEBIAN_FRONTEND` is not `noninteractive`. There is
+  no dry-run; to preview (a), compare each device's `script/<name>` KVS value with `sha1sum` of the
+  packaged `internal/shelly/scripts/<name>`.
+- Pool provisioning (`Setup`/`AddDevice`/`UpdateDevice`) is reachable **only** from `myhome/ctl/pool/`,
+  never from the daemon; the daemon's auto-setup applies solely to devices lacking `watchdog.js` as
+  script #1. A `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst
+  tries to enable it, systemd refuses, everything before that has already succeeded.
 
 ### Sub-agents
 

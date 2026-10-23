@@ -694,24 +694,85 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 		cancel: cancel,
 	}
 
-	// Ensure channel is closed when subscriber is cancelled
-	go func() {
-		<-subCtx.Done()
-		close(s.queue)
-	}()
-
-	// Get-or-create the per-topic mutex to guard subscriber list mutations
+	// Get-or-create the per-topic mutex. It guards the subscriber list, the
+	// fan-out (distribute), and the broker-level Subscribe/Unsubscribe decision,
+	// so "first subscriber" and "last subscriber" are always judged consistently.
 	lockI, _ := c.subscribersMu.LoadOrStore(topic, &sync.Mutex{})
 	topicMu := lockI.(*sync.Mutex)
 
-	// Atomically append to subscriber list under the per-topic lock
+	// Append to the subscriber list under the per-topic lock. The lock is held
+	// until the broker subscription (if needed) is in place.
 	topicMu.Lock()
+	defer topicMu.Unlock()
 	value, loaded := c.subscribers.LoadOrStore(topic, make([]*subscriber, 0))
 	subscribers := value.([]*subscriber)
 	subscribers = append(subscribers, s)
 	c.subscribers.Store(topic, subscribers)
-	topicMu.Unlock()
 	c.log.Info("Subscriber added", "topic", topic, "subscriber", s.name, "count", len(subscribers), "qlen", qlen, "mqtt_subscribe_needed", !loaded)
+
+	// When this subscriber's ctx ends, remove ONLY this subscriber, then close its
+	// queue -- both under the lock the fan-out holds while sending, so a send can
+	// never hit a closed channel (#519). The broker subscription is dropped only
+	// when the last subscriber leaves (#520).
+	//
+	// removeLocked must be called with topicMu held; it is idempotent so the
+	// synchronous rollback below and the watcher cannot double-close the queue.
+	removed := false
+	removeLocked := func(log logr.Logger, unsubscribe bool) {
+		if removed {
+			return
+		}
+		removed = true
+		current, _ := c.subscribers.Load(topic)
+		list, _ := current.([]*subscriber)
+		remaining := make([]*subscriber, 0, len(list))
+		for _, other := range list {
+			if other != s {
+				remaining = append(remaining, other)
+			}
+		}
+		close(s.queue)
+		if len(remaining) > 0 {
+			c.subscribers.Store(topic, remaining)
+			log.Info("Subscriber removed", "topic", topic, "remaining", len(remaining))
+			return
+		}
+
+		// Last subscriber gone: forget the topic entirely so reconnect/OnConnect
+		// re-registration doesn't resurrect it, then drop the broker subscription.
+		c.subscribers.Delete(topic)
+		c.handlers.Delete(topic)
+		c.pendingMutex.Lock()
+		delete(c.pendingSubscriptions, topic)
+		c.pendingMutex.Unlock()
+		if !unsubscribe {
+			return
+		}
+		token := c.mqtt.Unsubscribe(topic)
+		if !token.WaitTimeout(c.timeout) {
+			log.Error(nil, "Timed out unsubscribing", "from topic", topic)
+		} else if err := token.Error(); err != nil {
+			log.Error(err, "Failed to unsubscribe", "from topic", topic)
+		} else {
+			log.Info("Unsubscribed", "from topic", topic)
+		}
+	}
+	go func(log logr.Logger) {
+		<-subCtx.Done()
+		topicMu.Lock()
+		defer topicMu.Unlock()
+		removeLocked(log, true)
+	}(c.log.WithName(s.name))
+
+	// rollback undoes this registration when the broker subscription could not be
+	// established, so the topic is not left "loaded" with nothing at the broker
+	// (which would make every later Subscribe skip the broker call). Synchronous,
+	// so an immediate retry by the caller starts from a clean state.
+	rollback := func(err error) (<-chan T, error) {
+		removeLocked(c.log.WithName(s.name), false)
+		cancel()
+		return nil, err
+	}
 
 	if !loaded {
 		// First subscriber for this topic - need to register MQTT subscription
@@ -748,11 +809,11 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 				// not the whole feed for the rest of the day.
 				transformed := transform(msg)
 				log.Info("distribute: distributing to subscribers", "topic", topic, "subscriber_count", len(subscribers))
+				// Departed subscribers are removed from the list (and their queue
+				// closed) under this same lock, so every entry seen here is live.
+				// No single subscriber's ctx may end the loop (#521).
 				for i, ch := range subscribers {
 					select {
-					case <-ctx.Done():
-						c.log.V(1).Info("Subscriber context done", "topic", topic, "index", i, "error", ctx.Err())
-						return
 					case ch.queue <- transformed:
 						log.V(1).Info("distribute: sent to subscriber", "topic", topic, "index", i, "subscriber", ch.name)
 					default:
@@ -790,26 +851,15 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 			token := c.mqtt.Subscribe(topic, AtLeastOnce, distribute)
 			if !token.WaitTimeout(c.timeout) {
 				c.log.Error(nil, "Subscription timed out", "topic", topic, "timeout", c.timeout)
-				return nil, fmt.Errorf("subscription timed out for topic %s", topic)
+				return rollback(fmt.Errorf("subscription timed out for topic %s", topic))
 			}
 			if err := token.Error(); err != nil {
 				c.log.Error(err, "Subscription failed", "topic", topic)
-				return nil, err
+				return rollback(err)
 			}
 			c.log.Info("Subscribed synchronously", "topic", topic)
 		}
 	}
-
-	go func(log logr.Logger) {
-		<-ctx.Done()
-		// Don't log context cancellation as an error
-		token := c.mqtt.Unsubscribe(topic)
-		if token.WaitTimeout(c.timeout) {
-			log.Info("Unsubscribed", "from topic", topic)
-		} else {
-			log.Error(token.Error(), "Failed to unsubscribe", "from topic", topic)
-		}
-	}(c.log.WithName(s.name))
 
 	return s.queue, nil
 }

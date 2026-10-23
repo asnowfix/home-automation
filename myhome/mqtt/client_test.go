@@ -25,18 +25,59 @@ func (t *fakePahoToken) Error() error                      { return nil }
 
 // fakePahoClient implements pahomqtt.Client for unit tests.
 // It always reports as connected and silently accepts subscribe/publish calls.
-type fakePahoClient struct{}
+//
+// It also records Subscribe/Unsubscribe calls (and the subscribed handler) so
+// tests can assert broker-level behavior and drive the fan-out like the broker.
+type fakePahoClient struct {
+	mu           sync.Mutex
+	subscribed   []string
+	unsubscribed []string
+	handlers     map[string]pahomqtt.MessageHandler
+}
 
 func (f *fakePahoClient) IsConnected() bool                                                  { return true }
 func (f *fakePahoClient) IsConnectionOpen() bool                                             { return true }
 func (f *fakePahoClient) Connect() pahomqtt.Token                                            { return &fakePahoToken{} }
 func (f *fakePahoClient) Disconnect(uint)                                                    {}
 func (f *fakePahoClient) Publish(string, byte, bool, interface{}) pahomqtt.Token             { return &fakePahoToken{} }
-func (f *fakePahoClient) Subscribe(string, byte, pahomqtt.MessageHandler) pahomqtt.Token     { return &fakePahoToken{} }
+func (f *fakePahoClient) Subscribe(topic string, _ byte, h pahomqtt.MessageHandler) pahomqtt.Token {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.subscribed = append(f.subscribed, topic)
+	if f.handlers == nil {
+		f.handlers = make(map[string]pahomqtt.MessageHandler)
+	}
+	f.handlers[topic] = h
+	return &fakePahoToken{}
+}
 func (f *fakePahoClient) SubscribeMultiple(map[string]byte, pahomqtt.MessageHandler) pahomqtt.Token {
 	return &fakePahoToken{}
 }
-func (f *fakePahoClient) Unsubscribe(...string) pahomqtt.Token                   { return &fakePahoToken{} }
+func (f *fakePahoClient) Unsubscribe(topics ...string) pahomqtt.Token {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unsubscribed = append(f.unsubscribed, topics...)
+	return &fakePahoToken{}
+}
+
+// count returns how many times topic appears in list (subscribed or unsubscribed).
+func (f *fakePahoClient) count(list *[]string, topic string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, t := range *list {
+		if t == topic {
+			n++
+		}
+	}
+	return n
+}
+
+func (f *fakePahoClient) handler(topic string) pahomqtt.MessageHandler {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.handlers[topic]
+}
 func (f *fakePahoClient) AddRoute(string, pahomqtt.MessageHandler)               {}
 func (f *fakePahoClient) OptionsReader() pahomqtt.ClientOptionsReader            { return pahomqtt.ClientOptionsReader{} }
 
@@ -536,5 +577,157 @@ func TestReconnect_FailedSubscriptionQueuedForRetry(t *testing.T) {
 
 	if !queued {
 		t.Error("failed subscription should have been added to pendingSubscriptions for retry")
+	}
+}
+
+// recvOrFail reads one payload from ch or fails after a bounded wait.
+func recvOrFail(t *testing.T, ch <-chan []byte, what string) []byte {
+	t.Helper()
+	select {
+	case v, ok := <-ch:
+		if !ok {
+			t.Fatalf("channel closed while waiting for %s", what)
+		}
+		return v
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
+	return nil
+}
+
+// waitClosed waits (bounded) until ch is closed, draining any buffered values.
+func waitClosed(t *testing.T, ch <-chan []byte, what string) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s to be closed", what)
+		}
+	}
+}
+
+// TestSubscribe_CancelledSubscriberDoesNotPanicFanOut is a regression test for
+// #519: a subscriber whose ctx ended had its queue closed but stayed in the
+// fan-out list, so the next message sent on a closed channel and panicked in a
+// bare goroutine (killing the daemon).
+func TestSubscribe_CancelledSubscriberDoesNotPanicFanOut(t *testing.T) {
+	c := newTestClient(t)
+	fake := c.mqtt.(*fakePahoClient)
+	const topic = "test/519"
+	const n = 50
+
+	ctxA, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	chA, err := c.Subscribe(ctxA, topic, 1, "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chB, err := c.Subscribe(context.Background(), topic, n, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := fake.handler(topic)
+
+	cancelA()
+	waitClosed(t, chA, "A's channel")
+
+	for i := 0; i < n; i++ {
+		handler(nil, &fakePahoMessage{topic: topic, payload: []byte(fmt.Sprint(i))})
+	}
+	for i := 0; i < n; i++ {
+		recvOrFail(t, chB, fmt.Sprintf("B message %d/%d", i+1, n))
+	}
+}
+
+// TestSubscribe_UnsubscribeOnlyWhenLastSubscriberLeaves is a regression test
+// for #520: every departing subscriber used to unsubscribe the whole topic at
+// the broker, starving the remaining ones. The broker subscription must go
+// away only with the last subscriber, and a later Subscribe must re-register.
+func TestSubscribe_UnsubscribeOnlyWhenLastSubscriberLeaves(t *testing.T) {
+	c := newTestClient(t)
+	fake := c.mqtt.(*fakePahoClient)
+	const topic = "test/520"
+
+	ctxA, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	ctxB, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+	chA, err := c.Subscribe(ctxA, topic, 4, "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chB, err := c.Subscribe(ctxB, topic, 4, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.count(&fake.subscribed, topic); got != 1 {
+		t.Fatalf("expected 1 broker Subscribe, got %d", got)
+	}
+	handler := fake.handler(topic)
+
+	cancelA()
+	waitClosed(t, chA, "A's channel")
+	// Give any (buggy) asynchronous Unsubscribe a chance to land.
+	time.Sleep(100 * time.Millisecond)
+	if got := fake.count(&fake.unsubscribed, topic); got != 0 {
+		t.Fatalf("broker Unsubscribe issued while a subscriber remained (%d calls)", got)
+	}
+	handler(nil, &fakePahoMessage{topic: topic, payload: []byte("x")})
+	recvOrFail(t, chB, "survivor message")
+
+	cancelB()
+	waitClosed(t, chB, "B's channel")
+	deadline := time.Now().Add(2 * time.Second)
+	for fake.count(&fake.unsubscribed, topic) < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := fake.count(&fake.unsubscribed, topic); got != 1 {
+		t.Fatalf("expected exactly 1 broker Unsubscribe after last subscriber left, got %d", got)
+	}
+
+	// A fresh Subscribe must re-register at the broker and receive messages.
+	chC, err := c.Subscribe(context.Background(), topic, 4, "C")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.count(&fake.subscribed, topic); got != 2 {
+		t.Fatalf("expected a fresh broker Subscribe (2 total), got %d", got)
+	}
+	fake.handler(topic)(nil, &fakePahoMessage{topic: topic, payload: []byte("again")})
+	if got := recvOrFail(t, chC, "message after resubscribe"); string(got) != "again" {
+		t.Fatalf("expected %q, got %q", "again", got)
+	}
+}
+
+// TestDistribute_FirstSubscriberCancelledDoesNotAbortFanOut is a regression
+// test for #521: distribute closed over the FIRST subscriber's ctx, so once
+// that ctx ended the fan-out loop could return early and starve everyone else.
+func TestDistribute_FirstSubscriberCancelledDoesNotAbortFanOut(t *testing.T) {
+	c := newTestClient(t)
+	fake := c.mqtt.(*fakePahoClient)
+	const topic = "test/521"
+	const n = 200
+
+	ctxA, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	if _, err := c.Subscribe(ctxA, topic, 1, "first"); err != nil {
+		t.Fatal(err)
+	}
+	chB, err := c.Subscribe(context.Background(), topic, 1, "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := fake.handler(topic)
+	cancelA()
+
+	for i := 0; i < n; i++ {
+		handler(nil, &fakePahoMessage{topic: topic, payload: []byte(fmt.Sprint(i))})
+		recvOrFail(t, chB, fmt.Sprintf("message %d/%d", i+1, n))
 	}
 }

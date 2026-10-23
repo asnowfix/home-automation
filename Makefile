@@ -289,6 +289,7 @@ TESTFLAGS ?= -race
 TESTTIMEOUT ?= 674s
 
 test: build
+	bash linux/systemd/update_test.sh
 	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \

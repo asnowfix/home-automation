@@ -714,11 +714,15 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 	// queue -- both under the lock the fan-out holds while sending, so a send can
 	// never hit a closed channel (#519). The broker subscription is dropped only
 	// when the last subscriber leaves (#520).
-	go func(log logr.Logger) {
-		<-subCtx.Done()
-		topicMu.Lock()
-		defer topicMu.Unlock()
-
+	//
+	// removeLocked must be called with topicMu held; it is idempotent so the
+	// synchronous rollback below and the watcher cannot double-close the queue.
+	removed := false
+	removeLocked := func(log logr.Logger, unsubscribe bool) {
+		if removed {
+			return
+		}
+		removed = true
 		current, _ := c.subscribers.Load(topic)
 		list, _ := current.([]*subscriber)
 		remaining := make([]*subscriber, 0, len(list))
@@ -741,13 +745,34 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 		c.pendingMutex.Lock()
 		delete(c.pendingSubscriptions, topic)
 		c.pendingMutex.Unlock()
-		token := c.mqtt.Unsubscribe(topic)
-		if token.WaitTimeout(c.timeout) {
-			log.Info("Unsubscribed", "from topic", topic)
-		} else {
-			log.Error(token.Error(), "Failed to unsubscribe", "from topic", topic)
+		if !unsubscribe {
+			return
 		}
+		token := c.mqtt.Unsubscribe(topic)
+		if !token.WaitTimeout(c.timeout) {
+			log.Error(nil, "Timed out unsubscribing", "from topic", topic)
+		} else if err := token.Error(); err != nil {
+			log.Error(err, "Failed to unsubscribe", "from topic", topic)
+		} else {
+			log.Info("Unsubscribed", "from topic", topic)
+		}
+	}
+	go func(log logr.Logger) {
+		<-subCtx.Done()
+		topicMu.Lock()
+		defer topicMu.Unlock()
+		removeLocked(log, true)
 	}(c.log.WithName(s.name))
+
+	// rollback undoes this registration when the broker subscription could not be
+	// established, so the topic is not left "loaded" with nothing at the broker
+	// (which would make every later Subscribe skip the broker call). Synchronous,
+	// so an immediate retry by the caller starts from a clean state.
+	rollback := func(err error) (<-chan T, error) {
+		removeLocked(c.log.WithName(s.name), false)
+		cancel()
+		return nil, err
+	}
 
 	if !loaded {
 		// First subscriber for this topic - need to register MQTT subscription
@@ -826,11 +851,11 @@ func subscribe[T any](c *client, ctx context.Context, topic string, qlen uint, s
 			token := c.mqtt.Subscribe(topic, AtLeastOnce, distribute)
 			if !token.WaitTimeout(c.timeout) {
 				c.log.Error(nil, "Subscription timed out", "topic", topic, "timeout", c.timeout)
-				return nil, fmt.Errorf("subscription timed out for topic %s", topic)
+				return rollback(fmt.Errorf("subscription timed out for topic %s", topic))
 			}
 			if err := token.Error(); err != nil {
 				c.log.Error(err, "Subscription failed", "topic", topic)
-				return nil, err
+				return rollback(err)
 			}
 			c.log.Info("Subscribed synchronously", "topic", topic)
 		}

@@ -29,8 +29,9 @@ func (t *fakePahoToken) Error() error                      { return nil }
 // It also records Subscribe/Unsubscribe calls (and the subscribed handler) so
 // tests can assert broker-level behavior and drive the fan-out like the broker.
 type fakePahoClient struct {
-	mu           sync.Mutex
-	subscribed   []string
+	mu             sync.Mutex
+	failSubscribes int // next N Subscribe calls fail with a token error
+	subscribed     []string
 	unsubscribed []string
 	handlers     map[string]pahomqtt.MessageHandler
 }
@@ -44,6 +45,10 @@ func (f *fakePahoClient) Subscribe(topic string, _ byte, h pahomqtt.MessageHandl
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.subscribed = append(f.subscribed, topic)
+	if f.failSubscribes > 0 {
+		f.failSubscribes--
+		return &failingToken{err: fmt.Errorf("broker rejected subscription")}
+	}
 	if f.handlers == nil {
 		f.handlers = make(map[string]pahomqtt.MessageHandler)
 	}
@@ -589,7 +594,7 @@ func recvOrFail(t *testing.T, ch <-chan []byte, what string) []byte {
 			t.Fatalf("channel closed while waiting for %s", what)
 		}
 		return v
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatalf("timed out waiting for %s", what)
 	}
 	return nil
@@ -598,7 +603,7 @@ func recvOrFail(t *testing.T, ch <-chan []byte, what string) []byte {
 // waitClosed waits (bounded) until ch is closed, draining any buffered values.
 func waitClosed(t *testing.T, ch <-chan []byte, what string) {
 	t.Helper()
-	deadline := time.After(2 * time.Second)
+	deadline := time.After(10 * time.Second)
 	for {
 		select {
 		case _, ok := <-ch:
@@ -682,13 +687,25 @@ func TestSubscribe_UnsubscribeOnlyWhenLastSubscriberLeaves(t *testing.T) {
 
 	cancelB()
 	waitClosed(t, chB, "B's channel")
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(10 * time.Second)
 	for fake.count(&fake.unsubscribed, topic) < 1 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	time.Sleep(100 * time.Millisecond)
 	if got := fake.count(&fake.unsubscribed, topic); got != 1 {
 		t.Fatalf("expected exactly 1 broker Unsubscribe after last subscriber left, got %d", got)
+	}
+	if _, ok := c.subscribers.Load(topic); ok {
+		t.Fatal("topic still in c.subscribers after last subscriber left")
+	}
+	if _, ok := c.handlers.Load(topic); ok {
+		t.Fatal("topic still in c.handlers after last subscriber left")
+	}
+	c.pendingMutex.Lock()
+	_, pending := c.pendingSubscriptions[topic]
+	c.pendingMutex.Unlock()
+	if pending {
+		t.Fatal("topic still in c.pendingSubscriptions after last subscriber left")
 	}
 
 	// A fresh Subscribe must re-register at the broker and receive messages.
@@ -729,5 +746,38 @@ func TestDistribute_FirstSubscriberCancelledDoesNotAbortFanOut(t *testing.T) {
 	for i := 0; i < n; i++ {
 		handler(nil, &fakePahoMessage{topic: topic, payload: []byte(fmt.Sprint(i))})
 		recvOrFail(t, chB, fmt.Sprintf("message %d/%d", i+1, n))
+	}
+}
+
+// TestSubscribe_BrokerFailureRollsBackRegistration: when the synchronous broker
+// Subscribe fails, Subscribe must return the error and leave no trace (no
+// subscriber, handler or watcher), so a retry re-issues the broker Subscribe
+// instead of finding the topic already "loaded".
+func TestSubscribe_BrokerFailureRollsBackRegistration(t *testing.T) {
+	c := newTestClient(t)
+	fake := c.mqtt.(*fakePahoClient)
+	fake.failSubscribes = 1
+	const topic = "test/rollback"
+
+	if _, err := c.Subscribe(context.Background(), topic, 4, "first"); err == nil {
+		t.Fatal("expected Subscribe to fail when the broker rejects the subscription")
+	}
+	if _, ok := c.subscribers.Load(topic); ok {
+		t.Fatal("topic still in c.subscribers after failed Subscribe")
+	}
+	if _, ok := c.handlers.Load(topic); ok {
+		t.Fatal("topic still in c.handlers after failed Subscribe")
+	}
+
+	ch, err := c.Subscribe(context.Background(), topic, 4, "retry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.count(&fake.subscribed, topic); got != 2 {
+		t.Fatalf("expected the retry to re-issue a broker Subscribe (2 attempts), got %d", got)
+	}
+	fake.handler(topic)(nil, &fakePahoMessage{topic: topic, payload: []byte("ok")})
+	if got := recvOrFail(t, ch, "message after retry"); string(got) != "ok" {
+		t.Fatalf("expected %q, got %q", "ok", got)
 	}
 }

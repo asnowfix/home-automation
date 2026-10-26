@@ -41,7 +41,7 @@ The local password lives only in `myhome.db` (`vacuum_robots.password`) on the d
 - [x] 1. `pkg/roomba`: discovery, password parsing, client (retry, state merge, command ack, CN check) + tests against fake peers.
   Live check 2026-10-26 (`go test -tags live`): discovered, connected on attempt 1 with the CN check on, state read, `dock` acknowledged in 0.7 s
 - [x] 2. RPC types + `myhome/vacuum` service + storage + daemon wiring
-- [ ] 3. `myhome ctl vacuum` CLI
+- [x] 3. `myhome ctl vacuum` CLI. End-to-end 2026-10-26 against a local daemon (`--instance local`, throwaway myhome.db): the daemon connected to Edmond on attempt 1; `list`/`status`/`rooms`/`dock` OK, dock acknowledged; the password value is absent from the daemon log
 - [ ] 4. UI Vacuum tab
 - [x] 5. Room learning (`vacuum_regions`) + room clean: service side, landed with phase 2 (unit-tested; live check needs region ids from the app)
 - [ ] 6. Docs (`docs/vacuum.md`), live verification on Edmond via the daemon

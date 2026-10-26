@@ -26,6 +26,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/ctl/solar"
 	"github.com/asnowfix/home-automation/myhome/ctl/sswitch"
 	"github.com/asnowfix/home-automation/myhome/ctl/temperature"
+	"github.com/asnowfix/home-automation/myhome/ctl/vacuum"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	"os"
 	"os/signal"
@@ -171,6 +172,7 @@ func init() {
 	Cmd.AddCommand(room.Cmd)
 	Cmd.AddCommand(eventsctl.Cmd)
 	Cmd.AddCommand(fetch.Cmd)
+	Cmd.AddCommand(vacuum.Cmd)
 }
 
 var Commit string

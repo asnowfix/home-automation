@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/internal/myhome/mdnsrouter"
 	"github.com/asnowfix/home-automation/internal/myhome/model"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/internal/myhome/sfr"
@@ -353,11 +354,17 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	dm.log.Info("Starting device manager")
 
+	// Build the host-resolution chain: SFR (fast, in-memory ARP-like lookup)
+	// first when available, then mDNS (.local, real network cost), then a
+	// terminal not-found. See docs/no-ip-address-plan.md.
+	mdnsRouter := mdnsrouter.New(dm.resolver)
 	if options.Flags.RemoteProxy == "" {
-		dm.router = sfr.GetRouter(ctx)
+		dm.router = model.Chain(sfr.GetRouter(ctx), model.Chain(mdnsRouter, model.NotFoundRouter{}))
 	} else {
 		dm.log.Info("Remote proxy configured — skipping SFR router (no direct LAN access assumed)")
+		dm.router = model.Chain(mdnsRouter, model.NotFoundRouter{})
 	}
+	shelly.SetHostResolver(routerHostResolver{router: dm.router})
 
 	// Pre-populate cache with existing devices from database
 	// This ensures devices exist when retained MQTT sensor messages arrive
@@ -473,7 +480,7 @@ func (dm *DeviceManager) deviceUpdaterLoop(ctx context.Context) {
 					dm.triggerAutoSetup(ctx, log, d, devId)
 				}
 
-				refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(d.Name())), d, dm.router, dm.refreshed)
+				refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(d.Name())), d, dm.refreshed)
 			}(device, isNewDevice, deviceId)
 		}
 	}
@@ -547,7 +554,28 @@ func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, 
 	}()
 }
 
-func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.Router, refreshed chan<- *myhome.Device) {
+// routerHostResolver adapts a model.Router to pkg/shelly/types.HostResolver,
+// letting pkg/shelly re-resolve a device's IP without depending on the
+// internal/myhome package (see the Three-Tier Layer Rule in CLAUDE.md).
+type routerHostResolver struct {
+	router model.Router
+}
+
+func (r routerHostResolver) ResolveHost(ctx context.Context, mac net.HardwareAddr, name string) (net.IP, error) {
+	if len(mac) > 0 {
+		if host, err := r.router.GetHostByMac(ctx, mac); err == nil {
+			return host.Ip(), nil
+		}
+	}
+	if name != "" {
+		if host, err := r.router.GetHostByName(ctx, name); err == nil {
+			return host.Ip(), nil
+		}
+	}
+	return nil, model.ErrNotFound
+}
+
+func refreshOneDevice(ctx context.Context, device *myhome.Device, refreshed chan<- *myhome.Device) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
@@ -565,32 +593,14 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.R
 		return
 	}
 
-	var modified bool = false
-	if router != nil {
-		mac, err := net.ParseMAC(device.MAC)
-		host, err := router.GetHostByMac(ctx, mac)
-		if err == nil {
-			ip := host.Ip().String()
-			if ip != device.Host() {
-				log.V(1).Info("Changing IP", "device", device.DeviceSummary, "old_ip", device.Host(), "new_ip", ip)
-				device = device.WithHost(ip)
-				modified = true
-			}
-		} else {
-			log.Error(err, "Router has no IP for MAC", "device", device.DeviceSummary, "mac", device.MAC)
-			device = device.WithHost(fmt.Sprintf("%s.local", device.Id()))
-			modified = true
-		}
-	}
-
-	updated, err := device.Refresh(ctx)
+	// Host resolution (router MAC lookup, then mDNS) happens lazily inside
+	// pkg/shelly, only when an HTTP call actually needs it, via the
+	// types.HostResolver installed by shelly.SetHostResolver in Start()
+	// below — no periodic MAC->IP polling here. See docs/no-ip-address-plan.md.
+	modified, err := device.Refresh(ctx)
 	if err != nil {
 		log.Error(err, "Failed to refresh device", "device", device.DeviceSummary)
 		return
-	}
-
-	if updated {
-		modified = true
 	}
 
 	if !modified {

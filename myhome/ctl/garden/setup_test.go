@@ -44,8 +44,9 @@ func TestDefaultZoneKVS(t *testing.T) {
 }
 
 // TestDefaultZoneKVS_KeyLengthBudget guards the KVS key length budget
-// documented above gardenKVSKeys ("prefix (14) + suffix <=18 chars = <=32
-// chars total"). Exceeding it risks hitting Shelly's hard KVS key limit.
+// validated at schema-generation time by tools/genconfigschema ("prefix (14)
+// + suffix <=18 chars = <=32 chars total"). Exceeding it risks hitting
+// Shelly's hard KVS key limit.
 func TestDefaultZoneKVS_KeyLengthBudget(t *testing.T) {
 	const maxTotal = 32
 	for k := range defaultZoneKVS() {

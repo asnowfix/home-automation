@@ -2,6 +2,7 @@ package script
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
@@ -170,8 +172,11 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	// Shelly event handler system
 	eh := NewEventsHandler(ctx, vm)
 
-	// Define methods map with access to deviceState
-	methods := createMethodsMap(deviceState)
+	// Define methods map with access to deviceState. ctx/vm/eh let Switch.Set
+	// deliver a test-armed nested event (see DeviceState.pendingNestedEvent
+	// and #450) synchronously from inside the call, before invoking the
+	// script's own callback.
+	methods := createMethodsMap(ctx, eh, deviceState, handlers)
 
 	// Shelly object with all APIs from https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#shelly-apis
 	shellyObj := vm.NewObject()
@@ -276,6 +281,10 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		event.Info.Data = call.Argument(1).Export()
 		event.Info.Timestamp = time.Unix(0, int64(event.Now*1e6))
 
+		if deviceState != nil {
+			deviceState.RecordEmittedEvent(event.Info.Event, event.Info.Data)
+		}
+
 		log.V(1).Info("Shelly.emitEvent", "event", event)
 
 		// Send event to channel (non-blocking)
@@ -293,7 +302,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		component := call.Argument(0).String()
 		log.V(1).Info("Shelly.getComponentStatus", "component", component)
 		if deviceState.ComponentStatus != nil {
-			if v, ok := deviceState.ComponentStatus[component]; ok {
+			if v, ok := deviceState.ComponentStatusValue(component); ok {
 				return vm.ToValue(v)
 			}
 		}
@@ -310,6 +319,10 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		}
 
 		log.Info("Shelly.getComponentConfig()", "component", component, "id", id)
+
+		if v, ok := deviceState.ComponentConfigValue(component); ok {
+			return vm.ToValue(v)
+		}
 
 		// Return component-specific configuration
 		var config map[string]interface{}
@@ -629,6 +642,39 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	})
 	vm.Set("MQTT", mqttObj)
 
+	// BLE.Scanner: just enough for gateway scripts to start a scan and
+	// subscribe. Starts are counted (DeviceState.BLEScannerStarts) so a test
+	// can tell whether the script got as far as starting the scanner. No scan
+	// results are ever delivered.
+	// https://shelly-api-docs.shelly.cloud/gen2/Scripts/ShellyScriptLanguageFeatures#blescanner
+	bleScannerObj := vm.NewObject()
+	bleScannerObj.Set("SCAN_RESULT", 1)
+	bleScannerObj.Set("INFINITE_SCAN", -1)
+	bleScannerObj.Set("isRunning", func(call goja.FunctionCall) goja.Value {
+		deviceState.mu.RLock()
+		defer deviceState.mu.RUnlock()
+		return vm.ToValue(deviceState.bleScannerRunning)
+	})
+	bleScannerObj.Set("Start", func(call goja.FunctionCall) goja.Value {
+		deviceState.mu.Lock()
+		deviceState.bleScannerStarts++
+		deviceState.bleScannerRunning = true
+		deviceState.mu.Unlock()
+		return call.Argument(0)
+	})
+	bleScannerObj.Set("Stop", func(call goja.FunctionCall) goja.Value {
+		deviceState.mu.Lock()
+		deviceState.bleScannerRunning = false
+		deviceState.mu.Unlock()
+		return goja.Undefined()
+	})
+	bleScannerObj.Set("Subscribe", func(call goja.FunctionCall) goja.Value {
+		return goja.Undefined()
+	})
+	bleObj := vm.NewObject()
+	bleObj.Set("Scanner", bleScannerObj)
+	vm.Set("BLE", bleObj)
+
 	// Script object
 	scriptObj := vm.NewObject()
 
@@ -637,8 +683,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	storageObj.Set("getItem", func(call goja.FunctionCall) goja.Value {
 		key := call.Argument(0).String()
 		log.V(1).Info("Script.storage.getItem", "key", key)
-		storage := deviceState.GetStorage()
-		if val, ok := storage[key]; ok {
+		if val, ok := deviceState.StorageValue(key); ok {
 			// If the stored value is nil, treat it as missing/NULL and return null
 			// without changing the underlying storage. This preserves "cooling-rate": null
 			// and similar entries in device.json instead of turning them into "<nil>".
@@ -651,7 +696,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 			strVal, ok := val.(string)
 			if !ok {
 				strVal = fmt.Sprint(val)
-				storage[key] = strVal
+				deviceState.SetStorageValue(key, strVal)
 			}
 			log.V(1).Info("Script.storage.getItem", "key", key, "value", strVal)
 			return vm.ToValue(strVal)
@@ -665,17 +710,15 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		// Script.storage follows the Web Storage API semantics and supports
 		// only string values. Coerce the value to string using JS semantics.
 		valueStr := call.Argument(1).String()
-		storage := deviceState.GetStorage()
-		storage[key] = valueStr
+		deviceState.SetStorageValue(key, valueStr)
 		// Keep length property roughly in sync with the underlying map.
-		storageObj.Set("length", len(storage))
+		storageObj.Set("length", deviceState.StorageLen())
 		log.Info("Script.storage.setItem", "key", key, "value", valueStr)
-		log.V(1).Info("Script.storage.setItem", "storage", storage)
+		log.V(1).Info("Script.storage.setItem", "storage_len", deviceState.StorageLen())
 		return goja.Undefined()
 	})
 	// Initialize length property to reflect existing storage contents.
-	storage := deviceState.GetStorage()
-	storageObj.Set("length", len(storage))
+	storageObj.Set("length", deviceState.StorageLen())
 	// Provide key(index) to enumerate stored keys, similar to the Web Storage API.
 	storageObj.Set("key", func(call goja.FunctionCall) goja.Value {
 		idx := int(call.Argument(0).ToInteger())
@@ -742,6 +785,16 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		})
 	}
 
+	// If the caller provided a schedule-eval-injection channel (for tests),
+	// wire it up so a JSON {"code": "..."} sent to it is run against the
+	// script's global scope, exactly as a real device's Schedule.eval ->
+	// Script.Eval(id, code) would run a due job's code.
+	if deviceState.ScheduleEvalInjector != nil {
+		*handlers = append(*handlers, &scheduleEvalForwarder{
+			ch: deviceState.ScheduleEvalInjector,
+		})
+	}
+
 	return vm, nil
 }
 
@@ -759,9 +812,48 @@ func (f *testEventForwarder) Handle(ctx context.Context, vm *goja.Runtime, msg [
 	return f.eh.Handle(ctx, vm, msg)
 }
 
+// scheduleEvalForwarder is a handler that reads {"code": "..."} requests from
+// a test-controlled channel and runs the code against the running script's
+// global scope, on the same goroutine as every other VM access — mirroring
+// Schedule.eval's real Script.Eval(id, code) RPC without needing a real
+// device or an emulated wall-clock scheduler.
+type scheduleEvalForwarder struct {
+	ch <-chan []byte
+}
+
+func (f *scheduleEvalForwarder) Wait() <-chan []byte { return f.ch }
+func (f *scheduleEvalForwarder) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(msg, &req); err != nil {
+		return fmt.Errorf("scheduleEvalForwarder: decode request: %w", err)
+	}
+	if _, err := vm.RunString(req.Code); err != nil {
+		return fmt.Errorf("scheduleEvalForwarder: eval %q: %w", req.Code, err)
+	}
+	return nil
+}
+
 type methodFunc func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error)
 
-func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
+// scheduleID normalises a job's "id" field to an int. Jobs reach
+// DeviceState.Schedules either from a Go test fixture (int), from JSON
+// (float64) or from AddSchedule (int), so a bare type assertion is not enough.
+func scheduleID(v interface{}) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int64:
+		return int(n)
+	case float64:
+		return int(n)
+	}
+	return -1
+}
+
+func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *DeviceState, handlers *[]handler) map[string]methodFunc {
+	log, _ := logr.FromContext(ctx)
 	return map[string]methodFunc{
 		"shelly.detectlocation": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellydetectlocation
@@ -818,8 +910,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			paramsObj := params.ToObject(vm)
 			key := paramsObj.Get("key").String()
 
-			kvs := deviceState.GetKVS()
-			val, found := kvs[key]
+			val, found := deviceState.KVSValue(key)
 
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
@@ -837,7 +928,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 						return ret.Export(), nil
 					} else {
 						// Key not found - record it as nil so repeated calls don't mutate the map
-						kvs[key] = nil
+						deviceState.SetKVSValue(key, nil)
 						// Call callback with error code -114 (key not found)
 						callable(goja.Undefined(), goja.Null(), vm.ToValue(-114), vm.ToValue("Key not found"), userdata)
 						return nil, nil
@@ -890,9 +981,8 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			paramsObj := params.ToObject(vm)
 			key := paramsObj.Get("key").String()
 			value := paramsObj.Get("value").Export()
-			kvs := deviceState.GetKVS()
 			// KVS values are always stored as strings on real Shelly devices
-			kvs[key] = fmt.Sprintf("%v", value)
+			deviceState.SetKVSValue(key, fmt.Sprintf("%v", value))
 
 			// Trigger auto-save if callback is set
 			if deviceState.OnModified != nil {
@@ -913,7 +1003,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
 					result := map[string]interface{}{
-						"jobs": deviceState.Schedules,
+						"jobs": deviceState.ScheduleJobs(),
 					}
 					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 				}
@@ -932,12 +1022,12 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			// Also persist in ComponentStatus as schedule:N component
 			if deviceState.ComponentStatus != nil {
 				key := fmt.Sprintf("schedule:%d", id)
-				deviceState.ComponentStatus[key] = map[string]interface{}{
+				deviceState.SetComponentStatusValue(key, map[string]interface{}{
 					"id":       id,
 					"enable":   job["enable"],
 					"timespec": job["timespec"],
 					"calls":    job["calls"],
-				}
+				})
 			}
 
 			// Trigger auto-save if callback is set
@@ -954,6 +1044,56 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			return nil, nil
 		},
 
+		// Schedule.Update — merge the given fields into an existing job.
+		// https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Schedule#scheduleupdate
+		// Without this, Shelly.call('Schedule.Update', ...) fell through to the
+		// unknown-method path: the callback fired with a null result and the
+		// job was never modified, so a script that rewrites its own schedule
+		// (pool-pump.js updateScheduleMode) appeared to succeed while
+		// Schedule.List kept returning the old window — see #441.
+		"schedule.update": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
+			paramsObj := params.ToObject(vm)
+			id := int(paramsObj.Get("id").ToInteger())
+			updates, _ := params.Export().(map[string]interface{})
+
+			// Merge under the write lock. Iterating ScheduleJobs() here would
+			// mutate copies and silently lose the update.
+			updated, found := deviceState.UpdateSchedule(id, updates)
+
+			if !found {
+				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+					if callable, ok := goja.AssertFunction(callback); ok {
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(-105),
+							vm.ToValue(fmt.Sprintf("no schedule with id %d", id)), userdata)
+					}
+				}
+				return nil, nil
+			}
+
+			// Keep the schedule:N component view in step with the job, the
+			// same way Schedule.Create does.
+			if deviceState.ComponentStatus != nil {
+				deviceState.SetComponentStatusValue(fmt.Sprintf("schedule:%d", id), map[string]interface{}{
+					"id":       id,
+					"enable":   updated["enable"],
+					"timespec": updated["timespec"],
+					"calls":    updated["calls"],
+				})
+			}
+
+			if deviceState.OnModified != nil {
+				deviceState.OnModified()
+			}
+
+			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+				if callable, ok := goja.AssertFunction(callback); ok {
+					result := map[string]interface{}{"rev": 1}
+					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
+				}
+			}
+			return nil, nil
+		},
+
 		// Schedule.Delete — remove a schedule by ID
 		"schedule.delete": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			paramsObj := params.ToObject(vm)
@@ -963,7 +1103,7 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			// Also remove from ComponentStatus
 			if deviceState.ComponentStatus != nil {
 				key := fmt.Sprintf("schedule:%d", id)
-				delete(deviceState.ComponentStatus, key)
+				deviceState.DeleteComponentStatusValue(key)
 			}
 
 			// Trigger auto-save if callback is set
@@ -984,20 +1124,49 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			paramsObj := params.ToObject(vm)
 			id := int(paramsObj.Get("id").ToInteger())
 			on := paramsObj.Get("on").ToBoolean()
+
+			// Test hook (PR #479 review finding 4): a test can arm this id to
+			// fail via DeviceState.FailSwitchSet, to reproduce a real relay
+			// that doesn't actually respond to the command. Checked before any
+			// state mutation, so a failed call has no side effect — matching a
+			// real device where the switch never moved.
+			if code, message, failed := deviceState.SwitchSetFailure(id); failed {
+				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
+					if callable, ok := goja.AssertFunction(callback); ok {
+						callable(goja.Undefined(), goja.Null(), vm.ToValue(code), vm.ToValue(message), userdata)
+					}
+				}
+				return nil, nil
+			}
+
 			key := fmt.Sprintf("switch:%d", id)
 			if deviceState.ComponentStatus != nil {
-				if existing, ok := deviceState.ComponentStatus[key]; ok {
-					if m, ok := existing.(map[string]interface{}); ok {
-						m["output"] = on
-					}
-				} else {
-					deviceState.ComponentStatus[key] = map[string]interface{}{"id": id, "output": on}
+				// Mutate in place under the lock; a read-then-modify via
+				// ComponentStatusValue would only change the returned copy.
+				if !deviceState.SetComponentStatusField(key, "output", on) {
+					deviceState.SetComponentStatusValue(key, map[string]interface{}{"id": id, "output": on})
 				}
 			}
 
 			// Trigger auto-save if callback is set
 			if deviceState.OnModified != nil {
 				deviceState.OnModified()
+			}
+
+			// #450: if a test armed a nested event (DeviceState.pendingNestedEvent),
+			// deliver it to the script's event handlers now — synchronously,
+			// nested inside this very Switch.Set call and BEFORE its own
+			// callback fires. This reproduces a real device's ability to
+			// dispatch a fresh system event while a previous RPC's native
+			// completion handler is still on the stack, which the ordinary
+			// event loop (a Go `select` over EventInjector) cannot: that loop
+			// only ever dequeues the next event after the previous handler has
+			// fully returned. See DeviceState.pendingNestedEvent for the full
+			// rationale.
+			if nested, ok := deviceState.TakePendingNestedEvent(); ok {
+				if err := eh.Handle(ctx, vm, nested); err != nil {
+					log.Error(err, "Nested event dispatch failed (#450 test hook)")
+				}
 			}
 
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
@@ -1029,69 +1198,48 @@ func createMethodsMap(deviceState *DeviceState) map[string]methodFunc {
 			return nil, nil
 		},
 
+		// http.get emulates https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/HTTP#httpget
+		// params: { url: string, timeout: number }.
+		//
+		// #479-buttoncycles-ci: on real firmware, HTTP.GET is asynchronous --
+		// it never blocks the script's OTHER event processing (timers, button
+		// presses, switch RPCs) while the request is in flight; only the
+		// script's own callback waits for it. The previous implementation here
+		// called http.DefaultClient.Do() SYNCHRONOUSLY on the same goroutine
+		// that runs the whole script's single-threaded event loop
+		// (RunWithDeviceState's reflect.Select loop), so a slow or unreachable
+		// real network endpoint (e.g. pool-pump.js's daily forecast fetch to
+		// api.open-meteo.com, queued onto the exact same TASK_QUEUE as the
+		// button-cycle reconciler) stalled EVERYTHING else the script was
+		// doing for up to the full request timeout. Confirmed by direct local
+		// reproduction: inserting an artificial delay at the top of this
+		// function reproduced TestPoolPump_ButtonCyclesPro3's CI-only failure
+		// byte-for-byte (same assertion, same ~19.85s duration) -- see
+		// /Users/fix/campaign-401/dev-479-buttoncycles-progress.md.
+		//
+		// Fixed the same way Timer.set/MQTT.subscribe already handle
+		// long-lived async work in this file: the actual request runs on its
+		// own goroutine and delivers its result back through the shared event
+		// loop as a one-shot `handler`, exactly like a one-shot Timer.set(...,
+		// false, ...). The calling goroutine (the VM's) is never blocked.
 		"http.get": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
-			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/HTTP#httpget
-			// params: { url: string, timeout: number }
 			paramsObj := params.ToObject(vm)
 			url := paramsObj.Get("url").String()
 			timeout := int(paramsObj.Get("timeout").ToInteger())
 
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
-			defer cancel()
-
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-			if err != nil {
-				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-					if callable, ok := goja.AssertFunction(callback); ok {
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()), userdata)
-					}
-				}
-				return nil, err
+			if goja.IsUndefined(callback) || goja.IsNull(callback) {
+				// Nothing to deliver the result to -- do not bother making the
+				// request at all (the old code made it anyway and discarded
+				// the result).
+				return nil, nil
+			}
+			callable, ok := goja.AssertFunction(callback)
+			if !ok {
+				return nil, nil
 			}
 
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-					if callable, ok := goja.AssertFunction(callback); ok {
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()), userdata)
-					}
-				}
-				return nil, err
-			}
-			defer resp.Body.Close()
-
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-					if callable, ok := goja.AssertFunction(callback); ok {
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(-1), vm.ToValue(err.Error()), userdata)
-					}
-				}
-				return nil, err
-			}
-
-			headers := make(map[string]string)
-			for k, v := range resp.Header {
-				if len(v) > 0 {
-					headers[k] = v[0]
-				}
-			}
-
-			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
-					result := map[string]interface{}{
-						"body":    string(body),
-						"headers": headers,
-						"status":  resp.StatusCode,
-					}
-					// Call: callback(result, error_code, error_message)
-					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
-					if err != nil {
-						return nil, err
-					}
-					return ret.Export(), nil
-				}
-			}
+			h := newHTTPGetHandler(ctx, url, timeout, callable, userdata)
+			*handlers = append(*handlers, h)
 			return nil, nil
 		},
 	}
@@ -1163,6 +1311,120 @@ func (mh *mqttHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte)
 	return nil
 }
 
+// httpGetHandler delivers an HTTP.GET result back through the script's
+// single-threaded event loop without ever blocking it (#479-buttoncycles-ci
+// -- see the long comment on the "http.get" method entry above). The actual
+// request runs on its own goroutine (run()); Handle() -- which touches the
+// goja VM and so must only ever be called from the event loop's own
+// goroutine -- reads the fields run() wrote only after receiving on ch,
+// which is what makes reading them from Handle() race-free (the channel
+// send/receive is the memory barrier).
+//
+// One-shot, exactly like a non-repeating Timer.set(...): sends a single
+// value then closes ch, so the event loop's normal "channel closed, remove
+// handler" path (run.go's main loop) cleans it up after Handle() runs once.
+type httpGetHandler struct {
+	callable goja.Callable
+	userdata goja.Value
+	ch       chan []byte
+
+	// Written by run() before it sends on ch; read by Handle() after it
+	// receives from ch. Never accessed concurrently.
+	result  map[string]interface{}
+	hasErr  bool
+	errCode int
+	errMsg  string
+}
+
+func newHTTPGetHandler(ctx context.Context, url string, timeoutSec int, callable goja.Callable, userdata goja.Value) *httpGetHandler {
+	h := &httpGetHandler{
+		callable: callable,
+		userdata: userdata,
+		ch:       make(chan []byte, 1),
+	}
+	go h.run(ctx, url, timeoutSec)
+	return h
+}
+
+func (h *httpGetHandler) run(parent context.Context, url string, timeoutSec int) {
+	// Bounded by the RPC's own `timeout` param, same as before, but also
+	// cancelled early if the script's context ends (e.g. the test finishes)
+	// so this goroutine never outlives its script.
+	ctx, cancel := context.WithTimeout(parent, time.Duration(timeoutSec)*time.Second)
+	defer cancel()
+
+	body, headers, status, err := doHTTPGet(ctx, url)
+	if err != nil {
+		h.hasErr = true
+		h.errCode = -1
+		h.errMsg = err.Error()
+	} else {
+		h.result = map[string]interface{}{
+			"body":    body,
+			"headers": headers,
+			"status":  status,
+		}
+	}
+
+	h.ch <- []byte{}
+	close(h.ch)
+}
+
+func doHTTPGet(ctx context.Context, url string) (body string, headers map[string]string, status int, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", nil, 0, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", nil, 0, err
+	}
+
+	headers = make(map[string]string)
+	for k, v := range resp.Header {
+		if len(v) > 0 {
+			headers[k] = v[0]
+		}
+	}
+
+	return string(bodyBytes), headers, resp.StatusCode, nil
+}
+
+func (h *httpGetHandler) Wait() <-chan []byte {
+	return h.ch
+}
+
+func (h *httpGetHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte) error {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		return err
+	}
+
+	var resultVal, errCodeVal, errMsgVal goja.Value
+	if h.hasErr {
+		log.Info("HTTP.GET callback", "error_code", h.errCode, "error_message", h.errMsg)
+		resultVal = goja.Null()
+		errCodeVal = vm.ToValue(h.errCode)
+		errMsgVal = vm.ToValue(h.errMsg)
+	} else {
+		log.Info("HTTP.GET callback", "status", h.result["status"])
+		resultVal = vm.ToValue(h.result)
+		errCodeVal = vm.ToValue(0)
+		errMsgVal = goja.Null()
+	}
+
+	// Call: callback(result, error_code, error_message, userdata)
+	_, err = h.callable(goja.Undefined(), resultVal, errCodeVal, errMsgVal, h.userdata)
+	return err
+}
+
 // Timer handler implementation
 type timerHandler struct {
 	handle    int
@@ -1175,8 +1437,12 @@ type timerHandler struct {
 	timer     *time.Timer
 	startTime time.Time
 	nextFire  time.Time
-	stopped   bool
-	ch        chan []byte // cached channel, created once in Wait()
+	// stopped is written by Close() on the owning goroutine and read by the
+	// goroutines Wait() spawns, so it must be atomic: as a plain bool it is a
+	// data race that -race reports (enabled by default since #454) and that can
+	// in principle miss a stop entirely.
+	stopped atomic.Bool
+	ch      chan []byte // cached channel, created once in Wait()
 }
 
 func (th *timerHandler) Wait() <-chan []byte {
@@ -1193,7 +1459,7 @@ func (th *timerHandler) Wait() <-chan []byte {
 		th.nextFire = time.Now().Add(th.period)
 		go func() {
 			for range th.ticker.C {
-				if th.stopped {
+				if th.stopped.Load() {
 					break
 				}
 				th.nextFire = time.Now().Add(th.period)
@@ -1212,7 +1478,7 @@ func (th *timerHandler) Wait() <-chan []byte {
 		th.nextFire = time.Now().Add(period)
 		go func() {
 			<-th.timer.C
-			if !th.stopped {
+			if !th.stopped.Load() {
 				th.ch <- []byte{} // Signal to fire callback
 			}
 			close(th.ch)
@@ -1241,7 +1507,7 @@ func (th *timerHandler) Handle(ctx context.Context, vm *goja.Runtime, msg []byte
 }
 
 func (th *timerHandler) Stop() {
-	th.stopped = true
+	th.stopped.Store(true)
 	if th.ticker != nil {
 		th.ticker.Stop()
 	}

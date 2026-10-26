@@ -18,75 +18,77 @@ var PAST_DAYS = 1; // past_days=1: daily[0]=yesterday, daily[1]=today; hourly[24
 
 // === CONFIG SCHEMA (global settings; zone config lives in ZONE_DEFAULTS) ===
 // KVS key lengths: prefix 14 chars + suffix ≤18 chars = ≤32 chars total
+// >>> GENERATED: CONFIG_SCHEMA (source: schema JSON; regenerate via `make generate` — DO NOT EDIT BY HAND) >>>
 var CONFIG_SCHEMA = {
+  // Enable debug logging
   enableLogging: {
-    description: "Enable debug logging",
     key: "logging",
     default: true,
     type: "boolean"
   },
+  // MQTT topic prefix (CLI metadata only, not used at runtime)
   mqttTopicPrefix: {
-    description: "MQTT topic prefix (CLI metadata only, not used at runtime)",
     key: "mqtt-topic",
     default: "garden",
     type: "string",
     cliOnly: true
   },
+  // Earliest allowed watering start (0-23)
   earliestStartHour: {
-    description: "Earliest allowed watering start (0-23)",
     key: "earliest-start",
     default: 3,
     type: "number"
   },
+  // Midday quiet window start (fractional hour)
   lunchStart: {
-    description: "Midday quiet window start (fractional hour)",
     key: "lunch-start",
-    default: 12.0,
+    default: 12,
     type: "number"
   },
+  // Midday quiet window end (fractional hour)
   lunchEnd: {
-    description: "Midday quiet window end (fractional hour)",
     key: "lunch-end",
-    default: 14.0,
+    default: 14,
     type: "number"
   },
+  // Evening quiet window start (fractional hour)
   eveningStart: {
-    description: "Evening quiet window start (fractional hour)",
     key: "evening-start",
-    default: 19.0,
+    default: 19,
     type: "number"
   },
+  // Evening quiet window end (fractional hour)
   eveningEnd: {
-    description: "Evening quiet window end (fractional hour)",
     key: "evening-end",
     default: 23.5,
     type: "number"
   },
+  // Start hour when forecast unavailable
   fallbackStartHour: {
-    description: "Start hour when forecast unavailable",
     key: "fallback-start",
     default: 5,
     type: "number"
   },
+  // Skip watering if forecast min temp in window < this (C)
   frostCutoffC: {
-    description: "Skip watering if forecast min temp in window < this (C)",
     key: "frost-cutoff-c",
     default: 2,
     type: "number"
   },
+  // Skip watering if today's forecast rain >= this value (mm)
   rainHoldoffMm: {
-    description: "Skip watering if today's forecast rain >= this value (mm)",
     key: "rain-holdoff-mm",
     default: 8,
     type: "number"
   },
+  // Maximum soil water deficit cap (mm)
   maxDeficitMm: {
-    description: "Maximum soil water deficit cap (mm)",
     key: "max-deficit-mm",
     default: 25,
     type: "number"
   }
 };
+// <<< GENERATED: CONFIG_SCHEMA <<<
 
 // Per-zone defaults — calibrate appRateMmH via 'ctl garden calibrate'
 // appRateMmH: water delivery rate (mm/h).
@@ -115,8 +117,8 @@ var CONFIG_SCHEMA = {
 //   citrus (lemon, orange) and Strelitzia/Agapanthus/daylily/Carex, which want
 //   water more often in peak summer heat.
 var ZONE_DEFAULTS = [
-  {id: 0, name: "pelouse-maison",   appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: true},
-  {id: 1, name: "pelouse-barriere", appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: true},
+  {id: 0, name: "pelouse-maison",   appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: false},
+  {id: 1, name: "pelouse-barriere", appRateMmH: 192.0, kc: 0.8, triggerMm: 12.0, maxMin: 15, fallbackMin: 8,  group: "lawn", intervalDays: 1, enabled: false},
   {id: 2, name: "massifs",          appRateMmH:  18.0, kc: 0.6, triggerMm:  8.0, maxMin: 30, fallbackMin: 15, group: "beds", intervalDays: 4, enabled: true}
 ];
 
@@ -134,17 +136,19 @@ initConfig();
 var ZONES = [];
 
 // KVS key specs for a single zone (key suffix applied after "zoneN-")
+// >>> GENERATED: ZONE_KEY_SPECS (source: schema JSON; regenerate via `make generate` — DO NOT EDIT BY HAND) >>>
 var ZONE_KEY_SPECS = [
-  {field: "name",         key: "name",         type: "string"},
-  {field: "appRateMmH",   key: "app-rate",     type: "number"},
-  {field: "kc",           key: "kc",           type: "number"},
-  {field: "triggerMm",    key: "trigger-mm",   type: "number"},
-  {field: "maxMin",       key: "max-min",      type: "number"},
-  {field: "fallbackMin",  key: "fallback-min", type: "number"},
-  {field: "group",        key: "group",        type: "string"},
-  {field: "intervalDays", key: "interval",     type: "number"},
-  {field: "enabled",      key: "enabled",      type: "boolean"}
+  {field: "name", key: "name", type: "string"},
+  {field: "appRateMmH", key: "app-rate", type: "number"},
+  {field: "kc", key: "kc", type: "number"},
+  {field: "triggerMm", key: "trigger-mm", type: "number"},
+  {field: "maxMin", key: "max-min", type: "number"},
+  {field: "fallbackMin", key: "fallback-min", type: "number"},
+  {field: "group", key: "group", type: "string"},
+  {field: "intervalDays", key: "interval", type: "number"},
+  {field: "enabled", key: "enabled", type: "boolean"}
 ];
+// <<< GENERATED: ZONE_KEY_SPECS <<<
 
 function initZones() {
   for (var i = 0; i < ZONE_DEFAULTS.length; i++) {
@@ -188,9 +192,15 @@ function processTaskQueue() {
     TASK_INDEX = 0;
     return;
   }
+  // #480: an uncaught throw inside a queued task used to kill the whole
+  // script. Wrapping this single call site protects every queueTask() call.
   var task = TASK_QUEUE[TASK_INDEX];
   TASK_INDEX++;
-  task();
+  try {
+    task();
+  } catch (e) {
+    log("queued task error:", e);
+  }
 }
 
 function queueTask(task) {
@@ -735,6 +745,18 @@ function loadWateringQueue() {
 }
 
 // === SCHEDULE MANAGEMENT ===
+
+// #480: every script.eval payload a schedule job carries must be wrapped —
+// an uncaught throw inside an unwrapped handler kills the whole script.
+// Route every registration through this one helper so a future schedule job
+// can never be added unwrapped. The wrapped source always contains
+// handlerCall verbatim, so code that later reads the `code` field back off a
+// live Schedule.List (updatePlanSchedule, verifySchedules below) matches on
+// substring containment rather than exact equality.
+function wrapScheduleCall(handlerCall) {
+  return "(function(){try{" + handlerCall + "}catch(e){log('schedule handler error:',e)}})()";
+}
+
 function updatePlanSchedule(startH) {
   var ts = makeTimespec(startH);
   log("Updating watering schedule to " + ts);
@@ -750,7 +772,9 @@ function updatePlanSchedule(startH) {
       var job = result.jobs[i];
       if (job.calls && job.calls.length > 0) {
         var code = job.calls[0].params && job.calls[0].params.code;
-        if (code === "handleWateringStart()") {
+        // #480: code is wrapScheduleCall()'s wrapped source, not the bare
+        // handler call, so match by containment rather than exact equality.
+        if (code && code.indexOf("handleWateringStart()") !== -1) {
           jobId = job.id;
           break;
         }
@@ -823,12 +847,12 @@ function createSchedules(callback) {
     {
       enable: true,
       timespec: "0 30 0 * * SUN,MON,TUE,WED,THU,FRI,SAT",
-      calls: [{method: "script.eval", params: {id: scriptId, code: "handlePlan()"}}]
+      calls: [{method: "script.eval", params: {id: scriptId, code: wrapScheduleCall("handlePlan()")}}]
     },
     {
       enable: true,
       timespec: fallbackTs,
-      calls: [{method: "script.eval", params: {id: scriptId, code: "handleWateringStart()"}}]
+      calls: [{method: "script.eval", params: {id: scriptId, code: wrapScheduleCall("handleWateringStart()")}}]
     }
   ];
   var sIdx = 0;
@@ -864,8 +888,10 @@ function verifySchedules(cb) {
         var job = result.jobs[i];
         if (job.calls && job.calls.length > 0) {
           var code = job.calls[0].params && job.calls[0].params.code;
-          if (code === "handlePlan()") hasPlan = true;
-          if (code === "handleWateringStart()") hasWater = true;
+          // #480: code is wrapScheduleCall()'s wrapped source, not the bare
+          // handler call, so match by containment rather than exact equality.
+          if (code && code.indexOf("handlePlan()") !== -1) hasPlan = true;
+          if (code && code.indexOf("handleWateringStart()") !== -1) hasWater = true;
         }
       }
     }
@@ -1337,19 +1363,25 @@ function init() {
 }
 
 // === EVENT SUBSCRIPTION ===
+// #480 part 4: an uncaught throw inside this handler kills the whole script
+// (verified live on mezzanine). Wrapped in place -- no new call frame added.
 Shelly.addEventHandler(function(event) {
-  if (!event || !event.info) return;
-  var info = event.info;
-  if (info.event === "script_stop") {
-    log("Script stopping");
-    return;
-  }
-  if (typeof info.component === "string") {
-    if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
-      handleSwitchEvent(info);
-    } else if (info.component === "sys" && info.event === "sys_btn_push") {
-      cycleOutputs();
+  try {
+    if (!event || !event.info) return;
+    var info = event.info;
+    if (info.event === "script_stop") {
+      log("Script stopping");
+      return;
     }
+    if (typeof info.component === "string") {
+      if (info.component.indexOf("switch:") === 0 && typeof info.state === "boolean") {
+        handleSwitchEvent(info);
+      } else if (info.component === "sys" && info.event === "sys_btn_push") {
+        cycleOutputs();
+      }
+    }
+  } catch (e) {
+    log("event handler error:", e);
   }
 });
 

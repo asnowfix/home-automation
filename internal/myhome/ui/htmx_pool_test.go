@@ -78,3 +78,30 @@ func TestDeviceCardTemplate_PoolTags(t *testing.T) {
 		t.Errorf("non-pool device card unexpectedly rendered pool tags:\n%s", out)
 	}
 }
+
+// TestDeviceCardTemplate_WebUILink verifies the "open device web interface"
+// button is gated on HasWebUI, not on a cached Host value — Host is no
+// longer persisted (see #252/#336), and the link target (LinkToken) is
+// resolved live when clicked (see internal/myhome/proxy.resolveToIPv4), so
+// the button should still appear even when Host is empty.
+func TestDeviceCardTemplate_WebUILink(t *testing.T) {
+	tmpl := template.Must(template.New("device-card").Funcs(cardTemplateFuncs()).Parse(deviceCardTemplate))
+
+	var buf bytes.Buffer
+	withUI := DeviceView{Id: "shellyplus1-abc", Name: "Switch", LinkToken: "shellyplus1-abc", HasWebUI: true}
+	if err := tmpl.Execute(&buf, withUI); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out := buf.String(); !strings.Contains(out, `href="/devices/shellyplus1-abc/"`) {
+		t.Errorf("expected web UI link for HasWebUI device, got:\n%s", out)
+	}
+
+	buf.Reset()
+	withoutUI := DeviceView{Id: "shellyblu-abc", Name: "Sensor", LinkToken: "shellyblu-abc", HasWebUI: false}
+	if err := tmpl.Execute(&buf, withoutUI); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out := buf.String(); strings.Contains(out, "Open device web interface") {
+		t.Errorf("expected no web UI link for a BLU (HasWebUI=false) device, got:\n%s", out)
+	}
+}

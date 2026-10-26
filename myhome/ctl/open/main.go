@@ -40,7 +40,13 @@ var Cmd = &cobra.Command{
 		}
 		fmt.Println(string(s))
 
-		sh := fmt.Sprintf("open http://%s", device.Host())
+		// device.Host is no longer persisted (see #252); fall back to the
+		// device's mDNS ".local" name and let the OS/browser resolve it.
+		host := device.Host()
+		if host == "" {
+			host = device.Id() + ".local"
+		}
+		sh := fmt.Sprintf("open http://%s", host)
 		log.Info("Executing command", "command", sh)
 		return exec.Command("sh", "-c", sh).Run()
 	},

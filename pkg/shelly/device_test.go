@@ -2,6 +2,7 @@ package shelly
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 
@@ -9,6 +10,13 @@ import (
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/go-logr/logr"
 )
+
+// fakeResolverFunc adapts a plain func to types.HostResolver for tests.
+type fakeResolverFunc func(ctx context.Context, mac net.HardwareAddr, name string) (net.IP, error)
+
+func (f fakeResolverFunc) ResolveHost(ctx context.Context, mac net.HardwareAddr, name string) (net.IP, error) {
+	return f(ctx, mac, name)
+}
 
 // stubDevice is a minimal devices.Device for tests.
 type stubDevice struct {
@@ -193,5 +201,74 @@ func TestNewDeviceFromMqttId_Valid(t *testing.T) {
 	}
 	if d.Id() != "shellyplus1pm-aabbccddeeff" {
 		t.Errorf("unexpected id: %q", d.Id())
+	}
+}
+
+func TestChannel_ResolvesHostWhenNeitherMqttNorHttpReady(t *testing.T) {
+	t.Cleanup(func() { types.SetHostResolver(nil) })
+	types.SetHostResolver(fakeResolverFunc(func(ctx context.Context, mac net.HardwareAddr, name string) (net.IP, error) {
+		if name == "shellyplus1pm-aabbccddeeff" {
+			return net.ParseIP("192.168.1.77"), nil
+		}
+		return nil, errors.New("not found")
+	}))
+
+	d := &Device{Id_: "shellyplus1pm-aabbccddeeff", log: logr.Discard()}
+
+	got := d.Channel(context.Background(), types.ChannelDefault)
+	if got != types.ChannelHttp {
+		t.Fatalf("expected ChannelHttp, got %v", got)
+	}
+	if d.Host() != "192.168.1.77" {
+		t.Errorf("expected host to be updated to 192.168.1.77, got %q", d.Host())
+	}
+}
+
+func TestChannel_NoResolverStaysDiscarded(t *testing.T) {
+	t.Cleanup(func() { types.SetHostResolver(nil) })
+	types.SetHostResolver(nil)
+
+	d := &Device{Id_: "shellyplus1pm-aabbccddeeff", log: logr.Discard()}
+
+	got := d.Channel(context.Background(), types.ChannelDefault)
+	if got != types.ChannelDefault {
+		t.Fatalf("expected ChannelDefault (discarded), got %v", got)
+	}
+}
+
+// TestDeviceMqttChannels_Init_NoClientInContext_ReturnsError is the
+// regression test for #565's review: mqtt.GetClient(ctx) returning nil (a
+// ctx that was never wrapped by a composition root's
+// mqtt.NewContextWithClient — see myhome/ctl/mcp/mcp.go) used to be
+// dereferenced unconditionally a line later, panicking instead of failing
+// cleanly. A context.Background() here stands in for exactly that case: no
+// composition root ever touched it, mirroring what myhome ctl mcp's
+// server.ServeStdio(srv) built for itself before #565's fix wired the
+// client into its per-session ctx.
+func TestDeviceMqttChannels_Init_NoClientInContext_ReturnsError(t *testing.T) {
+	var m *DeviceMqttChannels
+	_, err := m.Init(context.Background(), "shellytest-565-nilclient-regression")
+	if err == nil {
+		t.Fatal("expected error when ctx carries no pkg/shelly/mqtt.Client, got nil")
+	}
+}
+
+func TestChannel_MqttReadyDoesNotCallResolver(t *testing.T) {
+	t.Cleanup(func() { types.SetHostResolver(nil) })
+	called := false
+	types.SetHostResolver(fakeResolverFunc(func(ctx context.Context, mac net.HardwareAddr, name string) (net.IP, error) {
+		called = true
+		return net.ParseIP("192.168.1.1"), nil
+	}))
+
+	d := &Device{Id_: "shellyplus1pm-aabbccddeeff", log: logr.Discard()}
+	d.mqtt = &DeviceMqttChannels{ReplyTo: "x", To: make(chan []byte, 1), From: make(chan []byte, 1)}
+
+	got := d.Channel(context.Background(), types.ChannelDefault)
+	if got != types.ChannelMqtt {
+		t.Fatalf("expected ChannelMqtt, got %v", got)
+	}
+	if called {
+		t.Error("resolver should not be called when MQTT is already ready")
 	}
 }

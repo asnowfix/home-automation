@@ -23,7 +23,7 @@ With a device identifier pattern, queries only matching devices.`,
 		ctx := cmd.Context()
 
 		// Discover all pool-pump devices dynamically
-		devices, err := getPoolDevices(ctx)
+		devices, _, err := getPoolDevices(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to discover pool pump devices: %w", err)
 		}

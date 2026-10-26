@@ -50,6 +50,58 @@ func TestNewDeviceStorage_CreatesSchema(t *testing.T) {
 	}
 }
 
+// TestMigrateHostsToHostnames_RewritesLegacyIPs verifies that a pre-existing
+// literal IP in host (left over from before #252) is rewritten to
+// "<id>.local" the next time the storage opens, while a non-IP host value
+// (e.g. already ".local", or empty) is left untouched.
+func TestMigrateHostsToHostnames_RewritesLegacyIPs(t *testing.T) {
+	s := newTestStorage(t)
+	ctx := context.Background()
+
+	withIP := makeDevice("Shelly", "shellyplus1pm-aabbccddeeff", "aa:bb:cc:dd:ee:ff", "pump", "192.168.1.101")
+	if _, err := s.SetDevice(ctx, withIP, false); err != nil {
+		t.Fatalf("SetDevice withIP: %v", err)
+	}
+	withHostname := makeDevice("Shelly", "shellyplus1pm-112233445566", "11:22:33:44:55:66", "light", "shellyplus1pm-112233445566.local")
+	if _, err := s.SetDevice(ctx, withHostname, false); err != nil {
+		t.Fatalf("SetDevice withHostname: %v", err)
+	}
+	noHost := makeDevice("Shelly", "shellyplus1pm-778899aabbcc", "77:88:99:aa:bb:cc", "spare", "")
+	if _, err := s.SetDevice(ctx, noHost, false); err != nil {
+		t.Fatalf("SetDevice noHost: %v", err)
+	}
+
+	// Re-running the migration (as NewDeviceStorage does on every open) must
+	// be idempotent and only touch the row that had a literal IP.
+	if err := s.migrateHostsToHostnames(); err != nil {
+		t.Fatalf("migrateHostsToHostnames: %v", err)
+	}
+
+	got, err := s.GetDeviceById(ctx, "shellyplus1pm-aabbccddeeff")
+	if err != nil {
+		t.Fatalf("GetDeviceById withIP: %v", err)
+	}
+	if want := "shellyplus1pm-aabbccddeeff.local"; got.Host() != want {
+		t.Errorf("withIP host = %q, want %q", got.Host(), want)
+	}
+
+	got, err = s.GetDeviceById(ctx, "shellyplus1pm-112233445566")
+	if err != nil {
+		t.Fatalf("GetDeviceById withHostname: %v", err)
+	}
+	if want := "shellyplus1pm-112233445566.local"; got.Host() != want {
+		t.Errorf("withHostname host = %q, want %q (should be untouched)", got.Host(), want)
+	}
+
+	got, err = s.GetDeviceById(ctx, "shellyplus1pm-778899aabbcc")
+	if err != nil {
+		t.Fatalf("GetDeviceById noHost: %v", err)
+	}
+	if got.Host() != "" {
+		t.Errorf("noHost host = %q, want empty", got.Host())
+	}
+}
+
 // ── SetDevice ─────────────────────────────────────────────────────────────────
 
 // TestSetDevice_InsertReportsChange confirms that the first insert of a device

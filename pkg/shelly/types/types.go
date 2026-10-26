@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
+
+	"github.com/go-logr/logr"
 )
 
 type MethodsRegistrar interface {
@@ -30,7 +33,7 @@ type Device interface {
 
 	IsMqttReady() bool
 
-	Channel(via Channel) Channel
+	Channel(ctx context.Context, via Channel) Channel
 
 	UpdateName(name string)
 	UpdateHost(host string)
@@ -42,6 +45,41 @@ type Device interface {
 }
 
 type DeviceCaller func(ctx context.Context, device Device, mh MethodHandler, out any, params any) (any, error)
+
+// HostResolver resolves a device's current dialable IP address, e.g. via
+// mDNS or a router's ARP-like lookup table. Implemented by the internal/
+// myhome layer, which owns network-topology concerns, and injected here at
+// daemon startup via SetHostResolver — keeping pkg/shelly free of any
+// MyHome-specific dependency (see CLAUDE.md's Three-Tier Layer Rule).
+type HostResolver interface {
+	ResolveHost(ctx context.Context, mac net.HardwareAddr, name string) (net.IP, error)
+}
+
+var hostResolver HostResolver
+
+// SetHostResolver installs the HostResolver used to (re-)resolve a device's
+// IP address when it is unknown, or immediately after an HTTP dial failure,
+// before falling back to another channel (e.g. MQTT). Call once at daemon
+// startup; nil (the default) disables resolution.
+func SetHostResolver(r HostResolver) {
+	hostResolver = r
+}
+
+// ResolveHost calls the installed HostResolver, if any. ok is false if no
+// resolver is installed, or the installed one could not find an address.
+func ResolveHost(ctx context.Context, mac net.HardwareAddr, name string) (ip net.IP, ok bool) {
+	if hostResolver == nil {
+		return nil, false
+	}
+	log := logr.FromContextOrDiscard(ctx)
+	start := time.Now()
+	ip, err := hostResolver.ResolveHost(ctx, mac, name)
+	log.Info("ResolveHost", "mac", mac, "name", name, "ip", ip, "err", err, "elapsed", time.Since(start))
+	if err != nil || ip == nil {
+		return nil, false
+	}
+	return ip, true
+}
 
 type Channel uint32
 

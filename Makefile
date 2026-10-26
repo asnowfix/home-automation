@@ -155,7 +155,10 @@ run-local-daemon: build
 		kill $$PIDS 2>/dev/null; sleep 1; kill -9 $$PIDS 2>/dev/null || true; \
 	fi
 	@rm -f "$(LOCAL_DAEMON_PID)"
-	@(nohup ./myhome/myhome daemon run --instance local --mqtt-broker $(MYHOME_MQTT_BROKER) > "$(LOCAL_DAEMON_LOG)" 2>&1 & echo $$! > "$(LOCAL_DAEMON_PID)")
+	@( \
+		if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
+		nohup ./myhome/myhome daemon run --instance local --mqtt-broker $(MYHOME_MQTT_BROKER) > "$(LOCAL_DAEMON_LOG)" 2>&1 & echo $$! > "$(LOCAL_DAEMON_PID)" \
+	)
 	@sleep 1
 	@echo "run-local-daemon: started (pid $$(cat "$(LOCAL_DAEMON_PID)")), logs: $(LOCAL_DAEMON_LOG)"
 
@@ -180,23 +183,134 @@ status-local-daemon:
 logs-local-daemon:
 	@tail -n 100 -f "$(LOCAL_DAEMON_LOG)"
 
+# TESTFLAGS is threaded through both test invocations so the race detector can
+# be switched on without editing this file:
+#
+#   make test-race          # or: make test TESTFLAGS=-race
+#
+# Races here are not merely flaky. The goja script emulator runs the script
+# under test on its own goroutine while tests poll DeviceState, and an
+# unsynchronised map read racing a write aborts the whole test binary with
+# "fatal error: concurrent map read and map write", losing every result in the
+# package rather than failing one test (#451).
+#
+# -race is ON by default (#453). These tests are wall-clock bound rather than
+# CPU bound — the emulator and the pollers spend their time waiting — so the
+# detector costs little, and it closes off a class of failure that is otherwise
+# very expensive to diagnose. Override with `make test TESTFLAGS=` if you need
+# a run without it.
+# -timeout is derived from MEASUREMENT, not guesswork: it is the slowest
+# package's last successful duration plus 10% headroom. See CLAUDE.md's
+# "Test timeout" rule for how and when to update it.
+#
+# Note Go applies -timeout PER PACKAGE (per test binary), not to the whole
+# run, so the number that matters is the slowest package -- currently
+# internal/shelly/scripts -- and not `make test`'s overall wall clock.
+#
+#   2026-08-25  internal/shelly/scripts  626.598s under -race  ->  690s
+#   2026-08-26  internal/shelly/scripts  685.399s under -race  ->  754s
+#   2026-08-26  internal/shelly/scripts  592.565s under -race  ->  652s  (#552 package split)
+#   2026-08-27  internal/shelly/scripts  592.456s under -race  ->  652s  (unchanged: #568 added
+#               internal/shelly/scripts/jstarget as its own package -- a separate test binary run
+#               in parallel, so it does not add to this package's serial total)
+#   2026-08-27  internal/shelly/scripts  622.644s under -race  ->  685s  (#523's three new tests
+#                                                                          land in the hot package
+#                                                                          itself, unlike #568's
+#                                                                          separate parallel package)
+#   2026-08-27  internal/shelly/scripts  599.953s under -race  ->  660s  (#523's reconcileWaterLevel()
+#                                                                          and its two tests removed
+#                                                                          per #576 review -- one of
+#                                                                          the three new tests, plus
+#                                                                          TestPoolPump_WaterSupplyOverridesSolar,
+#                                                                          remains and lands here close
+#                                                                          to the #552-split baseline)
+#   2026-08-30  internal/shelly/scripts  591.484s under -race  ->  652s  (unchanged: #421's
+#               TestPoolPump_TaskQueueThrottlesOnCallsInFlight is a source-level regex check, no
+#               emulator run, negligible added time)
+#   2026-08-31  internal/shelly/scripts  602.122s under -race  ->  663s  (#576 rebased onto main a
+#                                                                          second time, past #582's
+#                                                                          CALLS_IN_FLIGHT restore
+#                                                                          and its own new test;
+#                                                                          re-measured fresh per the
+#                                                                          rule -- only a successful
+#                                                                          run may set this, not
+#                                                                          arithmetic on the prior
+#                                                                          601.005s figure)
+#   2026-09-01  internal/shelly/scripts  600.488s under -race  ->  661s  (#425 rebased onto main --
+#                                                                          193 commits, including
+#                                                                          #582's CALLS_IN_FLIGHT
+#                                                                          fix that gated #425 in
+#                                                                          the first place; #425
+#                                                                          itself touches no file
+#                                                                          under this package, so
+#                                                                          the small drop from
+#                                                                          602.122s is run-to-run
+#                                                                          variance, not a code
+#                                                                          change)
+#   2026-09-03  internal/shelly/scripts  600.824s under -race  ->  661s  (#589 touches only
+#                                                                          internal/myhome/shelly/script
+#                                                                          and myhome/ctl/pool, neither
+#                                                                          under this package; 600.824s
+#                                                                          is run-to-run variance around
+#                                                                          the 600.488s baseline, and
+#                                                                          661s already covers it)
+#   2026-09-05  internal/shelly/scripts  612.403s under -race  ->  674s  (#587 adds five reason
+#                                                                          assertions plus
+#                                                                          TestPoolPump_SolarStartAndStopSurvivesOwnEcho
+#                                                                          to this package. The +11.6s
+#                                                                          over 600.824s is NOT variance:
+#                                                                          the new echo test measures
+#                                                                          12.877s standalone under -race,
+#                                                                          which accounts for the whole
+#                                                                          delta. Real added cost, so the
+#                                                                          timeout moves with it.)
+#
+# History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
+# (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
+# 08-25 and every PR touching the package started failing at exactly 600.65s
+# (#552). The 08-26 drop to 592.565s is scripts_smoke_test.go and
+# blu_listener_test.go moving into their own packages (internal/shelly/
+# scripts/smoke, internal/shelly/scripts/blu) so they run in parallel with
+# the rest instead of adding to its serial total -- the growth trend itself
+# is not addressed: pool_pump_test.go / pool_pump_reconciler_test.go /
+# pool_pump_runtime_recovery_test.go remain one dead-serial package at
+# ~590s (86% of the pre-split total) and are the next real target.
+TESTFLAGS ?= -race
+
+# TESTTIMEOUT is deliberately SEPARATE from TESTFLAGS so that overriding the
+# flags cannot silently drop the timeout -- `test-race` passes TESTFLAGS=-race,
+# and the comment above invites `make test TESTFLAGS=`, both of which would
+# otherwise reset it to Go's 600s default and reintroduce #552.
+#
+# It must be applied to EVERY target that runs the suite. CI calls `make cover`
+# five times across workflows against `make test` twice, so a timeout that
+# covers only `test` covers the minority case -- which is exactly how #552
+# survived its first fix.
+TESTTIMEOUT ?= 674s
+
 test: build
-	$(GO) test ./...
+	bash linux/systemd/update_test.sh
+	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
-	    (cd $$dir && $(GO) test ./...) || rc=1; \
+	    (cd $$dir && $(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...) || rc=1; \
 	  fi; \
 	done; exit $$rc
 
+# test-race is kept as an explicit alias now that -race is the default, so
+# scripts and habits that name it keep working.
+test-race:
+	$(MAKE) test TESTFLAGS=-race
+
 cover: build
 	@mkdir -p coverage
-	$(GO) test -covermode=atomic -coverprofile=coverage/root.cov ./...
+	$(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=coverage/root.cov ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
 	    sdir=$$(echo $$dir | tr '/' '_'); \
-	    (cd $$dir && $(GO) test -covermode=atomic -coverprofile=$(CURDIR)/coverage/$$sdir.cov ./...) || rc=1; \
+	    (cd $$dir && $(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=$(CURDIR)/coverage/$$sdir.cov ./...) || rc=1; \
 	  fi; \
 	done; \
 	echo "mode: atomic" > coverage.txt; \
@@ -216,6 +330,12 @@ cover-report: coverage.txt
 cover-html: coverage.txt
 	$(GO) tool cover -html=coverage.txt
 
+# cover-min-suggest: prints the integer floor of the current aggregate
+# coverage, i.e. the value to paste into .coverage-min after a PR that raises
+# coverage. Run `make cover` first.
+cover-min-suggest: coverage.txt
+	@$(GO) tool cover -func=coverage.txt | awk '/^total:/{ split($$3, p, "."); print p[1] }'
+
 build: generate
 	$(MAKE) -C myhome $(@)
 
@@ -223,9 +343,11 @@ generate:
 	$(GO) generate ./internal/myhome/ui/...
 	$(GO) generate ./myhome/ctl/pool
 	$(GO) generate ./myhome/ctl/garden
+	$(GO) generate ./internal/myhome/shelly/script
+	$(GO) generate ./internal/shelly/scripts/jstarget
 	$(GO) generate ./...
 
-VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
+VERSION ?= $(shell git describe --tags --match 'v*' --always 2>/dev/null | sed 's/^v//')
 
 # MSI Version must be strictly numeric (max 4 dot-separated fields) — strip any
 # git-describe suffix (e.g. "0.11.3-2-gabcdef" -> "0.11.3").
@@ -323,7 +445,7 @@ upload-release-notes:
 	@echo "Uploading release notes to GitHub..."
 	@echo "Fetching latest tags..."; \
 	git fetch --tags --quiet; \
-	VERSION=$${VERSION:-$$(git describe --tags --abbrev=0 2>/dev/null)}; \
+	VERSION=$${VERSION:-$$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null)}; \
 	if [ -z "$$VERSION" ]; then \
 		echo "Error: No version specified and no git tags found" >&2; \
 		exit 1; \

@@ -3,7 +3,6 @@ package mqtt
 import (
 	"context"
 	"net/url"
-	"sync"
 )
 
 // MQTT QoS levels
@@ -27,42 +26,35 @@ type Cache interface {
 	Insert(topic string, msg []byte) error
 }
 
-var (
-	client    Client
-	clientMu  sync.RWMutex
-	clientSet chan struct{}
-)
+// clientContextKey is the unexported type used to store a Client in a
+// context.Context via NewContextWithClient/GetClient.
+//
+// This replaces the former SetClient/GetClient/ResetClient trio: a
+// package-level mutable Client + sync.RWMutex + a "clientSet" channel that
+// GetClient blocked on until SetClient closed it, plus a ResetClient escape
+// hatch that existed purely so tests could reuse the package between runs,
+// and a SetClient that panicked on a second call with a different value
+// ("BUG: MQTT client already set with different value").
+//
+// The composition root (myhome/ctl.Cmd's PersistentPreRunE, or
+// myhome/daemon.daemon.Run) calls NewContextWithClient once, right after
+// obtaining its Client, and uses that wrapped ctx for everything
+// downstream — the same pattern internal/myhome.NewContextWithClient uses
+// for the RPC client (#362) — so there is no start-up race between "client
+// not set yet" and "first GetClient call" for GetClient to block on: by
+// construction, the value is already present on any ctx a caller could have
+// gotten from that root.
+type clientContextKey struct{}
 
-func init() {
-	clientSet = make(chan struct{})
+// NewContextWithClient returns a copy of ctx carrying c as the Shelly MQTT
+// client. Called once, at a composition root.
+func NewContextWithClient(ctx context.Context, c Client) context.Context {
+	return context.WithValue(ctx, clientContextKey{}, c)
 }
 
-func SetClient(c Client) {
-	clientMu.Lock()
-	defer clientMu.Unlock()
-	if client != nil && c != client {
-		panic("BUG: MQTT client already set with different value")
-	}
-	client = c
-	close(clientSet)
-}
-
-// ResetClient clears the global MQTT client so it can be set again.
-// This is intended for use in tests only.
-func ResetClient() {
-	clientMu.Lock()
-	defer clientMu.Unlock()
-	client = nil
-	clientSet = make(chan struct{})
-}
-
+// GetClient returns the Client stored by NewContextWithClient, or nil if
+// ctx doesn't carry one (e.g. a composition root never wrapped its ctx).
 func GetClient(ctx context.Context) Client {
-	select {
-	case <-clientSet:
-		clientMu.RLock()
-		defer clientMu.RUnlock()
-		return client
-	case <-ctx.Done():
-		return nil
-	}
+	c, _ := ctx.Value(clientContextKey{}).(Client)
+	return c
 }

@@ -183,7 +183,7 @@ jobs:
           if (Test-Path internal/myhome/ui/static/bulma.min.css) { ls internal/myhome/ui/static/bulma.min.css } else { Write-Host "bulma.min.css not found!" }
       - id: build
         name: Build Windows Exectutable
-        run: go build -ldflags "-X version.Version=${{ steps.version.outputs.release }}" -o "myhome.exe" ".\\myhome"
+        run: go build -ldflags "-X github.com/asnowfix/home-automation/pkg/version.Version=${{ steps.version.outputs.release }}" -o "myhome.exe" ".\\myhome"
       - name: Install ImageMagick
         id: install-imagemagick
         run: choco install imagemagick.app -y

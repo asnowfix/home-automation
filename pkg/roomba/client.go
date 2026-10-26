@@ -28,8 +28,8 @@ const (
 // DefaultAckTimeout bounds the wait for a command's echo. Observed latency is 1-3 s.
 const DefaultAckTimeout = 10 * time.Second
 
-// ErrNotConnected is returned by Command while the client has no live connection.
-var ErrNotConnected = errors.New("roomba: not connected")
+// ErrBadCredentials is returned by Connect when the robot rejects the BLID/password pair.
+var ErrBadCredentials = errors.New("roomba: robot rejected the credentials")
 
 // Client holds one long-lived MQTT connection to one robot.
 //
@@ -118,7 +118,7 @@ func (c *Client) Connect(ctx context.Context, retry time.Duration) error {
 			return nil
 		}
 		if errors.Is(err, packets.ErrorRefusedBadUsernameOrPassword) || errors.Is(err, packets.ErrorRefusedNotAuthorised) {
-			return fmt.Errorf("roomba: robot rejected the credentials: %w", err)
+			return fmt.Errorf("%w: %v", ErrBadCredentials, err)
 		}
 		c.log.V(1).Info("Connect attempt failed", "attempt", attempt, "error", err)
 		select {

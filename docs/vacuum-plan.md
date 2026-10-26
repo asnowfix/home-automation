@@ -40,8 +40,8 @@ The local password lives only in `myhome.db` (`vacuum_robots.password`) on the d
 - [x] 0. Spike: Go TLS + paho against Edmond (read state, dock, start/pause/resume/stop/dock)
 - [x] 1. `pkg/roomba`: discovery, password parsing, client (retry, state merge, command ack, CN check) + tests against fake peers.
   Live check 2026-10-26 (`go test -tags live`): discovered, connected on attempt 1 with the CN check on, state read, `dock` acknowledged in 0.7 s
-- [ ] 2. RPC types + `myhome/vacuum` service + storage + daemon wiring
+- [x] 2. RPC types + `myhome/vacuum` service + storage + daemon wiring
 - [ ] 3. `myhome ctl vacuum` CLI
 - [ ] 4. UI Vacuum tab
-- [ ] 5. Room learning (`vacuum_regions`) + room clean
+- [x] 5. Room learning (`vacuum_regions`) + room clean: service side, landed with phase 2 (unit-tested; live check needs region ids from the app)
 - [ ] 6. Docs (`docs/vacuum.md`), live verification on Edmond via the daemon

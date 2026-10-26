@@ -27,6 +27,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/occupancy"
 	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/myhome/temperature"
+	"github.com/asnowfix/home-automation/myhome/vacuum"
 	beem "github.com/asnowfix/home-automation/pkg/beem"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
@@ -483,6 +484,22 @@ func (d *daemon) Run() error {
 		fetchService := fetchproxy.NewService(d.ctx, log, mc, fetchStorage)
 		fetchService.RegisterHandlers()
 		log.Info("Fetch-and-transform proxy RPC methods registered")
+
+		// Register the robot vacuum service (#606). Always registered: with no
+		// robot paired it holds no connection and vacuum.list is empty. A paired
+		// robot accepts a single local client, so only one daemon instance should
+		// hold a given robot's pairing.
+		vacuumStorage, err := vacuum.NewStorage(log, storage.DB())
+		if err != nil {
+			log.Error(err, "Failed to initialize vacuum storage")
+			return err
+		}
+		vacuumService, err := vacuum.NewService(d.ctx, log, vacuumStorage)
+		if err != nil {
+			log.Error(err, "Failed to start vacuum service")
+			return err
+		}
+		vacuumService.RegisterHandlers()
 
 		// Register Occupancy RPC methods if enabled
 		if options.Flags.EnableOccupancyService && d.occupancyService != nil {

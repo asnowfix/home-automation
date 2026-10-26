@@ -51,6 +51,13 @@ const (
 	SolarClaimersList             Verb = "solar.claimerslist"
 	FetchList                     Verb = "fetch.list"
 	FetchDelete                   Verb = "fetch.delete"
+	VacuumList                    Verb = "vacuum.list"
+	VacuumStatusGet               Verb = "vacuum.status"
+	VacuumCommand                 Verb = "vacuum.command"
+	VacuumClean                   Verb = "vacuum.clean"
+	VacuumRooms                   Verb = "vacuum.rooms"
+	VacuumRoomName                Verb = "vacuum.roomname"
+	VacuumPair                    Verb = "vacuum.pair"
 )
 
 type Key string

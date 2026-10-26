@@ -300,8 +300,17 @@ var runCmd = &cobra.Command{
 		// Store Viper instance in global options for daemon to use
 		options.ViperConfig = v
 
-		daemon := NewDaemon(ctx)
-		log.Info("Running in foreground")
-		return daemon.Run()
+		// Dispatch through the kardianos service wrapper for both modes:
+		// - Interactive (foreground shell): runs daemon.Start()/Run() directly,
+		//   blocking until the context is canceled (unchanged behavior).
+		// - Windows service (launched by the SCM): connects to the Service
+		//   Control Manager dispatcher and reports RUNNING, which is required
+		//   for the SCM to consider the service started (fixes error 1053).
+		s, _, err := load(ctx, nil)
+		if err != nil {
+			return err
+		}
+		log.Info("Running")
+		return s.Run()
 	},
 }

@@ -44,6 +44,7 @@ use (
 	./myhome/temperature
 	./pkg/beem
 	./pkg/devices
+	./pkg/roomba
 	./pkg/sfr
 	./pkg/shelly
 	./pkg/shelly/blu

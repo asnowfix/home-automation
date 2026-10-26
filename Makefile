@@ -313,7 +313,7 @@ installer: build-windows
 
 build-windows:
 	@echo "Building Windows executable..."
-	@go build -ldflags "-X version.Version=$(VERSION)" -o myhome.exe ./myhome
+	@go build -ldflags "-X github.com/asnowfix/home-automation/pkg/version.Version=$(VERSION)" -o myhome.exe ./myhome
 
 # Upload release notes for the latest version to GitHub
 # Usage: make upload-release-notes [VERSION=vX.Y.Z]

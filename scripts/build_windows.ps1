@@ -26,7 +26,7 @@ if (Get-Command magick -ErrorAction SilentlyContinue) {
 
 # Build Go binary
 Write-Host "Building Windows executable..."
-$ldflags = "-X version.Version=$version"
+$ldflags = "-X github.com/asnowfix/home-automation/pkg/version.Version=$version"
 go build -ldflags $ldflags -o myhome.exe ./myhome
 
 # Build Installer (WiX)

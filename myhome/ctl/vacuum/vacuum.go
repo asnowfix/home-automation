@@ -102,31 +102,6 @@ var statusCmd = &cobra.Command{
 	},
 }
 
-// PhaseText turns a robot phase into words. Exported for the web UI's wording to match.
-func PhaseText(phase string) string {
-	switch phase {
-	case "charge":
-		return "docked, charging"
-	case "run":
-		return "cleaning"
-	case "stop":
-		return "stopped"
-	case "hmUsrDock":
-		return "returning to dock"
-	case "hmMidMsn":
-		return "returning to recharge"
-	case "hmPostMsn":
-		return "returning after cleaning"
-	case "stuck":
-		return "stuck, needs help"
-	case "evac":
-		return "emptying bin"
-	case "":
-		return "unknown"
-	}
-	return phase
-}
-
 func printRobot(r myhome.VacuumRobot) {
 	conn := "connected"
 	if !r.Connected {
@@ -138,7 +113,7 @@ func printRobot(r myhome.VacuumRobot) {
 		fmt.Println("  no status received yet")
 		return
 	}
-	fmt.Printf("  state:   %s (cycle %s)\n", PhaseText(s.Phase), s.Cycle)
+	fmt.Printf("  state:   %s (cycle %s)\n", myhome.VacuumPhaseText(s.Phase), s.Cycle)
 	fmt.Printf("  battery: %d%%\n", s.Battery)
 	bin := "ok"
 	switch {

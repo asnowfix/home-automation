@@ -94,3 +94,28 @@ type VacuumPairParams struct {
 type VacuumOKResult struct {
 	OK bool `json:"ok"`
 }
+
+// VacuumPhaseText describes a robot phase in words, for the CLI and the web UI.
+func VacuumPhaseText(phase string) string {
+	switch phase {
+	case "charge":
+		return "docked, charging"
+	case "run":
+		return "cleaning"
+	case "stop":
+		return "stopped"
+	case "hmUsrDock":
+		return "returning to dock"
+	case "hmMidMsn":
+		return "returning to recharge"
+	case "hmPostMsn":
+		return "returning after cleaning"
+	case "stuck":
+		return "stuck, needs help"
+	case "evac":
+		return "emptying bin"
+	case "":
+		return "unknown"
+	}
+	return phase
+}

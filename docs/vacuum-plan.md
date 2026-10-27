@@ -42,6 +42,6 @@ The local password lives only in `myhome.db` (`vacuum_robots.password`) on the d
   Live check 2026-10-26 (`go test -tags live`): discovered, connected on attempt 1 with the CN check on, state read, `dock` acknowledged in 0.7 s
 - [x] 2. RPC types + `myhome/vacuum` service + storage + daemon wiring
 - [x] 3. `myhome ctl vacuum` CLI. End-to-end 2026-10-26 against a local daemon (`--instance local`, throwaway myhome.db): the daemon connected to Edmond on attempt 1; `list`/`status`/`rooms`/`dock` OK, dock acknowledged; the password value is absent from the daemon log
-- [ ] 4. UI Vacuum tab
+- [x] 4. UI Vacuum section on the main page (`/htmx/vacuum`, polled every 5 s; empty until a robot is paired). Checked 2026-10-27 over HTTP against the local daemon (browser extension unavailable): live card rendered, `dock` posted and acknowledged, an invalid command shown as an error on the card
 - [x] 5. Room learning (`vacuum_regions`) + room clean: service side, landed with phase 2 (unit-tested; live check needs region ids from the app)
 - [ ] 6. Docs (`docs/vacuum.md`), live verification on Edmond via the daemon

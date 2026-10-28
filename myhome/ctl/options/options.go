@@ -15,7 +15,6 @@ import (
 	"github.com/asnowfix/home-automation/pkg/version"
 
 	"github.com/go-logr/logr"
-	"github.com/spf13/viper"
 	"sigs.k8s.io/yaml"
 )
 
@@ -49,9 +48,6 @@ const SHELLY_DEFAULT_RATE_LIMIT time.Duration = 200 * time.Millisecond
 // Beem's default 60s poll interval, so one or two missed polls don't
 // immediately drop the source out of the aggregate sum.
 const SOLAR_STALE_AFTER time.Duration = 5 * time.Minute
-
-// ViperConfig holds the Viper configuration instance
-var ViperConfig *viper.Viper
 
 var Flags struct {
 	CpuProfile                  string

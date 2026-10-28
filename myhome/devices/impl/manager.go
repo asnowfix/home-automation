@@ -21,7 +21,6 @@ import (
 	mhswitch "github.com/asnowfix/home-automation/internal/myhome/shelly/sswitch"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"github.com/asnowfix/home-automation/internal/tools"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/daemon/watch"
 	mhd "github.com/asnowfix/home-automation/myhome/devices"
 	"github.com/asnowfix/home-automation/myhome/events"
@@ -34,7 +33,20 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// Config is the subset of daemon settings the device manager reads, passed
+// in by the daemon (the composition root) instead of read from CLI globals.
+type Config struct {
+	RemoteProxy       string        // non-empty: no direct LAN access; skip the SFR router
+	RefreshInterval   time.Duration // known-devices refresh interval
+	EventsDir         string        // directory MQTT events are dumped to (empty: disabled)
+	MqttBroker        string        // explicit broker URL, if any (used for auto-setup)
+	AutoSetup         bool          // auto-configure newly discovered unknown devices
+	ReconcileInterval time.Duration // canonical-config reconcile interval (0 disables)
+	MdnsTimeout       time.Duration // mDNS lookup timeout
+}
+
 type DeviceManager struct {
+	cfg            Config
 	registry       *myhome.Registry
 	dr             mhd.DeviceRegistry
 	update         chan *myhome.Device
@@ -60,13 +72,14 @@ type SSEBroadcaster interface {
 // to prevent goroutine leaks when mDNS or network operations are slow/blocked
 const maxConcurrentRefreshes = 10
 
-func NewDeviceManager(ctx context.Context, registry *myhome.Registry, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient mqtt.Client, sseBroadcaster SSEBroadcaster) *DeviceManager {
+func NewDeviceManager(ctx context.Context, registry *myhome.Registry, cfg Config, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient mqtt.Client, sseBroadcaster SSEBroadcaster) *DeviceManager {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
 	}
 
 	dm := &DeviceManager{
+		cfg:            cfg,
 		registry:       registry,
 		dr:             mhd.NewCache(ctx, s),
 		log:            log.WithName("DeviceManager"),
@@ -344,7 +357,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	// first when available, then mDNS (.local, real network cost), then a
 	// terminal not-found. See docs/no-ip-address-plan.md.
 	mdnsRouter := mdnsrouter.New(dm.resolver)
-	if options.Flags.RemoteProxy == "" {
+	if dm.cfg.RemoteProxy == "" {
 		dm.router = model.Chain(sfr.GetRouter(ctx), model.Chain(mdnsRouter, model.NotFoundRouter{}))
 	} else {
 		dm.log.Info("Remote proxy configured — skipping SFR router (no direct LAN access assumed)")
@@ -369,10 +382,10 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
 	go dm.deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")))
-	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
+	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), dm.cfg.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
-	err = watch.StartMqttWatcher(ctx, dm.log, dm.mqttClient, dm, dm.dr, options.Flags.EventsDir)
+	err = watch.StartMqttWatcher(ctx, dm.log, dm.mqttClient, dm, dm.dr, dm.cfg.EventsDir)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch MQTT events")
 		return err
@@ -398,19 +411,19 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	case deviceServer != "":
 		dm.setupConfig.MqttBroker = deviceServer
 		dm.setupConfig.MqttPort = 0 // Signal that broker already includes port
-	case options.Flags.MqttBroker != "":
-		dm.setupConfig.MqttBroker = options.Flags.MqttBroker
+	case dm.cfg.MqttBroker != "":
+		dm.setupConfig.MqttBroker = dm.cfg.MqttBroker
 		dm.setupConfig.MqttPort = 1883
 	default:
 		dm.setupConfig.MqttBroker = "mqtt.local"
 		dm.setupConfig.MqttPort = 1883
 	}
-	dm.log.Info("Auto-setup configuration", "enabled", options.Flags.AutoSetup, "mqtt_broker", dm.setupConfig.MqttBroker)
+	dm.log.Info("Auto-setup configuration", "enabled", dm.cfg.AutoSetup, "mqtt_broker", dm.setupConfig.MqttBroker)
 
-	go dm.runReconciliationLoop(logr.NewContext(ctx, dm.log.WithName("runReconciliationLoop")), options.Flags.ReconcileInterval)
+	go dm.runReconciliationLoop(logr.NewContext(ctx, dm.log.WithName("runReconciliationLoop")), dm.cfg.ReconcileInterval)
 
 	// Loop on ZeroConf devices discovery
-	err = watch.ZeroConf(ctx, options.Flags.MdnsTimeout, dm, dm.dr, dm.resolver)
+	err = watch.ZeroConf(ctx, dm.cfg.MdnsTimeout, dm, dm.dr, dm.resolver)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch ZeroConf devices")
 		return err
@@ -438,7 +451,7 @@ func (dm *DeviceManager) deviceUpdaterLoop(ctx context.Context) {
 	if err != nil {
 		panic("BUG: No logger initialized")
 	}
-	log.Info("Starting updater loop", "max_concurrent_refreshes", maxConcurrentRefreshes, "auto_setup", options.Flags.AutoSetup)
+	log.Info("Starting updater loop", "max_concurrent_refreshes", maxConcurrentRefreshes, "auto_setup", dm.cfg.AutoSetup)
 
 	// Semaphore to limit concurrent refresh goroutines
 	sem := make(chan struct{}, maxConcurrentRefreshes)
@@ -462,7 +475,7 @@ func (dm *DeviceManager) deviceUpdaterLoop(ctx context.Context) {
 				defer func() { <-sem }() // Release slot when done
 
 				// Trigger auto-setup for new devices if enabled
-				if isNew && options.Flags.AutoSetup {
+				if isNew && dm.cfg.AutoSetup {
 					dm.triggerAutoSetup(ctx, log, d, devId)
 				}
 

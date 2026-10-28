@@ -16,7 +16,6 @@ import (
 	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"github.com/asnowfix/home-automation/internal/shelly/scripts"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/asnowfix/home-automation/myhome/fetchproxy"
@@ -38,18 +37,11 @@ import (
 type daemon struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
+	cfg              Config
 	registry         *myhome.Registry
 	dm               *impl.DeviceManager
 	rpc              myhome.Server
 	occupancyService *occupancy.Service
-}
-
-type Config struct {
-	RefreshInterval time.Duration `json:"refresh_interval"`
-}
-
-var DefaultConfig = Config{
-	RefreshInterval: 3 * time.Minute,
 }
 
 // reportingMailer wraps a notify.Mailer to report each Send outcome into the
@@ -72,13 +64,14 @@ func (m *reportingMailer) Send(ctx context.Context, subject, body string) error 
 // not control-flow handles, and a missing/mistyped value would panic here).
 // d.cancel (invoked from Stop, on OS service-stop requests) cancels d.ctx;
 // d.ctx.Done() also fires if the parent ctx is cancelled (e.g. SIGINT/SIGTERM
-// handled upstream in options.CommandLineContext), so both shutdown paths
+// handled upstream in the CLI entry point), so both shutdown paths
 // still converge on the same <-d.ctx.Done() wait in Run.
-func NewDaemon(ctx context.Context) *daemon {
+func NewDaemon(ctx context.Context, cfg Config) *daemon {
 	ctx, cancel := context.WithCancel(ctx)
 	return &daemon{
 		ctx:      ctx,
 		cancel:   cancel,
+		cfg:      cfg,
 		registry: myhome.NewRegistry(),
 	}
 }
@@ -102,8 +95,8 @@ func (d *daemon) Run() error {
 	}
 
 	// Set the instance name for RPC topics
-	if options.Flags.InstanceName != "" {
-		myhome.InstanceName = options.Flags.InstanceName
+	if d.cfg.InstanceName != "" {
+		myhome.InstanceName = d.cfg.InstanceName
 	}
 	log.Info("Starting MyHome daemon", "instance", myhome.InstanceName)
 
@@ -115,16 +108,16 @@ func (d *daemon) Run() error {
 		}
 	}()
 
-	var disableEmbeddedMqttBroker = len(options.Flags.MqttBroker) != 0
+	var disableEmbeddedMqttBroker = len(d.cfg.MqttBroker) != 0
 
-	resolver := mynet.MyResolver(log.WithName("mynet.Resolver"), options.Flags.MdnsTimeout)
+	resolver := mynet.MyResolver(log.WithName("mynet.Resolver"), d.cfg.MdnsTimeout)
 
 	// Conditionally start the embedded MQTT broker
 	var mqttBrokerAddr string
 	if !disableEmbeddedMqttBroker {
 		log.Info("Starting embedded MQTT broker")
 
-		err := mqtt.Broker(d.ctx, log, resolver, "myhome", nil, options.Flags.MqttBrokerClientLogInterval, options.Flags.NoMdnsPublish, options.ViperConfig)
+		err := mqtt.Broker(d.ctx, log, resolver, "myhome", nil, d.cfg.MqttBrokerClientLogInterval, d.cfg.NoMdnsPublish, d.cfg.Viper)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome")
 			return err
@@ -136,9 +129,9 @@ func (d *daemon) Run() error {
 		// Get broker readiness initial delay from config
 		readinessInitialDelay := 500 * time.Millisecond // default 500ms
 
-		if options.ViperConfig != nil {
-			if options.ViperConfig.IsSet("daemon.broker_readiness_initial_delay") {
-				readinessInitialDelay = options.ViperConfig.GetDuration("daemon.broker_readiness_initial_delay")
+		if d.cfg.Viper != nil {
+			if d.cfg.Viper.IsSet("daemon.broker_readiness_initial_delay") {
+				readinessInitialDelay = d.cfg.Viper.GetDuration("daemon.broker_readiness_initial_delay")
 			}
 		}
 
@@ -150,11 +143,11 @@ func (d *daemon) Run() error {
 		}
 	} else {
 		log.Info("Embedded MQTT broker disabled")
-		mqttBrokerAddr = options.Flags.MqttBroker
+		mqttBrokerAddr = d.cfg.MqttBroker
 	}
 
 	// Connect to the network's MQTT broker or use the embedded broker
-	err = mqtt.NewClientE(d.ctx, mqttBrokerAddr, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, options.Flags.MqttWatchdogInterval, options.Flags.MqttWatchdogMaxFailures, false)
+	err = mqtt.NewClientE(d.ctx, mqttBrokerAddr, myhome.InstanceName, d.cfg.MdnsTimeout, d.cfg.MqttTimeout, d.cfg.MqttGrace, d.cfg.MqttReconnectInterval, d.cfg.MqttWatchdogInterval, d.cfg.MqttWatchdogMaxFailures, false)
 	if err != nil {
 		log.Error(err, "Failed to initialize MQTT client")
 		return err
@@ -168,7 +161,7 @@ func (d *daemon) Run() error {
 	}
 	defer mc.Close()
 
-	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit, scripts.GetFS())
+	shelly.Init(log, mc, d.cfg.MqttTimeout, d.cfg.ShellyRateLimit, scripts.GetFS())
 	// Store mc in d.ctx for pkg/shelly's own mqtt.GetClient(ctx) callers
 	// (pkg/shelly/device.go, pkg/shelly/script/run.go) — see
 	// pkg/shelly/mqtt.NewContextWithClient's doc comment. Every subsequent
@@ -180,7 +173,7 @@ func (d *daemon) Run() error {
 	// mux := http.NewServeMux()
 
 	// Start Gen1 (HTTP->MQTT) proxy (auto-enabled with embedded MQTT broker)
-	if options.Flags.EnableGen1Proxy {
+	if d.cfg.EnableGen1Proxy {
 		log.Info("Starting Gen1 (HTTP->MQTT) proxy")
 		gen1.StartHttp2MqttProxy(logr.NewContext(d.ctx, log.WithName("gen1")), 8888, mc)
 	} else {
@@ -188,7 +181,7 @@ func (d *daemon) Run() error {
 	}
 
 	// Start Occupancy service (MQTT only)
-	if options.Flags.EnableOccupancyService {
+	if d.cfg.EnableOccupancyService {
 		log.Info("Starting occupancy service")
 
 		// Create occupancy service
@@ -213,15 +206,15 @@ func (d *daemon) Run() error {
 	}
 
 	// Start Prometheus Metrics Exporter (auto-enabled with device manager)
-	if options.Flags.EnableMetricsExporter {
+	if d.cfg.EnableMetricsExporter {
 		log.Info("Starting Prometheus metrics exporter")
 
-		httpAddr := fmt.Sprintf(":%d", options.Flags.MetricsExporterPort)
+		httpAddr := fmt.Sprintf(":%d", d.cfg.MetricsExporterPort)
 		exporter := metrics.NewExporter(
 			d.ctx,
 			log.WithName("metrics"),
 			mc,
-			options.Flags.MetricsExporterTopic,
+			d.cfg.MetricsExporterTopic,
 			httpAddr,
 		)
 
@@ -232,7 +225,7 @@ func (d *daemon) Run() error {
 
 		log.Info("Prometheus metrics exporter started",
 			"http_addr", httpAddr,
-			"mqtt_topic", options.Flags.MetricsExporterTopic)
+			"mqtt_topic", d.cfg.MetricsExporterTopic)
 	} else {
 		log.Info("Prometheus metrics exporter disabled")
 	}
@@ -246,14 +239,14 @@ func (d *daemon) Run() error {
 
 	// Start Beem Energy watcher if enabled
 	var beemWatcher *beem.Watcher
-	beemEnabled := options.Flags.BeemEmail != "" && options.Flags.BeemPassword != ""
+	beemEnabled := d.cfg.BeemEmail != "" && d.cfg.BeemPassword != ""
 	accountsRegistry.SetEnabled("beem", beemEnabled)
 	if beemEnabled {
 		log.Info("Starting Beem Energy watcher")
 		beemCfg := beem.ClientConfig{
-			Email:        options.Flags.BeemEmail,
-			Password:     options.Flags.BeemPassword,
-			PollInterval: options.Flags.BeemPollInterval,
+			Email:        d.cfg.BeemEmail,
+			Password:     d.cfg.BeemPassword,
+			PollInterval: d.cfg.BeemPollInterval,
 		}
 		beemWatcher = beem.NewWatcher(d.ctx, beemCfg, mc, log.WithName("pkg/beem"))
 		beemWatcher.OnResult = func(err error) { accountsRegistry.Report("beem", err) }
@@ -273,12 +266,12 @@ func (d *daemon) Run() error {
 	// pool-related flag.
 	var solarAgg *SolarAggregator
 	if beemWatcher != nil {
-		solarAgg = NewSolarAggregator(log.WithName("solar"), mc, options.Flags.SolarStaleAfter,
+		solarAgg = NewSolarAggregator(log.WithName("solar"), mc, d.cfg.SolarStaleAfter,
 			newBeemSolarSource(beemWatcher),
 			// future: append additional SolarSource adapters here
 		)
 		solarAgg.Start(d.ctx)
-		log.Info("Solar aggregator started", "topic", SolarAvailableTopic, "stale_after", options.Flags.SolarStaleAfter)
+		log.Info("Solar aggregator started", "topic", SolarAvailableTopic, "stale_after", d.cfg.SolarStaleAfter)
 	} else {
 		log.Info("Solar aggregator disabled: no solar sources configured (Beem credentials absent)")
 	}
@@ -288,7 +281,7 @@ func (d *daemon) Run() error {
 	// internally when username/password are empty. Report status from every
 	// refresh attempt; SetStatusReporter must be called before the device
 	// manager starts (it triggers the first refresh synchronously).
-	sfrEnabled := options.Flags.SFRUsername != "" && options.Flags.SFRPassword != ""
+	sfrEnabled := d.cfg.SFRUsername != "" && d.cfg.SFRPassword != ""
 	accountsRegistry.SetEnabled("sfr", sfrEnabled)
 	myhomesfr.SetStatusReporter(func(err error) { accountsRegistry.Report("sfr", err) })
 
@@ -324,15 +317,15 @@ func (d *daemon) Run() error {
 			poolNotices.OnEvent(d.ctx, e)
 		}
 
-		if options.Flags.EnableEventsService {
-			eventsStore, err = events.NewStorage(log.WithName("events"), options.Flags.EventsDBPath)
+		if d.cfg.EnableEventsService {
+			eventsStore, err = events.NewStorage(log.WithName("events"), d.cfg.EventsDBPath)
 			if err != nil {
-				log.Error(err, "Failed to initialize events storage", "path", options.Flags.EventsDBPath)
+				log.Error(err, "Failed to initialize events storage", "path", d.cfg.EventsDBPath)
 				// Non-fatal: continue without event recording
 				eventsStore = nil
 			} else {
 				eventsTracker = events.NewSensorDailyTracker(log.WithName("events"), eventsStore)
-				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, broadcastFn, options.Flags.EventsRetention)
+				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, broadcastFn, d.cfg.EventsRetention)
 				go func() {
 					if err := eventsTracker.Start(d.ctx); err != nil {
 						log.Error(err, "Events tracker stopped")
@@ -343,7 +336,7 @@ func (d *daemon) Run() error {
 						log.Error(err, "Events service stopped")
 					}
 				}()
-				log.Info("Events service started", "db", options.Flags.EventsDBPath, "retention", options.Flags.EventsRetention)
+				log.Info("Events service started", "db", d.cfg.EventsDBPath, "retention", d.cfg.EventsRetention)
 			}
 		} else {
 			log.Info("Events service disabled")
@@ -358,35 +351,35 @@ func (d *daemon) Run() error {
 		// on-device, solar pump notices) still gets recorded as a plain
 		// "notice"-severity event — only the motion rule and the email
 		// digest are unavailable.
-		if options.Flags.EnableNoticeService {
+		if d.cfg.EnableNoticeService {
 			if eventsSvc == nil {
 				log.Info("Notice service disabled: events service is not running")
 			} else if d.occupancyService == nil {
 				log.Info("Notice service disabled: occupancy service is not running")
 			} else {
-				accountsRegistry.SetEnabled("smtp", options.Flags.SMTPFrom != "")
+				accountsRegistry.SetEnabled("smtp", d.cfg.SMTPFrom != "")
 				mailer := &reportingMailer{
 					Mailer: notify.New(log.WithName("notify"), notify.Config{
-						Host:     options.Flags.SMTPHost,
-						Port:     options.Flags.SMTPPort,
-						Username: options.Flags.SMTPUsername,
-						Password: options.Flags.SMTPPassword,
-						From:     options.Flags.SMTPFrom,
-						To:       options.Flags.SMTPTo,
+						Host:     d.cfg.SMTPHost,
+						Port:     d.cfg.SMTPPort,
+						Username: d.cfg.SMTPUsername,
+						Password: d.cfg.SMTPPassword,
+						From:     d.cfg.SMTPFrom,
+						To:       d.cfg.SMTPTo,
 					}),
 					registry: accountsRegistry,
 				}
 				noticeSvc = notice.NewService(log.WithName("notice"), eventsSvc, d.occupancyService, mailer, notice.Config{
-					NightStart: options.Flags.NoticeNightStart,
-					NightEnd:   options.Flags.NoticeNightEnd,
-					DigestHour: options.Flags.NoticeDigestHour,
+					NightStart: d.cfg.NoticeNightStart,
+					NightEnd:   d.cfg.NoticeNightEnd,
+					DigestHour: d.cfg.NoticeDigestHour,
 				})
 				go noticeSvc.Start(d.ctx)
 				log.Info("Notice service started",
-					"night_start", options.Flags.NoticeNightStart,
-					"night_end", options.Flags.NoticeNightEnd,
-					"digest_hour", options.Flags.NoticeDigestHour,
-					"email_enabled", options.Flags.SMTPFrom != "",
+					"night_start", d.cfg.NoticeNightStart,
+					"night_end", d.cfg.NoticeNightEnd,
+					"digest_hour", d.cfg.NoticeDigestHour,
+					"email_enabled", d.cfg.SMTPFrom != "",
 				)
 			}
 		} else {
@@ -400,20 +393,28 @@ func (d *daemon) Run() error {
 		// Degraded mode: if the pool device can't be reached, NewPoolNotices
 		// returns nil and broadcastFn's poolNotices.OnEvent call is then a
 		// no-op — pump control itself is entirely unaffected either way.
-		if options.Flags.PoolEnabled && options.Flags.PoolDeviceID != "" {
-			poolNotices = NewPoolNotices(d.ctx, log.WithName("pool"), eventsSvc, options.Flags.PoolDeviceID)
+		if d.cfg.PoolEnabled && d.cfg.PoolDeviceID != "" {
+			poolNotices = NewPoolNotices(d.ctx, log.WithName("pool"), eventsSvc, d.cfg.PoolDeviceID)
 		}
 
 		// Minimal static identity registry of things that may claim solar
 		// energy (today: only the pool pump). Not a live-arbitration engine —
 		// see internal/myhome/energy and #401's follow-up "solar router" issue.
 		claimerRegistry := energy.NewRegistry()
-		if options.Flags.PoolDeviceID != "" {
-			claimerRegistry.Register("pool-pump", options.Flags.PoolDeviceID)
+		if d.cfg.PoolDeviceID != "" {
+			claimerRegistry.Register("pool-pump", d.cfg.PoolDeviceID)
 		}
 
 		// Start device manager
-		d.dm = impl.NewDeviceManager(d.ctx, d.registry, storage, resolver, mc, sseBroadcaster)
+		d.dm = impl.NewDeviceManager(d.ctx, d.registry, impl.Config{
+			RemoteProxy:       d.cfg.RemoteProxy,
+			RefreshInterval:   d.cfg.RefreshInterval,
+			EventsDir:         d.cfg.EventsDir,
+			MqttBroker:        d.cfg.MqttBroker,
+			AutoSetup:         d.cfg.AutoSetup,
+			ReconcileInterval: d.cfg.ReconcileInterval,
+			MdnsTimeout:       d.cfg.MdnsTimeout,
+		}, storage, resolver, mc, sseBroadcaster)
 		d.dm.WithEventService(eventsSvc, eventsTracker)
 		err = d.dm.Start(d.ctx)
 		if err != nil {
@@ -474,7 +475,7 @@ func (d *daemon) Run() error {
 		}
 
 		// Register Temperature RPC methods if enabled
-		if options.Flags.EnableTemperatureService {
+		if d.cfg.EnableTemperatureService {
 			log.Info("Initializing temperature RPC methods")
 
 			// Create temperature storage using the same database
@@ -506,7 +507,7 @@ func (d *daemon) Run() error {
 		log.Info("Fetch-and-transform proxy RPC methods registered")
 
 		// Register Occupancy RPC methods if enabled
-		if options.Flags.EnableOccupancyService && d.occupancyService != nil {
+		if d.cfg.EnableOccupancyService && d.occupancyService != nil {
 			log.Info("Registering occupancy RPC methods")
 
 			// Create and register occupancy RPC handler
@@ -530,7 +531,7 @@ func (d *daemon) Run() error {
 		solarRPCHandler.RegisterHandlers()
 
 		// Publish a hostname for the DeviceManager host: myhome.local
-		if !options.Flags.NoMdnsPublish {
+		if !d.cfg.NoMdnsPublish {
 			resolver.WithLocalName(d.ctx, myhome.MYHOME_HOSTNAME)
 		} else {
 			log.Info("Skipping mDNS hostname publishing (--no-mdns-publish)")
@@ -566,7 +567,7 @@ func (d *daemon) Run() error {
 		// Pass the live device manager (not raw storage) so the dashboard sees
 		// each device's in-memory Impl/Status rather than a DB snapshot with no
 		// live state attached.
-		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, d.dm, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy, accountsRegistry, global.PanicOnBugs, d.registry); err != nil {
+		if err := ui.Start(d.ctx, log.WithName("server"), d.cfg.UiPort, resolver, d.dm, mc, sseBroadcaster, eventsSvc, d.cfg.RemoteProxy, accountsRegistry, global.PanicOnBugs, d.registry); err != nil {
 			log.Error(err, "Failed to start UI server")
 			return err
 		}
@@ -578,13 +579,13 @@ func (d *daemon) Run() error {
 	log.Info("Running")
 
 	// Start periodic MQTT connection status monitoring if enabled
-	if options.Flags.MqttBrokerClientLogInterval > 0 {
+	if d.cfg.MqttBrokerClientLogInterval > 0 {
 		go func(ctx context.Context) {
 			log := logr.FromContextOrDiscard(ctx)
-			ticker := time.NewTicker(options.Flags.MqttBrokerClientLogInterval)
+			ticker := time.NewTicker(d.cfg.MqttBrokerClientLogInterval)
 			defer ticker.Stop()
 
-			log.Info("Starting MQTT connection status monitoring", "interval", options.Flags.MqttBrokerClientLogInterval)
+			log.Info("Starting MQTT connection status monitoring", "interval", d.cfg.MqttBrokerClientLogInterval)
 
 			for {
 				select {

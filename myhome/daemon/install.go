@@ -39,7 +39,10 @@ func load(ctx context.Context) (service.Service, service.Logger, error) {
 		Description: "MyHome Daemon, with embedded MQTT broker and persistent device manager",
 	}
 
-	daemon := NewDaemon(ctx)
+	// install/uninstall only register the service with the OS; no flags are
+	// parsed on this path, so the daemon gets a zero Config (as it implicitly
+	// did before, when it read the then-unset options.Flags).
+	daemon := NewDaemon(ctx, Config{})
 
 	s, err := service.New(daemon, &config)
 	if err != nil {

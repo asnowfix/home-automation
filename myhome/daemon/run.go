@@ -298,11 +298,63 @@ var runCmd = &cobra.Command{
 		options.Flags.SFRPassword = v.GetString("sfr.password")
 		sfr.Init(options.Flags.SFRUsername, options.Flags.SFRPassword)
 
-		// Store Viper instance in global options for daemon to use
-		options.ViperConfig = v
-
-		daemon := NewDaemon(ctx)
+		daemon := NewDaemon(ctx, configFromFlags(v))
 		log.Info("Running in foreground")
 		return daemon.Run()
 	},
+}
+
+// configFromFlags snapshots the resolved flag/config-file/environment values
+// (options.Flags, filled in by runCmd above) into the daemon's Config. This
+// is the only place the daemon reads options.Flags: everything downstream
+// receives the Config explicitly.
+func configFromFlags(v *viper.Viper) Config {
+	f := &options.Flags
+	return Config{
+		InstanceName:                f.InstanceName,
+		MqttBroker:                  f.MqttBroker,
+		MdnsTimeout:                 f.MdnsTimeout,
+		MqttTimeout:                 f.MqttTimeout,
+		MqttGrace:                   f.MqttGrace,
+		RefreshInterval:             f.RefreshInterval,
+		MqttWatchdogInterval:        f.MqttWatchdogInterval,
+		MqttWatchdogMaxFailures:     f.MqttWatchdogMaxFailures,
+		MqttReconnectInterval:       f.MqttReconnectInterval,
+		MqttBrokerClientLogInterval: f.MqttBrokerClientLogInterval,
+		EventsDir:                   f.EventsDir,
+		UiPort:                      f.UiPort,
+		EnableGen1Proxy:             f.EnableGen1Proxy,
+		EnableOccupancyService:      f.EnableOccupancyService,
+		EnableTemperatureService:    f.EnableTemperatureService,
+		EnableMetricsExporter:       f.EnableMetricsExporter,
+		MetricsExporterPort:         f.MetricsExporterPort,
+		MetricsExporterTopic:        f.MetricsExporterTopic,
+		ShellyRateLimit:             f.ShellyRateLimit,
+		AutoSetup:                   f.AutoSetup,
+		ReconcileInterval:           f.ReconcileInterval,
+		NoMdnsPublish:               f.NoMdnsPublish,
+		EnableEventsService:         f.EnableEventsService,
+		EventsDBPath:                f.EventsDBPath,
+		EventsRetention:             f.EventsRetention,
+		RemoteProxy:                 f.RemoteProxy,
+		PoolDeviceID:                f.PoolDeviceID,
+		PoolEnabled:                 f.PoolEnabled,
+		BeemEmail:                   f.BeemEmail,
+		BeemPassword:                f.BeemPassword,
+		BeemPollInterval:            f.BeemPollInterval,
+		SolarStaleAfter:             f.SolarStaleAfter,
+		SFRUsername:                 f.SFRUsername,
+		SFRPassword:                 f.SFRPassword,
+		EnableNoticeService:         f.EnableNoticeService,
+		NoticeNightStart:            f.NoticeNightStart,
+		NoticeNightEnd:              f.NoticeNightEnd,
+		NoticeDigestHour:            f.NoticeDigestHour,
+		SMTPHost:                    f.SMTPHost,
+		SMTPPort:                    f.SMTPPort,
+		SMTPUsername:                f.SMTPUsername,
+		SMTPPassword:                f.SMTPPassword,
+		SMTPFrom:                    f.SMTPFrom,
+		SMTPTo:                      f.SMTPTo,
+		Viper:                       v,
+	}
 }

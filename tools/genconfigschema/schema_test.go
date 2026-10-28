@@ -14,7 +14,7 @@ func TestCamelToSnake(t *testing.T) {
 		"preferredSpeed":       "preferred_speed",
 		"ecoSpeed":             "eco_speed",
 		"daySpeed":             "day_speed",
-		"maxSpeed":            "max_speed",
+		"maxSpeed":             "max_speed",
 		"nightRunDurationMs":   "night_run_duration_ms",
 		"temperatureThreshold": "temperature_threshold",
 		"poolVolume":           "pool_volume",

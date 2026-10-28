@@ -1064,7 +1064,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			if !found {
 				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 					if callable, ok := goja.AssertFunction(callback); ok {
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(-105),
+						_, _ = callable(goja.Undefined(), goja.Null(), vm.ToValue(-105),
 							vm.ToValue(fmt.Sprintf("no schedule with id %d", id)), userdata)
 					}
 				}
@@ -1089,7 +1089,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 				if callable, ok := goja.AssertFunction(callback); ok {
 					result := map[string]interface{}{"rev": 1}
-					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
+					_, _ = callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 				}
 			}
 			return nil, nil
@@ -1134,7 +1134,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			if code, message, failed := deviceState.SwitchSetFailure(id); failed {
 				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
 					if callable, ok := goja.AssertFunction(callback); ok {
-						callable(goja.Undefined(), goja.Null(), vm.ToValue(code), vm.ToValue(message), userdata)
+						_, _ = callable(goja.Undefined(), goja.Null(), vm.ToValue(code), vm.ToValue(message), userdata)
 					}
 				}
 				return nil, nil

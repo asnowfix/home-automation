@@ -3109,11 +3109,6 @@ func kvsValue(d *script.DeviceState, key string) interface{} {
 	return v
 }
 
-func storageValue(d *script.DeviceState, key string) interface{} {
-	v, _ := d.StorageValue(key)
-	return v
-}
-
 func componentStatusValue(d *script.DeviceState, key string) (interface{}, bool) {
 	return d.ComponentStatusValue(key)
 }

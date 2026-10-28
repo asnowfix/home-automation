@@ -34,7 +34,7 @@ var wantPoolKVSKeys = map[string]string{
 	"solar_min_turnover":      "script/pool-pump/solar-min-turnover",
 	"solar_max_turnover":      "script/pool-pump/solar-max-turnover",
 	"solar_stale_ms":          "script/pool-pump/solar-stale-ms",
-	"override_ms":         "script/pool-pump/override-ms",
+	"override_ms":             "script/pool-pump/override-ms",
 }
 
 // wantPoolDefaults is a frozen copy of the 22 DefaultXxx values previously
@@ -43,7 +43,7 @@ var wantPoolKVSKeys = map[string]string{
 var wantPoolDefaults = map[string]any{
 	"ecoSpeed":             2.0,
 	"daySpeed":             1.0,
-	"maxSpeed":            0.0,
+	"maxSpeed":             0.0,
 	"nightRunDurationMs":   3600000.0, // -> DefaultNightRunDuration (time.Duration, ms*time.Millisecond)
 	"temperatureThreshold": 20.0,
 	"poolVolume":           46.0,

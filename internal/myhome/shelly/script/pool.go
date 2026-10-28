@@ -335,7 +335,7 @@ type scheduleState struct {
 func preservedScheduleState(existing []schedule.Job, scriptId int) map[string]scheduleState {
 	preserved := make(map[string]scheduleState, len(existing))
 	for _, job := range existing {
-		if job.Calls == nil || len(job.Calls) == 0 {
+		if len(job.Calls) == 0 {
 			continue
 		}
 		call := job.Calls[0]

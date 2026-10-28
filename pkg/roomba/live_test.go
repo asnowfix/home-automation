@@ -4,15 +4,17 @@ package roomba
 
 // Live test against a real robot on the LAN. Not part of `make test`.
 //
-//	ROOMBA_CREDS=~/.homepi/roomba-creds.json go test -tags live -run TestLive -v ./pkg/roomba
+//	MYHOME_VACUUM_BLID=… MYHOME_VACUUM_PASSWORD=… go test -tags live -run TestLive -v ./pkg/roomba
 //
-// The credentials file is JSON {"blid":"…","password":"…"} and is never printed.
+// It reads the same variables as the daemon (#626): MYHOME_VACUUM_BLID and
+// MYHOME_VACUUM_PASSWORD, plus the optional MYHOME_VACUUM_HOST to skip
+// discovery. The simplest source is the daemon's own .env, e.g.
+// `set -a; . /var/lib/myhome/.env; set +a` first. The password is never printed.
 // The test only reads state and sends `dock`, which has no effect on a docked
 // robot and sends an undocked one home.
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -21,29 +23,24 @@ import (
 )
 
 func TestLive(t *testing.T) {
-	path := os.Getenv("ROOMBA_CREDS")
-	if path == "" {
-		t.Skip("ROOMBA_CREDS not set")
+	creds := struct{ BLID, Password string }{
+		BLID:     os.Getenv("MYHOME_VACUUM_BLID"),
+		Password: os.Getenv("MYHOME_VACUUM_PASSWORD"),
 	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var creds struct{ BLID, Password string }
-	if err := json.Unmarshal(raw, &creds); err != nil {
-		t.Fatal(err)
+	if creds.BLID == "" || creds.Password == "" {
+		t.Skip("MYHOME_VACUUM_BLID and MYHOME_VACUUM_PASSWORD not set")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	host := os.Getenv("ROOMBA_HOST")
+	host := os.Getenv("MYHOME_VACUUM_HOST")
 	if host == "" {
 		dctx, dcancel := context.WithTimeout(ctx, 8*time.Second)
 		info, err := (&Discoverer{}).Find(dctx, creds.BLID)
 		dcancel()
 		if err != nil {
-			t.Fatalf("discovery: %v (set ROOMBA_HOST to bypass)", err)
+			t.Fatalf("discovery: %v (set MYHOME_VACUUM_HOST to bypass)", err)
 		}
 		t.Logf("discovered %s at %s (sku %s, fw %s)", info.Name, info.IP, info.SKU, info.Firmware)
 		host = info.IP

@@ -19,6 +19,7 @@ const blid = "0123456789ABCDEF0123456789ABCDEF"
 type fakeClient struct {
 	mu        sync.Mutex
 	host      string
+	password  string
 	connected bool
 	connectFn func() error
 	onChange  func(roomba.Status)
@@ -88,7 +89,9 @@ func (h *harness) last() *fakeClient {
 	return h.clients[len(h.clients)-1]
 }
 
-func newHarness(t *testing.T, f finder, seed ...robotRecord) *harness {
+// newHarness starts a service with cfg; seed, when not nil, is the robot row a
+// previous run of the daemon left in the database.
+func newHarness(t *testing.T, f finder, cfg Config, seed *robotRecord) *harness {
 	t.Helper()
 	db, err := sqlx.Open("sqlite", ":memory:")
 	if err != nil {
@@ -100,8 +103,8 @@ func newHarness(t *testing.T, f finder, seed ...robotRecord) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, r := range seed {
-		if err := store.saveRobot(r); err != nil {
+	if seed != nil {
+		if _, err := db.NamedExec(`INSERT INTO vacuum_robots (blid, name, host) VALUES (:blid, :name, :host)`, seed); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -110,15 +113,14 @@ func newHarness(t *testing.T, f finder, seed ...robotRecord) *harness {
 
 	h := &harness{store: store}
 	h.svc = &Service{
-		ctx: ctx, log: logr.Discard(), store: store, finder: f, robots: map[string]*robot{},
+		ctx: ctx, log: logr.Discard(), store: store, cfg: cfg, finder: f, robots: map[string]*robot{},
 		newClient: func(_ logr.Logger, b, pw, host string, onChange func(roomba.Status)) robotClient {
-			c := &fakeClient{host: host, onChange: onChange}
+			c := &fakeClient{host: host, password: pw, onChange: onChange}
 			h.mu.Lock()
 			h.clients = append(h.clients, c)
 			h.mu.Unlock()
 			return c
 		},
-		password: func(ctx context.Context, host, b string) (string, error) { return "secret-password-30-chars-long", nil },
 	}
 	if err := h.svc.start(); err != nil {
 		t.Fatal(err)
@@ -145,21 +147,21 @@ func connected(h *harness) bool {
 
 func TestDiscoveryUpdatesHost(t *testing.T) {
 	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50", Name: "Edmond"}},
-		robotRecord{BLID: blid, Name: "Edmond", Password: "pw", Host: "192.0.2.74"})
+		Config{BLID: blid, Password: "pw"}, &robotRecord{BLID: blid, Name: "Edmond", Host: "192.0.2.74"})
 	eventually(t, "connection", func() bool { return connected(h) })
 
 	if got := h.last().host; got != "192.0.2.50" {
 		t.Fatalf("connected to %s, want the discovered address", got)
 	}
-	recs, _ := h.store.robots()
-	if recs[0].Host != "192.0.2.50" {
-		t.Fatalf("stored host = %s, want the discovered address", recs[0].Host)
+	rec, _ := h.store.robot(blid)
+	if rec.Host != "192.0.2.50" {
+		t.Fatalf("stored host = %s, want the discovered address", rec.Host)
 	}
 }
 
 func TestDiscoveryMissFallsBackToStoredHost(t *testing.T) {
 	h := newHarness(t, fakeFinder{err: errors.New("no reply")},
-		robotRecord{BLID: blid, Name: "Edmond", Password: "pw", Host: "192.0.2.50"})
+		Config{BLID: blid, Password: "pw"}, &robotRecord{BLID: blid, Name: "Edmond", Host: "192.0.2.50"})
 	eventually(t, "connection", func() bool { return connected(h) })
 	if got := h.last().host; got != "192.0.2.50" {
 		t.Fatalf("connected to %s, want the stored address", got)
@@ -168,7 +170,7 @@ func TestDiscoveryMissFallsBackToStoredHost(t *testing.T) {
 
 func TestCommandsAndNoPasswordInResults(t *testing.T) {
 	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50"}},
-		robotRecord{BLID: blid, Name: "Edmond", Password: "pw-must-not-leak", Host: "192.0.2.50"})
+		Config{BLID: blid, Password: "pw-must-not-leak"}, &robotRecord{BLID: blid, Name: "Edmond", Host: "192.0.2.50"})
 	eventually(t, "connection", func() bool { return connected(h) })
 
 	if _, err := h.svc.Command(context.Background(), "edmond", roomba.CmdStart); err != nil {
@@ -205,7 +207,7 @@ func jsonOf(t *testing.T, v any) string {
 
 func TestRoomLearningNamingAndClean(t *testing.T) {
 	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50"}},
-		robotRecord{BLID: blid, Name: "Edmond", Password: "pw", Host: "192.0.2.50"})
+		Config{BLID: blid, Password: "pw"}, &robotRecord{BLID: blid, Name: "Edmond", Host: "192.0.2.50"})
 	eventually(t, "connection", func() bool { return connected(h) })
 	c := h.last()
 
@@ -247,39 +249,90 @@ func TestRoomLearningNamingAndClean(t *testing.T) {
 	}
 }
 
-func TestPairStoresPasswordAndStartsSupervising(t *testing.T) {
-	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50", Name: "Edmond"}})
-	if _, err := h.svc.Status(""); err == nil {
-		t.Fatal("status before pairing should fail")
+func TestDisabledWithoutCredentials(t *testing.T) {
+	for _, cfg := range []Config{{}, {BLID: blid}, {Password: "pw"}, {Host: "192.0.2.50"}} {
+		if cfg.Enabled() {
+			t.Fatalf("%+v reported enabled", Config{BLID: cfg.BLID, Host: cfg.Host})
+		}
+		h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50"}}, cfg,
+			&robotRecord{BLID: blid, Name: "Edmond", Host: "192.0.2.50"})
+		if n := len(h.svc.List().Robots); n != 0 {
+			t.Fatalf("disabled service lists %d robots", n)
+		}
+		if _, err := h.svc.Status(""); err == nil || !strings.Contains(err.Error(), "MYHOME_VACUUM_PASSWORD") {
+			t.Fatalf("status err = %v, want a pointer to MYHOME_VACUUM_*", err)
+		}
+		time.Sleep(50 * time.Millisecond)
+		if h.last() != nil {
+			t.Fatal("disabled service opened a robot connection")
+		}
 	}
-	v, err := h.svc.Pair(context.Background(), "")
+}
+
+func TestEnabledUsesConfiguredPassword(t *testing.T) {
+	cfg := Config{BLID: blid, Password: "configured-password"}
+	if !cfg.Enabled() {
+		t.Fatal("BLID and password set, but not enabled")
+	}
+	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50"}}, cfg, nil)
+	eventually(t, "connection", func() bool { return connected(h) })
+	if got := h.last().password; got != "configured-password" {
+		t.Fatal("client was not given the configured password")
+	}
+	var cols []string
+	if err := h.store.db.Select(&cols, `SELECT name FROM pragma_table_info('vacuum_robots')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cols {
+		if c == "password" {
+			t.Fatal("vacuum_robots still has a password column")
+		}
+	}
+}
+
+func TestConfiguredHostSkipsDiscovery(t *testing.T) {
+	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50"}},
+		Config{BLID: blid, Password: "pw", Host: "192.0.2.99"}, nil)
+	eventually(t, "connection", func() bool { return connected(h) })
+	if got := h.last().host; got != "192.0.2.99" {
+		t.Fatalf("connected to %s, want MYHOME_VACUUM_HOST", got)
+	}
+}
+
+func TestMigrationDropsStoredPassword(t *testing.T) {
+	db, err := sqlx.Open("sqlite", ":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.ID != blid || v.Name != "Edmond" {
-		t.Fatalf("paired %+v", v)
+	db.SetMaxOpenConns(1)
+	defer db.Close()
+	// The table as the first #606 build created it.
+	if _, err := db.Exec(`
+	CREATE TABLE vacuum_robots (
+		blid       TEXT PRIMARY KEY,
+		name       TEXT NOT NULL DEFAULT '',
+		password   TEXT NOT NULL,
+		host       TEXT NOT NULL DEFAULT '',
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);
+	INSERT INTO vacuum_robots (blid, name, password, host) VALUES ('` + blid + `', 'Edmond', 'old-stored-password', '192.0.2.50');
+	`); err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(jsonOf(t, v), "secret-password") {
-		t.Fatal("password leaked into the pair result")
+	store, err := NewStorage(logr.Discard(), db)
+	if err != nil {
+		t.Fatal(err)
 	}
-	recs, _ := h.store.robots()
-	if len(recs) != 1 || recs[0].Password != "secret-password-30-chars-long" {
-		t.Fatalf("stored %+v", recs)
+	var n int
+	if err := db.Get(&n, `SELECT COUNT(*) FROM pragma_table_info('vacuum_robots') WHERE name='password'`); err != nil || n != 0 {
+		t.Fatalf("password column still present (%d, %v)", n, err)
 	}
-	eventually(t, "connection", func() bool { return connected(h) })
-}
-
-func TestPairNeedsButton(t *testing.T) {
-	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50"}})
-	calls := 0
-	h.svc.password = func(context.Context, string, string) (string, error) {
-		calls++
-		return "", roomba.ErrNeedsButton
+	rec, err := store.robot(blid)
+	if err != nil || rec.Name != "Edmond" || rec.Host != "192.0.2.50" {
+		t.Fatalf("robot after migration = %+v, %v", rec, err)
 	}
-	if _, err := h.svc.Pair(context.Background(), ""); !errors.Is(err, roomba.ErrNeedsButton) {
-		t.Fatalf("err = %v", err)
-	}
-	if calls != 1 {
-		t.Fatalf("retried %d times; a missing button press cannot be fixed by retrying", calls)
+	// Idempotent: a second start finds nothing to migrate.
+	if _, err := NewStorage(logr.Discard(), db); err != nil {
+		t.Fatal(err)
 	}
 }

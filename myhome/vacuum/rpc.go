@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"strings"
-	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/pkg/roomba"
@@ -40,9 +38,6 @@ func (s *Service) RegisterHandlers() {
 	myhome.RegisterMethodHandler(myhome.VacuumRoomName, func(ctx context.Context, in any) (any, error) {
 		p := in.(*myhome.VacuumRoomNameParams)
 		return s.NameRoom(p.Robot, p.RegionID, p.Name)
-	})
-	myhome.RegisterMethodHandler(myhome.VacuumPair, func(ctx context.Context, in any) (any, error) {
-		return s.Pair(ctx, in.(*myhome.VacuumPairParams).Host)
 	})
 	s.log.Info("Vacuum RPC handlers registered")
 }
@@ -211,89 +206,4 @@ func (s *Service) NameRoom(sel, regionID, name string) (*myhome.VacuumOKResult, 
 		return nil, fmt.Errorf("no learned region %q for robot %s", regionID, r.rec.Name)
 	}
 	return &myhome.VacuumOKResult{OK: true}, nil
-}
-
-// Pair fetches the local password of a robot whose HOME button was just held,
-// stores it, and starts supervising the robot. The password stays on this host.
-func (s *Service) Pair(ctx context.Context, host string) (*myhome.VacuumRobot, error) {
-	ctx, cancel := context.WithTimeout(ctx, pairTimeout)
-	defer cancel()
-
-	info, err := s.pairCandidate(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-
-	var password string
-	for {
-		pctx, pcancel := context.WithTimeout(ctx, 4*time.Second)
-		password, err = s.password(pctx, info.IP, info.BLID)
-		pcancel()
-		if err == nil || errors.Is(err, roomba.ErrNeedsButton) || ctx.Err() != nil {
-			break
-		}
-		// The robot refuses a connection that follows another too closely: retry.
-		select {
-		case <-ctx.Done():
-		case <-time.After(time.Second):
-		}
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	rec := robotRecord{BLID: info.BLID, Name: info.Name, Password: password, Host: info.IP}
-	if err := s.store.saveRobot(rec); err != nil {
-		return nil, err
-	}
-	s.log.Info("Robot paired", "robot", info.Name, "host", info.IP)
-
-	s.mu.Lock()
-	old, exists := s.robots[info.BLID]
-	s.mu.Unlock()
-	if exists {
-		// Re-pairing: the supervisor picks the new password up on its next cycle.
-		s.mu.Lock()
-		old.rec.Password = password
-		s.mu.Unlock()
-		v := s.view(old)
-		return &v, nil
-	}
-	s.add(rec)
-	r, _ := s.pick(info.BLID)
-	v := s.view(r)
-	return &v, nil
-}
-
-// pairCandidate finds the robot to pair: the one at host, or the only robot on
-// the LAN that answers discovery.
-func (s *Service) pairCandidate(ctx context.Context, host string) (roomba.Info, error) {
-	f := s.finder
-	if host != "" {
-		ip := net.ParseIP(host)
-		if ip == nil {
-			return roomba.Info{}, fmt.Errorf("host must be an IP address, got %q", host)
-		}
-		f = &roomba.Discoverer{Addr: &net.UDPAddr{IP: ip, Port: roomba.DiscoveryPort}}
-	}
-	sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-	found, err := f.Scan(sctx)
-	if err != nil {
-		return roomba.Info{}, err
-	}
-	switch len(found) {
-	case 0:
-		if host != "" {
-			return roomba.Info{}, fmt.Errorf("no robot answered discovery at %s", host)
-		}
-		return roomba.Info{}, errors.New("no robot answered discovery; retry, or pass its IP address")
-	case 1:
-		return found[0], nil
-	}
-	names := make([]string, len(found))
-	for i, f := range found {
-		names[i] = f.Name + " (" + f.IP + ")"
-	}
-	return roomba.Info{}, fmt.Errorf("several robots answered (%s): pass the IP address of the one to pair", strings.Join(names, ", "))
 }

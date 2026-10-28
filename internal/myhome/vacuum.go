@@ -5,7 +5,8 @@ import "time"
 // Robot vacuum RPC types (#606). Robots are addressed by id (the robot's BLID,
 // which is public on the LAN) or by name; an empty Robot means "the only robot"
 // and fails when there are several. The robot's local password never appears in
-// any of these types.
+// any of these types: pairing runs in the CLI (`myhome ctl vacuum pair`), not over
+// RPC, and the daemon reads the password from MYHOME_VACUUM_PASSWORD (#626).
 
 // VacuumParams selects one robot.
 type VacuumParams struct {
@@ -81,13 +82,6 @@ type VacuumRoomNameParams struct {
 	Robot    string `json:"robot,omitempty"`
 	RegionID string `json:"region_id"`
 	Name     string `json:"name"`
-}
-
-// VacuumPairParams pairs a robot whose HOME button was just held ~2 s.
-// Host is optional: without it the robot is found by discovery, and must be the
-// only unpaired robot answering.
-type VacuumPairParams struct {
-	Host string `json:"host,omitempty"`
 }
 
 // VacuumOKResult acknowledges a command the robot confirmed.

@@ -1,6 +1,10 @@
 // Package vacuum is the daemon-side robot vacuum service (#606): it keeps one
-// long-lived local connection per paired robot, learns the robot's rooms, and
-// serves the vacuum.* RPC methods for the CLI and the web UI.
+// long-lived local connection to the configured robot, learns the robot's
+// rooms, and serves the vacuum.* RPC methods for the CLI and the web UI.
+//
+// The robot is configured like every other integration secret (#626): its BLID
+// and local password come from MYHOME_VACUUM_BLID / MYHOME_VACUUM_PASSWORD in
+// the daemon's .env, never from a flag, the YAML file or the database.
 //
 // Design notes and the field measurements behind them: docs/vacuum-plan.md.
 package vacuum
@@ -26,8 +30,19 @@ var (
 	watchInterval    = 30 * time.Second // how often a live connection is checked
 	downTolerance    = 2 * time.Minute  // how long auto-reconnect may fail before re-resolving
 	badCredsBackoff  = 10 * time.Minute // a rejected password will not fix itself quickly
-	pairTimeout      = 12 * time.Second // must fit in the CLI's default 14 s RPC timeout
 )
+
+// Config identifies the robot and holds its local password. Password is a
+// secret: never log it, return it over RPC, or store it.
+type Config struct {
+	BLID     string // robot id (MYHOME_VACUUM_BLID)
+	Password string // robot local password (MYHOME_VACUUM_PASSWORD), from .env only
+	Host     string // optional fixed address (MYHOME_VACUUM_HOST); empty: discovery by BLID
+}
+
+// Enabled reports whether the robot is configured. Without both BLID and
+// password the service holds no connection and vacuum.list is empty.
+func (c Config) Enabled() bool { return c.BLID != "" && c.Password != "" }
 
 // robotClient is the part of *roomba.Client the service uses; faked in tests.
 type robotClient interface {
@@ -49,64 +64,57 @@ type finder interface {
 
 type robot struct {
 	rec       robotRecord
+	password  string      // from Config; never stored, logged or returned
 	client    robotClient // nil while not connected
 	status    *myhome.VacuumStatus
 	connected bool
 }
 
-// Service supervises the paired robots.
+// Service supervises the configured robot.
 type Service struct {
 	ctx       context.Context
 	log       logr.Logger
 	store     *Storage
+	cfg       Config
 	finder    finder
 	newClient newClientFunc
-	password  func(ctx context.Context, host, blid string) (string, error)
 
 	mu     sync.Mutex
 	robots map[string]*robot // by BLID
 }
 
-// NewService loads the paired robots and starts a supervisor for each.
-// With no robot paired it is idle until vacuum.pair is called.
-func NewService(ctx context.Context, log logr.Logger, store *Storage) (*Service, error) {
+// NewService starts supervising the configured robot. When cfg is not
+// Enabled the service is idle: it holds no connection and lists no robot.
+func NewService(ctx context.Context, log logr.Logger, store *Storage, cfg Config) (*Service, error) {
 	s := &Service{
 		ctx:    ctx,
 		log:    log.WithName("Vacuum"),
 		store:  store,
+		cfg:    cfg,
 		finder: &roomba.Discoverer{},
 		newClient: func(log logr.Logger, blid, password, host string, onChange func(roomba.Status)) robotClient {
 			return roomba.NewClient(log, blid, password, host, onChange)
 		},
-		password: roomba.GetPassword,
-		robots:   map[string]*robot{},
+		robots: map[string]*robot{},
 	}
 	return s, s.start()
 }
 
 func (s *Service) start() error {
-	recs, err := s.store.robots()
+	if !s.cfg.Enabled() {
+		return nil
+	}
+	rec, err := s.store.robot(s.cfg.BLID)
 	if err != nil {
 		return err
 	}
-	for _, rec := range recs {
-		s.add(rec)
-	}
-	s.log.Info("Vacuum service started", "robots", len(recs))
-	return nil
-}
-
-// add registers a robot and starts its supervisor.
-func (s *Service) add(rec robotRecord) {
+	r := &robot{rec: rec, password: s.cfg.Password}
 	s.mu.Lock()
-	if _, exists := s.robots[rec.BLID]; exists {
-		s.mu.Unlock()
-		return
-	}
-	r := &robot{rec: rec}
 	s.robots[rec.BLID] = r
 	s.mu.Unlock()
 	go s.supervise(r)
+	s.log.Info("Vacuum service started", "robot", rec.Name, "fixed_host", s.cfg.Host)
+	return nil
 }
 
 // supervise keeps one robot connected for the life of the daemon: find its
@@ -122,7 +130,7 @@ func (s *Service) supervise(r *robot) {
 			s.sleep(connectTimeout)
 			continue
 		}
-		c := s.newClient(s.log, r.rec.BLID, r.rec.Password, host, func(st roomba.Status) { s.onStatus(r, st) })
+		c := s.newClient(s.log, r.rec.BLID, r.password, host, func(st roomba.Status) { s.onStatus(r, st) })
 		cctx, cancel := context.WithTimeout(s.ctx, connectTimeout)
 		err := c.Connect(cctx, connectRetry)
 		cancel()
@@ -134,7 +142,7 @@ func (s *Service) supervise(r *robot) {
 			wait := time.Duration(0)
 			if errors.Is(err, roomba.ErrBadCredentials) {
 				wait = badCredsBackoff
-				log.Error(err, "Robot rejected its stored password; pair it again", "retry_in", wait)
+				log.Error(err, "Robot rejected MYHOME_VACUUM_PASSWORD; run `myhome ctl vacuum pair` and update .env", "retry_in", wait)
 			} else {
 				log.Info("Could not connect; re-resolving the robot's address", "host", host, "error", err.Error())
 			}
@@ -186,7 +194,12 @@ func (s *Service) watch(r *robot, c robotClient) {
 	}
 }
 
+// resolve returns the address to connect to: MYHOME_VACUUM_HOST when set,
+// otherwise discovery by BLID with the last known address as fallback.
 func (s *Service) resolve(r *robot) string {
+	if s.cfg.Host != "" {
+		return s.cfg.Host
+	}
 	ctx, cancel := context.WithTimeout(s.ctx, discoveryTimeout)
 	defer cancel()
 	info, err := s.finder.Find(ctx, r.rec.BLID)
@@ -256,20 +269,20 @@ func toStatus(st roomba.Status) myhome.VacuumStatus {
 	return vs
 }
 
-// pick resolves a robot selector: BLID or name, or "" when exactly one robot is paired.
+// pick resolves a robot selector: BLID or name, or "" for the configured robot.
 func (s *Service) pick(sel string) (*robot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sel == "" {
 		switch len(s.robots) {
 		case 0:
-			return nil, errors.New("no robot vacuum paired (see `myhome ctl vacuum pair`)")
+			return nil, errors.New("no robot vacuum configured: set MYHOME_VACUUM_BLID and MYHOME_VACUUM_PASSWORD in the daemon's .env (see `myhome ctl vacuum pair`)")
 		case 1:
 			for _, r := range s.robots {
 				return r, nil
 			}
 		default:
-			return nil, fmt.Errorf("%d robots paired: name one", len(s.robots))
+			return nil, fmt.Errorf("%d robots configured: name one", len(s.robots))
 		}
 	}
 	if r, ok := s.robots[sel]; ok {

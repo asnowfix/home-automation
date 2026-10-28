@@ -385,12 +385,4 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &VacuumOKResult{}
 		},
 	},
-	VacuumPair: {
-		NewParams: func() any {
-			return &VacuumPairParams{}
-		},
-		NewResult: func() any {
-			return &VacuumRobot{}
-		},
-	},
 }

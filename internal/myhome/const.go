@@ -57,7 +57,6 @@ const (
 	VacuumClean                   Verb = "vacuum.clean"
 	VacuumRooms                   Verb = "vacuum.rooms"
 	VacuumRoomName                Verb = "vacuum.roomname"
-	VacuumPair                    Verb = "vacuum.pair"
 )
 
 type Key string

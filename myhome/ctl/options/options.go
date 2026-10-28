@@ -95,6 +95,9 @@ var Flags struct {
 	SolarStaleAfter             time.Duration // solar aggregator: a source's last reading older than this is excluded from the sum
 	SFRUsername                 string        // SFR box account username; from .env, never a flag
 	SFRPassword                 string        // SFR box account password; from .env, never a flag
+	VacuumBLID                  string        // robot vacuum id (BLID); from .env, never a flag
+	VacuumPassword              string        // robot vacuum local password; from .env, never a flag
+	VacuumHost                  string        // robot vacuum fixed address; empty = discovery by BLID; never a flag
 	EnableNoticeService         bool          // whether to enable the notice service (motion rule + daily email digest)
 	NoticeNightStart            string        // "HH:MM" start of the night window used by the motion rule
 	NoticeNightEnd              string        // "HH:MM" end of the night window used by the motion rule

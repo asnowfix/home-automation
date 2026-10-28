@@ -1,12 +1,16 @@
 // Package vacuum implements `myhome ctl vacuum`: robot vacuum control through
-// the daemon's vacuum.* RPC methods (#606). No robot protocol code lives here.
+// the daemon's vacuum.* RPC methods (#606). The one exception is `pair`, which
+// calls pkg/roomba directly so the robot's password never crosses RPC (#626).
+// No robot protocol code lives here.
 package vacuum
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/pkg/roomba"
 	"github.com/spf13/cobra"
 )
 
@@ -19,12 +23,13 @@ var Cmd = &cobra.Command{
 	Long: `Control robot vacuums through the myhome daemon, which talks to each robot
 directly on the LAN (no iRobot cloud).
 
---robot selects a robot by name or id; it can be omitted when only one is paired.`,
+--robot selects a robot by name or id; it can be omitted (the daemon has one
+configured robot, see MYHOME_VACUUM_* in docs/configuration.md).`,
 	Args: cobra.NoArgs,
 }
 
 func init() {
-	Cmd.PersistentFlags().StringVarP(&robotFlag, "robot", "r", "", "robot name or id (default: the only paired robot)")
+	Cmd.PersistentFlags().StringVarP(&robotFlag, "robot", "r", "", "robot name or id (default: the configured robot)")
 	Cmd.AddCommand(listCmd, statusCmd, cleanCmd, roomsCmd, pairCmd)
 	for _, c := range []struct{ name, short string }{
 		{"stop", "Stop the current mission"},
@@ -62,7 +67,7 @@ func sendCommand(cmd *cobra.Command, command string) error {
 
 var listCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List paired robots",
+	Short: "List the configured robot",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		out, err := myhome.TheClient.CallE(cmd.Context(), myhome.VacuumList, nil)
@@ -74,7 +79,7 @@ var listCmd = &cobra.Command{
 			return fmt.Errorf("unexpected result type %T", out)
 		}
 		if len(res.Robots) == 0 {
-			fmt.Println("No robot vacuum paired. Run 'myhome ctl vacuum pair'.")
+			fmt.Println("No robot vacuum configured. Run 'myhome ctl vacuum pair' and put its output in the daemon's .env.")
 			return nil
 		}
 		for _, r := range res.Robots {
@@ -207,30 +212,39 @@ var roomsNameCmd = &cobra.Command{
 
 var pairCmd = &cobra.Command{
 	Use:   "pair [robot-ip]",
-	Short: "Pair a robot (hold its HOME button first)",
-	Long: `Pairs a robot with the daemon, which fetches and keeps the robot's local password.
+	Short: "Get a robot's id and local password for the daemon's .env (hold its HOME button first)",
+	Long: `Fetches the robot's id (BLID) and local password, and prints them as the
+MYHOME_VACUUM_* lines the daemon reads from its .env file.
 
 1. Put the robot on its dock.
 2. Hold its HOME button about 2 seconds, until it plays a tone.
-3. Within 2 minutes, run this command.
+3. Within 2 minutes, run this command on a host on the robot's LAN.
 
 Without robot-ip, the robot is found by discovery and must be the only one answering.
-The password stays on the daemon host; it is never sent to this command.`,
+
+This command talks to the robot directly, not through the daemon, and writes
+nothing anywhere: copy the printed lines into /var/lib/myhome/.env (or enter
+them at 'sudo dpkg-reconfigure myhome'), then restart the daemon.
+Standard output carries only those lines, so it can be redirected; it
+contains the password: do not paste it into logs, issues or chats.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		p := &myhome.VacuumPairParams{}
+		host := ""
 		if len(args) == 1 {
-			p.Host = args[0]
+			host = args[0]
 		}
-		out, err := myhome.TheClient.CallE(cmd.Context(), myhome.VacuumPair, p)
+		info, password, err := roomba.Pair(cmd.Context(), host)
 		if err != nil {
 			return err
 		}
-		r, ok := out.(*myhome.VacuumRobot)
-		if !ok {
-			return fmt.Errorf("unexpected result type %T", out)
+		fmt.Fprintf(os.Stderr, "Robot %q (%s) answered. Put these lines in the daemon's .env, then restart it:\n", info.Name, info.IP)
+		fmt.Printf("MYHOME_VACUUM_BLID=%s\n", info.BLID)
+		fmt.Printf("MYHOME_VACUUM_PASSWORD=%s\n", password)
+		if host != "" {
+			// Only pin the address when the operator chose it: discovery
+			// follows the robot when its DHCP-assigned address changes.
+			fmt.Printf("MYHOME_VACUUM_HOST=%s\n", host)
 		}
-		fmt.Printf("paired %s (%s) at %s\n", r.Name, r.ID, r.Host)
 		return nil
 	},
 }

@@ -3,6 +3,7 @@ package script
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/asnowfix/home-automation/pkg/shelly"
@@ -16,31 +17,11 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// PoolKVSKeys maps configuration fields to KVS keys
-// Note: KVS keys must be < 42 characters (target: ≤32 chars)
-// Prefix: script/pool-pump/ (18 chars) + key name
-var PoolKVSKeys = map[string]string{
-	"preferred_device_id":   "script/pool-pump/preferred",      // 30 chars ✓
-	"preferred_speed":       "script/pool-pump/speed",          // 26 chars ✓
-	"pro3_device_id":        "script/pool-pump/pro3-id",        // 28 chars ✓
-	"pro1_device_id":        "script/pool-pump/pro1-id",        // 28 chars ✓
-	"mqtt_topic_prefix":     "script/pool-pump/mqtt-topic",     // 29 chars ✓
-	"enable_logging":        "script/pool-pump/logging",        // 26 chars ✓
-	"eco_speed":             "script/pool-pump/eco-speed",      // 28 chars ✓
-	"mid_speed":             "script/pool-pump/mid-speed",      // 28 chars ✓
-	"high_speed":            "script/pool-pump/high-speed",     // 29 chars ✓
-	"night_run_duration_ms": "script/pool-pump/night-duration", // 32 chars ✓
-	"grace_delay_ms":        "script/pool-pump/grace-delay",    // 30 chars ✓
-	"temperature_threshold": "script/pool-pump/temp-threshold", // 32 chars ✓
-	"pool_volume":           "script/pool-pump/pool-volume",    // 29 chars ✓
-	"turnover":              "script/pool-pump/turnover",       // 27 chars ✓
-	"max_flow_rate":         "script/pool-pump/max-flow-rate",  // 31 chars ✓
-	"max_rpm":               "script/pool-pump/max-rpm",        // 26 chars ✓
-	"eco_rpm":               "script/pool-pump/eco-rpm",        // 26 chars ✓
-	"mid_rpm":               "script/pool-pump/mid-rpm",        // 26 chars ✓
-	"high_rpm":              "script/pool-pump/high-rpm",       // 27 chars ✓
-	"max_temp":              "script/pool-pump/max-temp",       // 27 chars ✓
-}
+// PoolKVSKeys maps configuration fields to KVS keys. Generated from
+// internal/shelly/scripts/pool-pump.schema.json by
+// internal/myhome/shelly/script/generate.go (issue #439) — see
+// pool_kvs_generated.go. The Shelly KVS key length limit is validated at
+// generation time, not by hand-counted comments.
 
 // PoolService handles pool pump operations
 type PoolService struct {
@@ -58,33 +39,50 @@ func NewPoolService(log logr.Logger, provider DeviceProvider) *PoolService {
 
 // SetupOptions contains configuration for pool setup
 type SetupOptions struct {
-	DeviceIDs            []string // All device IDs to set up
-	PreferredDeviceID    string   // Which device ID should run
-	PreferredSpeed       string   // "eco", "mid", "high", "max"
+	DeviceIDs            []string // Device IDs to set up
+	PreferredSpeed       string   // "eco", "day" or "max" ("max" is the only stage a Pro1 has)
 	NightRunDurationMs   int
-	GraceDelayMs         int
 	EcoSpeed             int
-	MidSpeed             int
-	HighSpeed            int
+	DaySpeed             int
+	MaxSpeed             int
 	TemperatureThreshold float64
 	PoolVolume           int
 	Turnover             int
 	MaxFlowRate          int
 	MaxRpm               int
 	EcoRpm               int
-	MidRpm               int
-	HighRpm              int
+	DayRpm               int
 	MaxTemp              float64
-	ForceUpload          bool
-	NoMinify             bool
+
+	// Solar-driven hysteresis (#405)
+	SolarEnabled         bool
+	SolarStartThresholdW int
+	SolarStopThresholdW  int
+	SolarStartDelayMs    int
+	SolarStopDelayMs     int
+	SolarMinTurnover     int
+	SolarMaxTurnover     int
+	SolarStaleMs         int
+
+	// Manual override (#476): how long a button press or an out-of-band
+	// switch change holds the pump against the schedule/solar policy.
+	OverrideMs int
+
+	ForceUpload bool
+	NoMinify    bool
 }
 
-// Setup configures the pool pump system on all specified devices
+// Setup configures the pool pump controller(s).
+//
+// One controller is wired to the pump at a time; several may be configured (a
+// Pro3 kept as a spare for a Pro1, say), but they never coordinate — each acts
+// solely on its own schedule. There is therefore no minimum device count and no
+// election.
 func (s *PoolService) Setup(ctx context.Context, opts SetupOptions) error {
-	s.log.Info("Setting up pool pump system", "devices", len(opts.DeviceIDs), "preferred", opts.PreferredDeviceID)
+	s.log.Info("Setting up pool pump", "devices", len(opts.DeviceIDs))
 
-	if len(opts.DeviceIDs) < 2 {
-		return fmt.Errorf("at least 2 devices required, got %d", len(opts.DeviceIDs))
+	if len(opts.DeviceIDs) < 1 {
+		return fmt.Errorf("at least 1 device required, got %d", len(opts.DeviceIDs))
 	}
 
 	// Resolve all device IDs
@@ -110,59 +108,53 @@ func (s *PoolService) Setup(ctx context.Context, opts SetupOptions) error {
 		}{InputID: id, ID: dev.Id(), SD: sd})
 	}
 
-	// Find Pro3 and Pro1 IDs for cross-device tracking
-	var pro3ID, pro1ID string
-	for _, info := range deviceInfos {
-		// Check switch count to determine device type
-		// We can't query the device here, so we rely on the user providing at least one Pro3
-		// The script will auto-detect device type at runtime
-		// For now, just use the first device as Pro3 and second as Pro1 if not specified
-		if pro3ID == "" {
-			pro3ID = info.ID
-		} else if pro1ID == "" {
-			pro1ID = info.ID
-		}
-	}
-
 	// Use MQTT channel for KVS operations
 	via := types.ChannelMqtt
 
 	// Setup each device with the same configuration
 	for _, info := range deviceInfos {
-		if err := s.setupDevice(ctx, via, info.SD, info.ID, pro3ID, pro1ID, opts); err != nil {
+		if err := s.setupDevice(ctx, via, info.SD, info.ID, opts); err != nil {
 			return fmt.Errorf("failed to setup device %s: %w", info.ID, err)
 		}
 	}
 
-	s.log.Info("Pool pump setup complete", "device_count", len(deviceInfos), "preferred", opts.PreferredDeviceID)
+	s.log.Info("Pool pump setup complete", "device_count", len(deviceInfos))
 	return nil
 }
 
-func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *shelly.Device, deviceID, pro3ID, pro1ID string, opts SetupOptions) error {
+func (s *PoolService) setupDevice(ctx context.Context, via types.Channel, sd *shelly.Device, deviceID string, opts SetupOptions) error {
 	s.log.Info("Setting up device", "device", sd.Name(), "id", deviceID)
 
 	// All devices get the same KVS configuration
 	kvsConfig := map[string]string{
 		PoolKVSKeys["enable_logging"]:        "true",
 		PoolKVSKeys["mqtt_topic_prefix"]:     "pool/pump",
-		PoolKVSKeys["preferred_device_id"]:   opts.PreferredDeviceID,
 		PoolKVSKeys["preferred_speed"]:       opts.PreferredSpeed,
-		PoolKVSKeys["pro3_device_id"]:        pro3ID,
-		PoolKVSKeys["pro1_device_id"]:        pro1ID,
 		PoolKVSKeys["eco_speed"]:             fmt.Sprintf("%d", opts.EcoSpeed),
-		PoolKVSKeys["mid_speed"]:             fmt.Sprintf("%d", opts.MidSpeed),
-		PoolKVSKeys["high_speed"]:            fmt.Sprintf("%d", opts.HighSpeed),
+		PoolKVSKeys["day_speed"]:             fmt.Sprintf("%d", opts.DaySpeed),
+		PoolKVSKeys["max_speed"]:             fmt.Sprintf("%d", opts.MaxSpeed),
 		PoolKVSKeys["night_run_duration_ms"]: fmt.Sprintf("%d", opts.NightRunDurationMs),
-		PoolKVSKeys["grace_delay_ms"]:        fmt.Sprintf("%d", opts.GraceDelayMs),
 		PoolKVSKeys["temperature_threshold"]: fmt.Sprintf("%.1f", opts.TemperatureThreshold),
 		PoolKVSKeys["pool_volume"]:           fmt.Sprintf("%d", opts.PoolVolume),
 		PoolKVSKeys["turnover"]:              fmt.Sprintf("%d", opts.Turnover),
 		PoolKVSKeys["max_flow_rate"]:         fmt.Sprintf("%d", opts.MaxFlowRate),
 		PoolKVSKeys["max_rpm"]:               fmt.Sprintf("%d", opts.MaxRpm),
 		PoolKVSKeys["eco_rpm"]:               fmt.Sprintf("%d", opts.EcoRpm),
-		PoolKVSKeys["mid_rpm"]:               fmt.Sprintf("%d", opts.MidRpm),
-		PoolKVSKeys["high_rpm"]:              fmt.Sprintf("%d", opts.HighRpm),
+		PoolKVSKeys["day_rpm"]:               fmt.Sprintf("%d", opts.DayRpm),
 		PoolKVSKeys["max_temp"]:              fmt.Sprintf("%.1f", opts.MaxTemp),
+
+		// Solar-driven hysteresis (#405)
+		PoolKVSKeys["solar_enabled"]:           fmt.Sprintf("%t", opts.SolarEnabled),
+		PoolKVSKeys["solar_start_threshold_w"]: fmt.Sprintf("%d", opts.SolarStartThresholdW),
+		PoolKVSKeys["solar_stop_threshold_w"]:  fmt.Sprintf("%d", opts.SolarStopThresholdW),
+		PoolKVSKeys["solar_start_delay_ms"]:    fmt.Sprintf("%d", opts.SolarStartDelayMs),
+		PoolKVSKeys["solar_stop_delay_ms"]:     fmt.Sprintf("%d", opts.SolarStopDelayMs),
+		PoolKVSKeys["solar_min_turnover"]:      fmt.Sprintf("%d", opts.SolarMinTurnover),
+		PoolKVSKeys["solar_max_turnover"]:      fmt.Sprintf("%d", opts.SolarMaxTurnover),
+		PoolKVSKeys["solar_stale_ms"]:          fmt.Sprintf("%d", opts.SolarStaleMs),
+
+		// Manual override (#476)
+		PoolKVSKeys["override_ms"]: fmt.Sprintf("%d", opts.OverrideMs),
 	}
 
 	// Set KVS configuration values with delays to avoid overloading device
@@ -260,6 +252,23 @@ func getDesiredSchedules(scriptId int) []scheduleDefinition {
 	}
 }
 
+// wrapScheduleJobCode wraps a schedule job's handler call in the standard
+// (function(){try{...}catch(e){...}})() form (AGENTS.md kill list rule 1),
+// so an uncaught throw inside the handler is contained instead of killing
+// the whole script -- a schedule job dispatches through script.eval exactly
+// like the ad-hoc probes that rule targets. This restores the protection
+// that pool-pump.js's own wrapScheduleCall() used to provide before it
+// became dead code (createSchedules() lost its only caller in #504) and was
+// removed in #526: schedule creation moved to Go, but the wrapping did not
+// move with it until now (#528).
+//
+// The catch binding is referenced via "if(e&&false){}" rather than left
+// empty -- AGENTS.md kill list rule 5: the minifier reduces an empty
+// "catch (e) {}" to "catch {}", a syntax error on Espruino.
+func wrapScheduleJobCode(code string) string {
+	return "(function(){try{" + code + "}catch(e){if(e&&false){}}})()"
+}
+
 // buildJobSpec creates a JobSpec from a schedule definition
 func buildJobSpec(scriptId int, def scheduleDefinition) schedule.JobSpec {
 	return schedule.JobSpec{
@@ -269,13 +278,106 @@ func buildJobSpec(scriptId int, def scheduleDefinition) schedule.JobSpec {
 			Method: "script.eval",
 			Params: map[string]interface{}{
 				"id":   scriptId,
-				"code": def.Code,
+				"code": wrapScheduleJobCode(def.Code),
 			},
 		}},
 	}
 }
 
-// reconcileSchedules deletes all pool-pump schedules and recreates them
+// poolPumpScheduleHandlerNames returns the bare handler-call strings (e.g.
+// "handleDailyCheck()") that make up every desired schedule job's code --
+// the same list getDesiredSchedules() draws from, kept as the single
+// authority for "which handler names identify a pool-pump schedule" so
+// isPoolPumpScheduleCode below can't drift from it.
+func poolPumpScheduleHandlerNames() []string {
+	defs := getDesiredSchedules(0) // scriptId is not used to derive Code
+	names := make([]string, len(defs))
+	for i, def := range defs {
+		names[i] = def.Code
+	}
+	return names
+}
+
+// isPoolPumpScheduleCode reports whether a Schedule.List job's code field
+// belongs to a pool-pump schedule, matching by containment rather than
+// equality (mirroring the JS side's onWindowJobs()/updateScheduleMode()/
+// verifySchedules() -- see the comment above buildJobSpec). Containment is
+// required so this recognizes pool-pump schedules regardless of whether
+// their code is bare (devices provisioned before #528) or wrapped (devices
+// provisioned after it) -- otherwise a re-provisioning run would fail to
+// find and delete a device's already-wrapped jobs before recreating them,
+// leaving duplicates behind.
+func isPoolPumpScheduleCode(code string) bool {
+	if code == "" {
+		return false
+	}
+	for _, name := range poolPumpScheduleHandlerNames() {
+		if strings.Contains(code, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// scheduleState is the on-device Enable/Timespec of an existing schedule
+// job, keyed by which handler its code calls.
+type scheduleState struct {
+	Enable   bool
+	Timespec string
+}
+
+// preservedScheduleState scans existing for pool-pump schedule jobs
+// belonging to scriptId and returns, per handler name (e.g.
+// "handleMorningStart()"), the on-device Enable/Timespec that a reconcile
+// must carry forward. Matching is by handler-name containment
+// (isPoolPumpScheduleCode's mechanism), so it recognizes a job's code
+// whether it is bare (pre-#528) or wrapped (post-#528).
+func preservedScheduleState(existing []schedule.Job, scriptId int) map[string]scheduleState {
+	preserved := make(map[string]scheduleState, len(existing))
+	for _, job := range existing {
+		if job.Calls == nil || len(job.Calls) == 0 {
+			continue
+		}
+		call := job.Calls[0]
+		if call.Method != "script.eval" {
+			continue
+		}
+		params, ok := call.Params.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		code, _ := params["code"].(string)
+		jobId, _ := params["id"].(float64)
+		if int(jobId) != scriptId {
+			continue
+		}
+		for _, name := range poolPumpScheduleHandlerNames() {
+			if strings.Contains(code, name) {
+				preserved[name] = scheduleState{Enable: job.Enable, Timespec: job.Timespec}
+				break
+			}
+		}
+	}
+	return preserved
+}
+
+// reconcileSchedules deletes all pool-pump schedules and recreates them,
+// updating each job's code (e.g. to pick up #528's try/catch wrapping)
+// while carrying forward the Enable flag and Timespec of any job that
+// already exists for that handler.
+//
+// getDesiredSchedules() returns fresh-install, winter-mode defaults. Before
+// #589, reconcile applied those defaults unconditionally on every run,
+// which reset an operational device's schedule state each time `pool add`
+// or `pool update` ran: on production this disabled the morning start and
+// evening stop (both deliberately enabled for the day's computed window)
+// and enabled the night jobs (deliberately disabled in summer mode),
+// arming an unauthorized 23:15 pump run. pool-pump.js's own @sunrise daily
+// check (handleDailyCheck()) re-asserts the correct enable flags and
+// windows, but only once a day -- so the excursion could last up to ~23
+// hours. Preserving existing state makes re-provisioning idempotent on an
+// already-configured device: only a handler with no existing job (a
+// genuinely new schedule) gets the getDesiredSchedules() default.
 func (s *PoolService) reconcileSchedules(ctx context.Context, via types.Channel, sd *shelly.Device, scriptId int) error {
 	fmt.Printf("  → Managing schedules on %s...\n", sd.Name())
 
@@ -286,6 +388,16 @@ func (s *PoolService) reconcileSchedules(ctx context.Context, via types.Channel,
 	existing, err := s.listSchedules(ctx, via, sd)
 	if err != nil {
 		return fmt.Errorf("failed to list schedules: %w", err)
+	}
+
+	// Carry forward each handler's on-device Enable/Timespec, if it already
+	// has a job, instead of applying getDesiredSchedules()'s defaults.
+	preserved := preservedScheduleState(existing, scriptId)
+	for i := range desired {
+		if state, ok := preserved[desired[i].Code]; ok {
+			desired[i].Enable = state.Enable
+			desired[i].Timespec = state.Timespec
+		}
 	}
 
 	// Delete all pool-pump related schedules first
@@ -311,9 +423,9 @@ func (s *PoolService) reconcileSchedules(ctx context.Context, via types.Channel,
 			continue
 		}
 
-		// Check if this is a pool-pump schedule by code pattern
-		if code == "" || (code != "handleDailyCheck()" && code != "handleMorningStart()" &&
-			code != "handleEveningStop()" && code != "handleNightStart()" && code != "handleNightStop()") {
+		// Check if this is a pool-pump schedule by code pattern (bare or
+		// wrapped -- see isPoolPumpScheduleCode).
+		if !isPoolPumpScheduleCode(code) {
 			continue
 		}
 
@@ -335,7 +447,7 @@ func (s *PoolService) reconcileSchedules(ctx context.Context, via types.Channel,
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	fmt.Printf("    Schedules recreated: %d created\n", len(desired))
+	fmt.Printf("    Schedules recreated: %d created (%d preserved existing enable/timespec)\n", len(desired), len(preserved))
 	return nil
 }
 
@@ -423,6 +535,9 @@ func (s *PoolService) setComponentNames(ctx context.Context, via types.Channel, 
 var knownPoolPumpStateKeys = []string{
 	"script/pool-pump/active-output",
 	"script/pool-pump/schedule-mode",
+	"script/pool-pump/runtime-sec",    // runtime_today_sec: cumulative pump-on seconds today (#402)
+	"script/pool-pump/runtime-ts",     // epoch second STATE.runtimeTodaySec applies to; KVS recovery path (#469)
+	"script/pool-pump/turnover-today", // turnover_today: today's achieved water-volume turnovers (#402)
 }
 
 // UpdateResult holds the outcome of auditing/updating a single device
@@ -433,7 +548,7 @@ type UpdateResult struct {
 	MissingKVS          []string // required KVS config keys absent from the device
 	StaleKVS            []string // script/pool-pump/* keys on device that are not in the known set
 	ScriptUpdated       bool     // true if pool-pump.js was re-uploaded (version changed or forced)
-	SchedulesReconciled bool     // true if schedules were reconciled (Pro3 only)
+	SchedulesReconciled bool     // true if schedules were reconciled (every device, Pro1 and Pro3 alike -- #589)
 	WaterSupplyInvertOK bool     // true if input:0 invert was already correct
 	WaterSupplyFixed    bool     // true if input:0 invert was corrected
 	Errors              []string
@@ -444,7 +559,8 @@ type UpdateResult struct {
 //   - reports (returns) stale script/pool-pump/* KVS keys not in the known set
 //   - checks and fixes the water-supply input (input:0) invert flag
 //   - uploads pool-pump.js if its hash has changed (or force=true)
-//   - reconciles schedules on Pro3 devices
+//   - reconciles schedules (every device -- Pro1 and Pro3 both have and run
+//     schedules; there is no Pro3-only restriction, see #589)
 func (s *PoolService) UpdateDevice(ctx context.Context, via types.Channel, sd *shelly.Device, force bool, noMinify bool) (*UpdateResult, error) {
 	result := &UpdateResult{
 		DeviceName: sd.Name(),
@@ -543,18 +659,19 @@ func (s *PoolService) UpdateDevice(ctx context.Context, via types.Channel, sd *s
 		result.ScriptUpdated = uploadedID != 0
 	}
 
-	// Reconcile schedules on Pro3 devices.
+	// Reconcile schedules on every device -- Pro1 and Pro3 alike. Gating
+	// this on DeviceType == "pro3" (as this code did before #589) skipped
+	// reconciliation entirely on a Pro1, which is what the production pump
+	// (filtration-hiver) is; Pro1 devices plainly have and run schedules.
 	// schedules reference the script by ID, so we fetch the current ID after upload.
-	if result.DeviceType == "pro3" {
-		scriptStatus, err := pkgscript.ScriptStatus(ctx, sd, via, scriptName)
-		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("failed to get script status for schedule reconciliation: %v", err))
-		} else if scriptStatus != nil {
-			if err := s.reconcileSchedules(ctx, via, sd, int(scriptStatus.Id)); err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("failed to reconcile schedules: %v", err))
-			} else {
-				result.SchedulesReconciled = true
-			}
+	scriptStatus, err := pkgscript.ScriptStatus(ctx, sd, via, scriptName)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("failed to get script status for schedule reconciliation: %v", err))
+	} else if scriptStatus != nil {
+		if err := s.reconcileSchedules(ctx, via, sd, int(scriptStatus.Id)); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("failed to reconcile schedules: %v", err))
+		} else {
+			result.SchedulesReconciled = true
 		}
 	}
 
@@ -694,33 +811,28 @@ func (s *PoolService) Stop(ctx context.Context, deviceID string) error {
 }
 
 // AddDevice adds a single device to the pool pump mesh
-func (s *PoolService) AddDevice(ctx context.Context, via types.Channel, sd *shelly.Device, deviceID, pro3ID, pro1ID string, allDeviceIDs []string, opts SetupOptions) error {
-	s.log.Info("Adding device to pool pump mesh", "device", sd.Name(), "id", deviceID)
+// AddDevice configures one pump controller. There is no mesh and no peer list:
+// exactly one controller is wired to the pump at a time and never coordinates
+// with another.
+func (s *PoolService) AddDevice(ctx context.Context, via types.Channel, sd *shelly.Device, deviceID string, opts SetupOptions) error {
+	s.log.Info("Configuring pool pump controller", "device", sd.Name(), "id", deviceID)
 
-	// NOTE: allDeviceIDs (the peer device list) is currently unused here —
-	// setupDevice derives per-device configuration itself. Kept in the
-	// signature for CLI compatibility.
-	_ = allDeviceIDs
-
-	// Use the unified setupDevice function
-	return s.setupDevice(ctx, via, sd, deviceID, pro3ID, pro1ID, opts)
+	return s.setupDevice(ctx, via, sd, deviceID, opts)
 }
 
 // SetPreferred sets the preferred device ID and speed on a device
-func (s *PoolService) SetPreferred(ctx context.Context, via types.Channel, sd *shelly.Device, preferredID, speed string) error {
-	s.log.Info("Setting preferred device", "device", sd.Name(), "preferred", preferredID, "speed", speed)
+// SetSpeed sets the speed a controller uses when it starts the pump.
+//
+// There is no longer a preferred *device* to set: exactly one controller is
+// wired at a time, so a device runs on its own schedule with no election.
+func (s *PoolService) SetSpeed(ctx context.Context, via types.Channel, sd *shelly.Device, speed string) error {
+	s.log.Info("Setting pump speed", "device", sd.Name(), "speed", speed)
 
-	// Set preferred device ID
-	if _, err := kvs.SetKeyValue(ctx, s.log, via, sd, PoolKVSKeys["preferred_device_id"], preferredID); err != nil {
-		return fmt.Errorf("failed to set preferred_device_id: %w", err)
-	}
-
-	// Set preferred speed
 	if _, err := kvs.SetKeyValue(ctx, s.log, via, sd, PoolKVSKeys["preferred_speed"], speed); err != nil {
 		return fmt.Errorf("failed to set preferred_speed: %w", err)
 	}
 
-	s.log.Info("Preferred device set successfully", "device", sd.Name())
+	s.log.Info("Pump speed set", "device", sd.Name(), "speed", speed)
 	return nil
 }
 
@@ -757,6 +869,15 @@ func (s *PoolService) RemoveDevice(ctx context.Context, via types.Channel, sd *s
 		PoolKVSKeys["mid_rpm"],
 		PoolKVSKeys["high_rpm"],
 		PoolKVSKeys["max_temp"],
+		PoolKVSKeys["solar_enabled"],
+		PoolKVSKeys["solar_start_threshold_w"],
+		PoolKVSKeys["solar_stop_threshold_w"],
+		PoolKVSKeys["solar_start_delay_ms"],
+		PoolKVSKeys["solar_stop_delay_ms"],
+		PoolKVSKeys["solar_min_turnover"],
+		PoolKVSKeys["solar_max_turnover"],
+		PoolKVSKeys["solar_stale_ms"],
+		PoolKVSKeys["override_ms"],
 	}
 
 	for _, key := range kvsKeys {

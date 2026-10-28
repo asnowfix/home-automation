@@ -189,34 +189,120 @@ status-local-daemon:
 logs-local-daemon:
 	@tail -n 100 -f "$(LOCAL_DAEMON_LOG)"
 
-test: build check-boundaries
-	$(GO) test ./...
-	@rc=0; $(foreach m,$(LIB_MODULES),(cd $(m) && $(GO) test ./...) || rc=1;) exit $$rc
-
-# test-race: same 4-module coverage as `test`, with the race detector
-# enabled. Kept as a separate target/CI job from `test`/`cover` so a slow or
-# flaky race run never blocks the coverage gate's timing.
+# TESTFLAGS is threaded through both test invocations so the race detector can
+# be switched on without editing this file:
 #
-# RACE_SKIP_PACKAGES: packages with known, pre-existing data races surfaced
-# when the race job was introduced (#355), excluded from the root module's
-# `go test -race ./...` by exact import path (NOT a prefix — myhome/daemon's
-# own subpackage myhome/daemon/watch has no known race and must stay
-# covered, so the grep below anchors both ends). Each entry is tracked by a
-# dedicated bug; remove the entry when closing the bug:
-#   internal/shelly/scripts — #372 (script-emulator DeviceState maps)
-#   myhome/daemon           — #373 (mockPumpController.calls in solar tests)
-# pkg/beem (a separate module, #374: package-level loginURL/summaryURL swap)
-# is skipped wholesale below instead, since it isn't part of the root
-# module's package list.
-RACE_SKIP_PACKAGES := github.com/asnowfix/home-automation/internal/shelly/scripts github.com/asnowfix/home-automation/myhome/daemon
+#   make test-race          # or: make test TESTFLAGS=-race
+#
+# Races here are not merely flaky. The goja script emulator runs the script
+# under test on its own goroutine while tests poll DeviceState, and an
+# unsynchronised map read racing a write aborts the whole test binary with
+# "fatal error: concurrent map read and map write", losing every result in the
+# package rather than failing one test (#451).
+#
+# -race is ON by default (#453). These tests are wall-clock bound rather than
+# CPU bound — the emulator and the pollers spend their time waiting — so the
+# detector costs little, and it closes off a class of failure that is otherwise
+# very expensive to diagnose. Override with `make test TESTFLAGS=` if you need
+# a run without it.
+# -timeout is derived from MEASUREMENT, not guesswork: it is the slowest
+# package's last successful duration plus 10% headroom. See CLAUDE.md's
+# "Test timeout" rule for how and when to update it.
+#
+# Note Go applies -timeout PER PACKAGE (per test binary), not to the whole
+# run, so the number that matters is the slowest package -- currently
+# internal/shelly/scripts -- and not `make test`'s overall wall clock.
+#
+#   2026-08-25  internal/shelly/scripts  626.598s under -race  ->  690s
+#   2026-08-26  internal/shelly/scripts  685.399s under -race  ->  754s
+#   2026-08-26  internal/shelly/scripts  592.565s under -race  ->  652s  (#552 package split)
+#   2026-08-27  internal/shelly/scripts  592.456s under -race  ->  652s  (unchanged: #568 added
+#               internal/shelly/scripts/jstarget as its own package -- a separate test binary run
+#               in parallel, so it does not add to this package's serial total)
+#   2026-08-27  internal/shelly/scripts  622.644s under -race  ->  685s  (#523's three new tests
+#                                                                          land in the hot package
+#                                                                          itself, unlike #568's
+#                                                                          separate parallel package)
+#   2026-08-27  internal/shelly/scripts  599.953s under -race  ->  660s  (#523's reconcileWaterLevel()
+#                                                                          and its two tests removed
+#                                                                          per #576 review -- one of
+#                                                                          the three new tests, plus
+#                                                                          TestPoolPump_WaterSupplyOverridesSolar,
+#                                                                          remains and lands here close
+#                                                                          to the #552-split baseline)
+#   2026-08-30  internal/shelly/scripts  591.484s under -race  ->  652s  (unchanged: #421's
+#               TestPoolPump_TaskQueueThrottlesOnCallsInFlight is a source-level regex check, no
+#               emulator run, negligible added time)
+#   2026-08-31  internal/shelly/scripts  602.122s under -race  ->  663s  (#576 rebased onto main a
+#                                                                          second time, past #582's
+#                                                                          CALLS_IN_FLIGHT restore
+#                                                                          and its own new test;
+#                                                                          re-measured fresh per the
+#                                                                          rule -- only a successful
+#                                                                          run may set this, not
+#                                                                          arithmetic on the prior
+#                                                                          601.005s figure)
+#   2026-09-01  internal/shelly/scripts  600.488s under -race  ->  661s  (#425 rebased onto main --
+#                                                                          193 commits, including
+#                                                                          #582's CALLS_IN_FLIGHT
+#                                                                          fix that gated #425 in
+#                                                                          the first place; #425
+#                                                                          itself touches no file
+#                                                                          under this package, so
+#                                                                          the small drop from
+#                                                                          602.122s is run-to-run
+#                                                                          variance, not a code
+#                                                                          change)
+#   2026-09-03  internal/shelly/scripts  600.824s under -race  ->  661s  (#589 touches only
+#                                                                          internal/myhome/shelly/script
+#                                                                          and myhome/ctl/pool, neither
+#                                                                          under this package; 600.824s
+#                                                                          is run-to-run variance around
+#                                                                          the 600.488s baseline, and
+#                                                                          661s already covers it)
+#   2026-09-05  internal/shelly/scripts  612.403s under -race  ->  674s  (#587 adds five reason
+#                                                                          assertions plus
+#                                                                          TestPoolPump_SolarStartAndStopSurvivesOwnEcho
+#                                                                          to this package. The +11.6s
+#                                                                          over 600.824s is NOT variance:
+#                                                                          the new echo test measures
+#                                                                          12.877s standalone under -race,
+#                                                                          which accounts for the whole
+#                                                                          delta. Real added cost, so the
+#                                                                          timeout moves with it.)
+#
+# History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
+# (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
+# 08-25 and every PR touching the package started failing at exactly 600.65s
+# (#552). The 08-26 drop to 592.565s is scripts_smoke_test.go and
+# blu_listener_test.go moving into their own packages (internal/shelly/
+# scripts/smoke, internal/shelly/scripts/blu) so they run in parallel with
+# the rest instead of adding to its serial total -- the growth trend itself
+# is not addressed: pool_pump_test.go / pool_pump_reconciler_test.go /
+# pool_pump_runtime_recovery_test.go remain one dead-serial package at
+# ~590s (86% of the pre-split total) and are the next real target.
+TESTFLAGS ?= -race
 
-test-race: build
-	@pattern=$$(echo "$(RACE_SKIP_PACKAGES)" | tr ' ' '|'); \
-	pkgs=$$($(GO) list ./... | grep -v -E "^($$pattern)$$"); \
-	$(GO) test -race $$pkgs
-	(cd pkg/shelly && $(GO) test -race ./...)
-	(cd pkg/sfr && $(GO) test -race ./...)
-	@echo "test-race: SKIP pkg/beem (known races, see RACE_SKIP_PACKAGES in Makefile, #374)"
+# TESTTIMEOUT is deliberately SEPARATE from TESTFLAGS so that overriding the
+# flags cannot silently drop the timeout -- `test-race` passes TESTFLAGS=-race,
+# and the comment above invites `make test TESTFLAGS=`, both of which would
+# otherwise reset it to Go's 600s default and reintroduce #552.
+#
+# It must be applied to EVERY target that runs the suite. CI calls `make cover`
+# five times across workflows against `make test` twice, so a timeout that
+# covers only `test` covers the minority case -- which is exactly how #552
+# survived its first fix.
+TESTTIMEOUT ?= 674s
+
+test: build check-boundaries
+	bash linux/systemd/update_test.sh
+	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...
+	@rc=0; $(foreach m,$(LIB_MODULES),(cd $(m) && $(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...) || rc=1;) exit $$rc
+
+# test-race is kept as an explicit alias now that -race is the default, so
+# scripts and habits that name it keep working.
+test-race:
+	$(MAKE) test TESTFLAGS=-race
 
 # lint: golangci-lint has no native concept of a Go workspace with multiple
 # modules, so it must be invoked once per module; each invocation
@@ -240,8 +326,8 @@ lint: build
 cover: build
 	@mkdir -p coverage
 	@pkgs="$$($(GO) list -f '{{if .TestGoFiles}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$')"; \
-	$(GO) test -covermode=atomic -coverprofile=coverage/root.cov $$pkgs
-	@rc=0; $(foreach m,$(LIB_MODULES),(cd $(m) && pkgs="$$($(GO) list -f '{{if .TestGoFiles}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$')" && $(GO) test -covermode=atomic -coverprofile=$(CURDIR)/coverage/$(subst /,_,$(m)).cov $$pkgs) || rc=1;) \
+	$(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=coverage/root.cov $$pkgs
+	@rc=0; $(foreach m,$(LIB_MODULES),(cd $(m) && pkgs="$$($(GO) list -f '{{if .TestGoFiles}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$')" && $(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=$(CURDIR)/coverage/$(subst /,_,$(m)).cov $$pkgs) || rc=1;) \
 	echo "mode: atomic" > coverage.txt; \
 	for f in coverage/*.cov; do grep -v "^mode:" "$$f" >> coverage.txt 2>/dev/null || true; done; \
 	exit $$rc

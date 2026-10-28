@@ -17,4 +17,16 @@ type ClientConfig struct {
 	Email        string
 	Password     string
 	PollInterval time.Duration
+
+	// LoginURL, SummaryURL and DevicesURL address the Beem API. Leave them
+	// empty for the public endpoints; NewClient fills in the defaults.
+	//
+	// These are per-client configuration rather than package-level variables
+	// so a test can point one client at an httptest.Server without disturbing
+	// any other client in the same binary. They used to be package globals
+	// that tests reassigned and restored, which raced the Watcher's polling
+	// goroutine and blocked running the suite under -race (#453).
+	LoginURL   string
+	SummaryURL string
+	DevicesURL string
 }

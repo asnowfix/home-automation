@@ -72,707 +72,58 @@ Each Shelly device must keep operating normally when the `myhome` daemon is down
 
 ## Shelly Device Scripting
 
-### JavaScript Engine Limitations
-
-Shelly devices run a **modified version of Espruino** JavaScript interpreter. Espruino implements **most of ES5** with some ES6 features, but Shelly's implementation has specific limitations:
-
-#### Official Language Support (from Shelly API Documentation)
-
-**Supported Features:**
-- Global scope variables, `let`, `var`
-- Function binding (`Function.prototype.bind`)
-- `String`, `Number`, `Function`, `Array`, `Math`, `Date` objects
-- `new`, `delete` operators
-- `Object.keys`, `Object.assign`
-- Exceptions
-- ES5 Array methods: `Array.isArray`, `[].map`, `[].filter`, `[].forEach`, `[].reduce`, `[].indexOf`, etc.
-- `ArrayBuffer` and `AES` (Gen 3/4 devices, firmware 1.6.0+)
-
-**NOT Supported:**
-- Hoisting (intentionally omitted - requires two-pass parsing)
-- ES6 Classes (function prototypes are supported)
-- Promises and async functions
-- Regular Expressions (on some boards)
-- `\u` escape sequences (use `\xHH` for byte encoding)
-
-**Important Specifics:**
-- `arguments.length` returns number of arguments passed (if more than defined) or number defined (if fewer passed)
-- `delete` operator works without brackets only
-- Strings use byte arrays (not UTF-16), optimized for memory with UTF-8 encoding support
-
-#### Best Practices for Shelly Scripts
-
-1. **Array Methods - SAFE TO USE**
-   - ✅ `Array.isArray()` - Supported
-   - ✅ `[].map()`, `[].filter()`, `[].forEach()`, `[].reduce()`, `[].indexOf()` - Supported on arrays
-   - ✅ `[].push()`, `[].pop()` - Supported (add/remove from end)
-   - ❌ `[].shift()`, `[].unshift()` - **NOT supported** (add/remove from beginning)
-   - ⚠️ `Array.prototype.slice.call(arguments)` - May fail, use for loops instead
-   
-   ```javascript
-   // AVOID - may not work on arguments object
-   var args = Array.prototype.slice.call(arguments);
-   
-   // PREFER - always works
-   var args = [];
-   for (var i = 0; i < arguments.length; i++) {
-     args.push(arguments[i]);
-   }
-   
-   // BROKEN - shift() not supported
-   array.shift(); // Remove first element
-   
-   // WORKING - manual shift implementation
-   var newArray = [];
-   for (var i = 1; i < array.length; i++) {
-     newArray.push(array[i]);
-   }
-   array = newArray;
-   ```
-
-2. **Variable Declarations**
-   - ✅ `var` - Always safe
-   - ⚠️ `let`/`const` - Supported in Espruino v2.14+, but `var` is safer for compatibility
-   - **Recommendation**: Use `var` for maximum compatibility
-
-3. **Function Definition Order - CRITICAL**
-   - ⚠️ **No hoisting**: Functions must be defined BEFORE they are used
-   - This applies to ALL function references, including those passed to callbacks
-   - Even though JavaScript normally hoists function declarations, Shelly's engine does NOT
-   
-   ```javascript
-   // BROKEN - function used before definition
-   function subscribeEvents() {
-     Shelly.addEventHandler(onEventData);  // ERROR: onEventData not defined yet
-   }
-   
-   function onEventData(eventData) {
-     // Handle event
-   }
-   
-   // WORKING - function defined before use
-   function onEventData(eventData) {
-     // Handle event
-   }
-   
-   function subscribeEvents() {
-     Shelly.addEventHandler(onEventData);  // OK: onEventData already defined
-   }
-   ```
-
-4. **Minifier-Safe Patterns**
-   - Use `"property" in object` instead of `!== undefined` (minifier converts to unsafe syntax)
-   
-   ```javascript
-   // AVOID - minifier breaks this
-   var value = obj.prop !== undefined ? obj.prop : null;
-   
-   // USE - minifier-safe
-   var value = ("prop" in obj) ? obj.prop : null;
-   ```
-
-5. **Catch Blocks - CRITICAL**
-   - ⚠️ **NEVER write empty catch blocks**: `catch (e) {}` - the minifier converts this to `catch {}` (ES2019 optional catch binding) which causes syntax errors
-   - ✅ **ALWAYS reference the error parameter**: `catch (e) { if (e && false) {} }`
-   - This pattern prevents the minifier from removing the parameter while keeping the catch block functional
-   - Apply this to **ALL** catch blocks, even if you don't use the error
-   
-   ```javascript
-   // BROKEN - minifier converts to catch {} which fails
-   try {
-     data = JSON.parse(str);
-   } catch (e) {}
-   
-   // WORKING - error parameter is referenced
-   try {
-     data = JSON.parse(str);
-   } catch (e) {
-     if (e && false) {}  // Prevents minifier from removing parameter
-   }
-   
-   // ALSO WORKING - if you actually use the error
-   try {
-     data = JSON.parse(str);
-   } catch (e) {
-     log('Parse error:', e);
-   }
-   ```
-
-#### Minification Issues
-
-**Issue**: The JavaScript minifier can convert modern syntax (like `catch (e)` to `catch {}` - ES2019 optional catch binding) which may not be supported by Shelly's JavaScript engine.
-
-**Troubleshooting**: Use `--no-minify` flag when debugging script issues:
-
-```bash
-go run . ctl shelly script upload device-name script.js --no-minify
-```
-
-**Why**: Unminified code is easier to debug and error messages show actual code. However, minification generally works fine if you follow minifier-safe patterns.
-
-**Minifier-Safe Patterns**: Use the `in` operator instead of `!== undefined`:
-
-```javascript
-// BROKEN with minifier
-var illumMin = value && value.illuminance_min !== undefined ? value.illuminance_min : null;
-
-// WORKING with minifier
-var illumMin = value && ("illuminance_min" in value) ? value.illuminance_min : null;
-```
-
-**Note**: `Function.prototype.bind()` is fully supported and works correctly with both minified and unminified code.
-
-#### Callback Depth Limits
-
-**Critical Rule**: No Shelly script should use more than **2-3 levels of nested anonymous functions**.
-
-**Official Documentation**: "A limitation of the javascript engine that it cannot parse too many levels of nested anonymous functions. With more than 2 or 3 levels the device crashes when attempting to execute the code."
-
-**Error Symptom**:
-```
-Uncaught Error: Too many calls in progress
-```
-
-This error has **two distinct causes** — both hit the same 5-concurrent-RPC limit but for different reasons:
-
-**Cause A — too many nested callbacks** (the nesting depth issue above).
-
-**Cause B — `Shelly.call` inside a `for` loop.** On the real device `Shelly.call` is asynchronous and returns immediately; a `for` loop dispatches all iterations before any response arrives, exhausting the 5-concurrent budget even with zero nesting depth.
-
-```javascript
-// DANGEROUS — fires N concurrent Shelly.call invocations
-for (var i = 0; i < items.length; i++) {
-  Shelly.call("KVS.Set", { key: keys[i], value: vals[i] }, onDone);
-}
-// Use queueTask() for each iteration instead (see task queue pattern below)
-```
-
-**Solutions**:
-
-1. **Use a task queue** - Queue async operations to execute sequentially via a single recurring timer (recommended)
-2. **Extract named functions** - Define callbacks at top level and pass as references
-3. **Use synchronous calls** - Prefer `Shelly.getComponentStatus()` and `Shelly.getComponentConfig()` when possible
-
-**Solution 1: Task Queue Pattern (Recommended)**
-
-Use a single recurring timer to process queued tasks sequentially. This avoids callback nesting entirely:
-
-```javascript
-// Task queue infrastructure (define once per script)
-var TASK_QUEUE = [];
-var TASK_INDEX = 0;
-var TASK_TIMER = null;
-
-function processTaskQueue() {
-  if (TASK_INDEX >= TASK_QUEUE.length) {
-    if (TASK_TIMER) {
-      Timer.clear(TASK_TIMER);
-      TASK_TIMER = null;
-    }
-    TASK_QUEUE = [];
-    TASK_INDEX = 0;
-    return;
-  }
-  var task = TASK_QUEUE[TASK_INDEX];
-  TASK_INDEX++;
-  task();
-}
-
-function queueTask(task) {
-  TASK_QUEUE.push(task);
-  if (!TASK_TIMER) {
-    // NOTE: this recurring timer counts against the 5-timer-per-script budget.
-    TASK_TIMER = Timer.set(200, true, processTaskQueue);
-  }
-}
-
-// Usage: Queue multiple async operations without nesting
-function saveState() {
-  queueTask(function() {
-    Shelly.call("KVS.Set", {key: "key1", value: "val1"});
-  });
-  queueTask(function() {
-    Shelly.call("KVS.Set", {key: "key2", value: "val2"});
-  });
-  queueTask(function() {
-    Shelly.call("KVS.Set", {key: "key3", value: "val3"});
-  });
-}
-```
-
-**Solution 2: Extracted Named Functions**
-
-```javascript
-// BROKEN - 5+ levels of nesting
-function loadData(callback) {
-  Shelly.call("KVS.List", {}, function(resp, err) {
-    for (var i = 0; i < list.length; i++) {
-      (function(k) {
-        Shelly.call("KVS.Get", {key: k}, function(gresp, gerr) {
-          // More nesting...
-        });
-      })(list[i]);
-    }
-  });
-}
-
-// WORKING - extracted named functions
-function processKey(k, map, onComplete) {
-  Shelly.call("KVS.Get", {key: k}, function(gresp, gerr) {
-    // Process key
-    onComplete();
-  });
-}
-
-function loadData(callback) {
-  Shelly.call("KVS.List", {}, function(resp, err) {
-    var pending = list.length;
-    function onKeyProcessed() {
-      pending--;
-      if (pending === 0) callback();
-    }
-    for (var i = 0; i < list.length; i++) {
-      processKey(list[i], map, onKeyProcessed);
-    }
-  });
-}
-```
-
-#### Observability: Script Event Emissions
-
-Scripts must call `Shelly.emitEvent(name, data)` for any change a human operator might want to know about — schedule decisions, safety actions, pump start/stop, mode changes. These flow through the device's standard `NotifyEvent` MQTT notification (`<device_id>/events/rpc`), are picked up by the daemon's Gen2 listener (`internal/myhome/shelly/gen2/listener.go`), and are stored in the events database where the web UI and `myhome ctl events` can display them.
-
-#### When to emit
-
-| Category | Examples | Severity |
-|---|---|---|
-| Schedule decisions | daily run-window computed, summer/winter mode selected | `info` |
-| Start/stop | pump started at speed X, pump stopped | `info` |
-| Safety actions | water-supply protection activated, anti-cycling fuse tripped | `warn` |
-| Restoration | pump restored after water supply turned off | `info` |
-
-**Rule of thumb**: if it would make sense as a line in a physical maintenance logbook, emit it.
-
-#### How to call
-
-```javascript
-// Fire-and-forget — does NOT count against the 5-concurrent-RPC limit.
-Shelly.emitEvent("pool.run_window", {
-  mode: "summer",
-  max_temp_c: 28.5,
-  run_hours: 7.3,
-  start_h: 9.5,   // fractional hour — 9.5 means 09:30
-  stop_h: 16.8
-});
-```
-
-The firmware publishes a standard `NotifyEvent` to `<device_id>/events/rpc` with `component: "script:<id>"`. The daemon's Gen2 listener (`internal/myhome/shelly/gen2/listener.go`) catches this and records it exactly like any other device event. The second argument is stored **nested under a `"data"` key** in the event's `data` column:
-
-```json
-{
-  "component": "script:1",
-  "event": "pool.run_window",
-  "id": 1,
-  "ts": 1234567890,
-  "data": { "mode": "summer", "max_temp_c": 28.5, "run_hours": 7.3, "start_h": 9.5, "stop_h": 16.8 }
-}
-```
-
-This is proven by captured real-device traffic — see `pkg/shelly/mqtt/testdata/notify_event__shelly1minig3__script_3__remote_button_event.json`.
-
-#### Naming convention
-
-- Format: `<script_name>.<verb>` — lowercase, underscores only: `pool.pump_start`, `pool.fuse_tripped`.
-- Use the script's `SCRIPT_NAME` constant as the prefix so events are grouped in the UI.
-- Name the specific occurrence, not a generic noun: `pool.pump_start` not `pool.event`.
-
-#### Data payload guidelines
-
-- Include enough context to understand the event without cross-referencing other state.
-- Use `snake_case` field names.
-- Include units in the name when non-obvious: `max_temp_c`, `run_hours`, not `temp`, `run`.
-- Do not include timestamps — the event already has `ts`.
-- Keep payloads small (under ~200 bytes). Avoid embedding arrays or large structures.
-
-#### Severity for new event types
-
-Severity is assigned by `internal/myhome/shelly/gen2/listener.go:severityFor()`. New event names default to `"info"`. When you add events that represent a degraded state or a safety interrupt, also add the event name to `severityFor()` with `"warn"` or `"alarm"` — do this in the same commit as the JS change.
-
----
-
-### Script Lifecycle Logging
-
-Always add startup and stop logging to Shelly scripts:
-
-```javascript
-// At script start
-log("Script starting...");
-
-// After initialization
-log("Script initialization complete");
-
-// On stop event
-Shelly.addEventHandler(function(eventData) {
-  if (eventData && eventData.info && eventData.info.event === "script_stop") {
-    log("Script stopping");
-  }
-});
-```
-
-### MQTT API Constraints
-
-#### MQTT.publish — No Callback
-
-`MQTT.publish(topic, payload, qos, retain)` accepts **exactly 4 parameters** and returns a boolean.
-
-**❌ No 5th callback argument is supported.** Any function passed as a 5th argument is silently ignored — the callback will never be invoked.
-
-```javascript
-// BROKEN — callback is silently ignored, continuation never runs
-MQTT.publish(topic, payload, 0, false, function(success) {
-  doNextStep(); // never called
-});
-
-// CORRECT — fire-and-forget, schedule continuation via task queue
-MQTT.publish(topic, payload, 0 /*at-most-once*/, false /*dont-retain*/);
-queueTask(function() { doNextStep(); });
-```
-
-#### Design Rule: Always Use the Task Queue for Post-Async Continuations
-
-**Never create a one-shot `Timer.set(delayMs, false, fn)` to delay a continuation after an async operation.** Every such timer consumes one of the 5 available timer slots for its full duration.
-
-Instead, append the continuation to the task queue with `queueTask(fn)`. The task queue's single recurring `TASK_TIMER` fires every 200ms, so the continuation is guaranteed to run after at least one 200ms tick — the same minimum delay — without consuming an extra timer slot.
-
-```javascript
-// AVOID — wastes a timer slot
-Timer.set(200, false, function() {
-  callback(null);
-});
-
-// PREFER — reuses the task queue's existing timer
-queueTask(function() { callback(null); });
-```
-
-This rule applies to all continuations after:
-- `MQTT.publish(...)` (no callback supported)
-- Any fire-and-forget `Shelly.call(...)` where you need to proceed after a brief settle delay
-- Any inter-step sequencing that would otherwise require a one-shot timer
-
-#### Design Rule: Defer Incoming Events During Multi-Step Async State Updates
-
-**Never let event handlers read shared state while an async operation is rebuilding it.**
-
-When a script performs a multi-step async operation that rebuilds a shared structure — a KVS reload chain (`KVS.List` → N×`KVS.Get`), a sequential fetch, a settings migration — any event that fires during the chain reads **stale or partially-built state** and silently drops work. This is a logic bug on real devices, not just a test artifact: Espruino is single-threaded but its event loop interleaves callbacks freely.
-
-**The pattern: guard flag + deferred queueTask**
-
-```javascript
-var STATE = {
-  myData: {},
-  reloading: false   // true while the async rebuild chain is in progress
-};
-
-// 1. Set the flag at the top of the async operation
-function reloadFromKVS(callback) {
-  STATE.reloading = true;
-  Shelly.call("KVS.List", { prefix: "..." }, onListResponse.bind(null, callback));
-}
-
-// 2. Clear the flag in EVERY exit path of the async chain
-function onAllDone(newData, callback) {
-  STATE.reloading = false;     // clear BEFORE installing new state
-  STATE.myData = newData;
-  if (callback) callback(true);
-}
-
-function onListResponse(callback, resp, err) {
-  if (err) {
-    STATE.reloading = false;   // error exit
-    if (callback) callback(false);
-    return;
-  }
-  if (!resp || !resp.keys || !resp.keys.length) {
-    STATE.reloading = false;   // empty-list exit
-    STATE.myData = {};
-    if (callback) callback(true);
-    return;
-  }
-  processKeysSequentially(resp.keys, {}, callback, 0);
-}
-
-// 3. Defer any event handler that reads the shared state
-function handleIncomingEvent(topic, payload) {
-  if (STATE.reloading) {
-    // Re-queue instead of silently dropping.
-    // Because onAllDone() runs inside a task-queue slot, this deferred call
-    // is guaranteed to run after the flag is cleared and state is installed.
-    queueTask(function() { handleIncomingEvent(topic, payload); });
-    return;
-  }
-  // ... normal processing using STATE.myData
-}
-```
-
-**Why `queueTask` is the right deferral mechanism here (not a flag poll):**
-
-`onAllDone` itself runs inside a task-queue slot (the last step of `processKeysSequentially` calls `queueTask` for each key). Any `queueTask(handleIncomingEvent)` added *during* the reload is appended to the same FIFO queue. Since the completion slot is already enqueued, the deferred event slot is guaranteed to run after it — FIFO order, no timing assumption required.
-
-**Checklist for any async state-rebuild operation:**
-
-- [ ] `STATE.reloading = true` at the **top** of the function that starts the chain
-- [ ] `STATE.reloading = false` in **every** exit path: normal completion, empty-result early return, and error early return
-- [ ] All event handlers that read the shared state check the flag and re-queue via `queueTask` when it is set
-- [ ] The final completion step (`onAllDone`) clears the flag **before** installing new state so deferred events see the updated data
-
-### Resource Limits
-
-**Official limits per script:**
-- No more than **5 timers** — the task queue drain timer counts against this budget
-- No more than **5 event subscriptions**
-- No more than **5 status change subscriptions**
-- No more than **5 RPC calls** (concurrent) — both nesting depth *and* for-loop dispatch contribute; see Callback Depth Limits above
-- No more than **10 MQTT topic subscriptions**
-- No more than **5 HTTP registered endpoints**
-
-**Per-device script count limit (varies by model):**
-
-The number of scripts that can run simultaneously on a single device depends on the hardware. Observed limits:
-
-| Model | Max enabled scripts |
-|---|---|
-| Shelly 1 Mini G3 (`shelly1minig3`) | 3 |
-
-Other models are not yet catalogued here — add entries as you hit them. Attempting to enable a script beyond the limit returns: `"Reached the maximum N of enabled scripts"` (error code -108).
-
-### KVS Key Naming Convention
-
-**All KVS (Key-Value Storage) keys must use only lowercase letters, digits, hyphens, and slashes: `[0-9a-z-/]`**
-
-#### Key Structure
-
-Keys should follow a hierarchical structure with forward slashes as separators:
-
-**For script-specific data:**
-```
-script/<script-name>/<purpose>
-```
-
-**Examples:**
-- `script/heater/config` - Main configuration for heater script
-- `script/heater/cooling-rate` - Learned cooling rate coefficient
-- `script/heater/last-cheap-end` - Temperature at end of cheap window
-- `script/heater/internal` - Internal temperature from MQTT
-- `script/heater/external` - External temperature from MQTT
-
-**For follow/state patterns:**
-```
-follow/<category>/<identifier>
-state/<category>/<identifier>
-```
-
-**Examples:**
-- `follow/shelly-blu/e8:e0:7e:d0:f9:89` - BLU device follow configuration
-- `follow/status/shelly1minig3-abc123` - Device status follow configuration
-- `state/shelly-blu/e8:e0:7e:d0:f9:89` - BLU device state data
-
-#### Naming Rules
-
-1. **Use hyphens, not underscores**: `cooling-rate` ✓ not `cooling_rate` ✗
-2. **Use lowercase only**: `script/heater/config` ✓ not `script/Heater/Config` ✗
-3. **Use forward slashes for hierarchy**: `script/heater/config` ✓ not `script.heater.config` ✗
-4. **Be descriptive but concise**: `last-cheap-end` ✓ not `last_cheap_electricity_window_end_time` ✗
-5. **Use consistent prefixes**: All script keys start with `script/`, all follow keys with `follow/`
-
-#### Benefits
-
-- **Consistent naming**: Easy to understand and maintain
-- **Namespace isolation**: Prevents key collisions between scripts
-- **Easy discovery**: Hierarchical structure allows prefix-based listing
-- **URL-safe**: Keys can be used in URLs without encoding
-- **Case-insensitive filesystems**: Avoids issues on case-insensitive systems
-
-### Data Storage Patterns
-
-#### Script.storage vs KVS vs In-Memory Variables
-
-Understanding the distinction between these three storage mechanisms is critical for Shelly scripts:
-
-**Script.storage (script-internal persistent data)**
-- **Use for**: Data that is managed ONLY by the script itself
-- **API**: `Script.storage.getItem(key)` and `Script.storage.setItem(key, value)`
-- **Example**: `heater.js` stores `coolingRate` and `forecastUrl` - values learned/computed by the script
-- **NOT accessible** from external commands or other scripts
-- **Persists** across script restarts and device reboots
-
-**KVS (external configuration)**
-- **Use for**: Data that is set by EXTERNAL commands/tools
-- **API**: `Shelly.call('KVS.Get', {key: key}, callback)` and `Shelly.call('KVS.Set', {key: key, value: value}, callback)`
-- **Example**: Follow configurations set by `myhome ctl follow blu` or `myhome ctl follow shelly`
-- **Keys follow pattern**: `follow/shelly-blu/<mac>` or `follow/status/<device-id>`
-- **Accessible** from external tools and other scripts
-- **Persists** across script restarts and device reboots
-
-**In-memory variables (runtime cache)**
-- **Use for**: Fast access to data loaded from KVS or Script.storage
-- **Example**: `var FOLLOWS = {}` in blu-listener.js, blu-publisher.js, status-listener.js
-- **Populated by**: `loadFollowsFromKVS()` which reads from KVS
-- **Updated when**: KVS changes are detected via event handlers
-- **Does NOT persist** across script restarts
-
-**Architecture flow for follow scripts:**
-
-1. External command sets KVS: `myhome ctl follow blu device mac` → KVS key `follow/shelly-blu/<mac>`
-2. Script loads on startup: `loadFollowsFromKVS()` → reads KVS → populates `FOLLOWS` variable
-3. Script watches for changes: KVS change event → `loadFollowsFromKVS()` → updates `FOLLOWS`
-4. Script uses data: `getFollows()` → returns `FOLLOWS` (fast in-memory access)
-
-**Common mistake**: Using `Script.storage` for data that should come from KVS. This breaks external configuration because Script.storage is script-private.
-
-**Example pattern:**
-
-```javascript
-// In-memory cache (fast access)
-var FOLLOWS = {};
-
-// Load from KVS into cache
-function loadFollowsFromKVS() {
-  Shelly.call('KVS.List', {}, function(result, error_code, error_message) {
-    if (error_code !== 0) {
-      log('KVS.List failed:', error_message);
-      return;
-    }
-    
-    var keys = result.keys || [];
-    for (var i = 0; i < keys.length; i++) {
-      if (keys[i].indexOf('follow/') === 0) {
-        loadSingleKey(keys[i]);
-      }
-    }
-  });
-}
-
-function loadSingleKey(key) {
-  Shelly.call('KVS.Get', {key: key}, function(result, error_code, error_message) {
-    if (error_code === 0 && result && result.value) {
-      var data = JSON.parse(result.value);
-      FOLLOWS[key] = data;
-    }
-  });
-}
-
-// Watch for KVS changes
-Shelly.addEventHandler(function(eventData) {
-  if (eventData && eventData.info && eventData.info.component === 'kvs') {
-    loadFollowsFromKVS();  // Reload cache
-  }
-});
-
-// Use cached data (fast)
-function getFollows() {
-  return FOLLOWS;
-}
-```
-
-### Resource Limit Workarounds
-
-#### Single Recurring Timer Pattern
-
-**Problem**: Shelly scripts are limited to **5 timers** per script. Sequential async operations (KVS calls, RPC calls) can quickly exhaust this limit if each operation creates its own timer.
-
-**Anti-Pattern (creates multiple timers):**
-```javascript
-function loadNextKey() {
-  Shelly.call("KVS.Get", {key: k}, function(result, err) {
-    // Process result
-    Timer.set(200, false, loadNextKey);  // Creates new timer each time
-  });
-}
-```
-
-**Correct Pattern (single recurring timer):**
-```javascript
-var taskQueue = [];
-var taskTimer = null;
-
-function processTaskQueue() {
-  if (taskQueue.length === 0) {
-    if (taskTimer) {
-      Timer.clear(taskTimer);
-      taskTimer = null;
-    }
-    return;
-  }
-  
-  var task = taskQueue.shift();  // Note: shift() not supported, use manual implementation
-  task();
-}
-
-function startTaskQueue() {
-  if (!taskTimer) {
-    taskTimer = Timer.set(200, true, processTaskQueue);  // Single recurring timer
-  }
-}
-
-// Add tasks to queue
-taskQueue.push(function() {
-  Shelly.call("KVS.Get", {key: k1}, function(r, e) { /* handle */ });
-});
-taskQueue.push(function() {
-  Shelly.call("KVS.Get", {key: k2}, function(r, e) { /* handle */ });
-});
-startTaskQueue();
-```
-
-**Note**: Since `[].shift()` is not supported, use this manual implementation:
-
-```javascript
-function processTaskQueue() {
-  if (taskQueue.length === 0) {
-    if (taskTimer) {
-      Timer.clear(taskTimer);
-      taskTimer = null;
-    }
-    return;
-  }
-  
-  // Manual shift implementation
-  var task = taskQueue[0];
-  var newQueue = [];
-  for (var i = 1; i < taskQueue.length; i++) {
-    newQueue.push(taskQueue[i]);
-  }
-  taskQueue = newQueue;
-  
-  task();
-}
-```
-
-### Known Issues
-
-#### Non-blocking Execution
-
-Shelly scripts run on the main system task and share CPU time with firmware. Code that blocks for too long can cause:
-- Issues with other firmware features
-- Communication problems
-- Device crashes
-
-**Avoid**:
-```javascript
-// BROKEN - infinite/near-infinite loops
-let n = 0;
-while (n < 500000) { n = n + 1; }
-```
-
-**Note**: If a script crashes the device, the system will detect this and **automatically disable the script** at the next boot.
-
-#### Error Handling
-
-When a script contains errors:
-- Execution is aborted
-- Error message is printed to console
-- Status change event is issued
-- Error info available in `Script.GetStatus` RPC call
+**The detail lives in the `shelly` skill: `.claude/skills/shelly/`.** It covers the JavaScript
+engine's limits and the patterns that work around them (`references/scripting.md`), the shared JS
+heap and how to measure it (`references/memory.md`), where state belongs (`references/storage.md`),
+the RPC and CLI surface (`references/api.md`), and the rules for running experiments on live
+hardware (`references/field-discipline.md`).
+
+Read the skill before writing or reviewing any Shelly JavaScript, or before touching a device. What
+follows is only the set of rules whose violation has actually destroyed something — kept here
+because it must not depend on a skill triggering.
+
+**Reducing a script's heap footprint** is its own methodology, longer than fits here:
+`docs/shelly-heap-allocation.md` covers where the ~23 KB heap actually goes, allocation sources ranked
+by measured cost, and the differential measurement recipe. Its one-line summary — **hunt allocation,
+not bytes** — is measured, not theorised: trimming 1519 minified bytes moved `mem_peak` by zero, while
+replacing one per-call closure with a fixed pool moved it ~1050 bytes and turned an `out_of_memory`
+into a working script. Note especially the correction box in its §1.1: **there is no single
+static→heap multiplier**, and using one underestimated a string deletion by 3×.
+
+### The kill list
+
+Each of these has terminated a running script on real hardware. A dead script on
+`filtration-hiver` is a day of lost pool filtration, because every Schedule job on the device
+dispatches through `script.eval` and silently becomes a no-op.
+
+1. **Never send an unwrapped `Script.Eval`**, including ad-hoc debug probes. Always
+   `(function(){try{ ... }catch(e){return "ERR:"+e}})()` — the return value survives wrapping, so
+   there is no case where skipping it is justified. Wrapping genuinely contains a `ReferenceError`
+   from an undefined identifier, not just a thrown value — measured 2026-09-02 on **both** Plus1/1.7.5
+   and **Pro1/2.0.0 (the production pump)**, where the error came back as a return value and the script
+   stayed alive. An earlier note claiming a `ReferenceError` escapes the `try`/`catch` does not
+   reproduce; see `.claude/skills/shelly/references/scripting.md`. Prefer the `typeof`-guarded,
+   quote-free probe form documented there, so a probe pointed at the wrong build degrades instead of
+   throwing.
+2. **Never leave a callback unwrapped.** A throw inside any `addEventHandler`, `addStatusHandler`,
+   `MQTT.subscribe` callback or queued task kills the script the same way. Wrap the body *in place*,
+   not via a higher-order function — an extra call frame per dispatch matters on these devices.
+3. **Never call anything on the line after `MQTT.subscribe()`.** It overflows the stack even with
+   ~23 KB of heap free. Log *before* the subscribe.
+4. **Define functions before use** — there is no hoisting, including for callback references.
+5. **Never write an empty `catch (e) {}`** — the minifier turns it into `catch {}`, a syntax error
+   on-device. Reference the parameter: `catch (e) { if (e && false) {} }`.
+6. **`mem_peak` is a device-wide high-water mark** that does not reset on script restart. Reboot
+   between measurement arms or every arm returns the maximum of all arms so far.
+7. **Never run two things against one device**, and never two `make test` runs on one machine. Both
+   have produced hours of confounded results.
+8. **The goja emulator reproduces none of this.** It has no stack-depth limit and no heap ceiling. A
+   green test suite says your logic is right and says nothing about whether the script will start on
+   a Pro1.
+
+Device authorizations are bounded and explicit — which devices, which operations, which hours. They
+are listed in `.claude/skills/shelly/references/field-discipline.md`. Anything not listed is not
+authorized.
 
 ---
 
@@ -781,6 +132,27 @@ When a script contains errors:
 ### Testing Guidelines
 
 **CRITICAL**: Every new feature MUST include incremental unit test cases.
+
+#### Sub-agents: do NOT background `make test` — commit first (see issue #432)
+
+`make test` is slow here (`internal/shelly/scripts` alone ~183s, full run several minutes), which
+tempts agents into `run_in_background: true`. **Do not do this if you are a sub-agent.** Observed 4
+times out of 8 agent runs: the agent backgrounds the test, ends its turn to wait for the completion
+notification, and never resumes — so its work is left **uncommitted** and its final report,
+measurements and caveats are lost, even though the tests passed.
+
+Rules for sub-agents:
+
+1. **Commit your work BEFORE running the full test suite.** Then a stall costs you the report, never
+   the code.
+2. **Run `make test` in the foreground** with a generous timeout. Use `go test ./path/...` on a
+   single package for fast iteration and save the full `make test` for the end.
+3. Do not end your turn waiting on a background task.
+
+If you are the **coordinating** agent and a sub-agent reports "waiting for the background test run",
+treat it as finished: review its worktree (`git -C <worktree> status` / `diff`), run the
+verification yourself, and commit on its behalf. Do not re-launch it — the work is usually already
+complete and correct.
 
 #### Testing Requirements
 
@@ -1114,6 +486,46 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 - `--no-minify`: Do not minify script before upload (recommended for Shelly)
 - `--force`: Force re-upload even if version hash matches
 - `--verbose`: Enable verbose logging
+- `--local-scripts-dir <dir>` (on `script upload` / `script update`, issue #457): load `<dir>/<name>`
+  instead of the embedded copy when a same-named file exists there, so a one-line edit can be
+  uploaded without a full `go build`. Flat directory only — no subdirectories, no path traversal.
+  Falls back silently to the embedded copy when the file is absent, so an empty/unset `dir` (the
+  default everywhere, including the packaged service) changes nothing. Every resolution logs its
+  source (`local` or `embedded`) at INFO — check the log if a stale local file is ever suspected.
+- `--no-local-scripts`: force embedded-only loading, overriding `--local-scripts-dir` even if it is
+  set. Local script content is never schema-checked (see #439/#457 design note): it can change
+  script *logic* freely, but if it renames or adds `CONFIG_SCHEMA` keys, `internal/myhome/shelly/script/pool.go`'s
+  generated Go constants go out of sync with what the script actually reads/writes — that still
+  needs a rebuild.
+
+#### Gotchas that cost real debugging time
+
+- **`SCRIPT` is a bare name resolved from the binary's embedded FS (`//go:embed *.js`), NOT a
+  filesystem path**, unless `--local-scripts-dir` (issue #457) is given and the directory contains a
+  same-named file — a plain `script upload`/`script update` with no such flag reads only the
+  embedded copy, and a path like `./scripts/pool-pump.js` still fails with
+  `Failed to read script <path>: file does not exist` (`io/fs` wording, the tell that it never
+  touched the disk — `LoadScript` requires a flat name, not a path). Without `--local-scripts-dir`,
+  **the version uploaded is whatever `internal/shelly/scripts/<name>.js` contained when that binary
+  was built**; to upload a different version without rebuilding, point `--local-scripts-dir` at the
+  directory holding the edited file instead.
+- **A reported upload failure is often a successful upload.** The chunked transfer completes, then a
+  post-upload RPC (`KVS.Get` version read, `Script.Start`) times out and the command exits non-zero
+  with `all 1 device(s) failed`. Seen on every attempt against a Pro1 at `-T 60s`, `90s` and `120s`.
+  **Always verify with `Script.GetStatus` before believing a failure** — see issue #428. Trusting a
+  false failure once produced a wrong conclusion about real hardware.
+- **`error_msg` is stale until the new script actually runs.** After uploading a new version, the
+  device still reports the *previous* crash. Cross-check the message against what the installed
+  source actually contains (`Script.GetCode` and grep for a version-specific identifier) before
+  believing it. A crash trace naming a function the installed version does not contain is stale.
+- **The device is briefly unresponsive to MQTT RPC right after `Script.Start`.** `Script.GetStatus`
+  has timed out at 14s and even 45s immediately after a start, then answered normally a minute
+  later. Use `-T 60s` and re-poll; do not conclude the device is wedged. The default `-T 14s` is too
+  short for the Pro1 generally.
+- **A bare `<device>` name needs a daemon; `.local` or an IP does not.** `LookupDevices()` resolves
+  `.local` names via mDNS and IPs directly — neither touches the daemon. A bare name only resolves
+  via the `device.lookup` RPC, which times out with no daemon running. See the `<device>` addressing
+  note in `CLAUDE.md`'s Commands section, and issue #599.
 
 #### Examples
 
@@ -1415,7 +827,7 @@ One-off Go programs in `tools/`. Since the module collapse (#359), these are ord
 | Tool | Purpose |
 |---|---|
 | `tools/classify-events/` | Classifies raw Shelly MQTT event dumps → test fixtures in `pkg/shelly/mqtt/testdata/` |
-| `tools/extract-pool-defaults/` | Code-gen: extracts pool-pump JS constants → `myhome/ctl/pool/pool_defaults_generated.go` |
+| `tools/genconfigschema/` | Code-gen: JSON schema → JS `CONFIG_SCHEMA` block (in place) + Go KVS-key maps/`Default*` constants |
 
 #### `tools/classify-events`
 
@@ -1432,14 +844,20 @@ Output filenames follow the pattern:
 
 The testdata lives alongside `pkg/shelly/mqtt/` so it travels with that package when it is eventually extracted into its own repository.
 
-#### `tools/extract-pool-defaults`
+#### `tools/genconfigschema`
 
-Code-generation tool invoked by `//go:generate` in `myhome/ctl/pool/generate.go`. Parses `CONFIG_SCHEMA` from `internal/shelly/scripts/pool-pump.js` and writes typed Go constants to `myhome/ctl/pool/pool_defaults_generated.go`. Run via `make generate`, not directly.
+Code-generation tool invoked by `//go:generate` in `myhome/ctl/pool/generate.go`, `myhome/ctl/garden/generate.go`, and `internal/myhome/shelly/script/generate.go`. Reads a single JSON schema per script (`internal/shelly/scripts/pool-pump.schema.json`, `garden.schema.json`) — the source of truth for that script's configuration (issue #439) — and produces both:
+
+- the JS `CONFIG_SCHEMA` (and, for `garden.js`, `ZONE_KEY_SPECS`) block, regenerated **in place** inside the `.js` file between `// >>> GENERATED: ... >>>` / `// <<< GENERATED: ... <<<` marker comments — `description` is emitted as a `//` comment above each field, never as an object property, so it costs zero device heap;
+- Go KVS-key maps (`PoolKVSKeys`, `GardenKVSKeys`, `ZoneFieldKeys`) and `Default*` constants, replacing what used to be hand-maintained maps or regex-scraped from the `.js` source.
+
+The Shelly KVS key length limit is validated at generation time (fails the build) instead of relying on hand-counted `// NN chars ✓` comments. Run via `make generate`, not directly:
 
 ```bash
-go run ./tools/extract-pool-defaults \
-    internal/shelly/scripts/pool-pump.js \
-    myhome/ctl/pool/pool_defaults_generated.go
+go run ./tools/genconfigschema \
+    -schema internal/shelly/scripts/pool-pump.schema.json \
+    -js internal/shelly/scripts/pool-pump.js \
+    -go myhome/ctl/pool/pool_defaults_generated.go -go-package pool -consts
 ```
 
 ---
@@ -1592,6 +1010,12 @@ For visibility without needing to run anything locally:
 2. **Enable debug logging**: `go run . ctl shelly script debug device-name true`
 3. **Monitor logs**: Debug output goes to stdout (not hlog)
 4. **Disable debug**: `go run . ctl shelly script debug device-name false`
+
+**Never reboot the device after enabling UDP debug.** `ctl shelly script debug <device> true`
+calls `Sys.SetConfig` and only reboots if the device itself reports `RestartRequired` — do not
+add a manual reboot around this command. Always disable debug again once you're done
+(`... false`); leaving UDP debug on permanently is not a valid workflow — it degrades device
+performance and causes crashes/reboots on its own within a fairly short time.
 
 ### Launch Configurations
 

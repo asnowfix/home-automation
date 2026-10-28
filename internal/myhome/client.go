@@ -5,6 +5,7 @@ import (
 	crand "crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -18,6 +19,12 @@ import (
 
 	"github.com/go-logr/logr"
 )
+
+// ErrRPCTimeout marks the error CallE returns when no daemon answers on the RPC
+// topic within hc.timeout. It exists so callers such as LookupDevices can tell
+// "no daemon is listening" apart from a genuine daemon-side error (e.g. "device
+// not found") via errors.Is, without parsing the message text.
+var ErrRPCTimeout = errors.New("timeout waiting for response")
 
 type client struct {
 	lock    sync.Mutex
@@ -150,6 +157,18 @@ func (hc *client) LookupDevices(ctx context.Context, name string) (*[]devices.De
 
 	mhd, err := Call[string, []DeviceSummary](ctx, hc, verb, name)
 	if err != nil {
+		if errors.Is(err, ErrRPCTimeout) {
+			// A bare name (no ".local" suffix, not an IP) has no daemon-free
+			// resolution path: it can only be resolved via the device.lookup/
+			// device.match RPC, which needs a daemon answering on this
+			// instance. Say so explicitly, and name the remedy that does not
+			// need a daemon at all, or this reads as "no working lookup path"
+			// rather than "wrong way to address this device" (issue #599).
+			return nil, fmt.Errorf("no daemon answered %s for device %q on instance %q; "+
+				"address the device by its .local name or IP instead to resolve it directly, "+
+				"without needing a daemon (e.g. %s.local, or its IP address): %w",
+				verb, name, InstanceName, name, err)
+		}
 		return nil, err
 	}
 
@@ -249,8 +268,8 @@ func (hc *client) CallE(ctx context.Context, method Verb, params any) (any, erro
 			// Don't log context cancellation as an error
 			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("timeout waiting for response to method %s after %v (request_id: %s, dst: %s, topic: %s)",
-			method, hc.timeout, requestId, req.Dst, ClientTopic(hc.me))
+		return nil, fmt.Errorf("%w to method %s after %v (request_id: %s, dst: %s, topic: %s)",
+			ErrRPCTimeout, method, hc.timeout, requestId, req.Dst, ClientTopic(hc.me))
 	case res = <-respCh:
 		hc.log.Info("Response received", "dialog", res.String(), "request_id", requestId)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/ctl/config"
 	"github.com/asnowfix/home-automation/myhome/ctl/db"
 	eventsctl "github.com/asnowfix/home-automation/myhome/ctl/events"
+	"github.com/asnowfix/home-automation/myhome/ctl/fetch"
 	"github.com/asnowfix/home-automation/myhome/ctl/forget"
 	"github.com/asnowfix/home-automation/myhome/ctl/garden"
 	"github.com/asnowfix/home-automation/myhome/ctl/heater"
@@ -26,6 +27,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/ctl/sfr"
 	"github.com/asnowfix/home-automation/myhome/ctl/shelly"
 	"github.com/asnowfix/home-automation/myhome/ctl/show"
+	"github.com/asnowfix/home-automation/myhome/ctl/solar"
 	"github.com/asnowfix/home-automation/myhome/ctl/sswitch"
 	"github.com/asnowfix/home-automation/myhome/ctl/temperature"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
@@ -94,6 +96,11 @@ var Cmd = &cobra.Command{
 		// Store mc in ctx for pkg/shelly's own mqtt.GetClient(ctx) callers
 		// (pkg/shelly/device.go, pkg/shelly/script/run.go) — see
 		// pkg/shelly/mqtt.NewContextWithClient's doc comment.
+		ctx = shellymqtt.NewContextWithClient(ctx, mc)
+
+		// Composition root: wrap ctx with the MQTT client exactly once, so
+		// everything downstream (pkg/shelly/mqtt.GetClient) can retrieve it
+		// from ctx instead of a process-global. See pkg/shelly/mqtt/client.go.
 		ctx = shellymqtt.NewContextWithClient(ctx, mc)
 
 		// Start cleanup goroutine that closes MQTT client when context is cancelled OR on signal
@@ -178,9 +185,11 @@ func init() {
 	Cmd.AddCommand(temperature.Cmd)
 	Cmd.AddCommand(heater.Cmd)
 	Cmd.AddCommand(pool.PoolCmd())
+	Cmd.AddCommand(solar.SolarCmd())
 	Cmd.AddCommand(garden.GardenCmd())
 	Cmd.AddCommand(room.Cmd)
 	Cmd.AddCommand(eventsctl.Cmd)
+	Cmd.AddCommand(fetch.Cmd)
 }
 
 var Commit string

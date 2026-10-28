@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -300,5 +301,44 @@ func TestLookupDevices_UsesReceiverNotGlobalTheClient(t *testing.T) {
 	}
 	if got.count != 1 || got.id != "dev-x" {
 		t.Errorf("got count=%d id=%q, want count=1 id=%q", got.count, got.id, "dev-x")
+	}
+}
+
+// TestLookupDevices_BareName_NoDaemon_NamesCauseAndRemedy is the regression test
+// for issue #599: a bare device name (no ".local" suffix, not an IP) can only be
+// resolved via the device.lookup/device.match RPC, which needs a daemon answering
+// on the configured instance. When no daemon answers, the resulting error must
+// name both the cause (no daemon answered) and the remedy (.local name or IP,
+// which resolve without a daemon) -- not just the bare "timeout ... after Ns"
+// message, which names neither.
+func TestLookupDevices_BareName_NoDaemon_NamesCauseAndRemedy(t *testing.T) {
+	ctx := logr.NewContext(context.Background(), logr.Discard())
+
+	// Nothing ever answers, so CallE always times out. Keep the timeout short:
+	// its duration is not what's under test.
+	hc, _ := newTestClient(t, "client-599", 50*time.Millisecond)
+
+	const bareName = "filtration-hiver"
+	_, err := hc.LookupDevices(ctx, bareName)
+	if err == nil {
+		t.Fatalf("LookupDevices(%q) with no daemon running: got nil error, want a timeout error", bareName)
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "no daemon answered") {
+		t.Errorf("error does not name the cause (%q not found in %q)", "no daemon answered", msg)
+	}
+	if !strings.Contains(msg, ".local") {
+		t.Errorf("error does not mention the .local remedy in %q", msg)
+	}
+	if !strings.Contains(msg, "IP") {
+		t.Errorf("error does not mention the IP remedy in %q", msg)
+	}
+	if !strings.Contains(msg, bareName+".local") {
+		t.Errorf("error does not give a concrete .local example for %q in %q", bareName, msg)
+	}
+	// The underlying timeout detail must still be present.
+	if !strings.Contains(msg, "timeout waiting for response") {
+		t.Errorf("error dropped the underlying timeout detail: %q", msg)
 	}
 }

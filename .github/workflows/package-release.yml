@@ -27,7 +27,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.ref }}
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: '1.25.x'
         env:
@@ -169,7 +169,7 @@ jobs:
           Add-Content -Path $env:GITHUB_OUTPUT -Value "version_patch=$($version[2])"
       - id: install-go
         name: Set up Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: '1.25.x'
         env:
@@ -283,17 +283,17 @@ jobs:
           head_tag: ${{ github.ref }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
       - name: Download MyHome MSI from package-msi
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: msi_file
       - name: Download MyHome DEB ARM64 from package-deb
         id: deb_file_arm64
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deb_file_arm64
       - name: Download MyHome DEB AMD64 from package-deb
         id: deb_file_amd64
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: deb_file_amd64
       - name: List files in workspace
@@ -308,6 +308,13 @@ jobs:
           artifacts: "*.deb,${{ needs.package-msi.outputs.msi_file }}"
           tag: v${{ steps.version.outputs.release }}
           prerelease: false
+          # Policy (#583): releases are created as DRAFTS on purpose. `latest`
+          # (what linux/systemd/update.sh installs nightly) intentionally lags
+          # the newest release: it is published and marked latest only after a
+          # manual install on the NAS plus one day in production. The fleet
+          # thus exercises the downgrade path continuously, so never add a
+          # "never downgrade" rule. The v0.12.x -> v0.11.12 boundary was
+          # unsafe (pre-#458 KVS rename).
           draft: true
           replacesArtifacts: true
           generateReleaseNotes: true
@@ -323,7 +330,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.inputs.source_branch }}
       - name: Import GPG key
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}

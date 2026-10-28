@@ -5,6 +5,7 @@ go 1.25.0
 toolchain go1.25.3
 
 require (
+	github.com/asnowfix/home-automation/internal/shelly/scripts v0.0.0-20261023093946-e27e073d936b
 	github.com/dop251/goja v0.0.0-20251103141225-af2ceb9156d7
 	github.com/go-logr/logr v1.4.3
 	github.com/gorilla/schema v1.4.1

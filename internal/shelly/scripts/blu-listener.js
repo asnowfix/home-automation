@@ -71,9 +71,15 @@ function processTaskQueue() {
     TASK_INDEX = 0;
     return;
   }
+  // #480: an uncaught throw inside a queued task used to kill the whole
+  // script. Wrapping this single call site protects every queueTask() call.
   var task = TASK_QUEUE[TASK_INDEX];
   TASK_INDEX++;
-  task();
+  try {
+    task();
+  } catch (e) {
+    log("queued task error:", e);
+  }
 }
 
 function queueTask(task) {
@@ -348,8 +354,15 @@ function onSwitchSetOnResponse(idx, follow, mac, resp, err) {
   else log("Turned on", follow.switchIdStr, "for", mac, "auto_off=", follow.autoOff, "s");
 }
 
+// #480 part 4: an uncaught throw inside an MQTT.subscribe callback kills the
+// whole script (verified live on mezzanine). Wrapped in place -- same
+// function, no new call frame.
 function onMqttMessage(t, m, r) {
-  handleBluEvent(t, m);
+  try {
+    handleBluEvent(t, m);
+  } catch (e) {
+    log("mqtt handler error:", e);
+  }
 }
 
 function subscribeMqtt() {

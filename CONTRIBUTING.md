@@ -927,51 +927,69 @@ Once in the pprof interactive mode:
 
 ## Code Generation
 
-### Pool Pump Default Values
+### Pool Pump / Garden Configuration Schema (issue #439)
 
-The pool pump configuration uses `go:generate` to extract default values from the JavaScript source (`pool-pump.js`) and generate Go constants. This ensures a single source of truth for configuration defaults.
+Pool pump and garden sprinkler configuration is defined **once**, in a JSON schema file per script, and `go:generate` derives everything else from it: the JS `CONFIG_SCHEMA` block (regenerated in place inside the `.js` file), the Go KVS-key maps, and the Go `Default*` constants. Before #439 these three were hand-kept in sync (or regex-scraped from the JS with no test coverage) — see the issue for the full history.
 
 **How it works:**
 
-1. **Source of truth**: Default values are defined in `internal/shelly/scripts/pool-pump.js` in the `CONFIG_SCHEMA` object
-2. **Generator tool**: `tools/extract-pool-defaults/main.go` parses the JavaScript and extracts defaults
-3. **Generated file**: `myhome/ctl/pool/pool_defaults_generated.go` contains Go constants
-4. **Usage**: The `setup.go` command uses these constants for flag defaults
+1. **Source of truth**: `internal/shelly/scripts/pool-pump.schema.json` / `garden.schema.json` — one entry per config field: `name`, `key` (KVS suffix), `default`, `type`, plus optional `description`, `cliOnly`, `required`, and Go-codegen hints (`goConst`, `goConstName`, `goConstType`).
+2. **Generator tool**: `tools/genconfigschema` reads the schema and:
+   - rewrites the `CONFIG_SCHEMA` block (and, for `garden.js`, the `ZONE_KEY_SPECS` block) **in place** inside the `.js` file, between `// >>> GENERATED: ... >>>` / `// <<< GENERATED: ... <<<` markers — `description` becomes a `//` comment above the field, never an object property, so it costs no device heap;
+   - writes the Go KVS-key map(s) (`PoolKVSKeys`, `GardenKVSKeys`, `ZoneFieldKeys`) and `Default*` constants to a generated `.go` file.
+3. **Generated files** (all gitignored, rebuilt by `make generate`):
+   - `myhome/ctl/pool/pool_defaults_generated.go` — pool `Default*` constants
+   - `myhome/ctl/garden/garden_defaults_generated.go` — garden `Default*` constants + `GardenKVSKeys` + `ZoneFieldKeys`
+   - `internal/myhome/shelly/script/pool_kvs_generated.go` — `PoolKVSKeys` (lives in this package, not `myhome/ctl/pool`, because `pool.go`'s business logic that consumes it lives here and `myhome/ctl/pool` already imports this package — generating it there would be an import cycle)
+4. **Usage**: `setup.go` commands use the `Default*` constants for flag defaults; `PoolKVSKeys`/`GardenKVSKeys` are used wherever code reads or writes KVS.
 
 **When to regenerate:**
 
-Run `go generate` whenever you modify default values in `pool-pump.js`:
+Run `go generate` whenever you modify a schema JSON file (never hand-edit the generated `CONFIG_SCHEMA`/`ZONE_KEY_SPECS` block in the `.js` — it will be overwritten):
 
 ```bash
-# Generate all code (including pool defaults)
+# Generate everything (including pool/garden schema-derived code)
 make generate
 
-# Or generate just the pool package
-go generate ./myhome/ctl/pool
+# Or generate just one script's artifacts
+go generate ./myhome/ctl/pool                    # pool-pump.js CONFIG_SCHEMA + Default consts
+go generate ./myhome/ctl/garden                  # garden.js CONFIG_SCHEMA/ZONE_KEY_SPECS + Default consts + KVS maps
+go generate ./internal/myhome/shelly/script       # PoolKVSKeys only
 ```
 
 **Build integration:**
 
 - `make build` automatically runs `make generate`
-- GitHub Actions workflows run `go generate` before building
-- The generated file is committed to the repository
+- GitHub Actions workflows and `.goreleaser.yml`'s `before.hooks` run the same three `go generate` invocations before building — see CLAUDE.md's "go generate sub-module gap" if you add or change one of these directives, all three CI/build config files must be updated together
+- The generated `.go` files are gitignored, not committed; the regenerated `.js` files (with their `CONFIG_SCHEMA` block refreshed) **are** committed, since they're the artifact uploaded to devices
 
-**Adding new defaults:**
+**Adding a new setting:**
 
-1. Add the field to `CONFIG_SCHEMA` in `pool-pump.js`
-2. Update `tools/extract-pool-defaults/main.go` to extract the new field
-3. Run `go generate ./myhome/ctl/pool`
-4. Use the new constant in `setup.go`
+1. Add the field to the schema JSON (`pool-pump.schema.json` / `garden.schema.json`)
+2. Run `go generate ./myhome/ctl/pool` (or `garden`, or both)
+3. Use the new `Default*` constant / KVS-map entry wherever needed
 
 **Example:**
 
+```json
+// pool-pump.schema.json
+{
+  "name": "ecoSpeed",
+  "description": "Pro3 switch ID for eco/low speed (0, 1, or 2)",
+  "key": "eco-speed",
+  "default": 2,
+  "type": "number",
+  "goConst": true
+}
+```
+
 ```javascript
-// pool-pump.js
-CONFIG_SCHEMA = {
-  ecoSpeed: {
-    default: 2,  // ← Source of truth
-    // ...
-  }
+// Regenerated in place: pool-pump.js
+// Pro3 switch ID for eco/low speed (0, 1, or 2)
+ecoSpeed: {
+  key: "eco-speed",
+  default: 2,
+  type: "number"
 }
 ```
 

@@ -21,17 +21,16 @@ func TestWatcherPublishesRetainedMQTT(t *testing.T) {
 	)
 	defer srv.Close()
 
-	origLogin, origSummary := loginURL, summaryURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	summaryURL = srv.URL + "/beemapp/box/summary"
-	defer func() { loginURL = origLogin; summaryURL = origSummary }()
-
 	mc := newRecordingPublisher()
 
 	cfg := ClientConfig{
 		Email:        "watcher@example.com",
 		Password:     "pw",
 		PollInterval: 10 * time.Millisecond, // fast for tests
+		// Per-client endpoints: the watcher polls on its own goroutine, so
+		// pointing package globals at srv would race it (#453).
+		LoginURL:   srv.URL + "/beemapp/user/login",
+		SummaryURL: srv.URL + "/beemapp/box/summary",
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -93,17 +92,16 @@ func TestWatcherMQTTRetainedFlag(t *testing.T) {
 	)
 	defer srv.Close()
 
-	origLogin, origSummary := loginURL, summaryURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	summaryURL = srv.URL + "/beemapp/box/summary"
-	defer func() { loginURL = origLogin; summaryURL = origSummary }()
-
 	rm := &retainedRecorder{}
 
 	cfg := ClientConfig{
 		Email:        "r@example.com",
 		Password:     "pw",
 		PollInterval: 10 * time.Millisecond,
+		// Per-client endpoints: the watcher polls on its own goroutine, so
+		// pointing package globals at srv would race it (#453).
+		LoginURL:   srv.URL + "/beemapp/user/login",
+		SummaryURL: srv.URL + "/beemapp/box/summary",
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

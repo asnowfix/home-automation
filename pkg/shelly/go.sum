@@ -1,5 +1,7 @@
 github.com/Masterminds/semver/v3 v3.2.1 h1:RN9w6+7QoMeJVGyfmbcgs28Br8cvmnucEXnY0rYXWg0=
 github.com/Masterminds/semver/v3 v3.2.1/go.mod h1:qvl/7zhW3nngYb5+80sSMF+FG2BjYrf8m9wsX0PNOMQ=
+github.com/asnowfix/home-automation/internal/shelly/scripts v0.0.0-20261023093946-e27e073d936b h1:9wvK64eSEfKCjEN8hgKj6IvpPHfV0HGo/JwyBk2pdEQ=
+github.com/asnowfix/home-automation/internal/shelly/scripts v0.0.0-20261023093946-e27e073d936b/go.mod h1:GIPV6N0k2A9DlauN50pTTZUcmqXppStHYNDYgc8Bw+0=
 github.com/cenkalti/backoff v2.2.1+incompatible h1:tNowT99t7UNflLxfYYSlKYsBpXdEet03Pg2g16Swow4=
 github.com/cenkalti/backoff v2.2.1+incompatible/go.mod h1:90ReRw6GdpyfrHakVjL/QHaoyV4aDUVVkXQJJJ3NXXM=
 github.com/dlclark/regexp2 v1.11.4 h1:rPYF9/LECdNymJufQKmri9gV604RvvABwgOA8un7yAo=

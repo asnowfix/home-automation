@@ -25,6 +25,13 @@ go test ./internal/myhome/...                    # single package
 go test -v -run TestName ./path/to/package       # specific test
 go test -race ./...                              # with race detector
 
+# NOTE: <device> addressed by ".local" name or IP resolves directly, no daemon needed
+# (mDNS / net.ParseIP in LookupDevices()). A bare name (no ".local", not an IP) needs a
+# daemon reachable on --instance to resolve via the device.lookup RPC — with none running,
+# ctl fails after a multi-second timeout. Prefer "<device>.local" or its IP. See issue #599.
+
+# NOTE: pass a BARE FILENAME relative to the current directory. An absolute path fails with a
+# misleading "file does not exist" even when the file is plainly there.
 go run ./myhome ctl shelly script upload <device> <script.js> --no-minify
 go run ./myhome ctl shelly script update <device>
 go run ./myhome ctl shelly script debug <device> true
@@ -36,6 +43,63 @@ go run ./tools/classify-events [events-dir] [testdata-dir]   # classify raw even
 To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call` tools). It is pre-configured in `.mcp.json` with MQTT broker `tcp://192.168.1.2:1883` and approved via `enabledMcpjsonServers` in `.claude/settings.json`. The `.mcp.json` command automatically runs `go generate ./internal/myhome/ui/...` on first use in a fresh worktree (fetches CSS/JS assets required to compile); this needs internet access once per worktree. Restart Claude Code to activate.
 
 `make test` is canonical — bare `go test ./...` from the repo root now covers the entire root module (everything except pkg/shelly, pkg/sfr, pkg/beem — see "Go Workspace" below), but still misses those 3 library modules, so `make test` (or the equivalent per-module loop) is still required for full coverage. New CI test commands must also invoke `make test`, not go directly to `go test`.
+
+### Test timeout — derived from measurement, never guessed
+
+`TESTFLAGS` in the root `Makefile` carries an explicit `-timeout`. **Whenever a full `make test`
+succeeds, set the timeout to the slowest package's measured duration plus 10%** (`N + N×0.1`), and
+record the measurement in the comment above `TESTFLAGS` with its date.
+
+The timeout then tracks what the suite actually costs instead of drifting until it silently fails.
+
+Two things to get right:
+
+- **Go applies `-timeout` per package** (per test binary), not to the whole run. So `N` is the
+  **slowest package**, currently `internal/shelly/scripts`, not `make test`'s overall wall clock.
+- **Apply it to every target that runs the suite**, and keep it in its own variable
+  (`TESTTIMEOUT`), not folded into `TESTFLAGS`. CI calls `make cover` five times across workflows
+  against `make test` twice, and `test-race` overrides `TESTFLAGS` — a timeout folded into the flags
+  is silently dropped by both. That is how #552 survived its own first fix.
+- **Measure under the SLOWEST configuration, which is `-race` — not `cover`.** Same-job evidence
+  2026-08-27 (GitHub Actions run `33041300536`, job `98417041803`) measured `cover` at 583.150s (PR
+  branch) and 583.390s (base `main`), both *faster* than 592.565s under `-race`. The #556 failure
+  that looked like the opposite — `cover` timing out at exactly 600.016s — was Go's default 600s
+  `-timeout` ceiling firing before `-timeout` was wired into `cover`, not a real measurement of its
+  cost; it is wired in today (`Makefile`'s `cover` target). CI calls `make cover` five times across
+  workflows against `make test` twice, so the measurement must still be taken under whichever
+  configuration is currently slowest, which today is `-race`.
+- **Only a successful run may set it.** A run that timed out tells you nothing about how long the
+  suite needs; raising the timeout from a failed run's duration just guesses again, more slowly.
+
+Why this rule exists: that package grew 507s → 591s → 627s in three days and crossed Go's **600s
+default** on 2026-08-25, after which `make test` could not pass for anyone. Two runs failed at
+600.654s and 600.651s — agreeing to within 3ms — which is what finally identified a fixed limit
+rather than the CPU contention everyone had assumed (#552).
+
+**When two runs fail at the same duration to within milliseconds, suspect a limit, not load.**
+
+#### The suite now outlives a foreground command — background it or lose the agent
+
+There are **two independent 600-second ceilings**, and this suite crossed both at once:
+
+| limit | value | what it kills |
+|---|---|---|
+| Go's default `-timeout` | 600 s | the test run itself (#552) |
+| the agent harness's max foreground `Bash` timeout | 600 s | **the agent waiting on it** |
+
+Raising the Go timeout fixes the first and makes the second *worse*: a foreground `make test` now
+runs long enough to guarantee the caller is killed first, mid-run, leaving uncommitted work and no
+report.
+
+So **never run the suite in the foreground** — not merely because the log floods context, which was
+the original reason, but because **the run outlives the command**. Background it to a file with
+`run_in_background`, then poll that file in **separate, short** `Bash` calls within the same turn: a
+single poll loop is itself a foreground command and dies at the same 600 s mark. (Observed
+2026-08-26: a poll loop was killed at exactly 10m00s while waiting on CI.)
+
+This is also the strongest argument that raising the timeout is a stopgap. The real fix — splitting
+the package or sharing emulator state (#552) — is what brings the suite back under the ceilings
+rather than negotiating with one of them.
 
 **`go generate` sub-module gap (mostly resolved by #359)**: before the module collapse, `go generate ./...` from the workspace root did not recurse into any of the ~59 separate Go workspace modules, so every `//go:generate` directive anywhere in the tree needed registering in 4 separate places. Now that only `pkg/shelly`, `pkg/sfr` and `pkg/beem` remain as separate modules, this gap is gone for anything in the root module: a `//go:generate` directive added to any root-module package (which is now almost everything — `myhome/*`, `internal/*`, `hlog`, `pkg/devices`, `pkg/tapo`, `pkg/version`) is picked up by the single `go generate ./...` call in `make generate`, `.goreleaser.yml`, and `package-release.yml`'s Windows step — no extra registration needed.
 
@@ -108,6 +172,223 @@ memory of a prior conversation or session — anyone (agent or human) can pick i
 other source of information than what the issue itself contains. It may, and should, reference
 external sources (docs URLs) and/or other issue(s) and/or PR(s), but must not assume the reader
 was present for the discussion that led to filing it.
+
+**Every issue filed in this repo must be self-contained** per the above definition — this applies
+whether a human or a coding agent is the one filing it. Before creating an issue, write it as if
+handing it to a coding agent with a cold context window: no "as discussed above," no assuming the
+reader saw the same live-debugging session or chat history that motivated the issue. Cross-issue
+dependencies must be made explicit (e.g. "blocked by #123," "must land after #456") rather than
+implied by filing order or narrative context.
+
+**Close an issue only on empirical evidence, and put that evidence in the closing comment.** A fix
+that is present in the source is *not* verified — run the thing. For a data race, that means the
+race detector's output on the affected package; for a device bug, a live measurement; for a crash,
+a regression test that fails without the fix. An issue whose fix has been confirmed only by reading
+the diff stays **open**, with a note saying so.
+
+Grep alone is not evidence. Verifying a claim against `origin/main` while sitting on a feature
+branch — mixing `git grep <rev>` with working-tree greps — silently produces contradictory answers.
+Pick one and say which.
+
+**Keep the umbrella issue of a long campaign current.** For multi-week work, the top-level issue is
+the status board: post an update whenever a gate opens or closes, a measurement lands, or a release
+decision changes, using explicit state words (new / pending / implementing / verifying / discarded /
+closed-by-PR / blocked). Do not post when nothing changed.
+
+### `events.db` is the long-term record — query it before asserting a rate
+
+The daemon persists every device event to a SQLite database, so **how often something actually
+happened is a query, not a guess** — weeks or months after the fact, with no need to have been
+watching at the time. Treat it as the first place to look whenever a claim depends on a frequency,
+a duration, or "does this ever happen?".
+
+**Where it lives.** `events.db`, a plain relative filename by default, next to `myhome.db`.
+Overridable with `--events-db`, `MYHOME_EVENTS_DB`, or the `events.db` config key; `ctl events` falls
+back to `~/.myhome/events.db`.
+
+⚠️ **Retention is 90 days by default, and the daemon enforces it hourly** (`myhome/events/service.go`
+tickers once an hour and purges everything older than `--events-retention`). It is long-term, not
+permanent. **Anything you may want beyond that window must be snapshotted before it ages out** — copy
+the file; there is no archive.
+
+**Schema** — one `events` table: `ts`, `received_at`, `device_id`, `component`, `event`, `severity`,
+`data` (JSON), with indexes on `ts`, `device_id`, `event` and `severity`, so filtering by any of those
+is cheap. `sensor_daily_stats` holds pre-aggregated per-day sensor min/max/sum.
+
+**How to query.** `myhome ctl events list` and `... follow` for browsing. For anything analytical, go
+at the file with `sqlite3` directly — aggregation is the whole point:
+
+```sql
+-- does this event pair up, or are edges being lost? group by day against a restart proxy
+SELECT date(ts,'unixepoch','localtime') d,
+       SUM(event='config_changed')              AS cfg,
+       SUM(event='pool.water_supply_protected') AS prot,
+       SUM(event='pool.water_supply_restored')  AS rest
+FROM events WHERE device_id='shellypro1-ec62608c0230'
+GROUP BY d HAVING prot>0 OR rest>0 ORDER BY d;
+```
+
+**Worked example, #523 (2026-08-27).** An issue claimed a safety fact could go stale "indefinitely"
+because an input edge might be missed, and a fix was designed, briefed, implemented, reviewed and
+nearly merged on that premise. One query over 71 days settled it: on **every** day without
+configuration activity the edges paired **1:1 with zero exceptions**, and every unpaired event fell on
+a day with restarts, where init legitimately re-asserts state. The same query showed the real cadence
+— one episode per day lasting 15–25 minutes — and pinned the single observation the issue was built
+on to **92 seconds into an ordinary episode**, i.e. the fact was correct and the cross-check was the
+anomaly. The issue closed as *not a defect*; the code was deleted.
+
+**The rule that follows:** a change proposing to mitigate a failure must state **the observed rate of
+that failure**, or say "never observed" explicitly. Consequence alone justifies nothing on a device
+with ~7 KB of free heap. If the failure would emit an event, that rate is already in `events.db` and
+costs one query — and "nobody looked" is how unnecessary code reaches review.
+
+### Live devices: capture before-state, and never trust a command's name for its blast radius
+
+**A provisioning command's name, `--help`, and the issue that queues it all understate what it
+writes.** Read its implementation before running it against a device in service. Worked example,
+2026-09-02 (#589): the queued task was "re-provision to verify #528", and reading the code first
+found that `ctl pool update` **skips schedules entirely on a Pro1** (gated on `pro3`), that
+`ctl pool add` rewrites **24 KVS keys** rather than just schedules, and that `pool add`'s own help
+text contradicts its code. A fourth defect appeared only at runtime: the speed lookup reads from
+*another* pool device, that device timed out, and the code **fell through to a hardcoded default**,
+silently rewriting the running pump's speed from `max` to `eco`. A guard written specifically to
+prevent a silent reset failed open.
+
+The discipline that made this recoverable:
+
+- **Capture the complete before-state to a file first** — `Schedule.List` *and* the full KVS map
+  (`KVS.GetMany`, which truncates at ~22 items over MQTT, so page it). "I'll put it back" means
+  nothing without it.
+- **Shelly etags are content-derived, so they prove restoration.** After restoring a value, compare
+  its etag to the one captured before: a match is proof of *exact* restoration, not merely an
+  equivalent-looking value. This is the cheapest verification available and nothing else gives it.
+- **Diff before/after programmatically**, and report which fields are identical rather than eyeballing
+  a listing.
+- **Re-read the facts a live experiment mutated** on the next session rather than trusting the comment
+  that says they were restored. One read-only RPC; the failure it guards against is silent.
+
+### NAS operational facts
+
+- **`myhome.service` restarts every 6 hours by design** — the packaged unit sets
+  `RuntimeMaxSec=21600`. So `NRestarts` climbing is expected, not a crash loop; check
+  `ExecMainStatus`/`Result` before treating it as one. Each restart triggers a rediscovery burst of
+  ~41 `device.online` events, roughly **164/day**, which is a large share of what #499 investigates.
+- **The journal is `Storage=volatile`** and the daemon is chatty enough to rotate it away within
+  ~15 minutes. **NAS post-mortem evidence does not survive** — use `events.db` (see above), which does.
+- **`sqlite3` is not installed on the NAS.** Query `events.db` with `python3`'s `sqlite3` module
+  against `file:/var/lib/myhome/events.db?mode=ro` instead.
+- **`myhome-update.timer`** installs whatever `releases/latest` resolves to, nightly (00:00), so a
+  hand-installed binary or a draft release is overwritten — with a *downgrade* if `releases/latest`
+  is older (measured 2026-10-20: a hand-built 0.12.4-lux1 was replaced by 0.12.4 at midnight). To
+  keep a different build on the NAS, disable (or mask) the timer first and re-enable it once that
+  build is the published latest.
+- **`dpkg -i` runs the package's postinst, and that is not just a binary swap.** `update.sh` itself
+  only fetches the `.deb` and runs `dpkg -i`, but the postinst then (a) runs
+  `myhome ctl shelly script update '*'`, pushing the packaged scripts to **every known device that
+  already has the script loaded** whose KVS version marker (`script/<name>` = sha1 of the packaged
+  source) differs — that includes the production pool pump if it carries a hand-deployed build;
+  (b) `systemctl reenable`s **both** timers, so a merely *disabled* update timer comes back (a
+  *masked* one makes postinst fail, see below); (c) prompts for credentials and rewrites
+  `/var/lib/myhome/.env` when stdin is a tty and `DEBIAN_FRONTEND` is not `noninteractive`. There is
+  no dry-run; to preview (a), compare each device's `script/<name>` KVS value with `sha1sum` of the
+  packaged `internal/shelly/scripts/<name>`.
+- Pool provisioning (`Setup`/`AddDevice`/`UpdateDevice`) is reachable **only** from `myhome/ctl/pool/`,
+  never from the daemon; the daemon's auto-setup applies solely to devices lacking `watchdog.js` as
+  script #1. A `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst
+  tries to enable it, systemd refuses, everything before that has already succeeded.
+
+### Sub-agents
+
+**Every sub-agent must persist its progress outside its own context**, incrementally, as it works —
+not only in its final report. A sub-agent can die mid-task (API error, spend limit, stall) and its
+worktree may be auto-removed if it never committed, taking every finding with it.
+
+When launching a sub-agent, give it exactly one of these and say which:
+
+- **A progress file** at a path you define (e.g. `docs/<issue>-progress.md`, or a scratchpad path),
+  appended after each meaningful step: what was tried, what was measured, what was ruled out.
+- **Comments on the GitHub issue** it was given as its objective — preferred when the work is tied
+  to an issue, since the findings then survive for whoever picks it up next and satisfy the
+  self-contained-issue rule above.
+
+Live-device measurements (`mem_peak`, RPC responses, event-DB queries) and negative results must be
+written down as they are obtained. Re-deriving them means re-touching real hardware.
+
+Sub-agents must not `git push` or open PRs — the coordinator does that from the sub-agent's worktree.
+
+#### Running tests in a sub-agent
+
+**Commit first, then run tests.** A sub-agent that dies mid-run loses everything uncommitted, and its
+worktree may be auto-removed.
+
+**Never run the test suite in the foreground.** Go test output under `-race`, with the script
+emulator's per-call logging, is large enough to consume a sub-agent's context before it can act on
+the result.
+
+**Never end a turn in order to wait for a test run.** This is the #432 stall mode. Ending a turn
+terminates the sub-agent, and nothing re-invokes it when its background job finishes — so an agent
+that signs off with "waiting for the test run, will resume when notified" is simply gone.
+
+Measured directly on 2026-08-11 with a throwaway agent that backgrounded a 200-second job and then
+ended its turn:
+
+- the agent stopped after **9.8 s**, reported by the harness as `completed`;
+- its child kept running and finished normally **3.5 minutes later**;
+- the agent received **no** automatic notification of that completion — confirmed by asking the
+  agent itself after resuming it;
+- the agent's own completion notification fired **immediately**, while its child was still alive.
+
+Two consequences worth acting on:
+
+- **The child's work is not lost, only orphaned.** Before re-running anything for a stalled agent,
+  look for its output on disk — a completed `make test` costs ~6 minutes to repeat for nothing.
+- **A stalled agent can be resumed** by the coordinator with `SendMessage`, picking up its
+  transcript. That is a recovery, not the design; the agent must not plan around it.
+
+Do not treat "the agent's notification arrived" as meaning its background work has finished — the
+observed behaviour above shows the two are unrelated.
+
+**And do not treat a *missing* notification as meaning the agent died.** The inverse error is just as
+costly and easier to make, because the stall mode above primes you to expect it.
+
+Observed 2026-09-03: an agent's progress file ended at *"Next: full `make test`"* and no completion
+notification had arrived after ~14 hours of wall clock, so it was declared stalled. It had not
+stalled — the coordinating session had itself been suspended repeatedly, inflating the agent's
+apparent elapsed time. The agent was still running, finished normally with a **green full suite**, and
+held a **commit that was never pushed** because the coordinator had already "recovered" its work. A
+pull request was opened stating, as fact, that the agent died mid-suite and that CI would be the first
+verification. Both were false, and the error was caught only because the agent flagged the discrepancy
+itself in its final report.
+
+**An agent that is busy and an agent that is dead are both silent.** So do not infer either from
+silence — look at what the work itself shows, in this order, before concluding anything:
+
+1. `git log` on its branch, and whether the branch head has moved since you last looked;
+2. its worktree (`git -C <worktree> status`);
+3. its progress file's modification time, not just its contents — a file whose last line reads
+   "next: X" may simply mean X is in progress.
+
+**Wall-clock duration is not a usable liveness signal when the coordinator can be suspended.** A
+90-minute budget can legitimately span many hours of real time. If you need to know, check the branch.
+
+**If you do conclude an agent is dead, say so as an inference and not as fact** — especially in a pull
+request description, which outlives the session and will be read as evidence by whoever reviews it.
+
+The required pattern is: **background the run, then poll it to completion inside the same turn.**
+
+1. Start the suite with `run_in_background`, writing to a file.
+2. Loop: check the output file periodically until the run finishes or the timeout expires.
+3. Read results by **grepping the file** (`^(--- FAIL|FAIL|ok )`), never by inhaling it whole.
+4. **Report the wall-clock duration of the test run** in the final report, alongside pass/fail.
+
+The coordinator **must give an overall timeout at agent startup** — the agent stops polling and
+reports what it has when that budget is exhausted, rather than looping forever. Choose it from the
+measured suite duration with headroom: a full `make test` on `origin/main` took **5 min 47 s**
+(346.67 s wall clock) on 2026-08-11, so ~15 minutes is a reasonable default budget. These tests are
+known to slow down under CPU contention (#393), and several agents may share the machine.
+
+Duration reporting is not bookkeeping: it is how the suite's cost stays visible, so the budget above
+is re-derived from measurement rather than guessed.
 
 ### Go
 

@@ -11,7 +11,7 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome"
 )
 
-// Vacuum panel (#606): one card per paired robot, refreshed by polling. The
+// Vacuum panel (#606): one card per configured robot, refreshed by polling. The
 // robot pushes its state to the daemon only on change, so polling the daemon's
 // cached state is cheap and never reaches the robot.
 
@@ -75,7 +75,7 @@ func (h *HTMXHandler) renderVacuum(w http.ResponseWriter, actionErr map[string]s
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	p, ok := h.vacuumPanel(actionErr)
 	if !ok {
-		return // no robot paired: the section stays empty
+		return // no robot configured: the section stays empty
 	}
 	tmpl := template.Must(template.New("vacuum-panel").Parse(vacuumPanelTemplate))
 	if err := tmpl.Execute(w, p); err != nil {

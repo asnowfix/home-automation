@@ -41,6 +41,9 @@ _write_env() {
     local smtp_password="$6"
     local smtp_from="$7"
     local smtp_to="$8"
+    local vacuum_blid="$9"
+    local vacuum_password="${10}"
+    local vacuum_host="${11}"
 
     cat > "$ENV_FILE" <<EOF
 # MyHome credentials — loaded by systemd via EnvironmentFile.
@@ -55,6 +58,12 @@ MYHOME_SMTP_USERNAME=${smtp_username}
 MYHOME_SMTP_PASSWORD=${smtp_password}
 MYHOME_SMTP_FROM=${smtp_from}
 MYHOME_SMTP_TO=${smtp_to}
+# Robot vacuum (iRobot Roomba, local LAN). Enabled once BLID and password are
+# set; get both with: myhome ctl vacuum pair   (hold the robot's HOME button first).
+# MYHOME_VACUUM_HOST is optional: a fixed robot IP, used instead of discovery.
+MYHOME_VACUUM_BLID=${vacuum_blid}
+MYHOME_VACUUM_PASSWORD=${vacuum_password}
+MYHOME_VACUUM_HOST=${vacuum_host}
 EOF
     chmod 600 "$ENV_FILE"
 }
@@ -133,13 +142,44 @@ if [ -t 0 ] && [ "${DEBIAN_FRONTEND:-}" != "noninteractive" ]; then
         echo ""
     fi
 
+    cur_vacuum_blid="$(_env_get MYHOME_VACUUM_BLID)"
+    cur_vacuum_password="$(_env_get MYHOME_VACUUM_PASSWORD)"
+    cur_vacuum_host="$(_env_get MYHOME_VACUUM_HOST)"
+
+    echo ""
+    echo "=== Robot vacuum (iRobot Roomba, local LAN) (optional) ==="
+    echo "Get the robot id (BLID) and password with 'myhome ctl vacuum pair'"
+    echo "after holding the robot's HOME button ~2 s. Leave BLID blank to disable."
+    echo ""
+
+    read -rp "Robot BLID [${cur_vacuum_blid}]: " vacuum_blid
+    vacuum_blid="${vacuum_blid:-$cur_vacuum_blid}"
+
+    vacuum_password=""
+    vacuum_host=""
+    if [ -n "$vacuum_blid" ]; then
+        # The password can only be obtained again with the robot's HOME button,
+        # so an empty answer keeps the current one instead of erasing it.
+        if [ -n "$cur_vacuum_password" ]; then
+            read -rsp "Robot password (blank keeps the current one): " vacuum_password
+        else
+            read -rsp "Robot password: " vacuum_password
+        fi
+        echo ""
+        vacuum_password="${vacuum_password:-$cur_vacuum_password}"
+
+        read -rp "Robot IP, blank for discovery [${cur_vacuum_host}]: " vacuum_host
+        vacuum_host="${vacuum_host:-$cur_vacuum_host}"
+    fi
+
     _write_env "$beem_email" "$beem_password" "$sfr_username" "$sfr_password" \
-        "$smtp_username" "$smtp_password" "$smtp_from" "$smtp_to"
+        "$smtp_username" "$smtp_password" "$smtp_from" "$smtp_to" \
+        "$vacuum_blid" "$vacuum_password" "$vacuum_host"
     echo "Credentials written to $ENV_FILE"
 else
     # --- Non-interactive path: create skeleton if absent ---
     if [ ! -f "$ENV_FILE" ]; then
-        _write_env "" "" "" "" "" "" "" ""
+        _write_env "" "" "" "" "" "" "" "" "" "" ""
         echo "Created credential skeleton at $ENV_FILE"
         echo "Run 'dpkg-reconfigure $SERVICE' to configure credentials interactively."
     fi

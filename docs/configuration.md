@@ -553,6 +553,18 @@ Credentials for the SFR home gateway. Authentication is skipped when either valu
 | `sfr.username` | `MYHOME_SFR_USERNAME` | — | SFR box admin username |
 | `sfr.password` | `MYHOME_SFR_PASSWORD` | — | SFR box admin password |
 
+## Robot Vacuum
+
+The iRobot Roomba integration (see [`docs/vacuum.md`](vacuum.md)) is enabled automatically when both `vacuum.blid` and `vacuum.password` are set and non-empty; there is no separate enable flag. Without them the daemon logs `Robot vacuum integration disabled`, opens no robot connection, and `vacuum.list` returns no robot.
+
+The password is a secret: set it in `/var/lib/myhome/.env` (prompted by `sudo dpkg-reconfigure myhome`; see `example.env`), never as a flag and never in `myhome.yaml`. It is not stored in `myhome.db`. Get the id and password with `myhome ctl vacuum pair`, which prints the `MYHOME_VACUUM_*` lines to copy into `.env`.
+
+| Key | Env var | Default | Description |
+|-----|---------|---------|-------------|
+| `vacuum.blid` | `MYHOME_VACUUM_BLID` | — | Robot id (BLID), printed by `myhome ctl vacuum pair` |
+| `vacuum.password` | `MYHOME_VACUUM_PASSWORD` | — | Robot local password, printed by `myhome ctl vacuum pair` (`.env` only) |
+| `vacuum.host` | `MYHOME_VACUUM_HOST` | — | Optional fixed robot IP, used instead of broadcast discovery (e.g. with a DHCP reservation, or where broadcast does not reach the robot). Empty: discovery by BLID, falling back to the last address the robot was reached at |
+
 ## Pool
 
 `pool-pump.js` itself tracks how many seconds it has run today and how much water-volume turnover

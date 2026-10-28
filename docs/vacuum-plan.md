@@ -25,15 +25,21 @@ pkg/roomba/                 generic local protocol: Discover, GetPassword, Clien
 internal/myhome/vacuum.go   RPC verbs + request/response types
 myhome/vacuum/              daemon service: storage (myhome.db), one client per robot,
                             region learning, RPC handlers                                    (new module)
-myhome/ctl/vacuum/          CLI (RPC only, no protocol code)
+myhome/ctl/vacuum/          CLI (RPC, except `pair`, which calls pkg/roomba directly; #626)
 internal/myhome/ui          Vacuum tab
 ```
 
 ## Secrets
 
-The local password lives only in `myhome.db` (`vacuum_robots.password`) on the daemon host.
-`vacuum.pair` runs the HOME-button handshake **on the daemon**, so the password never crosses
-`myhome/rpc`. No RPC result, log line or CLI output carries it.
+Revised by #626. The robot's BLID and local password are configured like every other
+integration secret: `MYHOME_VACUUM_BLID` / `MYHOME_VACUUM_PASSWORD` in the daemon's `.env`, read
+through Viper, never a flag or YAML. The first build kept the password in `myhome.db`
+(`vacuum_robots.password`); that column is now cleared and dropped at startup.
+
+There is no `vacuum.pair` RPC any more. `myhome ctl vacuum pair` runs the HOME-button handshake
+itself (`roomba.Pair`) and prints the `MYHOME_VACUUM_*` lines for the operator to put in `.env`;
+it writes nothing. So the password never crosses `myhome/rpc`, and no RPC result or daemon log
+line carries it. `pair`'s own standard output is the one place it is printed, on purpose.
 
 ## Decision: check the certificate's CN, not a pinned fingerprint
 

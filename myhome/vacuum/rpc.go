@@ -42,7 +42,7 @@ func (s *Service) RegisterHandlers() {
 	s.log.Info("Vacuum RPC handlers registered")
 }
 
-// List returns every paired robot.
+// List returns the configured robot, or none when the integration is disabled.
 func (s *Service) List() *myhome.VacuumListResult {
 	s.mu.Lock()
 	rs := make([]*robot, 0, len(s.robots))

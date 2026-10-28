@@ -35,6 +35,24 @@ The local password lives only in `myhome.db` (`vacuum_robots.password`) on the d
 `vacuum.pair` runs the HOME-button handshake **on the daemon**, so the password never crosses
 `myhome/rpc`. No RPC result, log line or CLI output carries it.
 
+## Decision: check the certificate's CN, not a pinned fingerprint
+
+#606 §5 proposed trust-on-first-use: pin the robot certificate's fingerprint at pairing time.
+The implementation checks instead that the certificate's subject is `CN=iRobot-<BLID>` for the
+paired robot (`pkg/roomba/tls.go`, `verifyRobotCN`), and skips chain verification.
+
+- iRobot's root CA is not available, so the chain cannot be verified either way.
+- The CN check catches the realistic failure here: the robot's DHCP address being handed to
+  another device. The robot's address has already changed once (.74 → .50).
+- Edmond's certificate is valid until 2029-03-08. If a firmware update replaced it before then
+  (not observed, and not ruled out), a pinned fingerprint would lock the daemon out until the robot is paired again. A CN
+  check survives that.
+- The trade-off: the CN check does not stop a device on the LAN that presents a self-made
+  certificate with the right CN. Such a device would receive the robot's password at connect
+  time. That needs an attacker on the LAN who also knows the BLID. Pinning would close this
+  gap, at the cost of the lockout above, and can be added later as a stored fingerprint
+  checked alongside the CN.
+
 ## Phases
 
 - [x] 0. Spike: Go TLS + paho against Edmond (read state, dock, start/pause/resume/stop/dock)

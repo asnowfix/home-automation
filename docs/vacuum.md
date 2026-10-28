@@ -97,3 +97,18 @@ ROOMBA_CREDS=path/to/creds.json go test -tags live -run TestLive -v ./pkg/roomba
 ```
 
 `creds.json` is `{"blid": "…", "password": "…"}`; keep it out of git, with mode 0600.
+
+## Developer notes (Edmond)
+
+The robot used during development is a Roomba i7 named **Edmond** (epic #606, PR #622).
+
+- **Credentials.** Its id and local password are in `~/.homepi/roomba-creds.json` on the Mac used
+  for development (mode 0600). They are never committed, logged, or put in an issue. To work from
+  another machine, copy that file over a private channel (e.g. `scp`), or press HOME and pair
+  again: the password only changes on a factory reset.
+- **Address.** DHCP, last seen at 192.168.1.50 (previously .74). See "Finding the robot" above.
+- **One client at a time.** Stop any development daemon that holds Edmond before the NAS daemon
+  pairs with it, and the other way round. Two daemons fight for the single connection.
+- **Running a development daemon from a directory that contains a file named `myhome`** (e.g. the
+  binary itself) fails at startup with `yaml: invalid trailing UTF-8 octet`: the daemon reads
+  that file as its config. Name the binary something else (e.g. `myhome-bin`). Tracked in #623.

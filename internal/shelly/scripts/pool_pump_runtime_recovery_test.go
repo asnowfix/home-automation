@@ -333,7 +333,7 @@ func TestPoolPump_RuntimeRecovery_SolarCreditShortensExtension(t *testing.T) {
 		return readPoolPumpWindowStop(t, d)
 	}
 
-	noCreditStop := run(t, 0)               // full 3600s shortfall
+	noCreditStop := run(t, 0)                  // full 3600s shortfall
 	solarCreditStop := run(t, intendedSec-600) // only 600s (10min) shortfall left
 
 	nowMin := int64(minutesSinceMidnight(time.Now()))
@@ -464,8 +464,8 @@ func TestPoolPump_RuntimeRecovery_OpenIntervalCountsTowardShortfall(t *testing.T
 
 	sunsetHour := float64(minutesSinceMidnight(time.Now())+180) / 60 // far away: not the bound under test
 	seedPoolPumpForecastState(t, d, forecastServed, 40, sunsetHour, fixtureStopMin)
-	seedPoolPumpRuntimeToday(t, d, 0)          // no CLOSED interval at all
-	seedPoolPumpOpenRunInterval(t, d, 1800)    // but an OPEN one, running 1800s already
+	seedPoolPumpRuntimeToday(t, d, 0)       // no CLOSED interval at all
+	seedPoolPumpOpenRunInterval(t, d, 1800) // but an OPEN one, running 1800s already
 
 	if err := evalPoolPumpSchedule(d, "handleEveningStop()"); err != nil {
 		t.Fatalf("failed to fire handleEveningStop(): %v", err)

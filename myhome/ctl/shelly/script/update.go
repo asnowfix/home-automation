@@ -3,15 +3,15 @@ package script
 import (
 	"context"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -38,7 +38,12 @@ var updateCtl = &cobra.Command{
 		if len(args) > 1 {
 			scriptArgs = []string{args[1]}
 		}
-		_, err := myhome.Foreach(cmd.Context(), log, device, options.Via, doUpdate, scriptArgs)
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), log, client, device, options.Via, doUpdate, scriptArgs)
 		return err
 	},
 }
@@ -46,7 +51,7 @@ var updateCtl = &cobra.Command{
 var updateNoMinify bool
 var updateForce bool
 
-func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)

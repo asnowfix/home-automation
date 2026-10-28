@@ -3,15 +3,15 @@ package script
 import (
 	"context"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	myScript "github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
-	myScript "github.com/asnowfix/home-automation/internal/shelly/scripts"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -26,12 +26,17 @@ var statusCtl = &cobra.Command{
 	Short: "Report status of all scripts loaded on the given Shelly device(s)",
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doStatus, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doStatus, options.Args(args))
 		return err
 	},
 }
 
-func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
@@ -45,7 +50,9 @@ func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device de
 			hlog.Logger.Error(err, "Unable to get script status")
 			return nil, err
 		}
-		options.PrintResult(out, sd.Name())
+		if err := options.PrintResult(out, sd.Name()); err != nil {
+			return nil, err
+		}
 		return out, nil
 	}
 
@@ -56,6 +63,8 @@ func doStatus(ctx context.Context, log logr.Logger, via types.Channel, device de
 		return nil, err
 	}
 
-	options.PrintResult(enhancedStatuses, sd.Name())
+	if err := options.PrintResult(enhancedStatuses, sd.Name()); err != nil {
+		return nil, err
+	}
 	return enhancedStatuses, nil
 }

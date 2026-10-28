@@ -86,14 +86,18 @@ All 54 modules renamed to use full `github.com/asnowfix/home-automation/...` pat
 
 ---
 
-## Phase 1: Consolidate into Single Module
+## Phase 1: Consolidate into Single Module — DONE (via #359)
 
 **Goal:** Merge 16 sub-modules into a single Go module while still inside `home-automation`.
 
+**Status:** Completed as part of #359 ("collapse 59 Go modules into 4"), which merged pkg/shelly's sub-packages into one `pkg/shelly` module *and* folded everything else in the repo (`myhome/*`, `internal/*`, `hlog`, `pkg/devices`, `pkg/tapo`, `pkg/version`) into the root module in the same pass — a wider scope than this phase originally called for, but the mechanics below (go.mod/go.work surgery) are identical to what #359 actually did. `go.work` now lists exactly 4 modules: `.`, `pkg/shelly`, `pkg/sfr`, `pkg/beem`.
+
+Note for whoever picks up Phase 2 (extraction to `go-shellies`): #359 also fixed the two remaining Phase-0-style couplings that would otherwise have blocked extraction — `pkg/shelly/script/ops.go` was discarding its injected `logr.Logger` and calling `hlog.GetLogger` instead (the last `hlog` import inside pkg/shelly), and the `internal/myhome/net` / `internal/shelly/scripts` / `pkg/devices` imports mentioned in 0.1/0.6 were already gone by the time #359 started (landed via #360). `make check-boundaries` now enforces in CI that pkg/shelly (and pkg/sfr, pkg/beem) never import a root-module package again.
+
 ### 1.1 Create unified go.mod
 
-- [ ] Create a new `pkg/shelly/go.mod` that declares `module pkg/shelly` with all dependencies aggregated from the 16 sub-module go.mod files
-- [ ] Remove individual `go.mod` / `go.sum` from each sub-package directory:
+- [x] Create a new `pkg/shelly/go.mod` that declares `module github.com/asnowfix/home-automation/pkg/shelly` with all dependencies aggregated from the 16 sub-module go.mod files
+- [x] Remove individual `go.mod` / `go.sum` from each sub-package directory:
   - `pkg/shelly/types/go.mod`
   - `pkg/shelly/mqtt/go.mod`
   - `pkg/shelly/script/go.mod`
@@ -102,33 +106,34 @@ All 54 modules renamed to use full `github.com/asnowfix/home-automation/...` pat
   - `pkg/shelly/wifi/go.mod`
   - `pkg/shelly/ethernet/go.mod`
   - `pkg/shelly/input/go.mod`
-  - `pkg/shelly/matter/go.mod`
+  - `pkg/shelly/matter/go.mod` (had no separate go.mod by the time #359 ran)
   - `pkg/shelly/schedule/go.mod`
   - `pkg/shelly/shttp/go.mod`
   - `pkg/shelly/sswitch/go.mod`
-  - `pkg/shelly/ble/go.mod` (if exists)
+  - `pkg/shelly/ble/go.mod` (had no separate go.mod by the time #359 ran)
   - `pkg/shelly/blu/go.mod`
   - `pkg/shelly/gen1/go.mod`
-  - `pkg/shelly/ratelimit/go.mod` (if exists)
+  - `pkg/shelly/ratelimit/go.mod` (had no separate go.mod by the time #359 ran)
+  - `pkg/shelly/shelly/go.mod`, `pkg/shelly/typestest/go.mod` (present in the repo at #359 time, not anticipated by this original list)
 
 ### 1.2 Update go.work
 
-- [ ] Remove all 16 sub-module entries from `go.work`
-- [ ] Keep only `./pkg/shelly` entry
-- [ ] Update replace directives in all consuming modules to point to `./pkg/shelly` only
+- [x] Remove all pkg/shelly sub-module entries from `go.work`
+- [x] Keep only `./pkg/shelly` entry (alongside `.`, `./pkg/sfr`, `./pkg/beem` — #359's scope was the whole repo, not just pkg/shelly)
+- [x] Update replace directives in all consuming modules to point to `./pkg/shelly` only (the root module's go.mod is the only remaining consumer now that everything else folded into it too; it keeps a single `replace .../pkg/shelly => ./pkg/shelly`, per the "Versioning note" below)
 
 ### 1.3 Fix internal imports
 
-- [ ] All sub-packages now import each other as `pkg/shelly/<sub>` — no change needed since they already use this pattern
-- [ ] Update any consuming module's `go.mod` replace directives (remove the per-sub-package replaces)
+- [x] All sub-packages now import each other as `pkg/shelly/<sub>` — no change needed since they already use this pattern
+- [x] Update any consuming module's `go.mod` replace directives (remove the per-sub-package replaces)
 
 ### 1.4 Verify
 
-- [ ] `make test` passes
-- [ ] `make build` produces working binary
-- [ ] All CLI commands work against real devices (manual smoke test)
+- [x] `make test` passes
+- [x] `make build` produces working binary
+- [ ] All CLI commands work against real devices (manual smoke test) — not done as part of #359 (mechanical module-boundary change, no runtime behavior touched); do this before/alongside Phase 2 extraction work
 
-**Checkpoint:** `pkg/shelly` is a single Go module with sub-packages. 16 entries removed from `go.work`. All tests pass.
+**Checkpoint:** `pkg/shelly` is a single Go module with sub-packages. All ~15 pkg/shelly sub-module entries removed from `go.work` (along with everything else — go.work is down to 4 entries total). All tests pass.
 
 ---
 

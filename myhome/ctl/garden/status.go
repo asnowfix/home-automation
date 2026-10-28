@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
@@ -21,7 +22,12 @@ per-zone water deficits, today's planned watering, and active state.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		_, sd, err := getDeviceByAny(ctx, args[0])
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
+		_, sd, err := getDeviceByAny(ctx, client, args[0])
 		if err != nil {
 			return fmt.Errorf("device lookup failed: %w", err)
 		}

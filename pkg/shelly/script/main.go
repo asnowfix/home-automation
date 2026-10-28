@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"io/fs"
 	"reflect"
 	"strconv"
 
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/tdewolff/minify/v2"
 	mjs "github.com/tdewolff/minify/v2/js"
 )

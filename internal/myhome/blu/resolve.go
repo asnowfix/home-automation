@@ -3,8 +3,9 @@ package blu
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
 	"strings"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/internal/tools"
 )
 
@@ -16,7 +17,7 @@ import (
 //   - MAC address: "e8:e0:7e:a6:0c:6f", "E8E07EA60C6F", "e8-e0-7e-a6-0c-6f"
 //   - Device ID: "shellyblu-e8e07ea60c6f"
 //   - Device name: "motion-sensor-hallway"
-func ResolveMac(ctx context.Context, identifier string) (string, error) {
+func ResolveMac(ctx context.Context, c myhome.Client, identifier string) (string, error) {
 	// First, try to normalize as a MAC address directly
 	mac := tools.NormalizeMac(identifier)
 	if mac != "" && isValidMac(mac) {
@@ -24,7 +25,7 @@ func ResolveMac(ctx context.Context, identifier string) (string, error) {
 	}
 
 	// If not a valid MAC, try to look up the device by identifier
-	devices, err := myhome.TheClient.LookupDevices(ctx, identifier)
+	devices, err := c.LookupDevices(ctx, identifier)
 	if err != nil {
 		return "", fmt.Errorf("failed to lookup BLU device %q: %w", identifier, err)
 	}

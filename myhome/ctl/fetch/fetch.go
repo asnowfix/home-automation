@@ -32,13 +32,13 @@ var listCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		result, err := myhome.TheClient.CallE(ctx, myhome.FetchList, nil)
+		client, err := myhome.ClientFromContext(ctx)
 		if err != nil {
 			return err
 		}
-		list, ok := result.(*myhome.FetchListResult)
-		if !ok {
-			return fmt.Errorf("unexpected result type: %T", result)
+		list, err := myhome.Call[any, *myhome.FetchListResult](ctx, client, myhome.FetchList, nil)
+		if err != nil {
+			return err
 		}
 
 		if options.Flags.Json {
@@ -76,13 +76,13 @@ var deleteCmd = &cobra.Command{
 			DeviceID: args[0],
 			Name:     args[1],
 		}
-		result, err := myhome.TheClient.CallE(ctx, myhome.FetchDelete, params)
+		client, err := myhome.ClientFromContext(ctx)
 		if err != nil {
 			return err
 		}
-		deleted, ok := result.(*myhome.FetchDeleteResult)
-		if !ok {
-			return fmt.Errorf("unexpected result type: %T", result)
+		deleted, err := myhome.Call[*myhome.FetchDeleteParams, *myhome.FetchDeleteResult](ctx, client, myhome.FetchDelete, params)
+		if err != nil {
+			return err
 		}
 
 		fmt.Printf("Deleted fetch subscription: %s/%s\n", deleted.DeviceID, deleted.Name)

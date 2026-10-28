@@ -3,10 +3,11 @@ package gen1
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/myhome/devices"
-	"github.com/asnowfix/home-automation/internal/myhome/model"
 	"testing"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/internal/myhome/model"
+	"github.com/asnowfix/home-automation/myhome/devices"
 
 	"github.com/go-logr/logr"
 )
@@ -67,9 +68,9 @@ func TestHandleMessage_SensorUpdateWritesCache(t *testing.T) {
 // TestHandleMessage_SensorTypes verifies multiple sensor types are forwarded.
 func TestHandleMessage_SensorTypes(t *testing.T) {
 	cases := []struct {
-		topic   string
-		payload string
-		wantID  string
+		topic      string
+		payload    string
+		wantID     string
 		wantSensor string
 	}{
 		{"shellies/dev1/sensor/humidity", "65", "dev1", "humidity"},

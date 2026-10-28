@@ -14,7 +14,6 @@ import (
 
 	"github.com/asnowfix/home-automation/internal/global"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/go-logr/logr"
@@ -105,6 +104,17 @@ type client struct {
 
 const BROKER_DEFAULT_NAME = "mqtt"
 
+// defaultWatchdogInterval/defaultWatchdogMaxFailures guard against
+// time.NewTicker(0) panicking in watchdog(): myhome/ctl's Cmd never
+// registers --mqtt-watchdog-interval/--mqtt-watchdog-max-failures (those
+// flags exist only on `myhome run`), so options.Flags.MqttWatchdogInterval
+// is its Go zero value for every `myhome ctl` invocation. NewClientE was
+// already passed that zero value before #362 (the pre-existing GetClientE
+// fallback used the same options.Flags read), so this clamp is a latent-bug
+// fix incidental to moving the construction code, not a new dependency.
+const defaultWatchdogInterval = 30 * time.Second
+const defaultWatchdogMaxFailures = 3
+
 var mqttBroker string = BROKER_DEFAULT_NAME
 
 var mqttOps *mqtt.ClientOptions
@@ -117,58 +127,26 @@ var theClient *client
 
 var mutex sync.Mutex
 
+// GetClientE returns the process-wide MQTT client constructed by an earlier
+// NewClientE call. It used to silently construct one itself (reading
+// myhome/ctl/options.Flags directly) the first time it was called without a
+// prior NewClientE — but that fallback built a client missing NewClientE's
+// auth/keepalive/reconnect ClientOptions (SetUsername, SetClientID,
+// SetKeepAlive, SetOnConnectHandler, ...), a materially different and
+// half-configured client silently substituted for the real one. Requiring
+// NewClientE first removes both myhome/mqtt's import of the CLI's
+// options/viper package (see #362) and that latent misconfiguration.
 func GetClientE(ctx context.Context) (Client, error) {
-	log, err := logr.FromContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	if theClient != nil {
-		return theClient, nil
+	if theClient == nil {
+		return nil, fmt.Errorf("MQTT client not initialized: call NewClientE before GetClientE")
 	}
-
-	mdnsCtx, mdnsCancel := context.WithTimeout(ctx, options.Flags.MdnsTimeout)
-	defer mdnsCancel()
-	brokerUrl, err := lookupBroker(mdnsCtx, log, mynet.MyResolver(log), mqttBroker)
-	if err != nil {
-		log.Error(err, "could not find MQTT broker", "where", mqttBroker)
-		return nil, err
-	}
-	log.Info("Using MQTT broker", "url", brokerUrl)
-
-	mqttOps.AddBroker(brokerUrl.String())
-	mqttOps.Servers = []*url.URL{brokerUrl}
-
-	// Direct call to GetClientE (not via NewClientE) - use lazyStart=true
-	theClient = &client{
-		// clientId:  clientId,
-		mqtt:                 mqtt.NewClient(mqttOps),
-		brokerUrl:            brokerUrl,
-		log:                  log,
-		resolutionTimeout:    options.Flags.MdnsTimeout,
-		timeout:              options.Flags.MqttTimeout,
-		grace:                options.Flags.MqttGrace,
-		lazyStart:            true,
-		watchdogInterval:     options.Flags.MqttWatchdogInterval,
-		watchdogMaxFailures:  options.Flags.MqttWatchdogMaxFailures,
-		reconnectInterval:    options.Flags.MqttReconnectInterval,
-		lastReconnect:        time.Now(),
-		ctx:                  global.ProcessContext(ctx),
-		pendingSubscriptions: make(map[string]mqtt.MessageHandler),
-	}
-
-	log.Info("MQTT client initialized", "client_id", theClient.Id(), "timeout", theClient.timeout, "grace", theClient.grace)
-
-	// Don't connect yet: This ensures subscriptions are set up before
-	// connection, so retained messages are delivered to handlers
-	// right at connection time.
 	return theClient, nil
 }
 
-func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration, reconnectInterval time.Duration, lazyStart bool) error {
+func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTimeout time.Duration, mqttTimeout time.Duration, mqttGrace time.Duration, reconnectInterval time.Duration, watchdogInterval time.Duration, watchdogMaxFailures int, lazyStart bool) error {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		return err
@@ -259,6 +237,51 @@ func NewClientE(ctx context.Context, broker string, instanceName string, mdnsTim
 	}
 
 	mqttOps.SetConnectTimeout(mqttTimeout)
+
+	if watchdogInterval <= 0 {
+		watchdogInterval = defaultWatchdogInterval
+	}
+	if watchdogMaxFailures <= 0 {
+		watchdogMaxFailures = defaultWatchdogMaxFailures
+	}
+
+	// Resolve the broker address and construct theClient now (rather than
+	// lazily on first GetClientE call, as before #362): NewClientE already
+	// receives every value construction needs as an explicit parameter, so
+	// there is no reason to defer it to a second call.
+	mdnsCtx, mdnsCancel := context.WithTimeout(ctx, mdnsTimeout)
+	defer mdnsCancel()
+	brokerUrl, err := lookupBroker(mdnsCtx, log, mynet.MyResolver(log, mdnsTimeout), mqttBroker)
+	if err != nil {
+		log.Error(err, "could not find MQTT broker", "where", mqttBroker)
+		return err
+	}
+	log.Info("Using MQTT broker", "url", brokerUrl)
+
+	mqttOps.AddBroker(brokerUrl.String())
+	mqttOps.Servers = []*url.URL{brokerUrl}
+
+	theClient = &client{
+		mqtt:                 mqtt.NewClient(mqttOps),
+		brokerUrl:            brokerUrl,
+		log:                  log,
+		resolutionTimeout:    mdnsTimeout,
+		timeout:              mqttTimeout,
+		grace:                mqttGrace,
+		lazyStart:            lazyStart,
+		watchdogInterval:     watchdogInterval,
+		watchdogMaxFailures:  watchdogMaxFailures,
+		reconnectInterval:    reconnectInterval,
+		lastReconnect:        time.Now(),
+		ctx:                  global.ProcessContext(ctx),
+		pendingSubscriptions: make(map[string]mqtt.MessageHandler),
+	}
+
+	log.Info("MQTT client initialized", "client_id", theClient.Id(), "timeout", theClient.timeout, "grace", theClient.grace)
+
+	// Don't connect yet: this ensures subscriptions are set up before
+	// connection, so retained messages are delivered to handlers right at
+	// connection time (see Start/autoConnect).
 	return nil
 }
 
@@ -613,7 +636,9 @@ func (c *client) Publisher(ctx context.Context, topic string, qlen uint, qos byt
 					log.Info("Channel closed", "topic", topic, "publisher", publisherName)
 					return
 				}
-				c.Publish(ctx, topic, msg, qos, retained, publisherName)
+				if err := c.Publish(ctx, topic, msg, qos, retained, publisherName); err != nil {
+					log.Error(err, "Failed to publish", "topic", topic, "publisher", publisherName)
+				}
 			}
 		}
 	}(c.log.WithName(publisherName))
@@ -667,7 +692,9 @@ func (c *client) SubscribeWithHandler(ctx context.Context, topic string, qlen ui
 		log.Info("Handler goroutine started", "topic", topic, "subscriber", subscriberName)
 		for msg := range mch {
 			log.V(1).Info("Handler received message from channel", "topic", msg.Topic(), "subscriber", msg.Subscriber(), "payload_len", len(msg.Payload()))
-			handler(msg.Topic(), msg.Payload(), msg.Subscriber())
+			if err := handler(msg.Topic(), msg.Payload(), msg.Subscriber()); err != nil {
+				log.Error(err, "Message handler failed", "topic", msg.Topic(), "subscriber", msg.Subscriber())
+			}
 		}
 		log.Info("Handler goroutine exiting", "topic", topic, "subscriber", subscriberName)
 	}(c.log.WithName(subscriberName))

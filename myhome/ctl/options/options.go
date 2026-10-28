@@ -4,17 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/global"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
+
 	"github.com/asnowfix/home-automation/pkg/version"
 
 	"github.com/go-logr/logr"
-	"github.com/spf13/viper"
 	"sigs.k8s.io/yaml"
 )
 
@@ -48,9 +48,6 @@ const SHELLY_DEFAULT_RATE_LIMIT time.Duration = 200 * time.Millisecond
 // Beem's default 60s poll interval, so one or two missed polls don't
 // immediately drop the source out of the aggregate sum.
 const SOLAR_STALE_AFTER time.Duration = 5 * time.Minute
-
-// ViperConfig holds the Viper configuration instance
-var ViperConfig *viper.Viper
 
 var Flags struct {
 	CpuProfile                  string
@@ -109,7 +106,13 @@ var Flags struct {
 
 var Via types.Channel
 
-func CommandLineContext(ctx context.Context) context.Context {
+// CommandLineContext builds the cancellable, request-scoped context shared by
+// every myhome entry point (daemon and ctl). It returns the derived context
+// together with its CancelFunc: the caller owns that CancelFunc explicitly
+// (e.g. in a package-level var used from PersistentPostRunE) rather than
+// threading it through context.WithValue, which is for request-scoped data,
+// not control-flow dependencies.
+func CommandLineContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	var cancel context.CancelFunc
 
 	// Create the process-wide context that background services can use
@@ -117,10 +120,8 @@ func CommandLineContext(ctx context.Context) context.Context {
 
 	if Flags.Wait > 0 {
 		ctx, cancel = context.WithTimeout(processCtx, Flags.Wait)
-		ctx = context.WithValue(ctx, global.CancelKey, cancel)
 	} else {
 		ctx, cancel = context.WithCancel(processCtx)
-		ctx = context.WithValue(ctx, global.CancelKey, cancel)
 	}
 
 	// Store the process-wide context so lazy-started services can access it
@@ -138,7 +139,7 @@ func CommandLineContext(ctx context.Context) context.Context {
 		cancel()
 		processCancel()
 	}()
-	return ctx
+	return ctx, cancel
 }
 
 func Args(args []string) []string {

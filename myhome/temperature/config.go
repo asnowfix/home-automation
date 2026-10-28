@@ -2,6 +2,7 @@ package temperature
 
 import (
 	"fmt"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/spf13/viper"
@@ -97,18 +98,4 @@ func parseTimeString(timeStr string) (int, error) {
 		return 0, fmt.Errorf("invalid time values: %s", timeStr)
 	}
 	return hours*60 + mins, nil
-}
-
-// splitTimeRange splits "06:00-23:00" into ["06:00", "23:00"]
-func splitTimeRange(s string) []string {
-	// Find the dash separator
-	for i := 0; i < len(s); i++ {
-		if s[i] == '-' {
-			// Make sure it's not at the start (negative time)
-			if i > 0 {
-				return []string{s[:i], s[i+1:]}
-			}
-		}
-	}
-	return []string{s}
 }

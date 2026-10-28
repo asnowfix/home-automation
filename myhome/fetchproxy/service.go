@@ -62,6 +62,7 @@ type Service struct {
 	ctx      context.Context
 	log      logr.Logger
 	mc       mqtt.Client
+	registry *myhome.Registry
 	storage  *Storage
 	limits   EvalLimits
 	http     httpDoer
@@ -78,16 +79,17 @@ type Service struct {
 // to SubscribeTopic to receive new/updated registrations. Errors along the
 // way are logged, not fatal: a broken subscribe or a single bad stored row
 // must not prevent the rest of the daemon from starting.
-func NewService(ctx context.Context, log logr.Logger, mc mqtt.Client, storage *Storage) *Service {
+func NewService(ctx context.Context, log logr.Logger, registry *myhome.Registry, mc mqtt.Client, storage *Storage) *Service {
 	s := &Service{
-		ctx:     ctx,
-		log:     log.WithName("fetchproxy.Service"),
-		mc:      mc,
-		storage: storage,
-		limits:  DefaultLimits(),
-		http:    &http.Client{Timeout: DefaultHTTPTimeout},
-		cancels: make(map[string]context.CancelFunc),
-		states:  make(map[string]*fetchState),
+		ctx:      ctx,
+		log:      log.WithName("fetchproxy.Service"),
+		mc:       mc,
+		registry: registry,
+		storage:  storage,
+		limits:   DefaultLimits(),
+		http:     &http.Client{Timeout: DefaultHTTPTimeout},
+		cancels:  make(map[string]context.CancelFunc),
+		states:   make(map[string]*fetchState),
 	}
 
 	subs, err := storage.List()
@@ -109,12 +111,10 @@ func NewService(ctx context.Context, log logr.Logger, mc mqtt.Client, storage *S
 // RegisterHandlers registers the fetch.list / fetch.delete RPC methods used
 // by `myhome ctl fetch`.
 func (s *Service) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.FetchList, func(ctx context.Context, params any) (any, error) {
+	myhome.Register(s.registry, myhome.FetchList, func(ctx context.Context, _ any) (*myhome.FetchListResult, error) {
 		return s.HandleList(ctx)
 	})
-	myhome.RegisterMethodHandler(myhome.FetchDelete, func(ctx context.Context, params any) (any, error) {
-		return s.HandleDelete(ctx, params.(*myhome.FetchDeleteParams))
-	})
+	myhome.Register(s.registry, myhome.FetchDelete, s.HandleDelete)
 }
 
 // handleIngest is the SubscribeWithHandler callback for SubscribeTopic. A

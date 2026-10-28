@@ -4,18 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"strings"
+	"time"
+
 	"github.com/asnowfix/home-automation/hlog"
-	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
-	"strings"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -62,7 +62,12 @@ All other configuration values have defaults.`,
 			return fmt.Errorf("--room-id is required")
 		}
 
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doSetup, nil)
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doSetup, nil)
 		return err
 	},
 }
@@ -85,13 +90,14 @@ func init() {
 	setupCmd.Flags().BoolVar(&setupFlags.ForceUpload, "force", false, "Force re-upload even if version hash matches")
 	setupCmd.Flags().BoolVar(&setupFlags.AutoDiscover, "auto-discover", false, "Auto-discover sensors in the same room")
 
-	// Mark mandatory flags
-	setupCmd.MarkFlagRequired("internal-temperature-topic")
-	setupCmd.MarkFlagRequired("external-temperature-topic")
-	setupCmd.MarkFlagRequired("room-id")
+	// Mark mandatory flags (error only fires for an unknown flag name,
+	// which would be a programming error caught by any invocation)
+	_ = setupCmd.MarkFlagRequired("internal-temperature-topic")
+	_ = setupCmd.MarkFlagRequired("external-temperature-topic")
+	_ = setupCmd.MarkFlagRequired("room-id")
 }
 
-func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
@@ -121,7 +127,11 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 			Identifier: sd.Id(),
 			RoomId:     setupFlags.RoomId,
 		}
-		_, err := myhome.TheClient.CallE(ctx, myhome.DeviceSetRoom, params)
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		_, err = myhome.Call[*myhome.DeviceSetRoomParams, any](ctx, client, myhome.DeviceSetRoom, params)
 		if err != nil {
 			fmt.Printf("  ⚠ Failed to set device room in DB: %v\n", err)
 		} else {
@@ -204,12 +214,16 @@ func discoverDoorSensorsInRoom(ctx context.Context, roomId string) ([]string, er
 	params := &myhome.DeviceListByRoomParams{
 		RoomId: roomId,
 	}
-	result, err := myhome.TheClient.CallE(ctx, myhome.DeviceListByRoom, params)
+	client, err := myhome.ClientFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result, err := myhome.Call[*myhome.DeviceListByRoomParams, *myhome.DeviceListByRoomResult](ctx, client, myhome.DeviceListByRoom, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list devices in room: %w", err)
 	}
 
-	devices := result.(*myhome.DeviceListByRoomResult).Devices
+	devices := result.Devices
 	var topics []string
 
 	for _, d := range devices {

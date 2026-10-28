@@ -3,13 +3,14 @@ package script
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	pkgshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -37,24 +38,22 @@ type DeviceProvider interface {
 type HeaterService struct {
 	log      logr.Logger
 	provider DeviceProvider
+	registry *myhome.Registry
 }
 
 // NewHeaterService creates a new heater service
-func NewHeaterService(log logr.Logger, provider DeviceProvider) *HeaterService {
+func NewHeaterService(log logr.Logger, provider DeviceProvider, registry *myhome.Registry) *HeaterService {
 	return &HeaterService{
 		log:      log.WithName("HeaterService"),
 		provider: provider,
+		registry: registry,
 	}
 }
 
 // RegisterHandlers registers the heater RPC handlers
 func (s *HeaterService) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.HeaterGetConfig, func(ctx context.Context, in any) (any, error) {
-		return s.HandleGetConfig(ctx, in.(*myhome.HeaterGetConfigParams))
-	})
-	myhome.RegisterMethodHandler(myhome.HeaterSetConfig, func(ctx context.Context, in any) (any, error) {
-		return s.HandleSetConfig(ctx, in.(*myhome.HeaterSetConfigParams))
-	})
+	myhome.Register(s.registry, myhome.HeaterGetConfig, s.HandleGetConfig)
+	myhome.Register(s.registry, myhome.HeaterSetConfig, s.HandleSetConfig)
 }
 
 // HandleGetConfig returns the heater configuration for a device

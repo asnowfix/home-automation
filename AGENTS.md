@@ -305,22 +305,7 @@ Follow this pattern (see temperature and occupancy services as examples):
    - `internal/myhome/occupancy.go` - Occupancy RPC types
    - `internal/myhome/yourservice.go` - Your service RPC types
 
-3. **Add method signature to `internal/myhome/methods.go`:**
-   ```go
-   var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
-       // ... existing methods
-       YourNewMethod: {
-           NewParams: func() any {
-               return &YourServiceParams{}
-           },
-           NewResult: func() any {
-               return &YourServiceResult{}
-           },
-       },
-   }
-   ```
-
-4. **Create handler in your service package (e.g., `myhome/yourservice/methods.go`):**
+3. **Create handler in your service package (e.g., `myhome/yourservice/methods.go`) and register it — no separate signature-map entry needed:**
    ```go
    type MethodHandlers struct {
        service *Service
@@ -335,22 +320,30 @@ Follow this pattern (see temperature and occupancy services as examples):
    }
    
    func (h *MethodHandlers) RegisterHandlers() {
-       myhome.RegisterMethodHandler(myhome.YourNewMethod, h.handleMethod)
+       myhome.Register(myhome.YourNewMethod, h.handleMethod)
        h.log.Info("Your service RPC handlers registered")
    }
    
-   func (h *MethodHandlers) handleMethod(params any) (any, error) {
-       p, ok := params.(*myhome.YourServiceParams)
-       if !ok {
-           return nil, fmt.Errorf("invalid params type")
-       }
-       
+   // handleMethod's signature IS the method's contract: myhome.Register infers
+   // the request/response wire types from it at compile time, so there is no
+   // separate signature-map entry to keep in sync and no `params any` type
+   // assertion to write — the compiler already guarantees params arrives as
+   // *myhome.YourServiceParams.
+   func (h *MethodHandlers) handleMethod(ctx context.Context, params *myhome.YourServiceParams) (*myhome.YourServiceResult, error) {
        // Your logic here
        return &myhome.YourServiceResult{Data: "result"}, nil
    }
    ```
 
-5. **Register in `myhome/daemon/daemon.go` after device manager starts:**
+   Callers on the other end use the generic `myhome.Call[P, R]` helper to get the same compile-time typing back:
+   ```go
+   result, err := myhome.Call[*myhome.YourServiceParams, *myhome.YourServiceResult](
+       ctx, myhome.TheClient, myhome.YourNewMethod, &myhome.YourServiceParams{Field: "x"},
+   )
+   ```
+   (`myhome.TheClient.CallE` itself stays untyped — it must satisfy the `Client` interface across the wire client, `FakeClient`, and `DeviceManager`'s in-process short-circuit alike — so always call through `myhome.Call`, not `CallE` directly, from application code.)
+
+4. **Register in `myhome/daemon/daemon.go` after device manager starts:**
    ```go
    // Register Your Service RPC methods if enabled
    if options.Flags.EnableYourService {
@@ -387,7 +380,7 @@ func NewRPCService(ctx context.Context) (*RPCService, error) {
 ```go
 // CORRECT - Do this!
 func (h *MethodHandlers) RegisterHandlers() {
-    myhome.RegisterMethodHandler(myhome.YourMethod, h.handleMethod)
+    myhome.Register(myhome.YourMethod, h.handleMethod)
 }
 ```
 
@@ -829,7 +822,7 @@ mac, err := blu.ResolveMac(ctx, identifier)
 
 ### Developer Tools
 
-One-off Go programs in `tools/`. Each is its own workspace module — always add new ones with `go work use ./tools/<name>`. Run from the repo root.
+One-off Go programs in `tools/`. Since the module collapse (#359), these are ordinary packages in the root module — no `go work use` needed for a new one. Run from the repo root.
 
 | Tool | Purpose |
 |---|---|
@@ -974,8 +967,10 @@ One paragraph.
 ### Go Test Suite
 
 `make test` is the canonical way to run the full test suite.  It runs
-`go test ./...` on the root module and then on every sub-module listed in
-`go.work`, so no module is silently skipped.
+`go test ./...` on the root module and then on each of the 3 standalone
+library modules (`pkg/shelly`, `pkg/sfr`, `pkg/beem` — see `go.work` and
+CLAUDE.md's "Go Workspace" section, #359), so no module is silently
+skipped.
 
 **Rule: any new test command must be wired up in both places:**
 

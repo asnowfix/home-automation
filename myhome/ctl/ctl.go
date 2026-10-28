@@ -2,22 +2,26 @@ package ctl
 
 import (
 	"context"
-	"github.com/asnowfix/home-automation/internal/global"
+	"os"
+	"os/signal"
+	"syscall"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/internal/shelly/scripts"
 	"github.com/asnowfix/home-automation/myhome/ctl/blu"
 	"github.com/asnowfix/home-automation/myhome/ctl/config"
-	ctlmcp "github.com/asnowfix/home-automation/myhome/ctl/mcp"
 	"github.com/asnowfix/home-automation/myhome/ctl/db"
 	eventsctl "github.com/asnowfix/home-automation/myhome/ctl/events"
 	"github.com/asnowfix/home-automation/myhome/ctl/fetch"
 	"github.com/asnowfix/home-automation/myhome/ctl/forget"
+	"github.com/asnowfix/home-automation/myhome/ctl/garden"
 	"github.com/asnowfix/home-automation/myhome/ctl/heater"
 	"github.com/asnowfix/home-automation/myhome/ctl/list"
+	ctlmcp "github.com/asnowfix/home-automation/myhome/ctl/mcp"
 	"github.com/asnowfix/home-automation/myhome/ctl/mqtt"
 	"github.com/asnowfix/home-automation/myhome/ctl/open"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/myhome/ctl/garden"
 	"github.com/asnowfix/home-automation/myhome/ctl/pool"
 	"github.com/asnowfix/home-automation/myhome/ctl/room"
 	"github.com/asnowfix/home-automation/myhome/ctl/sfr"
@@ -27,17 +31,21 @@ import (
 	"github.com/asnowfix/home-automation/myhome/ctl/sswitch"
 	"github.com/asnowfix/home-automation/myhome/ctl/temperature"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
-	"os"
-	"os/signal"
 	shellyPkg "github.com/asnowfix/home-automation/pkg/shelly"
 	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"runtime/pprof"
-	"syscall"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 )
+
+// cancelFunc is owned by this package alone, set once in PersistentPreRunE
+// and consumed once in PersistentPostRunE. It's a package-level var rather
+// than a context value on purpose: context.WithValue is for request-scoped
+// data, not for a control-flow handle like a CancelFunc (an unchecked type
+// assertion on a missing/mistyped value would panic). ctl.Cmd runs once per
+// process invocation, so there's no concurrent-invocation hazard here.
+var cancelFunc context.CancelFunc
 
 var Cmd = &cobra.Command{
 	Use:              "ctl",
@@ -52,14 +60,16 @@ var Cmd = &cobra.Command{
 		log := hlog.Logger
 		ctx := logr.NewContext(cmd.Context(), log)
 
-		ctx = options.CommandLineContext(ctx)
+		var cancel context.CancelFunc
+		ctx, cancel = options.CommandLineContext(ctx)
+		cancelFunc = cancel
 
 		// Set the target instance name for RPC topics
 		if options.Flags.InstanceName != "" {
 			myhome.InstanceName = options.Flags.InstanceName
 		}
 
-		err := mqttclient.NewClientE(ctx, options.Flags.MqttBroker, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, true)
+		err := mqttclient.NewClientE(ctx, options.Flags.MqttBroker, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, options.Flags.MqttWatchdogInterval, options.Flags.MqttWatchdogMaxFailures, true)
 		if err != nil {
 			log.Error(err, "Failed to initialize MQTT client")
 			return err
@@ -71,13 +81,22 @@ var Cmd = &cobra.Command{
 			return err
 		}
 
-		myhome.TheClient, err = myhome.NewClientE(ctx, log, mc, options.Flags.MqttTimeout)
+		myHomeClient, err := myhome.NewClientE(ctx, log, mc, options.Flags.MqttTimeout)
 		if err != nil {
 			log.Error(err, "Failed to initialize MyHome client")
 			return err
 		}
+		// Store the client in ctx so every subcommand's RunE can retrieve it
+		// via myhome.ClientFromContext(cmd.Context()) — see NewContextWithClient's
+		// doc comment for why context is used here instead of a package-level
+		// TheClient global.
+		ctx = myhome.NewContextWithClient(ctx, myHomeClient)
 
-		shellyPkg.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
+		shellyPkg.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit, scripts.GetFS())
+		// Store mc in ctx for pkg/shelly's own mqtt.GetClient(ctx) callers
+		// (pkg/shelly/device.go, pkg/shelly/script/run.go) — see
+		// pkg/shelly/mqtt.NewContextWithClient's doc comment.
+		ctx = shellymqtt.NewContextWithClient(ctx, mc)
 
 		// Composition root: wrap ctx with the MQTT client exactly once, so
 		// everything downstream (pkg/shelly/mqtt.GetClient) can retrieve it
@@ -116,18 +135,18 @@ var Cmd = &cobra.Command{
 	PersistentPostRunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		f := ctx.Value(global.CpuProfileKey)
-		if f != nil {
-			defer pprof.StopCPUProfile()
-		}
+		// CPU profile start/stop/close is owned entirely by myhome/main.go's
+		// PersistentPostRunE (which always runs, as the root command's
+		// persistent hooks apply to every subcommand); nothing to do here.
 
 		mc, err := mqttclient.GetClientE(ctx)
 		if err != nil {
 			return err
 		}
 
-		cancel := ctx.Value(global.CancelKey).(context.CancelFunc)
-		cancel()
+		if cancelFunc != nil {
+			cancelFunc()
+		}
 		mc.Close()
 		return nil
 	},

@@ -3,9 +3,10 @@ package devices
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
 	"strconv"
 	"sync"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/go-logr/logr"
 )

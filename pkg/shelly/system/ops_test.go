@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/typestest"
 )
 
 func TestGetConfig(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		want := &Config{ConfigRevision: 7}
 		d.SetResult(getConfig.String(), want)
 
@@ -24,7 +25,7 @@ func TestGetConfig(t *testing.T) {
 	})
 
 	t.Run("device error propagates", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		wantErr := errors.New("sys config unavailable")
 		d.SetError(getConfig.String(), wantErr)
 
@@ -35,7 +36,7 @@ func TestGetConfig(t *testing.T) {
 	})
 
 	t.Run("RpcUdp with empty destination address is normalized to nil", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		cfg := &Config{
 			RpcUdp: &struct {
 				DestinationAddress string `json:"dst_addr"`
@@ -54,7 +55,7 @@ func TestGetConfig(t *testing.T) {
 	})
 
 	t.Run("RpcUdp with a real destination address is preserved", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		cfg := &Config{
 			RpcUdp: &struct {
 				DestinationAddress string `json:"dst_addr"`
@@ -74,7 +75,7 @@ func TestGetConfig(t *testing.T) {
 }
 
 func TestSetConfig(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	want := &SetConfigResponse{RestartRequired: true}
 	d.SetResult(setConfig.String(), want)
 
@@ -93,7 +94,7 @@ func TestSetConfig(t *testing.T) {
 
 func TestGetStatus(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		want := &Status{UpTime: 100}
 		d.SetResult(getStatus.String(), want)
 
@@ -107,7 +108,7 @@ func TestGetStatus(t *testing.T) {
 	})
 
 	t.Run("unexpected result type", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		d.SetResult(getStatus.String(), "not-a-status")
 
 		_, err := GetStatus(context.Background(), types.ChannelDefault, d)

@@ -3,15 +3,15 @@ package script
 import (
 	"context"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -32,7 +32,12 @@ var uploadCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doUpload, []string{scriptName})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doUpload, []string{scriptName})
 		return err
 	},
 }
@@ -40,7 +45,7 @@ var uploadCtl = &cobra.Command{
 var noMinify bool
 var forceUpload bool
 
-func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
@@ -107,7 +112,12 @@ var startCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{pkgscript.Start.String(), scriptName})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doStartStopDelete, []string{pkgscript.Start.String(), scriptName})
 		return err
 	},
 }
@@ -123,7 +133,12 @@ var stopCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{pkgscript.Stop.String(), scriptName})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doStartStopDelete, []string{pkgscript.Stop.String(), scriptName})
 		return err
 	},
 }
@@ -139,12 +154,17 @@ var deleteCtl = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptName := args[1]
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, device, options.Via, doStartStopDelete, []string{pkgscript.Delete.String(), scriptName})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, device, options.Via, doStartStopDelete, []string{pkgscript.Delete.String(), scriptName})
 		return err
 	},
 }
 
-func doStartStopDelete(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doStartStopDelete(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
@@ -162,7 +182,9 @@ func doStartStopDelete(ctx context.Context, log logr.Logger, via types.Channel, 
 			return nil, err
 		}
 		fmt.Printf("✓ Successfully deleted %s from %s (including KVS version entry)\n", scriptName, sd.Name())
-		options.PrintResult(out)
+		if err := options.PrintResult(out); err != nil {
+			return nil, err
+		}
 		return out, nil
 	}
 
@@ -173,6 +195,8 @@ func doStartStopDelete(ctx context.Context, log logr.Logger, via types.Channel, 
 		return nil, err
 	}
 
-	options.PrintResult(out)
+	if err := options.PrintResult(out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }

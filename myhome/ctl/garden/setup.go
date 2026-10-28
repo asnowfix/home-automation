@@ -8,7 +8,6 @@ import (
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
@@ -61,8 +60,8 @@ func defaultZoneKVS() map[string]string {
 	return m
 }
 
-func getDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, *shelly.Device, error) {
-	devs, err := myhome.TheClient.LookupDevices(ctx, identifier)
+func getDeviceByAny(ctx context.Context, c myhome.Client, identifier string) (*myhome.Device, *shelly.Device, error) {
+	devs, err := c.LookupDevices(ctx, identifier)
 	if err != nil || len(*devs) == 0 {
 		return nil, nil, fmt.Errorf("device not found: %s", identifier)
 	}
@@ -84,7 +83,7 @@ func getDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, *sh
 	}
 	var sd *shelly.Device
 	var sdErr error
-	_, err = myhome.Foreach(ctx, hlog.Logger, d.Id(), types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, dev devices.Device, args []string) (any, error) {
+	_, err = myhome.Foreach(ctx, hlog.Logger, c, d.Id(), types.ChannelDefault, func(ctx context.Context, log logr.Logger, via types.Channel, dev shelly.Summary, args []string) (any, error) {
 		if s, ok := dev.(*shelly.Device); ok {
 			sd = s
 		} else {
@@ -99,7 +98,7 @@ func getDeviceByAny(ctx context.Context, identifier string) (*myhome.Device, *sh
 		return nil, nil, sdErr
 	}
 	if sd == nil {
-		return nil, nil, fmt.Errorf("Shelly device not found: %s", identifier)
+		return nil, nil, fmt.Errorf("shelly device not found: %s", identifier)
 	}
 	return mhDev, sd, nil
 }
@@ -119,10 +118,15 @@ to reflect real coverage.`,
 		ctx := cmd.Context()
 		identifier := args[0]
 
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
 		noMinify, _ := cmd.Flags().GetBool("no-minify")
 		force, _ := cmd.Flags().GetBool("force")
 
-		_, sd, err := getDeviceByAny(ctx, identifier)
+		_, sd, err := getDeviceByAny(ctx, client, identifier)
 		if err != nil {
 			return fmt.Errorf("device lookup failed: %w", err)
 		}
@@ -175,7 +179,7 @@ to reflect real coverage.`,
 
 		// 4. Create schedules via script.eval
 		fmt.Printf("Creating schedules via script.eval...\n")
-		code := fmt.Sprintf("clearNonUpdateSchedules(function(){createSchedules(null)})")
+		code := "clearNonUpdateSchedules(function(){createSchedules(null)})"
 		if _, err := pkgscript.EvalInDevice(ctx, via, sd, scriptName, code); err != nil {
 			fmt.Printf("  Warning: schedule creation may have failed: %v\n", err)
 		} else {

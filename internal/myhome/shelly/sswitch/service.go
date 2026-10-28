@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	pkgshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	pkgsswitch "github.com/asnowfix/home-automation/pkg/shelly/sswitch"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"strconv"
 
 	"github.com/go-logr/logr"
 )
@@ -25,33 +26,25 @@ type DeviceProvider interface {
 type Service struct {
 	log      logr.Logger
 	provider DeviceProvider
+	registry *myhome.Registry
 }
 
 // NewService creates a new switch service
-func NewService(log logr.Logger, provider DeviceProvider) *Service {
+func NewService(log logr.Logger, provider DeviceProvider, registry *myhome.Registry) *Service {
 	return &Service{
 		log:      log.WithName("Switch"),
 		provider: provider,
+		registry: registry,
 	}
 }
 
 // RegisterHandlers registers the switch RPC handlers
 func (s *Service) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.SwitchToggle, func(ctx context.Context, in any) (any, error) {
-		return s.HandleToggle(ctx, in.(*myhome.SwitchParams))
-	})
-	myhome.RegisterMethodHandler(myhome.SwitchOn, func(ctx context.Context, in any) (any, error) {
-		return s.HandleOn(ctx, in.(*myhome.SwitchParams))
-	})
-	myhome.RegisterMethodHandler(myhome.SwitchOff, func(ctx context.Context, in any) (any, error) {
-		return s.HandleOff(ctx, in.(*myhome.SwitchParams))
-	})
-	myhome.RegisterMethodHandler(myhome.SwitchStatus, func(ctx context.Context, in any) (any, error) {
-		return s.HandleStatus(ctx, in.(*myhome.SwitchParams))
-	})
-	myhome.RegisterMethodHandler(myhome.SwitchAll, func(ctx context.Context, in any) (any, error) {
-		return s.HandleAll(ctx, in.(*myhome.SwitchAllParams))
-	})
+	myhome.Register(s.registry, myhome.SwitchToggle, s.HandleToggle)
+	myhome.Register(s.registry, myhome.SwitchOn, s.HandleOn)
+	myhome.Register(s.registry, myhome.SwitchOff, s.HandleOff)
+	myhome.Register(s.registry, myhome.SwitchStatus, s.HandleStatus)
+	myhome.Register(s.registry, myhome.SwitchAll, s.HandleAll)
 }
 
 // HandleToggle handles switch.toggle RPC method

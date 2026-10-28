@@ -39,7 +39,10 @@ func load(ctx context.Context) (service.Service, service.Logger, error) {
 		Description: "MyHome Daemon, with embedded MQTT broker and persistent device manager",
 	}
 
-	daemon := NewDaemon(ctx)
+	// install/uninstall only register the service with the OS; no flags are
+	// parsed on this path, so the daemon gets a zero Config (as it implicitly
+	// did before, when it read the then-unset options.Flags).
+	daemon := NewDaemon(ctx, Config{})
 
 	s, err := service.New(daemon, &config)
 	if err != nil {
@@ -62,7 +65,7 @@ var installCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		l.Info("Installing service")
+		_ = l.Info("Installing service") // best-effort service-manager logging
 		return s.Install()
 	},
 }
@@ -75,7 +78,7 @@ var uninstallCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		l.Info("Uninstalling service")
+		_ = l.Info("Uninstalling service") // best-effort service-manager logging
 		return s.Uninstall()
 	},
 }

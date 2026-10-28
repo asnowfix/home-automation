@@ -3,11 +3,12 @@ package sfr
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome/model"
 	"net"
-	"github.com/asnowfix/home-automation/pkg/sfr"
 	"sync"
 	"time"
+
+	"github.com/asnowfix/home-automation/internal/myhome/model"
+	"github.com/asnowfix/home-automation/pkg/sfr"
 
 	"github.com/go-logr/logr"
 )
@@ -54,7 +55,9 @@ func GetRouter(ctx context.Context) model.Router {
 	go func(ctx context.Context) {
 		log.Info("Started connected devices refresh loop")
 
-		r.refresh(ctx, log)
+		if err := r.refresh(ctx, log); err != nil {
+			log.Error(err, "Initial connected-devices refresh failed (will retry on next tick)")
+		}
 
 		ticker := time.NewTicker(1 * time.Minute)
 		defer ticker.Stop()

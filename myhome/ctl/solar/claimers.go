@@ -20,13 +20,13 @@ var claimersCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
-		out, err := myhome.TheClient.CallE(ctx, myhome.SolarClaimersList, nil)
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
+		result, err := myhome.Call[any, *myhome.SolarClaimersListResult](ctx, client, myhome.SolarClaimersList, nil)
 		if err != nil {
 			return fmt.Errorf("failed to list solar claimers: %w", err)
-		}
-		result, ok := out.(*myhome.SolarClaimersListResult)
-		if !ok {
-			return fmt.Errorf("unexpected result type %T", out)
 		}
 
 		if len(result.Claimers) == 0 {

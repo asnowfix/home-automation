@@ -14,24 +14,25 @@ import (
 // already-initialized device handle and KVS helpers rather than standing up
 // a second connection to the same device.
 type PoolRPCHandler struct {
-	log  logr.Logger
-	pool *PoolNotices
+	log      logr.Logger
+	pool     *PoolNotices
+	registry *myhome.Registry
 }
 
 // NewPoolRPCHandler builds a PoolRPCHandler. pool may be nil (pool tracking
 // disabled or the device unreachable at startup) — handleGetStatus then
 // returns a clear error instead of panicking.
-func NewPoolRPCHandler(log logr.Logger, pool *PoolNotices) *PoolRPCHandler {
-	return &PoolRPCHandler{log: log.WithName("PoolRPCHandler"), pool: pool}
+func NewPoolRPCHandler(log logr.Logger, pool *PoolNotices, registry *myhome.Registry) *PoolRPCHandler {
+	return &PoolRPCHandler{log: log.WithName("PoolRPCHandler"), pool: pool, registry: registry}
 }
 
 // RegisterHandlers registers the pool.getstatus RPC method.
 func (h *PoolRPCHandler) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.PoolGetStatus, h.handleGetStatus)
+	myhome.Register(h.registry, myhome.PoolGetStatus, h.handleGetStatus)
 	h.log.Info("Pool RPC handler registered")
 }
 
-func (h *PoolRPCHandler) handleGetStatus(ctx context.Context, _ any) (any, error) {
+func (h *PoolRPCHandler) handleGetStatus(ctx context.Context, _ any) (*myhome.PoolGetStatusResult, error) {
 	if h.pool == nil {
 		return nil, fmt.Errorf("pool status unavailable: pool device not configured or unreachable")
 	}

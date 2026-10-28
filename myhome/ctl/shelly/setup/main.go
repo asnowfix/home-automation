@@ -4,18 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
 	"github.com/asnowfix/home-automation/hlog"
-	shellysetup "github.com/asnowfix/home-automation/internal/myhome/shelly/setup"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	shellysetup "github.com/asnowfix/home-automation/internal/myhome/shelly/setup"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	mhmqtt "github.com/asnowfix/home-automation/myhome/mqtt"
-	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/asnowfix/home-automation/pkg/shelly/wifi"
@@ -44,26 +42,15 @@ func init() {
 	Cmd.Flags().StringVar(&deviceNameOverride, "name", "", "Set device name (overrides auto-derivation)")
 }
 
-// isTimeoutError checks if an error is a timeout error
-func isTimeoutError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	return strings.Contains(errStr, "timeout") ||
-		strings.Contains(errStr, "Timeout") ||
-		strings.Contains(errStr, "deadline exceeded")
-}
-
 // setupDeviceByIP sets up a device using its IP address (initial setup mode)
-func setupDeviceByIP(ctx context.Context, name string, ip net.IP) error {
-	_, err := myhome.Foreach(ctx, hlog.Logger, ip.String(), types.ChannelHttp, doSetup, []string{name})
+func setupDeviceByIP(ctx context.Context, client myhome.Client, name string, ip net.IP) error {
+	_, err := myhome.Foreach(ctx, hlog.Logger, client, ip.String(), types.ChannelHttp, doSetup, []string{name})
 	return err
 }
 
 // setupDevicesByName sets up devices by looking them up by name pattern
-func setupDevicesByName(ctx context.Context, pattern string) error {
-	_, err := myhome.Foreach(ctx, hlog.Logger, pattern, types.ChannelHttp, doSetup, []string{})
+func setupDevicesByName(ctx context.Context, client myhome.Client, pattern string) error {
+	_, err := myhome.Foreach(ctx, hlog.Logger, client, pattern, types.ChannelHttp, doSetup, []string{})
 	return err
 }
 
@@ -72,7 +59,7 @@ func setupDevicesByName(ctx context.Context, pattern string) error {
 func getSetupConfig(ctx context.Context) (shellysetup.Config, error) {
 	cfg := shellysetup.Config{
 		MqttPort: 1883,
-		Resolver: mynet.MyResolver(hlog.Logger),
+		Resolver: mynet.MyResolver(hlog.Logger, options.Flags.MdnsTimeout),
 	}
 
 	// Use parent's --mqtt-broker flag if specified, otherwise use current process MQTT broker
@@ -100,11 +87,17 @@ func getSetupConfig(ctx context.Context) (shellysetup.Config, error) {
 }
 
 // doSetup performs the actual setup logic for a single device
-func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device shellyapi.Summary, args []string) (any, error) {
 	sd, ok := device.(*shellyapi.Device)
 	if !ok {
 		return nil, fmt.Errorf("expected *shellyapi.Device, got %T", device)
 	}
+
+	// client is optional here: some setup flows run before/without a myhome
+	// RPC client (e.g. bare device provisioning), so a missing client just
+	// disables the "save name to DB" / "trigger refresh" steps below rather
+	// than failing setup outright, matching the previous nil-check behavior.
+	client, _ := myhome.ClientFromContext(ctx)
 
 	// Get device name: --name flag takes priority, then args, then existing name
 	var targetName string
@@ -128,9 +121,9 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 		fmt.Printf("Skipping device communication for %s device %s\n", deviceType, deviceId)
 
 		// Save name to DB if provided (via RPC to daemon)
-		if targetName != "" && targetName != sd.Name() && myhome.TheClient != nil {
+		if targetName != "" && targetName != sd.Name() && client != nil {
 			fmt.Printf("  . Updating device name in DB: %s\n", targetName)
-			_, err := myhome.TheClient.CallE(ctx, myhome.DeviceSetup, &myhome.DeviceSetupParams{
+			_, err := myhome.Call[*myhome.DeviceSetupParams, any](ctx, client, myhome.DeviceSetup, &myhome.DeviceSetupParams{
 				Identifier: sd.Id(),
 				Name:       targetName,
 			})
@@ -227,8 +220,8 @@ func doSetup(ctx context.Context, log logr.Logger, via types.Channel, device dev
 	}
 
 	// Trigger device refresh via myhome RPC to sync DB (if client is available)
-	if myhome.TheClient != nil {
-		if _, refreshErr := myhome.TheClient.CallE(ctx, myhome.DeviceRefresh, sd.Id()); refreshErr != nil {
+	if client != nil {
+		if _, refreshErr := myhome.Call[string, *myhome.Device](ctx, client, myhome.DeviceRefresh, sd.Id()); refreshErr != nil {
 			log.V(1).Info("Could not trigger device refresh via RPC", "error", refreshErr)
 		} else {
 			fmt.Printf("  ✓ Device refresh triggered\n")
@@ -256,12 +249,17 @@ Flags:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		deviceIdentifier := args[0]
 
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
 		// Check if identifier is an IP address - use it directly
 		if ip := net.ParseIP(deviceIdentifier); ip != nil {
-			return setupDeviceByIP(cmd.Context(), deviceNameOverride, ip)
+			return setupDeviceByIP(cmd.Context(), client, deviceNameOverride, ip)
 		}
 
 		// Otherwise, lookup device by any identifier (id, MAC, hostname, name pattern)
-		return setupDevicesByName(cmd.Context(), deviceIdentifier)
+		return setupDevicesByName(cmd.Context(), client, deviceIdentifier)
 	},
 }

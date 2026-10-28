@@ -2,6 +2,7 @@ package room
 
 import (
 	"fmt"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/spf13/cobra"
@@ -19,12 +20,17 @@ Use an empty string "" to remove the room assignment.`,
 		device := args[0]
 		roomId := args[1]
 
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
 		params := &myhome.DeviceSetRoomParams{
 			Identifier: device,
 			RoomId:     roomId,
 		}
 
-		_, err := myhome.TheClient.CallE(cmd.Context(), myhome.DeviceSetRoom, params)
+		_, err = myhome.Call[*myhome.DeviceSetRoomParams, any](cmd.Context(), client, myhome.DeviceSetRoom, params)
 		if err != nil {
 			return err
 		}

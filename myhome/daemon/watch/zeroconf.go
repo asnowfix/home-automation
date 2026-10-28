@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
+	"time"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/myhome/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
-	"net"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/grandcat/zeroconf"
@@ -22,7 +23,7 @@ func ZeroConf(ctx context.Context, restartAfter time.Duration, dm devices.Manage
 		panic("BUG: No logger initialized")
 	}
 
-	go func(log logr.Logger) error {
+	go func(log logr.Logger) {
 		stopped := make(chan struct{}, 1)
 		for {
 			// A fresh channel is required each iteration: zeroconf closes the
@@ -34,26 +35,26 @@ func ZeroConf(ctx context.Context, restartAfter time.Duration, dm devices.Manage
 				log.Error(err, "Failed to start ZeroConf browser, will retry after delay")
 				select {
 				case <-ctx.Done():
-					return ctx.Err()
+					return
 				case <-time.After(restartAfter):
 					continue
 				}
 			}
 			log.Info("(Re)Started ZeroConf browser")
 
-			go func(log logr.Logger, scan <-chan *zeroconf.ServiceEntry, stopped chan<- struct{}) error {
+			go func(log logr.Logger, scan <-chan *zeroconf.ServiceEntry, stopped chan<- struct{}) {
 				for {
 					select {
 					case <-ctx.Done():
 						// Don't log context cancellation as an error
 						stopped <- struct{}{}
-						return ctx.Err()
+						return
 
 					case entry, ok := <-scan:
 						if !ok {
 							log.Info("ZeroConf scan channel closed, will restart browser")
 							stopped <- struct{}{}
-							return nil
+							return
 						}
 						if entry == nil {
 							log.V(1).Info("Received nil entry, skipping")
@@ -108,7 +109,7 @@ func ZeroConf(ctx context.Context, restartAfter time.Duration, dm devices.Manage
 			select {
 			case <-ctx.Done():
 				// Don't log context cancellation as an error
-				return ctx.Err()
+				return
 			case <-stopped:
 				log.Info("Restarting ZeroConf browser after delay")
 				time.Sleep(restartAfter)

@@ -3,12 +3,11 @@ package beem
 import (
 	"context"
 	"encoding/json"
-	"net/url"
 	"sync"
 	"testing"
 	"time"
 
-	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/go-logr/logr"
 )
 
 // TestWatcherPublishesRetainedMQTT verifies that Watcher.Start causes a
@@ -22,14 +21,14 @@ func TestWatcherPublishesRetainedMQTT(t *testing.T) {
 	)
 	defer srv.Close()
 
-	mc := mqttclient.NewRecordingMockClient()
+	mc := newRecordingPublisher()
 
 	cfg := ClientConfig{
 		Email:        "watcher@example.com",
 		Password:     "pw",
 		PollInterval: 10 * time.Millisecond, // fast for tests
 		// Per-client endpoints: the watcher polls on its own goroutine, so
-		// pointing package globals at srv here raced that goroutine (#453).
+		// pointing package globals at srv would race it (#453).
 		LoginURL:   srv.URL + "/beemapp/user/login",
 		SummaryURL: srv.URL + "/beemapp/box/summary",
 	}
@@ -37,7 +36,7 @@ func TestWatcherPublishesRetainedMQTT(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	w := NewWatcher(ctx, cfg, mc)
+	w := NewWatcher(ctx, cfg, mc, logr.Discard())
 
 	// Override the HTTP client so the watcher's internal Client uses our test server.
 	w.client.http = *srv.Client()
@@ -99,14 +98,16 @@ func TestWatcherMQTTRetainedFlag(t *testing.T) {
 		Email:        "r@example.com",
 		Password:     "pw",
 		PollInterval: 10 * time.Millisecond,
-		LoginURL:     srv.URL + "/beemapp/user/login",
-		SummaryURL:   srv.URL + "/beemapp/box/summary",
+		// Per-client endpoints: the watcher polls on its own goroutine, so
+		// pointing package globals at srv would race it (#453).
+		LoginURL:   srv.URL + "/beemapp/user/login",
+		SummaryURL: srv.URL + "/beemapp/box/summary",
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	w := NewWatcher(ctx, cfg, rm)
+	w := NewWatcher(ctx, cfg, rm, logr.Discard())
 	w.client.http = *srv.Client()
 
 	if err := w.Start(ctx); err != nil {
@@ -139,7 +140,35 @@ func TestWatcherMQTTRetainedFlag(t *testing.T) {
 	}
 }
 
-// ---- minimal retained-flag-capturing mock ----
+// ---- minimal Publisher mocks (pkg/beem has no dependency on myhome/mqtt) ----
+
+// recordingPublisher records every published payload, keyed by topic —
+// enough to stand in for myhome/mqtt's RecordingMockClient in these tests.
+type recordingPublisher struct {
+	mu        sync.Mutex
+	published map[string][][]byte
+}
+
+func newRecordingPublisher() *recordingPublisher {
+	return &recordingPublisher{published: make(map[string][][]byte)}
+}
+
+func (r *recordingPublisher) Publish(ctx context.Context, topic string, payload []byte, qos byte, retained bool, publisherName string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := make([]byte, len(payload))
+	copy(cp, payload)
+	r.published[topic] = append(r.published[topic], cp)
+	return nil
+}
+
+func (r *recordingPublisher) Published(topic string) [][]byte {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([][]byte, len(r.published[topic]))
+	copy(out, r.published[topic])
+	return out
+}
 
 type publishCall struct {
 	topic    string
@@ -147,6 +176,7 @@ type publishCall struct {
 	retained bool
 }
 
+// retainedRecorder captures the retained flag of every Publish call.
 type retainedRecorder struct {
 	mu    sync.Mutex
 	calls []publishCall
@@ -159,25 +189,4 @@ func (r *retainedRecorder) Publish(ctx context.Context, topic string, payload []
 	copy(cp, payload)
 	r.calls = append(r.calls, publishCall{topic: topic, payload: cp, retained: retained})
 	return nil
-}
-
-// The remaining Client interface methods are stubs.
-func (r *retainedRecorder) GetServer() string   { return "mock://localhost:1883" }
-func (r *retainedRecorder) BrokerUrl() *url.URL { u, _ := url.Parse(r.GetServer()); return u }
-func (r *retainedRecorder) Id() string          { return "retained-recorder" }
-func (r *retainedRecorder) Start() error        { return nil }
-func (r *retainedRecorder) IsConnected() bool   { return true }
-func (r *retainedRecorder) Close()              {}
-func (r *retainedRecorder) Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error) {
-	return nil, nil
-}
-func (r *retainedRecorder) SubscribeWithHandler(ctx context.Context, topic string, qlen uint, subscriber string, handle func(topic string, payload []byte, subscriber string) error) error {
-	return nil
-}
-func (r *retainedRecorder) SubscribeWithTopic(ctx context.Context, topic string, qlen uint, subscriberName string) (<-chan mqttclient.Message, error) {
-	return nil, nil
-}
-func (r *retainedRecorder) DeviceServer() (string, error) { return "localhost:1883", nil }
-func (r *retainedRecorder) Publisher(ctx context.Context, topic string, qlen uint, qos byte, retained bool, publisherName string) (chan<- []byte, error) {
-	return nil, nil
 }

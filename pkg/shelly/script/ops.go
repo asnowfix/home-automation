@@ -3,10 +3,9 @@ package script
 import (
 	"io/fs"
 	"net/http"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"reflect"
 
-	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
 )
@@ -38,7 +37,7 @@ const (
 )
 
 func Init(l logr.Logger, r types.MethodsRegistrar, scriptsFS fs.FS) {
-	log = hlog.GetLogger("pkg/shelly/script")
+	log = l
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	setFS(scriptsFS)
 	r.RegisterMethodHandler(SetConfig.String(), types.MethodHandler{

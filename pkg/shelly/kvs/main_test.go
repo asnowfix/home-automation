@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/typestest"
 	"github.com/go-logr/logr"
 )
 
 func TestGetValue(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		want := &GetResponse{Value: "17"}
 		d.SetResult(string(Get), want)
 
@@ -29,7 +30,7 @@ func TestGetValue(t *testing.T) {
 	})
 
 	t.Run("device error propagates", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		wantErr := errors.New("kvs unreachable")
 		d.SetError(string(Get), wantErr)
 
@@ -40,7 +41,7 @@ func TestGetValue(t *testing.T) {
 	})
 
 	t.Run("unexpected result type", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		d.SetResult(string(Get), "not-a-response")
 
 		_, err := GetValue(context.Background(), logr.Discard(), types.ChannelDefault, d, "key")
@@ -51,7 +52,7 @@ func TestGetValue(t *testing.T) {
 }
 
 func TestSetKeyValue(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	want := &Status{}
 	d.SetResult(string(Set), want)
 
@@ -69,7 +70,7 @@ func TestSetKeyValue(t *testing.T) {
 }
 
 func TestListKeys(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	want := &ListResponse{Keys: map[string]Status{"a": {}}}
 	d.SetResult(string(List), want)
 
@@ -87,7 +88,7 @@ func TestListKeys(t *testing.T) {
 }
 
 func TestGetManyValues(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	want := &GetManyResponse{Items: FlexibleMap{"a": "1"}}
 	d.SetResult(string(GetMany), want)
 
@@ -101,7 +102,7 @@ func TestGetManyValues(t *testing.T) {
 }
 
 func TestDeleteKey(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	want := &Status{}
 	d.SetResult(string(Delete), want)
 

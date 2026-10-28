@@ -7,9 +7,12 @@ import (
 type ContextKey uint
 
 const (
-	CancelKey ContextKey = iota
-	CpuProfileKey
-	VersionKey
+	// VersionKey and ProcessContextKey carry request-scoped data that's
+	// legitimately read far from where it's set. Control-flow dependencies
+	// (a CancelFunc, an *os.File) are NOT stored here — see myhome/main.go,
+	// myhome/ctl/ctl.go and myhome/daemon/daemon.go, which each own their
+	// cancellation/profile lifecycle explicitly instead.
+	VersionKey ContextKey = iota
 	ProcessContextKey
 )
 

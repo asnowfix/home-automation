@@ -3,10 +3,11 @@ package open
 import (
 	"encoding/json"
 	"fmt"
+	"os/exec"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"os/exec"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -20,7 +21,12 @@ var Cmd = &cobra.Command{
 		log := hlog.Logger
 		name := args[0]
 
-		devices, err := myhome.TheClient.LookupDevices(cmd.Context(), name)
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		devices, err := client.LookupDevices(cmd.Context(), name)
 		if err != nil {
 			return err
 		}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/asnowfix/home-automation/internal/myhome"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
@@ -28,6 +29,11 @@ during those windows.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
 		zoneID, err := strconv.Atoi(args[1])
 		if err != nil || zoneID < 0 || zoneID > 2 {
 			return fmt.Errorf("zone must be 0, 1, or 2 (got %q)", args[1])
@@ -37,7 +43,7 @@ during those windows.`,
 			return fmt.Errorf("minutes must be between 1 and 60 (got %q)", args[2])
 		}
 
-		_, sd, err := getDeviceByAny(ctx, args[0])
+		_, sd, err := getDeviceByAny(ctx, client, args[0])
 		if err != nil {
 			return fmt.Errorf("device lookup failed: %w", err)
 		}

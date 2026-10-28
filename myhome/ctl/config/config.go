@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 
@@ -44,6 +45,11 @@ Examples:
 		ctx := cmd.Context()
 		log := hlog.Logger
 
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
 		identifier := args[0]
 
 		// Validate that at least one flag is set
@@ -58,7 +64,7 @@ Examples:
 		}
 
 		// Call the configuration update function
-		err := myhome.ConfigureDevice(ctx, log, identifier, flags.Name, ecoModePtr)
+		err = myhome.ConfigureDevice(ctx, log, client, identifier, flags.Name, ecoModePtr)
 		if err != nil {
 			return fmt.Errorf("failed to configure device: %w", err)
 		}
@@ -71,7 +77,7 @@ Examples:
 func init() {
 	Cmd.Flags().StringVarP(&flags.Name, "name", "n", "", "Set device name (updates local DB and Gen2+ devices)")
 	Cmd.Flags().BoolVar(&flags.EcoMode, "ecomode", false, "Set eco mode on Gen2+ devices (true/false)")
-	
+
 	// Track if ecomode was explicitly set
 	Cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
 		flags.EcoModeSet = cmd.Flags().Changed("ecomode")

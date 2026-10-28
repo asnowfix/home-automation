@@ -1,17 +1,15 @@
 package ui
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
 	"time"
 
-	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/internal/myhome/accounts"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/internal/myhome/proxy"
@@ -30,7 +28,7 @@ import (
 // - an IPv4/IPv6 address
 // - a .local hostname
 // - any known identifier in the myhome database (name, id, mac, host)
-func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db DeviceRegistry, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry) error {
+func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db DeviceRegistry, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry, panicOnBugs bool, registry *myhome.Registry) error {
 	addr := fmt.Sprintf(":%d", listenPort)
 	srv := &http.Server{Addr: addr}
 
@@ -39,7 +37,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if !global.PanicOnBugs {
+		if !panicOnBugs {
 			// Panic recovery to avoid blank pages
 			defer func() {
 				if rec := recover(); rec != nil {
@@ -73,12 +71,12 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 			return
 		}
 
-		proxy.Handle(ctx, log, resolver, db, upstreamProxy, w, r)
+		proxy.Handle(ctx, log, resolver, db, upstreamProxy, panicOnBugs, w, r)
 
 	})
 
 	mux.Handle("/events", sseBroadcaster)
-	mux.HandleFunc("/rpc", RpcHandler(ctx, log.WithName("RpcHandler")))
+	mux.HandleFunc("/rpc", RpcHandler(ctx, log.WithName("RpcHandler"), registry))
 
 	// Static assets (Bulma CSS, HTMX, Alpine.js)
 	mux.HandleFunc("/static/", func(w http.ResponseWriter, r *http.Request) {
@@ -89,11 +87,12 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 		}
 		w.Header().Set("Content-Type", asset.ContentType)
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		w.Write(asset.Content)
+		// Best-effort: a failed asset write means the client went away.
+		_, _ = w.Write(asset.Content)
 	})
 
 	// HTMX endpoints for partial HTML responses
-	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc, accountsRegistry)
+	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc, accountsRegistry, registry)
 	if sseBroadcaster != nil {
 		sseBroadcaster.SetDeviceNameResolver(htmxHandler.DeviceNameResolver())
 	}
@@ -130,41 +129,4 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	}()
 
 	return nil
-}
-
-// statusWriter captures response status code and bytes written
-type statusWriter struct {
-	http.ResponseWriter
-	status int
-	bytes  int64
-}
-
-func (w *statusWriter) WriteHeader(code int) {
-	w.status = code
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *statusWriter) Write(b []byte) (int, error) {
-	if w.status == 0 {
-		// default if WriteHeader not called
-		w.status = http.StatusOK
-	}
-	n, err := w.ResponseWriter.Write(b)
-	w.bytes += int64(n)
-	return n, err
-}
-
-// Ensure websocket upgrades can hijack the connection through this wrapper
-func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return hj.Hijack()
-	}
-	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support hijacking")
-}
-
-// Pass through Flush when supported
-func (w *statusWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
 }

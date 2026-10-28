@@ -21,7 +21,6 @@ import (
 	mhswitch "github.com/asnowfix/home-automation/internal/myhome/shelly/sswitch"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"github.com/asnowfix/home-automation/internal/tools"
-	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/daemon/watch"
 	mhd "github.com/asnowfix/home-automation/myhome/devices"
 	"github.com/asnowfix/home-automation/myhome/events"
@@ -34,11 +33,24 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// Config is the subset of daemon settings the device manager reads, passed
+// in by the daemon (the composition root) instead of read from CLI globals.
+type Config struct {
+	RemoteProxy       string        // non-empty: no direct LAN access; skip the SFR router
+	RefreshInterval   time.Duration // known-devices refresh interval
+	EventsDir         string        // directory MQTT events are dumped to (empty: disabled)
+	MqttBroker        string        // explicit broker URL, if any (used for auto-setup)
+	AutoSetup         bool          // auto-configure newly discovered unknown devices
+	ReconcileInterval time.Duration // canonical-config reconcile interval (0 disables)
+	MdnsTimeout       time.Duration // mDNS lookup timeout
+}
+
 type DeviceManager struct {
+	cfg            Config
+	registry       *myhome.Registry
 	dr             mhd.DeviceRegistry
 	update         chan *myhome.Device
 	refreshed      chan *myhome.Device
-	cancel         context.CancelFunc
 	log            logr.Logger
 	mqttClient     mqtt.Client
 	sseBroadcaster SSEBroadcaster // For broadcasting sensor updates to UI
@@ -60,13 +72,15 @@ type SSEBroadcaster interface {
 // to prevent goroutine leaks when mDNS or network operations are slow/blocked
 const maxConcurrentRefreshes = 10
 
-func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient mqtt.Client, sseBroadcaster SSEBroadcaster) *DeviceManager {
+func NewDeviceManager(ctx context.Context, registry *myhome.Registry, cfg Config, s *storage.DeviceStorage, resolver mynet.Resolver, mqttClient mqtt.Client, sseBroadcaster SSEBroadcaster) *DeviceManager {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
 	}
 
 	dm := &DeviceManager{
+		cfg:            cfg,
+		registry:       registry,
 		dr:             mhd.NewCache(ctx, s),
 		log:            log.WithName("DeviceManager"),
 		update:         make(chan *myhome.Device, 64), // TODO configurable buffer size
@@ -76,8 +90,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		sseBroadcaster: sseBroadcaster,
 	}
 
-	myhome.RegisterMethodHandler(myhome.DevicesMatch, func(ctx context.Context, in any) (any, error) {
-		name := in.(string)
+	myhome.Register(dm.registry, myhome.DevicesMatch, func(ctx context.Context, name string) (*[]devices.Device, error) {
 		devices := make([]devices.Device, 0)
 
 		var ds []*myhome.Device
@@ -101,9 +114,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		}
 		return &devices, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceLookup, func(ctx context.Context, in any) (any, error) {
-		name := in.(string)
-
+	myhome.Register(dm.registry, myhome.DeviceLookup, func(ctx context.Context, name string) (*[]devices.Device, error) {
 		devices := make([]devices.Device, 0)
 		device, err := dm.GetDeviceByAny(ctx, name)
 		if err == nil {
@@ -112,18 +123,16 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 			return &devices, nil
 		}
 
-		return nil, fmt.Errorf("failed to get device by identifier: %v", err)
+		return nil, fmt.Errorf("failed to get device by identifier: %w", err)
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceShow, func(ctx context.Context, in any) (any, error) {
-		params := in.(*myhome.DeviceShowParams)
+	myhome.Register(dm.registry, myhome.DeviceShow, func(ctx context.Context, params *myhome.DeviceShowParams) (*myhome.Device, error) {
 		return dm.GetDeviceByAny(ctx, params.Identifier)
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceForget, func(ctx context.Context, in any) (any, error) {
-		return nil, dm.ForgetDevice(ctx, in.(string))
+	myhome.Register(dm.registry, myhome.DeviceForget, func(ctx context.Context, identifier string) (any, error) {
+		return nil, dm.ForgetDevice(ctx, identifier)
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceRefresh, func(ctx context.Context, in any) (any, error) {
+	myhome.Register(dm.registry, myhome.DeviceRefresh, func(ctx context.Context, ident string) (*myhome.Device, error) {
 		log := dm.log.WithName("rpc/device.refresh")
-		ident := in.(string)
 		log.V(1).Info("New", "ident", ident)
 		device, err := dm.GetDeviceByAny(ctx, ident)
 		if err != nil {
@@ -163,8 +172,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		return device, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceSetup, func(ctx context.Context, in any) (any, error) {
-		params := in.(*myhome.DeviceSetupParams)
+	myhome.Register(dm.registry, myhome.DeviceSetup, func(ctx context.Context, params *myhome.DeviceSetupParams) (any, error) {
 		log := dm.log.WithName("rpc/device.setup")
 		log.V(1).Info("New", "params", params)
 		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
@@ -195,13 +203,10 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		// Ensure implementation is loaded and initialized
 		sd, ok := device.Impl().(*shelly.Device)
 		if !ok || sd == nil {
-			impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
+			var err error
+			sd, err = shelly.NewDeviceFromSummary(ctx, log, device)
 			if err != nil {
 				return nil, err
-			}
-			sd, ok = impl.(*shelly.Device)
-			if !ok {
-				return nil, fmt.Errorf("unexpected device implementation type: %T", impl)
 			}
 		}
 		// Initialize device (sets up MQTT channels if needed)
@@ -249,8 +254,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		log.V(1).Info("Setup complete", "device", device.Id())
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceUpdate, func(ctx context.Context, in any) (any, error) {
-		device := in.(*myhome.Device)
+	myhome.Register(dm.registry, myhome.DeviceUpdate, func(ctx context.Context, device *myhome.Device) (any, error) {
 		log := dm.log.WithName("rpc/device.update")
 		log.V(1).Info("New", "id", device.Id(), "name", device.Name())
 
@@ -268,10 +272,9 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceSetRoom, func(ctx context.Context, in any) (any, error) {
+	myhome.Register(dm.registry, myhome.DeviceSetRoom, func(ctx context.Context, params *myhome.DeviceSetRoomParams) (any, error) {
 		var err error
 
-		params := in.(*myhome.DeviceSetRoomParams)
 		log := dm.log.WithName("rpc/device.setroom")
 		log.V(1).Info("New", "identifier", params.Identifier, "room_id", params.RoomId)
 		// Save room to database
@@ -295,14 +298,11 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		// Get or create Shelly device implementation
 		sd, ok := device.Impl().(*shelly.Device)
 		if !ok || sd == nil {
-			impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
+			var err error
+			sd, err = shelly.NewDeviceFromSummary(ctx, log, device)
 			if err != nil {
 				log.Error(err, "Failed to create device for KVS update", "identifier", params.Identifier)
 				return nil, nil // DB update succeeded, KVS is best-effort
-			}
-			sd, ok = impl.(*shelly.Device)
-			if !ok {
-				return nil, nil
 			}
 		}
 
@@ -317,8 +317,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceListByRoom, func(ctx context.Context, in any) (any, error) {
-		params := in.(*myhome.DeviceListByRoomParams)
+	myhome.Register(dm.registry, myhome.DeviceListByRoom, func(ctx context.Context, params *myhome.DeviceListByRoomParams) (*myhome.DeviceListByRoomResult, error) {
 		log := dm.log.WithName("rpc/device.listbyroom")
 		log.V(1).Info("New", "room_id", params.RoomId)
 		devices, err := dm.dr.GetDevicesByRoom(ctx, params.RoomId)
@@ -328,10 +327,10 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		}
 		return &myhome.DeviceListByRoomResult{Devices: devices}, nil
 	})
-	myhome.RegisterMethodHandler(myhome.ThermometerList, func(ctx context.Context, in any) (any, error) {
+	myhome.Register(dm.registry, myhome.ThermometerList, func(ctx context.Context, _ any) (*myhome.ThermometerListResult, error) {
 		return dm.HandleThermometerList(ctx)
 	})
-	myhome.RegisterMethodHandler(myhome.DoorList, func(ctx context.Context, in any) (any, error) {
+	myhome.Register(dm.registry, myhome.DoorList, func(ctx context.Context, _ any) (*myhome.DoorListResult, error) {
 		return dm.HandleDoorList(ctx)
 	})
 
@@ -358,7 +357,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	// first when available, then mDNS (.local, real network cost), then a
 	// terminal not-found. See docs/no-ip-address-plan.md.
 	mdnsRouter := mdnsrouter.New(dm.resolver)
-	if options.Flags.RemoteProxy == "" {
+	if dm.cfg.RemoteProxy == "" {
 		dm.router = model.Chain(sfr.GetRouter(ctx), model.Chain(mdnsRouter, model.NotFoundRouter{}))
 	} else {
 		dm.log.Info("Remote proxy configured — skipping SFR router (no direct LAN access assumed)")
@@ -374,19 +373,19 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	}
 
 	// Register heater service handlers
-	heaterService := shellyscript.NewHeaterService(dm.log, dm)
+	heaterService := shellyscript.NewHeaterService(dm.log, dm, dm.registry)
 	heaterService.RegisterHandlers()
 
 	// Register switch service handlers
-	switchService := mhswitch.NewService(dm.log, dm)
+	switchService := mhswitch.NewService(dm.log, dm, dm.registry)
 	switchService.RegisterHandlers()
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
 	go dm.deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")))
-	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
+	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), dm.cfg.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
-	err = watch.StartMqttWatcher(ctx, dm.log, dm.mqttClient, dm, dm.dr)
+	err = watch.StartMqttWatcher(ctx, dm.log, dm.mqttClient, dm, dm.dr, dm.cfg.EventsDir)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch MQTT events")
 		return err
@@ -412,19 +411,19 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	case deviceServer != "":
 		dm.setupConfig.MqttBroker = deviceServer
 		dm.setupConfig.MqttPort = 0 // Signal that broker already includes port
-	case options.Flags.MqttBroker != "":
-		dm.setupConfig.MqttBroker = options.Flags.MqttBroker
+	case dm.cfg.MqttBroker != "":
+		dm.setupConfig.MqttBroker = dm.cfg.MqttBroker
 		dm.setupConfig.MqttPort = 1883
 	default:
 		dm.setupConfig.MqttBroker = "mqtt.local"
 		dm.setupConfig.MqttPort = 1883
 	}
-	dm.log.Info("Auto-setup configuration", "enabled", options.Flags.AutoSetup, "mqtt_broker", dm.setupConfig.MqttBroker)
+	dm.log.Info("Auto-setup configuration", "enabled", dm.cfg.AutoSetup, "mqtt_broker", dm.setupConfig.MqttBroker)
 
-	go dm.runReconciliationLoop(logr.NewContext(ctx, dm.log.WithName("runReconciliationLoop")), options.Flags.ReconcileInterval)
+	go dm.runReconciliationLoop(logr.NewContext(ctx, dm.log.WithName("runReconciliationLoop")), dm.cfg.ReconcileInterval)
 
 	// Loop on ZeroConf devices discovery
-	err = watch.ZeroConf(ctx, options.Flags.MdnsTimeout, dm, dm.dr, dm.resolver)
+	err = watch.ZeroConf(ctx, dm.cfg.MdnsTimeout, dm, dm.dr, dm.resolver)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch ZeroConf devices")
 		return err
@@ -452,7 +451,7 @@ func (dm *DeviceManager) deviceUpdaterLoop(ctx context.Context) {
 	if err != nil {
 		panic("BUG: No logger initialized")
 	}
-	log.Info("Starting updater loop", "max_concurrent_refreshes", maxConcurrentRefreshes, "auto_setup", options.Flags.AutoSetup)
+	log.Info("Starting updater loop", "max_concurrent_refreshes", maxConcurrentRefreshes, "auto_setup", dm.cfg.AutoSetup)
 
 	// Semaphore to limit concurrent refresh goroutines
 	sem := make(chan struct{}, maxConcurrentRefreshes)
@@ -476,7 +475,7 @@ func (dm *DeviceManager) deviceUpdaterLoop(ctx context.Context) {
 				defer func() { <-sem }() // Release slot when done
 
 				// Trigger auto-setup for new devices if enabled
-				if isNew && options.Flags.AutoSetup {
+				if isNew && dm.cfg.AutoSetup {
 					dm.triggerAutoSetup(ctx, log, d, devId)
 				}
 
@@ -513,14 +512,10 @@ func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, 
 	// Get the Shelly device implementation
 	sd, ok := device.Impl().(*shelly.Device)
 	if !ok {
-		d, err := shelly.NewDeviceFromSummary(ctx, log, device)
-		if err != nil || d == nil {
-			err = fmt.Errorf("Cannot auto-setup: failed to create Shelly device %s", deviceId)
-			panic(err)
-		}
-		sd, ok = d.(*shelly.Device)
-		if !ok || sd == nil {
-			err = fmt.Errorf("Cannot auto-setup: failed to create Shelly device %s", deviceId)
+		var err error
+		sd, err = shelly.NewDeviceFromSummary(ctx, log, device)
+		if err != nil || sd == nil {
+			err = fmt.Errorf("cannot auto-setup: failed to create Shelly device %s", deviceId)
 			panic(err)
 		}
 		device.WithImpl(sd)
@@ -624,8 +619,7 @@ func (dm *DeviceManager) storeDeviceLoop(ctx context.Context, refreshed <-chan *
 		case <-ctx.Done():
 			return
 		case device := <-refreshed:
-			var modified bool = false
-			modified, err = dm.dr.SetDevice(ctx, device, true)
+			modified, err := dm.dr.SetDevice(ctx, device, true)
 			if err != nil {
 				log.Error(err, "Failed to upsert", "device", device.DeviceSummary)
 				continue
@@ -732,13 +726,10 @@ func (dm *DeviceManager) runReconciliationLoop(ctx context.Context, interval tim
 func (dm *DeviceManager) reconcileOneDevice(ctx context.Context, log logr.Logger, device *myhome.Device) {
 	sd, ok := device.Impl().(*shelly.Device)
 	if !ok || sd == nil {
-		impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
+		var err error
+		sd, err = shelly.NewDeviceFromSummary(ctx, log, device)
 		if err != nil {
 			log.Error(err, "Failed to create device for reconciliation", "device", device.Id())
-			return
-		}
-		sd, ok = impl.(*shelly.Device)
-		if !ok || sd == nil {
 			return
 		}
 	}
@@ -814,25 +805,19 @@ func (dm *DeviceManager) SetDevice(ctx context.Context, d *myhome.Device, overwr
 func (dm *DeviceManager) CallE(ctx context.Context, method myhome.Verb, params any) (any, error) {
 	dm.log.Info("Calling method", "method", method, "params", params)
 	var err error
-	mh, err := myhome.Methods(method)
+	mh, err := dm.registry.Methods(method)
 	if err != nil {
 		return nil, err
 	}
-	// if mh.InType != reflect.TypeOf(params) {
-	// 	return nil, fmt.Errorf("invalid parameters for method %s: got %v, want %v", method, reflect.TypeOf(params), mh.InType)
-	// }
-	result, err := mh.ActionE(ctx, params)
-	if err != nil {
-		return nil, err
-	}
-	// if mh.OutType != reflect.TypeOf(result) {
-	// 	return nil, fmt.Errorf("invalid type for method %s: got %v, want %v", method, reflect.TypeOf(result), mh.OutType)
-	// }
-	return result, nil
+	// Method.Call marshals params once (mirroring the wire path) and
+	// delegates to the registered handler's generic Action, so this
+	// in-process short-circuit decodes through the exact same logic a real
+	// MQTT request would.
+	return mh.Call(ctx, params)
 }
 
 func (dm *DeviceManager) MethodE(method myhome.Verb) (*myhome.Method, error) {
-	mh, err := myhome.Methods(method)
+	mh, err := dm.registry.Methods(method)
 	if err != nil {
 		return nil, err
 	}
@@ -928,13 +913,10 @@ func classifyDoors(devices []*myhome.Device) []myhome.DoorInfo {
 func (dm *DeviceManager) GetShellyDevice(ctx context.Context, device *myhome.Device) (*shelly.Device, error) {
 	sd, ok := device.Impl().(*shelly.Device)
 	if !ok || sd == nil {
-		impl, err := shelly.NewDeviceFromSummary(ctx, dm.log, device)
+		var err error
+		sd, err = shelly.NewDeviceFromSummary(ctx, dm.log, device)
 		if err != nil {
 			return nil, err
-		}
-		sd, ok = impl.(*shelly.Device)
-		if !ok {
-			return nil, fmt.Errorf("unexpected device implementation type: %T", impl)
 		}
 	}
 	return sd, nil

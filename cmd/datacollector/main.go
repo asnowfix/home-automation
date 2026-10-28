@@ -63,7 +63,16 @@ func main() {
 	logger = hlog.Logger
 
 	ctx := logr.NewContext(context.Background(), logger)
-	ctx = options.CommandLineContext(ctx)
+	ctx, cancel := options.CommandLineContext(ctx)
+	defer cancel()
+
+	// GetClientE requires a prior NewClientE (see #362): this standalone
+	// tool never goes through myhome/ctl's cobra flags, so pass the
+	// package's own defaults explicitly instead of reading options.Flags
+	// (which would still be its zero values here).
+	if err := mqtt.NewClientE(ctx, "", "datacollector", options.MDNS_LOOKUP_DEFAULT_TIMEOUT, options.MQTT_DEFAULT_TIMEOUT, options.MQTT_DEFAULT_GRACE, options.MQTT_RECONNECT_INTERVAL, options.MQTT_WATCHDOG_CHECK_INTERVAL, options.MQTT_WATCHDOG_MAX_FAILURES, true); err != nil {
+		log.Fatalf("Failed to initialize MQTT client: %v", err)
+	}
 
 	mc, err := mqtt.GetClientE(ctx)
 	if err != nil {
@@ -75,10 +84,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create myhome client: %v", err)
 	}
-	myhome.TheClient = client
 
 	// Get all devices
-	devices, err := myhome.TheClient.LookupDevices(ctx, "*")
+	devices, err := client.LookupDevices(ctx, "*")
 	if err != nil {
 		log.Fatalf("Failed to get devices: %v", err)
 	}
@@ -99,15 +107,9 @@ func main() {
 		logger.Info("Testing device", "id", device.Id(), "name", device.Name())
 
 		// Create Shelly device instance
-		shellyDevice, err := shelly.NewDeviceFromSummary(ctx, logger, device)
+		sd, err := shelly.NewDeviceFromSummary(ctx, logger, device)
 		if err != nil {
 			logger.Error(err, "Failed to create Shelly device", "device_id", device.Id())
-			continue
-		}
-
-		sd, ok := shellyDevice.(*shelly.Device)
-		if !ok {
-			logger.Error(fmt.Errorf("not a Shelly device"), "Invalid device type", "device_id", device.Id())
 			continue
 		}
 
@@ -295,7 +297,7 @@ func saveTestSuite(testSuite *TestSuite, filename string) error {
 	outputDir := "test_data"
 	err := os.MkdirAll(outputDir, 0755)
 	if err != nil {
-		return fmt.Errorf("failed to create output directory: %v", err)
+		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
 	filePath := filepath.Join(outputDir, filename)
@@ -303,13 +305,13 @@ func saveTestSuite(testSuite *TestSuite, filename string) error {
 	// Marshal to JSON with pretty printing
 	jsonData, err := json.MarshalIndent(testSuite, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal test suite: %v", err)
+		return fmt.Errorf("failed to marshal test suite: %w", err)
 	}
 
 	// Write to file
 	err = os.WriteFile(filePath, jsonData, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to write file: %v", err)
+		return fmt.Errorf("failed to write file: %w", err)
 	}
 
 	logger.Info("Test data saved", "file", filePath, "size_bytes", len(jsonData))

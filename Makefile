@@ -24,7 +24,13 @@ export GOTOOLCHAIN=go1.25.3
 GOOS := $(shell go env GOOS)
 GOARCH := $(shell go env GOARCH)
 
-mods = $(patsubst %/,%,$(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */*/*/go.mod) $(wildcard */*/*/*/go.mod))
+# The workspace has exactly 4 modules (#359): the root app module plus three
+# standalone library modules that must stay independently importable
+# (pkg/shelly, pkg/sfr, pkg/beem). `go test/build ./...` from the repo root
+# only covers the root module — the library modules need their own
+# invocation, so every workspace-wide target below loops over LIB_MODULES
+# after handling root.
+LIB_MODULES := pkg/shelly pkg/sfr pkg/beem
 
 # Local daemon dev loop: run/stop/tail a daemon instance built from whichever
 # worktree invokes it, pointed at the real home MQTT broker. --instance local
@@ -65,6 +71,9 @@ help:
 	@echo "  status                - Show service status"
 	@echo "  logs                  - Show service logs"
 	@echo "  test                  - Run tests across all workspace modules"
+	@echo "  test-race             - Run tests with -race across all workspace modules"
+	@echo "  lint                  - Run golangci-lint across all workspace modules"
+	@echo "  check-boundaries      - Fail if pkg/shelly, pkg/sfr or pkg/beem import the root module"
 	@echo "  cover                 - Run tests with coverage; produces coverage.txt"
 	@echo "  cover-report          - Print aggregate coverage total from coverage.txt"
 	@echo "  cover-html            - Open coverage.txt as an HTML report in the browser"
@@ -120,10 +129,7 @@ endif
 tidy:
 	$(GO) get -u ./...
 	$(GO) mod tidy
-	$(foreach m,$(mods),$(GO) work use $(dir $(m)) &&) echo
-	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) list -m -u all) &&) echo
-	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) get -u ./...) &&) echo
-	$(foreach m,$(mods),(cd $(call folder,$(dir $(m))) && $(GO) mod tidy) &&) echo
+	$(foreach m,$(LIB_MODULES),(cd $(call folder,$(m)) && $(GO) get -u ./... && $(GO) mod tidy) &&) echo
 
 release:
 	goreleaser build --snapshot --clean --single-target
@@ -288,31 +294,40 @@ TESTFLAGS ?= -race
 # survived its first fix.
 TESTTIMEOUT ?= 674s
 
-test: build
+test: build check-boundaries
 	bash linux/systemd/update_test.sh
 	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...
-	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
-	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
-	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
-	    (cd $$dir && $(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...) || rc=1; \
-	  fi; \
-	done; exit $$rc
+	@rc=0; $(foreach m,$(LIB_MODULES),(cd $(m) && $(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...) || rc=1;) exit $$rc
 
 # test-race is kept as an explicit alias now that -race is the default, so
 # scripts and habits that name it keep working.
 test-race:
 	$(MAKE) test TESTFLAGS=-race
 
+# lint: golangci-lint has no native concept of a Go workspace with multiple
+# modules, so it must be invoked once per module; each invocation
+# auto-discovers the root .golangci.yml by walking up from its working
+# directory. Requires golangci-lint on PATH (see
+# https://golangci-lint.run/welcome/install/ or CI's pinned-version install
+# step in .github/workflows/test.yml).
+lint: build
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "lint: golangci-lint not found on PATH; see https://golangci-lint.run/welcome/install/"; exit 1; }
+	golangci-lint run ./...
+	@rc=0; $(foreach m,$(LIB_MODULES),(cd $(m) && golangci-lint run ./...) || rc=1;) exit $$rc
+
+# cover: coverage is scoped to packages that actually have tests, matching
+# the pre-#359 module-collapse behavior where a submodule with zero
+# _test.go files was skipped by the module-loop entirely (and, being a
+# separate module, never entered root's own `./...` scan either). Now that
+# module boundaries are gone, untested leaf/CLI packages (myhome/ctl/*,
+# hlog, cmd/*, tools/*, etc.) would otherwise be silently pulled into the
+# coverage denominator by a plain `go test ./...`, deflating the ratio
+# without reflecting any real change in how well *tested* code is covered.
 cover: build
 	@mkdir -p coverage
-	$(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=coverage/root.cov ./...
-	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
-	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
-	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
-	    sdir=$$(echo $$dir | tr '/' '_'); \
-	    (cd $$dir && $(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=$(CURDIR)/coverage/$$sdir.cov ./...) || rc=1; \
-	  fi; \
-	done; \
+	@pkgs="$$($(GO) list -f '{{if .TestGoFiles}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$')"; \
+	$(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=coverage/root.cov $$pkgs
+	@rc=0; $(foreach m,$(LIB_MODULES),(cd $(m) && pkgs="$$($(GO) list -f '{{if .TestGoFiles}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$')" && $(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=$(CURDIR)/coverage/$(subst /,_,$(m)).cov $$pkgs) || rc=1;) \
 	echo "mode: atomic" > coverage.txt; \
 	for f in coverage/*.cov; do grep -v "^mode:" "$$f" >> coverage.txt 2>/dev/null || true; done; \
 	exit $$rc
@@ -340,16 +355,34 @@ build: generate
 	$(MAKE) -C myhome $(@)
 
 generate:
-	$(GO) generate ./internal/myhome/ui/...
-	$(GO) generate ./myhome/ctl/pool
-	$(GO) generate ./myhome/ctl/garden
-	$(GO) generate ./internal/myhome/shelly/script
-	$(GO) generate ./internal/shelly/scripts/jstarget
 	$(GO) generate ./...
+
+# check-boundaries: pkg/shelly, pkg/sfr and pkg/beem are standalone library
+# modules (#359) — each must remain independently importable by an external
+# project, so none of them may import a root-module package (myhome/*,
+# internal/*, hlog, pkg/devices, pkg/tapo, pkg/version). This walks each
+# library module's real dependency graph (`go list -deps`, run from inside
+# the module so it's evaluated standalone) and fails if it finds any
+# github.com/asnowfix/home-automation/... package outside the module itself.
+check-boundaries:
+	@rc=0; \
+	for m in $(LIB_MODULES); do \
+	  modpath="github.com/asnowfix/home-automation/$$m"; \
+	  bad=$$(cd $$m && $(GO) list -deps ./... 2>&1 | grep '^github.com/asnowfix/home-automation' | grep -v "^$$modpath\(/\|$$\)"); \
+	  if [ -n "$$bad" ]; then \
+	    echo "check-boundaries: FAIL - $$m imports outside its own module:"; \
+	    echo "$$bad" | sed 's/^/  /'; \
+	    rc=1; \
+	  else \
+	    echo "check-boundaries: OK - $$m"; \
+	  fi; \
+	done; exit $$rc
 
 # Build Debian package for current OS/ARCH (Linux only)
 # Usage: make debpkg [VERSION=X.Y.Z]
 # If VERSION is not specified, uses git describe
+# --match 'v*' excludes the integration-branch progress tags
+# (campaign/<issue>-<slug>, see #368) from version derivation.
 ifeq ($(OS),Linux)
 ARCH := $(shell dpkg --print-architecture 2>/dev/null || uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
 VERSION ?= $(shell git describe --tags --match 'v*' --always 2>/dev/null | sed 's/^v//')
@@ -457,4 +490,4 @@ upload-release-notes:
 		exit 1; \
 	fi
 
-.PHONY: upload-release-notes
+.PHONY: upload-release-notes lint test-race

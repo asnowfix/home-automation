@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
@@ -84,7 +85,7 @@ func CancelJob(ctx context.Context, log logr.Logger, via types.Channel, d types.
 	scheduled := out.(*Scheduled)
 	// Look whether the job is already scheduled
 	for _, job := range scheduled.Jobs {
-		if job.JobId.Id == jobId {
+		if job.Id == jobId {
 			log.Info("Found scheduled", "job", job)
 			_, err := d.CallE(ctx, via, string(Delete), &JobId{Id: jobId})
 			if err != nil {

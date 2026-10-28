@@ -64,7 +64,7 @@ func main() {
 		if err != nil {
 			// Fall back to the unformatted source so the compiler error
 			// points at the real problem, but still fail the run.
-			os.WriteFile(*goPath, []byte(src), 0o644)
+			_ = os.WriteFile(*goPath, []byte(src), 0o644)
 			fmt.Fprintf(os.Stderr, "genconfigschema: gofmt failed (wrote unformatted %s for inspection): %v\n", *goPath, err)
 			os.Exit(1)
 		}

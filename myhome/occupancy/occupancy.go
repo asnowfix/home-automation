@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/asnowfix/home-automation/myhome/mqtt"
-	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
-	"github.com/asnowfix/home-automation/pkg/sfr"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/pkg/sfr"
 
 	"github.com/go-logr/logr"
 )
@@ -50,7 +50,7 @@ func (c *sfrLanChecker) GetHostsList(ctx context.Context) ([]*sfr.LanHost, error
 type Service struct {
 	ctx              context.Context
 	log              logr.Logger
-	mc               mqttclient.Client
+	mc               mqtt.Client
 	lanChecker       LanChecker   // abstraction over sfr.GetHostsList for testability
 	lastEvent        atomic.Int64 // unix nano of last relevant input event
 	lastMobileSeen   atomic.Int64 // unix nano of last mobile device presence
@@ -61,7 +61,7 @@ type Service struct {
 	mobileDevices    []string // list of device name patterns to check for (case-insensitive substring match)
 }
 
-func NewService(ctx context.Context, log logr.Logger, mc mqttclient.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) *Service {
+func NewService(ctx context.Context, log logr.Logger, mc mqtt.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) *Service {
 	s := &Service{
 		ctx:              ctx,
 		log:              log.WithName("occupancy.Service"),
@@ -135,7 +135,9 @@ func (s *Service) occupied(reason string) {
 		s.log.Error(err, "Failed to marshal occupancy")
 		return
 	}
-	s.mc.Publish(s.ctx, "myhome/occupancy", b, mqtt.AtLeastOnce, true /*retain*/, "myhome/occupancy")
+	if err := s.mc.Publish(s.ctx, "myhome/occupancy", b, mqtt.AtLeastOnce, true /*retain*/, "myhome/occupancy"); err != nil {
+		s.log.Error(err, "Failed to publish occupancy")
+	}
 
 	s.lastSeenTime.Store(time.Now().UnixNano())
 	s.lastSeenTimer = time.AfterFunc(s.lastSeenWindow, func() {
@@ -164,7 +166,10 @@ func (s *Service) occupied(reason string) {
 			s.log.Error(err, "Failed to marshal occupancy on timer expiry")
 			return
 		}
-		s.mc.Publish(s.ctx, "myhome/occupancy", b, mqtt.AtLeastOnce, true /*retain*/, "myhome/occupancy")
+		if err := s.mc.Publish(s.ctx, "myhome/occupancy", b, mqtt.AtLeastOnce, true /*retain*/, "myhome/occupancy"); err != nil {
+			s.log.Error(err, "Failed to publish occupancy on timer expiry")
+			return
+		}
 		s.log.Info("Published false occupancy after timer expiry", "elapsed", elapsedStr)
 	})
 }
@@ -245,7 +250,7 @@ func (s *Service) checkMobilePresence() {
 }
 
 // Start launches the occupancy HTTP service listening on port with the given MQTT client.
-func Start(ctx context.Context, port int, mc mqttclient.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) error {
+func Start(ctx context.Context, port int, mc mqtt.Client, window time.Duration, mobilePollPeriod time.Duration, mobileDevices []string) error {
 	log := logr.FromContextOrDiscard(ctx)
 	svc := NewService(ctx, log, mc, window, mobilePollPeriod, mobileDevices)
 	if mobileDevices != nil {

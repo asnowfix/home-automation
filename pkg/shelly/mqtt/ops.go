@@ -3,8 +3,9 @@ package mqtt
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"time"
+
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"net/http"
 	"reflect"
@@ -31,12 +32,12 @@ const (
 
 var registrar types.MethodsRegistrar
 
-// Init registers the MQTT RPC methods and channel. The mc parameter is
-// accepted for signature/call-site compatibility with the other component
-// Init functions pkg/shelly.Init drives, but this package no longer stores
-// it globally: the composition root (myhome/ctl.Cmd's PersistentPreRunE, or
-// myhome/daemon.daemon.Run) is responsible for making the client available
-// downstream via NewContextWithClient(ctx, mc), which GetClient(ctx) reads.
+// Init wires up the MQTT RPC channel and method handlers. mc is used only
+// to initialize mqttChannel (the RPC channel implementation) here; it is
+// NOT stored for later retrieval by GetClient — callers that need mc via
+// ctx must wrap their own root context with mqtt.NewContextWithClient(ctx,
+// mc) themselves, right after calling Init (see NewContextWithClient's doc
+// comment).
 func Init(log logr.Logger, r types.MethodsRegistrar, mc Client, timeout time.Duration) {
 	log.Info("Init", "package", reflect.TypeOf(empty{}).PkgPath())
 	registrar = r

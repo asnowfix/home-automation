@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/go-logr/logr"
 )
 
 // buildTestServer returns an httptest.Server that serves one login response and
@@ -53,7 +55,7 @@ func newClientForTest(cfg ClientConfig, srv *httptest.Server) *Client {
 	cfg.LoginURL = srv.URL + "/beemapp/user/login"
 	cfg.SummaryURL = srv.URL + "/beemapp/box/summary"
 	cfg.DevicesURL = srv.URL + "/beemapp/devices"
-	c := NewClient(cfg)
+	c := NewClient(cfg, logr.Discard())
 	c.http = *srv.Client()
 	return c
 }

@@ -3,15 +3,15 @@ package reboot
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"time"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
-	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -22,28 +22,33 @@ var Cmd = &cobra.Command{
 	Short: "Reboot Shelly device",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, oneDeviceReboot, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, oneDeviceReboot, options.Args(args))
 		return err
 	},
 }
 
-func oneDeviceReboot(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func oneDeviceReboot(ctx context.Context, log logr.Logger, via types.Channel, device shellyapi.Summary, args []string) (any, error) {
 	sd, ok := device.(*shellyapi.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
-	
+
 	fmt.Printf("Rebooting %s...\n", sd.Name())
-	
+
 	out, err := sd.CallE(ctx, via, shelly.Reboot.String(), nil)
 	if err != nil {
 		log.Error(err, "Unable to reboot device", "device", sd.Id())
 		return nil, err
 	}
-	
+
 	log.Info("Device reboot initiated, waiting for device to come back online", "device", sd.Id())
 	fmt.Printf("Waiting for %s to come back online...\n", sd.Name())
-	
+
 	// Wait for device to go offline (give it 5 seconds to start rebooting)
 	select {
 	case <-time.After(5 * time.Second):
@@ -52,14 +57,14 @@ func oneDeviceReboot(ctx context.Context, log logr.Logger, via types.Channel, de
 		fmt.Printf("\n✗ Interrupted while waiting for reboot\n")
 		return nil, ctx.Err()
 	}
-	
+
 	// Poll for device to come back online (up to 60 seconds)
 	maxWait := 60 * time.Second
 	pollInterval := 2 * time.Second
 	timeout := time.After(maxWait)
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():

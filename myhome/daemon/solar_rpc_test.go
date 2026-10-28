@@ -30,16 +30,13 @@ func TestSolarRPCHandler_ClaimersList_EnrichesPoolPump(t *testing.T) {
 	registry := energy.NewRegistry()
 	registry.Register("pool-pump", dev.id)
 
-	h := NewSolarRPCHandler(logr.Discard(), registry, pool)
+	h := NewSolarRPCHandler(logr.Discard(), registry, pool, myhome.NewRegistry())
 
 	out, err := h.handleClaimersList(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("handleClaimersList: %v", err)
 	}
-	result, ok := out.(*myhome.SolarClaimersListResult)
-	if !ok {
-		t.Fatalf("unexpected result type %T", out)
-	}
+	result := out
 	if len(result.Claimers) != 1 {
 		t.Fatalf("expected 1 claimer, got %d", len(result.Claimers))
 	}
@@ -70,13 +67,13 @@ func TestSolarRPCHandler_ClaimersList_PoolInactive(t *testing.T) {
 	registry := energy.NewRegistry()
 	registry.Register("pool-pump", dev.id)
 
-	h := NewSolarRPCHandler(logr.Discard(), registry, pool)
+	h := NewSolarRPCHandler(logr.Discard(), registry, pool, myhome.NewRegistry())
 
 	out, err := h.handleClaimersList(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("handleClaimersList: %v", err)
 	}
-	result := out.(*myhome.SolarClaimersListResult)
+	result := out
 	if len(result.Claimers) != 1 {
 		t.Fatalf("expected 1 claimer, got %d", len(result.Claimers))
 	}
@@ -98,13 +95,13 @@ func TestSolarRPCHandler_ClaimersList_NilPoolNotices(t *testing.T) {
 	registry := energy.NewRegistry()
 	registry.Register("pool-pump", "some-device-id")
 
-	h := NewSolarRPCHandler(logr.Discard(), registry, nil)
+	h := NewSolarRPCHandler(logr.Discard(), registry, nil, myhome.NewRegistry())
 
 	out, err := h.handleClaimersList(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("handleClaimersList: %v", err)
 	}
-	result := out.(*myhome.SolarClaimersListResult)
+	result := out
 	if len(result.Claimers) != 1 {
 		t.Fatalf("expected 1 claimer, got %d", len(result.Claimers))
 	}
@@ -131,13 +128,13 @@ func TestSolarRPCHandler_ClaimersList_LiveReadErrorDoesNotFailRPC(t *testing.T) 
 	registry := energy.NewRegistry()
 	registry.Register("pool-pump", dev.id)
 
-	h := NewSolarRPCHandler(logr.Discard(), registry, pool)
+	h := NewSolarRPCHandler(logr.Discard(), registry, pool, myhome.NewRegistry())
 
 	out, err := h.handleClaimersList(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("handleClaimersList should not fail on a live-read error, got: %v", err)
 	}
-	result := out.(*myhome.SolarClaimersListResult)
+	result := out
 	if len(result.Claimers) != 1 {
 		t.Fatalf("expected 1 claimer, got %d", len(result.Claimers))
 	}
@@ -151,13 +148,13 @@ func TestSolarRPCHandler_ClaimersList_LiveReadErrorDoesNotFailRPC(t *testing.T) 
 // than an error.
 func TestSolarRPCHandler_ClaimersList_EmptyRegistry(t *testing.T) {
 	registry := energy.NewRegistry()
-	h := NewSolarRPCHandler(logr.Discard(), registry, nil)
+	h := NewSolarRPCHandler(logr.Discard(), registry, nil, myhome.NewRegistry())
 
 	out, err := h.handleClaimersList(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("handleClaimersList: %v", err)
 	}
-	result := out.(*myhome.SolarClaimersListResult)
+	result := out
 	if result.Claimers == nil {
 		t.Fatalf("expected non-nil empty claimers slice")
 	}

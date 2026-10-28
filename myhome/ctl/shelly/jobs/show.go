@@ -4,17 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"reflect"
 	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 )
@@ -24,12 +24,17 @@ var showCtl = &cobra.Command{
 	Short: "Show Shelly devices scheduled jobs",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, showOneDeviceJobs, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, showOneDeviceJobs, options.Args(args))
 		return err
 	},
 }
 
-func showOneDeviceJobs(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func showOneDeviceJobs(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
@@ -41,11 +46,11 @@ func showOneDeviceJobs(ctx context.Context, log logr.Logger, via types.Channel, 
 	}
 
 	jobs := out.(*schedule.Scheduled)
-	
+
 	// Prepare complete output as a single string to avoid interleaving
 	var output string
 	deviceHeader := fmt.Sprintf("%s (%s)", sd.Name(), sd.Id())
-	
+
 	if options.Flags.Json {
 		// For JSON, include device info in the output
 		jsonOutput := map[string]interface{}{
@@ -67,7 +72,7 @@ func showOneDeviceJobs(ctx context.Context, log logr.Logger, via types.Channel, 
 		}
 		output = fmt.Sprintf("# %s\n%s", deviceHeader, string(s))
 	}
-	
+
 	// Print complete output atomically
 	fmt.Print(output)
 

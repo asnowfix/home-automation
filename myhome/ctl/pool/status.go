@@ -85,15 +85,21 @@ With a device identifier pattern, queries only matching devices.`,
 // best-effort addition: if the daemon has pool tracking disabled or is
 // unreachable, it prints a short note instead of failing the whole command.
 func printFiltrationStatus(ctx context.Context) {
-	out, err := myhome.TheClient.CallE(ctx, myhome.PoolGetStatus, nil)
+	client, err := myhome.ClientFromContext(ctx)
 	if err != nil {
 		fmt.Println("Filtration Status")
 		fmt.Println("=================")
 		fmt.Printf("  (unavailable: %v)\n\n", err)
 		return
 	}
-	status, ok := out.(*myhome.PoolGetStatusResult)
-	if !ok {
+	status, err := myhome.Call[any, *myhome.PoolGetStatusResult](ctx, client, myhome.PoolGetStatus, nil)
+	if err != nil {
+		fmt.Println("Filtration Status")
+		fmt.Println("=================")
+		fmt.Printf("  (unavailable: %v)\n\n", err)
+		return
+	}
+	if status == nil {
 		return
 	}
 

@@ -4,15 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	shellypkg "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -44,7 +44,12 @@ var toggleCmd = &cobra.Command{
 	Short: "Toggle device switch",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"toggle"})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doSwitchOneDevice, []string{"toggle"})
 		return err
 	},
 }
@@ -54,7 +59,12 @@ var onCmd = &cobra.Command{
 	Short: "Turn device switch on",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"on"})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doSwitchOneDevice, []string{"on"})
 		return err
 	},
 }
@@ -64,7 +74,12 @@ var offCmd = &cobra.Command{
 	Short: "Turn device switch off",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"off"})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doSwitchOneDevice, []string{"off"})
 		return err
 	},
 }
@@ -74,7 +89,12 @@ var statusCmd = &cobra.Command{
 	Short: "Display device switch status",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		out, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, doSwitchOneDevice, []string{"status"})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		out, err := myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, doSwitchOneDevice, []string{"status"})
 		if err != nil {
 			return err
 		}
@@ -92,7 +112,7 @@ var statusCmd = &cobra.Command{
 	},
 }
 
-func doSwitchOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func doSwitchOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
@@ -119,7 +139,7 @@ func doSwitchOneDevice(ctx context.Context, log logr.Logger, via types.Channel, 
 	}
 
 	if err != nil {
-		err = fmt.Errorf("failed to run %s device %s: %v", args[0], sd.Id(), err)
+		err = fmt.Errorf("failed to run %s device %s: %w", args[0], sd.Id(), err)
 		log.Info("Failed to run %s device %s: %v", sd.Id(), err)
 		return nil, err
 	}

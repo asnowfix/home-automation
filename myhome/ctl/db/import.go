@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"github.com/asnowfix/home-automation/internal/myhome"
 	"os"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/spf13/cobra"
 )
@@ -54,8 +55,12 @@ Examples:
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
+		client, err := myhome.ClientFromContext(ctx)
+		if err != nil {
+			return err
+		}
+
 		var data []byte
-		var err error
 
 		if len(args) == 1 {
 			// Read from file
@@ -101,7 +106,7 @@ Examples:
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.DeviceUpdate, &device)
+				_, err := myhome.Call[*myhome.Device, any](ctx, client, myhome.DeviceUpdate, &device)
 				if err != nil {
 					// Check if this is a context cancellation error
 					if ctx.Err() != nil {
@@ -125,7 +130,7 @@ Examples:
 					Kinds:  roomConfig.Kinds,
 					Levels: roomConfig.Levels,
 				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSet, params)
+				_, err := myhome.Call[*myhome.TemperatureSetParams, *myhome.TemperatureSetResult](ctx, client, myhome.TemperatureSet, params)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "⚠ Failed to import room %s: %v\n", roomID, err)
 					continue
@@ -140,7 +145,7 @@ Examples:
 					Weekday: weekday,
 					DayType: dayType,
 				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSetWeekdayDefault, params)
+				_, err := myhome.Call[*myhome.TemperatureSetWeekdayDefaultParams, *myhome.TemperatureSetWeekdayDefaultResult](ctx, client, myhome.TemperatureSetWeekdayDefault, params)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "⚠ Failed to import weekday default %d: %v\n", weekday, err)
 					continue
@@ -165,7 +170,7 @@ Examples:
 					DayType: schedule.DayType,
 					Ranges:  rangeStrs,
 				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSetKindSchedule, params)
+				_, err := myhome.Call[*myhome.TemperatureSetKindScheduleParams, *myhome.TemperatureSetKindScheduleResult](ctx, client, myhome.TemperatureSetKindSchedule, params)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "⚠ Failed to import kind schedule %s/%s: %v\n", schedule.Kind, schedule.DayType, err)
 					continue

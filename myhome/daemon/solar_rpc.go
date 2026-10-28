@@ -25,23 +25,24 @@ type SolarRPCHandler struct {
 	log      logr.Logger
 	registry *energy.Registry
 	pool     *PoolNotices
+	reg      *myhome.Registry
 }
 
 // NewSolarRPCHandler builds a SolarRPCHandler. pool may be nil (pool
 // tracking disabled or the device unreachable at startup) — handleClaimersList
 // then reports the pool-pump claimer's identity without live status,
 // mirroring how PoolNotices.OnEvent on a nil receiver is already a no-op.
-func NewSolarRPCHandler(log logr.Logger, registry *energy.Registry, pool *PoolNotices) *SolarRPCHandler {
-	return &SolarRPCHandler{log: log.WithName("SolarRPCHandler"), registry: registry, pool: pool}
+func NewSolarRPCHandler(log logr.Logger, registry *energy.Registry, pool *PoolNotices, reg *myhome.Registry) *SolarRPCHandler {
+	return &SolarRPCHandler{log: log.WithName("SolarRPCHandler"), registry: registry, pool: pool, reg: reg}
 }
 
 // RegisterHandlers registers the solar.claimerslist RPC method.
 func (h *SolarRPCHandler) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.SolarClaimersList, h.handleClaimersList)
+	myhome.Register(h.reg, myhome.SolarClaimersList, h.handleClaimersList)
 	h.log.Info("Solar RPC handler registered")
 }
 
-func (h *SolarRPCHandler) handleClaimersList(ctx context.Context, _ any) (any, error) {
+func (h *SolarRPCHandler) handleClaimersList(ctx context.Context, _ any) (*myhome.SolarClaimersListResult, error) {
 	claimers := h.registry.Snapshot()
 
 	out := make([]myhome.SolarClaimer, 0, len(claimers))

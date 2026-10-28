@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/myhome/mqtt"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
 
 	"github.com/go-logr/logr"
 )
@@ -17,6 +18,7 @@ import (
 type Service struct {
 	mu                 sync.RWMutex
 	log                logr.Logger
+	registry           *myhome.Registry                                                                 // RPC method registry this service registers its handlers on
 	mqttClient         mqtt.Client                                                                      // MyHome MQTT client for publishing updates
 	storage            *Storage                                                                         // Persistent storage
 	rooms              map[string]*RoomConfig                                                           // room-id -> config
@@ -53,9 +55,10 @@ type TimeRange struct {
 }
 
 // NewService creates a new temperature service (RPC-only)
-func NewService(ctx context.Context, log logr.Logger, mqttClient mqtt.Client, storage *Storage) *Service {
+func NewService(ctx context.Context, log logr.Logger, registry *myhome.Registry, mqttClient mqtt.Client, storage *Storage) *Service {
 	s := &Service{
 		log:             log.WithName("temperature.Service"),
+		registry:        registry,
 		mqttClient:      mqttClient,
 		storage:         storage,
 		rooms:           make(map[string]*RoomConfig),
@@ -76,45 +79,23 @@ func NewService(ctx context.Context, log logr.Logger, mqttClient mqtt.Client, st
 
 // RegisterHandlers registers all temperature RPC method handlers
 func (s *Service) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.TemperatureGet, func(ctx context.Context, params any) (any, error) {
-		return s.HandleGet(ctx, params.(*myhome.TemperatureGetParams))
-	})
-	myhome.RegisterMethodHandler(myhome.TemperatureSet, func(ctx context.Context, params any) (any, error) {
-		return s.HandleSet(ctx, params.(*myhome.TemperatureSetParams))
-	})
-	myhome.RegisterMethodHandler(myhome.TemperatureList, func(ctx context.Context, params any) (any, error) {
+	myhome.Register(s.registry, myhome.TemperatureGet, s.HandleGet)
+	myhome.Register(s.registry, myhome.TemperatureSet, s.HandleSet)
+	myhome.Register(s.registry, myhome.TemperatureList, func(ctx context.Context, _ any) (*myhome.TemperatureRoomList, error) {
 		return s.HandleList(ctx)
 	})
-	myhome.RegisterMethodHandler(myhome.TemperatureDelete, func(ctx context.Context, params any) (any, error) {
-		return s.HandleDelete(ctx, params.(*myhome.TemperatureDeleteParams))
-	})
-	myhome.RegisterMethodHandler(myhome.TemperatureGetSchedule, func(ctx context.Context, params any) (any, error) {
-		return s.HandleGetSchedule(ctx, params.(*myhome.TemperatureGetScheduleParams))
-	})
-	myhome.RegisterMethodHandler(myhome.TemperatureGetWeekdayDefaults, func(ctx context.Context, params any) (any, error) {
-		return s.HandleGetWeekdayDefaults(ctx, params.(*myhome.TemperatureGetWeekdayDefaultsParams))
-	})
-	myhome.RegisterMethodHandler(myhome.TemperatureSetWeekdayDefault, func(ctx context.Context, params any) (any, error) {
-		return s.HandleSetWeekdayDefault(ctx, params.(*myhome.TemperatureSetWeekdayDefaultParams))
-	})
-	myhome.RegisterMethodHandler(myhome.TemperatureGetKindSchedules, func(ctx context.Context, params any) (any, error) {
-		return s.HandleGetKindSchedules(ctx, params.(*myhome.TemperatureGetKindSchedulesParams))
-	})
-	myhome.RegisterMethodHandler(myhome.TemperatureSetKindSchedule, func(ctx context.Context, params any) (any, error) {
-		return s.HandleSetKindSchedule(ctx, params.(*myhome.TemperatureSetKindScheduleParams))
-	})
-	myhome.RegisterMethodHandler(myhome.RoomList, func(ctx context.Context, params any) (any, error) {
+	myhome.Register(s.registry, myhome.TemperatureDelete, s.HandleDelete)
+	myhome.Register(s.registry, myhome.TemperatureGetSchedule, s.HandleGetSchedule)
+	myhome.Register(s.registry, myhome.TemperatureGetWeekdayDefaults, s.HandleGetWeekdayDefaults)
+	myhome.Register(s.registry, myhome.TemperatureSetWeekdayDefault, s.HandleSetWeekdayDefault)
+	myhome.Register(s.registry, myhome.TemperatureGetKindSchedules, s.HandleGetKindSchedules)
+	myhome.Register(s.registry, myhome.TemperatureSetKindSchedule, s.HandleSetKindSchedule)
+	myhome.Register(s.registry, myhome.RoomList, func(ctx context.Context, _ any) (*myhome.RoomListResult, error) {
 		return s.HandleRoomList(ctx)
 	})
-	myhome.RegisterMethodHandler(myhome.RoomCreate, func(ctx context.Context, params any) (any, error) {
-		return s.HandleRoomCreate(ctx, params.(*myhome.RoomCreateParams))
-	})
-	myhome.RegisterMethodHandler(myhome.RoomEdit, func(ctx context.Context, params any) (any, error) {
-		return s.HandleRoomEdit(ctx, params.(*myhome.RoomEditParams))
-	})
-	myhome.RegisterMethodHandler(myhome.RoomDelete, func(ctx context.Context, params any) (any, error) {
-		return s.HandleRoomDelete(ctx, params.(*myhome.RoomDeleteParams))
-	})
+	myhome.Register(s.registry, myhome.RoomCreate, s.HandleRoomCreate)
+	myhome.Register(s.registry, myhome.RoomEdit, s.HandleRoomEdit)
+	myhome.Register(s.registry, myhome.RoomDelete, s.HandleRoomDelete)
 }
 
 // loadFromStorage loads all data from persistent storage into memory

@@ -9,9 +9,10 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"strconv"
 	"time"
+
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
 )
@@ -101,7 +102,9 @@ func (ch *HttpChannel) getE(ctx context.Context, host string, cmd string, params
 			if err != nil {
 				return nil, err
 			}
-			json.Unmarshal(b, &qp)
+			if err := json.Unmarshal(b, &qp); err != nil {
+				return nil, err
+			}
 		}
 		for key, value := range qp {
 			s, err := json.Marshal(value)

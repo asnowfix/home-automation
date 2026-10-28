@@ -3,6 +3,7 @@ package fetchproxy
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -145,7 +146,7 @@ func (s *Storage) List() ([]Subscription, error) {
 func (s *Storage) Get(deviceID, name string) (*Subscription, error) {
 	var r subscriptionRow
 	err := s.db.Get(&r, `SELECT * FROM fetch_subscriptions WHERE device_id = ? AND name = ?`, deviceID, name)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("fetch subscription not found: %s/%s", deviceID, name)
 	}
 	if err != nil {

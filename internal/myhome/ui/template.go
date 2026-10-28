@@ -5,14 +5,15 @@ import (
 	"embed"
 	"io"
 	"io/fs"
+	"net/http"
+	"strings"
+	"text/template"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 	sswitchsvc "github.com/asnowfix/home-automation/internal/myhome/shelly/sswitch"
-	"net/http"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	pkgshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
-	"strings"
-	"text/template"
 
 	"github.com/asnowfix/home-automation/internal/global"
 
@@ -61,18 +62,18 @@ type DeviceView struct {
 	HasWebUI             bool                            `json:"has_web_ui"` // true if the device exposes an HTTP web UI at all (excludes BLU); reachability itself is resolved live when the link is opened, see internal/myhome/proxy
 	IsRefreshable        bool                            `json:"is_refreshable"`
 	HasHeaterScript      bool                            `json:"has_heater_script"`
-	HasDoorSensor        bool                            `json:"has_door_sensor"`        // true if device has door/window sensing capability
-	HasTemperatureSensor bool                            `json:"has_temperature_sensor"` // true if device has temperature sensing capability
-	HasHumiditySensor    bool                            `json:"has_humidity_sensor"`    // true if device has humidity sensing capability
-	DeviceTypeEmoji      string                          `json:"device_type_emoji"`      // Emoji indicating device type (e.g., 🌡️ for thermometer, 🚶 for motion)
-	Temperature          *float64                        `json:"temperature,omitempty"`  // Current temperature in Celsius (nil if not a thermometer)
-	Humidity             *float64                        `json:"humidity,omitempty"`     // Current humidity in percentage (nil if not a humidity sensor)
-	DoorOpened           *bool                           `json:"door_opened,omitempty"`  // true if door/window is open, false if closed (nil if not a door/window sensor)
-	Switches             map[int]pkgshelly.SwitchSummary `json:"switches,omitempty"`     // Switches on the device (nil if not a switch)
-	IsPoolPump           bool                            `json:"is_pool_pump,omitempty"`           // true if this is the configured pool pump device
-	TurnoverAchieved     *float64                        `json:"turnover_achieved,omitempty"`      // pool volumes filtered today so far (nil unless IsPoolPump)
-	TurnoverTarget       *float64                        `json:"turnover_target,omitempty"`        // configured daily turnover target, times/day (nil unless IsPoolPump)
-	WaterSupplyActive    *bool                           `json:"water_supply_active,omitempty"`    // true = water-supply protection engaged, pump paused (nil unless IsPoolPump)
+	HasDoorSensor        bool                            `json:"has_door_sensor"`               // true if device has door/window sensing capability
+	HasTemperatureSensor bool                            `json:"has_temperature_sensor"`        // true if device has temperature sensing capability
+	HasHumiditySensor    bool                            `json:"has_humidity_sensor"`           // true if device has humidity sensing capability
+	DeviceTypeEmoji      string                          `json:"device_type_emoji"`             // Emoji indicating device type (e.g., 🌡️ for thermometer, 🚶 for motion)
+	Temperature          *float64                        `json:"temperature,omitempty"`         // Current temperature in Celsius (nil if not a thermometer)
+	Humidity             *float64                        `json:"humidity,omitempty"`            // Current humidity in percentage (nil if not a humidity sensor)
+	DoorOpened           *bool                           `json:"door_opened,omitempty"`         // true if door/window is open, false if closed (nil if not a door/window sensor)
+	Switches             map[int]pkgshelly.SwitchSummary `json:"switches,omitempty"`            // Switches on the device (nil if not a switch)
+	IsPoolPump           bool                            `json:"is_pool_pump,omitempty"`        // true if this is the configured pool pump device
+	TurnoverAchieved     *float64                        `json:"turnover_achieved,omitempty"`   // pool volumes filtered today so far (nil unless IsPoolPump)
+	TurnoverTarget       *float64                        `json:"turnover_target,omitempty"`     // configured daily turnover target, times/day (nil unless IsPoolPump)
+	WaterSupplyActive    *bool                           `json:"water_supply_active,omitempty"` // true = water-supply protection engaged, pump paused (nil unless IsPoolPump)
 }
 
 // applyPoolStatus enriches views in place with the configured pool device's
@@ -81,12 +82,12 @@ type DeviceView struct {
 // is exactly one configured pool device system-wide, so doing this inside
 // DeviceToView itself would trigger a redundant KVS/MQTT round trip for
 // every other device on each dashboard refresh.
-func applyPoolStatus(ctx context.Context, views []DeviceView) {
-	mh, err := myhome.Methods(myhome.PoolGetStatus)
+func applyPoolStatus(ctx context.Context, registry *myhome.Registry, views []DeviceView) {
+	mh, err := registry.Methods(myhome.PoolGetStatus)
 	if err != nil {
 		return // pool RPC not registered (pool tracking disabled)
 	}
-	res, err := mh.ActionE(ctx, nil)
+	res, err := mh.Call(ctx, nil)
 	if err != nil {
 		return // device unreachable / KVS misconfigured — leave fields blank
 	}

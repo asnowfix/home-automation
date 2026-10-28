@@ -231,7 +231,7 @@ func queryBox(ip net.IP, method string, params *map[string]string) (any, error) 
 func getXML(url string) ([]byte, error) {
 	resp, err := sfrHTTPClient.Get(url)
 	if err != nil {
-		return []byte{}, fmt.Errorf("GET error: %v", err)
+		return []byte{}, fmt.Errorf("GET error: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -241,7 +241,7 @@ func getXML(url string) ([]byte, error) {
 
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return []byte{}, fmt.Errorf("read body: %v", err)
+		return []byte{}, fmt.Errorf("read body: %w", err)
 	}
 
 	return data, nil

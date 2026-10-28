@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/asnowfix/home-automation/hlog"
 	"github.com/go-logr/logr"
 )
 
@@ -109,9 +108,12 @@ type Client struct {
 }
 
 // NewClient returns a new Beem API client using the supplied configuration.
+// log receives client activity; pass logr.Discard() for no logging. Taking
+// the logger as a parameter (instead of a package-level logging singleton)
+// keeps this package free of any dependency on the app module.
 // Endpoint URLs left empty in cfg are resolved to the public Beem endpoints
 // here, once, so request paths never consult mutable shared state.
-func NewClient(cfg ClientConfig) *Client {
+func NewClient(cfg ClientConfig, log logr.Logger) *Client {
 	if cfg.LoginURL == "" {
 		cfg.LoginURL = defaultLoginURL
 	}
@@ -123,7 +125,7 @@ func NewClient(cfg ClientConfig) *Client {
 	}
 	return &Client{
 		cfg: cfg,
-		log: hlog.GetLogger("pkg/beem"),
+		log: log,
 	}
 }
 

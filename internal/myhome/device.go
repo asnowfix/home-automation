@@ -3,8 +3,9 @@ package myhome
 import (
 	"context"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome/sfr"
 	"net"
+
+	"github.com/asnowfix/home-automation/internal/myhome/sfr"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
@@ -146,7 +147,7 @@ func NewDeviceFromImpl(ctx context.Context, log logr.Logger, device devices.Devi
 func (d *Device) Refresh(ctx context.Context) (bool, error) {
 	d.log.Info("Refreshing device", "id", d.Id(), "name", d.Name())
 
-	var modified bool = false
+	var modified bool
 	var err error
 
 	switch d.Manufacturer() {
@@ -154,14 +155,10 @@ func (d *Device) Refresh(ctx context.Context) (bool, error) {
 		sd, ok := d.Impl().(*shellyapi.Device)
 		if !ok || sd == nil {
 			var err error
-			device, err := shellyapi.NewDeviceFromSummary(ctx, d.log, d)
+			sd, err = shellyapi.NewDeviceFromSummary(ctx, d.log, d)
 			if err != nil {
 				d.log.Error(err, "Failed to create device from summary", "device", d.DeviceSummary)
 				return false, err
-			}
-			sd, ok = device.(*shellyapi.Device)
-			if !ok {
-				return false, fmt.Errorf("device is not a Shelly device: %T", device)
 			}
 			d.WithImpl(sd)
 		}

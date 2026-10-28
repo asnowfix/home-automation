@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/typestest"
 	"github.com/go-logr/logr"
 )
 
@@ -24,7 +25,7 @@ func resetKvsCache() {
 
 func TestGetValueCachesResult(t *testing.T) {
 	resetKvsCache()
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.IdValue = "device-cache-1"
 	d.SetResult(string(Get), &GetResponse{Value: "17"})
 
@@ -48,7 +49,7 @@ func TestGetValueCachesResult(t *testing.T) {
 
 func TestSetKeyValueInvalidatesCache(t *testing.T) {
 	resetKvsCache()
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.IdValue = "device-cache-2"
 	d.SetResult(string(Get), &GetResponse{Value: "17"})
 
@@ -76,7 +77,7 @@ func TestSetKeyValueInvalidatesCache(t *testing.T) {
 
 func TestObserveRevisionSelfWriteDoesNotWipeOtherKeys(t *testing.T) {
 	resetKvsCache()
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.IdValue = "device-cache-3"
 
 	// Prime two cached keys.
@@ -109,7 +110,7 @@ func TestObserveRevisionSelfWriteDoesNotWipeOtherKeys(t *testing.T) {
 
 func TestObserveRevisionExternalChangeWipesDevice(t *testing.T) {
 	resetKvsCache()
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.IdValue = "device-cache-4"
 
 	d.SetResult(string(Get), &GetResponse{Value: "a-1"})

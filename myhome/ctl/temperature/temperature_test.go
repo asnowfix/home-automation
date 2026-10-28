@@ -9,22 +9,24 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome"
 )
 
-// withFakeClient installs a FakeClient as myhome.TheClient for the duration
-// of the test and restores the previous value on cleanup. myhome.TheClient
-// is a package-level global shared across the whole test binary, so tests
-// using it must not run in parallel.
+// withFakeClient returns a FakeClient for the test to configure and inject
+// into a command's context via fakeClientContext before calling its RunE.
+// Unlike the former myhome.TheClient package-level global, this carries no
+// shared state between tests, so callers are free to run in parallel.
 func withFakeClient(t *testing.T) *myhome.FakeClient {
 	t.Helper()
-	prev := myhome.TheClient
-	fake := myhome.NewFakeClient()
-	myhome.TheClient = fake
-	t.Cleanup(func() {
-		myhome.TheClient = prev
-	})
-	return fake
+	return myhome.NewFakeClient()
 }
 
-// --- CLI-level tests: client injection via myhome.TheClient / FakeClient ---
+// fakeClientContext returns a context.Background() carrying fake as the RPC
+// client, the same way ctl.go's PersistentPreRunE carries the real client —
+// see myhome.NewContextWithClient. Tests pass this to cmd.SetContext before
+// invoking RunE directly.
+func fakeClientContext(fake *myhome.FakeClient) context.Context {
+	return myhome.NewContextWithClient(context.Background(), fake)
+}
+
+// --- CLI-level tests: client injection via context + FakeClient ---
 
 func TestGetCmd_HappyPath(t *testing.T) {
 	fake := withFakeClient(t)
@@ -35,7 +37,7 @@ func TestGetCmd_HappyPath(t *testing.T) {
 		Levels: map[string]float64{"eco": 17},
 	})
 
-	getCmd.SetContext(context.Background())
+	getCmd.SetContext(fakeClientContext(fake))
 	err := getCmd.RunE(getCmd, []string{"salon"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -61,7 +63,7 @@ func TestGetCmd_PropagatesClientError(t *testing.T) {
 	wantErr := errors.New("device unreachable")
 	fake.SetError(myhome.TemperatureGet, wantErr)
 
-	getCmd.SetContext(context.Background())
+	getCmd.SetContext(fakeClientContext(fake))
 	err := getCmd.RunE(getCmd, []string{"salon"})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected error %v, got %v", wantErr, err)
@@ -72,7 +74,7 @@ func TestGetCmd_UnexpectedResultType(t *testing.T) {
 	fake := withFakeClient(t)
 	fake.SetResult(myhome.TemperatureGet, "not-a-config")
 
-	getCmd.SetContext(context.Background())
+	getCmd.SetContext(fakeClientContext(fake))
 	err := getCmd.RunE(getCmd, []string{"salon"})
 	if err == nil {
 		t.Fatal("expected an error for unexpected result type, got nil")
@@ -86,7 +88,7 @@ func TestListCmd_HappyPath(t *testing.T) {
 	}
 	fake.SetResult(myhome.TemperatureList, &rooms)
 
-	listCmd.SetContext(context.Background())
+	listCmd.SetContext(fakeClientContext(fake))
 	err := listCmd.RunE(listCmd, []string{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -101,7 +103,7 @@ func TestListCmd_Empty(t *testing.T) {
 	empty := myhome.TemperatureRoomList{}
 	fake.SetResult(myhome.TemperatureList, &empty)
 
-	listCmd.SetContext(context.Background())
+	listCmd.SetContext(fakeClientContext(fake))
 	if err := listCmd.RunE(listCmd, []string{}); err != nil {
 		t.Fatalf("unexpected error on empty list: %v", err)
 	}
@@ -111,7 +113,7 @@ func TestDeleteCmd_HappyPath(t *testing.T) {
 	fake := withFakeClient(t)
 	fake.SetResult(myhome.TemperatureDelete, &myhome.TemperatureDeleteResult{RoomID: "salon", Status: "deleted"})
 
-	deleteCmd.SetContext(context.Background())
+	deleteCmd.SetContext(fakeClientContext(fake))
 	err := deleteCmd.RunE(deleteCmd, []string{"salon"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

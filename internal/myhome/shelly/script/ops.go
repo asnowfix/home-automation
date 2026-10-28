@@ -6,12 +6,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
-	"github.com/asnowfix/home-automation/pkg/shelly/script"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"path/filepath"
 	"time"
 
+	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	"github.com/asnowfix/home-automation/pkg/shelly/script"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/go-logr/logr"
 )
 

@@ -18,7 +18,7 @@ func Register(log logr.Logger, f ListDevicesFunc) {
 
 func List(log logr.Logger) ([]Host, error) {
 	var err error
-	var all []Host = make([]Host, 0)
+	var all = make([]Host, 0)
 	for _, ld := range listDevicesFuncs {
 		h, err := ld()
 		if err == nil {

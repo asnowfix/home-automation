@@ -29,31 +29,33 @@ type Cache interface {
 // clientContextKey is the unexported type used to store a Client in a
 // context.Context via NewContextWithClient/GetClient.
 //
-// This replaces the former SetClient/GetClient/ResetClient trio: a
+// This replaces the former SetClient/GetClient/ResetClient trio, a
 // package-level mutable Client + sync.RWMutex + a "clientSet" channel that
-// GetClient blocked on until SetClient closed it, plus a ResetClient escape
-// hatch that existed purely so tests could reuse the package between runs,
-// and a SetClient that panicked on a second call with a different value
-// ("BUG: MQTT client already set with different value").
+// GetClient blocked on until SetClient closed it — plus a ResetClient
+// escape hatch that existed purely so tests could reuse the package between
+// runs, and a SetClient that panicked on a second call with a different
+// value ("BUG: MQTT client already set with different value").
 //
-// The composition root (myhome/ctl.Cmd's PersistentPreRunE, or
-// myhome/daemon.daemon.Run) calls NewContextWithClient once, right after
-// obtaining its Client, and uses that wrapped ctx for everything
-// downstream — the same pattern internal/myhome.NewContextWithClient uses
-// for the RPC client (#362) — so there is no start-up race between "client
-// not set yet" and "first GetClient call" for GetClient to block on: by
-// construction, the value is already present on any ctx a caller could have
-// gotten from that root.
+// Init(log, registrar, mc, timeout) is called exactly once per process, at
+// a composition root (myhome/ctl.Cmd's PersistentPreRunE or
+// myhome/daemon.daemon.Run), before any request-serving goroutine starts.
+// The composition root wraps its own root ctx with the client right after
+// calling Init and uses that wrapped ctx for everything downstream — the
+// same pattern internal/myhome.NewContextWithClient uses for the RPC
+// client (see #362) — so there is no start-up race between "client not set
+// yet" and "first GetClient call" for GetClient to block on: by
+// construction, the value is already present on any ctx a caller could
+// have gotten from that root.
 type clientContextKey struct{}
 
 // NewContextWithClient returns a copy of ctx carrying c as the Shelly MQTT
-// client. Called once, at a composition root.
+// client. Called once, at a composition root, right after Init.
 func NewContextWithClient(ctx context.Context, c Client) context.Context {
 	return context.WithValue(ctx, clientContextKey{}, c)
 }
 
 // GetClient returns the Client stored by NewContextWithClient, or nil if
-// ctx doesn't carry one (e.g. a composition root never wrapped its ctx).
+// ctx doesn't carry one (e.g. a composition root never ran Init).
 func GetClient(ctx context.Context) Client {
 	c, _ := ctx.Value(clientContextKey{}).(Client)
 	return c

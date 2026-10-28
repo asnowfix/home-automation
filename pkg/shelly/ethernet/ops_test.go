@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/typestest"
 )
 
 func TestGetConfig(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		want := &Config{Enable: true, Ip: "192.168.1.20"}
 		d.SetResult(getConfig.String(), want)
 
@@ -24,7 +25,7 @@ func TestGetConfig(t *testing.T) {
 	})
 
 	t.Run("device error propagates", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		wantErr := errors.New("eth config unavailable")
 		d.SetError(getConfig.String(), wantErr)
 
@@ -36,7 +37,7 @@ func TestGetConfig(t *testing.T) {
 }
 
 func TestSetConfig(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	d.SetResult(setConfig.String(), &SetConfigResponse{Success: true})
 
 	err := SetConfig(context.Background(), d, types.ChannelDefault, &Config{Enable: true})
@@ -49,7 +50,7 @@ func TestSetConfig(t *testing.T) {
 }
 
 func TestSetConfig_DeviceError(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	wantErr := errors.New("eth set config failed")
 	d.SetError(setConfig.String(), wantErr)
 
@@ -60,7 +61,7 @@ func TestSetConfig_DeviceError(t *testing.T) {
 }
 
 func TestGetStatus(t *testing.T) {
-	d := types.NewFakeDevice()
+	d := typestest.NewFakeDevice()
 	want := &Status{IP: "192.168.1.20"}
 	d.SetResult(getStatus.String(), want)
 
@@ -75,7 +76,7 @@ func TestGetStatus(t *testing.T) {
 
 func TestDoGetStatus(t *testing.T) {
 	t.Run("happy path", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		want := &Status{IP: "192.168.1.20"}
 		d.SetResult(getStatus.String(), want)
 
@@ -89,7 +90,7 @@ func TestDoGetStatus(t *testing.T) {
 	})
 
 	t.Run("device error propagates", func(t *testing.T) {
-		d := types.NewFakeDevice()
+		d := typestest.NewFakeDevice()
 		wantErr := errors.New("eth status unavailable")
 		d.SetError(getStatus.String(), wantErr)
 

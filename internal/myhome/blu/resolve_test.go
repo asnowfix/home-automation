@@ -32,19 +32,19 @@ func TestMacFromBluDeviceID(t *testing.T) {
 			want:     "aa:bb:cc:11:22:33",
 		},
 		{
-			name:    "non-BLU Shelly device",
+			name:     "non-BLU Shelly device",
 			deviceID: "shellypm-aabbcc112233",
-			wantErr: true,
+			wantErr:  true,
 		},
 		{
-			name:    "shelly pro2",
+			name:     "shelly pro2",
 			deviceID: "shellypro2-2cbcbb9fb834",
-			wantErr: true,
+			wantErr:  true,
 		},
 		{
-			name:    "truncated MAC in device ID",
+			name:     "truncated MAC in device ID",
 			deviceID: "shellyblumotion1-e8e07e",
-			wantErr: true,
+			wantErr:  true,
 		},
 	}
 
@@ -69,9 +69,9 @@ func TestIsValidMac(t *testing.T) {
 		{"e8:e0:7e:a6:0c:6f", true},
 		{"b0:c7:de:11:58:d5", true},
 		{"aa:bb:cc:11:22:33", true},
-		{"e8e07ea60c6f", false},    // no colons
+		{"e8e07ea60c6f", false},      // no colons
 		{"e8-e0-7e-a6-0c-6f", false}, // dashes
-		{"e8:e0:7e:a6:0c", false},  // too short
+		{"e8:e0:7e:a6:0c", false},    // too short
 		{"", false},
 	}
 

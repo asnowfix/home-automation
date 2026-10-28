@@ -18,10 +18,10 @@ import (
 // fakePahoToken is a pre-completed Token for use in tests.
 type fakePahoToken struct{}
 
-func (t *fakePahoToken) Wait() bool                        { return true }
-func (t *fakePahoToken) WaitTimeout(time.Duration) bool    { return true }
-func (t *fakePahoToken) Done() <-chan struct{}              { ch := make(chan struct{}); close(ch); return ch }
-func (t *fakePahoToken) Error() error                      { return nil }
+func (t *fakePahoToken) Wait() bool                     { return true }
+func (t *fakePahoToken) WaitTimeout(time.Duration) bool { return true }
+func (t *fakePahoToken) Done() <-chan struct{}          { ch := make(chan struct{}); close(ch); return ch }
+func (t *fakePahoToken) Error() error                   { return nil }
 
 // fakePahoClient implements pahomqtt.Client for unit tests.
 // It always reports as connected and silently accepts subscribe/publish calls.
@@ -32,15 +32,17 @@ type fakePahoClient struct {
 	mu             sync.Mutex
 	failSubscribes int // next N Subscribe calls fail with a token error
 	subscribed     []string
-	unsubscribed []string
-	handlers     map[string]pahomqtt.MessageHandler
+	unsubscribed   []string
+	handlers       map[string]pahomqtt.MessageHandler
 }
 
-func (f *fakePahoClient) IsConnected() bool                                                  { return true }
-func (f *fakePahoClient) IsConnectionOpen() bool                                             { return true }
-func (f *fakePahoClient) Connect() pahomqtt.Token                                            { return &fakePahoToken{} }
-func (f *fakePahoClient) Disconnect(uint)                                                    {}
-func (f *fakePahoClient) Publish(string, byte, bool, interface{}) pahomqtt.Token             { return &fakePahoToken{} }
+func (f *fakePahoClient) IsConnected() bool       { return true }
+func (f *fakePahoClient) IsConnectionOpen() bool  { return true }
+func (f *fakePahoClient) Connect() pahomqtt.Token { return &fakePahoToken{} }
+func (f *fakePahoClient) Disconnect(uint)         {}
+func (f *fakePahoClient) Publish(string, byte, bool, interface{}) pahomqtt.Token {
+	return &fakePahoToken{}
+}
 func (f *fakePahoClient) Subscribe(topic string, _ byte, h pahomqtt.MessageHandler) pahomqtt.Token {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -83,8 +85,10 @@ func (f *fakePahoClient) handler(topic string) pahomqtt.MessageHandler {
 	defer f.mu.Unlock()
 	return f.handlers[topic]
 }
-func (f *fakePahoClient) AddRoute(string, pahomqtt.MessageHandler)               {}
-func (f *fakePahoClient) OptionsReader() pahomqtt.ClientOptionsReader            { return pahomqtt.ClientOptionsReader{} }
+func (f *fakePahoClient) AddRoute(string, pahomqtt.MessageHandler) {}
+func (f *fakePahoClient) OptionsReader() pahomqtt.ClientOptionsReader {
+	return pahomqtt.ClientOptionsReader{}
+}
 
 // newTestClient creates a client wired up with the fakePahoClient for unit tests.
 func newTestClient(t *testing.T) *client {
@@ -226,6 +230,7 @@ func ExampleClient_autoConnect_lazyStart() {
 	// Create context with logger
 	ctx := context.Background()
 	ctx = logr.NewContext(ctx, logr.Discard())
+	_ = ctx // consumed by the commented-out client calls below
 
 	// For CLI commands, NewClientE is called with lazyStart=true
 	// err := NewClientE(ctx, "mqtt://localhost:1883", "cli", 5*time.Second, 5*time.Second, 1*time.Second, 0, true)
@@ -248,6 +253,7 @@ func ExampleClient_autoConnect_noLazyStart() {
 	// Create context with logger
 	ctx := context.Background()
 	ctx = logr.NewContext(ctx, logr.Discard())
+	_ = ctx // consumed by the commented-out client calls below
 
 	// For daemon, NewClientE is called with lazyStart=false
 	// err := NewClientE(ctx, "mqtt://localhost:1883", "daemon", 5*time.Second, 5*time.Second, 1*time.Second, 2*time.Hour, false)
@@ -448,7 +454,7 @@ func TestResolveDeviceHost_NonLoopback(t *testing.T) {
 		{"192.168.1.2"},
 		{"10.0.0.1"},
 		{"mqtt.local"},
-		{"::1"},  // IPv6 loopback — handled below, included for clarity
+		{"::1"}, // IPv6 loopback — handled below, included for clarity
 		{"2001:db8::1"},
 	}
 
@@ -530,10 +536,10 @@ func (f *failingPahoClient) Subscribe(topic string, qos byte, handler pahomqtt.M
 
 type failingToken struct{ err error }
 
-func (t *failingToken) Wait() bool                      { return true }
-func (t *failingToken) WaitTimeout(time.Duration) bool  { return true }
-func (t *failingToken) Done() <-chan struct{}             { ch := make(chan struct{}); close(ch); return ch }
-func (t *failingToken) Error() error                     { return t.err }
+func (t *failingToken) Wait() bool                     { return true }
+func (t *failingToken) WaitTimeout(time.Duration) bool { return true }
+func (t *failingToken) Done() <-chan struct{}          { ch := make(chan struct{}); close(ch); return ch }
+func (t *failingToken) Error() error                   { return t.err }
 
 // TestReconnect_FailedSubscriptionQueuedForRetry verifies that when a subscription
 // fails during periodic reconnection it is added to pendingSubscriptions so the

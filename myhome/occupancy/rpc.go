@@ -2,34 +2,37 @@ package occupancy
 
 import (
 	"context"
-	"github.com/asnowfix/home-automation/internal/myhome"
 	"time"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/go-logr/logr"
 )
 
 // RPCHandler handles occupancy RPC methods
 type RPCHandler struct {
-	service *Service
-	log     logr.Logger
+	service  *Service
+	log      logr.Logger
+	registry *myhome.Registry
 }
 
 // NewRPCHandler creates an occupancy RPC handler
-func NewRPCHandler(log logr.Logger, service *Service) *RPCHandler {
+func NewRPCHandler(log logr.Logger, service *Service, registry *myhome.Registry) *RPCHandler {
 	return &RPCHandler{
-		service: service,
-		log:     log.WithName("occupancy.rpc"),
+		service:  service,
+		log:      log.WithName("occupancy.rpc"),
+		registry: registry,
 	}
 }
 
 // RegisterHandlers registers occupancy RPC methods
 func (h *RPCHandler) RegisterHandlers() {
-	myhome.RegisterMethodHandler(myhome.OccupancyGetStatus, h.handleGetStatus)
+	myhome.Register(h.registry, myhome.OccupancyGetStatus, h.handleGetStatus)
 	h.log.Info("Occupancy RPC handler registered")
 }
 
 // handleGetStatus returns the current occupancy status
-func (h *RPCHandler) handleGetStatus(ctx context.Context, params any) (any, error) {
+func (h *RPCHandler) handleGetStatus(ctx context.Context, params any) (*myhome.OccupancyStatusResult, error) {
 	// Get occupancy status using the service's IsOccupied method
 	occupied := h.service.IsOccupied(ctx)
 

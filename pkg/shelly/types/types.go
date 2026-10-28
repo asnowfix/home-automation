@@ -143,30 +143,41 @@ const (
 	None
 )
 
+// apiNames maps each Api constant to its display name. Unlike a positional
+// array literal, this can't silently desynchronize when a new Api is
+// inserted in the const block above: every entry is keyed by the constant
+// itself, so it tracks wherever that constant's iota value ends up. See
+// TestApiString_AllConstantsNamed, which fails loudly if a constant is added
+// here without a matching entry.
+var apiNames = map[Api]string{
+	Shelly:             "Shelly",
+	Schedule:           "Schedule",
+	Webhook:            "Webhook",
+	HTTP:               "HTTP",
+	KVS:                "KVS",
+	System:             "System",
+	WiFi:               "WiFi",
+	Ethernet:           "Ethernet",
+	BluetoothLowEnergy: "BluetoothLowEnergy",
+	Cloud:              "Cloud",
+	Mqtt:               "Mqtt",
+	OutboundWebsocket:  "OutboundWebsocket",
+	Script:             "Script",
+	Input:              "Input",
+	Modbus:             "Modbus",
+	Voltmeter:          "Voltmeter",
+	Cover:              "Cover",
+	Switch:             "Switch",
+	Light:              "Light",
+	DevicePower:        "DevicePower",
+	Humidity:           "Humidity",
+	Temperature:        "Temperature",
+	None:               "None",
+}
+
 func (api Api) String() string {
-	return [...]string{
-		"Shelly",
-		"Schedule",
-		"Webhook",
-		"HTTP",
-		"KVS",
-		"System",
-		"WiFi",
-		"Ethernet",
-		"BluetoothLowEnergy",
-		"Cloud",
-		"Mqtt",
-		"OutboundWebsocket",
-		"Script",
-		"Input",
-		"Modbus",
-		"Voltmeter",
-		"Cover",
-		"Switch",
-		"Light",
-		"DevicePower",
-		"Humidity",
-		"Temperature",
-		"None",
-	}[api]
+	if name, ok := apiNames[api]; ok {
+		return name
+	}
+	return fmt.Sprintf("Api(%d)", uint32(api))
 }

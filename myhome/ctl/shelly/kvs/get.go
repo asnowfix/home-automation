@@ -3,14 +3,14 @@ package kvs
 import (
 	"context"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
@@ -31,12 +31,17 @@ var getCtl = &cobra.Command{
 		if len(args) == 2 {
 			match = args[1]
 		}
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, get, []string{match})
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, get, []string{match})
 		return err
 	},
 }
 
-func get(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func get(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
@@ -46,6 +51,8 @@ func get(ctx context.Context, log logr.Logger, via types.Channel, device devices
 		log.Error(err, "Unable to get many key-values")
 		return nil, err
 	}
-	options.PrintResult(out)
+	if err := options.PrintResult(out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }

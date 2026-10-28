@@ -12,6 +12,7 @@ import (
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/shelly/typestest"
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/testr"
@@ -43,7 +44,7 @@ func TestMqttWatcherStopsOnChannelClose(t *testing.T) {
 	ch := make(chan mqtt.Message)
 	done := make(chan struct{})
 	go func() {
-		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch)
+		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch, "")
 		close(done)
 	}()
 
@@ -72,7 +73,7 @@ func TestMqttWatcherStopsOnContextCancel(t *testing.T) {
 	ch := make(chan mqtt.Message)
 	done := make(chan struct{})
 	go func() {
-		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch)
+		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch, "")
 		close(done)
 	}()
 
@@ -98,7 +99,7 @@ func TestUpdateFromMqttEvent_ExternalKvsWriteInvalidatesCache(t *testing.T) {
 	deviceId := "shellyplus1-08b61fd98f44"
 	d := myhome.NewDevice(log, myhome.SHELLY, deviceId)
 
-	fd := types.NewFakeDevice()
+	fd := typestest.NewFakeDevice()
 	fd.IdValue = deviceId
 	fd.SetResult(string(kvs.Get), &kvs.GetResponse{Value: "true"})
 

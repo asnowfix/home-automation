@@ -44,8 +44,8 @@ func TestCheckSourceLength_TableDriven(t *testing.T) {
 			minifyRequested: false,
 			wantErr:         true,
 			wantContains: []string{
-				"65535",                  // the limit
-				"65536",                  // the actual size
+				"65535", // the limit
+				"65536", // the actual size
 				"--no-minify cannot work",
 			},
 		},

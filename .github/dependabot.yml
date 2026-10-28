@@ -1,7 +1,9 @@
 version: 2
 updates:
-  # go.work workspace root — Dependabot discovers all 59 sub-module go.mod
-  # files listed in go.work from this single entry.
+  # go.work workspace root — Dependabot discovers all 4 module go.mod files
+  # listed in go.work (root, pkg/shelly, pkg/sfr, pkg/beem — see #359) from
+  # this single entry; before the module collapse this same entry covered
+  # ~59 sub-module go.mod files the same way.
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:

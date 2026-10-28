@@ -4,15 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/asnowfix/home-automation/pkg/shelly/wifi"
@@ -29,12 +29,17 @@ var listApClientsCmd = &cobra.Command{
 	Short: "Show Shelly devices WiFi Access Point clients",
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := myhome.Foreach(cmd.Context(), hlog.Logger, args[0], options.Via, oneDeviceListApClients, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), hlog.Logger, client, args[0], options.Via, oneDeviceListApClients, options.Args(args))
 		return err
 	},
 }
 
-func oneDeviceListApClients(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func oneDeviceListApClients(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
@@ -50,9 +55,14 @@ func oneDeviceListApClients(ctx context.Context, log logr.Logger, via types.Chan
 		return nil, fmt.Errorf("invalid WiFi Access Point clients type %T", out)
 	}
 
+	mhClient, err := myhome.ClientFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	clients := make([]wifi.APClient, len(result.APClients))
 	for i, client := range result.APClients {
-		devices, err := myhome.TheClient.LookupDevices(ctx, client.MAC)
+		devices, err := mhClient.LookupDevices(ctx, client.MAC)
 		if err == nil {
 			device := (*devices)[0]
 			client.Name = device.Name()

@@ -2,6 +2,7 @@ package devices
 
 import (
 	"context"
+
 	"github.com/asnowfix/home-automation/internal/myhome"
 )
 

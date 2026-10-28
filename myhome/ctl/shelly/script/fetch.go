@@ -3,16 +3,16 @@ package script
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
-	"os"
-	"path/filepath"
-	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -28,12 +28,17 @@ var fetchCtl = &cobra.Command{
 	Args:  cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := hlog.Logger
-		_, err := myhome.Foreach(cmd.Context(), log, args[0], options.Via, fetchFromOneDevice, options.Args(args))
+		client, err := myhome.ClientFromContext(cmd.Context())
+		if err != nil {
+			return err
+		}
+
+		_, err = myhome.Foreach(cmd.Context(), log, client, args[0], options.Via, fetchFromOneDevice, options.Args(args))
 		return err
 	},
 }
 
-func fetchFromOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
+func fetchFromOneDevice(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
@@ -57,7 +62,7 @@ func fetchFromOneDevice(ctx context.Context, log logr.Logger, via types.Channel,
 	}
 }
 
-func fetchOneScript(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) error {
+func fetchOneScript(ctx context.Context, log logr.Logger, via types.Channel, device shelly.Summary, args []string) error {
 	sd, ok := device.(*shelly.Device)
 	if !ok {
 		return fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
@@ -75,8 +80,12 @@ func fetchOneScript(ctx context.Context, log logr.Logger, via types.Channel, dev
 				return err
 			}
 			// store code string in file by name, in a folder named by the device id
-			os.MkdirAll(sd.Id(), 0755)
-			os.WriteFile(filepath.Join(sd.Id(), args[0]), []byte(code), 0644)
+			if err := os.MkdirAll(sd.Id(), 0755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(sd.Id(), args[0]), []byte(code), 0644); err != nil {
+				return err
+			}
 			return nil
 		}
 	}

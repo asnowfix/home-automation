@@ -503,3 +503,42 @@ HA community threads (dates as stated in §1–§4); packetmischief.ca post (202
 - **Reddit (r/roomba, r/homeassistant) and GitHub issues:** not searched in depth (time budget). The dorita980 and roombapy issue trackers were not read.
 - **Our `pkg/roomba/password.go`:** only the parsing function and its comment were read (lines 22-40). `tls.go` was not read; the CN check is described from vacuum-plan.md.
 - **The 7-byte reply meaning** (§4c): not reconciled.
+
+## Verified on our account, 2026-10-29
+
+Run once, read-only, with `irobot_cloud_rooms.py` (stdlib + requests, flow from tidalf/irbt, country `FR`).
+No retry, nothing written, no credential printed.
+
+| step | result |
+|---|---|
+| `GET disc-prod.iot.irobotapi.com/v1/app/discover?country_code=FR` | 200, has `gigya`, `httpBaseAuth`, `httpBase`, `awsRegion` |
+| Gigya `accounts.login` (us1) | 200, `errorCode` 0 |
+| `POST {httpBase}/v1/login/account` (`assume_robot_ownership: "0"`) | 200, AWS credentials returned |
+| SigV4 `GET {httpBaseAuth}/v1/user/associations/robots` | 200; the account holds exactly our robot |
+| SigV4 `GET .../v1/<blid>/pmaps?activeDetails=1` | 200; **2 maps** |
+
+So the irbt login chain (not dorita980's `/v2/login`) works as of today: **HIGH** for the chain and
+the `pmaps` shape; the discovery path `/v1/app/discover` is the one that answered.
+
+Map `e8EOWqiwQ6e8sGpyYU4C-w` (the one the robot reports locally), name "Rez-de-chaussée": 8 regions in
+`active_pmapv_details.regions[]`, each `{id, name, region_type}`, no `type` field:
+
+| region id | name | region_type |
+|---|---|---|
+| 1 | Salle à manger | dining_room |
+| 8 | Chambre à coucher | bedroom |
+| 16 | Buanderie | laundry_room |
+| 17 | Salle de bains | bathroom |
+| 18 | Couloir | hallway |
+| 19 | Salle de séjour | family_room |
+| 20 | Salon | living_room |
+| 21 | Cuisine | kitchen |
+
+The second map (`Rp-tEHCuQuGwH7cd0jKdnQ`, version 231016T113248) returned no regions.
+
+**Version mismatch, open (MEDIUM concern):** the cloud's `user_pmapv_id` for the first map is
+`251027T114719`, while the robot's own `pmaps` state reports `260829T114918` for the same map id. The
+robot's local value is the newer one. Region ids come from the older cloud version, so they may not
+match the map the robot now uses. Room cleans must send the robot's **local** `user_pmapv_id`. Whether
+the ids are still valid is unverified until a single-room clean is tried (see §5 on the unknown effect of
+a wrong id). Also unverified: that cloud ids equal local ids (irbt's behaviour only suggests it).

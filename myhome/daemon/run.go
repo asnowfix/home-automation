@@ -312,13 +312,16 @@ var runCmd = &cobra.Command{
 }
 
 // readVacuumConfig loads the robot vacuum settings. Viper reads
-// MYHOME_VACUUM_BLID / MYHOME_VACUUM_PASSWORD / MYHOME_VACUUM_HOST from the
-// environment (the packaged daemon's .env) or the config file. Like Beem/SFR,
-// these are never CLI flags, and the password belongs in .env only.
+// MYHOME_VACUUM_BLID / MYHOME_VACUUM_PASSWORD / MYHOME_VACUUM_HOST and the
+// iRobot cloud account MYHOME_IROBOT_EMAIL / MYHOME_IROBOT_PASSWORD (#628) from
+// the environment (the packaged daemon's .env) or the config file. Like
+// Beem/SFR, these are never CLI flags, and the passwords belong in .env only.
 func readVacuumConfig(v *viper.Viper) {
 	options.Flags.VacuumBLID = v.GetString("vacuum.blid")
 	options.Flags.VacuumPassword = v.GetString("vacuum.password")
 	options.Flags.VacuumHost = v.GetString("vacuum.host")
+	options.Flags.IRobotEmail = v.GetString("irobot.email")
+	options.Flags.IRobotPassword = v.GetString("irobot.password")
 }
 
 // vacuumConfig is the vacuum service configuration read by readVacuumConfig.
@@ -327,5 +330,8 @@ func vacuumConfig() vacuum.Config {
 		BLID:     options.Flags.VacuumBLID,
 		Password: options.Flags.VacuumPassword,
 		Host:     options.Flags.VacuumHost,
+
+		IRobotEmail:    options.Flags.IRobotEmail,
+		IRobotPassword: options.Flags.IRobotPassword,
 	}
 }

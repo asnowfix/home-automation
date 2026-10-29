@@ -98,6 +98,8 @@ var Flags struct {
 	VacuumBLID                  string        // robot vacuum id (BLID); from .env, never a flag
 	VacuumPassword              string        // robot vacuum local password; from .env, never a flag
 	VacuumHost                  string        // robot vacuum fixed address; empty = discovery by BLID; never a flag
+	IRobotEmail                 string        // iRobot cloud account email, for room sync (#628); from .env, never a flag
+	IRobotPassword              string        // iRobot cloud account password (#628); from .env, never a flag
 	EnableNoticeService         bool          // whether to enable the notice service (motion rule + daily email digest)
 	NoticeNightStart            string        // "HH:MM" start of the night window used by the motion rule
 	NoticeNightEnd              string        // "HH:MM" end of the night window used by the motion rule

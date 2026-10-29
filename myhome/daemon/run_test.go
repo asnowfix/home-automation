@@ -120,6 +120,41 @@ func TestVacuumConfigFromEnv(t *testing.T) {
 	}
 }
 
+// TestIRobotConfigFromEnv verifies the iRobot cloud account (#628) is read from
+// MYHOME_IROBOT_EMAIL / MYHOME_IROBOT_PASSWORD, independently of the robot's own
+// MYHOME_VACUUM_* credentials, and that room sync is enabled only with both.
+func TestIRobotConfigFromEnv(t *testing.T) {
+	saved := options.Flags
+	t.Cleanup(func() { options.Flags = saved })
+	newViper := func() *viper.Viper {
+		v := viper.New()
+		v.SetEnvPrefix("MYHOME")
+		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+		v.AutomaticEnv()
+		return v
+	}
+	for _, k := range []string{"MYHOME_VACUUM_BLID", "MYHOME_VACUUM_PASSWORD", "MYHOME_VACUUM_HOST"} {
+		t.Setenv(k, "")
+	}
+
+	t.Setenv("MYHOME_IROBOT_EMAIL", "owner@example.com")
+	t.Setenv("MYHOME_IROBOT_PASSWORD", "")
+	readVacuumConfig(newViper())
+	if vacuumConfig().CloudEnabled() {
+		t.Fatal("cloud enabled without MYHOME_IROBOT_PASSWORD")
+	}
+
+	t.Setenv("MYHOME_IROBOT_PASSWORD", "account-password")
+	readVacuumConfig(newViper())
+	cfg := vacuumConfig()
+	if !cfg.CloudEnabled() || cfg.IRobotEmail != "owner@example.com" || cfg.IRobotPassword != "account-password" {
+		t.Fatalf("iRobot account not read from the environment (email=%q)", cfg.IRobotEmail)
+	}
+	if cfg.Enabled() {
+		t.Fatal("the iRobot account alone enabled the robot connection")
+	}
+}
+
 func keys(m map[string]string) []string {
 	out := []string{}
 	for k := range m {

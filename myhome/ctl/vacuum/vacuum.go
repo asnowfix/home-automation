@@ -6,6 +6,7 @@ package vacuum
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -21,7 +22,8 @@ var Cmd = &cobra.Command{
 	Use:   "vacuum",
 	Short: "Control robot vacuums (iRobot Roomba, local LAN protocol)",
 	Long: `Control robot vacuums through the myhome daemon, which talks to each robot
-directly on the LAN (no iRobot cloud).
+directly on the LAN. The iRobot cloud account (MYHOME_IROBOT_*) is used only to
+read the robot's rooms ('vacuum rooms sync').
 
 --robot selects a robot by name or id; it can be omitted (the daemon has one
 configured robot, see MYHOME_VACUUM_* in docs/configuration.md).`,
@@ -40,7 +42,7 @@ func init() {
 	} {
 		Cmd.AddCommand(commandCmd(c.name, c.short))
 	}
-	roomsCmd.AddCommand(roomsNameCmd)
+	roomsCmd.AddCommand(roomsNameCmd, roomsSyncCmd)
 	cleanCmd.Flags().StringSliceVar(&cleanRooms, "room", nil, "room name or region id; repeat for several, cleaned in order")
 }
 
@@ -161,10 +163,16 @@ With --room (repeatable), cleans those rooms in order; see 'vacuum rooms'.`,
 
 var roomsCmd = &cobra.Command{
 	Use:   "rooms",
-	Short: "List the rooms learned from the robot",
-	Long: `Lists the rooms (regions) the robot has used. Rooms are learned automatically
-whenever a room clean is started, including from the iRobot app: start one clean
-of each room from the app once, then name the regions with 'vacuum rooms name'.`,
+	Short: "List the robot's rooms",
+	Long: `Lists the robot's rooms (regions).
+
+Rooms come from the iRobot cloud account when MYHOME_IROBOT_EMAIL and
+MYHOME_IROBOT_PASSWORD are set in the daemon's .env: the daemon fetches them
+once at start, and 'vacuum rooms sync' fetches them again. The cloud is then
+the source of truth for room names.
+
+Without the account, rooms are learned whenever a room clean is started,
+including from the iRobot app, and named with 'vacuum rooms name'.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		out, err := myhome.TheClient.CallE(cmd.Context(), myhome.VacuumRooms, &myhome.VacuumParams{Robot: robotFlag})
@@ -175,30 +183,110 @@ of each room from the app once, then name the regions with 'vacuum rooms name'.`
 		if !ok {
 			return fmt.Errorf("unexpected result type %T", out)
 		}
-		if len(res.Regions) == 0 {
-			fmt.Println("No room learned yet. Start a room clean from the iRobot app once, then run this again.")
-			return nil
-		}
-		fmt.Printf("%-8s %-5s %-20s %s\n", "REGION", "TYPE", "NAME", "MAP")
-		for _, r := range res.Regions {
-			stale := ""
-			if r.Stale {
-				stale = " (stale: map changed)"
-			}
-			name := r.Name
-			if name == "" {
-				name = "-"
-			}
-			fmt.Printf("%-8s %-5s %-20s %s%s\n", r.ID, r.Type, name, r.MapID, stale)
-		}
+		printRooms(os.Stdout, res)
 		return nil
 	},
 }
 
+// printRooms prints vacuum.rooms. Room ids from the cloud are presented as
+// unverified when the cloud's map version differs from the robot's (#628).
+func printRooms(w io.Writer, res *myhome.VacuumRoomsResult) {
+	if len(res.Regions) == 0 {
+		if res.CloudNames {
+			fmt.Fprintln(w, "No room known yet. Run 'myhome ctl vacuum rooms sync' to fetch them from the iRobot cloud.")
+		} else {
+			fmt.Fprintln(w, "No room known yet. Set MYHOME_IROBOT_EMAIL / MYHOME_IROBOT_PASSWORD in the daemon's .env and run")
+			fmt.Fprintln(w, "'myhome ctl vacuum rooms sync', or start a room clean from the iRobot app once.")
+		}
+		return
+	}
+	fmt.Fprintf(w, "%-8s %-5s %-22s %-14s %-6s %s\n", "REGION", "TYPE", "NAME", "KIND", "FROM", "MAP")
+	type mapVersions struct{ cloud, robot string }
+	mismatch := map[string]mapVersions{} // map label -> versions, for cloud rooms only
+	var order []string
+	for _, r := range res.Regions {
+		name, kind := r.Name, r.Kind
+		if name == "" {
+			name = "-"
+		}
+		if kind == "" {
+			kind = "-"
+		}
+		label := r.MapID
+		if r.MapName != "" {
+			label = r.MapName + " (" + r.MapID + ")"
+		}
+		note := ""
+		switch {
+		case r.Stale && r.Source == myhome.VacuumSourceCloud:
+			note = "  [stale: no longer in the iRobot cloud]"
+		case r.Stale:
+			note = "  [stale: map changed]"
+		case r.Unverified:
+			note = "  [unverified]"
+			if _, seen := mismatch[label]; !seen {
+				order = append(order, label)
+			}
+			mismatch[label] = mapVersions{r.MapVersion, r.RobotMapVersion}
+		}
+		fmt.Fprintf(w, "%-8s %-5s %-22s %-14s %-6s %s%s\n", r.ID, r.Type, name, kind, r.Source, label, note)
+	}
+	for _, label := range order {
+		v := mismatch[label]
+		robot := v.robot
+		if robot == "" {
+			robot = "no version yet (not connected?)"
+		}
+		fmt.Fprintf(w, "\nMap %s: ids come from iRobot cloud map version %s; the robot reports %s; unverified.\n", label, v.cloud, robot)
+		fmt.Fprintln(w, "A room clean always sends the robot's own version.")
+	}
+	if res.CloudNames {
+		fmt.Fprintln(w, "\nRoom names come from the iRobot cloud ('vacuum rooms sync' refreshes them).")
+	}
+}
+
+var roomsSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Fetch the robot's rooms from the iRobot cloud account",
+	Long: `Asks the daemon to log in to the iRobot cloud account (MYHOME_IROBOT_EMAIL /
+MYHOME_IROBOT_PASSWORD in its .env) and fetch the robot's maps and rooms.
+
+One login attempt, no retry. Room names from the cloud replace local names; a
+room the cloud no longer lists is marked stale. On any failure the rooms already
+stored are kept. Only plain email+password accounts work (not Google/Apple
+sign-in or two-factor).`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		out, err := myhome.TheClient.CallE(cmd.Context(), myhome.VacuumRoomsSync, &myhome.VacuumParams{Robot: robotFlag})
+		if err != nil {
+			return err
+		}
+		res, ok := out.(*myhome.VacuumRoomsSyncResult)
+		if !ok {
+			return fmt.Errorf("unexpected result type %T", out)
+		}
+		printSync(os.Stdout, res)
+		return nil
+	},
+}
+
+func printSync(w io.Writer, res *myhome.VacuumRoomsSyncResult) {
+	for _, m := range res.Maps {
+		robot := m.RobotVersion
+		if robot == "" {
+			robot = "not reported"
+		}
+		fmt.Fprintf(w, "map %q (%s): %d rooms, cloud version %s, robot version %s\n", m.Name, m.ID, m.Rooms, m.CloudVersion, robot)
+	}
+	fmt.Fprintf(w, "%d added, %d updated, %d now stale. See 'myhome ctl vacuum rooms'.\n", res.Added, res.Updated, res.Stale)
+}
+
 var roomsNameCmd = &cobra.Command{
 	Use:   "name <region-id> <name>",
-	Short: "Name a learned room",
-	Args:  cobra.ExactArgs(2),
+	Short: "Name a room the iRobot cloud did not provide",
+	Long: `Gives a room a local name. When the iRobot account is configured, rooms from
+the cloud cannot be renamed here: their names come from the cloud.`,
+	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := myhome.TheClient.CallE(cmd.Context(), myhome.VacuumRoomName,
 			&myhome.VacuumRoomNameParams{Robot: robotFlag, RegionID: args[0], Name: args[1]})

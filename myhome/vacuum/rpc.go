@@ -222,9 +222,10 @@ func (s *Service) regions(r *robot) ([]myhome.VacuumRegion, error) {
 }
 
 // NameRoom gives a region a local name. When the iRobot account is configured
-// the cloud is the source of truth for names (owner decision, #628: no verified
-// rename API exists), so regions the cloud provided are refused; a sync would
-// overwrite the name anyway.
+// the cloud is the source of truth for names (owner decision, #628: no usable
+// rename API is known for this robot, see docs/irobot-api-verbs.md), so regions
+// the cloud provided are refused; a sync would overwrite the name anyway. This
+// is the policy's code point, with Storage.syncCloud, if a rename API turns up.
 func (s *Service) NameRoom(sel, regionID, name string) (*myhome.VacuumOKResult, error) {
 	r, err := s.pick(sel)
 	if err != nil {

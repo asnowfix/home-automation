@@ -84,10 +84,13 @@ from the account's `GET /v1/<blid>/pmaps?activeDetails=1`. Login chain and evide
 
 - **Names: the cloud is the source of truth** (owner decision 2026-10-29). A sync overwrites local
   names, marks rooms the cloud dropped as stale (`vacuum_regions.removed`), and `rooms name` refuses
-  cloud rooms. Bounded rename-API check: RoombaSharp has a `set_room_metadata` edit, but on the V4
-  `p2maps` API (not the `pmaps` API our i7 answered on) and it creates a new map version, so it was
-  not taken as the "non-destructive rename" that would flip the policy. No write path exists.
-  Details and the open owner choice are on #628.
+  cloud rooms, because **no usable rename API is known for this robot** (see
+  `docs/irobot-api-verbs.md`). The only known rename, `set_room_metadata` on the V4 `p2maps` API
+  (RoombaSharp), does not serve our i7 map: read-only `p2maps` GETs returned HTTP 400
+  `AspenError.MapNotFound`. That is "not found", not "proven absent": the official app can rename,
+  and its call is undocumented. No write path exists. If a usable rename API turns up, the policy
+  flips (local DB becomes the source of truth and names are synced up). The code point is
+  `Service.NameRoom` / `Storage.syncCloud` in `myhome/vacuum`.
 - **Versions: the mismatch is normal.** The cloud keeps the last app-confirmed map version, while the
   robot's moves on after each clean. Rooms store the cloud version for information. A clean always
   sends the robot's live version and is refused if the robot has not reported the map. A cloud room

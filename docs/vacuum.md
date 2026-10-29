@@ -113,8 +113,10 @@ What a sync does:
   the Gigya login, Gigya's `errorCode`), logs a warning, and **keeps the rooms already stored**.
   Each HTTP call has a timeout. The daemon never waits for the cloud to start, and there is no
   periodic sync.
-- **The cloud is the source of truth for room names**, because no verified API to rename a room
-  exists (owner decision, #628). A sync overwrites local names. A room the cloud no longer lists is
+- **The cloud is the source of truth for room names**, because no usable rename API is known for
+  this robot (see [irobot-api-verbs.md](irobot-api-verbs.md); owner decision, #628). That is "not
+  found", not "proven absent": the official app can rename rooms, but its call is undocumented. A
+  sync overwrites local names. A room the cloud no longer lists is
   marked **stale** and refused, not deleted. While the account is configured, `rooms name` refuses
   rooms that came from the cloud ("managed by the iRobot cloud"). Rename them in the app, then sync.
 - It reads nothing else: not the robot's password, not map geometry, not schedules. It writes
@@ -196,6 +198,10 @@ the password.
 ## Developer notes (Edmond)
 
 The robot used during development is a Roomba i7 named **Edmond** (epic #606, PR #622).
+
+- **API reference.** [irobot-api-verbs.md](irobot-api-verbs.md) catalogs the local and cloud verbs
+  and records which ones we verified. [irobot-local-api-research.md](irobot-local-api-research.md)
+  has the sources and confidence levels behind them.
 
 - **Credentials.** Its id and local password are the `MYHOME_VACUUM_BLID` /
   `MYHOME_VACUUM_PASSWORD` lines of the daemon's `.env`: `/var/lib/myhome/.env` on the NAS, and the

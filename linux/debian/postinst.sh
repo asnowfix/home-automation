@@ -44,6 +44,8 @@ _write_env() {
     local vacuum_blid="$9"
     local vacuum_password="${10}"
     local vacuum_host="${11}"
+    local irobot_email="${12}"
+    local irobot_password="${13}"
 
     cat > "$ENV_FILE" <<EOF
 # MyHome credentials — loaded by systemd via EnvironmentFile.
@@ -64,6 +66,10 @@ MYHOME_SMTP_TO=${smtp_to}
 MYHOME_VACUUM_BLID=${vacuum_blid}
 MYHOME_VACUUM_PASSWORD=${vacuum_password}
 MYHOME_VACUUM_HOST=${vacuum_host}
+# iRobot cloud account (optional): used only to fetch the robot's room names and
+# ids (myhome ctl vacuum rooms sync). Plain email+password accounts only.
+MYHOME_IROBOT_EMAIL=${irobot_email}
+MYHOME_IROBOT_PASSWORD=${irobot_password}
 EOF
     chmod 600 "$ENV_FILE"
 }
@@ -172,14 +178,39 @@ if [ -t 0 ] && [ "${DEBIAN_FRONTEND:-}" != "noninteractive" ]; then
         vacuum_host="${vacuum_host:-$cur_vacuum_host}"
     fi
 
+    cur_irobot_email="$(_env_get MYHOME_IROBOT_EMAIL)"
+    cur_irobot_password="$(_env_get MYHOME_IROBOT_PASSWORD)"
+
+    echo ""
+    echo "=== iRobot account (robot vacuum room names) (optional) ==="
+    echo "The email and password of the iRobot app account, used only to fetch the"
+    echo "robot's rooms. Plain email+password accounts only (not Google/Apple sign-in"
+    echo "or two-factor). Leave email blank to disable."
+    echo ""
+
+    read -rp "iRobot account email [${cur_irobot_email}]: " irobot_email
+    irobot_email="${irobot_email:-$cur_irobot_email}"
+
+    irobot_password=""
+    if [ -n "$irobot_email" ]; then
+        if [ -n "$cur_irobot_password" ]; then
+            read -rsp "iRobot account password (blank keeps the current one): " irobot_password
+        else
+            read -rsp "iRobot account password: " irobot_password
+        fi
+        echo ""
+        irobot_password="${irobot_password:-$cur_irobot_password}"
+    fi
+
     _write_env "$beem_email" "$beem_password" "$sfr_username" "$sfr_password" \
         "$smtp_username" "$smtp_password" "$smtp_from" "$smtp_to" \
-        "$vacuum_blid" "$vacuum_password" "$vacuum_host"
+        "$vacuum_blid" "$vacuum_password" "$vacuum_host" \
+        "$irobot_email" "$irobot_password"
     echo "Credentials written to $ENV_FILE"
 else
     # --- Non-interactive path: create skeleton if absent ---
     if [ ! -f "$ENV_FILE" ]; then
-        _write_env "" "" "" "" "" "" "" "" "" "" ""
+        _write_env "" "" "" "" "" "" "" "" "" "" "" "" ""
         echo "Created credential skeleton at $ENV_FILE"
         echo "Run 'dpkg-reconfigure $SERVICE' to configure credentials interactively."
     fi

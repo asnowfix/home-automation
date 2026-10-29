@@ -4,6 +4,10 @@ MyHome controls iRobot Roomba vacuums **directly on the LAN**, with no iRobot cl
 runs its own MQTT broker on port 8883, and the daemon keeps one connection to it. This keeps
 working when the internet is down, and when the iRobot app shows the robot as "offline".
 
+The one optional use of the iRobot cloud is to read the robot's **rooms**: names and ids. The robot
+does not report them locally (see [Rooms](#rooms)). Only that read needs the internet, and control
+never depends on it.
+
 Tested on a Roomba i7 (SKU i715640, firmware `lewis+22.52.10`). Other Wi-Fi Roombas that
 dorita980 supports should work too, but have not been tried. Design and field measurements:
 [vacuum-plan.md](vacuum-plan.md). Epic: #606.
@@ -59,8 +63,9 @@ myhome ctl vacuum status
 myhome ctl vacuum clean                     # whole home
 myhome ctl vacuum clean --room kitchen --room hall   # those rooms, in order
 myhome ctl vacuum pause | resume | stop | dock | find
-myhome ctl vacuum rooms                     # learned rooms
-myhome ctl vacuum rooms name 11 kitchen     # name a learned room
+myhome ctl vacuum rooms                     # known rooms, with where each came from
+myhome ctl vacuum rooms sync                # fetch the rooms from the iRobot cloud account
+myhome ctl vacuum rooms name 11 kitchen     # name a room the cloud did not provide
 ```
 
 `--robot <name|id>` selects a robot, and can be omitted (the daemon has one configured robot). A command
@@ -73,18 +78,75 @@ and a room picker.
 
 ## Rooms
 
-The robot addresses rooms by ids that exist only on the robot's map. MyHome **learns** them:
-whenever a room clean is started, from MyHome or from the iRobot app, the robot reports the
-map and region ids it used, and the daemon records them.
+The robot addresses rooms by **region ids** that exist only on its map, and it does not report
+its rooms over the LAN: its local state has no room list and no names (checked 2026-10-29 on
+Edmond). There are two ways to get them.
 
-To set up rooms once:
+### From the iRobot cloud account (preferred)
+
+Set the iRobot **app account** in the daemon's `.env` (`sudo dpkg-reconfigure myhome` prompts
+for it; reference: [configuration.md](configuration.md#irobot-cloud-account-room-names)):
+
+```
+MYHOME_IROBOT_EMAIL=…
+MYHOME_IROBOT_PASSWORD=…
+```
+
+These are the account's credentials, not the robot's: `MYHOME_VACUUM_*` (above) stay the robot's
+own local credentials, and the robot must be configured too. Only plain email+password accounts
+work: an account that signs in with Google or Apple, or that has two-factor authentication, is
+refused with a message saying so.
+
+The daemon then fetches the rooms **once at start**, in the background. `myhome ctl vacuum rooms
+sync` fetches them again, for example after editing the map in the app:
+
+```
+$ myhome ctl vacuum rooms sync
+map "Rez-de-chaussée" (e8EO…): 8 rooms, cloud version 251027T114719, robot version 261029T090306
+0 added, 8 updated, 0 now stale. See 'myhome ctl vacuum rooms'.
+```
+
+What a sync does:
+
+- It logs in **once** (discovery, Gigya login, iRobot login, then the map read). It does not retry,
+  so a wrong password cannot lock the account. On any failure it names the failing step (and, for
+  the Gigya login, Gigya's `errorCode`), logs a warning, and **keeps the rooms already stored**.
+  Each HTTP call has a timeout. The daemon never waits for the cloud to start, and there is no
+  periodic sync.
+- **The cloud is the source of truth for room names**, because no verified API to rename a room
+  exists (owner decision, #628). A sync overwrites local names. A room the cloud no longer lists is
+  marked **stale** and refused, not deleted. While the account is configured, `rooms name` refuses
+  rooms that came from the cloud ("managed by the iRobot cloud"). Rename them in the app, then sync.
+- It reads nothing else: not the robot's password, not map geometry, not schedules. It writes
+  nothing to the cloud.
+
+**Map versions, and why the ids are "unverified".** The cloud stores the rooms of the map version
+last confirmed in the app. The robot's own version moves on after every clean. On 2026-10-29 the
+cloud held `251027T114719` while the robot reported `261029T090306` for the same map. A mismatch is
+therefore the **normal** state. `rooms` then says so:
+
+```
+Map Rez-de-chaussée (e8EO…): ids come from iRobot cloud map version 251027T114719; the robot reports 261029T090306; unverified.
+```
+
+A room clean always sends the robot's **own** current map version, read from its live state at
+that moment, never the cloud's. Whether the cloud's region ids are the ids the robot accepts is
+**not yet verified on Edmond**. Until one single-room clean has been tried (keep `myhome ctl vacuum
+dock` ready), treat a room clean as an experiment. What a robot does with an unknown region id is
+not documented (see `docs/irobot-local-api-research.md`).
+
+### Learned from the robot (fallback, no account)
+
+Whenever a room clean is started, from MyHome or from the iRobot app, the robot reports the map
+and region ids it used, and the daemon records them. Without the account:
 
 1. In the iRobot app, start a clean of one room (or several), then stop it.
 2. `myhome ctl vacuum rooms` now lists the region ids. Name them with `rooms name`.
 
-When the map is edited in the app, its version changes. Rooms learned on the older version are
-then marked **stale** and refused, rather than risking cleaning the wrong place. Start a room
-clean from the app again to refresh them.
+When the robot's map version changes, rooms learned on the older version are marked **stale** and
+refused, rather than risking cleaning the wrong place. Start a room clean from the app again to
+refresh them. Note that the robot's version changes after cleans, not only after map edits (see
+above), so learned rooms go stale often. That is one reason the cloud is preferred.
 
 ## Finding the robot
 
@@ -109,7 +171,13 @@ A DHCP reservation on the router helps, but is not required. The SFR box has no 
 | First connection attempt refused | Normal: the robot refuses a connection that follows another too closely, and the retry 3–5 s later succeeds. |
 | `not connected (last known address …)` | The robot is asleep off the dock, or out of Wi-Fi range. Dock it, or press CLEAN. |
 | A command "not acknowledged by the robot" | The robot did not echo the command within 10 s. Check `status`. |
-| Room "learned on an older version of the map" | The map changed in the app. Start that room once from the app. |
+| Room "learned on an older version of the map" | The robot's map version changed. Run `rooms sync` (with the iRobot account), or start that room once from the app. |
+| `rooms sync`: "not configured" | `MYHOME_IROBOT_EMAIL` or `MYHOME_IROBOT_PASSWORD` is not in the daemon's environment. |
+| `rooms sync`: "gigya login failed (Gigya errorCode 403042)" | Wrong account email or password. One attempt is made per sync; fix `.env` and restart before trying again. |
+| `rooms sync`: "only plain email+password accounts are supported" | The account signs in with Google/Apple, or uses two-factor. Not supported. |
+| `rooms sync`: "discover failed" / timeout | No internet, or the iRobot cloud is down. The stored rooms are kept; control is unaffected. |
+| `rooms name`: "managed by the iRobot cloud" | The room came from the cloud, which owns its name. Rename it in the app, then `rooms sync`. |
+| Room "no longer on the iRobot cloud map" | The last sync did not list it (the map was edited in the app). |
 
 ## Live test
 

@@ -565,6 +565,17 @@ The password is a secret: set it in `/var/lib/myhome/.env` (prompted by `sudo dp
 | `vacuum.password` | `MYHOME_VACUUM_PASSWORD` | — | Robot local password, printed by `myhome ctl vacuum pair` (`.env` only) |
 | `vacuum.host` | `MYHOME_VACUUM_HOST` | — | Optional fixed robot IP, used instead of broadcast discovery (e.g. with a DHCP reservation, or where broadcast does not reach the robot). Empty: discovery by BLID, falling back to the last address the robot was reached at |
 
+### iRobot cloud account (room names)
+
+Optional, and independent of `vacuum.*` above (those stay the robot's own local credentials). When both `irobot.email` and `irobot.password` are set, the daemon logs in to the iRobot cloud **once at start** (in the background; it never delays or blocks startup) and on `myhome ctl vacuum rooms sync`, to fetch the robot's rooms: region ids, names and room types. There is no periodic sync. The cloud is then the source of truth for room names (see [`docs/vacuum.md`](vacuum.md#rooms)). Without them, the daemon logs `iRobot cloud room sync disabled` and rooms are learned from the robot only.
+
+Room sync also needs the robot configured (`vacuum.blid` and `vacuum.password`): the daemon asks the cloud for that robot's maps only. Only plain email+password accounts work (not Google/Apple sign-in or two-factor). Each sync makes a single login attempt, with no retry. Both values are secrets and go in `/var/lib/myhome/.env` only (prompted by `sudo dpkg-reconfigure myhome`; see `example.env`). They are never flags or YAML values, and are never stored in `myhome.db`, logged or returned over RPC.
+
+| Key | Env var | Default | Description |
+|-----|---------|---------|-------------|
+| `irobot.email` | `MYHOME_IROBOT_EMAIL` | — | iRobot app account email (`.env`) |
+| `irobot.password` | `MYHOME_IROBOT_PASSWORD` | — | iRobot app account password (`.env` only) |
+
 ## Pool
 
 `pool-pump.js` itself tracks how many seconds it has run today and how much water-volume turnover

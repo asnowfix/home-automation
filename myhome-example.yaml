@@ -213,6 +213,14 @@ vacuum:
   # Default: empty (discover the robot by its BLID)
   # host: "192.168.1.50"
 
+# iRobot cloud account (optional; see docs/vacuum.md "Rooms"): used only to fetch
+# the robot's room names and ids, once at daemon start and on
+# `myhome ctl vacuum rooms sync`. Both MYHOME_IROBOT_EMAIL and
+# MYHOME_IROBOT_PASSWORD belong in the daemon's .env (prompted by
+# `dpkg-reconfigure myhome`), never in this file. There is no non-secret
+# setting to put here.
+# irobot: {}
+
 # Notice service: curates a "notice" event severity (daily pool/garden plans,
 # solar pump on/off, motion at night or while absent) and emails a daily
 # digest. Unlike events/occupancy/temperature, this is NOT auto-enabled with

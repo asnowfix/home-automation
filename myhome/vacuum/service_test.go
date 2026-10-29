@@ -91,7 +91,7 @@ func (h *harness) last() *fakeClient {
 
 // newHarness starts a service with cfg; seed, when not nil, is the robot row a
 // previous run of the daemon left in the database.
-func newHarness(t *testing.T, f finder, cfg Config, seed *robotRecord) *harness {
+func newHarness(t *testing.T, f finder, cfg Config, seed *robotRecord, opts ...func(*Service)) *harness {
 	t.Helper()
 	db, err := sqlx.Open("sqlite", ":memory:")
 	if err != nil {
@@ -121,6 +121,9 @@ func newHarness(t *testing.T, f finder, cfg Config, seed *robotRecord) *harness 
 			h.mu.Unlock()
 			return c
 		},
+	}
+	for _, o := range opts {
+		o(h.svc)
 	}
 	if err := h.svc.start(); err != nil {
 		t.Fatal(err)

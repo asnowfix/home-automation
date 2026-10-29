@@ -39,6 +39,9 @@ func (s *Service) RegisterHandlers() {
 		p := in.(*myhome.VacuumRoomNameParams)
 		return s.NameRoom(p.Robot, p.RegionID, p.Name)
 	})
+	myhome.RegisterMethodHandler(myhome.VacuumRoomsSync, func(ctx context.Context, in any) (any, error) {
+		return s.SyncRooms(ctx, in.(*myhome.VacuumParams).Robot)
+	})
 	s.log.Info("Vacuum RPC handlers registered")
 }
 
@@ -86,9 +89,15 @@ func (s *Service) Command(ctx context.Context, sel, cmd string) (*myhome.VacuumO
 	return &myhome.VacuumOKResult{OK: true}, nil
 }
 
-// Clean cleans the named rooms, in order. All rooms must be on the same map, and
-// that map must not have changed since the rooms were learned: a stale region id
-// could clean the wrong place, so it is refused rather than guessed.
+// Clean cleans the named rooms, in order. All rooms must be on the same map.
+// The map version sent is always the robot's own current one, read from its
+// live state now, never the stored cloud version (#628).
+//
+// A stale region is refused rather than guessed, since a wrong id could clean
+// the wrong place: a learned region whose map changed since, or a cloud region
+// the last sync no longer listed. A cloud region whose map version differs from
+// the robot's is NOT refused: that is the normal state (the cloud keeps the
+// last map confirmed in the app, the robot moves on after each clean).
 func (s *Service) Clean(ctx context.Context, sel string, rooms []string) (*myhome.VacuumOKResult, error) {
 	if len(rooms) == 0 {
 		return nil, errors.New("no room given (use vacuum.command start for a whole-home clean)")
@@ -109,12 +118,23 @@ func (s *Service) Clean(ctx context.Context, sel string, rooms []string) (*myhom
 			return nil, err
 		}
 		if reg.Stale {
-			return nil, fmt.Errorf("room %q was learned on an older version of the map; start one room clean from the iRobot app to refresh it", room)
+			if reg.Source == myhome.VacuumSourceCloud {
+				return nil, fmt.Errorf("room %q is no longer on the iRobot cloud map (last `myhome ctl vacuum rooms sync`)", room)
+			}
+			return nil, fmt.Errorf("room %q was learned on an older version of the map; run `myhome ctl vacuum rooms sync` (or start one room clean from the iRobot app) to refresh it", room)
 		}
 		if m.ID != "" && m.ID != reg.MapID {
 			return nil, fmt.Errorf("rooms are on different maps (%s, %s)", m.ID, reg.MapID)
 		}
-		m = roomba.Map{ID: reg.MapID, Version: reg.MapVersion}
+		version := reg.RobotMapVersion
+		if version == "" {
+			if reg.Source == myhome.VacuumSourceCloud {
+				// Never fall back to the cloud's version: it is not the robot's.
+				return nil, fmt.Errorf("robot %s has not reported map %s yet (is it connected?)", r.rec.Name, reg.MapID)
+			}
+			version = reg.MapVersion // learned from the robot itself
+		}
+		m = roomba.Map{ID: reg.MapID, Version: version}
 		regions = append(regions, roomba.Region{ID: reg.ID, Type: reg.Type})
 	}
 	c, err := s.client(r)
@@ -153,7 +173,8 @@ func findRegion(known []myhome.VacuumRegion, room string) (myhome.VacuumRegion, 
 	return myhome.VacuumRegion{}, fmt.Errorf("room %q is ambiguous (%d matches)", room, len(matches))
 }
 
-// Rooms lists the learned regions, flagging those whose map has changed since.
+// Rooms lists the known regions, flagging stale ones and cloud ones whose map
+// version differs from the robot's.
 func (s *Service) Rooms(sel string) (*myhome.VacuumRoomsResult, error) {
 	r, err := s.pick(sel)
 	if err != nil {
@@ -163,7 +184,7 @@ func (s *Service) Rooms(sel string) (*myhome.VacuumRoomsResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &myhome.VacuumRoomsResult{Regions: regions}, nil
+	return &myhome.VacuumRoomsResult{Regions: regions, CloudNames: s.cfg.CloudEnabled()}, nil
 }
 
 func (s *Service) regions(r *robot) ([]myhome.VacuumRegion, error) {
@@ -183,27 +204,50 @@ func (s *Service) regions(r *robot) ([]myhome.VacuumRegion, error) {
 	out := []myhome.VacuumRegion{}
 	for _, rec := range recs {
 		ver, known := current[rec.MapID]
-		out = append(out, myhome.VacuumRegion{
-			MapID: rec.MapID, MapVersion: rec.MapVersion, ID: rec.RegionID, Type: rec.RegionType, Name: rec.Name,
+		reg := myhome.VacuumRegion{
+			MapID: rec.MapID, MapName: rec.MapName, MapVersion: rec.MapVersion, ID: rec.RegionID,
+			Type: rec.RegionType, Kind: rec.Kind, Name: rec.Name, Source: rec.Source, RobotMapVersion: ver,
+		}
+		if rec.Source == myhome.VacuumSourceCloud {
+			reg.Stale = rec.Removed
+			reg.Unverified = ver != rec.MapVersion
+		} else {
+			reg.Source = myhome.VacuumSourceRobot
 			// Without live state we cannot tell; the robot re-checks the version anyway.
-			Stale: len(current) > 0 && (!known || ver != rec.MapVersion),
-		})
+			reg.Stale = len(current) > 0 && (!known || ver != rec.MapVersion)
+		}
+		out = append(out, reg)
 	}
 	return out, nil
 }
 
-// NameRoom gives a learned region a name.
+// NameRoom gives a region a local name. When the iRobot account is configured
+// the cloud is the source of truth for names (owner decision, #628: no verified
+// rename API exists), so regions the cloud provided are refused; a sync would
+// overwrite the name anyway.
 func (s *Service) NameRoom(sel, regionID, name string) (*myhome.VacuumOKResult, error) {
 	r, err := s.pick(sel)
 	if err != nil {
 		return nil, err
 	}
-	n, err := s.store.nameRegion(r.rec.BLID, regionID, strings.TrimSpace(name))
+	cloudOwned := s.cfg.CloudEnabled()
+	n, err := s.store.nameRegion(r.rec.BLID, regionID, strings.TrimSpace(name), cloudOwned)
 	if err != nil {
 		return nil, err
 	}
-	if n == 0 {
-		return nil, fmt.Errorf("no learned region %q for robot %s", regionID, r.rec.Name)
+	if n > 0 {
+		return &myhome.VacuumOKResult{OK: true}, nil
 	}
-	return &myhome.VacuumOKResult{OK: true}, nil
+	if cloudOwned {
+		recs, err := s.store.regions(r.rec.BLID)
+		if err != nil {
+			return nil, err
+		}
+		for _, rec := range recs {
+			if rec.RegionID == regionID && rec.Source == myhome.VacuumSourceCloud {
+				return nil, fmt.Errorf("the name of region %s is managed by the iRobot cloud (MYHOME_IROBOT_* is set): it cannot be renamed here, and `myhome ctl vacuum rooms sync` refreshes it", regionID)
+			}
+		}
+	}
+	return nil, fmt.Errorf("no region %q for robot %s", regionID, r.rec.Name)
 }

@@ -6,6 +6,9 @@
 // and local password come from MYHOME_VACUUM_BLID / MYHOME_VACUUM_PASSWORD in
 // the daemon's .env, never from a flag, the YAML file or the database.
 //
+// Room names and ids come from the iRobot cloud account (#628) when
+// MYHOME_IROBOT_EMAIL / MYHOME_IROBOT_PASSWORD are set: see sync.go.
+//
 // Design notes and the field measurements behind them: docs/vacuum-plan.md.
 package vacuum
 
@@ -19,6 +22,7 @@ import (
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/pkg/roomba"
+	"github.com/asnowfix/home-automation/pkg/roomba/cloud"
 	"github.com/go-logr/logr"
 )
 
@@ -32,13 +36,21 @@ var (
 	badCredsBackoff  = 10 * time.Minute // a rejected password will not fix itself quickly
 )
 
-// Config identifies the robot and holds its local password. Password is a
-// secret: never log it, return it over RPC, or store it.
+// Config identifies the robot and holds its local password and the iRobot
+// account. Password and IRobotPassword are secrets: never log them, return
+// them over RPC, or store them.
 type Config struct {
 	BLID     string // robot id (MYHOME_VACUUM_BLID)
 	Password string // robot local password (MYHOME_VACUUM_PASSWORD), from .env only
 	Host     string // optional fixed address (MYHOME_VACUUM_HOST); empty: discovery by BLID
+
+	IRobotEmail    string // iRobot account email (MYHOME_IROBOT_EMAIL), for room sync
+	IRobotPassword string // iRobot account password (MYHOME_IROBOT_PASSWORD), from .env only
 }
+
+// CloudEnabled reports whether the iRobot account is configured. Without it
+// room sync is a no-op and room names are local.
+func (c Config) CloudEnabled() bool { return c.IRobotEmail != "" && c.IRobotPassword != "" }
 
 // Enabled reports whether the robot is configured. Without both BLID and
 // password the service holds no connection and vacuum.list is empty.
@@ -70,6 +82,11 @@ type robot struct {
 	connected bool
 }
 
+// cloudMaps reads the robot's maps from the iRobot cloud; *cloud.Client in production.
+type cloudMaps interface {
+	Maps(ctx context.Context, email, password, blid string) ([]cloud.Map, error)
+}
+
 // Service supervises the configured robot.
 type Service struct {
 	ctx       context.Context
@@ -78,9 +95,12 @@ type Service struct {
 	cfg       Config
 	finder    finder
 	newClient newClientFunc
+	cloud     cloudMaps
 
 	mu     sync.Mutex
 	robots map[string]*robot // by BLID
+
+	syncMu sync.Mutex // one room sync at a time
 }
 
 // NewService starts supervising the configured robot. When cfg is not
@@ -95,6 +115,7 @@ func NewService(ctx context.Context, log logr.Logger, store *Storage, cfg Config
 		newClient: func(log logr.Logger, blid, password, host string, onChange func(roomba.Status)) robotClient {
 			return roomba.NewClient(log, blid, password, host, onChange)
 		},
+		cloud:  cloud.New(),
 		robots: map[string]*robot{},
 	}
 	return s, s.start()
@@ -102,6 +123,9 @@ func NewService(ctx context.Context, log logr.Logger, store *Storage, cfg Config
 
 func (s *Service) start() error {
 	if !s.cfg.Enabled() {
+		if s.cfg.CloudEnabled() {
+			s.log.Info("iRobot account set but no robot configured: room sync needs MYHOME_VACUUM_BLID and MYHOME_VACUUM_PASSWORD")
+		}
 		return nil
 	}
 	rec, err := s.store.robot(s.cfg.BLID)
@@ -113,7 +137,12 @@ func (s *Service) start() error {
 	s.robots[rec.BLID] = r
 	s.mu.Unlock()
 	go s.supervise(r)
-	s.log.Info("Vacuum service started", "robot", rec.Name, "fixed_host", s.cfg.Host)
+	s.log.Info("Vacuum service started", "robot", rec.Name, "fixed_host", s.cfg.Host, "cloud_rooms", s.cfg.CloudEnabled())
+	if s.cfg.CloudEnabled() {
+		go s.syncAtStart()
+	} else {
+		s.log.Info("iRobot cloud room sync disabled (MYHOME_IROBOT_EMAIL / MYHOME_IROBOT_PASSWORD not set)")
+	}
 	return nil
 }
 

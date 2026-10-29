@@ -173,7 +173,7 @@ const vacuumPanelTemplate = `
         <input type="hidden" name="command" value="clean-rooms">
         <div class="field is-grouped is-grouped-multiline">
           {{range .Rooms}}
-          <label class="checkbox mr-3"><input type="checkbox" name="room" value="{{.ID}}"> {{if .Name}}{{.Name}}{{else}}region {{.ID}}{{end}}</label>
+          <label class="checkbox mr-3"{{if .Unverified}} title="id from iRobot cloud map version {{.MapVersion}}; the robot reports {{if .RobotMapVersion}}{{.RobotMapVersion}}{{else}}no version yet{{end}} (unverified)"{{end}}><input type="checkbox" name="room" value="{{.ID}}"> {{if .Name}}{{.Name}}{{else}}region {{.ID}}{{end}}</label>
           {{end}}
         </div>
         <button class="button is-small is-primary" type="submit">Clean selected rooms</button>

@@ -60,21 +60,63 @@ type VacuumCleanParams struct {
 	Rooms []string `json:"rooms"`
 }
 
-// VacuumRegion is a room or zone the robot knows on one of its maps. Regions are
-// learned from the robot's lastCommand whenever a room clean is started, from
-// here or from the iRobot app; the name is ours to give.
+// Where a region came from (VacuumRegion.Source).
+const (
+	VacuumSourceRobot = "robot" // learned from the robot's lastCommand after a room clean
+	VacuumSourceCloud = "cloud" // fetched from the iRobot cloud account (vacuum.roomsync)
+)
+
+// VacuumRegion is a room or zone on one of the robot's maps. Regions come from
+// the iRobot cloud account (vacuum.roomsync, #628), which is the source of truth
+// for their names, or are learned from the robot's lastCommand whenever a room
+// clean is started, from here or from the iRobot app.
 type VacuumRegion struct {
 	MapID      string `json:"map_id"`
-	MapVersion string `json:"map_version"` // the map version the region was learned on
+	MapName    string `json:"map_name,omitempty"` // from the cloud
+	MapVersion string `json:"map_version"`        // the map version the region was learned or fetched on
 	ID         string `json:"id"`
-	Type       string `json:"type"` // rid (room) or zid (zone)
+	Type       string `json:"type"`           // rid (room) or zid (zone)
+	Kind       string `json:"kind,omitempty"` // the cloud's room type: kitchen, bedroom, ...
 	Name       string `json:"name,omitempty"`
-	Stale      bool   `json:"stale"` // the map has changed since; the id may no longer be valid
+	Source     string `json:"source"` // VacuumSourceRobot or VacuumSourceCloud
+	// RobotMapVersion is the version the robot reports for this map right now
+	// (empty until the robot has reported). For a cloud region it normally
+	// differs from MapVersion: the robot's version moves on after every clean,
+	// the cloud's stays at the last map confirmed in the app.
+	RobotMapVersion string `json:"robot_map_version,omitempty"`
+	// Unverified is set on a cloud region whose map version differs from the
+	// robot's: the id is believed valid but has not been confirmed on this map.
+	Unverified bool `json:"unverified,omitempty"`
+	// Stale: for a learned region, the robot's map changed since it was learned;
+	// for a cloud region, the last sync no longer listed it. Stale regions are
+	// not cleaned.
+	Stale bool `json:"stale"`
 }
 
 // VacuumRoomsResult is the result of vacuum.rooms.
 type VacuumRoomsResult struct {
 	Regions []VacuumRegion `json:"regions"`
+	// CloudNames is true when the iRobot account is configured: room names
+	// then come from the cloud and vacuum.roomname refuses cloud regions.
+	CloudNames bool `json:"cloud_names"`
+}
+
+// VacuumSyncedMap summarises one map fetched by vacuum.roomsync.
+type VacuumSyncedMap struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	CloudVersion string `json:"cloud_version"`
+	RobotVersion string `json:"robot_version,omitempty"` // empty when the robot has not reported it
+	Rooms        int    `json:"rooms"`
+}
+
+// VacuumRoomsSyncResult is the result of vacuum.roomsync. It never contains a
+// credential or a token.
+type VacuumRoomsSyncResult struct {
+	Maps    []VacuumSyncedMap `json:"maps"`
+	Added   int               `json:"added"`
+	Updated int               `json:"updated"`
+	Stale   int               `json:"stale"` // regions no longer listed by the cloud, now marked stale
 }
 
 // VacuumRoomNameParams names a learned region.

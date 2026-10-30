@@ -9,6 +9,11 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/asnowfix/home-automation/hlog"
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/pkg/roomba"
@@ -132,6 +137,9 @@ func printRobot(r myhome.VacuumRobot) {
 	fmt.Printf("  bin:     %s\n", bin)
 	if s.Error != 0 {
 		fmt.Printf("  error:   %d\n", s.Error)
+		if h := myhome.VacuumErrorHint(s.Error); h != "" {
+			fmt.Printf("           %s\n", h)
+		}
 	}
 	if s.MissionMinutes > 0 {
 		fmt.Printf("  mission: %d min\n", s.MissionMinutes)
@@ -145,20 +153,79 @@ var cleanCmd = &cobra.Command{
 	Use:   "clean",
 	Short: "Clean the whole home, or the given rooms",
 	Long: `Without --room, starts a whole-home clean.
-With --room (repeatable), cleans those rooms in order; see 'vacuum rooms'.`,
+With --room (repeatable), cleans those rooms in order; see 'vacuum rooms'.
+
+A room clean names a map version: for rooms from the iRobot cloud, the cloud's
+version (the robot rejected its own reported version with error 224 on
+2026-10-30). After the robot acknowledges, the daemon watches it for 15 s. If
+it aborts at once (back on the dock with an error, never running), the daemon
+retries once with the other known version, provided the robot is still docked
+and no stop/pause/dock was sent meanwhile. The output says which version ran.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(cleanRooms) == 0 {
 			return sendCommand(cmd, "start")
 		}
-		_, err := myhome.TheClient.CallE(cmd.Context(), myhome.VacuumClean,
+		client, err := roomCleanClient(cmd)
+		if err != nil {
+			return err
+		}
+		out, err := client.CallE(cmd.Context(), myhome.VacuumClean,
 			&myhome.VacuumCleanParams{Robot: robotFlag, Rooms: cleanRooms})
 		if err != nil {
 			return err
 		}
-		fmt.Printf("cleaning %s: acknowledged by the robot\n", strings.Join(cleanRooms, ", "))
+		res, ok := out.(*myhome.VacuumCleanResult)
+		if !ok {
+			return fmt.Errorf("unexpected result type %T", out)
+		}
+		printClean(os.Stdout, strings.Join(cleanRooms, ", "), res)
 		return nil
 	},
+}
+
+// roomCleanTimeout covers a room clean with its retry: up to two robot
+// acknowledgements (10 s each) and two 15 s abort watches, plus margin.
+const roomCleanTimeout = 70 * time.Second
+
+// roomCleanClient returns an RPC client that waits long enough for vacuum.clean,
+// unless --mqtt-timeout was given explicitly.
+func roomCleanClient(cmd *cobra.Command) (myhome.Client, error) {
+	if f := cmd.Flags().Lookup("mqtt-timeout"); f != nil && f.Changed {
+		return myhome.TheClient, nil
+	}
+	if options.Flags.MqttTimeout >= roomCleanTimeout {
+		return myhome.TheClient, nil
+	}
+	mc, err := mqttclient.GetClientE(cmd.Context())
+	if err != nil {
+		return nil, err
+	}
+	return myhome.NewClientE(cmd.Context(), hlog.Logger, mc, roomCleanTimeout)
+}
+
+// printClean says which map version the robot accepted, after a retry if any.
+func printClean(w io.Writer, rooms string, res *myhome.VacuumCleanResult) {
+	for i, a := range res.Attempts {
+		line := fmt.Sprintf("attempt %d, map version %s: %s", i+1, a.MapVersion, a.Outcome)
+		if a.Error != 0 {
+			line += fmt.Sprintf(" (error %d)", a.Error)
+		}
+		fmt.Fprintln(w, line)
+	}
+	if n := len(res.Attempts); n > 0 {
+		last := res.Attempts[n-1]
+		if last.Outcome == myhome.VacuumCleanRunning {
+			fmt.Fprintf(w, "cleaning %s: running with map version %s\n", rooms, last.MapVersion)
+		} else {
+			fmt.Fprintf(w, "cleaning %s: acknowledged with map version %s; not seen running yet (check 'vacuum status')\n", rooms, last.MapVersion)
+		}
+		if n > 1 {
+			if h := myhome.VacuumErrorHint(res.Attempts[0].Error); h != "" {
+				fmt.Fprintln(w, "first attempt: "+h)
+			}
+		}
+	}
 }
 
 var roomsCmd = &cobra.Command{
@@ -188,8 +255,8 @@ including from the iRobot app, and named with 'vacuum rooms name'.`,
 	},
 }
 
-// printRooms prints vacuum.rooms. Room ids from the cloud are presented as
-// unverified when the cloud's map version differs from the robot's (#628).
+// printRooms prints vacuum.rooms, with each map's versions for information:
+// the one a room clean names, and the one the robot reports (#628).
 func printRooms(w io.Writer, res *myhome.VacuumRoomsResult) {
 	if len(res.Regions) == 0 {
 		if res.CloudNames {
@@ -201,8 +268,8 @@ func printRooms(w io.Writer, res *myhome.VacuumRoomsResult) {
 		return
 	}
 	fmt.Fprintf(w, "%-8s %-5s %-22s %-14s %-6s %s\n", "REGION", "TYPE", "NAME", "KIND", "FROM", "MAP")
-	type mapVersions struct{ cloud, robot string }
-	mismatch := map[string]mapVersions{} // map label -> versions, for cloud rooms only
+	type mapInfo struct{ cloud, robot string }
+	maps := map[string]mapInfo{} // map label -> versions, for maps with cloud rooms
 	var order []string
 	for _, r := range res.Regions {
 		name, kind := r.Name, r.Kind
@@ -222,23 +289,21 @@ func printRooms(w io.Writer, res *myhome.VacuumRoomsResult) {
 			note = "  [stale: no longer in the iRobot cloud]"
 		case r.Stale:
 			note = "  [stale: map changed]"
-		case r.Unverified:
-			note = "  [unverified]"
-			if _, seen := mismatch[label]; !seen {
+		case r.Source == myhome.VacuumSourceCloud:
+			if _, seen := maps[label]; !seen {
 				order = append(order, label)
 			}
-			mismatch[label] = mapVersions{r.MapVersion, r.RobotMapVersion}
+			maps[label] = mapInfo{r.MapVersion, r.RobotMapVersion}
 		}
 		fmt.Fprintf(w, "%-8s %-5s %-22s %-14s %-6s %s%s\n", r.ID, r.Type, name, kind, r.Source, label, note)
 	}
 	for _, label := range order {
-		v := mismatch[label]
+		v := maps[label]
 		robot := v.robot
 		if robot == "" {
 			robot = "no version yet (not connected?)"
 		}
-		fmt.Fprintf(w, "\nMap %s: ids come from iRobot cloud map version %s; the robot reports %s; unverified.\n", label, v.cloud, robot)
-		fmt.Fprintln(w, "A room clean always sends the robot's own version.")
+		fmt.Fprintf(w, "\nMap %s: room cleans name iRobot cloud map version %s; the robot reports %s.\n", label, v.cloud, robot)
 	}
 	if res.CloudNames {
 		fmt.Fprintln(w, "\nRoom names come from the iRobot cloud ('vacuum rooms sync' refreshes them).")

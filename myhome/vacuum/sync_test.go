@@ -103,22 +103,23 @@ func TestRoomSyncUpsertNamePolicyAndClean(t *testing.T) {
 		t.Fatalf("cloud did not overwrite the local region: %+v", k)
 	}
 
-	// The robot reports a newer map version: normal, so informational, not stale.
+	// The robot reports a newer map version: normal, shown as information, not stale.
 	eventually(t, "connection", func() bool { return connected(h) })
 	c := h.last()
-	live := roomba.Status{Name: "Edmond", Maps: []roomba.Map{{ID: "m1", Version: "261029T090306"}}}
+	live := roomba.Status{Name: "Edmond", Phase: roomba.PhaseCharge, Cycle: "none", Maps: []roomba.Map{{ID: "m1", Version: "261029T090306"}}}
 	c.onChange(live)
 	k = regionByID(t, h, "21")
-	if !k.Unverified || k.Stale || k.RobotMapVersion != "261029T090306" {
-		t.Fatalf("version mismatch not reported as unverified: %+v", k)
+	if k.Stale || k.RobotMapVersion != "261029T090306" || k.MapVersion != "251027T114719" {
+		t.Fatalf("versions = %+v", k)
 	}
 
-	// A room clean sends the robot's own version, never the cloud's.
+	// A cloud room clean names the cloud's version (measured to work 2026-10-30).
 	if _, err := h.svc.Clean(context.Background(), "", []string{"cuisine", "salle à manger"}); err != nil {
 		t.Fatal(err)
 	}
-	if c.cleanMap != (roomba.Map{ID: "m1", Version: "261029T090306"}) || len(c.cleaned) != 2 || c.cleaned[0] != (roomba.Region{ID: "21", Type: "rid"}) {
-		t.Fatalf("cleaned %+v on %+v", c.cleaned, c.cleanMap)
+	if got, want := payload(t, c.cleanMap, c.cleaned),
+		`{"ordered":1,"pmap_id":"m1","regions":[{"region_id":"21","type":"rid"},{"region_id":"1","type":"rid"}],"user_pmapv_id":"251027T114719"}`; got != want {
+		t.Fatalf("payload\n got  %s\n want %s", got, want)
 	}
 
 	// The robot echoes the clean in lastCommand: the cloud region keeps its cloud version.
@@ -177,7 +178,7 @@ func TestCloudRoomNeedsRobotVersion(t *testing.T) {
 	h := newHarness(t, fakeFinder{err: errors.New("offline")}, cloudCfg(), nil, func(s *Service) { s.cloud = fc })
 	eventually(t, "sync at start", func() bool { res, _ := h.svc.Rooms(""); return res != nil && len(res.Regions) == 1 })
 	// No host known and discovery fails: the robot never reports its maps.
-	if _, err := h.svc.Clean(context.Background(), "", []string{"cuisine"}); err == nil || !strings.Contains(err.Error(), "has not reported map m1") {
+	if _, err := h.svc.Clean(context.Background(), "", []string{"cuisine"}); err == nil || !strings.Contains(err.Error(), "does not report map m1") {
 		t.Fatalf("clean without the robot's map version: %v", err)
 	}
 }

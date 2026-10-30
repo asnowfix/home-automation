@@ -23,6 +23,7 @@ type VacuumStatus struct {
 	Error          int         `json:"error"`
 	NotReady       int         `json:"not_ready"`
 	MissionMinutes int         `json:"mission_minutes"`
+	Mission        int         `json:"mission,omitempty"` // mission counter (nMssn)
 	LastCommand    string      `json:"last_command,omitempty"`
 	Maps           []VacuumMap `json:"maps,omitempty"`
 	UpdatedAt      time.Time   `json:"updated_at"`
@@ -80,13 +81,12 @@ type VacuumRegion struct {
 	Name       string `json:"name,omitempty"`
 	Source     string `json:"source"` // VacuumSourceRobot or VacuumSourceCloud
 	// RobotMapVersion is the version the robot reports for this map right now
-	// (empty until the robot has reported). For a cloud region it normally
-	// differs from MapVersion: the robot's version moves on after every clean,
-	// the cloud's stays at the last map confirmed in the app.
+	// (empty until the robot has reported). Information only: for a cloud
+	// region it normally differs from MapVersion (the robot's moves on after
+	// every clean, the cloud's stays at the last map confirmed in the app), and
+	// a room clean names MapVersion, which the robot accepts (measured
+	// 2026-10-30, #628).
 	RobotMapVersion string `json:"robot_map_version,omitempty"`
-	// Unverified is set on a cloud region whose map version differs from the
-	// robot's: the id is believed valid but has not been confirmed on this map.
-	Unverified bool `json:"unverified,omitempty"`
 	// Stale: for a learned region, the robot's map changed since it was learned;
 	// for a cloud region, the last sync no longer listed it. Stale regions are
 	// not cleaned.
@@ -124,6 +124,37 @@ type VacuumRoomNameParams struct {
 	Robot    string `json:"robot,omitempty"`
 	RegionID string `json:"region_id"`
 	Name     string `json:"name"`
+}
+
+// Outcomes of one room-clean attempt (VacuumCleanAttempt.Outcome).
+const (
+	VacuumCleanRunning  = "running"   // the robot reached phase run or cycle clean
+	VacuumCleanAborted  = "aborted"   // back on the dock, cycle none, with an error, without ever running
+	VacuumCleanNoReport = "no-report" // the watch window ended with neither: acknowledged, outcome unknown
+)
+
+// VacuumCleanAttempt is one start command sent for a room clean.
+type VacuumCleanAttempt struct {
+	MapVersion string `json:"map_version"` // the user_pmapv_id named in the command
+	Outcome    string `json:"outcome"`
+	Error      int    `json:"error,omitempty"` // cleanMissionStatus.error on an abort
+}
+
+// VacuumCleanResult is the result of vacuum.clean: the attempts made (one, or
+// two when the first aborted at once and the other known version was tried).
+type VacuumCleanResult struct {
+	OK       bool                 `json:"ok"`
+	MapID    string               `json:"map_id"`
+	Attempts []VacuumCleanAttempt `json:"attempts"`
+}
+
+// VacuumErrorHint explains a cleanMissionStatus.error code, or returns "" when
+// there is nothing to add to the bare number. iRobot documents none of them.
+func VacuumErrorHint(code int) string {
+	if code == 224 {
+		return "error 224: the robot opened the mission and aborted at once; seen when a room clean names a map version the robot does not accept. Rooms from the iRobot cloud are cleaned with the cloud map version"
+	}
+	return ""
 }
 
 // VacuumOKResult acknowledges a command the robot confirmed.

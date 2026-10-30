@@ -26,6 +26,8 @@ type fakeClient struct {
 	commands  []string
 	cleaned   []roomba.Region
 	cleanMap  roomba.Map
+	cleans    []roomba.Map     // every room clean sent, in order
+	react     func(roomba.Map) // the robot's reaction to a room clean, run synchronously
 }
 
 func (f *fakeClient) Connect(ctx context.Context, retry time.Duration) error {
@@ -50,8 +52,13 @@ func (f *fakeClient) Command(ctx context.Context, cmd string, extra map[string]a
 }
 func (f *fakeClient) CleanRegions(ctx context.Context, m roomba.Map, regions []roomba.Region) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.cleanMap, f.cleaned = m, regions
+	f.cleans = append(f.cleans, m)
+	react := f.react
+	f.mu.Unlock()
+	if react != nil {
+		react(m)
+	}
 	return nil
 }
 
@@ -199,6 +206,12 @@ func TestCommandsAndNoPasswordInResults(t *testing.T) {
 	}
 }
 
+// payload is the exact start-command parameters the robot receives.
+func payload(t *testing.T, m roomba.Map, regions []roomba.Region) string {
+	t.Helper()
+	return jsonOf(t, roomba.RegionCleanParams(m, regions))
+}
+
 func jsonOf(t *testing.T, v any) string {
 	t.Helper()
 	b, err := json.Marshal(v)
@@ -236,8 +249,10 @@ func TestRoomLearningNamingAndClean(t *testing.T) {
 	if _, err := h.svc.Clean(context.Background(), "", []string{"kitchen", "4"}); err != nil {
 		t.Fatal(err)
 	}
-	if c.cleanMap != (roomba.Map{ID: "m1", Version: "v1"}) || len(c.cleaned) != 2 || c.cleaned[0].ID != "11" || c.cleaned[1].ID != "4" {
-		t.Fatalf("cleaned %+v on %+v", c.cleaned, c.cleanMap)
+	// A room learned from a robot echo is cleaned with that echo's version.
+	if got, want := payload(t, c.cleanMap, c.cleaned),
+		`{"ordered":1,"pmap_id":"m1","regions":[{"region_id":"11","type":"rid"},{"region_id":"4","type":"rid"}],"user_pmapv_id":"v1"}`; got != want {
+		t.Fatalf("payload\n got  %s\n want %s", got, want)
 	}
 
 	// The map is edited in the app: its version changes and learned ids become stale.

@@ -80,6 +80,9 @@ type robot struct {
 	client    robotClient // nil while not connected
 	status    *myhome.VacuumStatus
 	connected bool
+
+	watchers   map[chan myhome.VacuumStatus]struct{} // room cleans watching for an immediate abort
+	interrupts int                                   // stop/pause/resume/dock commands sent; a change cancels a retry
 }
 
 // cloudMaps reads the robot's maps from the iRobot cloud; *cloud.Client in production.
@@ -255,6 +258,12 @@ func (s *Service) onStatus(r *robot, st roomba.Status) {
 	s.mu.Lock()
 	prev := r.status
 	r.status = &vs
+	for ch := range r.watchers {
+		select {
+		case ch <- vs:
+		default: // a full watcher misses an update rather than blocking the MQTT goroutine
+		}
+	}
 	s.mu.Unlock()
 
 	if prev == nil || prev.Phase != vs.Phase || prev.Error != vs.Error || prev.BinFull != vs.BinFull {
@@ -289,7 +298,7 @@ func toStatus(st roomba.Status) myhome.VacuumStatus {
 	vs := myhome.VacuumStatus{
 		Battery: st.Battery, BinFull: st.BinFull, BinPresent: st.BinPresent,
 		Phase: st.Phase, Cycle: st.Cycle, Error: st.Error, NotReady: st.NotReady,
-		MissionMinutes: st.MissionMinutes, LastCommand: st.LastCommand.Command,
+		MissionMinutes: st.MissionMinutes, Mission: st.Mission, LastCommand: st.LastCommand.Command,
 		UpdatedAt: time.Now(),
 	}
 	for _, m := range st.Maps {

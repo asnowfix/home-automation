@@ -23,6 +23,7 @@ type vacuumCard struct {
 	Paused    bool
 	Rooms     []myhome.VacuumRegion
 	Error     string // last action's failure, shown on the card
+	ErrorHint string // explanation of the robot's error code, when one is known
 }
 
 type vacuumPanel struct {
@@ -51,6 +52,7 @@ func (h *HTMXHandler) vacuumPanel(actionErr map[string]string) (vacuumPanel, boo
 		c := vacuumCard{VacuumRobot: r, Error: actionErr[r.ID]}
 		if r.Status != nil {
 			c.PhaseText = myhome.VacuumPhaseText(r.Status.Phase)
+			c.ErrorHint = myhome.VacuumErrorHint(r.Status.Error)
 			switch r.Status.Phase {
 			case "run", "hmUsrDock", "hmMidMsn", "hmPostMsn":
 				c.Running = true
@@ -145,7 +147,7 @@ const vacuumPanelTemplate = `
           {{if not .Status.BinPresent}}<span class="tag is-danger">bin missing</span>
           {{else if .Status.BinFull}}<span class="tag is-warning">bin full</span>
           {{else}}<span class="tag is-light">bin ok</span>{{end}}
-          {{if ne .Status.Error 0}}<span class="tag is-danger">error {{.Status.Error}}</span>{{end}}
+          {{if ne .Status.Error 0}}<span class="tag is-danger"{{if .ErrorHint}} title="{{.ErrorHint}}"{{end}}>error {{.Status.Error}}</span>{{end}}
           {{if gt .Status.MissionMinutes 0}}<span class="tag is-light">{{.Status.MissionMinutes}} min</span>{{end}}
         </div>
         {{else}}
@@ -173,7 +175,7 @@ const vacuumPanelTemplate = `
         <input type="hidden" name="command" value="clean-rooms">
         <div class="field is-grouped is-grouped-multiline">
           {{range .Rooms}}
-          <label class="checkbox mr-3"{{if .Unverified}} title="id from iRobot cloud map version {{.MapVersion}}; the robot reports {{if .RobotMapVersion}}{{.RobotMapVersion}}{{else}}no version yet{{end}} (unverified)"{{end}}><input type="checkbox" name="room" value="{{.ID}}"> {{if .Name}}{{.Name}}{{else}}region {{.ID}}{{end}}</label>
+          <label class="checkbox mr-3" title="map version used for cleaning: {{.MapVersion}}{{if eq .Source "cloud"}} (iRobot cloud){{end}}; the robot reports {{if .RobotMapVersion}}{{.RobotMapVersion}}{{else}}no version yet{{end}}"><input type="checkbox" name="room" value="{{.ID}}"> {{if .Name}}{{.Name}}{{else}}region {{.ID}}{{end}}</label>
           {{end}}
         </div>
         <button class="button is-small is-primary" type="submit">Clean selected rooms</button>

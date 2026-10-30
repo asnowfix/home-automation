@@ -2,7 +2,6 @@ package vacuum
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -83,65 +82,13 @@ func (s *Service) Command(ctx context.Context, sel, cmd string) (*myhome.VacuumO
 	if err != nil {
 		return nil, err
 	}
+	if cmd != roomba.CmdStart && cmd != roomba.CmdFind {
+		// stop, pause, dock or resume: a room clean being watched must not retry.
+		s.mu.Lock()
+		r.interrupts++
+		s.mu.Unlock()
+	}
 	if err := c.Command(ctx, cmd, nil); err != nil {
-		return nil, err
-	}
-	return &myhome.VacuumOKResult{OK: true}, nil
-}
-
-// Clean cleans the named rooms, in order. All rooms must be on the same map.
-// The map version sent is always the robot's own current one, read from its
-// live state now, never the stored cloud version (#628).
-//
-// A stale region is refused rather than guessed, since a wrong id could clean
-// the wrong place: a learned region whose map changed since, or a cloud region
-// the last sync no longer listed. A cloud region whose map version differs from
-// the robot's is NOT refused: that is the normal state (the cloud keeps the
-// last map confirmed in the app, the robot moves on after each clean).
-func (s *Service) Clean(ctx context.Context, sel string, rooms []string) (*myhome.VacuumOKResult, error) {
-	if len(rooms) == 0 {
-		return nil, errors.New("no room given (use vacuum.command start for a whole-home clean)")
-	}
-	r, err := s.pick(sel)
-	if err != nil {
-		return nil, err
-	}
-	known, err := s.regions(r)
-	if err != nil {
-		return nil, err
-	}
-	var m roomba.Map
-	var regions []roomba.Region
-	for _, room := range rooms {
-		reg, err := findRegion(known, room)
-		if err != nil {
-			return nil, err
-		}
-		if reg.Stale {
-			if reg.Source == myhome.VacuumSourceCloud {
-				return nil, fmt.Errorf("room %q is no longer on the iRobot cloud map (last `myhome ctl vacuum rooms sync`)", room)
-			}
-			return nil, fmt.Errorf("room %q was learned on an older version of the map; run `myhome ctl vacuum rooms sync` (or start one room clean from the iRobot app) to refresh it", room)
-		}
-		if m.ID != "" && m.ID != reg.MapID {
-			return nil, fmt.Errorf("rooms are on different maps (%s, %s)", m.ID, reg.MapID)
-		}
-		version := reg.RobotMapVersion
-		if version == "" {
-			if reg.Source == myhome.VacuumSourceCloud {
-				// Never fall back to the cloud's version: it is not the robot's.
-				return nil, fmt.Errorf("robot %s has not reported map %s yet (is it connected?)", r.rec.Name, reg.MapID)
-			}
-			version = reg.MapVersion // learned from the robot itself
-		}
-		m = roomba.Map{ID: reg.MapID, Version: version}
-		regions = append(regions, roomba.Region{ID: reg.ID, Type: reg.Type})
-	}
-	c, err := s.client(r)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.CleanRegions(ctx, m, regions); err != nil {
 		return nil, err
 	}
 	return &myhome.VacuumOKResult{OK: true}, nil
@@ -173,8 +120,8 @@ func findRegion(known []myhome.VacuumRegion, room string) (myhome.VacuumRegion, 
 	return myhome.VacuumRegion{}, fmt.Errorf("room %q is ambiguous (%d matches)", room, len(matches))
 }
 
-// Rooms lists the known regions, flagging stale ones and cloud ones whose map
-// version differs from the robot's.
+// Rooms lists the known regions, flagging stale ones, with the robot's
+// reported version of each map for information.
 func (s *Service) Rooms(sel string) (*myhome.VacuumRoomsResult, error) {
 	r, err := s.pick(sel)
 	if err != nil {
@@ -210,7 +157,6 @@ func (s *Service) regions(r *robot) ([]myhome.VacuumRegion, error) {
 		}
 		if rec.Source == myhome.VacuumSourceCloud {
 			reg.Stale = rec.Removed
-			reg.Unverified = ver != rec.MapVersion
 		} else {
 			reg.Source = myhome.VacuumSourceRobot
 			// Without live state we cannot tell; the robot re-checks the version anyway.

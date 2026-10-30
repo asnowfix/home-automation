@@ -165,7 +165,7 @@ func TestStateMergeAndStatus(t *testing.T) {
 		t.Fatal("status reported ready before batPct and cleanMissionStatus arrived")
 	}
 	push(c, map[string]any{"batPct": 100, "bin": map[string]any{"full": false, "present": true}})
-	push(c, map[string]any{"cleanMissionStatus": map[string]any{"phase": "charge", "cycle": "none", "error": 0, "mssnM": 0},
+	push(c, map[string]any{"cleanMissionStatus": map[string]any{"phase": "charge", "cycle": "none", "error": 0, "mssnM": 0, "nMssn": 1038},
 		"lastCommand": map[string]any{"command": "addrobotdone", "initiator": nil, "time": nil}})
 	push(c, map[string]any{"batPct": 95}) // partial delta keeps the rest
 
@@ -173,7 +173,7 @@ func TestStateMergeAndStatus(t *testing.T) {
 	if !ok {
 		t.Fatal("status not ready")
 	}
-	if st.Name != "Edmond" || st.Battery != 95 || !st.BinPresent || st.BinFull || st.Phase != PhaseCharge {
+	if st.Name != "Edmond" || st.Battery != 95 || !st.BinPresent || st.BinFull || st.Phase != PhaseCharge || st.Mission != 1038 {
 		t.Fatalf("unexpected status %+v", st)
 	}
 	if len(st.Maps) != 1 || st.Maps[0] != (Map{ID: "e8EOWqiwQ6e8sGpyYU4C-w", Version: "260829T114918"}) {

@@ -52,6 +52,7 @@ type Status struct {
 	Error          int         `json:"error"`
 	NotReady       int         `json:"not_ready"`
 	MissionMinutes int         `json:"mission_minutes"`
+	Mission        int         `json:"mission"` // cleanMissionStatus.nMssn: mission counter, +1 when a mission opens
 	Initiator      string      `json:"initiator"`
 	Maps           []Map       `json:"maps"`
 	LastCommand    LastCommand `json:"last_command"`
@@ -117,11 +118,12 @@ func (s state) status() Status {
 		Error     int    `json:"error"`
 		NotReady  int    `json:"notReady"`
 		MssnM     int    `json:"mssnM"`
+		NMssn     int    `json:"nMssn"`
 		Initiator string `json:"initiator"`
 	}
 	_ = json.Unmarshal(s["cleanMissionStatus"], &cms)
 	st.Phase, st.Cycle, st.Error, st.NotReady = cms.Phase, cms.Cycle, cms.Error, cms.NotReady
-	st.MissionMinutes, st.Initiator = cms.MssnM, cms.Initiator
+	st.MissionMinutes, st.Mission, st.Initiator = cms.MssnM, cms.NMssn, cms.Initiator
 
 	// pmaps is a list of single-entry objects: [{"<pmap_id>":"<user_pmapv_id>"}]
 	var pmaps []map[string]string

@@ -222,10 +222,16 @@ func (c *Client) CleanRegions(ctx context.Context, m Map, regions []Region) erro
 	if len(regions) == 0 {
 		return errors.New("roomba: no region to clean")
 	}
-	return c.Command(ctx, CmdStart, map[string]any{
+	return c.Command(ctx, CmdStart, RegionCleanParams(m, regions))
+}
+
+// RegionCleanParams is what CleanRegions adds to the start command: the map,
+// the map version to name, and the regions in order.
+func RegionCleanParams(m Map, regions []Region) map[string]any {
+	return map[string]any{
 		"pmap_id":       m.ID,
 		"user_pmapv_id": m.Version,
 		"ordered":       1,
 		"regions":       regions,
-	})
+	}
 }

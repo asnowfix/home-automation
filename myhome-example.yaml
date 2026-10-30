@@ -212,6 +212,9 @@ vacuum:
   # Optional fixed robot IP, used instead of broadcast discovery.
   # Default: empty (discover the robot by its BLID)
   # host: "192.168.1.50"
+  # Experimental (#630): after a failed connect attempt, ping the robot (a
+  # short ICMP burst, needs root) to wake its Wi-Fi radio. Default: false
+  # wake: true
 
 # iRobot cloud account (optional; see docs/vacuum.md "Rooms"): used only to fetch
 # the robot's room names and ids, once at daemon start and on

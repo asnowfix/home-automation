@@ -181,6 +181,15 @@ broadcast can go unanswered, especially while the robot is driving.
 discovery. Use it only with a DHCP reservation, or where broadcast does not reach the robot. The TLS certificate must name the
 expected robot (`CN=iRobot-<id>`), so an address now held by another device is rejected.
 
+**A dozing robot after a daemon restart (#630, experimental).** A docked robot has been seen to
+refuse connections for about 2 minutes after the daemon restarted. During that time it answered
+pings in 570-860 ms instead of a few ms, which points to Wi-Fi power save. After a few pings it
+connected (one observation, 2026-10-30). `MYHOME_VACUUM_WAKE=true` makes the daemon send a short
+ICMP echo burst (at most 3 packets, at most 2 s) to the robot after each failed connect attempt. The
+journal then shows `Wake probe ... replied=... rtt=...`. It needs root or CAP_NET_RAW; the packaged
+unit runs as root. It stays off by default until measured: if it makes no difference, it will be
+removed.
+
 A DHCP reservation on the router helps, but is not required. The SFR box has no API for it
 (web UI only).
 

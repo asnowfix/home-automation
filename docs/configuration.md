@@ -564,6 +564,7 @@ The password is a secret: set it in `/var/lib/myhome/.env` (prompted by `sudo dp
 | `vacuum.blid` | `MYHOME_VACUUM_BLID` | — | Robot id (BLID), printed by `myhome ctl vacuum pair` |
 | `vacuum.password` | `MYHOME_VACUUM_PASSWORD` | — | Robot local password, printed by `myhome ctl vacuum pair` (`.env` only) |
 | `vacuum.host` | `MYHOME_VACUUM_HOST` | — | Optional fixed robot IP, used instead of broadcast discovery (e.g. with a DHCP reservation, or where broadcast does not reach the robot). Empty: discovery by BLID, falling back to the last address the robot was reached at |
+| `vacuum.wake` | `MYHOME_VACUUM_WAKE` | `false` | After each failed connect attempt, send a short ICMP echo burst (at most 3 packets, at most 2 s) to the robot, to wake a dozing Wi-Fi radio (#630). Needs root or CAP_NET_RAW (the packaged unit runs as root); otherwise it is logged once and skipped. Experimental: off until measured |
 
 ### iRobot cloud account (room names)
 

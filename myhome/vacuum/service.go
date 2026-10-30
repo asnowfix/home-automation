@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
@@ -28,12 +29,13 @@ import (
 
 // Timings of the per-robot supervisor. Variables so tests can shorten them.
 var (
-	discoveryTimeout = 8 * time.Second  // one discovery round before falling back to the stored host
-	connectRetry     = 3 * time.Second  // the robot refuses a connect that follows another too closely
-	connectTimeout   = 2 * time.Minute  // give up on this host and re-resolve the robot's address
-	watchInterval    = 30 * time.Second // how often a live connection is checked
-	downTolerance    = 2 * time.Minute  // how long auto-reconnect may fail before re-resolving
-	badCredsBackoff  = 10 * time.Minute // a rejected password will not fix itself quickly
+	discoveryTimeout = 8 * time.Second   // one discovery round before falling back to the stored host
+	connectRetry     = 3 * time.Second   // the robot refuses a connect that follows another too closely
+	connectTimeout   = 2 * time.Minute   // give up on this host and re-resolve the robot's address
+	watchInterval    = 30 * time.Second  // how often a live connection is checked
+	downTolerance    = 2 * time.Minute   // how long auto-reconnect may fail before re-resolving
+	badCredsBackoff  = 10 * time.Minute  // a rejected password will not fix itself quickly
+	wakeBudget       = roomba.WakeBudget // the longest one wake probe may delay a connect retry
 )
 
 // Config identifies the robot and holds its local password and the iRobot
@@ -43,6 +45,9 @@ type Config struct {
 	BLID     string // robot id (MYHOME_VACUUM_BLID)
 	Password string // robot local password (MYHOME_VACUUM_PASSWORD), from .env only
 	Host     string // optional fixed address (MYHOME_VACUUM_HOST); empty: discovery by BLID
+	// Wake enables the ICMP wake probe after each failed connect attempt
+	// (MYHOME_VACUUM_WAKE, #630). Off by default until measured.
+	Wake bool
 
 	IRobotEmail    string // iRobot account email (MYHOME_IROBOT_EMAIL), for room sync
 	IRobotPassword string // iRobot account password (MYHOME_IROBOT_PASSWORD), from .env only
@@ -99,6 +104,8 @@ type Service struct {
 	finder    finder
 	newClient newClientFunc
 	cloud     cloudMaps
+	wake      func(ctx context.Context, host string) (roomba.WakeResult, error) // roomba.Wake; faked in tests
+	wakeOff   atomic.Bool                                                       // set once the probe is known not to be permitted
 
 	mu     sync.Mutex
 	robots map[string]*robot // by BLID
@@ -115,11 +122,14 @@ func NewService(ctx context.Context, log logr.Logger, store *Storage, cfg Config
 		store:  store,
 		cfg:    cfg,
 		finder: &roomba.Discoverer{},
-		newClient: func(log logr.Logger, blid, password, host string, onChange func(roomba.Status)) robotClient {
-			return roomba.NewClient(log, blid, password, host, onChange)
-		},
 		cloud:  cloud.New(),
+		wake:   roomba.Wake,
 		robots: map[string]*robot{},
+	}
+	s.newClient = func(log logr.Logger, blid, password, host string, onChange func(roomba.Status)) robotClient {
+		c := roomba.NewClient(log, blid, password, host, onChange)
+		c.BeforeRetry = s.beforeRetry(host)
+		return c
 	}
 	return s, s.start()
 }
@@ -222,6 +232,36 @@ func (s *Service) watch(r *robot, c robotClient) {
 		case time.Since(downSince) > downTolerance:
 			s.log.Info("Connection down too long; re-resolving the robot", "robot", r.rec.Name, "down_for", time.Since(downSince).Round(time.Second))
 			return
+		}
+	}
+}
+
+// beforeRetry returns the hook run after each failed connect attempt to host:
+// the ICMP wake probe when MYHOME_VACUUM_WAKE is set, otherwise nil (#630).
+// The probe is bounded by roomba.WakeBudget; it never fails the connect, and
+// once the daemon is found to lack the privilege for it, it is skipped.
+func (s *Service) beforeRetry(host string) func(ctx context.Context) {
+	if !s.cfg.Wake {
+		return nil
+	}
+	return func(ctx context.Context) {
+		if s.wakeOff.Load() {
+			return
+		}
+		ctx, cancel := context.WithTimeout(ctx, wakeBudget)
+		defer cancel()
+		start := time.Now()
+		res, err := s.wake(ctx, host)
+		switch {
+		case errors.Is(err, roomba.ErrWakeNotPermitted):
+			s.wakeOff.Store(true)
+			s.log.Info("Wake probe disabled: the daemon may not send ICMP (needs root or CAP_NET_RAW)")
+		case err != nil:
+			s.log.Info("Wake probe failed", "host", host, "error", err.Error())
+		default:
+			// Logged at info so the #630 measurement can read it from the journal.
+			s.log.Info("Wake probe", "host", host, "sent", res.Sent, "replied", res.Replied,
+				"rtt", res.RTT.Round(time.Millisecond), "took", time.Since(start).Round(time.Millisecond))
 		}
 	}
 }

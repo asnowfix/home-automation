@@ -98,6 +98,7 @@ var Flags struct {
 	VacuumBLID                  string        // robot vacuum id (BLID); from .env, never a flag
 	VacuumPassword              string        // robot vacuum local password; from .env, never a flag
 	VacuumHost                  string        // robot vacuum fixed address; empty = discovery by BLID; never a flag
+	VacuumWake                  bool          // ICMP wake probe after a failed robot connect attempt (#630); default off
 	IRobotEmail                 string        // iRobot cloud account email, for room sync (#628); from .env, never a flag
 	IRobotPassword              string        // iRobot cloud account password (#628); from .env, never a flag
 	EnableNoticeService         bool          // whether to enable the notice service (motion rule + daily email digest)

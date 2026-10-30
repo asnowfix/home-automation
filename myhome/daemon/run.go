@@ -320,6 +320,7 @@ func readVacuumConfig(v *viper.Viper) {
 	options.Flags.VacuumBLID = v.GetString("vacuum.blid")
 	options.Flags.VacuumPassword = v.GetString("vacuum.password")
 	options.Flags.VacuumHost = v.GetString("vacuum.host")
+	options.Flags.VacuumWake = v.GetBool("vacuum.wake")
 	options.Flags.IRobotEmail = v.GetString("irobot.email")
 	options.Flags.IRobotPassword = v.GetString("irobot.password")
 }
@@ -330,6 +331,7 @@ func vacuumConfig() vacuum.Config {
 		BLID:     options.Flags.VacuumBLID,
 		Password: options.Flags.VacuumPassword,
 		Host:     options.Flags.VacuumHost,
+		Wake:     options.Flags.VacuumWake,
 
 		IRobotEmail:    options.Flags.IRobotEmail,
 		IRobotPassword: options.Flags.IRobotPassword,

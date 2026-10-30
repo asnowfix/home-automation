@@ -46,6 +46,11 @@ type Client struct {
 
 	mc      mqtt.Client
 	publish func(topic string, payload []byte) error // replaced in tests
+	dial    func(ctx context.Context) error          // one connect attempt; replaced in tests
+
+	// BeforeRetry, if set, runs after a failed connect attempt and before the
+	// wait for the next one (e.g. a wake probe, #630). It must be bounded.
+	BeforeRetry func(ctx context.Context)
 
 	mu    sync.Mutex
 	state state
@@ -86,6 +91,15 @@ func NewClient(log logr.Logger, blid, password, host string, onChange func(Statu
 		SetConnectionLostHandler(func(_ mqtt.Client, err error) { c.log.Info("Connection lost", "error", err) }).
 		SetOnConnectHandler(func(mqtt.Client) { c.log.Info("Connected") })
 	c.mc = mqtt.NewClient(opts)
+	c.dial = func(ctx context.Context) error {
+		t := c.mc.Connect()
+		select {
+		case <-t.Done():
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		return t.Error()
+	}
 	c.publish = func(topic string, payload []byte) error {
 		t := c.mc.Publish(topic, 0, false, payload)
 		if !t.WaitTimeout(5 * time.Second) {
@@ -106,13 +120,10 @@ func (c *Client) Host() string { return c.host }
 // A wrong password fails fast: retrying it cannot help.
 func (c *Client) Connect(ctx context.Context, retry time.Duration) error {
 	for attempt := 1; ; attempt++ {
-		t := c.mc.Connect()
-		select {
-		case <-t.Done():
-		case <-ctx.Done():
-			return ctx.Err()
+		err := c.dial(ctx)
+		if err != nil && ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			return err // ctx ended while waiting for the attempt
 		}
-		err := t.Error()
 		if err == nil {
 			c.log.Info("Connect succeeded", "attempt", attempt)
 			return nil
@@ -121,6 +132,9 @@ func (c *Client) Connect(ctx context.Context, retry time.Duration) error {
 			return fmt.Errorf("%w: %v", ErrBadCredentials, err)
 		}
 		c.log.V(1).Info("Connect attempt failed", "attempt", attempt, "error", err)
+		if c.BeforeRetry != nil {
+			c.BeforeRetry(ctx)
+		}
 		select {
 		case <-time.After(retry):
 		case <-ctx.Done():

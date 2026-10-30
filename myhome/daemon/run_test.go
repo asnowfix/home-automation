@@ -111,7 +111,15 @@ func TestVacuumConfigFromEnv(t *testing.T) {
 	t.Setenv("MYHOME_VACUUM_PASSWORD", "test-password")
 	t.Setenv("MYHOME_VACUUM_HOST", "192.0.2.50")
 	readVacuumConfig(newViper())
+	if vacuumConfig().Wake {
+		t.Fatal("wake probe on without MYHOME_VACUUM_WAKE")
+	}
+	t.Setenv("MYHOME_VACUUM_WAKE", "true")
+	readVacuumConfig(newViper())
 	cfg := vacuumConfig()
+	if !cfg.Wake {
+		t.Fatal("MYHOME_VACUUM_WAKE=true not read")
+	}
 	if !cfg.Enabled() {
 		t.Fatal("disabled with MYHOME_VACUUM_BLID and MYHOME_VACUUM_PASSWORD set")
 	}

@@ -122,20 +122,38 @@ What a sync does:
 - It reads nothing else: not the robot's password, not map geometry, not schedules. It writes
   nothing to the cloud.
 
-**Map versions, and why the ids are "unverified".** The cloud stores the rooms of the map version
-last confirmed in the app. The robot's own version moves on after every clean. On 2026-10-29 the
-cloud held `251027T114719` while the robot reported `261029T090306` for the same map. A mismatch is
-therefore the **normal** state. `rooms` then says so:
+**Map versions: room cleans name the cloud's.** The cloud stores the rooms of the map version last
+confirmed in the app. The robot's own reported version moves on after every clean. On 2026-10-29 the
+cloud held `251027T114719` while the robot reported `261029T090306` for the same map, so a mismatch
+is the **normal** state. `rooms` shows both versions, for information only:
 
 ```
-Map Rez-de-chaussée (e8EO…): ids come from iRobot cloud map version 251027T114719; the robot reports 261029T090306; unverified.
+Map Rez-de-chaussée (e8EO…): room cleans name iRobot cloud map version 251027T114719; the robot reports 261029T090306.
 ```
 
-A room clean always sends the robot's **own** current map version, read from its live state at
-that moment, never the cloud's. Whether the cloud's region ids are the ids the robot accepts is
-**not yet verified on Edmond**. Until one single-room clean has been tried (keep `myhome ctl vacuum
-dock` ready), treat a room clean as an experiment. What a robot does with an unknown region id is
-not documented (see `docs/irobot-local-api-research.md`).
+A clean of a cloud room names the **cloud's** version. This is a measured result, on one robot
+(Edmond, 2026-10-30). The same single-room clean of the kitchen (region 21) was rejected with the
+robot's own version (acknowledged, mission opened, aborted within ~3 s with `error 224`, never left
+the dock), and it cleaned the kitchen with the cloud's version. The cloud's region id was right.
+Hypothesis, **not verified**: the robot reports its latest learned map version, while a clean must
+name the version the cloud considers active. Rooms learned from a robot echo are cleaned with that
+echo's version. Either way the map id must be one the robot currently reports, or the clean is
+refused.
+
+**One automatic retry** (owner decision, 2026-10-30). After the robot acknowledges a room clean, the
+daemon watches it for 15 s. An **immediate abort** means the robot is back on the dock (phase
+`charge`, cycle `none`) with an error code, without having run in that window. On an immediate abort,
+and only then, the daemon retries **once** with the other known version of the same map (cloud
+version, or the robot's reported one). It does so only when that version exists and differs, the
+robot is still docked, and no stop, pause or dock was sent in the meantime. Never a third attempt.
+Both attempts are logged with their versions and error codes. `clean` prints which version ran; if
+both aborted it prints both attempts and the error-224 hint, and fails. The cloud-version-first order
+comes from that single measurement on one robot. The retry is a constant in `myhome/vacuum/clean.go`
+(`retryOtherVersion`) and can be turned off.
+
+`error 224` is not documented anywhere. `status`, the clean output and the web UI explain it as:
+"the robot opened the mission and aborted at once; seen when a room clean names a map version the
+robot does not accept".
 
 ### Learned from the robot (fallback, no account)
 
@@ -148,7 +166,9 @@ and region ids it used, and the daemon records them. Without the account:
 When the robot's map version changes, rooms learned on the older version are marked **stale** and
 refused, rather than risking cleaning the wrong place. Start a room clean from the app again to
 refresh them. Note that the robot's version changes after cleans, not only after map edits (see
-above), so learned rooms go stale often. That is one reason the cloud is preferred.
+above), so learned rooms go stale often. That is one reason the cloud is preferred. (Whether this
+staleness check is even right is open: a room started from the app may echo the cloud's version,
+which then never equals the robot's reported one.)
 
 ## Finding the robot
 
@@ -173,6 +193,8 @@ A DHCP reservation on the router helps, but is not required. The SFR box has no 
 | First connection attempt refused | Normal: the robot refuses a connection that follows another too closely, and the retry 3–5 s later succeeds. |
 | `not connected (last known address …)` | The robot is asleep off the dock, or out of Wi-Fi range. Dock it, or press CLEAN. |
 | A command "not acknowledged by the robot" | The robot did not echo the command within 10 s. Check `status`. |
+| `clean`: "aborted it at once … error 224" | The robot rejected the map version named. Rooms from the cloud already use the cloud version and get one retry with the robot's; if both abort, run `rooms sync` (the map may have changed in the app) and check `status`. |
+| `clean`: "does not report map …" | The robot is not connected yet, or the map no longer exists on it. |
 | Room "learned on an older version of the map" | The robot's map version changed. Run `rooms sync` (with the iRobot account), or start that room once from the app. |
 | `rooms sync`: "not configured" | `MYHOME_IROBOT_EMAIL` or `MYHOME_IROBOT_PASSWORD` is not in the daemon's environment. |
 | `rooms sync`: "gigya login failed (Gigya errorCode 403042)" | Wrong account email or password. One attempt is made per sync; fix `.env` and restart before trying again. |

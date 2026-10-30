@@ -163,6 +163,16 @@ reverse engineering; none is iRobot documentation. iRobot publishes no API docs 
 - Region ids as small integers: the cloud mock uses `"id": "1"`, `"2"`; the forum examples use '1'…'27'.
   Strings of digits, small. Confidence MEDIUM (fixtures + multiple community examples).
 
+**Verified on our robot, 2026-10-30 (one robot, one run each; HIGH for this robot, unknown in
+general).** On Edmond (Roomba i7, firmware 22.52.10) the robot reported `user_pmapv_id`
+`261029T090306` for map `e8EOWqiwQ6e8sGpyYU4C-w`, while the cloud's active version was `251027T114719`.
+A single-room `start` for region `21` naming the robot's version was echoed, opened a mission and
+aborted within ~3 s with `cleanMissionStatus.error` 224, without leaving the dock. The identical
+command naming the cloud's version cleaned the kitchen (owner confirmed). Hypothesis, **unverified**:
+the robot reports its latest *learned* map version, while a clean must name the version the cloud
+considers active (the last one confirmed in the app). This contradicts the earlier inference in our
+code that the robot's own version is the one to send.
+
 **Cross-cutting point for question 1 (MEDIUM).** Local `lastCommand`/`regions` names ids `region_id` and
 `type`; the cloud `pmaps` names them `id`, `name`, `region_type`. irbt (cloud client, tested on an i7
 per its README) sends the cloud `regions[].id` as `region_id` in its start payload

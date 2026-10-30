@@ -19,7 +19,7 @@ command in `lastCommand`. State is a "shadow" pushed as `{"state":{"reported":{.
 | Verb | Payload (besides `command`, `time`, `initiator:"localApp"`) | Effect | Status |
 |---|---|---|---|
 | `start` (no args) | none | Full clean | VERIFIED 2026-10-29 08:23 (robot went to `cycle: clean`, `phase: run`) |
-| `start` + regions | `pmap_id`, `user_pmapv_id`, `ordered`, `regions:[{region_id,type:"rid"}]` | Room clean | USED; **not yet observed live**. Single-room test planned |
+| `start` + regions | `pmap_id`, `user_pmapv_id`, `ordered`, `regions:[{region_id,type:"rid"}]` | Room clean | **VERIFIED 2026-10-30 with the CLOUD `user_pmapv_id`** (`251027T114719`, region `21`: the robot cleaned the kitchen). **Rejected with the robot's own reported version** (`261029T090306`): echoed, mission opened, aborted within ~3 s with `cleanMissionStatus.error` **224**, never left the dock. One robot (i7), one measurement each |
 | `stop` | none | Stop the mission | VERIFIED (2026-10-26, #606) |
 | `pause` / `resume` | none | Pause / resume | VERIFIED (2026-10-26, #606) |
 | `dock` | none | Send home | VERIFIED (2026-10-26, and live test) |
@@ -63,10 +63,12 @@ SigV4-signed calls (service `execute-api`).
   becomes the source of truth only if a rename API exists), the evidence so far keeps the **cloud as
   source of truth**. A different `pmaps` write endpoint could still exist; it would have to be captured
   from the official app, which cannot run here.
-- Each cloud write would create a new map version, and our room clean must send the robot's own current
-  `user_pmapv_id` (read at send time). Cloud and robot versions already differ (`251027T114719` vs
-  `261029T090306`), so a mismatch is the normal state.
-- Open until the single-room test: whether cloud region ids are accepted by the robot locally.
+- Each cloud write would create a new map version. Room cleans must name the **cloud's** active
+  `user_pmapv_id`, not the robot's reported one (measured 2026-10-30, see the `start` + regions row).
+  Cloud and robot versions differ (`251027T114719` vs `261029T090306`) as the normal state.
+- Settled 2026-10-30: the cloud region id `21` is accepted by the robot locally, with the cloud version.
+  `error 224` is undocumented in every source read; our reading (robot rejected the version named) is
+  an inference from that one pair of runs.
 
 ## 4. Our own RPC verbs (`internal/myhome/const.go`)
 

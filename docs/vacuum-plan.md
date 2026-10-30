@@ -91,13 +91,23 @@ from the account's `GET /v1/<blid>/pmaps?activeDetails=1`. Login chain and evide
   and its call is undocumented. No write path exists. If a usable rename API turns up, the policy
   flips (local DB becomes the source of truth and names are synced up). The code point is
   `Service.NameRoom` / `Storage.syncCloud` in `myhome/vacuum`.
-- **Versions: the mismatch is normal.** The cloud keeps the last app-confirmed map version, while the
-  robot's moves on after each clean. Rooms store the cloud version for information. A clean always
-  sends the robot's live version and is refused if the robot has not reported the map. A cloud room
-  is "unverified", not "stale", when the versions differ.
+- **Versions: the mismatch is normal, and cleans name the cloud's.** The cloud keeps the last
+  app-confirmed map version, while the robot's moves on after each clean. Measured 2026-10-30 on
+  Edmond (one robot): a single-room clean naming the robot's reported version (`261029T090306`) aborted
+  within ~3 s with `error 224`; the same clean naming the cloud's (`251027T114719`) cleaned the kitchen.
+  So a cloud room is cleaned with its stored cloud version; a room learned from an echo keeps that
+  echo's version. The map id must be one the robot reports. Versions are shown as information only.
+  Hypothesis (unverified): the robot reports its latest learned version; a clean must name the
+  cloud's active one.
+- **One retry on an immediate abort** (owner decision 2026-10-30, `myhome/vacuum/clean.go`). This means:
+  watch 15 s after the acknowledgement; on charge + cycle none + error, with a new mission or error code
+  and never running, retry once with the other known version, provided the robot is still docked and no
+  stop/pause/resume/dock was sent; never a third attempt; `retryOtherVersion` turns it off.
 - **Secrets.** The account password, the Gigya signature and the AWS credentials stay inside
   `pkg/roomba/cloud`, which never puts them in an error. The account's robot list carries the robot's
   local password and is not called. Tests run the real client against a fake cloud and assert
   that no secret reaches logs or RPC results.
-- **Open:** whether cloud region ids are what the robot accepts locally; how long ids stay valid
-  across map versions. Both are settled only by the owner's live single-room clean.
+- **Settled 2026-10-30:** the cloud region id (`21`, kitchen) is what the robot accepts locally,
+  together with the cloud's map version. **Open:** how long ids and the cloud version stay valid as
+  the map changes, and whether the robot-echo staleness check is right (an app-started clean may
+  echo the cloud's version).

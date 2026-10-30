@@ -304,6 +304,9 @@ func toStatus(st roomba.Status) myhome.VacuumStatus {
 	for _, m := range st.Maps {
 		vs.Maps = append(vs.Maps, myhome.VacuumMap{ID: m.ID, Version: m.Version})
 	}
+	for _, reg := range st.LastCommand.Regions {
+		vs.Regions = append(vs.Regions, reg.ID)
+	}
 	return vs
 }
 

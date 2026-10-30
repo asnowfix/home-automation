@@ -72,3 +72,34 @@ func TestVacuumPanel_NoStatusYet(t *testing.T) {
 		t.Errorf("unexpected output:\n%s", out)
 	}
 }
+
+func TestTargetNames(t *testing.T) {
+	rooms := []myhome.VacuumRegion{{ID: "21", Name: "Cuisine"}, {ID: "8", Name: "Chambre"}, {ID: "5"}}
+	got := targetNames([]string{"21", "5", "99"}, rooms)
+	want := []string{"Cuisine", "region 5", "region 99"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("targetNames = %v, want %v", got, want)
+	}
+	if n := targetNames(nil, rooms); len(n) != 0 {
+		t.Errorf("whole-home clean has targets: %v", n)
+	}
+}
+
+func TestVacuumPanel_ShowsTargetRooms(t *testing.T) {
+	out := renderVacuumPanel(t, vacuumPanel{Cards: []vacuumCard{{
+		VacuumRobot: myhome.VacuumRobot{ID: "B1", Name: "Edmond", Connected: true,
+			Status: &myhome.VacuumStatus{Battery: 90, BinPresent: true, Phase: "run", Cycle: "clean"}},
+		PhaseText: "cleaning", Running: true, Targets: []string{"Cuisine", "Couloir"},
+	}}})
+	if !strings.Contains(out, "Rooms: Cuisine, Couloir") {
+		t.Errorf("target rooms not shown:\n%s", out)
+	}
+	out = renderVacuumPanel(t, vacuumPanel{Cards: []vacuumCard{{
+		VacuumRobot: myhome.VacuumRobot{ID: "B1", Name: "Edmond", Connected: true,
+			Status: &myhome.VacuumStatus{Battery: 90, BinPresent: true, Phase: "run", Cycle: "clean"}},
+		PhaseText: "cleaning", Running: true,
+	}}})
+	if strings.Contains(out, "Rooms:") {
+		t.Error("whole-home clean shows a room list")
+	}
+}

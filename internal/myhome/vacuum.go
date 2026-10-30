@@ -25,6 +25,7 @@ type VacuumStatus struct {
 	MissionMinutes int         `json:"mission_minutes"`
 	Mission        int         `json:"mission,omitempty"` // mission counter (nMssn)
 	LastCommand    string      `json:"last_command,omitempty"`
+	Regions        []string    `json:"regions,omitempty"` // ids of the rooms/zones the last command asked for; empty for a whole-home clean
 	Maps           []VacuumMap `json:"maps,omitempty"`
 	UpdatedAt      time.Time   `json:"updated_at"`
 }

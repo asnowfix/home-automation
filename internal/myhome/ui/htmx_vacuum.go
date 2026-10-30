@@ -22,8 +22,9 @@ type vacuumCard struct {
 	Running   bool // cleaning or returning
 	Paused    bool
 	Rooms     []myhome.VacuumRegion
-	Error     string // last action's failure, shown on the card
-	ErrorHint string // explanation of the robot's error code, when one is known
+	Targets   []string // names of the rooms being cleaned, while a mission is open; empty for a whole-home clean
+	Error     string   // last action's failure, shown on the card
+	ErrorHint string   // explanation of the robot's error code, when one is known
 }
 
 type vacuumPanel struct {
@@ -36,6 +37,22 @@ func callVacuum(ctx context.Context, verb myhome.Verb, params any) (any, error) 
 		return nil, err // vacuum service not registered
 	}
 	return mh.ActionE(ctx, params)
+}
+
+// targetNames resolves the region ids of the robot's last command to room names.
+func targetNames(ids []string, rooms []myhome.VacuumRegion) []string {
+	var names []string
+	for _, id := range ids {
+		name := "region " + id
+		for _, reg := range rooms {
+			if reg.ID == id && reg.Name != "" {
+				name = reg.Name
+				break
+			}
+		}
+		names = append(names, name)
+	}
+	return names
 }
 
 func (h *HTMXHandler) vacuumPanel(actionErr map[string]string) (vacuumPanel, bool) {
@@ -66,6 +83,9 @@ func (h *HTMXHandler) vacuumPanel(actionErr map[string]string) (vacuumPanel, boo
 					c.Rooms = append(c.Rooms, reg)
 				}
 			}
+		}
+		if r.Status != nil && (c.Running || c.Paused) {
+			c.Targets = targetNames(r.Status.Regions, c.Rooms)
 		}
 		p.Cards = append(p.Cards, c)
 	}
@@ -140,6 +160,7 @@ const vacuumPanelTemplate = `
       <div class="card-content">
         {{if .Status}}
         <p class="is-size-5 mb-2">{{.PhaseText}}</p>
+        {{if .Targets}}<p class="mb-2">Rooms: {{range $i, $t := .Targets}}{{if $i}}, {{end}}{{$t}}{{end}}</p>{{end}}
         <progress class="progress is-small {{if lt .Status.Battery 20}}is-danger{{else if lt .Status.Battery 50}}is-warning{{else}}is-success{{end}}"
                   value="{{.Status.Battery}}" max="100" title="battery {{.Status.Battery}}%">{{.Status.Battery}}%</progress>
         <div class="tags">

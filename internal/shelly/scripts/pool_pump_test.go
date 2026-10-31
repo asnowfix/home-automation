@@ -1846,6 +1846,51 @@ func TestPoolPump_SolarNeverStartsPumpInWinter(t *testing.T) {
 	}
 }
 
+// TestPoolPump_SolarRunStopsWhenModeTurnsWinter covers the latched case of
+// #621: a solar run in progress (summer) must not stay latched if the mode
+// becomes winter -- the next evaluation drops F_SOLAR_WANT and the pump stops
+// even though solar is still far above the start threshold. The mode flip is
+// injected via ScheduleEvalInjector (as the day-rollover test does for runtime
+// state); the next solar message stands in for the 30s SOLAR.tickTimer.
+func TestPoolPump_SolarRunStopsWhenModeTurnsWinter(t *testing.T) {
+	buf := readPoolPumpScript(t)
+	mc := mqtt.NewMockClient()
+	evalCh := make(chan []byte, 4)
+	deviceState := &script.DeviceState{
+		KVS:                  solarKVS(nil),
+		Storage:              solarSummerStorage(),
+		ComponentStatus:      pro3ComponentStatus(),
+		Schedules:            poolPumpSchedules(),
+		ScheduleEvalInjector: evalCh,
+	}
+	stop := runPoolPumpPhase(t, buf, deviceState, mc)
+	defer stop()
+
+	publish := func() {
+		if err := mc.Publish(context.Background(), "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+			t.Fatalf("publish failed: %v", err)
+		}
+	}
+	publish()
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0"
+	}) {
+		t.Fatalf("setup: summer solar start expected, got active-output=%v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+	if err := evalPoolPumpSchedule(deviceState, "STATE.scheduleMode = 'winter';"); err != nil {
+		t.Fatalf("failed to inject winter mode: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond) // let the injected eval land
+	publish()
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "-1"
+	}) {
+		t.Fatalf("solar run must stop once mode is winter, got active-output=%v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+}
+
 // TestPoolPump_SolarStartsAndStopsPump verifies the core hysteresis: a fresh,
 // above-threshold sample starts the pump (via doStart, so the fuse/
 // isMyTurnToRun/water-supply checks all still apply), and a subsequent fresh,

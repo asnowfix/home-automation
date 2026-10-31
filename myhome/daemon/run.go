@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	"github.com/asnowfix/home-automation/myhome/vacuum"
 	"github.com/asnowfix/home-automation/pkg/sfr"
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -297,6 +298,10 @@ var runCmd = &cobra.Command{
 		options.Flags.SFRPassword = v.GetString("sfr.password")
 		sfr.Init(options.Flags.SFRUsername, options.Flags.SFRPassword)
 
+		// Robot vacuum (#626): enabled automatically when both BLID and
+		// password are set. See readVacuumConfig.
+		readVacuumConfig(v)
+
 		// Store Viper instance in global options for daemon to use
 		options.ViperConfig = v
 
@@ -304,4 +309,31 @@ var runCmd = &cobra.Command{
 		log.Info("Running in foreground")
 		return daemon.Run()
 	},
+}
+
+// readVacuumConfig loads the robot vacuum settings. Viper reads
+// MYHOME_VACUUM_BLID / MYHOME_VACUUM_PASSWORD / MYHOME_VACUUM_HOST and the
+// iRobot cloud account MYHOME_IROBOT_EMAIL / MYHOME_IROBOT_PASSWORD (#628) from
+// the environment (the packaged daemon's .env) or the config file. Like
+// Beem/SFR, these are never CLI flags, and the passwords belong in .env only.
+func readVacuumConfig(v *viper.Viper) {
+	options.Flags.VacuumBLID = v.GetString("vacuum.blid")
+	options.Flags.VacuumPassword = v.GetString("vacuum.password")
+	options.Flags.VacuumHost = v.GetString("vacuum.host")
+	options.Flags.VacuumWake = v.GetBool("vacuum.wake")
+	options.Flags.IRobotEmail = v.GetString("irobot.email")
+	options.Flags.IRobotPassword = v.GetString("irobot.password")
+}
+
+// vacuumConfig is the vacuum service configuration read by readVacuumConfig.
+func vacuumConfig() vacuum.Config {
+	return vacuum.Config{
+		BLID:     options.Flags.VacuumBLID,
+		Password: options.Flags.VacuumPassword,
+		Host:     options.Flags.VacuumHost,
+		Wake:     options.Flags.VacuumWake,
+
+		IRobotEmail:    options.Flags.IRobotEmail,
+		IRobotPassword: options.Flags.IRobotPassword,
+	}
 }

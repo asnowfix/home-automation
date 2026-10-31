@@ -27,6 +27,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/occupancy"
 	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/myhome/temperature"
+	"github.com/asnowfix/home-automation/myhome/vacuum"
 	beem "github.com/asnowfix/home-automation/pkg/beem"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
@@ -483,6 +484,27 @@ func (d *daemon) Run() error {
 		fetchService := fetchproxy.NewService(d.ctx, log, mc, fetchStorage)
 		fetchService.RegisterHandlers()
 		log.Info("Fetch-and-transform proxy RPC methods registered")
+
+		// Register the robot vacuum service (#606). The vacuum.* methods are
+		// always registered; the robot connection starts only when
+		// MYHOME_VACUUM_BLID and MYHOME_VACUUM_PASSWORD are set (#626), and
+		// without them vacuum.list is empty. The robot accepts a single local
+		// client, so only one daemon instance should be configured with it.
+		vacuumStorage, err := vacuum.NewStorage(log, storage.DB())
+		if err != nil {
+			log.Error(err, "Failed to initialize vacuum storage")
+			return err
+		}
+		vacuumCfg := vacuumConfig()
+		if !vacuumCfg.Enabled() {
+			log.Info("Robot vacuum integration disabled (MYHOME_VACUUM_BLID / MYHOME_VACUUM_PASSWORD not set)")
+		}
+		vacuumService, err := vacuum.NewService(d.ctx, log, vacuumStorage, vacuumCfg)
+		if err != nil {
+			log.Error(err, "Failed to start vacuum service")
+			return err
+		}
+		vacuumService.RegisterHandlers()
 
 		// Register Occupancy RPC methods if enabled
 		if options.Flags.EnableOccupancyService && d.occupancyService != nil {

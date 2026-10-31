@@ -204,6 +204,26 @@ sfr:
   username: ""
   password: ""
 
+# Robot vacuum (iRobot Roomba, local LAN; see docs/vacuum.md). Enabled once
+# MYHOME_VACUUM_BLID and MYHOME_VACUUM_PASSWORD are set — both belong in the
+# daemon's .env (/var/lib/myhome/.env, prompted by `dpkg-reconfigure myhome`),
+# never in this file. Get them with `myhome ctl vacuum pair`.
+vacuum:
+  # Optional fixed robot IP, used instead of broadcast discovery.
+  # Default: empty (discover the robot by its BLID)
+  # host: "192.168.1.50"
+  # Experimental (#630): after a failed connect attempt, ping the robot (a
+  # short ICMP burst, needs root) to wake its Wi-Fi radio. Default: false
+  # wake: true
+
+# iRobot cloud account (optional; see docs/vacuum.md "Rooms"): used only to fetch
+# the robot's room names and ids, once at daemon start and on
+# `myhome ctl vacuum rooms sync`. Both MYHOME_IROBOT_EMAIL and
+# MYHOME_IROBOT_PASSWORD belong in the daemon's .env (prompted by
+# `dpkg-reconfigure myhome`), never in this file. There is no non-secret
+# setting to put here.
+# irobot: {}
+
 # Notice service: curates a "notice" event severity (daily pool/garden plans,
 # solar pump on/off, motion at night or while absent) and emails a daily
 # digest. Unlike events/occupancy/temperature, this is NOT auto-enabled with

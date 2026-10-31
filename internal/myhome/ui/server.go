@@ -104,6 +104,8 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	mux.HandleFunc("/htmx/events", htmxHandler.EventsTable)
 	mux.HandleFunc("/htmx/events/more", htmxHandler.EventsMore)
 	mux.HandleFunc("/htmx/accounts", htmxHandler.AccountsPanel)
+	mux.HandleFunc("/htmx/vacuum", htmxHandler.VacuumPanel)
+	mux.HandleFunc("/htmx/vacuum/action", htmxHandler.VacuumAction)
 
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Info("http-incoming", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "proto", r.Proto, "content-length", r.ContentLength)

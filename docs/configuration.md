@@ -553,6 +553,30 @@ Credentials for the SFR home gateway. Authentication is skipped when either valu
 | `sfr.username` | `MYHOME_SFR_USERNAME` | — | SFR box admin username |
 | `sfr.password` | `MYHOME_SFR_PASSWORD` | — | SFR box admin password |
 
+## Robot Vacuum
+
+The iRobot Roomba integration (see [`docs/vacuum.md`](vacuum.md)) is enabled automatically when both `vacuum.blid` and `vacuum.password` are set and non-empty; there is no separate enable flag. Without them the daemon logs `Robot vacuum integration disabled`, opens no robot connection, and `vacuum.list` returns no robot.
+
+The password is a secret: set it in `/var/lib/myhome/.env` (prompted by `sudo dpkg-reconfigure myhome`; see `example.env`), never as a flag and never in `myhome.yaml`. It is not stored in `myhome.db`. Get the id and password with `myhome ctl vacuum pair`, which prints the `MYHOME_VACUUM_*` lines to copy into `.env`.
+
+| Key | Env var | Default | Description |
+|-----|---------|---------|-------------|
+| `vacuum.blid` | `MYHOME_VACUUM_BLID` | — | Robot id (BLID), printed by `myhome ctl vacuum pair` |
+| `vacuum.password` | `MYHOME_VACUUM_PASSWORD` | — | Robot local password, printed by `myhome ctl vacuum pair` (`.env` only) |
+| `vacuum.host` | `MYHOME_VACUUM_HOST` | — | Optional fixed robot IP, used instead of broadcast discovery (e.g. with a DHCP reservation, or where broadcast does not reach the robot). Empty: discovery by BLID, falling back to the last address the robot was reached at |
+| `vacuum.wake` | `MYHOME_VACUUM_WAKE` | `false` | After each failed connect attempt, send a short ICMP echo burst (at most 3 packets, at most 2 s) to the robot, to wake a dozing Wi-Fi radio (#630). Needs root or CAP_NET_RAW (the packaged unit runs as root); otherwise it is logged once and skipped. Experimental: off until measured |
+
+### iRobot cloud account (room names)
+
+Optional, and independent of `vacuum.*` above (those stay the robot's own local credentials). When both `irobot.email` and `irobot.password` are set, the daemon logs in to the iRobot cloud **once at start** (in the background; it never delays or blocks startup) and on `myhome ctl vacuum rooms sync`, to fetch the robot's rooms: region ids, names and room types. There is no periodic sync. The cloud is then the source of truth for room names (see [`docs/vacuum.md`](vacuum.md#rooms)). Without them, the daemon logs `iRobot cloud room sync disabled` and rooms are learned from the robot only.
+
+Room sync also needs the robot configured (`vacuum.blid` and `vacuum.password`): the daemon asks the cloud for that robot's maps only. Only plain email+password accounts work (not Google/Apple sign-in or two-factor). Each sync makes a single login attempt, with no retry. Both values are secrets and go in `/var/lib/myhome/.env` only (prompted by `sudo dpkg-reconfigure myhome`; see `example.env`). They are never flags or YAML values, and are never stored in `myhome.db`, logged or returned over RPC.
+
+| Key | Env var | Default | Description |
+|-----|---------|---------|-------------|
+| `irobot.email` | `MYHOME_IROBOT_EMAIL` | — | iRobot app account email (`.env`) |
+| `irobot.password` | `MYHOME_IROBOT_PASSWORD` | — | iRobot app account password (`.env` only) |
+
 ## Pool
 
 `pool-pump.js` itself tracks how many seconds it has run today and how much water-volume turnover

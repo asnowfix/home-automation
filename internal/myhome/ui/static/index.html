@@ -90,6 +90,16 @@
     </div>
   </section>
 
+  <!-- Vacuum Section (#606): empty until a robot is configured (MYHOME_VACUUM_*) -->
+  <section class="section pt-0">
+    <div class="container"
+         id="vacuum-container"
+         hx-get="/htmx/vacuum"
+         hx-trigger="load, every 5s"
+         hx-swap="innerHTML">
+    </div>
+  </section>
+
   <!-- Accounts Section -->
   <section class="section pt-0">
     <div class="container">

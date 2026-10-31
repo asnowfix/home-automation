@@ -1797,6 +1797,55 @@ func solarPayload(availableW float64, tsUnixSec int64) []byte {
 	return data
 }
 
+// solarSummerStorage boots the script in summer mode. #621: solar only starts
+// the pump in summer; an empty Storage boots in winter (the script's default),
+// where solar must stay silent -- so every test that expects a solar start
+// seeds the mode explicitly.
+func solarSummerStorage() map[string]interface{} {
+	return map[string]interface{}{"schedule-mode": "summer"}
+}
+
+// TestPoolPump_SolarNeverStartsPumpInWinter is the #621 regression: in winter
+// mode (here the default, empty Storage) fresh solar surplus far above the
+// start threshold, with a zero start delay, must NOT start the pump -- the
+// pump runs only on the night window. Same sequence as
+// TestPoolPump_SolarStartsAndStopsPump, which boots in summer and does start.
+func TestPoolPump_SolarNeverStartsPumpInWinter(t *testing.T) {
+	buf := readPoolPumpScript(t)
+	mc := mqtt.NewMockClient()
+	deviceState := &script.DeviceState{
+		KVS:             solarKVS(nil),
+		Storage:         make(map[string]interface{}), // no saved mode -> winter
+		ComponentStatus: pro3ComponentStatus(),
+		Schedules:       poolPumpSchedules(),
+	}
+	ctx, cancel := poolPumpRunContext(t, mc)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+	// Give checkSolarHysteresis (synchronous on receipt) and a few task-queue
+	// ticks time to act; the 30s SOLAR.tickTimer period is not waited out.
+	time.Sleep(2 * time.Second)
+	cancel()
+	<-done
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
+		t.Fatalf("winter mode: solar must not start the pump, got active-output=%v", v)
+	}
+	if reason, ok := lastEventReason(t, deviceState, "pool.pump_start"); ok {
+		t.Fatalf("winter mode: unexpected pool.pump_start (reason=%d)", reason)
+	}
+}
+
 // TestPoolPump_SolarStartsAndStopsPump verifies the core hysteresis: a fresh,
 // above-threshold sample starts the pump (via doStart, so the fuse/
 // isMyTurnToRun/water-supply checks all still apply), and a subsequent fresh,
@@ -1809,7 +1858,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 
 	deviceState := &script.DeviceState{
 		KVS:             solarKVS(nil),
-		Storage:         make(map[string]interface{}),
+		Storage:         solarSummerStorage(),
 		ComponentStatus: pro3ComponentStatus(),
 		Schedules:       poolPumpSchedules(),
 	}
@@ -1903,7 +1952,7 @@ func TestPoolPump_SolarStartAndStopSurvivesOwnEcho(t *testing.T) {
 
 	deviceState := &script.DeviceState{
 		KVS:             solarKVS(nil),
-		Storage:         make(map[string]interface{}),
+		Storage:         solarSummerStorage(),
 		ComponentStatus: pro3ComponentStatus(),
 		Schedules:       poolPumpSchedules(),
 		EventInjector:   injector,
@@ -1982,8 +2031,9 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 	deviceState := &script.DeviceState{
 		KVS: kvs,
 		Storage: map[string]interface{}{
-			"runtime-sec":  "3600", // 1h — comfortably exceeds the ~7.7s ceiling above
-			"runtime-date": dateString(time.Now()),
+			"schedule-mode": "summer",
+			"runtime-sec":   "3600", // 1h — comfortably exceeds the ~7.7s ceiling above
+			"runtime-date":  dateString(time.Now()),
 		},
 		ComponentStatus: pro3ComponentStatus(), // pump off at boot
 		Schedules:       poolPumpSchedules(),
@@ -2050,7 +2100,7 @@ func TestPoolPump_WaterSupplyOverridesSolar(t *testing.T) {
 
 	deviceState := &script.DeviceState{
 		KVS:             kvs,
-		Storage:         make(map[string]interface{}),
+		Storage:         solarSummerStorage(),
 		ComponentStatus: cs,
 		Schedules:       poolPumpSchedules(),
 	}
@@ -2130,7 +2180,7 @@ func TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart(t *testing.
 	evalCh := make(chan []byte, 4)
 	deviceState := &script.DeviceState{
 		KVS:                  kvs,
-		Storage:              make(map[string]interface{}),
+		Storage:              solarSummerStorage(),
 		ComponentStatus:      pro3ComponentStatus(), // pump off at boot
 		Schedules:            nil,                   // #502: the mezzanine case -- no pool schedules at all
 		ScheduleEvalInjector: evalCh,
@@ -2206,7 +2256,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 
 	deviceState := &script.DeviceState{
 		KVS:             solarKVS(nil),
-		Storage:         make(map[string]interface{}),
+		Storage:         solarSummerStorage(),
 		ComponentStatus: pro3ComponentStatus(),
 		Schedules:       poolPumpSchedules(),
 		EventInjector:   injector,
@@ -2269,7 +2319,7 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 
 	deviceState := &script.DeviceState{
 		KVS:             kvs,
-		Storage:         make(map[string]interface{}),
+		Storage:         solarSummerStorage(),
 		ComponentStatus: pro3ComponentStatus(),
 		Schedules:       poolPumpSchedules(),
 	}

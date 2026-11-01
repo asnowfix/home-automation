@@ -122,7 +122,12 @@ Rejected alternative: all decisions on Shelly devices. Cross-load priority would
 
 Borrowed from evcc's prioritiser (design only; evcc is not imported, see section 8): **strict priority with reservation**. Loads are ordered; each higher-priority load that is eligible and *starting* reserves the surplus it needs, so a lower-priority load does not grab it. Within a priority, no proportional split in v1. Proportional sharing is deferred until phase 1 and 3 data show it is needed (decision for the owner, open question 5).
 
-Default order (configurable): 1) safety minimums (pool minimum filtration, water-heater minimum), 2) office heaters, 3) water heater, 4) pool pump above its minimum, 5) dishwasher, washer. Pool pump-first in summer is an owner decision for phase 3; the order is data, not code.
+Default order (configurable, and **seasonal**, decided by the owner 2026-11-01). The order is data, not code, and follows the pool pump's existing `schedule-mode` (summer/winter):
+
+- **Summer:** 1) safety minimums (pool minimum filtration, water-heater minimum), 2) office heaters, 3) **pool pump**, 4) **water heater**, 5) dishwasher, washer.
+- **Winter:** 1) safety minimums, 2) office heaters, 3) **water heater**, 4) dishwasher, washer. The pool pump is not a solar load in winter: it runs only in its night window and solar starts are gated off in winter mode (#621 / PR #651), so it has no rank to hold.
+
+Where the office heaters sit relative to the pool pump in summer (heaters first, as drafted) is still worth confirming in review.
 
 ## 5. Control details
 
@@ -198,6 +203,6 @@ Each live-device phase starts by capturing the device's complete before-state (K
 3. Water heater nameplate power; where to meter.
 4. Office heaters: type, power, switching, own thermostat.
 5. Strict priority or proportional sharing.
-6. Pool pump versus water heater order in summer.
+6. ~~Pool pump versus water heater order~~: decided, pool pump first in summer, water heater first in winter (section 4.4).
 7. Legionella / minimum-temperature policy for the water heater.
 8. Allocator packaging: part of the `myhome` daemon (proposed) or a separate service.

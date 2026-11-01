@@ -2479,7 +2479,10 @@ function checkSolarHysteresis() {
   // from when we last received a message (SOLAR.lastMsgTs) — see the comment
   // on the SOLAR var above for why that distinction matters.
   var now = Date.now();
-  if (SOLAR.publishedTs === 0 || (now - SOLAR.publishedTs) > CONFIG.solarStaleMs) {
+  // #621: solar starts are summer-only. Winter (or no saved mode) is handled
+  // like stale/absent: the only writer of F_SOLAR_WANT drops it, so a latched
+  // solar run also stops at the next message or 30 s tick.
+  if (STATE.scheduleMode !== 'summer' || SOLAR.publishedTs === 0 || (now - SOLAR.publishedTs) > CONFIG.solarStaleMs) {
     SOLAR.aboveStartSince = 0;
     SOLAR.belowStopSince = 0;
     solarWant(false);   // stale/absent: the forecast-driven window decides alone

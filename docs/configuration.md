@@ -439,6 +439,8 @@ Examples:
 
 **Note**: Nested keys use underscores, not dots.
 
+**Credentials on the Debian package**: `dpkg-reconfigure myhome` (or an install/upgrade from a terminal) prompts for the secrets stored in `/var/lib/myhome/.env`; answering a password prompt with a blank keeps the current value. To clear a secret, clear its email/username/From address (Beem, SFR, SMTP, robot BLID, iRobot account), which disables that integration and drops its password. The SMTP password is optional: with a From address and no stored password, an empty answer is accepted (a relay that needs no login); the other passwords are required until set.
+
 ## Validation
 
 The daemon validates configuration on startup:

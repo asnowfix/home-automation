@@ -3,6 +3,7 @@ package kvs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"reflect"
@@ -41,11 +42,27 @@ func GetManyValues(ctx context.Context, log logr.Logger, via types.Channel, devi
 	return kvs, nil
 }
 
+// ErrNotFound is wrapped by the error GetValue returns when the device itself
+// answered that the key does not exist. Test with errors.Is.
+//
+// Any other GetValue error — a timeout, a cancelled context, a transport
+// failure, a device error that is not "not found" — means the lookup failed
+// and says nothing about whether the key exists. Callers that turn a missing
+// key into an action must not treat those as ErrNotFound (#663).
+var ErrNotFound = errors.New("kvs: key not found")
+
+// GetValue reads one KVS entry, through a per-device cache.
+//
+// On failure it returns an error wrapping ErrNotFound if (and only if) the
+// device replied that the key does not exist; see ErrNotFound.
 func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, key string) (*GetResponse, error) {
 	if entry, ok := cacheGet(device.Id(), key); ok {
 		if entry.notFound {
 			log.V(1).Info("KVS cache hit (not found)", "device", device.Id(), "key", key)
-			return nil, fmt.Errorf("kvs: key %q not found on device %q (cached)", key, device.Id())
+			if entry.definitive {
+				return nil, fmt.Errorf("%w: key %q on device %q (cached)", ErrNotFound, key, device.Id())
+			}
+			return nil, fmt.Errorf("kvs: earlier lookup of key %q on device %q failed (cached)", key, device.Id())
 		}
 		log.V(1).Info("KVS cache hit", "device", device.Id(), "key", key)
 		res := entry.value
@@ -56,8 +73,14 @@ func GetValue(ctx context.Context, log logr.Logger, via types.Channel, device ty
 		Key: key,
 	})
 	if err != nil {
+		var rpcErr *types.RpcError
+		if errors.As(err, &rpcErr) && rpcErr.IsNotFound() {
+			log.Info("KVS key not found on device (continuing)", "key", key)
+			cachePutNotFound(device.Id(), key, true)
+			return nil, fmt.Errorf("%w: key %q on device %q: %w", ErrNotFound, key, device.Id(), err)
+		}
 		log.Info("Unable to get on key (continuing)", "key", key)
-		cachePutNotFound(device.Id(), key)
+		cachePutNotFound(device.Id(), key, false)
 		return nil, err
 	}
 	res, ok := out.(*GetResponse)

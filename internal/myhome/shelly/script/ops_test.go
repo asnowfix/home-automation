@@ -2,6 +2,8 @@ package script
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
@@ -24,6 +26,7 @@ func TestShouldUpload(t *testing.T) {
 		name       string
 		force      bool
 		want       string
+		marker     versionMarkerState
 		kvsVersion string
 		present    bool
 		wantUpload bool
@@ -31,6 +34,7 @@ func TestShouldUpload(t *testing.T) {
 		{
 			name:       "version differs, script present",
 			want:       version,
+			marker:     markerRead,
 			kvsVersion: "old",
 			present:    true,
 			wantUpload: true,
@@ -38,9 +42,45 @@ func TestShouldUpload(t *testing.T) {
 		{
 			name:       "version matches and script is present: skip",
 			want:       version,
+			marker:     markerRead,
 			kvsVersion: version,
 			present:    true,
 			wantUpload: false,
+		},
+		{
+			// #663: the KVS read failed, so the marker is unknown — not different.
+			// The script is on the device and may be running: leave it alone.
+			name:       "marker unreadable, script present: skip",
+			want:       version,
+			marker:     markerUnknown,
+			present:    true,
+			wantUpload: false,
+		},
+		{
+			// Unreadable marker, but nothing to disturb: the upload is the only
+			// way to get the script onto the device.
+			name:       "marker unreadable, script absent: upload",
+			want:       version,
+			marker:     markerUnknown,
+			present:    false,
+			wantUpload: true,
+		},
+		{
+			name:       "marker unreadable but force set: upload",
+			force:      true,
+			want:       version,
+			marker:     markerUnknown,
+			present:    true,
+			wantUpload: true,
+		},
+		{
+			// The device answered "no such key": a genuinely missing marker still
+			// uploads (first install, or a marker that was deleted).
+			name:       "marker missing, script present: upload",
+			want:       version,
+			marker:     markerMissing,
+			present:    true,
+			wantUpload: true,
 		},
 		{
 			// The #449 case. Before the fix this skipped the upload, then tried
@@ -49,6 +89,7 @@ func TestShouldUpload(t *testing.T) {
 			// success for a script that does nothing.
 			name:       "version matches but script is gone: upload anyway",
 			want:       version,
+			marker:     markerRead,
 			kvsVersion: version,
 			present:    false,
 			wantUpload: true,
@@ -57,6 +98,7 @@ func TestShouldUpload(t *testing.T) {
 			name:       "force overrides a matching version",
 			force:      true,
 			want:       version,
+			marker:     markerRead,
 			kvsVersion: version,
 			present:    true,
 			wantUpload: true,
@@ -64,7 +106,7 @@ func TestShouldUpload(t *testing.T) {
 		{
 			name:       "no marker recorded yet",
 			want:       version,
-			kvsVersion: "",
+			marker:     markerMissing,
 			present:    false,
 			wantUpload: true,
 		},
@@ -72,10 +114,10 @@ func TestShouldUpload(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, reason := shouldUpload(tc.force, tc.want, tc.kvsVersion, tc.present)
+			got, reason := shouldUpload(tc.force, tc.want, tc.marker, tc.kvsVersion, tc.present)
 			if got != tc.wantUpload {
-				t.Errorf("shouldUpload(force=%v, want=%q, kvs=%q, present=%v) = %v (%q), want %v",
-					tc.force, tc.want, tc.kvsVersion, tc.present, got, reason, tc.wantUpload)
+				t.Errorf("shouldUpload(force=%v, want=%q, marker=%v, kvs=%q, present=%v) = %v (%q), want %v",
+					tc.force, tc.want, tc.marker, tc.kvsVersion, tc.present, got, reason, tc.wantUpload)
 			}
 			if reason == "" {
 				t.Error("expected a non-empty reason for the log line")
@@ -236,15 +278,25 @@ type fakeUploadDevice struct {
 	// transport error, ...).
 	startErr   func(attempt int) error
 	startCalls int
+
+	// calls counts every CallE invocation by method, so tests can assert that
+	// a code path did NOT touch the device (e.g. no Script.Stop / Script.PutCode).
+	calls map[string]int
+
+	// kvGetErr, if set, is returned by every KVS.Get: a transport-level
+	// failure (timeout, connection reset) as opposed to the device answering
+	// "key not found".
+	kvGetErr error
 }
 
 var _ types.Device = (*fakeUploadDevice)(nil)
 
 func newFakeUploadDevice(id string) *fakeUploadDevice {
-	return &fakeUploadDevice{id: id, scripts: map[uint32]string{}, kv: map[string]string{}}
+	return &fakeUploadDevice{id: id, scripts: map[uint32]string{}, kv: map[string]string{}, calls: map[string]int{}}
 }
 
 func (f *fakeUploadDevice) CallE(_ context.Context, _ types.Channel, method string, params any) (any, error) {
+	f.calls[method]++
 	switch method {
 	case "Script.List":
 		list := make([]pkgscript.Status, 0, len(f.scripts))
@@ -279,9 +331,15 @@ func (f *fakeUploadDevice) CallE(_ context.Context, _ types.Channel, method stri
 
 	case "KVS.Get":
 		req := params.(*kvs.GetRequest)
+		if f.kvGetErr != nil {
+			return nil, f.kvGetErr
+		}
 		v, ok := f.kv[req.Key]
 		if !ok {
-			return nil, fmt.Errorf("fakeUploadDevice: key %q not found", req.Key)
+			// The device answered: a typed RPC error whose message says "not found",
+			// as the MQTT channel produces. (The code is illustrative; the
+			// classification is by message — see types.RpcError.IsNotFound.)
+			return nil, &types.RpcError{Code: -105, Message: "Key not found"}
 		}
 		return &kvs.GetResponse{Value: v}, nil
 
@@ -451,4 +509,135 @@ func (f *failingCallDevice) CallE(ctx context.Context, via types.Channel, method
 		return nil, errTransport
 	}
 	return f.fakeUploadDevice.CallE(ctx, via, method, params)
+}
+
+// sha1Hex mirrors UploadWithVersionDetailed's version marker: the sha1 of the
+// script source, hex-encoded.
+func sha1Hex(code []byte) string {
+	sum := sha1.Sum(code)
+	return hex.EncodeToString(sum[:])
+}
+
+// TestUploadWithVersionDetailed_KVSReadErrorDoesNotReupload is the regression
+// test for issue #663. `script update` re-uploaded an identical, in-service
+// script whenever the KVS version read failed transiently: the unreadable
+// marker was treated as "" (a version mismatch), so the upload path ran —
+// Script.Stop, Script.PutCode chunks, SetConfig — and on the production pool
+// pump that stopped the running script with the relay ON.
+//
+// A read ERROR means the marker is unknown, not different. Nothing may be
+// stopped or rewritten; the start step still runs (a no-op on a running
+// script).
+func TestUploadWithVersionDetailed_KVSReadErrorDoesNotReupload(t *testing.T) {
+	log := testr.New(t)
+	code := []byte("// v1\n")
+	dev := newFakeUploadDevice("device-663-kvs-read-error")
+	dev.scripts[1] = "pool-pump.js"                           // already on the device...
+	dev.kv["script/pool-pump.js"] = sha1Hex(code)             // ...and identical
+	dev.kvGetErr = errors.New("timeout waiting for response") // but the marker read fails
+
+	_, _, err := UploadWithVersionDetailed(context.Background(), log, types.ChannelDefault, dev, "pool-pump.js", code, false, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, m := range []string{"Script.Stop", "Script.PutCode", "Script.Create", "Script.SetConfig", "KVS.Set"} {
+		if n := dev.calls[m]; n != 0 {
+			t.Errorf("%s was called %d time(s) after a KVS read error; an unreadable version marker must not trigger an upload", m, n)
+		}
+	}
+	if dev.calls["Script.Start"] == 0 {
+		t.Error("Script.Start was not called: the start step must still run (a no-op on a running script)")
+	}
+}
+
+// TestUploadWithVersionDetailed_UnreadableMarkerVariants covers the other ways
+// a KVS read can fail without the device saying "key not found": a device that
+// answers with some other error (busy, bad argument, ...) is as unreadable as
+// a timeout. And when the script is not on the device at all there is nothing
+// running to disturb, so the upload still happens.
+func TestUploadWithVersionDetailed_UnreadableMarkerVariants(t *testing.T) {
+	code := []byte("// v1\n")
+
+	t.Run("device answers with an error that is not not-found: no upload", func(t *testing.T) {
+		dev := newFakeUploadDevice("device-663-other-rpc-error")
+		dev.scripts[1] = "pool-pump.js"
+		dev.kvGetErr = &types.RpcError{Code: -1, Message: "Resource busy"}
+
+		if _, _, err := UploadWithVersionDetailed(context.Background(), testr.New(t), types.ChannelDefault, dev, "pool-pump.js", code, false, false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if dev.calls["Script.Stop"] != 0 || dev.calls["Script.PutCode"] != 0 {
+			t.Errorf("a non-not-found device error must not upload: Script.Stop=%d Script.PutCode=%d", dev.calls["Script.Stop"], dev.calls["Script.PutCode"])
+		}
+	})
+
+	t.Run("marker unreadable but script absent: uploads", func(t *testing.T) {
+		dev := newFakeUploadDevice("device-663-unreadable-absent")
+		dev.kvGetErr = errors.New("timeout waiting for response")
+
+		if _, _, err := UploadWithVersionDetailed(context.Background(), testr.New(t), types.ChannelDefault, dev, "pool-pump.js", code, false, false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if dev.calls["Script.Create"] == 0 || dev.calls["Script.PutCode"] == 0 {
+			t.Errorf("an absent script must still be uploaded: Script.Create=%d Script.PutCode=%d", dev.calls["Script.Create"], dev.calls["Script.PutCode"])
+		}
+	})
+
+	t.Run("force uploads despite an unreadable marker", func(t *testing.T) {
+		dev := newFakeUploadDevice("device-663-unreadable-force")
+		dev.scripts[1] = "pool-pump.js"
+		dev.kvGetErr = errors.New("timeout waiting for response")
+
+		if _, _, err := UploadWithVersionDetailed(context.Background(), testr.New(t), types.ChannelDefault, dev, "pool-pump.js", code, false, true); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if dev.calls["Script.Stop"] == 0 || dev.calls["Script.PutCode"] == 0 {
+			t.Errorf("--force must upload: Script.Stop=%d Script.PutCode=%d", dev.calls["Script.Stop"], dev.calls["Script.PutCode"])
+		}
+	})
+}
+
+// TestUploadWithVersionDetailed_MissingMarkerStillUploads pins what #663 must
+// not change: when the device ANSWERS that the marker key does not exist, the
+// script on the device is of unknown provenance and is still (re)uploaded.
+func TestUploadWithVersionDetailed_MissingMarkerStillUploads(t *testing.T) {
+	log := testr.New(t)
+	dev := newFakeUploadDevice("device-663-missing-marker")
+	dev.scripts[1] = "pool-pump.js" // present, but no kv["script/pool-pump.js"]
+
+	code := []byte("// v1\n")
+	if _, _, err := UploadWithVersionDetailed(context.Background(), log, types.ChannelDefault, dev, "pool-pump.js", code, false, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if dev.calls["Script.Stop"] == 0 || dev.calls["Script.PutCode"] == 0 {
+		t.Errorf("a missing marker must still upload: Script.Stop=%d Script.PutCode=%d", dev.calls["Script.Stop"], dev.calls["Script.PutCode"])
+	}
+	if got, want := dev.kv["script/pool-pump.js"], sha1Hex(code); got != want {
+		t.Errorf("marker after upload = %q, want %q", got, want)
+	}
+}
+
+// TestUploadWithVersionDetailed_DifferentMarkerStillUploads pins what #663
+// must not change: a successful read that returns a DIFFERENT version is a
+// real upgrade and must still be deployed.
+func TestUploadWithVersionDetailed_DifferentMarkerStillUploads(t *testing.T) {
+	log := testr.New(t)
+	dev := newFakeUploadDevice("device-663-different-marker")
+	dev.scripts[1] = "pool-pump.js"
+	dev.kv["script/pool-pump.js"] = "0000000000000000000000000000000000000000"
+
+	code := []byte("// v2\n")
+	_, _, err := UploadWithVersionDetailed(context.Background(), log, types.ChannelDefault, dev, "pool-pump.js", code, false, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if dev.calls["Script.Stop"] == 0 || dev.calls["Script.PutCode"] == 0 {
+		t.Errorf("a different version marker must still upload: Script.Stop=%d Script.PutCode=%d", dev.calls["Script.Stop"], dev.calls["Script.PutCode"])
+	}
+	if got, want := dev.kv["script/pool-pump.js"], sha1Hex(code); got != want {
+		t.Errorf("marker after upload = %q, want %q", got, want)
+	}
 }

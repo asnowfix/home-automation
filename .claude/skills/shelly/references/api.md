@@ -288,3 +288,32 @@ exist in `pkg/shelly/script/types.go` as `Errors` and `ErrorMessage`.
 ⚠️ A **stopped** script's status omits `mem_used` and `mem_peak` entirely. Anything reading them must
 tolerate their absence rather than treating 0 as a measurement.
 
+### After the fact: did a script (re)start, and did its init finish? (from `events.db`)
+
+`Script.GetStatus` only answers for *now*. Once the script has died or been restarted, `events.db`
+(90-day retention, see `CLAUDE.md`) is the only record, and it has **no script start / stop / crash
+event** for any device. Use these proxies, measured on `mezzanine` 2026-11-02/03 (#661):
+
+- A device `config_changed` event (cfg_rev +1) at a time nothing else was configuring means a script
+  **(re)started and ran its init**. `pool-pump.js` init issues `Sys.SetConfig` (step 1/4), `Input.SetConfig`
+  and `Switch.SetConfig`.
+- A `pool.run_window` within ~10 s of that `config_changed` means **init completed**. A `config_changed`
+  with no `run_window` after it means init died or stalled. A missing sunrise `pool.run_window` means the
+  script was not alive that morning.
+- Calibration — which RPCs bump `cfg_rev` (so which can fake a "restart"):
+
+| RPC | bumps cfg_rev? |
+|---|---|
+| `Script.Stop`, `Script.Start`, `Script.PutCode`, `Script.SetConfig` (no-op) | no |
+| `Input.SetConfig`, `Switch.SetConfig` (no-op, same values) | no |
+| `Script.Create`, `Script.Delete` | **yes** |
+| `Sys.SetConfig` (even a no-op) | **yes** |
+
+  So a re-upload of an existing script emits **no** `config_changed` of its own; the event comes from
+  the script's own init. `Script.Start` on an already-running script returns `{"was_running":true}` and
+  does nothing.
+- **`config_changed` is lossy**: nothing is recorded while the daemon (which is also the MQTT broker)
+  is down, so `cfg_rev` has gaps. Absence of the event is not evidence that nothing happened.
+
+Query these over the whole retention before touching hardware.
+

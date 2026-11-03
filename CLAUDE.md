@@ -308,7 +308,13 @@ When launching a sub-agent, give it exactly one of these and say which:
 Live-device measurements (`mem_peak`, RPC responses, event-DB queries) and negative results must be
 written down as they are obtained. Re-deriving them means re-touching real hardware.
 
-Sub-agents must not `git push` or open PRs — the coordinator does that from the sub-agent's worktree.
+Sub-agents commit in their own worktree and must not `git push` or open PRs. The coordinator pushes
+the **branch ref** from its own worktree (`git push origin <branch>`, `gh pr create --head <branch>`).
+Never use `git -C <sibling worktree>`, `--git-dir`/`--work-tree`, or a `/usr/bin/git`-style
+workaround: a worktree-isolated session's built-in guard refuses them (sibling worktrees under
+`.claude/worktrees/` count as "the shared checkout"). Avoid branch names with a `git` or `git-*` path
+segment, and heredocs in git commands — both are refused too. Uncommitted work in a sibling cannot be
+read or committed by an isolated coordinator: ask the agent (`SendMessage`) to commit first.
 
 #### Running tests in a sub-agent
 
@@ -358,7 +364,8 @@ itself in its final report.
 silence — look at what the work itself shows, in this order, before concluding anything:
 
 1. `git log` on its branch, and whether the branch head has moved since you last looked;
-2. its worktree (`git -C <worktree> status`);
+2. `git diff <base>..<branch>` (committed work only — an isolated coordinator cannot run git inside a
+   sibling worktree, so ask the agent to commit if you need to see more);
 3. its progress file's modification time, not just its contents — a file whose last line reads
    "next: X" may simply mean X is in progress.
 

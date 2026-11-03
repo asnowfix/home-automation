@@ -150,8 +150,9 @@ Rules for sub-agents:
 3. Do not end your turn waiting on a background task.
 
 If you are the **coordinating** agent and a sub-agent reports "waiting for the background test run",
-treat it as finished: review its worktree (`git -C <worktree> status` / `diff`), run the
-verification yourself, and commit on its behalf. Do not re-launch it — the work is usually already
+treat it as finished: review its branch (`git log <branch>`, `git diff <base>..<branch>`), run the
+verification yourself, and have it commit first (`SendMessage`) if work is uncommitted — never
+`git -C <sibling worktree>`, which the isolation guard refuses. Do not re-launch it — the work is usually already
 complete and correct.
 
 #### Testing Requirements

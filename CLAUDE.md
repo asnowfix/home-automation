@@ -316,6 +316,12 @@ workaround: a worktree-isolated session's built-in guard refuses them (sibling w
 segment, and heredocs in git commands — both are refused too. Uncommitted work in a sibling cannot be
 read or committed by an isolated coordinator: ask the agent (`SendMessage`) to commit first.
 
+**Recovering a dead agent's uncommitted work** (agent gone, nothing to `SendMessage`): the isolation
+guard cannot be disabled, but it only applies to worktree-isolated sessions. Do the recovery from a
+non-isolated context — a normal terminal, or a Claude Code session started in the main checkout — where
+`git -C <agent worktree> status` / `add` / `commit` are allowed. Commit on a branch there, then push
+and open the PR as usual. Do not try to get around the guard from inside an isolated session.
+
 #### Running tests in a sub-agent
 
 **Commit first, then run tests.** A sub-agent that dies mid-run loses everything uncommitted, and its

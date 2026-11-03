@@ -152,7 +152,8 @@ Rules for sub-agents:
 If you are the **coordinating** agent and a sub-agent reports "waiting for the background test run",
 treat it as finished: review its branch (`git log <branch>`, `git diff <base>..<branch>`), run the
 verification yourself, and have it commit first (`SendMessage`) if work is uncommitted — never
-`git -C <sibling worktree>`, which the isolation guard refuses. Do not re-launch it — the work is usually already
+`git -C <sibling worktree>`, which the isolation guard refuses. If the agent is dead, recover its
+work from a non-isolated terminal or a session started in the main checkout (see CLAUDE.md). Do not re-launch it — the work is usually already
 complete and correct.
 
 #### Testing Requirements

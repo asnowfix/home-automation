@@ -184,16 +184,10 @@ func UploadWithVersionDetailed(ctx context.Context, log logr.Logger, via types.C
 	basename := filepath.Base(name)
 	kvsKey := fmt.Sprintf("script/%s", basename)
 
-	// Read the script version from the KVS
-	kvsVersion := ""
-	res, err := kvs.GetValue(ctx, log, via, device, kvsKey)
-	if err != nil || res == nil {
-		log.Info("Unable to get KVS entry for script version (continuing)", "key", kvsKey)
-		// Don't fail the upload if KVS fails, just log the error
-	} else {
-		kvsVersion = res.Value
-		log.Info("Got KVS entry for script version", "key", kvsKey, "version", kvsVersion)
-	}
+	// Read the script version from the KVS. Don't fail the call if the read
+	// fails, but do keep a failed read apart from a missing marker: see
+	// versionMarkerState.
+	marker, kvsVersion := readVersionMarker(ctx, log, via, device, kvsKey)
 
 	// The version marker records what was last uploaded, but it can outlive the
 	// script itself: deleting a script from the device's web UI, with a raw
@@ -207,7 +201,8 @@ func UploadWithVersionDetailed(ctx context.Context, log logr.Logger, via types.C
 	// Upload if forced, the version changed, or the device does not actually
 	// have the script.
 	var id uint32
-	upload, reason := shouldUpload(force, version, kvsVersion, present)
+	var err error
+	upload, reason := shouldUpload(force, version, marker, kvsVersion, present)
 	if upload {
 		log.Info(reason, "name", name, "version", version, "key", kvsKey, "device", device.Name())
 
@@ -252,8 +247,51 @@ func UploadWithVersionDetailed(ctx context.Context, log logr.Logger, via types.C
 	return id, status, nil
 }
 
+// versionMarkerState is what reading the device's script/<name> KVS entry
+// established. A failed read and a missing marker are different facts and must
+// not be merged into one empty version string (#663).
+type versionMarkerState int
+
+const (
+	// markerUnknown: the read failed (timeout, transport error, a device error
+	// that is not "not found"). The device's version is unknown, NOT different.
+	markerUnknown versionMarkerState = iota
+	// markerMissing: the device answered that there is no marker (first
+	// install, or a marker that was deleted).
+	markerMissing
+	// markerRead: the device returned a marker; the version string is valid.
+	markerRead
+)
+
+// readVersionMarker reads the version marker at kvsKey and classifies the
+// outcome. The returned version is only meaningful for markerRead.
+//
+// kvs.GetValue reports ErrNotFound only when the device itself replied that
+// the key does not exist; every other error leaves the marker unknown.
+func readVersionMarker(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, kvsKey string) (versionMarkerState, string) {
+	res, err := kvs.GetValue(ctx, log, via, device, kvsKey)
+	switch {
+	case err == nil && res != nil:
+		log.Info("Got KVS entry for script version", "key", kvsKey, "version", res.Value)
+		return markerRead, res.Value
+	case errors.Is(err, kvs.ErrNotFound):
+		log.Info("No KVS entry for script version on device", "key", kvsKey, "device", device.Name())
+		return markerMissing, ""
+	default:
+		log.Info("Unable to read KVS entry for script version, treating the version as unknown", "key", kvsKey, "device", device.Name(), "error", fmt.Sprint(err))
+		return markerUnknown, ""
+	}
+}
+
 // shouldUpload decides whether the script's code must be sent to the device,
 // and returns the reason for the log line.
+//
+// An unknown marker (marker == markerUnknown: the KVS read failed) never
+// triggers an upload by itself. Uploading means Script.Stop on the running
+// instance, which on the in-service pool pump left the relay ON through the
+// night (#663, #661). The one exception is a script that is not on the device
+// at all: there is nothing running to disturb and the upload is the only way to
+// get it there.
 //
 // The subtle case is the last one. A matching version marker is not on its own
 // evidence that the device still has the script: the marker lives in the
@@ -263,11 +301,17 @@ func UploadWithVersionDetailed(ctx context.Context, log logr.Logger, via types.C
 // script that is absent (an outright error) or, if something recreated it
 // empty, one that runs and does nothing while reporting success (#449).
 //
+// kvsVersion is only consulted when marker == markerRead (it is "" otherwise).
+//
 // Kept as a pure function so this decision is testable without a device.
-func shouldUpload(force bool, wantVersion, kvsVersion string, present bool) (bool, string) {
+func shouldUpload(force bool, wantVersion string, marker versionMarkerState, kvsVersion string, present bool) (bool, string) {
 	switch {
 	case force:
 		return true, "Force flag set, uploading script"
+	case marker == markerUnknown && !present:
+		return true, "Script version marker unreadable and the script is not on the device, uploading"
+	case marker == markerUnknown:
+		return false, "Script version marker unreadable, skipping upload so a running script is not restarted (use --force to override)"
 	case wantVersion != kvsVersion:
 		return true, "Script version is different, uploading new one"
 	case !present:

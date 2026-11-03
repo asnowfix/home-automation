@@ -11,12 +11,23 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/jackpal/gateway"
 )
+
+// tokenAttrRE matches a token attribute in a box XML response, the form
+// auth.getToken uses to hand back the session token.
+var tokenAttrRE = regexp.MustCompile(`(token=")[^"]*(")`)
+
+// redactTokenAttributes hides the value of every token attribute in raw box
+// XML before it reaches a log line (#620).
+func redactTokenAttributes(raw string) string {
+	return tokenAttrRE.ReplaceAllString(raw, `${1}<redacted>${2}`)
+}
 
 var (
 	boxIp      net.IP
@@ -133,7 +144,8 @@ func getToken(ip net.IP) (string, string, error) {
 		return "", "", err
 	}
 	auth := res.(*Auth)
-	log.Info("Auth", "token", auth.Token, "method", auth.Method)
+	// The token is a session secret; never write it to the journal (#620).
+	log.V(1).Info("Auth", "method", auth.Method)
 	return auth.Token, auth.Method, nil
 }
 
@@ -157,7 +169,7 @@ func checkToken(ip net.IP, token string) error {
 		log.Info("auth.checkToken", err)
 		return err
 	}
-	log.Info("Valid auth", "token", token)
+	log.V(1).Info("Valid auth")
 	return nil
 }
 
@@ -166,7 +178,9 @@ func doHash(value string, tb []byte) (string, error) {
 	h.Write([]byte(value))
 	hh := hex.EncodeToString(h.Sum(nil))
 
-	log.Info("SHA256", "data", value, "hash", hh, "hash_len", len(hh))
+	// Only the lengths: the input can be the box admin login or password, and
+	// the hash is half of the auth check's secret (#620).
+	log.V(2).Info("SHA256", "hash_len", len(hh))
 
 	// create a new HMAC by defining the hash type and the key
 	hmac := hmac.New(sha256.New, tb)
@@ -181,7 +195,7 @@ func doHash(value string, tb []byte) (string, error) {
 	hmacHex := hex.EncodeToString(dataHmac)
 	secretHex := hex.EncodeToString(tb)
 
-	log.Info("HMAC_SHA256", "key", secretHex, "data", string(value), "hmac_hex", hmacHex, "hmac_hex_len", len(hmacHex))
+	log.V(2).Info("HMAC_SHA256", "key_len", len(secretHex), "hmac_hex_len", len(hmacHex))
 	return hmacHex, nil
 }
 
@@ -198,14 +212,26 @@ func queryBox(ip net.IP, method string, params *map[string]string) (any, error) 
 		Path:     "/api/1.0/",
 		RawQuery: values.Encode(),
 	}
-	log.Info("Calling", "url", u)
+	// auth.checkToken carries the session token and its hash in the query
+	// string, so redact the secret parameters before logging (#620).
+	redacted := *u
+	q := redacted.Query()
+	for _, k := range []string{"token", "hash"} {
+		if q.Has(k) {
+			q.Set(k, "<redacted>")
+		}
+	}
+	redacted.RawQuery = q.Encode()
+	log.Info("Calling", "url", redacted.String())
 
 	xmlBytes, err := getXML(u.String())
 	if err != nil {
 		log.Error(err, "Failed to get XML")
 		return nil, err
 	}
-	log.Info("Result", "raw", string(xmlBytes))
+	// Some responses embed the session token as an attribute; keep the raw
+	// body behind V(1) and hide the attribute value (#620).
+	log.V(1).Info("Result", "raw", redactTokenAttributes(string(xmlBytes)))
 
 	var res Response
 	if err := xml.Unmarshal(xmlBytes, &res); err != nil {

@@ -1894,7 +1894,14 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		KVS:             solarKVS(nil),
 		Storage:         solarSummerStorage(),
 		ComponentStatus: pro3ComponentStatus(),
-		Schedules:       poolPumpSchedules(),
+		// A concrete window that has already closed: after solar drops, the
+		// pump must fall back to "off, outside the window". With the default
+		// symbolic (@sunrise/@sunset) schedules the window never resolves
+		// without a forecast, desiredOutput() returns -2 ("no opinion") and
+		// the pump would stay on. These tests used to get a concrete window
+		// only as a side effect of init's on-device forecast HTTP fetch
+		// reaching the real Open-Meteo (#465 removed that fetch).
+		Schedules: poolPumpSummerSchedules(time.Now().Add(-3*time.Hour), time.Now().Add(-1*time.Hour)),
 	}
 
 	ctx, cancel := poolPumpRunContext(t, mc)
@@ -1988,8 +1995,15 @@ func TestPoolPump_SolarStartAndStopSurvivesOwnEcho(t *testing.T) {
 		KVS:             solarKVS(nil),
 		Storage:         solarSummerStorage(),
 		ComponentStatus: pro3ComponentStatus(),
-		Schedules:       poolPumpSchedules(),
-		EventInjector:   injector,
+		// A concrete window that has already closed: after solar drops, the
+		// pump must fall back to "off, outside the window". With the default
+		// symbolic (@sunrise/@sunset) schedules the window never resolves
+		// without a forecast, desiredOutput() returns -2 ("no opinion") and
+		// the pump would stay on. These tests used to get a concrete window
+		// only as a side effect of init's on-device forecast HTTP fetch
+		// reaching the real Open-Meteo (#465 removed that fetch).
+		Schedules:     poolPumpSummerSchedules(time.Now().Add(-3*time.Hour), time.Now().Add(-1*time.Hour)),
+		EventInjector: injector,
 	}
 
 	stop := runPoolPumpPhase(t, buf, deviceState, mc)

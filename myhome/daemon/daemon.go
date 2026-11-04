@@ -32,6 +32,7 @@ import (
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
 	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	"github.com/asnowfix/home-automation/pkg/version"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
 )
@@ -291,6 +292,7 @@ func (d *daemon) Run() error {
 
 		// Create SSE broadcaster for live sensor updates
 		sseBroadcaster := ui.NewSSEBroadcaster(log.WithName("sse"))
+		sseBroadcaster.SetBuildInfo(time.Now(), version.GetVersion())
 
 		// Start event service if enabled
 		var eventsSvc *events.Service

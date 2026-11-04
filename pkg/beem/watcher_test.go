@@ -22,17 +22,16 @@ func TestWatcherPublishesRetainedMQTT(t *testing.T) {
 	)
 	defer srv.Close()
 
-	origLogin, origSummary := loginURL, summaryURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	summaryURL = srv.URL + "/beemapp/box/summary"
-	defer func() { loginURL = origLogin; summaryURL = origSummary }()
-
 	mc := mqttclient.NewRecordingMockClient()
 
 	cfg := ClientConfig{
 		Email:        "watcher@example.com",
 		Password:     "pw",
 		PollInterval: 10 * time.Millisecond, // fast for tests
+		// Per-client endpoints: the watcher polls on its own goroutine, so
+		// pointing package globals at srv here raced that goroutine (#453).
+		LoginURL:   srv.URL + "/beemapp/user/login",
+		SummaryURL: srv.URL + "/beemapp/box/summary",
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -94,17 +93,14 @@ func TestWatcherMQTTRetainedFlag(t *testing.T) {
 	)
 	defer srv.Close()
 
-	origLogin, origSummary := loginURL, summaryURL
-	loginURL = srv.URL + "/beemapp/user/login"
-	summaryURL = srv.URL + "/beemapp/box/summary"
-	defer func() { loginURL = origLogin; summaryURL = origSummary }()
-
 	rm := &retainedRecorder{}
 
 	cfg := ClientConfig{
 		Email:        "r@example.com",
 		Password:     "pw",
 		PollInterval: 10 * time.Millisecond,
+		LoginURL:     srv.URL + "/beemapp/user/login",
+		SummaryURL:   srv.URL + "/beemapp/box/summary",
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -166,12 +162,12 @@ func (r *retainedRecorder) Publish(ctx context.Context, topic string, payload []
 }
 
 // The remaining Client interface methods are stubs.
-func (r *retainedRecorder) GetServer() string                  { return "mock://localhost:1883" }
-func (r *retainedRecorder) BrokerUrl() *url.URL                { u, _ := url.Parse(r.GetServer()); return u }
-func (r *retainedRecorder) Id() string                         { return "retained-recorder" }
-func (r *retainedRecorder) Start() error                       { return nil }
-func (r *retainedRecorder) IsConnected() bool                  { return true }
-func (r *retainedRecorder) Close()                             {}
+func (r *retainedRecorder) GetServer() string   { return "mock://localhost:1883" }
+func (r *retainedRecorder) BrokerUrl() *url.URL { u, _ := url.Parse(r.GetServer()); return u }
+func (r *retainedRecorder) Id() string          { return "retained-recorder" }
+func (r *retainedRecorder) Start() error        { return nil }
+func (r *retainedRecorder) IsConnected() bool   { return true }
+func (r *retainedRecorder) Close()              {}
 func (r *retainedRecorder) Subscribe(ctx context.Context, topic string, qlen uint, subscriber string) (<-chan []byte, error) {
 	return nil, nil
 }

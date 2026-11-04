@@ -35,15 +35,20 @@ use (
 	./myhome/devices
 	./myhome/devices/impl
 	./myhome/events
+	./myhome/fetchproxy
 	./myhome/mqtt
+	./myhome/notice
+	./myhome/notify
 	./myhome/occupancy
 	./myhome/storage
 	./myhome/electricity
 	./myhome/ical
 	./myhome/weather
 	./myhome/rooms
+	./myhome/vacuum
 	./pkg/beem
 	./pkg/devices
+	./pkg/roomba
 	./pkg/sfr
 	./pkg/shelly
 	./pkg/shelly/blu

@@ -675,6 +675,54 @@ func TestCache_SetDevice_NoOverwrite_RejectsDuplicate(t *testing.T) {
 	}
 }
 
+// TestCache_SetDevice_EmptyMACAndHostDoNotCollide reproduces the production
+// bug where two distinct devices sharing an empty MAC and/or Host (common for
+// Gen1/BLU sensors, e.g. shellyht-* temperature sensors, that never resolve a
+// hostname) would be treated as the "same" device by SetDevice's OR-matching
+// loop: inserting the second device evicted the first from the cache slice
+// instead of replacing itself, leaving the second device's later re-insertion
+// (e.g. on the next periodic refresh) to duplicate itself in the list while
+// the first device vanished silently.
+func TestCache_SetDevice_EmptyMACAndHostDoNotCollide(t *testing.T) {
+	reg := newFakeRegistry()
+	c := NewCache(testCtx(t), reg)
+	ctx := context.Background()
+
+	d1 := fakeDevice("shellyht-CC2E04", "temperature-bureau", "", "")
+	d2 := fakeDevice("shellyht-CC2489", "temperature-cuisine", "", "")
+
+	if _, err := c.SetDevice(ctx, d1, true); err != nil {
+		t.Fatalf("SetDevice d1: %v", err)
+	}
+	if _, err := c.SetDevice(ctx, d2, true); err != nil {
+		t.Fatalf("SetDevice d2: %v", err)
+	}
+
+	all, err := c.GetAllDevices(ctx)
+	if err != nil {
+		t.Fatalf("GetAllDevices: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected 2 distinct devices, got %d: %+v", len(all), all)
+	}
+
+	// Re-insert d2 again (simulating a periodic refresh / repeated MQTT
+	// announcement) and confirm it still doesn't duplicate or evict d1.
+	if _, err := c.SetDevice(ctx, fakeDevice("shellyht-CC2489", "temperature-cuisine", "", ""), true); err != nil {
+		t.Fatalf("SetDevice d2 (re-insert): %v", err)
+	}
+	all, err = c.GetAllDevices(ctx)
+	if err != nil {
+		t.Fatalf("GetAllDevices: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected 2 distinct devices after re-insert, got %d: %+v", len(all), all)
+	}
+	if _, err := c.GetDeviceById(ctx, "shellyht-CC2E04"); err != nil {
+		t.Errorf("d1 should still be present after d2's re-insertion: %v", err)
+	}
+}
+
 // ── tests: Flush ──────────────────────────────────────────────────────────────
 
 // TestCache_Flush_ClearsAllMaps verifies that Flush resets all five internal
@@ -712,28 +760,39 @@ func TestCache_Flush_ClearsAllMaps(t *testing.T) {
 
 // ── tests: delegation to registry (the TODO methods) ─────────────────────────
 
-// TestCache_GetAllDevices_DelegatesToRegistry documents the current TODO
-// behaviour: GetAllDevices always calls the registry, even if the cache is
-// populated. This test will need updating when the TODO is resolved.
-func TestCache_GetAllDevices_DelegatesToRegistry(t *testing.T) {
+// TestCache_GetAllDevices_ReturnsCacheContent verifies GetAllDevices serves
+// the in-memory cache (which callers may have enriched with a live Impl,
+// e.g. via SetDevice from the device manager) instead of re-reading the
+// registry, which would return bare DB rows with no Impl attached.
+func TestCache_GetAllDevices_ReturnsCacheContent(t *testing.T) {
 	reg := newFakeRegistry()
 	c := NewCache(testCtx(t), reg)
 	ctx := context.Background()
 
-	// Write two devices directly to the registry, bypassing the cache.
+	// Writing directly to the registry, bypassing the cache, must NOT show
+	// up: GetAllDevices must not delegate to the registry at all.
 	reg.devices["shelly-030"] = fakeDevice("shelly-030", "a", "aa:bb:cc:dd:ee:30", "192.168.1.30")
-	reg.devices["shelly-031"] = fakeDevice("shelly-031", "b", "aa:bb:cc:dd:ee:31", "192.168.1.31")
 
 	all, err := c.GetAllDevices(ctx)
 	if err != nil {
 		t.Fatalf("GetAllDevices: %v", err)
 	}
-	if len(all) != 2 {
-		t.Errorf("count: got %d, want 2", len(all))
+	if len(all) != 0 {
+		t.Errorf("count: got %d, want 0 (registry-only device must not appear)", len(all))
 	}
-	// The registry must have been called (current TODO behaviour).
-	if reg.calls["GetAllDevices"] == 0 {
-		t.Error("expected GetAllDevices to delegate to registry")
+	if reg.calls["GetAllDevices"] != 0 {
+		t.Error("expected GetAllDevices to serve the cache without calling the registry")
+	}
+
+	if _, err := c.SetDevice(ctx, fakeDevice("shelly-031", "b", "aa:bb:cc:dd:ee:31", "192.168.1.31"), false); err != nil {
+		t.Fatalf("SetDevice: %v", err)
+	}
+	all, err = c.GetAllDevices(ctx)
+	if err != nil {
+		t.Fatalf("GetAllDevices: %v", err)
+	}
+	if len(all) != 1 || all[0].Id() != "shelly-031" {
+		t.Errorf("expected cached device to appear after SetDevice, got %+v", all)
 	}
 }
 

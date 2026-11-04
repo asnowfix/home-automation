@@ -278,8 +278,11 @@ suffixes ≤ 18 chars** (prefix is 14; hard limit 42).
 | triggerDeficitMm | `zone<z>-trigger-mm` | `12` / `8` / `12` | number |
 | maxRunMinutes | `zone<z>-max-min` | `15` / `30` / `15` | number |
 | fallbackRunMinutes | `zone<z>-fallback-min` | `8` / `15` / `8` | number |
+| group | `zone<z>-group` | `lawn` / `beds` / `lawn` | string |
+| intervalDays | `zone<z>-interval` | `1` / `4` / `1` | number |
 | enabled | `zone<z>-enabled` | `true` | bool |
 | run count (read-only) | `zone<z>-runs` | — | number | written by script, read by CLI |
+| group last-watered (read-only) | `group/<name>-last` | — | number | day-number, written by script (§12) |
 
 ---
 
@@ -361,7 +364,42 @@ Commands:
 
 ---
 
-## 11. Assumptions & out of scope
+## 11. Phase 7 — Differentiated cadence by group
+
+> **Status:** implemented. See `docs/garden-differentiated-cadence-plan.md` for the full design
+> rationale and verification checklist (this section summarizes the shipped result).
+
+The per-zone ET₀ deficit model alone doesn't let zones with the same deficit profile diverge in
+*how often* they run. Each zone now carries a **`group`** (string) and **`intervalDays`** (minimum
+days between waterings for that group, effective interval = `min` across enabled members):
+
+- `pelouse-maison` (0) and `pelouse-barriere` (2) → `group: "lawn"`, `intervalDays: 1` — they fire
+  **together**: whenever the lawn group is due and *any* enabled member's deficit crosses its
+  trigger, both water that day, each with its own ET₀-computed minutes.
+- `massifs` (1) → `group: "beds"`, `intervalDays: 4` — waters at most every 4 days, even though its
+  own deficit may cross `triggerMm` sooner; the deficit keeps accumulating (capped at
+  `maxDeficitMm`) during the "rest" days. **Tuned 2026-06-21** (was 7 at initial ship): this bed
+  mixes true-mediterranean plants (rosemary, society garlic, boxwood, Phormium, abelia, feijoa —
+  happy with a weekly soak) with thirstier ones (lemon, orange, Strelitzia, Agapanthus, daylily,
+  Carex) that stress without water for a full week in peak summer heat. 4 days is the compromise;
+  see plant list in `ZONE_DEFAULTS` comment in `garden.js`.
+- A future `pots` ("plantes en pot") group needs no script changes — just a new `group` string once
+  a hardware channel exists.
+
+`computeZonePlan()` groups enabled zones by `group`, gates each group by
+`todayDayNumber() - group-last/<name> >= groupInterval` (day-number tracked in `Script.storage`,
+mirrored to KVS key `group/<name>-last`), and only updates `group-last` when a member **actually
+completes** watering (in `tickWatering()`, not at plan time) — so a quiet-window or rain abort never
+wrongly skips a week. The offline fallback planner intentionally ignores cadence (resilience over
+schedule fidelity).
+
+**Manual runs** (button / external `Switch.Set`) remain uncounted and do not affect deficits or
+group cadence — by design, to keep the model simple; only the existing `garden.manual` event
+records them.
+
+---
+
+## 12. Assumptions & out of scope
 
 - **Forecast-only** — no physical rain/soil-moisture sensor assumed on Pro3 inputs.
 - Liters/volume reporting is informational only (no per-zone area model unless added later).

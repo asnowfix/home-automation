@@ -82,6 +82,9 @@ func (m *DeviceMqttChannels) Init(ctx context.Context, deviceId string) (*Device
 	}
 
 	mc := mqtt.GetClient(ctx)
+	if mc == nil {
+		return nil, fmt.Errorf("MQTT client not initialized (ctx carries no pkg/shelly/mqtt.Client — composition root never wrapped it)")
+	}
 	replyTo := fmt.Sprintf("%s_%s", mc.Id(), deviceId)
 
 	// Use larger buffer (64) to handle concurrent refresh operations without dropping responses
@@ -150,7 +153,7 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 
 	// Resolve the channel after MQTT initialization - this ensures MQTT-only devices
 	// (no known host) use MQTT instead of the discard caller for ChannelDefault
-	via = d.Channel(via)
+	via = d.Channel(ctx, via)
 
 	if d.Id() == "" {
 		err := d.initDeviceInfo(ctx, via)
@@ -420,13 +423,13 @@ func (d *Device) StopDialog(ctx context.Context, id uint32) {
 	d.mqtt.Unlock()
 }
 
-func (d *Device) Channel(via types.Channel) types.Channel {
+func (d *Device) Channel(ctx context.Context, via types.Channel) types.Channel {
 	switch via {
 	case types.ChannelDefault:
 		if d.IsMqttReady() {
 			return types.ChannelMqtt
 		}
-		if d.IsHttpReady() {
+		if d.IsHttpReady() || d.resolveHost(ctx) {
 			return types.ChannelHttp
 		}
 	case types.ChannelMqtt:
@@ -434,12 +437,24 @@ func (d *Device) Channel(via types.Channel) types.Channel {
 			return types.ChannelMqtt
 		}
 	case types.ChannelHttp:
-		if d.IsHttpReady() {
+		if d.IsHttpReady() || d.resolveHost(ctx) {
 			return types.ChannelHttp
 		}
 	}
 	// Auto discarded
 	return types.ChannelDefault
+}
+
+// resolveHost asks the injected types.HostResolver (if any) for the
+// device's current IP, keyed by MAC first and then by device ID (mDNS
+// hostname). On success it updates Host_ and returns true.
+func (d *Device) resolveHost(ctx context.Context) bool {
+	ip, ok := types.ResolveHost(ctx, d.Mac(), d.Id())
+	if !ok {
+		return false
+	}
+	d.UpdateHost(ip.String())
+	return true
 }
 
 var nameRe = regexp.MustCompile(fmt.Sprintf("^(?P<id>[a-zA-Z0-9]+).%s.local.$", MDNS_SHELLIES))
@@ -628,6 +643,9 @@ func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devic
 }
 
 func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.Device) (devices.Device, error) {
+	if summary.Id() == "" {
+		return nil, fmt.Errorf("device summary has empty ID (name=%q, host=%q)", summary.Name(), summary.Host())
+	}
 	d := &Device{
 		// info: &shelly.DeviceInfo{
 		// 	Name:    summary.Name(),
@@ -780,6 +798,13 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 		wg.Add(1)
 		go func(devSummary devices.Device) {
 			defer wg.Done()
+
+			// Skip devices whose ID is not yet known (partially discovered)
+			if devSummary.Id() == "" {
+				log.V(1).Info("Skipping device with no ID yet", "name", devSummary.Name(), "host", devSummary.Host())
+				results <- DeviceResult{Device: devSummary, Error: nil}
+				return
+			}
 
 			// Skip Gen1 devices - they cannot receive commands or run scripts
 			if IsGen1Device(devSummary.Id()) {

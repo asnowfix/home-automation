@@ -180,3 +180,43 @@ func TestHandleBLUEventBridge_WindowEvent(t *testing.T) {
 		t.Errorf("Data %q should contain 'window'", *e.Data)
 	}
 }
+
+// TestHandleBLUEventBridge_MotionRecordsIlluminance verifies that the lux
+// reading carried by a motion packet is persisted with the motion event, and
+// that it is omitted when the packet has none.
+func TestHandleBLUEventBridge_MotionRecordsIlluminance(t *testing.T) {
+	const mac = "b0:c7:de:11:58:d5"
+	motion := 1
+	lux := 12.0
+
+	tests := []struct {
+		name string
+		lux  *float64
+		want string
+	}{
+		{"with illuminance", &lux, `"illuminance":12`},
+		{"without illuminance", nil, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := buildBLUPayload(t, BLUEventData{Address: mac, Motion: &motion, Illuminance: tc.lux, RSSI: -90})
+			svc := newTestEventsService(t)
+			handleBLUEventBridge(context.Background(), logr.Discard(), payload, svc, nil)
+
+			evts, err := svc.Store().Query(context.Background(), events.Query{})
+			if err != nil {
+				t.Fatalf("Query: %v", err)
+			}
+			if len(evts) != 1 || evts[0].Data == nil {
+				t.Fatalf("expected 1 event with data, got %+v", evts)
+			}
+			got := *evts[0].Data
+			if tc.want != "" && !strings.Contains(got, tc.want) {
+				t.Errorf("Data %q should contain %q", got, tc.want)
+			}
+			if tc.want == "" && strings.Contains(got, "illuminance") {
+				t.Errorf("Data %q should not contain illuminance", got)
+			}
+		})
+	}
+}

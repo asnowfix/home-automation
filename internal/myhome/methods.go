@@ -313,4 +313,92 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &EventListResponse{}
 		},
 	},
+	PoolGetStatus: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &PoolGetStatusResult{}
+		},
+	},
+	SolarClaimersList: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &SolarClaimersListResult{}
+		},
+	},
+	FetchList: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &FetchListResult{}
+		},
+	},
+	FetchDelete: {
+		NewParams: func() any {
+			return &FetchDeleteParams{}
+		},
+		NewResult: func() any {
+			return &FetchDeleteResult{}
+		},
+	},
+	VacuumList: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &VacuumListResult{}
+		},
+	},
+	VacuumStatusGet: {
+		NewParams: func() any {
+			return &VacuumParams{}
+		},
+		NewResult: func() any {
+			return &VacuumRobot{}
+		},
+	},
+	VacuumCommand: {
+		NewParams: func() any {
+			return &VacuumCommandParams{}
+		},
+		NewResult: func() any {
+			return &VacuumOKResult{}
+		},
+	},
+	VacuumClean: {
+		NewParams: func() any {
+			return &VacuumCleanParams{}
+		},
+		NewResult: func() any {
+			return &VacuumCleanResult{}
+		},
+	},
+	VacuumRooms: {
+		NewParams: func() any {
+			return &VacuumParams{}
+		},
+		NewResult: func() any {
+			return &VacuumRoomsResult{}
+		},
+	},
+	VacuumRoomName: {
+		NewParams: func() any {
+			return &VacuumRoomNameParams{}
+		},
+		NewResult: func() any {
+			return &VacuumOKResult{}
+		},
+	},
+	VacuumRoomsSync: {
+		NewParams: func() any {
+			return &VacuumParams{}
+		},
+		NewResult: func() any {
+			return &VacuumRoomsSyncResult{}
+		},
+	},
 }

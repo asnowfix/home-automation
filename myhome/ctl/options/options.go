@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"os"
 	"os/signal"
-	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"syscall"
 	"time"
 
@@ -32,6 +32,8 @@ const COMMAND_DEFAULT_TIMEOUT time.Duration = 0 // No timeout by default (wait i
 
 const DEVICE_REFRESH_INTERVAL time.Duration = 1 * time.Minute
 
+const RECONCILE_DEFAULT_INTERVAL time.Duration = 1 * time.Hour
+
 const MQTT_WATCHDOG_CHECK_INTERVAL time.Duration = 30 * time.Second
 
 const MQTT_WATCHDOG_MAX_FAILURES int = 3
@@ -41,6 +43,11 @@ const MQTT_BROKER_CLIENT_LOG_INTERVAL time.Duration = 2 * time.Minute
 const MQTT_RECONNECT_INTERVAL time.Duration = 2 * time.Hour
 
 const SHELLY_DEFAULT_RATE_LIMIT time.Duration = 200 * time.Millisecond
+
+// SOLAR_STALE_AFTER is the default for --solar-stale-after: roughly 5x
+// Beem's default 60s poll interval, so one or two missed polls don't
+// immediately drop the source out of the aggregate sum.
+const SOLAR_STALE_AFTER time.Duration = 5 * time.Minute
 
 // ViperConfig holds the Viper configuration instance
 var ViperConfig *viper.Viper
@@ -77,6 +84,7 @@ var Flags struct {
 	MetricsExporterTopic        string
 	ShellyRateLimit             time.Duration // the value taken by --shelly-rate-limit
 	AutoSetup                   bool          // the value taken by --auto-setup / -A
+	ReconcileInterval           time.Duration // the value taken by --reconcile-interval (0 disables)
 	NoMdnsPublish               bool          // the value taken by --no-mdns-publish
 	InstanceName                string        // the value taken by --instance / -I
 	EventsDBPath                string        // path to events SQLite database
@@ -88,14 +96,25 @@ var Flags struct {
 	BeemEmail                   string        // Beem Energy account email
 	BeemPassword                string        // Beem Energy account password
 	BeemPollInterval            time.Duration // Beem Energy poll interval
-	BeemEnabled                 bool          // whether to enable Beem Energy integration
-	PoolSolarEnabled            bool          // whether to enable solar-driven pool pump automation
-	PoolSolarStartThresholdW    float64       // solar power threshold to start pump (W)
-	PoolSolarStopThresholdW     float64       // solar power threshold to stop pump (W)
-	PoolSolarStartDelay         time.Duration // solar must hold above start threshold for this long
-	PoolSolarStopDelay          time.Duration // solar must hold below stop threshold for this long
-	PoolSolarMinVolumeTurnover  float64       // soft-stop target: pool volumes filtered per day (converted to daily_target_sec via pool KVS)
-	PoolSolarMaxVolumeTurnover  float64       // hard ceiling: pool volumes filtered per day (converted to max_rotation_sec via pool KVS)
+	SolarStaleAfter             time.Duration // solar aggregator: a source's last reading older than this is excluded from the sum
+	SFRUsername                 string        // SFR box account username; from .env, never a flag
+	SFRPassword                 string        // SFR box account password; from .env, never a flag
+	VacuumBLID                  string        // robot vacuum id (BLID); from .env, never a flag
+	VacuumPassword              string        // robot vacuum local password; from .env, never a flag
+	VacuumHost                  string        // robot vacuum fixed address; empty = discovery by BLID; never a flag
+	VacuumWake                  bool          // ICMP wake probe after a failed robot connect attempt (#630); default off
+	IRobotEmail                 string        // iRobot cloud account email, for room sync (#628); from .env, never a flag
+	IRobotPassword              string        // iRobot cloud account password (#628); from .env, never a flag
+	EnableNoticeService         bool          // whether to enable the notice service (motion rule + daily email digest)
+	NoticeNightStart            string        // "HH:MM" start of the night window used by the motion rule
+	NoticeNightEnd              string        // "HH:MM" end of the night window used by the motion rule
+	NoticeDigestHour            int           // local hour (0-23) at which the daily notice digest email is sent
+	SMTPHost                    string        // SMTP host, e.g. smtp.gmail.com
+	SMTPPort                    int           // SMTP port, e.g. 587 (STARTTLS submission)
+	SMTPUsername                string        // SMTP auth username
+	SMTPPassword                string        // SMTP auth password (e.g. a Gmail App Password); from .env, never a flag
+	SMTPFrom                    string        // envelope/header From address; empty disables email entirely
+	SMTPTo                      string        // recipient address, or comma-separated list of addresses
 }
 
 var Via types.Channel

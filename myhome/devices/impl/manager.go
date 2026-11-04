@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/internal/myhome/mdnsrouter"
 	"github.com/asnowfix/home-automation/internal/myhome/model"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"github.com/asnowfix/home-automation/internal/myhome/sfr"
@@ -353,11 +354,17 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	dm.log.Info("Starting device manager")
 
+	// Build the host-resolution chain: SFR (fast, in-memory ARP-like lookup)
+	// first when available, then mDNS (.local, real network cost), then a
+	// terminal not-found. See docs/no-ip-address-plan.md.
+	mdnsRouter := mdnsrouter.New(dm.resolver)
 	if options.Flags.RemoteProxy == "" {
-		dm.router = sfr.GetRouter(ctx)
+		dm.router = model.Chain(sfr.GetRouter(ctx), model.Chain(mdnsRouter, model.NotFoundRouter{}))
 	} else {
 		dm.log.Info("Remote proxy configured — skipping SFR router (no direct LAN access assumed)")
+		dm.router = model.Chain(mdnsRouter, model.NotFoundRouter{})
 	}
+	shelly.SetHostResolver(routerHostResolver{router: dm.router})
 
 	// Pre-populate cache with existing devices from database
 	// This ensures devices exist when retained MQTT sensor messages arrive
@@ -389,19 +396,32 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	dm.setupConfig = shellysetup.Config{
 		Resolver: dm.resolver,
 	}
-	// Use the current process MQTT broker for auto-setup
+	// Use the current process MQTT broker for auto-setup. DeviceServer()
+	// resolves a loopback address (e.g. the embedded broker's "localhost:1883")
+	// to the host's LAN IP, since the device itself would otherwise resolve
+	// "localhost" to its own loopback interface.
+	deviceServer := ""
 	if dm.mqttClient != nil {
-		// GetServer returns host:port, use it directly
-		dm.setupConfig.MqttBroker = dm.mqttClient.GetServer()
+		var err error
+		deviceServer, err = dm.mqttClient.DeviceServer()
+		if err != nil {
+			dm.log.Error(err, "Failed to resolve device-facing MQTT broker address; falling back to configured broker")
+		}
+	}
+	switch {
+	case deviceServer != "":
+		dm.setupConfig.MqttBroker = deviceServer
 		dm.setupConfig.MqttPort = 0 // Signal that broker already includes port
-	} else if options.Flags.MqttBroker != "" {
+	case options.Flags.MqttBroker != "":
 		dm.setupConfig.MqttBroker = options.Flags.MqttBroker
 		dm.setupConfig.MqttPort = 1883
-	} else {
+	default:
 		dm.setupConfig.MqttBroker = "mqtt.local"
 		dm.setupConfig.MqttPort = 1883
 	}
 	dm.log.Info("Auto-setup configuration", "enabled", options.Flags.AutoSetup, "mqtt_broker", dm.setupConfig.MqttBroker)
+
+	go dm.runReconciliationLoop(logr.NewContext(ctx, dm.log.WithName("runReconciliationLoop")), options.Flags.ReconcileInterval)
 
 	// Loop on ZeroConf devices discovery
 	err = watch.ZeroConf(ctx, options.Flags.MdnsTimeout, dm, dm.dr, dm.resolver)
@@ -460,7 +480,7 @@ func (dm *DeviceManager) deviceUpdaterLoop(ctx context.Context) {
 					dm.triggerAutoSetup(ctx, log, d, devId)
 				}
 
-				refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(d.Name())), d, dm.router, dm.refreshed)
+				refreshOneDevice(logr.NewContext(tools.WithToken(ctx), log.WithName("refreshOneDevice").WithName(d.Name())), d, dm.refreshed)
 			}(device, isNewDevice, deviceId)
 		}
 	}
@@ -507,7 +527,13 @@ func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, 
 	}
 
 	// Check if device is already set up (has watchdog script running)
-	if shellysetup.IsDeviceSetUp(ctx, log, sd) {
+	setUp, err := shellysetup.IsDeviceSetUp(ctx, log, sd)
+	if err != nil {
+		log.Info("Skipping auto-setup this round: could not determine setup state", "device_id", deviceId, "error", err)
+		dm.setupInFlight.Delete(deviceId)
+		return
+	}
+	if setUp {
 		log.V(1).Info("Skipping auto-setup: device already set up", "device_id", deviceId)
 		dm.setupInFlight.Delete(deviceId)
 		return
@@ -528,7 +554,28 @@ func (dm *DeviceManager) triggerAutoSetup(ctx context.Context, log logr.Logger, 
 	}()
 }
 
-func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.Router, refreshed chan<- *myhome.Device) {
+// routerHostResolver adapts a model.Router to pkg/shelly/types.HostResolver,
+// letting pkg/shelly re-resolve a device's IP without depending on the
+// internal/myhome package (see the Three-Tier Layer Rule in CLAUDE.md).
+type routerHostResolver struct {
+	router model.Router
+}
+
+func (r routerHostResolver) ResolveHost(ctx context.Context, mac net.HardwareAddr, name string) (net.IP, error) {
+	if len(mac) > 0 {
+		if host, err := r.router.GetHostByMac(ctx, mac); err == nil {
+			return host.Ip(), nil
+		}
+	}
+	if name != "" {
+		if host, err := r.router.GetHostByName(ctx, name); err == nil {
+			return host.Ip(), nil
+		}
+	}
+	return nil, model.ErrNotFound
+}
+
+func refreshOneDevice(ctx context.Context, device *myhome.Device, refreshed chan<- *myhome.Device) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		panic("BUG: No logger initialized")
@@ -546,32 +593,14 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, router model.R
 		return
 	}
 
-	var modified bool = false
-	if router != nil {
-		mac, err := net.ParseMAC(device.MAC)
-		host, err := router.GetHostByMac(ctx, mac)
-		if err == nil {
-			ip := host.Ip().String()
-			if ip != device.Host() {
-				log.V(1).Info("Changing IP", "device", device.DeviceSummary, "old_ip", device.Host(), "new_ip", ip)
-				device = device.WithHost(ip)
-				modified = true
-			}
-		} else {
-			log.Error(err, "Router has no IP for MAC", "device", device.DeviceSummary, "mac", device.MAC)
-			device = device.WithHost(fmt.Sprintf("%s.local", device.Id()))
-			modified = true
-		}
-	}
-
-	updated, err := device.Refresh(ctx)
+	// Host resolution (router MAC lookup, then mDNS) happens lazily inside
+	// pkg/shelly, only when an HTTP call actually needs it, via the
+	// types.HostResolver installed by shelly.SetHostResolver in Start()
+	// below — no periodic MAC->IP polling here. See docs/no-ip-address-plan.md.
+	modified, err := device.Refresh(ctx)
 	if err != nil {
 		log.Error(err, "Failed to refresh device", "device", device.DeviceSummary)
 		return
-	}
-
-	if updated {
-		modified = true
 	}
 
 	if !modified {
@@ -656,6 +685,69 @@ func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, interval time.
 			dm.UpdateChannel() <- gen2Devices[i]
 			i++
 		}
+	}
+}
+
+// runReconciliationLoop periodically re-applies canonical MQTT broker / NTP / Matter
+// config to every known Gen2+ device over HTTP, as a self-healing safety net against
+// config drift (see docs/MQTT-BROKER-LOOPBACK-PLAN.md). interval <= 0 disables the loop.
+//
+// HTTP is forced rather than auto-selected: if a device's MQTT broker is wrong, its
+// "MQTT ready" flag can look fine while nothing actually reaches it, so only HTTP to
+// the device's own IP reflects reality.
+func (dm *DeviceManager) runReconciliationLoop(ctx context.Context, interval time.Duration) {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
+	if interval <= 0 {
+		log.Info("Reconciliation loop disabled")
+		return
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("Exiting reconciliation loop")
+			return
+		case <-ticker.C:
+			devices, err := dm.GetAllDevices(ctx)
+			if err != nil {
+				log.Error(err, "Failed to get all devices for reconciliation")
+				continue
+			}
+			for _, d := range devices {
+				if shelly.IsGen1Device(d.Id()) || strings.HasPrefix(d.Id(), "shellyblu-") {
+					continue
+				}
+				dm.reconcileOneDevice(ctx, log, d)
+			}
+		}
+	}
+}
+
+func (dm *DeviceManager) reconcileOneDevice(ctx context.Context, log logr.Logger, device *myhome.Device) {
+	sd, ok := device.Impl().(*shelly.Device)
+	if !ok || sd == nil {
+		impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
+		if err != nil {
+			log.Error(err, "Failed to create device for reconciliation", "device", device.Id())
+			return
+		}
+		sd, ok = impl.(*shelly.Device)
+		if !ok || sd == nil {
+			return
+		}
+	}
+	if sd.Host() == "" {
+		log.V(1).Info("Skipping reconciliation: no host known for device", "device", device.Id())
+		return
+	}
+	if err := shellysetup.ReconcileConfig(ctx, log, types.ChannelHttp, sd, dm.setupConfig); err != nil {
+		log.Error(err, "Reconciliation failed", "device", device.Id())
 	}
 }
 
@@ -753,7 +845,13 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 	if err != nil {
 		return nil, fmt.Errorf("failed to get devices: %w", err)
 	}
+	return &myhome.ThermometerListResult{Thermometers: classifyThermometers(devices)}, nil
+}
 
+// classifyThermometers scans devices for Gen1 H&T sensors (by Info.Application
+// or the "shellyht-" id prefix) and BLU sensors advertising a "temperature"
+// BTHome capability, returning one ThermometerInfo per match.
+func classifyThermometers(devices []*myhome.Device) []myhome.ThermometerInfo {
 	thermometers := make([]myhome.ThermometerInfo, 0)
 
 	for _, d := range devices {
@@ -764,8 +862,7 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 				Name:      d.Name(),
 				Type:      "Gen1",
 				MqttTopic: fmt.Sprintf("shellies/%s/sensor/temperature", d.Id()),
-				RoomId:    d.RoomId, // Add this field
-
+				RoomId:    d.RoomId,
 			})
 			continue
 		}
@@ -780,7 +877,7 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 						Name:      d.Name(),
 						Type:      "BLU",
 						MqttTopic: fmt.Sprintf("shelly-blu/events/%s", d.MAC),
-						RoomId:    d.RoomId, // Add this field
+						RoomId:    d.RoomId,
 					})
 					break
 				}
@@ -788,7 +885,7 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 		}
 	}
 
-	return &myhome.ThermometerListResult{Thermometers: thermometers}, nil
+	return thermometers
 }
 
 // HandleDoorList returns a list of devices with window/door sensing capability
@@ -797,7 +894,12 @@ func (dm *DeviceManager) HandleDoorList(ctx context.Context) (*myhome.DoorListRe
 	if err != nil {
 		return nil, fmt.Errorf("failed to get devices: %w", err)
 	}
+	return &myhome.DoorListResult{Doors: classifyDoors(devices)}, nil
+}
 
+// classifyDoors scans devices for BLU sensors advertising a "window" BTHome
+// capability, returning one DoorInfo per match.
+func classifyDoors(devices []*myhome.Device) []myhome.DoorInfo {
 	doors := make([]myhome.DoorInfo, 0)
 
 	for _, d := range devices {
@@ -819,7 +921,7 @@ func (dm *DeviceManager) HandleDoorList(ctx context.Context) (*myhome.DoorListRe
 		}
 	}
 
-	return &myhome.DoorListResult{Doors: doors}, nil
+	return doors
 }
 
 // GetShellyDevice returns a Shelly device for RPC calls (implements script.DeviceProvider)

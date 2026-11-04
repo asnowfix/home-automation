@@ -2,12 +2,14 @@ package watch
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/myhome"
-	"github.com/asnowfix/home-automation/myhome/devices"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
-	"net"
+	"github.com/asnowfix/home-automation/myhome/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
+	"net"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -66,6 +68,14 @@ func ZeroConf(ctx context.Context, restartAfter time.Duration, dm devices.Manage
 						}
 
 						device, err := db.GetDeviceByAny(ctx, entry.Instance)
+						if err != nil && !errors.Is(err, sql.ErrNoRows) {
+							// Transient lookup failure (DB error, etc.) - do not
+							// treat an already-known device as brand new, which
+							// would re-trigger auto-setup and risk clobbering its
+							// working config. Retry on the next mDNS browse cycle.
+							log.Error(err, "Failed to look up device, skipping entry this cycle", "entry", entry)
+							continue
+						}
 						if err != nil || device.Info == nil {
 							sd, err := shelly.NewDeviceFromZeroConfEntry(ctx, log, dr, entry)
 							if err != nil {

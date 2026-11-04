@@ -28,6 +28,7 @@ RuntimeMaxSec=21600
 
 # Environment variables
 Environment=HOME=/var/lib/myhome
+EnvironmentFile=-/var/lib/myhome/.env
 
 [Install]
 # multi-user.target normally defines a system state where all network services

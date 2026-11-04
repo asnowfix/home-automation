@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Extract version from tag
@@ -32,7 +32,7 @@ jobs:
             exit 1
           fi
       - name: Import GPG key
-        uses: crazy-max/ghaction-import-gpg@v6
+        uses: crazy-max/ghaction-import-gpg@v7
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
@@ -56,12 +56,11 @@ jobs:
           set -euo pipefail
           EXPECTED_TAG="${{ github.ref_name }}"
           
-          # Build the binary
-          cd myhome
+          # Build the binary; root make build depends on generate (fetches embedded JS/CSS assets)
           make build
-          
+
           # Get version from binary
-          VERSION=$(./myhome version)
+          VERSION=$(./myhome/myhome version)
           
           echo "Expected version: $EXPECTED_TAG"
           echo "Actual version: $VERSION"

@@ -11,7 +11,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"sync"
 	"time"
 
@@ -72,11 +71,18 @@ func getBoxIp(ctx context.Context) net.IP {
 	return boxIp
 }
 
-var username string = os.Getenv("SFR_USERNAME")
+var username string
 
-var password string = os.Getenv("SFR_PASSWORD")
+var password string
 
-var token string = ""
+var token string
+
+// Init sets the SFR box credentials. Call this once at startup (e.g. from Viper config).
+// If not called, or called with empty strings, authentication is skipped.
+func Init(u, p string) {
+	username = u
+	password = p
+}
 
 type Response struct {
 	XMLName  xml.Name `xml:"rsp"`
@@ -108,7 +114,7 @@ func renewToken(ip net.IP) error {
 		log.Info("getToken()", err)
 		return err
 	}
-	if method == "passwd" || method == "all" {
+	if (method == "passwd" || method == "all") && (username != "" || password != "") {
 		err = checkToken(ip, t)
 		if err != nil {
 			log.Info("checkToken()", err)

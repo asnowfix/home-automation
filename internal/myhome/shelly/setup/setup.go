@@ -12,21 +12,21 @@ import (
 
 	"github.com/go-logr/logr"
 
-	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/input"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	"github.com/asnowfix/home-automation/pkg/shelly/matter"
 	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
 	"github.com/asnowfix/home-automation/pkg/shelly/system"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/asnowfix/home-automation/pkg/shelly/wifi"
-	"github.com/asnowfix/home-automation/pkg/shelly/schedule"
 )
 
 // Config holds configuration options for device setup
@@ -249,29 +249,11 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 
 	// Configure MQTT server
 	log.Info("Configuring MQTT broker", "device", deviceId)
-	if cfg.MqttBroker != "" {
-		mqttServer := cfg.MqttBroker
-
-		// If MqttPort is 0, the broker string already includes the port (e.g., "192.168.1.1:1883")
-		// Otherwise, we need to resolve the hostname and append the port
-		if cfg.MqttPort == 0 {
-			// Broker already includes port, use as-is
-			log.Info("Using MQTT broker with embedded port", "server", mqttServer)
-		} else {
-			// Need to resolve hostname and append port
-			if cfg.Resolver != nil {
-				ips, err := cfg.Resolver.LookupHost(ctx, log, cfg.MqttBroker)
-				if err != nil {
-					return fmt.Errorf("failed to resolve MQTT broker %s: %w", cfg.MqttBroker, err)
-				}
-				if len(ips) == 0 {
-					return fmt.Errorf("no IP address resolved for %s", cfg.MqttBroker)
-				}
-				mqttServer = ips[0].String()
-			}
-			mqttServer = net.JoinHostPort(mqttServer, strconv.Itoa(cfg.MqttPort))
-		}
-
+	mqttServer, err := resolveMqttServer(ctx, log, cfg)
+	if err != nil {
+		return err
+	}
+	if mqttServer != "" {
 		log.Info("Setting MQTT broker", "device", deviceId, "server", mqttServer, "via", via, "http_ready", sd.IsHttpReady(), "mqtt_ready", sd.IsMqttReady())
 		_, err = mqtt.SetServer(ctx, via, sd, mqttServer)
 		if err != nil {
@@ -283,46 +265,8 @@ func SetupDevice(ctx context.Context, log logr.Logger, sd *shellyapi.Device, tar
 		log.Info("MQTT broker not configured (no broker specified)", "device", deviceId)
 	}
 
-	status, err := system.GetStatus(ctx, via, sd)
-	if err != nil {
-		log.Error(err, "Failed to get device status", "device", deviceId)
-		return fmt.Errorf("failed to get device status: %w", err)
-	}
-
-	// Reboot device if necessary (required after MQTT configuration change)
-	if status.RestartRequired {
-		log.Info("Rebooting device (required after configuration changes)", "device", deviceId)
-
-		err = shelly.DoReboot(ctx, sd)
-		if err != nil {
-			log.Error(err, "Failed to reboot device", "device", deviceId)
-			return fmt.Errorf("failed to reboot device: %w", err)
-		}
-
-		// Wait for device to go offline (reboot started)
-		log.Info("Waiting for device to go offline", "device", deviceId)
-		time.Sleep(5 * time.Second)
-
-		// Wait for device to come back online
-		log.Info("Waiting for device to come back online", "device", deviceId)
-		maxRetries := 20 // 20 * 3 seconds = 60 seconds max
-		for i := 0; i < maxRetries; i++ {
-			time.Sleep(3 * time.Second)
-			status, err = system.GetStatus(ctx, via, sd)
-			if err == nil {
-				// Device is back online
-				log.Info("Device rebooted successfully", "device", deviceId)
-				break
-			}
-			if i == maxRetries-1 {
-				log.Error(nil, "Device did not come back online after reboot", "device", deviceId)
-				return fmt.Errorf("device did not come back online after reboot")
-			}
-		}
-
-		// Wait additional time for all services to fully initialize
-		log.Info("Waiting for device services to fully initialize", "device", deviceId)
-		time.Sleep(10 * time.Second)
+	if err := rebootIfRequired(ctx, log, via, sd, deviceId); err != nil {
+		return err
 	}
 
 	// Load watchdog.js as script #1
@@ -413,24 +357,164 @@ const setupDoneKey = "script/setup/done"
 
 // IsDeviceSetUp checks if a device has already been set up by looking for the setup marker in KVS.
 // This is cheaper than listing scripts.
-func IsDeviceSetUp(ctx context.Context, log logr.Logger, sd *shellyapi.Device) bool {
+//
+// A returned error means "could not even attempt the check" (no HTTP or MQTT channel is
+// ready for this device at all) and must not be treated as "not set up": callers should
+// skip the device for this round rather than re-running setup, since SetupDevice itself
+// would fail at the same channel-selection step anyway.
+//
+// A missing KVS key (genuinely never set up) and a transient read failure currently look
+// identical at this layer - the RPC transports don't distinguish "not found" from "timeout"
+// (see docs/MQTT-BROKER-LOOPBACK-PLAN.md). To avoid letting a single flaky read trigger a
+// full re-setup (including rewriting the device's MQTT broker) on an already-configured
+// device, the read is retried once before concluding "not set up".
+func IsDeviceSetUp(ctx context.Context, log logr.Logger, sd *shellyapi.Device) (bool, error) {
 	via, err := selectChannel(sd)
 	if err != nil {
-		log.Error(err, "Unable to determine if device is set up (Channel)", "device", sd.Id())
-		return false
+		return false, fmt.Errorf("unable to determine if device %s is set up (channel): %w", sd.Id(), err)
 	}
 	_, err = kvs.GetValue(ctx, log, via, sd, setupDoneKey)
-	if err != nil {
-		log.Error(err, "Unable to determine if device is set up (KVS)", "device", sd.Id())
-		return false
+	if err == nil {
+		return true, nil
 	}
-	return true
+	log.V(1).Info("KVS read failed, retrying once before concluding device is not set up", "device", sd.Id(), "error", err)
+	time.Sleep(time.Second)
+	_, err = kvs.GetValue(ctx, log, via, sd, setupDoneKey)
+	return err == nil, nil
 }
 
 // markDeviceSetUp stores a marker in KVS to indicate the device has been set up
 func markDeviceSetUp(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device) error {
 	_, err := kvs.SetKeyValue(ctx, log, via, sd, setupDoneKey, "1")
 	return err
+}
+
+// resolveMqttServer turns cfg.MqttBroker/cfg.MqttPort into a host:port string ready
+// to write to a device's MQTT config. Returns "" if no broker is configured.
+func resolveMqttServer(ctx context.Context, log logr.Logger, cfg Config) (string, error) {
+	if cfg.MqttBroker == "" {
+		return "", nil
+	}
+	mqttServer := cfg.MqttBroker
+
+	// If MqttPort is 0, the broker string already includes the port (e.g., "192.168.1.1:1883")
+	// Otherwise, we need to resolve the hostname and append the port
+	if cfg.MqttPort == 0 {
+		log.Info("Using MQTT broker with embedded port", "server", mqttServer)
+		return mqttServer, nil
+	}
+	if cfg.Resolver != nil {
+		ips, err := cfg.Resolver.LookupHost(ctx, log, cfg.MqttBroker)
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve MQTT broker %s: %w", cfg.MqttBroker, err)
+		}
+		if len(ips) == 0 {
+			return "", fmt.Errorf("no IP address resolved for %s", cfg.MqttBroker)
+		}
+		mqttServer = ips[0].String()
+	}
+	return net.JoinHostPort(mqttServer, strconv.Itoa(cfg.MqttPort)), nil
+}
+
+// rebootIfRequired reboots the device and waits for it to come back online, if the
+// device reports that a restart is required (e.g. after an MQTT broker change).
+func rebootIfRequired(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device, deviceId string) error {
+	status, err := system.GetStatus(ctx, via, sd)
+	if err != nil {
+		log.Error(err, "Failed to get device status", "device", deviceId)
+		return fmt.Errorf("failed to get device status: %w", err)
+	}
+	if !status.RestartRequired {
+		return nil
+	}
+
+	log.Info("Rebooting device (required after configuration changes)", "device", deviceId)
+	if err := shelly.DoReboot(ctx, sd); err != nil {
+		log.Error(err, "Failed to reboot device", "device", deviceId)
+		return fmt.Errorf("failed to reboot device: %w", err)
+	}
+
+	// Wait for device to go offline (reboot started)
+	log.Info("Waiting for device to go offline", "device", deviceId)
+	time.Sleep(5 * time.Second)
+
+	// Wait for device to come back online
+	log.Info("Waiting for device to come back online", "device", deviceId)
+	maxRetries := 20 // 20 * 3 seconds = 60 seconds max
+	for i := 0; i < maxRetries; i++ {
+		time.Sleep(3 * time.Second)
+		if _, err = system.GetStatus(ctx, via, sd); err == nil {
+			log.Info("Device rebooted successfully", "device", deviceId)
+			break
+		}
+		if i == maxRetries-1 {
+			log.Error(nil, "Device did not come back online after reboot", "device", deviceId)
+			return fmt.Errorf("device did not come back online after reboot")
+		}
+	}
+
+	// Wait additional time for all services to fully initialize
+	log.Info("Waiting for device services to fully initialize", "device", deviceId)
+	time.Sleep(10 * time.Second)
+	return nil
+}
+
+// ReconcileConfig periodically re-applies the idempotent configuration values
+// SetupDevice establishes on first setup (MQTT broker, NTP server, Matter disabled),
+// as a drift-correction safety net for already-configured devices. Unlike SetupDevice,
+// it never touches the device name, WiFi, or watchdog.js script management - those are
+// one-time provisioning concerns, and re-running them periodically risks clobbering
+// user edits (e.g. a renamed device) for no benefit.
+//
+// The caller passes an explicit channel rather than letting this function auto-select
+// one, so it can force types.ChannelHttp: if a device's MQTT broker is wrong, its
+// "MQTT ready" flag can look fine while it can't actually reach anything, so only HTTP
+// to the device's own IP is guaranteed to reflect reality.
+func ReconcileConfig(ctx context.Context, log logr.Logger, via types.Channel, sd *shellyapi.Device, cfg Config) error {
+	deviceId := sd.Id()
+
+	config, err := system.GetConfig(ctx, via, sd)
+	if err != nil {
+		return fmt.Errorf("failed to get system config: %w", err)
+	}
+	if config.Sntp.Server != "pool.ntp.org" {
+		config.Sntp.Server = "pool.ntp.org"
+		if _, err := system.SetConfig(ctx, via, sd, config); err != nil {
+			return fmt.Errorf("failed to set system config: %w", err)
+		}
+		log.Info("Reconciled NTP server", "device", deviceId)
+	}
+
+	if err := matter.Disable(ctx, via, sd); err != nil {
+		log.V(1).Info("Unable to disable Matter during reconciliation (may not be supported)", "device", deviceId, "error", err)
+	}
+
+	mqttServer, err := resolveMqttServer(ctx, log, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to resolve MQTT broker: %w", err)
+	}
+	if mqttServer == "" {
+		return nil
+	}
+
+	out, err := sd.CallE(ctx, via, mqtt.GetConfig.String(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to get MQTT config: %w", err)
+	}
+	mqttCfg, ok := out.(*mqtt.Config)
+	if !ok {
+		return fmt.Errorf("unexpected MQTT config response type: %T", out)
+	}
+	if mqttCfg.Enable && mqttCfg.Server == mqttServer {
+		return nil
+	}
+
+	log.Info("Reconciling MQTT broker", "device", deviceId, "old_server", mqttCfg.Server, "new_server", mqttServer)
+	if _, err := mqtt.SetServer(ctx, via, sd, mqttServer); err != nil {
+		return fmt.Errorf("failed to set MQTT broker: %w", err)
+	}
+
+	return rebootIfRequired(ctx, log, via, sd, deviceId)
 }
 
 // nonAlphanumericRegex matches any non-alphanumeric character

@@ -136,38 +136,9 @@ Examples:
 		isNewRoom := len(matchingRooms) == 0 && !strings.Contains(pattern, "*")
 
 		if isNewRoom {
-			// Creating new room - require all fields
-			if !nameSet {
-				return fmt.Errorf("--name is required for new room")
-			}
-			if !kindsSet {
-				return fmt.Errorf("--kinds is required for new room (room kinds: bedroom, office, living-room, kitchen, other)")
-			}
-			if !ecoSet {
-				return fmt.Errorf("--eco is required for new room (it's the default temperature level)")
-			}
-
-			// Parse kinds
-			kinds := parseKinds(kindsStr)
-			if len(kinds) == 0 {
-				return fmt.Errorf("invalid kinds: %s", kindsStr)
-			}
-
-			// Build levels map
-			levels := make(map[string]float64)
-			levels["eco"] = eco
-			if comfortSet && comfort > 0 {
-				levels["comfort"] = comfort
-			}
-			if awaySet && away > 0 {
-				levels["away"] = away
-			}
-
-			params := &myhome.TemperatureSetParams{
-				RoomID: pattern,
-				Name:   name,
-				Kinds:  kinds,
-				Levels: levels,
+			params, err := buildNewRoomParams(pattern, name, nameSet, kindsStr, kindsSet, eco, ecoSet, comfortSet, comfort, awaySet, away)
+			if err != nil {
+				return err
 			}
 
 			result, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSet, params)
@@ -191,50 +162,12 @@ Examples:
 
 		updatedCount := 0
 		for roomID, existingConfig := range matchingRooms {
-			// Build update params - start with existing values
-			updateName := existingConfig.Name
-			updateKinds := existingConfig.Kinds
-			updateLevels := make(map[string]float64)
-			for k, v := range existingConfig.Levels {
-				updateLevels[k] = v
+			params, err := buildUpdatedRoomParams(roomID, existingConfig, name, nameSet, kindsStr, kindsSet, eco, ecoSet, comfortSet, comfort, awaySet, away)
+			if err != nil {
+				return err
 			}
 
-			// Apply only the flags that were set
-			if nameSet {
-				updateName = name
-			}
-			if kindsSet {
-				updateKinds = parseKinds(kindsStr)
-				if len(updateKinds) == 0 {
-					return fmt.Errorf("invalid kinds: %s", kindsStr)
-				}
-			}
-			if ecoSet {
-				updateLevels["eco"] = eco
-			}
-			if comfortSet {
-				if comfort > 0 {
-					updateLevels["comfort"] = comfort
-				} else {
-					delete(updateLevels, "comfort")
-				}
-			}
-			if awaySet {
-				if away > 0 {
-					updateLevels["away"] = away
-				} else {
-					delete(updateLevels, "away")
-				}
-			}
-
-			params := &myhome.TemperatureSetParams{
-				RoomID: roomID,
-				Name:   updateName,
-				Kinds:  updateKinds,
-				Levels: updateLevels,
-			}
-
-			_, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSet, params)
+			_, err = myhome.TheClient.CallE(ctx, myhome.TemperatureSet, params)
 			if err != nil {
 				fmt.Printf("✗ Failed to update room %s: %v\n", roomID, err)
 				continue
@@ -642,6 +575,88 @@ func init() {
 	// Kind schedule list flags
 	kindScheduleListCmd.Flags().String("kind", "", "Filter by room kind (bedroom, office, living-room, kitchen, other)")
 	kindScheduleListCmd.Flags().String("day-type", "", "Filter by day-type (work-day, day-off)")
+}
+
+// buildNewRoomParams validates flags and builds the TemperatureSetParams
+// needed to create a brand-new room. name/kinds/eco are required for a new
+// room; comfort/away are only included when explicitly set and positive.
+func buildNewRoomParams(pattern, name string, nameSet bool, kindsStr string, kindsSet bool, eco float64, ecoSet bool, comfortSet bool, comfort float64, awaySet bool, away float64) (*myhome.TemperatureSetParams, error) {
+	if !nameSet {
+		return nil, fmt.Errorf("--name is required for new room")
+	}
+	if !kindsSet {
+		return nil, fmt.Errorf("--kinds is required for new room (room kinds: bedroom, office, living-room, kitchen, other)")
+	}
+	if !ecoSet {
+		return nil, fmt.Errorf("--eco is required for new room (it's the default temperature level)")
+	}
+
+	kinds := parseKinds(kindsStr)
+	if len(kinds) == 0 {
+		return nil, fmt.Errorf("invalid kinds: %s", kindsStr)
+	}
+
+	levels := make(map[string]float64)
+	levels["eco"] = eco
+	if comfortSet && comfort > 0 {
+		levels["comfort"] = comfort
+	}
+	if awaySet && away > 0 {
+		levels["away"] = away
+	}
+
+	return &myhome.TemperatureSetParams{
+		RoomID: pattern,
+		Name:   name,
+		Kinds:  kinds,
+		Levels: levels,
+	}, nil
+}
+
+// buildUpdatedRoomParams merges only the explicitly-set flags onto an
+// existing room's configuration, leaving unspecified values unchanged.
+// A comfort/away value set to <= 0 removes that level from the room.
+func buildUpdatedRoomParams(roomID string, existing *myhome.TemperatureRoomConfig, name string, nameSet bool, kindsStr string, kindsSet bool, eco float64, ecoSet bool, comfortSet bool, comfort float64, awaySet bool, away float64) (*myhome.TemperatureSetParams, error) {
+	updateName := existing.Name
+	updateKinds := existing.Kinds
+	updateLevels := make(map[string]float64, len(existing.Levels))
+	for k, v := range existing.Levels {
+		updateLevels[k] = v
+	}
+
+	if nameSet {
+		updateName = name
+	}
+	if kindsSet {
+		updateKinds = parseKinds(kindsStr)
+		if len(updateKinds) == 0 {
+			return nil, fmt.Errorf("invalid kinds: %s", kindsStr)
+		}
+	}
+	if ecoSet {
+		updateLevels["eco"] = eco
+	}
+	if comfortSet {
+		if comfort > 0 {
+			updateLevels["comfort"] = comfort
+		} else {
+			delete(updateLevels, "comfort")
+		}
+	}
+	if awaySet {
+		if away > 0 {
+			updateLevels["away"] = away
+		} else {
+			delete(updateLevels, "away")
+		}
+	}
+
+	return &myhome.TemperatureSetParams{
+		RoomID: roomID,
+		Name:   updateName,
+		Kinds:  updateKinds,
+		Levels: updateLevels,
+	}, nil
 }
 
 func matchRoomPattern(pattern string, rooms myhome.TemperatureRoomList) map[string]*myhome.TemperatureRoomConfig {

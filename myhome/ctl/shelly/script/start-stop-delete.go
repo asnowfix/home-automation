@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"github.com/asnowfix/home-automation/hlog"
-	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
@@ -48,8 +48,11 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 	scriptName := args[0]
 	fmt.Printf(". Uploading %s to %s...\n", scriptName, sd.Name())
 
-	// Read the embedded script file
-	buf, err := pkgscript.ReadEmbeddedFile(scriptName)
+	// Resolve the script: a same-named file in --local-scripts-dir shadows
+	// the embedded copy (unless --no-local-scripts is set), falling back
+	// silently to embedded when absent. See LoadScript for the precedence
+	// rule and issue #457 for the motivation.
+	buf, source, err := mhscript.LoadScript(log, localScriptsDirEffective(), scriptName)
 	if err != nil {
 		fmt.Printf("✗ Failed to read script %s: %v\n", scriptName, err)
 
@@ -64,12 +67,30 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 
 		return nil, err
 	}
+	fmt.Printf("  . Source: %s\n", source)
 
-	// Upload with version tracking
-	id, err := mhscript.UploadWithVersion(ctx, log, via, sd, scriptName, buf, !noMinify, forceUpload)
+	// Upload with version tracking. Use the *Detailed variant so a
+	// post-upload confirmation gap (code delivered, but enabling/starting
+	// it did not confirm — commonly a device still busy right after the
+	// upload) can be reported for what it is instead of as an upload
+	// failure. See issue #428.
+	id, status, err := mhscript.UploadWithVersionDetailed(ctx, log, via, sd, scriptName, buf, !noMinify, forceUpload)
 	if err != nil {
+		// The code transfer itself did not complete: this is a genuine
+		// failure, and the only case that should make the command exit
+		// non-zero.
 		fmt.Printf("✗ Failed to upload %s to %s: %v\n", scriptName, sd.Name(), err)
 		return nil, err
+	}
+	if status == mhscript.StatusIndeterminate {
+		// The code is confirmed on the device (every chunk was
+		// acknowledged), but a follow-up confirmation step did not
+		// respond in time even after retrying. This is not a failure —
+		// re-uploading would be wasted work — so the command exits 0.
+		// The operator's correct next step is to re-check status, not
+		// re-upload.
+		fmt.Printf("⚠ Uploaded %s to %s (id: %d), but could not confirm it started/enabled — the device may still be busy. Re-run `script status` rather than re-uploading.\n", scriptName, sd.Name(), id)
+		return id, nil
 	}
 	fmt.Printf("✓ Successfully uploaded %s to %s (id: %d)\n", scriptName, sd.Name(), id)
 	return id, nil

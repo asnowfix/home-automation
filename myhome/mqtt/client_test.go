@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,18 +25,64 @@ func (t *fakePahoToken) Error() error                      { return nil }
 
 // fakePahoClient implements pahomqtt.Client for unit tests.
 // It always reports as connected and silently accepts subscribe/publish calls.
-type fakePahoClient struct{}
+//
+// It also records Subscribe/Unsubscribe calls (and the subscribed handler) so
+// tests can assert broker-level behavior and drive the fan-out like the broker.
+type fakePahoClient struct {
+	mu             sync.Mutex
+	failSubscribes int // next N Subscribe calls fail with a token error
+	subscribed     []string
+	unsubscribed []string
+	handlers     map[string]pahomqtt.MessageHandler
+}
 
 func (f *fakePahoClient) IsConnected() bool                                                  { return true }
 func (f *fakePahoClient) IsConnectionOpen() bool                                             { return true }
 func (f *fakePahoClient) Connect() pahomqtt.Token                                            { return &fakePahoToken{} }
 func (f *fakePahoClient) Disconnect(uint)                                                    {}
 func (f *fakePahoClient) Publish(string, byte, bool, interface{}) pahomqtt.Token             { return &fakePahoToken{} }
-func (f *fakePahoClient) Subscribe(string, byte, pahomqtt.MessageHandler) pahomqtt.Token     { return &fakePahoToken{} }
+func (f *fakePahoClient) Subscribe(topic string, _ byte, h pahomqtt.MessageHandler) pahomqtt.Token {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.subscribed = append(f.subscribed, topic)
+	if f.failSubscribes > 0 {
+		f.failSubscribes--
+		return &failingToken{err: fmt.Errorf("broker rejected subscription")}
+	}
+	if f.handlers == nil {
+		f.handlers = make(map[string]pahomqtt.MessageHandler)
+	}
+	f.handlers[topic] = h
+	return &fakePahoToken{}
+}
 func (f *fakePahoClient) SubscribeMultiple(map[string]byte, pahomqtt.MessageHandler) pahomqtt.Token {
 	return &fakePahoToken{}
 }
-func (f *fakePahoClient) Unsubscribe(...string) pahomqtt.Token                   { return &fakePahoToken{} }
+func (f *fakePahoClient) Unsubscribe(topics ...string) pahomqtt.Token {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unsubscribed = append(f.unsubscribed, topics...)
+	return &fakePahoToken{}
+}
+
+// count returns how many times topic appears in list (subscribed or unsubscribed).
+func (f *fakePahoClient) count(list *[]string, topic string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, t := range *list {
+		if t == topic {
+			n++
+		}
+	}
+	return n
+}
+
+func (f *fakePahoClient) handler(topic string) pahomqtt.MessageHandler {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.handlers[topic]
+}
 func (f *fakePahoClient) AddRoute(string, pahomqtt.MessageHandler)               {}
 func (f *fakePahoClient) OptionsReader() pahomqtt.ClientOptionsReader            { return pahomqtt.ClientOptionsReader{} }
 
@@ -254,6 +301,145 @@ func TestSubscribe_ConcurrentSubscriptions(t *testing.T) {
 	}
 }
 
+// fakePahoMessage implements pahomqtt.Message for tests that drive the
+// stored "distribute" handler directly, as the broker would.
+type fakePahoMessage struct {
+	topic   string
+	payload []byte
+}
+
+func (m *fakePahoMessage) Duplicate() bool   { return false }
+func (m *fakePahoMessage) Qos() byte         { return 0 }
+func (m *fakePahoMessage) Retained() bool    { return false }
+func (m *fakePahoMessage) Topic() string     { return m.topic }
+func (m *fakePahoMessage) MessageID() uint16 { return 0 }
+func (m *fakePahoMessage) Payload() []byte   { return m.payload }
+func (m *fakePahoMessage) Ack()              {}
+
+// TestDistribute_FullQueueDropsMessageNotSubscriber is a regression test for
+// #517: a burst of messages that fills a subscriber's bounded queue must
+// drop only the messages that don't fit, not the subscriber itself. Before
+// this fix, one full-queue moment permanently removed the subscriber from
+// the topic's fan-out list -- with no automatic re-subscribe -- so every
+// later message on that topic (e.g. every device sharing a wildcard
+// subscription such as "+/events/rpc") was silently lost until the process
+// restarted.
+func TestDistribute_FullQueueDropsMessageNotSubscriber(t *testing.T) {
+	c := newTestClient(t)
+	ctx := context.Background()
+	const topic = "test/overflow"
+
+	ch, err := c.Subscribe(ctx, topic, 1, "subscriber") // qlen=1: easy to overflow
+	if err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+
+	handlerI, ok := c.handlers.Load(topic)
+	if !ok {
+		t.Fatal("no distribute handler registered for topic")
+	}
+	handler := handlerI.(pahomqtt.MessageHandler)
+
+	// distribute() does its real work in a goroutine spawned per handler()
+	// call, so waiting for effects means polling rather than assuming
+	// synchronous completion.
+	waitFor := func(what string, done func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if done() {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("timed out waiting for: %s", what)
+	}
+
+	// First message fills the qlen=1 buffer -- poll for the buffered
+	// length to actually reach 1, which is a real (not assumed) signal
+	// that this call's distribute() goroutine has run.
+	handler(nil, &fakePahoMessage{topic: topic, payload: []byte("first")})
+	waitFor("first message buffered", func() bool { return len(ch) == 1 })
+
+	// Second message finds the buffer full and must be dropped -- as
+	// "queue full", not as "remove the subscriber". Give its goroutine
+	// (serialized after the first on the same per-topic mutex) a moment to
+	// run, well beyond what trivial in-memory map/channel work needs.
+	handler(nil, &fakePahoMessage{topic: topic, payload: []byte("second")})
+	time.Sleep(100 * time.Millisecond)
+
+	value, ok := c.subscribers.Load(topic)
+	if !ok {
+		t.Fatal("subscriber list missing for topic")
+	}
+	if got := reflect.ValueOf(value).Len(); got != 1 {
+		t.Fatalf("expected subscriber to survive a full queue, got %d subscribers left", got)
+	}
+
+	// The dropped message must be counted (#517/#518 F2) -- this is what
+	// answers "did we lose events today, and how many" instead of leaving
+	// only a per-message log line (or, before this PR, a permanently dead
+	// subscriber and total silence).
+	counterI, ok := c.dropCounts.Load(topic + "|subscriber")
+	if !ok {
+		t.Fatal("expected a drop counter to have been created")
+	}
+	if got := counterI.(*atomic.Uint64).Load(); got != 1 {
+		t.Fatalf("expected drop count 1, got %d", got)
+	}
+
+	// Drain the one message that made it through, then confirm the
+	// subscriber is still live by delivering a third message to it.
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for first message")
+	}
+
+	handler(nil, &fakePahoMessage{topic: topic, payload: []byte("third")})
+
+	select {
+	case got := <-ch:
+		if string(got) != "third" {
+			t.Fatalf("expected %q, got %q", "third", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("subscriber did not receive message after surviving a full queue")
+	}
+}
+
+// TestRecordDrop_AccumulatesPerTopicSubscriber verifies recordDrop()'s
+// counting in isolation from distribute()'s goroutine timing: repeated
+// drops on the same (topic, subscriber) accumulate on one counter, a
+// different subscriber on the same topic gets its own counter, and the
+// reporter goroutine is started (dropLogOnce) without panicking or blocking
+// -- it only exercises the "first drop ever" path here since
+// dropCountReportInterval (5m) is far longer than this test should run.
+func TestRecordDrop_AccumulatesPerTopicSubscriber(t *testing.T) {
+	c := newTestClient(t)
+
+	c.recordDrop("t1", "subA")
+	c.recordDrop("t1", "subA")
+	c.recordDrop("t1", "subA")
+	c.recordDrop("t1", "subB")
+
+	got, ok := c.dropCounts.Load("t1|subA")
+	if !ok {
+		t.Fatal("expected a counter for t1|subA")
+	}
+	if n := got.(*atomic.Uint64).Load(); n != 3 {
+		t.Fatalf("expected 3 drops for t1|subA, got %d", n)
+	}
+
+	got, ok = c.dropCounts.Load("t1|subB")
+	if !ok {
+		t.Fatal("expected a counter for t1|subB")
+	}
+	if n := got.(*atomic.Uint64).Load(); n != 1 {
+		t.Fatalf("expected 1 drop for t1|subB, got %d", n)
+	}
+}
+
 // TestResolveDeviceHost_NonLoopback verifies that non-loopback addresses pass through unchanged.
 func TestResolveDeviceHost_NonLoopback(t *testing.T) {
 	cases := []struct {
@@ -396,5 +582,202 @@ func TestReconnect_FailedSubscriptionQueuedForRetry(t *testing.T) {
 
 	if !queued {
 		t.Error("failed subscription should have been added to pendingSubscriptions for retry")
+	}
+}
+
+// recvOrFail reads one payload from ch or fails after a bounded wait.
+func recvOrFail(t *testing.T, ch <-chan []byte, what string) []byte {
+	t.Helper()
+	select {
+	case v, ok := <-ch:
+		if !ok {
+			t.Fatalf("channel closed while waiting for %s", what)
+		}
+		return v
+	case <-time.After(10 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
+	return nil
+}
+
+// waitClosed waits (bounded) until ch is closed, draining any buffered values.
+func waitClosed(t *testing.T, ch <-chan []byte, what string) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s to be closed", what)
+		}
+	}
+}
+
+// TestSubscribe_CancelledSubscriberDoesNotPanicFanOut is a regression test for
+// #519: a subscriber whose ctx ended had its queue closed but stayed in the
+// fan-out list, so the next message sent on a closed channel and panicked in a
+// bare goroutine (killing the daemon).
+func TestSubscribe_CancelledSubscriberDoesNotPanicFanOut(t *testing.T) {
+	c := newTestClient(t)
+	fake := c.mqtt.(*fakePahoClient)
+	const topic = "test/519"
+	const n = 50
+
+	ctxA, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	chA, err := c.Subscribe(ctxA, topic, 1, "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chB, err := c.Subscribe(context.Background(), topic, n, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := fake.handler(topic)
+
+	cancelA()
+	waitClosed(t, chA, "A's channel")
+
+	for i := 0; i < n; i++ {
+		handler(nil, &fakePahoMessage{topic: topic, payload: []byte(fmt.Sprint(i))})
+	}
+	for i := 0; i < n; i++ {
+		recvOrFail(t, chB, fmt.Sprintf("B message %d/%d", i+1, n))
+	}
+}
+
+// TestSubscribe_UnsubscribeOnlyWhenLastSubscriberLeaves is a regression test
+// for #520: every departing subscriber used to unsubscribe the whole topic at
+// the broker, starving the remaining ones. The broker subscription must go
+// away only with the last subscriber, and a later Subscribe must re-register.
+func TestSubscribe_UnsubscribeOnlyWhenLastSubscriberLeaves(t *testing.T) {
+	c := newTestClient(t)
+	fake := c.mqtt.(*fakePahoClient)
+	const topic = "test/520"
+
+	ctxA, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	ctxB, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+	chA, err := c.Subscribe(ctxA, topic, 4, "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chB, err := c.Subscribe(ctxB, topic, 4, "B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.count(&fake.subscribed, topic); got != 1 {
+		t.Fatalf("expected 1 broker Subscribe, got %d", got)
+	}
+	handler := fake.handler(topic)
+
+	cancelA()
+	waitClosed(t, chA, "A's channel")
+	// Give any (buggy) asynchronous Unsubscribe a chance to land.
+	time.Sleep(100 * time.Millisecond)
+	if got := fake.count(&fake.unsubscribed, topic); got != 0 {
+		t.Fatalf("broker Unsubscribe issued while a subscriber remained (%d calls)", got)
+	}
+	handler(nil, &fakePahoMessage{topic: topic, payload: []byte("x")})
+	recvOrFail(t, chB, "survivor message")
+
+	cancelB()
+	waitClosed(t, chB, "B's channel")
+	deadline := time.Now().Add(10 * time.Second)
+	for fake.count(&fake.unsubscribed, topic) < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := fake.count(&fake.unsubscribed, topic); got != 1 {
+		t.Fatalf("expected exactly 1 broker Unsubscribe after last subscriber left, got %d", got)
+	}
+	if _, ok := c.subscribers.Load(topic); ok {
+		t.Fatal("topic still in c.subscribers after last subscriber left")
+	}
+	if _, ok := c.handlers.Load(topic); ok {
+		t.Fatal("topic still in c.handlers after last subscriber left")
+	}
+	c.pendingMutex.Lock()
+	_, pending := c.pendingSubscriptions[topic]
+	c.pendingMutex.Unlock()
+	if pending {
+		t.Fatal("topic still in c.pendingSubscriptions after last subscriber left")
+	}
+
+	// A fresh Subscribe must re-register at the broker and receive messages.
+	chC, err := c.Subscribe(context.Background(), topic, 4, "C")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.count(&fake.subscribed, topic); got != 2 {
+		t.Fatalf("expected a fresh broker Subscribe (2 total), got %d", got)
+	}
+	fake.handler(topic)(nil, &fakePahoMessage{topic: topic, payload: []byte("again")})
+	if got := recvOrFail(t, chC, "message after resubscribe"); string(got) != "again" {
+		t.Fatalf("expected %q, got %q", "again", got)
+	}
+}
+
+// TestDistribute_FirstSubscriberCancelledDoesNotAbortFanOut is a regression
+// test for #521: distribute closed over the FIRST subscriber's ctx, so once
+// that ctx ended the fan-out loop could return early and starve everyone else.
+func TestDistribute_FirstSubscriberCancelledDoesNotAbortFanOut(t *testing.T) {
+	c := newTestClient(t)
+	fake := c.mqtt.(*fakePahoClient)
+	const topic = "test/521"
+	const n = 200
+
+	ctxA, cancelA := context.WithCancel(context.Background())
+	defer cancelA()
+	if _, err := c.Subscribe(ctxA, topic, 1, "first"); err != nil {
+		t.Fatal(err)
+	}
+	chB, err := c.Subscribe(context.Background(), topic, 1, "second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := fake.handler(topic)
+	cancelA()
+
+	for i := 0; i < n; i++ {
+		handler(nil, &fakePahoMessage{topic: topic, payload: []byte(fmt.Sprint(i))})
+		recvOrFail(t, chB, fmt.Sprintf("message %d/%d", i+1, n))
+	}
+}
+
+// TestSubscribe_BrokerFailureRollsBackRegistration: when the synchronous broker
+// Subscribe fails, Subscribe must return the error and leave no trace (no
+// subscriber, handler or watcher), so a retry re-issues the broker Subscribe
+// instead of finding the topic already "loaded".
+func TestSubscribe_BrokerFailureRollsBackRegistration(t *testing.T) {
+	c := newTestClient(t)
+	fake := c.mqtt.(*fakePahoClient)
+	fake.failSubscribes = 1
+	const topic = "test/rollback"
+
+	if _, err := c.Subscribe(context.Background(), topic, 4, "first"); err == nil {
+		t.Fatal("expected Subscribe to fail when the broker rejects the subscription")
+	}
+	if _, ok := c.subscribers.Load(topic); ok {
+		t.Fatal("topic still in c.subscribers after failed Subscribe")
+	}
+	if _, ok := c.handlers.Load(topic); ok {
+		t.Fatal("topic still in c.handlers after failed Subscribe")
+	}
+
+	ch, err := c.Subscribe(context.Background(), topic, 4, "retry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.count(&fake.subscribed, topic); got != 2 {
+		t.Fatalf("expected the retry to re-issue a broker Subscribe (2 attempts), got %d", got)
+	}
+	fake.handler(topic)(nil, &fakePahoMessage{topic: topic, payload: []byte("ok")})
+	if got := recvOrFail(t, ch, "message after retry"); string(got) != "ok" {
+		t.Fatalf("expected %q, got %q", "ok", got)
 	}
 }

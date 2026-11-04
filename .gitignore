@@ -51,6 +51,10 @@ SECRETS.md
 /worktrees
 /.claude/worktrees
 
+# Local credentials (see example.env / CONTRIBUTING.md "Local Credentials")
+.env
+.env.local
+
 # Local files
 /myhome/ctl/homectl*
 /myhome/myhome*
@@ -71,3 +75,5 @@ internal/myhome/ui/static/alpine.min.js
 internal/myhome/ui/static/htmx.min.js
 myhome/ctl/pool/pool_defaults_generated.go
 myhome/ctl/garden/garden_defaults_generated.go
+internal/myhome/shelly/script/pool_kvs_generated.go
+internal/shelly/scripts/jstarget/acorn.js

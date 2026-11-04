@@ -113,7 +113,7 @@ var listCmd = &cobra.Command{
 func init() {
 	listCmd.Flags().StringVar(&listDevice, "device", "", "Filter by device ID/name/MAC (default: all)")
 	listCmd.Flags().StringVar(&listType, "type", "", "Event name prefix, e.g. \"switch\" (default: all)")
-	listCmd.Flags().StringVar(&listSeverity, "severity", "", "Filter by severity: alarm|warn|info|debug (default: all)")
+	listCmd.Flags().StringVar(&listSeverity, "severity", "", "Filter by severity: alarm|warn|notice|info|debug (default: all)")
 	listCmd.Flags().StringVar(&listSince, "since", "24h", "Show events since this duration ago, e.g. 24h, 7d (default: 24h)")
 	listCmd.Flags().IntVar(&listLimit, "limit", 100, "Maximum number of rows to return (default: 100)")
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output JSON instead of a table")
@@ -130,11 +130,16 @@ var (
 )
 
 // severityRank maps severity labels to numeric rank (higher = more severe).
+// "notice" is not a severity escalation per se — it curates events worth a
+// human's attention — but it is ranked above "info" so that
+// `events follow --severity notice` surfaces notices and anything more
+// severe, without requiring a separate filtering dimension.
 var severityRank = map[string]int{
-	"debug": 0,
-	"info":  1,
-	"warn":  2,
-	"alarm": 3,
+	"debug":  0,
+	"info":   1,
+	"notice": 2,
+	"warn":   3,
+	"alarm":  4,
 }
 
 var followCmd = &cobra.Command{
@@ -154,7 +159,7 @@ var followCmd = &cobra.Command{
 		if followSeverity != "" {
 			r, ok := severityRank[strings.ToLower(followSeverity)]
 			if !ok {
-				return fmt.Errorf("invalid --severity %q: must be debug|info|warn|alarm", followSeverity)
+				return fmt.Errorf("invalid --severity %q: must be debug|info|notice|warn|alarm", followSeverity)
 			}
 			minRank = r
 		}
@@ -253,7 +258,7 @@ func followSSE(ctx context.Context, url, deviceFilter, typeFilter string, minRan
 func init() {
 	followCmd.Flags().StringVar(&followDevice, "device", "", "Filter by device ID/name/MAC (default: all)")
 	followCmd.Flags().StringVar(&followType, "type", "", "Event name prefix filter, e.g. \"switch\" (default: all)")
-	followCmd.Flags().StringVar(&followSeverity, "severity", "info", "Minimum severity: debug|info|warn|alarm (default: info)")
+	followCmd.Flags().StringVar(&followSeverity, "severity", "info", "Minimum severity: debug|info|notice|warn|alarm (default: info)")
 }
 
 // ============================================================================

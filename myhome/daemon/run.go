@@ -1,10 +1,14 @@
 package daemon
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	"github.com/asnowfix/home-automation/myhome/vacuum"
+	"github.com/asnowfix/home-automation/pkg/sfr"
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -12,6 +16,27 @@ import (
 
 func defaultEventsDBPath() string {
 	return "events.db"
+}
+
+// loadConfigFile attempts to read myhome's YAML config into v (search paths
+// and env binding must already be configured on v). A missing file is
+// expected and benign — defaults/flags/env take over, matching the
+// documented "config file is optional" behavior. A file that exists but
+// fails to parse (e.g. a YAML syntax error) returns an error instead: a
+// previous version silently fell back to defaults in that case, logging the
+// same message as "no config file found" — which let a broken myhome.yaml
+// run for weeks with every config key quietly ignored (see pool/solar
+// options, which have no other way to be set short of CLI flags).
+func loadConfigFile(v *viper.Viper, log logr.Logger) error {
+	if err := v.ReadInConfig(); err == nil {
+		log.Info("Loaded config from", "file", v.ConfigFileUsed())
+		return nil
+	} else if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+		log.Info("No config file found, using defaults and flags")
+		return nil
+	} else {
+		return fmt.Errorf("config file %s exists but failed to parse: %w", v.ConfigFileUsed(), err)
+	}
 }
 
 var disableGen1Proxy bool
@@ -51,25 +76,22 @@ func init() {
 	runCmd.PersistentFlags().IntVar(&options.Flags.MetricsExporterPort, "metrics-exporter-port", options.PROMETHEUS_DEFAULT_PORT, "Prometheus metrics exporter HTTP port")
 	runCmd.PersistentFlags().StringVar(&options.Flags.MetricsExporterTopic, "metrics-exporter-topic", "shelly/metrics", "MQTT topic for Shelly device metrics")
 	runCmd.PersistentFlags().BoolVar(&disableAutoSetup, "disable-auto-setup", false, "Disable automatic configuration of newly discovered unknown devices")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.ReconcileInterval, "reconcile-interval", options.RECONCILE_DEFAULT_INTERVAL, "Interval for re-applying canonical MQTT broker/NTP/Matter config to known devices over HTTP (0 to disable)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.NoMdnsPublish, "no-mdns-publish", false, "Disable mDNS/Zeroconf publishing (useful for dev instances)")
 	runCmd.PersistentFlags().StringVarP(&options.Flags.InstanceName, "instance", "I", "myhome", "Server instance name for RPC topics (default: myhome)")
 	runCmd.PersistentFlags().StringVar(&options.Flags.EventsDBPath, "events-db", defaultEventsDBPath(), "Path to the events SQLite database")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.EventsRetention, "events-retention", 90*24*time.Hour, "Retention period for event records (default 90 days)")
 	runCmd.PersistentFlags().BoolVar(&disableEventsService, "disable-events-service", false, "Disable the event recording service")
 	runCmd.PersistentFlags().StringVar(&options.Flags.RemoteProxy, "remote-proxy", "", "Forward /devices/... requests to a remote myhome daemon (e.g. http://home-pi:6080) instead of connecting directly")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.SolarStaleAfter, "solar-stale-after", options.SOLAR_STALE_AFTER, "Solar aggregator: exclude a source's reading from the total once it is older than this")
 	runCmd.PersistentFlags().StringVar(&options.Flags.PoolDeviceID, "pool-device-id", "", "Pool Shelly device ID")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolEnabled, "enable-pool", false, "Enable pool runtime tracking")
-	runCmd.PersistentFlags().StringVar(&options.Flags.BeemEmail, "beem-email", "", "Beem Energy account email")
-	runCmd.PersistentFlags().StringVar(&options.Flags.BeemPassword, "beem-password", "", "Beem Energy account password")
-	runCmd.PersistentFlags().DurationVar(&options.Flags.BeemPollInterval, "beem-poll-interval", 60*time.Second, "Beem Energy poll interval")
-	runCmd.PersistentFlags().BoolVar(&options.Flags.BeemEnabled, "enable-beem", false, "Enable Beem Energy integration")
-	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolSolarEnabled, "enable-pool-solar", false, "Enable solar-driven pool pump automation")
-	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarStartThresholdW, "pool-solar-start-threshold-w", 500, "Solar power threshold to start pump (W)")
-	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarStopThresholdW, "pool-solar-stop-threshold-w", 200, "Solar power threshold to stop pump (W)")
-	runCmd.PersistentFlags().DurationVar(&options.Flags.PoolSolarStartDelay, "pool-solar-start-delay", 5*time.Minute, "Solar must hold above start threshold for this long before starting pump")
-	runCmd.PersistentFlags().DurationVar(&options.Flags.PoolSolarStopDelay, "pool-solar-stop-delay", 10*time.Minute, "Solar must hold below stop threshold for this long before stopping pump")
-	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarMinVolumeTurnover, "pool-solar-min-volume-turnover", 5, "Soft-stop target: pool volumes filtered per day; pump keeps running past this while solar is still above start threshold")
-	runCmd.PersistentFlags().Float64Var(&options.Flags.PoolSolarMaxVolumeTurnover, "pool-solar-max-volume-turnover", 7, "Hard ceiling: pool volumes filtered per day; pump always stops (and won't be solar-started) once reached")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableNoticeService, "enable-notice-service", false, "Enable the notice service (motion rule + daily email digest); requires the events and occupancy services")
+	runCmd.PersistentFlags().StringVar(&options.Flags.NoticeNightStart, "notice-night-start", "22:00", "Night window start (HH:MM) used by the motion notice rule")
+	runCmd.PersistentFlags().StringVar(&options.Flags.NoticeNightEnd, "notice-night-end", "06:00", "Night window end (HH:MM) used by the motion notice rule")
+	runCmd.PersistentFlags().IntVar(&options.Flags.NoticeDigestHour, "notice-digest-hour", 8, "Local hour (0-23) at which the daily notice digest email is sent")
+	runCmd.PersistentFlags().StringVar(&options.Flags.SMTPHost, "smtp-host", "smtp.gmail.com", "SMTP host for the notice digest email")
+	runCmd.PersistentFlags().IntVar(&options.Flags.SMTPPort, "smtp-port", 587, "SMTP port for the notice digest email (STARTTLS submission)")
 	runCmd.MarkFlagsMutuallyExclusive("enable-gen1-proxy", "disable-gen1-proxy")
 	runCmd.MarkFlagsMutuallyExclusive("enable-occupancy-service", "disable-occupancy-service")
 	runCmd.MarkFlagsMutuallyExclusive("enable-temperature-service", "disable-temperature-service")
@@ -97,13 +119,12 @@ var runCmd = &cobra.Command{
 
 		// Enable environment variable support
 		v.SetEnvPrefix("MYHOME")
+		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 		v.AutomaticEnv()
+		v.SetDefault("beem.poll_interval", "60s")
 
-		// Try to read config file (optional)
-		if err := v.ReadInConfig(); err == nil {
-			log.Info("Loaded config from", "file", v.ConfigFileUsed())
-		} else {
-			log.Info("No config file found, using defaults and flags")
+		if err := loadConfigFile(v, log); err != nil {
+			return err
 		}
 
 		// Bind flags to viper (flags take precedence over config file)
@@ -141,6 +162,9 @@ var runCmd = &cobra.Command{
 		}
 		if v.IsSet("daemon.mqtt_broker_client_log_interval") && !cmd.Flags().Changed("mqtt-broker-client-log-interval") {
 			options.Flags.MqttBrokerClientLogInterval = v.GetDuration("daemon.mqtt_broker_client_log_interval")
+		}
+		if v.IsSet("daemon.reconcile_interval") && !cmd.Flags().Changed("reconcile-interval") {
+			options.Flags.ReconcileInterval = v.GetDuration("daemon.reconcile_interval")
 		}
 		if v.IsSet("daemon.events_dir") && !cmd.Flags().Changed("events-dir") {
 			options.Flags.EventsDir = v.GetString("daemon.events_dir")
@@ -236,7 +260,7 @@ var runCmd = &cobra.Command{
 			}
 		}
 
-// Handle electricity service flags — auto-enable with device manager
+		// Handle electricity service flags — auto-enable with device manager
 		if cmd.Flags().Changed("disable-electricity-service") && disableElectricityService {
 			options.Flags.EnableElectricityService = false
 		} else if !cmd.Flags().Changed("enable-electricity-service") && !cmd.Flags().Changed("disable-electricity-service") {
@@ -246,6 +270,39 @@ var runCmd = &cobra.Command{
 			}
 		}
 
+		// Handle notice service config from viper / flags. Unlike events/
+		// occupancy/temperature, notice is not auto-enabled with the device
+		// manager — it depends on both of those already being enabled and
+		// on (optional) SMTP credentials, so an operator opts in explicitly.
+		if v.IsSet("notice.enabled") && !cmd.Flags().Changed("enable-notice-service") {
+			options.Flags.EnableNoticeService = v.GetBool("notice.enabled")
+		}
+		if v.IsSet("notice.night_start") && !cmd.Flags().Changed("notice-night-start") {
+			options.Flags.NoticeNightStart = v.GetString("notice.night_start")
+		}
+		if v.IsSet("notice.night_end") && !cmd.Flags().Changed("notice-night-end") {
+			options.Flags.NoticeNightEnd = v.GetString("notice.night_end")
+		}
+		if v.IsSet("notice.digest_hour") && !cmd.Flags().Changed("notice-digest-hour") {
+			options.Flags.NoticeDigestHour = v.GetInt("notice.digest_hour")
+		}
+		if v.IsSet("smtp.host") && !cmd.Flags().Changed("smtp-host") {
+			options.Flags.SMTPHost = v.GetString("smtp.host")
+		}
+		if v.IsSet("smtp.port") && !cmd.Flags().Changed("smtp-port") {
+			options.Flags.SMTPPort = v.GetInt("smtp.port")
+		}
+
+		// SMTP credentials — Viper reads MYHOME_SMTP_USERNAME / MYHOME_SMTP_PASSWORD /
+		// MYHOME_SMTP_FROM / MYHOME_SMTP_TO from the environment or config file.
+		// Like Beem/SFR above, these are never CLI flags. Email sending is
+		// skipped entirely (not an error) when smtp.from is empty — see
+		// myhome/notify.New.
+		options.Flags.SMTPUsername = v.GetString("smtp.username")
+		options.Flags.SMTPPassword = v.GetString("smtp.password")
+		options.Flags.SMTPFrom = v.GetString("smtp.from")
+		options.Flags.SMTPTo = v.GetString("smtp.to")
+
 		// Handle pool runtime tracker config from viper / flags
 		if v.IsSet("pool.device_id") && !cmd.Flags().Changed("pool-device-id") {
 			options.Flags.PoolDeviceID = v.GetString("pool.device_id")
@@ -254,42 +311,25 @@ var runCmd = &cobra.Command{
 			options.Flags.PoolEnabled = v.GetBool("pool.enabled")
 		}
 
-		// Handle Beem Energy config from viper / flags
-		if v.IsSet("beem.email") && !cmd.Flags().Changed("beem-email") {
-			options.Flags.BeemEmail = v.GetString("beem.email")
-		}
-		if v.IsSet("beem.password") && !cmd.Flags().Changed("beem-password") {
-			options.Flags.BeemPassword = v.GetString("beem.password")
-		}
-		if v.IsSet("beem.poll_interval") && !cmd.Flags().Changed("beem-poll-interval") {
-			options.Flags.BeemPollInterval = v.GetDuration("beem.poll_interval")
-		}
-		if v.IsSet("beem.enabled") && !cmd.Flags().Changed("enable-beem") {
-			options.Flags.BeemEnabled = v.GetBool("beem.enabled")
+		// Beem Energy: enabled automatically when both email and password are set
+		options.Flags.BeemEmail = v.GetString("beem.email")
+		options.Flags.BeemPassword = v.GetString("beem.password")
+		options.Flags.BeemPollInterval = v.GetDuration("beem.poll_interval")
+
+		// Solar aggregator: generic, not gated behind pool/Beem-specific flags.
+		if v.IsSet("solar.stale_after") && !cmd.Flags().Changed("solar-stale-after") {
+			options.Flags.SolarStaleAfter = v.GetDuration("solar.stale_after")
 		}
 
-		// Handle pool solar automation config from viper / flags
-		if v.IsSet("pool.solar.enabled") && !cmd.Flags().Changed("enable-pool-solar") {
-			options.Flags.PoolSolarEnabled = v.GetBool("pool.solar.enabled")
-		}
-		if v.IsSet("pool.solar.start_threshold_w") && !cmd.Flags().Changed("pool-solar-start-threshold-w") {
-			options.Flags.PoolSolarStartThresholdW = v.GetFloat64("pool.solar.start_threshold_w")
-		}
-		if v.IsSet("pool.solar.stop_threshold_w") && !cmd.Flags().Changed("pool-solar-stop-threshold-w") {
-			options.Flags.PoolSolarStopThresholdW = v.GetFloat64("pool.solar.stop_threshold_w")
-		}
-		if v.IsSet("pool.solar.start_delay") && !cmd.Flags().Changed("pool-solar-start-delay") {
-			options.Flags.PoolSolarStartDelay = v.GetDuration("pool.solar.start_delay")
-		}
-		if v.IsSet("pool.solar.stop_delay") && !cmd.Flags().Changed("pool-solar-stop-delay") {
-			options.Flags.PoolSolarStopDelay = v.GetDuration("pool.solar.stop_delay")
-		}
-		if v.IsSet("pool.solar.min_volume_turnover") && !cmd.Flags().Changed("pool-solar-min-volume-turnover") {
-			options.Flags.PoolSolarMinVolumeTurnover = v.GetFloat64("pool.solar.min_volume_turnover")
-		}
-		if v.IsSet("pool.solar.max_volume_turnover") && !cmd.Flags().Changed("pool-solar-max-volume-turnover") {
-			options.Flags.PoolSolarMaxVolumeTurnover = v.GetFloat64("pool.solar.max_volume_turnover")
-		}
+		// SFR box credentials — Viper reads MYHOME_SFR_USERNAME / MYHOME_SFR_PASSWORD
+		// from the environment or config file; auth is skipped if either is empty.
+		options.Flags.SFRUsername = v.GetString("sfr.username")
+		options.Flags.SFRPassword = v.GetString("sfr.password")
+		sfr.Init(options.Flags.SFRUsername, options.Flags.SFRPassword)
+
+		// Robot vacuum (#626): enabled automatically when both BLID and
+		// password are set. See readVacuumConfig.
+		readVacuumConfig(v)
 
 		// Store Viper instance in global options for daemon to use
 		options.ViperConfig = v
@@ -298,4 +338,31 @@ var runCmd = &cobra.Command{
 		log.Info("Running in foreground")
 		return daemon.Run()
 	},
+}
+
+// readVacuumConfig loads the robot vacuum settings. Viper reads
+// MYHOME_VACUUM_BLID / MYHOME_VACUUM_PASSWORD / MYHOME_VACUUM_HOST and the
+// iRobot cloud account MYHOME_IROBOT_EMAIL / MYHOME_IROBOT_PASSWORD (#628) from
+// the environment (the packaged daemon's .env) or the config file. Like
+// Beem/SFR, these are never CLI flags, and the passwords belong in .env only.
+func readVacuumConfig(v *viper.Viper) {
+	options.Flags.VacuumBLID = v.GetString("vacuum.blid")
+	options.Flags.VacuumPassword = v.GetString("vacuum.password")
+	options.Flags.VacuumHost = v.GetString("vacuum.host")
+	options.Flags.VacuumWake = v.GetBool("vacuum.wake")
+	options.Flags.IRobotEmail = v.GetString("irobot.email")
+	options.Flags.IRobotPassword = v.GetString("irobot.password")
+}
+
+// vacuumConfig is the vacuum service configuration read by readVacuumConfig.
+func vacuumConfig() vacuum.Config {
+	return vacuum.Config{
+		BLID:     options.Flags.VacuumBLID,
+		Password: options.Flags.VacuumPassword,
+		Host:     options.Flags.VacuumHost,
+		Wake:     options.Flags.VacuumWake,
+
+		IRobotEmail:    options.Flags.IRobotEmail,
+		IRobotPassword: options.Flags.IRobotPassword,
+	}
 }

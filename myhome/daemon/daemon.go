@@ -9,27 +9,35 @@ import (
 
 	"github.com/asnowfix/home-automation/internal/global"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/internal/myhome/accounts"
+	"github.com/asnowfix/home-automation/internal/myhome/energy"
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
+	myhomesfr "github.com/asnowfix/home-automation/internal/myhome/sfr"
 	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
+	"github.com/asnowfix/home-automation/myhome/electricity"
 	"github.com/asnowfix/home-automation/myhome/events"
+	"github.com/asnowfix/home-automation/myhome/fetchproxy"
+	"github.com/asnowfix/home-automation/myhome/ical"
 	"github.com/asnowfix/home-automation/myhome/metrics"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	mqttserver "github.com/asnowfix/home-automation/myhome/mqtt"
-	"github.com/asnowfix/home-automation/myhome/electricity"
-	"github.com/asnowfix/home-automation/myhome/ical"
+	"github.com/asnowfix/home-automation/myhome/notice"
+	"github.com/asnowfix/home-automation/myhome/notify"
 	"github.com/asnowfix/home-automation/myhome/occupancy"
 	"github.com/asnowfix/home-automation/myhome/rooms"
 	"github.com/asnowfix/home-automation/myhome/storage"
+	"github.com/asnowfix/home-automation/myhome/vacuum"
 	"github.com/asnowfix/home-automation/myhome/weather"
 	beem "github.com/asnowfix/home-automation/pkg/beem"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	shellycloud "github.com/asnowfix/home-automation/pkg/shelly/cloud"
+	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
+	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	shellyshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	shellytypes "github.com/asnowfix/home-automation/pkg/shelly/types"
-	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
 )
@@ -48,6 +56,20 @@ type Config struct {
 
 var DefaultConfig = Config{
 	RefreshInterval: 3 * time.Minute,
+}
+
+// reportingMailer wraps a notify.Mailer to report each Send outcome into the
+// accounts registry, without notify (a leaf, provider-agnostic package)
+// needing to know about account-status tracking.
+type reportingMailer struct {
+	notify.Mailer
+	registry *accounts.Registry
+}
+
+func (m *reportingMailer) Send(ctx context.Context, subject, body string) error {
+	err := m.Mailer.Send(ctx, subject, body)
+	m.registry.Report("smtp", err)
+	return err
 }
 
 func NewDaemon(ctx context.Context) *daemon {
@@ -201,6 +223,11 @@ func (d *daemon) Run() error {
 	}
 	defer mc.Close()
 
+	// Composition root: wrap d.ctx with the MQTT client exactly once, so
+	// everything downstream (pkg/shelly/mqtt.GetClient) can retrieve it from
+	// ctx instead of a process-global. See pkg/shelly/mqtt/client.go.
+	d.ctx = shellymqtt.NewContextWithClient(d.ctx, mc)
+
 	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 
 	// Start the main HTTP server (as a Mux), given to every other servers started below
@@ -264,9 +291,18 @@ func (d *daemon) Run() error {
 		log.Info("Prometheus metrics exporter disabled")
 	}
 
+	// accountsRegistry tracks the connection status of every external
+	// account myhome talks to (Beem, SFR, SMTP, MQTT), surfaced in the UI's
+	// accounts panel. Each integration below reports into it at its existing
+	// connection/poll point; a disabled integration is marked enabled=false
+	// so it reads as "not configured" rather than "failed".
+	accountsRegistry := accounts.NewRegistry()
+
 	// Start Beem Energy watcher if enabled
 	var beemWatcher *beem.Watcher
-	if options.Flags.BeemEnabled && options.Flags.BeemEmail != "" && options.Flags.BeemPassword != "" {
+	beemEnabled := options.Flags.BeemEmail != "" && options.Flags.BeemPassword != ""
+	accountsRegistry.SetEnabled("beem", beemEnabled)
+	if beemEnabled {
 		log.Info("Starting Beem Energy watcher")
 		beemCfg := beem.ClientConfig{
 			Email:        options.Flags.BeemEmail,
@@ -274,6 +310,7 @@ func (d *daemon) Run() error {
 			PollInterval: options.Flags.BeemPollInterval,
 		}
 		beemWatcher = beem.NewWatcher(d.ctx, beemCfg, mc)
+		beemWatcher.OnResult = func(err error) { accountsRegistry.Report("beem", err) }
 		if err := beemWatcher.Start(d.ctx); err != nil {
 			log.Error(err, "Failed to start Beem watcher")
 			return err
@@ -282,6 +319,32 @@ func (d *daemon) Run() error {
 	} else {
 		log.Info("Beem Energy integration disabled")
 	}
+
+	// Solar aggregator: sums whatever solar-energy sources are known (today:
+	// only Beem) and republishes the total on a retained MQTT topic for
+	// Shelly device scripts to consume directly. Generic and additive — no
+	// dependency on PoolDeviceID/pool tracking, so it is not gated behind any
+	// pool-related flag.
+	var solarAgg *SolarAggregator
+	if beemWatcher != nil {
+		solarAgg = NewSolarAggregator(log.WithName("solar"), mc, options.Flags.SolarStaleAfter,
+			newBeemSolarSource(beemWatcher),
+			// future: append additional SolarSource adapters here
+		)
+		solarAgg.Start(d.ctx)
+		log.Info("Solar aggregator started", "topic", SolarAvailableTopic, "stale_after", options.Flags.SolarStaleAfter)
+	} else {
+		log.Info("Solar aggregator disabled: no solar sources configured (Beem credentials absent)")
+	}
+
+	// SFR box: the device manager (below) starts a periodic refresh loop via
+	// myhomesfr.GetRouter regardless of credentials — auth is skipped
+	// internally when username/password are empty. Report status from every
+	// refresh attempt; SetStatusReporter must be called before the device
+	// manager starts (it triggers the first refresh synchronously).
+	sfrEnabled := options.Flags.SFRUsername != "" && options.Flags.SFRPassword != ""
+	accountsRegistry.SetEnabled("sfr", sfrEnabled)
+	myhomesfr.SetStatusReporter(func(err error) { accountsRegistry.Report("sfr", err) })
 
 	if !disableDeviceManager {
 		log.Info("Starting device manager")
@@ -299,6 +362,22 @@ func (d *daemon) Run() error {
 		var eventsSvc *events.Service
 		var eventsTracker *events.SensorDailyTracker
 		var eventsStore *events.Storage
+
+		// noticeSvc and poolNotices are set below (after eventsSvc exists,
+		// since both need to call eventsSvc.Record). The broadcast closure
+		// below captures the variables themselves, not their values, so it
+		// sees the later assignment — by the time any event is actually
+		// broadcast, both have long since been wired up.
+		var noticeSvc *notice.Service
+		var poolNotices *PoolNotices
+		broadcastFn := func(e events.Event) {
+			sseBroadcaster.BroadcastEvent(e)
+			if noticeSvc != nil {
+				noticeSvc.OnEvent(d.ctx, e)
+			}
+			poolNotices.OnEvent(d.ctx, e)
+		}
+
 		if options.Flags.EnableEventsService {
 			eventsStore, err = events.NewStorage(log.WithName("events"), options.Flags.EventsDBPath)
 			if err != nil {
@@ -307,7 +386,7 @@ func (d *daemon) Run() error {
 				eventsStore = nil
 			} else {
 				eventsTracker = events.NewSensorDailyTracker(log.WithName("events"), eventsStore)
-				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, sseBroadcaster.BroadcastEvent, options.Flags.EventsRetention)
+				eventsSvc = events.NewService(log.WithName("events"), eventsStore, eventsTracker, broadcastFn, options.Flags.EventsRetention)
 				go eventsTracker.Start(d.ctx)
 				go eventsSvc.Start(d.ctx)
 				log.Info("Events service started", "db", options.Flags.EventsDBPath, "retention", options.Flags.EventsRetention)
@@ -316,62 +395,67 @@ func (d *daemon) Run() error {
 			log.Info("Events service disabled")
 		}
 
-		// Initialize pool runtime tracker if enabled
-		var poolTracker *PoolRuntimeTracker
-		if options.Flags.PoolEnabled && options.Flags.PoolDeviceID != "" && eventsStore != nil {
-			poolTracker = NewPoolRuntimeTracker(log.WithName("pool"), eventsStore, options.Flags.PoolDeviceID)
-			log.Info("Pool runtime tracker initialized", "device_id", options.Flags.PoolDeviceID)
-		} else if options.Flags.PoolEnabled {
-			log.Info("Pool runtime tracker disabled (no device ID or events store unavailable)")
+		// Start the notice service (curated "notice"-severity events + daily
+		// email digest) if enabled. Requires both the events service (to
+		// record derived motion notices and query the digest) and the
+		// occupancy service (to tell motion-while-absent from routine
+		// motion). Degraded mode: if disabled or its dependencies aren't
+		// running, every other notice source (pool/garden plans emitted
+		// on-device, solar pump notices) still gets recorded as a plain
+		// "notice"-severity event — only the motion rule and the email
+		// digest are unavailable.
+		if options.Flags.EnableNoticeService {
+			if eventsSvc == nil {
+				log.Info("Notice service disabled: events service is not running")
+			} else if d.occupancyService == nil {
+				log.Info("Notice service disabled: occupancy service is not running")
+			} else {
+				accountsRegistry.SetEnabled("smtp", options.Flags.SMTPFrom != "")
+				mailer := &reportingMailer{
+					Mailer: notify.New(log.WithName("notify"), notify.Config{
+						Host:     options.Flags.SMTPHost,
+						Port:     options.Flags.SMTPPort,
+						Username: options.Flags.SMTPUsername,
+						Password: options.Flags.SMTPPassword,
+						From:     options.Flags.SMTPFrom,
+						To:       options.Flags.SMTPTo,
+					}),
+					registry: accountsRegistry,
+				}
+				noticeSvc = notice.NewService(log.WithName("notice"), eventsSvc, d.occupancyService, mailer, notice.Config{
+					NightStart: options.Flags.NoticeNightStart,
+					NightEnd:   options.Flags.NoticeNightEnd,
+					DigestHour: options.Flags.NoticeDigestHour,
+				})
+				go noticeSvc.Start(d.ctx)
+				log.Info("Notice service started",
+					"night_start", options.Flags.NoticeNightStart,
+					"night_end", options.Flags.NoticeNightEnd,
+					"digest_hour", options.Flags.NoticeDigestHour,
+					"email_enabled", options.Flags.SMTPFrom != "",
+				)
+			}
+		} else {
+			log.Info("Notice service disabled")
 		}
 
-		// Start solar automation if enabled
-		if options.Flags.PoolSolarEnabled && options.Flags.PoolDeviceID != "" && beemWatcher != nil {
-			if options.Flags.PoolSolarMaxVolumeTurnover < options.Flags.PoolSolarMinVolumeTurnover {
-				log.Error(nil, "Solar automation disabled: pool.solar.max_volume_turnover must be >= min_volume_turnover",
-					"min_volume_turnover", options.Flags.PoolSolarMinVolumeTurnover,
-					"max_volume_turnover", options.Flags.PoolSolarMaxVolumeTurnover,
-				)
-			} else if pumpCtrl, err := newShellyPumpController(d.ctx, log.WithName("solar.pump"), options.Flags.PoolDeviceID); err != nil {
-				log.Error(err, "Failed to create pump controller for solar automation")
-			} else if dailyTargetSec, maxRotationSec, err := computeRuntimeTargets(
-				d.ctx, log.WithName("solar"), pumpCtrl.device,
-				options.Flags.PoolSolarMinVolumeTurnover, options.Flags.PoolSolarMaxVolumeTurnover,
-			); err != nil {
-				log.Error(err, "Solar automation disabled: failed to derive runtime targets from pool KVS")
-			} else {
-				solarCfg := SolarConfig{
-					StartThresholdW: options.Flags.PoolSolarStartThresholdW,
-					StopThresholdW:  options.Flags.PoolSolarStopThresholdW,
-					StartDelay:      options.Flags.PoolSolarStartDelay,
-					StopDelay:       options.Flags.PoolSolarStopDelay,
-					DailyTargetSec:  dailyTargetSec,
-					MaxRotationSec:  maxRotationSec,
-				}
-				solarAuto := NewSolarAutomation(
-					log.WithName("solar"),
-					beemWatcher.PowerCh,
-					poolTracker, // nil if pool tracker not enabled
-					pumpCtrl,
-					solarCfg,
-				)
-				solarAuto.Start(d.ctx)
-				log.Info("Solar automation started",
-					"device_id", options.Flags.PoolDeviceID,
-					"start_threshold_w", solarCfg.StartThresholdW,
-					"stop_threshold_w", solarCfg.StopThresholdW,
-					"start_delay", solarCfg.StartDelay,
-					"stop_delay", solarCfg.StopDelay,
-					"daily_target_sec", solarCfg.DailyTargetSec,
-					"max_rotation_sec", solarCfg.MaxRotationSec,
-				)
-			}
-		} else if options.Flags.PoolSolarEnabled {
-			if options.Flags.PoolDeviceID == "" {
-				log.Info("Solar automation disabled: no pool device ID configured")
-			} else {
-				log.Info("Solar automation disabled: Beem Energy watcher not running")
-			}
+		// Record a "pool.turnover_today" notice whenever the pump stops
+		// (schedule/manual or solar-triggered pool.pump_stop — solar-driven
+		// stops flow through pool-pump.js's own doStop since #405, so there is
+		// no separate daemon-emitted solar event to watch for here anymore).
+		// Degraded mode: if the pool device can't be reached, NewPoolNotices
+		// returns nil and broadcastFn's poolNotices.OnEvent call is then a
+		// no-op — pump control itself is entirely unaffected either way.
+		if options.Flags.PoolEnabled && options.Flags.PoolDeviceID != "" {
+			poolNotices = NewPoolNotices(d.ctx, log.WithName("pool"), eventsSvc, options.Flags.PoolDeviceID)
+		}
+
+		// Minimal static identity registry of things that may claim solar
+		// energy (today: only the pool pump). Not a live-arbitration engine —
+		// see internal/myhome/energy and #401's follow-up "solar router" issue.
+		claimerRegistry := energy.NewRegistry()
+		if options.Flags.PoolDeviceID != "" {
+			claimerRegistry.Register("pool-pump", options.Flags.PoolDeviceID)
 		}
 
 		// Start device manager
@@ -534,6 +618,41 @@ func (d *daemon) Run() error {
 			log.Info("Rooms RPC methods registered")
 		}
 
+		// Register the fetch-and-transform proxy (#465). Always registered —
+		// like the Pool/Solar RPC handlers below, there is nothing to
+		// disable: with zero subscriptions it is an idle MQTT subscriber and
+		// an empty fetch.list.
+		log.Info("Initializing fetch-and-transform proxy")
+		fetchStorage, err := fetchproxy.NewStorage(log, storage.DB())
+		if err != nil {
+			log.Error(err, "Failed to initialize fetch-and-transform proxy storage")
+			return err
+		}
+		fetchService := fetchproxy.NewService(d.ctx, log, mc, fetchStorage)
+		fetchService.RegisterHandlers()
+		log.Info("Fetch-and-transform proxy RPC methods registered")
+
+		// Register the robot vacuum service (#606). The vacuum.* methods are
+		// always registered; the robot connection starts only when
+		// MYHOME_VACUUM_BLID and MYHOME_VACUUM_PASSWORD are set (#626), and
+		// without them vacuum.list is empty. The robot accepts a single local
+		// client, so only one daemon instance should be configured with it.
+		vacuumStorage, err := vacuum.NewStorage(log, storage.DB())
+		if err != nil {
+			log.Error(err, "Failed to initialize vacuum storage")
+			return err
+		}
+		vacuumCfg := vacuumConfig()
+		if !vacuumCfg.Enabled() {
+			log.Info("Robot vacuum integration disabled (MYHOME_VACUUM_BLID / MYHOME_VACUUM_PASSWORD not set)")
+		}
+		vacuumService, err := vacuum.NewService(d.ctx, log, vacuumStorage, vacuumCfg)
+		if err != nil {
+			log.Error(err, "Failed to start vacuum service")
+			return err
+		}
+		vacuumService.RegisterHandlers()
+
 		// Register Occupancy RPC methods if enabled
 		if options.Flags.EnableOccupancyService && d.occupancyService != nil {
 			log.Info("Registering occupancy RPC methods")
@@ -544,6 +663,19 @@ func (d *daemon) Run() error {
 
 			log.Info("Occupancy RPC methods registered")
 		}
+
+		// Register Pool RPC methods (turnover rate + water-supply status for
+		// the UI and `ctl pool status`). Always registered — the signature
+		// exists regardless of pool tracking; handleGetStatus itself returns
+		// a clear error if poolNotices is nil (pool disabled/unreachable).
+		poolRPCHandler := NewPoolRPCHandler(log, poolNotices)
+		poolRPCHandler.RegisterHandlers()
+
+		// Register Solar RPC methods (static energy-claimers registry).
+		// Always registered — claimerRegistry may simply be empty when no
+		// pool device is configured.
+		solarRPCHandler := NewSolarRPCHandler(log, claimerRegistry, poolNotices)
+		solarRPCHandler.RegisterHandlers()
 
 		// Publish a hostname for the DeviceManager host: myhome.local
 		if !options.Flags.NoMdnsPublish {
@@ -560,6 +692,8 @@ func (d *daemon) Run() error {
 			return err
 		}
 		log.Info("MQTT client connected - subscriptions active")
+		accountsRegistry.SetEnabled("mqtt", true)
+		accountsRegistry.Report("mqtt", nil)
 
 		// Subscribe to $SYS topics for monitoring (after connection to avoid early connection)
 		// Use large buffer (256) because broker publishes 15-20+ $SYS topics in rapid bursts every 30s
@@ -577,7 +711,10 @@ func (d *daemon) Run() error {
 		}
 
 		// Start UI & reverse HTTP proxy
-		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, storage, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy); err != nil {
+		// Pass the live device manager (not raw storage) so the dashboard sees
+		// each device's in-memory Impl/Status rather than a DB snapshot with no
+		// live state attached.
+		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, d.dm, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy, accountsRegistry, storage.DB()); err != nil {
 			log.Error(err, "Failed to start UI server")
 			return err
 		}
@@ -607,6 +744,11 @@ func (d *daemon) Run() error {
 					if mc != nil {
 						connected := mc.IsConnected()
 						log.Info("MQTT client connection status", "connected", connected, "client_id", mc.Id())
+						var reportErr error
+						if !connected {
+							reportErr = fmt.Errorf("mqtt client disconnected")
+						}
+						accountsRegistry.Report("mqtt", reportErr)
 					}
 				}
 			}

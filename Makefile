@@ -26,6 +26,28 @@ GOARCH := $(shell go env GOARCH)
 
 mods = $(patsubst %/,%,$(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */*/*/go.mod) $(wildcard */*/*/*/go.mod))
 
+# Local daemon dev loop: run/stop/tail a daemon instance built from whichever
+# worktree invokes it, pointed at the real home MQTT broker. --instance local
+# matches myhome-local.sh's convention (avoids RPC topic collisions with the
+# systemd-managed "myhome" instance).
+#
+# State (pidfile/log) lives in a single OS-standard user directory, NOT under
+# the repo/worktree: only one dev daemon should ever run at a time (it binds
+# fixed ports 6080/6060), and a per-worktree location can't see a stale
+# instance left running by a different worktree.
+MYHOME_MQTT_BROKER ?= tcp://192.168.1.2:1883
+ifeq ($(OS),Windows_NT)
+LOCAL_DAEMON_STATE_DIR := $(LOCALAPPDATA)/myhome/local-daemon
+else ifeq ($(OS),Darwin)
+LOCAL_DAEMON_STATE_DIR := $(HOME)/Library/Application Support/myhome/local-daemon
+else
+XDG_STATE_HOME ?= $(HOME)/.local/state
+LOCAL_DAEMON_STATE_DIR := $(XDG_STATE_HOME)/myhome/local-daemon
+endif
+LOCAL_DAEMON_PID := $(LOCAL_DAEMON_STATE_DIR)/myhome.pid
+LOCAL_DAEMON_LOG := $(LOCAL_DAEMON_STATE_DIR)/myhome.log
+LOCAL_DAEMON_PATTERN := daemon run --instance local --mqtt-broker $(MYHOME_MQTT_BROKER)
+
 default: help
 
 help:
@@ -33,6 +55,10 @@ help:
 	@echo "  help                  - Show this help message"
 	@echo "  build                 - Build the project"
 	@echo "  run                   - Run the project"
+	@echo "  run-local-daemon      - Start a dev-loop daemon in the background (kills any prior instance first)"
+	@echo "  stop-local-daemon     - Stop the dev-loop daemon started by run-local-daemon"
+	@echo "  status-local-daemon   - Show whether the dev-loop daemon is running"
+	@echo "  logs-local-daemon     - Tail the dev-loop daemon's log file"
 	@echo "  install               - Install the project"
 	@echo "  start                 - Start the service"
 	@echo "  stop                  - Stop the service"
@@ -106,23 +132,186 @@ release:
 run: build
 	$(MAKE) -C myhome $(@)
 
+# Dev-loop daemon: always kills any other instance before starting a fresh
+# one built from the current checkout. Two layers of detection, since the
+# pidfile alone can go stale (state dir wiped, process killed -9 elsewhere):
+#   1. the shared pidfile — authoritative, works across worktrees/sessions
+#   2. a pgrep fallback for a stray instance the pidfile doesn't know about
+# The pgrep pattern also matches this very recipe's own shell (its command
+# text contains the pattern string), so its own $$ (current shell PID) is
+# excluded from the kill list.
+run-local-daemon: build
+	@mkdir -p "$(LOCAL_DAEMON_STATE_DIR)"
+	@if [ -f "$(LOCAL_DAEMON_PID)" ]; then \
+		OLD_PID=$$(cat "$(LOCAL_DAEMON_PID)"); \
+		if kill -0 $$OLD_PID 2>/dev/null; then \
+			echo "run-local-daemon: stopping existing instance (pid $$OLD_PID)"; \
+			kill $$OLD_PID 2>/dev/null; sleep 1; kill -9 $$OLD_PID 2>/dev/null || true; \
+		fi; \
+	fi
+	@PIDS="$$(pgrep -f '$(LOCAL_DAEMON_PATTERN)' 2>/dev/null | grep -v -x $$$$)"; \
+	if [ -n "$$PIDS" ]; then \
+		echo "run-local-daemon: stopping stray instance(s) not tracked by pidfile: $$PIDS"; \
+		kill $$PIDS 2>/dev/null; sleep 1; kill -9 $$PIDS 2>/dev/null || true; \
+	fi
+	@rm -f "$(LOCAL_DAEMON_PID)"
+	@( \
+		if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
+		nohup ./myhome/myhome daemon run --instance local --mqtt-broker $(MYHOME_MQTT_BROKER) > "$(LOCAL_DAEMON_LOG)" 2>&1 & echo $$! > "$(LOCAL_DAEMON_PID)" \
+	)
+	@sleep 1
+	@echo "run-local-daemon: started (pid $$(cat "$(LOCAL_DAEMON_PID)")), logs: $(LOCAL_DAEMON_LOG)"
+
+stop-local-daemon:
+	@if [ -f "$(LOCAL_DAEMON_PID)" ]; then \
+		PID=$$(cat "$(LOCAL_DAEMON_PID)"); \
+		if kill -0 $$PID 2>/dev/null; then kill $$PID && echo "stop-local-daemon: stopped (pid $$PID)"; else echo "stop-local-daemon: pidfile stale, not running"; fi; \
+		rm -f "$(LOCAL_DAEMON_PID)"; \
+	else \
+		echo "stop-local-daemon: no pidfile ($(LOCAL_DAEMON_PID))"; \
+	fi
+	@PIDS="$$(pgrep -f '$(LOCAL_DAEMON_PATTERN)' 2>/dev/null | grep -v -x $$$$)"; \
+	if [ -n "$$PIDS" ]; then kill $$PIDS 2>/dev/null; sleep 1; kill -9 $$PIDS 2>/dev/null || true; fi
+
+status-local-daemon:
+	@if [ -f "$(LOCAL_DAEMON_PID)" ] && kill -0 $$(cat "$(LOCAL_DAEMON_PID)") 2>/dev/null; then \
+		echo "status-local-daemon: running (pid $$(cat "$(LOCAL_DAEMON_PID)"))"; \
+	else \
+		echo "status-local-daemon: not running"; \
+	fi
+
+logs-local-daemon:
+	@tail -n 100 -f "$(LOCAL_DAEMON_LOG)"
+
+# TESTFLAGS is threaded through both test invocations so the race detector can
+# be switched on without editing this file:
+#
+#   make test-race          # or: make test TESTFLAGS=-race
+#
+# Races here are not merely flaky. The goja script emulator runs the script
+# under test on its own goroutine while tests poll DeviceState, and an
+# unsynchronised map read racing a write aborts the whole test binary with
+# "fatal error: concurrent map read and map write", losing every result in the
+# package rather than failing one test (#451).
+#
+# -race is ON by default (#453). These tests are wall-clock bound rather than
+# CPU bound — the emulator and the pollers spend their time waiting — so the
+# detector costs little, and it closes off a class of failure that is otherwise
+# very expensive to diagnose. Override with `make test TESTFLAGS=` if you need
+# a run without it.
+# -timeout is derived from MEASUREMENT, not guesswork: it is the slowest
+# package's last successful duration plus 10% headroom. See CLAUDE.md's
+# "Test timeout" rule for how and when to update it.
+#
+# Note Go applies -timeout PER PACKAGE (per test binary), not to the whole
+# run, so the number that matters is the slowest package -- currently
+# internal/shelly/scripts -- and not `make test`'s overall wall clock.
+#
+#   2026-08-25  internal/shelly/scripts  626.598s under -race  ->  690s
+#   2026-08-26  internal/shelly/scripts  685.399s under -race  ->  754s
+#   2026-08-26  internal/shelly/scripts  592.565s under -race  ->  652s  (#552 package split)
+#   2026-08-27  internal/shelly/scripts  592.456s under -race  ->  652s  (unchanged: #568 added
+#               internal/shelly/scripts/jstarget as its own package -- a separate test binary run
+#               in parallel, so it does not add to this package's serial total)
+#   2026-08-27  internal/shelly/scripts  622.644s under -race  ->  685s  (#523's three new tests
+#                                                                          land in the hot package
+#                                                                          itself, unlike #568's
+#                                                                          separate parallel package)
+#   2026-08-27  internal/shelly/scripts  599.953s under -race  ->  660s  (#523's reconcileWaterLevel()
+#                                                                          and its two tests removed
+#                                                                          per #576 review -- one of
+#                                                                          the three new tests, plus
+#                                                                          TestPoolPump_WaterSupplyOverridesSolar,
+#                                                                          remains and lands here close
+#                                                                          to the #552-split baseline)
+#   2026-08-30  internal/shelly/scripts  591.484s under -race  ->  652s  (unchanged: #421's
+#               TestPoolPump_TaskQueueThrottlesOnCallsInFlight is a source-level regex check, no
+#               emulator run, negligible added time)
+#   2026-08-31  internal/shelly/scripts  602.122s under -race  ->  663s  (#576 rebased onto main a
+#                                                                          second time, past #582's
+#                                                                          CALLS_IN_FLIGHT restore
+#                                                                          and its own new test;
+#                                                                          re-measured fresh per the
+#                                                                          rule -- only a successful
+#                                                                          run may set this, not
+#                                                                          arithmetic on the prior
+#                                                                          601.005s figure)
+#   2026-09-01  internal/shelly/scripts  600.488s under -race  ->  661s  (#425 rebased onto main --
+#                                                                          193 commits, including
+#                                                                          #582's CALLS_IN_FLIGHT
+#                                                                          fix that gated #425 in
+#                                                                          the first place; #425
+#                                                                          itself touches no file
+#                                                                          under this package, so
+#                                                                          the small drop from
+#                                                                          602.122s is run-to-run
+#                                                                          variance, not a code
+#                                                                          change)
+#   2026-09-03  internal/shelly/scripts  600.824s under -race  ->  661s  (#589 touches only
+#                                                                          internal/myhome/shelly/script
+#                                                                          and myhome/ctl/pool, neither
+#                                                                          under this package; 600.824s
+#                                                                          is run-to-run variance around
+#                                                                          the 600.488s baseline, and
+#                                                                          661s already covers it)
+#   2026-09-05  internal/shelly/scripts  612.403s under -race  ->  674s  (#587 adds five reason
+#                                                                          assertions plus
+#                                                                          TestPoolPump_SolarStartAndStopSurvivesOwnEcho
+#                                                                          to this package. The +11.6s
+#                                                                          over 600.824s is NOT variance:
+#                                                                          the new echo test measures
+#                                                                          12.877s standalone under -race,
+#                                                                          which accounts for the whole
+#                                                                          delta. Real added cost, so the
+#                                                                          timeout moves with it.)
+#
+# History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
+# (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
+# 08-25 and every PR touching the package started failing at exactly 600.65s
+# (#552). The 08-26 drop to 592.565s is scripts_smoke_test.go and
+# blu_listener_test.go moving into their own packages (internal/shelly/
+# scripts/smoke, internal/shelly/scripts/blu) so they run in parallel with
+# the rest instead of adding to its serial total -- the growth trend itself
+# is not addressed: pool_pump_test.go / pool_pump_reconciler_test.go /
+# pool_pump_runtime_recovery_test.go remain one dead-serial package at
+# ~590s (86% of the pre-split total) and are the next real target.
+TESTFLAGS ?= -race
+
+# TESTTIMEOUT is deliberately SEPARATE from TESTFLAGS so that overriding the
+# flags cannot silently drop the timeout -- `test-race` passes TESTFLAGS=-race,
+# and the comment above invites `make test TESTFLAGS=`, both of which would
+# otherwise reset it to Go's 600s default and reintroduce #552.
+#
+# It must be applied to EVERY target that runs the suite. CI calls `make cover`
+# five times across workflows against `make test` twice, so a timeout that
+# covers only `test` covers the minority case -- which is exactly how #552
+# survived its first fix.
+TESTTIMEOUT ?= 674s
+
 test: build
-	$(GO) test ./...
+	bash linux/systemd/update_test.sh
+	python3 -I linux/debian/postinst_test.py
+	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
-	    (cd $$dir && $(GO) test ./...) || rc=1; \
+	    (cd $$dir && $(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...) || rc=1; \
 	  fi; \
 	done; exit $$rc
 
+# test-race is kept as an explicit alias now that -race is the default, so
+# scripts and habits that name it keep working.
+test-race:
+	$(MAKE) test TESTFLAGS=-race
+
 cover: build
 	@mkdir -p coverage
-	$(GO) test -covermode=atomic -coverprofile=coverage/root.cov ./...
+	$(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=coverage/root.cov ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
 	    sdir=$$(echo $$dir | tr '/' '_'); \
-	    (cd $$dir && $(GO) test -covermode=atomic -coverprofile=$(CURDIR)/coverage/$$sdir.cov ./...) || rc=1; \
+	    (cd $$dir && $(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=$(CURDIR)/coverage/$$sdir.cov ./...) || rc=1; \
 	  fi; \
 	done; \
 	echo "mode: atomic" > coverage.txt; \
@@ -142,6 +331,12 @@ cover-report: coverage.txt
 cover-html: coverage.txt
 	$(GO) tool cover -html=coverage.txt
 
+# cover-min-suggest: prints the integer floor of the current aggregate
+# coverage, i.e. the value to paste into .coverage-min after a PR that raises
+# coverage. Run `make cover` first.
+cover-min-suggest: coverage.txt
+	@$(GO) tool cover -func=coverage.txt | awk '/^total:/{ split($$3, p, "."); print p[1] }'
+
 build: generate
 	$(MAKE) -C myhome $(@)
 
@@ -149,6 +344,8 @@ generate:
 	$(GO) generate ./internal/myhome/ui/...
 	$(GO) generate ./myhome/ctl/pool
 	$(GO) generate ./myhome/ctl/garden
+	$(GO) generate ./internal/myhome/shelly/script
+	$(GO) generate ./internal/shelly/scripts/jstarget
 	$(GO) generate ./...
 
 # Build Debian package for current OS/ARCH (Linux only)
@@ -156,11 +353,19 @@ generate:
 # If VERSION is not specified, uses git describe
 ifeq ($(OS),Linux)
 ARCH := $(shell dpkg --print-architecture 2>/dev/null || uname -m | sed 's/x86_64/amd64/' | sed 's/aarch64/arm64/')
-VERSION ?= $(shell git describe --tags --always 2>/dev/null | sed 's/^v//')
+VERSION ?= $(shell git describe --tags --match 'v*' --always 2>/dev/null | sed 's/^v//')
 DEBPKG_DIR := .debpkg
 DEB_FILE := myhome_$(VERSION)_$(ARCH).deb
 
-debpkg: build
+debpkg: build debpkg-package
+
+# debpkg-package assembles the .deb from an already-built myhome/myhome
+# binary, without (re)triggering `build`/`generate`. Split out so that
+# cross-compiling CI jobs can run `make generate` and a GOARCH-scoped
+# `make -C myhome build` themselves — see .goreleaser.yml's `before.hooks`
+# for why: `go generate` invokes host-native helper tools (e.g. fetchasset)
+# that must NOT inherit a cross GOARCH, while the final binary must.
+debpkg-package:
 	@echo "Building Debian package for $(ARCH), version $(VERSION)..."
 	@# Clean previous build
 	rm -rf $(DEBPKG_DIR)
@@ -179,10 +384,13 @@ debpkg: build
 	cp linux/systemd/update.sh $(DEBPKG_DIR)/usr/share/myhome/update.sh
 	cp linux/systemd/myhome-db-backup.sh $(DEBPKG_DIR)/usr/share/myhome/myhome-db-backup.sh
 	cp myhome-example.yaml $(DEBPKG_DIR)/usr/share/myhome/myhome-example.yaml
+	cp linux/prometheus/mqtt-exporter.yaml.sample $(DEBPKG_DIR)/usr/share/myhome/prometheus-mqtt-exporter.yaml.sample
 	chmod +x $(DEBPKG_DIR)/usr/share/myhome/*.sh
-	@# Prometheus MQTT Exporter configuration
-	mkdir -p $(DEBPKG_DIR)/etc/prometheus
-	cp linux/prometheus/mqtt-exporter.yaml $(DEBPKG_DIR)/etc/prometheus/mqtt-exporter.yaml
+	@# Prometheus MQTT Exporter: systemd drop-in pointing it at our own config
+	@# path, instead of /etc/prometheus/mqtt-exporter.yaml (owned by the
+	@# upstream prometheus-mqtt-exporter package — see #261)
+	mkdir -p $(DEBPKG_DIR)/lib/systemd/system/prometheus-mqtt-exporter.service.d
+	cp linux/prometheus/myhome.conf $(DEBPKG_DIR)/lib/systemd/system/prometheus-mqtt-exporter.service.d/myhome.conf
 	@# DEBIAN maintainer scripts
 	mkdir -p $(DEBPKG_DIR)/DEBIAN
 	cp linux/debian/postinst.sh $(DEBPKG_DIR)/DEBIAN/postinst
@@ -226,7 +434,7 @@ upload-release-notes:
 	@echo "Uploading release notes to GitHub..."
 	@echo "Fetching latest tags..."; \
 	git fetch --tags --quiet; \
-	VERSION=$${VERSION:-$$(git describe --tags --abbrev=0 2>/dev/null)}; \
+	VERSION=$${VERSION:-$$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null)}; \
 	if [ -z "$$VERSION" ]; then \
 		echo "Error: No version specified and no git tags found" >&2; \
 		exit 1; \

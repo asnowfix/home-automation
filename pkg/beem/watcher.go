@@ -21,6 +21,11 @@ type Watcher struct {
 	// PowerCh delivers every successfully fetched PowerSample to callers.
 	PowerCh <-chan PowerSample
 
+	// OnResult, if set, is called after every poll attempt with the outcome
+	// (nil error on success). Lets the daemon track account connection status
+	// without this package knowing anything about that concept.
+	OnResult func(err error)
+
 	client     *Client
 	mqttClient mqttclient.Client
 	powerCh    chan PowerSample
@@ -82,6 +87,9 @@ func (w *Watcher) run(ctx context.Context) {
 
 func (w *Watcher) poll(ctx context.Context) {
 	sample, err := w.client.PollSummary(ctx)
+	if w.OnResult != nil {
+		w.OnResult(err)
+	}
 	if err != nil {
 		w.log.Error(err, "Beem Energy poll failed")
 		return

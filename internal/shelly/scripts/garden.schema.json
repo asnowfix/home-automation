@@ -1,0 +1,113 @@
+{
+  "script": "garden.js",
+  "kvsPrefix": "script/garden/",
+  "kvsKeysVar": "GardenKVSKeys",
+  "zoneFieldKeysVar": "ZoneFieldKeys",
+  "fields": [
+    {
+      "name": "enableLogging",
+      "description": "Enable debug logging",
+      "key": "logging",
+      "default": true,
+      "type": "boolean"
+    },
+    {
+      "name": "mqttTopicPrefix",
+      "description": "MQTT topic prefix (CLI metadata only, not used at runtime)",
+      "key": "mqtt-topic",
+      "default": "garden",
+      "type": "string",
+      "cliOnly": true
+    },
+    {
+      "name": "earliestStartHour",
+      "description": "Earliest allowed watering start (0-23)",
+      "key": "earliest-start",
+      "default": 3,
+      "type": "number",
+      "goConst": true
+    },
+    {
+      "name": "lunchStart",
+      "description": "Midday quiet window start (fractional hour)",
+      "key": "lunch-start",
+      "default": 12.0,
+      "type": "number",
+      "goConst": true,
+      "goConstType": "float64"
+    },
+    {
+      "name": "lunchEnd",
+      "description": "Midday quiet window end (fractional hour)",
+      "key": "lunch-end",
+      "default": 14.0,
+      "type": "number",
+      "goConst": true,
+      "goConstType": "float64"
+    },
+    {
+      "name": "eveningStart",
+      "description": "Evening quiet window start (fractional hour)",
+      "key": "evening-start",
+      "default": 19.0,
+      "type": "number",
+      "goConst": true,
+      "goConstType": "float64"
+    },
+    {
+      "name": "eveningEnd",
+      "description": "Evening quiet window end (fractional hour)",
+      "key": "evening-end",
+      "default": 23.5,
+      "type": "number",
+      "goConst": true,
+      "goConstType": "float64"
+    },
+    {
+      "name": "fallbackStartHour",
+      "description": "Start hour when forecast unavailable",
+      "key": "fallback-start",
+      "default": 5,
+      "type": "number",
+      "goConst": true
+    },
+    {
+      "name": "frostCutoffC",
+      "description": "Skip watering if forecast min temp in window < this (C)",
+      "key": "frost-cutoff-c",
+      "default": 2,
+      "type": "number",
+      "goConst": true,
+      "goConstType": "float64"
+    },
+    {
+      "name": "rainHoldoffMm",
+      "description": "Skip watering if today's forecast rain >= this value (mm)",
+      "key": "rain-holdoff-mm",
+      "default": 8,
+      "type": "number",
+      "goConst": true,
+      "goConstType": "float64"
+    },
+    {
+      "name": "maxDeficitMm",
+      "description": "Maximum soil water deficit cap (mm)",
+      "key": "max-deficit-mm",
+      "default": 25,
+      "type": "number",
+      "goConst": true,
+      "goConstType": "float64"
+    }
+  ],
+  "zoneFields": [
+    {"field": "name", "key": "name", "type": "string"},
+    {"field": "appRateMmH", "key": "app-rate", "type": "number"},
+    {"field": "kc", "key": "kc", "type": "number"},
+    {"field": "triggerMm", "key": "trigger-mm", "type": "number"},
+    {"field": "maxMin", "key": "max-min", "type": "number"},
+    {"field": "fallbackMin", "key": "fallback-min", "type": "number"},
+    {"field": "group", "key": "group", "type": "string"},
+    {"field": "intervalDays", "key": "interval", "type": "number"},
+    {"field": "enabled", "key": "enabled", "type": "boolean"}
+  ]
+}

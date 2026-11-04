@@ -2,6 +2,10 @@
 
 ## Table of Contents <!-- omit in toc -->
 
+- [Local Credentials (.env)](#local-credentials-env)
+  - [.worktreeinclude](#worktreeinclude)
+  - [example.env](#exampleenv)
+  - [Using .env locally](#using-env-locally)
 - [Release Workflow](#release-workflow)
   - [Workflow Overview](#workflow-overview)
   - [Before First Release](#before-first-release)
@@ -56,6 +60,53 @@
     - [Configuration Hierarchy (highest to lowest priority):](#configuration-hierarchy-highest-to-lowest-priority)
   - [Database Schema](#database-schema)
 - [VSCode](#vscode)
+
+## Local Credentials (.env)
+
+myhome's account integrations (Beem Energy, SFR box, SMTP) are configured exclusively via
+environment variables for credentials — never in `myhome.yaml`, never as command-line flags.
+See `docs/configuration.md` for the authoritative list of every config key, its env var, its
+flag (if any), and its default.
+
+### .worktreeinclude
+
+`.worktreeinclude` (repo root) is a [Claude Code worktree
+convention](https://code.claude.com/docs/en/worktrees): it lists gitignored files that should be
+copied from the main checkout into every new git worktree Claude Code creates. `.env` and
+`.env.local` are both gitignored (they hold real credentials, see `.gitignore`), so without this
+file a fresh worktree would have no way to inherit them — `git worktree add` only carries
+tracked files. This is unrelated to `go.work`/module resolution; it only affects which
+gitignored files get copied into a new worktree's directory.
+
+### example.env
+
+`example.env` (repo root) is a template listing every credential env var myhome reads, with
+empty placeholder values and a comment explaining what each one is for and when it's needed
+(mirrors `docs/configuration.md`'s "Beem Energy" / "SFR Box" / "Notice & Email (SMTP)"
+sections). Copy it to `.env`, fill in real values, and never commit `.env` itself.
+
+```bash
+cp example.env .env
+# edit .env with real values
+```
+
+### Using .env locally
+
+**myhome does not auto-load `.env`** the way `python-dotenv` does — there is no such library
+wired into the Go binary. Viper's `AutomaticEnv()` only reads whatever is already in the
+process environment (see `myhome/daemon/run.go`), so you must source `.env` into your shell
+before running the daemon or any `ctl` command that needs those credentials:
+
+```bash
+set -a; source .env; set +a
+go run ./myhome daemon run --mqtt-broker tcp://192.168.1.2:1883
+```
+
+In production this is handled differently but with the same file convention: `dpkg-reconfigure
+myhome` writes `/var/lib/myhome/.env` (see the Debian package's `postinst.sh`), and the systemd
+unit loads it via an `EnvironmentFile=` directive before starting the process — so the
+credentials are already in the environment by the time the binary's `main()` runs, and no
+in-process `.env` parsing is ever needed there either.
 
 ## Release Workflow
 
@@ -876,51 +927,69 @@ Once in the pprof interactive mode:
 
 ## Code Generation
 
-### Pool Pump Default Values
+### Pool Pump / Garden Configuration Schema (issue #439)
 
-The pool pump configuration uses `go:generate` to extract default values from the JavaScript source (`pool-pump.js`) and generate Go constants. This ensures a single source of truth for configuration defaults.
+Pool pump and garden sprinkler configuration is defined **once**, in a JSON schema file per script, and `go:generate` derives everything else from it: the JS `CONFIG_SCHEMA` block (regenerated in place inside the `.js` file), the Go KVS-key maps, and the Go `Default*` constants. Before #439 these three were hand-kept in sync (or regex-scraped from the JS with no test coverage) — see the issue for the full history.
 
 **How it works:**
 
-1. **Source of truth**: Default values are defined in `internal/shelly/scripts/pool-pump.js` in the `CONFIG_SCHEMA` object
-2. **Generator tool**: `tools/extract-pool-defaults/main.go` parses the JavaScript and extracts defaults
-3. **Generated file**: `myhome/ctl/pool/pool_defaults_generated.go` contains Go constants
-4. **Usage**: The `setup.go` command uses these constants for flag defaults
+1. **Source of truth**: `internal/shelly/scripts/pool-pump.schema.json` / `garden.schema.json` — one entry per config field: `name`, `key` (KVS suffix), `default`, `type`, plus optional `description`, `cliOnly`, `required`, and Go-codegen hints (`goConst`, `goConstName`, `goConstType`).
+2. **Generator tool**: `tools/genconfigschema` reads the schema and:
+   - rewrites the `CONFIG_SCHEMA` block (and, for `garden.js`, the `ZONE_KEY_SPECS` block) **in place** inside the `.js` file, between `// >>> GENERATED: ... >>>` / `// <<< GENERATED: ... <<<` markers — `description` becomes a `//` comment above the field, never an object property, so it costs no device heap;
+   - writes the Go KVS-key map(s) (`PoolKVSKeys`, `GardenKVSKeys`, `ZoneFieldKeys`) and `Default*` constants to a generated `.go` file.
+3. **Generated files** (all gitignored, rebuilt by `make generate`):
+   - `myhome/ctl/pool/pool_defaults_generated.go` — pool `Default*` constants
+   - `myhome/ctl/garden/garden_defaults_generated.go` — garden `Default*` constants + `GardenKVSKeys` + `ZoneFieldKeys`
+   - `internal/myhome/shelly/script/pool_kvs_generated.go` — `PoolKVSKeys` (lives in this package, not `myhome/ctl/pool`, because `pool.go`'s business logic that consumes it lives here and `myhome/ctl/pool` already imports this package — generating it there would be an import cycle)
+4. **Usage**: `setup.go` commands use the `Default*` constants for flag defaults; `PoolKVSKeys`/`GardenKVSKeys` are used wherever code reads or writes KVS.
 
 **When to regenerate:**
 
-Run `go generate` whenever you modify default values in `pool-pump.js`:
+Run `go generate` whenever you modify a schema JSON file (never hand-edit the generated `CONFIG_SCHEMA`/`ZONE_KEY_SPECS` block in the `.js` — it will be overwritten):
 
 ```bash
-# Generate all code (including pool defaults)
+# Generate everything (including pool/garden schema-derived code)
 make generate
 
-# Or generate just the pool package
-go generate ./myhome/ctl/pool
+# Or generate just one script's artifacts
+go generate ./myhome/ctl/pool                    # pool-pump.js CONFIG_SCHEMA + Default consts
+go generate ./myhome/ctl/garden                  # garden.js CONFIG_SCHEMA/ZONE_KEY_SPECS + Default consts + KVS maps
+go generate ./internal/myhome/shelly/script       # PoolKVSKeys only
 ```
 
 **Build integration:**
 
 - `make build` automatically runs `make generate`
-- GitHub Actions workflows run `go generate` before building
-- The generated file is committed to the repository
+- GitHub Actions workflows and `.goreleaser.yml`'s `before.hooks` run the same three `go generate` invocations before building — see CLAUDE.md's "go generate sub-module gap" if you add or change one of these directives, all three CI/build config files must be updated together
+- The generated `.go` files are gitignored, not committed; the regenerated `.js` files (with their `CONFIG_SCHEMA` block refreshed) **are** committed, since they're the artifact uploaded to devices
 
-**Adding new defaults:**
+**Adding a new setting:**
 
-1. Add the field to `CONFIG_SCHEMA` in `pool-pump.js`
-2. Update `tools/extract-pool-defaults/main.go` to extract the new field
-3. Run `go generate ./myhome/ctl/pool`
-4. Use the new constant in `setup.go`
+1. Add the field to the schema JSON (`pool-pump.schema.json` / `garden.schema.json`)
+2. Run `go generate ./myhome/ctl/pool` (or `garden`, or both)
+3. Use the new `Default*` constant / KVS-map entry wherever needed
 
 **Example:**
 
+```json
+// pool-pump.schema.json
+{
+  "name": "ecoSpeed",
+  "description": "Pro3 switch ID for eco/low speed (0, 1, or 2)",
+  "key": "eco-speed",
+  "default": 2,
+  "type": "number",
+  "goConst": true
+}
+```
+
 ```javascript
-// pool-pump.js
-CONFIG_SCHEMA = {
-  ecoSpeed: {
-    default: 2,  // ← Source of truth
-    // ...
-  }
+// Regenerated in place: pool-pump.js
+// Pro3 switch ID for eco/low speed (0, 1, or 2)
+ecoSpeed: {
+  key: "eco-speed",
+  default: 2,
+  type: "number"
 }
 ```
 

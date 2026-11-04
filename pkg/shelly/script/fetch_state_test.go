@@ -61,7 +61,7 @@ func (f *fakeDevice) StartDialog(_ context.Context) uint32     { return 0 }
 func (f *fakeDevice) StopDialog(_ context.Context, _ uint32)  {}
 func (f *fakeDevice) IsHttpReady() bool                        { return false }
 func (f *fakeDevice) IsMqttReady() bool                        { return true }
-func (f *fakeDevice) Channel(via types.Channel) types.Channel  { return via }
+func (f *fakeDevice) Channel(_ context.Context, via types.Channel) types.Channel { return via }
 func (f *fakeDevice) UpdateName(_ string)                      {}
 func (f *fakeDevice) UpdateHost(_ string)                      {}
 func (f *fakeDevice) ClearHost()                               {}

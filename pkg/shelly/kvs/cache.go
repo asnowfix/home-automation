@@ -23,7 +23,14 @@ const ttl = 5 * time.Minute
 type cacheEntry struct {
 	value    GetResponse
 	notFound bool
-	expires  time.Time
+	// definitive is meaningful only with notFound: true when the device
+	// itself answered "not found", false when the lookup merely failed
+	// (timeout, transport error, an unrecognised device error). Both are
+	// cached as misses, but only the first may be replayed as ErrNotFound —
+	// otherwise a transient failure would later read back as a fact about the
+	// key (#663).
+	definitive bool
+	expires    time.Time
 }
 
 var (
@@ -51,10 +58,10 @@ func cachePut(deviceId, key string, value GetResponse) {
 	cache[cacheKey(deviceId, key)] = cacheEntry{value: value, expires: time.Now().Add(ttl)}
 }
 
-func cachePutNotFound(deviceId, key string) {
+func cachePutNotFound(deviceId, key string, definitive bool) {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
-	cache[cacheKey(deviceId, key)] = cacheEntry{notFound: true, expires: time.Now().Add(ttl)}
+	cache[cacheKey(deviceId, key)] = cacheEntry{notFound: true, definitive: definitive, expires: time.Now().Add(ttl)}
 }
 
 func cacheInvalidate(deviceId, key string) {

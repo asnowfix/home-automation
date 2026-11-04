@@ -2,8 +2,10 @@
 Description=Daily update of myhome package
 
 [Timer]
-OnCalendar=daily
-AccuracySec=1h
+# 04:30, not midnight: 00:00 is when logrotate, dpkg-db-backup, atop-rotate and the db backup all
+# fire, and a package update restarts the daemon and re-uploads device scripts (#661).
+OnCalendar=*-*-* 04:30:00
+AccuracySec=1min
 
 [Install]
 WantedBy=timers.target

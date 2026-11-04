@@ -35,11 +35,11 @@ func (mc *MetricsCache) GetAll() string {
 	mc.mu.RLock()
 	defer mc.mu.RUnlock()
 
-	result := ""
+	var result strings.Builder
 	for _, metrics := range mc.metrics {
-		result += metrics
+		result.WriteString(metrics)
 	}
-	return result
+	return result.String()
 }
 
 // Exporter handles MQTT subscription and HTTP serving for Prometheus metrics

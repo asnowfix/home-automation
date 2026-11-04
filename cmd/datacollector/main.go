@@ -27,16 +27,16 @@ import (
 
 // APICall represents a single API call with request and response
 type APICall struct {
-	Timestamp   time.Time   `json:"timestamp"`
-	DeviceID    string      `json:"device_id"`
-	DeviceName  string      `json:"device_name"`
-	DeviceModel string      `json:"device_model,omitempty"`
-	Method      string      `json:"method"`
-	Channel     string      `json:"channel"`
-	Request     interface{} `json:"request"`
-	Response    interface{} `json:"response"`
-	Error       string      `json:"error,omitempty"`
-	Duration    string      `json:"duration"`
+	Timestamp   time.Time `json:"timestamp"`
+	DeviceID    string    `json:"device_id"`
+	DeviceName  string    `json:"device_name"`
+	DeviceModel string    `json:"device_model,omitempty"`
+	Method      string    `json:"method"`
+	Channel     string    `json:"channel"`
+	Request     any       `json:"request"`
+	Response    any       `json:"response"`
+	Error       string    `json:"error,omitempty"`
+	Duration    string    `json:"duration"`
 }
 
 // TestSuite represents the complete collection of API calls
@@ -153,107 +153,107 @@ func testDeviceAPIs(ctx context.Context, device *shelly.Device, testSuite *TestS
 	// Define core API methods to test (only ones we know exist)
 	methods := []struct {
 		name   string
-		caller func() (interface{}, error)
+		caller func() (any, error)
 	}{
 		{
 			name: "Sys.GetConfig",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return system.GetConfig(ctx, types.ChannelDefault, device)
 			},
 		},
 		{
 			name: "Shelly.GetDeviceInfo",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return device.CallE(ctx, types.ChannelDefault, "Shelly.GetDeviceInfo", nil)
 			},
 		},
 		{
 			name: "WiFi.GetStatus",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return wifi.DoGetStatus(ctx, types.ChannelDefault, device)
 			},
 		},
 		{
 			name: "WiFi.GetConfig",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return wifi.DoGetConfig(ctx, types.ChannelDefault, device)
 			},
 		},
 		{
 			name: "Eth.GetConfig",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return ethernet.GetConfig(ctx, types.ChannelDefault, device)
 			},
 		},
 		{
 			name: "Eth.GetStatus",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return ethernet.GetStatus(ctx, device, types.ChannelDefault)
 			},
 		},
 		{
 			name: "KVS.GetMany",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return kvs.GetManyValues(ctx, logger, types.ChannelDefault, device, "*")
 			},
 		},
 		{
 			name: "Shelly.GetStatus",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return device.CallE(ctx, types.ChannelDefault, "Shelly.GetStatus", nil)
 			},
 		},
 		{
 			name: "Shelly.GetConfig",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return device.CallE(ctx, types.ChannelDefault, "Shelly.GetConfig", nil)
 			},
 		},
 		{
 			name: "Shelly.ListMethods",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return device.CallE(ctx, types.ChannelDefault, "Shelly.ListMethods", nil)
 			},
 		},
 		{
 			name: "Switch.GetConfig",
-			caller: func() (interface{}, error) {
-				return device.CallE(ctx, types.ChannelDefault, "Switch.GetConfig", map[string]interface{}{"id": 0})
+			caller: func() (any, error) {
+				return device.CallE(ctx, types.ChannelDefault, "Switch.GetConfig", map[string]any{"id": 0})
 			},
 		},
 		{
 			name: "Switch.GetStatus",
-			caller: func() (interface{}, error) {
-				return device.CallE(ctx, types.ChannelDefault, "Switch.GetStatus", map[string]interface{}{"id": 0})
+			caller: func() (any, error) {
+				return device.CallE(ctx, types.ChannelDefault, "Switch.GetStatus", map[string]any{"id": 0})
 			},
 		},
 		{
 			name: "Input.GetConfig",
-			caller: func() (interface{}, error) {
-				return device.CallE(ctx, types.ChannelDefault, "Input.GetConfig", map[string]interface{}{"id": 0})
+			caller: func() (any, error) {
+				return device.CallE(ctx, types.ChannelDefault, "Input.GetConfig", map[string]any{"id": 0})
 			},
 		},
 		{
 			name: "Input.GetStatus",
-			caller: func() (interface{}, error) {
-				return device.CallE(ctx, types.ChannelDefault, "Input.GetStatus", map[string]interface{}{"id": 0})
+			caller: func() (any, error) {
+				return device.CallE(ctx, types.ChannelDefault, "Input.GetStatus", map[string]any{"id": 0})
 			},
 		},
 		{
 			name: "MQTT.GetConfig",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return device.CallE(ctx, types.ChannelDefault, "MQTT.GetConfig", nil)
 			},
 		},
 		{
 			name: "MQTT.GetStatus",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return device.CallE(ctx, types.ChannelDefault, "MQTT.GetStatus", nil)
 			},
 		},
 		{
 			name: "Script.List",
-			caller: func() (interface{}, error) {
+			caller: func() (any, error) {
 				return device.CallE(ctx, types.ChannelDefault, "Script.List", nil)
 			},
 		},

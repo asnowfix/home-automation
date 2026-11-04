@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -254,10 +255,17 @@ func queryBox(ip net.IP, method string, params *map[string]string) (any, error) 
 }
 
 // tweaked from: https://stackoverflow.com/a/42718113/1170664
-func getXML(url string) ([]byte, error) {
-	resp, err := sfrHTTPClient.Get(url)
+func getXML(rawURL string) ([]byte, error) {
+	resp, err := sfrHTTPClient.Get(rawURL)
 	if err != nil {
-		return []byte{}, fmt.Errorf("GET error: %v", err)
+		// *url.Error embeds the full request URL, whose query string carries
+		// the session token and hash on auth.checkToken: keep only the cause
+		// (#620).
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		return []byte{}, fmt.Errorf("GET error: %w", err)
 	}
 	defer resp.Body.Close()
 

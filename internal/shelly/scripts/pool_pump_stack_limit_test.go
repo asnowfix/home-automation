@@ -27,11 +27,12 @@ import (
 // the device. See docs/pool-pump-winter-crash-progress.md for results.
 
 type stackScenario struct {
-	name      string
-	relayOn   bool // switch:0 ON when the script starts
-	inWindow  bool // winter night window contains "now"
-	yesterday bool // runtime record (and run-start, if relay ON) dated yesterday
-	logging   bool // KVS logging=true (production setting)
+	name       string
+	relayOn    bool // switch:0 ON when the script starts
+	inWindow   bool // winter night window contains "now"
+	yesterday  bool // runtime record (and run-start, if relay ON) dated yesterday
+	logging    bool // KVS logging=true (production setting)
+	atMidnight bool // script clock shifted to the next 00:01 (window wraps midnight)
 }
 
 type stackPhaseResult struct {
@@ -84,6 +85,17 @@ func runStackScenario(t *testing.T, sc stackScenario, limit int) stackPhaseResul
 	var res stackPhaseResult
 	srv := poolPumpWinterForecastServer(t)
 	now := time.Now()
+	var shift time.Duration
+	if sc.atMidnight {
+		// Pretend it is the next 00:01 local: the script reads its clock via
+		// Date.now()/new Date(), rewritten below (no extra JS frames).
+		next := time.Date(now.Year(), now.Month(), now.Day(), 0, 1, 0, 0, now.Location())
+		if !next.After(now) {
+			next = next.AddDate(0, 0, 1)
+		}
+		shift = next.Sub(now)
+		now = next
+	}
 	nowMin := now.Hour()*60 + now.Minute()
 
 	kvs := pro1KVS()
@@ -116,6 +128,12 @@ func runStackScenario(t *testing.T, sc stackScenario, limit int) stackPhaseResul
 	ctx, cancel := poolPumpRunContext(t, mqtt.NewMockClient())
 	defer cancel()
 	buf := readPoolPumpScript(t)
+	if shift > 0 {
+		off := fmt.Sprintf("+%d", shift.Milliseconds())
+		src := strings.ReplaceAll(string(buf), "new Date()", "new Date(@@NOW@@)")
+		src = strings.ReplaceAll(src, "Date.now()", "(Date.now()"+off+")")
+		buf = []byte(strings.ReplaceAll(src, "@@NOW@@", "Date.now()"+off))
+	}
 	done := make(chan error, 1)
 	go func() { done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, ds) }()
 	defer func() { cancel(); <-done }()
@@ -216,6 +234,9 @@ func TestPoolPump_StackDepthSweep(t *testing.T) {
 		{name: "ON/outside/yesterday", relayOn: true, inWindow: false, yesterday: true, logging: true},
 		{name: "ON/inside/today", relayOn: true, inWindow: true, yesterday: false, logging: true},
 		{name: "ON/inside/yesterday (prod failure shape)", relayOn: true, inWindow: true, yesterday: true, logging: true},
+		{name: "@00:01 OFF/outside/today", relayOn: false, inWindow: false, yesterday: false, logging: true, atMidnight: true},
+		{name: "@00:01 OFF/inside(wrap)/yesterday", relayOn: false, inWindow: true, yesterday: true, logging: true, atMidnight: true},
+		{name: "@00:01 ON/inside(wrap)/yesterday", relayOn: true, inWindow: true, yesterday: true, logging: true, atMidnight: true},
 		{name: "ON/inside/yesterday, logging off", relayOn: true, inWindow: true, yesterday: true, logging: false},
 	}
 	only := os.Getenv("POOLPUMP_STACK_ONLY")

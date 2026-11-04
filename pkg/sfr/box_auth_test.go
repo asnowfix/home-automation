@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-logr/logr/funcr"
 )
@@ -243,12 +244,67 @@ func TestCheckTokenDoesNotLogSecrets(t *testing.T) {
 	}
 
 	output := logged.String()
-	for _, secret := range []string{"s3cret", "user@example.com", "tok-123", uh + ph} {
+	// Each hash is checked on its own: a line carrying only one of them must
+	// not slip past a check on their concatenation.
+	for _, secret := range []string{"s3cret", "user@example.com", "tok-123", uh, ph} {
 		if strings.Contains(output, secret) {
 			t.Errorf("log output leaks %q:\n%s", secret, output)
 		}
 	}
 	if !strings.Contains(output, "Calling") {
 		t.Fatalf("expected the Calling line at verbosity 10:\n%s", output)
+	}
+}
+
+// TestCheckTokenNetworkErrorDoesNotLogSecrets covers the error path: a
+// transport failure produces a *url.Error that embeds the full request URL,
+// and auth.checkToken carries the session token and hash in its query string.
+func TestCheckTokenNetworkErrorDoesNotLogSecrets(t *testing.T) {
+	t.Cleanup(func() { Init("", "") })
+	Init("user@example.com", "s3cret")
+
+	var logged strings.Builder
+	oldLog := log
+	log = funcr.New(func(prefix, args string) {
+		logged.WriteString(prefix)
+		logged.WriteByte(' ')
+		logged.WriteString(args)
+		logged.WriteByte('\n')
+	}, funcr.Options{Verbosity: 10})
+	t.Cleanup(func() { log = oldLog })
+
+	// A server that is already closed: every request fails with a refused
+	// connection, whose error text includes the request URL.
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close()
+	old := sfrHTTPClient
+	sfrHTTPClient = &http.Client{
+		Timeout:   time.Second,
+		Transport: &hostRedirectTransport{targetURL: srv.URL},
+	}
+	t.Cleanup(func() { sfrHTTPClient = old })
+
+	uh, err := doHash("user@example.com", []byte("tok-123"))
+	if err != nil {
+		t.Fatalf("doHash(user): %v", err)
+	}
+	ph, err := doHash("s3cret", []byte("tok-123"))
+	if err != nil {
+		t.Fatalf("doHash(password): %v", err)
+	}
+
+	cerr := checkToken(net.ParseIP("192.168.1.1"), "tok-123")
+	if cerr == nil {
+		t.Fatal("expected a network error, got nil")
+	}
+	if !strings.Contains(cerr.Error(), "refused") {
+		t.Errorf("error should still name the cause, got: %v", cerr)
+	}
+
+	output := logged.String() + "\n" + cerr.Error()
+	for _, secret := range []string{"s3cret", "user@example.com", "tok-123", uh, ph} {
+		if strings.Contains(output, secret) {
+			t.Errorf("log/error output leaks %q:\n%s", secret, output)
+		}
 	}
 }

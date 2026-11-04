@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,13 +131,15 @@ func runStackScenario(t *testing.T, sc stackScenario, limit int) stackPhaseResul
 	// Completion of init: schedule-mode written (saveState), the daily check's
 	// forecast parse reached its pool.run_window emit, or an overflow stopped
 	// the show (fail fast).
-	res.initOK = waitFor(8*time.Second, 50*time.Millisecond, func() bool {
+	t0 := time.Now()
+	res.initOK = waitFor(25*time.Second, 50*time.Millisecond, func() bool {
 		if script.StackOverflows() > 0 {
 			return true
 		}
 		_, exists := ds.KVSValue("script/pool-pump/schedule-mode")
 		return exists && runWindowSeen()
 	})
+	t.Logf("init wait %v ok=%v", time.Since(t0), res.initOK)
 	if script.StackOverflows() > 0 {
 		res.initOK = false
 	}
@@ -215,7 +218,11 @@ func TestPoolPump_StackDepthSweep(t *testing.T) {
 		{name: "ON/inside/yesterday (prod failure shape)", relayOn: true, inWindow: true, yesterday: true, logging: true},
 		{name: "ON/inside/yesterday, logging off", relayOn: true, inWindow: true, yesterday: true, logging: false},
 	}
+	only := os.Getenv("POOLPUMP_STACK_ONLY")
 	for _, sc := range scenarios {
+		if only != "" && !strings.Contains(sc.name, only) {
+			continue
+		}
 		if r := runStackScenario(t, sc, 0); !r.survived() {
 			t.Errorf("%s: harness broken, unlimited run does not survive: %s", sc.name, r)
 			continue

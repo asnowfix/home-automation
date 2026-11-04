@@ -35,6 +35,11 @@ type DeviceState struct {
 	bleScannerStarts  int
 	bleScannerRunning bool
 
+	// MaxCallStackSize, when > 0, caps the goja call-stack depth of the
+	// emulated runtime (vm.SetMaxCallStackSize). 0 (default) means unlimited.
+	// See stack_limit.go and #496/#250.
+	MaxCallStackSize int `json:"-"`
+
 	// EventInjector, when non-nil, allows a test to push raw JSON-encoded
 	// device-event objects into the running script's event-handler loop.
 	// Send a JSON object with the same shape as Shelly device events:

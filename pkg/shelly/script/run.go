@@ -57,6 +57,7 @@ func RunWithDeviceState(ctx context.Context, name string, buf []byte, minify boo
 	}
 	out, err := vm.RunScript(name, string(buf))
 	if err != nil {
+		noteStackOverflow(err)
 		log.Error(err, "Script evaluation failed", "name", name)
 		return err
 	}
@@ -168,6 +169,9 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 	nextTimerHandle := 1
 
 	vm := goja.New()
+	if deviceState != nil && deviceState.MaxCallStackSize > 0 {
+		vm.SetMaxCallStackSize(deviceState.MaxCallStackSize)
+	}
 
 	// Shelly event handler system
 	eh := NewEventsHandler(ctx, vm)
@@ -204,7 +208,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 			log.Error(err, "Shelly.call() unknown method", "method", method)
 			// Call the callback with null result if provided
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					// Call: callback(result, error_code, error_message, userdata)
 					callable(goja.Undefined(), goja.Null(), vm.ToValue(0), goja.Null(), userdata)
 				}
@@ -233,7 +237,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 			return goja.Undefined()
 		}
 
-		if callable, ok := goja.AssertFunction(callback); ok {
+		if callable, ok := assertFunction(callback); ok {
 			eh.AddHandler(callable, userdata)
 			log.V(1).Info("Shelly.addEventHandler registered", "handlers", len(eh.handlers))
 		} else {
@@ -508,7 +512,7 @@ func createShellyRuntime(ctx context.Context, mc mqtt.Client, handlers *[]handle
 		}
 
 		if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-			if callable, ok := goja.AssertFunction(callback); ok {
+			if callable, ok := assertFunction(callback); ok {
 				handle := nextTimerHandle
 				nextTimerHandle++
 
@@ -830,6 +834,7 @@ func (f *scheduleEvalForwarder) Handle(ctx context.Context, vm *goja.Runtime, ms
 		return fmt.Errorf("scheduleEvalForwarder: decode request: %w", err)
 	}
 	if _, err := vm.RunString(req.Code); err != nil {
+		noteStackOverflow(err)
 		return fmt.Errorf("scheduleEvalForwarder: eval %q: %w", req.Code, err)
 	}
 	return nil
@@ -858,7 +863,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 		"shelly.detectlocation": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellydetectlocation
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					result := map[string]interface{}{
 						"lat": 52.5200,
 						"lon": 13.4050,
@@ -894,7 +899,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			}
 
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					result := map[string]interface{}{"keys": keys}
 					ret, err := callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 					if err != nil {
@@ -913,7 +918,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			val, found := deviceState.KVSValue(key)
 
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					if found {
 						result := map[string]interface{}{
 							"key":   key,
@@ -950,7 +955,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 		"kvs.getmany": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			// emulate https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/KVS#kvsgetmany
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					kvs := deviceState.GetKVS()
 					items := make([]interface{}, 0, len(kvs))
 					for key, value := range kvs {
@@ -990,7 +995,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			}
 
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					result := map[string]interface{}{"etag": "test", "rev": 1}
 					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 				}
@@ -1001,7 +1006,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 		// Schedule.List — return all tracked schedules
 		"schedule.list": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					result := map[string]interface{}{
 						"jobs": deviceState.ScheduleJobs(),
 					}
@@ -1036,7 +1041,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			}
 
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					result := map[string]interface{}{"id": id}
 					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 				}
@@ -1062,7 +1067,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 
 			if !found {
 				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-					if callable, ok := goja.AssertFunction(callback); ok {
+					if callable, ok := assertFunction(callback); ok {
 						callable(goja.Undefined(), goja.Null(), vm.ToValue(-105),
 							vm.ToValue(fmt.Sprintf("no schedule with id %d", id)), userdata)
 					}
@@ -1086,7 +1091,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			}
 
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					result := map[string]interface{}{"rev": 1}
 					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 				}
@@ -1112,7 +1117,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			}
 
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					callable(goja.Undefined(), vm.ToValue(true), vm.ToValue(0), goja.Null(), userdata)
 				}
 			}
@@ -1132,7 +1137,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			// real device where the switch never moved.
 			if code, message, failed := deviceState.SwitchSetFailure(id); failed {
 				if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-					if callable, ok := goja.AssertFunction(callback); ok {
+					if callable, ok := assertFunction(callback); ok {
 						callable(goja.Undefined(), goja.Null(), vm.ToValue(code), vm.ToValue(message), userdata)
 					}
 				}
@@ -1170,7 +1175,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 			}
 
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					result := map[string]interface{}{"id": id, "output": on}
 					callable(goja.Undefined(), vm.ToValue(result), vm.ToValue(0), goja.Null(), userdata)
 				}
@@ -1181,7 +1186,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 		// Input.SetConfig — acknowledge component rename, no state needed
 		"input.setconfig": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					callable(goja.Undefined(), vm.ToValue(true), vm.ToValue(0), goja.Null(), userdata)
 				}
 			}
@@ -1191,7 +1196,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 		// Switch.SetConfig — acknowledge component rename, no state needed
 		"switch.setconfig": func(vm *goja.Runtime, method string, params goja.Value, callback goja.Value, userdata goja.Value) (interface{}, error) {
 			if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-				if callable, ok := goja.AssertFunction(callback); ok {
+				if callable, ok := assertFunction(callback); ok {
 					callable(goja.Undefined(), vm.ToValue(true), vm.ToValue(0), goja.Null(), userdata)
 				}
 			}
@@ -1233,7 +1238,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 				// the result).
 				return nil, nil
 			}
-			callable, ok := goja.AssertFunction(callback)
+			callable, ok := assertFunction(callback)
 			if !ok {
 				return nil, nil
 			}
@@ -1250,7 +1255,7 @@ func createMethodsMap(ctx context.Context, eh *eventsHandler, deviceState *Devic
 
 func mqttSubscribe(ctx context.Context, mc mqtt.Client, vm *goja.Runtime, topic string, callback goja.Value) (handler, error) {
 	if !goja.IsUndefined(callback) && !goja.IsNull(callback) {
-		if callable, ok := goja.AssertFunction(callback); ok {
+		if callable, ok := assertFunction(callback); ok {
 			in, err := mc.Subscribe(ctx, topic, 8, "shelly/script")
 			if err != nil {
 				return nil, err

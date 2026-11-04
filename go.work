@@ -42,8 +42,10 @@ use (
 	./myhome/occupancy
 	./myhome/storage
 	./myhome/temperature
+	./myhome/vacuum
 	./pkg/beem
 	./pkg/devices
+	./pkg/roomba
 	./pkg/sfr
 	./pkg/shelly
 	./pkg/shelly/blu

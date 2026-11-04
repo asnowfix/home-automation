@@ -99,7 +99,10 @@ Aim for `mem_free` ≥ ~5 KB steady state; a script that boots with 1–2 KB fre
 dying unpredictably later. Details and the measurement protocol: `references/memory.md`.
 
 **The interpreter's stack is shallow and its concurrency budget is 5.** Five timers, five event
-subscriptions, five concurrent RPCs, ten MQTT subscriptions. Nested anonymous functions beyond 2–3
+subscriptions, five concurrent RPCs, ten MQTT subscriptions. **And a device runs at most 3 scripts** —
+a 4th upload enables with `-108 Reached the maximum 3 of enabled scripts`, and with 3 already
+running a 4th `Script.Start` fails too (measured on `development`, 2026-08-30). The code and id are
+still written, so a refused enable leaves a real, startable script behind. Nested anonymous functions beyond 2–3
 levels crash. `Shelly.call` in a `for` loop exhausts the RPC budget with zero nesting depth, because
 it returns immediately and the loop dispatches every iteration before any response arrives. The
 answer to almost all of this is the **task queue**: one recurring timer draining a FIFO, which
@@ -119,9 +122,18 @@ $B Script.GetStatus '{"id":N}'      # running? mem_used/mem_peak/mem_free — al
 $B Script.List      '{}'            # which scripts exist, and their ids
 $B Schedule.List    '{}'            # a script with no schedule jobs will never fire
 
-myhome ctl shelly script upload <device> <script.js> --no-minify   # always --no-minify when debugging
+myhome ctl shelly script upload <device> <script.js> --no-minify   # only if the script fits — see below
 myhome ctl shelly script probe  <device> <script>                  # settled mem_peak measurement
 ```
+
+**`--no-minify` only works if the source fits in 65535 bytes** — the device's script-length limit
+(`pkg/shelly/script.MaxSourceBytes`, unverified against firmware docs; correct it there if a device
+proves it wrong). The upload path checks this before sending and refuses with a clear error naming
+the limit and the actual size, rather than letting the device reject it after the fact (#553).
+**`pool-pump.js` does not fit** (measured at 137673 bytes unminified vs. 35928 bytes minified,
+2026-08-26) — it can only be uploaded minified. On-device debugging of that script therefore works
+against minified source with mangled local names: a stack trace or error string will not map back
+to a readable name in the repo. See `references/api.md` for what that means in practice.
 
 `KVS.Get` and `KVS.GetMany` **cannot unmarshal numeric or boolean values** (#468) — read them out of
 the error payload.

@@ -101,117 +101,42 @@ Env vars: `MYHOME_BEEM_EMAIL`, `MYHOME_BEEM_PASSWORD`
 
 Run the pool pump during daylight hours when solar production exceeds a threshold, so that free solar energy contributes to the daily filtration objective (5× pool volume). Solar-driven runtime must count against the same daily objective as the scheduled runs — it substitutes for grid-powered runtime, not adds on top of it.
 
-### Trigger architecture chosen: daemon goroutine (Option B)
+### Revision note (#401 redesign)
 
-A new goroutine in `myhome/daemon/solar_automation.go` subscribes to `myhome/energy/beem/power`, applies hysteresis, and controls the pool pump via the existing switch RPC. The pool-pump JS script and `PoolService` require no changes.
+This section originally documented a daemon-side goroutine (`myhome/daemon/solar_automation.go`)
+as "Option B — daemon goroutine," and explicitly rejected "Option A — Shelly JS subscribes to the
+beem topic" on the grounds of the JS MQTT-subscription budget and brittle JS hysteresis. Both of
+those calls are now **reversed** — issue #401 found that:
 
-**Rejected options:**
+- The daemon's `Switch.Set` bypassed `pool-pump.js`'s own `doStart`/`doStop`/anti-cycling-fuse/
+  `isMyTurnToRun()`/speed-mapping logic, so a solar-triggered start could be silently vetoed by the
+  device's own safety logic with no feedback loop, and the pump's solar behavior depended entirely
+  on the daemon being up — violating this repo's "daemon-optional per device" resilience rule (see
+  CLAUDE.md).
+- JS unit-testability, the original objection to Option A, turned out to be fully solved by the
+  existing `script.RunWithDeviceState` emulator harness with a real mock MQTT client — the same
+  harness already used to test the rest of `pool-pump.js`.
+- The MQTT subscription-budget concern was real but manageable: solar hysteresis is one more
+  subscription (`myhome/energy/solar/available`) within the existing 10-subscription Shelly limit,
+  not a new category of cost.
 
-- **Option A — Shelly JS subscribes to beem topic:** consumes 1 of 10 Shelly MQTT subscriptions; harder to unit-test; JS hysteresis is brittle.
-- **Option C — PoolService subscribes directly:** violates the three-tier layer rule; couples `pkg/shelly` to Beem.
-- **Option D — Prometheus/alerting bridge:** overkill for a hobby project.
+**Current architecture:** the daemon aggregates known solar sources (today: only Beem — see Part 1)
+and republishes the total, retained, to `myhome/energy/solar/available` (`myhome/daemon/solar_aggregate.go`,
+implemented in #403). `pool-pump.js` subscribes to that topic directly and applies its own
+KVS-configured hysteresis (`script/pool-pump/solar-*` keys — see `docs/pool-pump.md`), calling its
+own `doStart`/`doStop` exactly as scheduled/manual runs do (implemented in #405). All daemon-side
+`Switch.Set` calls and the old hysteresis state machine were deleted in #406.
 
-### Hysteresis state machine
-
-Variables `daily_target_sec` and `max_rotation_sec` are computed from `min_volume_turnover` / `max_volume_turnover` and KVS at startup — see "Runtime target computation" below.
-
-```
-IDLE  →  (solar_w ≥ start_threshold_w  for  start_delay
-          AND  runtime < max_rotation_sec)                          →  RUNNING
-
-RUNNING  →  (solar_w < stop_threshold_w  for  stop_delay)          →  IDLE  [solar loss]
-RUNNING  →  (runtime ≥ daily_target_sec
-             AND  solar_w < start_threshold_w)                      →  IDLE  [soft stop]
-RUNNING  →  (runtime ≥ max_rotation_sec)                           →  IDLE  [hard ceiling]
-```
-
-**Soft stop vs. hard ceiling:**
-
-- `daily_target_sec` (`min_volume_turnover × …`) is the normal filtration goal. Reaching it stops the pump *only if solar has also dropped below `start_threshold_w`*. While solar is still producing, the pump keeps running past the daily target — free energy is used to over-filter rather than going to waste.
-- `max_rotation_sec` (`max_volume_turnover × …`) is an absolute ceiling. The pump always stops when this is reached, regardless of solar output.
-- The pump will not be *started* via solar once `max_rotation_sec` is already reached.
-
-**Combined stop logic on each power sample (RUNNING state):**
-
-| Condition | Action |
-|---|---|
-| `runtime ≥ max_rotation_sec` | Stop immediately (hard ceiling) |
-| `runtime ≥ daily_target_sec` AND `solar_w < start_threshold_w` | Stop immediately (soft stop: goal met, solar gone) |
-| `solar_w < stop_threshold_w` held for `stop_delay` | Stop (solar loss, regardless of runtime) |
-| otherwise | Keep running |
-
-### New files
-
-```
-myhome/daemon/solar_automation.go     — hysteresis state machine, pump control
-myhome/daemon/pool_runtime_tracker.go — daily runtime accumulator (see Part 3)
-```
-
-### Config additions (pool stanza)
-
-```yaml
-pool:
-  solar:
-    enabled:               true
-    start_threshold_w:     500   # start pump when solar exceeds this
-    stop_threshold_w:      200   # stop when solar falls below this
-    start_delay:           5m    # must hold above threshold before starting
-    stop_delay:            10m   # must hold below threshold before stopping
-    min_volume_turnover:   5     # soft stop: stop when this many pool volumes filtered AND solar gone
-    max_volume_turnover:   7     # hard ceiling: always stop when this many pool volumes filtered
-```
-
-`min_volume_turnover` and `max_volume_turnover` are dimensionless multipliers (pool volumes filtered per day). The daemon converts them to seconds at startup by reading the pool device KVS — see "Runtime target computation" below.
-
-**Startup validation:** solar automation refuses to initialize if `max_volume_turnover < min_volume_turnover`. The daemon logs an error and continues without solar automation.
+When the solar-availability topic is stale or absent, the pump simply keeps running its existing
+forecast-derived schedule (Open-Meteo) — no separate fallback code; solar hysteresis is purely
+additive on top of it.
 
 ### Runtime target computation
 
-At solar automation startup, the daemon reads four KVS keys from the pool Shelly device (identified by `pool.device_id`) — the same keys pool-pump.js uses for its own autonomous scheduling, nothing new is written:
-
-| KVS key | Unit | Description |
-|---|---|---|
-| `script/pool-pump/pool-volume` | m³ | Pool water volume |
-| `script/pool-pump/max-flow-rate` | m³/h | Flow rate at max RPM |
-| `script/pool-pump/max-rpm` | RPM | Motor max speed |
-| `script/pool-pump/speed` | RPM | Current operating speed |
-
-From these the daemon derives:
-
-```
-flow_rate        = max_flow_rate × (speed / max_rpm)            [m³/h]
-daily_target_sec = pool_volume × min_volume_turnover / flow_rate × 3600   [s]
-max_rotation_sec = pool_volume × max_volume_turnover / flow_rate × 3600   [s]
-```
-
-**KVS write policy:** the daemon reads KVS at startup but never writes it for this feature. The device KVS remains exclusively the JS script's domain, preserving its ability to run autonomously if the daemon is down.
-
-### Interaction with existing schedule (additive / substitute semantics)
-
-- Solar goroutine starts the pump **only when** `runtime < max_rotation_sec` (or `max_rotation_sec == 0`)
-- Solar goroutine stops the pump on solar loss, soft stop (target met + solar gone), or hard ceiling
-- The normal JS schedule (morning start / evening stop / night run) fires independently; the runtime tracker counts all pump-on time regardless of who started the pump
-- When `max_rotation_sec` is reached and the JS night schedule fires at 23:15, the daemon detects the pump turning on and sends a stop command ~30 s later (one relay click; no JS changes required)
-
-### Daily target computation (Go side)
-
-Same formula as `computeRunHours()` in pool-pump.js:
-
-```
-flowRate = maxFlowRate × (preferredRpm / maxRpm)          [m³/h]
-targetSec = poolVolume × turnover / flowRate × 3600        [seconds]
-```
-
-Values read from pool KVS at daemon startup:
-- `script/pool-pump/pool-volume`
-- `script/pool-pump/turnover`
-- `script/pool-pump/max-flow-rate`
-- `script/pool-pump/max-rpm`
-- `script/pool-pump/eco-rpm` (or whichever speed is `script/pool-pump/speed`)
-- `script/pool-pump/max-power` — nameplate power at `max-rpm` (W); used to derive power per speed:
-  `power_at_speed_w = max_power_w × (speed_rpm / max_rpm)`
-  Example: 1600 W at 2900 rpm → eco at 1450 rpm ≈ 800 W. This feeds the aenergy-based runtime
-  option (Option C, Part 3) and future speed-adaptive triggering (see follow-up issue).
+The daily-target/hard-ceiling seconds (`daily_target_sec` / `max_rotation_sec`) are now computed
+on-device by `pool-pump.js` itself, from the same KVS keys it already reads for scheduling
+(`script/pool-pump/{pool-volume,max-flow-rate,max-rpm,speed}`) — no daemon-side KVS read for this
+purpose remains. See `docs/pool-pump.md` for the current formula and KVS key list.
 
 ---
 
@@ -219,13 +144,34 @@ Values read from pool KVS at daemon startup:
 
 ### Problem
 
-The accumulator must survive daemon restarts. A restart without replay would cause the solar trigger to over-run the pump (it thinks no filtration has happened yet today).
+The accumulator must survive daemon restarts (and, since the #401 redesign, must survive the daemon
+being down entirely — the pump's own solar/schedule decisions no longer depend on it being up).
 
-### Implemented approach — shared `events.db` + `OnDurationSec`
+### Implemented approach — on-device KVS accumulator (#402)
 
-The gen2 listener (`internal/myhome/shelly/gen2/listener.go`) already records every `switch.on` / `switch.off` event from every Shelly device into the shared `events.db`. No separate pump table or pool-specific subscriber is needed.
+`pool-pump.js` accounts for its own daily runtime and turnover directly in `activateOutput()`
+(on/off-transition accounting), mirroring both to KVS as it runs:
 
-A generic query `events.Storage.OnDurationSec(deviceID, component, onEvent, offEvent, date)` computes the total ON-duration for any switch on any calendar day:
+- `script/pool-pump/runtime-sec` — cumulative seconds run today
+- `script/pool-pump/turnover-today` — cumulative water-volume turnovers achieved today
+
+The daemon's `PoolNotices` type (`myhome/daemon/pool_notices.go`) reads these two keys back (plus
+the configured `script/pool-pump/turnover` target) for `ctl pool status`, the web UI's pool tags,
+and the `pool.turnover_today` notice — no daemon-side computation, no `events.db` dependency for
+runtime tracking.
+
+This supersedes the originally-implemented `events.db`/`OnDurationSec` approach (below), which
+depended on the daemon being up to record every `switch.on`/`switch.off` event and has since been
+deleted (`myhome/daemon/pool_runtime_tracker.go`, removed in #406).
+
+**Issue #246** ("aenergy-based runtime tracker"), previously closed as **won't do** in favor of the
+`events.db` approach, is effectively resolved by this redesign: `pool-pump.js` now tracks its own
+on/off transitions directly rather than polling `aenergy` — a different (simpler, exact) mechanism
+than #246 proposed, but the same on-device outcome. See #402 for the implementation.
+
+### Historical record — original `events.db` + `OnDurationSec` approach
+
+The gen2 listener (`internal/myhome/shelly/gen2/listener.go`) recorded every `switch.on` / `switch.off` event from every Shelly device into the shared `events.db`. A generic query `events.Storage.OnDurationSec(deviceID, component, onEvent, offEvent, date)` computed the total ON-duration for any switch on any calendar day:
 
 ```sql
 SELECT COALESCE(SUM(
@@ -248,34 +194,27 @@ WHERE e1.device_id = <deviceID> AND e1.component = <component>
   ) = <offEvent>    -- deduplicate consecutive ON events
 ```
 
-`PoolRuntimeTracker` (`myhome/daemon/pool_runtime_tracker.go`) wraps this query for the pool pump (`switch:0`, `switch.on` / `switch.off`).
-
-| | |
-|---|---|
-| **Pros** | No new database or table; durable and exact across restarts (events already persisted by gen2 listener); open intervals handled natively (pump currently running); deduplication of reconnect-induced duplicate ONs built into the query; full audit trail reusable for Prometheus / statistics |
-| **Cons** | Depends on daemon being up to record events (Shelly reboot while daemon is down drops that interval); query runs on every `canStart()` call (~once per poll interval while solar is above threshold) |
-
-### Considered alternatives
-
-**Option B — Shelly KVS persistence** (daemon writes `{date, runtime_sec}` to KVS every 5 min): survives daemon restarts, but adds KVS write latency, shares the KVS namespace with the JS script, and loses up to 5 minutes on crash.
-
-**Option C — `aenergy` as ground truth** (hardware Wh counter → runtime via `power_at_speed_w`): viable because the Shelly switch controls a contactor (constant power draw), so `aenergy` is an exact runtime proxy. A JS-side variant (pool-pump.js reads `aenergy.total` via `Switch.GetStatus` and writes to KVS) would keep the accumulator on the device and survive daemon restarts.
-
-**Why Option C (JS-side variant) was not chosen:** the shared `events.db` already provides the same guarantees without any JS changes, without consuming a JS timer slot or a KVS namespace entry, and with better restart semantics (daemon replay vs. Shelly reboot reset). The only scenario where the JS KVS variant wins is a prolonged daemon outage while the Shelly is running — unlikely for a home automation setup. Issue #246 is therefore closed as **won't do**.
+`PoolRuntimeTracker` wrapped this query for the pool pump (`switch:0`, `switch.on` / `switch.off`).
+Its main drawback — the one that motivated the #401 redesign — was depending on the daemon being up
+to record events at all, so a Shelly reboot (or extended daemon outage) while the pump was running
+would drop that interval, and pump behavior itself depended on the daemon for `canStart()` checks.
 
 ---
 
-## Implementation phases ✅
+## Implementation phases
 
-| Phase | Scope | Status |
+See issue #401 (umbrella) and its sub-issues for the current implementation history:
+
+| Issue | Scope | Status |
 |---|---|---|
-| 1 | `pkg/beem` REST client + MQTT publisher | ✅ done |
-| 2 | Config wiring (4-file convention) | ✅ done |
-| 3 | Pool runtime tracker (`events.db` + `OnDurationSec`) | ✅ done |
-| 4 | Solar automation goroutine | ✅ done |
-| 5 | Daemon wiring | ✅ done |
-| 6 | Tests | ✅ done |
-| 7 | Soft stop + hard ceiling: `min_volume_turnover` / `max_volume_turnover` config; KVS read at startup to derive `daily_target_sec` / `max_rotation_sec`; startup validation | ✅ done |
+| #402 | `pool-pump.js`: on-device runtime/turnover accumulator (fixes `ctl pool status`) | ✅ done |
+| #403 | Daemon: aggregate solar sources, publish `myhome/energy/solar/available` | ✅ done |
+| #405 | `pool-pump.js`: solar-driven start/stop hysteresis | ✅ done |
+| #404 | Daemon: minimal energy-claimers registry + RPC | ✅ done |
+| #406 | Remove legacy `SolarAutomation` daemon code + config/docs cleanup (this rewrite) | ✅ done |
+
+The original phase table (daemon-side `solar_automation.go` + `pool_runtime_tracker.go`) is
+superseded by the above and preserved only in git history.
 
 ---
 

@@ -27,9 +27,11 @@ import (
 	"github.com/asnowfix/home-automation/myhome/occupancy"
 	"github.com/asnowfix/home-automation/myhome/storage"
 	"github.com/asnowfix/home-automation/myhome/temperature"
+	"github.com/asnowfix/home-automation/myhome/vacuum"
 	beem "github.com/asnowfix/home-automation/pkg/beem"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
+	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
 )
@@ -154,6 +156,11 @@ func (d *daemon) Run() error {
 		return err
 	}
 	defer mc.Close()
+
+	// Composition root: wrap d.ctx with the MQTT client exactly once, so
+	// everything downstream (pkg/shelly/mqtt.GetClient) can retrieve it from
+	// ctx instead of a process-global. See pkg/shelly/mqtt/client.go.
+	d.ctx = shellymqtt.NewContextWithClient(d.ctx, mc)
 
 	shelly.Init(log, mc, options.Flags.MqttTimeout, options.Flags.ShellyRateLimit)
 
@@ -366,20 +373,10 @@ func (d *daemon) Run() error {
 			log.Info("Notice service disabled")
 		}
 
-		// Initialize pool runtime tracker if enabled. Only SolarAutomation's
-		// daily-target/hard-ceiling checks depend on this now — PoolNotices
-		// (below) no longer needs it since #402 moved runtime/turnover
-		// tracking on-device (pool-pump.js mirrors both to KVS itself).
-		var poolTracker *PoolRuntimeTracker
-		if options.Flags.PoolEnabled && options.Flags.PoolDeviceID != "" && eventsStore != nil {
-			poolTracker = NewPoolRuntimeTracker(log.WithName("pool"), eventsStore, options.Flags.PoolDeviceID)
-			log.Info("Pool runtime tracker initialized", "device_id", options.Flags.PoolDeviceID)
-		} else if options.Flags.PoolEnabled {
-			log.Info("Pool runtime tracker disabled (no device ID or events store unavailable)")
-		}
-
 		// Record a "pool.turnover_today" notice whenever the pump stops
-		// (schedule/manual pool.pump_stop, or solar-driven pool.solar_stop).
+		// (schedule/manual or solar-triggered pool.pump_stop — solar-driven
+		// stops flow through pool-pump.js's own doStop since #405, so there is
+		// no separate daemon-emitted solar event to watch for here anymore).
 		// Degraded mode: if the pool device can't be reached, NewPoolNotices
 		// returns nil and broadcastFn's poolNotices.OnEvent call is then a
 		// no-op — pump control itself is entirely unaffected either way.
@@ -393,59 +390,6 @@ func (d *daemon) Run() error {
 		claimerRegistry := energy.NewRegistry()
 		if options.Flags.PoolDeviceID != "" {
 			claimerRegistry.Register("pool-pump", options.Flags.PoolDeviceID)
-		}
-
-		// Start solar automation if enabled
-		if options.Flags.PoolSolarEnabled && options.Flags.PoolDeviceID != "" && beemWatcher != nil {
-			if options.Flags.PoolSolarMaxVolumeTurnover < options.Flags.PoolSolarMinVolumeTurnover {
-				log.Error(nil, "Solar automation disabled: pool.solar.max_volume_turnover must be >= min_volume_turnover",
-					"min_volume_turnover", options.Flags.PoolSolarMinVolumeTurnover,
-					"max_volume_turnover", options.Flags.PoolSolarMaxVolumeTurnover,
-				)
-			} else if pumpCtrl, err := newShellyPumpController(d.ctx, log.WithName("solar.pump"), options.Flags.PoolDeviceID); err != nil {
-				log.Error(err, "Failed to create pump controller for solar automation")
-			} else if dailyTargetSec, maxRotationSec, err := computeRuntimeTargets(
-				d.ctx, log.WithName("solar"), pumpCtrl.device,
-				options.Flags.PoolSolarMinVolumeTurnover, options.Flags.PoolSolarMaxVolumeTurnover,
-			); err != nil {
-				log.Error(err, "Solar automation disabled: failed to derive runtime targets from pool KVS")
-			} else {
-				solarCfg := SolarConfig{
-					StartThresholdW: options.Flags.PoolSolarStartThresholdW,
-					StopThresholdW:  options.Flags.PoolSolarStopThresholdW,
-					StartDelay:      options.Flags.PoolSolarStartDelay,
-					StopDelay:       options.Flags.PoolSolarStopDelay,
-					DailyTargetSec:  dailyTargetSec,
-					MaxRotationSec:  maxRotationSec,
-				}
-				solarAuto := NewSolarAutomation(
-					log.WithName("solar"),
-					beemWatcher.PowerCh,
-					poolTracker, // nil if pool tracker not enabled
-					pumpCtrl,
-					solarCfg,
-				)
-				// eventsSvc may be nil (events service disabled) — WithEvents
-				// degrades to a no-op in that case; solar pump control is
-				// unaffected either way (see SolarAutomation.recordNotice).
-				solarAuto.WithEvents(eventsSvc, options.Flags.PoolDeviceID)
-				solarAuto.Start(d.ctx)
-				log.Info("Solar automation started",
-					"device_id", options.Flags.PoolDeviceID,
-					"start_threshold_w", solarCfg.StartThresholdW,
-					"stop_threshold_w", solarCfg.StopThresholdW,
-					"start_delay", solarCfg.StartDelay,
-					"stop_delay", solarCfg.StopDelay,
-					"daily_target_sec", solarCfg.DailyTargetSec,
-					"max_rotation_sec", solarCfg.MaxRotationSec,
-				)
-			}
-		} else if options.Flags.PoolSolarEnabled {
-			if options.Flags.PoolDeviceID == "" {
-				log.Info("Solar automation disabled: no pool device ID configured")
-			} else {
-				log.Info("Solar automation disabled: Beem Energy watcher not running")
-			}
 		}
 
 		// Start device manager
@@ -540,6 +484,27 @@ func (d *daemon) Run() error {
 		fetchService := fetchproxy.NewService(d.ctx, log, mc, fetchStorage)
 		fetchService.RegisterHandlers()
 		log.Info("Fetch-and-transform proxy RPC methods registered")
+
+		// Register the robot vacuum service (#606). The vacuum.* methods are
+		// always registered; the robot connection starts only when
+		// MYHOME_VACUUM_BLID and MYHOME_VACUUM_PASSWORD are set (#626), and
+		// without them vacuum.list is empty. The robot accepts a single local
+		// client, so only one daemon instance should be configured with it.
+		vacuumStorage, err := vacuum.NewStorage(log, storage.DB())
+		if err != nil {
+			log.Error(err, "Failed to initialize vacuum storage")
+			return err
+		}
+		vacuumCfg := vacuumConfig()
+		if !vacuumCfg.Enabled() {
+			log.Info("Robot vacuum integration disabled (MYHOME_VACUUM_BLID / MYHOME_VACUUM_PASSWORD not set)")
+		}
+		vacuumService, err := vacuum.NewService(d.ctx, log, vacuumStorage, vacuumCfg)
+		if err != nil {
+			log.Error(err, "Failed to start vacuum service")
+			return err
+		}
+		vacuumService.RegisterHandlers()
 
 		// Register Occupancy RPC methods if enabled
 		if options.Flags.EnableOccupancyService && d.occupancyService != nil {

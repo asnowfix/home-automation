@@ -19,7 +19,7 @@ dies there costs a day of filtration, because every Schedule job on the device d
 
 ## Standing authorizations
 
-Granted by the maintainer, no expiry, on **`filtration-hiver` and `mezzanine` only** — without
+Granted by the maintainer, no expiry, on **`filtration-hiver` and `mezzanine`** — without
 asking:
 
 1. Upload any script build, minified or not. **State explicitly when the two devices are not running
@@ -33,6 +33,30 @@ asking:
 5. Revert any experimental setting and restore last known-good, any hour, if a script crashes twice
    or the pump is left unsafe.
 
+### `development` — test bed, granted 2026-08-30
+
+`development` (`shellyplus1-08b61fd98f44`) is a **test device**, granted by the maintainer on
+2026-08-30 for script experiments: upload, start, stop and delete scripts, and write KVS under the
+script's own prefix.
+
+**Restoration is a hard obligation.** Its baseline is `watchdog.js` (id 1) **running**,
+`myhome-link.js` (id 2) **loaded and stopped**, `pool-pump.js` (id 3) **running**. Put it back
+exactly, delete every probe script and every KVS key you added, and verify with `script list` before
+you finish — it runs `pool-pump.js` and emits real `pool.*` events into `events.db`.
+
+⚠️ **`development` is NOT equivalent to the production pump.** Measured 2026-09-02:
+
+| | `development` | `filtration-hiver` (production) |
+|---|---|---|
+| app | **Plus1** (`SNSW-001X16EU`) | **Pro1** (`SPSW-201XE16EU`) |
+| firmware | **1.7.5** (`20260311-…`) | **2.0.0** (`20260710-…`) |
+
+Different application **and a different firmware major**, four months apart. Interpreter semantics,
+heap headroom and exception behaviour are exactly the things that can differ across that gap, so
+"it worked on `development`" is **not** evidence for the pool pump. Say which device a measurement
+came from, always. There is currently **no** Pro1-on-2.0.0 test bed; `filtration-hiver` is the only
+one and it is production.
+
 **Not authorized:** any other device; network, MQTT or firmware configuration; unmasking
 `myhome-update.timer`; the pool's physical safety interlocks.
 
@@ -43,6 +67,25 @@ Anything not on this list needs the maintainer's go-ahead. Ask before acting, no
 package install.
 
 ---
+
+## Domain fact: the pool pump's water-supply input is a LEVEL
+
+`input:0` on `filtration-hiver` is a **water-supply level** from a gauge that refills to a target and
+stops — not a fault signal, and not really an edge even though the device reports changes as events.
+
+Normal operation therefore looks like this: the pump runs a few minutes, the level drops, the gauge
+trips, `pool.pump_stop {"reason":"water supply"}` fires, and the pump resumes 20–30 minutes later
+once refilled. **This is the interlock working. Do not spend a session troubleshooting it.**
+
+Two traps it has already sprung:
+
+- `F_WATER` is a latch that clears, so probing hours later shows `false` and looks like it never
+  fired.
+- `Switch.GetStatus.input.state` (instantaneous level) and `F_WATER` (last consumed edge) can
+  legitimately disagree; one disagreeing sample proves nothing.
+
+Full detail, including measured timings: `docs/pool-pump.md`, "Water Supply Input".
+
 
 ## One experiment per device
 

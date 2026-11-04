@@ -125,7 +125,7 @@ Two traps worth repeating here:
 ## Script management CLI
 
 ```bash
-# Upload (always --no-minify while debugging)
+# Upload (--no-minify while debugging, IF the script fits — see below)
 go run ./myhome ctl shelly script upload <device> <script.js> --no-minify
 go run ./myhome ctl shelly script upload <device> <script.js> --force   # bypass hash check
 
@@ -143,6 +143,72 @@ go run ./myhome ctl shelly script probe  <device> <script>     # settled mem_pea
 Embedded scripts live in `internal/shelly/scripts/`. KVS version hashes are stored under
 `script/<name>/version` and checked before upload to avoid unnecessary re-uploads — note the
 version-marker trap in #449 when force-uploading for a measurement.
+
+### `--no-minify` does not always work — the device has a source-length limit
+
+The device rejects any script whose source exceeds **65535 bytes** (`pkg/shelly/script.MaxSourceBytes`
+— a single named constant, documented there as unverified against firmware/the official docs from
+this environment; correct it if a device is ever found to accept or reject a different length). Since
+`--no-minify` sends the source as-is, it can only work when the script itself is under that limit.
+
+The upload path (`pkg/shelly/script.Upload` / `doUpload`, used by both `script upload` and
+`script update`) checks the length **before** attempting any RPC and refuses with a clear error
+naming the limit and the actual size — it does not let the device reject it after the fact, and it
+does not silently report success while doing something else (#538, #553).
+
+**`pool-pump.js` does not fit unminified.** Measured directly via `pkg/shelly/script.Minify`
+(2026-08-26): **137673 bytes unminified, 35928 bytes minified.** It has been over the limit for a
+while — nobody noticed because every recent deployment used the default minified path (#553). It can
+only be deployed minified.
+
+Practical consequence: **on-device debugging of `pool-pump.js` now works against minified source**,
+with mangled local variable names. A stack trace, `Script.GetStatus` error message, or breakpoint
+line number will not map cleanly back to a readable name or line in the repository — expect to
+correlate by structure and log strings (see `field-discipline.md`) rather than by name. Recovering
+readable on-device debugging (e.g. a minifier mode that preserves top-level names) is tracked
+separately in #430, and shrinking the script itself in #542/#544; neither is done by #553.
+
+Any other script under `internal/shelly/scripts/` should be checked the same way before assuming
+`--no-minify` will work for it — the CLI now tells you plainly if it will not.
+
+### `upload` ignores the file you name unless you tell it not to
+
+**This took the production pool pump down on 2026-08-23.** By default `upload` resolves the script
+by *name* against the copy **embedded in the binary you are running**, not against the path you
+typed. If that binary is old, you silently deploy an old script — and the device is left with the
+script **stopped**.
+
+The only warning is one line of output:
+
+```
+. Source: embedded      <-- the binary's copy, however stale that binary is
+. Source: local         <-- the file you actually named
+```
+
+To upload the file in front of you:
+
+```bash
+go run ./myhome ctl shelly script upload --force \
+    --local-scripts-dir "$PWD" <device> pool-pump.js
+```
+
+Three things must all be right:
+
+- **`--local-scripts-dir <dir>`** — without it, local loading is disabled entirely and the embedded
+  copy always wins. The flag's own help calls this "dev convenience"; it is closer to a safety
+  requirement whenever you are deploying something that is not the binary's own build.
+- **`--force`** — the KVS version hash check will otherwise skip the upload as unnecessary.
+- **a bare filename relative to your cwd** — an absolute path fails with a misleading
+  `file does not exist` even when the file is plainly there.
+
+A prebuilt CLI kept around for convenience (rather than `go run` from the current checkout) carries
+whatever scripts were embedded on the day it was built. Treat its embedded copies as stale by
+definition.
+
+**Always confirm what landed**, rather than trusting the success tick: grep the output for
+`Source: local`, then check `Script.GetStatus` reports `"running": true` and that `mem_used` is
+consistent with the build you meant to deploy. Identifying a build from its bytes is covered in
+`field-discipline.md`.
 
 ---
 
@@ -192,3 +258,62 @@ go run ./myhome ctl shelly mqtt status <device>
 
 Long-running or remote invocations generally want explicit broker and timeout flags:
 `-B tcp://<broker>:1883 -T 60s`.
+
+## Script lifecycle: how to tell a crash from a clean stop
+
+Measured on `development` (`shellyplus1-08b61fd98f44`), 2026-08-30.
+
+**A crashing script raises no event that any other script can see.** `script_stop` is delivered
+**only to the script that is stopping** — which is how every script in this repo uses it, as self
+cleanup. Verified with a positive control, not inferred from silence: a bystander's
+`Shelly.addEventHandler` *did* receive a `Shelly.emitEvent("probe_ping")` raised by another script
+(`{"n":1,"c":"script:5","e":"probe_ping"}`), and then received **nothing** when that same script died
+on an uncaught throw. The probe wrote a KVS boot marker to prove it was alive and that `KVS.Set`
+worked, so the silence was real.
+
+**So supervision must poll.** `Script.List` + `Script.GetStatus` on a tick, drained through the task
+queue — never a `for` loop of `Shelly.call`, which exhausts the 5-RPC budget.
+
+`Script.GetStatus` is the discriminator:
+
+| case | response |
+|---|---|
+| **crashed** | `{"id":5,"running":false,"mem_free":13972,"errors":["error"],"error_msg":"Uncaught Error: Cannot read property 'boom' of null\n at …in function called from system"}` |
+| **stopped cleanly** | `{"id":1,"running":false,"mem_free":13944}` |
+
+So `enable && !running && errors` is a sound "it failed" test, and `error_msg` carries the message
+and stack — the only place the reason survives, since nothing is published off-device. Both fields
+exist in `pkg/shelly/script/types.go` as `Errors` and `ErrorMessage`.
+
+⚠️ A **stopped** script's status omits `mem_used` and `mem_peak` entirely. Anything reading them must
+tolerate their absence rather than treating 0 as a measurement.
+
+### After the fact: did a script (re)start, and did its init finish? (from `events.db`)
+
+`Script.GetStatus` only answers for *now*. Once the script has died or been restarted, `events.db`
+(90-day retention, see `CLAUDE.md`) is the only record, and it has **no script start / stop / crash
+event** for any device. Use these proxies, measured on `mezzanine` 2026-11-02/03 (#661):
+
+- A device `config_changed` event (cfg_rev +1) at a time nothing else was configuring means a script
+  **(re)started and ran its init**. `pool-pump.js` init issues `Sys.SetConfig` (step 1/4), `Input.SetConfig`
+  and `Switch.SetConfig`.
+- A `pool.run_window` within ~10 s of that `config_changed` means **init completed**. A `config_changed`
+  with no `run_window` after it means init died or stalled. A missing sunrise `pool.run_window` means the
+  script was not alive that morning.
+- Calibration — which RPCs bump `cfg_rev` (so which can fake a "restart"):
+
+| RPC | bumps cfg_rev? |
+|---|---|
+| `Script.Stop`, `Script.Start`, `Script.PutCode`, `Script.SetConfig` (no-op) | no |
+| `Input.SetConfig`, `Switch.SetConfig` (no-op, same values) | no |
+| `Script.Create`, `Script.Delete` | **yes** |
+| `Sys.SetConfig` (even a no-op) | **yes** |
+
+  So a re-upload of an existing script emits **no** `config_changed` of its own; the event comes from
+  the script's own init. `Script.Start` on an already-running script returns `{"was_running":true}` and
+  does nothing.
+- **`config_changed` is lossy**: nothing is recorded while the daemon (which is also the MQTT broker)
+  is down, so `cfg_rev` has gaps. Absence of the event is not evidence that nothing happened.
+
+Query these over the whole retention before touching hardware.
+

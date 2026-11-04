@@ -51,7 +51,7 @@ func TestFormatDigest_MultipleNotices(t *testing.T) {
 	now := time.Date(2026, 6, 30, 8, 0, 0, 0, time.UTC)
 	notices := []events.Event{
 		{Ts: float64(now.Add(-1 * time.Hour).Unix()), DeviceID: "garden", Component: "garden", Event: "garden.plan"},
-		{Ts: float64(now.Add(-2 * time.Hour).Unix()), DeviceID: "pool-pump", Component: "solar", Event: "pool.solar_start"},
+		{Ts: float64(now.Add(-2 * time.Hour).Unix()), DeviceID: "pool-pump", Component: "pool", Event: "pool.pump_start"},
 		{Ts: float64(now.Add(-3 * time.Hour).Unix()), DeviceID: "motion-1", Component: "motion", Event: "motion.absent"},
 	}
 	subject, body := formatDigest(notices, now)
@@ -63,7 +63,7 @@ func TestFormatDigest_MultipleNotices(t *testing.T) {
 	if lines != 3 {
 		t.Errorf("body line count = %d, want 3:\n%s", lines, body)
 	}
-	for _, want := range []string{"garden.plan", "pool.solar_start", "motion.absent"} {
+	for _, want := range []string{"garden.plan", "pool.pump_start", "motion.absent"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("digest body missing %q:\n%s", want, body)
 		}

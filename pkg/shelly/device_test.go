@@ -236,6 +236,23 @@ func TestChannel_NoResolverStaysDiscarded(t *testing.T) {
 	}
 }
 
+// TestDeviceMqttChannels_Init_NoClientInContext_ReturnsError is the
+// regression test for #565's review: mqtt.GetClient(ctx) returning nil (a
+// ctx that was never wrapped by a composition root's
+// mqtt.NewContextWithClient — see myhome/ctl/mcp/mcp.go) used to be
+// dereferenced unconditionally a line later, panicking instead of failing
+// cleanly. A context.Background() here stands in for exactly that case: no
+// composition root ever touched it, mirroring what myhome ctl mcp's
+// server.ServeStdio(srv) built for itself before #565's fix wired the
+// client into its per-session ctx.
+func TestDeviceMqttChannels_Init_NoClientInContext_ReturnsError(t *testing.T) {
+	var m *DeviceMqttChannels
+	_, err := m.Init(context.Background(), "shellytest-565-nilclient-regression")
+	if err == nil {
+		t.Fatal("expected error when ctx carries no pkg/shelly/mqtt.Client, got nil")
+	}
+}
+
 func TestChannel_MqttReadyDoesNotCallResolver(t *testing.T) {
 	t.Cleanup(func() { types.SetHostResolver(nil) })
 	called := false

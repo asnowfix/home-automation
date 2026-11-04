@@ -181,6 +181,7 @@ func gardenWrappedJob(id int, handlerCall, timespec string) map[string]interface
 // fix this silently no-ops (jobId stays -1, "WARNING: handleWateringStart()
 // schedule not found", no Schedule.Update call) instead of erroring loudly.
 func TestGarden_UpdatePlanSchedule_MatchesWrappedCode(t *testing.T) {
+	t.Parallel()
 	vm, setJobs, updates, logLines := gardenVMWithScheduleList(t)
 
 	setJobs([]map[string]interface{}{
@@ -208,6 +209,7 @@ func TestGarden_UpdatePlanSchedule_MatchesWrappedCode(t *testing.T) {
 // success ("Garden schedules verified"), not the FATAL missing-schedules
 // message, and cb must still run.
 func TestGarden_VerifySchedules_MatchesWrappedCode(t *testing.T) {
+	t.Parallel()
 	vm, setJobs, _, logLines := gardenVMWithScheduleList(t)
 
 	setJobs([]map[string]interface{}{
@@ -260,6 +262,7 @@ func zonePlanIDs(t *testing.T, raw string) map[int]int {
 // "lawn") water together as soon as either crosses its trigger, while massifs
 // (zone 2, group "beds") is gated independently by its own trigger.
 func TestGarden_LawnFiresTogetherBedsIndependent(t *testing.T) {
+	t.Parallel()
 	vm := gardenVM(t)
 
 	// The lawn zones ship disabled (23e7307, "disable zone-0/1 by default, as
@@ -297,6 +300,7 @@ func TestGarden_LawnFiresTogetherBedsIndependent(t *testing.T) {
 // live ZONES config rather than hardcoding it, so the test tracks whatever
 // the script's current default is instead of silently going stale.
 func TestGarden_GroupCadenceGate(t *testing.T) {
+	t.Parallel()
 	vm := gardenVM(t)
 
 	// Same reason as above: with the shipped defaults the lawn zones are
@@ -354,6 +358,7 @@ func TestGarden_GroupCadenceGate(t *testing.T) {
 // simply started failing when the default flipped, blocking every PR into
 // main rather than reporting a garden regression.
 func TestGarden_DisabledZoneStaysOutOfPlan(t *testing.T) {
+	t.Parallel()
 	vm := gardenVM(t)
 
 	if enabled := mustEval(t, vm, `ZONES[0].enabled || ZONES[1].enabled`).ToBoolean(); enabled {

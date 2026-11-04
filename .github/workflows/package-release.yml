@@ -180,6 +180,7 @@ jobs:
           go generate -v ./myhome/ctl/pool
           go generate -v ./myhome/ctl/garden
           go generate -v ./internal/myhome/shelly/script
+          go generate -v ./internal/shelly/scripts/jstarget
           go generate -v ./...
           if (Test-Path internal/myhome/ui/static/bulma.min.css) { ls internal/myhome/ui/static/bulma.min.css } else { Write-Host "bulma.min.css not found!" }
       - id: build
@@ -307,6 +308,13 @@ jobs:
           artifacts: "*.deb,${{ needs.package-msi.outputs.msi_file }}"
           tag: v${{ steps.version.outputs.release }}
           prerelease: false
+          # Policy (#583): releases are created as DRAFTS on purpose. `latest`
+          # (what linux/systemd/update.sh installs nightly) intentionally lags
+          # the newest release: it is published and marked latest only after a
+          # manual install on the NAS plus one day in production. The fleet
+          # thus exercises the downgrade path continuously, so never add a
+          # "never downgrade" rule. The v0.12.x -> v0.11.12 boundary was
+          # unsafe (pre-#458 KVS rename).
           draft: true
           replacesArtifacts: true
           generateReleaseNotes: true

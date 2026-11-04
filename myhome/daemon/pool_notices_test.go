@@ -12,6 +12,20 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// newTestEventsStorage returns an in-memory events.Storage for tests, closed
+// automatically via t.Cleanup. Formerly lived in the now-deleted
+// pool_runtime_tracker_test.go (see #406); moved here because
+// TestPoolNoticesOnEventIgnoresUnrelatedEvents is its only remaining caller.
+func newTestEventsStorage(t *testing.T) *events.Storage {
+	t.Helper()
+	s, err := events.NewStorage(logr.Discard(), ":memory:")
+	if err != nil {
+		t.Fatalf("events.NewStorage: %v", err)
+	}
+	t.Cleanup(s.Close)
+	return s
+}
+
 func TestRoundTo(t *testing.T) {
 	cases := []struct {
 		v      float64

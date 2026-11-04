@@ -76,3 +76,4 @@ internal/myhome/ui/static/htmx.min.js
 myhome/ctl/pool/pool_defaults_generated.go
 myhome/ctl/garden/garden_defaults_generated.go
 internal/myhome/shelly/script/pool_kvs_generated.go
+internal/shelly/scripts/jstarget/acorn.js

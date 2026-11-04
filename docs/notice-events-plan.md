@@ -41,8 +41,7 @@ Each phase is committed separately with this checklist updated in the same commi
 | Event | Component | Origin | Severity assignment |
 |---|---|---|---|
 | `pool.run_window` | `pool` (script) | on-device, via MQTT `+/events/rpc` | `severityFor()` in gen2 listener |
-| `pool.pump_start` / `pool.pump_stop` | `pool` (script) | on-device | `severityFor()` |
-| `pool.solar_start` / `pool.solar_stop` | `solar` | Go daemon (`SolarAutomation.step`) | set directly to `notice` |
+| `pool.pump_start` / `pool.pump_stop` | `pool` (script) | on-device, incl. solar-triggered starts/stops (`reason` field distinguishes them — see #406) | `severityFor()` |
 | `garden.plan` / `garden.skip_rain` / `garden.skip_frost` / `garden.plan_fallback` | `garden` (script) | on-device | `severityFor()` |
 | `motion.absent` | `motion` | derived in `myhome/notice` from `motion.detected` + `occupancy.IsOccupied` | set directly to `notice` |
 | `motion.night` | `motion` | derived in `myhome/notice` from `motion.detected` + night window | set directly to `notice` |

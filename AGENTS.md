@@ -82,6 +82,14 @@ Read the skill before writing or reviewing any Shelly JavaScript, or before touc
 follows is only the set of rules whose violation has actually destroyed something — kept here
 because it must not depend on a skill triggering.
 
+**Reducing a script's heap footprint** is its own methodology, longer than fits here:
+`docs/shelly-heap-allocation.md` covers where the ~23 KB heap actually goes, allocation sources ranked
+by measured cost, and the differential measurement recipe. Its one-line summary — **hunt allocation,
+not bytes** — is measured, not theorised: trimming 1519 minified bytes moved `mem_peak` by zero, while
+replacing one per-call closure with a fixed pool moved it ~1050 bytes and turned an `out_of_memory`
+into a working script. Note especially the correction box in its §1.1: **there is no single
+static→heap multiplier**, and using one underestimated a string deletion by 3×.
+
 ### The kill list
 
 Each of these has terminated a running script on real hardware. A dead script on
@@ -90,7 +98,13 @@ dispatches through `script.eval` and silently becomes a no-op.
 
 1. **Never send an unwrapped `Script.Eval`**, including ad-hoc debug probes. Always
    `(function(){try{ ... }catch(e){return "ERR:"+e}})()` — the return value survives wrapping, so
-   there is no case where skipping it is justified.
+   there is no case where skipping it is justified. Wrapping genuinely contains a `ReferenceError`
+   from an undefined identifier, not just a thrown value — measured 2026-09-02 on **both** Plus1/1.7.5
+   and **Pro1/2.0.0 (the production pump)**, where the error came back as a return value and the script
+   stayed alive. An earlier note claiming a `ReferenceError` escapes the `try`/`catch` does not
+   reproduce; see `.claude/skills/shelly/references/scripting.md`. Prefer the `typeof`-guarded,
+   quote-free probe form documented there, so a probe pointed at the wrong build degrades instead of
+   throwing.
 2. **Never leave a callback unwrapped.** A throw inside any `addEventHandler`, `addStatusHandler`,
    `MQTT.subscribe` callback or queued task kills the script the same way. Wrap the body *in place*,
    not via a higher-order function — an extra call frame per dispatch matters on these devices.
@@ -136,8 +150,10 @@ Rules for sub-agents:
 3. Do not end your turn waiting on a background task.
 
 If you are the **coordinating** agent and a sub-agent reports "waiting for the background test run",
-treat it as finished: review its worktree (`git -C <worktree> status` / `diff`), run the
-verification yourself, and commit on its behalf. Do not re-launch it — the work is usually already
+treat it as finished: review its branch (`git log <branch>`, `git diff <base>..<branch>`), run the
+verification yourself, and have it commit first (`SendMessage`) if work is uncommitted — never
+`git -C <sibling worktree>`, which the isolation guard refuses. If the agent is dead, recover its
+work from a non-isolated terminal or a session started in the main checkout (see CLAUDE.md). Do not re-launch it — the work is usually already
 complete and correct.
 
 #### Testing Requirements
@@ -515,6 +531,10 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
   has timed out at 14s and even 45s immediately after a start, then answered normally a minute
   later. Use `-T 60s` and re-poll; do not conclude the device is wedged. The default `-T 14s` is too
   short for the Pro1 generally.
+- **A bare `<device>` name needs a daemon; `.local` or an IP does not.** `LookupDevices()` resolves
+  `.local` names via mDNS and IPs directly — neither touches the daemon. A bare name only resolves
+  via the `device.lookup` RPC, which times out with no daemon running. See the `<device>` addressing
+  note in `CLAUDE.md`'s Commands section, and issue #599.
 
 #### Examples
 

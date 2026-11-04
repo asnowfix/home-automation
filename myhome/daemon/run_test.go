@@ -3,8 +3,10 @@ package daemon
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/go-logr/logr"
 	"github.com/spf13/viper"
 )
@@ -73,4 +75,98 @@ func writeConfig(t *testing.T, dir, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write test config: %v", err)
 	}
+}
+
+// TestVacuumConfigFromEnv verifies the robot vacuum follows the Beem/SFR
+// pattern (#626): MYHOME_VACUUM_* environment variables (the packaged daemon's
+// .env) reach the vacuum service, which is enabled only when both the BLID and
+// the password are set.
+func TestVacuumConfigFromEnv(t *testing.T) {
+	saved := options.Flags
+	t.Cleanup(func() { options.Flags = saved })
+
+	newViper := func() *viper.Viper {
+		v := viper.New()
+		v.SetEnvPrefix("MYHOME")
+		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+		v.AutomaticEnv()
+		return v
+	}
+
+	for _, env := range []map[string]string{
+		{},
+		{"MYHOME_VACUUM_BLID": "0123456789ABCDEF"},
+		{"MYHOME_VACUUM_PASSWORD": "test-password"},
+	} {
+		for _, k := range []string{"MYHOME_VACUUM_BLID", "MYHOME_VACUUM_PASSWORD", "MYHOME_VACUUM_HOST"} {
+			t.Setenv(k, env[k])
+		}
+		readVacuumConfig(newViper())
+		if vacuumConfig().Enabled() {
+			t.Fatalf("enabled with only %v set", keys(env))
+		}
+	}
+
+	t.Setenv("MYHOME_VACUUM_BLID", "0123456789ABCDEF")
+	t.Setenv("MYHOME_VACUUM_PASSWORD", "test-password")
+	t.Setenv("MYHOME_VACUUM_HOST", "192.0.2.50")
+	readVacuumConfig(newViper())
+	if vacuumConfig().Wake {
+		t.Fatal("wake probe on without MYHOME_VACUUM_WAKE")
+	}
+	t.Setenv("MYHOME_VACUUM_WAKE", "true")
+	readVacuumConfig(newViper())
+	cfg := vacuumConfig()
+	if !cfg.Wake {
+		t.Fatal("MYHOME_VACUUM_WAKE=true not read")
+	}
+	if !cfg.Enabled() {
+		t.Fatal("disabled with MYHOME_VACUUM_BLID and MYHOME_VACUUM_PASSWORD set")
+	}
+	if cfg.BLID != "0123456789ABCDEF" || cfg.Password != "test-password" || cfg.Host != "192.0.2.50" {
+		t.Fatalf("config not read from the environment: blid=%q host=%q", cfg.BLID, cfg.Host)
+	}
+}
+
+// TestIRobotConfigFromEnv verifies the iRobot cloud account (#628) is read from
+// MYHOME_IROBOT_EMAIL / MYHOME_IROBOT_PASSWORD, independently of the robot's own
+// MYHOME_VACUUM_* credentials, and that room sync is enabled only with both.
+func TestIRobotConfigFromEnv(t *testing.T) {
+	saved := options.Flags
+	t.Cleanup(func() { options.Flags = saved })
+	newViper := func() *viper.Viper {
+		v := viper.New()
+		v.SetEnvPrefix("MYHOME")
+		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+		v.AutomaticEnv()
+		return v
+	}
+	for _, k := range []string{"MYHOME_VACUUM_BLID", "MYHOME_VACUUM_PASSWORD", "MYHOME_VACUUM_HOST"} {
+		t.Setenv(k, "")
+	}
+
+	t.Setenv("MYHOME_IROBOT_EMAIL", "owner@example.com")
+	t.Setenv("MYHOME_IROBOT_PASSWORD", "")
+	readVacuumConfig(newViper())
+	if vacuumConfig().CloudEnabled() {
+		t.Fatal("cloud enabled without MYHOME_IROBOT_PASSWORD")
+	}
+
+	t.Setenv("MYHOME_IROBOT_PASSWORD", "account-password")
+	readVacuumConfig(newViper())
+	cfg := vacuumConfig()
+	if !cfg.CloudEnabled() || cfg.IRobotEmail != "owner@example.com" || cfg.IRobotPassword != "account-password" {
+		t.Fatalf("iRobot account not read from the environment (email=%q)", cfg.IRobotEmail)
+	}
+	if cfg.Enabled() {
+		t.Fatal("the iRobot account alone enabled the robot connection")
+	}
+}
+
+func keys(m map[string]string) []string {
+	out := []string{}
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

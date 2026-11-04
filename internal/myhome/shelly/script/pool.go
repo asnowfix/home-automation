@@ -3,6 +3,7 @@ package script
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/asnowfix/home-automation/pkg/shelly"
@@ -251,6 +252,23 @@ func getDesiredSchedules(scriptId int) []scheduleDefinition {
 	}
 }
 
+// wrapScheduleJobCode wraps a schedule job's handler call in the standard
+// (function(){try{...}catch(e){...}})() form (AGENTS.md kill list rule 1),
+// so an uncaught throw inside the handler is contained instead of killing
+// the whole script -- a schedule job dispatches through script.eval exactly
+// like the ad-hoc probes that rule targets. This restores the protection
+// that pool-pump.js's own wrapScheduleCall() used to provide before it
+// became dead code (createSchedules() lost its only caller in #504) and was
+// removed in #526: schedule creation moved to Go, but the wrapping did not
+// move with it until now (#528).
+//
+// The catch binding is referenced via "if(e&&false){}" rather than left
+// empty -- AGENTS.md kill list rule 5: the minifier reduces an empty
+// "catch (e) {}" to "catch {}", a syntax error on Espruino.
+func wrapScheduleJobCode(code string) string {
+	return "(function(){try{" + code + "}catch(e){if(e&&false){}}})()"
+}
+
 // buildJobSpec creates a JobSpec from a schedule definition
 func buildJobSpec(scriptId int, def scheduleDefinition) schedule.JobSpec {
 	return schedule.JobSpec{
@@ -260,13 +278,106 @@ func buildJobSpec(scriptId int, def scheduleDefinition) schedule.JobSpec {
 			Method: "script.eval",
 			Params: map[string]interface{}{
 				"id":   scriptId,
-				"code": def.Code,
+				"code": wrapScheduleJobCode(def.Code),
 			},
 		}},
 	}
 }
 
-// reconcileSchedules deletes all pool-pump schedules and recreates them
+// poolPumpScheduleHandlerNames returns the bare handler-call strings (e.g.
+// "handleDailyCheck()") that make up every desired schedule job's code --
+// the same list getDesiredSchedules() draws from, kept as the single
+// authority for "which handler names identify a pool-pump schedule" so
+// isPoolPumpScheduleCode below can't drift from it.
+func poolPumpScheduleHandlerNames() []string {
+	defs := getDesiredSchedules(0) // scriptId is not used to derive Code
+	names := make([]string, len(defs))
+	for i, def := range defs {
+		names[i] = def.Code
+	}
+	return names
+}
+
+// isPoolPumpScheduleCode reports whether a Schedule.List job's code field
+// belongs to a pool-pump schedule, matching by containment rather than
+// equality (mirroring the JS side's onWindowJobs()/updateScheduleMode()/
+// verifySchedules() -- see the comment above buildJobSpec). Containment is
+// required so this recognizes pool-pump schedules regardless of whether
+// their code is bare (devices provisioned before #528) or wrapped (devices
+// provisioned after it) -- otherwise a re-provisioning run would fail to
+// find and delete a device's already-wrapped jobs before recreating them,
+// leaving duplicates behind.
+func isPoolPumpScheduleCode(code string) bool {
+	if code == "" {
+		return false
+	}
+	for _, name := range poolPumpScheduleHandlerNames() {
+		if strings.Contains(code, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// scheduleState is the on-device Enable/Timespec of an existing schedule
+// job, keyed by which handler its code calls.
+type scheduleState struct {
+	Enable   bool
+	Timespec string
+}
+
+// preservedScheduleState scans existing for pool-pump schedule jobs
+// belonging to scriptId and returns, per handler name (e.g.
+// "handleMorningStart()"), the on-device Enable/Timespec that a reconcile
+// must carry forward. Matching is by handler-name containment
+// (isPoolPumpScheduleCode's mechanism), so it recognizes a job's code
+// whether it is bare (pre-#528) or wrapped (post-#528).
+func preservedScheduleState(existing []schedule.Job, scriptId int) map[string]scheduleState {
+	preserved := make(map[string]scheduleState, len(existing))
+	for _, job := range existing {
+		if job.Calls == nil || len(job.Calls) == 0 {
+			continue
+		}
+		call := job.Calls[0]
+		if call.Method != "script.eval" {
+			continue
+		}
+		params, ok := call.Params.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		code, _ := params["code"].(string)
+		jobId, _ := params["id"].(float64)
+		if int(jobId) != scriptId {
+			continue
+		}
+		for _, name := range poolPumpScheduleHandlerNames() {
+			if strings.Contains(code, name) {
+				preserved[name] = scheduleState{Enable: job.Enable, Timespec: job.Timespec}
+				break
+			}
+		}
+	}
+	return preserved
+}
+
+// reconcileSchedules deletes all pool-pump schedules and recreates them,
+// updating each job's code (e.g. to pick up #528's try/catch wrapping)
+// while carrying forward the Enable flag and Timespec of any job that
+// already exists for that handler.
+//
+// getDesiredSchedules() returns fresh-install, winter-mode defaults. Before
+// #589, reconcile applied those defaults unconditionally on every run,
+// which reset an operational device's schedule state each time `pool add`
+// or `pool update` ran: on production this disabled the morning start and
+// evening stop (both deliberately enabled for the day's computed window)
+// and enabled the night jobs (deliberately disabled in summer mode),
+// arming an unauthorized 23:15 pump run. pool-pump.js's own @sunrise daily
+// check (handleDailyCheck()) re-asserts the correct enable flags and
+// windows, but only once a day -- so the excursion could last up to ~23
+// hours. Preserving existing state makes re-provisioning idempotent on an
+// already-configured device: only a handler with no existing job (a
+// genuinely new schedule) gets the getDesiredSchedules() default.
 func (s *PoolService) reconcileSchedules(ctx context.Context, via types.Channel, sd *shelly.Device, scriptId int) error {
 	fmt.Printf("  → Managing schedules on %s...\n", sd.Name())
 
@@ -277,6 +388,16 @@ func (s *PoolService) reconcileSchedules(ctx context.Context, via types.Channel,
 	existing, err := s.listSchedules(ctx, via, sd)
 	if err != nil {
 		return fmt.Errorf("failed to list schedules: %w", err)
+	}
+
+	// Carry forward each handler's on-device Enable/Timespec, if it already
+	// has a job, instead of applying getDesiredSchedules()'s defaults.
+	preserved := preservedScheduleState(existing, scriptId)
+	for i := range desired {
+		if state, ok := preserved[desired[i].Code]; ok {
+			desired[i].Enable = state.Enable
+			desired[i].Timespec = state.Timespec
+		}
 	}
 
 	// Delete all pool-pump related schedules first
@@ -302,9 +423,9 @@ func (s *PoolService) reconcileSchedules(ctx context.Context, via types.Channel,
 			continue
 		}
 
-		// Check if this is a pool-pump schedule by code pattern
-		if code == "" || !(code == "handleDailyCheck()" || code == "handleMorningStart()" ||
-			code == "handleEveningStop()" || code == "handleNightStart()" || code == "handleNightStop()") {
+		// Check if this is a pool-pump schedule by code pattern (bare or
+		// wrapped -- see isPoolPumpScheduleCode).
+		if !isPoolPumpScheduleCode(code) {
 			continue
 		}
 
@@ -326,7 +447,7 @@ func (s *PoolService) reconcileSchedules(ctx context.Context, via types.Channel,
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	fmt.Printf("    Schedules recreated: %d created\n", len(desired))
+	fmt.Printf("    Schedules recreated: %d created (%d preserved existing enable/timespec)\n", len(desired), len(preserved))
 	return nil
 }
 
@@ -427,7 +548,7 @@ type UpdateResult struct {
 	MissingKVS          []string // required KVS config keys absent from the device
 	StaleKVS            []string // script/pool-pump/* keys on device that are not in the known set
 	ScriptUpdated       bool     // true if pool-pump.js was re-uploaded (version changed or forced)
-	SchedulesReconciled bool     // true if schedules were reconciled (Pro3 only)
+	SchedulesReconciled bool     // true if schedules were reconciled (every device, Pro1 and Pro3 alike -- #589)
 	WaterSupplyInvertOK bool     // true if input:0 invert was already correct
 	WaterSupplyFixed    bool     // true if input:0 invert was corrected
 	Errors              []string
@@ -438,7 +559,8 @@ type UpdateResult struct {
 //   - reports (returns) stale script/pool-pump/* KVS keys not in the known set
 //   - checks and fixes the water-supply input (input:0) invert flag
 //   - uploads pool-pump.js if its hash has changed (or force=true)
-//   - reconciles schedules on Pro3 devices
+//   - reconciles schedules (every device -- Pro1 and Pro3 both have and run
+//     schedules; there is no Pro3-only restriction, see #589)
 func (s *PoolService) UpdateDevice(ctx context.Context, via types.Channel, sd *shelly.Device, force bool, noMinify bool) (*UpdateResult, error) {
 	result := &UpdateResult{
 		DeviceName: sd.Name(),
@@ -537,18 +659,19 @@ func (s *PoolService) UpdateDevice(ctx context.Context, via types.Channel, sd *s
 		result.ScriptUpdated = uploadedID != 0
 	}
 
-	// Reconcile schedules on Pro3 devices.
+	// Reconcile schedules on every device -- Pro1 and Pro3 alike. Gating
+	// this on DeviceType == "pro3" (as this code did before #589) skipped
+	// reconciliation entirely on a Pro1, which is what the production pump
+	// (filtration-hiver) is; Pro1 devices plainly have and run schedules.
 	// schedules reference the script by ID, so we fetch the current ID after upload.
-	if result.DeviceType == "pro3" {
-		scriptStatus, err := pkgscript.ScriptStatus(ctx, sd, via, scriptName)
-		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("failed to get script status for schedule reconciliation: %v", err))
-		} else if scriptStatus != nil {
-			if err := s.reconcileSchedules(ctx, via, sd, int(scriptStatus.Id)); err != nil {
-				result.Errors = append(result.Errors, fmt.Sprintf("failed to reconcile schedules: %v", err))
-			} else {
-				result.SchedulesReconciled = true
-			}
+	scriptStatus, err := pkgscript.ScriptStatus(ctx, sd, via, scriptName)
+	if err != nil {
+		result.Errors = append(result.Errors, fmt.Sprintf("failed to get script status for schedule reconciliation: %v", err))
+	} else if scriptStatus != nil {
+		if err := s.reconcileSchedules(ctx, via, sd, int(scriptStatus.Id)); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("failed to reconcile schedules: %v", err))
+		} else {
+			result.SchedulesReconciled = true
 		}
 	}
 

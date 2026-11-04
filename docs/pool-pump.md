@@ -29,6 +29,123 @@
 
 ---
 
+## Water Supply Input — a LEVEL, not an event
+
+**This is normal operation. Do not troubleshoot it as a fault.** It has cost more than one
+investigation already.
+
+`input:0` on the pump device is the **water-supply level** reported by a water gauge. The gauge fills
+the pool up to a target level and then stops. The device surfaces changes as *events*, and
+`handleInputEvent()` → `setWater()` consumes them as edges, but the underlying signal is a **level**,
+not an edge — that distinction is what makes the observed behaviour make sense.
+
+### What this looks like in normal operation
+
+Running the pump draws the level down, the gauge trips, the pump stops until the gauge has refilled
+to target, then the pump resumes. Measured on `filtration-hiver`:
+
+| date | pump ran | protected | released | protection lasted |
+|---|---|---|---|---|
+| 2026-08-18 | 11:12:44 | 11:20:50 | 11:47:54 | ~27 min |
+| 2026-08-19 | 12:17:01 | 12:23:29 | 12:43:47 | ~20 min |
+
+So a mid-window stop of roughly 20–30 minutes, a few minutes after the pump starts, with
+`pool.pump_stop {"reason":"water supply"}`, **is the interlock working**. The durations vary because
+they track the refill, not a timer.
+
+### The supply is a TANK, and rain refills it
+
+**Maintainer, 2026-08-23.** The water the gauge tops the pool up from is a **tank**, not an unlimited
+mains feed. So how often the interlock fires tracks the tank level, which tracks recent rainfall.
+
+This is the difference between two readings of the same observation:
+
+| dates | interlock | why |
+|---|---|---|
+| 2026-08-18, 08-19 | tripped a few minutes into every window, ~20–30 min each | tank low |
+| 2026-08-21, 08-22 | **did not fire at all** | a rain storm had refilled the tank |
+
+**So the absence of trips is not evidence that anything was fixed.** It means it rained. I recorded
+"the interruption did not recur, so my earlier framing over-generalised" — that was half right: it is
+not a daily certainty, but the reason is the tank, not chance. It will return in dry weather.
+
+**The consequence worth thinking about:** a dry spell lowers the tank, which makes the interlock fire
+more often, which costs filtration time — during exactly the weather when evaporation is highest and
+the pool most needs filtering. The failure mode is self-reinforcing rather than random, and that is
+the case #524's runtime recovery is really for.
+
+Unknown and not assumed here: whether the tank also has a mains top-up, what its capacity is, and
+what refill rate the gauge achieves. Anyone tuning thresholds should establish those first rather
+than inferring them from pump behaviour.
+
+### Two ways this has already misled an investigation
+
+1. **`F_WATER` is a latch that clears.** Probing it hours after the event shows `false` and looks
+   like protection never fired. It reflects *now*, not the day.
+2. **`Switch.GetStatus.input.state` and `F_WATER` can legitimately disagree**, because one is the
+   instantaneous level and the other is the last edge the script consumed. A single disagreeing
+   sample is not evidence of a bug.
+
+If the pump appears to stop mid-window for no reason, **look for `pool.water_supply_protected` in the
+events DB first** — and remember events can be lost when the device's MQTT link flaps (#499), so
+absence is not evidence of absence.
+
+### What *is* worth acting on
+
+- The pump not reaching its turnover target because protection eats the window — that is a **supply**
+  matter (flow rate, gauge target, refill time), not a code defect. See #524 for the software half:
+  the run window is a fixed clock interval and does not compensate for time lost.
+- `F_WATER` is maintained from edges only (plus a one-time read at init) — **deliberately, not as a
+  gap**. A periodic reconciler was proposed and implemented in #523, then withdrawn: the only
+  evidence on record is one 2026-08-19 sample in the *opposite* direction from the one a safety
+  argument needs, and the issue itself says a single sample cannot distinguish a missed edge from a
+  genuine input flap. On this supply's ~30-minute flip/flop cadence, a missed edge self-corrects at
+  the next transition well before any periodic tick would fire, and no lost *protecting* edge has
+  ever been observed. See #523 for the full argument; it is relabelled `blocked-diagnosis` and stays
+  open pending real evidence rather than a hypothesis.
+
+
+### Priority: water supply overrides everything, including solar
+
+Running dry can destroy the pump, so the water-supply level is an **absolute** override — not one
+input among several. `desiredOutput()` encodes this as the first line of the policy:
+
+```js
+if (F_WATER) return -1;      // safety first, always
+```
+
+Nothing below it — manual override, solar, the run window — can re-enable the pump while the supply
+is low. **Any change to the policy ordering must keep this first.**
+
+**Now covered by `TestPoolPump_WaterSupplyOverridesSolar`** (#523, split off #527's Test 3): boots
+protected (`input:0.state=true`), publishes solar availability well above `solarStartThresholdW`
+with zero start delay, and asserts the pump stays off. Verified as a real regression check by
+temporarily removing the `if (F_WATER) return -1;` line — the test fails without it.
+
+### Solar accumulates *through* a resupply, and starts the pump when it ends
+
+The solar opinion is deliberately independent of the pump's physical state. `checkSolarHysteresis()`
+runs on every solar MQTT message and on its own periodic tick, and it is **not** gated on `F_WATER`,
+so while the pump is held off for a refill:
+
+- solar readings keep arriving and keep being evaluated;
+- `SOLAR.aboveStartSince` keeps accumulating toward `solarStartDelayMs`;
+- `F_SOLAR_WANT` can therefore *become* true during the hold.
+
+When the gauge releases, `setWater(false)` calls `reconcile("water supply off")`, and
+`desiredOutput()` — now past the `F_WATER` guard — reaches `if (F_SOLAR_WANT) return
+mapSpeedToSwitch(...)`. **The pump starts immediately at the end of the resupply**, with no wait for
+the next solar evaluation and no re-arming of the start delay.
+
+This is a consequence of #476 making `F_SOLAR_WANT` a *latched opinion* rather than a reading of the
+relay. The comment there records why: reading physical state meant a window-driven run suppressed
+solar's start hysteresis, so "solar went away" could cut a scheduled run short.
+
+**Status: correct by construction, not yet proven by test.** There is no emulator test covering
+"solar rises during a water hold, pump starts on release". Until there is, this section describes the
+intended design and a reading of the code — not verified behaviour. See #524.
+
+
 ## Button Handling (Power Cycling)
 
 The system button (`sys_btn_push` event) on both devices provides manual pump control.
@@ -287,6 +404,9 @@ Ported from the (now-deleted) Go `SolarAutomation.step()` state machine, but cal
 | On, soft target reached | and solar < `solar-start-w` | `doStop(...)` — solar gone after meeting the daily minimum |
 | On, solar < `solar-stop-w` for `solar-stop-delay` ms | | `doStop(...)` |
 | Topic stale or never received | | early return — schedule keeps running untouched |
+| Schedule mode is not `summer` (winter, or no saved mode) | (any solar level) | treated exactly like stale: solar never starts the pump, and a solar run in progress stops at the next evaluation (message or 30 s tick) |
+
+**Solar starts are summer-only (#621).** In winter mode the pump runs only on the fixed night window (23:15 → 00:15); solar surplus must not start filtration in daytime. Before #621 the mode was never consulted: 6 of 11 winter-mode days between 2026-10-09 and 2026-10-31 had solar-driven daytime starts (9 starts, 21.3 h). The hard-ceiling stop and the water-supply interlock are unaffected and apply in both modes.
 
 Re-evaluated on every solar MQTT message (`onSolarAvailable` calls `checkSolarHysteresis()` synchronously) **and** on a 30-second periodic tick (`SOLAR.tickTimer`, only allocated when `solarEnabled`), so staleness is detected even if the daemon dies mid-hold-delay and no further MQTT message ever arrives.
 
@@ -397,10 +517,23 @@ Shelly scripts are limited to **5 timers**. Current usage:
 |-------|---------|---------|
 | `TASK_TIMER` | Task queue (200 ms recurring) | Only while queue is non-empty |
 | `STATE.graceTimer` | Inter-device grace delay | During switchover only |
-| `STATE.runtimeFlushTimer` | Runtime checkpoint (60 s recurring, see #402) | Only while the pump is running |
+| `STATE.runtimeFlushTimer` | Runtime checkpoint (60 s, see #402/#547) | Only while the pump is running |
 | `SOLAR.tickTimer` | Solar hysteresis re-evaluation (30 s recurring, see #405) | Only while `solar-enabled` is true |
 
-Peak simultaneous: **4** (task queue + grace timer + runtime flush timer + solar tick timer, verified at implementation time). Well within the 5-timer limit.
+Peak simultaneous: **4** (task queue + grace timer + runtime flush timer + solar tick timer). Well
+within the 5-timer limit.
+
+**#547**: `STATE.runtimeFlushTimer` used to be a single recurring `Timer.set(60000, true, ...)`.
+On a 7h32m production run that timer returned a live handle but never fired again — the whole
+run's accrual survived only in RAM until the stop. A first fix attempt moved it onto the task
+queue's 200 ms drain via a self-requeuing task, but that leaks one `TASK_QUEUE` entry per tick for
+as long as the pump runs (`processTaskQueue()` only compacts the array once it fully drains, which
+a task that always re-queues itself before returning never allows) — a likely OOM on a long run.
+It now re-arms a **fresh one-shot** `Timer.set(60000, false, ...)` at the end of every checkpoint
+(`runtimeFlushFire()`) instead of relying on `repeat = true` to keep firing unattended for hours —
+still exactly one timer slot, held only while the pump runs, same as before #547.
+`STATE.runtimeFlushCount`/`runtimeFlushLastTs` let a hardware probe observe the chain is still
+advancing, rather than only inferring it from `STATE.runStartTs` staying put.
 
 ---
 

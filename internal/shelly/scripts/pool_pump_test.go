@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,6 +20,11 @@ import (
 )
 
 const poolPumpScriptPath = "pool-pump.js"
+
+// runStartStorageKey mirrors pool-pump.js's STORAGE_KEYS.runStart (#550): the
+// Script.storage key holding the epoch-ms of the currently-open run
+// interval, or "null" when none is open.
+const runStartStorageKey = "run-start"
 
 func readPoolPumpScript(t *testing.T) []byte {
 	t.Helper()
@@ -131,10 +137,15 @@ const (
 // assert timing, and they produce precise failure messages. When this context
 // is the binding deadline instead, the VM is killed mid-test and whatever
 // assertion runs next reports a behavioural fault that never happened.
-func poolPumpRunContext(t *testing.T) (context.Context, context.CancelFunc) {
+//
+// mc is the MQTT client the script's ctx carries (pkg/shelly/mqtt.GetClient) —
+// see pkg/shelly/mqtt/client.go. Each caller supplies its own, so tests no
+// longer share process-global MQTT client state and never need a Reset
+// between runs.
+func poolPumpRunContext(t *testing.T, mc mqtt.Client) (context.Context, context.CancelFunc) {
 	t.Helper()
 	return context.WithTimeout(
-		logr.NewContext(context.Background(), testr.New(t)),
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mc),
 		2*time.Minute,
 	)
 }
@@ -218,11 +229,9 @@ func pro1Schedules() []map[string]interface{} {
 func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	deviceState := &script.DeviceState{
@@ -307,11 +316,9 @@ func poolPumpSchedulesWrapped() []map[string]interface{} {
 func TestPoolPump_InitVerifiesWrappedSchedules(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	deviceState := &script.DeviceState{
@@ -356,9 +363,7 @@ func TestPoolPump_InitVerifiesWrappedSchedules(t *testing.T) {
 func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 
@@ -395,7 +400,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 
 	// 20s ceiling: init (up to 9s) + two water-supply transitions (up to 5s
 	// each, see below) — generous headroom, not the expected runtime.
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -476,9 +481,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 8)
 
@@ -490,7 +493,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -571,9 +574,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 8)
 
@@ -589,7 +590,7 @@ func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
 	// unaffected by #402 — cycleOutputs() bypasses activateOutput()) + two
 	// water-supply transitions (up to 5s each, see below) — generous
 	// headroom, not the expected runtime.
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -743,14 +744,12 @@ func assertSwitchOutput(t *testing.T, deviceState *script.DeviceState, want bool
 func TestPoolPump_WaterSupplyFlapFalseThenTrue(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 8)
 	deviceState := poolPumpWaterSupplyFlapDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -834,14 +833,12 @@ func TestPoolPump_WaterSupplyFlapFalseThenTrue(t *testing.T) {
 func TestPoolPump_WaterSupplyFlapTrueThenFalse(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 8)
 	deviceState := poolPumpWaterSupplyFlapDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -987,9 +984,7 @@ func parseKVSFloat(t *testing.T, deviceState *script.DeviceState, key string) fl
 func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 
@@ -1004,7 +999,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1077,7 +1072,7 @@ func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
 // Script.storage isn't reset between phases, only whatever the running
 // script itself wrote to it, exactly like Script.Stop/Script.Start on a
 // real device reusing the same on-flash storage.
-func runPoolPumpPhase(t *testing.T, buf []byte, deviceState *script.DeviceState) (stop func()) {
+func runPoolPumpPhase(t *testing.T, buf []byte, deviceState *script.DeviceState, mc mqtt.Client) (stop func()) {
 	t.Helper()
 	// KVS (unlike Storage) is deliberately NOT reset between phases either —
 	// but that means "schedule-mode" is already present in deviceState.KVS
@@ -1088,7 +1083,7 @@ func runPoolPumpPhase(t *testing.T, buf []byte, deviceState *script.DeviceState)
 	// it first so the predicate can only be satisfied by a fresh write.
 	deviceState.DeleteKVSValue("script/pool-pump/schedule-mode")
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	done := make(chan error, 1)
 	go func() {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
@@ -1171,9 +1166,7 @@ func localDayNumber(epochSec int64) int64 {
 func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	cs := pro3ComponentStatus()
@@ -1190,7 +1183,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 	// --- Phase 1: pump runs briefly, then a real water-supply-ON event
 	// stops it, which calls stopRuntimeAccounting() -> persistRuntimeState()
 	// -> the script's own storeStorageValue() write. ---
-	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
 	time.Sleep(1200 * time.Millisecond)
 	injector <- shellyInputEvent(0, true)
 	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
@@ -1218,7 +1211,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 	cs2["input:0"] = map[string]interface{}{"id": 0, "state": true}
 	deviceState.ComponentStatus = cs2
 
-	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop2()
 
 	restoredSec := parseKVSInt(t, deviceState, "script/pool-pump/runtime-sec")
@@ -1235,6 +1228,102 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 	}
 }
 
+// TestPoolPump_MissedStopReconciledAtNextBoot is #550's lost-event closer:
+// a transition can only be missed while the script itself is not running
+// (noteRelayTransition() sees every transition the instant the script is up
+// — see its comment above applyDone()), so the whole class is closed by
+// reconciling against real hardware at the NEXT boot, in enforceOutputState(),
+// rather than by any in-run polling loop.
+//
+// Phase 1 starts with the relay already on (enforceOutputState()'s existing
+// resume path opens an interval and — per #550 — mirrors STATE.runStartTs to
+// Script.storage["run-start"]). The script is then killed via context
+// cancellation, NOT a real stop event — simulating a crash: nothing ever
+// calls stopRuntimeAccounting(), so the "run-start" marker is left set.
+// Phase 2 starts with the relay OFF (as if it were switched off, or the
+// device itself rebooted, during the outage) against the SAME DeviceState.
+//
+// enforceOutputState() must see hardware OFF but a still-open "run-start"
+// marker and clear it -- crediting NOTHING for the outage span. An earlier
+// version of reconcileMissedStop() credited "now - restoredStartTs", which
+// is the wrong direction: the real stop happened at some unknown point
+// DURING the outage, strictly before "now", so crediting up to "now" always
+// over-credits, by an amount equal to however long the pump was actually off
+// before this restart. That is unbounded (an outage can last hours or days,
+// #530 saw days) and silently teaches #526's runtime recovery that the day's
+// filtration is already satisfied when it may not be -- the failure mode
+// #550's PR body discusses under #547. Crediting zero instead makes the
+// worst case a bounded UNDER-credit (a cost in electricity, not water
+// quality), which is why this test asserts NO growth in
+// Script.storage["runtime"].sec across the reconciliation, not a specific
+// positive amount.
+func TestPoolPump_MissedStopReconciledAtNextBoot(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mc := mqtt.NewMockClient()
+
+	cs := pro1ComponentStatus()
+	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true} // pump on at boot
+
+	deviceState := &script.DeviceState{
+		KVS:             pro1KVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: cs,
+		Schedules:       pro1Schedules(),
+	}
+
+	// --- Phase 1: pump resumes at boot (already on), runs briefly so
+	// startRuntimeAccounting() persists Script.storage["run-start"], then the
+	// script is killed by cancelling its context — no stop event, no
+	// stopRuntimeAccounting(), the marker is never cleared. ---
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
+	time.Sleep(1200 * time.Millisecond)
+	stop1()
+
+	runStartRaw, ok := deviceState.StorageValue(runStartStorageKey)
+	if !ok {
+		t.Fatalf("setup: phase 1 never persisted Script.storage[%q]", runStartStorageKey)
+	}
+	if runStartRaw == "null" || runStartRaw == nil {
+		t.Fatalf("setup: phase 1's Script.storage[%q] = %v, want an open (non-null) marker", runStartStorageKey, runStartRaw)
+	}
+	// startRuntimeAccounting() never itself calls persistRuntimeState() (only
+	// a genuine day-rollover inside ensureRuntimeDay() would), so this is
+	// whatever loadState() wrote during phase 1's own init — before any real
+	// elapsed time could have accrued to it. This is the "before" figure the
+	// fix must not grow across phase 2's reconciliation.
+	phase1Storage := readRuntimeStorage(t, deviceState)
+
+	// --- Phase 2: a fresh script instance, relay now OFF (the missed stop),
+	// same DeviceState so Script.storage["run-start"] survives untouched. ---
+	cs2 := pro1ComponentStatus()
+	cs2["switch:0"] = map[string]interface{}{"id": 0, "output": false}
+	deviceState.ComponentStatus = cs2
+
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
+	defer stop2()
+
+	// Give the queueTask() chain (activeOutput write, scheduleMode write,
+	// THEN reconcileMissedStop() — one queued task drains per 200ms tick, and
+	// this one is queued after the others from the same enforceOutputState()
+	// call) time to fully settle, not just reach the schedule-mode KVS write
+	// runPoolPumpPhase() already waited for.
+	settlePoolPumpTaskQueue(t)
+
+	afterRaw, ok := deviceState.StorageValue(runStartStorageKey)
+	if !ok || afterRaw != "null" {
+		t.Fatalf(`expected Script.storage[%q] cleared to "null" once the missed stop was reconciled, got %v (ok=%v)`,
+			runStartStorageKey, afterRaw, ok)
+	}
+
+	restoredStorage := readRuntimeStorage(t, deviceState)
+	if restoredStorage.Sec != phase1Storage.Sec {
+		t.Fatalf(`Script.storage["runtime"].sec grew from %v to %v across a missed-stop reconciliation -- `+
+			`the outage span was credited instead of discarded, reintroducing the over-credit bug`,
+			phase1Storage.Sec, restoredStorage.Sec)
+	}
+}
+
 // TestPoolPump_RuntimeAccounting_PreviousDayRestartResets verifies the
 // day-rollover reset using the current {sec, ts} format end to end across a
 // genuine two-phase restart (unlike TestPoolPump_RuntimeAccounting_
@@ -1247,9 +1336,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 func TestPoolPump_RuntimeAccounting_PreviousDayRestartResets(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	deviceState := &script.DeviceState{
 		KVS:             controllerKVS(),
@@ -1258,13 +1345,13 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartResets(t *testing.T) {
 		Schedules:       poolPumpSchedules(),
 	}
 
-	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
 	stop1()
 
 	yesterday := time.Now().AddDate(0, 0, -1)
 	seedRuntimeStorage(deviceState, 43200, yesterday.Unix()) // 12h — clearly stale if carried over
 
-	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop2()
 
 	got := readRuntimeStorage(t, deviceState)
@@ -1273,6 +1360,142 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartResets(t *testing.T) {
 	}
 	if localDayNumber(int64(got.Ts)) != localDayNumber(time.Now().Unix()) {
 		t.Errorf(`Script.storage["runtime"].ts after cross-day restart = %v, want today`, got.Ts)
+	}
+}
+
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit
+// is #530's regression test. It seeds the exact condition confirmed live on
+// `filtration-hiver` before it was hand-defused (a runtime record whose ts is
+// yesterday's), but — unlike
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartResets above — runs with
+// logging ENABLED, so log()'s full body (the argument-formatting loop that
+// the crash trace on hardware shows overflowing: `typeof n === "object" ?
+// e+=JSON.stringify(n) : e+=String(n)`) actually executes on the rollover
+// path instead of returning immediately at its `if (!CONFIG.enableLogging)
+// return;` guard. controllerKVS() sets logging=false for every other test in
+// this file (output noise), which means
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartResets — despite seeding
+// the identical scenario — never once calls into the code that crashed on
+// hardware; confirmed by running it, unmodified, against the pre-#530 code:
+// it passes (see the #530 PR description for the exact command and result).
+//
+// IMPORTANT — what this test does and does not prove: goja does not enforce
+// a call-stack depth limit the way Espruino's firmware does (that gap is
+// #496), so this test CANNOT fail on the pre-#530 code and must not be read
+// as reproducing the "Too much recursion" crash. What it verifies is the
+// logic #530 requires to survive the fix: that deferring reconcileRuntimeState's
+// log() calls via queueTask() does not change the {sec, ts} decision (the
+// counter is still zeroed and ts still re-anchored to today, exactly as
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartResets checks) and that
+// init still reaches completion (schedule-mode written to KVS) even with the
+// exact log() call path that overflows on real hardware fully exercised. A
+// genuine hardware-equivalent regression test needs #496's calibrated
+// goja.SetMaxCallStackSize; until that lands, hardware verification is the
+// only thing that can actually catch a reintroduced version of this bug.
+func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mc := mqtt.NewMockClient()
+
+	kvs := controllerKVS()
+
+	deviceState := &script.DeviceState{
+		KVS:             kvs,
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(), // pump off throughout
+		Schedules:       poolPumpSchedules(),
+	}
+
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
+	stop1()
+
+	yesterday := time.Now().AddDate(0, 0, -1)
+	seedRuntimeStorage(deviceState, 18341, yesterday.Unix()) // matches the live filtration-hiver reading in #530
+
+	// runPoolPumpPhase() itself already fails the test (via waitFor's init
+	// timeout) if init never reaches the schedule-mode KVS write below — the
+	// only way that write is skipped is if something between loadState() and
+	// finishContinueInit() throws or hangs, so a regression that breaks the
+	// deferred-log path (e.g. a reference error in one of the queued
+	// closures) still fails this test even though goja cannot reproduce the
+	// stack overflow itself.
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
+	defer stop2()
+
+	got := readRuntimeStorage(t, deviceState)
+	if got.Sec != 0 {
+		t.Errorf(`Script.storage["runtime"].sec after cross-day restart (logging on) = %v, want 0 (stale total must not carry over, #469/#530)`, got.Sec)
+	}
+	if localDayNumber(int64(got.Ts)) != localDayNumber(time.Now().Unix()) {
+		t.Errorf(`Script.storage["runtime"].ts after cross-day restart (logging on) = %v, want today`, got.Ts)
+	}
+}
+
+// TestPoolPump_RuntimeAccounting_RolloverPersistsDiscardedFigure is the
+// regression test for #533 item 3: the discarded-runtime figure must survive
+// a lost log message. Before #533, the rollover branch of
+// reconcileRuntimeState() announced the discarded sec total only via a
+// deferred, best-effort log() call — nothing else recorded it, so if init
+// aborted for an unrelated reason before the queued task ran, or the script
+// was stopped, the number was gone even though the {sec:0, ts:today} reset
+// itself remained recoverable from Script.storage. #533 adds a
+// storeValue("rollover-discarded", sec) call alongside the log, mirroring
+// the figure to KVS so it survives independently of the log line. (The key
+// was originally "runtime-last-rollover-discarded", 48 chars including the
+// "script/pool-pump/" prefix -- rejected outright by real firmware, which
+// caps KVS keys at 41 chars; renamed post-hoc, see #537.)
+//
+// This seeds the same cross-day scenario as
+// TestPoolPump_RuntimeAccounting_PreviousDayRestartResets and additionally
+// asserts the KVS mirror. Like that test, it says nothing about the #530
+// stack-depth defect itself (goja does not model call-stack depth, #496) —
+// it only proves the persisted-figure semantics.
+func TestPoolPump_RuntimeAccounting_RolloverPersistsDiscardedFigure(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mc := mqtt.NewMockClient()
+
+	deviceState := &script.DeviceState{
+		KVS:             controllerKVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(), // pump off throughout
+		Schedules:       poolPumpSchedules(),
+	}
+
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
+	stop1()
+
+	yesterday := time.Now().AddDate(0, 0, -1)
+	const discardedSec = 18341 // matches the live filtration-hiver reading in #530
+	seedRuntimeStorage(deviceState, discardedSec, yesterday.Unix())
+
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
+	defer stop2()
+
+	// The rollover's log()/storeValue() pair is deferred via queueTask() (the
+	// task-queue timer ticks every 200ms), and runPoolPumpPhase only waits for
+	// the earlier, synchronous schedule-mode KVS write -- so the deferred
+	// mirror may not have landed yet the instant init is observed complete.
+	//
+	// Key name: "script/pool-pump/rollover-discarded", not
+	// "...runtime-last-rollover-discarded" as originally shipped -- the longer
+	// name is 48 chars and real Shelly Pro1 firmware rejects any KVS key of 42
+	// chars or more (-103 "length should be less than 42!"), confirmed on
+	// hardware. The goja emulator driving this test does not model that limit
+	// (like it doesn't model call-stack depth, #496), so this test alone would
+	// have passed against the rejected key name -- see
+	// TestPoolPump_KVSKeyLengthsUnderFirmwareLimit below for the static guard.
+	wrote := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		_, ok := deviceState.KVSValue("script/pool-pump/rollover-discarded")
+		return ok
+	})
+	if !wrote {
+		t.Fatalf(`KVS "rollover-discarded" was never written after a cross-day restart`)
+	}
+
+	got := parseKVSFloat(t, deviceState, "script/pool-pump/rollover-discarded")
+	if got != discardedSec {
+		t.Errorf(`KVS "rollover-discarded" = %v, want %v (the discarded sec total)`, got, discardedSec)
 	}
 }
 
@@ -1287,9 +1510,7 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartResets(t *testing.T) {
 func TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	cs := pro3ComponentStatus()
@@ -1303,7 +1524,7 @@ func TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS(t *testing.T) {
 		EventInjector:   injector,
 	}
 
-	stop1 := runPoolPumpPhase(t, buf, deviceState)
+	stop1 := runPoolPumpPhase(t, buf, deviceState, mc)
 	time.Sleep(1200 * time.Millisecond)
 	injector <- shellyInputEvent(0, true)
 	stopped := waitFor(eventTimeout, 50*time.Millisecond, func() bool {
@@ -1329,7 +1550,7 @@ func TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS(t *testing.T) {
 	cs2["input:0"] = map[string]interface{}{"id": 0, "state": true}
 	deviceState.ComponentStatus = cs2
 
-	stop2 := runPoolPumpPhase(t, buf, deviceState)
+	stop2 := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop2()
 
 	// applyRuntimeState() re-persists to Script.storage synchronously as
@@ -1367,9 +1588,7 @@ func TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS(t *testing.T) {
 func TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	deviceState := &script.DeviceState{
 		KVS: controllerKVS(),
@@ -1381,7 +1600,7 @@ func TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate(t *testing.
 		Schedules:       poolPumpSchedules(),
 	}
 
-	stop := runPoolPumpPhase(t, buf, deviceState)
+	stop := runPoolPumpPhase(t, buf, deviceState, mc)
 	stop()
 
 	got := readRuntimeStorage(t, deviceState)
@@ -1413,9 +1632,7 @@ func TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate(t *testing.
 func TestPoolPump_RuntimeAccounting_AnchorDoesNotDriftAcrossCheckpoints(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	evalCh := make(chan []byte, 4)
 	cs := pro3ComponentStatus()
@@ -1429,7 +1646,7 @@ func TestPoolPump_RuntimeAccounting_AnchorDoesNotDriftAcrossCheckpoints(t *testi
 		ScheduleEvalInjector: evalCh,
 	}
 
-	stop := runPoolPumpPhase(t, buf, deviceState)
+	stop := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop()
 
 	// Boot itself already performed one real persistRuntimeState() call
@@ -1480,9 +1697,7 @@ func TestPoolPump_RuntimeAccounting_AnchorDoesNotDriftAcrossCheckpoints(t *testi
 func TestPoolPump_RuntimeAccounting_StopRightAfterMidnightDoesNotCreditWholeRun(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	evalCh := make(chan []byte, 4)
 	injector := make(chan []byte, 4)
@@ -1498,7 +1713,7 @@ func TestPoolPump_RuntimeAccounting_StopRightAfterMidnightDoesNotCreditWholeRun(
 		ScheduleEvalInjector: evalCh,
 	}
 
-	stop := runPoolPumpPhase(t, buf, deviceState)
+	stop := runPoolPumpPhase(t, buf, deviceState, mc)
 	defer stop()
 
 	// Stand in for "this run started yesterday and had accrued 20000s by
@@ -1571,6 +1786,100 @@ func solarPayload(availableW float64, tsUnixSec int64) []byte {
 	return data
 }
 
+// solarSummerStorage boots the script in summer mode. #621: solar only starts
+// the pump in summer; an empty Storage boots in winter (the script's default),
+// where solar must stay silent -- so every test that expects a solar start
+// seeds the mode explicitly.
+func solarSummerStorage() map[string]interface{} {
+	return map[string]interface{}{"schedule-mode": "summer"}
+}
+
+// TestPoolPump_SolarNeverStartsPumpInWinter is the #621 regression: in winter
+// mode (here the default, empty Storage) fresh solar surplus far above the
+// start threshold, with a zero start delay, must NOT start the pump -- the
+// pump runs only on the night window. Same sequence as
+// TestPoolPump_SolarStartsAndStopsPump, which boots in summer and does start.
+func TestPoolPump_SolarNeverStartsPumpInWinter(t *testing.T) {
+	buf := readPoolPumpScript(t)
+	mc := mqtt.NewMockClient()
+	deviceState := &script.DeviceState{
+		KVS:             solarKVS(nil),
+		Storage:         make(map[string]interface{}), // no saved mode -> winter
+		ComponentStatus: pro3ComponentStatus(),
+		Schedules:       poolPumpSchedules(),
+	}
+	ctx, cancel := poolPumpRunContext(t, mc)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+	// Give checkSolarHysteresis (synchronous on receipt) and a few task-queue
+	// ticks time to act; the 30s SOLAR.tickTimer period is not waited out.
+	time.Sleep(2 * time.Second)
+	cancel()
+	<-done
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
+		t.Fatalf("winter mode: solar must not start the pump, got active-output=%v", v)
+	}
+	if reason, ok := lastEventReason(t, deviceState, "pool.pump_start"); ok {
+		t.Fatalf("winter mode: unexpected pool.pump_start (reason=%d)", reason)
+	}
+}
+
+// TestPoolPump_SolarRunStopsWhenModeTurnsWinter covers the latched case of
+// #621: a solar run in progress (summer) must not stay latched if the mode
+// becomes winter -- the next evaluation drops F_SOLAR_WANT and the pump stops
+// even though solar is still far above the start threshold. The mode flip is
+// injected via ScheduleEvalInjector (as the day-rollover test does for runtime
+// state); the next solar message stands in for the 30s SOLAR.tickTimer.
+func TestPoolPump_SolarRunStopsWhenModeTurnsWinter(t *testing.T) {
+	buf := readPoolPumpScript(t)
+	mc := mqtt.NewMockClient()
+	evalCh := make(chan []byte, 4)
+	deviceState := &script.DeviceState{
+		KVS:                  solarKVS(nil),
+		Storage:              solarSummerStorage(),
+		ComponentStatus:      pro3ComponentStatus(),
+		Schedules:            poolPumpSchedules(),
+		ScheduleEvalInjector: evalCh,
+	}
+	stop := runPoolPumpPhase(t, buf, deviceState, mc)
+	defer stop()
+
+	publish := func() {
+		if err := mc.Publish(context.Background(), "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+			t.Fatalf("publish failed: %v", err)
+		}
+	}
+	publish()
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0"
+	}) {
+		t.Fatalf("setup: summer solar start expected, got active-output=%v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+	if err := evalPoolPumpSchedule(deviceState, "STATE.scheduleMode = 'winter';"); err != nil {
+		t.Fatalf("failed to inject winter mode: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond) // let the injected eval land
+	publish()
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "-1"
+	}) {
+		t.Fatalf("solar run must stop once mode is winter, got active-output=%v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+}
+
 // TestPoolPump_SolarStartsAndStopsPump verifies the core hysteresis: a fresh,
 // above-threshold sample starts the pump (via doStart, so the fuse/
 // isMyTurnToRun/water-supply checks all still apply), and a subsequent fresh,
@@ -1579,19 +1888,16 @@ func solarPayload(availableW float64, tsUnixSec int64) []byte {
 func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	mqtt.SetClient(mc)
-	t.Cleanup(mqtt.ResetClient)
 
 	deviceState := &script.DeviceState{
 		KVS:             solarKVS(nil),
-		Storage:         make(map[string]interface{}),
+		Storage:         solarSummerStorage(),
 		ComponentStatus: pro3ComponentStatus(),
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1623,6 +1929,11 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		<-done
 		t.Fatalf("solar start: expected active-output=0, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
+	// #587: this is the campaign's central question -- a solar-driven start
+	// must be distinguishable in the record from a scheduled one.
+	if reason, ok := lastEventReason(t, deviceState, "pool.pump_start"); !ok || reason != reasonSolar {
+		t.Fatalf("expected pool.pump_start reason=solar(%d), got %d (ok=%v)", reasonSolar, reason, ok)
+	}
 
 	// Fresh (ts = now), below the 200W stop threshold.
 	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(100, time.Now().Unix()), 0, true, "test"); err != nil {
@@ -1640,6 +1951,102 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 	if !stopped {
 		t.Fatalf("solar stop: expected active-output=-1, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
 	}
+	// #587: the stop must read as "solar" too, not the generic "window"
+	// fallthrough -- this run's window was never the reason it was on (see
+	// RC_ACTIVE_REASON's declaration in pool-pump.js for why the plain
+	// fallthrough alone cannot tell these apart).
+	if reason, ok := lastEventReason(t, deviceState, "pool.pump_stop"); !ok || reason != reasonSolar {
+		t.Fatalf("expected pool.pump_stop reason=solar(%d), got %d (ok=%v)", reasonSolar, reason, ok)
+	}
+}
+
+// TestPoolPump_SolarStartAndStopSurvivesOwnEcho is the review-round-1 (#587)
+// regression: on real firmware, a switch:N status-change notification also
+// fires for THIS SCRIPT'S OWN actuation completing, not only for a genuine
+// out-of-band change -- handleSwitchEvent()'s own comment already accounts
+// for this ("An event that merely echoes our own actuation agrees with the
+// policy by construction and sets no override"). TestPoolPump_
+// SolarStartsAndStopsPump never exercises that echo at all: the emulator
+// only ever synthesises a switch:N event when a test explicitly arms one via
+// SetPendingNestedEvent or (as here) an EventInjector send -- Switch.Set
+// never has that side effect on its own (#496). That is precisely why this
+// test's absence hid the defect: the emulator's own structural gap (no
+// implicit echo) is not evidence a solar start/stop survives one on
+// hardware.
+//
+// This injects the echo explicitly between the solar-driven start and the
+// solar-driven stop, reproducing the exact sequence a real Pro3 would
+// deliver, and asserts the stop still reads "solar" rather than being
+// mislabelled "override" by a relabelling rule that cannot tell an echo of
+// its own actuation from a genuine out-of-band change.
+func TestPoolPump_SolarStartAndStopSurvivesOwnEcho(t *testing.T) {
+	buf := readPoolPumpScript(t)
+	mc := mqtt.NewMockClient()
+	injector := make(chan []byte, 4)
+
+	deviceState := &script.DeviceState{
+		KVS:             solarKVS(nil),
+		Storage:         solarSummerStorage(),
+		ComponentStatus: pro3ComponentStatus(),
+		Schedules:       poolPumpSchedules(),
+		EventInjector:   injector,
+	}
+
+	stop := runPoolPumpPhase(t, buf, deviceState, mc)
+	defer stop()
+
+	// Fresh (ts = now), above the 500W start threshold -- solar drives the
+	// start, exactly like TestPoolPump_SolarStartsAndStopsPump.
+	if err := mc.Publish(context.Background(), "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0"
+	}) {
+		t.Fatalf("solar start: expected active-output=0, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+	if reason, ok := lastEventReason(t, deviceState, "pool.pump_start"); !ok || reason != reasonSolar {
+		t.Fatalf("setup: expected pool.pump_start reason=solar(%d), got %d (ok=%v)", reasonSolar, reason, ok)
+	}
+
+	// The firmware echo: a switch:0 status-change notification reporting
+	// EXACTLY the output this script's own Switch.Set just drove -- RC_BUSY
+	// is false again by the time this arrives (applyDone() already ran), so
+	// this reaches handleSwitchEvent()'s !RC_BUSY branch exactly like a
+	// genuine out-of-band event would, and must be told apart from one.
+	//
+	// Deliberately NOT settling the task queue here: reconcile("switch
+	// event") only queues a reconcileNow() pass for the NEXT 200ms tick, and
+	// while F_SOLAR_WANT is still true that pass would independently
+	// refresh RC_ACTIVE_REASON back to solar, self-healing a corrupted value
+	// before the drop below ever runs -- exactly the "may usually be
+	// overwritten" case noted in review. Publishing the low reading
+	// immediately, before that tick fires, coalesces both facts into the
+	// SAME reconcile pass (F_SOLAR_WANT already false by the time it runs),
+	// which is what actually exposes the defect.
+	injector <- shellySwitchEvent(0, true)
+
+	// Fresh (ts = now), below the 200W stop threshold -- solar releases.
+	if err := mc.Publish(context.Background(), "myhome/energy/solar/available", solarPayload(100, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+	if !waitFor(eventTimeout, 50*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "-1"
+	}) {
+		t.Fatalf("solar stop: expected active-output=-1, got %v", kvsValue(deviceState, "script/pool-pump/active-output"))
+	}
+	// The defect this test exists to catch: an unconditional relabelling in
+	// handleSwitchEvent() clobbers RC_ACTIVE_REASON on the echo above, so
+	// this stop -- genuinely solar-released -- comes back "override" instead
+	// of "solar". Against the pre-fix commit this assertion fails exactly
+	// that way.
+	if reason, ok := lastEventReason(t, deviceState, "pool.pump_stop"); !ok || reason != reasonSolar {
+		t.Fatalf("expected pool.pump_stop reason=solar(%d) even after surviving its own actuation's "+
+			"switch:0 echo, got %d (ok=%v) -- handleSwitchEvent() must not relabel an event that merely "+
+			"echoes the policy's own current opinion", reasonSolar, reason, ok)
+	}
 }
 
 // TestPoolPump_SolarRespectsHardCeiling verifies that a runtime baseline
@@ -1650,10 +2057,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	mqtt.SetClient(mc)
-	t.Cleanup(mqtt.ResetClient)
 
 	// Ceiling target = poolVolume(46) * solarMaxTurnover(0.001) / flowRate(≈21.38 m3/h) * 3600s ≈ 7.7s.
 	kvs := solarKVS(map[string]string{"solar-max-turnover": "0.001"})
@@ -1661,14 +2065,15 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 	deviceState := &script.DeviceState{
 		KVS: kvs,
 		Storage: map[string]interface{}{
-			"runtime-sec":  "3600", // 1h — comfortably exceeds the ~7.7s ceiling above
-			"runtime-date": dateString(time.Now()),
+			"schedule-mode": "summer",
+			"runtime-sec":   "3600", // 1h — comfortably exceeds the ~7.7s ceiling above
+			"runtime-date":  dateString(time.Now()),
 		},
 		ComponentStatus: pro3ComponentStatus(), // pump off at boot
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1702,6 +2107,79 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 	}
 }
 
+// TestPoolPump_WaterSupplyOverridesSolar is #527's safety-critical assertion:
+// F_WATER true must block a solar start unconditionally, regardless of how
+// far above threshold the available power is. desiredOutput() checks F_WATER
+// first, ahead of solar and everything else (see the comment on that
+// function) -- this pins that ordering down with a test, so a reordering
+// that looks harmless fails loudly instead of silently defeating the
+// interlock solar is not allowed to override.
+//
+// Scope note (#527): this is the one assertion from that issue cheap to add
+// alongside #523's work, since it reuses solarKVS/solarPayload and the exact
+// shape of TestPoolPump_SolarRespectsHardCeiling above. The other two tests
+// #527 asks for (solar accumulating through a hold, and starting immediately
+// on release) are not included here -- they need their own hold/release
+// sequencing and are left to #527 itself.
+func TestPoolPump_WaterSupplyOverridesSolar(t *testing.T) {
+	buf := readPoolPumpScript(t)
+
+	mc := mqtt.NewMockClient()
+
+	kvs := solarKVS(nil)
+	kvs["script/pool-pump/logging"] = "true"
+
+	cs := pro3ComponentStatus()
+	cs["input:0"] = map[string]interface{}{"id": 0, "state": true} // protected from boot
+
+	deviceState := &script.DeviceState{
+		KVS:             kvs,
+		Storage:         solarSummerStorage(),
+		ComponentStatus: cs,
+		Schedules:       poolPumpSchedules(),
+	}
+
+	ctx, cancel := poolPumpRunContext(t, mc)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	if !waitPoolPumpInit(t, deviceState) {
+		cancel()
+		<-done
+		t.Fatalf("init timeout")
+	}
+
+	// waitPoolPumpInit only waits for the EARLY "schedule-mode" KVS write
+	// finishContinueInit() makes before the four-step initSteps chain (which
+	// includes the Step 2 water-supply check that actually sets F_WATER) even
+	// starts -- a test mutating state right after that early marker can beat
+	// Step 2 and pass or fail for the wrong reason. Publishing the solar
+	// message before that chain reaches Step 2 races checkSolarHysteresis's
+	// reconcile() against F_WATER still being its false default, starting the
+	// pump for a reason that has nothing to do with the assertion under test.
+	// Settle first so F_WATER is genuinely true before solar is introduced.
+	settlePoolPumpTaskQueue(t)
+
+	// Fresh, well above the start threshold, zero start delay -- would start
+	// immediately via solar if water-supply protection weren't in effect.
+	if err := mc.Publish(ctx, "myhome/energy/solar/available", solarPayload(600, time.Now().Unix()), 0, true, "test"); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+
+	// Give checkSolarHysteresis time to run; the pump must stay off.
+	time.Sleep(2 * time.Second)
+	cancel()
+	<-done
+
+	if v := kvsValue(deviceState, "script/pool-pump/active-output"); v != "-1" {
+		t.Fatalf("water supply must override solar: expected pump to stay off despite input:0.state=true, got active-output=%v", v)
+	}
+}
+
 // TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart is the
 // regression test for #502: a device with ZERO Schedule.List jobs at all
 // (Schedules is nil, mirroring `mezzanine`'s "only a firmware-update job"
@@ -1727,10 +2205,7 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 func TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	mqtt.SetClient(mc)
-	t.Cleanup(mqtt.ResetClient)
 
 	// Same tiny ceiling override as TestPoolPump_SolarRespectsHardCeiling
 	// (~7.7s target), so a modest injected sec total blocks solar start.
@@ -1739,13 +2214,13 @@ func TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart(t *testing.
 	evalCh := make(chan []byte, 4)
 	deviceState := &script.DeviceState{
 		KVS:                  kvs,
-		Storage:              make(map[string]interface{}),
+		Storage:              solarSummerStorage(),
 		ComponentStatus:      pro3ComponentStatus(), // pump off at boot
 		Schedules:            nil,                   // #502: the mezzanine case -- no pool schedules at all
 		ScheduleEvalInjector: evalCh,
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1809,21 +2284,19 @@ func TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart(t *testing.
 func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 
 	deviceState := &script.DeviceState{
 		KVS:             solarKVS(nil),
-		Storage:         make(map[string]interface{}),
+		Storage:         solarSummerStorage(),
 		ComponentStatus: pro3ComponentStatus(),
 		Schedules:       poolPumpSchedules(),
 		EventInjector:   injector,
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -1872,10 +2345,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 	buf := readPoolPumpScript(t)
 
-	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	mqtt.SetClient(mc)
-	t.Cleanup(mqtt.ResetClient)
 
 	// solar-stale-ms defaults to 300000 (5 min) via CONFIG_SCHEMA — not
 	// overridden here, so this exercises the real default.
@@ -1883,12 +2353,12 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 
 	deviceState := &script.DeviceState{
 		KVS:             kvs,
-		Storage:         make(map[string]interface{}),
+		Storage:         solarSummerStorage(),
 		ComponentStatus: pro3ComponentStatus(),
 		Schedules:       poolPumpSchedules(),
 	}
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -2143,12 +2613,9 @@ func poolPumpSummerSchedulesWrapped(start, stop time.Time) []map[string]interfac
 func poolPumpRewriteResult(t *testing.T, deviceState *script.DeviceState, forecastPayload []byte, wantOutput string) (string, []map[string]interface{}) {
 	t.Helper()
 
-	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	mqtt.SetClient(mc)
-	t.Cleanup(mqtt.ResetClient)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	buf := readPoolPumpScript(t)
@@ -2425,6 +2892,277 @@ func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStopsPump(t *testing.T) {
 	}
 }
 
+// === #509: updateScheduleMode() derives the post-update window from the
+// jobs it already has in hand, instead of paying for a second Schedule.List
+// (queueTask(readWindow)) on top of the sunrise forecast parse. That second
+// read was measured to cost ~670 bytes of mem_peak on `mezzanine`, and on
+// `filtration-hiver` on 2026-08-17 — with only ~1.2 KB of heap headroom left
+// — it reclaimed the whole script with no trace, mid schedule-rewrite.
+//
+// These four tests pin the invariant #509 requires: the derived window fact
+// must equal whatever a fresh Schedule.List taken after the updates would
+// have produced. TestPoolPump_ScheduleRewriteIntoPastStartsPump and its
+// siblings above already cover "summer window moved" end to end (a rewrite
+// that changes the active-output outcome); these four cover the remaining
+// arms explicitly required by #509's done-criteria.
+
+// poolPumpWinterForecastServer serves an Open-Meteo response whose every
+// hourly temperature sits under poolPumpWindowKVS()'s temp-threshold (20),
+// so decideModeFromForecast() selects 'winter' and calls
+// updateScheduleMode('winter', null, null) — the no-timings arm that #509's
+// invariant list calls out by name, since a summer-only derivation would not
+// cover it.
+func poolPumpWinterForecastServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	temps := make([]float64, 24)
+	for i := range temps {
+		temps[i] = 10
+	}
+	body, err := json.Marshal(map[string]interface{}{
+		"hourly": map[string]interface{}{"temperature_2m": temps},
+		"daily": map[string]interface{}{
+			"sunrise": []string{"2026-08-07T06:00"},
+			"sunset":  []string{"2026-08-07T20:00"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to build winter forecast body: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged is the
+// "windowChanged false" arm: the schedule already carries exactly the
+// window the forecast recomputes, so updateScheduleMode() writes nothing at
+// all and the derivation path in updateNext()'s completion must not run
+// either. The pump keeps running off the window resolved at init.
+func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testing.T) {
+	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
+
+	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	// poolPumpWideStartMin/StopMin (01:00 / 23:29) is exactly what this
+	// forecast+KVS combination recomputes — see the comment on those
+	// constants — so seeding the schedule with those same times means
+	// moves() finds nothing to write.
+	start := time.Date(now.Year(), now.Month(), now.Day(), 1, 0, 0, 0, now.Location())
+	stop := time.Date(now.Year(), now.Month(), now.Day(), 23, 29, 0, 0, now.Location())
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro1ComponentStatus(), // pump off at boot
+		Schedules:       poolPumpSummerSchedules(start, stop),
+	}
+
+	mc := mqtt.NewMockClient()
+
+	ctx, cancel := poolPumpRunContext(t, mc)
+	defer cancel()
+
+	buf := readPoolPumpScript(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	// The window is already correct, so init's own onWindowJobs() call (not
+	// the daily check) should start the pump.
+	started := waitFor(initTimeout, 100*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0"
+	})
+
+	// Give the daily check its own window to run to completion and (not)
+	// rewrite anything, same budget poolPumpRewriteResult gives a genuine
+	// rewrite to land.
+	waitFor(8*time.Second, 100*time.Millisecond, func() bool { return false })
+
+	got := kvsValue(deviceState, "script/pool-pump/active-output")
+	schedules := deviceState.ScheduleJobs()
+	cancel()
+	<-done
+
+	if !started {
+		t.Fatalf("pump never started even though the pre-existing window already contains now")
+	}
+	if got != "0" {
+		t.Fatalf("a no-op daily check (windowChanged false) must not disturb the window "+
+			"the pump is already running from: active-output=%v", got)
+	}
+	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 0) {
+		t.Fatalf("windowChanged should have stayed false: morning-start timespec changed to %q", ts)
+	}
+	if ts := poolPumpScheduleTimespec(schedules, "handleEveningStop()"); ts != poolPumpTimespec(23, 29) {
+		t.Fatalf("windowChanged should have stayed false: evening-stop timespec changed to %q", ts)
+	}
+}
+
+// TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow is the "winter mode
+// switch" arm. decideModeFromForecast() calls
+// updateScheduleMode('winter', null, null) — no timings — so the derivation
+// path must resolve the night window from enable flags alone, which a
+// summer-only derivation would not exercise.
+func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
+	srv := poolPumpWinterForecastServer(t)
+	now := time.Now()
+
+	job := func(id int, code, timespec string, enable bool) map[string]interface{} {
+		return map[string]interface{}{
+			"id": id, "enable": enable, "timespec": timespec,
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": 1, "code": code},
+			}},
+		}
+	}
+
+	// Night jobs already bracket "now" but start disabled, matching a real
+	// summer-mode device. The winter switch must enable them at their
+	// existing timespec — updateScheduleMode never touches night timespecs —
+	// and the resulting window must resolve without a second Schedule.List.
+	nightStart := now.Add(-1 * time.Hour)
+	nightStop := now.Add(1 * time.Hour)
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: pro1ComponentStatus(), // pump off
+		Schedules: []map[string]interface{}{
+			job(1, "handleDailyCheck()", "@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT", true),
+			job(2, "handleMorningStart()", poolPumpTimespec(now.Add(2*time.Hour).Hour(), now.Add(2*time.Hour).Minute()), true),
+			job(3, "handleEveningStop()", poolPumpTimespec(now.Add(4*time.Hour).Hour(), now.Add(4*time.Hour).Minute()), true),
+			job(4, "handleNightStart()", poolPumpTimespec(nightStart.Hour(), nightStart.Minute()), false),
+			job(5, "handleNightStop()", poolPumpTimespec(nightStop.Hour(), nightStop.Minute()), false),
+		},
+	}
+
+	mc := mqtt.NewMockClient()
+
+	ctx, cancel := poolPumpRunContext(t, mc)
+	defer cancel()
+
+	buf := readPoolPumpScript(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	modeOK := waitFor(initTimeout, 200*time.Millisecond, func() bool {
+		v, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
+		return exists && v == "winter"
+	})
+	if !modeOK {
+		cancel()
+		<-done
+		t.Fatalf("schedule-mode never became 'winter' for a below-threshold forecast; got %v",
+			kvsValue(deviceState, "script/pool-pump/schedule-mode"))
+	}
+
+	started := waitFor(eventTimeout, 100*time.Millisecond, func() bool {
+		v, ok := deviceState.KVSValue("script/pool-pump/active-output")
+		return ok && v == "0"
+	})
+	got := kvsValue(deviceState, "script/pool-pump/active-output")
+	cancel()
+	<-done
+
+	if !started {
+		t.Fatalf("winter switch enabled the night jobs bracketing now, but the pump never "+
+			"started (active-output=%v) — the derived night window did not resolve", got)
+	}
+}
+
+// TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved is the
+// "device whose morning/evening jobs are absent" arm. onWindowJobs()'s own
+// "still symbolic" guard must fire here exactly as it would off a fresh
+// Schedule.List: with no handleEveningStop() job to match at all, the
+// derived window can never resolve, so the fact must stay whatever it
+// already was — NOT get forced to "off" — even though updateScheduleMode()
+// did write a change (the morning job moved) and windowChanged is true.
+func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T) {
+	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	now := time.Now()
+
+	job := func(id int, code, timespec string, enable bool) map[string]interface{} {
+		return map[string]interface{}{
+			"id": id, "enable": enable, "timespec": timespec,
+			"calls": []interface{}{map[string]interface{}{
+				"method": "script.eval",
+				"params": map[string]interface{}{"id": 1, "code": code},
+			}},
+		}
+	}
+
+	cs := pro1ComponentStatus()
+	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true} // already running
+
+	deviceState := &script.DeviceState{
+		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
+		Storage: map[string]interface{}{
+			"schedule-mode": "summer",
+			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+		},
+		ComponentStatus: cs,
+		// No handleEveningStop() job at all, at init or after the rewrite --
+		// the window can never resolve, so it must never have resolved, and
+		// the pump the fixture starts already running must be left alone.
+		Schedules: []map[string]interface{}{
+			job(1, "handleDailyCheck()", "@sunrise * * SUN,MON,TUE,WED,THU,FRI,SAT", true),
+			job(2, "handleMorningStart()", poolPumpTimespec(now.Add(2*time.Hour).Hour(), now.Add(2*time.Hour).Minute()), true),
+			job(4, "handleNightStart()", poolPumpTimespec(23, 15), false),
+			job(5, "handleNightStop()", poolPumpTimespec(0, 15), false),
+		},
+	}
+
+	mc := mqtt.NewMockClient()
+
+	ctx, cancel := poolPumpRunContext(t, mc)
+	defer cancel()
+
+	buf := readPoolPumpScript(t)
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
+	}()
+
+	initial := poolPumpScheduleTimespec(deviceState.ScheduleJobs(), "handleMorningStart()")
+	rewritten := waitFor(initTimeout, 100*time.Millisecond, func() bool {
+		return poolPumpScheduleTimespec(deviceState.ScheduleJobs(), "handleMorningStart()") != initial
+	})
+	if !rewritten {
+		cancel()
+		<-done
+		t.Fatalf("morning-start job was never rewritten (still %q) — test didn't exercise windowChanged", initial)
+	}
+
+	// Give the reconciler its own window to (not) act on the unresolved window.
+	waitFor(8*time.Second, 100*time.Millisecond, func() bool { return false })
+
+	got := kvsValue(deviceState, "script/pool-pump/active-output")
+	cancel()
+	<-done
+
+	if got != "0" {
+		t.Fatalf("missing evening job must leave the window unresolved (-2 'no opinion'), "+
+			"not force the already-running pump off: active-output=%v", got)
+	}
+}
+
 // TestPoolPump_DailyCheckRunsDuringWaterSupplyProtection is the aftermath
 // defect noted alongside the #450 crash: after the live crash-restart on
 // 2026-08-11, the script logged 'Current mode: winter', then 'Daily check
@@ -2459,12 +3197,9 @@ func TestPoolPump_DailyCheckRunsDuringWaterSupplyProtection(t *testing.T) {
 		Schedules:       poolPumpSummerSchedules(now.Add(2*time.Hour), now.Add(4*time.Hour)),
 	}
 
-	mqtt.ResetClient()
 	mc := mqtt.NewMockClient()
-	mqtt.SetClient(mc)
-	t.Cleanup(mqtt.ResetClient)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	buf := readPoolPumpScript(t)
@@ -2709,14 +3444,12 @@ func waitPoolPumpInit(t *testing.T, deviceState *script.DeviceState) bool {
 func TestPoolPump_CallSlotBurstExhaustsPoolButSurvives(t *testing.T) {
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	deviceState := newCallSlotDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -2782,14 +3515,12 @@ func TestPoolPump_CallSlotBurstExhaustsPoolButSurvives(t *testing.T) {
 func TestPoolPump_CallSlotsReleaseAfterBurst(t *testing.T) {
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	deviceState := newCallSlotDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -2849,14 +3580,12 @@ func TestPoolPump_CallSlotsReleaseAfterBurst(t *testing.T) {
 func TestPoolPump_CallSlotDeepChainDefersInsteadOfRecursing(t *testing.T) {
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	deviceState := newCallSlotDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -2908,14 +3637,12 @@ func TestPoolPump_CallSlotDeepChainDefersInsteadOfRecursing(t *testing.T) {
 func TestPoolPump_CallSlotErrorPathReleasesSlot(t *testing.T) {
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
-	mqtt.ResetClient()
-	mqtt.SetClient(mqtt.NewMockClient())
-	t.Cleanup(mqtt.ResetClient)
+	mc := mqtt.NewMockClient()
 
 	injector := make(chan []byte, 4)
 	deviceState := newCallSlotDeviceState(injector)
 
-	ctx, cancel := poolPumpRunContext(t)
+	ctx, cancel := poolPumpRunContext(t, mc)
 	defer cancel()
 
 	done := make(chan error, 1)
@@ -2951,4 +3678,153 @@ func TestPoolPump_CallSlotErrorPathReleasesSlot(t *testing.T) {
 
 	cancel()
 	<-done
+}
+
+// TestPoolPump_KVSKeyLengthsUnderFirmwareLimit is a static guard for #537:
+// real Shelly firmware rejects any KVS key of 42 chars or more (-103
+// "length should be less than 42!"), confirmed on hardware against the
+// "runtime-last-rollover-discarded" suffix (48 chars including the
+// "script/pool-pump/" prefix) shipped in an earlier revision of #533. The
+// goja emulator that drives every other test in this file does not model
+// that limit -- like it doesn't model call-stack depth (#496) -- so a normal
+// behavioral test can pass against a key name real firmware would reject
+// outright (KVS.Set fails, KVS.List never lists it). This test instead
+// statically extracts every KVS key suffix the script can write or read
+// (storeValue()/loadValueAsync() literal args, STATE_KEYS values, and
+// CONFIG_SCHEMA "key" entries) straight from the source and checks each
+// full key ("script/" + SCRIPT_NAME + "/" + suffix) against the limit, so a
+// future long key name fails here instead of silently on the pump.
+func TestPoolPump_KVSKeyLengthsUnderFirmwareLimit(t *testing.T) {
+	const firmwareKVSKeyLimit = 42 // device error: "length should be less than 42!"
+
+	src := string(readPoolPumpScript(t))
+
+	scriptNameRe := regexp.MustCompile(`var SCRIPT_NAME = "([^"]+)"`)
+	m := scriptNameRe.FindStringSubmatch(src)
+	if m == nil {
+		t.Fatalf("could not find SCRIPT_NAME in pool-pump.js — test assumptions stale")
+	}
+	prefix := "script/" + m[1] + "/"
+
+	suffixes := map[string]string{} // suffix -> where it was found, for error messages
+
+	storeOrLoadRe := regexp.MustCompile(`(?:storeValue|loadValueAsync)\("([a-z0-9-]+)"`)
+	for _, sm := range storeOrLoadRe.FindAllStringSubmatch(src, -1) {
+		suffixes[sm[1]] = "storeValue()/loadValueAsync() literal argument"
+	}
+
+	stateKeysBlockRe := regexp.MustCompile(`(?s)var STATE_KEYS = \{(.*?)\n\};`)
+	if bm := stateKeysBlockRe.FindStringSubmatch(src); bm != nil {
+		fieldRe := regexp.MustCompile(`\w+:\s*"([a-z0-9-]+)"`)
+		for _, fm := range fieldRe.FindAllStringSubmatch(bm[1], -1) {
+			suffixes[fm[1]] = "STATE_KEYS"
+		}
+	} else {
+		t.Fatalf("could not find STATE_KEYS block in pool-pump.js — test assumptions stale")
+	}
+
+	schemaBlockRe := regexp.MustCompile(`(?s)var CONFIG_SCHEMA = \{(.*?)\n\};`)
+	if bm := schemaBlockRe.FindStringSubmatch(src); bm != nil {
+		keyRe := regexp.MustCompile(`key:\s*"([a-z0-9-]+)"`)
+		for _, km := range keyRe.FindAllStringSubmatch(bm[1], -1) {
+			suffixes[km[1]] = "CONFIG_SCHEMA"
+		}
+	} else {
+		t.Fatalf("could not find CONFIG_SCHEMA block in pool-pump.js — test assumptions stale")
+	}
+
+	if len(suffixes) < 5 {
+		t.Fatalf("only found %d KVS key suffixes — extraction regexes are likely broken, not that the script shrank", len(suffixes))
+	}
+
+	for suffix, source := range suffixes {
+		full := prefix + suffix
+		if len(full) >= firmwareKVSKeyLimit {
+			t.Errorf("KVS key %q (from %s) is %d chars, >= the firmware limit of %d — real devices reject this key outright", full, source, len(full), firmwareKVSKeyLimit)
+		}
+	}
+}
+
+// TestPoolPump_TaskQueueThrottlesOnCallsInFlight is a source-level regression
+// test for #421's second recurrence: the bookkeeping (CALLS_IN_FLIGHT /
+// MAX_CALLS_IN_FLIGHT, the Shelly.call wrapper, CALL_SLOTS/MAX_CALL_DEPTH)
+// was fixed and tested by PR #466 (TestPoolPump_CallSlot*), but that
+// machinery only defends against synchronous re-entrant nesting depth (the
+// #450 stack-overflow crash). The actual #421 budget -- deferring a newly
+// dispatched queued task while too many RPCs are already in flight on the
+// real device -- lived only in processTaskQueue() itself. That gate was
+// present on the v0.11.x release line (PR #426/#434, commit c444f9c0) but
+// was silently dropped when the surrounding machinery was ported to main in
+// commit 2d542cc1 ("bring the proven call-safety machinery to main"), which
+// touched everything else in this block but never modified
+// processTaskQueue(). The crash recurred in production on 2026-08-12,
+// through this exact code path (storeValue() dispatched from the task
+// queue), on a build where every existing #421/#450 emulator test passed.
+//
+// This cannot be reproduced dynamically against this package's emulator:
+// pkg/shelly/script's Shelly.call implementation (run.go) invokes every
+// method's JS callback synchronously and inline, before Shelly.call()
+// returns control to the calling script -- there is no async/goroutine
+// completion model and no artificial per-call delay (no DeviceTestMode /
+// CallDelay on main; that capability was added to the release-line emulator
+// by the same c444f9c0 commit but was never ported to main either). So
+// CALLS_IN_FLIGHT can never be observed above 1 while a queued task runs,
+// and any test that tried to drive it past MAX_CALLS_IN_FLIGHT and assert
+// deferral would pass trivially, on both the buggy and the fixed source --
+// exactly the emulator gap #496 exists to close.
+//
+// So this test instead asserts the one thing that actually distinguishes
+// "ported bookkeeping" from "ported budget": that processTaskQueue()'s own
+// source checks CALLS_IN_FLIGHT against MAX_CALLS_IN_FLIGHT, and does so
+// BEFORE the line that dispatches a task (TASK_INDEX++ followed by task()).
+// Static, deterministic, and it fails against the exact commit (2d542cc1)
+// that dropped the gate the first time.
+func TestPoolPump_TaskQueueThrottlesOnCallsInFlight(t *testing.T) {
+	src := string(readPoolPumpScript(t))
+
+	fnRe := regexp.MustCompile(`(?s)function processTaskQueue\(\)\s*\{(.*?)\n\}\n`)
+	m := fnRe.FindStringSubmatch(src)
+	if m == nil {
+		t.Fatalf("could not find processTaskQueue() in pool-pump.js — test assumptions stale")
+	}
+	body := m[1]
+
+	// Capture the gate's own if-block, not just the comparison, so the
+	// "must not touch TASK_INDEX" check below only looks inside the gate
+	// itself rather than at unrelated code (including this test's own
+	// explanatory comments in pool-pump.js, which legitimately mention
+	// TASK_INDEX in prose).
+	gateRe := regexp.MustCompile(`(?s)if\s*\(\s*CALLS_IN_FLIGHT\s*>=\s*MAX_CALLS_IN_FLIGHT\s*\)\s*\{(.*?)\n(\s*)\}\n`)
+	gateMatch := gateRe.FindStringSubmatchIndex(body)
+	if gateMatch == nil {
+		t.Fatalf("processTaskQueue() does not check CALLS_IN_FLIGHT >= MAX_CALLS_IN_FLIGHT anywhere in its body — " +
+			"the #421 in-flight-RPC budget is tracked (CALLS_IN_FLIGHT/MAX_CALLS_IN_FLIGHT exist) but never enforced, " +
+			"which is exactly the gap that let the 'Too many calls in progress' crash recur in production on " +
+			"2026-08-12 through this function (see issue #421)")
+	}
+	gateStart, gateEnd := gateMatch[0], gateMatch[1]
+	gateBlockBody := body[gateMatch[2]:gateMatch[3]]
+
+	dispatchRe := regexp.MustCompile(`TASK_INDEX\+\+`)
+	dispatchLoc := dispatchRe.FindStringIndex(body)
+	if dispatchLoc == nil {
+		t.Fatalf("could not find the TASK_INDEX++ dispatch line in processTaskQueue() — test assumptions stale")
+	}
+
+	if gateStart > dispatchLoc[0] {
+		t.Fatalf("processTaskQueue() checks CALLS_IN_FLIGHT >= MAX_CALLS_IN_FLIGHT AFTER dispatching the task " +
+			"(TASK_INDEX++) instead of before it — the gate must run before a task is dispatched, or it never " +
+			"prevents the over-budget call from firing in the first place")
+	}
+	if gateEnd > dispatchLoc[0] {
+		t.Fatalf("the CALLS_IN_FLIGHT gate's if-block overlaps the dispatch line — the gate must return/skip " +
+			"the tick entirely before reaching the dispatch code")
+	}
+
+	// The gate's own block must not advance TASK_INDEX: the same task should
+	// be retried on the next tick once a slot frees up, never skipped.
+	if strings.Contains(gateBlockBody, "TASK_INDEX") {
+		t.Fatalf("the CALLS_IN_FLIGHT gate's if-block touches TASK_INDEX — " +
+			"the throttled tick must leave TASK_INDEX untouched so the deferred task is retried, not skipped or reordered")
+	}
 }

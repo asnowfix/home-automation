@@ -439,6 +439,8 @@ Examples:
 
 **Note**: Nested keys use underscores, not dots.
 
+**Credentials on the Debian package**: `dpkg-reconfigure myhome` (or an install/upgrade from a terminal) prompts for the secrets stored in `/var/lib/myhome/.env`; answering a password prompt with a blank keeps the current value. To clear a secret, clear its email/username/From address (Beem, SFR, SMTP, robot BLID, iRobot account), which disables that integration and drops its password. The SMTP password is optional: with a From address and no stored password, an empty answer is accepted (a relay that needs no login); the other passwords are required until set.
+
 ## Validation
 
 The daemon validates configuration on startup:
@@ -553,9 +555,38 @@ Credentials for the SFR home gateway. Authentication is skipped when either valu
 | `sfr.username` | `MYHOME_SFR_USERNAME` | — | SFR box admin username |
 | `sfr.password` | `MYHOME_SFR_PASSWORD` | — | SFR box admin password |
 
+## Robot Vacuum
+
+The iRobot Roomba integration (see [`docs/vacuum.md`](vacuum.md)) is enabled automatically when both `vacuum.blid` and `vacuum.password` are set and non-empty; there is no separate enable flag. Without them the daemon logs `Robot vacuum integration disabled`, opens no robot connection, and `vacuum.list` returns no robot.
+
+The password is a secret: set it in `/var/lib/myhome/.env` (prompted by `sudo dpkg-reconfigure myhome`; see `example.env`), never as a flag and never in `myhome.yaml`. It is not stored in `myhome.db`. Get the id and password with `myhome ctl vacuum pair`, which prints the `MYHOME_VACUUM_*` lines to copy into `.env`.
+
+| Key | Env var | Default | Description |
+|-----|---------|---------|-------------|
+| `vacuum.blid` | `MYHOME_VACUUM_BLID` | — | Robot id (BLID), printed by `myhome ctl vacuum pair` |
+| `vacuum.password` | `MYHOME_VACUUM_PASSWORD` | — | Robot local password, printed by `myhome ctl vacuum pair` (`.env` only) |
+| `vacuum.host` | `MYHOME_VACUUM_HOST` | — | Optional fixed robot IP, used instead of broadcast discovery (e.g. with a DHCP reservation, or where broadcast does not reach the robot). Empty: discovery by BLID, falling back to the last address the robot was reached at |
+| `vacuum.wake` | `MYHOME_VACUUM_WAKE` | `false` | After each failed connect attempt, send a short ICMP echo burst (at most 3 packets, at most 2 s) to the robot, to wake a dozing Wi-Fi radio (#630). Needs root or CAP_NET_RAW (the packaged unit runs as root); otherwise it is logged once and skipped. Experimental: off until measured |
+
+### iRobot cloud account (room names)
+
+Optional, and independent of `vacuum.*` above (those stay the robot's own local credentials). When both `irobot.email` and `irobot.password` are set, the daemon logs in to the iRobot cloud **once at start** (in the background; it never delays or blocks startup) and on `myhome ctl vacuum rooms sync`, to fetch the robot's rooms: region ids, names and room types. There is no periodic sync. The cloud is then the source of truth for room names (see [`docs/vacuum.md`](vacuum.md#rooms)). Without them, the daemon logs `iRobot cloud room sync disabled` and rooms are learned from the robot only.
+
+Room sync also needs the robot configured (`vacuum.blid` and `vacuum.password`): the daemon asks the cloud for that robot's maps only. Only plain email+password accounts work (not Google/Apple sign-in or two-factor). Each sync makes a single login attempt, with no retry. Both values are secrets and go in `/var/lib/myhome/.env` only (prompted by `sudo dpkg-reconfigure myhome`; see `example.env`). They are never flags or YAML values, and are never stored in `myhome.db`, logged or returned over RPC.
+
+| Key | Env var | Default | Description |
+|-----|---------|---------|-------------|
+| `irobot.email` | `MYHOME_IROBOT_EMAIL` | — | iRobot app account email (`.env`) |
+| `irobot.password` | `MYHOME_IROBOT_PASSWORD` | — | iRobot app account password (`.env` only) |
+
 ## Pool
 
-The pool runtime tracker reports how many seconds the pool pump has run today by querying the shared events database (`events.db`). The gen2 listener already captures every switch ON/OFF event from all Shelly devices — no separate pool database is needed.
+`pool-pump.js` itself tracks how many seconds it has run today and how much water-volume turnover
+it has achieved, mirroring both to KVS (`script/pool-pump/runtime-sec`, `script/pool-pump/turnover-today`)
+as it starts/stops (see `docs/beem-energy.md` "Part 3"). The daemon's `PoolNotices` type
+(`myhome/daemon/pool_notices.go`) just reads those KVS values back — no separate pool database, and
+no dependency on the shared events database — to power `ctl pool status`, the web UI's pool tags,
+and the `pool.turnover_today` notice recorded whenever the pump stops.
 
 ### Example
 
@@ -572,54 +603,19 @@ pool:
 | `pool.device_id` | `MYHOME_POOL_DEVICE_ID` | `--pool-device-id` | — | Pool Shelly device ID (e.g. `shellyplus1pm-aabbccddeeff`) |
 | `pool.enabled` | `MYHOME_POOL_ENABLED` | `--enable-pool` | `false` | Enable pool runtime tracking |
 
-### Solar automation
+### Solar-driven pool pump
 
-The solar automation goroutine subscribes to Beem Energy power samples and controls the pool pump using a hysteresis state machine:
+Solar-driven pump control no longer lives in the daemon. As of the #401 redesign, `pool-pump.js`
+itself subscribes to the daemon-published `myhome/energy/solar/available` topic (see
+`docs/beem-energy.md` "Part 2") and decides for itself whether to start/stop, using its own
+KVS-configured hysteresis thresholds (`script/pool-pump/solar-*` keys — see `docs/pool-pump.md`)
+and its own existing `doStart`/`doStop`. This keeps the anti-cycling fuse, `isMyTurnToRun()`, and
+water-supply protection in force for solar-triggered runs exactly as for scheduled/manual runs, and
+lets the pump keep working on its forecast-derived schedule when the daemon is down.
 
-- **IDLE → RUNNING** when `solar_w ≥ start_threshold_w` for `start_delay` (and the hard ceiling hasn't been reached today)
-- **RUNNING → IDLE** when the hard ceiling (`max_volume_turnover`) is reached — always, regardless of solar
-- **RUNNING → IDLE** when the soft-stop target (`min_volume_turnover`) is reached **and** `solar_w < start_threshold_w` — while solar is still producing, the pump keeps running past the soft target to use free energy
-- **RUNNING → IDLE** when `solar_w < stop_threshold_w` for `stop_delay`
-
-`min_volume_turnover` and `max_volume_turnover` are dimensionless multipliers (pool volumes filtered per day). At startup the daemon reads `script/pool-pump/{pool-volume,max-flow-rate,max-rpm,speed}` from the pool device KVS — the same values pool-pump.js uses for its own scheduling — and derives `daily_target_sec` / `max_rotation_sec`:
-
-```
-flow_rate        = max_flow_rate × (speed / max_rpm)
-daily_target_sec = pool_volume × min_volume_turnover / flow_rate × 3600
-max_rotation_sec = pool_volume × max_volume_turnover / flow_rate × 3600
-```
-
-The daemon only reads these KVS keys, never writes them — KVS remains exclusively the JS script's domain. Solar automation is disabled (with a logged error) if `max_volume_turnover < min_volume_turnover` or if any of the four KVS keys is missing or non-numeric.
-
-Requires both `pool.device_id` and Beem Energy credentials (`beem.email` + `beem.password`) to be configured.
-
-#### Example
-
-```yaml
-pool:
-  device_id: "shellyplus1pm-aabbccddeeff"
-  enabled: true
-  solar:
-    enabled: true
-    start_threshold_w:   500
-    stop_threshold_w:    200
-    start_delay:         5m
-    stop_delay:          10m
-    min_volume_turnover: 5   # soft stop: stop once filtered AND solar gone
-    max_volume_turnover: 7   # hard ceiling: always stop once filtered
-```
-
-#### Options
-
-| Key | Env var | Flag | Default | Description |
-|-----|---------|------|---------|-------------|
-| `pool.solar.enabled` | `MYHOME_POOL_SOLAR_ENABLED` | `--enable-pool-solar` | `false` | Enable solar-driven pump automation |
-| `pool.solar.start_threshold_w` | `MYHOME_POOL_SOLAR_START_THRESHOLD_W` | `--pool-solar-start-threshold-w` | `500` | Solar power threshold to start pump (W) |
-| `pool.solar.stop_threshold_w` | `MYHOME_POOL_SOLAR_STOP_THRESHOLD_W` | `--pool-solar-stop-threshold-w` | `200` | Solar power threshold to stop pump (W) |
-| `pool.solar.start_delay` | `MYHOME_POOL_SOLAR_START_DELAY` | `--pool-solar-start-delay` | `5m` | Solar must hold above start threshold for this long |
-| `pool.solar.stop_delay` | `MYHOME_POOL_SOLAR_STOP_DELAY` | `--pool-solar-stop-delay` | `10m` | Solar must hold below stop threshold for this long |
-| `pool.solar.min_volume_turnover` | `MYHOME_POOL_SOLAR_MIN_VOLUME_TURNOVER` | `--pool-solar-min-volume-turnover` | `5` | Soft-stop target: pool volumes filtered per day; pump keeps running past this while solar is still above the start threshold |
-| `pool.solar.max_volume_turnover` | `MYHOME_POOL_SOLAR_MAX_VOLUME_TURNOVER` | `--pool-solar-max-volume-turnover` | `7` | Hard ceiling: pool volumes filtered per day; pump always stops (and won't be solar-started) once reached |
+The daemon's only remaining role here is publishing the aggregate solar wattage (see "Solar
+Aggregator" above) and reading back the on-device runtime/turnover accumulators described above for
+`ctl pool status` and the `pool.turnover_today` notice.
 
 ## Notice & Email (SMTP)
 

@@ -24,6 +24,17 @@ type DeviceState struct {
 	// Populated by tests or loaded from a device snapshot (see FetchDeviceState).
 	ComponentStatus map[string]interface{} `json:"component_status,omitempty"`
 
+	// ComponentConfig overrides what Shelly.getComponentConfig() returns for a
+	// component (e.g. "ble"), replacing the emulator's built-in default. It
+	// lets a test reproduce a firmware-specific config shape, such as the
+	// 2.0.0+ "ble" config that has no "enable" key.
+	ComponentConfig map[string]interface{} `json:"component_config,omitempty"`
+
+	// bleScannerStarts counts BLE.Scanner.Start() calls the script made, and
+	// bleScannerRunning is the state BLE.Scanner.isRunning() reports.
+	bleScannerStarts  int
+	bleScannerRunning bool
+
 	// EventInjector, when non-nil, allows a test to push raw JSON-encoded
 	// device-event objects into the running script's event-handler loop.
 	// Send a JSON object with the same shape as Shelly device events:
@@ -382,6 +393,22 @@ func (d *DeviceState) EmittedEvents() []EmittedEvent {
 	out := make([]EmittedEvent, len(d.emittedEvents))
 	copy(out, d.emittedEvents)
 	return out
+}
+
+// ComponentConfigValue returns the test-supplied getComponentConfig override
+// for a component, if any, under the read lock.
+func (d *DeviceState) ComponentConfigValue(name string) (interface{}, bool) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	v, ok := d.ComponentConfig[name]
+	return v, ok
+}
+
+// BLEScannerStarts returns how many times the script called BLE.Scanner.Start.
+func (d *DeviceState) BLEScannerStarts() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.bleScannerStarts
 }
 
 // EmittedEventCount returns how many times the script called

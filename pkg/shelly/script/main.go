@@ -44,9 +44,17 @@ func ListAvailable() ([]string, error) {
 	return scripts, nil
 }
 
+// jsMinifierVersion pins the tdewolff minifier to ES5 (2009) so it can never
+// emit constructs the Shelly Espruino engine can't parse — e.g. optional
+// catch binding (`catch {}`, ES2019) or template literals with interpolation
+// (ES2015). See CLAUDE.md's "Never empty catch blocks" rule: without this,
+// the minifier silently turns a safe `catch (e) {}` into `catch {}`, which is
+// a syntax error on-device.
+const jsMinifierVersion = 2009
+
 func minifyJS(src []byte) ([]byte, error) {
 	m := minify.New()
-	m.AddFunc("text/javascript", mjs.Minify)
+	m.Add("text/javascript", &mjs.Minifier{Version: jsMinifierVersion})
 	var out bytes.Buffer
 	if err := m.Minify("text/javascript", &out, bytes.NewReader(src)); err != nil {
 		return nil, err
@@ -382,6 +390,16 @@ func doUpload(ctx context.Context, via types.Channel, device types.Device, name 
 				log.Info("Downgraded template literals in minified script", "name", name)
 			}
 		}
+	}
+
+	// Reject before any RPC is attempted: the device will refuse a script
+	// over MaxSourceBytes anyway (out_of_codespace), but only after chunks
+	// have already gone out, and that failure can be as unclear as a bare
+	// RPC error. Catching it here — ahead of isLoaded/Create/Stop/PutCode —
+	// covers every caller of doUpload, not just the `--no-minify` CLI path.
+	// See issue #553.
+	if err := checkSourceLength(name, buf, minify); err != nil {
+		return 0, err
 	}
 
 	id, err := isLoaded(ctx, via, device, name)

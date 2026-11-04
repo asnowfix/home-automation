@@ -44,7 +44,7 @@ These principles ensure resilience, privacy, and independence from third-party s
 
 ### Resilience Rules for Agents
 
-Two rules must hold for every change. Check them before marking a task done.
+Three rules must hold for every change. Check them before marking a task done.
 
 #### Rule 1 — Internet-optional
 
@@ -67,6 +67,19 @@ Each Shelly device must keep operating normally when the `myhome` daemon is down
 - When refactoring logic from a device script into the daemon, the PR description must name the degraded mode explicitly.
 
 **Violation examples**: moving a script's keep-alive timer into a daemon goroutine; making a device's switch behaviour depend on a live RPC call to `myhome/rpc`; removing a device-side fallback because "the daemon handles it now".
+
+#### Rule 3 — Devices push state; nobody polls devices
+
+Fresh device state reaches the daemon and the UI by push: device notifications on `<id>/events/rpc`, the device's own `<id>/status/...` and `<id>/online` topics, and retained topics the daemon publishes under `myhome/<domain>/<device-id>/status`. It never arrives by periodic RPC to a device.
+
+- **No timers that read device state.** Do not add a ticker, `hx-trigger="every ..."` or retry loop that results in an RPC to a device to learn its state. Config *writes* that heal drift (the hourly reconcile) are not state reads and are out of scope.
+- **No device RPC on the render path.** UI fragments render from daemon memory only. If a value is not in memory, render it as unknown. Do not fetch it.
+- **One forced refresh is allowed, at daemon start.** Explicit user actions (a Refresh button, `myhome ctl ...`) are allowed too. Neither is polling.
+- **Projection before publication.** If a value can be derived from an event the device already emits, derive it in the daemon (zero device heap). A device-side `MQTT.publish` or a new event field is a last resort. It is acceptable only for a value no event carries, and only with a measured `mem_peak` before and after, on the target hardware. Pool Pro1 scripts are at the heap limit (#474, #433).
+- **Retained topics carry their own age.** Every daemon-published status payload is JSON with a `ts` field (Unix seconds, the time the state was determined). Consumers decide staleness from `ts`, never from receipt time.
+- **Browsers cannot read MQTT.** The daemon relays state to pages by SSE invalidation plus an htmx re-fetch (see `docs/design/682-retained-state.md`, "Relay pattern").
+
+Before proposing to retire a polling path, check whether it is the only source of some field. Before proposing a device-side publish, state the observed rate of the problem it solves (`events.db`).
 
 ---
 

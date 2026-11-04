@@ -413,6 +413,7 @@ is re-derived from measurement rather than guessed.
 - **Non-trivial tasks**: create a plan file under `docs/` before writing code; mark each phase done before starting the next; commit plan updates alongside the implementation.
 - **Resilience — internet-optional**: the system must remain fully operational on the local network when the internet is unreachable. Features that use remote sources (weather, cloud APIs, firmware checks) must time out and degrade gracefully; they must not block or break local operation. Always add a timeout and a fallback/no-op path before shipping any code that calls an external URL.
 - **Resilience — daemon-optional per device**: each Shelly device must continue operating normally when the `myhome` daemon is down. Cross-device automation flows (device A triggers device B via the daemon) may pause during an outage, but no device's core function may depend solely on the daemon. Before moving logic from a device script into the daemon, explicitly document the degraded mode in the PR description.
+- **Device state is pushed, never polled**: no timers or render paths that RPC a device for state; derive from events in the daemon; device-side publishes need a heap measurement. See AGENTS.md "Rule 3".
 
 ### Shelly JavaScript
 

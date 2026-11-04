@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Hobby project with three goals: learn Go, learn Claude Code, automate the house with [Shelly devices](https://www.shelly.com/). Prefer idiomatic, educational Go patterns. Keep changes small and well-explained. Simplicity over generality. Detailed guidelines (Shelly JS, RPC patterns, config management) are in `AGENTS.md`.
 
+## Home NAS
+
+The NAS `gruissan.local` (`192.168.1.2`) runs the `myhome` daemon, the MQTT broker (`tcp://192.168.1.2:1883`) and the nightly `myhome-update.timer`. Two SSH MCP servers reach it: `nas-ssh-admin` (user `admin`, NAS administration) and `nas-ssh-fix` (user `fix`, NAS user services). Register them on a new machine with the `home-setup` skill.
+
 ## Commands
 
 ```bash

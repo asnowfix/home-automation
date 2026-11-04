@@ -163,10 +163,12 @@ const eventLogPageHTML = `<!doctype html>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>MyHome – Event Log</title>
-  <link rel="stylesheet" href="/static/bulma.min.css"/>
+  <link rel="stylesheet" href="/static/bulma.min.css?v={{.Version}}"/>
+  <link rel="stylesheet" href="/static/myhome.css?v={{.Version}}"/>
+  <meta name="theme-color" content="#151617"/>
   <link rel="icon" href="/static/penates.svg" type="image/svg+xml"/>
-  <script defer src="/static/alpine.min.js"></script>
-  <script src="/static/htmx.min.js"></script>
+  <script defer src="/static/alpine.min.js?v={{.Version}}"></script>
+  <script src="/static/htmx.min.js?v={{.Version}}"></script>
   <style>[x-cloak] { display: none !important; }</style>
 </head>
 <body x-data="eventLogApp()">

@@ -1,122 +1,242 @@
+/*
+ * MyHome design tokens and the dark base (#683).
+ *
+ * Linked after bulma.min.css. Bulma 0.9.4 is compiled Sass with literal
+ * colours and no custom properties, so the tokens are applied by selector
+ * overrides, limited to the components the UI fragments actually use.
+ * New shell markup uses its own mh- classes and does not rely on Bulma.
+ */
+
+/* Inter variable font (SIL OFL 1.1, see Inter-OFL.txt). The version is in the
+   file name because this stylesheet is static and assets are cached immutably. */
+@font-face {
+  font-family: "Inter";
+  src: url("/static/InterVariable-4.1.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
+
+  --mh-bg: #151617;
+  --mh-surface-1: #1b1d21;
+  --mh-surface-2: #242527;
+  --mh-surface-3: #303235;
+  --mh-surface-4: #5b5f66;
+  --mh-card: rgba(52, 55, 58, 0.3);
+
+  --mh-primary: #2491ff;
+  --mh-primary-tint-1: #182f45;
+  --mh-primary-tint-2: #1a3b5d;
+  --mh-secondary: #bbdcf8;
+
+  --mh-text: #eaeaea;
+  --mh-text-muted: #a1a2a2;
+
+  --mh-radius-pill: 200px;
+  --mh-radius-card: 24px;
+
+  --mh-font: "Inter", system-ui, sans-serif;
+  --mh-font-size: 16px;
+  --mh-font-weight: 400;
+
+  --mh-tap: 48px;
+  --mh-rail-width: 80px;
+}
+
+/* Page */
+html {
+  background: var(--mh-bg);
+  font-size: var(--mh-font-size);
 }
 
 body {
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
-  margin: 2rem;
+  background: var(--mh-bg);
+  color: var(--mh-text);
+  font-family: var(--mh-font);
+  font-size: var(--mh-font-size);
+  font-weight: var(--mh-font-weight);
 }
 
-h1 {
-  margin-bottom: 0.5rem;
+/* Bulma components used by the fragments */
+.hero.is-light {
+  background-color: var(--mh-surface-1);
+  color: var(--mh-text);
 }
 
-.subtitle {
-  color: #6b7280;
-  margin-bottom: 1.5rem;
+.title,
+.subtitle,
+.label,
+.hero.is-light .title,
+.hero.is-light .subtitle {
+  color: var(--mh-text);
+  font-family: var(--mh-font);
 }
 
-/* Top toolbar */
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+.subtitle,
+.help {
+  color: var(--mh-text-muted);
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 1rem;
+.section {
+  background: var(--mh-bg);
 }
 
-.card {
-  border: 1px solid #e5e7eb33;
-  border-radius: 12px;
-  padding: 1rem;
-  background: #ffffff0d;
-  backdrop-filter: blur(2px);
+a {
+  color: var(--mh-primary);
 }
 
-.name {
-  font-weight: 600;
-  font-size: 1.05rem;
-  margin-bottom: 0.25rem;
+.card,
+.box {
+  background: var(--mh-card);
+  color: var(--mh-text);
+  border-radius: var(--mh-radius-card);
+  box-shadow: none;
 }
 
-.meta {
-  font-size: 0.9rem;
-  color: #6b7280;
+.card-header,
+.card-footer {
+  background: transparent;
+  border-color: var(--mh-surface-3);
+  box-shadow: none;
+}
+
+.card-header-title {
+  color: var(--mh-text);
+}
+
+.label {
+  font-weight: 500;
+}
+
+.input,
+.textarea,
+.select select {
+  background: var(--mh-surface-3);
+  border-color: var(--mh-surface-4);
+  color: var(--mh-text);
+  min-height: var(--mh-tap);
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--mh-text-muted);
+}
+
+.input:focus,
+.textarea:focus,
+.select select:focus {
+  border-color: var(--mh-primary);
+  box-shadow: 0 0 0 0.125em var(--mh-primary-tint-2);
+}
+
+.select:not(.is-multiple):not(.is-loading)::after {
+  border-color: var(--mh-text-muted);
+}
+
+.table {
+  background: transparent;
+  color: var(--mh-text);
+}
+
+.table th,
+.table td {
+  border-color: var(--mh-surface-3);
+  color: var(--mh-text);
+}
+
+.table thead th {
+  color: var(--mh-text-muted);
+}
+
+.table.is-hoverable tbody tr:not(.is-selected):hover,
+.table.is-striped tbody tr:not(.is-selected):nth-child(even) {
+  background-color: var(--mh-surface-2);
+}
+
+.tag:not(body) {
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  border-radius: var(--mh-radius-pill);
+}
+
+.tag.is-info,
+.tag.is-link,
+.tag.is-primary {
+  background: var(--mh-primary-tint-2);
+  color: var(--mh-secondary);
 }
 
 .button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-top: 0.6rem;
-  padding: 0.4rem 0.7rem;
-  border-radius: 8px;
-  height: 36px;
-  text-align: center;
-  font-size: 0.95rem;
-  line-height: 1;
-  font-weight: 500;
-  font-family: inherit;
-  text-decoration: none;
-  background: #2563eb; /* default (Open) */
-  color: white;
+  background: var(--mh-surface-3);
+  border-color: transparent;
+  color: var(--mh-text);
+  border-radius: var(--mh-radius-pill);
+  font-family: var(--mh-font);
+  min-height: var(--mh-tap);
 }
 
-/* Shelly-inspired primary action (cyan/teal) */
-.button--shelly {
-  background: #00bcd4;
+.button:hover,
+.button:focus {
+  background: var(--mh-surface-4);
+  border-color: transparent;
+  color: var(--mh-text);
 }
 
-.actions {
-  display: grid;
-  gap: 0.5rem;
-  margin-top: 0.6rem;
+.button.is-primary,
+.button.is-link,
+.button.is-info {
+  background: var(--mh-primary);
+  color: var(--mh-bg);
 }
 
-.actions:not(.single) {
-  grid-template-columns: 1fr 1fr;
+.button.is-primary:hover,
+.button.is-link:hover,
+.button.is-info:hover {
+  background: var(--mh-primary);
+  filter: brightness(1.1);
+  color: var(--mh-bg);
 }
 
-.actions .slot .button {
-  width: 100%;
-  min-width: 0;
+.button.is-light {
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
 }
 
-.actions.single {
-  display: inline-flex;
-  gap: 0.5rem;
+.modal-background {
+  background-color: rgba(0, 0, 0, 0.7);
 }
 
-.actions.single .slot .button {
-  width: auto;
+.modal-card-head,
+.modal-card-foot {
+  background: var(--mh-surface-2);
+  border-color: var(--mh-surface-3);
 }
 
-.button--refresh {
-  background: #7c3aed;
+.modal-card-body {
+  background: var(--mh-surface-1);
+  color: var(--mh-text);
 }
 
-button.button { border: none; cursor: pointer; appearance: none; }
-
-.button:hover {
-  filter: brightness(1.05);
+.modal-card-title {
+  color: var(--mh-text);
 }
 
-.button:active {
-  transform: translateY(1px);
+.modal-card {
+  border-radius: var(--mh-radius-card);
+  overflow: hidden;
 }
 
-.empty {
-  color: #6b7280;
-  font-style: italic;
+.notification {
+  background: var(--mh-surface-2);
+  color: var(--mh-text);
+  border-radius: var(--mh-radius-card);
 }
 
-footer {
-  margin-top: 2rem;
-  font-size: 0.85rem;
-  color: #9ca3af;
+.notification.is-info,
+.notification.is-link {
+  background: var(--mh-primary-tint-1);
+  color: var(--mh-secondary);
 }

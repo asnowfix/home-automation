@@ -21,7 +21,7 @@ import (
 
 // Embed static assets under this package
 //
-//go:embed static/*
+//go:embed static/index.html
 var staticFS embed.FS
 
 // StaticFS returns the embedded static filesystem

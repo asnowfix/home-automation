@@ -264,6 +264,11 @@ logs-local-daemon:
 #                                                                          which accounts for the whole
 #                                                                          delta. Real added cost, so the
 #                                                                          timeout moves with it.)
+#   2026-11-04  internal/shelly/scripts  635.569s under -race  ->  700s  (#675 toolchain go1.25.3 ->
+#               go1.26.10, full `make -i test` on darwin/amd64, every Go package ok. 635.569 x 1.1 =
+#               699.1, rounded up. The prior 674s left only ~4% over the 646.4s measured on
+#               2026-11-03 under go1.25.3 (#675), so this restores the 10% rule rather than
+#               reflecting a toolchain slowdown.)
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
@@ -286,7 +291,7 @@ TESTFLAGS ?= -race
 # five times across workflows against `make test` twice, so a timeout that
 # covers only `test` covers the minority case -- which is exactly how #552
 # survived its first fix.
-TESTTIMEOUT ?= 674s
+TESTTIMEOUT ?= 700s
 
 test: build
 	bash linux/systemd/update_test.sh

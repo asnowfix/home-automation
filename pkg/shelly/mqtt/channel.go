@@ -97,7 +97,7 @@ func (ch *MqttChannel) receiveResponse(ctx context.Context, device types.Device,
 
 		device.StopDialog(ctx, reqId)
 		if res.Error != nil {
-			return nil, fmt.Errorf("device replied error '%v' (code:%v) to request '%v'", res.Error.Message, res.Error.Code, string(resMsg))
+			return nil, &types.RpcError{Code: res.Error.Code, Message: res.Error.Message, Reply: string(resMsg)}
 		}
 
 		return out, nil

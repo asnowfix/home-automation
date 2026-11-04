@@ -276,7 +276,7 @@ The discipline that made this recoverable:
   ~15 minutes. **NAS post-mortem evidence does not survive** — use `events.db` (see above), which does.
 - **`sqlite3` is not installed on the NAS.** Query `events.db` with `python3`'s `sqlite3` module
   against `file:/var/lib/myhome/events.db?mode=ro` instead.
-- **`myhome-update.timer`** installs whatever `releases/latest` resolves to, nightly (00:00), so a
+- **`myhome-update.timer`** installs whatever `releases/latest` resolves to, nightly (04:30 since #661; it was 00:00 before, colliding with the midnight timers), so a
   hand-installed binary or a draft release is overwritten — with a *downgrade* if `releases/latest`
   is older (measured 2026-10-20: a hand-built 0.12.4-lux1 was replaced by 0.12.4 at midnight). To
   keep a different build on the NAS, disable (or mask) the timer first and re-enable it once that

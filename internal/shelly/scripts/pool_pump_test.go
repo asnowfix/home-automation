@@ -2906,36 +2906,25 @@ func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStopsPump(t *testing.T) {
 // that changes the active-output outcome); these four cover the remaining
 // arms explicitly required by #509's done-criteria.
 
-// poolPumpWinterForecastServer serves an Open-Meteo response whose every
-// hourly temperature sits under poolPumpWindowKVS()'s temp-threshold (20),
+// poolPumpWinterForecastPayload is the proxy result (#465) for a forecast
+// whose max temperature sits under poolPumpWindowKVS()'s temp-threshold (20),
 // so decideModeFromForecast() selects 'winter' and calls
 // updateScheduleMode('winter', null, null) — the no-timings arm that #509's
 // invariant list calls out by name, since a summer-only derivation would not
 // cover it.
-func poolPumpWinterForecastServer(t *testing.T) *httptest.Server {
+func poolPumpWinterForecastPayload(t *testing.T) []byte {
 	t.Helper()
-
-	temps := make([]float64, 24)
-	for i := range temps {
-		temps[i] = 10
-	}
 	body, err := json.Marshal(map[string]interface{}{
-		"hourly": map[string]interface{}{"temperature_2m": temps},
-		"daily": map[string]interface{}{
-			"sunrise": []string{"2026-08-07T06:00"},
-			"sunset":  []string{"2026-08-07T20:00"},
-		},
+		"max_temp_c": 10,
+		"peak_hour":  12,
+		"sunrise_h":  6.0,
+		"sunset_h":   20.0,
+		"ts":         time.Now().Unix(),
 	})
 	if err != nil {
-		t.Fatalf("failed to build winter forecast body: %v", err)
+		t.Fatalf("failed to build winter forecast payload: %v", err)
 	}
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	return body
 }
 
 // TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged is the
@@ -2946,7 +2935,7 @@ func poolPumpWinterForecastServer(t *testing.T) *httptest.Server {
 func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testing.T) {
 	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
 
-	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpWidePeakHour, "00:00", "23:59")
 	now := time.Now()
 
 	// poolPumpWideStartMin/StopMin (01:00 / 23:29) is exactly what this
@@ -2960,7 +2949,7 @@ func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testi
 		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: pro1ComponentStatus(), // pump off at boot
 		Schedules:       poolPumpSummerSchedules(start, stop),
@@ -2976,6 +2965,11 @@ func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testi
 	go func() {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
+
+	// #465: the daemon's proxy result stands in for the old forecast server.
+	stopPublishing := make(chan struct{})
+	defer close(stopPublishing)
+	poolPumpPublishForecastUntil(ctx, mc, forecast, stopPublishing)
 
 	// The window is already correct, so init's own onWindowJobs() call (not
 	// the daily check) should start the pump.
@@ -3015,7 +3009,7 @@ func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testi
 // path must resolve the night window from enable flags alone, which a
 // summer-only derivation would not exercise.
 func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
-	srv := poolPumpWinterForecastServer(t)
+	forecast := poolPumpWinterForecastPayload(t)
 	now := time.Now()
 
 	job := func(id int, code, timespec string, enable bool) map[string]interface{} {
@@ -3039,7 +3033,7 @@ func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
 		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: pro1ComponentStatus(), // pump off
 		Schedules: []map[string]interface{}{
@@ -3061,6 +3055,11 @@ func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
 	go func() {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
+
+	// #465: the daemon's proxy result stands in for the old forecast server.
+	stopPublishing := make(chan struct{})
+	defer close(stopPublishing)
+	poolPumpPublishForecastUntil(ctx, mc, forecast, stopPublishing)
 
 	modeOK := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		v, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
@@ -3095,7 +3094,7 @@ func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
 // already was — NOT get forced to "off" — even though updateScheduleMode()
 // did write a change (the morning job moved) and windowChanged is true.
 func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T) {
-	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpWidePeakHour, "00:00", "23:59")
 	now := time.Now()
 
 	job := func(id int, code, timespec string, enable bool) map[string]interface{} {
@@ -3115,7 +3114,7 @@ func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T
 		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: cs,
 		// No handleEveningStop() job at all, at init or after the rewrite --
@@ -3139,6 +3138,11 @@ func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T
 	go func() {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
+
+	// #465: the daemon's proxy result stands in for the old forecast server.
+	stopPublishing := make(chan struct{})
+	defer close(stopPublishing)
+	poolPumpPublishForecastUntil(ctx, mc, forecast, stopPublishing)
 
 	initial := poolPumpScheduleTimespec(deviceState.ScheduleJobs(), "handleMorningStart()")
 	rewritten := waitFor(initTimeout, 100*time.Millisecond, func() bool {

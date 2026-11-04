@@ -115,7 +115,13 @@ func poolPumpWindowNow(t *testing.T, offsetStart, offsetStop time.Duration, swit
 // returned stop().
 func runPoolPump(t *testing.T, d *script.DeviceState) (stop func()) {
 	t.Helper()
-	mc := mqtt.NewMockClient()
+	return runPoolPumpWithClient(t, d, mqtt.NewMockClient())
+}
+
+// runPoolPumpWithClient is runPoolPump with a caller-supplied mock MQTT
+// client, so a test can publish to the script (e.g. a #465 forecast result).
+func runPoolPumpWithClient(t *testing.T, d *script.DeviceState, mc *mqtt.MockClient) (stop func()) {
+	t.Helper()
 
 	buf := readPoolPumpScript(t)
 	ctx, cancel := poolPumpRunContext(t, mc)

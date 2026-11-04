@@ -222,6 +222,11 @@ FROM events WHERE device_id='shellypro1-ec62608c0230'
 GROUP BY d HAVING prot>0 OR rest>0 ORDER BY d;
 ```
 
+**"Did the script crash or restart?"** There is no script start/stop/crash event. A `config_changed`
+at an unexpected time marks a script (re)start whose init ran, and a `pool.run_window` ~10 s later
+marks init completing; the proxies, the `cfg_rev` calibration table and the lossiness caveat are in
+`.claude/skills/shelly/references/api.md` ("After the fact"). Query them before touching hardware.
+
 **Worked example, #523 (2026-08-27).** An issue claimed a safety fact could go stale "indefinitely"
 because an input edge might be missed, and a fix was designed, briefed, implemented, reviewed and
 nearly merged on that premise. One query over 71 days settled it: on **every** day without

@@ -1,6 +1,6 @@
 module github.com/asnowfix/home-automation
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/asnowfix/home-automation/hlog v0.0.0-20260402201030-0ed25e95389f

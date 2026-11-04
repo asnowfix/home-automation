@@ -1,8 +1,8 @@
 module github.com/asnowfix/home-automation/pkg/shelly
 
-go 1.25.0
+go 1.26.0
 
-toolchain go1.25.3
+toolchain go1.26.10
 
 require (
 	github.com/asnowfix/home-automation/internal/myhome/net v0.0.0-20260714105922-3929eb070393

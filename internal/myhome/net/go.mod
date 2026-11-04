@@ -9,7 +9,7 @@ require (
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/jackpal/gateway v1.1.1
 	github.com/pion/mdns/v2 v2.0.7
-	golang.org/x/net v0.42.0
+	golang.org/x/net v0.58.0
 )
 
 require (

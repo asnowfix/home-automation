@@ -30,7 +30,7 @@ require (
 
 require (
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
-	github.com/eclipse/paho.mqtt.golang v1.5.0 // indirect
+	github.com/eclipse/paho.mqtt.golang v1.5.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/zerologr v1.2.3 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
@@ -46,7 +46,7 @@ require (
 	github.com/rs/zerolog v1.33.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	golang.org/x/mod v0.26.0 // indirect
-	golang.org/x/net v0.42.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/tools v0.35.0 // indirect

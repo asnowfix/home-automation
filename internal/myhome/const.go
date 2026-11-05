@@ -39,6 +39,7 @@ const (
 	RoomCreate                    Verb = "room.create"
 	RoomEdit                      Verb = "room.edit"
 	RoomDelete                    Verb = "room.delete"
+	RoomSetup                     Verb = "room.setup"
 	DeviceSetRoom                 Verb = "device.setroom"
 	DeviceListByRoom              Verb = "device.listbyroom"
 	SwitchToggle                  Verb = "switch.toggle"

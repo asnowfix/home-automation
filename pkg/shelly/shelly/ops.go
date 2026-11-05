@@ -58,6 +58,11 @@ func Init(log logr.Logger, r types.MethodsRegistrar, timeout time.Duration) {
 		HttpMethod: http.MethodGet,
 	})
 
+	r.RegisterMethodHandler(DetectLocation.String(), types.MethodHandler{
+		Allocate:   func() any { return new(DetectLocationResponse) },
+		HttpMethod: http.MethodGet,
+	})
+
 	// TODO complete the list of handlers
 
 	r.RegisterMethodHandler(GetComponents.String(), types.MethodHandler{

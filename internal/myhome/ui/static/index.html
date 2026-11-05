@@ -11,11 +11,11 @@
   
   <!-- Android/Chrome Meta Tags -->
   <meta name="mobile-web-app-capable" content="yes"/>
-  <meta name="theme-color" content="#F5EFE6"/>
+  <meta name="theme-color" content="#151617"/>
   
   <!-- Windows Meta Tags -->
-  <meta name="msapplication-TileColor" content="#F5EFE6"/>
-  <meta name="msapplication-TileImage" content="/static/penates.svg"/>
+  <meta name="msapplication-TileColor" content="#151617"/>
+  <meta name="msapplication-TileImage" content="/static/penates.svg?v={{.Version}}"/>
   <meta name="msapplication-config" content="none"/>
   
   <!-- General Meta Tags -->
@@ -23,15 +23,16 @@
   <meta name="description" content="MyHome Penates"/>
   
   <title>MyHome Devices</title>
-  <link rel="stylesheet" href="/static/bulma.min.css"/>
+  <link rel="stylesheet" href="/static/bulma.min.css?v={{.Version}}"/>
+  <link rel="stylesheet" href="/static/myhome.css?v={{.Version}}"/>
   
   <!-- Icons for all platforms -->
-  <link rel="icon" href="/static/penates.svg" type="image/svg+xml"/>
-  <link rel="apple-touch-icon" href="/static/penates.svg"/>
-  <link rel="manifest" href="/static/manifest.json"/>
+  <link rel="icon" href="/static/penates.svg?v={{.Version}}" type="image/svg+xml"/>
+  <link rel="apple-touch-icon" href="/static/penates.svg?v={{.Version}}"/>
+  <link rel="manifest" href="/static/manifest.json?v={{.Version}}"/>
   
-  <script defer src="/static/alpine.min.js"></script>
-  <script src="/static/htmx.min.js"></script>
+  <script defer src="/static/alpine.min.js?v={{.Version}}"></script>
+  <script src="/static/htmx.min.js?v={{.Version}}"></script>
   <style>
     .door-icon {
       display: inline-block;
@@ -171,6 +172,13 @@
               </label>
             </template>
           </div>
+        </div>
+        <div class="field">
+          <label class="label">iCal Agenda URL <span class="has-text-grey has-text-weight-normal">(optional)</span></label>
+          <div class="control">
+            <input class="input" type="url" x-model="roomForm.icalUrl" placeholder="https://calendar.example.com/room.ics">
+          </div>
+          <p class="help">Public iCal URL for room occupancy agenda (used by heater controller)</p>
         </div>
         <hr>
         <p class="has-text-weight-semibold mb-2">Temperature Levels (°C)</p>
@@ -322,6 +330,7 @@
           name: '',
           kinds: ['other'],
           levels: { eco: 18, comfort: 20, away: 15 },
+          icalUrl: '',
           saving: false
         },
         setupForm: {
@@ -590,6 +599,7 @@
             name: '',
             kinds: ['other'],
             levels: { eco: 18, comfort: 20, away: 15 },
+            icalUrl: '',
             saving: false
           };
           this.modals.room = true;
@@ -615,6 +625,7 @@
               name: room.name || '',
               kinds: room.kinds || ['other'],
               levels: room.levels || { eco: 18, comfort: 20, away: 15 },
+              icalUrl: room.ical_url || '',
               saving: false
             };
             this.modals.room = true;
@@ -635,7 +646,8 @@
               id: this.roomForm.id,
               name: this.roomForm.name || this.roomForm.id,
               kinds: this.roomForm.kinds,
-              levels: this.roomForm.levels
+              levels: this.roomForm.levels,
+              ical_url: this.roomForm.icalUrl
             };
 
             const res = await fetch('/rpc', {
@@ -654,16 +666,26 @@
               await fetch('/rpc', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                  method: 'temperature.set', 
-                  params: { 
-                    room_id: this.roomForm.id, 
-                    name: this.roomForm.name || this.roomForm.id, 
-                    kinds: this.roomForm.kinds, 
-                    levels: this.roomForm.levels 
-                  } 
+                body: JSON.stringify({
+                  method: 'temperature.set',
+                  params: {
+                    room_id: this.roomForm.id,
+                    name: this.roomForm.name || this.roomForm.id,
+                    kinds: this.roomForm.kinds,
+                    levels: this.roomForm.levels
+                  }
                 })
               });
+              if (this.roomForm.icalUrl) {
+                await fetch('/rpc', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    method: 'room.edit',
+                    params: { id: this.roomForm.id, ical_url: this.roomForm.icalUrl }
+                  })
+                });
+              }
             }
 
             this.closeRoomModal();

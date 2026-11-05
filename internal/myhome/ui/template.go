@@ -99,9 +99,6 @@ type IndexData struct {
 // index template and renderer
 var indexTmpl *template.Template
 
-// eventLogTmpl is the full-page event log template
-var eventLogTmpl *template.Template
-
 func init() {
 	indexContent, err := staticFS.ReadFile("static/index.html")
 	if err != nil {
@@ -113,11 +110,6 @@ func init() {
 		"lower": strings.ToLower,
 	})
 	indexTmpl = template.Must(tmpl.Parse(string(indexContent)))
-
-	// Build the event-log page template
-	eventLogTmpl = template.Must(template.New("event-log").Funcs(template.FuncMap{
-		"lower": strings.ToLower,
-	}).Parse(eventLogPageHTML))
 }
 
 // DeviceToView converts a myhome.Device to ui.DeviceView for SSE broadcasting and UI rendering
@@ -340,19 +332,6 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 		DoorOpened:           doorOpened,
 		Switches:             switches,
 	}
-}
-
-// RenderEventLog renders the event log page.
-// It reuses the same index layout but injects the events table section.
-// Device data is loaded separately by the client via hx-get="/htmx/devices"
-// (index.html/eventLogPageHTML never reference .Devices), so this does not
-// enumerate devices — that work would be discarded and was the dominant
-// cost of loading this page (see #390).
-func RenderEventLog(ctx context.Context, w io.Writer) error {
-	data := IndexData{
-		Version: ctx.Value(global.VersionKey).(string),
-	}
-	return eventLogTmpl.Execute(w, data)
 }
 
 // RenderIndex renders the index page.

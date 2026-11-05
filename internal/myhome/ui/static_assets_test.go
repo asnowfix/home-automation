@@ -57,8 +57,7 @@ func TestMyhomeCSSTokensAndFontFace(t *testing.T) {
 func TestRenderedPagesCacheBustAssets(t *testing.T) {
 	ctx := context.WithValue(context.Background(), global.VersionKey, "9.9.9-test")
 	renders := map[string]func(context.Context, *bytes.Buffer) error{
-		"index":     func(c context.Context, b *bytes.Buffer) error { return RenderIndex(c, b) },
-		"event-log": func(c context.Context, b *bytes.Buffer) error { return RenderEventLog(c, b) },
+		"index": func(c context.Context, b *bytes.Buffer) error { return RenderIndex(c, b) },
 	}
 	for name, render := range renders {
 		var buf bytes.Buffer
@@ -66,7 +65,7 @@ func TestRenderedPagesCacheBustAssets(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 		html := buf.String()
-		for _, a := range []string{"bulma.min.css", "myhome.css", "htmx.min.js", "alpine.min.js", "manifest.json", "penates.svg"} {
+		for _, a := range []string{"bulma.min.css", "myhome.css", "htmx.min.js", "alpine.min.js", "myhome.js", "manifest.json", "penates.svg"} {
 			if a == "manifest.json" && name != "index" {
 				continue // the event-log page has no manifest link
 			}
@@ -131,4 +130,13 @@ func TestAllTokensAndManifestColours(t *testing.T) {
 	if !strings.Contains(m, `"theme_color": "#151617"`) || !strings.Contains(m, `"background_color": "#151617"`) {
 		t.Error("manifest.json colours are not the dark background")
 	}
+}
+
+func staticAsset(t *testing.T, path string) []byte {
+	t.Helper()
+	a, ok := static.Assets[path]
+	if !ok {
+		t.Fatalf("%s not in static.Assets", path)
+	}
+	return a.Content
 }

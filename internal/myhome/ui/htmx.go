@@ -727,15 +727,6 @@ const deviceCardsTemplate = `
       </p>
       <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
       <div class="buttons mt-3">
-        {{if .HasWebUI}}
-          <a class="button is-link is-small" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="2" y1="12" x2="22" y2="12"></line>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-            </svg>
-          </a>
-        {{end}}
         {{if .IsRefreshable}}
         <button class="button is-warning is-small" 
                 id="btn-refresh-{{.Id}}"
@@ -846,15 +837,6 @@ const deviceCardTemplate = `
       </p>
       <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
       <div class="buttons mt-3">
-        {{if .HasWebUI}}
-          <a class="button is-link is-small" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="2" y1="12" x2="22" y2="12"></line>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-            </svg>
-          </a>
-        {{end}}
         {{if .IsRefreshable}}
         <button class="button is-warning is-small" 
                 id="btn-refresh-{{.Id}}"
@@ -932,7 +914,7 @@ const roomsListTemplate = `
       {{if .Devices}}
       <div class="mt-2">
         {{range .Devices}}
-        <p class="is-size-7">{{roleEmoji .Role}} <a href="/devices/{{.ID}}/" target="_blank" rel="noopener noreferrer">{{.Name}}</a></p>
+        <p class="is-size-7">{{roleEmoji .Role}} {{.Name}}</p>
         {{end}}
       </div>
       {{end}}

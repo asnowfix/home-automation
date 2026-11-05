@@ -37,67 +37,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 
 	log.V(1).Info("Starting UI server", "addr", addr, "resolver", resolver, "db", db, "mc", mc, "sseBroadcaster", sseBroadcaster)
 
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if !global.PanicOnBugs {
-			// Panic recovery to avoid blank pages
-			defer func() {
-				if rec := recover(); rec != nil {
-					log.Error(fmt.Errorf("%v", rec), "panic recovered", "path", r.URL.Path, "stack", string(debug.Stack()))
-					http.Error(w, "internal error", http.StatusInternalServerError)
-				}
-			}()
-		}
-
-		start := time.Now()
-		path := strings.TrimPrefix(r.URL.Path, "/")
-		log.Info("request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "ua", r.UserAgent())
-
-		if path == "" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			if err := RenderIndex(ctx, w); err != nil {
-				log.Error(err, "failed to render index page")
-				http.Error(w, "unable to render index", http.StatusInternalServerError)
-			}
-			log.Info("served index", "dur", time.Since(start))
-			return
-		}
-
-		if path == "event-log" {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			if err := RenderEventLog(ctx, w); err != nil {
-				log.Error(err, "failed to render event log page")
-				http.Error(w, "unable to render event log", http.StatusInternalServerError)
-			}
-			log.Info("served event log", "dur", time.Since(start))
-			return
-		}
-
-		proxy.Handle(ctx, log, resolver, db, upstreamProxy, w, r)
-
-	})
-
-	mux.Handle("/events", sseBroadcaster)
-	mux.HandleFunc("/rpc", RpcHandler(ctx, log.WithName("RpcHandler")))
-
-	// Static assets (Bulma CSS, HTMX, Alpine.js)
-	mux.HandleFunc("/static/", serveStatic)
-
-	// HTMX endpoints for partial HTML responses
-	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc, accountsRegistry, sqlDB)
-	if sseBroadcaster != nil {
-		sseBroadcaster.SetDeviceNameResolver(htmxHandler.DeviceNameResolver())
-	}
-	mux.HandleFunc("/htmx/devices", htmxHandler.DeviceCards)
-	mux.HandleFunc("/htmx/device/", htmxHandler.DeviceCard)
-	mux.HandleFunc("/htmx/rooms", htmxHandler.RoomsList)
-	mux.HandleFunc("/htmx/switch/toggle", htmxHandler.SwitchButton)
-	mux.HandleFunc("/htmx/events", htmxHandler.EventsTable)
-	mux.HandleFunc("/htmx/events/more", htmxHandler.EventsMore)
-	mux.HandleFunc("/htmx/accounts", htmxHandler.AccountsPanel)
-	mux.HandleFunc("/htmx/vacuum", htmxHandler.VacuumPanel)
-	mux.HandleFunc("/htmx/vacuum/action", htmxHandler.VacuumAction)
+	mux := newMux(ctx, log, resolver, db, sseBroadcaster, eventsSvc, upstreamProxy, accountsRegistry, sqlDB)
 
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Info("http-incoming", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "proto", r.Proto, "content-length", r.ContentLength)
@@ -176,4 +116,70 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", asset.ContentType)
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	w.Write(asset.Content)
+}
+
+// newMux builds the UI's route table. It is separate from Start so tests can
+// exercise the routes with httptest. Unknown paths fall through to the device
+// reverse proxy (GET / is the shell, /event-log redirects to its section).
+func newMux(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db DeviceRegistry, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry, sqlDB *sqlx.DB) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if !global.PanicOnBugs {
+			// Panic recovery to avoid blank pages
+			defer func() {
+				if rec := recover(); rec != nil {
+					log.Error(fmt.Errorf("%v", rec), "panic recovered", "path", r.URL.Path, "stack", string(debug.Stack()))
+					http.Error(w, "internal error", http.StatusInternalServerError)
+				}
+			}()
+		}
+
+		start := time.Now()
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		log.Info("request", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "ua", r.UserAgent())
+
+		if path == "" {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if err := RenderIndex(ctx, w); err != nil {
+				log.Error(err, "failed to render index page")
+				http.Error(w, "unable to render index", http.StatusInternalServerError)
+			}
+			log.Info("served index", "dur", time.Since(start))
+			return
+		}
+
+		// The event log is a section of the shell now; keep old bookmarks working.
+		if path == "event-log" {
+			http.Redirect(w, r, "/#events", http.StatusFound)
+			return
+		}
+
+		proxy.Handle(ctx, log, resolver, db, upstreamProxy, w, r)
+
+	})
+
+	mux.Handle("/events", sseBroadcaster)
+	mux.HandleFunc("/rpc", RpcHandler(ctx, log.WithName("RpcHandler")))
+
+	// Static assets (Bulma CSS, HTMX, Alpine.js)
+	mux.HandleFunc("/static/", serveStatic)
+
+	// HTMX endpoints for partial HTML responses
+	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc, accountsRegistry, sqlDB)
+	if sseBroadcaster != nil {
+		sseBroadcaster.SetDeviceNameResolver(htmxHandler.DeviceNameResolver())
+	}
+	mux.HandleFunc("/htmx/devices", htmxHandler.DeviceCards)
+	mux.HandleFunc("/htmx/device/", htmxHandler.DeviceCard)
+	mux.HandleFunc("/htmx/rooms", htmxHandler.RoomsList)
+	mux.HandleFunc("/htmx/switch/toggle", htmxHandler.SwitchButton)
+	mux.HandleFunc("/htmx/events", htmxHandler.EventsTable)
+	mux.HandleFunc("/htmx/events/more", htmxHandler.EventsMore)
+	mux.HandleFunc("/htmx/accounts", htmxHandler.AccountsPanel)
+	mux.HandleFunc("/htmx/pool", htmxHandler.PoolPanel)
+	mux.HandleFunc("/htmx/vacuum", htmxHandler.VacuumPanel)
+	mux.HandleFunc("/htmx/vacuum/action", htmxHandler.VacuumAction)
+
+	return mux
 }

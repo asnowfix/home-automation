@@ -74,7 +74,7 @@ The devices moved to the outdoor AP without rebooting. This is a single observat
 strongest signal found so far: **a critical device sitting on its fallback AP flapped constantly,
 and the same device on its primary AP did not flap at all.**
 
-Open hypotheses, none proven:
+Open hypotheses, none proven. H1, H2 and H5 are about the network itself and are investigated in the Wi-Fi network campaign, #694. H3 and H4 stay here, in phase 2.
 
 | # | Hypothesis | Test |
 |---|---|---|
@@ -103,7 +103,7 @@ discrepancy raised in the alerting notes: the Pi is the NAS.
 | Online state | Only stored as event rows, with no in-memory state or deduplication (`internal/myhome/shelly/gen2/listener.go:241`) | code |
 | MQTT broker | Embedded in the daemon (mochi), so a daemon restart also disconnects every device | code |
 
-Related issues: #61, #247, #266, #283, #478, #495, #517, #580, #429.
+Related issues: #61, #247, #266, #283, #478, #495, #517, #580, #429. Network campaign: #694.
 
 ## 5. Flapping analysis
 
@@ -255,16 +255,15 @@ Phases are ordered so that each one produces evidence for the next.
 
 | Phase | Goal | Exit condition |
 |---|---|---|
-| 0. Critical-device Wi-Fi | Explain why the critical devices fell back from their primary AP | Cause found or recorded as unknown; devices on their primary AP |
 | 1. See | Collect and store device health; chart it | 7 days of signal, BSSID and uptime data; Pi cost measured |
-| 2. Explain | Understand flapping and the `watchdog.js` path | Cause of bursts stated or ruled down; worst four devices fixed or explained; firmware hypothesis tested |
+| 2. Explain | Understand flapping and the `watchdog.js` path | Cause of bursts stated or ruled down; worst four devices explained, with network fixes handed to #694; firmware hypothesis tested |
 | 3. Alert | Critical and group alerts, banner and email | Test outage alerts within the threshold; noise measured over 14 days |
 | 4. Extend | Warning-tier email, WhatsApp, `/metrics`, more rules | Each rule has an observed rate; volume agreed |
 | 5. Clean up | Remove unused paths | `prometheus-metrics.js`, packaged exporter and #266, #283 resolved |
 
 Candidate issues, each to be written self-contained:
 
-1. **Critical-device Wi-Fi:** why the two critical devices fell back from their primary AP, and whether that AP can fail unnoticed.
+1. **Connected-AP metric:** record which access point each device is on and its signal, so that a device on its fallback AP is visible. (The Wi-Fi investigation itself moved to #694.)
 2. **MQTT capture on hardware:** what Shelly pushes and when, whether `online` is retained, and the
    memory and network cost of one status RPC. Read-only.
 3. **`metrics.db` store:** schema, batching, retention, config options in all four required files.
@@ -287,7 +286,7 @@ Dependencies: 3 and 4 before 5 and 7. 2 before 4. 6 before 8. 4 before 9. 9 befo
 ## 8. Unknowns
 
 - Root cause of the critical-device outage and of the fleet-wide bursts.
-- Why the critical devices left their primary AP, and why they returned without rebooting.
+- Why the critical devices left their primary AP, and why they returned without rebooting (tracked in #694).
 - Periodic or on-change push of RSSI and free RAM; whether `online` is retained. Needs a capture.
 - Pi RAM, CPU and SD write costs of the proposed store and collector. Only workstation figures exist.
 - Cost of status RPCs on the devices with the least free memory.
@@ -301,4 +300,3 @@ Dependencies: 3 and 4 before 5 and 7. 2 before 4. 6 before 8. 4 before 9. 9 befo
 
 1. Approve the architecture, particularly in-daemon alerting and SQLite.
 2. Approve filing the epic and child issues on GitHub.
-3. Whether phase 0 stays a separate phase. The critical devices have been stable on their primary AP since 2026-11-01, so it could shrink to one issue run alongside phase 1.

@@ -111,6 +111,14 @@ type Status struct {
 	WebSocket *any                 `json:"ws,omitempty"`
 }
 
+// DetectLocationResponse is the response from Shelly.DetectLocation.
+// https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellydetectlocation
+type DetectLocationResponse struct {
+	Lat float64 `json:"lat"` // Latitude in decimal degrees
+	Lon float64 `json:"lon"` // Longitude in decimal degrees
+	TZ  string  `json:"tz"`  // IANA timezone string (e.g. "Europe/Paris")
+}
+
 // From https://shelly-api-docs.shelly.cloud/gen2/ComponentsAndServices/Shelly#shellycheckforupdate
 
 type MethodsResponse struct {

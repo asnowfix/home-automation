@@ -179,7 +179,7 @@ Other ports:
 - 9100: Prometheus metrics exporter
 - 1883: MQTT broker
 - 6060: GoLang profiler (pprof) (XXX to be closed when privileged)
-- 8888: Temperature control (XXX to be folded into main port)
+- 8888: Gen1 HTTP→MQTT proxy (receives HTTP POSTs from Gen1 Shelly devices and forwards them to MQTT)
 
 ## Logging System
 

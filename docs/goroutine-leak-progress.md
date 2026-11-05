@@ -9,3 +9,4 @@
   - Note: a first attempt counting opened connections was wrong: closing a partially read body closes the connection, so it measured nothing useful. Open-after-CloseIdleConnections is the deterministic signal.
 - Systemd: RuntimeMaxSec 21600 -> 172800; CLAUDE.md NAS bullet updated (~164/day -> ~20/day) plus drop-in removal note. Only other repo mentions of 21600/6h were unrelated.
 - Pre-existing: gofmt -l flags channel.go and ops.go (import order) on main; left alone.
+- Full `make test` on fix branch: EXIT=0, 66 `ok` lines, 0 FAIL, wall clock about 14 min (started ~875 s before the poll finished; upper bound). Slowest package internal/shelly/scripts 634.735 s (plain `make test`, 2026-11-05); TESTTIMEOUT stays 674s (634.7 < 674; the rule asks for the -race measurement, not taken). shttp package 10.2 s (pre-existing slow tests, new test ~0.06 s).

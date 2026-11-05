@@ -16,8 +16,8 @@ Research notes, with sources and their own unknowns:
 
 - **Nothing monitors the devices today.** Prometheus runs on the NAS but scrapes only itself and
   node-exporter (measured).
-- **A duration-based offline alert would have caught the gate outage about 5 minutes in.** It would
-  have fired around 21:48 instead of leaving 12.6 hours of silence. No evidence shows the outage
+- **A duration-based offline alert would have caught the outage of the two critical devices about 5 minutes in.** It would
+  have fired within minutes instead of leaving 12.6 hours of silence. No evidence shows the outage
   could have been predicted.
 - **Alerts on today's fleet would be noisy.** There were 115 offline periods of 30 minutes or more
   in 7 days (measured), so Wi-Fi and flapping must be understood first.
@@ -38,68 +38,66 @@ Research notes, with sources and their own unknowns:
 | Storage | SQLite if the stack is inside the daemon |
 | Charts | Native charts first; extensions decided later |
 | External dead-man service | Not at this point |
-| Thresholds | 5 min for critical devices (gate, pool pump), 30 min for others, battery sleepers excluded, no quiet hours |
+| Thresholds | 5 min for critical devices (the two outage devices, pool pump), 30 min for others, battery sleepers excluded, no quiet hours |
 | Live access for the study | Read-only permitted |
 
-## 3. Trigger incident: gate devices, 2026-10-31
+## 3. Trigger incident: two critical devices, 2026-10-31
 
-Terms: "EAP" or "external AP" is the outdoor TP-Link access point; "internal AP" is the indoor Wi-Fi repeater.
+Network details (device identities, access-point models and identifiers, exact times and signal
+values) are kept privately by the owner, because this repository is public. Terms used here:
+"outdoor AP" is the access point serving the outdoor area; "internal AP" is the indoor Wi-Fi
+network, which the outdoor devices use as a fallback.
 
-Both `fermeture-portail` and `ouverture-portail` are Shelly 1 Mini G3 devices on firmware 2.0.3,
-in the same outdoor enclosure.
-
-| Time | Event | Evidence |
-|---|---|---|
-| 10-28 04:20 | `fermeture-portail` installs firmware; 32 fleet devices update that day | measured |
-| 10-30 23:16 to 10-31 16:34 | Repeated short flaps, many shared with 20+ other devices | measured |
-| 10-31 21:43:30 | Both report `device.offline` in the same second | measured |
-| 11-01 00:00, 06:00 | Daemon restarts; neither device produces any event | measured |
-| 11-01 ~10:17 | Enclosure power cycle, per the owner; four devices later show uptime that fits this | owner, measured |
-| 11-01 10:17:24 | Both report `device.online` in the same second | measured |
-| 11-01 10:19:01 | First logged button press on `fermeture-portail` | measured |
-
-Before the outage, one device had the internal AP then the external AP; the other had the external
-AP only. Afterwards, both were set to external first, internal second (owner).
+Two critical Shelly 1 Mini G3 devices, mounted together outdoors, went offline in the same second on
+the evening of 2026-10-31 and stayed silent for 12.6 hours (measured). They returned, again in the
+same second, after the owner power-cycled their installation. Neither produced any event across the
+two daemon restarts in between. Before the outage, one device had the internal AP as primary and the
+outdoor AP as fallback; the other had the outdoor AP only. Afterwards, both were set to outdoor AP
+first, internal AP second (owner).
 
 What this establishes:
 
-- The silence of 12.6 h is the only gap over 6.5 h for either device in 60 days (measured).
-- The return came 97 s before the first logged button press. Together with reset reason 1 on
-  `ouverture-portail`, this points to the power cycle as the restoring action, not the later reset.
-  Reset reason 1 meaning power-on is from memory of ESP-IDF, not verified on this firmware. An
-  earlier press going unlogged cannot be excluded.
+- The 12.6 h silence is the only gap over 6.5 h for either device in 60 days (measured).
+- The power cycle, not the later reset of one device, appears to be what restored them. They were
+  back before the first logged button press, and one device's reset reason indicates power-on. That
+  reset-reason meaning is from memory of ESP-IDF, not verified on this firmware.
 - A shared cause is likely because the timing matched to the second. The cause is unknown.
 
-Measured after recovery, about 11:29: **both devices are on the internal AP's SSID at -92 and -91 dBm,
-although the external AP was configured as primary.** All 33 responding devices report
-that same SSID, on three BSSIDs with a common vendor prefix. This is one snapshot. Whether the EAP shares that
-SSID or is one of those BSSIDs is not known.
+What happened after recovery (measured):
+
+| Period | Connected to | Signal | Offline events |
+|---|---|---|---|
+| First ~8 h after recovery | Internal AP (fallback) | Very weak, below -90 dBm | 8 and 16 in one afternoon |
+| Following 3.5 days | Outdoor AP (primary) | Good, about -55 dBm | 0 |
+
+The devices moved to the outdoor AP without rebooting. This is a single observation, but it is the
+strongest signal found so far: **a critical device sitting on its fallback AP flapped constantly,
+and the same device on its primary AP did not flap at all.**
 
 Open hypotheses, none proven:
 
 | # | Hypothesis | Test |
 |---|---|---|
-| H1 | The EAP is not serving these devices, leaving them on a very weak internal AP link | Owner checks the EAP; record BSSID over time |
-| H2 | Devices fail to rejoin at very low signal until restarted | Signal and BSSID history on the next event |
-| H3 | Firmware of 10-26 raised flap rates: portal devices went from ~1 to ~5 offline events per day | Compare again after 14+ days; the current window is 4 days and includes 10-31 |
+| H1 | The outdoor AP was not serving the devices, leaving them on the weak fallback | Owner checks the AP; record each device's AP over time |
+| H2 | Devices fail to rejoin at very low signal until restarted | AP and signal history on the next event |
+| H3 | Firmware of 2026-10-26 raised flap rates | Compare again after 14+ days; the first window was 4 days and included 10-31 |
 | H4 | The `watchdog.js` reboot path made the outage worse, or caused the fleet restart | See section 5 |
-| H5 | A power event affected the enclosure circuit | Check with the owner; measure AP uptime |
+| H5 | The power cycle also restarted the outdoor AP, which booted after the devices | Owner confirms how the AP is powered |
 
 ## 4. Current state of the code and NAS
 
-The NAS is a Raspberry Pi 3B+ (aarch64, 906 MB RAM, about 580 MB available, SD card, measured).
-This resolves a discrepancy raised in the alerting notes: the Pi is the NAS.
+The NAS is a Raspberry Pi 3B+ with under 1 GB of RAM and an SD card (measured). This resolves a
+discrepancy raised in the alerting notes: the Pi is the NAS.
 
 | Component | State | Evidence |
 |---|---|---|
 | `myhome/metrics/exporter.go` | Off by default, despite "auto-enabled" in its help text; wired at `myhome/daemon/daemon.go:204` | code |
 | Exporter output | Repeats HELP/TYPE per device; `promtool` rejects it; Prometheus 2.53.5 accepted it; 2.42 untested | measured locally |
 | Exporter staleness | Offline devices keep serving their last values, with no eviction | code |
-| Exporter port | Defaults to 9100, held by node-exporter on the NAS; a bind failure is only logged | measured, code |
-| `prometheus-metrics.js` | Crashes when minified (#266); not on the gate devices, which run only `watchdog.js` | issue, measured |
-| Prometheus 2.42 on NAS | Active, 44 MB RSS, 602 MB on disk, no device targets, no rules | measured |
-| Alertmanager | Referenced by Prometheus config, inactive | measured |
-| `prometheus-mqtt-exporter` | Failed; fits #283 | measured |
+| Exporter port | Its default port is already taken on the NAS; a bind failure is only logged | measured, code |
+| `prometheus-metrics.js` | Crashes when minified (#266); not on the two critical devices, which run only `watchdog.js` | issue, measured |
+| Prometheus on NAS | Installed, but monitors no device and has no rules | measured |
+| Alerting and MQTT exporter on NAS | Installed but not working; the exporter failure fits #283 | measured |
 | Email | `myhome/notify/gmail.go` and the `Mailer` interface already exist; failed digests are logged and dropped | code |
 | Event hook | `broadcastFn` at `myhome/daemon/daemon.go:307` already fans events out to services | code |
 | Online state | Only stored as event rows, with no in-memory state or deduplication (`internal/myhome/shelly/gen2/listener.go:241`) | code |
@@ -135,7 +133,7 @@ Two inferences that affect the design:
   known device with no recent online message as offline, and persist state across restarts.
 - **`watchdog.js` may be a source of events, not only a safeguard.** It reboots a device after 5
   failed 60-second MQTT checks (`internal/shelly/scripts/watchdog.js:20`, code), and it runs on the
-  gate devices (measured). A broker outage of about 5 minutes could reboot the fleet. On 10-31, most
+  critical devices (measured). A broker outage of about 5 minutes could reboot the fleet. On 10-31, most
   devices restarted in software around 10:30 (from uptime), and online events without matching
   offline events appeared at 10:02, 10:08, 10:24 and 10:34, which is what a broker restart would look
   like. This fits, but the journal has rotated and no direct proof exists. Reboots are not recorded in
@@ -222,7 +220,7 @@ First rules:
 
 Later rules, enabled only once a measured rate supports them (per the rule in `CLAUDE.md`):
 weak signal, unexpected AP or BSSID change, repeated reboots, crash reset reasons, stopped scripts
-(#478), flapping rate.
+(#478), flapping rate. The strongest candidate so far is "critical device connected to its fallback AP", from the single observation in section 3.
 
 ### WhatsApp
 
@@ -257,7 +255,7 @@ Phases are ordered so that each one produces evidence for the next.
 
 | Phase | Goal | Exit condition |
 |---|---|---|
-| 0. Gate Wi-Fi | Stabilise gate connectivity | EAP answers obtained; both gate devices on a usable link or a decision recorded |
+| 0. Critical-device Wi-Fi | Explain why the critical devices fell back from their primary AP | Cause found or recorded as unknown; devices on their primary AP |
 | 1. See | Collect and store device health; chart it | 7 days of signal, BSSID and uptime data; Pi cost measured |
 | 2. Explain | Understand flapping and the `watchdog.js` path | Cause of bursts stated or ruled down; worst four devices fixed or explained; firmware hypothesis tested |
 | 3. Alert | Critical and group alerts, banner and email | Test outage alerts within the threshold; noise measured over 14 days |
@@ -266,7 +264,7 @@ Phases are ordered so that each one produces evidence for the next.
 
 Candidate issues, each to be written self-contained:
 
-1. **Gate Wi-Fi investigation:** EAP status, SSID, BSSID; why the devices sit on the internal AP.
+1. **Critical-device Wi-Fi:** why the two critical devices fell back from their primary AP, and whether that AP can fail unnoticed.
 2. **MQTT capture on hardware:** what Shelly pushes and when, whether `online` is retained, and the
    memory and network cost of one status RPC. Read-only.
 3. **`metrics.db` store:** schema, batching, retention, config options in all four required files.
@@ -288,8 +286,8 @@ Dependencies: 3 and 4 before 5 and 7. 2 before 4. 6 before 8. 4 before 9. 9 befo
 
 ## 8. Unknowns
 
-- Root cause of the gate outage and of the fleet-wide bursts.
-- Which BSSID belongs to which AP, and whether the EAP is working.
+- Root cause of the critical-device outage and of the fleet-wide bursts.
+- Why the critical devices left their primary AP, and why they returned without rebooting.
 - Periodic or on-change push of RSSI and free RAM; whether `online` is retained. Needs a capture.
 - Pi RAM, CPU and SD write costs of the proposed store and collector. Only workstation figures exist.
 - Cost of status RPCs on the devices with the least free memory.
@@ -303,5 +301,4 @@ Dependencies: 3 and 4 before 5 and 7. 2 before 4. 6 before 8. 4 before 9. 9 befo
 
 1. Approve the architecture, particularly in-daemon alerting and SQLite.
 2. Approve filing the epic and child issues on GitHub.
-3. Whether phase 0 can proceed in parallel with the code work. Recommended: yes, it is the current
-   risk to the gate.
+3. Whether phase 0 stays a separate phase. The critical devices have been stable on their primary AP since 2026-11-01, so it could shrink to one issue run alongside phase 1.

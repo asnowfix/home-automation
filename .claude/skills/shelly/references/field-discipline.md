@@ -215,17 +215,19 @@ says nothing about whether the script will start on a Pro1.
 
 ## If you are a sub-agent
 
-`make test` is slow here — `internal/shelly/scripts` alone takes ~183 s, a full run several minutes —
-which tempts agents into `run_in_background: true`. **Do not do this if you are a sub-agent.**
-Observed in 4 of 8 agent runs (#432): the agent backgrounds the test, ends its turn to wait for the
-completion notification, and never resumes. Its work is left **uncommitted** and its report,
-measurements and caveats are lost — even though the tests passed.
+`make test` is slow here, and the full suite now outlives the 600 s foreground `Bash` cap, so a
+foreground run kills the agent mid-run. CLAUDE.md ("The suite now outlives a foreground command",
+"Running tests in a sub-agent") is authoritative. The opposite mistake is just as fatal (#432,
+observed in 4 of 8 agent runs): backgrounding the run and **ending the turn** to wait for the
+notification. The agent never resumes, its work is left **uncommitted** and its report,
+measurements and caveats are lost, even though the tests passed.
 
 1. **Commit your work BEFORE running the full test suite.** Then a stall costs you the report, never
    the code.
-2. **Run `make test` in the foreground** with a generous timeout. Use `go test ./path/...` on a single
-   package for fast iteration and save the full run for the end.
-3. **Do not end your turn waiting on a background task.**
+2. **Never run `make test` in the foreground.** Start it with `run_in_background` writing to a file
+   and poll that file with separate, short `Bash` calls within the same turn. Use
+   `go test ./path/...` on a single package for fast iteration and save the full run for the end.
+3. **Never end your turn while the run is in progress.**
 
 If you are the **coordinating** agent and a sub-agent reports "waiting for the background test run",
 treat it as finished: review its worktree (`git -C <worktree> status` / `diff`), run the verification

@@ -166,7 +166,7 @@ const eventLogPageHTML = `<!doctype html>
   <link rel="stylesheet" href="/static/bulma.min.css?v={{.Version}}"/>
   <link rel="stylesheet" href="/static/myhome.css?v={{.Version}}"/>
   <meta name="theme-color" content="#151617"/>
-  <link rel="icon" href="/static/penates.svg" type="image/svg+xml"/>
+  <link rel="icon" href="/static/penates.svg?v={{.Version}}" type="image/svg+xml"/>
   <script defer src="/static/alpine.min.js?v={{.Version}}"></script>
   <script src="/static/htmx.min.js?v={{.Version}}"></script>
   <style>[x-cloak] { display: none !important; }</style>

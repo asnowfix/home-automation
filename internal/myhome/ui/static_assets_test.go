@@ -3,8 +3,8 @@ package ui
 import (
 	"bytes"
 	"context"
-	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -66,7 +66,10 @@ func TestRenderedPagesCacheBustAssets(t *testing.T) {
 			t.Fatalf("%s: %v", name, err)
 		}
 		html := buf.String()
-		for _, a := range []string{"bulma.min.css", "myhome.css", "htmx.min.js", "alpine.min.js"} {
+		for _, a := range []string{"bulma.min.css", "myhome.css", "htmx.min.js", "alpine.min.js", "manifest.json", "penates.svg"} {
+			if a == "manifest.json" && name != "index" {
+				continue // the event-log page has no manifest link
+			}
 			if !strings.Contains(html, "/static/"+a+"?v=9.9.9-test") {
 				t.Errorf("%s: /static/%s lacks ?v=<version>", name, a)
 			}
@@ -77,20 +80,55 @@ func TestRenderedPagesCacheBustAssets(t *testing.T) {
 	}
 }
 
-// A versioned URL must still hit the asset handler, which looks up the path only.
-func TestStaticHandlerIgnoresVersionQuery(t *testing.T) {
-	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		asset, ok := static.Assets[r.URL.Path]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", asset.ContentType)
-		w.Write(asset.Content)
-	})
+// A versioned URL must still hit the real asset handler, which looks up the path only.
+func TestServeStatic(t *testing.T) {
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/static/myhome.css?v=1.2.3", nil))
+	serveStatic(rec, httptest.NewRequest("GET", "/static/myhome.css?v=1.2.3", nil))
 	if rec.Code != 200 || rec.Body.Len() == 0 {
 		t.Fatalf("versioned css request: code %d, %d bytes", rec.Code, rec.Body.Len())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "text/css; charset=utf-8" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	if cc := rec.Header().Get("Cache-Control"); !strings.Contains(cc, "immutable") {
+		t.Errorf("Cache-Control = %q", cc)
+	}
+	rec = httptest.NewRecorder()
+	serveStatic(rec, httptest.NewRequest("GET", "/static/nope.css?v=1", nil))
+	if rec.Code != 404 {
+		t.Errorf("unknown asset: code %d, want 404", rec.Code)
+	}
+}
+
+func TestCSSURLsAreServedAssets(t *testing.T) {
+	css := string(static.Assets["/static/myhome.css"].Content)
+	urls := regexp.MustCompile(`url\("?([^")]+)"?\)`).FindAllStringSubmatch(css, -1)
+	if len(urls) == 0 {
+		t.Fatal("no url() in myhome.css")
+	}
+	for _, m := range urls {
+		if _, ok := static.Assets[m[1]]; !ok {
+			t.Errorf("myhome.css url(%s) is not in static.Assets", m[1])
+		}
+	}
+}
+
+func TestAllTokensAndManifestColours(t *testing.T) {
+	css := string(static.Assets["/static/myhome.css"].Content)
+	for _, tok := range []string{
+		"--mh-bg: #151617", "--mh-surface-1: #1b1d21", "--mh-surface-2: #242527", "--mh-surface-3: #303235",
+		"--mh-surface-4: #5b5f66", "--mh-card: rgba(52, 55, 58, 0.3)", "--mh-primary: #2491ff",
+		"--mh-primary-tint-1: #182f45", "--mh-primary-tint-2: #1a3b5d", "--mh-secondary: #bbdcf8",
+		"--mh-text: #eaeaea", "--mh-text-muted: #a1a2a2", "--mh-radius-pill: 200px", "--mh-radius-card: 24px",
+		`--mh-font: "Inter", system-ui, sans-serif`, "--mh-font-size: 16px", "--mh-font-weight: 400",
+		"--mh-tap: 48px", "--mh-rail-width: 80px",
+	} {
+		if !strings.Contains(css, tok) {
+			t.Errorf("myhome.css lacks token %q", tok)
+		}
+	}
+	m := string(static.Assets["/static/manifest.json"].Content)
+	if !strings.Contains(m, `"theme_color": "#151617"`) || !strings.Contains(m, `"background_color": "#151617"`) {
+		t.Error("manifest.json colours are not the dark background")
 	}
 }

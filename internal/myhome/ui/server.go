@@ -81,16 +81,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	mux.HandleFunc("/rpc", RpcHandler(ctx, log.WithName("RpcHandler")))
 
 	// Static assets (Bulma CSS, HTMX, Alpine.js)
-	mux.HandleFunc("/static/", func(w http.ResponseWriter, r *http.Request) {
-		asset, ok := static.Assets[r.URL.Path]
-		if !ok {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", asset.ContentType)
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		w.Write(asset.Content)
-	})
+	mux.HandleFunc("/static/", serveStatic)
 
 	// HTMX endpoints for partial HTML responses
 	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc, accountsRegistry)
@@ -169,4 +160,19 @@ func (w *statusWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// serveStatic serves an embedded asset from static.Assets. Lookup is by URL
+// path only, so a cache-busting "?v=<version>" query is ignored. Assets are
+// immutable: a changed asset is picked up through the new query string (or a
+// new file name, for the font).
+func serveStatic(w http.ResponseWriter, r *http.Request) {
+	asset, ok := static.Assets[r.URL.Path]
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", asset.ContentType)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Write(asset.Content)
 }

@@ -4,10 +4,8 @@ import (
 	"context"
 	"embed"
 	"io"
-	"io/fs"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	sswitchsvc "github.com/asnowfix/home-automation/internal/myhome/shelly/sswitch"
-	"net/http"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	pkgshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
@@ -19,24 +17,11 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// Embed static assets under this package
+// staticFS holds only the index page template; every other static asset is
+// embedded by the static package and served from static.Assets.
 //
 //go:embed static/index.html
 var staticFS embed.FS
-
-// StaticFS returns the embedded static filesystem
-func StaticFS() (fs.FS, error) {
-	return fs.Sub(staticFS, "static")
-}
-
-// StaticFileServer returns an http.Handler for serving static files
-func StaticFileServer() (http.Handler, error) {
-	sub, err := StaticFS()
-	if err != nil {
-		return nil, err
-	}
-	return http.FileServer(http.FS(sub)), nil
-}
 
 // DeviceRegistry is the device-lookup capability the UI layer needs to render
 // dashboards. It's defined here (rather than importing devices.DeviceRegistry)

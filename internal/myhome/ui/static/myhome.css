@@ -88,6 +88,30 @@ a {
   color: var(--mh-primary);
 }
 
+strong,
+code,
+.content strong {
+  color: inherit;
+}
+
+hr {
+  background-color: var(--mh-surface-3);
+}
+
+.footer {
+  background: var(--mh-bg);
+  color: var(--mh-text-muted);
+}
+
+/* Bulma sets these element selectors, so body alone does not reach them. */
+button,
+input,
+optgroup,
+select,
+textarea {
+  font-family: var(--mh-font);
+}
+
 .card,
 .box {
   background: var(--mh-card);
@@ -132,6 +156,11 @@ a {
   box-shadow: 0 0 0 0.125em var(--mh-primary-tint-2);
 }
 
+.select:not(.is-multiple) {
+  min-height: var(--mh-tap);
+  height: auto;
+}
+
 .select:not(.is-multiple):not(.is-loading)::after {
   border-color: var(--mh-text-muted);
 }
@@ -162,9 +191,9 @@ a {
   border-radius: var(--mh-radius-pill);
 }
 
-.tag.is-info,
-.tag.is-link,
-.tag.is-primary {
+.tag:not(body).is-info,
+.tag:not(body).is-link,
+.tag:not(body).is-primary {
   background: var(--mh-primary-tint-2);
   color: var(--mh-secondary);
 }
@@ -178,26 +207,81 @@ a {
   min-height: var(--mh-tap);
 }
 
-.button:hover,
 .button:focus {
-  background: var(--mh-surface-4);
   border-color: transparent;
   color: var(--mh-text);
 }
 
 .button.is-primary,
 .button.is-link,
-.button.is-info {
+.button.is-info,
+.button.is-primary:focus,
+.button.is-link:focus,
+.button.is-info:focus {
   background: var(--mh-primary);
   color: var(--mh-bg);
 }
 
-.button.is-primary:hover,
-.button.is-link:hover,
-.button.is-info:hover {
+/* Press feedback is :active; :hover only where a real pointer exists, because
+   it sticks after a tap on a touch screen (design, touch rules). */
+.button:active,
+.button.is-light:active {
+  background: var(--mh-surface-4);
+  color: var(--mh-text);
+}
+
+.button.is-primary:active,
+.button.is-link:active,
+.button.is-info:active {
   background: var(--mh-primary);
-  filter: brightness(1.1);
   color: var(--mh-bg);
+  filter: brightness(0.85);
+}
+
+a:active {
+  color: var(--mh-secondary);
+}
+
+@media (hover: hover) {
+  .button:hover {
+    background: var(--mh-surface-4);
+    border-color: transparent;
+    color: var(--mh-text);
+  }
+
+  .button.is-primary:hover,
+  .button.is-link:hover,
+  .button.is-info:hover {
+    background: var(--mh-primary);
+    filter: brightness(1.1);
+    color: var(--mh-bg);
+  }
+
+  .button.is-light:hover {
+    background: var(--mh-surface-4);
+    color: var(--mh-text);
+  }
+
+  a:hover,
+  .checkbox:hover {
+    color: var(--mh-secondary);
+  }
+}
+
+/* Without a pointer, neutralise Bulma's sticky hover colours. */
+@media (hover: none) {
+  a:hover {
+    color: var(--mh-primary);
+  }
+
+  .checkbox:hover {
+    color: inherit;
+  }
+
+  .button.is-light:hover {
+    background: var(--mh-surface-3);
+    color: var(--mh-text);
+  }
 }
 
 .button.is-light {

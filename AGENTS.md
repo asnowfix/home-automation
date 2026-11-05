@@ -79,6 +79,8 @@ Fresh device state reaches the daemon and the UI by push: device notifications o
 - **Retained topics carry their own age.** Every daemon-published status payload is JSON with a `ts` field (Unix seconds, the time the state was determined). Consumers decide staleness from `ts`, never from receipt time.
 - **Browsers cannot read MQTT.** The daemon relays state to pages by SSE invalidation plus an htmx re-fetch (see `docs/design/682-retained-state.md`, "Relay pattern").
 
+**Status: a target, not today's behaviour.** The polling paths inventoried in `docs/design/682-retained-state.md` still exist and are being retired under #682, and the `myhome/<domain>/<device-id>/status` topics arrive in a later step. Do not add new polling, and do not retire an existing path outside that sequence.
+
 Before proposing to retire a polling path, check whether it is the only source of some field. Before proposing a device-side publish, state the observed rate of the problem it solves (`events.db`).
 
 ---

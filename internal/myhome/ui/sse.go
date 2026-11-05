@@ -76,10 +76,10 @@ func NewSSEBroadcaster(log logr.Logger) *SSEBroadcaster {
 	}
 }
 
-// SetBuildInfo sets the daemon start time and version reported in "ping"
+// SetDaemonInfo sets the daemon start time and version reported in "ping"
 // events. Without it, started is the broadcaster's creation time and version
 // is empty.
-func (b *SSEBroadcaster) SetBuildInfo(started time.Time, version string) {
+func (b *SSEBroadcaster) SetDaemonInfo(started time.Time, version string) {
 	b.mu.Lock()
 	b.started = started
 	b.version = version

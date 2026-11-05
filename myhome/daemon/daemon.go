@@ -292,7 +292,8 @@ func (d *daemon) Run() error {
 
 		// Create SSE broadcaster for live sensor updates
 		sseBroadcaster := ui.NewSSEBroadcaster(log.WithName("sse"))
-		sseBroadcaster.SetBuildInfo(time.Now(), version.GetVersion())
+		// Recorded start time: clients compare it across reconnects to detect a restart.
+		sseBroadcaster.SetDaemonInfo(time.Now(), version.GetVersion())
 
 		// Start event service if enabled
 		var eventsSvc *events.Service

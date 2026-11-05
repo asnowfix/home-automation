@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -144,11 +145,20 @@ func readFrames(t *testing.T, sc *bufio.Scanner, n int) []string {
 	return frames
 }
 
+// openStream connects to the broadcaster; the request carries a deadline so a
+// regression (e.g. pings stop) fails in seconds instead of hanging until the
+// package timeout.
 func openStream(t *testing.T, b *SSEBroadcaster) *bufio.Scanner {
 	t.Helper()
 	srv := httptest.NewServer(b)
 	t.Cleanup(srv.Close)
-	resp, err := http.Get(srv.URL)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +175,7 @@ func TestSSE_PingStream(t *testing.T) {
 
 	b := newTestBroadcaster(t)
 	started := time.Unix(1700000000, 0)
-	b.SetBuildInfo(started, "v1.2.3")
+	b.SetDaemonInfo(started, "v1.2.3")
 	b.now = func() time.Time { return time.Unix(1700000100, 0) }
 
 	frames := readFrames(t, openStream(t, b), 5)
@@ -193,9 +203,14 @@ func TestSSE_PingStream(t *testing.T) {
 	}
 }
 
-// TestSSE_PingDoesNotDisturbBroadcasts verifies eventlog frames still arrive
-// byte-identical alongside pings.
-func TestSSE_PingDoesNotDisturbBroadcasts(t *testing.T) {
+// TestSSE_PingsInterleaveWithBroadcasts verifies eventlog frames arrive with
+// their exact payload while pings tick (10 ms), and that a disconnect
+// unsubscribes the client.
+func TestSSE_PingsInterleaveWithBroadcasts(t *testing.T) {
+	old := ssePingInterval
+	ssePingInterval = 10 * time.Millisecond
+	t.Cleanup(func() { ssePingInterval = old })
+
 	b := newTestBroadcaster(t)
 	sc := openStream(t, b)
 	// The handler subscribes before writing the prologue, so once retry,
@@ -203,18 +218,47 @@ func TestSSE_PingDoesNotDisturbBroadcasts(t *testing.T) {
 	readFrames(t, sc, 3)
 
 	b.BroadcastEvent(events.Event{Ts: 42, DeviceID: "d1", Component: "c", Event: "e", Severity: "info"})
-	f := readFrames(t, sc, 1)[0]
-	want := "event: eventlog\ndata: " + mustJSON(t, eventLogPayload{Event: events.Event{Ts: 42, DeviceID: "d1", Component: "c", Event: "e", Severity: "info"}})
-	if f != want {
-		t.Errorf("eventlog frame = %q, want %q", f, want)
+	want := `event: eventlog` + "\n" + `data: {"id":0,"ts":42,"received_at":0,"device_id":"d1","component":"c","event":"e","severity":"info"}`
+	var got string
+	for i := 0; i < 50; i++ {
+		f := readFrames(t, sc, 1)[0]
+		if strings.HasPrefix(f, "event: ping") {
+			continue
+		}
+		got = f
+		break
+	}
+	if got != want {
+		t.Errorf("eventlog frame = %q, want %q", got, want)
 	}
 }
 
-func mustJSON(t *testing.T, v any) string {
-	t.Helper()
-	j, err := json.Marshal(v)
+// TestSSE_DisconnectUnsubscribes verifies the handler removes its client when
+// the connection goes away.
+func TestSSE_DisconnectUnsubscribes(t *testing.T) {
+	b := newTestBroadcaster(t)
+	srv := httptest.NewServer(b)
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(j)
+	readFrames(t, bufio.NewScanner(resp.Body), 1)
+	cancel()
+	resp.Body.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		b.mu.Lock()
+		n := len(b.clients)
+		b.mu.Unlock()
+		if n == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("client still subscribed after disconnect (%d)", n)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }

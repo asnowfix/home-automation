@@ -9,8 +9,11 @@ import (
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/mqtt"
+	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	shellyschema "github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr"
@@ -43,7 +46,7 @@ func TestMqttWatcherStopsOnChannelClose(t *testing.T) {
 	ch := make(chan mqtt.Message)
 	done := make(chan struct{})
 	go func() {
-		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch)
+		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch, nil)
 		close(done)
 	}()
 
@@ -72,7 +75,7 @@ func TestMqttWatcherStopsOnContextCancel(t *testing.T) {
 	ch := make(chan mqtt.Message)
 	done := make(chan struct{})
 	go func() {
-		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch)
+		mqttWatcher(ctx, log, "+/events/rpc", nil, nil, ch, nil)
 		close(done)
 	}()
 
@@ -111,7 +114,7 @@ func TestUpdateFromMqttEvent_ExternalKvsWriteInvalidatesCache(t *testing.T) {
 	}
 
 	before := loadEventFixture(t, "notify_status__shellyplus1__sys_kvs_rev_before.json")
-	if err := UpdateFromMqttEvent(ctx, d, before); err != nil {
+	if _, err := UpdateFromMqttEvent(ctx, d, before); err != nil {
 		t.Fatalf("unexpected error on baseline event: %v", err)
 	}
 
@@ -124,7 +127,7 @@ func TestUpdateFromMqttEvent_ExternalKvsWriteInvalidatesCache(t *testing.T) {
 	}
 
 	after := loadEventFixture(t, "notify_status__shellyplus1__sys_kvs_rev_after.json")
-	if err := UpdateFromMqttEvent(ctx, d, after); err != nil {
+	if _, err := UpdateFromMqttEvent(ctx, d, after); err != nil {
 		t.Fatalf("unexpected error on follow-up event: %v", err)
 	}
 
@@ -136,5 +139,36 @@ func TestUpdateFromMqttEvent_ExternalKvsWriteInvalidatesCache(t *testing.T) {
 	}
 	if len(fd.Calls) != 2 {
 		t.Fatalf("expected a fresh device call after external kvs_rev change, got %d total calls", len(fd.Calls))
+	}
+}
+
+// TestUpdateFromMqttEvent_AppliesSwitchNotification replays a real captured
+// NotifyStatus (switch:0 output flip) and checks that it lands in the
+// device's in-memory status and is reported as a user-visible change, while
+// an event repeating the same output is not.
+func TestUpdateFromMqttEvent_AppliesSwitchNotification(t *testing.T) {
+	log := testr.New(t)
+	ctx := logr.NewContext(context.Background(), log)
+
+	ev := loadEventFixture(t, "notify_status__shelly1minig3__switch_0.json") // output:false
+	sd, err := shellyapi.NewDeviceFromMqttId(ctx, log, ev.Src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev := sd.(*shellyapi.Device)
+	dev.SetStatus(&shellyschema.Status{Switch0: &sswitch.Status{Output: true}})
+	d := myhome.NewDevice(log, myhome.SHELLY, ev.Src).WithImpl(dev)
+
+	changed, err := UpdateFromMqttEvent(ctx, d, ev)
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v, want true,nil", changed, err)
+	}
+	if dev.Status().Switch0.Output {
+		t.Error("switch output not updated from the notification")
+	}
+
+	changed, err = UpdateFromMqttEvent(ctx, d, ev)
+	if err != nil || changed {
+		t.Fatalf("replayed event: changed=%v err=%v, want false,nil", changed, err)
 	}
 }

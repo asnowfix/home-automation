@@ -20,7 +20,11 @@ import (
 	"github.com/go-logr/logr"
 )
 
-func StartMqttWatcher(ctx context.Context, log logr.Logger, mc mqttclient.Client, dm devices.Manager, dr devices.DeviceRegistry) error {
+// StartMqttWatcher applies device notifications to the in-memory device state.
+// onStateChange (may be nil) is called, from the watcher goroutine, when a
+// notification changed a user-visible state (switch output, input state); the
+// device manager uses it to push an SSE invalidation to open browsers.
+func StartMqttWatcher(ctx context.Context, log logr.Logger, mc mqttclient.Client, dm devices.Manager, dr devices.DeviceRegistry, onStateChange func(*myhome.Device)) error {
 	log = log.WithName("MqttWatcher")
 	topic := "+/events/rpc"
 	ch, err := mc.SubscribeWithTopic(ctx, topic, 16, "daemon/watch")
@@ -30,12 +34,12 @@ func StartMqttWatcher(ctx context.Context, log logr.Logger, mc mqttclient.Client
 	}
 
 	log.Info("Starting", "topic", topic)
-	go mqttWatcher(ctx, log, topic, dm, dr, ch)
+	go mqttWatcher(ctx, log, topic, dm, dr, ch, onStateChange)
 
 	return nil
 }
 
-func mqttWatcher(ctx context.Context, log logr.Logger, topic string, dm devices.Manager, dr devices.DeviceRegistry, ch <-chan mqtt.Message) {
+func mqttWatcher(ctx context.Context, log logr.Logger, topic string, dm devices.Manager, dr devices.DeviceRegistry, ch <-chan mqtt.Message, onStateChange func(*myhome.Device)) {
 	log.Info("Started", "topic", topic)
 	for {
 		select {
@@ -115,10 +119,13 @@ func mqttWatcher(ctx context.Context, log logr.Logger, topic string, dm devices.
 			}
 
 			log.Info("Updating device from MQTT event", "device", device.DeviceSummary)
-			err = UpdateFromMqttEvent(ctx, device, event)
+			changed, err := UpdateFromMqttEvent(ctx, device, event)
 			if err != nil {
 				log.Error(err, "Failed to update device from MQTT event", "src", event.Src, "device", device.DeviceSummary)
 				continue
+			}
+			if changed && onStateChange != nil {
+				onStateChange(device)
 			}
 
 			dm.UpdateChannel() <- device
@@ -126,9 +133,11 @@ func mqttWatcher(ctx context.Context, log logr.Logger, topic string, dm devices.
 	}
 }
 
-func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqtt.Event) error {
-	log, err := logr.FromContext(ctx)
-	if err != nil {
+// UpdateFromMqttEvent applies one device notification to the in-memory state.
+// It reports whether a user-visible state (switch output, input state) changed.
+func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqtt.Event) (changed bool, err error) {
+	log, lerr := logr.FromContext(ctx)
+	if lerr != nil {
 		panic("BUG: No logger initialized")
 	}
 
@@ -143,12 +152,18 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqt
 			status := &shelly.Status{}
 			if err := json.Unmarshal(event.Params, status); err != nil {
 				log.Error(err, "Failed to unmarshal status", "event", event)
-				return err
+				return false, err
 			}
 			if status.System != nil {
 				kvs.ObserveRevision(log, d.Id(), status.System.KvsRevision)
 			}
-			// TODO: Update device from status
+			if sd, ok := d.Impl().(*shellyapi.Device); ok && sd != nil {
+				changed, err = sd.ApplyStatusNotification(event.Params)
+				if err != nil {
+					log.Error(err, "Failed to apply status notification", "event", event)
+					return false, err
+				}
+			}
 		}
 	}
 
@@ -162,7 +177,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqt
 			var params shellymqtt.NotifyEventParams
 			if err := json.Unmarshal(event.Params, &params); err != nil {
 				log.Error(err, "Failed to unmarshal NotifyEvent params", "event", event)
-				return err
+				return changed, err
 			}
 			for _, ev := range params.Events {
 				log.Info("Event", "component", ev.Component, "event", ev.Event)
@@ -174,9 +189,9 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqt
 				}
 			}
 		} else {
-			return fmt.Errorf("missing event parameters in event: %v", event)
+			return changed, fmt.Errorf("missing event parameters in event: %v", event)
 		}
 	}
 
-	return nil
+	return changed, nil
 }

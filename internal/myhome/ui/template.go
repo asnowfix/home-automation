@@ -1,6 +1,10 @@
 package ui
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"sync"
+	"github.com/asnowfix/home-automation/internal/myhome/ui/static"
 	"context"
 	"embed"
 	"io"
@@ -99,6 +103,32 @@ type IndexData struct {
 // index template and renderer
 var indexTmpl *template.Template
 
+// assetHashes caches the content-hash suffix of each embedded asset.
+var assetHashes sync.Map
+
+// assetURL returns an embedded asset's path with a "?v=<hash>" query derived
+// from its bytes. Assets are served immutable for a year, so the URL must change
+// whenever the content does; the build version cannot do that (every hand build
+// reports the same one). Unknown paths are returned unchanged.
+func assetURL(path string) string {
+	if v, ok := assetHashes.Load(path); ok {
+		return path + "?v=" + v.(string)
+	}
+	a, ok := static.Assets[path]
+	if !ok {
+		return path
+	}
+	h := contentHash(a.Content)
+	assetHashes.Store(path, h)
+	return path + "?v=" + h
+}
+
+// contentHash is the first 12 hex digits of the SHA-256 of b.
+func contentHash(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
 func init() {
 	indexContent, err := staticFS.ReadFile("static/index.html")
 	if err != nil {
@@ -108,6 +138,7 @@ func init() {
 	// Create template with custom functions
 	tmpl := template.New("index").Funcs(template.FuncMap{
 		"lower": strings.ToLower,
+		"asset": assetURL,
 	})
 	indexTmpl = template.Must(tmpl.Parse(string(indexContent)))
 }

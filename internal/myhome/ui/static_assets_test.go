@@ -55,27 +55,39 @@ func TestMyhomeCSSTokensAndFontFace(t *testing.T) {
 }
 
 func TestRenderedPagesCacheBustAssets(t *testing.T) {
-	ctx := context.WithValue(context.Background(), global.VersionKey, "9.9.9-test")
-	renders := map[string]func(context.Context, *bytes.Buffer) error{
-		"index": func(c context.Context, b *bytes.Buffer) error { return RenderIndex(c, b) },
+	ctx := context.WithValue(context.Background(), global.VersionKey, "unknown")
+	var buf bytes.Buffer
+	if err := RenderIndex(ctx, &buf); err != nil {
+		t.Fatal(err)
 	}
-	for name, render := range renders {
-		var buf bytes.Buffer
-		if err := render(ctx, &buf); err != nil {
-			t.Fatalf("%s: %v", name, err)
+	html := buf.String()
+	for _, a := range []string{"bulma.min.css", "myhome.css", "htmx.min.js", "alpine.min.js", "myhome.js", "manifest.json", "penates.svg"} {
+		path := "/static/" + a
+		want := path + "?v=" + contentHash(static.Assets[path].Content)
+		if !strings.Contains(html, want) {
+			t.Errorf("index lacks content-hashed URL %s", want)
 		}
-		html := buf.String()
-		for _, a := range []string{"bulma.min.css", "myhome.css", "htmx.min.js", "alpine.min.js", "myhome.js", "manifest.json", "penates.svg"} {
-			if a == "manifest.json" && name != "index" {
-				continue // the event-log page has no manifest link
-			}
-			if !strings.Contains(html, "/static/"+a+"?v=9.9.9-test") {
-				t.Errorf("%s: /static/%s lacks ?v=<version>", name, a)
-			}
-		}
-		if !strings.Contains(html, `content="#151617"`) {
-			t.Errorf("%s: theme-color not set to the dark background", name)
-		}
+	}
+	if strings.Contains(html, "?v=unknown") {
+		t.Error("index still versions assets by build version")
+	}
+	if !strings.Contains(html, `content="#151617"`) {
+		t.Error("theme-color not set to the dark background")
+	}
+}
+
+// The URL must change when the bytes change, and not otherwise: assets are served
+// immutable, so a stale URL means a stale file for a year.
+func TestContentHashTracksBytes(t *testing.T) {
+	a, b := contentHash([]byte("one")), contentHash([]byte("two"))
+	if a == b || len(a) != 12 {
+		t.Errorf("hashes %q %q", a, b)
+	}
+	if a != contentHash([]byte("one")) {
+		t.Error("hash is not deterministic")
+	}
+	if got := assetURL("/static/nope.css"); got != "/static/nope.css" {
+		t.Errorf("unknown asset url = %q", got)
 	}
 }
 

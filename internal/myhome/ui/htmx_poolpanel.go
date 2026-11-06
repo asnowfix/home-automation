@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"html/template"
 	"net/http"
 
@@ -37,27 +38,41 @@ const poolPanelTemplate = `{{if eq .State "disabled"}}
 
 var poolPanelTmpl = template.Must(template.New("pool-panel").Parse(poolPanelTemplate))
 
+// poolViewFromStatus maps a pool.getstatus outcome to the fragment state:
+// ErrPoolNotEnabled is "disabled" (a calm empty state), any other error is
+// "unavailable".
+func poolViewFromStatus(res any, err error) poolPanelView {
+	if errors.Is(err, myhome.ErrPoolNotEnabled) {
+		return poolPanelView{State: "disabled"}
+	}
+	if err != nil {
+		return poolPanelView{State: "unavailable"}
+	}
+	st, ok := res.(*myhome.PoolGetStatusResult)
+	if !ok {
+		return poolPanelView{State: "unavailable"}
+	}
+	return poolPanelView{
+		State:             "ok",
+		Name:              st.DeviceID,
+		WaterSupplyActive: st.WaterSupplyActive,
+		TurnoverAchieved:  st.TurnoverAchieved,
+		TurnoverTarget:    st.TurnoverTarget,
+		RuntimeMin:        st.RuntimeSec / 60,
+	}
+}
+
 // PoolPanel renders the Pool section from pool.getstatus, the same source the
-// device card's pool tags use. When the verb is not registered (pool tracking
-// disabled) it renders an empty state; it never invents values.
+// device card's pool tags use. It never invents values.
 func (h *HTMXHandler) PoolPanel(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	view := poolPanelView{State: "disabled"}
 	if mh, err := myhome.Methods(myhome.PoolGetStatus); err == nil {
-		view.State = "unavailable"
-		if res, err := mh.ActionE(h.ctx, nil); err == nil {
-			if st, ok := res.(*myhome.PoolGetStatusResult); ok {
-				view = poolPanelView{
-					State:             "ok",
-					Name:              st.DeviceID,
-					WaterSupplyActive: st.WaterSupplyActive,
-					TurnoverAchieved:  st.TurnoverAchieved,
-					TurnoverTarget:    st.TurnoverTarget,
-					RuntimeMin:        st.RuntimeSec / 60,
-				}
-				if d, err := h.db.GetDeviceById(h.ctx, st.DeviceID); err == nil && d != nil && d.Name() != "" {
-					view.Name = d.Name()
-				}
+		res, err := mh.ActionE(h.ctx, nil)
+		view = poolViewFromStatus(res, err)
+		if view.State == "ok" {
+			if d, err := h.db.GetDeviceById(h.ctx, view.Name); err == nil && d != nil && d.Name() != "" {
+				view.Name = d.Name()
 			}
 		}
 	}

@@ -1,5 +1,12 @@
 package myhome
 
+import "errors"
+
+// ErrPoolNotEnabled is returned by the pool.getstatus handler when pool tracking is
+// disabled, or its device was unreachable at startup, so callers (the UI) can show
+// "not enabled" rather than an error.
+var ErrPoolNotEnabled = errors.New("pool tracking not enabled")
+
 // PoolGetStatusResult reports the configured pool device's water-supply
 // status and today's filtration turnover (achieved vs. configured target),
 // for display in both the web UI and `ctl pool status`. There are no request

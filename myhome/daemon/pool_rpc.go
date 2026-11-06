@@ -33,7 +33,7 @@ func (h *PoolRPCHandler) RegisterHandlers() {
 
 func (h *PoolRPCHandler) handleGetStatus(ctx context.Context, _ any) (any, error) {
 	if h.pool == nil {
-		return nil, fmt.Errorf("pool status unavailable: pool device not configured or unreachable")
+		return nil, fmt.Errorf("pool status unavailable (pool device not configured or unreachable): %w", myhome.ErrPoolNotEnabled)
 	}
 
 	achieved, target, runtimeSec, err := h.pool.ComputeTurnover(ctx)

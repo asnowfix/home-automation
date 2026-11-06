@@ -97,7 +97,8 @@ func (h *HTMXHandler) renderVacuum(w http.ResponseWriter, actionErr map[string]s
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	p, ok := h.vacuumPanel(actionErr)
 	if !ok {
-		return // no robot configured: the section stays empty
+		fmt.Fprint(w, `<p class="has-text-grey">No vacuum robot is configured.</p>`)
+		return
 	}
 	tmpl := template.Must(template.New("vacuum-panel").Parse(vacuumPanelTemplate))
 	if err := tmpl.Execute(w, p); err != nil {

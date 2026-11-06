@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+	"fmt"
 	"bytes"
 	"context"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/internal/global"
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/go-logr/logr"
 )
@@ -128,5 +131,32 @@ func TestShellScriptServed(t *testing.T) {
 	rec := get(testMux(), "/static/myhome.js?v=1")
 	if rec.Code != 200 || rec.Header().Get("Content-Type") != "application/javascript; charset=utf-8" {
 		t.Errorf("myhome.js = %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+}
+
+func TestRoomsFragmentWhenTemperatureDisabled(t *testing.T) {
+	rec := get(testMux(), "/htmx/rooms")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Rooms are not enabled") {
+		t.Errorf("GET /htmx/rooms = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestVacuumFragmentWhenNoRobot(t *testing.T) {
+	rec := get(testMux(), "/htmx/vacuum")
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "No vacuum robot is configured") {
+		t.Errorf("GET /htmx/vacuum = %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestPoolViewFromStatus(t *testing.T) {
+	wrapped := fmt.Errorf("pool status unavailable: %w", myhome.ErrPoolNotEnabled)
+	if got := poolViewFromStatus(nil, wrapped).State; got != "disabled" {
+		t.Errorf("not-enabled error -> %q, want disabled", got)
+	}
+	if got := poolViewFromStatus(nil, errors.New("compute turnover: timeout")).State; got != "unavailable" {
+		t.Errorf("real error -> %q, want unavailable", got)
+	}
+	if got := poolViewFromStatus(&myhome.PoolGetStatusResult{DeviceID: "p"}, nil); got.State != "ok" || got.Name != "p" {
+		t.Errorf("ok result -> %+v", got)
 	}
 }

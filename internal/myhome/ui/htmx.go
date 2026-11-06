@@ -283,7 +283,9 @@ func deviceRoleLabel(d *myhome.Device) string {
 func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
 	mh, err := myhome.Methods(myhome.TemperatureList)
 	if err != nil {
-		http.Error(w, "method not found", http.StatusInternalServerError)
+		// temperature service disabled: a calm empty state, not an error
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<div class="column is-12"><p class="has-text-grey">Rooms are not enabled on this daemon.</p></div>`)
 		return
 	}
 

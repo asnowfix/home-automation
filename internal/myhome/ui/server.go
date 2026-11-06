@@ -20,6 +20,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/mqtt"
 
 	"github.com/go-logr/logr"
+	"github.com/jmoiron/sqlx"
 )
 
 // Start launches an HTTP reverse proxy that listens on the given port and proxies
@@ -30,7 +31,7 @@ import (
 // - an IPv4/IPv6 address
 // - a .local hostname
 // - any known identifier in the myhome database (name, id, mac, host)
-func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db DeviceRegistry, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry) error {
+func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db DeviceRegistry, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry, sqlDB *sqlx.DB) error {
 	addr := fmt.Sprintf(":%d", listenPort)
 	srv := &http.Server{Addr: addr}
 
@@ -93,7 +94,7 @@ func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.
 	})
 
 	// HTMX endpoints for partial HTML responses
-	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc, accountsRegistry)
+	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc, accountsRegistry, sqlDB)
 	if sseBroadcaster != nil {
 		sseBroadcaster.SetDeviceNameResolver(htmxHandler.DeviceNameResolver())
 	}

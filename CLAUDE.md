@@ -189,6 +189,28 @@ the status board: post an update whenever a gate opens or closes, a measurement 
 decision changes, using explicit state words (new / pending / implementing / verifying / discarded /
 closed-by-PR / blocked). Do not post when nothing changed.
 
+### This repository is public — keep the house's network details out of it
+
+Everything written here, in issues, in PR descriptions, in review comments and in commit messages is
+public, and it stays public: GitHub keeps a PR's earlier commits reachable after a force-push, and an
+issue's edit history shows earlier versions of its body. So **never publish**:
+
+- Wi-Fi SSIDs, access-point BSSIDs or MAC addresses, and access-point makes and models;
+- hostnames of the NAS or other infrastructure;
+- Wi-Fi or any other passwords, even partially;
+- per-device signal readings or exact outage times for security-relevant devices (gate, doors,
+  locks), which together describe when and how they can be cut off.
+
+Write generic terms instead ("outdoor AP", "internal AP", "the critical devices", "the evening of
+2026-10-31") and keep the details in the owner's private notes. Facts already published (the NAS IP,
+Shelly device ids and names) need not be removed.
+
+**Check before publishing.** Grep a document for these items before committing it, and redact first:
+removing them afterwards does not remove them from GitHub. Worked example, 2026-11-05 (#654, #655): the
+first push of the observability study named the gate devices, the outdoor AP's make and model, exact
+outage times and the NAS's monitoring state; the redaction came one commit later, so the original stays
+reachable in the PR's history.
+
 ### `events.db` is the long-term record — query it before asserting a rate
 
 The daemon persists every device event to a SQLite database, so **how often something actually
@@ -221,6 +243,11 @@ SELECT date(ts,'unixepoch','localtime') d,
 FROM events WHERE device_id='shellypro1-ec62608c0230'
 GROUP BY d HAVING prot>0 OR rest>0 ORDER BY d;
 ```
+
+**"Did the script crash or restart?"** There is no script start/stop/crash event. A `config_changed`
+at an unexpected time marks a script (re)start whose init ran, and a `pool.run_window` ~10 s later
+marks init completing; the proxies, the `cfg_rev` calibration table and the lossiness caveat are in
+`.claude/skills/shelly/references/api.md` ("After the fact"). Query them before touching hardware.
 
 **Worked example, #523 (2026-08-27).** An issue claimed a safety fact could go stale "indefinitely"
 because an input edge might be missed, and a fix was designed, briefed, implemented, reviewed and
@@ -271,7 +298,7 @@ The discipline that made this recoverable:
   ~15 minutes. **NAS post-mortem evidence does not survive** — use `events.db` (see above), which does.
 - **`sqlite3` is not installed on the NAS.** Query `events.db` with `python3`'s `sqlite3` module
   against `file:/var/lib/myhome/events.db?mode=ro` instead.
-- **`myhome-update.timer`** installs whatever `releases/latest` resolves to, nightly (00:00), so a
+- **`myhome-update.timer`** installs whatever `releases/latest` resolves to, nightly (04:30 since #661; it was 00:00 before, colliding with the midnight timers), so a
   hand-installed binary or a draft release is overwritten — with a *downgrade* if `releases/latest`
   is older (measured 2026-10-20: a hand-built 0.12.4-lux1 was replaced by 0.12.4 at midnight). To
   keep a different build on the NAS, disable (or mask) the timer first and re-enable it once that
@@ -308,7 +335,19 @@ When launching a sub-agent, give it exactly one of these and say which:
 Live-device measurements (`mem_peak`, RPC responses, event-DB queries) and negative results must be
 written down as they are obtained. Re-deriving them means re-touching real hardware.
 
-Sub-agents must not `git push` or open PRs — the coordinator does that from the sub-agent's worktree.
+Sub-agents commit in their own worktree and must not `git push` or open PRs. The coordinator pushes
+the **branch ref** from its own worktree (`git push origin <branch>`, `gh pr create --head <branch>`).
+Never use `git -C <sibling worktree>`, `--git-dir`/`--work-tree`, or a `/usr/bin/git`-style
+workaround: a worktree-isolated session's built-in guard refuses them (sibling worktrees under
+`.claude/worktrees/` count as "the shared checkout"). Avoid branch names with a `git` or `git-*` path
+segment, and heredocs in git commands — both are refused too. Uncommitted work in a sibling cannot be
+read or committed by an isolated coordinator: ask the agent (`SendMessage`) to commit first.
+
+**Recovering a dead agent's uncommitted work** (agent gone, nothing to `SendMessage`): the isolation
+guard cannot be disabled, but it only applies to worktree-isolated sessions. Do the recovery from a
+non-isolated context — a normal terminal, or a Claude Code session started in the main checkout — where
+`git -C <agent worktree> status` / `add` / `commit` are allowed. Commit on a branch there, then push
+and open the PR as usual. Do not try to get around the guard from inside an isolated session.
 
 #### Running tests in a sub-agent
 
@@ -358,7 +397,8 @@ itself in its final report.
 silence — look at what the work itself shows, in this order, before concluding anything:
 
 1. `git log` on its branch, and whether the branch head has moved since you last looked;
-2. its worktree (`git -C <worktree> status`);
+2. `git diff <base>..<branch>` (committed work only — an isolated coordinator cannot run git inside a
+   sibling worktree, so ask the agent to commit if you need to see more);
 3. its progress file's modification time, not just its contents — a file whose last line reads
    "next: X" may simply mean X is in progress.
 

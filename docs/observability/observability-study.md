@@ -1,6 +1,7 @@
 # Observability and alerting study
 
-Status: draft for owner review, 2026-11-01. Not committed. No GitHub issue filed yet.
+Status: architecture approved by the owner on 2026-11-06 (in-daemon alerting, separate SQLite
+metrics store). Epic #654; child issues #704 to #718.
 
 Evidence labels: **measured** (read from a live system or run), **code** (read in this
 repository), **documented** (primary source, see the research notes), **inferred** (reasoned,
@@ -261,25 +262,25 @@ Phases are ordered so that each one produces evidence for the next.
 | 4. Extend | Warning-tier email, WhatsApp, `/metrics`, more rules | Each rule has an observed rate; volume agreed |
 | 5. Clean up | Remove unused paths | `prometheus-metrics.js`, packaged exporter and #266, #283 resolved |
 
-Candidate issues, each to be written self-contained:
+Child issues, filed 2026-11-06 as sub-issues of #654:
 
-1. **Connected-AP metric:** record which access point each device is on and its signal, so that a device on its fallback AP is visible. (The Wi-Fi investigation itself moved to #694.)
-2. **MQTT capture on hardware:** what Shelly pushes and when, whether `online` is retained, and the
+1. #707 **Connected-AP metric:** record which access point each device is on and its signal, so that a device on its fallback AP is visible. (The Wi-Fi investigation itself moved to #694.)
+2. #704 **MQTT capture on hardware:** what Shelly pushes and when, whether `online` is retained, and the
    memory and network cost of one status RPC. Read-only.
-3. **`metrics.db` store:** schema, batching, retention, config options in all four required files.
-4. **Device health collector:** with staggered polling and per-device online state.
-5. **Native charts:** uPlot asset and a device-health view.
-6. **Record reboots and reset reasons:** so restarts stop being invisible in `events.db`.
-7. **Flapping investigation:** bursts, worst four devices, 14-day firmware comparison.
-8. **`watchdog.js` reboot review:** rate from data, and behaviour during long outages. Touches live
+3. #705 **`metrics.db` store:** schema, batching, retention, config options in all four required files.
+4. #706 **Device health collector:** with staggered polling and per-device online state.
+5. #708 **Native charts:** uPlot asset and a device-health view.
+6. #709 **Record reboots and reset reasons:** so restarts stop being invisible in `events.db`.
+7. #710 **Flapping investigation:** bursts, worst four devices, 14-day firmware comparison.
+8. #711 **`watchdog.js` reboot review:** rate from data, and behaviour during long outages. Touches live
    devices, so capture before-state first.
-9. **Alert evaluator:** persisted state, grouping, grace period, tests that simulate a restart.
-10. **UI alert banner:** on the existing notice flow.
-11. **Email queue and retry:** on the existing Gmail mailer, with timeouts.
-12. **Daemon watchdog:** systemd settings and independent check, including the `OnFailure` test.
-13. **`/metrics` rewrite:** `client_golang`, free port.
-14. **WhatsApp notifier:** CallMeBot behind the notifier interface.
-15. **Clean-up:** `prometheus-metrics.js`, exporter packaging, and #61, #266, #283, #247 updates.
+9. #712 **Alert evaluator:** persisted state, grouping, grace period, tests that simulate a restart.
+10. #713 **UI alert banner:** on the existing notice flow.
+11. #714 **Email queue and retry:** on the existing Gmail mailer, with timeouts.
+12. #715 **Daemon watchdog:** systemd settings and independent check, including the `OnFailure` test.
+13. #716 **`/metrics` rewrite:** `client_golang`, free port.
+14. #717 **WhatsApp notifier:** CallMeBot behind the notifier interface.
+15. #718 **Clean-up:** `prometheus-metrics.js`, exporter packaging, and #61, #266, #283, #247 updates.
 
 Dependencies: 3 and 4 before 5 and 7. 2 before 4. 6 before 8. 4 before 9. 9 before 10, 11, 14.
 
@@ -296,7 +297,7 @@ Dependencies: 3 and 4 before 5 and 7. 2 before 4. 6 before 8. 4 before 9. 9 befo
   skipped (`lumieres-jardin` and `spots-piscine`, assumed from their absence).
 - Whether any metric predicts failure. Treat this as an experiment for phase 2, not a promise.
 
-## 9. Decisions needed
+## 9. Decisions
 
-1. Approve the architecture, particularly in-daemon alerting and SQLite.
-2. Approve filing the epic and child issues on GitHub.
+1. Architecture, particularly in-daemon alerting and SQLite: **approved** 2026-11-06.
+2. Filing the epic and child issues: **approved** 2026-11-06. Epic #654, children #704 to #718.

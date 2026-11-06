@@ -189,6 +189,28 @@ the status board: post an update whenever a gate opens or closes, a measurement 
 decision changes, using explicit state words (new / pending / implementing / verifying / discarded /
 closed-by-PR / blocked). Do not post when nothing changed.
 
+### This repository is public — keep the house's network details out of it
+
+Everything written here, in issues, in PR descriptions, in review comments and in commit messages is
+public, and it stays public: GitHub keeps a PR's earlier commits reachable after a force-push, and an
+issue's edit history shows earlier versions of its body. So **never publish**:
+
+- Wi-Fi SSIDs, access-point BSSIDs or MAC addresses, and access-point makes and models;
+- hostnames of the NAS or other infrastructure;
+- Wi-Fi or any other passwords, even partially;
+- per-device signal readings or exact outage times for security-relevant devices (gate, doors,
+  locks), which together describe when and how they can be cut off.
+
+Write generic terms instead ("outdoor AP", "internal AP", "the critical devices", "the evening of
+2026-10-31") and keep the details in the owner's private notes. Facts already published (the NAS IP,
+Shelly device ids and names) need not be removed.
+
+**Check before publishing.** Grep a document for these items before committing it, and redact first:
+removing them afterwards does not remove them from GitHub. Worked example, 2026-11-05 (#654, #655): the
+first push of the observability study named the gate devices, the outdoor AP's make and model, exact
+outage times and the NAS's monitoring state; the redaction came one commit later, so the original stays
+reachable in the PR's history.
+
 ### `events.db` is the long-term record — query it before asserting a rate
 
 The daemon persists every device event to a SQLite database, so **how often something actually

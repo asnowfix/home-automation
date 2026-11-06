@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/go-logr/logr"
@@ -30,6 +31,24 @@ func SSEFromContext(ctx context.Context) *SSEBroadcaster {
 // a slow client is forcibly disconnected.
 const sseSlowClientMaxSkips = 10
 
+// ssePingInterval is how often each SSE connection receives a "ping" event.
+// It is the daemon liveness signal for the browser: while the daemon is up the
+// stream never stays silent for longer than this. A variable (not a constant)
+// only so tests can shorten it.
+var ssePingInterval = 15 * time.Second
+
+// sseRetryMillis is the EventSource reconnect delay advertised to browsers.
+const sseRetryMillis = 3000
+
+// ssePingData is the payload of the "ping" SSE event. started and version let
+// a client tell a daemon restart (different started) or upgrade (different
+// version) apart from a plain network blip.
+type ssePingData struct {
+	TS      int64  `json:"ts"`
+	Started int64  `json:"started"`
+	Version string `json:"version"`
+}
+
 // sseClient tracks per-client state inside the broadcaster.
 type sseClient struct {
 	ch               chan string
@@ -42,6 +61,9 @@ type SSEBroadcaster struct {
 	mu      sync.Mutex
 	log     logr.Logger
 	nameFor func(string) string // optional: resolves device id → friendly name
+	started time.Time           // daemon start, reported in ping events
+	version string              // daemon version, reported in ping events
+	now     func() time.Time    // clock, injectable for tests
 }
 
 // NewSSEBroadcaster creates a new SSE broadcaster
@@ -49,7 +71,28 @@ func NewSSEBroadcaster(log logr.Logger) *SSEBroadcaster {
 	return &SSEBroadcaster{
 		clients: make(map[chan string]*sseClient),
 		log:     log.WithName("SSEBroadcaster"),
+		started: time.Now(),
+		now:     time.Now,
 	}
+}
+
+// SetDaemonInfo sets the daemon start time and version reported in "ping"
+// events. Without it, started is the broadcaster's creation time and version
+// is empty.
+func (b *SSEBroadcaster) SetDaemonInfo(started time.Time, version string) {
+	b.mu.Lock()
+	b.started = started
+	b.version = version
+	b.mu.Unlock()
+}
+
+// pingFrame renders one "ping" SSE frame.
+func (b *SSEBroadcaster) pingFrame() string {
+	b.mu.Lock()
+	d := ssePingData{TS: b.now().Unix(), Started: b.started.Unix(), Version: b.version}
+	b.mu.Unlock()
+	jsonData, _ := json.Marshal(d) // fixed struct of ints and a string: cannot fail
+	return fmt.Sprintf("event: ping\ndata: %s\n\n", jsonData)
 }
 
 // SetDeviceNameResolver registers a function that maps a device id to a
@@ -193,14 +236,26 @@ func (b *SSEBroadcaster) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ch := b.Subscribe()
 	defer b.Unsubscribe(ch)
 
-	// Send initial event to confirm connection
+	// Reconnect delay for EventSource, then the initial event to confirm the
+	// connection (byte-identical to what it always was), then a first ping.
+	_, _ = fmt.Fprintf(w, "retry: %d\n\n", sseRetryMillis)
 	_, _ = w.Write([]byte("event: connected\ndata: ok\n\n"))
+	_, _ = w.Write([]byte(b.pingFrame()))
 	flusher.Flush()
 	b.log.Info("SSE connection established, entering message loop")
+
+	// Pings are written by this goroutine, not through broadcast(), so they
+	// never count toward slow-client eviction. A failed write to a dead peer
+	// surfaces here instead of lingering until the next real event.
+	ticker := time.NewTicker(ssePingInterval)
+	defer ticker.Stop()
 
 	ctx := r.Context()
 	for {
 		select {
+		case <-ticker.C:
+			_, _ = w.Write([]byte(b.pingFrame()))
+			flusher.Flush()
 		case <-ctx.Done():
 			b.log.Info("SSE client context done, disconnecting")
 			return

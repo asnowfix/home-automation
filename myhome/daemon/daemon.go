@@ -668,7 +668,7 @@ func (d *daemon) Run() error {
 		// the UI and `ctl pool status`). Always registered — the signature
 		// exists regardless of pool tracking; handleGetStatus itself returns
 		// a clear error if poolNotices is nil (pool disabled/unreachable).
-		poolRPCHandler := NewPoolRPCHandler(log, poolNotices)
+		poolRPCHandler := NewPoolRPCHandler(log, poolNotices, options.Flags.PoolEnabled && options.Flags.PoolDeviceID != "")
 		poolRPCHandler.RegisterHandlers()
 
 		// Register Solar RPC methods (static energy-claimers registry).

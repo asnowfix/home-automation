@@ -163,6 +163,9 @@ func (b *SSEBroadcaster) BroadcastDeviceUpdate(dv DeviceView) {
 type eventLogPayload struct {
 	events.Event
 	DeviceName string `json:"device_name,omitempty"`
+	// Html is the same <tr> the events table renders server-side (eventRowTemplate),
+	// so the shell inserts live rows without rebuilding them in JS.
+	Html string `json:"html,omitempty"`
 }
 
 // BroadcastEvent broadcasts a new event log entry as JSON to all SSE clients.
@@ -176,6 +179,7 @@ func (b *SSEBroadcaster) BroadcastEvent(e events.Event) {
 	if nameFor != nil {
 		payload.DeviceName = nameFor(e.DeviceID)
 	}
+	payload.Html = renderEventRow(toEventRows([]events.Event{e}, map[string]string{e.DeviceID: payload.DeviceName})[0])
 	b.broadcast("eventlog", payload)
 }
 

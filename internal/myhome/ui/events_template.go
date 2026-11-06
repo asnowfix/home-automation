@@ -154,3 +154,15 @@ const eventsTableTemplate = `<form id="events-filter-form"
   <p class="has-text-grey has-text-centered">No events in the last 24 hours.</p>
   {{end}}
 </div>`
+
+var eventRowTmpl = template.Must(template.New("event-row").Funcs(eventTemplateFuncs()).Parse(eventRowTemplate))
+
+// renderEventRow renders one event as a table row, identical to the rows of the
+// server-rendered table. It returns "" if rendering fails.
+func renderEventRow(row eventRow) string {
+	var b bytes.Buffer
+	if err := eventRowTmpl.Execute(&b, row); err != nil {
+		return ""
+	}
+	return b.String()
+}

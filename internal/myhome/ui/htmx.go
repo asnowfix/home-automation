@@ -285,7 +285,7 @@ func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// temperature service disabled: a calm empty state, not an error
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<div class="column is-12"><p class="has-text-grey">Rooms are not enabled on this daemon.</p></div>`)
+		fmt.Fprint(w, `<div class="column is-12" data-rooms-disabled><p class="has-text-grey">Rooms are not enabled on this daemon.</p></div>`)
 		return
 	}
 

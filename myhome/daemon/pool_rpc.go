@@ -16,13 +16,16 @@ import (
 type PoolRPCHandler struct {
 	log  logr.Logger
 	pool *PoolNotices
+	// enabled is whether pool tracking was requested (--enable-pool with a device
+	// id). pool == nil with enabled set means the device was unreachable at startup.
+	enabled bool
 }
 
 // NewPoolRPCHandler builds a PoolRPCHandler. pool may be nil (pool tracking
 // disabled or the device unreachable at startup) — handleGetStatus then
 // returns a clear error instead of panicking.
-func NewPoolRPCHandler(log logr.Logger, pool *PoolNotices) *PoolRPCHandler {
-	return &PoolRPCHandler{log: log.WithName("PoolRPCHandler"), pool: pool}
+func NewPoolRPCHandler(log logr.Logger, pool *PoolNotices, enabled bool) *PoolRPCHandler {
+	return &PoolRPCHandler{log: log.WithName("PoolRPCHandler"), pool: pool, enabled: enabled}
 }
 
 // RegisterHandlers registers the pool.getstatus RPC method.
@@ -33,7 +36,10 @@ func (h *PoolRPCHandler) RegisterHandlers() {
 
 func (h *PoolRPCHandler) handleGetStatus(ctx context.Context, _ any) (any, error) {
 	if h.pool == nil {
-		return nil, fmt.Errorf("pool status unavailable (pool device not configured or unreachable): %w", myhome.ErrPoolNotEnabled)
+		if !h.enabled {
+			return nil, fmt.Errorf("pool status unavailable (enable pool tracking with a pool device id): %w", myhome.ErrPoolNotEnabled)
+		}
+		return nil, fmt.Errorf("pool status unavailable: pool device was unreachable at startup")
 	}
 
 	achieved, target, runtimeSec, err := h.pool.ComputeTurnover(ctx)

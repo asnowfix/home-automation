@@ -13,6 +13,7 @@ import (
 
 	"github.com/asnowfix/home-automation/internal/global"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/events"
 
 	"github.com/go-logr/logr"
 )
@@ -77,8 +78,15 @@ func TestShellHasNoExternalNavigationOrAutoOpenOverlay(t *testing.T) {
 	if regexp.MustCompile(`modal-background"[^>]*@click`).MatchString(html) {
 		t.Error("a modal backdrop dismisses on click")
 	}
-	if strings.Contains(html, `class="modal is-active"`) {
-		t.Error("an overlay is open on load")
+	// overlays open from Alpine state: every modal flag must start false, and none
+	// may be forced open in markup
+	js := string(staticAsset(t, "/static/myhome.js"))
+	m := regexp.MustCompile(`(?s)modals:\s*\{(.*?)\}`).FindStringSubmatch(js)
+	if m == nil || strings.Contains(m[1], "true") || strings.Count(m[1], "false") != 4 {
+		t.Errorf("modals initial state must be four false flags, got %q", m)
+	}
+	if regexp.MustCompile(`class="modal[^"]*is-active`).MatchString(html) {
+		t.Error("an overlay is open in markup")
 	}
 }
 
@@ -158,5 +166,34 @@ func TestPoolViewFromStatus(t *testing.T) {
 	}
 	if got := poolViewFromStatus(&myhome.PoolGetStatusResult{DeviceID: "p"}, nil); got.State != "ok" || got.Name != "p" {
 		t.Errorf("ok result -> %+v", got)
+	}
+}
+
+func TestLiveEventRowMatchesServerRow(t *testing.T) {
+	e := events.Event{Ts: 1700000000, DeviceID: "dev-1", Component: "switch:0", Event: "toggled", Severity: "info"}
+	data := `{"a":1}`
+	e.Data = &data
+	row := toEventRows([]events.Event{e}, map[string]string{"dev-1": "Kitchen"})[0]
+	html := renderEventRow(row)
+	for _, want := range []string{"<tr", "Kitchen", `<code class="is-size-7 has-text-grey">dev-1</code>`, "<details", "switch:0"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("live row lacks %q: %s", want, html)
+		}
+	}
+	// the SSE payload carries that same row
+	b := newTestBroadcaster(t)
+	ch := b.Subscribe()
+	defer b.Unsubscribe(ch)
+	b.BroadcastEvent(e)
+	msg := <-ch
+	if !strings.Contains(msg, "event: eventlog") || !strings.Contains(msg, `\u003ctr`) {
+		t.Errorf("eventlog payload lacks the rendered row: %s", msg)
+	}
+}
+
+func TestShellScriptWiresEventLog(t *testing.T) {
+	js := string(staticAsset(t, "/static/myhome.js"))
+	if !strings.Contains(js, "addEventListener('eventlog'") || !strings.Contains(js, "kiosk.prependEvent") {
+		t.Error("myhome.js does not listen for eventlog and call prependEvent")
 	}
 }

@@ -68,10 +68,10 @@ func (h *HTMXHandler) PoolPanel(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	view := poolPanelView{State: "disabled"}
 	if mh, err := myhome.Methods(myhome.PoolGetStatus); err == nil {
-		res, err := mh.ActionE(h.ctx, nil)
+		res, err := mh.ActionE(r.Context(), nil)
 		view = poolViewFromStatus(res, err)
 		if view.State == "ok" {
-			if d, err := h.db.GetDeviceById(h.ctx, view.Name); err == nil && d != nil && d.Name() != "" {
+			if d, err := h.db.GetDeviceById(r.Context(), view.Name); err == nil && d != nil && d.Name() != "" {
 				view.Name = d.Name()
 			}
 		}

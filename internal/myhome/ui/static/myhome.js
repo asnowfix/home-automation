@@ -20,6 +20,10 @@ var kiosk = {
     if (!sec) { return; }
     sec.dataset.fetchedAt = String(Date.now());
     delete sec.dataset.dirty;
+    if (sec.id === 'sec-rooms') {
+      var add = document.getElementById('add-room-btn');
+      if (add) { add.hidden = !!sec.querySelector('[data-rooms-disabled]'); }
+    }
     var pill = sec.querySelector('[data-pill]');
     if (pill) { pill.hidden = true; }
   },
@@ -53,21 +57,12 @@ var kiosk = {
     if (sec) { sec.querySelectorAll('[data-refresh]').forEach(function(n) { htmx.trigger(n, 'refresh'); }); }
   },
 
-  // Live event rows go to the table when the Events section holds it.
+  // Live event rows: ev.html is the server-rendered <tr>. When the table is not
+  // in the DOM yet (or the payload has no row) the Events section is marked dirty.
   prependEvent: function(ev) {
     var tbody = document.getElementById('events-tbody');
-    if (!tbody) { return; }
-    var tr = document.createElement('tr');
-    var ts = new Date(ev.ts * 1000).toISOString().replace('T', ' ').substring(0, 19);
-    var sev = {'alarm': 'has-text-danger', 'warn': 'has-text-warning', 'notice': 'has-text-link', 'debug': 'has-text-grey-light'}[ev.severity];
-    if (sev) { tr.className = sev; }
-    var dev = ev.device_name ? ev.device_name + ' ' + (ev.device_id || '') : (ev.device_id || '');
-    [ts, dev, ev.component, ev.event, ev.severity, ev.data].forEach(function(val) {
-      var td = document.createElement('td');
-      td.textContent = val || '';
-      tr.appendChild(td);
-    });
-    tbody.insertBefore(tr, tbody.firstChild);
+    if (!tbody || !ev.html) { this.dirty('events'); return; }
+    tbody.insertAdjacentHTML('afterbegin', ev.html);
   }
 };
 
@@ -259,6 +254,14 @@ var kiosk = {
             }
           } catch (err) {
             console.error('SSE: Failed to parse device-update:', err);
+          }
+        });
+
+        eventSource.addEventListener('eventlog', (e) => {
+          try {
+            kiosk.prependEvent(JSON.parse(e.data));
+          } catch (err) {
+            console.error('SSE: Failed to parse eventlog:', err);
           }
         });
 

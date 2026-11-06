@@ -327,6 +327,13 @@ The discipline that made this recoverable:
   script #1. A `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst
   tries to enable it, systemd refuses, everything before that has already succeeded.
 
+### Pushing from a worktree: `cd <worktree> && git push`, never `git -C <dir> push`
+
+Agents push with `cd <worktree> && git push -q -u origin <branch>`. The `git -C <dir> push ...` form is
+**denied** in the permission rules: it slips past every `git push` pattern (allow, ask and deny), so it
+would bypass the push guards that keep agents from pushing to `main` or release branches. `git -C <dir>`
+remains fine for read-only and local commands (`status`, `log`, `diff`, `add`, `commit`, `fetch`).
+
 ### Sub-agents
 
 **Every sub-agent must persist its progress outside its own context**, incrementally, as it works —

@@ -444,3 +444,8 @@ body.mh-shell {
   max-height: none;
   background: var(--mh-surface-3);
 }
+
+/* Bulma's .button sets display, which beats the hidden attribute. */
+[hidden] {
+  display: none !important;
+}

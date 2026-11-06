@@ -197,3 +197,10 @@ func TestShellScriptWiresEventLog(t *testing.T) {
 		t.Error("myhome.js does not listen for eventlog and call prependEvent")
 	}
 }
+
+func TestHiddenAttributeWinsOverComponentDisplay(t *testing.T) {
+	css := string(staticAsset(t, "/static/myhome.css"))
+	if !regexp.MustCompile(`\[hidden\]\s*\{\s*display:\s*none\s*!important`).MatchString(css) {
+		t.Error("myhome.css lacks [hidden] { display: none !important }")
+	}
+}

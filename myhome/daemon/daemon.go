@@ -36,6 +36,7 @@ import (
 	shellycloud "github.com/asnowfix/home-automation/pkg/shelly/cloud"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
 	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	"github.com/asnowfix/home-automation/pkg/version"
 	shellyshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	shellytypes "github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/go-logr/logr"
@@ -357,6 +358,8 @@ func (d *daemon) Run() error {
 
 		// Create SSE broadcaster for live sensor updates
 		sseBroadcaster := ui.NewSSEBroadcaster(log.WithName("sse"))
+		// Recorded start time: clients compare it across reconnects to detect a restart.
+		sseBroadcaster.SetDaemonInfo(time.Now(), version.GetVersion())
 
 		// Start event service if enabled
 		var eventsSvc *events.Service

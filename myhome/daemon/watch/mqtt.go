@@ -119,18 +119,27 @@ func mqttWatcher(ctx context.Context, log logr.Logger, topic string, dm devices.
 			}
 
 			log.Info("Updating device from MQTT event", "device", device.DeviceSummary)
-			changed, err := UpdateFromMqttEvent(ctx, device, event)
-			if err != nil {
+			if err := applyEvent(ctx, log, device, event, onStateChange); err != nil {
 				log.Error(err, "Failed to update device from MQTT event", "src", event.Src, "device", device.DeviceSummary)
 				continue
-			}
-			if changed && onStateChange != nil {
-				onStateChange(device)
 			}
 
 			dm.UpdateChannel() <- device
 		}
 	}
+}
+
+// applyEvent applies one notification to the device and, if it changed a
+// user-visible state, calls onStateChange (may be nil).
+func applyEvent(ctx context.Context, log logr.Logger, device *myhome.Device, event *shellymqtt.Event, onStateChange func(*myhome.Device)) error {
+	changed, err := UpdateFromMqttEvent(ctx, device, event)
+	if err != nil {
+		return err
+	}
+	if changed && onStateChange != nil {
+		onStateChange(device)
+	}
+	return nil
 }
 
 // UpdateFromMqttEvent applies one device notification to the in-memory state.
@@ -177,7 +186,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqt
 			var params shellymqtt.NotifyEventParams
 			if err := json.Unmarshal(event.Params, &params); err != nil {
 				log.Error(err, "Failed to unmarshal NotifyEvent params", "event", event)
-				return changed, err
+				return false, err
 			}
 			for _, ev := range params.Events {
 				log.Info("Event", "component", ev.Component, "event", ev.Event)
@@ -189,7 +198,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqt
 				}
 			}
 		} else {
-			return changed, fmt.Errorf("missing event parameters in event: %v", event)
+			return false, fmt.Errorf("missing event parameters in event: %v", event)
 		}
 	}
 

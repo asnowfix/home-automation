@@ -5,8 +5,8 @@ import (
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
-	"github.com/go-logr/logr"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	"github.com/go-logr/logr"
 )
 
 func newTestDevice(id, name string) *myhome.Device {

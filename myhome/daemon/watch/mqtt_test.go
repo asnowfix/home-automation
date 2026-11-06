@@ -172,3 +172,30 @@ func TestUpdateFromMqttEvent_AppliesSwitchNotification(t *testing.T) {
 		t.Fatalf("replayed event: changed=%v err=%v, want false,nil", changed, err)
 	}
 }
+
+// TestApplyEvent_CallsOnStateChange covers the notification -> status ->
+// callback path: the callback fires once for a flip and not for a replay.
+func TestApplyEvent_CallsOnStateChange(t *testing.T) {
+	log := testr.New(t)
+	ctx := logr.NewContext(context.Background(), log)
+
+	ev := loadEventFixture(t, "notify_status__shelly1minig3__switch_0.json") // output:false
+	sd, err := shellyapi.NewDeviceFromMqttId(ctx, log, ev.Src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev := sd.(*shellyapi.Device)
+	dev.SetStatus(&shellyschema.Status{Switch0: &sswitch.Status{Output: true}})
+	d := myhome.NewDevice(log, myhome.SHELLY, ev.Src).WithImpl(dev)
+
+	var got []string
+	cb := func(x *myhome.Device) { got = append(got, x.Id()) }
+	for i := 0; i < 2; i++ {
+		if err := applyEvent(ctx, log, d, ev, cb); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(got) != 1 || got[0] != ev.Src {
+		t.Fatalf("callback calls = %v, want exactly one for %s", got, ev.Src)
+	}
+}

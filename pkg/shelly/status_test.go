@@ -75,31 +75,59 @@ func TestApplyStatusNotification_Malformed(t *testing.T) {
 }
 
 // TestApplyStatusNotification_Race runs merges, refresh-style replacement and
-// readers concurrently; meaningful under -race.
+// readers concurrently; meaningful under -race. The reader iterates the slice
+// elements, so a merge that wrote into a slice shared with a published
+// snapshot (json.Unmarshal reuses the backing array) is reported as a race.
 func TestApplyStatusNotification_Race(t *testing.T) {
-	d := newStatusDevice(t, &shelly.Status{Switch0: &sswitch.Status{}})
+	d := newStatusDevice(t, &shelly.Status{Switch0: &sswitch.Status{
+		Errors: []string{"a"},
+		Aenergy: struct {
+			Total    float32   `json:"total"`
+			ByMinute []float32 `json:"by_minute"`
+			MinuteTs int       `json:"minute_ts"`
+		}{ByMinute: []float32{1, 2, 3}},
+	}})
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 500; i++ {
-			_, _ = d.ApplyStatusNotification(json.RawMessage(`{"switch:0":{"output":true,"aenergy":{"by_minute":[1,2,3]}}}`))
+			_, _ = d.ApplyStatusNotification(json.RawMessage(`{"switch:0":{"output":true,"errors":["b"],"aenergy":{"by_minute":[4,5,6]}}}`))
 		}
 	}()
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 500; i++ {
-			d.SetStatus(&shelly.Status{Switch0: &sswitch.Status{}})
+			_, _ = d.ApplyStatusNotification(json.RawMessage(`{"switch:0":{"output":false}}`))
 		}
 	}()
 	go func() {
 		defer wg.Done()
+		sum := float32(0)
+		n := 0
 		for i := 0; i < 500; i++ {
 			if s := d.Status(); s != nil && s.Switch0 != nil {
-				_ = s.Switch0.Output
-				_ = len(s.Switch0.Aenergy.ByMinute)
+				for _, v := range s.Switch0.Aenergy.ByMinute {
+					sum += v
+				}
+				for _, e := range s.Switch0.Errors {
+					n += len(e)
+				}
 			}
 		}
+		_, _ = sum, n
 	}()
 	wg.Wait()
+}
+
+func TestApplyStatusNotification_AllComponentIndexes(t *testing.T) {
+	d := newStatusDevice(t, &shelly.Status{})
+	changed, err := d.ApplyStatusNotification(json.RawMessage(`{"switch:1":{"output":true},"switch:2":{"output":true},"switch:3":{"output":true},"input:1":{"state":true},"input:2":{"state":true},"input:3":{"state":true}}`))
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	s := d.Status()
+	if !s.Switch1.Output || !s.Switch2.Output || !s.Switch3.Output || !s.Input1.State || !s.Input2.State || !s.Input3.State {
+		t.Errorf("not all indexes applied: %+v", s)
+	}
 }

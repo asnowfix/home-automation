@@ -11,7 +11,11 @@ import (
 // The device status is copy-on-write: a published *shelly.Status is never
 // mutated, only replaced under statusMu. Readers (UI rendering) therefore
 // need no lock beyond the pointer read in Status(), and a notification merge
-// running on the MQTT watcher goroutine cannot race a concurrent Refresh.
+// running on the MQTT watcher goroutine is not a data race with a concurrent
+// Refresh. It is still a lost update: a Refresh that read the device before a
+// flip can SetStatus after the merge and overwrite it. That is masked today
+// because every notification also queues a follow-up refresh, and has never
+// been observed.
 
 // SetStatus replaces the status snapshot (used by Refresh, which reads the
 // full status from the device).

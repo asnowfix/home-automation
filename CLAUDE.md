@@ -263,10 +263,19 @@ The discipline that made this recoverable:
 
 ### NAS operational facts
 
-- **`myhome.service` restarts every 6 hours by design** — the packaged unit sets
-  `RuntimeMaxSec=21600`. So `NRestarts` climbing is expected, not a crash loop; check
-  `ExecMainStatus`/`Result` before treating it as one. Each restart triggers a rediscovery burst of
-  ~41 `device.online` events, roughly **164/day**, which is a large share of what #499 investigates.
+- **`myhome.service` restarts every 2 days by design** — the packaged unit sets
+  `RuntimeMaxSec=172800` (it was 6 hours / `21600` until #695). So `NRestarts` climbing is expected,
+  not a crash loop; check `ExecMainStatus`/`Result` before treating it as one. Each restart
+  triggers a rediscovery burst of ~41 `device.online` events: roughly **~20/day** at the 2-day
+  cadence (it was ~164/day at 6 h, which inflated what #499 investigates; figures measured before
+  2026-11 must be divided accordingly). The old 6-hour restart was **masking a goroutine leak**
+  (~+4/h of `net/http.(*persistConn)` pairs from unclosed response bodies and a per-request HTTPS
+  transport, #695), so a long-lived daemon is only trustworthy once the 2-day goroutine watch of
+  #695 has passed.
+- **NAS drop-in to remove after #695.** `/etc/systemd/system/myhome.service.d/no-runtime-max.conf`
+  (`RuntimeMaxSec=infinity`, added 2026-11-03 to observe the daemon beyond 6 h) overrides the
+  packaged value. Once the fixed build is installed and the #695 2-day watch is over, delete it and
+  run `systemctl daemon-reload` so the packaged 2-day restart applies again.
 - **The journal is `Storage=volatile`** and the daemon is chatty enough to rotate it away within
   ~15 minutes. **NAS post-mortem evidence does not survive** — use `events.db` (see above), which does.
 - **`sqlite3` is not installed on the NAS.** Query `events.db` with `python3`'s `sqlite3` module

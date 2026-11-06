@@ -1,10 +1,10 @@
 package ui
 
 import (
-	"errors"
-	"fmt"
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"

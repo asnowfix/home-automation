@@ -325,7 +325,23 @@ The discipline that made this recoverable:
 - Pool provisioning (`Setup`/`AddDevice`/`UpdateDevice`) is reachable **only** from `myhome/ctl/pool/`,
   never from the daemon; the daemon's auto-setup applies solely to devices lacking `watchdog.js` as
   script #1. A `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst
-  tries to enable it, systemd refuses, everything before that has already succeeded.
+  tries to enable it, systemd refuses, and it **aborts there**. Binary, unit file and the daemon
+  restart have already happened, but the steps *after* the timer handling have **not** run
+  (measured 2026-11-06, v0.13.3): the `myhome ctl shelly script update '*'` push and the
+  `myhome-db-backup.timer` re-enable. Run them by hand as root, as postinst would:
+  `sudo /usr/bin/myhome ctl --wait 180s shelly script update '*'` and
+  `sudo systemctl enable --now myhome-db-backup.timer`. Also remove any local
+  `myhome.service.d/` override (e.g. `no-runtime-max.conf`) and `systemctl daemon-reload`, or the
+  packaged `RuntimeMaxSec` is silently overridden.
+- **A draft release is validated as a whole, through a real package installation.** Install the
+  draft's `.deb` for the host's architecture (`dpkg -i`, `DEBIAN_FRONTEND=noninteractive`, after
+  verifying its checksum) and run the postinst follow-ups above. Do not validate a draft by
+  hand-copying its binary, units or scripts, and do not skip or "preview away" parts of the install:
+  the script marker (`script/<name>` = sha1 of the packaged source) already makes the script push a
+  no-op on every device that is up to date. Installing an *individual* binary, script or config file
+  over SSH or the CLI is fine for development and debugging, but it does not count as having tested
+  the release. Before the push, only check what is device-specific: the production pump relay is OFF
+  and the time is outside its 23:00-00:30 winter window (#661).
 
 ### Pushing from a worktree: `cd <worktree> && git push`, never `git -C <dir> push`
 

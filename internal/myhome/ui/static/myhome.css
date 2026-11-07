@@ -34,6 +34,7 @@
 
   --mh-text: #eaeaea;
   --mh-text-muted: #a1a2a2;
+  --mh-danger: #b3261e;
 
   --mh-radius-pill: 200px;
   --mh-radius-card: 24px;
@@ -509,10 +510,62 @@ body.mh-shell {
 
 .mh-vac-btn.is-primary {
   background: var(--mh-primary);
+  color: var(--mh-bg);
 }
 
 .mh-vac-btn.is-danger {
-  background: #b3261e;
+  background: var(--mh-danger);
+  color: var(--mh-text);
+}
+
+/* Status tags and notes: explicit dark-surface colours (text at least 4.5:1),
+   not Bulma's light variants, which wash out on this theme. */
+.mh-vac-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.mh-vac-tag {
+  padding: 4px 14px;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  font-size: 14px;
+}
+
+.mh-vac-tag.is-ok {
+  background: #12351f;
+  color: #9be7b0;
+}
+
+.mh-vac-tag.is-warn {
+  background: #3d3114;
+  color: #f5d06f;
+}
+
+.mh-vac-tag.is-bad {
+  background: #4a1d1a;
+  color: #ffb4ab;
+}
+
+.mh-vac-note {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+}
+
+.mh-vac-note.is-warn {
+  background: #3d3114;
+  color: #f5d06f;
+}
+
+.mh-vac-note.is-bad {
+  background: #4a1d1a;
+  color: #ffb4ab;
 }
 
 .mh-vac-btn:active {

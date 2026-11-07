@@ -48,7 +48,7 @@
     [x-cloak] { display: none !important; }
   </style>
 </head>
-<body class="mh-shell" x-data="app()" @open-setup-modal.window="openSetupModal($event.detail)" @open-heater-modal.window="openHeaterModal($event.detail)" @edit-room.window="editRoom($event.detail)" @delete-room.window="confirmDeleteRoom($event.detail)">
+<body class="mh-shell" data-version="{{.Version}}" x-data="app()" @open-setup-modal.window="openSetupModal($event.detail)" @open-heater-modal.window="openHeaterModal($event.detail)" @edit-room.window="editRoom($event.detail)" @delete-room.window="confirmDeleteRoom($event.detail)">
 
   <nav class="mh-rail" aria-label="Sections">
     <button type="button" class="mh-rail-item" :class="{'is-active': section === 'home'}" :aria-current="section === 'home' ? 'page' : null" @click="go('home')">
@@ -73,7 +73,13 @@
     </button>
   </nav>
 
-  <main id="mh-content" class="mh-content">
+  <div class="mh-stage">
+  <div id="mh-offline" class="mh-offline" role="status" aria-live="polite" hidden :hidden="online">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M9.5 5.6A6 6 0 0 1 18 10a4 4 0 0 1 2.6 6.9"/><path d="M6.3 7.3A6 6 0 0 0 7 19h10"/></svg>
+    <span class="mh-offline-text">Penates (My Home Daemon) is offline</span>
+    <span class="mh-offline-since" x-text="staleLabel"></span>
+  </div>
+  <main id="mh-content" class="mh-content" :class="{'is-stale': !online}">
       <section id="sec-home" data-section="home" x-show="section === 'home'" x-cloak>
         <header class="mh-sec-head">
           <h2 class="title is-4">Home</h2>
@@ -125,7 +131,7 @@
         <div id="vacuum-container"
              data-refresh
              hx-get="/htmx/vacuum"
-             hx-trigger="load, refresh, every 5s [kiosk.visible('vacuum')]"
+             hx-trigger="load, refresh, every 5s [kiosk.visible('vacuum') && kiosk.online]"
              hx-swap="innerHTML">
         </div>
       </section>
@@ -144,6 +150,7 @@
         </div>
       </section>
   </main>
+  </div>
 
   <!-- Overlays cover the content area only; each has its own close button and the backdrop does not dismiss -->
   <!-- Room Edit Modal -->

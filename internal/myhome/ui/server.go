@@ -141,6 +141,9 @@ func newMux(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db De
 
 		if path == "" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			// The shell carries the version baseline (data-version) and the asset
+			// hashes: never serve it from a stale cache.
+			w.Header().Set("Cache-Control", "no-cache")
 			if err := RenderIndex(ctx, w); err != nil {
 				log.Error(err, "failed to render index page")
 				http.Error(w, "unable to render index", http.StatusInternalServerError)

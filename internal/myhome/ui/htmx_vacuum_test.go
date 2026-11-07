@@ -376,7 +376,7 @@ func TestVacuumAction_RechecksStateForStartAndStop(t *testing.T) {
 // and no confirm is open; the shell's beforeRequest guard refuses non-GET htmx
 // requests while offline, which covers the confirm bar's POSTs.
 func TestVacuumPollFilterAndOfflineGuard(t *testing.T) {
-	html := string(staticAsset(t, "/static/index.html"))
+	html := get(testMux(), "/").Body.String()
 	for _, want := range []string{"kiosk.visible('vacuum')", "kiosk.online", "#vacuum-container [data-confirming]"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("vacuum poll filter lacks %q", want)

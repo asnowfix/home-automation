@@ -5,6 +5,71 @@ var kiosk = {
   section: 'home',
   staleMs: 60000,
 
+  // Daemon liveness (682 §5 rule). online is also read by htmx trigger filters.
+  // offlineMs: longest silence tolerated on a stream that still looks open.
+  online: true,
+  offlineMs: 40000,
+  lastSeenMono: 0,   // performance.now() at the last SSE frame
+  lastFrameWall: 0,  // browser clock (ms) at the last SSE frame: fallback for staleSince
+  lastPingTs: 0,     // the daemon's clock (s) from the last ping
+  started: 0,        // daemon start time (s) from the first ping of this page load
+  version: '',       // daemon version from the first ping of this page load
+  staleText: '',
+
+  // Any SSE frame proves the daemon is reachable. ping is the parsed ping
+  // payload, or null for other events. Returns what the caller must do:
+  // recovered (was offline) and reload (the daemon was upgraded meanwhile).
+  frame: function(nowMono, nowWall, ping) {
+    var recovered = !this.online;
+    this.online = true;
+    this.staleText = '';
+    this.lastSeenMono = nowMono;
+    this.lastFrameWall = nowWall;
+    var reload = false;
+    if (ping) {
+      this.lastPingTs = Number(ping.ts) || this.lastPingTs;
+      if (!this.version && !this.started) {
+        this.started = ping.started || 0;
+        this.version = ping.version || '';
+      } else if (ping.version && this.version && ping.version !== this.version) {
+        reload = true;
+      }
+    }
+    return { recovered: recovered, reload: reload };
+  },
+
+  // The stream closed or errored: offline. Returns true when this is a change.
+  lost: function(now) {
+    if (!this.online) { return false; }
+    this.online = false;
+    this.staleText = this.staleLabel(now);
+    return true;
+  },
+
+  // Silence watchdog, called every few seconds. Returns true when it flipped.
+  tick: function(nowMono, now) {
+    if (this.online && nowMono - this.lastSeenMono > this.offlineMs) { return this.lost(now); }
+    return false;
+  },
+
+  // "stale since 14:32" from the daemon's clock (a Pi without an RTC may have a
+  // wrong one); the browser time of the last frame until a ping has been seen.
+  staleLabel: function(now) {
+    var d = new Date(this.lastPingTs ? this.lastPingTs * 1000 : this.lastFrameWall);
+    var hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    if (d.toDateString() !== now.toDateString()) {
+      hm = d.toLocaleDateString([], { day: 'numeric', month: 'short' }) + ' ' + hm;
+    }
+    return 'stale since ' + hm;
+  },
+
+  // Back online: re-fetch what is on screen, flag the rest for when it is shown.
+  recovered: function() {
+    for (var i = 0; i < this.sections.length; i++) {
+      if (this.visible(this.sections[i])) { this.refresh(this.sections[i]); } else { this.dirty(this.sections[i]); }
+    }
+  },
+
   visible: function(name) { return this.section === name; },
 
   fromHash: function() {
@@ -69,6 +134,8 @@ var kiosk = {
   function app() {
     return {
       section: 'home',
+      online: true,
+      staleLabel: '',
       sensors: {},
       doors: {},
       switches: {},
@@ -106,9 +173,17 @@ var kiosk = {
       init() {
         this.section = kiosk.fromHash();
         kiosk.section = this.section;
+        kiosk.lastSeenMono = performance.now();
+        kiosk.lastFrameWall = Date.now();
         this.connectSSE();
+        setInterval(() => { if (kiosk.tick(performance.now(), new Date())) { this.syncLive(); } }, 5000);
         this.loadRooms();
         document.addEventListener('contextmenu', (e) => e.preventDefault());
+        // Offline: nothing may write. GET refreshes are harmless and stay.
+        document.body.addEventListener('htmx:beforeRequest', (e) => {
+          const verb = e.detail.requestConfig && e.detail.requestConfig.verb;
+          if (!kiosk.online && verb && verb !== 'get') { e.preventDefault(); }
+        });
         document.body.addEventListener('htmx:afterSwap', (e) => kiosk.fetched(e.detail.target));
         document.body.addEventListener('htmx:responseError', (e) => kiosk.failed(e.detail.target));
         document.body.addEventListener('htmx:sendError', (e) => kiosk.failed(e.detail.target));
@@ -219,14 +294,39 @@ var kiosk = {
         }
       },
 
+      // Mirror the kiosk liveness state into Alpine (banner and greyed view).
+      syncLive() {
+        this.online = kiosk.online;
+        this.staleLabel = kiosk.staleText;
+      },
+
+      // Every SSE frame lands here first. ping is the parsed ping payload or null.
+      seen(ping) {
+        const r = kiosk.frame(performance.now(), Date.now(), ping);
+        this.syncLive();
+        if (r.reload) { location.reload(); return; }
+        if (r.recovered) { kiosk.recovered(); }
+      },
+
       connectSSE() {
         const eventSource = new EventSource('/events');
         
         eventSource.addEventListener('connected', () => {
           console.log('SSE: connected');
+          this.seen(null);
+        });
+
+        eventSource.addEventListener('ping', (e) => {
+          try {
+            this.seen(JSON.parse(e.data));
+          } catch (err) {
+            console.error('SSE: Failed to parse ping:', err);
+            this.seen(null);
+          }
         });
 
         eventSource.addEventListener('sensor-update', (e) => {
+          this.seen(null);
           try {
             const data = JSON.parse(e.data);
             console.log('SSE: sensor-update', data);
@@ -237,6 +337,7 @@ var kiosk = {
         });
 
         eventSource.addEventListener('device-update', (e) => {
+          this.seen(null);
           try {
             const deviceView = JSON.parse(e.data);
             console.log('SSE: device-update', deviceView);
@@ -258,6 +359,7 @@ var kiosk = {
         });
 
         eventSource.addEventListener('eventlog', (e) => {
+          this.seen(null);
           try {
             kiosk.prependEvent(JSON.parse(e.data));
           } catch (err) {
@@ -267,6 +369,8 @@ var kiosk = {
 
         eventSource.onerror = (e) => {
           console.error('SSE: error:', e);
+          // EventSource retries by itself (retry: 3000); until a frame arrives we are offline.
+          if (eventSource.readyState !== 1 && kiosk.lost(new Date())) { this.syncLive(); }
         };
       },
 

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# DEPRECATED: use `python3 -I myhome-local.py` (portable, adds a read-only `daemon` mode).
+# This script stays until the Python launcher has been verified, then it is deleted.
+#
 # myhome-local.sh — Bootstrap and run myhome from a local checkout (main tree or any git worktree).
 #
 # Generates the gitignored assets/code that `go build`/`go run` require (UI static

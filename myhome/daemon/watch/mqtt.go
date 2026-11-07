@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	mhswitch "github.com/asnowfix/home-automation/internal/myhome/shelly/sswitch"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices"
 	"github.com/asnowfix/home-automation/myhome/mqtt"
@@ -129,6 +130,13 @@ func mqttWatcher(ctx context.Context, log logr.Logger, topic string, dm devices.
 	}
 }
 
+// reprimePolarity re-reads a device's switch polarity after its KVS changed externally.
+func reprimePolarity(ctx context.Context, log logr.Logger, sd *shellyapi.Device) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	mhswitch.PrimeOnValue(ctx, log, sd)
+}
+
 // applyEvent applies one notification to the device and, if it changed a
 // user-visible state, calls onStateChange (may be nil).
 func applyEvent(ctx context.Context, log logr.Logger, device *myhome.Device, event *shellymqtt.Event, onStateChange func(*myhome.Device)) error {
@@ -163,10 +171,16 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqt
 				log.Error(err, "Failed to unmarshal status", "event", event)
 				return false, err
 			}
+			invalidated := false
 			if status.System != nil {
-				kvs.ObserveRevision(log, d.Id(), status.System.KvsRevision)
+				invalidated = kvs.ObserveRevision(log, d.Id(), status.System.KvsRevision)
 			}
 			if sd, ok := d.Impl().(*shellyapi.Device); ok && sd != nil {
+				if invalidated {
+					// The switch polarity (a KVS key) was dropped with the device's cache;
+					// rendering never reads the device (#732), so re-resolve it, off this goroutine.
+					go reprimePolarity(ctx, log, sd)
+				}
 				changed, err = sd.ApplyStatusNotification(event.Params)
 				if err != nil {
 					log.Error(err, "Failed to apply status notification", "event", event)

@@ -386,7 +386,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
-	err = watch.StartMqttWatcher(ctx, dm.log, dm.mqttClient, dm, dm.dr)
+	err = watch.StartMqttWatcher(ctx, dm.log, dm.mqttClient, dm, dm.dr, dm.broadcastStateChange)
 	if err != nil {
 		dm.log.Error(err, "Failed to watch MQTT events")
 		return err
@@ -610,6 +610,18 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, refreshed chan
 
 	log.V(1).Info("Updated: preparing to store", "device", device.DeviceSummary)
 	refreshed <- device
+}
+
+// broadcastStateChange tells open browsers that a device's live state (switch
+// output, input) changed. The browser only uses the id to re-fetch the card
+// (index.html device-update handler), so a minimal view is sent: building the
+// full one (ui.DeviceToView) can read KVS from the device, which must not
+// happen on the MQTT watcher goroutine.
+func (dm *DeviceManager) broadcastStateChange(d *myhome.Device) {
+	if dm.sseBroadcaster == nil {
+		return
+	}
+	dm.sseBroadcaster.BroadcastDeviceUpdate(ui.DeviceView{Id: d.Id(), Name: d.Name()})
 }
 
 func (dm *DeviceManager) storeDeviceLoop(ctx context.Context, refreshed <-chan *myhome.Device) {

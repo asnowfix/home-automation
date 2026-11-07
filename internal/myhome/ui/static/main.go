@@ -25,11 +25,23 @@ var alpineJS []byte
 //go:embed myhome.css
 var myhomeCSS []byte
 
+//go:embed myhome.js
+var myhomeJS []byte
+
 //go:embed penates.svg
 var penatesSVG []byte
 
 //go:embed manifest.json
 var manifestJSON []byte
+
+// Inter variable font 4.1 (rsms/inter release asset web/InterVariable.woff2) and its
+// licence. Committed, not generated: see README.md in this directory.
+//
+//go:embed InterVariable-4.1.woff2
+var interWOFF2 []byte
+
+//go:embed Inter-OFL.txt
+var interLicense []byte
 
 // Asset represents a static asset with its content and MIME type
 type Asset struct {
@@ -42,7 +54,13 @@ var Assets = map[string]Asset{
 	"/static/bulma.min.css": {Content: bulmaCSS, ContentType: "text/css; charset=utf-8"},
 	"/static/htmx.min.js":   {Content: htmxJS, ContentType: "application/javascript; charset=utf-8"},
 	"/static/alpine.min.js": {Content: alpineJS, ContentType: "application/javascript; charset=utf-8"},
+	"/static/myhome.js":     {Content: myhomeJS, ContentType: "application/javascript; charset=utf-8"},
 	"/static/myhome.css":    {Content: myhomeCSS, ContentType: "text/css; charset=utf-8"},
 	"/static/penates.svg":   {Content: penatesSVG, ContentType: "image/svg+xml; charset=utf-8"},
 	"/static/manifest.json": {Content: manifestJSON, ContentType: "application/json; charset=utf-8"},
+
+	// The version is in the font's file name because myhome.css is static and
+	// assets are served immutable; keep it in step with the @font-face url.
+	"/static/InterVariable-4.1.woff2": {Content: interWOFF2, ContentType: "font/woff2"},
+	"/static/Inter-OFL.txt":           {Content: interLicense, ContentType: "text/plain; charset=utf-8"},
 }

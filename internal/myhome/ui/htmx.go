@@ -150,11 +150,8 @@ func (h *HTMXHandler) DeviceCards(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Info("DeviceCards: rendering template", "device_count", len(deviceViews))
 
-	// Render all device cards
-	tmpl := template.Must(template.New("device-cards").Funcs(cardTemplateFuncs()).Parse(deviceCardsTemplate))
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.Execute(w, deviceViews); err != nil {
+	if err := deviceRowTmpl.ExecuteTemplate(w, "devices", deviceViews); err != nil {
 		h.log.Error(err, "DeviceCards: failed to render device cards")
 		http.Error(w, "render error", http.StatusInternalServerError)
 		return
@@ -181,10 +178,8 @@ func (h *HTMXHandler) DeviceCard(w http.ResponseWriter, r *http.Request) {
 	applyPoolStatus(h.ctx, views)
 	dv := views[0]
 
-	tmpl := template.Must(template.New("device-card").Funcs(cardTemplateFuncs()).Parse(deviceCardTemplate))
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.Execute(w, dv); err != nil {
+	if err := deviceRowTmpl.ExecuteTemplate(w, "device", dv); err != nil {
 		h.log.Error(err, "failed to render device card")
 		http.Error(w, "render error", http.StatusInternalServerError)
 	}
@@ -283,7 +278,9 @@ func deviceRoleLabel(d *myhome.Device) string {
 func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
 	mh, err := myhome.Methods(myhome.TemperatureList)
 	if err != nil {
-		http.Error(w, "method not found", http.StatusInternalServerError)
+		// temperature service disabled: a calm empty state, not an error
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<div class="column is-12" data-rooms-disabled><p class="has-text-grey">Rooms are not enabled on this daemon.</p></div>`)
 		return
 	}
 
@@ -394,9 +391,11 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse switch ID
-	var sid int
-	fmt.Sscanf(switchID, "%d", &sid)
+	sid, err := strconv.Atoi(switchID)
+	if err != nil {
+		http.Error(w, "switch_id must be a number", http.StatusBadRequest)
+		return
+	}
 
 	// Call switch.toggle RPC
 	mh, err := myhome.Methods(myhome.SwitchToggle)
@@ -410,7 +409,13 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 		SwitchId:   sid,
 	}
 
-	res, err := mh.ActionE(h.ctx, params)
+	// The daemon context carries the logger and values the handler needs; the
+	// request's cancellation (a closed browser) is layered on top of it.
+	ctx, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	defer context.AfterFunc(r.Context(), cancel)()
+
+	res, err := mh.ActionE(ctx, params)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -422,17 +427,15 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Render switch button HTML
-	tmpl := template.Must(template.New("switch-button").Parse(switchButtonTemplate))
-
-	data := map[string]interface{}{
-		"DeviceID": deviceID,
-		"SwitchID": switchID,
-		"On":       result.On,
-	}
-
+	// Render the round button with the logical state after polarity.
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.Execute(w, data); err != nil {
+	if err := deviceRowTmpl.ExecuteTemplate(w, "power", powerView{
+		DeviceID: deviceID,
+		SwitchID: sid,
+		Label:    r.FormValue("label"),
+		Known:    true,
+		On:       result.On,
+	}); err != nil {
 		h.log.Error(err, "failed to render switch button")
 		http.Error(w, "render error", http.StatusInternalServerError)
 	}
@@ -620,271 +623,6 @@ func (h *HTMXHandler) renderEventsRows(w http.ResponseWriter, r *http.Request, o
 	}
 }
 
-// cardTemplateFuncs returns the template.FuncMap shared by deviceCardsTemplate
-// and deviceCardTemplate. isActive/turnoverText exist because html/template
-// does not auto-dereference *bool/*float64 fields for {{if}} or {{printf}} —
-// a non-nil pointer is always "truthy" regardless of the value it points to,
-// and printf on a pointer prints its address, not the pointed-to value.
-func cardTemplateFuncs() template.FuncMap {
-	return template.FuncMap{
-		"lower": strings.ToLower,
-		"isActive": func(b *bool) bool {
-			return b != nil && *b
-		},
-		"turnoverText": func(achieved, target *float64) string {
-			if achieved == nil || target == nil {
-				return ""
-			}
-			return fmt.Sprintf("%.1f/%.1f x/day", *achieved, *target)
-		},
-		"f1": func(f *float64) string {
-			if f == nil {
-				return ""
-			}
-			return fmt.Sprintf("%.1f", *f)
-		},
-	}
-}
-
-const deviceCardsTemplate = `
-{{range .}}
-{{ $deviceId := .Id }}
-<div class="column is-4-desktop is-6-tablet" data-device-name="{{.Name | lower}}">
-  <div class="card" id="device-{{.Id}}">
-    <div class="card-content">
-      <p class="title is-5">
-        {{if .DeviceTypeEmoji}}{{.DeviceTypeEmoji}} {{end}}
-        <span id="device-{{.Id}}-name">{{.Name}}</span>
-        {{if .HasTemperatureSensor}}
-          {{if .Temperature}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{f1 .Temperature}}°C</span>
-          {{else}}
-            <span class="tag is-light ml-2" id="sensor-{{.Id}}-temperature">--°C</span>
-          {{end}}
-        {{end}}
-        
-        {{range $switchId, $switch := .Switches}}
-          <div class="level" id="switch-{{$deviceId}}-{{$switchId}}">
-            <button class="button is-rounded {{if $switch.On}}is-info is-active{{else}}is-light{{end}}" 
-                    id="btn-switch-{{$deviceId}}-{{$switchId}}"
-                    @click="toggleSwitch('{{$deviceId}}', '{{$switchId}}')"
-                    title="Toggle switch">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="btn-switch-{{$deviceId}}-{{$switchId}}-shape">
-                {{if $switch.On}}
-                <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-                <circle cx="16" cy="12" r="3"></circle>
-                {{else}}
-                <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-                <circle cx="8" cy="12" r="3"></circle>
-                {{end}}
-              </svg>
-            </button>
-            <span class="level-item">{{$switch.Name}}</span>
-          </div>
-        {{end}}
-        
-        {{if .HasHumiditySensor}}
-          {{if .Humidity}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{f1 .Humidity}}%</span>
-          {{else}}
-            <span class="tag is-light ml-2" id="sensor-{{.Id}}-humidity">--%</span>
-          {{end}}
-        {{end}}
-        {{if .HasDoorSensor}}
-          {{if ne .DoorOpened nil}}
-            {{if .DoorOpened}}
-              <span class="tag is-warning ml-2" id="door-{{.Id}}">
-                <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z"/>
-                </svg>
-                Open
-              </span>
-            {{else}}
-              <span class="tag is-success ml-2" id="door-{{.Id}}">
-                <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
-                </svg>
-                Closed
-              </span>
-            {{end}}
-          {{else}}
-            <span class="tag is-light ml-2" id="door-{{.Id}}">
-              <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
-              </svg>
-              --
-            </span>
-          {{end}}
-        {{end}}
-        {{if .IsPoolPump}}
-          {{if isActive .WaterSupplyActive}}
-            <span class="tag is-warning ml-2" id="water-supply-{{.Id}}" title="Water supply active, pump paused">💧 Paused</span>
-          {{else}}
-            <span class="tag is-success ml-2" id="water-supply-{{.Id}}" title="Water supply OK">💧 OK</span>
-          {{end}}
-          <span class="tag is-light ml-2" id="turnover-{{.Id}}" title="Filtration turnover today">🔄 {{turnoverText .TurnoverAchieved .TurnoverTarget}}</span>
-        {{end}}
-      </p>
-      <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
-      <div class="buttons mt-3">
-        {{if .HasWebUI}}
-          <a class="button is-link is-small" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="2" y1="12" x2="22" y2="12"></line>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-            </svg>
-          </a>
-        {{end}}
-        {{if .IsRefreshable}}
-        <button class="button is-warning is-small" 
-                id="btn-refresh-{{.Id}}"
-                @click="refreshDevice('{{.Id}}')"
-                title="Refresh device">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <polyline points="1 20 1 14 7 14"></polyline>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-          </svg>
-        </button>
-        {{end}}
-        <button class="button is-success is-small" 
-                @click="$dispatch('open-setup-modal', {deviceId: '{{.Id}}'})"
-                title="Setup device">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
-          </svg>
-        </button>
-        {{if .HasHeaterScript}}
-        <button class="button is-danger is-small" 
-                @click="$dispatch('open-heater-modal', {deviceId: '{{.Id}}'})"
-                title="Heater Configuration">🔥</button>
-        {{end}}
-      </div>
-    </div>
-  </div>
-</div>
-{{end}}
-`
-
-const deviceCardTemplate = `
-<div class="column is-4-desktop is-6-tablet" data-device-name="{{.Name | lower}}">
-  <div class="card" id="device-{{.Id}}">
-    <div class="card-content">
-      <p class="title is-5">
-        {{if .DeviceTypeEmoji}}{{.DeviceTypeEmoji}} {{end}}
-        <span id="device-{{.Id}}-name">{{.Name}}</span>
-        {{if .HasTemperatureSensor}}
-          {{if .Temperature}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-temperature">{{f1 .Temperature}}°C</span>
-          {{else}}
-            <span class="tag is-light ml-2" id="sensor-{{.Id}}-temperature">--°C</span>
-          {{end}}
-        {{end}}
-        
-        {{range $switchId, $switch := .Switches}}
-          <div class="level" id="switch-{{$.Id}}-{{$switchId}}">
-            <button class="button is-rounded {{if $switch.On}}is-info is-active{{else}}is-light{{end}}" 
-                    id="btn-switch-{{$.Id}}-{{$switchId}}"
-                    @click="toggleSwitch('{{$.Id}}', '{{$switchId}}')"
-                    title="Toggle switch">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="btn-switch-{{$.Id}}-{{$switchId}}-shape">
-                {{if $switch.On}}
-                <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-                <circle cx="16" cy="12" r="3"></circle>
-                {{else}}
-                <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-                <circle cx="8" cy="12" r="3"></circle>
-                {{end}}
-              </svg>
-            </button>
-            <span class="level-item">{{$switch.Name}}</span>
-          </div>
-        {{end}}
-        
-        {{if .HasHumiditySensor}}
-          {{if .Humidity}}
-            <span class="tag is-info ml-2" id="sensor-{{.Id}}-humidity">{{f1 .Humidity}}%</span>
-          {{else}}
-            <span class="tag is-light ml-2" id="sensor-{{.Id}}-humidity">--%</span>
-          {{end}}
-        {{end}}
-        {{if .HasDoorSensor}}
-          {{if ne .DoorOpened nil}}
-            {{if .DoorOpened}}
-              <span class="tag is-warning ml-2" id="door-{{.Id}}">
-                <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z"/>
-                </svg>
-                Open
-              </span>
-            {{else}}
-              <span class="tag is-success ml-2" id="door-{{.Id}}">
-                <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
-                </svg>
-                Closed
-              </span>
-            {{end}}
-          {{else}}
-            <span class="tag is-light ml-2" id="door-{{.Id}}">
-              <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
-              </svg>
-              --
-            </span>
-          {{end}}
-        {{end}}
-        {{if .IsPoolPump}}
-          {{if isActive .WaterSupplyActive}}
-            <span class="tag is-warning ml-2" id="water-supply-{{.Id}}" title="Water supply active, pump paused">💧 Paused</span>
-          {{else}}
-            <span class="tag is-success ml-2" id="water-supply-{{.Id}}" title="Water supply OK">💧 OK</span>
-          {{end}}
-          <span class="tag is-light ml-2" id="turnover-{{.Id}}" title="Filtration turnover today">🔄 {{turnoverText .TurnoverAchieved .TurnoverTarget}}</span>
-        {{end}}
-      </p>
-      <p class="subtitle is-7 has-text-grey">{{.Manufacturer}} · {{.Id}}</p>
-      <div class="buttons mt-3">
-        {{if .HasWebUI}}
-          <a class="button is-link is-small" href="/devices/{{.LinkToken}}/" target="_blank" rel="noopener noreferrer" title="Open device web interface">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="2" y1="12" x2="22" y2="12"></line>
-              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
-            </svg>
-          </a>
-        {{end}}
-        {{if .IsRefreshable}}
-        <button class="button is-warning is-small" 
-                id="btn-refresh-{{.Id}}"
-                @click="refreshDevice('{{.Id}}')"
-                title="Refresh device">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="23 4 23 10 17 10"></polyline>
-            <polyline points="1 20 1 14 7 14"></polyline>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-          </svg>
-        </button>
-        {{end}}
-        <button class="button is-success is-small" 
-                @click="$dispatch('open-setup-modal', {deviceId: '{{.Id}}'})"
-                title="Setup device">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path>
-          </svg>
-        </button>
-        {{if .HasHeaterScript}}
-        <button class="button is-danger is-small" 
-                @click="$dispatch('open-heater-modal', {deviceId: '{{.Id}}'})"
-                title="Heater Configuration">🔥</button>
-        {{end}}
-      </div>
-    </div>
-  </div>
-</div>
-`
-
 const roomsListTemplate = `
 {{if .}}
   {{range .}}
@@ -932,7 +670,7 @@ const roomsListTemplate = `
       {{if .Devices}}
       <div class="mt-2">
         {{range .Devices}}
-        <p class="is-size-7">{{roleEmoji .Role}} <a href="/devices/{{.ID}}/" target="_blank" rel="noopener noreferrer">{{.Name}}</a></p>
+        <p class="is-size-7">{{roleEmoji .Role}} {{.Name}}</p>
         {{end}}
       </div>
       {{end}}
@@ -967,23 +705,4 @@ const accountsPanelTemplate = `
   <p class="has-text-grey">No accounts tracked yet.</p>
 </div>
 {{end}}
-`
-
-const switchButtonTemplate = `
-<button class="button is-rounded {{if .On}}is-info is-active{{else}}is-light{{end}}" 
-        hx-post="/htmx/switch/toggle"
-        hx-vals='{"device_id": "{{.DeviceID}}", "switch_id": "{{.SwitchID}}"}'
-        hx-target="this"
-        hx-swap="outerHTML"
-        title="Toggle switch">
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    {{if .On}}
-    <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-    <circle cx="16" cy="12" r="3"></circle>
-    {{else}}
-    <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-    <circle cx="8" cy="12" r="3"></circle>
-    {{end}}
-  </svg>
-</button>
 `

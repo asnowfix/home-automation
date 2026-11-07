@@ -64,6 +64,35 @@ func cachePutNotFound(deviceId, key string, definitive bool) {
 	cache[cacheKey(deviceId, key)] = cacheEntry{notFound: true, definitive: definitive, expires: time.Now().Add(ttl)}
 }
 
+// PeekState is what Peek knows about a key without contacting the device.
+type PeekState int
+
+const (
+	PeekUnknown PeekState = iota // nothing cached, or an earlier lookup failed transiently
+	PeekFound                    // the device answered with a value
+	PeekAbsent                   // the device answered that the key does not exist
+)
+
+// Peek reads the cache only and never calls the device, so it is safe on a
+// request path (#732). Unlike GetValue it ignores the TTL: an entry stays valid
+// until SetKeyValue/DeleteKey or a kvs_rev change invalidates it, and a later
+// GetValue (the device refresh) renews it. Returns PeekUnknown when there is
+// nothing trustworthy to report.
+func Peek(deviceId, key string) (GetResponse, PeekState) {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	e, ok := cache[cacheKey(deviceId, key)]
+	switch {
+	case !ok:
+		return GetResponse{}, PeekUnknown
+	case !e.notFound:
+		return e.value, PeekFound
+	case e.definitive:
+		return GetResponse{}, PeekAbsent
+	}
+	return GetResponse{}, PeekUnknown
+}
+
 func cacheInvalidate(deviceId, key string) {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
@@ -108,23 +137,28 @@ func noteSelfWrite(deviceId string) {
 // behavior). If it moved by more than our own pending writes account for,
 // something else changed a KVS entry on this device, so the entire
 // per-device cache is dropped.
-func ObserveRevision(log logr.Logger, deviceId string, rev uint32) {
+//
+// It returns true when the device's cache was dropped, so the caller can re-read
+// what it depends on (off the calling goroutine) instead of waiting for the next
+// refresh.
+func ObserveRevision(log logr.Logger, deviceId string, rev uint32) (invalidated bool) {
 	revMu.Lock()
 	defer revMu.Unlock()
 
 	prev, known := lastSeenRev[deviceId]
 	lastSeenRev[deviceId] = rev
 	if !known || rev == prev {
-		return
+		return false
 	}
 
 	delta := rev - prev
 	if delta <= pendingSelf[deviceId] {
 		pendingSelf[deviceId] -= delta
 		log.V(1).Info("KVS revision bump matches our own writes, cache kept", "device", deviceId, "prev_rev", prev, "rev", rev)
-		return
+		return false
 	}
 	pendingSelf[deviceId] = 0
 	log.Info("KVS revision changed externally, invalidating device cache", "device", deviceId, "prev_rev", prev, "rev", rev)
 	cacheInvalidateDevice(deviceId)
+	return true
 }

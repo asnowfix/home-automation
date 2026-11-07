@@ -126,3 +126,59 @@ func TestObserveRevisionExternalChangeWipesDevice(t *testing.T) {
 		t.Error("expected key 'a' to be evicted after an externally-caused revision bump")
 	}
 }
+
+func TestPeekNeverCallsDeviceAndIgnoresTTL(t *testing.T) {
+	resetKvsCache()
+	d := types.NewFakeDevice()
+	d.IdValue = "device-peek-1"
+
+	if _, st := Peek(d.IdValue, "k"); st != PeekUnknown {
+		t.Errorf("empty cache: state %v, want PeekUnknown", st)
+	}
+
+	d.SetResult(string(Get), &GetResponse{Value: "true"})
+	if _, err := GetValue(context.Background(), logr.Discard(), types.ChannelDefault, d, "k"); err != nil {
+		t.Fatal(err)
+	}
+	calls := len(d.Calls)
+
+	// an expired entry is still reported (the refresh renews it), without a device call
+	cacheMu.Lock()
+	e := cache[cacheKey(d.IdValue, "k")]
+	e.expires = e.expires.Add(-2 * ttl)
+	cache[cacheKey(d.IdValue, "k")] = e
+	cacheMu.Unlock()
+	if v, st := Peek(d.IdValue, "k"); st != PeekFound || v.Value != "true" {
+		t.Errorf("Peek = %q, %v; want true, PeekFound", v.Value, st)
+	}
+	if len(d.Calls) != calls {
+		t.Errorf("Peek called the device")
+	}
+
+	cachePutNotFound(d.IdValue, "absent", true)
+	if _, st := Peek(d.IdValue, "absent"); st != PeekAbsent {
+		t.Errorf("definitive not-found: %v, want PeekAbsent", st)
+	}
+	cachePutNotFound(d.IdValue, "failed", false)
+	if _, st := Peek(d.IdValue, "failed"); st != PeekUnknown {
+		t.Errorf("transient failure: %v, want PeekUnknown", st)
+	}
+}
+
+func TestObserveRevisionReportsInvalidation(t *testing.T) {
+	resetKvsCache()
+	id := "device-peek-2"
+	cachePut(id, "k", GetResponse{Value: "x"})
+	if ObserveRevision(logr.Discard(), id, 5) {
+		t.Error("first sighting must not invalidate")
+	}
+	if ObserveRevision(logr.Discard(), id, 5) {
+		t.Error("unchanged revision must not invalidate")
+	}
+	if !ObserveRevision(logr.Discard(), id, 6) {
+		t.Error("external bump must report invalidation")
+	}
+	if _, st := Peek(id, "k"); st != PeekUnknown {
+		t.Errorf("after kvs_rev change Peek = %v, want PeekUnknown", st)
+	}
+}

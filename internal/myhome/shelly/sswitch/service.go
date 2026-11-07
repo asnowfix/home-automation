@@ -192,6 +192,35 @@ func OnValue(ctx context.Context, log logr.Logger, sd *shelly.Device, switchId i
 	return parseOnValueIndexed(kv.Value, switchId)
 }
 
+// OnValueCached is OnValue for request paths: it reads only what a previous
+// OnValue/PrimeOnValue stored and never calls the device. known is false when
+// the polarity has not been resolved yet (or was invalidated by a kvs_rev
+// change); a key the device reports absent is known, and means "true".
+func OnValueCached(deviceId string, switchId int) (on bool, known bool) {
+	kv, state := kvs.Peek(deviceId, string(myhome.NormallyClosedKey))
+	switch state {
+	case kvs.PeekAbsent:
+		return true, true
+	case kvs.PeekFound:
+		if switchId == 0 {
+			return parseOnValue(kv.Value), true
+		}
+		var ncs []bool
+		if json.Unmarshal([]byte(kv.Value), &ncs) != nil || switchId >= len(ncs) {
+			return false, false
+		}
+		return !ncs[switchId], true
+	}
+	return false, false
+}
+
+// PrimeOnValue resolves a device's switch polarity (one KVS read, shared by all
+// its switches) so that OnValueCached can answer later. It contacts the device:
+// call it from refresh paths only, never while rendering.
+func PrimeOnValue(ctx context.Context, log logr.Logger, sd *shelly.Device) {
+	_, _ = kvs.GetValue(ctx, log, types.ChannelDefault, sd, string(myhome.NormallyClosedKey))
+}
+
 // parseOnValue decides the switch's logical "on" value from the raw
 // normally-closed KVS string for switchId 0: it's a single bool
 // ("true"/"false"), and the returned value is the negation of that flag.

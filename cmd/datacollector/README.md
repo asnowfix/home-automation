@@ -81,7 +81,7 @@ The complete test suite includes:
 
 ### Prerequisites
 
-- Go 1.23+ installed
+- Go 1.26+ installed
 - Access to the home automation MQTT broker
 - Local network with discoverable Shelly devices
 

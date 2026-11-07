@@ -1,8 +1,8 @@
 module github.com/asnowfix/home-automation/myhome/daemon/watch
 
-go 1.25.0
+go 1.26.0
 
-toolchain go1.25.3
+toolchain go1.26.10
 
 require (
 	github.com/asnowfix/home-automation/internal/myhome v0.0.0-20260827193303-e3119f39f082

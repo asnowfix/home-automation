@@ -18,9 +18,9 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.25.x'
+          go-version: '1.26.x'
         env:
-          GOTOOLCHAIN: go1.25.3
+          GOTOOLCHAIN: go1.26.10
       - name: Run tests with coverage
         run: make cover
       - name: Per-package coverage summary
@@ -57,9 +57,9 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.25.x'
+          go-version: '1.26.x'
         env:
-          GOTOOLCHAIN: go1.25.3
+          GOTOOLCHAIN: go1.26.10
       - name: Coverage on PR branch
         run: |
           make cover
@@ -106,9 +106,9 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.25.x'
+          go-version: '1.26.x'
         env:
-          GOTOOLCHAIN: go1.25.3
+          GOTOOLCHAIN: go1.26.10
       - name: Generate assets (host-native — must not be cross-compiled)
         run: make generate
       - name: Cross-compile arm64 binary

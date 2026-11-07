@@ -41,6 +41,12 @@ func (s *Service) RegisterHandlers() {
 	myhome.RegisterMethodHandler(myhome.VacuumRoomsSync, func(ctx context.Context, in any) (any, error) {
 		return s.SyncRooms(ctx, in.(*myhome.VacuumParams).Robot)
 	})
+	myhome.RegisterMethodHandler(myhome.VacuumExport, func(ctx context.Context, _ any) (any, error) {
+		return s.store.Export()
+	})
+	myhome.RegisterMethodHandler(myhome.VacuumImport, func(ctx context.Context, in any) (any, error) {
+		return s.store.Import(in.(*myhome.VacuumDump))
+	})
 	s.log.Info("Vacuum RPC handlers registered")
 }
 

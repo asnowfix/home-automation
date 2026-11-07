@@ -187,3 +187,24 @@ func VacuumPhaseText(phase string) string {
 	}
 	return phase
 }
+
+// VacuumRow is one database row of the vacuum tables, keyed by column name.
+// Rows are exchanged as maps so that an export taken from a build with more
+// columns (for example vacuum_regions.room_id, #684) still imports into a build
+// with fewer, and the other way round: unknown columns are ignored, missing
+// ones take their default.
+type VacuumRow map[string]any
+
+// VacuumDump is the vacuum part of `ctl db export` (vacuum.export) and of
+// `ctl db import` (vacuum.import). It carries the robot's non-secret facts and
+// its learned or cloud-synced regions, never the robot's password.
+type VacuumDump struct {
+	Robots  []VacuumRow `json:"robots,omitempty"`
+	Regions []VacuumRow `json:"regions,omitempty"`
+}
+
+// VacuumImportResult counts the rows vacuum.import stored.
+type VacuumImportResult struct {
+	Robots  int `json:"robots"`
+	Regions int `json:"regions"`
+}

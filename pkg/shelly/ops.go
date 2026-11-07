@@ -3,6 +3,7 @@ package shelly
 import (
 	"context"
 	"github.com/asnowfix/home-automation/pkg/shelly/ble"
+	"github.com/asnowfix/home-automation/pkg/shelly/cloud"
 	"github.com/asnowfix/home-automation/pkg/shelly/ethernet"
 	"github.com/asnowfix/home-automation/pkg/shelly/input"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
@@ -37,6 +38,7 @@ func Init(log logr.Logger, mc mqtt.Client, timeout time.Duration, rateLimitInter
 	// gen1.Init(log, &registrar)
 	shelly.Init(log, &registrar, timeout)
 	ble.Init(log, &registrar)
+	cloud.Init(log, &registrar)
 	ethernet.Init(log, &registrar)
 	input.Init(log, &registrar)
 	kvs.Init(log, &registrar)

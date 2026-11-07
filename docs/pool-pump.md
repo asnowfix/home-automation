@@ -378,6 +378,9 @@ Ported from the (now-deleted) Go `SolarAutomation.step()` state machine, but cal
 | On, soft target reached | and solar < `solar-start-w` | `doStop(...)` — solar gone after meeting the daily minimum |
 | On, solar < `solar-stop-w` for `solar-stop-delay` ms | | `doStop(...)` |
 | Topic stale or never received | | early return — schedule keeps running untouched |
+| Schedule mode is not `summer` (winter, or no saved mode) | (any solar level) | treated exactly like stale: solar never starts the pump, and a solar run in progress stops at the next evaluation (message or 30 s tick) |
+
+**Solar starts are summer-only (#621).** In winter mode the pump runs only on the fixed night window (23:15 → 00:15); solar surplus must not start filtration in daytime. Before #621 the mode was never consulted: 6 of 11 winter-mode days between 2026-10-09 and 2026-10-31 had solar-driven daytime starts (9 starts, 21.3 h). The hard-ceiling stop and the water-supply interlock are unaffected and apply in both modes.
 
 Re-evaluated on every solar MQTT message (`onSolarAvailable` calls `checkSolarHysteresis()` synchronously) **and** on a 30-second periodic tick (`SOLAR.tickTimer`, only allocated when `solarEnabled`), so staleness is detected even if the daemon dies mid-hold-delay and no further MQTT message ever arrives.
 

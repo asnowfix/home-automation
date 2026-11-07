@@ -35,13 +35,6 @@
   <script defer src="{{asset "/static/alpine.min.js"}}"></script>
   <script src="{{asset "/static/htmx.min.js"}}"></script>
   <style>
-    .door-icon {
-      display: inline-block;
-      width: 16px;
-      height: 16px;
-      vertical-align: middle;
-      margin-right: 4px;
-    }
     .button.is-loading svg {
       opacity: 0.5;
     }
@@ -85,13 +78,13 @@
           <h2 class="title is-4">Home</h2>
           <span class="mh-pill" data-pill hidden></span>
         </header>
-        <div class="columns is-multiline"
+        <div class="mh-grid"
              id="devices-container"
              data-refresh
              hx-get="/htmx/devices"
              hx-trigger="load, refresh"
              hx-swap="innerHTML">
-          <div class="column is-12"><p class="has-text-grey">Loading devices...</p></div>
+          <p class="has-text-grey">Loading devices...</p>
         </div>
       </section>
       <section id="sec-rooms" data-section="rooms" x-show="section === 'rooms'" x-cloak>
@@ -318,6 +311,27 @@
     </div>
   </div>
 
+
+  <!-- Device sheet: opened by tapping a row, closed by default, own close button -->
+  <div class="modal" :class="{'is-active': modals.device}">
+    <div class="modal-background"></div>
+    <div class="modal-card">
+      <header class="modal-card-head">
+        <p class="modal-card-title" x-text="deviceSheet.name"></p>
+        <button class="delete mh-close" aria-label="close" @click="modals.device = false"></button>
+      </header>
+      <section class="modal-card-body">
+        <p><span x-text="deviceSheet.manufacturer"></span></p>
+        <p class="has-text-grey" x-text="deviceSheet.id"></p>
+        <p class="mh-sheet-error" x-show="deviceSheet.error" x-text="deviceSheet.error" role="alert"></p>
+      </section>
+      <footer class="modal-card-foot mh-sheet-actions">
+        <button type="button" class="mh-action" x-show="deviceSheet.refreshable" :class="{'is-busy': deviceSheet.busy}" :disabled="!online || deviceSheet.busy" @click="refreshDevice(deviceSheet.id)" x-text="deviceSheet.busy ? 'Refreshing…' : 'Refresh'">Refresh</button>
+        <button type="button" class="mh-action" :disabled="!online" @click="modals.device = false; $dispatch('open-setup-modal', {deviceId: deviceSheet.id})">Setup</button>
+        <button type="button" class="mh-action" x-show="deviceSheet.heater" @click="modals.device = false; $dispatch('open-heater-modal', {deviceId: deviceSheet.id})">Heater</button>
+      </footer>
+    </div>
+  </div>
 
   <!-- System status sheet: opened from the Events section, closed by default -->
   <div class="modal" :class="{'is-active': modals.status}">

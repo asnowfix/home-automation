@@ -14,6 +14,9 @@ Modes:
       Passthrough (default `mcp`): runs `go run ./myhome ctl --instance local
       --mqtt-broker <broker> <ctl-args>`. This is what .mcp.json calls.
 
+  python3 -I myhome-local.py --build-only
+      Generate what is missing, then `go build` into a temporary file and exit (no run).
+
   python3 -I myhome-local.py daemon
       A read-only side daemon (instance "local") seeded with a copy of the main daemon's
       database. In order:
@@ -35,6 +38,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -51,12 +55,19 @@ SAFE_DAEMON_FLAGS = [
     "--no-mdns-publish",
 ]
 
-# (output that must exist, go generate arguments), as in myhome-local.sh.
+# The root Makefile's `generate` target, step for step: (output that must exist, go
+# generate arguments). A step is skipped only when its output exists. The Makefile ends
+# with a catch-all `go generate ./...`, run here (GENERATE_ALL) whenever any step ran.
+# `make` itself is not assumed to be installed. myhome-local.sh had only the first three
+# steps, so a fresh worktree failed to build (PoolKVSKeys undefined, jstarget acorn.js).
 ASSETS = [
     ("internal/myhome/ui/static/alpine.min.js", ["./internal/myhome/ui/..."]),
     ("myhome/ctl/pool/pool_defaults_generated.go", ["./myhome/ctl/pool"]),
     ("myhome/ctl/garden/garden_defaults_generated.go", ["./myhome/ctl/garden"]),
+    ("internal/myhome/shelly/script/pool_kvs_generated.go", ["./internal/myhome/shelly/script"]),
+    ("internal/shelly/scripts/jstarget/acorn.js", ["./internal/shelly/scripts/jstarget"]),
 ]
+GENERATE_ALL = ["./..."]
 
 # Environment variables the side instance may see: what Go and the OS need, nothing
 # from MYHOME_*. Everything else is dropped.
@@ -158,10 +169,17 @@ def need_go() -> str:
     return go
 
 
+def missing_steps(root: Path) -> list[list[str]]:
+    """The `go generate` argument lists whose output is absent, in Makefile order."""
+    steps = [gen_args for output, gen_args in ASSETS if not (root / output).is_file()]
+    if steps:
+        steps.append(GENERATE_ALL)
+    return steps
+
+
 def ensure_assets(root: Path, go: str) -> None:
-    for output, gen_args in ASSETS:
-        if not (root / output).is_file():
-            subprocess.run([go, "generate", *gen_args], cwd=root, check=True)
+    for gen_args in missing_steps(root):
+        subprocess.run([go, "generate", *gen_args], cwd=root, check=True)
 
 
 def passthrough(root: Path, go: str, broker: str, args: list[str]) -> None:
@@ -224,6 +242,11 @@ def main(argv: list[str]) -> int:
     go = need_go()
     broker = broker_from(dict(os.environ))
     ensure_assets(root, go)
+    if argv == ["--build-only"]:
+        # Proof that a fresh worktree compiles after generation; runs nothing.
+        with tempfile.TemporaryDirectory() as tmp:
+            return subprocess.run([go, "build", "-o", str(Path(tmp) / "myhome-build-check"), "./myhome"],
+                                  cwd=root, env=scrubbed_env(dict(os.environ)), check=False).returncode
     if argv and argv[0] == "daemon":
         if len(argv) > 1:
             sys.exit("myhome-local: daemon mode takes no further arguments")

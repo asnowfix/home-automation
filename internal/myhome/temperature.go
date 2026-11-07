@@ -32,6 +32,9 @@ type TemperatureSetParams struct {
 	Name   string             `json:"name"`
 	Kinds  []RoomKind         `json:"kinds"`  // Room kinds (can be multiple)
 	Levels map[string]float64 `json:"levels"` // Temperature levels: "eco", "comfort", "away", etc.
+	// ICalURL is the room's public iCal agenda URL. nil keeps the stored value
+	// (callers that predate the field must not wipe it); a pointer to "" clears it.
+	ICalURL *string `json:"ical_url,omitempty"`
 }
 
 // TemperatureDeleteParams represents parameters for temperature.delete

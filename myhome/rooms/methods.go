@@ -47,6 +47,11 @@ func (s *Service) HandleSet(ctx context.Context, p *myhome.TemperatureSetParams)
 		Kinds:  p.Kinds,
 		Levels: p.Levels,
 	}
+	if p.ICalURL != nil {
+		config.ICalURL = *p.ICalURL
+	} else if existing, err := s.storage.GetRoom(p.RoomID); err == nil {
+		config.ICalURL = existing.ICalURL
+	}
 
 	modified, err := s.storage.SaveRoom(config)
 	if err != nil {

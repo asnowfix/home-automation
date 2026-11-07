@@ -445,6 +445,85 @@ body.mh-shell {
   background: var(--mh-surface-3);
 }
 
+/* Vacuum section (#685). */
+.mh-vac {
+  padding: 16px;
+  margin-bottom: 16px;
+  border-radius: var(--mh-radius-card);
+  background: var(--mh-card);
+}
+
+.mh-vac-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.mh-vac-name {
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.mh-vac-phase {
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.mh-vac-sub {
+  color: var(--mh-text-muted);
+  font-size: 14px;
+}
+
+.mh-vac-controls,
+.mh-vac-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mh-vac-confirm {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mh-surface-3);
+}
+
+.mh-vac-ask {
+  flex: 1 1 100%;
+}
+
+.mh-vac-btn {
+  min-width: 96px;
+  min-height: 56px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  font-family: var(--mh-font);
+  font-size: 16px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mh-vac-btn.is-primary {
+  background: var(--mh-primary);
+}
+
+.mh-vac-btn.is-danger {
+  background: #b3261e;
+}
+
+.mh-vac-btn:active {
+  background: var(--mh-surface-4);
+}
+
+.mh-vac-btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 /* Bulma's .button sets display, which beats the hidden attribute. */
 [hidden] {
   display: none !important;

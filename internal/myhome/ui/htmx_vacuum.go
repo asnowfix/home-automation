@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 )
@@ -25,6 +26,66 @@ type vacuumCard struct {
 	Targets   []string // names of the rooms being cleaned, while a mission is open; empty for a whole-home clean
 	Error     string   // last action's failure, shown on the card
 	ErrorHint string   // explanation of the robot's error code, when one is known
+	CycleText string   // the robot's cycle in words; empty when idle
+	ErrorText string   // the robot's error code in words; empty when there is none
+	NotReady  string   // why the robot cannot start, in words; empty when ready
+	Updated   string   // when the robot last reported, e.g. "12:03:05 (2 min ago)"
+}
+
+// vacuumCycleText names a robot cycle in words; unknown cycles are shown as the robot sent them.
+func vacuumCycleText(cycle string) string {
+	switch cycle {
+	case "", "none":
+		return ""
+	case "clean":
+		return "cleaning cycle"
+	case "dock":
+		return "returning to the dock"
+	case "quick":
+		return "quick clean"
+	case "spot":
+		return "spot clean"
+	case "evac":
+		return "emptying the bin"
+	}
+	return "cycle " + cycle
+}
+
+// vacuumErrorText turns a robot error code into words. The repository documents only
+// code 224 (see myhome.VacuumErrorHint); every other code is shown as "code N" rather
+// than guessed at (#685).
+func vacuumErrorText(code int) string {
+	if code == 0 {
+		return ""
+	}
+	if hint := myhome.VacuumErrorHint(code); hint != "" {
+		return hint
+	}
+	return fmt.Sprintf("code %d", code)
+}
+
+// vacuumNotReadyText words the robot's not-ready code; none is documented in the
+// repository, so a non-zero code is shown as "code N".
+func vacuumNotReadyText(code int) string {
+	if code == 0 {
+		return ""
+	}
+	return fmt.Sprintf("code %d", code)
+}
+
+// vacuumUpdatedText shows when the robot last reported, as a clock time and an age.
+func vacuumUpdatedText(t, now time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	age := now.Sub(t).Round(time.Minute)
+	switch {
+	case age < time.Minute:
+		return t.Local().Format("15:04:05") + " (just now)"
+	case age < time.Hour:
+		return fmt.Sprintf("%s (%d min ago)", t.Local().Format("15:04:05"), int(age.Minutes()))
+	}
+	return t.Local().Format("2006-01-02 15:04:05")
 }
 
 type vacuumPanel struct {
@@ -70,6 +131,10 @@ func (h *HTMXHandler) vacuumPanel(actionErr map[string]string) (vacuumPanel, boo
 		if r.Status != nil {
 			c.PhaseText = myhome.VacuumPhaseText(r.Status.Phase)
 			c.ErrorHint = myhome.VacuumErrorHint(r.Status.Error)
+			c.CycleText = vacuumCycleText(r.Status.Cycle)
+			c.ErrorText = vacuumErrorText(r.Status.Error)
+			c.NotReady = vacuumNotReadyText(r.Status.NotReady)
+			c.Updated = vacuumUpdatedText(r.Status.UpdatedAt, time.Now())
 			switch r.Status.Phase {
 			case "run", "hmUsrDock", "hmMidMsn", "hmPostMsn":
 				c.Running = true
@@ -147,64 +212,59 @@ func (h *HTMXHandler) VacuumAction(w http.ResponseWriter, r *http.Request) {
 }
 
 const vacuumPanelTemplate = `
-<h2 class="title is-4">🧹 Vacuum</h2>
-<div class="columns is-multiline">
 {{range .Cards}}
-  <div class="column is-12-mobile is-6-tablet is-4-desktop">
-    <div class="card">
-      <header class="card-header">
-        <p class="card-header-title">{{.Name}}</p>
-        <span class="card-header-icon">
-          {{if .Connected}}<span class="tag is-success is-light">connected</span>{{else}}<span class="tag is-danger is-light">offline</span>{{end}}
-        </span>
-      </header>
-      <div class="card-content">
-        {{if .Status}}
-        <p class="is-size-5 mb-2">{{.PhaseText}}</p>
-        {{if .Targets}}<p class="mb-2">Rooms: {{range $i, $t := .Targets}}{{if $i}}, {{end}}{{$t}}{{end}}</p>{{end}}
-        <progress class="progress is-small {{if lt .Status.Battery 20}}is-danger{{else if lt .Status.Battery 50}}is-warning{{else}}is-success{{end}}"
-                  value="{{.Status.Battery}}" max="100" title="battery {{.Status.Battery}}%">{{.Status.Battery}}%</progress>
-        <div class="tags">
-          <span class="tag">battery {{.Status.Battery}}%</span>
-          {{if not .Status.BinPresent}}<span class="tag is-danger">bin missing</span>
-          {{else if .Status.BinFull}}<span class="tag is-warning">bin full</span>
-          {{else}}<span class="tag is-light">bin ok</span>{{end}}
-          {{if ne .Status.Error 0}}<span class="tag is-danger"{{if .ErrorHint}} title="{{.ErrorHint}}"{{end}}>error {{.Status.Error}}</span>{{end}}
-          {{if gt .Status.MissionMinutes 0}}<span class="tag is-light">{{.Status.MissionMinutes}} min</span>{{end}}
-        </div>
-        {{else}}
-        <p class="has-text-grey">No status received yet{{if .Host}} (last seen at {{.Host}}){{end}}.</p>
-        {{end}}
-        {{if .Error}}<p class="notification is-danger is-light py-2 px-3">{{.Error}}</p>{{end}}
-      </div>
-      <footer class="card-footer">
-        {{$id := .ID}}
-        {{if .Running}}
-          <a class="card-footer-item" hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"pause"}' hx-target="#vacuum-container">Pause</a>
-          <a class="card-footer-item" hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"stop"}' hx-target="#vacuum-container">Stop</a>
-        {{else if .Paused}}
-          <a class="card-footer-item" hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"resume"}' hx-target="#vacuum-container">Resume</a>
-          <a class="card-footer-item" hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"stop"}' hx-target="#vacuum-container">Stop</a>
-        {{else}}
-          <a class="card-footer-item" hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"start"}' hx-target="#vacuum-container"
-             hx-confirm="Start a whole-home clean?">Clean all</a>
-        {{end}}
-        <a class="card-footer-item" hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"dock"}' hx-target="#vacuum-container">Dock</a>
-      </footer>
-      {{if .Rooms}}
-      <form class="card-content pt-3" hx-post="/htmx/vacuum/action" hx-target="#vacuum-container">
-        <input type="hidden" name="robot" value="{{.ID}}">
-        <input type="hidden" name="command" value="clean-rooms">
-        <div class="field is-grouped is-grouped-multiline">
-          {{range .Rooms}}
-          <label class="checkbox mr-3" title="map version used for cleaning: {{.MapVersion}}{{if eq .Source "cloud"}} (iRobot cloud){{end}}; the robot reports {{if .RobotMapVersion}}{{.RobotMapVersion}}{{else}}no version yet{{end}}"><input type="checkbox" name="room" value="{{.ID}}"> {{if .Name}}{{.Name}}{{else}}region {{.ID}}{{end}}</label>
-          {{end}}
-        </div>
-        <button class="button is-small is-primary" type="submit">Clean selected rooms</button>
-      </form>
-      {{end}}
-    </div>
+{{$id := .ID}}{{$on := .Connected}}
+<div class="mh-vac" x-data="{ask: ''}" :data-confirming="ask ? 'true' : null">
+  <div class="mh-vac-head">
+    <p class="mh-vac-name">{{.Name}}</p>
+    {{if .Connected}}<span class="tag is-success is-medium">connected</span>{{else}}<span class="tag is-danger is-medium">offline</span>{{end}}
   </div>
-{{end}}
+  {{if not .Connected}}<p class="notification is-warning is-light py-2 px-3">The robot is not connected to the daemon{{if .Status}}; the figures below are the last it reported{{end}}. Controls are disabled.</p>{{end}}
+  {{if .Status}}
+  <p class="mh-vac-phase">{{.PhaseText}}{{if .CycleText}}<span class="mh-vac-sub"> - {{.CycleText}}</span>{{end}}</p>
+  {{if .Targets}}<p class="mb-2">Cleaning: {{range $i, $t := .Targets}}{{if $i}}, {{end}}{{$t}}{{end}}</p>{{end}}
+  <progress class="progress {{if lt .Status.Battery 20}}is-danger{{else if lt .Status.Battery 50}}is-warning{{else}}is-success{{end}}"
+            value="{{.Status.Battery}}" max="100">{{.Status.Battery}}%</progress>
+  <div class="tags are-medium">
+    <span class="tag">battery {{.Status.Battery}}%</span>
+    {{if not .Status.BinPresent}}<span class="tag is-danger">bin missing</span>
+    {{else if .Status.BinFull}}<span class="tag is-warning">bin full</span>
+    {{else}}<span class="tag is-light">bin ok</span>{{end}}
+    {{if gt .Status.MissionMinutes 0}}<span class="tag is-light">mission {{.Status.MissionMinutes}} min</span>{{end}}
+  </div>
+  {{if .ErrorText}}<p class="notification is-danger is-light py-2 px-3">Error: {{.ErrorText}}</p>{{end}}
+  {{if .NotReady}}<p class="notification is-warning is-light py-2 px-3">Not ready to start: {{.NotReady}}</p>{{end}}
+  <p class="mh-vac-sub mb-3">Last update: {{.Updated}}</p>
+  {{else}}
+  <p class="has-text-grey mb-3">No status received yet{{if .Host}} (last seen at {{.Host}}){{end}}.</p>
+  {{end}}
+  {{if .Error}}<p class="notification is-danger is-light py-2 px-3">{{.Error}}</p>{{end}}
+
+  <div class="mh-vac-controls">
+    <button type="button" class="mh-vac-btn is-primary" {{if or (not $on) .Running .Paused}}disabled{{end}} @click="ask = 'start'">Clean all</button>
+    <button type="button" class="mh-vac-btn" {{if or (not $on) (not .Running)}}disabled{{end}}
+            hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"pause"}' hx-target="#vacuum-container">Pause</button>
+    <button type="button" class="mh-vac-btn" {{if or (not $on) (not .Paused)}}disabled{{end}}
+            hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"resume"}' hx-target="#vacuum-container">Resume</button>
+    <button type="button" class="mh-vac-btn is-danger" {{if or (not $on) (and (not .Running) (not .Paused))}}disabled{{end}} @click="ask = 'stop'">Stop</button>
+    <button type="button" class="mh-vac-btn" {{if not $on}}disabled{{end}}
+            hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"dock"}' hx-target="#vacuum-container">Dock</button>
+    <button type="button" class="mh-vac-btn" {{if not $on}}disabled{{end}}
+            hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"find"}' hx-target="#vacuum-container">Find</button>
+    <button type="button" class="mh-vac-btn" {{if or (not $on) .Running .Paused}}disabled{{end}}
+            hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"evac"}' hx-target="#vacuum-container">Empty bin</button>
+  </div>
+
+  {{/* In-page confirm for clean-all and stop. Self-contained so the shared dialog (#683) can replace it. */}}
+  <div class="mh-vac-confirm" x-show="ask" x-cloak>
+    <p class="mh-vac-ask" x-show="ask === 'start'">Start a whole-home clean?</p>
+    <p class="mh-vac-ask" x-show="ask === 'stop'">Stop the mission? The robot will not resume it.</p>
+    <button type="button" class="mh-vac-btn" @click="ask = ''">Cancel</button>
+    <button type="button" class="mh-vac-btn is-primary" data-vac-confirm="start" x-show="ask === 'start'"
+            hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"start"}' hx-target="#vacuum-container">Confirm</button>
+    <button type="button" class="mh-vac-btn is-danger" data-vac-confirm="stop" x-show="ask === 'stop'"
+            hx-post="/htmx/vacuum/action" hx-vals='{"robot":"{{$id}}","command":"stop"}' hx-target="#vacuum-container">Confirm</button>
+  </div>
 </div>
+{{end}}
 `

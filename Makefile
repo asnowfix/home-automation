@@ -48,6 +48,26 @@ LOCAL_DAEMON_PID := $(LOCAL_DAEMON_STATE_DIR)/myhome.pid
 LOCAL_DAEMON_LOG := $(LOCAL_DAEMON_STATE_DIR)/myhome.log
 LOCAL_DAEMON_PATTERN := daemon run --instance local --mqtt-broker $(MYHOME_MQTT_BROKER)
 
+# A side daemon shares the real broker with production, and --instance local
+# scopes only the RPC topic, not what the daemon does to devices. With an empty
+# local DB every device heard on the broker looks "new" and would be auto-set-up
+# (config, firmware, KVS, script writes), then reconciled hourly, and the
+# occupancy/temperature services would publish retained topics heater.js reads
+# (#700). So the target is read-only toward devices BY DEFAULT:
+#   --disable-auto-setup            no setup of "new" devices
+#   --reconcile-interval 0          no hourly config write-back
+#   --disable-occupancy-service     no myhome/occupancy publication
+#   --disable-temperature-service   no myhome/rooms/<id>/temperature/ranges publication
+#   --no-mdns-publish               do not advertise ourselves as a myhome daemon
+# Still possible, because they are deliberate user actions no flag disables: UI
+# switch toggles, device setup, set-room, heater config, the device web-UI proxy,
+# and ctl --instance local commands.
+# .env (vacuum, Beem solar, SFR credentials: would take over the single vacuum
+# connection and publish myhome/energy/solar/available) is NOT sourced, and
+# inherited MYHOME_* variables are dropped, unless LOCAL_DAEMON_ENV=1.
+LOCAL_DAEMON_SAFE_FLAGS := --disable-auto-setup --reconcile-interval 0 --disable-occupancy-service --disable-temperature-service --no-mdns-publish
+LOCAL_DAEMON_ENV ?=
+
 default: help
 
 help:
@@ -55,7 +75,7 @@ help:
 	@echo "  help                  - Show this help message"
 	@echo "  build                 - Build the project"
 	@echo "  run                   - Run the project"
-	@echo "  run-local-daemon      - Start a dev-loop daemon in the background (kills any prior instance first)"
+	@echo "  run-local-daemon      - Start a read-only-toward-devices dev-loop daemon in the background (kills any prior instance first; LOCAL_DAEMON_ENV=1 sources .env)"
 	@echo "  stop-local-daemon     - Stop the dev-loop daemon started by run-local-daemon"
 	@echo "  status-local-daemon   - Show whether the dev-loop daemon is running"
 	@echo "  logs-local-daemon     - Tail the dev-loop daemon's log file"
@@ -156,8 +176,13 @@ run-local-daemon: build
 	fi
 	@rm -f "$(LOCAL_DAEMON_PID)"
 	@( \
-		if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
-		nohup ./myhome/myhome daemon run --instance local --mqtt-broker $(MYHOME_MQTT_BROKER) > "$(LOCAL_DAEMON_LOG)" 2>&1 & echo $$! > "$(LOCAL_DAEMON_PID)" \
+		if [ "$(LOCAL_DAEMON_ENV)" = "1" ]; then \
+			echo "run-local-daemon: LOCAL_DAEMON_ENV=1: sourcing .env, device-writing credentials may be active"; \
+			if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
+		else \
+			for v in $$(env | cut -d= -f1 | grep '^MYHOME_'); do unset $$v; done; \
+		fi; \
+		nohup ./myhome/myhome daemon run --instance local --mqtt-broker $(MYHOME_MQTT_BROKER) $(LOCAL_DAEMON_SAFE_FLAGS) >"$(LOCAL_DAEMON_LOG)" 2>&1 & echo $$! > "$(LOCAL_DAEMON_PID)" \
 	)
 	@sleep 1
 	@echo "run-local-daemon: started (pid $$(cat "$(LOCAL_DAEMON_PID)")), logs: $(LOCAL_DAEMON_LOG)"

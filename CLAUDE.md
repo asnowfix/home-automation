@@ -189,6 +189,28 @@ the status board: post an update whenever a gate opens or closes, a measurement 
 decision changes, using explicit state words (new / pending / implementing / verifying / discarded /
 closed-by-PR / blocked). Do not post when nothing changed.
 
+### This repository is public — keep the house's network details out of it
+
+Everything written here, in issues, in PR descriptions, in review comments and in commit messages is
+public, and it stays public: GitHub keeps a PR's earlier commits reachable after a force-push, and an
+issue's edit history shows earlier versions of its body. So **never publish**:
+
+- Wi-Fi SSIDs, access-point BSSIDs or MAC addresses, and access-point makes and models;
+- hostnames of the NAS or other infrastructure;
+- Wi-Fi or any other passwords, even partially;
+- per-device signal readings or exact outage times for security-relevant devices (gate, doors,
+  locks), which together describe when and how they can be cut off.
+
+Write generic terms instead ("outdoor AP", "internal AP", "the critical devices", "the evening of
+2026-10-31") and keep the details in the owner's private notes. Facts already published (the NAS IP,
+Shelly device ids and names) need not be removed.
+
+**Check before publishing.** Grep a document for these items before committing it, and redact first:
+removing them afterwards does not remove them from GitHub. Worked example, 2026-11-05 (#654, #655): the
+first push of the observability study named the gate devices, the outdoor AP's make and model, exact
+outage times and the NAS's monitoring state; the redaction came one commit later, so the original stays
+reachable in the PR's history.
+
 ### `events.db` is the long-term record — query it before asserting a rate
 
 The daemon persists every device event to a SQLite database, so **how often something actually
@@ -268,10 +290,19 @@ The discipline that made this recoverable:
 
 ### NAS operational facts
 
-- **`myhome.service` restarts every 6 hours by design** — the packaged unit sets
-  `RuntimeMaxSec=21600`. So `NRestarts` climbing is expected, not a crash loop; check
-  `ExecMainStatus`/`Result` before treating it as one. Each restart triggers a rediscovery burst of
-  ~41 `device.online` events, roughly **164/day**, which is a large share of what #499 investigates.
+- **`myhome.service` restarts every 2 days by design** — the packaged unit sets
+  `RuntimeMaxSec=172800` (it was 6 hours / `21600` until #695). So `NRestarts` climbing is expected,
+  not a crash loop; check `ExecMainStatus`/`Result` before treating it as one. Each restart
+  triggers a rediscovery burst of ~41 `device.online` events: roughly **~20/day** at the 2-day
+  cadence (it was ~164/day at 6 h, which inflated what #499 investigates; figures measured before
+  2026-11 must be divided accordingly). The old 6-hour restart was **masking a goroutine leak**
+  (~+4/h of `net/http.(*persistConn)` pairs from unclosed response bodies and a per-request HTTPS
+  transport, #695), so a long-lived daemon is only trustworthy once the 2-day goroutine watch of
+  #695 has passed.
+- **NAS drop-in to remove after #695.** `/etc/systemd/system/myhome.service.d/no-runtime-max.conf`
+  (`RuntimeMaxSec=infinity`, added 2026-11-03 to observe the daemon beyond 6 h) overrides the
+  packaged value. Once the fixed build is installed and the #695 2-day watch is over, delete it and
+  run `systemctl daemon-reload` so the packaged 2-day restart applies again.
 - **The journal is `Storage=volatile`** and the daemon is chatty enough to rotate it away within
   ~15 minutes. **NAS post-mortem evidence does not survive** — use `events.db` (see above), which does.
 - **`sqlite3` is not installed on the NAS.** Query `events.db` with `python3`'s `sqlite3` module
@@ -295,6 +326,13 @@ The discipline that made this recoverable:
   never from the daemon; the daemon's auto-setup applies solely to devices lacking `watchdog.js` as
   script #1. A `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst
   tries to enable it, systemd refuses, everything before that has already succeeded.
+
+### Pushing from a worktree: `cd <worktree> && git push`, never `git -C <dir> push`
+
+Agents push with `cd <worktree> && git push -q -u origin <branch>`. The `git -C <dir> push ...` form is
+**denied** in the permission rules: it slips past every `git push` pattern (allow, ask and deny), so it
+would bypass the push guards that keep agents from pushing to `main` or release branches. `git -C <dir>`
+remains fine for read-only and local commands (`status`, `log`, `diff`, `add`, `commit`, `fetch`).
 
 ### Sub-agents
 

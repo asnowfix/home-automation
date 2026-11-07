@@ -23,8 +23,9 @@ TimeoutStopSec=30
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
-# Restart the service every 6 hours (21600 seconds)
-RuntimeMaxSec=21600
+# Restart the service every 2 days (172800 seconds). This is a safety net, not
+# a fix: it was 6 hours until #695, where it masked a goroutine leak.
+RuntimeMaxSec=172800
 
 # Environment variables
 Environment=HOME=/var/lib/myhome

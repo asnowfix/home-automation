@@ -73,6 +73,10 @@ func (ch *HttpChannel) callE(ctx context.Context, device types.Device, verb type
 		}
 	}
 
+	// Close the body on every path, or the keep-alive connection (and its
+	// persistConn goroutines) is pinned forever (#695).
+	defer res.Body.Close()
+
 	err = json.NewDecoder(res.Body).Decode(&out)
 	if err != nil {
 		log.Error(err, "HTTP error decoding response", "device_id", device.Id())
@@ -128,6 +132,7 @@ func (ch *HttpChannel) getE(ctx context.Context, host string, cmd string, params
 	}
 
 	if res.StatusCode >= 400 {
+		res.Body.Close()
 		err = fmt.Errorf("http client error %d (%s)", res.StatusCode, res.Status)
 		return nil, err
 	}
@@ -202,6 +207,7 @@ func (ch *HttpChannel) postE(ctx context.Context, host string, hm string, cmd st
 	}
 
 	if res.StatusCode >= 400 {
+		res.Body.Close()
 		err = fmt.Errorf("http client error %d (%s)", res.StatusCode, res.Status)
 		return nil, err
 	}

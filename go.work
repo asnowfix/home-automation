@@ -41,7 +41,10 @@ use (
 	./myhome/notify
 	./myhome/occupancy
 	./myhome/storage
-	./myhome/temperature
+	./myhome/electricity
+	./myhome/ical
+	./myhome/weather
+	./myhome/rooms
 	./myhome/vacuum
 	./pkg/beem
 	./pkg/devices

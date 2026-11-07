@@ -570,6 +570,7 @@ body.mh-shell {
 
 .mh-vac-btn:active {
   background: var(--mh-surface-4);
+  color: var(--mh-text);
 }
 
 .mh-vac-btn:disabled {

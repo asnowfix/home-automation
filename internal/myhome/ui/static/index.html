@@ -131,7 +131,7 @@
         <div id="vacuum-container"
              data-refresh
              hx-get="/htmx/vacuum"
-             hx-trigger="load, refresh, every 5s [kiosk.visible('vacuum') && kiosk.online]"
+             hx-trigger="load, refresh, every 5s [kiosk.visible('vacuum') && kiosk.online && !document.querySelector('#vacuum-container [data-confirming]')]"
              hx-swap="innerHTML">
         </div>
       </section>

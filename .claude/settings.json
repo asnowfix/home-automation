@@ -29,9 +29,6 @@
       "Bash(gh pr *)",
       "Bash(gh api *)",
       "Bash(jq *)"
-    ],
-    "ask": [
-      "Bash(git push *)"
     ]
   }
 }

@@ -12,30 +12,62 @@ var kiosk = {
   lastSeenMono: 0,   // performance.now() at the last SSE frame
   lastFrameWall: 0,  // browser clock (ms) at the last SSE frame: fallback for staleSince
   lastPingTs: 0,     // the daemon's clock (s) from the last ping
-  started: 0,        // daemon start time (s) from the first ping of this page load
-  version: '',       // daemon version from the first ping of this page load
+  started: 0,        // daemon start time (s) from the first ping of this page load; a change means a restart
+  version: '',       // daemon version this page was rendered with (body data-version)
   staleText: '',
+  es: null,          // the live EventSource (kept here, not in Alpine's reactive proxy)
+
+  // Reopening a dead stream: EventSource gives up for good (readyState CLOSED)
+  // after a non-200 answer, and a silent partition leaves a half-open socket
+  // that never errors. So while offline the shell closes and re-creates the
+  // stream itself, backing off from reopenMinMs to reopenMaxMs.
+  reopenMinMs: 3000,
+  reopenMaxMs: 30000,
+  reopenDelay: 3000,
+  nextReopenMono: 0,
 
   // Any SSE frame proves the daemon is reachable. ping is the parsed ping
-  // payload, or null for other events. Returns what the caller must do:
-  // recovered (was offline) and reload (the daemon was upgraded meanwhile).
+  // payload, or null for other events. pageVersion is the version the page was
+  // rendered with (the baseline, so an upgrade while offline is seen on the
+  // first ping). Returns the single action the caller must take:
+  // 'reload' (daemon upgraded), 'refresh-all' (daemon restarted), 'recover'
+  // (was offline, same daemon) or '' (nothing).
   frame: function(nowMono, nowWall, ping) {
-    var recovered = !this.online;
+    var wasOffline = !this.online;
     this.online = true;
     this.staleText = '';
     this.lastSeenMono = nowMono;
     this.lastFrameWall = nowWall;
-    var reload = false;
+    this.reopenDelay = this.reopenMinMs;
+    var upgraded = false, restarted = false;
     if (ping) {
       this.lastPingTs = Number(ping.ts) || this.lastPingTs;
-      if (!this.version && !this.started) {
-        this.started = ping.started || 0;
-        this.version = ping.version || '';
-      } else if (ping.version && this.version && ping.version !== this.version) {
-        reload = true;
+      if (ping.version && this.version && ping.version !== this.version) { upgraded = true; }
+      if (!this.version && ping.version) { this.version = ping.version; }
+      if (ping.started) {
+        if (this.started && ping.started !== this.started) { restarted = true; }
+        this.started = ping.started;
       }
     }
-    return { recovered: recovered, reload: reload };
+    if (upgraded) { return 'reload'; }
+    if (restarted) { return 'refresh-all'; }
+    return wasOffline ? 'recover' : '';
+  },
+
+  // The stream errored. readyState: 0 CONNECTING (the browser retries by
+  // itself), 2 CLOSED (it will not). Returns { changed, reopen }: changed when
+  // the banner state flipped, reopen when the caller must re-create the stream.
+  streamError: function(readyState, nowMono, now) {
+    var changed = false;
+    if (readyState !== 1) { changed = this.lost(now); }
+    var reopen = readyState === 2;
+    if (reopen) { this.scheduleReopen(nowMono); }
+    return { changed: changed, reopen: reopen };
+  },
+
+  scheduleReopen: function(nowMono) {
+    this.nextReopenMono = nowMono + this.reopenDelay;
+    this.reopenDelay = Math.min(this.reopenDelay * 2, this.reopenMaxMs);
   },
 
   // The stream closed or errored: offline. Returns true when this is a change.
@@ -46,10 +78,30 @@ var kiosk = {
     return true;
   },
 
-  // Silence watchdog, called every few seconds. Returns true when it flipped.
+  // Watchdog, called every second. A silent stream flips to offline and is
+  // reopened; while offline it is reopened on a backoff. Also recomputes the
+  // label so "stale since" gains its date prefix across midnight. Returns
+  // { changed, reopen }.
   tick: function(nowMono, now) {
-    if (this.online && nowMono - this.lastSeenMono > this.offlineMs) { return this.lost(now); }
-    return false;
+    var changed = false, reopen = false;
+    if (this.online) {
+      if (nowMono - this.lastSeenMono > this.offlineMs) {
+        changed = this.lost(now);
+        reopen = true;
+        this.reopenDelay = this.reopenMinMs;
+        this.scheduleReopen(nowMono);
+      }
+    } else {
+      var text = this.staleLabel(now);
+      if (text !== this.staleText) { this.staleText = text; changed = true; }
+      if (nowMono >= this.nextReopenMono) { reopen = true; this.scheduleReopen(nowMono); }
+    }
+    return { changed: changed, reopen: reopen };
+  },
+
+  // htmx writes are refused while offline; GET refreshes stay.
+  blocks: function(verb) {
+    return !this.online && !!verb && String(verb).toLowerCase() !== 'get';
   },
 
   // "stale since 14:32" from the daemon's clock (a Pi without an RTC may have a
@@ -64,9 +116,9 @@ var kiosk = {
   },
 
   // Back online: re-fetch what is on screen, flag the rest for when it is shown.
-  recovered: function() {
+  recovered: function(all) {
     for (var i = 0; i < this.sections.length; i++) {
-      if (this.visible(this.sections[i])) { this.refresh(this.sections[i]); } else { this.dirty(this.sections[i]); }
+      if (all || this.visible(this.sections[i])) { this.refresh(this.sections[i]); } else { this.dirty(this.sections[i]); }
     }
   },
 
@@ -173,16 +225,20 @@ var kiosk = {
       init() {
         this.section = kiosk.fromHash();
         kiosk.section = this.section;
+        kiosk.version = document.body.dataset.version || '';
         kiosk.lastSeenMono = performance.now();
         kiosk.lastFrameWall = Date.now();
         this.connectSSE();
-        setInterval(() => { if (kiosk.tick(performance.now(), new Date())) { this.syncLive(); } }, 5000);
+        setInterval(() => {
+          const r = kiosk.tick(performance.now(), new Date());
+          if (r.changed) { this.syncLive(); }
+          if (r.reopen) { this.connectSSE(); }
+        }, 1000);
         this.loadRooms();
         document.addEventListener('contextmenu', (e) => e.preventDefault());
         // Offline: nothing may write. GET refreshes are harmless and stay.
         document.body.addEventListener('htmx:beforeRequest', (e) => {
-          const verb = e.detail.requestConfig && e.detail.requestConfig.verb;
-          if (!kiosk.online && verb && verb !== 'get') { e.preventDefault(); }
+          if (kiosk.blocks(e.detail.requestConfig && e.detail.requestConfig.verb)) { e.preventDefault(); }
         });
         document.body.addEventListener('htmx:afterSwap', (e) => kiosk.fetched(e.detail.target));
         document.body.addEventListener('htmx:responseError', (e) => kiosk.failed(e.detail.target));
@@ -302,14 +358,17 @@ var kiosk = {
 
       // Every SSE frame lands here first. ping is the parsed ping payload or null.
       seen(ping) {
-        const r = kiosk.frame(performance.now(), Date.now(), ping);
+        const action = kiosk.frame(performance.now(), Date.now(), ping);
         this.syncLive();
-        if (r.reload) { location.reload(); return; }
-        if (r.recovered) { kiosk.recovered(); }
+        if (action === 'reload') { location.reload(); return; }
+        if (action === 'refresh-all') { kiosk.recovered(true); }
+        if (action === 'recover') { kiosk.recovered(false); }
       },
 
       connectSSE() {
+        if (kiosk.es) { kiosk.es.close(); }
         const eventSource = new EventSource('/events');
+        kiosk.es = eventSource;
         
         eventSource.addEventListener('connected', () => {
           console.log('SSE: connected');
@@ -369,8 +428,11 @@ var kiosk = {
 
         eventSource.onerror = (e) => {
           console.error('SSE: error:', e);
-          // EventSource retries by itself (retry: 3000); until a frame arrives we are offline.
-          if (eventSource.readyState !== 1 && kiosk.lost(new Date())) { this.syncLive(); }
+          // Offline until a frame arrives. CONNECTING: the browser retries (retry: 3000).
+          // CLOSED: it never will, so the next tick reopens the stream.
+          if (eventSource !== kiosk.es) { return; }
+          const r = kiosk.streamError(eventSource.readyState, performance.now(), new Date());
+          if (r.changed) { this.syncLive(); }
         };
       },
 

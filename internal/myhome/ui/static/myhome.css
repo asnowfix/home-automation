@@ -510,6 +510,7 @@ body.mh-shell {
 
 .mh-row-main:active {
   background: var(--mh-surface-2);
+  border-radius: var(--mh-radius-card);
 }
 
 .mh-row-text {
@@ -595,7 +596,6 @@ body.mh-shell {
   animation: mh-pulse 1s ease-in-out infinite;
 }
 
-.mh-power:disabled,
 .mh-power.is-unknown {
   color: var(--mh-text-muted);
   opacity: 0.5;
@@ -630,7 +630,8 @@ body.mh-shell {
   background: var(--mh-surface-4);
 }
 
-.mh-action:disabled {
+.mh-action:disabled,
+.mh-action.is-busy {
   opacity: 0.5;
   pointer-events: none;
 }
@@ -652,4 +653,12 @@ body.mh-shell {
 /* Bulma's .button sets display, which beats the hidden attribute. */
 [hidden] {
   display: none !important;
+}
+
+.mh-sheet-error {
+  margin-top: 8px;
+  padding: 8px 16px;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-primary-tint-2);
+  color: var(--mh-secondary);
 }

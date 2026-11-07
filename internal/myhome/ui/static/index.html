@@ -323,9 +323,10 @@
       <section class="modal-card-body">
         <p><span x-text="deviceSheet.manufacturer"></span></p>
         <p class="has-text-grey" x-text="deviceSheet.id"></p>
+        <p class="mh-sheet-error" x-show="deviceSheet.error" x-text="deviceSheet.error" role="alert"></p>
       </section>
       <footer class="modal-card-foot mh-sheet-actions">
-        <button type="button" class="mh-action" x-show="deviceSheet.refreshable" :disabled="!online" @click="refreshDevice(deviceSheet.id)">Refresh</button>
+        <button type="button" class="mh-action" x-show="deviceSheet.refreshable" :class="{'is-busy': deviceSheet.busy}" :disabled="!online || deviceSheet.busy" @click="refreshDevice(deviceSheet.id)" x-text="deviceSheet.busy ? 'Refreshing…' : 'Refresh'">Refresh</button>
         <button type="button" class="mh-action" :disabled="!online" @click="modals.device = false; $dispatch('open-setup-modal', {deviceId: deviceSheet.id})">Setup</button>
         <button type="button" class="mh-action" x-show="deviceSheet.heater" @click="modals.device = false; $dispatch('open-heater-modal', {deviceId: deviceSheet.id})">Heater</button>
       </footer>

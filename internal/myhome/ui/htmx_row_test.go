@@ -11,6 +11,7 @@ import (
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	pkgshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
 	"github.com/go-logr/logr"
 )
 
@@ -58,6 +59,16 @@ func TestDeviceRowSwitchStates(t *testing.T) {
 		if strings.Contains(out, "toggleSwitch") || strings.Contains(out, "is-info") || strings.Contains(out, "is-warning") {
 			t.Errorf("%s: legacy card markup left behind", c.name)
 		}
+	}
+}
+
+func TestPendingLooksDifferentFromUnknown(t *testing.T) {
+	css := string(staticAsset(t, "/static/myhome.css"))
+	if regexp.MustCompile(`\.mh-power:disabled`).MatchString(css) {
+		t.Error("a disabled (pending) power button is styled like an unknown one")
+	}
+	if !strings.Contains(css, ".mh-power.is-unknown {") || !strings.Contains(css, ".mh-power.htmx-request {") {
+		t.Error("unknown and pending styles missing")
 	}
 }
 
@@ -147,7 +158,7 @@ func TestDeviceRowTapTargetsAndSheet(t *testing.T) {
 	}
 }
 
-// stubSwitchToggle registers a switch.toggle handler for one test and restores the previous one.
+// stubSwitchToggle registers a switch.toggle handler for one test and restores the registry.
 func stubSwitchToggle(t *testing.T, h myhome.MethodHandler) {
 	t.Helper()
 	prev, err := myhome.Methods(myhome.SwitchToggle)
@@ -156,9 +167,7 @@ func stubSwitchToggle(t *testing.T, h myhome.MethodHandler) {
 		if err == nil {
 			myhome.RegisterMethodHandler(myhome.SwitchToggle, prev.ActionE)
 		} else {
-			myhome.RegisterMethodHandler(myhome.SwitchToggle, func(context.Context, any) (any, error) {
-				return nil, http.ErrNotSupported
-			})
+			myhome.UnregisterMethodHandler(myhome.SwitchToggle)
 		}
 	})
 }
@@ -233,19 +242,45 @@ func (f fakeRegistry) GetDeviceByAny(ctx context.Context, id string) (*myhome.De
 	return f.GetDeviceById(ctx, id)
 }
 
-// Rendering rows must not actuate or query switches: only the explicit toggle does.
+// Rendering rows, switches included, must not actuate switches: only the
+// explicit toggle does. (The polarity read in DeviceToView is a separate
+// device call, tracked in #732, and is not asserted here.)
 func TestRenderingRowsCallsNoSwitchMethod(t *testing.T) {
 	calls := 0
 	stubSwitchToggle(t, func(context.Context, any) (any, error) { calls++; return nil, nil })
-	dev := myhome.NewDevice(logr.Discard(), myhome.SHELLY, "shellyht-abc").WithName("Hall sensor")
-	h := newMux(logr.NewContext(context.Background(), logr.Discard()), logr.Discard(), nil, fakeRegistry{devs: []*myhome.Device{dev}}, nil, nil, "", nil, nil)
-	for _, p := range []string{"/htmx/devices", "/htmx/device/shellyht-abc"} {
+	sensor := myhome.NewDevice(logr.Discard(), myhome.SHELLY, "shellyht-abc").WithName("Hall sensor")
+	plug := myhome.NewDevice(logr.Discard(), myhome.SHELLY, "shellyplus1-abc").WithName("Lamp")
+	plug.Config = &pkgshelly.Config{Switch0: &sswitch.Config{Id: 0, Name: "main"}}
+	h := newMux(logr.NewContext(context.Background(), logr.Discard()), logr.Discard(), nil, fakeRegistry{devs: []*myhome.Device{sensor, plug}}, nil, nil, "", nil, nil)
+	for _, p := range []string{"/htmx/devices", "/htmx/device/shellyht-abc", "/htmx/device/shellyplus1-abc"} {
 		rec := get(h, p)
-		if rec.Code != 200 || !strings.Contains(rec.Body.String(), `id="device-shellyht-abc"`) {
+		if rec.Code != 200 {
 			t.Fatalf("%s = %d: %s", p, rec.Code, rec.Body)
+		}
+		if p != "/htmx/device/shellyht-abc" && !strings.Contains(rec.Body.String(), `id="btn-switch-shellyplus1-abc-0"`) {
+			t.Errorf("%s renders no switch row:\n%s", p, rec.Body)
 		}
 	}
 	if calls != 0 {
 		t.Errorf("switch.toggle called %d times while rendering", calls)
+	}
+}
+
+func TestToggleFailureIsReportedOnTheSection(t *testing.T) {
+	vm := kioskVM(t)
+	got := evalJS(t, vm, `
+		var pill = {hidden: true, textContent: ''};
+		var sec = {querySelector: function(){ return pill; }};
+		var btn = {classList: {contains: function(c){ return c === 'mh-power'; }},
+		           getAttribute: function(){ return 'Toggle Kitchen'; },
+		           closest: function(){ return sec; }};
+		kiosk.failed(btn);
+		var plain = {classList: {contains: function(){ return false; }}, closest: function(){ return sec; }};
+		var first = pill.textContent;
+		kiosk.failed(plain);
+		first + '|' + pill.textContent + '|' + pill.hidden`).String()
+	parts := strings.Split(got, "|")
+	if len(parts) != 3 || !strings.HasPrefix(parts[0], "couldn't toggle Kitchen, ") || !strings.HasPrefix(parts[1], "couldn't refresh, ") || parts[2] != "false" {
+		t.Errorf("failure pills = %q", got)
 	}
 }

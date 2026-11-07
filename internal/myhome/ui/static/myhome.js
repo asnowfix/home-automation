@@ -151,7 +151,12 @@ var kiosk = {
     var pill = sec && sec.querySelector('[data-pill]');
     if (!pill) { return; }
     var d = new Date();
-    pill.textContent = "couldn't refresh, " + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    // A failed state-button POST says which switch, not "refresh".
+    var verb = "couldn't refresh";
+    if (target.classList && target.classList.contains('mh-power')) {
+      verb = "couldn't toggle " + String(target.getAttribute('aria-label') || '').replace(/^Toggle /, '');
+    }
+    pill.textContent = verb + ", " + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
     pill.hidden = false;
   },
 
@@ -206,7 +211,7 @@ var kiosk = {
         status: false,
         device: false
       },
-      deviceSheet: { id: '', name: '', manufacturer: '', refreshable: false, heater: false },
+      deviceSheet: { id: '', name: '', manufacturer: '', refreshable: false, heater: false, busy: false, error: '' },
       roomEditMode: 'create',
       roomForm: {
         id: '',
@@ -274,41 +279,32 @@ var kiosk = {
           name: d.name,
           manufacturer: d.manufacturer,
           refreshable: !!d.refreshable,
-          heater: !!d.heater
+          heater: !!d.heater,
+          busy: false,
+          error: ''
         };
         this.modals.device = true;
       },
 
       async refreshDevice(deviceId) {
-        if (!kiosk.online) { return; }
-        const btn = document.getElementById('btn-refresh-' + deviceId);
-        if (btn) {
-          btn.disabled = true;
-          btn.classList.add('is-loading');
-        }
-        
+        if (!kiosk.online || this.deviceSheet.busy) { return; }
+        this.deviceSheet.busy = true;
+        this.deviceSheet.error = '';
         try {
-          console.log('refreshDevice: POST /rpc device.refresh for', deviceId);
           const res = await fetch('/rpc', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ method: 'device.refresh', params: deviceId })
           });
-          
-          console.log('refreshDevice: response status', res.status);
           if (!res.ok) {
             console.error('refreshDevice: error', await res.text());
-            return;
+            this.deviceSheet.error = "Couldn't refresh " + this.deviceSheet.name;
           }
-          
-          console.log('refreshDevice: success');
         } catch (e) {
           console.error('refreshDevice: error', e.name, e.message, e);
+          this.deviceSheet.error = "Couldn't refresh " + this.deviceSheet.name;
         } finally {
-          if (btn) {
-            btn.disabled = false;
-            btn.classList.remove('is-loading');
-          }
+          this.deviceSheet.busy = false;
         }
       },
 

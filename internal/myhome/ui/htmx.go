@@ -409,7 +409,13 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 		SwitchId:   sid,
 	}
 
-	res, err := mh.ActionE(h.ctx, params)
+	// The daemon context carries the logger and values the handler needs; the
+	// request's cancellation (a closed browser) is layered on top of it.
+	ctx, cancel := context.WithCancel(h.ctx)
+	defer cancel()
+	defer context.AfterFunc(r.Context(), cancel)()
+
+	res, err := mh.ActionE(ctx, params)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -228,3 +228,9 @@ func TestShellWiresLiveness(t *testing.T) {
 		t.Error("v1 keeps the cache in memory only")
 	}
 }
+
+func TestShellPageIsNotCached(t *testing.T) {
+	if cc := get(testMux(), "/").Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("Cache-Control on / = %q, want no-cache", cc)
+	}
+}

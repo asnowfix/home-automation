@@ -27,6 +27,17 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// insecureTransport is the single transport shared by every proxied request to
+// an HTTPS backend. Device certificates are self-signed, hence
+// InsecureSkipVerify. It must be shared: a transport created per request is
+// never reused nor closed, and leaves one idle connection (plus its
+// persistConn goroutine pair) behind for each request (#695).
+var insecureTransport = &http.Transport{
+	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+	IdleConnTimeout:     90 * time.Second,
+	MaxIdleConnsPerHost: 2,
+}
+
 // DeviceLookup is the minimal device-lookup capability the proxy needs to
 // resolve a host token to an IP. Defined locally (rather than importing
 // devices.DeviceRegistry) so a live device manager/cache can be passed in
@@ -159,10 +170,7 @@ func Handle(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db De
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	if scheme == "https" {
 		// accept self-signed device certs
-		if tp, ok := proxy.Transport.(*http.Transport); ok && tp != nil {
-			// unexpected: ReverseProxy.Transport is nil by default, so ok==false
-		}
-		proxy.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+		proxy.Transport = insecureTransport
 	}
 
 	// Customize director to preserve the remainder path and query

@@ -1,4 +1,4 @@
-package temperature
+package rooms
 
 import (
 	"context"
@@ -87,15 +87,15 @@ func TestGetDayType_BuiltInDefaults(t *testing.T) {
 	}
 }
 
-// TestGetDayType_WeekdayDefaultOverride verifies that per-room weekday overrides
-// take precedence over built-in defaults.
+// TestGetDayType_WeekdayDefaultOverride verifies that a stored weekday default
+// overrides the built-in Mon-Fri/weekend defaults.
 func TestGetDayType_WeekdayDefaultOverride(t *testing.T) {
 	svc, _ := newTestService(t)
 	ctx := context.Background()
 
-	// Override Monday (weekday 1) → day-off for room r1.
-	svc.weekdayDefaults["r1"] = map[int]myhome.DayType{
-		1: myhome.DayTypeDayOff,
+	// Override Monday (weekday 1) → day-off.
+	if _, err := svc.storage.SetWeekdayDefault(1, myhome.DayTypeDayOff); err != nil {
+		t.Fatalf("SetWeekdayDefault: %v", err)
 	}
 
 	monday := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -141,12 +141,28 @@ func TestGetDayType_ExternalAPIFallback(t *testing.T) {
 func TestGetComfortRanges(t *testing.T) {
 	ctx := context.Background()
 
+	seedKindSchedule := func(t *testing.T, svc *Service, kind myhome.RoomKind, dayType myhome.DayType, ranges ...myhome.TemperatureTimeRange) {
+		t.Helper()
+		if _, err := svc.storage.SetKindSchedule(kind, dayType, ranges); err != nil {
+			t.Fatalf("SetKindSchedule: %v", err)
+		}
+	}
+	seedRoomStorage := func(t *testing.T, svc *Service, id string, kinds ...myhome.RoomKind) {
+		t.Helper()
+		if _, err := svc.storage.SaveRoom(&RoomConfig{
+			ID:     id,
+			Name:   id,
+			Kinds:  kinds,
+			Levels: map[string]float64{"eco": 17.0, "comfort": 21.0},
+		}); err != nil {
+			t.Fatalf("SaveRoom: %v", err)
+		}
+	}
+
 	t.Run("room with single kind and schedule", func(t *testing.T) {
 		svc, _ := newTestService(t)
-		svc.rooms["r1"] = &RoomConfig{ID: "r1", Name: "R1", Kinds: []myhome.RoomKind{myhome.RoomKindBedroom}}
-		svc.kindSchedules[myhome.RoomKindBedroom] = map[myhome.DayType][]TimeRange{
-			myhome.DayTypeWorkDay: {{Start: 360, End: 1380}},
-		}
+		seedRoomStorage(t, svc, "r1", myhome.RoomKindBedroom)
+		seedKindSchedule(t, svc, myhome.RoomKindBedroom, myhome.DayTypeWorkDay, myhome.TemperatureTimeRange{Start: 360, End: 1380})
 
 		monday := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 		ranges, dayType, err := svc.GetComfortRanges(ctx, "r1", monday)
@@ -163,17 +179,9 @@ func TestGetComfortRanges(t *testing.T) {
 
 	t.Run("room with two kinds returns union", func(t *testing.T) {
 		svc, _ := newTestService(t)
-		svc.rooms["r1"] = &RoomConfig{
-			ID:    "r1",
-			Name:  "R1",
-			Kinds: []myhome.RoomKind{myhome.RoomKindBedroom, myhome.RoomKindOffice},
-		}
-		svc.kindSchedules[myhome.RoomKindBedroom] = map[myhome.DayType][]TimeRange{
-			myhome.DayTypeWorkDay: {{Start: 360, End: 720}},
-		}
-		svc.kindSchedules[myhome.RoomKindOffice] = map[myhome.DayType][]TimeRange{
-			myhome.DayTypeWorkDay: {{Start: 540, End: 1080}},
-		}
+		seedRoomStorage(t, svc, "r1", myhome.RoomKindBedroom, myhome.RoomKindOffice)
+		seedKindSchedule(t, svc, myhome.RoomKindBedroom, myhome.DayTypeWorkDay, myhome.TemperatureTimeRange{Start: 360, End: 720})
+		seedKindSchedule(t, svc, myhome.RoomKindOffice, myhome.DayTypeWorkDay, myhome.TemperatureTimeRange{Start: 540, End: 1080})
 
 		monday := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 		ranges, _, err := svc.GetComfortRanges(ctx, "r1", monday)
@@ -187,10 +195,8 @@ func TestGetComfortRanges(t *testing.T) {
 
 	t.Run("room with kind but no schedule for day type", func(t *testing.T) {
 		svc, _ := newTestService(t)
-		svc.rooms["r1"] = &RoomConfig{ID: "r1", Name: "R1", Kinds: []myhome.RoomKind{myhome.RoomKindBedroom}}
-		svc.kindSchedules[myhome.RoomKindBedroom] = map[myhome.DayType][]TimeRange{
-			myhome.DayTypeWorkDay: {{Start: 360, End: 1380}},
-		}
+		seedRoomStorage(t, svc, "r1", myhome.RoomKindBedroom)
+		seedKindSchedule(t, svc, myhome.RoomKindBedroom, myhome.DayTypeWorkDay, myhome.TemperatureTimeRange{Start: 360, End: 1380})
 
 		// Saturday → day-off; only work-day schedule exists → empty.
 		saturday := time.Date(2024, 1, 6, 0, 0, 0, 0, time.UTC)
@@ -213,19 +219,11 @@ func TestGetComfortRanges(t *testing.T) {
 
 	t.Run("deduplication: identical ranges from two kinds appear once", func(t *testing.T) {
 		svc, _ := newTestService(t)
-		svc.rooms["r1"] = &RoomConfig{
-			ID:    "r1",
-			Name:  "R1",
-			Kinds: []myhome.RoomKind{myhome.RoomKindBedroom, myhome.RoomKindOffice},
-		}
+		seedRoomStorage(t, svc, "r1", myhome.RoomKindBedroom, myhome.RoomKindOffice)
 		// Both kinds share the same range.
-		same := []TimeRange{{Start: 360, End: 1380}}
-		svc.kindSchedules[myhome.RoomKindBedroom] = map[myhome.DayType][]TimeRange{
-			myhome.DayTypeWorkDay: same,
-		}
-		svc.kindSchedules[myhome.RoomKindOffice] = map[myhome.DayType][]TimeRange{
-			myhome.DayTypeWorkDay: same,
-		}
+		sharedRange := myhome.TemperatureTimeRange{Start: 360, End: 1380}
+		seedKindSchedule(t, svc, myhome.RoomKindBedroom, myhome.DayTypeWorkDay, sharedRange)
+		seedKindSchedule(t, svc, myhome.RoomKindOffice, myhome.DayTypeWorkDay, sharedRange)
 
 		monday := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 		ranges, _, err := svc.GetComfortRanges(ctx, "r1", monday)
@@ -238,30 +236,57 @@ func TestGetComfortRanges(t *testing.T) {
 	})
 }
 
-// TestIsComfortTime checks normal and midnight-crossing comfort windows.
-func TestIsComfortTime(t *testing.T) {
+// TestComfortTimeViaGetComfortRanges verifies normal and midnight-crossing comfort
+// windows through GetComfortRanges + isInTimeRange (the replacement for isComfortTime).
+func TestComfortTimeViaGetComfortRanges(t *testing.T) {
 	svc, _ := newTestService(t)
-	kinds := []myhome.RoomKind{myhome.RoomKindBedroom}
-	svc.kindSchedules[myhome.RoomKindBedroom] = map[myhome.DayType][]TimeRange{
-		myhome.DayTypeWorkDay: {{Start: 360, End: 1380}},   // 06:00-23:00
-		myhome.DayTypeDayOff:  {{Start: 1380, End: 360}},   // 23:00-06:00 (crosses midnight)
+	ctx := context.Background()
+
+	// Seed room + schedules via storage.
+	if _, err := svc.storage.SaveRoom(&RoomConfig{
+		ID:     "r1",
+		Name:   "R1",
+		Kinds:  []myhome.RoomKind{myhome.RoomKindBedroom},
+		Levels: map[string]float64{"eco": 17.0, "comfort": 21.0},
+	}); err != nil {
+		t.Fatalf("SaveRoom: %v", err)
+	}
+	svc.storage.SetKindSchedule(myhome.RoomKindBedroom, myhome.DayTypeWorkDay,
+		[]myhome.TemperatureTimeRange{{Start: 360, End: 1380}})  // 06:00–23:00
+	svc.storage.SetKindSchedule(myhome.RoomKindBedroom, myhome.DayTypeDayOff,
+		[]myhome.TemperatureTimeRange{{Start: 1380, End: 360}})  // 23:00–06:00 crosses midnight
+
+	inComfort := func(t *testing.T, date time.Time, hour, minute int) bool {
+		t.Helper()
+		ranges, _, err := svc.GetComfortRanges(ctx, "r1", date)
+		if err != nil {
+			t.Fatalf("GetComfortRanges: %v", err)
+		}
+		mins := hour*60 + minute
+		for _, r := range ranges {
+			if isInTimeRange(mins, r) {
+				return true
+			}
+		}
+		return false
 	}
 
-	if !svc.isComfortTime(kinds, myhome.DayTypeWorkDay, tod(12, 0)) {
+	monday := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)  // work-day
+	saturday := time.Date(2024, 1, 6, 0, 0, 0, 0, time.UTC) // day-off
+
+	if !inComfort(t, monday, 12, 0) {
 		t.Error("12:00 work-day should be comfort time")
 	}
-	if svc.isComfortTime(kinds, myhome.DayTypeWorkDay, tod(5, 0)) {
+	if inComfort(t, monday, 5, 0) {
 		t.Error("05:00 work-day should be eco time")
 	}
-	// Midnight-crossing range: 23:30 and 04:00 should both be inside.
-	if !svc.isComfortTime(kinds, myhome.DayTypeDayOff, tod(23, 30)) {
+	if !inComfort(t, saturday, 23, 30) {
 		t.Error("23:30 day-off should be comfort time (midnight-crossing range)")
 	}
-	if !svc.isComfortTime(kinds, myhome.DayTypeDayOff, tod(4, 0)) {
+	if !inComfort(t, saturday, 4, 0) {
 		t.Error("04:00 day-off should be comfort time (midnight-crossing range)")
 	}
-	// 12:00 is outside the midnight-crossing range.
-	if svc.isComfortTime(kinds, myhome.DayTypeDayOff, tod(12, 0)) {
+	if inComfort(t, saturday, 12, 0) {
 		t.Error("12:00 day-off should be eco time (outside midnight-crossing range)")
 	}
 }

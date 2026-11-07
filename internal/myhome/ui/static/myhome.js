@@ -169,6 +169,13 @@ var kiosk = {
     if (sec.dataset.dirty || age > this.staleMs) { this.refresh(name); }
   },
 
+  // Re-render one device (all its rows) from the server. A GET, so it is
+  // allowed while offline; the previous DOM stays if it fails.
+  reloadDevice: function(id) {
+    var el = document.getElementById('device-' + id);
+    if (el) { htmx.ajax('GET', '/htmx/device/' + encodeURIComponent(id), { target: el, swap: 'outerHTML' }); }
+  },
+
   refresh: function(name) {
     var sec = this.el(name);
     if (sec) { sec.querySelectorAll('[data-refresh]').forEach(function(n) { htmx.trigger(n, 'refresh'); }); }
@@ -196,8 +203,10 @@ var kiosk = {
         room: false,
         setup: false,
         heater: false,
-        status: false
+        status: false,
+        device: false
       },
+      deviceSheet: { id: '', name: '', manufacturer: '', refreshable: false, heater: false },
       roomEditMode: 'create',
       roomForm: {
         id: '',
@@ -249,7 +258,7 @@ var kiosk = {
       // hash current without growing the history. Tapping the active item is
       // the same "go to top".
       go(name) {
-        this.modals.room = this.modals.setup = this.modals.heater = this.modals.status = false;
+        this.modals.room = this.modals.setup = this.modals.heater = this.modals.status = this.modals.device = false;
         this.section = name;
         kiosk.section = name;
         history.replaceState(null, '', '#' + name);
@@ -258,67 +267,20 @@ var kiosk = {
         kiosk.showing(name);
       },
 
-      async toggleSwitch(deviceId, switchId) {
-        const btn = document.getElementById('btn-switch-' + deviceId + '-' + switchId);
-        const shape = document.getElementById('btn-switch-' + deviceId + '-' + switchId + '-shape');
-        
-        if (btn) {
-          btn.disabled = true;
-          btn.classList.add('is-loading');
-        }
-        
-        try {
-          const res = await fetch('/rpc', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              method: 'switch.toggle', 
-              params: {
-                identifier: deviceId,
-                switch_id: parseInt(switchId)
-              }
-            })
-          });
-          
-          if (!res.ok) {
-            console.error('toggleSwitch: error', await res.text());
-            return;
-          }
-          
-          const out = await res.json();
-          console.log('toggleSwitch: response', out);
-          const newState = out.on;
-          
-          if (btn) {
-            btn.disabled = false;
-            btn.classList.remove('is-loading');
-            
-            if (newState) {
-              btn.classList.remove('is-light');
-              btn.classList.add('is-info', 'is-active');
-              shape.innerHTML = `
-                <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-                <circle cx="16" cy="12" r="3"></circle>
-              `;
-            } else {
-              btn.classList.remove('is-info', 'is-active');
-              btn.classList.add('is-light');
-              shape.innerHTML = `
-                <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-                <circle cx="8" cy="12" r="3"></circle>
-              `;
-            }
-          }
-        } catch (e) {
-          console.error('toggleSwitch: error', e);
-          if (btn) {
-            btn.disabled = false;
-            btn.classList.remove('is-loading');
-          }
-        }
+      // Device sheet: filled from the row's data-* attributes, closed by default.
+      openDeviceSheet(d) {
+        this.deviceSheet = {
+          id: d.deviceId,
+          name: d.name,
+          manufacturer: d.manufacturer,
+          refreshable: !!d.refreshable,
+          heater: !!d.heater
+        };
+        this.modals.device = true;
       },
 
       async refreshDevice(deviceId) {
+        if (!kiosk.online) { return; }
         const btn = document.getElementById('btn-refresh-' + deviceId);
         if (btn) {
           btn.disabled = true;
@@ -401,17 +363,7 @@ var kiosk = {
             const deviceView = JSON.parse(e.data);
             console.log('SSE: device-update', deviceView);
             
-            // Trigger HTMX to reload the specific device card from server
-            const deviceCard = document.querySelector(`[id="device-${deviceView.id}"]`);
-            if (deviceCard) {
-              const parentColumn = deviceCard.closest('.column');
-              if (parentColumn) {
-                htmx.ajax('GET', `/htmx/device/${deviceView.id}`, {
-                  target: parentColumn,
-                  swap: 'outerHTML'
-                });
-              }
-            }
+            kiosk.reloadDevice(deviceView.id);
           } catch (err) {
             console.error('SSE: Failed to parse device-update:', err);
           }
@@ -440,61 +392,27 @@ var kiosk = {
         if (!this.sensors[deviceId]) {
           this.sensors[deviceId] = {};
         }
-        
-        if (sensor === 'temperature') {
-          this.sensors[deviceId].temperature = value + '°C';
-          // Update DOM element directly
-          const tempEl = document.getElementById('sensor-' + deviceId + '-temperature');
-          if (tempEl) {
-            tempEl.textContent = parseFloat(value).toFixed(1) + '°C';
-            tempEl.classList.remove('is-light');
-            tempEl.classList.add('is-info');
-          }
-        } else if (sensor === 'humidity') {
-          this.sensors[deviceId].humidity = value + '%';
-          // Update DOM element directly
-          const humEl = document.getElementById('sensor-' + deviceId + '-humidity');
-          if (humEl) {
-            humEl.textContent = parseFloat(value).toFixed(1) + '%';
-            humEl.classList.remove('is-light');
-            humEl.classList.add('is-info');
+
+        if (sensor === 'temperature' || sensor === 'humidity') {
+          const unit = sensor === 'temperature' ? '°C' : '%';
+          this.sensors[deviceId][sensor] = value + unit;
+          const el = document.getElementById('sensor-' + deviceId + '-' + sensor);
+          if (el) {
+            el.textContent = parseFloat(value).toFixed(1) + unit;
+            el.classList.remove('is-unknown');
           }
         } else if (sensor === 'window') {
           const isOpen = value === "1";
           this.doors[deviceId] = isOpen ? 'open' : 'closed';
-          // Update DOM element directly
           const doorEl = document.getElementById('door-' + deviceId);
-          if (doorEl) {
-            if (isOpen) {
-              doorEl.className = 'tag is-warning ml-2';
-              doorEl.innerHTML = `
-                <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z"/>
-                </svg>
-                Open
-              `;
-            } else {
-              doorEl.className = 'tag is-success ml-2';
-              doorEl.innerHTML = `
-                <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
-                </svg>
-                Closed
-              `;
-            }
+          const text = doorEl && doorEl.querySelector('[data-door-text]');
+          if (text) {
+            text.textContent = isOpen ? 'Open' : 'Closed';
+            doorEl.classList.remove('is-unknown');
+            doorEl.classList.toggle('is-alert', isOpen);
           } else {
-            // Door element doesn't exist yet - trigger HTMX card refresh
-            console.log('SSE: door element not found, triggering card refresh for', deviceId);
-            const deviceCard = document.querySelector(`[id="device-${deviceId}"]`);
-            if (deviceCard) {
-              const parentColumn = deviceCard.closest('.column');
-              if (parentColumn) {
-                htmx.ajax('GET', `/htmx/device/${deviceId}`, {
-                  target: parentColumn,
-                  swap: 'outerHTML'
-                });
-              }
-            }
+            // The pill is not on the page yet: re-render the device.
+            kiosk.reloadDevice(deviceId);
           }
         }
       },

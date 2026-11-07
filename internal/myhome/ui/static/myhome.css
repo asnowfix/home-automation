@@ -466,15 +466,173 @@ body.mh-shell {
   display: none;
 }
 
+/* Home grid: as many columns as fit, no fixed widths in px. A device wrapper
+   disappears from layout so that each of its rows is a grid item. */
+.mh-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  gap: 8px;
+}
+
+.mh-device {
+  display: contents;
+}
+
 .mh-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 12px 16px;
   min-height: 72px;
   border-radius: var(--mh-radius-card);
   background: var(--mh-card);
 }
 
+/* Avatar, name and pills: one tap target that opens the device sheet. */
+.mh-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--mh-tap);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--mh-text);
+  font-family: var(--mh-font);
+  font-size: var(--mh-font-size);
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mh-row-main:active {
+  background: var(--mh-surface-2);
+}
+
+.mh-row-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .mh-row-name {
   font-weight: 500;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mh-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.mh-avatar {
+  flex: 0 0 var(--mh-tap);
+  width: var(--mh-tap);
+  height: var(--mh-tap);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  font-size: 22px;
+}
+
+.mh-row:has(.mh-power.is-on) .mh-avatar {
+  background: var(--mh-primary-tint-2);
+}
+
+.mh-pill.is-unknown {
+  color: var(--mh-text-muted);
+}
+
+.mh-pill.is-alert {
+  background: var(--mh-primary-tint-2);
+}
+
+.door-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+/* Round state button: off, on (ring), pending (htmx-request), unknown (disabled). */
+.mh-power {
+  flex: 0 0 var(--mh-tap);
+  width: var(--mh-tap);
+  height: var(--mh-tap);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mh-power.is-on {
+  background: var(--mh-primary-tint-1);
+  border-color: var(--mh-primary);
+}
+
+.mh-power:active {
+  background: var(--mh-surface-4);
+}
+
+.mh-power.htmx-request {
+  animation: mh-pulse 1s ease-in-out infinite;
+}
+
+.mh-power:disabled,
+.mh-power.is-unknown {
+  color: var(--mh-text-muted);
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+
+@keyframes mh-pulse {
+  50% { border-color: var(--mh-primary); opacity: 0.6; }
+}
+
+/* Sheet actions: token-styled buttons instead of Bulma's colour variants. */
+.mh-sheet-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mh-action {
+  min-width: var(--mh-tap);
+  min-height: var(--mh-tap);
+  padding: 0 24px;
+  border: 0;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  font-family: var(--mh-font);
+  font-size: var(--mh-font-size);
+  cursor: pointer;
+}
+
+.mh-action:active {
+  background: var(--mh-surface-4);
+}
+
+.mh-action:disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 /* Overlays cover the content area only, so the rail stays reachable. The

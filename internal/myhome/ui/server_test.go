@@ -92,10 +92,14 @@ func TestShellHasNoExternalNavigationOrAutoOpenOverlay(t *testing.T) {
 
 func TestShellScriptHasNoExternalNavigation(t *testing.T) {
 	js := string(staticAsset(t, "/static/myhome.js"))
-	for _, s := range []string{"window.open", "location.reload", "_blank"} {
+	for _, s := range []string{"window.open", "_blank"} {
 		if strings.Contains(js, s) {
 			t.Errorf("myhome.js contains %q", s)
 		}
+	}
+	// the one permitted reload: a daemon upgrade seen on a ping (offline_test.go)
+	if n := strings.Count(js, "location.reload"); n != 1 {
+		t.Errorf("myhome.js has %d location.reload calls, want exactly 1", n)
 	}
 }
 

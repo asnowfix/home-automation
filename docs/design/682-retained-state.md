@@ -223,6 +223,9 @@ that the browser can actually observe.
   - Daemon stopped or restarting: the TCP connection closes, so `onerror` fires and the banner
     shows within about 1 s.
   - Silent partition: the banner shows within 40 to 45 s.
+  - The client does not rely on EventSource's own retry: when the watchdog expires, and on each
+    tick while offline (backoff 3 s doubling to a 30 s cap), and when `readyState` is `CLOSED`
+    (a non-200 answer, which EventSource never retries), it closes the stream and opens a new one.
   - On reconnect, a different `started` means the daemon restarted, so the client re-fetches all
     sections. A different `version` means the daemon was upgraded, so the client calls
     `location.reload()`. It does this only once the daemon is reachable again, so it cannot land

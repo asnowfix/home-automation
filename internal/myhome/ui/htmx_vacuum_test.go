@@ -371,3 +371,19 @@ func TestVacuumAction_RechecksStateForStartAndStop(t *testing.T) {
 		t.Errorf("find is not re-checked, sent %v", *sent)
 	}
 }
+
+// The vacuum poll runs only while the section is shown, the daemon is reachable
+// and no confirm is open; the shell's beforeRequest guard refuses non-GET htmx
+// requests while offline, which covers the confirm bar's POSTs.
+func TestVacuumPollFilterAndOfflineGuard(t *testing.T) {
+	html := string(staticAsset(t, "/static/index.html"))
+	for _, want := range []string{"kiosk.visible('vacuum')", "kiosk.online", "#vacuum-container [data-confirming]"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("vacuum poll filter lacks %q", want)
+		}
+	}
+	js := string(staticAsset(t, "/static/myhome.js"))
+	if !strings.Contains(js, "kiosk.blocks(") {
+		t.Error("shell no longer refuses htmx writes while offline")
+	}
+}

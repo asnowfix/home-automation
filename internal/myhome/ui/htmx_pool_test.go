@@ -79,12 +79,10 @@ func TestDeviceCardTemplate_PoolTags(t *testing.T) {
 	}
 }
 
-// TestDeviceCardTemplate_WebUILink verifies the "open device web interface"
-// button is gated on HasWebUI, not on a cached Host value — Host is no
-// longer persisted (see #252/#336), and the link target (LinkToken) is
-// resolved live when clicked (see internal/myhome/proxy.resolveToIPv4), so
-// the button should still appear even when Host is empty.
-func TestDeviceCardTemplate_WebUILink(t *testing.T) {
+// TestDeviceCardTemplate_NoWebUILink verifies the card opens no new browser
+// window: the kiosk has no browser chrome to come back from (#683), so the
+// device web-UI link is gone even for devices that have one.
+func TestDeviceCardTemplate_NoWebUILink(t *testing.T) {
 	tmpl := template.Must(template.New("device-card").Funcs(cardTemplateFuncs()).Parse(deviceCardTemplate))
 
 	var buf bytes.Buffer
@@ -92,16 +90,7 @@ func TestDeviceCardTemplate_WebUILink(t *testing.T) {
 	if err := tmpl.Execute(&buf, withUI); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if out := buf.String(); !strings.Contains(out, `href="/devices/shellyplus1-abc/"`) {
-		t.Errorf("expected web UI link for HasWebUI device, got:\n%s", out)
-	}
-
-	buf.Reset()
-	withoutUI := DeviceView{Id: "shellyblu-abc", Name: "Sensor", LinkToken: "shellyblu-abc", HasWebUI: false}
-	if err := tmpl.Execute(&buf, withoutUI); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if out := buf.String(); strings.Contains(out, "Open device web interface") {
-		t.Errorf("expected no web UI link for a BLU (HasWebUI=false) device, got:\n%s", out)
+	if out := buf.String(); strings.Contains(out, "/devices/") || strings.Contains(out, "_blank") {
+		t.Errorf("device card links out of the shell:\n%s", out)
 	}
 }

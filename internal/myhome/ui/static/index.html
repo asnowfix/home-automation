@@ -15,24 +15,25 @@
   
   <!-- Windows Meta Tags -->
   <meta name="msapplication-TileColor" content="#151617"/>
-  <meta name="msapplication-TileImage" content="/static/penates.svg?v={{.Version}}"/>
+  <meta name="msapplication-TileImage" content="{{asset "/static/penates.svg"}}"/>
   <meta name="msapplication-config" content="none"/>
   
   <!-- General Meta Tags -->
   <meta name="application-name" content="MyHome"/>
   <meta name="description" content="MyHome Penates"/>
   
-  <title>MyHome Devices</title>
-  <link rel="stylesheet" href="/static/bulma.min.css?v={{.Version}}"/>
-  <link rel="stylesheet" href="/static/myhome.css?v={{.Version}}"/>
+  <title>MyHome</title>
+  <link rel="stylesheet" href="{{asset "/static/bulma.min.css"}}"/>
+  <link rel="stylesheet" href="{{asset "/static/myhome.css"}}"/>
   
   <!-- Icons for all platforms -->
-  <link rel="icon" href="/static/penates.svg?v={{.Version}}" type="image/svg+xml"/>
-  <link rel="apple-touch-icon" href="/static/penates.svg?v={{.Version}}"/>
-  <link rel="manifest" href="/static/manifest.json?v={{.Version}}"/>
+  <link rel="icon" href="{{asset "/static/penates.svg"}}" type="image/svg+xml"/>
+  <link rel="apple-touch-icon" href="{{asset "/static/penates.svg"}}"/>
+  <link rel="manifest" href="{{asset "/static/manifest.json"}}"/>
   
-  <script defer src="/static/alpine.min.js?v={{.Version}}"></script>
-  <script src="/static/htmx.min.js?v={{.Version}}"></script>
+  <script defer src="{{asset "/static/myhome.js"}}"></script>
+  <script defer src="{{asset "/static/alpine.min.js"}}"></script>
+  <script src="{{asset "/static/htmx.min.js"}}"></script>
   <style>
     .door-icon {
       display: inline-block;
@@ -47,106 +48,111 @@
     [x-cloak] { display: none !important; }
   </style>
 </head>
-<body x-data="app()" @open-setup-modal.window="openSetupModal($event.detail)" @open-heater-modal.window="openHeaterModal($event.detail)" @edit-room.window="editRoom($event.detail)" @delete-room.window="confirmDeleteRoom($event.detail)">
-  
-  <!-- Hero Section -->
-  <section class="hero is-light is-small">
-    <div class="hero-body">
-      <div class="container">
-        <div class="level">
-          <div class="level-left">
-            <button class="button is-light is-small mr-3" @click="window.location.reload()" title="Reload page">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="23 4 23 10 17 10"></polyline>
-                <polyline points="1 20 1 14 7 14"></polyline>
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
-              </svg>
-            </button>
-            <h1 class="title is-3">MyHome</h1>
-            <span class="subtitle is-6 ml-3" x-text="`${deviceCount} devices / {{.Version}}`"></span>
-          </div>
-          <div class="level-right">
-            <a class="button ml-2" href="/event-log">Event Log</a>
-            <a class="button is-info ml-2" href="https://control.shelly.cloud" target="_blank" rel="noopener noreferrer">Shelly Control</a>
-            <a class="button is-link ml-2" href="https://community.shelly.cloud/" target="_blank" rel="noopener noreferrer">Community Forum</a>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
+<body class="mh-shell" x-data="app()" @open-setup-modal.window="openSetupModal($event.detail)" @open-heater-modal.window="openHeaterModal($event.detail)" @edit-room.window="editRoom($event.detail)" @delete-room.window="confirmDeleteRoom($event.detail)">
 
-  <!-- Devices Section -->
-  <section class="section">
-    <div class="container">
-      <div class="columns is-multiline" 
-           id="devices-container"
-           hx-get="/htmx/devices"
-           hx-trigger="load"
-           hx-swap="innerHTML"
-           hx-indicator="#loading-devices">
-        <div id="loading-devices" class="column is-12 has-text-centered htmx-indicator">
-          <p class="is-size-5">Loading devices...</p>
-        </div>
-      </div>
-    </div>
-  </section>
+  <nav class="mh-rail" aria-label="Sections">
+    <button type="button" class="mh-rail-item" :class="{'is-active': section === 'home'}" :aria-current="section === 'home' ? 'page' : null" @click="go('home')">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>
+      <span>Home</span>
+    </button>
+    <button type="button" class="mh-rail-item" :class="{'is-active': section === 'rooms'}" :aria-current="section === 'rooms' ? 'page' : null" @click="go('rooms')">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="15" cy="12" r="1"/></svg>
+      <span>Rooms</span>
+    </button>
+    <button type="button" class="mh-rail-item" :class="{'is-active': section === 'pool'}" :aria-current="section === 'pool' ? 'page' : null" @click="go('pool')">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 17c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2"/><path d="M2 21c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2"/><path d="M8 13V5a2 2 0 0 1 4 0"/><path d="M16 13V5a2 2 0 0 0-4 0"/></svg>
+      <span>Pool</span>
+    </button>
+    <button type="button" class="mh-rail-item" :class="{'is-active': section === 'vacuum'}" :aria-current="section === 'vacuum' ? 'page' : null" @click="go('vacuum')">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
+      <span>Vacuum</span>
+    </button>
+    <button type="button" class="mh-rail-item" :class="{'is-active': section === 'events'}" :aria-current="section === 'events' ? 'page' : null" @click="go('events')">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+      <span>Events</span>
+    </button>
+  </nav>
 
-  <!-- Vacuum Section (#606): empty until a robot is configured (MYHOME_VACUUM_*) -->
-  <section class="section pt-0">
-    <div class="container"
-         id="vacuum-container"
-         hx-get="/htmx/vacuum"
-         hx-trigger="load, every 5s"
-         hx-swap="innerHTML">
-    </div>
-  </section>
+  <main id="mh-content" class="mh-content">
+      <section id="sec-home" data-section="home" x-show="section === 'home'" x-cloak>
+        <header class="mh-sec-head">
+          <h2 class="title is-4">Home</h2>
+          <span class="mh-pill" data-pill hidden></span>
+        </header>
+        <div class="columns is-multiline"
+             id="devices-container"
+             data-refresh
+             hx-get="/htmx/devices"
+             hx-trigger="load, refresh"
+             hx-swap="innerHTML">
+          <div class="column is-12"><p class="has-text-grey">Loading devices...</p></div>
+        </div>
+      </section>
+      <section id="sec-rooms" data-section="rooms" x-show="section === 'rooms'" x-cloak>
+        <header class="mh-sec-head">
+          <h2 class="title is-4">Rooms</h2>
+          <span class="mh-pill" data-pill hidden></span>
+          <button id="add-room-btn" class="button is-primary" @click="showAddRoomModal()">+ Add Room</button>
+        </header>
+        <div id="rooms-list"
+             class="columns is-multiline"
+             data-refresh
+             hx-get="/htmx/rooms"
+             hx-trigger="load, refresh, roomsUpdated from:body"
+             hx-swap="innerHTML">
+          <div class="column is-12"><p class="has-text-grey">Loading rooms...</p></div>
+        </div>
+      </section>
+      <section id="sec-pool" data-section="pool" x-show="section === 'pool'" x-cloak>
+        <header class="mh-sec-head">
+          <h2 class="title is-4">Pool</h2>
+          <span class="mh-pill" data-pill hidden></span>
+        </header>
+        <div id="pool-container"
+             data-refresh
+             hx-get="/htmx/pool"
+             hx-trigger="load, refresh"
+             hx-swap="innerHTML">
+          <p class="has-text-grey">Loading pool...</p>
+        </div>
+      </section>
+      <section id="sec-vacuum" data-section="vacuum" x-show="section === 'vacuum'" x-cloak>
+        <header class="mh-sec-head">
+          <h2 class="title is-4">Vacuum</h2>
+          <span class="mh-pill" data-pill hidden></span>
+        </header>
+        <!-- empty until a robot is configured (MYHOME_VACUUM_*); polls only while shown -->
+        <div id="vacuum-container"
+             data-refresh
+             hx-get="/htmx/vacuum"
+             hx-trigger="load, refresh, every 5s [kiosk.visible('vacuum')]"
+             hx-swap="innerHTML">
+        </div>
+      </section>
+      <section id="sec-events" data-section="events" x-show="section === 'events'" x-cloak>
+        <header class="mh-sec-head">
+          <h2 class="title is-4">Events</h2>
+          <span class="mh-pill" data-pill hidden></span>
+          <button class="button" @click="modals.status = true">System status</button>
+        </header>
+        <div id="events-table"
+             data-refresh
+             hx-get="/htmx/events"
+             hx-trigger="load, refresh"
+             hx-swap="innerHTML">
+          <p class="has-text-grey">Loading events...</p>
+        </div>
+      </section>
+  </main>
 
-  <!-- Accounts Section -->
-  <section class="section pt-0">
-    <div class="container">
-      <h2 class="title is-4">🔌 Accounts</h2>
-      <div class="columns is-multiline"
-           id="accounts-container"
-           hx-get="/htmx/accounts"
-           hx-trigger="load"
-           hx-swap="innerHTML">
-        <div class="column is-12">
-          <p class="has-text-grey">Loading accounts...</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Rooms Management Section -->
-  <section class="section pt-0">
-    <div class="container">
-      <div class="level">
-        <div class="level-left">
-          <h2 class="title is-4">🏠 Rooms</h2>
-        </div>
-        <div class="level-right">
-          <button class="button is-primary is-small" @click="showAddRoomModal()">+ Add Room</button>
-        </div>
-      </div>
-      <div id="rooms-list" 
-           class="columns is-multiline"
-           hx-get="/htmx/rooms"
-           hx-trigger="load, roomsUpdated from:body"
-           hx-swap="innerHTML">
-        <div class="column is-12">
-          <p class="has-text-grey">Loading rooms...</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
+  <!-- Overlays cover the content area only; each has its own close button and the backdrop does not dismiss -->
   <!-- Room Edit Modal -->
   <div class="modal" :class="{'is-active': modals.room}">
-    <div class="modal-background" @click="closeRoomModal()"></div>
+    <div class="modal-background"></div>
     <div class="modal-card" style="max-width: 500px;">
       <header class="modal-card-head">
         <p class="modal-card-title" x-text="roomEditMode === 'create' ? 'Add Room' : 'Edit Room'"></p>
-        <button class="delete" aria-label="close" @click="closeRoomModal()"></button>
+        <button class="delete mh-close" aria-label="close" @click="closeRoomModal()"></button>
       </header>
       <section class="modal-card-body">
         <div class="field">
@@ -176,7 +182,7 @@
         <div class="field">
           <label class="label">iCal Agenda URL <span class="has-text-grey has-text-weight-normal">(optional)</span></label>
           <div class="control">
-            <input class="input" type="url" x-model="roomForm.icalUrl" placeholder="https://calendar.example.com/room.ics">
+            <input class="input" type="url" x-model="roomForm.icalUrl" placeholder="Calendar address (.ics)">
           </div>
           <p class="help">Public iCal URL for room occupancy agenda (used by heater controller)</p>
         </div>
@@ -217,11 +223,11 @@
 
   <!-- Setup Modal -->
   <div class="modal" :class="{'is-active': modals.setup}">
-    <div class="modal-background" @click="closeSetupModal()"></div>
+    <div class="modal-background"></div>
     <div class="modal-card">
       <header class="modal-card-head">
         <p class="modal-card-title">Setup Device</p>
-        <button class="delete" aria-label="close" @click="closeSetupModal()"></button>
+        <button class="delete mh-close" aria-label="close" @click="closeSetupModal()"></button>
       </header>
       <section class="modal-card-body">
         <div class="field">
@@ -289,11 +295,11 @@
 
   <!-- Heater Configuration Modal (simplified for demo) -->
   <div class="modal" :class="{'is-active': modals.heater}">
-    <div class="modal-background" @click="closeHeaterModal()"></div>
+    <div class="modal-background"></div>
     <div class="modal-card" style="max-width: 600px;">
       <header class="modal-card-head">
         <p class="modal-card-title">🔥 Heater Configuration</p>
-        <button class="delete" aria-label="close" @click="closeHeaterModal()"></button>
+        <button class="delete mh-close" aria-label="close" @click="closeHeaterModal()"></button>
       </header>
       <section class="modal-card-body">
         <p class="notification is-info">Heater configuration UI would go here. This is a simplified demo.</p>
@@ -305,540 +311,32 @@
     </div>
   </div>
 
-  <footer class="footer">
-    <div class="content has-text-centered has-text-grey-light is-size-7">
-      Served by MyHome reverse proxy · Powered by Alpine.js & HTMX
+
+  <!-- System status sheet: opened from the Events section, closed by default -->
+  <div class="modal" :class="{'is-active': modals.status}">
+    <div class="modal-background"></div>
+    <div class="modal-card">
+      <header class="modal-card-head">
+        <p class="modal-card-title">System status</p>
+        <button class="delete mh-close" aria-label="close" @click="modals.status = false"></button>
+      </header>
+      <section class="modal-card-body">
+        <p class="mb-3">MyHome {{.Version}}</p>
+        <h3 class="title is-5">Accounts</h3>
+        <div class="columns is-multiline"
+             id="accounts-container"
+             data-refresh
+             hx-get="/htmx/accounts"
+             hx-trigger="load, refresh"
+             hx-swap="innerHTML">
+          <div class="column is-12"><p class="has-text-grey">Loading accounts...</p></div>
+        </div>
+      </section>
+      <footer class="modal-card-foot">
+        <button class="button" @click="modals.status = false">Close</button>
+      </footer>
     </div>
-  </footer>
+  </div>
 
-  <script>
-    function app() {
-      return {
-        deviceCount: 0,
-        sensors: {},
-        doors: {},
-        switches: {},
-        rooms: [],
-        modals: {
-          room: false,
-          setup: false,
-          heater: false
-        },
-        roomEditMode: 'create',
-        roomForm: {
-          id: '',
-          name: '',
-          kinds: ['other'],
-          levels: { eco: 18, comfort: 20, away: 15 },
-          icalUrl: '',
-          saving: false
-        },
-        setupForm: {
-          deviceId: '',
-          name: '',
-          roomId: '',
-          staEssid: '',
-          staPasswd: '',
-          sta1Essid: '',
-          sta1Passwd: '',
-          apPasswd: '',
-          saving: false
-        },
-        heaterForm: {
-          deviceId: ''
-        },
-
-        init() {
-          this.connectSSE();
-          this.loadRooms();
-          
-          // Debug HTMX events
-          document.body.addEventListener('htmx:beforeRequest', (event) => {
-            console.log('HTMX: beforeRequest', event.detail);
-          });
-          
-          document.body.addEventListener('htmx:afterRequest', (event) => {
-            console.log('HTMX: afterRequest', event.detail);
-          });
-          
-          document.body.addEventListener('htmx:responseError', (event) => {
-            console.error('HTMX: responseError', event.detail);
-          });
-          
-          // Update device count after HTMX loads devices
-          document.body.addEventListener('htmx:afterSwap', (event) => {
-            console.log('HTMX: afterSwap', event.detail);
-            if (event.detail.target.id === 'devices-container') {
-              const deviceCards = document.querySelectorAll('#devices-container .card');
-              this.deviceCount = deviceCards.length;
-              console.log('Device count updated:', this.deviceCount);
-            }
-          });
-        },
-
-        async toggleSwitch(deviceId, switchId) {
-          const btn = document.getElementById('btn-switch-' + deviceId + '-' + switchId);
-          const shape = document.getElementById('btn-switch-' + deviceId + '-' + switchId + '-shape');
-          
-          if (btn) {
-            btn.disabled = true;
-            btn.classList.add('is-loading');
-          }
-          
-          try {
-            const res = await fetch('/rpc', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                method: 'switch.toggle', 
-                params: {
-                  identifier: deviceId,
-                  switch_id: parseInt(switchId)
-                }
-              })
-            });
-            
-            if (!res.ok) {
-              console.error('toggleSwitch: error', await res.text());
-              return;
-            }
-            
-            const out = await res.json();
-            console.log('toggleSwitch: response', out);
-            const newState = out.on;
-            
-            if (btn) {
-              btn.disabled = false;
-              btn.classList.remove('is-loading');
-              
-              if (newState) {
-                btn.classList.remove('is-light');
-                btn.classList.add('is-info', 'is-active');
-                shape.innerHTML = `
-                  <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-                  <circle cx="16" cy="12" r="3"></circle>
-                `;
-              } else {
-                btn.classList.remove('is-info', 'is-active');
-                btn.classList.add('is-light');
-                shape.innerHTML = `
-                  <rect x="1" y="5" width="22" height="14" rx="7" ry="7"></rect>
-                  <circle cx="8" cy="12" r="3"></circle>
-                `;
-              }
-            }
-          } catch (e) {
-            console.error('toggleSwitch: error', e);
-            if (btn) {
-              btn.disabled = false;
-              btn.classList.remove('is-loading');
-            }
-          }
-        },
-
-        async refreshDevice(deviceId) {
-          const btn = document.getElementById('btn-refresh-' + deviceId);
-          if (btn) {
-            btn.disabled = true;
-            btn.classList.add('is-loading');
-          }
-          
-          try {
-            console.log('refreshDevice: POST /rpc device.refresh for', deviceId);
-            const res = await fetch('/rpc', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ method: 'device.refresh', params: deviceId })
-            });
-            
-            console.log('refreshDevice: response status', res.status);
-            if (!res.ok) {
-              console.error('refreshDevice: error', await res.text());
-              return;
-            }
-            
-            console.log('refreshDevice: success');
-          } catch (e) {
-            console.error('refreshDevice: error', e.name, e.message, e);
-          } finally {
-            if (btn) {
-              btn.disabled = false;
-              btn.classList.remove('is-loading');
-            }
-          }
-        },
-
-        connectSSE() {
-          const eventSource = new EventSource('/events');
-          
-          eventSource.addEventListener('connected', () => {
-            console.log('SSE: connected');
-          });
-
-          eventSource.addEventListener('sensor-update', (e) => {
-            try {
-              const data = JSON.parse(e.data);
-              console.log('SSE: sensor-update', data);
-              this.updateSensor(data.device_id, data.sensor, data.value);
-            } catch (err) {
-              console.error('SSE: Failed to parse sensor-update:', err);
-            }
-          });
-
-          eventSource.addEventListener('device-update', (e) => {
-            try {
-              const deviceView = JSON.parse(e.data);
-              console.log('SSE: device-update', deviceView);
-              
-              // Trigger HTMX to reload the specific device card from server
-              const deviceCard = document.querySelector(`[id="device-${deviceView.id}"]`);
-              if (deviceCard) {
-                const parentColumn = deviceCard.closest('.column');
-                if (parentColumn) {
-                  htmx.ajax('GET', `/htmx/device/${deviceView.id}`, {
-                    target: parentColumn,
-                    swap: 'outerHTML'
-                  });
-                }
-              }
-            } catch (err) {
-              console.error('SSE: Failed to parse device-update:', err);
-            }
-          });
-
-          eventSource.onerror = (e) => {
-            console.error('SSE: error:', e);
-          };
-        },
-
-        updateSensor(deviceId, sensor, value) {
-          if (!this.sensors[deviceId]) {
-            this.sensors[deviceId] = {};
-          }
-          
-          if (sensor === 'temperature') {
-            this.sensors[deviceId].temperature = value + '°C';
-            // Update DOM element directly
-            const tempEl = document.getElementById('sensor-' + deviceId + '-temperature');
-            if (tempEl) {
-              tempEl.textContent = parseFloat(value).toFixed(1) + '°C';
-              tempEl.classList.remove('is-light');
-              tempEl.classList.add('is-info');
-            }
-          } else if (sensor === 'humidity') {
-            this.sensors[deviceId].humidity = value + '%';
-            // Update DOM element directly
-            const humEl = document.getElementById('sensor-' + deviceId + '-humidity');
-            if (humEl) {
-              humEl.textContent = parseFloat(value).toFixed(1) + '%';
-              humEl.classList.remove('is-light');
-              humEl.classList.add('is-info');
-            }
-          } else if (sensor === 'window') {
-            const isOpen = value === "1";
-            this.doors[deviceId] = isOpen ? 'open' : 'closed';
-            // Update DOM element directly
-            const doorEl = document.getElementById('door-' + deviceId);
-            if (doorEl) {
-              if (isOpen) {
-                doorEl.className = 'tag is-warning ml-2';
-                doorEl.innerHTML = `
-                  <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M3 21V3h12l6 6v12H3zm2-2h14V9.828L14.172 5H5v14zm9-6h2v2h-2v-2z"/>
-                  </svg>
-                  Open
-                `;
-              } else {
-                doorEl.className = 'tag is-success ml-2';
-                doorEl.innerHTML = `
-                  <svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/>
-                  </svg>
-                  Closed
-                `;
-              }
-            } else {
-              // Door element doesn't exist yet - trigger HTMX card refresh
-              console.log('SSE: door element not found, triggering card refresh for', deviceId);
-              const deviceCard = document.querySelector(`[id="device-${deviceId}"]`);
-              if (deviceCard) {
-                const parentColumn = deviceCard.closest('.column');
-                if (parentColumn) {
-                  htmx.ajax('GET', `/htmx/device/${deviceId}`, {
-                    target: parentColumn,
-                    swap: 'outerHTML'
-                  });
-                }
-              }
-            }
-          }
-        },
-
-        async loadRooms() {
-          try {
-            const res = await fetch('/rpc', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ method: 'room.list', params: null })
-            });
-            if (res.ok) {
-              const data = await res.json();
-              if (data.result && data.result.rooms) {
-                this.rooms = data.result.rooms;
-              }
-            }
-          } catch (e) {
-            console.error('Failed to load rooms:', e);
-          }
-        },
-
-        showAddRoomModal() {
-          this.roomEditMode = 'create';
-          this.roomForm = {
-            id: '',
-            name: '',
-            kinds: ['other'],
-            levels: { eco: 18, comfort: 20, away: 15 },
-            icalUrl: '',
-            saving: false
-          };
-          this.modals.room = true;
-        },
-
-        async editRoom({roomId}) {
-          try {
-            const res = await fetch('/rpc', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ method: 'temperature.get', params: { room_id: roomId } })
-            });
-            if (!res.ok) {
-              alert('Failed to load room');
-              return;
-            }
-            const data = await res.json();
-            const room = data.result || data;
-
-            this.roomEditMode = 'edit';
-            this.roomForm = {
-              id: roomId,
-              name: room.name || '',
-              kinds: room.kinds || ['other'],
-              levels: room.levels || { eco: 18, comfort: 20, away: 15 },
-              icalUrl: room.ical_url || '',
-              saving: false
-            };
-            this.modals.room = true;
-          } catch (e) {
-            alert('Error loading room: ' + e);
-          }
-        },
-
-        closeRoomModal() {
-          this.modals.room = false;
-        },
-
-        async submitRoomEdit() {
-          this.roomForm.saving = true;
-          try {
-            const method = this.roomEditMode === 'create' ? 'room.create' : 'room.edit';
-            const params = {
-              id: this.roomForm.id,
-              name: this.roomForm.name || this.roomForm.id,
-              kinds: this.roomForm.kinds,
-              levels: this.roomForm.levels,
-              ical_url: this.roomForm.icalUrl
-            };
-
-            const res = await fetch('/rpc', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ method, params })
-            });
-
-            if (!res.ok) {
-              const t = await res.text();
-              alert('Failed to save room: ' + t);
-              return;
-            }
-
-            if (this.roomEditMode === 'create') {
-              await fetch('/rpc', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  method: 'temperature.set',
-                  params: {
-                    room_id: this.roomForm.id,
-                    name: this.roomForm.name || this.roomForm.id,
-                    kinds: this.roomForm.kinds,
-                    levels: this.roomForm.levels
-                  }
-                })
-              });
-              if (this.roomForm.icalUrl) {
-                await fetch('/rpc', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    method: 'room.edit',
-                    params: { id: this.roomForm.id, ical_url: this.roomForm.icalUrl }
-                  })
-                });
-              }
-            }
-
-            this.closeRoomModal();
-            this.loadRooms();
-            document.body.dispatchEvent(new CustomEvent('roomsUpdated'));
-          } catch (e) {
-            alert('Error: ' + e);
-          } finally {
-            this.roomForm.saving = false;
-          }
-        },
-
-        async deleteRoom() {
-          if (!confirm('Delete this room?\n\nNote: If this room is assigned to heaters, they will need to be reconfigured.')) {
-            return;
-          }
-          try {
-            const res = await fetch('/rpc', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ method: 'room.delete', params: { id: this.roomForm.id } })
-            });
-            if (!res.ok) {
-              const t = await res.text();
-              alert('Failed to delete room: ' + t);
-              return;
-            }
-            this.closeRoomModal();
-            this.loadRooms();
-            document.body.dispatchEvent(new CustomEvent('roomsUpdated'));
-          } catch (e) {
-            alert('Error deleting room: ' + e);
-          }
-        },
-
-        confirmDeleteRoom({roomId, roomName}) {
-          if (confirm(`Delete room "${roomName}"?\n\nNote: If this room is assigned to heaters, they will need to be reconfigured.`)) {
-            this.deleteRoomById(roomId);
-          }
-        },
-
-        async deleteRoomById(roomId) {
-          try {
-            const res = await fetch('/rpc', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ method: 'room.delete', params: { id: roomId } })
-            });
-            if (!res.ok) {
-              const t = await res.text();
-              alert('Failed to delete room: ' + t);
-              return;
-            }
-            this.loadRooms();
-            document.body.dispatchEvent(new CustomEvent('roomsUpdated'));
-          } catch (e) {
-            alert('Error deleting room: ' + e);
-          }
-        },
-
-        async openSetupModal({deviceId}) {
-          this.setupForm = {
-            deviceId,
-            name: '',
-            roomId: '',
-            staEssid: '',
-            staPasswd: '',
-            sta1Essid: '',
-            sta1Passwd: '',
-            apPasswd: '',
-            saving: false
-          };
-          
-          await this.loadRooms();
-          
-          try {
-            const res = await fetch('/rpc', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ method: 'device.show', params: { identifier: deviceId } })
-            });
-            if (res.ok) {
-              const data = await res.json();
-              if (data.result) {
-                this.setupForm.roomId = data.result.room_id || '';
-                this.setupForm.name = data.result.name || '';
-              }
-            }
-          } catch (e) {
-            console.log('Could not fetch device info:', e);
-          }
-          
-          this.modals.setup = true;
-        },
-
-        closeSetupModal() {
-          this.modals.setup = false;
-        },
-
-        async submitSetup() {
-          this.setupForm.saving = true;
-          try {
-            const params = { identifier: this.setupForm.deviceId };
-            
-            if (this.setupForm.name) params.name = this.setupForm.name;
-            if (this.setupForm.staEssid) params.sta_essid = this.setupForm.staEssid;
-            if (this.setupForm.staPasswd) params.sta_passwd = this.setupForm.staPasswd;
-            if (this.setupForm.sta1Essid) params.sta1_essid = this.setupForm.sta1Essid;
-            if (this.setupForm.sta1Passwd) params.sta1_passwd = this.setupForm.sta1Passwd;
-            if (this.setupForm.apPasswd) params.ap_passwd = this.setupForm.apPasswd;
-
-            if (this.setupForm.roomId !== undefined) {
-              await fetch('/rpc', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                  method: 'device.setroom', 
-                  params: { identifier: this.setupForm.deviceId, room_id: this.setupForm.roomId } 
-                })
-              });
-            }
-
-            const res = await fetch('/rpc', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ method: 'device.setup', params })
-            });
-            
-            if (!res.ok) {
-              const t = await res.text();
-              alert('Setup failed: ' + t);
-              return;
-            }
-            
-            this.closeSetupModal();
-            setTimeout(() => location.reload(), 500);
-          } catch (e) {
-            alert('Setup error: ' + e);
-          } finally {
-            this.setupForm.saving = false;
-          }
-        },
-
-        openHeaterModal({deviceId}) {
-          this.heaterForm.deviceId = deviceId;
-          this.modals.heater = true;
-        },
-
-        closeHeaterModal() {
-          this.modals.heater = false;
-        }
-      };
-    }
-  </script>
 </body>
 </html>

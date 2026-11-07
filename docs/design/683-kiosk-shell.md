@@ -137,7 +137,8 @@ No new Go module, no new JS dependency, and no `go:generate` change.
   `hx-trigger="load, refresh, every 5s [kiosk.visible('vacuum') && kiosk.online]"`. An htmx trigger
   filter is standard htmx 2 syntax. It then stops costing anything while hidden or offline.
 - **Fragment failure while online.** htmx does not swap on a network error or on a 5xx by default
-  (htmx 2 default response handling; verify in PR 2), so the previous DOM stays. A
+  (htmx 2 default response handling; verified in PR 2 for the embedded 2.0.4: `responseHandling` is
+  `204: no swap`, `[23]..: swap`, `[45]..: no swap, error`), so the previous DOM stays. A
   `htmx:responseError`/`htmx:sendError` handler adds a muted pill "couldn't refresh, HH:MM" to the
   section header.
 
@@ -249,8 +250,13 @@ Page meta follows the tokens: `theme-color` and `manifest.json` `theme_color`/`b
   narrows that directive to `static/index.html`. Otherwise the font may be stored in the binary
   twice.
 - **Cache-busting for the rest:** the shell links `bulma.min.css`, `htmx.min.js`, `alpine.min.js`,
-  `myhome.css` and `myhome.js` with `?v={{.Version}}`. The asset handler looks up `r.URL.Path`
-  only, ignoring the query (verified, `server.go:85`), so no server change is needed.
+  `myhome.css`, `myhome.js`, `manifest.json` and `penates.svg` with `?v=<content hash>` (the first 12
+  hex digits of the SHA-256 of the embedded bytes, computed once; the `asset` template function).
+  The build version cannot do this job: every hand build reports `unknown`, so the URL never
+  changed and the browser kept a stale `myhome.css` for the `immutable` year. The asset handler
+  looks up `r.URL.Path` only, ignoring the query (verified, `server.go`), so no server change is
+  needed. The icon URL inside `manifest.json` stays unversioned: that file is static bytes and
+  cannot carry a hash of another asset without generation.
 - **No emoji in kiosk chrome.** The current templates use emoji as glyphs. Whether the Pi image
   ships a colour-emoji font is unverified (inferred risk: tofu boxes). Rail, avatars and state
   glyphs use inline SVG, the existing pattern.

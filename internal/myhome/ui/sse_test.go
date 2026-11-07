@@ -218,7 +218,8 @@ func TestSSE_PingsInterleaveWithBroadcasts(t *testing.T) {
 	readFrames(t, sc, 3)
 
 	b.BroadcastEvent(events.Event{Ts: 42, DeviceID: "d1", Component: "c", Event: "e", Severity: "info"})
-	want := `event: eventlog` + "\n" + `data: {"id":0,"ts":42,"received_at":0,"device_id":"d1","component":"c","event":"e","severity":"info"}`
+	ev := events.Event{Ts: 42, DeviceID: "d1", Component: "c", Event: "e", Severity: "info"}
+	b.BroadcastEvent(ev)
 	var got string
 	for i := 0; i < 50; i++ {
 		f := readFrames(t, sc, 1)[0]
@@ -228,8 +229,21 @@ func TestSSE_PingsInterleaveWithBroadcasts(t *testing.T) {
 		got = f
 		break
 	}
-	if got != want {
-		t.Errorf("eventlog frame = %q, want %q", got, want)
+	// Frozen wire format: the events.Event fields in this exact order, then "html"
+	// (the server-rendered table row, see renderEventRow).
+	prefix := `event: eventlog` + "\n" + `data: {"id":0,"ts":42,"received_at":0,"device_id":"d1","component":"c","event":"e","severity":"info","html":"`
+	if !strings.HasPrefix(got, prefix) {
+		t.Fatalf("eventlog frame = %q, want prefix %q", got, prefix)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(got, "event: eventlog\ndata: ")), &payload); err != nil {
+		t.Fatalf("payload is not JSON: %v", err)
+	}
+	if len(payload) != 8 {
+		t.Errorf("payload keys = %v, want exactly id ts received_at device_id component event severity html", payload)
+	}
+	if html := payload["html"]; html != renderEventRow(toEventRows([]events.Event{ev}, nil)[0]) || html == "" {
+		t.Errorf("html = %q, want the rendered event row", html)
 	}
 }
 

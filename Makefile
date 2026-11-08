@@ -264,6 +264,23 @@ logs-local-daemon:
 #                                                                          which accounts for the whole
 #                                                                          delta. Real added cost, so the
 #                                                                          timeout moves with it.)
+#   2026-11-08  internal/shelly/scripts  634.934s, 1 CPU, -race  ->  700s   (#748: t.Parallel() on
+#                                                                          every pool-pump and
+#                                                                          schedule-wrap test. Measured
+#                                                                          with `taskset -c 0`, i.e.
+#                                                                          GOMAXPROCS=1 and -parallel
+#                                                                          1, because a package that
+#                                                                          calls t.Parallel() costs
+#                                                                          wall clock in proportion to
+#                                                                          the cores it gets: 40.98s on
+#                                                                          24 CPUs, 634.934s on one --
+#                                                                          the same as the serial
+#                                                                          634.658s before the change.
+#                                                                          The timeout must hold on a
+#                                                                          one-thread runner, so it is
+#                                                                          derived from the one-CPU run.
+#                                                                          634.934 * 1.1 = 698.4s,
+#                                                                          rounded up to 700s.)
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
@@ -286,7 +303,7 @@ TESTFLAGS ?= -race
 # five times across workflows against `make test` twice, so a timeout that
 # covers only `test` covers the minority case -- which is exactly how #552
 # survived its first fix.
-TESTTIMEOUT ?= 674s
+TESTTIMEOUT ?= 700s
 
 test: build
 	bash linux/systemd/update_test.sh

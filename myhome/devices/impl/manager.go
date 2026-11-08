@@ -323,6 +323,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
 	go dm.deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")))
 	go dm.primeAllPolarities(logr.NewContext(ctx, dm.log.WithName("primePolarities")))
+	ui.SetStarting(true) // cleared by the refresh job after its first pass (#763)
 	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
@@ -667,6 +668,20 @@ func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, interval time.
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	// The UI shows "Starting…" on switches nobody has looked at yet (#763). The
+	// first full pass of this round-robin has tried every Gen2 device once, so
+	// it is the end of that phase; a device still unknown after it was tried
+	// and is plainly unknown. The deferred call covers every exit (error,
+	// cancellation), so the phase can never outlive this job.
+	defer dm.endStarting(ctx)
+	startingOver := false
+	endStartingOnce := func() {
+		if !startingOver {
+			startingOver = true
+			dm.endStarting(ctx)
+		}
+	}
+
 	i := 0
 
 	for {
@@ -691,16 +706,41 @@ func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, interval time.
 
 			if len(gen2Devices) == 0 {
 				log.V(1).Info("No Gen2+ devices to refresh (Gen1 and BLU devices are updated via MQTT)")
+				endStartingOnce()
 				continue
 			}
 
 			if i >= len(gen2Devices) {
 				i = 0
+				endStartingOnce() // wrapped: every Gen2 device has been tried once
 			}
 
 			log.Info("Refreshing device", "index", i, "total_gen2_devices", len(gen2Devices), "device", gen2Devices[i].DeviceSummary)
 			dm.UpdateChannel() <- gen2Devices[i]
 			i++
+		}
+	}
+}
+
+// endStarting closes the UI's post-start "Starting…" phase and tells open
+// browsers to re-fetch the switch devices, so rows still showing "Starting…"
+// turn into plain unknown without a page reload. The minimal view is the one
+// broadcastStateChange sends: the browser only uses the id.
+func (dm *DeviceManager) endStarting(ctx context.Context) {
+	if !ui.IsStarting() {
+		return
+	}
+	ui.SetStarting(false)
+	if dm.sseBroadcaster == nil {
+		return
+	}
+	devices, err := dm.GetAllDevices(ctx)
+	if err != nil {
+		return
+	}
+	for _, d := range devices {
+		if c := d.Config; c != nil && (c.Switch0 != nil || c.Switch1 != nil || c.Switch2 != nil || c.Switch3 != nil) {
+			dm.sseBroadcaster.BroadcastDeviceUpdate(ui.DeviceView{Id: d.Id(), Name: d.Name()})
 		}
 	}
 }

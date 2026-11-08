@@ -15,19 +15,23 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// unreachableDevices installs a registrar whose every device call is counted and
-// then hangs for 3 s, like a device that does not answer (#732). It returns the counter.
+// unreachableDevices installs a registrar with every real method handler
+// registered (shelly.Init), so a call to ANY method gets past Device.CallE's
+// handler lookup and reaches the counting caller; each call is counted and then
+// hangs for 3 s, like a device that does not answer (#732). It returns the counter.
+// The registrar is reset when the test ends.
 func unreachableDevices(t *testing.T) *atomic.Int32 {
 	t.Helper()
 	var calls atomic.Int32
+	shelly.Init(logr.Discard(), nil, time.Second, 0)
 	r := shelly.GetRegistrar()
-	r.Init(logr.Discard())
-	r.RegisterMethodHandler(string(kvs.Get), types.MethodHandler{Allocate: func() any { return new(kvs.GetResponse) }})
-	r.RegisterDeviceCaller(types.ChannelDefault, func(ctx context.Context, _ types.Device, _ types.MethodHandler, _ any, _ any) (any, error) {
+	r.RegisterDeviceCaller(types.ChannelDefault, func(ctx context.Context, _ types.Device, mh types.MethodHandler, _ any, _ any) (any, error) {
 		calls.Add(1)
+		t.Logf("device call attempted: %s", mh.Method)
 		time.Sleep(3 * time.Second)
 		return nil, context.DeadlineExceeded
 	})
+	t.Cleanup(func() { r.Init(logr.Discard()) })
 	return &calls
 }
 

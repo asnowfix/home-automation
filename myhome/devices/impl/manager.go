@@ -30,6 +30,7 @@ import (
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	shellycfg "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/go-logr/logr"
 )
@@ -621,10 +622,19 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, refreshed chan
 // (#732), so every refresh path calls this, and so does the startup pass.
 func primeSwitchPolarity(ctx context.Context, log logr.Logger, device *myhome.Device) {
 	sd, ok := device.Impl().(*shelly.Device)
-	if !ok || sd == nil || device.Config == nil {
+	if !ok || sd == nil {
 		return
 	}
-	c := device.Config
+	primeSwitchPolarityVia(ctx, log, sd, device.Config)
+}
+
+// primeSwitchPolarityVia primes through the given handle without touching any
+// shared device state; the KVS cache is keyed by device id, so any handle for the
+// device fills the entry the UI reads.
+func primeSwitchPolarityVia(ctx context.Context, log logr.Logger, sd *shelly.Device, c *shellycfg.Config) {
+	if c == nil {
+		return
+	}
 	if c.Switch0 == nil && c.Switch1 == nil && c.Switch2 == nil && c.Switch3 == nil {
 		return
 	}
@@ -651,15 +661,21 @@ func (dm *DeviceManager) primeAllPolarities(ctx context.Context) {
 		if shelly.IsGen1Device(d.Id()) || shelly.IsBluDevice(d.Id()) {
 			continue
 		}
-		if d.Impl() == nil {
-			sd, err := shelly.NewDeviceFromSummary(ctx, log, d)
+		// Never publish a handle with WithImpl here: the devices are shared with the
+		// MQTT watcher and the UI, and Impl is an unsynchronized field. Use the
+		// existing handle if there is one, else a private one that is dropped.
+		sd, ok := d.Impl().(*shelly.Device)
+		if !ok || sd == nil {
+			impl, err := shelly.NewDeviceFromSummary(ctx, log, d)
 			if err != nil {
 				continue
 			}
-			d.WithImpl(sd)
+			if sd, ok = impl.(*shelly.Device); !ok {
+				continue
+			}
 		}
 		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		primeSwitchPolarity(cctx, log, d)
+		primeSwitchPolarityVia(cctx, log, sd, d.Config)
 		cancel()
 	}
 	log.Info("Switch polarity pass done", "devices", len(devices))

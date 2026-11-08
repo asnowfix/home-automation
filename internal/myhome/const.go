@@ -60,6 +60,7 @@ const (
 	VacuumRooms                   Verb = "vacuum.rooms"
 	VacuumRoomName                Verb = "vacuum.roomname"
 	VacuumRoomsSync               Verb = "vacuum.roomsync"
+	VacuumRoomAssign              Verb = "vacuum.roomassign"
 	VacuumExport                  Verb = "vacuum.export"
 	VacuumImport                  Verb = "vacuum.import"
 )

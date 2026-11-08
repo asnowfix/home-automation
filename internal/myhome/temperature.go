@@ -1,6 +1,13 @@
 package myhome
 
+import "errors"
+
 // Temperature RPC types
+
+// ErrRoomNotFound is wrapped by the rooms service when a room id does not
+// exist (temperature.get). It lives here so other services can tell "no such
+// room" from any other failure without importing myhome/rooms.
+var ErrRoomNotFound = errors.New("room not found")
 
 // DayType represents the type of day for temperature scheduling
 type DayType string

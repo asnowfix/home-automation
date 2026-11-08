@@ -407,6 +407,14 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &VacuumOKResult{}
 		},
 	},
+	VacuumRoomAssign: {
+		NewParams: func() any {
+			return &VacuumRoomAssignParams{}
+		},
+		NewResult: func() any {
+			return &VacuumRoomAssignResult{}
+		},
+	},
 	VacuumRoomsSync: {
 		NewParams: func() any {
 			return &VacuumParams{}

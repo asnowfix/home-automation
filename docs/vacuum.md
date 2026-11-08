@@ -66,6 +66,9 @@ myhome ctl vacuum pause | resume | stop | dock | find
 myhome ctl vacuum rooms                     # known rooms, with where each came from
 myhome ctl vacuum rooms sync                # fetch the rooms from the iRobot cloud account
 myhome ctl vacuum rooms name 11 kitchen     # name a room the cloud did not provide
+myhome ctl vacuum rooms assign Cuisine cuisine   # put the area named Cuisine in the daemon room "cuisine"
+myhome ctl vacuum rooms assign Cuisine salon --map <map-id>   # --map when the name exists on several maps
+myhome ctl vacuum rooms unassign Cuisine         # take the area out of its room
 ```
 
 `--robot <name|id>` selects a robot, and can be omitted (the daemon has one configured robot). A command
@@ -169,6 +172,33 @@ refresh them. Note that the robot's version changes after cleans, not only after
 above), so learned rooms go stale often. That is one reason the cloud is preferred. (Whether this
 staleness check is even right is open: a room started from the app may echo the cloud's version,
 which then never equals the robot's reported one.)
+
+### Assigning areas to the daemon's rooms
+
+A robot area (region) can be assigned to a room of the daemon (`myhome ctl room list`), so a
+room can later be cleaned by name. The CLI designates an area by the **human-friendly name** the
+daemon stores for it (the `NAME` column of `vacuum rooms`, e.g. `Cuisine`; case and surrounding
+spaces do not matter), never by the robot's or cloud's id. `vacuum rooms assign <area-name> <room-id>`
+stores the room id in `vacuum_regions.room_id` (RPC `vacuum.roomassign`); `unassign <area-name>`
+clears it; the `ROOM` column of `vacuum rooms` shows it (`-` when unassigned).
+
+- **The daemon resolves the name**, from the areas it stores, so the CLI holds no business logic and
+  the robot need not be connected. An unknown name is refused (`no area "Garage" for robot ...`); an
+  area that has no name yet must first be named with `vacuum rooms name`. The RPC also accepts
+  `region_id` instead of `region_name` (exactly one), for callers that hold the id.
+- **An area is in at most one room**; several areas may share a room. Assigning an area that is
+  already in another room **moves** it, and the command says so (`area Cuisine moved from room
+  salon to room cuisine`).
+- A name (like an id) is unique **per robot map** only. If it matches on two maps the command asks
+  for `--map <map-id>` (it picks the single non-stale one when there is exactly one). Two areas of
+  **one** map with the same name cannot be told apart: the command refuses and asks to rename one.
+  Staleness of learned areas is unknown without a live connection and then counts as not stale.
+- The daemon checks that the room exists (through `temperature.get`); an unknown room is refused,
+  and a daemon without rooms answers "rooms are not enabled on this daemon". Unassigning needs no room.
+- The assignment survives `vacuum rooms sync` (renames, removals: a removed area goes stale and keeps
+  its room) and is carried by `ctl db export` / `import`. A room deleted afterwards leaves a dangling
+  id, which readers must treat as unassigned.
+- A stale area may be assigned (to repair a mapping), but is still never cleaned.
 
 ## Finding the robot
 

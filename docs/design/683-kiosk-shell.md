@@ -320,8 +320,10 @@ Page meta follows the tokens: `theme-color` and `manifest.json` `theme_color`/`b
    the same dialog through `$store.confirm.ask(text)`. The dialog has a title, one line of text,
    [Cancel] on the left and [Confirm] (primary) on the right, both at least 48 px tall, with no
    backdrop dismiss and no timeout.
-   - **Confirm required:** pool pump switch, vacuum start/dock/clean-room, device refresh, device
-     setup, room delete, and any `device.*` write.
+   - **Confirm required:** pool pump switch, vacuum **Clean all** and **Stop** (as #685 is written;
+     owner decision 2026-11-08: no other vacuum-section control asks, dock included), the room
+     page's "Clean this room" (#684, owner answer 3 of 2026-11-08), device refresh, device setup,
+     room delete, and any `device.*` write.
    - **Not required:** ordinary light and plug toggles, which are reversible, instant and frequent.
 6. Text is at least 14 px everywhere, and the body is 16 px.
 7. No `target="_blank"`, external links, `window.open` or native dialogs (repeated from §3, because

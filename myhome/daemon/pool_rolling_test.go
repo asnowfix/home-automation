@@ -15,8 +15,8 @@ var rollNow = time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 
 func ago(h float64) time.Time { return rollNow.Add(-time.Duration(h * float64(time.Hour))) }
 
-func smp(hoursAgo, achieved float64, runtime, anchor int64) turnoverSample {
-	return turnoverSample{ts: ago(hoursAgo), achieved: achieved, runtimeSec: runtime, target: 5, anchor: anchor}
+func smp(hoursAgo, achieved float64, anchor int64) turnoverSample {
+	return turnoverSample{ts: ago(hoursAgo), achieved: achieved, target: 5, anchor: anchor}
 }
 
 // stopsAt builds pump_stop times for samples (a stop just before each).
@@ -43,42 +43,35 @@ func TestRollingFigures(t *testing.T) {
 		stops []time.Time
 		up    time.Time
 		want  string
-		run   int64
 	}{
-		{"same day increments", []turnoverSample{smp(30, 1, 3600, 1), smp(10, 2.5, 9000, 1), smp(5, 3.5, 12600, 1)}, stopsAt(30, 10, 5), long, "2.5", 9000},
-		{"reset: first stop after counts whole", []turnoverSample{smp(30, 4, 14400, 1), smp(20, 1.5, 3600, 2), smp(5, 3, 7200, 2)}, stopsAt(30, 20, 5), long, "3", 7200},
-		{"reset to a value above the old one is still detected", []turnoverSample{smp(30, 1, 100, 1), smp(20, 2, 200, 2)}, stopsAt(30, 20), long, "2", 200},
-		{"old stop outside window ignored", []turnoverSample{smp(40, 3, 1, 1), smp(30, 5, 2, 1)}, stopsAt(40, 30), long, "0", 0},
-		{"no stop, daemon up whole window: 0", nil, nil, long, "0", 0},
-		{"no stop, daemon started recently: unknown", nil, nil, ago(1), "unknown", 0},
-		{"window start has no predecessor: unknown", []turnoverSample{smp(5, 1, 1, 1)}, stopsAt(5), long, "unknown", 0},
-		{"pre-anchor event: unknown", []turnoverSample{smp(30, 1, 1, 0), smp(5, 2, 2, 0)}, stopsAt(30, 5), long, "unknown", 0},
-		{"counter fell within a day: unknown", []turnoverSample{smp(30, 3, 3, 1), smp(5, 2, 2, 1)}, stopsAt(30, 5), long, "unknown", 0},
+		{"same day increments", []turnoverSample{smp(30, 1, 1), smp(10, 2.5, 1), smp(5, 3.5, 1)}, stopsAt(30, 10, 5), long, "2.5"},
+		{"reset: first stop after counts whole", []turnoverSample{smp(30, 4, 1), smp(20, 1.5, 2), smp(5, 3, 2)}, stopsAt(30, 20, 5), long, "3"},
+		{"reset to a value above the old one is still detected", []turnoverSample{smp(30, 1, 1), smp(20, 2, 2)}, stopsAt(30, 20), long, "2"},
+		{"old stop outside window ignored", []turnoverSample{smp(40, 3, 1), smp(30, 5, 1)}, stopsAt(40, 30), long, "0"},
+		{"no stop, daemon up whole window: 0", nil, nil, long, "0"},
+		{"no stop, daemon started recently: unknown", nil, nil, ago(1), "unknown"},
+		{"window start has no predecessor: unknown", []turnoverSample{smp(5, 1, 1)}, stopsAt(5), long, "unknown"},
+		{"pre-anchor event: unknown", []turnoverSample{smp(30, 1, 0), smp(5, 2, 0)}, stopsAt(30, 5), long, "unknown"},
+		{"counter fell within a day: unknown", []turnoverSample{smp(30, 3, 1), smp(5, 2, 1)}, stopsAt(30, 5), long, "unknown"},
 		// A stop (at 10 h) whose read failed must not be absorbed by the next increment.
-		{"failed read in window: unknown", []turnoverSample{smp(30, 1, 100, 1), smp(5, 3, 300, 1)}, stopsAt(30, 10, 5), long, "unknown", 0},
-		{"failed read before window start: unknown, not over-counted", []turnoverSample{smp(40, 1, 100, 1), smp(5, 3, 300, 1)}, stopsAt(40, 30, 5), long, "unknown", 0},
-		{"all reads failed, stop in window: never 0", nil, stopsAt(8), long, "unknown", 0},
-		{"stop just now, read pending: not yet unknown", []turnoverSample{smp(30, 1, 100, 1), smp(5, 3, 300, 1)}, append(stopsAt(30, 5), rollNow.Add(-20*time.Second)), long, "2", 200},
+		{"failed read in window: unknown", []turnoverSample{smp(30, 1, 1), smp(5, 3, 1)}, stopsAt(30, 10, 5), long, "unknown"},
+		{"failed read before window start: unknown, not over-counted", []turnoverSample{smp(40, 1, 1), smp(5, 3, 1)}, stopsAt(40, 30, 5), long, "unknown"},
+		{"all reads failed, stop in window: never 0", nil, stopsAt(8), long, "unknown"},
+		{"stop just now, read pending: not yet unknown", []turnoverSample{smp(30, 1, 1), smp(5, 3, 1)}, append(stopsAt(30, 5), rollNow.Add(-20*time.Second)), long, "2"},
 		// An unanchored event among good ones: unknown while in the window, recovers after.
-		{"unanchored event in window", []turnoverSample{smp(30, 1, 1, 1), smp(10, 2, 2, 0), smp(5, 3, 3, 1)}, stopsAt(30, 10, 5), long, "unknown", 0},
-		{"unanchored event has left the window", []turnoverSample{smp(40, 2, 2, 0), smp(30, 1, 1, 1), smp(5, 3, 3, 1)}, stopsAt(40, 30, 5), long, "2", 2},
+		{"unanchored event in window", []turnoverSample{smp(30, 1, 1), smp(10, 2, 0), smp(5, 3, 1)}, stopsAt(30, 10, 5), long, "unknown"},
+		{"unanchored event has left the window", []turnoverSample{smp(40, 2, 0), smp(30, 1, 1), smp(5, 3, 1)}, stopsAt(40, 30, 5), long, "2"},
 	} {
 		got := rollingFigures(tc.in, tc.stops, rollNow, tc.up)
 		if vol(got) != tc.want {
 			t.Errorf("%s: volume = %s, want %s", tc.name, vol(got), tc.want)
 			continue
 		}
-		if tc.want != "unknown" && (got.Runtime24h == nil || *got.Runtime24h != tc.run) {
-			t.Errorf("%s: runtime = %v, want %d", tc.name, got.Runtime24h, tc.run)
-		}
-		if tc.want == "unknown" && got.Runtime24h != nil {
-			t.Errorf("%s: runtime known while volume unknown", tc.name)
-		}
 	}
 }
 
 func TestRollingTargetSurvivesUnknownVolume(t *testing.T) {
-	f := rollingFigures([]turnoverSample{smp(5, 1, 1, 1)}, stopsAt(5), rollNow, ago(72))
+	f := rollingFigures([]turnoverSample{smp(5, 1, 1)}, stopsAt(5), rollNow, ago(72))
 	if f.Turnover24h != nil || f.Target == nil || *f.Target != 5 {
 		t.Errorf("figures = %+v, want unknown volume with target 5", f)
 	}
@@ -136,9 +129,9 @@ func TestRolling24hKnownAnswerRealStore(t *testing.T) {
 	p := &PoolNotices{log: logr.Discard(), events: svc, deviceID: "pool-roll"}
 	f := p.Rolling24h(ctx, now, now.Add(-72*time.Hour))
 	// In the window: the 19 h-ago run (stop at cumulative 4 h, previous 2 h: 2 h
-	// = 1.0 volume) and the run after the reset (1 h = 0.5): 1.5 volume, 3 h.
-	if f.Turnover24h == nil || *f.Turnover24h != 1.5 || f.Runtime24h == nil || *f.Runtime24h != 3*3600 || f.Target == nil || *f.Target != 5 {
-		t.Errorf("figures = %+v (volume %s), want 1.5 / 10800 s / target 5", f, vol(f))
+	// = 1.0 volume) and the run after the reset (1 h = 0.5): 1.5 volume.
+	if f.Turnover24h == nil || *f.Turnover24h != 1.5 || f.Target == nil || *f.Target != 5 {
+		t.Errorf("figures = %+v (volume %s), want 1.5 / target 5", f, vol(f))
 	}
 }
 
@@ -175,8 +168,8 @@ func TestPoolSnapshotRollingAcrossMidnight(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := out.(*myhome.PoolSnapshotResult)
-	if r.Turnover24h == nil || *r.Turnover24h != 2.5 || r.TurnoverTarget == nil || *r.TurnoverTarget != 5 || r.Runtime24hSec == nil || *r.Runtime24hSec != 9000 {
-		t.Errorf("at 00:01 result = %+v, want 2.5 / target 5 / 9000 s", r)
+	if r.Turnover24h == nil || *r.Turnover24h != 2.5 || r.TurnoverTarget == nil || *r.TurnoverTarget != 5 {
+		t.Errorf("at 00:01 result = %+v, want 2.5 / target 5", r)
 	}
 	if n := dev.calls.Load(); n != 0 {
 		t.Errorf("handleSnapshot made %d device call(s), want 0", n)
@@ -212,7 +205,7 @@ func TestRecordTurnoverTodayCarriesAnchor(t *testing.T) {
 		t.Fatalf("events = %v, err = %v", evs, err)
 	}
 	s := parseTurnoverSamples(evs)
-	if len(s) != 1 || s[0].achieved != 1.5 || s[0].anchor != 1794000000 || s[0].target != 5 || s[0].runtimeSec != 3600 {
+	if len(s) != 1 || s[0].achieved != 1.5 || s[0].anchor != 1794000000 || s[0].target != 5 {
 		t.Errorf("samples = %+v", s)
 	}
 }

@@ -2,7 +2,6 @@ package ui
 
 import (
 	"errors"
-	"fmt"
 	"html/template"
 	"net/http"
 
@@ -18,7 +17,6 @@ type poolPanelView struct {
 	WaterSupplyActive *bool // nil = unknown, rendered "--"
 	TurnoverAchieved  *float64
 	TurnoverTarget    *float64
-	RuntimeMin        string // "" = unknown
 }
 
 const poolPanelTemplate = `{{if eq .State "disabled"}}
@@ -33,7 +31,6 @@ const poolPanelTemplate = `{{if eq .State "disabled"}}
     {{else if isActive .WaterSupplyActive}}<span class="tag is-warning">Water supply: pump paused</span>
     {{else}}<span class="tag is-success">Water supply: OK</span>{{end}}
     <span class="tag">Filtered 24 h: {{with turnoverText .TurnoverAchieved .TurnoverTarget}}{{.}}{{else}}--{{end}}</span>
-    <span class="tag">Pump runtime 24 h: {{with .RuntimeMin}}{{.}} min{{else}}--{{end}}</span>
   </p>
 </div>
 {{end}}`
@@ -54,17 +51,13 @@ func poolViewFromStatus(res any, err error) poolPanelView {
 	if !ok {
 		return poolPanelView{State: "unavailable"}
 	}
-	v := poolPanelView{
+	return poolPanelView{
 		State:             "ok",
 		Name:              st.DeviceID,
 		WaterSupplyActive: st.WaterSupplyActive,
 		TurnoverAchieved:  st.Turnover24h, // rolling 24 h
 		TurnoverTarget:    st.TurnoverTarget,
 	}
-	if st.Runtime24hSec != nil {
-		v.RuntimeMin = fmt.Sprint(*st.Runtime24hSec / 60)
-	}
-	return v
 }
 
 // PoolPanel renders the Pool section from pool.snapshot (daemon memory only, no

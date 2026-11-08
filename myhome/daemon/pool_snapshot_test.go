@@ -28,7 +28,7 @@ func TestPoolSnapshotUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := out.(*myhome.PoolSnapshotResult)
-	if s.DeviceID != "pool-1" || s.WaterSupplyActive != nil || s.Turnover24h != nil || s.TurnoverTarget != nil || s.Runtime24hSec != nil {
+	if s.DeviceID != "pool-1" || s.WaterSupplyActive != nil || s.Turnover24h != nil || s.TurnoverTarget != nil {
 		t.Errorf("snapshot = %+v, want only DeviceID set", s)
 	}
 }

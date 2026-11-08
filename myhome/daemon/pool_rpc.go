@@ -94,7 +94,6 @@ func (h *PoolRPCHandler) handleSnapshot(ctx context.Context, _ any) (any, error)
 	// pool.pump_stop events already persisted (no device call). Unknown stays nil.
 	f := h.pool.Rolling24h(ctx, now(), h.startedAt)
 	res.Turnover24h, res.TurnoverTarget = f.Turnover24h, f.Target
-	res.Runtime24hSec = f.Runtime24h
 	return res, nil
 }
 

@@ -126,8 +126,8 @@ func TestPoolPanelTemplateStates(t *testing.T) {
 		return b.String()
 	}
 	achieved, target, active := 3.2, 5.0, false
-	ok := render(poolPanelView{State: "ok", Name: "Pump", WaterSupplyActive: &active, TurnoverAchieved: &achieved, TurnoverTarget: &target, RuntimeMin: "90"})
-	for _, s := range []string{"Pump", "Water supply: OK", "3.2/5.0 x/day", "90 min"} {
+	ok := render(poolPanelView{State: "ok", Name: "Pump", WaterSupplyActive: &active, TurnoverAchieved: &achieved, TurnoverTarget: &target})
+	for _, s := range []string{"Pump", "Water supply: OK", "3.2/5.0 x/day"} {
 		if !strings.Contains(ok, s) {
 			t.Errorf("ok state lacks %q: %s", s, ok)
 		}
@@ -137,7 +137,7 @@ func TestPoolPanelTemplateStates(t *testing.T) {
 		t.Error("paused state not rendered")
 	}
 	unknown := render(poolPanelView{State: "ok", Name: "Pump"})
-	for _, s := range []string{"Water supply: --", "Filtered 24 h: --", "runtime 24 h: --"} {
+	for _, s := range []string{"Water supply: --", "Filtered 24 h: --"} {
 		if !strings.Contains(unknown, s) {
 			t.Errorf("unknown state lacks %q: %s", s, unknown)
 		}

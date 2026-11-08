@@ -12,13 +12,13 @@ import (
 
 // Rolling 24 h pool figures (#731, owner decision on #745).
 //
-// The device's turnover-today and runtime-sec counters are cumulative since
+// The device's turnover-today counter is cumulative since
 // the device's own reset (sunrise in summer, 00:15 in winter), so they are not
 // 24 h windows. The daemon already persists one pool.turnover_today event per
-// pump stop carrying both counters, the configured target and the device's day
+// pump stop carrying the counter, the configured target and the device's day
 // anchor runtime_ts, which changes exactly when the device resets them.
-// Differencing consecutive events with the same anchor gives the volume and the
-// runtime of each completed run; the first event after a reset contributes its
+// Differencing consecutive events with the same anchor gives the volume of each
+// completed run; the first event after a reset contributes its
 // whole value. The target is configuration, not a counter: it is taken from the
 // newest event whatever its age.
 //
@@ -56,17 +56,15 @@ const (
 )
 
 type turnoverSample struct {
-	ts         time.Time
-	achieved   float64
-	runtimeSec int64
-	target     float64
-	anchor     int64 // device day anchor (runtime_ts); 0 = not recorded
+	ts       time.Time
+	achieved float64
+	target   float64
+	anchor   int64 // device day anchor (runtime_ts); 0 = not recorded
 }
 
 // poolFigures is the rolling answer; nil fields are unknown.
 type poolFigures struct {
 	Turnover24h *float64
-	Runtime24h  *int64 // seconds
 	Target      *float64
 }
 
@@ -79,17 +77,16 @@ func parseTurnoverSamples(evs []events.Event) []turnoverSample {
 			continue
 		}
 		var d struct {
-			Achieved   *float64 `json:"turnover_achieved"`
-			Target     float64  `json:"turnover_target"`
-			RuntimeSec int64    `json:"runtime_sec"`
-			RuntimeTs  int64    `json:"runtime_ts"`
+			Achieved  *float64 `json:"turnover_achieved"`
+			Target    float64  `json:"turnover_target"`
+			RuntimeTs int64    `json:"runtime_ts"`
 		}
 		if json.Unmarshal([]byte(*e.Data), &d) != nil || d.Achieved == nil {
 			continue
 		}
 		out = append(out, turnoverSample{
 			ts: time.Unix(int64(e.Ts), 0), achieved: *d.Achieved,
-			runtimeSec: d.RuntimeSec, target: d.Target, anchor: d.RuntimeTs,
+			target: d.Target, anchor: d.RuntimeTs,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ts.Before(out[j].ts) })
@@ -143,7 +140,6 @@ func rollingFigures(samples []turnoverSample, stops []time.Time, now, upSince ti
 	}
 	start := now.Add(-rollingWindow)
 	var vol float64
-	var run int64
 	first := -1
 	for i, s := range samples {
 		if s.ts.Before(start) || s.ts.After(now) {
@@ -158,15 +154,13 @@ func rollingFigures(samples []turnoverSample, stops []time.Time, now, upSince ti
 		prev := samples[i-1]
 		if s.anchor != prev.anchor {
 			vol += s.achieved // the device reset between the two stops
-			run += s.runtimeSec
 			continue
 		}
-		dv, dr := s.achieved-prev.achieved, s.runtimeSec-prev.runtimeSec
-		if dv < 0 || dr < 0 {
+		dv := s.achieved - prev.achieved
+		if dv < 0 {
 			return f // same day but a counter fell (e.g. reconfiguration): inconsistent
 		}
 		vol += dv
-		run += dr
 	}
 	if first < 0 {
 		// No turnover event in the window: 0 is a fact only if the daemon heard
@@ -174,15 +168,15 @@ func rollingFigures(samples []turnoverSample, stops []time.Time, now, upSince ti
 		if upSince.IsZero() || upSince.After(start) || unpairedStop(stops, nil, start, now) {
 			return f
 		}
-		zv, zr := 0.0, int64(0)
-		f.Turnover24h, f.Runtime24h = &zv, &zr
+		zv := 0.0
+		f.Turnover24h = &zv
 		return f
 	}
 	if unpairedStop(stops, samples, samples[first-1].ts, now) {
 		return f // a stop whose read failed: its run would be absorbed or lost
 	}
 	vol = math.Round(vol*100) / 100
-	f.Turnover24h, f.Runtime24h = &vol, &run
+	f.Turnover24h = &vol
 	return f
 }
 

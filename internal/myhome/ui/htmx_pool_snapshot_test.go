@@ -72,10 +72,10 @@ func TestRenderDevicesPoolFromMemory(t *testing.T) {
 // Known snapshot values render, still without a device call.
 func TestRenderDevicesPoolSnapshotValues(t *testing.T) {
 	calls := unreachableDevices(t)
-	ok, achieved, target, runtime := false, 3.2, 5.0, int64(5400)
+	ok, achieved, target := false, 3.2, 5.0
 	live := stubPoolVerbs(t, &myhome.PoolSnapshotResult{
 		DeviceID: "shellypro1-aabbccddee11", WaterSupplyActive: &ok,
-		Turnover24h: &achieved, TurnoverTarget: &target, Runtime24hSec: &runtime,
+		Turnover24h: &achieved, TurnoverTarget: &target,
 	})
 	h := newMux(renderCtx(), logr.Discard(), nil, fakeRegistry{devs: []*myhome.Device{switchDevice(t, "shellypro1-aabbccddee11", false)}}, nil, nil, "", nil, nil)
 

@@ -44,13 +44,13 @@
 <body class="mh-shell" data-version="{{.Version}}" x-data="app()" @open-setup-modal.window="openSetupModal($event.detail)" @open-heater-modal.window="openHeaterModal($event.detail)" @edit-room.window="editRoom($event.detail)" @delete-room.window="confirmDeleteRoom($event.detail)">
 
   <nav class="mh-rail" aria-label="Sections">
-    <button type="button" class="mh-rail-item" :class="{'is-active': section === 'home'}" :aria-current="section === 'home' ? 'page' : null" @click="go('home')">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>
-      <span>Home</span>
-    </button>
     <button type="button" class="mh-rail-item" :class="{'is-active': section === 'rooms'}" :aria-current="section === 'rooms' ? 'page' : null" @click="go('rooms')">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><circle cx="15" cy="12" r="1"/></svg>
       <span>Rooms</span>
+    </button>
+    <button type="button" class="mh-rail-item" :class="{'is-active': section === 'home'}" :aria-current="section === 'home' ? 'page' : null" @click="go('home')">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg>
+      <span>Devices</span>
     </button>
     <button type="button" class="mh-rail-item" :class="{'is-active': section === 'pool'}" :aria-current="section === 'pool' ? 'page' : null" @click="go('pool')">
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 17c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2"/><path d="M2 21c2.5 0 2.5-2 5-2s2.5 2 5 2 2.5-2 5-2 2.5 2 5 2"/><path d="M8 13V5a2 2 0 0 1 4 0"/><path d="M16 13V5a2 2 0 0 0-4 0"/></svg>
@@ -73,20 +73,6 @@
     <span class="mh-offline-since" x-text="staleLabel"></span>
   </div>
   <main id="mh-content" class="mh-content" :class="{'is-stale': !online}">
-      <section id="sec-home" data-section="home" x-show="section === 'home'" x-cloak>
-        <header class="mh-sec-head">
-          <h2 class="title is-4">Home</h2>
-          <span class="mh-pill" data-pill hidden></span>
-        </header>
-        <div class="mh-grid"
-             id="devices-container"
-             data-refresh
-             hx-get="/htmx/devices"
-             hx-trigger="load, refresh"
-             hx-swap="innerHTML">
-          <p class="has-text-grey">Loading devices...</p>
-        </div>
-      </section>
       <section id="sec-rooms" data-section="rooms" x-show="section === 'rooms'" x-cloak>
         <header class="mh-sec-head">
           <h2 class="title is-4">Rooms</h2>
@@ -100,6 +86,20 @@
              hx-trigger="load, refresh, roomsUpdated from:body"
              hx-swap="innerHTML">
           <div class="column is-12"><p class="has-text-grey">Loading rooms...</p></div>
+        </div>
+      </section>
+      <section id="sec-home" data-section="home" x-show="section === 'home'" x-cloak>
+        <header class="mh-sec-head">
+          <h2 class="title is-4">Devices</h2>
+          <span class="mh-pill" data-pill hidden></span>
+        </header>
+        <div class="mh-grid"
+             id="devices-container"
+             data-refresh
+             hx-get="/htmx/devices"
+             hx-trigger="load, refresh"
+             hx-swap="innerHTML">
+          <p class="has-text-grey">Loading devices...</p>
         </div>
       </section>
       <section id="sec-pool" data-section="pool" x-show="section === 'pool'" x-cloak>

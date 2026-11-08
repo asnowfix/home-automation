@@ -132,10 +132,10 @@ func TestKioskLivenessStateMachine(t *testing.T) {
 	if got := js(`String(kiosk.online) + "|" + kiosk.staleText + "|" + kiosk.reopenDelay`); got != "true||3000" {
 		t.Errorf("after recovery = %s", got)
 	}
-	if got := js(`kiosk.recovered(false); calls.join(" ")`); got != "d:home r:rooms d:pool d:vacuum d:events" {
+	if got := js(`kiosk.recovered(false); calls.join(" ")`); got != "r:rooms d:home d:pool d:vacuum d:events" {
 		t.Errorf("recovered calls = %s", got)
 	}
-	if got := js(`calls = []; kiosk.recovered(true); calls.join(" ")`); got != "r:home r:rooms r:pool r:vacuum r:events" {
+	if got := js(`calls = []; kiosk.recovered(true); calls.join(" ")`); got != "r:rooms r:home r:pool r:vacuum r:events" {
 		t.Errorf("recovered(all) calls = %s", got)
 	}
 	// a second frame is not a recovery

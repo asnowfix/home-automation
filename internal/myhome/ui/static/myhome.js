@@ -1,8 +1,8 @@
 // Shell state shared with htmx trigger filters (kiosk.visible) and fragment
 // freshness bookkeeping. The Alpine component below owns navigation.
 var kiosk = {
-  sections: ['home', 'rooms', 'pool', 'vacuum', 'events'],
-  section: 'home',
+  sections: ['rooms', 'home', 'pool', 'vacuum', 'events'],
+  section: 'rooms',
   staleMs: 60000,
 
   // Daemon liveness (682 §5 rule). online is also read by htmx trigger filters.
@@ -126,7 +126,7 @@ var kiosk = {
 
   fromHash: function() {
     var h = (location.hash || '').replace('#', '');
-    return this.sections.indexOf(h) >= 0 ? h : 'home';
+    return this.sections.indexOf(h) >= 0 ? h : 'rooms';
   },
 
   el: function(name) { return document.getElementById('sec-' + name); },
@@ -176,9 +176,14 @@ var kiosk = {
 
   // Re-render one device (all its rows) from the server. A GET, so it is
   // allowed while offline; the previous DOM stays if it fails.
+  // A device renders on both Rooms and Devices, so its element ids occur twice
+  // in the DOM (one copy per section): every copy is looked up and updated.
+  byId: function(id) { return document.querySelectorAll('[id="' + id + '"]'); },
+
   reloadDevice: function(id) {
-    var el = document.getElementById('device-' + id);
-    if (el) { htmx.ajax('GET', '/htmx/device/' + encodeURIComponent(id), { target: el, swap: 'outerHTML' }); }
+    this.byId('device-' + id).forEach(function(el) {
+      htmx.ajax('GET', '/htmx/device/' + encodeURIComponent(id), { target: el, swap: 'outerHTML' });
+    });
   },
 
   refresh: function(name) {
@@ -197,7 +202,7 @@ var kiosk = {
 
   function app() {
     return {
-      section: 'home',
+      section: 'rooms',
       online: true,
       staleLabel: '',
       sensors: {},
@@ -392,21 +397,21 @@ var kiosk = {
         if (sensor === 'temperature' || sensor === 'humidity') {
           const unit = sensor === 'temperature' ? '°C' : '%';
           this.sensors[deviceId][sensor] = value + unit;
-          const el = document.getElementById('sensor-' + deviceId + '-' + sensor);
-          if (el) {
+          kiosk.byId('sensor-' + deviceId + '-' + sensor).forEach((el) => {
             el.textContent = parseFloat(value).toFixed(1) + unit;
             el.classList.remove('is-unknown');
-          }
+          });
         } else if (sensor === 'window') {
           const isOpen = value === "1";
           this.doors[deviceId] = isOpen ? 'open' : 'closed';
-          const doorEl = document.getElementById('door-' + deviceId);
-          const text = doorEl && doorEl.querySelector('[data-door-text]');
-          if (text) {
-            text.textContent = isOpen ? 'Open' : 'Closed';
+          const doorEls = kiosk.byId('door-' + deviceId);
+          doorEls.forEach((doorEl) => {
+            const text = doorEl.querySelector('[data-door-text]');
+            if (text) { text.textContent = isOpen ? 'Open' : 'Closed'; }
             doorEl.classList.remove('is-unknown');
             doorEl.classList.toggle('is-alert', isOpen);
-          } else {
+          });
+          if (doorEls.length === 0) {
             // The pill is not on the page yet: re-render the device.
             kiosk.reloadDevice(deviceId);
           }

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -110,5 +111,63 @@ func TestRenderEndpointsMakeNoDeviceCall(t *testing.T) {
 		t.Errorf("render endpoints took %v with unreachable devices", d)
 	} else {
 		t.Logf("/htmx/devices + /htmx/device/{id} with unreachable devices: %v", d)
+	}
+}
+
+// TestRoomsFragmentGroupsEveryDeviceOnce pins #744: the Rooms fragment lists each
+// device exactly once, under its room, or under "Unassigned" when it has no
+// room_id or names a room that does not exist, and makes no device call.
+func TestRoomsFragmentGroupsEveryDeviceOnce(t *testing.T) {
+	calls := unreachableDevices(t)
+
+	assigned := switchDevice(t, "shellyplus1-aabbccddee21", false)
+	assigned.RoomId = "study"
+	none := switchDevice(t, "shellyplus1-aabbccddee22", false)
+	dangling := switchDevice(t, "shellyplus1-aabbccddee23", false)
+	dangling.RoomId = "demolished"
+
+	if prev, err := myhome.Methods(myhome.TemperatureList); err == nil {
+		t.Cleanup(func() { myhome.RegisterMethodHandler(myhome.TemperatureList, prev.ActionE) })
+	} else {
+		t.Cleanup(func() { myhome.UnregisterMethodHandler(myhome.TemperatureList) })
+	}
+	myhome.RegisterMethodHandler(myhome.TemperatureList, func(context.Context, any) (any, error) {
+		return &myhome.TemperatureRoomList{
+			"study": {RoomID: "study", Name: "Study Room", Kinds: []myhome.RoomKind{}},
+			"empty": {RoomID: "empty", Name: "Empty Room", Kinds: []myhome.RoomKind{}},
+		}, nil
+	})
+
+	h := newMux(renderCtx(), logr.Discard(), nil, fakeRegistry{devs: []*myhome.Device{assigned, none, dangling}}, nil, nil, "", nil, nil)
+	rec := get(h, "/htmx/rooms")
+	if rec.Code != 200 {
+		t.Fatalf("/htmx/rooms = %d", rec.Code)
+	}
+	body := rec.Body.String()
+
+	for _, id := range []string{assigned.Id(), none.Id(), dangling.Id()} {
+		if n := strings.Count(body, `id="device-`+id+`"`); n != 1 {
+			t.Errorf("device %s rendered %d times, want exactly 1", id, n)
+		}
+	}
+	room := strings.Index(body, "Study Room")
+	unassigned := strings.Index(body, "Unassigned")
+	if room < 0 || unassigned < 0 || room > unassigned {
+		t.Fatalf("want the Study Room card before the Unassigned group (room=%d unassigned=%d)", room, unassigned)
+	}
+	if !strings.Contains(body, "Empty Room") {
+		t.Error("a room without devices must still be listed")
+	}
+	pos := func(id string) int { return strings.Index(body, `id="device-`+id+`"`) }
+	if p := pos(assigned.Id()); p < room || p > unassigned {
+		t.Errorf("assigned device at %d, want inside the room card (%d..%d)", p, room, unassigned)
+	}
+	for _, d := range []*myhome.Device{none, dangling} {
+		if pos(d.Id()) < unassigned {
+			t.Errorf("device %s must be under Unassigned", d.Id())
+		}
+	}
+	if n := calls.Load(); n != 0 {
+		t.Errorf("rooms render made %d device call(s)", n)
 	}
 }

@@ -185,13 +185,6 @@ func (h *HTMXHandler) DeviceCard(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// roomDeviceView summarises one device assigned to a room.
-type roomDeviceView struct {
-	ID   string
-	Name string
-	Role string // "heater", "temp-sensor", "door-sensor", "other"
-}
-
 // agendaSlot mirrors the JSON stored in room_agenda_cache.
 type agendaSlot struct {
 	S int `json:"s"` // start minutes since midnight
@@ -206,7 +199,8 @@ type RoomView struct {
 	Levels  map[string]float64
 	ICalURL string
 
-	Devices []roomDeviceView
+	// every device of the room, rendered with the Devices-section row
+	Devices []DeviceView
 	// today's agenda from cache (nil if not available)
 	AgendaSlots []agendaSlot
 	AgendaNow   bool   // is current time in a busy slot?
@@ -251,74 +245,81 @@ func agendaStatus(slots []agendaSlot) (inBusy bool, next string) {
 	return false, ""
 }
 
-func deviceRoleLabel(d *myhome.Device) string {
-	id := strings.ToLower(d.Id())
-	if strings.HasPrefix(id, "shellyblu-") {
-		if d.Info != nil && d.Info.BTHome != nil {
-			for _, cap := range d.Info.BTHome.Capabilities {
-				if cap == "window" {
-					return "door-sensor"
-				}
-			}
-			for _, cap := range d.Info.BTHome.Capabilities {
-				if cap == "temperature" {
-					return "temp-sensor"
-				}
-			}
+// roomsTmpl is parsed once, from the same row templates as the Devices
+// section so a room lists devices with the very same row (a template cannot be
+// cloned once executed, hence a second parse rather than deviceRowTmpl.Clone).
+var roomsTmpl = template.Must(template.New("rooms").Funcs(rowTemplateFuncs()).Funcs(template.FuncMap{
+	"kindColor": func(k string) string {
+		switch k {
+		case "bedroom":
+			return "is-info"
+		case "office":
+			return "is-warning"
+		case "living-room":
+			return "is-success"
+		case "kitchen":
+			return "is-danger"
+		default:
+			return "is-light"
 		}
-		return "other"
-	}
-	if strings.HasPrefix(id, "shellyht-") {
-		return "temp-sensor"
-	}
-	return "heater"
-}
+	},
+}).Parse(deviceRowsTemplate + roomsListTemplate))
 
 // RoomsList renders the rooms list HTML fragment
 func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
-	mh, err := myhome.Methods(myhome.TemperatureList)
-	if err != nil {
-		// temperature service disabled: a calm empty state, not an error
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<div class="column is-12" data-rooms-disabled><p class="has-text-grey">Rooms are not enabled on this daemon.</p></div>`)
-		return
+	// The temperature service may be disabled: rooms are then empty and every
+	// device lands in "Unassigned", so the page still lists each device once.
+	roomsDisabled := false
+	var roomMap myhome.TemperatureRoomList
+	if mh, err := myhome.Methods(myhome.TemperatureList); err != nil {
+		roomsDisabled = true
+	} else {
+		res, err := mh.ActionE(h.ctx, mh.Signature.NewParams())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		rm, ok := res.(*myhome.TemperatureRoomList)
+		if !ok {
+			http.Error(w, "unexpected result type", http.StatusInternalServerError)
+			return
+		}
+		roomMap = *rm
 	}
 
-	res, err := mh.ActionE(h.ctx, mh.Signature.NewParams())
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	// One pass over the DB-loaded cache (no device call): each device goes to
+	// its room, or to Unassigned when it has none or names an unknown room.
+	var allDevices []*myhome.Device
+	if h.db != nil {
+		allDevices, _ = h.db.GetAllDevices(h.ctx)
 	}
-
-	roomMap, ok := res.(*myhome.TemperatureRoomList)
-	if !ok {
-		http.Error(w, "unexpected result type", http.StatusInternalServerError)
-		return
+	byRoom := make(map[string][]DeviceView, len(roomMap))
+	var unassigned []DeviceView
+	for _, d := range allDevices {
+		dv := DeviceToView(h.ctx, d)
+		if _, known := roomMap[d.RoomId]; known && d.RoomId != "" {
+			byRoom[d.RoomId] = append(byRoom[d.RoomId], dv)
+		} else {
+			unassigned = append(unassigned, dv)
+		}
 	}
+	sortViews := func(v []DeviceView) {
+		sort.Slice(v, func(i, j int) bool {
+			return strings.ToLower(v[i].Name) < strings.ToLower(v[j].Name)
+		})
+		applyPoolStatus(h.ctx, v)
+	}
+	sortViews(unassigned)
 
-	views := make([]RoomView, 0, len(*roomMap))
-	for _, rc := range *roomMap {
+	views := make([]RoomView, 0, len(roomMap))
+	for _, rc := range roomMap {
 		kinds := make([]string, len(rc.Kinds))
 		for i, k := range rc.Kinds {
 			kinds[i] = string(k)
 		}
 
-		var devViews []roomDeviceView
-		allDevices, _ := h.db.GetAllDevices(h.ctx)
-		for _, d := range allDevices {
-			if d.RoomId != rc.RoomID {
-				continue
-			}
-			name := d.Name()
-			if name == "" {
-				name = d.Id()
-			}
-			devViews = append(devViews, roomDeviceView{
-				ID:   d.Id(),
-				Name: name,
-				Role: deviceRoleLabel(d),
-			})
-		}
+		devViews := byRoom[rc.RoomID]
+		sortViews(devViews)
 
 		slots := h.roomAgenda(rc.RoomID)
 		inBusy, nextLabel := agendaStatus(slots)
@@ -340,37 +341,17 @@ func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
 		return views[i].Name < views[j].Name
 	})
 
-	tmpl := template.Must(template.New("rooms-list").Funcs(template.FuncMap{
-		"kindColor": func(k string) string {
-			switch k {
-			case "bedroom":
-				return "is-info"
-			case "office":
-				return "is-warning"
-			case "living-room":
-				return "is-success"
-			case "kitchen":
-				return "is-danger"
-			default:
-				return "is-light"
-			}
-		},
-		"roleEmoji": func(role string) string {
-			switch role {
-			case "heater":
-				return "🔥"
-			case "temp-sensor":
-				return "🌡️"
-			case "door-sensor":
-				return "🚪"
-			default:
-				return "📦"
-			}
-		},
-	}).Parse(roomsListTemplate))
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.Execute(w, views); err != nil {
+	if roomsDisabled {
+		fmt.Fprint(w, `<div class="column is-12" data-rooms-disabled><p class="has-text-grey">Rooms are not enabled on this daemon.</p></div>`)
+	}
+	data := struct {
+		Rooms      []RoomView
+		Unassigned []DeviceView
+		Disabled   bool
+	}{views, unassigned, roomsDisabled}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := roomsTmpl.ExecuteTemplate(w, "rooms-list", data); err != nil {
 		h.log.Error(err, "failed to render rooms list")
 		http.Error(w, "render error", http.StatusInternalServerError)
 	}
@@ -623,9 +604,9 @@ func (h *HTMXHandler) renderEventsRows(w http.ResponseWriter, r *http.Request, o
 	}
 }
 
-const roomsListTemplate = `
-{{if .}}
-  {{range .}}
+const roomsListTemplate = `{{define "rooms-list"}}
+{{if .Rooms}}
+  {{range .Rooms}}
   <div class="column is-4-desktop is-6-tablet">
     <div class="box">
       <div class="level mb-2">
@@ -668,19 +649,24 @@ const roomsListTemplate = `
       {{end}}
 
       {{if .Devices}}
-      <div class="mt-2">
-        {{range .Devices}}
-        <p class="is-size-7">{{roleEmoji .Role}} {{.Name}}</p>
-        {{end}}
-      </div>
+      <div class="mt-2 mh-grid">{{template "devices" .Devices}}</div>
       {{end}}
     </div>
   </div>
   {{end}}
-{{else}}
+{{else if and (not .Unassigned) (not .Disabled)}}
   <div class="column is-12">
     <p class="has-text-grey">No rooms configured yet. Click <strong>+ Add Room</strong> to create one.</p>
   </div>
+{{end}}
+{{if .Unassigned}}
+  <div class="column is-12" data-unassigned>
+    <div class="box">
+      <strong>Unassigned</strong>
+      <div class="mt-2 mh-grid">{{template "devices" .Unassigned}}</div>
+    </div>
+  </div>
+{{end}}
 {{end}}
 `
 

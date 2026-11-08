@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -58,6 +59,29 @@ func TestShellHasFiveRailItemsAndSections(t *testing.T) {
 	}
 	if n := strings.Count(html, `data-section=`); n != 5 {
 		t.Errorf("data-section containers = %d, want 5", n)
+	}
+}
+
+// The kiosk opens on Rooms: Rooms is the first rail item and section, Devices
+// (section id "home", unchanged) the second (#744).
+func TestShellRailOrderRoomsThenDevices(t *testing.T) {
+	html := get(testMux(), "/").Body.String()
+	var labels []string
+	for _, m := range regexp.MustCompile(`class="mh-rail-item"[\s\S]*?<span>([^<]*)</span>`).FindAllStringSubmatch(html, -1) {
+		labels = append(labels, m[1])
+	}
+	if got, want := strings.Join(labels, ","), "Rooms,Devices,Pool,Vacuum,Events"; got != want {
+		t.Errorf("rail = %s, want %s", got, want)
+	}
+	if strings.Index(html, `id="sec-rooms"`) > strings.Index(html, `id="sec-home"`) {
+		t.Error("sec-rooms must precede sec-home")
+	}
+	js, err := os.ReadFile("static/myhome.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(js), "section: 'rooms'"); n != 2 {
+		t.Errorf("default section 'rooms' appears %d times in myhome.js, want 2 (kiosk + app)", n)
 	}
 }
 

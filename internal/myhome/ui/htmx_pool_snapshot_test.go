@@ -12,19 +12,26 @@ import (
 
 // stubPoolVerbs registers a pool.snapshot answering snap and a pool.getstatus
 // that counts calls (it must never be reached from a render path, #731). Both
-// are removed when the test ends.
+// are restored when the test ends.
 func stubPoolVerbs(t *testing.T, snap *myhome.PoolSnapshotResult) *atomic.Int32 {
 	t.Helper()
 	var live atomic.Int32
+	// Save what was registered before, to restore it (not just unregister) at the end.
+	for _, v := range []myhome.Verb{myhome.PoolGetStatus, myhome.PoolSnapshot} {
+		prev, err := myhome.Methods(v)
+		t.Cleanup(func() {
+			if err == nil {
+				myhome.RegisterMethodHandler(v, prev.ActionE)
+			} else {
+				myhome.UnregisterMethodHandler(v)
+			}
+		})
+	}
 	myhome.RegisterMethodHandler(myhome.PoolGetStatus, func(context.Context, any) (any, error) {
 		live.Add(1)
 		return nil, context.DeadlineExceeded
 	})
 	myhome.RegisterMethodHandler(myhome.PoolSnapshot, func(context.Context, any) (any, error) { return snap, nil })
-	t.Cleanup(func() {
-		myhome.UnregisterMethodHandler(myhome.PoolGetStatus)
-		myhome.UnregisterMethodHandler(myhome.PoolSnapshot)
-	})
 	return &live
 }
 

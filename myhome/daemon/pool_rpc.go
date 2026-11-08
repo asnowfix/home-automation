@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
@@ -23,6 +24,7 @@ type PoolRPCHandler struct {
 	// deviceID and waterSupply feed pool.snapshot (WithSnapshotSource).
 	deviceID    string
 	waterSupply func(ctx context.Context) *bool
+	now         func() time.Time // injectable clock; nil = time.Now
 }
 
 // WithSnapshotSource tells pool.snapshot which device it describes and how to
@@ -83,7 +85,16 @@ func (h *PoolRPCHandler) handleSnapshot(ctx context.Context, _ any) (any, error)
 	if h.waterSupply != nil {
 		res.WaterSupplyActive = h.waterSupply(ctx)
 	}
-	if s, ok := h.pool.Snapshot(); ok {
+	// A reading from a previous local day is not "today": the device resets its
+	// daily counters at midnight and the snapshot only refreshes at start and on
+	// pool.pump_stop, so stale figures are dropped (rendered "--"), never shown.
+	now := time.Now
+	if h.now != nil {
+		now = h.now
+	}
+	n := now()
+	midnight := time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, n.Location())
+	if s, ok := h.pool.Snapshot(); ok && !s.ts.Before(midnight) {
 		res.TurnoverAchieved, res.TurnoverTarget, res.RuntimeSec = &s.achieved, &s.target, &s.runtimeSec
 		res.TurnoverTs = s.ts.Unix()
 		h.log.V(1).Info("pool.snapshot served", "turnover_ts", res.TurnoverTs)

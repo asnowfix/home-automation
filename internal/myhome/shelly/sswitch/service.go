@@ -186,32 +186,50 @@ func OnValue(ctx context.Context, log logr.Logger, sd *shelly.Device, switchId i
 		log.Info("Unable to get value", "key", string(myhome.NormallyClosedKey), "reason", err)
 		return true
 	}
-	if switchId == 0 {
-		return parseOnValue(kv.Value)
+	on, ok := parseOn(kv.Value, switchId)
+	if !ok {
+		log.Info("Unparsable value", "key", string(myhome.NormallyClosedKey), "value", kv.Value)
+		return true
 	}
-	return parseOnValueIndexed(kv.Value, switchId)
+	return on
 }
 
-// parseOnValue decides the switch's logical "on" value from the raw
-// normally-closed KVS string for switchId 0: it's a single bool
-// ("true"/"false"), and the returned value is the negation of that flag.
-func parseOnValue(value string) bool {
-	nc, _ := strconv.ParseBool(value)
-	return !nc
+// OnValueCached is OnValue for request paths: it reads only what a previous
+// OnValue/PrimeOnValue stored and never calls the device. known is false when
+// the polarity has not been resolved yet (or was invalidated by a kvs_rev
+// change); a key the device reports absent is known, and means "true".
+func OnValueCached(deviceId string, switchId int) (on bool, known bool) {
+	kv, state := kvs.Peek(deviceId, string(myhome.NormallyClosedKey))
+	switch state {
+	case kvs.PeekAbsent:
+		return true, true
+	case kvs.PeekFound:
+		return parseOn(kv.Value, switchId)
+	}
+	return false, false
 }
 
-// parseOnValueIndexed decides the switch's logical "on" value from the raw
-// normally-closed KVS string for a non-zero switchId: it's a JSON array of
-// bools indexed by switchId, and the returned value is the negation of
-// ncs[switchId].
-//
-// NOTE: preserves a pre-existing behavior from before this extraction: the
-// unmarshal error is ignored and ncs[switchId] is always evaluated, so an
-// invalid value or an out-of-range switchId panics (index out of range) since
-// ncs stays nil/short. Not fixed here — out of scope for a
-// behavior-preserving testability refactor; flagged for a future fix.
-func parseOnValueIndexed(value string, switchId int) bool {
+// PrimeOnValue resolves a device's switch polarity (one KVS read, shared by all
+// its switches) so that OnValueCached can answer later. It contacts the device:
+// call it from refresh paths only, never while rendering.
+func PrimeOnValue(ctx context.Context, log logr.Logger, sd *shelly.Device) {
+	_, _ = kvs.GetValue(ctx, log, types.ChannelDefault, sd, string(myhome.NormallyClosedKey))
+}
+
+// parseOn decides the switch's logical "on" value from the raw normally-closed
+// KVS string: either a single bool ("true"/"false"), which applies to switch 0,
+// or a JSON array of bools indexed by switchId. "on" is the negation of the flag.
+// ok is false when the value cannot be interpreted for this switch (not a bool
+// nor an array, or switchId out of range); it never panics.
+func parseOn(value string, switchId int) (on bool, ok bool) {
+	if switchId == 0 {
+		if nc, err := strconv.ParseBool(value); err == nil {
+			return !nc, true
+		}
+	}
 	var ncs []bool
-	_ = json.Unmarshal([]byte(value), &ncs)
-	return !ncs[switchId]
+	if json.Unmarshal([]byte(value), &ncs) != nil || switchId < 0 || switchId >= len(ncs) {
+		return false, false
+	}
+	return !ncs[switchId], true
 }

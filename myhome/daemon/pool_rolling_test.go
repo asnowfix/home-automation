@@ -80,6 +80,7 @@ func TestPoolSnapshotRolling24h(t *testing.T) {
 	}
 }
 
+// (A distinct device id: the kvs package caches reads per device id.)
 // A pump stop persists the device's day anchor, and Rolling24h reads it back
 // through the real events store.
 func TestRecordTurnoverTodayCarriesAnchor(t *testing.T) {
@@ -89,12 +90,12 @@ func TestRecordTurnoverTodayCarriesAnchor(t *testing.T) {
 	}
 	defer store.Close()
 	svc := events.NewService(logr.Discard(), store, nil, nil, time.Hour)
-	dev := &fakeKVSDevice{id: "pool-1", kvs: map[string]string{
+	dev := &fakeKVSDevice{id: "pool-anchor", kvs: map[string]string{
 		kvsKeyRuntimeToday: "3600", kvsKeyTurnoverToday: "1.5", kvsKeyTurnover: "5", kvsKeyRuntimeTs: "1794000000"}}
-	p := &PoolNotices{log: logr.Discard(), events: svc, device: dev, deviceID: "pool-1"}
+	p := &PoolNotices{log: logr.Discard(), events: svc, device: dev, deviceID: "pool-anchor"}
 	p.recordTurnoverToday(context.Background())
 
-	evs, err := store.Query(context.Background(), events.Query{DeviceID: "pool-1", EventType: "pool.turnover_today"})
+	evs, err := store.Query(context.Background(), events.Query{DeviceID: "pool-anchor", EventType: "pool.turnover_today"})
 	if err != nil || len(evs) != 1 {
 		t.Fatalf("events = %v, err = %v", evs, err)
 	}

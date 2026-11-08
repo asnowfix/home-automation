@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# DEPRECATED: use `python3 -I myhome-local.py` (portable, adds a read-only `daemon` mode).
+# DEPRECATED: use `python3 -I scripts/myhome-ctl.py` (portable wrapper) and
+# `python3 -I scripts/myhome-local-daemon.py` (read-only local daemon).
 # This script stays until the Python launcher has been verified, then it is deleted.
 #
 # myhome-local.sh — Bootstrap and run myhome from a local checkout (main tree or any git worktree).

@@ -138,9 +138,9 @@ Environment gotchas that affect every test case run from a macOS dev machine on 
 Verified 2026-09-06, no daemon running:
 
 ```
-$ python3 -I myhome-local.py shelly script list filtration-hiver.local    # works
-$ python3 -I myhome-local.py shelly script list 192.168.1.21              # works
-$ python3 -I myhome-local.py shelly script list filtration-hiver          # FAILS
+$ python3 -I scripts/myhome-ctl.py shelly script list filtration-hiver.local    # works
+$ python3 -I scripts/myhome-ctl.py shelly script list 192.168.1.21              # works
+$ python3 -I scripts/myhome-ctl.py shelly script list filtration-hiver          # FAILS
 timeout waiting for response to method device.lookup after 14s (dst: local)
 ```
 

@@ -3,7 +3,7 @@
     "shelly": {
       "type": "stdio",
       "command": "python3",
-      "args": ["-I", "myhome-local.py", "mcp"]
+      "args": ["-I", "scripts/myhome-ctl.py", "mcp"]
     }
   }
 }

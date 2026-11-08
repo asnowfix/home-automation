@@ -18,7 +18,17 @@ make tidy           # tidy all workspace modules
 # Run the full daemon locally against the real home MQTT broker (needed to test UI/RPC changes
 # against live devices, e.g. via a browser at http://127.0.0.1:6080). Run from the worktree
 # whose code you want to test — each worktree's `go run` builds its own checked-out sources.
-go run ./myhome daemon run --instance local --mqtt-broker tcp://192.168.1.2:1883
+# Use `python3 -I scripts/myhome-local-daemon.py` (below): it owns the safe flags, so a bare
+# `daemon run --instance local` is NOT safe against the real broker. See the warning after it.
+
+# WARNING: a side daemon shares the real broker with production, and `--instance local` scopes only
+# the RPC topic. With an empty local DB it would auto-set-up every device it hears (config, firmware,
+# KVS and script writes), reconcile them hourly, and publish `myhome/occupancy` and the room
+# temperature ranges that heater.js reads (#700). The script's `SAFE_DAEMON_FLAGS` turn all of that
+# off (the list lives only there), and it drops `.env` and MYHOME_* variables: `.env` credentials
+# (vacuum, Beem, SFR) would take over the vacuum connection and publish solar availability.
+# Writes you start yourself remain possible and no flag blocks them: UI switch toggles, device setup,
+# set-room, heater config, the device web-UI proxy, `ctl --instance local ...`.
 
 go test ./internal/myhome/...                    # single package
 go test -v -run TestName ./path/to/package       # specific test
@@ -41,7 +51,7 @@ go run ./tools/classify-events [events-dir] [testdata-dir]   # classify raw even
 
 To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call` tools). It is pre-configured in `.mcp.json` with MQTT broker `tcp://192.168.1.2:1883` and approved via `enabledMcpjsonServers` in `.claude/settings.json`. The `.mcp.json` command automatically runs `go generate ./internal/myhome/ui/...` on first use in a fresh worktree (fetches CSS/JS assets required to compile); this needs internet access once per worktree. Restart Claude Code to activate.
 
-`python3 -I myhome-local.py [ctl-args...]` (default `mcp`) bootstraps a worktree and runs `ctl --instance local`; it is what `.mcp.json` calls (replaces `myhome-local.sh`, kept until verified). `python3 -I myhome-local.py daemon` starts a read-only side daemon (instance `local`, #700 safe flags, scrubbed environment) in `~/.local/state/myhome/local-side-instance` (platform equivalents), seeded by `db export` from the main daemon then `db import`. Its tests: `python3 -I -m unittest discover -s . -p test_myhome_local.py`.
+`python3 -I scripts/myhome-ctl.py [ctl-args...]` (default `mcp`) runs the missing `go generate` steps of a fresh worktree, then `go run ./myhome ctl --instance myhome`, toward the MAIN instance; it is what `.mcp.json` calls (replaces `myhome-local.sh`, kept until verified). `python3 -I scripts/myhome-local-daemon.py` starts a LOCAL read-only daemon (instance `local`, home broker, #700 safe flags, scrubbed environment) in `~/.local/state/myhome/local-side-instance` (platform equivalents): it alone resets that directory's `myhome.db`, runs `db export` from the main daemon, then `db import` into the local one. Tests: `python3 -I -m unittest discover -s scripts -p 'test_*.py'`.
 
 `make test` is canonical — never bare `go test ./...` (it skips workspace sub-modules). New CI test commands must also invoke `make test`, not go directly to `go test`.
 
@@ -294,8 +304,10 @@ The discipline that made this recoverable:
   no dry-run; to preview (a), compare each device's `script/<name>` KVS value with `sha1sum` of the
   packaged `internal/shelly/scripts/<name>`.
 - Pool provisioning (`Setup`/`AddDevice`/`UpdateDevice`) is reachable **only** from `myhome/ctl/pool/`,
-  never from the daemon; the daemon's auto-setup applies solely to devices lacking `watchdog.js` as
-  script #1. A `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst
+  never from the daemon; the daemon's auto-setup applies to any Gen2 device whose KVS marker
+  `script/setup/done` is missing (`IsDeviceSetUp`, called from `myhome/devices/impl/manager.go`; the
+  marker is defined in `internal/myhome/shelly/setup/setup.go`), not only to devices lacking
+  `watchdog.js`; a daemon with an empty DB treats every device as new (#700). A `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst
   tries to enable it, systemd refuses, everything before that has already succeeded.
 
 ### Sub-agents

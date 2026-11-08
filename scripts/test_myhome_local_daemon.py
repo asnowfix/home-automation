@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for myhome-local.py: run with `python3 -I -m unittest test_myhome_local` (no network, no daemon)."""
+"""Tests for myhome-local-daemon.py: run with `python3 -I -m unittest discover -s scripts -p 'test_*.py'` (no network, no daemon)."""
 
 import importlib.util
 import tempfile
@@ -7,7 +7,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-_spec = importlib.util.spec_from_file_location("myhome_local", Path(__file__).resolve().parent / "myhome-local.py")
+_spec = importlib.util.spec_from_file_location("myhome_local_daemon", Path(__file__).resolve().parent / "myhome-local-daemon.py")
 ml = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ml)
 
@@ -69,37 +69,7 @@ class PathSafety(unittest.TestCase):
                 ml.delete_side_db(inst, inst)
 
 
-class Generation(unittest.TestCase):
-    def test_steps_follow_the_makefile_and_skip_existing_outputs(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.assertEqual(ml.missing_steps(root), [g for _, g in ml.ASSETS] + [ml.GENERATE_ALL])
-            for output, _ in ml.ASSETS:
-                (root / output).parent.mkdir(parents=True, exist_ok=True)
-                (root / output).write_text("x", encoding="utf-8")
-            self.assertEqual(ml.missing_steps(root), [])
-            (root / ml.ASSETS[3][0]).unlink()
-            self.assertEqual(ml.missing_steps(root), [ml.ASSETS[3][1], ml.GENERATE_ALL])
-
-    def test_makefile_generate_steps_are_all_covered(self):
-        makefile = (Path(__file__).resolve().parent / "Makefile").read_text(encoding="utf-8")
-        block = makefile.split("\ngenerate:\n", 1)[1].split("\n\n", 1)[0]
-        wanted = [line.split("$(GO) generate ", 1)[1].strip() for line in block.splitlines() if "$(GO) generate" in line]
-        have = [" ".join(g) for _, g in ml.ASSETS] + [" ".join(ml.GENERATE_ALL)]
-        self.assertEqual(have, wanted)
-
-
 class Arguments(unittest.TestCase):
-    def test_passthrough_defaults_to_mcp(self):
-        self.assertEqual(ml.ctl_args(BROKER, []), ["ctl", "--instance", "local", "--mqtt-broker", BROKER, "mcp"])
-
-    def test_passthrough_keeps_arguments(self):
-        self.assertEqual(ml.ctl_args(BROKER, ["shelly", "list"])[-2:], ["shelly", "list"])
-
-    def test_broker_override(self):
-        self.assertEqual(ml.broker_from({}), "tcp://192.168.1.2:1883")
-        self.assertEqual(ml.broker_from({"MYHOME_MQTT_BROKER": BROKER}), BROKER)
-
     def test_daemon_has_exactly_the_safe_flags(self):
         args = ml.daemon_args(BROKER)
         self.assertEqual(args[:6], ["daemon", "run", "--instance", "local", "--mqtt-broker", BROKER])
@@ -112,11 +82,6 @@ class Arguments(unittest.TestCase):
         self.assertEqual(ml.export_args(BROKER, out)[-2:], ["--output", str(out)])
         self.assertEqual(ml.import_args(BROKER, out)[:3], ["ctl", "--instance", "local"])
         self.assertEqual(ml.import_args(BROKER, out)[-3:], ["db", "import", str(out)])
-
-    def test_environment_is_scrubbed(self):
-        env = ml.scrubbed_env({"PATH": "/bin", "MYHOME_MQTT_BROKER": "x", "MYHOME_DB": "y", "HOME": "/h", "SECRET": "s"})
-        self.assertEqual(env, {"PATH": "/bin", "HOME": "/h"})
-
 
 class FakeDaemon:
     returncode = None

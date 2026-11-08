@@ -893,3 +893,29 @@ Order: PR 1 and PR 2 in parallel → PR 3 → PR 4 → PR 5.
    first; otherwise PR 3 carries a temporary copy of the predicate.
 
 (The vacuum confirm scope is no longer open: #685 as written, decided 2026-11-08.)
+
+### §F. Owner answers to §E (2026-11-08, second round)
+
+The owner answered on #684 (comment of 2026-11-08 16:24 UTC). Each answer is mapped to its question,
+one to one:
+
+| Q | Question (§E) | Owner answer | Effect |
+|---|---|---|---|
+| T | Build the toggle (PR 5) as designed? | **Drop** | **§C and PR 5 are dropped.** Nothing in §C is built. Answer 2 of the first round (a toggle, not a stepper) is superseded by this: there is no heater control on the room page for now. |
+| E1 | Does "Comfort" mean the comfort temperature, or the heater actually on? | **Relay on** | Recorded as the owner's intent for any future heater control. **It does not match §C**, which designed a setpoint override and judged forcing the relay "not buildable cheaply". Moot while T stands. A future control must be redesigned around forcing the relay. |
+| E2 | How long does an override last? [until the next scheduled change] | **Yes** | Recommendation accepted. Moot while T stands. |
+| E3 | Import with a two-sensor room: reject or warn? [reject] | **Reject** | As built in PR #755 (#752). |
+| E4 | Nothing republishes the ranges at midnight | **Separate issue** | Filed as #757. Not part of #684. |
+| E5 | Toggle when nobody is home? [disabled] | **Default confirmed** | Moot while T stands. |
+| E6 | A `ctl room override` command? [yes] | **Default confirmed** | Moot while T stands: there is no override verb to call. |
+| E7 | BLU thermometer may escape the one-sensor predicate [accept for now] | **Default confirmed** | As built in PR #755 (a code comment records the gap). |
+| E8 | Move an area between rooms in one command? [yes, report the old room] | **Default confirmed** | As specified in #751. |
+
+**Mismatches, stated explicitly:** (1) E1 contradicts the design of §C, but T drops §C, so nothing
+conflicts in what is built. (2) E2, E5 and E6 answer questions about the dropped toggle and have no
+effect now.
+
+**Revised PR list for #684:** PR 1 mapping with RPC + CLI (#751); PR 2 one sensor per room (#752, PR
+#755); PR 3 read-only room page with temperature age; PR 4 clean this room (confirmed). There is no PR 5.
+The §E question E9 (PR 2 before PR 3) stands. Still open from earlier: can region ids collide across
+two robot maps; are there rooms whose only thermometer is a Gen2 device.

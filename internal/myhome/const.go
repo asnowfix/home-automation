@@ -49,6 +49,7 @@ const (
 	SwitchAll                     Verb = "switch.all"
 	EventList                     Verb = "event.list"
 	PoolGetStatus                 Verb = "pool.getstatus"
+	PoolSnapshot                  Verb = "pool.snapshot"
 	SolarClaimersList             Verb = "solar.claimerslist"
 	FetchList                     Verb = "fetch.list"
 	FetchDelete                   Verb = "fetch.delete"

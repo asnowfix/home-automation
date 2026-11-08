@@ -149,14 +149,25 @@ func TestPoolPanelTemplateStates(t *testing.T) {
 		}
 		return b.String()
 	}
-	ok := render(poolPanelView{State: "ok", Name: "Pump", TurnoverAchieved: 3.2, TurnoverTarget: 5, RuntimeMin: 90})
-	for _, s := range []string{"Pump", "Water supply: OK", "3.2 / 5.0", "90 min"} {
+	achieved, target, active := 3.2, 5.0, false
+	ok := render(poolPanelView{State: "ok", Name: "Pump", WaterSupplyActive: &active, TurnoverAchieved: &achieved, TurnoverTarget: &target})
+	for _, s := range []string{"Pump", "Water supply: OK", "3.2/5.0 x/day"} {
 		if !strings.Contains(ok, s) {
 			t.Errorf("ok state lacks %q: %s", s, ok)
 		}
 	}
-	if !strings.Contains(render(poolPanelView{State: "ok", WaterSupplyActive: true}), "pump paused") {
+	paused := true
+	if !strings.Contains(render(poolPanelView{State: "ok", WaterSupplyActive: &paused}), "pump paused") {
 		t.Error("paused state not rendered")
+	}
+	unknown := render(poolPanelView{State: "ok", Name: "Pump"})
+	for _, s := range []string{"Water supply: --", "Filtered 24 h: --"} {
+		if !strings.Contains(unknown, s) {
+			t.Errorf("unknown state lacks %q: %s", s, unknown)
+		}
+	}
+	if strings.Contains(unknown, "OK") {
+		t.Errorf("unknown water supply rendered as OK: %s", unknown)
 	}
 	if !strings.Contains(render(poolPanelView{State: "unavailable"}), "unavailable") {
 		t.Error("unavailable state not rendered")
@@ -192,7 +203,7 @@ func TestPoolViewFromStatus(t *testing.T) {
 	if got := poolViewFromStatus(nil, errors.New("compute turnover: timeout")).State; got != "unavailable" {
 		t.Errorf("real error -> %q, want unavailable", got)
 	}
-	if got := poolViewFromStatus(&myhome.PoolGetStatusResult{DeviceID: "p"}, nil); got.State != "ok" || got.Name != "p" {
+	if got := poolViewFromStatus(&myhome.PoolSnapshotResult{DeviceID: "p"}, nil); got.State != "ok" || got.Name != "p" {
 		t.Errorf("ok result -> %+v", got)
 	}
 }

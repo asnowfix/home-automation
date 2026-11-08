@@ -539,7 +539,9 @@ func (d *daemon) Run() error {
 		}
 
 		// Resolve weather coordinates via priority chain, then start forecast publisher.
-		{
+		if options.Flags.DisableWeatherPublisher {
+			log.Info("Weather forecast publisher disabled by option (--disable-weather-publisher / weather.disable_publisher)")
+		} else {
 			lat, lon, source := options.Flags.WeatherLatitude, options.Flags.WeatherLongitude, "config"
 			if lat == 0 && lon == 0 {
 				lat, lon, source = discoverLocation(d.ctx, log, d.dm)
@@ -686,6 +688,13 @@ func (d *daemon) Run() error {
 		// exists regardless of pool tracking; handleGetStatus itself returns
 		// a clear error if poolNotices is nil (pool disabled/unreachable).
 		poolRPCHandler := NewPoolRPCHandler(log, poolNotices, options.Flags.PoolEnabled && options.Flags.PoolDeviceID != "")
+		// Set the device id whether or not dm exists, so "enabled, unknown"
+		// stays distinct from "disabled" in pool.snapshot.
+		var poolWater func(context.Context) *bool
+		if d.dm != nil {
+			poolWater = cachedWaterSupply(d.dm, options.Flags.PoolDeviceID)
+		}
+		poolRPCHandler.WithSnapshotSource(options.Flags.PoolDeviceID, poolWater)
 		poolRPCHandler.RegisterHandlers()
 
 		// Register Solar RPC methods (static energy-claimers registry).

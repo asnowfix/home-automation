@@ -44,6 +44,7 @@ SAFE_DAEMON_FLAGS = [
     "--disable-occupancy-service",
     "--disable-temperature-service",
     "--no-mdns-publish",
+    "--disable-weather-publisher",
 ]
 
 DB_FILES = ("myhome.db", "myhome.db-wal", "myhome.db-shm")

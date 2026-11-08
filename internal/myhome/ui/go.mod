@@ -11,6 +11,7 @@ require (
 )
 
 require (
+	github.com/asnowfix/home-automation/myhome/devices v0.0.0-00010101000000-000000000000
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
@@ -33,3 +34,5 @@ replace github.com/asnowfix/home-automation/myhome/events => ../../../myhome/eve
 replace github.com/asnowfix/home-automation/myhome/storage => ../../../myhome/storage
 
 replace github.com/asnowfix/home-automation/internal/myhome => ../
+
+replace github.com/asnowfix/home-automation/myhome/devices => ../../../myhome/devices

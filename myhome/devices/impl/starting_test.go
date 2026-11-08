@@ -76,7 +76,16 @@ func TestRefreshJobEndsStarting(t *testing.T) {
 	if ui.IsStarting() {
 		t.Fatal("Starting… still on after a full pass")
 	}
-	got := sse.ids()
+	// The flag clears before the re-fetch broadcast goes out: wait for it.
+	var got []string
+	for time.Now().Before(deadline) {
+		if got = sse.ids(); len(got) > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond) // let a wrong extra broadcast show up
+	got = sse.ids()
 	if len(got) != 1 || got[0] != sw.Id() {
 		t.Errorf("re-fetch broadcast for %v; want only the switch device %s", got, sw.Id())
 	}

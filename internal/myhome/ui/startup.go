@@ -19,5 +19,9 @@ var starting atomic.Bool
 // path of that job, once the first pass is over.
 func SetStarting(v bool) { starting.Store(v) }
 
+// EndStarting turns the phase off and reports whether this call did it, so
+// concurrent callers end it exactly once.
+func EndStarting() bool { return starting.CompareAndSwap(true, false) }
+
 // IsStarting reports whether the post-start phase is still on.
 func IsStarting() bool { return starting.Load() }

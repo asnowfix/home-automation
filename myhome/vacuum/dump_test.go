@@ -102,13 +102,10 @@ func TestVacuumDumpRoundTripIntoEmptyDB(t *testing.T) {
 	}
 }
 
-// vacuum_regions gains a room_id column (#684): a dump must survive both
-// directions of that schema difference.
+// vacuum_regions gained a room_id column (#751): a dump must survive both
+// directions of that schema difference (an older build is simulated by dropping it).
 func TestVacuumDumpToleratesRoomIDColumn(t *testing.T) {
 	withRoom := newDumpStorage(t)
-	if _, err := withRoom.db.Exec(`ALTER TABLE vacuum_regions ADD COLUMN room_id TEXT NOT NULL DEFAULT ''`); err != nil {
-		t.Fatal(err)
-	}
 	seed(t, withRoom)
 	if _, err := withRoom.db.Exec(`UPDATE vacuum_regions SET room_id='kitchen' WHERE region_id='7'`); err != nil {
 		t.Fatal(err)
@@ -129,9 +126,6 @@ func TestVacuumDumpToleratesRoomIDColumn(t *testing.T) {
 
 	// into a build that has the column: kept
 	again := newDumpStorage(t)
-	if _, err := again.db.Exec(`ALTER TABLE vacuum_regions ADD COLUMN room_id TEXT NOT NULL DEFAULT ''`); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := again.Import(roundTrip(t, dump)); err != nil {
 		t.Fatal(err)
 	}
@@ -142,6 +136,9 @@ func TestVacuumDumpToleratesRoomIDColumn(t *testing.T) {
 
 	// into a build without it: ignored, the rest imports
 	without := newDumpStorage(t)
+	if _, err := without.db.Exec(`ALTER TABLE vacuum_regions DROP COLUMN room_id`); err != nil {
+		t.Fatal(err)
+	}
 	res, err := without.Import(roundTrip(t, dump))
 	if err != nil || res.Regions != 2 {
 		t.Fatalf("import into older schema: %+v, %v", res, err)

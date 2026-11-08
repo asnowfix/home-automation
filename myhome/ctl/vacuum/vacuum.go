@@ -5,6 +5,7 @@
 package vacuum
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -47,7 +48,9 @@ func init() {
 	} {
 		Cmd.AddCommand(commandCmd(c.name, c.short))
 	}
-	roomsCmd.AddCommand(roomsNameCmd, roomsSyncCmd)
+	roomsCmd.AddCommand(roomsNameCmd, roomsSyncCmd, roomsAssignCmd, roomsUnassignCmd)
+	roomsAssignCmd.Flags().StringVar(&assignMap, "map", "", "robot map id, when the region id exists on several maps")
+	roomsUnassignCmd.Flags().StringVar(&assignMap, "map", "", "robot map id, when the region id exists on several maps")
 	cleanCmd.Flags().StringSliceVar(&cleanRooms, "room", nil, "room name or region id; repeat for several, cleaned in order")
 }
 
@@ -267,7 +270,7 @@ func printRooms(w io.Writer, res *myhome.VacuumRoomsResult) {
 		}
 		return
 	}
-	fmt.Fprintf(w, "%-8s %-5s %-22s %-14s %-6s %s\n", "REGION", "TYPE", "NAME", "KIND", "FROM", "MAP")
+	fmt.Fprintf(w, "%-8s %-5s %-22s %-14s %-14s %-6s %s\n", "REGION", "TYPE", "NAME", "KIND", "ROOM", "FROM", "MAP")
 	type mapInfo struct{ cloud, robot string }
 	maps := map[string]mapInfo{} // map label -> versions, for maps with cloud rooms
 	var order []string
@@ -278,6 +281,10 @@ func printRooms(w io.Writer, res *myhome.VacuumRoomsResult) {
 		}
 		if kind == "" {
 			kind = "-"
+		}
+		room := r.RoomID
+		if room == "" {
+			room = "-"
 		}
 		label := r.MapID
 		if r.MapName != "" {
@@ -295,7 +302,7 @@ func printRooms(w io.Writer, res *myhome.VacuumRoomsResult) {
 			}
 			maps[label] = mapInfo{r.MapVersion, r.RobotMapVersion}
 		}
-		fmt.Fprintf(w, "%-8s %-5s %-22s %-14s %-6s %s%s\n", r.ID, r.Type, name, kind, r.Source, label, note)
+		fmt.Fprintf(w, "%-8s %-5s %-22s %-14s %-14s %-6s %s%s\n", r.ID, r.Type, name, kind, room, r.Source, label, note)
 	}
 	for _, label := range order {
 		v := maps[label]
@@ -361,6 +368,63 @@ the cloud cannot be renamed here: their names come from the cloud.`,
 		fmt.Printf("region %s is now %q\n", args[0], args[1])
 		return nil
 	},
+}
+
+var assignMap string
+
+var roomsAssignCmd = &cobra.Command{
+	Use:   "assign <region-id> <room-id> [--map <map-id>]",
+	Short: "Assign a robot region to a daemon room",
+	Long: `Assigns a robot region (see 'vacuum rooms') to a room of the daemon (see
+'myhome ctl room list'), so that the room can be cleaned. A region belongs to at
+most one room: assigning one that is in another room moves it. Several regions
+may belong to the same room.
+
+A region id is unique per robot map only: if it exists on several maps,
+pass --map. The daemon resolves the region and checks the room.`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runAssign(cmd.Context(), os.Stdout, args[0], args[1])
+	},
+}
+
+var roomsUnassignCmd = &cobra.Command{
+	Use:   "unassign <region-id> [--map <map-id>]",
+	Short: "Remove a robot region from its daemon room",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runAssign(cmd.Context(), os.Stdout, args[0], "")
+	},
+}
+
+func runAssign(ctx context.Context, w io.Writer, regionID, roomID string) error {
+	out, err := myhome.TheClient.CallE(ctx, myhome.VacuumRoomAssign,
+		&myhome.VacuumRoomAssignParams{Robot: robotFlag, MapID: assignMap, RegionID: regionID, RoomID: roomID})
+	if err != nil {
+		return err
+	}
+	res, ok := out.(*myhome.VacuumRoomAssignResult)
+	if !ok {
+		return fmt.Errorf("unexpected result %T", out)
+	}
+	printAssign(w, res)
+	return nil
+}
+
+// printAssign says what happened, including the room an area was moved from.
+func printAssign(w io.Writer, res *myhome.VacuumRoomAssignResult) {
+	switch {
+	case res.RoomID == "" && res.Previous == "":
+		fmt.Fprintf(w, "region %s was not in a room\n", res.RegionID)
+	case res.RoomID == "":
+		fmt.Fprintf(w, "region %s removed from room %s\n", res.RegionID, res.Previous)
+	case res.Previous == res.RoomID:
+		fmt.Fprintf(w, "region %s was already in room %s\n", res.RegionID, res.RoomID)
+	case res.Previous == "":
+		fmt.Fprintf(w, "region %s is now in room %s\n", res.RegionID, res.RoomID)
+	default:
+		fmt.Fprintf(w, "region %s moved from %s to %s\n", res.RegionID, res.Previous, res.RoomID)
+	}
 }
 
 var pairCmd = &cobra.Command{

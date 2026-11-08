@@ -66,6 +66,9 @@ myhome ctl vacuum pause | resume | stop | dock | find
 myhome ctl vacuum rooms                     # known rooms, with where each came from
 myhome ctl vacuum rooms sync                # fetch the rooms from the iRobot cloud account
 myhome ctl vacuum rooms name 11 kitchen     # name a room the cloud did not provide
+myhome ctl vacuum rooms assign 11 cuisine   # put robot area 11 in the daemon room "cuisine"
+myhome ctl vacuum rooms assign 11 salon --map <map-id>   # --map when id 11 exists on several maps
+myhome ctl vacuum rooms unassign 11         # take the area out of its room
 ```
 
 `--robot <name|id>` selects a robot, and can be omitted (the daemon has one configured robot). A command
@@ -169,6 +172,25 @@ refresh them. Note that the robot's version changes after cleans, not only after
 above), so learned rooms go stale often. That is one reason the cloud is preferred. (Whether this
 staleness check is even right is open: a room started from the app may echo the cloud's version,
 which then never equals the robot's reported one.)
+
+### Assigning areas to the daemon's rooms
+
+A robot area (region) can be assigned to a room of the daemon (`myhome ctl room list`), so a
+room can later be cleaned by name. `vacuum rooms assign <region-id> <room-id>` stores the room id in
+`vacuum_regions.room_id` (RPC `vacuum.roomassign`); `unassign` clears it; the `ROOM` column of
+`vacuum rooms` shows it (`-` when unassigned).
+
+- **An area is in at most one room**; several areas may share a room. Assigning an area that is
+  already in another room **moves** it, and the command says so (`region 12 moved from salon to
+  cuisine`).
+- A region id is unique **per robot map**, so if the same id exists on two maps the command asks for
+  `--map <map-id>` (it picks the single non-stale one when there is exactly one).
+- The daemon checks that the room exists (through `temperature.get`); an unknown room is refused,
+  and a daemon without rooms answers "rooms are not enabled on this daemon". Unassigning needs no room.
+- The assignment survives `vacuum rooms sync` (renames, removals: a removed area goes stale and keeps
+  its room) and is carried by `ctl db export` / `import`. A room deleted afterwards leaves a dangling
+  id, which readers must treat as unassigned.
+- A stale area may be assigned (to repair a mapping), but is still never cleaned.
 
 ## Finding the robot
 

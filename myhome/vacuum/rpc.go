@@ -38,6 +38,10 @@ func (s *Service) RegisterHandlers() {
 		p := in.(*myhome.VacuumRoomNameParams)
 		return s.NameRoom(p.Robot, p.RegionID, p.Name)
 	})
+	myhome.RegisterMethodHandler(myhome.VacuumRoomAssign, func(ctx context.Context, in any) (any, error) {
+		p := in.(*myhome.VacuumRoomAssignParams)
+		return s.AssignRoom(ctx, p.Robot, p.MapID, p.RegionID, p.RoomID)
+	})
 	myhome.RegisterMethodHandler(myhome.VacuumRoomsSync, func(ctx context.Context, in any) (any, error) {
 		return s.SyncRooms(ctx, in.(*myhome.VacuumParams).Robot)
 	})
@@ -163,7 +167,7 @@ func (s *Service) regions(r *robot) ([]myhome.VacuumRegion, error) {
 		ver, known := current[rec.MapID]
 		reg := myhome.VacuumRegion{
 			MapID: rec.MapID, MapName: rec.MapName, MapVersion: rec.MapVersion, ID: rec.RegionID,
-			Type: rec.RegionType, Kind: rec.Kind, Name: rec.Name, Source: rec.Source, RobotMapVersion: ver,
+			Type: rec.RegionType, Kind: rec.Kind, Name: rec.Name, Source: rec.Source, RobotMapVersion: ver, RoomID: rec.RoomID,
 		}
 		if rec.Source == myhome.VacuumSourceCloud {
 			reg.Stale = rec.Removed
@@ -175,6 +179,68 @@ func (s *Service) regions(r *robot) ([]myhome.VacuumRegion, error) {
 		out = append(out, reg)
 	}
 	return out, nil
+}
+
+// AssignRoom assigns a region to a daemon room (roomID == "" unassigns) and
+// reports the room it was in. The region is resolved here, not in the CLI: with
+// mapID, exactly that (map, region); without, every region with that id, and if
+// several (ids are unique per map only) the single non-stale one. A stale region
+// may be assigned (the owner may be repairing a mapping); cleaning one stays
+// refused by vacuum.clean.
+func (s *Service) AssignRoom(ctx context.Context, sel, mapID, regionID, roomID string) (*myhome.VacuumRoomAssignResult, error) {
+	r, err := s.pick(sel)
+	if err != nil {
+		return nil, err
+	}
+	known, err := s.regions(r)
+	if err != nil {
+		return nil, err
+	}
+	var matches, fresh []myhome.VacuumRegion
+	for _, reg := range known {
+		if reg.ID == regionID && (mapID == "" || reg.MapID == mapID) {
+			matches = append(matches, reg)
+			if !reg.Stale {
+				fresh = append(fresh, reg)
+			}
+		}
+	}
+	var reg myhome.VacuumRegion
+	switch {
+	case len(matches) == 0 && mapID != "":
+		return nil, fmt.Errorf("no region %q on map %q for robot %s", regionID, mapID, r.rec.Name)
+	case len(matches) == 0:
+		return nil, fmt.Errorf("no region %q for robot %s", regionID, r.rec.Name)
+	case len(matches) == 1:
+		reg = matches[0]
+	case len(fresh) == 1:
+		reg = fresh[0]
+	default:
+		return nil, fmt.Errorf("region %s exists on %d robot maps; pass --map <map-id>", regionID, len(matches))
+	}
+	if roomID != "" {
+		if err := checkRoomExists(ctx, roomID); err != nil {
+			return nil, err
+		}
+	}
+	prev, err := s.store.assignRegion(r.rec.BLID, reg.MapID, reg.ID, roomID)
+	if err != nil {
+		return nil, err
+	}
+	return &myhome.VacuumRoomAssignResult{MapID: reg.MapID, RegionID: reg.ID, RoomID: roomID, Previous: prev}, nil
+}
+
+// checkRoomExists asks the rooms service through its RPC verb rather than
+// importing myhome/rooms (an RPC boundary, as for every cross-service call).
+func checkRoomExists(ctx context.Context, roomID string) error {
+	m, err := myhome.Methods(myhome.TemperatureGet)
+	if err != nil {
+		return fmt.Errorf("rooms are not enabled on this daemon")
+	}
+	if _, err := m.ActionE(ctx, &myhome.TemperatureGetParams{RoomID: roomID}); err != nil {
+		return fmt.Errorf("unknown room %q: %w", roomID, err)
+	}
+	return nil
 }
 
 // NameRoom gives a region a local name. When the iRobot account is configured

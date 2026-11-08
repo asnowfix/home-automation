@@ -1,6 +1,7 @@
 package vacuum
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -60,5 +61,66 @@ func TestPrintSyncNoSecretFields(t *testing.T) {
 	}
 	if !strings.Contains(out, "8 rooms") || !strings.Contains(out, "robot version not reported") {
 		t.Fatalf("output = %s", out)
+	}
+}
+
+func TestPrintAssign(t *testing.T) {
+	for _, c := range []struct {
+		res  myhome.VacuumRoomAssignResult
+		want string
+	}{
+		{myhome.VacuumRoomAssignResult{RegionID: "12", RoomID: "cuisine"}, "region 12 is now in room cuisine"},
+		{myhome.VacuumRoomAssignResult{RegionID: "12", RoomID: "cuisine", Previous: "salon"}, "region 12 moved from salon to cuisine"},
+		{myhome.VacuumRoomAssignResult{RegionID: "12", RoomID: "cuisine", Previous: "cuisine"}, "region 12 was already in room cuisine"},
+		{myhome.VacuumRoomAssignResult{RegionID: "12", Previous: "salon"}, "region 12 removed from room salon"},
+		{myhome.VacuumRoomAssignResult{RegionID: "12"}, "region 12 was not in a room"},
+	} {
+		var b strings.Builder
+		printAssign(&b, &c.res)
+		if got := strings.TrimSpace(b.String()); got != c.want {
+			t.Errorf("printAssign(%+v) = %q, want %q", c.res, got, c.want)
+		}
+	}
+}
+
+func TestPrintRoomsShowsRoomColumn(t *testing.T) {
+	var b strings.Builder
+	printRooms(&b, &myhome.VacuumRoomsResult{Regions: []myhome.VacuumRegion{
+		{MapID: "m1", ID: "11", Type: "rid", Name: "Cuisine", Source: myhome.VacuumSourceRobot, RoomID: "kitchen"},
+		{MapID: "m1", ID: "4", Type: "rid", Name: "Hall", Source: myhome.VacuumSourceRobot},
+	}})
+	out := b.String()
+	if !strings.Contains(out, "ROOM") || !strings.Contains(out, "kitchen") {
+		t.Errorf("no ROOM column:\n%s", out)
+	}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "Hall") && !strings.Contains(l, " - ") {
+			t.Errorf("unassigned region not shown as '-': %q", l)
+		}
+	}
+}
+
+// The CLI only relays the RPC: the daemon resolves the region and checks the room.
+func TestRunAssignCallsOnlyTheRPC(t *testing.T) {
+	fake := myhome.NewFakeClient()
+	fake.SetResult(myhome.VacuumRoomAssign, &myhome.VacuumRoomAssignResult{MapID: "m1", RegionID: "12", RoomID: "cuisine", Previous: "salon"})
+	old := myhome.TheClient
+	myhome.TheClient = fake
+	t.Cleanup(func() { myhome.TheClient = old; assignMap = "" })
+	assignMap = "m1"
+
+	var b strings.Builder
+	if err := runAssign(context.Background(), &b, "12", "cuisine"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.Calls) != 1 || fake.Calls[0].Method != myhome.VacuumRoomAssign {
+		t.Fatalf("calls = %+v", fake.Calls)
+	}
+	p, ok := fake.Calls[0].Params.(*myhome.VacuumRoomAssignParams)
+	if !ok || p.MapID != "m1" || p.RegionID != "12" || p.RoomID != "cuisine" {
+		t.Errorf("params = %+v", fake.Calls[0].Params)
+	}
+	if !strings.Contains(b.String(), "moved from salon to cuisine") {
+		t.Errorf("output = %q", b.String())
 	}
 }

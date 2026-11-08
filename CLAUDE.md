@@ -18,7 +18,17 @@ make tidy           # tidy all workspace modules
 # Run the full daemon locally against the real home MQTT broker (needed to test UI/RPC changes
 # against live devices, e.g. via a browser at http://127.0.0.1:6080). Run from the worktree
 # whose code you want to test — each worktree's `go run` builds its own checked-out sources.
-go run ./myhome daemon run --instance local --mqtt-broker tcp://192.168.1.2:1883
+# Use `python3 -I scripts/myhome-local-daemon.py` (below): it owns the safe flags, so a bare
+# `daemon run --instance local` is NOT safe against the real broker. See the warning after it.
+
+# WARNING: a side daemon shares the real broker with production, and `--instance local` scopes only
+# the RPC topic. With an empty local DB it would auto-set-up every device it hears (config, firmware,
+# KVS and script writes), reconcile them hourly, and publish `myhome/occupancy` and the room
+# temperature ranges that heater.js reads (#700). The script's `SAFE_DAEMON_FLAGS` turn all of that
+# off (the list lives only there), and it drops `.env` and MYHOME_* variables: `.env` credentials
+# (vacuum, Beem, SFR) would take over the vacuum connection and publish solar availability.
+# Writes you start yourself remain possible and no flag blocks them: UI switch toggles, device setup,
+# set-room, heater config, the device web-UI proxy, `ctl --instance local ...`.
 
 go test ./internal/myhome/...                    # single package
 go test -v -run TestName ./path/to/package       # specific test
@@ -294,8 +304,10 @@ The discipline that made this recoverable:
   no dry-run; to preview (a), compare each device's `script/<name>` KVS value with `sha1sum` of the
   packaged `internal/shelly/scripts/<name>`.
 - Pool provisioning (`Setup`/`AddDevice`/`UpdateDevice`) is reachable **only** from `myhome/ctl/pool/`,
-  never from the daemon; the daemon's auto-setup applies solely to devices lacking `watchdog.js` as
-  script #1. A `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst
+  never from the daemon; the daemon's auto-setup applies to any Gen2 device whose KVS marker
+  `script/setup/done` is missing (`IsDeviceSetUp`, called from `myhome/devices/impl/manager.go`; the
+  marker is defined in `internal/myhome/shelly/setup/setup.go`), not only to devices lacking
+  `watchdog.js`; a daemon with an empty DB treats every device as new (#700). A `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst
   tries to enable it, systemd refuses, everything before that has already succeeded.
 
 ### Sub-agents

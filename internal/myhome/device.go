@@ -6,6 +6,7 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome/sfr"
 	"net"
 	"strings"
+	"sync"
 	"time"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
@@ -123,12 +124,25 @@ type DeviceImplementation interface {
 	Status() *shelly.Status
 }
 
+// implMu guards the impl field of every Device. It is package-level, not a
+// field, because Device is copied by value in many places (storage, UI, ctl):
+// a lock inside the value would be copied too, possibly while held (#762).
+// Contention is negligible: the critical sections are a pointer read or write.
+var implMu sync.RWMutex
+
+// WithImpl publishes the inner implementation handle. Safe for concurrent use
+// with Impl and other WithImpl calls.
 func (d *Device) WithImpl(i any) *Device {
+	implMu.Lock()
 	d.impl = i
+	implMu.Unlock()
 	return d
 }
 
+// Impl returns the inner implementation handle (nil if none yet).
 func (d *Device) Impl() any {
+	implMu.RLock()
+	defer implMu.RUnlock()
 	return d.impl
 }
 

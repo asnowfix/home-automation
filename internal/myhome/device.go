@@ -106,9 +106,10 @@ func IsTemperatureSensor(d *Device) bool {
 // Status represents the current runtime status of a device
 type Status struct {
 	Sensors *Sensors `json:"sensors,omitempty"` // Sensor readings (BTHome format)
-	// SensorsUpdatedAt is when any sensor value last arrived (in memory only); absent
-	// until the first value, so a page can show "N h ago" for a stale reading.
-	SensorsUpdatedAt *time.Time `json:"sensors_updated_at,omitempty"`
+	// TemperatureUpdatedAt is when the "temperature" value last arrived (in memory only);
+	// other sensor keys do not touch it. Absent until the first temperature, so a page
+	// can show "N h ago" for a stale reading.
+	TemperatureUpdatedAt *time.Time `json:"temperature_updated_at,omitempty"`
 }
 
 type Component struct {

@@ -334,8 +334,10 @@ func (c *Cache) UpdateSensorValue(ctx context.Context, deviceID string, sensor s
 		*fieldPtr = &v
 	}
 
-	now := time.Now()
-	device.Status.SensorsUpdatedAt = &now
+	if sensor == "temperature" {
+		now := time.Now()
+		device.Status.TemperatureUpdatedAt = &now
+	}
 
 	c.log.V(1).Info("Updated sensor value in cache", "device_id", deviceID, "sensor", sensor, "value", value)
 	return nil

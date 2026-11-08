@@ -874,9 +874,10 @@ func TestCache_Concurrent_NoRace(t *testing.T) {
 	wg.Wait()
 }
 
-// TestCache_UpdateSensorValue_UpdateTime checks the in-memory update time: absent
-// before any value, set on a successful update, untouched by a rejected one.
-func TestCache_UpdateSensorValue_UpdateTime(t *testing.T) {
+// TestCache_UpdateSensorValue_TemperatureUpdateTime checks the in-memory temperature
+// update time: absent before any value, untouched by a rejected value or by other
+// sensors, set by a temperature update.
+func TestCache_UpdateSensorValue_TemperatureUpdateTime(t *testing.T) {
 	c := NewCache(testCtx(t), newFakeRegistry())
 	d := fakeDevice("shellyht-001", "ht", "aa:bb:cc:dd:ee:02", "192.168.1.2")
 	if _, err := c.SetDevice(context.Background(), d, false); err != nil {
@@ -887,29 +888,46 @@ func TestCache_UpdateSensorValue_UpdateTime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDeviceById: %v", err)
 	}
-	if got.Status != nil && got.Status.SensorsUpdatedAt != nil {
-		t.Fatalf("update time set before any value: %v", got.Status.SensorsUpdatedAt)
+	if got.Status != nil && got.Status.TemperatureUpdatedAt != nil {
+		t.Fatalf("update time set before any value: %v", got.Status.TemperatureUpdatedAt)
 	}
-	if b, _ := json.Marshal(got); strings.Contains(string(b), "sensors_updated_at") {
-		t.Fatalf("sensors_updated_at serialized before any value: %s", b)
+	if b, _ := json.Marshal(got); strings.Contains(string(b), "temperature_updated_at") {
+		t.Fatalf("temperature_updated_at serialized before any value: %s", b)
 	}
 
 	if err := c.UpdateSensorValue(context.Background(), "shellyht-001", "temperature", "bogus"); err == nil {
 		t.Fatal("expected an error for an invalid value")
 	}
-	if got.Status.SensorsUpdatedAt != nil {
-		t.Fatalf("update time set by a rejected value: %v", got.Status.SensorsUpdatedAt)
+	if got.Status.TemperatureUpdatedAt != nil {
+		t.Fatalf("update time set by a rejected value: %v", got.Status.TemperatureUpdatedAt)
+	}
+
+	for _, sensor := range []string{"humidity", "battery"} {
+		if err := c.UpdateSensorValue(context.Background(), "shellyht-001", sensor, "50"); err != nil {
+			t.Fatalf("UpdateSensorValue(%s): %v", sensor, err)
+		}
+		if got.Status.TemperatureUpdatedAt != nil {
+			t.Fatalf("update time set by %s: %v", sensor, got.Status.TemperatureUpdatedAt)
+		}
 	}
 
 	before := time.Now()
 	if err := c.UpdateSensorValue(context.Background(), "shellyht-001", "temperature", "21.5"); err != nil {
 		t.Fatalf("UpdateSensorValue: %v", err)
 	}
-	at := got.Status.SensorsUpdatedAt
+	at := got.Status.TemperatureUpdatedAt
 	if at == nil || at.Before(before) || at.After(time.Now()) {
 		t.Fatalf("update time = %v, want within [%v, now]", at, before)
 	}
-	if b, _ := json.Marshal(got); !strings.Contains(string(b), "sensors_updated_at") {
-		t.Fatalf("sensors_updated_at missing from JSON: %s", b)
+	if b, _ := json.Marshal(got); !strings.Contains(string(b), "temperature_updated_at") {
+		t.Fatalf("temperature_updated_at missing from JSON: %s", b)
+	}
+
+	// A later humidity update leaves the temperature time unchanged.
+	if err := c.UpdateSensorValue(context.Background(), "shellyht-001", "humidity", "51"); err != nil {
+		t.Fatalf("UpdateSensorValue: %v", err)
+	}
+	if got.Status.TemperatureUpdatedAt != at {
+		t.Fatalf("humidity update moved the temperature time")
 	}
 }

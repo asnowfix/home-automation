@@ -2,6 +2,7 @@ package vacuum
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -238,7 +239,10 @@ func checkRoomExists(ctx context.Context, roomID string) error {
 		return fmt.Errorf("rooms are not enabled on this daemon")
 	}
 	if _, err := m.ActionE(ctx, &myhome.TemperatureGetParams{RoomID: roomID}); err != nil {
-		return fmt.Errorf("unknown room %q: %w", roomID, err)
+		if errors.Is(err, myhome.ErrRoomNotFound) {
+			return fmt.Errorf("unknown room %q", roomID)
+		}
+		return fmt.Errorf("checking room %q: %w", roomID, err)
 	}
 	return nil
 }

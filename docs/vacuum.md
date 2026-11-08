@@ -184,7 +184,9 @@ room can later be cleaned by name. `vacuum rooms assign <region-id> <room-id>` s
   already in another room **moves** it, and the command says so (`region 12 moved from salon to
   cuisine`).
 - A region id is unique **per robot map**, so if the same id exists on two maps the command asks for
-  `--map <map-id>` (it picks the single non-stale one when there is exactly one).
+  `--map <map-id>` (it picks the single non-stale one when there is exactly one). Ambiguity is judged
+  from the regions stored in the database, so it does not need the robot to be connected; without a
+  live connection staleness of learned regions is unknown and counts as not stale.
 - The daemon checks that the room exists (through `temperature.get`); an unknown room is refused,
   and a daemon without rooms answers "rooms are not enabled on this daemon". Unassigning needs no room.
 - The assignment survives `vacuum rooms sync` (renames, removals: a removed area goes stale and keeps

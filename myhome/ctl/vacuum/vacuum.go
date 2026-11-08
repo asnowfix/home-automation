@@ -381,10 +381,15 @@ most one room: assigning one that is in another room moves it. Several regions
 may belong to the same room.
 
 A region id is unique per robot map only: if it exists on several maps,
-pass --map. The daemon resolves the region and checks the room.`,
+pass --map. The daemon resolves the region and checks the room. It can only
+tell that an id is ambiguous from the regions it has stored, so this does not
+need the robot to be connected.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runAssign(cmd.Context(), os.Stdout, args[0], args[1])
+		if strings.TrimSpace(args[1]) == "" {
+			return fmt.Errorf("room id is empty: use 'myhome ctl vacuum rooms unassign %s' to take the region out of its room", args[0])
+		}
+		return runAssign(cmd.Context(), os.Stdout, args[0], strings.TrimSpace(args[1]))
 	},
 }
 

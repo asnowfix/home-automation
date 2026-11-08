@@ -2,6 +2,7 @@ package vacuum
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -38,7 +39,10 @@ func fakeRooms(t *testing.T, known ...string) {
 				return &myhome.TemperatureRoomConfig{RoomID: id}, nil
 			}
 		}
-		return nil, fmt.Errorf("room not found: %s", id)
+		if id == "broken" {
+			return nil, errors.New("database is locked")
+		}
+		return nil, fmt.Errorf("%w: %s", myhome.ErrRoomNotFound, id)
 	})
 }
 
@@ -119,6 +123,12 @@ func TestAssignRejections(t *testing.T) {
 
 	if _, err := h.svc.AssignRoom(ctx, "", "", "11", "nowhere"); err == nil || !strings.Contains(err.Error(), `unknown room "nowhere"`) {
 		t.Errorf("unknown room: %v", err)
+	}
+	// Another failure of the rooms service is not reported as "unknown room".
+	_, err := h.svc.AssignRoom(ctx, "", "", "11", "broken")
+	if err == nil || strings.Contains(err.Error(), "unknown room") ||
+		!strings.Contains(err.Error(), `checking room "broken"`) || !strings.Contains(err.Error(), "database is locked") {
+		t.Errorf("other rooms error: %v", err)
 	}
 	if got := roomOf(t, h, "m1", "11"); got != "" {
 		t.Errorf("a refused assignment wrote %q", got)

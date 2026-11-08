@@ -17,6 +17,7 @@ type powerView struct {
 	Label    string // accessible name: the row title
 	Known    bool   // false until the daemon has seen the switch state: the button is shown disabled
 	On       bool   // logical state, after the device's polarity
+	Starting bool   // unknown, and the daemon has not yet had its turn to look at the device (#763)
 }
 
 // deviceRow is one row of the Home grid: one per switch, or one per device
@@ -53,7 +54,8 @@ func deviceRows(d DeviceView) []deviceRow {
 		}
 		rows = append(rows, deviceRow{
 			D: &d, Title: title, First: i == 0, HasSwitch: true,
-			Power: powerView{DeviceID: d.Id, SwitchID: id, Label: title, Known: !d.SwitchUnknown[id], On: sw.On},
+			Power: powerView{DeviceID: d.Id, SwitchID: id, Label: title, Known: !d.SwitchUnknown[id], On: sw.On,
+				Starting: d.Starting && d.SwitchUnknown[id]},
 		})
 	}
 	return rows
@@ -115,6 +117,7 @@ const deviceRowsTemplate = `
     <span class="mh-avatar" aria-hidden="true">{{if .HasSwitch}}<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.500A6 6 0 0 0 12 3z"/></svg>{{else}}<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>{{end}}</span>
     <span class="mh-row-text">
       <span class="mh-row-name"{{if .First}} id="device-{{.D.Id}}-name"{{end}}>{{.Title}}</span>
+      {{if .Power.Starting}}<span class="mh-pill is-unknown mh-starting" id="starting-{{.D.Id}}-{{.Power.SwitchID}}">Starting…</span>{{end}}
       {{if .First}}<span class="mh-tags">
         {{if .D.HasTemperatureSensor}}<span class="mh-pill{{if not .D.Temperature}} is-unknown{{end}}" id="sensor-{{.D.Id}}-temperature">{{if .D.Temperature}}{{f1 .D.Temperature}}{{else}}--{{end}}°C</span>{{end}}
         {{if .D.HasHumiditySensor}}<span class="mh-pill{{if not .D.Humidity}} is-unknown{{end}}" id="sensor-{{.D.Id}}-humidity">{{if .D.Humidity}}{{f1 .D.Humidity}}{{else}}--{{end}}%</span>{{end}}
@@ -130,5 +133,5 @@ const deviceRowsTemplate = `
 
 {{define "power"}}<button type="button" class="mh-power{{if not .Known}} is-unknown{{else if .On}} is-on{{end}}" id="btn-switch-{{.DeviceID}}-{{.SwitchID}}"
         {{if .Known}}hx-post="/htmx/switch/toggle" hx-vals="{{vals .}}" hx-target="this" hx-swap="outerHTML" hx-disabled-elt="this"{{else}}disabled{{end}}
-        aria-label="Toggle {{.Label}}" aria-pressed="{{if .On}}true{{else}}false{{end}}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg></button>{{end}}
+        aria-label="Toggle {{.Label}}{{if .Starting}} (starting){{end}}" aria-pressed="{{if .On}}true{{else}}false{{end}}"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg></button>{{end}}
 `

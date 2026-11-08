@@ -372,6 +372,12 @@ template adaptation above, and list the commits in the issue.
    implementer: when "Starting…" turns into plain unknown for a device that never reports (a quiet or
    offline device). The design says only "until the first retained event arrives"; propose a rule
    (e.g. after the first full rediscovery pass) in the PR rather than leave a device "Starting…" forever.
+   **Decided in #763 (PR #773):** the phase ends when the refresh round-robin
+   (`runDeviceRefreshJob`) wraps, i.e. on the tick after the last Gen2 device was queued, or when that job
+   exits for any reason. Worst case (N+1) x `--refresh-interval` for N Gen2 devices (longer if discovery
+   adds devices mid-pass). Accepted gaps: the pass is counted by index, so a shrinking device list can
+   end it early, and an empty cache ends it at once. No hard cap. Open browsers are then told to
+   re-fetch the rows still unknown.
 
 Follow-up PRs from these answers (each into the campaign branch, after PR B #745 lands, since they touch
 the same files):

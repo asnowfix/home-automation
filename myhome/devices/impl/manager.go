@@ -323,6 +323,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
 	go dm.deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")))
 	go dm.primeAllPolarities(logr.NewContext(ctx, dm.log.WithName("primePolarities")))
+	ui.SetStarting(true) // cleared by the refresh job after its first pass (#763)
 	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
@@ -667,6 +668,18 @@ func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, interval time.
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	// The UI shows "Starting…" on switches nobody has looked at yet (#763). The
+	// phase ends when this round-robin wraps, i.e. on the tick after the last
+	// Gen2 device was queued: the worst case is (N+1) x interval for N devices
+	// (longer if discovery adds devices mid-pass), and the extra tick lets the
+	// last refresh land. A device still unknown then was tried and is plainly
+	// unknown. Accepted gaps: the pass is counted by index over a list that can
+	// shrink (ForgetDevice), so an early wrap can end the phase before every
+	// remaining device was tried, and an empty cache ends it at once. The
+	// deferred call covers every exit (error, cancellation), so the phase can
+	// never outlive this job; endStarting is idempotent.
+	defer dm.endStarting(ctx)
+
 	i := 0
 
 	for {
@@ -691,16 +704,41 @@ func (dm *DeviceManager) runDeviceRefreshJob(ctx context.Context, interval time.
 
 			if len(gen2Devices) == 0 {
 				log.V(1).Info("No Gen2+ devices to refresh (Gen1 and BLU devices are updated via MQTT)")
+				dm.endStarting(ctx)
 				continue
 			}
 
 			if i >= len(gen2Devices) {
 				i = 0
+				dm.endStarting(ctx) // wrapped: the list was walked once
 			}
 
 			log.Info("Refreshing device", "index", i, "total_gen2_devices", len(gen2Devices), "device", gen2Devices[i].DeviceSummary)
 			dm.UpdateChannel() <- gen2Devices[i]
 			i++
+		}
+	}
+}
+
+// endStarting closes the UI's post-start "Starting…" phase (idempotent) and
+// tells open browsers to re-fetch the switch devices whose row is still
+// unknown, so rows showing "Starting…" turn into plain unknown without a page
+// reload. DeviceToView makes no device call.
+func (dm *DeviceManager) endStarting(ctx context.Context) {
+	if !ui.EndStarting() {
+		return
+	}
+	if dm.sseBroadcaster == nil {
+		return
+	}
+	devices, err := dm.GetAllDevices(ctx)
+	if err != nil {
+		dm.log.Error(err, "Starting phase over, but cannot list devices to refresh open browsers")
+		return
+	}
+	for _, d := range devices {
+		if len(ui.DeviceToView(ctx, d).SwitchUnknown) > 0 {
+			dm.broadcastStateChange(d)
 		}
 	}
 }

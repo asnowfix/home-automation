@@ -62,6 +62,7 @@ type DeviceView struct {
 	TurnoverAchieved     *float64                        `json:"turnover_achieved,omitempty"`   // pool volumes filtered in the last 24 h (nil = unknown or not IsPoolPump)
 	TurnoverTarget       *float64                        `json:"turnover_target,omitempty"`     // configured daily turnover target, times/day (nil unless IsPoolPump)
 	WaterSupplyActive    *bool                           `json:"water_supply_active,omitempty"` // true = water-supply protection engaged, pump paused (nil unless IsPoolPump)
+	Starting             bool                            `json:"-"`                             // daemon still in its post-start phase (#763): unknown switches render "Starting…", not a bare unknown
 	SwitchUnknown        map[int]bool                    `json:"-"`                             // switch ids whose state the daemon has not seen yet: the row shows a disabled button, not "off"
 }
 
@@ -366,6 +367,7 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 		DoorOpened:           doorOpened,
 		Switches:             switches,
 		SwitchUnknown:        unknown,
+		Starting:             IsStarting() && len(unknown) > 0,
 	}
 }
 

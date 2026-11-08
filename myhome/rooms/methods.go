@@ -2,6 +2,7 @@ package rooms
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"time"
@@ -46,6 +47,19 @@ func (s *Service) HandleSet(ctx context.Context, p *myhome.TemperatureSetParams)
 		Name:   p.Name,
 		Kinds:  p.Kinds,
 		Levels: p.Levels,
+	}
+	if p.ICalURL != nil {
+		config.ICalURL = *p.ICalURL
+	} else {
+		// nil keeps the stored URL. Only "no such room yet" may fall back to
+		// an empty one: any other storage error must not wipe it.
+		existing, err := s.storage.GetRoom(p.RoomID)
+		switch {
+		case err == nil:
+			config.ICalURL = existing.ICalURL
+		case !errors.Is(err, ErrRoomNotFound):
+			return nil, fmt.Errorf("failed to read existing room: %w", err)
+		}
 	}
 
 	modified, err := s.storage.SaveRoom(config)

@@ -62,6 +62,7 @@ type DeviceView struct {
 	TurnoverAchieved     *float64                        `json:"turnover_achieved,omitempty"`   // pool volumes filtered today so far (nil unless IsPoolPump)
 	TurnoverTarget       *float64                        `json:"turnover_target,omitempty"`     // configured daily turnover target, times/day (nil unless IsPoolPump)
 	WaterSupplyActive    *bool                           `json:"water_supply_active,omitempty"` // true = water-supply protection engaged, pump paused (nil unless IsPoolPump)
+	SwitchUnknown        map[int]bool                    `json:"-"`                             // switch ids whose state the daemon has not seen yet: the row shows a disabled button, not "off"
 }
 
 // applyPoolStatus enriches views in place with the configured pool device's
@@ -247,6 +248,7 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 
 	// Get switch information
 	switches := make(map[int]pkgshelly.SwitchSummary)
+	unknown := make(map[int]bool)
 
 	// First try to get switches from config if available
 	if d.Config != nil {
@@ -263,33 +265,45 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 		for _, sw := range []*sswitch.Config{d.Config.Switch0, d.Config.Switch1, d.Config.Switch2, d.Config.Switch3} {
 			if sw != nil {
 				output := false
+				// A switch with no status yet is unknown, not off.
+				known := false
 				// Get actual switch status if available
 				if status != nil {
 					switch sw.Id {
 					case 0:
 						if status.Switch0 != nil {
 							output = status.Switch0.Output
+							known = true
 						}
 					case 1:
 						if status.Switch1 != nil {
 							output = status.Switch1.Output
+							known = true
 						}
 					case 2:
 						if status.Switch2 != nil {
 							output = status.Switch2.Output
+							known = true
 						}
 					case 3:
 						if status.Switch3 != nil {
 							output = status.Switch3.Output
+							known = true
 						}
 					}
 				}
 
 				// Active/on color depends on the normally-closed KVS key when present:
 				// the raw Output only means "on" if it matches the device's configured on-value.
+				// Rendering never calls the device (#732): the polarity comes from the
+				// cache the refresh path fills, and an unresolved one shows as unknown.
 				isOn := output
 				if sd != nil {
-					isOn = output == sswitchsvc.OnValue(ctx, log, sd, sw.Id)
+					if onValue, resolved := sswitchsvc.OnValueCached(d.Id(), sw.Id); resolved {
+						isOn = output == onValue
+					} else {
+						known = false
+					}
 				}
 
 				switches[sw.Id] = pkgshelly.SwitchSummary{
@@ -297,24 +311,14 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 					Name: sw.Name,
 					On:   isOn,
 				}
+				if !known {
+					unknown[sw.Id] = true
+				}
 			}
 		}
 		log.V(1).Info("Loaded switches from config", "device", d.Id(), "count", len(switches))
-	} else if sd, ok := d.Impl().(*shelly.Device); ok && sd != nil {
-		// Fallback: Fetch switches directly from device if no config
-		log.V(1).Info("No config, fetching switches from device", "device", d.Id())
-		switchSummary, err := pkgshelly.GetSwitchesSummary(ctx, sd)
-		if err != nil {
-			log.V(1).Info("Failed to get switches summary", "device", d.Id(), "error", err)
-		} else {
-			for id, ss := range switchSummary {
-				ss.On = ss.On == sswitchsvc.OnValue(ctx, log, sd, id)
-				switchSummary[id] = ss
-			}
-			switches = switchSummary
-			log.V(1).Info("Fetched switches from device", "device", d.Id(), "count", len(switches))
-		}
 	}
+	// A device without config shows no switches: it is never queried while rendering (#732).
 
 	// Extract sensor values from cached device status
 	var temperature *float64
@@ -362,6 +366,7 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 		Humidity:             humidity,
 		DoorOpened:           doorOpened,
 		Switches:             switches,
+		SwitchUnknown:        unknown,
 	}
 }
 

@@ -619,6 +619,20 @@ func (d *daemon) Run() error {
 			}()
 
 			log.Info("Rooms RPC methods registered")
+		} else {
+			// Temperature service disabled (e.g. a read-only side instance
+			// fed by `ctl db import`): still serve the room and schedule RPCs
+			// from the local database so imported data lands and the UI can
+			// read it, but with no MQTT client, no iCal agenda publisher, no
+			// room setup and no initial/daily SetupAllRooms. Nothing is
+			// published and nothing is written toward a device.
+			roomsStorage, err := rooms.NewStorage(log, storage.DB())
+			if err != nil {
+				log.Error(err, "Failed to initialize rooms storage")
+				return err
+			}
+			rooms.NewDataService(log, roomsStorage).RegisterHandlers()
+			log.Info("Rooms data RPC methods registered (temperature service disabled: no publishing)")
 		}
 
 		// Register the fetch-and-transform proxy (#465). Always registered —

@@ -82,8 +82,8 @@ func TestShellHasNoExternalNavigationOrAutoOpenOverlay(t *testing.T) {
 	// may be forced open in markup
 	js := string(staticAsset(t, "/static/myhome.js"))
 	m := regexp.MustCompile(`(?s)modals:\s*\{(.*?)\}`).FindStringSubmatch(js)
-	if m == nil || strings.Contains(m[1], "true") || strings.Count(m[1], "false") != 4 {
-		t.Errorf("modals initial state must be four false flags, got %q", m)
+	if m == nil || strings.Contains(m[1], "true") || strings.Count(m[1], "false") != 5 {
+		t.Errorf("modals initial state must be five false flags, got %q", m)
 	}
 	if regexp.MustCompile(`class="modal[^"]*is-active`).MatchString(html) {
 		t.Error("an overlay is open in markup")

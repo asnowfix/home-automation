@@ -71,6 +71,7 @@ func init() {
 	runCmd.PersistentFlags().BoolVar(&disableElectricityService, "disable-electricity-service", false, "Disable the electricity pricing publisher (mutually exclusive with --enable-electricity-service)")
 	runCmd.PersistentFlags().StringVar(&options.Flags.ElectricityCheapIntervals, "cheap-electricity", "23:15-07:15", "Cheap electricity window(s): HH:MM-HH:MM[,HH:MM-HH:MM]")
 	runCmd.PersistentFlags().Float64Var(&options.Flags.WeatherLatitude, "weather-latitude", 0, "Location latitude for weather forecast (decimal degrees)")
+	runCmd.PersistentFlags().BoolVar(&options.Flags.DisableWeatherPublisher, "disable-weather-publisher", false, "Do not publish the retained weather forecast (myhome/weather/forecast)")
 	runCmd.PersistentFlags().Float64Var(&options.Flags.WeatherLongitude, "weather-longitude", 0, "Location longitude for weather forecast (decimal degrees)")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableMetricsExporter, "enable-metrics-exporter", false, "Enable the Prometheus metrics exporter (auto-enabled with device manager)")
 	runCmd.PersistentFlags().IntVar(&options.Flags.MetricsExporterPort, "metrics-exporter-port", options.PROMETHEUS_DEFAULT_PORT, "Prometheus metrics exporter HTTP port")
@@ -192,6 +193,9 @@ var runCmd = &cobra.Command{
 		}
 		if v.IsSet("weather.longitude") && !cmd.Flags().Changed("weather-longitude") {
 			options.Flags.WeatherLongitude = v.GetFloat64("weather.longitude")
+		}
+		if v.IsSet("weather.disable_publisher") && !cmd.Flags().Changed("disable-weather-publisher") {
+			options.Flags.DisableWeatherPublisher = v.GetBool("weather.disable_publisher")
 		}
 		if v.IsSet("daemon.disable_device_manager") && !cmd.Flags().Changed("disable-device-manager") {
 			disableDeviceManager = v.GetBool("daemon.disable_device_manager")

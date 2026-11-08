@@ -539,7 +539,9 @@ func (d *daemon) Run() error {
 		}
 
 		// Resolve weather coordinates via priority chain, then start forecast publisher.
-		{
+		if options.Flags.DisableWeatherPublisher {
+			log.Info("Weather forecast publisher disabled by option (--disable-weather-publisher / weather.disable_publisher)")
+		} else {
 			lat, lon, source := options.Flags.WeatherLatitude, options.Flags.WeatherLongitude, "config"
 			if lat == 0 && lon == 0 {
 				lat, lon, source = discoverLocation(d.ctx, log, d.dm)

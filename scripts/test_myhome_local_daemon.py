@@ -74,7 +74,8 @@ class Arguments(unittest.TestCase):
         args = ml.daemon_args(BROKER)
         self.assertEqual(args[:6], ["daemon", "run", "--instance", "local", "--mqtt-broker", BROKER])
         self.assertEqual(args[6:], ["--disable-auto-setup", "--reconcile-interval", "0", "--disable-occupancy-service",
-                                    "--disable-temperature-service", "--no-mdns-publish"])
+                                    "--disable-temperature-service", "--no-mdns-publish",
+                                    "--disable-weather-publisher"])
 
     def test_export_targets_main_instance_and_import_the_side_one(self):
         out = Path("/x/e.json")

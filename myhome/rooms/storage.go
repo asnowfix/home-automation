@@ -3,6 +3,7 @@ package rooms
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"time"
@@ -197,13 +198,16 @@ func (s *Storage) SaveRoom(config *RoomConfig) (bool, error) {
 	return false, nil
 }
 
+// ErrRoomNotFound is returned (wrapped) by GetRoom when the room does not exist.
+var ErrRoomNotFound = errors.New("room not found")
+
 // GetRoom retrieves a room configuration
 func (s *Storage) GetRoom(roomID string) (*RoomConfig, error) {
 	var row RoomConfigDB
 
 	err := s.db.Get(&row, `SELECT room_id, name, kinds, levels, ical_url, updated_at FROM rooms WHERE room_id = ?`, roomID)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("room not found: %s", roomID)
+		return nil, fmt.Errorf("%w: %s", ErrRoomNotFound, roomID)
 	}
 	if err != nil {
 		s.log.Error(err, "Failed to get room", "room_id", roomID)

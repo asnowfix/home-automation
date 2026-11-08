@@ -25,19 +25,25 @@ func (c serviceClient) CallE(ctx context.Context, v myhome.Verb, in any) (any, e
 		return c.svc.HandleList(ctx)
 	case myhome.TemperatureSet:
 		var p myhome.TemperatureSetParams
-		_ = json.Unmarshal(b, &p)
+		if err := json.Unmarshal(b, &p); err != nil {
+			return nil, err
+		}
 		return c.svc.HandleSet(ctx, &p)
 	case myhome.TemperatureGetWeekdayDefaults:
 		return c.svc.HandleGetWeekdayDefaults(ctx, &myhome.TemperatureGetWeekdayDefaultsParams{})
 	case myhome.TemperatureSetWeekdayDefault:
 		var p myhome.TemperatureSetWeekdayDefaultParams
-		_ = json.Unmarshal(b, &p)
+		if err := json.Unmarshal(b, &p); err != nil {
+			return nil, err
+		}
 		return c.svc.HandleSetWeekdayDefault(ctx, &p)
 	case myhome.TemperatureGetKindSchedules:
 		return c.svc.HandleGetKindSchedules(ctx, &myhome.TemperatureGetKindSchedulesParams{})
 	case myhome.TemperatureSetKindSchedule:
 		var p myhome.TemperatureSetKindScheduleParams
-		_ = json.Unmarshal(b, &p)
+		if err := json.Unmarshal(b, &p); err != nil {
+			return nil, err
+		}
 		return c.svc.HandleSetKindSchedule(ctx, &p)
 	}
 	return nil, io.ErrUnexpectedEOF // vacuum.* and others: not served here

@@ -72,7 +72,7 @@ func TestExportIncludesVacuumAndSurvivesJSON(t *testing.T) {
 	// a daemon without the vacuum service just leaves the section out
 	c = &recClient{results: map[Verb]any{VacuumExport: errors.New("unknown method")}}
 	exp, err = ExportDatabase(context.Background(), c, "*", false)
-	if err != nil || exp.Vacuum != nil {
+	if err != nil || exp.Vacuum != nil || len(exp.Skipped) == 0 || exp.Skipped[len(exp.Skipped)-1].Section != "vacuum" {
 		t.Errorf("missing vacuum service: %+v, %v", exp.Vacuum, err)
 	}
 }
@@ -140,11 +140,11 @@ func TestOldFormatsStillImport(t *testing.T) {
 	if _, err := ParseDatabaseImport([]byte("not json")); err == nil || !strings.Contains(err.Error(), "parse") {
 		t.Errorf("garbage accepted: %v", err)
 	}
-	// a failing vacuum.import does not fail the rest
+	// a failing vacuum.import is reported (progress and error), never "complete"
 	in, _ := ParseDatabaseImport([]byte(`{"vacuum":{"robots":[{"blid":"B"}]}}`))
 	c := &recClient{results: map[Verb]any{VacuumImport: errors.New("boom")}}
 	var out strings.Builder
-	if _, err := ImportDatabase(context.Background(), c, in, false, &out); err != nil || !strings.Contains(out.String(), "boom") {
+	if _, err := ImportDatabase(context.Background(), c, in, false, &out); err == nil || !strings.Contains(out.String(), "boom") {
 		t.Errorf("vacuum failure: %v / %q", err, out.String())
 	}
 }

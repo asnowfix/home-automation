@@ -22,8 +22,11 @@ var ExportCmd = &cobra.Command{
 	Long: `Export the complete database to JSON format.
 
 By default, exports devices (with their room assignment), rooms (with iCal URL), weekday defaults,
-kind schedules, and the vacuum robots and their regions. Caches, the event log and device-registered
-fetch subscriptions are not exported.
+kind schedules, and the vacuum robots and their regions. Caches, the event log (events.db, a separate
+file: copy it by hand if the target UI needs history or daily min/max) and device-registered fetch
+subscriptions are not exported.
+A section the daemon cannot serve (service disabled, or a daemon too old to know the method) is
+reported as a warning on stderr, distinct from a section that is simply empty.
 Use --devices-only to export only devices.
 
 The output can be written to stdout (default) or to a file using --output.
@@ -61,6 +64,9 @@ Examples:
 		}
 		n := export.Count()
 		if n == (myhome.ImportCounts{}) {
+			for _, sk := range export.Skipped {
+				fmt.Fprintf(os.Stderr, "⚠ %s\n", sk)
+			}
 			fmt.Fprintln(os.Stderr, "No data found to export")
 			return nil
 		}
@@ -85,6 +91,11 @@ Examples:
 			fmt.Fprintf(os.Stderr, "✓ Exported to %s:\n", exportFlags.Output)
 		} else {
 			fmt.Println(string(data))
+		}
+
+		// Sections the daemon could not serve are not "0 items": say so.
+		for _, sk := range export.Skipped {
+			fmt.Fprintf(os.Stderr, "⚠ %s\n", sk)
 		}
 
 		// Print summary to stderr

@@ -71,18 +71,25 @@ Examples:
 		if err != nil {
 			return err
 		}
-		n, err := myhome.ImportDatabase(ctx, myhome.TheClient, dbImport, importFlags.DevicesOnly, os.Stderr)
-		if err != nil {
-			return err
+		n, importErr := myhome.ImportDatabase(ctx, myhome.TheClient, dbImport, importFlags.DevicesOnly, os.Stderr)
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 
-		fmt.Fprintf(os.Stderr, "\n✓ Import complete:\n")
+		if importErr != nil {
+			fmt.Fprintf(os.Stderr, "\n⚠ Import INCOMPLETE (%d failed), stored:\n", n.Failed)
+		} else {
+			fmt.Fprintf(os.Stderr, "\n✓ Import complete:\n")
+		}
 		fmt.Fprintf(os.Stderr, "  - %d devices\n", n.Devices)
 		if !importFlags.DevicesOnly {
 			fmt.Fprintf(os.Stderr, "  - %d temperature rooms\n", n.Rooms)
 			fmt.Fprintf(os.Stderr, "  - %d weekday defaults\n", n.WeekdayDefaults)
 			fmt.Fprintf(os.Stderr, "  - %d kind schedules\n", n.KindSchedules)
 			fmt.Fprintf(os.Stderr, "  - %d vacuum robots, %d vacuum regions\n", n.VacuumRobots, n.VacuumRegions)
+		}
+		if importErr != nil {
+			return importErr
 		}
 
 		return nil

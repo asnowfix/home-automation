@@ -61,6 +61,17 @@ func NewService(ctx context.Context, log logr.Logger, mqttClient mqtt.Client, st
 	return s
 }
 
+// NewDataService creates a rooms service that only reads and writes its own
+// database: it never publishes to MQTT, at startup or on any change. It backs
+// the room and schedule RPCs of a daemon whose temperature service is
+// disabled (a read-only side instance), so that `db import` can fill it
+// without anything reaching a device.
+func NewDataService(log logr.Logger, storage *Storage) *Service {
+	s := &Service{log: log.WithName("rooms.DataService"), storage: storage}
+	s.log.Info("Rooms data service initialized (no MQTT publishing)")
+	return s
+}
+
 // RegisterHandlers registers all RPC method handlers
 func (s *Service) RegisterHandlers() {
 	myhome.RegisterMethodHandler(myhome.TemperatureGet, func(ctx context.Context, params any) (any, error) {
@@ -120,7 +131,13 @@ func (s *Service) publishAllRanges(ctx context.Context) {
 
 // PublishRangesUpdate publishes temperature ranges for a room to MQTT
 // Topic: myhome/rooms/<room-id>/temperature/ranges
+//
+// A Service built without an MQTT client (NewDataService) publishes nothing:
+// the ranges are retained messages that heaters consume.
 func (s *Service) PublishRangesUpdate(ctx context.Context, roomID string) error {
+	if s.mqttClient == nil {
+		return nil
+	}
 	ranges, dayType, err := s.GetComfortRanges(ctx, roomID, time.Now())
 	if err != nil {
 		return err

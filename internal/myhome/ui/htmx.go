@@ -287,29 +287,50 @@ func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
 		roomMap = *rm
 	}
 
-	// One pass over the DB-loaded cache (no device call): each device goes to
-	// its room, or to Unassigned when it has none or names an unknown room.
+	// One pass over the DB-loaded cache (no device call). A failed read is a
+	// 500, as in DeviceCards: htmx then keeps the previous DOM instead of
+	// swapping in an empty (but valid-looking) page.
 	var allDevices []*myhome.Device
 	if h.db != nil {
-		allDevices, _ = h.db.GetAllDevices(h.ctx)
+		var err error
+		allDevices, err = h.db.GetAllDevices(h.ctx)
+		if err != nil {
+			h.log.Error(err, "RoomsList: failed to get devices")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
+	// Build, sort and enrich the flat list once (pool.snapshot is a single
+	// in-memory call), then group: each device goes to its room, or to
+	// Unassigned when it has none or names an unknown room.
+	flat := make([]DeviceView, 0, len(allDevices))
+	roomOf := make([]string, 0, len(allDevices))
+	for _, d := range allDevices {
+		flat = append(flat, DeviceToView(h.ctx, d))
+		roomOf = append(roomOf, d.RoomId)
+	}
+	order := make([]int, len(flat))
+	for i := range order {
+		order[i] = i
+	}
+	sort.Slice(order, func(i, j int) bool {
+		return strings.ToLower(flat[order[i]].Name) < strings.ToLower(flat[order[j]].Name)
+	})
+	sorted := make([]DeviceView, len(flat))
+	sortedRoom := make([]string, len(flat))
+	for i, k := range order {
+		sorted[i], sortedRoom[i] = flat[k], roomOf[k]
+	}
+	applyPoolStatus(h.ctx, sorted)
 	byRoom := make(map[string][]DeviceView, len(roomMap))
 	var unassigned []DeviceView
-	for _, d := range allDevices {
-		dv := DeviceToView(h.ctx, d)
-		if _, known := roomMap[d.RoomId]; known && d.RoomId != "" {
-			byRoom[d.RoomId] = append(byRoom[d.RoomId], dv)
+	for i, dv := range sorted {
+		if _, known := roomMap[sortedRoom[i]]; known && sortedRoom[i] != "" {
+			byRoom[sortedRoom[i]] = append(byRoom[sortedRoom[i]], dv)
 		} else {
 			unassigned = append(unassigned, dv)
 		}
 	}
-	sortViews := func(v []DeviceView) {
-		sort.Slice(v, func(i, j int) bool {
-			return strings.ToLower(v[i].Name) < strings.ToLower(v[j].Name)
-		})
-		applyPoolStatus(h.ctx, v)
-	}
-	sortViews(unassigned)
 
 	views := make([]RoomView, 0, len(roomMap))
 	for _, rc := range roomMap {
@@ -319,7 +340,6 @@ func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
 		}
 
 		devViews := byRoom[rc.RoomID]
-		sortViews(devViews)
 
 		slots := h.roomAgenda(rc.RoomID)
 		inBusy, nextLabel := agendaStatus(slots)
@@ -650,6 +670,8 @@ const roomsListTemplate = `{{define "rooms-list"}}
 
       {{if .Devices}}
       <div class="mt-2 mh-grid">{{template "devices" .Devices}}</div>
+      {{else}}
+      <p class="is-size-7 has-text-grey mt-2">No devices</p>
       {{end}}
     </div>
   </div>

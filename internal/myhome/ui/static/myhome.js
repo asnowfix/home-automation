@@ -174,12 +174,14 @@ var kiosk = {
     if (sec.dataset.dirty || age > this.staleMs) { this.refresh(name); }
   },
 
-  // Re-render one device (all its rows) from the server. A GET, so it is
-  // allowed while offline; the previous DOM stays if it fails.
   // A device renders on both Rooms and Devices, so its element ids occur twice
   // in the DOM (one copy per section): every copy is looked up and updated.
   byId: function(id) { return document.querySelectorAll('[id="' + id + '"]'); },
 
+  // Re-render one device (every copy) from the server. A GET per copy, so two
+  // per device-update: kept rather than hand-swapping HTML, which would skip
+  // htmx's processing of the new hx-* attributes. Allowed while offline; the
+  // previous DOM stays if it fails.
   reloadDevice: function(id) {
     this.byId('device-' + id).forEach(function(el) {
       htmx.ajax('GET', '/htmx/device/' + encodeURIComponent(id), { target: el, swap: 'outerHTML' });
@@ -672,7 +674,7 @@ var kiosk = {
           }
           
           this.closeSetupModal();
-          setTimeout(() => kiosk.refresh('home'), 500);
+          setTimeout(() => { kiosk.refresh('home'); kiosk.refresh('rooms'); }, 500);
         } catch (e) {
           alert('Setup error: ' + e);
         } finally {

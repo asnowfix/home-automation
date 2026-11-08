@@ -34,6 +34,7 @@
 
   --mh-text: #eaeaea;
   --mh-text-muted: #a1a2a2;
+  --mh-danger: #b3261e;
 
   --mh-radius-pill: 200px;
   --mh-radius-card: 24px;
@@ -510,6 +511,7 @@ body.mh-shell {
 
 .mh-row-main:active {
   background: var(--mh-surface-2);
+  border-radius: var(--mh-radius-card);
 }
 
 .mh-row-text {
@@ -595,7 +597,6 @@ body.mh-shell {
   animation: mh-pulse 1s ease-in-out infinite;
 }
 
-.mh-power:disabled,
 .mh-power.is-unknown {
   color: var(--mh-text-muted);
   opacity: 0.5;
@@ -630,7 +631,8 @@ body.mh-shell {
   background: var(--mh-surface-4);
 }
 
-.mh-action:disabled {
+.mh-action:disabled,
+.mh-action.is-busy {
   opacity: 0.5;
   pointer-events: none;
 }
@@ -649,7 +651,147 @@ body.mh-shell {
   background: var(--mh-surface-3);
 }
 
+/* Vacuum section (#685). */
+.mh-vac {
+  padding: 16px;
+  margin-bottom: 16px;
+  border-radius: var(--mh-radius-card);
+  background: var(--mh-card);
+}
+
+.mh-vac-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.mh-vac-name {
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.mh-vac-phase {
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.mh-vac-sub {
+  color: var(--mh-text-muted);
+  font-size: 14px;
+}
+
+.mh-vac-controls,
+.mh-vac-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mh-vac-confirm {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mh-surface-3);
+}
+
+.mh-vac-ask {
+  flex: 1 1 100%;
+}
+
+.mh-vac-btn {
+  min-width: 96px;
+  min-height: 56px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  font-family: var(--mh-font);
+  font-size: 16px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mh-vac-btn.is-primary {
+  background: var(--mh-primary);
+  color: var(--mh-bg);
+}
+
+.mh-vac-btn.is-danger {
+  background: var(--mh-danger);
+  color: var(--mh-text);
+}
+
+/* Status tags and notes: explicit dark-surface colours (text at least 4.5:1),
+   not Bulma's light variants, which wash out on this theme. */
+.mh-vac-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.mh-vac-tag {
+  padding: 4px 14px;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  font-size: 14px;
+}
+
+.mh-vac-tag.is-ok {
+  background: #12351f;
+  color: #9be7b0;
+}
+
+.mh-vac-tag.is-warn {
+  background: #3d3114;
+  color: #f5d06f;
+}
+
+.mh-vac-tag.is-bad {
+  background: #4a1d1a;
+  color: #ffb4ab;
+}
+
+.mh-vac-note {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+}
+
+.mh-vac-note.is-warn {
+  background: #3d3114;
+  color: #f5d06f;
+}
+
+.mh-vac-note.is-bad {
+  background: #4a1d1a;
+  color: #ffb4ab;
+}
+
+.mh-vac-btn:active {
+  background: var(--mh-surface-4);
+  color: var(--mh-text);
+}
+
+.mh-vac-btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
 /* Bulma's .button sets display, which beats the hidden attribute. */
 [hidden] {
   display: none !important;
+}
+
+.mh-sheet-error {
+  margin-top: 8px;
+  padding: 8px 16px;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-primary-tint-2);
+  color: var(--mh-secondary);
 }

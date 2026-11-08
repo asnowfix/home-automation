@@ -112,7 +112,7 @@ const deviceRowsTemplate = `
           data-device-id="{{.D.Id}}" data-name="{{.D.Name}}" data-manufacturer="{{.D.Manufacturer}}"
           data-refreshable="{{if .D.IsRefreshable}}1{{end}}" data-heater="{{if .D.HasHeaterScript}}1{{end}}"
           @click="openDeviceSheet($el.dataset)">
-    <span class="mh-avatar" aria-hidden="true">{{if .HasSwitch}}<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.500A6 6 0 0 0 12 3z"/></svg>{{else if .D.DeviceTypeEmoji}}{{.D.DeviceTypeEmoji}}{{else}}<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>{{end}}</span>
+    <span class="mh-avatar" aria-hidden="true">{{if .HasSwitch}}<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.500A6 6 0 0 0 12 3z"/></svg>{{else}}<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>{{end}}</span>
     <span class="mh-row-text">
       <span class="mh-row-name"{{if .First}} id="device-{{.D.Id}}-name"{{end}}>{{.Title}}</span>
       {{if .First}}<span class="mh-tags">

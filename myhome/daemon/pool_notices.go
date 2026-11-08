@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	poolscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
@@ -56,21 +55,10 @@ type PoolNotices struct {
 	device   types.Device // types.Device (not concrete *shellyapi.Device) so tests can inject a fake KVS responder
 	deviceID string
 
-	// snap is the last turnover reading, served by pool.snapshot so renders
-	// never read the device (#731). Written only here (start, pool.pump_stop).
-	snapMu sync.Mutex
-	snap   poolTurnoverSnapshot
-
-	// loadTurnoverEvents returns the persisted pool.turnover_today events, oldest
-	// first; nil = read them from the events store. Injectable for tests.
-	loadTurnoverEvents func(ctx context.Context) ([]events.Event, error)
-}
-
-// poolTurnoverSnapshot is one turnover reading with the time it was taken.
-type poolTurnoverSnapshot struct {
-	achieved, target float64
-	runtimeSec       int64
-	ts               time.Time // zero = never read
+	// loadEvents returns this device's persisted events of one type (newest
+	// first, as the store does); nil = read them from the events store.
+	// Injectable for tests.
+	loadEvents func(ctx context.Context, eventType string) ([]events.Event, error)
 }
 
 // NewPoolNotices builds a PoolNotices, or returns nil if any dependency is
@@ -118,38 +106,17 @@ func (p *PoolNotices) OnEvent(ctx context.Context, e events.Event) {
 	if e.Event != "pool.pump_stop" {
 		return
 	}
-	p.recordTurnoverToday(ctx)
+	// Off the listener goroutine and with its own deadline: it makes several
+	// sequential device reads, each otherwise bounded only by the MQTT timeout.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), turnoverReadTimeout)
+		defer cancel()
+		p.recordTurnoverToday(ctx)
+	}()
 }
 
-// RefreshSnapshot reads the turnover from the device once and stores it for
-// pool.snapshot. Called once at start (a single read, as Rule 3 allows) and on
-// every pool.pump_stop; never from a render path. A nil receiver is a no-op.
-func (p *PoolNotices) RefreshSnapshot(ctx context.Context) {
-	if p == nil {
-		return
-	}
-	if _, _, _, err := p.ComputeTurnover(ctx); err != nil {
-		p.log.Info("Pool turnover snapshot not refreshed", "error", err.Error())
-	}
-}
-
-// storeSnapshot records a successful turnover reading.
-func (p *PoolNotices) storeSnapshot(achieved, target float64, runtimeSec int64) {
-	p.snapMu.Lock()
-	defer p.snapMu.Unlock()
-	p.snap = poolTurnoverSnapshot{achieved: achieved, target: target, runtimeSec: runtimeSec, ts: time.Now()}
-	p.log.V(1).Info("Pool turnover snapshot stored", "achieved", achieved, "target", target, "runtime_sec", runtimeSec)
-}
-
-// Snapshot returns the last stored turnover reading; ok is false if none yet.
-func (p *PoolNotices) Snapshot() (s poolTurnoverSnapshot, ok bool) {
-	if p == nil {
-		return poolTurnoverSnapshot{}, false
-	}
-	p.snapMu.Lock()
-	defer p.snapMu.Unlock()
-	return p.snap, !p.snap.ts.IsZero()
-}
+// turnoverReadTimeout bounds the device reads made for one pool.turnover_today.
+const turnoverReadTimeout = 30 * time.Second
 
 func (p *PoolNotices) recordTurnoverToday(ctx context.Context) {
 	achieved, target, runtimeSec, err := p.ComputeTurnover(ctx)
@@ -214,7 +181,6 @@ func (p *PoolNotices) ComputeTurnover(ctx context.Context) (achieved, target flo
 	}
 
 	achieved = roundTo(achieved, 2)
-	p.storeSnapshot(achieved, target, runtimeSec)
 	return achieved, target, runtimeSec, nil
 }
 

@@ -137,7 +137,7 @@ func TestPoolPanelTemplateStates(t *testing.T) {
 		t.Error("paused state not rendered")
 	}
 	unknown := render(poolPanelView{State: "ok", Name: "Pump"})
-	for _, s := range []string{"Water supply: --", "Filtered 24 h: --", "runtime today: --"} {
+	for _, s := range []string{"Water supply: --", "Filtered 24 h: --", "runtime 24 h: --"} {
 		if !strings.Contains(unknown, s) {
 			t.Errorf("unknown state lacks %q: %s", s, unknown)
 		}

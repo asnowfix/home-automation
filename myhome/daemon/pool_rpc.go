@@ -25,7 +25,7 @@ type PoolRPCHandler struct {
 	deviceID    string
 	waterSupply func(ctx context.Context) *bool
 	now         func() time.Time // injectable clock; nil = time.Now
-	startedAt   time.Time        // daemon-side coverage start for the rolling 24 h figure
+	startedAt   time.Time        // when the daemon began recording events (coverage of the rolling 24 h figures)
 }
 
 // WithSnapshotSource tells pool.snapshot which device it describes and how to
@@ -76,7 +76,7 @@ func (h *PoolRPCHandler) handleGetStatus(ctx context.Context, _ any) (any, error
 }
 
 // handleSnapshot answers pool.snapshot from memory only: the cached water-supply
-// input and the last stored turnover reading. It makes no device call, so the UI
+// input and the rolling 24 h figures derived from persisted events. It makes no device call, so the UI
 // can call it on every render (#731). Unknown values stay nil.
 func (h *PoolRPCHandler) handleSnapshot(ctx context.Context, _ any) (any, error) {
 	if !h.enabled || h.deviceID == "" {
@@ -86,25 +86,15 @@ func (h *PoolRPCHandler) handleSnapshot(ctx context.Context, _ any) (any, error)
 	if h.waterSupply != nil {
 		res.WaterSupplyActive = h.waterSupply(ctx)
 	}
-	// A reading from a previous local day is not "today": the device resets its
-	// daily counters at midnight and the snapshot only refreshes at start and on
-	// pool.pump_stop, so stale figures are dropped (rendered "--"), never shown.
 	now := time.Now
 	if h.now != nil {
 		now = h.now
 	}
-	n := now()
-	midnight := time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, n.Location())
-	if s, ok := h.pool.Snapshot(); ok && !s.ts.Before(midnight) {
-		res.TurnoverAchieved, res.TurnoverTarget, res.RuntimeSec = &s.achieved, &s.target, &s.runtimeSec
-		res.TurnoverTs = s.ts.Unix()
-		h.log.V(1).Info("pool.snapshot served", "turnover_ts", res.TurnoverTs)
-	}
-	// Rolling 24 h volume, from the pool.turnover_today events already persisted
-	// (no device call). Unknown stays nil.
-	if v, ok := h.pool.Rolling24h(ctx, n, h.startedAt); ok {
-		res.Turnover24h = &v
-	}
+	// Rolling 24 h figures and the target, from the pool.turnover_today and
+	// pool.pump_stop events already persisted (no device call). Unknown stays nil.
+	f := h.pool.Rolling24h(ctx, now(), h.startedAt)
+	res.Turnover24h, res.TurnoverTarget = f.Turnover24h, f.Target
+	res.Runtime24hSec = f.Runtime24h
 	return res, nil
 }
 

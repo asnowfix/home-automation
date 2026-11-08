@@ -27,9 +27,7 @@ type PoolGetStatusResult struct {
 type PoolSnapshotResult struct {
 	DeviceID          string   `json:"device_id" yaml:"device_id"`
 	WaterSupplyActive *bool    `json:"water_supply_active,omitempty" yaml:"water_supply_active,omitempty"` // input:0 state from the device status the daemon already holds
-	TurnoverAchieved  *float64 `json:"turnover_achieved,omitempty" yaml:"turnover_achieved,omitempty"`     // as of TurnoverTs
-	TurnoverTarget    *float64 `json:"turnover_target,omitempty" yaml:"turnover_target,omitempty"`
-	Turnover24h       *float64 `json:"turnover_24h,omitempty" yaml:"turnover_24h,omitempty"` // pool volumes filtered in the 24 h before now, from persisted pool.turnover_today events; completed pump runs only
-	RuntimeSec        *int64   `json:"runtime_sec,omitempty" yaml:"runtime_sec,omitempty"`
-	TurnoverTs        int64    `json:"turnover_ts,omitempty" yaml:"turnover_ts,omitempty"` // unix seconds the turnover figures were read; 0 = never
+	Turnover24h       *float64 `json:"turnover_24h,omitempty" yaml:"turnover_24h,omitempty"`           // pool volumes filtered in the 24 h before now, from persisted pool.turnover_today and pool.pump_stop events; completed pump runs only
+	TurnoverTarget    *float64 `json:"turnover_target,omitempty" yaml:"turnover_target,omitempty"`     // configured daily target (times/day), from the newest pool.turnover_today event
+	Runtime24hSec     *int64   `json:"runtime_24h_sec,omitempty" yaml:"runtime_24h_sec,omitempty"`     // pump runtime in the 24 h before now, same derivation
 }

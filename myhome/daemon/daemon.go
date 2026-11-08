@@ -693,15 +693,6 @@ func (d *daemon) Run() error {
 			poolWater = cachedWaterSupply(d.dm, options.Flags.PoolDeviceID)
 		}
 		poolRPCHandler.WithSnapshotSource(options.Flags.PoolDeviceID, poolWater)
-		// One turnover read at start fills the snapshot the UI renders from; later
-		// reads come from pool.pump_stop. In the background, bounded, never per render.
-		if poolNotices != nil {
-			go func() {
-				ctx, cancel := context.WithTimeout(d.ctx, 15*time.Second)
-				defer cancel()
-				poolNotices.RefreshSnapshot(ctx)
-			}()
-		}
 		poolRPCHandler.RegisterHandlers()
 
 		// Register Solar RPC methods (static energy-claimers registry).

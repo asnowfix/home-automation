@@ -415,4 +415,20 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &VacuumRoomsSyncResult{}
 		},
 	},
+	VacuumExport: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &VacuumDump{}
+		},
+	},
+	VacuumImport: {
+		NewParams: func() any {
+			return &VacuumDump{}
+		},
+		NewResult: func() any {
+			return &VacuumImportResult{}
+		},
+	},
 }

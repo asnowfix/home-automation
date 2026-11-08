@@ -41,6 +41,8 @@ go run ./tools/classify-events [events-dir] [testdata-dir]   # classify raw even
 
 To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call` tools). It is pre-configured in `.mcp.json` with MQTT broker `tcp://192.168.1.2:1883` and approved via `enabledMcpjsonServers` in `.claude/settings.json`. The `.mcp.json` command automatically runs `go generate ./internal/myhome/ui/...` on first use in a fresh worktree (fetches CSS/JS assets required to compile); this needs internet access once per worktree. Restart Claude Code to activate.
 
+`python3 -I myhome-local.py [ctl-args...]` (default `mcp`) bootstraps a worktree and runs `ctl --instance local`; it is what `.mcp.json` calls (replaces `myhome-local.sh`, kept until verified). `python3 -I myhome-local.py daemon` starts a read-only side daemon (instance `local`, #700 safe flags, scrubbed environment) in `~/.local/state/myhome/local-side-instance` (platform equivalents), seeded by `db export` from the main daemon then `db import`. Its tests: `python3 -I -m unittest discover -s . -p test_myhome_local.py`.
+
 `make test` is canonical — never bare `go test ./...` (it skips workspace sub-modules). New CI test commands must also invoke `make test`, not go directly to `go test`.
 
 ### Test timeout — derived from measurement, never guessed

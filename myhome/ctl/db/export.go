@@ -3,19 +3,12 @@ package db
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/asnowfix/home-automation/internal/myhome"
 	"os"
+
+	"github.com/asnowfix/home-automation/internal/myhome"
 
 	"github.com/spf13/cobra"
 )
-
-// DatabaseExport represents the complete database export
-type DatabaseExport struct {
-	Devices          any                                      `json:"devices,omitempty"`
-	TemperatureRooms map[string]*myhome.TemperatureRoomConfig `json:"rooms,omitempty"`
-	WeekdayDefaults  map[int]myhome.DayType                   `json:"weekday_defaults,omitempty"`
-	KindSchedules    []myhome.TemperatureKindSchedule         `json:"kind_schedules,omitempty"`
-}
 
 var exportFlags struct {
 	Output      string
@@ -28,7 +21,12 @@ var ExportCmd = &cobra.Command{
 	Short: "Export database to JSON",
 	Long: `Export the complete database to JSON format.
 
-By default, exports all tables: devices, temperature rooms, weekday defaults, and kind schedules.
+By default, exports devices (with their room assignment), rooms (with iCal URL), weekday defaults,
+kind schedules, and the vacuum robots and their regions. Caches, the event log (events.db, a separate
+file: copy it by hand if the target UI needs history or daily min/max) and device-registered fetch
+subscriptions are not exported.
+A section the daemon cannot serve (service disabled, or a daemon too old to know the method) is
+reported as a warning on stderr, distinct from a section that is simply empty.
 Use --devices-only to export only devices.
 
 The output can be written to stdout (default) or to a file using --output.
@@ -60,52 +58,15 @@ Examples:
 			pattern = args[0]
 		}
 
-		export := DatabaseExport{}
-		deviceCount := 0
-
-		// Get devices matching pattern
-		devices, err := myhome.TheClient.LookupDevices(ctx, pattern)
+		export, err := myhome.ExportDatabase(ctx, myhome.TheClient, pattern, exportFlags.DevicesOnly)
 		if err != nil {
-			return fmt.Errorf("failed to lookup devices: %w", err)
+			return err
 		}
-		if devices != nil && len(*devices) > 0 {
-			export.Devices = devices
-			deviceCount = len(*devices)
-		}
-
-		// Export temperature tables unless --devices-only is set
-		if !exportFlags.DevicesOnly {
-			// Get temperature rooms
-			roomsResult, err := myhome.TheClient.CallE(ctx, myhome.TemperatureList, nil)
-			if err == nil {
-				if rooms, ok := roomsResult.(*myhome.TemperatureRoomList); ok && len(*rooms) > 0 {
-					export.TemperatureRooms = *rooms
-				}
+		n := export.Count()
+		if n == (myhome.ImportCounts{}) {
+			for _, sk := range export.Skipped {
+				fmt.Fprintf(os.Stderr, "⚠ %s\n", sk)
 			}
-
-			// Get weekday defaults
-			weekdayResult, err := myhome.TheClient.CallE(ctx, myhome.TemperatureGetWeekdayDefaults, &myhome.TemperatureGetWeekdayDefaultsParams{})
-			if err == nil {
-				if weekdayDefaults, ok := weekdayResult.(*myhome.TemperatureWeekdayDefaults); ok && len(weekdayDefaults.Defaults) > 0 {
-					export.WeekdayDefaults = weekdayDefaults.Defaults
-				}
-			}
-
-			// Get kind schedules
-			kindSchedulesResult, err := myhome.TheClient.CallE(ctx, myhome.TemperatureGetKindSchedules, &myhome.TemperatureGetKindSchedulesParams{})
-			if err == nil {
-				if kindSchedules, ok := kindSchedulesResult.(*myhome.TemperatureKindScheduleList); ok && len(*kindSchedules) > 0 {
-					export.KindSchedules = *kindSchedules
-				}
-			}
-		}
-
-		// Check if we have anything to export
-		roomCount := len(export.TemperatureRooms)
-		weekdayCount := len(export.WeekdayDefaults)
-		scheduleCount := len(export.KindSchedules)
-
-		if deviceCount == 0 && roomCount == 0 && weekdayCount == 0 && scheduleCount == 0 {
 			fmt.Fprintln(os.Stderr, "No data found to export")
 			return nil
 		}
@@ -132,12 +93,18 @@ Examples:
 			fmt.Println(string(data))
 		}
 
+		// Sections the daemon could not serve are not "0 items": say so.
+		for _, sk := range export.Skipped {
+			fmt.Fprintf(os.Stderr, "⚠ %s\n", sk)
+		}
+
 		// Print summary to stderr
-		fmt.Fprintf(os.Stderr, "  - %d devices\n", deviceCount)
+		fmt.Fprintf(os.Stderr, "  - %d devices\n", n.Devices)
 		if !exportFlags.DevicesOnly {
-			fmt.Fprintf(os.Stderr, "  - %d temperature rooms\n", roomCount)
-			fmt.Fprintf(os.Stderr, "  - %d weekday defaults\n", weekdayCount)
-			fmt.Fprintf(os.Stderr, "  - %d kind schedules\n", scheduleCount)
+			fmt.Fprintf(os.Stderr, "  - %d temperature rooms\n", n.Rooms)
+			fmt.Fprintf(os.Stderr, "  - %d weekday defaults\n", n.WeekdayDefaults)
+			fmt.Fprintf(os.Stderr, "  - %d kind schedules\n", n.KindSchedules)
+			fmt.Fprintf(os.Stderr, "  - %d vacuum robots, %d vacuum regions\n", n.VacuumRobots, n.VacuumRegions)
 		}
 
 		return nil

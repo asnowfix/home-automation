@@ -45,7 +45,7 @@ func TestStartupRenderFromDBLoadedCache(t *testing.T) {
 	mk("shellyplus1-aabbccddee11", "Lamp Hall", "AABBCCDDEE11", swCfg(), "")
 	mk("shellyplus1-aabbccddee12", "Lamp Study", "AABBCCDDEE12", swCfg(), "study")
 	mk("shellyplus1-aabbccddee13", "Never Configured", "AABBCCDDEE13", nil, "")
-	// pool tracking stays off here; see the PR B marker below
+	mk("shellypro1-aabbccddee14", "Pool Pump", "AABBCCDDEE14", nil, "") // pool tracking on, see below
 
 	cache := devices.NewCache(ctx, store)
 	if err := cache.Load(ctx); err != nil {
@@ -68,6 +68,10 @@ func TestStartupRenderFromDBLoadedCache(t *testing.T) {
 		}, nil
 	})
 
+	// Pool tracking on, nothing known yet: pool.snapshot has no values, and a
+	// counting pool.getstatus (the live, device-reading verb) must never be reached.
+	liveCalls := stubPoolVerbs(t, &myhome.PoolSnapshotResult{DeviceID: "shellypro1-aabbccddee14"})
+
 	h := newMux(ctx, logr.Discard(), nil, cache, nil, nil, "", nil, nil)
 
 	home := get(h, "/htmx/devices")
@@ -87,8 +91,15 @@ func TestStartupRenderFromDBLoadedCache(t *testing.T) {
 		t.Error("a switch renders on before any state was seen")
 	}
 
-	// TODO(PR B, #731): with pool tracking on, assert the pool pills render "--"
-	// (not "OK") and that a counting pool.getstatus fake is never called.
+	if !strings.Contains(body, "Water supply --") || strings.Contains(body, "Water supply OK") {
+		t.Error("pool water-supply pill must render -- (not OK) with no snapshot")
+	}
+	if !strings.Contains(body, "Turnover --") {
+		t.Error("pool turnover pill must render -- with no snapshot")
+	}
+	if n := liveCalls.Load(); n != 0 {
+		t.Errorf("rendering called pool.getstatus %d time(s), want 0 (#731)", n)
+	}
 
 	rooms := get(h, "/htmx/rooms")
 	if rooms.Code != 200 {

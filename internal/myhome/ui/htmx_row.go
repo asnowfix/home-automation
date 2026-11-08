@@ -119,7 +119,7 @@ const deviceRowsTemplate = `
         {{if .D.HasTemperatureSensor}}<span class="mh-pill{{if not .D.Temperature}} is-unknown{{end}}" id="sensor-{{.D.Id}}-temperature">{{if .D.Temperature}}{{f1 .D.Temperature}}{{else}}--{{end}}°C</span>{{end}}
         {{if .D.HasHumiditySensor}}<span class="mh-pill{{if not .D.Humidity}} is-unknown{{end}}" id="sensor-{{.D.Id}}-humidity">{{if .D.Humidity}}{{f1 .D.Humidity}}{{else}}--{{end}}%</span>{{end}}
         {{if .D.HasDoorSensor}}<span class="mh-pill{{if not .D.DoorOpened}} is-unknown{{else if isActive .D.DoorOpened}} is-alert{{end}}" id="door-{{.D.Id}}"><svg class="door-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 21V3h12v18H3zm2-2h8V5H5v14zm9-6h2v2h-2v-2z"/></svg><span data-door-text>{{if not .D.DoorOpened}}--{{else if isActive .D.DoorOpened}}Open{{else}}Closed{{end}}</span></span>{{end}}
-        {{if .D.IsPoolPump}}<span class="mh-pill{{if isActive .D.WaterSupplyActive}} is-alert{{end}}" id="water-supply-{{.D.Id}}">{{if isActive .D.WaterSupplyActive}}Water supply paused{{else}}Water supply OK{{end}}</span>
+        {{if .D.IsPoolPump}}<span class="mh-pill{{if not .D.WaterSupplyActive}} is-unknown{{else if isActive .D.WaterSupplyActive}} is-alert{{end}}" id="water-supply-{{.D.Id}}">{{if not .D.WaterSupplyActive}}Water supply --{{else if isActive .D.WaterSupplyActive}}Water supply paused{{else}}Water supply OK{{end}}</span>
         <span class="mh-pill is-unknown" id="turnover-{{.D.Id}}">Turnover {{with turnoverText .D.TurnoverAchieved .D.TurnoverTarget}}{{.}}{{else}}--{{end}}</span>{{end}}
       </span>{{end}}
     </span>

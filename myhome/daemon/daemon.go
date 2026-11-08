@@ -672,6 +672,18 @@ func (d *daemon) Run() error {
 		// exists regardless of pool tracking; handleGetStatus itself returns
 		// a clear error if poolNotices is nil (pool disabled/unreachable).
 		poolRPCHandler := NewPoolRPCHandler(log, poolNotices, options.Flags.PoolEnabled && options.Flags.PoolDeviceID != "")
+		if d.dm != nil {
+			poolRPCHandler.WithSnapshotSource(options.Flags.PoolDeviceID, cachedWaterSupply(d.dm, options.Flags.PoolDeviceID))
+		}
+		// One turnover read at start fills the snapshot the UI renders from; later
+		// reads come from pool.pump_stop. In the background, bounded, never per render.
+		if poolNotices != nil {
+			go func() {
+				ctx, cancel := context.WithTimeout(d.ctx, 15*time.Second)
+				defer cancel()
+				poolNotices.RefreshSnapshot(ctx)
+			}()
+		}
 		poolRPCHandler.RegisterHandlers()
 
 		// Register Solar RPC methods (static energy-claimers registry).

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	poolscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
@@ -53,6 +54,18 @@ type PoolNotices struct {
 	events   *events.Service
 	device   types.Device // types.Device (not concrete *shellyapi.Device) so tests can inject a fake KVS responder
 	deviceID string
+
+	// snap is the last turnover reading, served by pool.snapshot so renders
+	// never read the device (#731). Written only here (start, pool.pump_stop).
+	snapMu sync.Mutex
+	snap   poolTurnoverSnapshot
+}
+
+// poolTurnoverSnapshot is one turnover reading with the time it was taken.
+type poolTurnoverSnapshot struct {
+	achieved, target float64
+	runtimeSec       int64
+	ts               time.Time // zero = never read
 }
 
 // NewPoolNotices builds a PoolNotices, or returns nil if any dependency is
@@ -101,6 +114,36 @@ func (p *PoolNotices) OnEvent(ctx context.Context, e events.Event) {
 		return
 	}
 	p.recordTurnoverToday(ctx)
+}
+
+// RefreshSnapshot reads the turnover from the device once and stores it for
+// pool.snapshot. Called once at start (a single read, as Rule 3 allows) and on
+// every pool.pump_stop; never from a render path. A nil receiver is a no-op.
+func (p *PoolNotices) RefreshSnapshot(ctx context.Context) {
+	if p == nil {
+		return
+	}
+	if _, _, _, err := p.ComputeTurnover(ctx); err != nil {
+		p.log.Info("Pool turnover snapshot not refreshed", "error", err.Error())
+	}
+}
+
+// storeSnapshot records a successful turnover reading.
+func (p *PoolNotices) storeSnapshot(achieved, target float64, runtimeSec int64) {
+	p.snapMu.Lock()
+	defer p.snapMu.Unlock()
+	p.snap = poolTurnoverSnapshot{achieved: achieved, target: target, runtimeSec: runtimeSec, ts: time.Now()}
+	p.log.V(1).Info("Pool turnover snapshot stored", "achieved", achieved, "target", target, "runtime_sec", runtimeSec)
+}
+
+// Snapshot returns the last stored turnover reading; ok is false if none yet.
+func (p *PoolNotices) Snapshot() (s poolTurnoverSnapshot, ok bool) {
+	if p == nil {
+		return poolTurnoverSnapshot{}, false
+	}
+	p.snapMu.Lock()
+	defer p.snapMu.Unlock()
+	return p.snap, !p.snap.ts.IsZero()
 }
 
 func (p *PoolNotices) recordTurnoverToday(ctx context.Context) {
@@ -157,7 +200,9 @@ func (p *PoolNotices) ComputeTurnover(ctx context.Context) (achieved, target flo
 		return 0, 0, 0, fmt.Errorf("read turnover target: %w", err)
 	}
 
-	return roundTo(achieved, 2), target, runtimeSec, nil
+	achieved = roundTo(achieved, 2)
+	p.storeSnapshot(achieved, target, runtimeSec)
+	return achieved, target, runtimeSec, nil
 }
 
 // WaterSupplyActive reports whether the pool device's water-supply

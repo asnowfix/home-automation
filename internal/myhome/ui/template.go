@@ -66,33 +66,32 @@ type DeviceView struct {
 }
 
 // applyPoolStatus enriches views in place with the configured pool device's
-// turnover rate and water-supply status, fetched once via the pool.getstatus
-// RPC method (myhome/daemon/pool_rpc.go) rather than once per device — there
-// is exactly one configured pool device system-wide, so doing this inside
-// DeviceToView itself would trigger a redundant KVS/MQTT round trip for
-// every other device on each dashboard refresh.
+// turnover and water-supply status from the pool.snapshot RPC method
+// (myhome/daemon/pool_rpc.go), once rather than once per device. pool.snapshot
+// answers from daemon memory only, so rendering never reaches the pool device
+// (#731, AGENTS.md Rule 3). A field the daemon does not know yet stays nil and
+// renders as "--".
 func applyPoolStatus(ctx context.Context, views []DeviceView) {
-	mh, err := myhome.Methods(myhome.PoolGetStatus)
+	mh, err := myhome.Methods(myhome.PoolSnapshot)
 	if err != nil {
 		return // pool RPC not registered (pool tracking disabled)
 	}
 	res, err := mh.ActionE(ctx, nil)
 	if err != nil {
-		return // device unreachable / KVS misconfigured — leave fields blank
+		return
 	}
-	status, ok := res.(*myhome.PoolGetStatusResult)
+	snap, ok := res.(*myhome.PoolSnapshotResult)
 	if !ok {
 		return
 	}
 	for i := range views {
-		if views[i].Id != status.DeviceID {
+		if views[i].Id != snap.DeviceID {
 			continue
 		}
-		achieved, target, active := status.TurnoverAchieved, status.TurnoverTarget, status.WaterSupplyActive
 		views[i].IsPoolPump = true
-		views[i].TurnoverAchieved = &achieved
-		views[i].TurnoverTarget = &target
-		views[i].WaterSupplyActive = &active
+		views[i].TurnoverAchieved = snap.TurnoverAchieved
+		views[i].TurnoverTarget = snap.TurnoverTarget
+		views[i].WaterSupplyActive = snap.WaterSupplyActive
 	}
 }
 

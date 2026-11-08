@@ -28,7 +28,7 @@ mods = $(patsubst %/,%,$(wildcard */go.mod) $(wildcard */*/go.mod) $(wildcard */
 
 # Local daemon dev loop: run/stop/tail a daemon instance built from whichever
 # worktree invokes it, pointed at the real home MQTT broker. --instance local
-# matches myhome-local.py's convention (avoids RPC topic collisions with the
+# matches scripts/myhome-local-daemon.py's convention (avoids RPC topic collisions with the
 # systemd-managed "myhome" instance).
 #
 # State (pidfile/log) lives in a single OS-standard user directory, NOT under

@@ -1,49 +1,40 @@
 #!/usr/bin/env python3
-"""myhome-local.py - bootstrap and run myhome from a local checkout (main tree or any git worktree).
+"""myhome-local-daemon.py - run a LOCAL read-only myhome daemon (instance "local") seeded from the main one.
 
-Portable replacement for myhome-local.sh (Linux, macOS, Windows; Python 3.12+, stdlib only).
-Run it as `python3 -I myhome-local.py ...` (on Windows `py -3 -I myhome-local.py ...`).
+Portable (Linux, macOS, Windows; Python 3.12+, stdlib only). Run it as
+`python3 -I scripts/myhome-local-daemon.py` (on Windows `py -3 -I scripts\\myhome-local-daemon.py`).
+For the thin ctl/MCP wrapper toward the MAIN instance, see myhome-ctl.py.
 
-It first generates the gitignored assets/code that `go build`/`go run` need (UI static
-assets, pool/garden defaults), skipping each step whose output already exists. Each git
-worktree has its own untracked files, so a fresh worktree needs them regenerated.
+In order:
+  1. build the binary into the instance directory (after the missing `go generate` steps);
+  2. delete the side instance's own myhome.db (+ -wal/-shm), inside INSTANCE_DIR only;
+  3. `ctl --instance myhome db export` from the MAIN daemon over MQTT (read-only);
+  4. start the local daemon with the #700 safe flags, in INSTANCE_DIR;
+  5. probe until it answers, run `ctl --instance local db import <file>` exactly once (a partial
+     import is reported and the daemon keeps running), then keep running until Ctrl-C.
+The local daemon runs with a scrubbed environment (no MYHOME_* variables, no .env).
 
-Modes:
+Broker: the local daemon has no broker of its own; it uses the home broker for the export, the
+import and device traffic (owner decision on #746), with the #700 read-only flags.
 
-  python3 -I myhome-local.py [ctl-args...]
-      Passthrough (default `mcp`): runs `go run ./myhome ctl --instance local
-      --mqtt-broker <broker> <ctl-args>`. This is what .mcp.json calls.
-
-  python3 -I myhome-local.py --build-only
-      Generate what is missing, then `go build` into a temporary file and exit (no run).
-
-  python3 -I myhome-local.py daemon
-      A read-only side daemon (instance "local") seeded with a copy of the main daemon's
-      database. In order:
-        1. delete the side instance's own myhome.db (+ -wal/-shm), inside INSTANCE_DIR only;
-        2. `ctl --instance myhome db export` from the MAIN daemon over MQTT (read-only);
-        3. start the side daemon with the #700 safe flags, in INSTANCE_DIR;
-        4. `ctl --instance local db import <file>` once it answers. Import goes over RPC
-           to a running daemon, which is why the daemon is started before the import;
-        5. keep running until Ctrl-C.
-      The side daemon runs with a scrubbed environment (no MYHOME_* variables, no .env).
-
-MYHOME_MQTT_BROKER overrides the broker (default tcp://192.168.1.2:1883).
+MYHOME_MQTT_BROKER overrides the home broker (default tcp://192.168.1.2:1883).
 """
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import platform
-import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 
-DEFAULT_BROKER = "tcp://192.168.1.2:1883"
-MAIN_INSTANCE = "myhome"
+_spec = importlib.util.spec_from_file_location("_myhome_common", Path(__file__).resolve().with_name("_myhome_common.py"))
+common = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(common)
+
+MAIN_INSTANCE = common.MAIN_INSTANCE
 SIDE_INSTANCE = "local"
 
 # Flags that make the side daemon read-only toward devices and the network (#700).
@@ -54,28 +45,6 @@ SAFE_DAEMON_FLAGS = [
     "--disable-temperature-service",
     "--no-mdns-publish",
 ]
-
-# The root Makefile's `generate` target, step for step: (output that must exist, go
-# generate arguments). A step is skipped only when its output exists. The Makefile ends
-# with a catch-all `go generate ./...`, run here (GENERATE_ALL) whenever any step ran.
-# `make` itself is not assumed to be installed. myhome-local.sh had only the first three
-# steps, so a fresh worktree failed to build (PoolKVSKeys undefined, jstarget acorn.js).
-ASSETS = [
-    ("internal/myhome/ui/static/alpine.min.js", ["./internal/myhome/ui/..."]),
-    ("myhome/ctl/pool/pool_defaults_generated.go", ["./myhome/ctl/pool"]),
-    ("myhome/ctl/garden/garden_defaults_generated.go", ["./myhome/ctl/garden"]),
-    ("internal/myhome/shelly/script/pool_kvs_generated.go", ["./internal/myhome/shelly/script"]),
-    ("internal/shelly/scripts/jstarget/acorn.js", ["./internal/shelly/scripts/jstarget"]),
-]
-GENERATE_ALL = ["./..."]
-
-# Environment variables the side instance may see: what Go and the OS need, nothing
-# from MYHOME_*. Everything else is dropped.
-ENV_ALLOWLIST = (
-    "PATH", "HOME", "USERPROFILE", "SYSTEMROOT", "SystemDrive", "TEMP", "TMP", "TMPDIR",
-    "LOCALAPPDATA", "APPDATA", "GOPATH", "GOCACHE", "GOMODCACHE", "GOROOT", "GOFLAGS",
-    "GOPROXY", "GOTOOLCHAIN", "GOENV",
-)
 
 DB_FILES = ("myhome.db", "myhome.db-wal", "myhome.db-shm")
 EXPORT_NAME = "main-export.json"
@@ -98,15 +67,6 @@ def instance_dir(home: Path, system: str) -> Path:
     return base / "myhome" / "local-side-instance"
 
 
-def broker_from(environ: dict[str, str]) -> str:
-    return environ.get("MYHOME_MQTT_BROKER") or DEFAULT_BROKER
-
-
-def ctl_args(broker: str, args: list[str]) -> list[str]:
-    """Argument list of the passthrough mode (after `go run ./myhome`)."""
-    return ["ctl", "--instance", SIDE_INSTANCE, "--mqtt-broker", broker, *(args or ["mcp"])]
-
-
 def daemon_args(broker: str) -> list[str]:
     return ["daemon", "run", "--instance", SIDE_INSTANCE, "--mqtt-broker", broker, *SAFE_DAEMON_FLAGS]
 
@@ -127,10 +87,6 @@ def probe_args(broker: str) -> list[str]:
 
 def import_args(broker: str, src: Path) -> list[str]:
     return ["ctl", "--instance", SIDE_INSTANCE, "--mqtt-broker", broker, "db", "import", str(src)]
-
-
-def scrubbed_env(environ: dict[str, str]) -> dict[str, str]:
-    return {k: v for k, v in environ.items() if k in ENV_ALLOWLIST and not k.startswith("MYHOME_")}
 
 
 def db_targets(directory: Path) -> list[Path]:
@@ -158,46 +114,6 @@ def delete_side_db(directory: Path, expected: Path) -> list[Path]:
             target.unlink()
             removed.append(target)
     return removed
-
-
-def repo_root() -> Path:
-    git = shutil.which("git")
-    if not git:
-        sys.exit("myhome-local: git not found in PATH")
-    out = subprocess.run([git, "rev-parse", "--show-toplevel"], cwd=Path(__file__).resolve().parent,
-                         capture_output=True, text=True, encoding="utf-8", check=False)
-    if out.returncode != 0:
-        sys.exit("myhome-local: not inside a git checkout: " + out.stderr.strip())
-    return Path(out.stdout.strip())
-
-
-def need_go() -> str:
-    go = shutil.which("go")
-    if not go:
-        sys.exit("myhome-local: go not found in PATH")
-    return go
-
-
-def missing_steps(root: Path) -> list[list[str]]:
-    """The `go generate` argument lists whose output is absent, in Makefile order."""
-    steps = [gen_args for output, gen_args in ASSETS if not (root / output).is_file()]
-    if steps:
-        steps.append(GENERATE_ALL)
-    return steps
-
-
-def ensure_assets(root: Path, go: str) -> None:
-    for gen_args in missing_steps(root):
-        subprocess.run([go, "generate", *gen_args], cwd=root, check=True)
-
-
-def passthrough(root: Path, go: str, broker: str, args: list[str]) -> None:
-    cmd = [go, "run", "./myhome", *ctl_args(broker, args)]
-    if platform.system() == "Windows":
-        # exec does not replace the process on Windows; inherit stdio and relay the exit code.
-        sys.exit(subprocess.run(cmd, cwd=root, check=False).returncode)
-    os.chdir(root)
-    os.execvp(cmd[0], cmd)
 
 
 def wait_and_import(daemon, probe: list[str], import_cmd: list[str], cwd: Path, env: dict[str, str],
@@ -232,7 +148,7 @@ def wait_and_import(daemon, probe: list[str], import_cmd: list[str], cwd: Path, 
 def run_daemon_mode(root: Path, go: str, broker: str) -> int:
     inst = instance_dir(Path(os.path.expanduser("~")), platform.system())
     inst.mkdir(parents=True, exist_ok=True)
-    env = scrubbed_env(dict(os.environ))
+    env = common.scrubbed_env(dict(os.environ))
 
     binary = inst / ("myhome-side.exe" if platform.system() == "Windows" else "myhome-side")
     print(f"[1/5] building {binary}")
@@ -267,21 +183,12 @@ def run_daemon_mode(root: Path, go: str, broker: str) -> int:
 
 
 def main(argv: list[str]) -> int:
-    root = repo_root()
-    go = need_go()
-    broker = broker_from(dict(os.environ))
-    ensure_assets(root, go)
-    if argv == ["--build-only"]:
-        # Proof that a fresh worktree compiles after generation; runs nothing.
-        with tempfile.TemporaryDirectory() as tmp:
-            return subprocess.run([go, "build", "-o", str(Path(tmp) / "myhome-build-check"), "./myhome"],
-                                  cwd=root, env=scrubbed_env(dict(os.environ)), check=False).returncode
-    if argv and argv[0] == "daemon":
-        if len(argv) > 1:
-            sys.exit("myhome-local: daemon mode takes no further arguments")
-        return run_daemon_mode(root, go, broker)
-    passthrough(root, go, broker, argv)
-    return 0
+    if argv:
+        sys.exit("myhome-local-daemon: takes no arguments (MYHOME_MQTT_BROKER overrides the home broker)")
+    root = common.repo_root()
+    go = common.need_go()
+    common.ensure_assets(root, go)
+    return run_daemon_mode(root, go, common.broker_from(dict(os.environ)))
 
 
 if __name__ == "__main__":

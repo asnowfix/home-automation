@@ -2,6 +2,8 @@ package impl
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -865,7 +867,7 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 
 // isGen1HT tells a Gen1 H&T from a BLU thermometer once IsTemperatureSensor said yes.
 func isGen1HT(d *myhome.Device) bool {
-	return (d.Info != nil && d.Info.Application == "shellyht") || strings.HasPrefix(d.Id(), "shellyht-")
+	return (d.Info != nil && d.Info.Application == "shellyht") || strings.HasPrefix(strings.ToLower(d.Id()), "shellyht-")
 }
 
 // classifyThermometers scans devices for Gen1 H&T sensors (by Info.Application
@@ -989,7 +991,9 @@ func (dm *DeviceManager) handleDeviceSetRoom(ctx context.Context, in any) (any, 
 	log := dm.log.WithName("rpc/device.setroom")
 	log.V(1).Info("New", "identifier", params.Identifier, "room_id", params.RoomId)
 	identifier := params.Identifier
-	if target, gerr := dm.GetDeviceByAny(ctx, identifier); gerr == nil && target != nil {
+	target, gerr := dm.GetDeviceByAny(ctx, identifier)
+	switch {
+	case gerr == nil && target != nil:
 		if target.RoomId == params.RoomId {
 			// already there: nothing to check
 		} else if err = dm.checkRoomAssignment(ctx, target, params.RoomId); err != nil {
@@ -998,6 +1002,12 @@ func (dm *DeviceManager) handleDeviceSetRoom(ctx context.Context, in any) (any, 
 		}
 		// The storage UPDATE matches id, MAC, name or host: use the resolved id.
 		identifier = target.Id()
+	case gerr == nil || errors.Is(gerr, sql.ErrNoRows):
+		// Unknown device: nothing to check, the UPDATE below matches no row.
+		log.V(0).Info("Device not found, skipping the one-temperature-sensor-per-room check", "identifier", identifier)
+	default:
+		log.Error(gerr, "Failed to look up device for room assignment", "identifier", identifier)
+		return nil, gerr
 	}
 	// Save room to database
 	if _, err = dm.dr.SetDeviceRoom(ctx, identifier, params.RoomId); err != nil {
@@ -1006,7 +1016,7 @@ func (dm *DeviceManager) handleDeviceSetRoom(ctx context.Context, in any) (any, 
 	}
 
 	// Also set room-id in device KVS (for Gen2+ Shelly devices)
-	device, err := dm.GetDeviceByAny(ctx, params.Identifier)
+	device, err := dm.GetDeviceByAny(ctx, identifier)
 	if err != nil {
 		log.Error(err, "Failed to get device for KVS update", "identifier", params.Identifier)
 		return nil, nil // DB update succeeded, KVS is best-effort

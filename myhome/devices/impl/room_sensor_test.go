@@ -2,12 +2,14 @@ package impl
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mhd "github.com/asnowfix/home-automation/myhome/devices"
+	shellyshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/go-logr/logr"
 )
 
@@ -24,7 +26,7 @@ func (f *fakeRegistry) GetDeviceById(_ context.Context, id string) (*myhome.Devi
 			return d, nil
 		}
 	}
-	return nil, errors.New("not found")
+	return nil, sql.ErrNoRows
 }
 func (f *fakeRegistry) GetDeviceByAny(ctx context.Context, id string) (*myhome.Device, error) {
 	return f.GetDeviceById(ctx, id)
@@ -81,6 +83,32 @@ func TestIsTemperatureSensor(t *testing.T) {
 	if myhome.IsTemperatureSensor(makeDevice("shellyplus1-aabbcc", nil)) || myhome.IsTemperatureSensor(nil) {
 		t.Error("heater / nil must not be a temperature sensor")
 	}
+}
+
+func TestIsTemperatureSensor_Gen1ByApplication(t *testing.T) {
+	d := makeDevice("kitchen-ht", nil) // id without the shellyht- prefix
+	d.Info = &shellyshelly.DeviceInfo{}
+	d.Info.Application = "shellyht"
+	if !myhome.IsTemperatureSensor(d) {
+		t.Error("Gen1 H&T identified by Info.Application should be a temperature sensor")
+	}
+	if !myhome.IsTemperatureSensor(makeDevice("ShellyHT-ABC", nil)) {
+		t.Error("id prefix match should be case-insensitive")
+	}
+}
+
+func TestSetRoom_LookupErrorReturned(t *testing.T) {
+	dm, _ := newRoomTestManager()
+	dm.dr = &errRegistry{fakeRegistry: &fakeRegistry{}}
+	if _, err := dm.handleDeviceSetRoom(context.Background(), &myhome.DeviceSetRoomParams{Identifier: "x", RoomId: "salon"}); err == nil {
+		t.Fatal("a non-not-found lookup error must be returned")
+	}
+}
+
+type errRegistry struct{ *fakeRegistry }
+
+func (e *errRegistry) GetDeviceByAny(context.Context, string) (*myhome.Device, error) {
+	return nil, errors.New("database is locked")
 }
 
 func TestSetRoom_SecondSensorRejected(t *testing.T) {

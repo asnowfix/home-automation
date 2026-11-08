@@ -230,6 +230,7 @@ var kiosk = {
         sta1Essid: '',
         sta1Passwd: '',
         apPasswd: '',
+        setupError: '',
         saving: false
       },
       heaterForm: {
@@ -595,6 +596,7 @@ var kiosk = {
           sta1Essid: '',
           sta1Passwd: '',
           apPasswd: '',
+          setupError: '',
           saving: false
         };
         
@@ -626,6 +628,7 @@ var kiosk = {
 
       async submitSetup() {
         this.setupForm.saving = true;
+        this.setupForm.setupError = '';
         try {
           const params = { identifier: this.setupForm.deviceId };
           
@@ -646,7 +649,7 @@ var kiosk = {
               })
             });
             if (!roomRes.ok) {
-              alert('Room assignment refused: ' + await roomRes.text());
+              this.setupForm.setupError = 'Room assignment refused: ' + await roomRes.text();
               return;
             }
           }

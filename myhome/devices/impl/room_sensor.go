@@ -38,6 +38,7 @@ func (dm *DeviceManager) checkRoomAssignment(ctx context.Context, d *myhome.Devi
 	if roomID == "" || !myhome.IsTemperatureSensor(d) {
 		return nil
 	}
+	// Check-then-write is not atomic: two concurrent assignments could both pass. Accepted (single-user kiosk).
 	all, err := dm.dr.GetAllDevices(ctx)
 	if err != nil {
 		return fmt.Errorf("check room %q for temperature sensors: %w", roomID, err)

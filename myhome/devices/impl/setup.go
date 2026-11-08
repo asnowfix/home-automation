@@ -104,6 +104,7 @@ func (dm *DeviceManager) SetupRoom(ctx context.Context, roomID string) (*myhome.
 	if len(tempSensors) > 1 {
 		msg := multipleSensorsMessage(roomID, tempSensors)
 		log.Error(nil, "Room has several temperature sensors, refusing to configure it", "count", len(tempSensors))
+		log.Info("Room setup refused", "room", roomID, "reason", msg)
 		result := &myhome.RoomSetupResult{RoomsProcessed: 1}
 		for _, h := range heaters {
 			result.Devices = append(result.Devices, myhome.RoomSetupDeviceResult{DeviceID: h.Id(), Error: msg})

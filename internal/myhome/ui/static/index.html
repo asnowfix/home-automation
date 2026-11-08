@@ -283,6 +283,7 @@
             <input class="input" type="password" x-model="setupForm.apPasswd" placeholder="Access Point password">
           </div>
         </div>
+        <div class="notification is-danger is-light" x-show="setupForm.setupError" x-text="setupForm.setupError"></div>
       </section>
       <footer class="modal-card-foot">
         <button class="button is-success" @click="submitSetup()" :disabled="setupForm.saving">

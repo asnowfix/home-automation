@@ -25,6 +25,7 @@ type PoolRPCHandler struct {
 	deviceID    string
 	waterSupply func(ctx context.Context) *bool
 	now         func() time.Time // injectable clock; nil = time.Now
+	startedAt   time.Time        // daemon-side coverage start for the rolling 24 h figure
 }
 
 // WithSnapshotSource tells pool.snapshot which device it describes and how to
@@ -38,7 +39,7 @@ func (h *PoolRPCHandler) WithSnapshotSource(deviceID string, waterSupply func(ct
 // disabled or the device unreachable at startup) — handleGetStatus then
 // returns a clear error instead of panicking.
 func NewPoolRPCHandler(log logr.Logger, pool *PoolNotices, enabled bool) *PoolRPCHandler {
-	return &PoolRPCHandler{log: log.WithName("PoolRPCHandler"), pool: pool, enabled: enabled}
+	return &PoolRPCHandler{log: log.WithName("PoolRPCHandler"), pool: pool, enabled: enabled, startedAt: time.Now()}
 }
 
 // RegisterHandlers registers the pool.getstatus RPC method.
@@ -98,6 +99,11 @@ func (h *PoolRPCHandler) handleSnapshot(ctx context.Context, _ any) (any, error)
 		res.TurnoverAchieved, res.TurnoverTarget, res.RuntimeSec = &s.achieved, &s.target, &s.runtimeSec
 		res.TurnoverTs = s.ts.Unix()
 		h.log.V(1).Info("pool.snapshot served", "turnover_ts", res.TurnoverTs)
+	}
+	// Rolling 24 h volume, from the pool.turnover_today events already persisted
+	// (no device call). Unknown stays nil.
+	if v, ok := h.pool.Rolling24h(ctx, n, h.startedAt); ok {
+		res.Turnover24h = &v
 	}
 	return res, nil
 }

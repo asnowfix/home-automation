@@ -94,7 +94,7 @@ func TestStartupRenderFromDBLoadedCache(t *testing.T) {
 	if !strings.Contains(body, "Water supply --") || strings.Contains(body, "Water supply OK") {
 		t.Error("pool water-supply pill must render -- (not OK) with no snapshot")
 	}
-	if !strings.Contains(body, "Turnover --") {
+	if !strings.Contains(body, "Turnover 24 h --") {
 		t.Error("pool turnover pill must render -- with no snapshot")
 	}
 	if n := liveCalls.Load(); n != 0 {

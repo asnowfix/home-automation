@@ -59,7 +59,7 @@ type DeviceView struct {
 	DoorOpened           *bool                           `json:"door_opened,omitempty"`         // true if door/window is open, false if closed (nil if not a door/window sensor)
 	Switches             map[int]pkgshelly.SwitchSummary `json:"switches,omitempty"`            // Switches on the device (nil if not a switch)
 	IsPoolPump           bool                            `json:"is_pool_pump,omitempty"`        // true if this is the configured pool pump device
-	TurnoverAchieved     *float64                        `json:"turnover_achieved,omitempty"`   // pool volumes filtered today so far (nil unless IsPoolPump)
+	TurnoverAchieved     *float64                        `json:"turnover_achieved,omitempty"`   // pool volumes filtered in the last 24 h (nil = unknown or not IsPoolPump)
 	TurnoverTarget       *float64                        `json:"turnover_target,omitempty"`     // configured daily turnover target, times/day (nil unless IsPoolPump)
 	WaterSupplyActive    *bool                           `json:"water_supply_active,omitempty"` // true = water-supply protection engaged, pump paused (nil unless IsPoolPump)
 	SwitchUnknown        map[int]bool                    `json:"-"`                             // switch ids whose state the daemon has not seen yet: the row shows a disabled button, not "off"
@@ -89,7 +89,7 @@ func applyPoolStatus(ctx context.Context, views []DeviceView) {
 			continue
 		}
 		views[i].IsPoolPump = true
-		views[i].TurnoverAchieved = snap.TurnoverAchieved
+		views[i].TurnoverAchieved = snap.Turnover24h // rolling 24 h, not the device-day counter
 		views[i].TurnoverTarget = snap.TurnoverTarget
 		views[i].WaterSupplyActive = snap.WaterSupplyActive
 	}

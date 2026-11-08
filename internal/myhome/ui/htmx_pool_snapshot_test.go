@@ -64,7 +64,7 @@ func TestRenderDevicesPoolFromMemory(t *testing.T) {
 	if !strings.Contains(body, "Water supply --") || strings.Contains(body, "Water supply OK") {
 		t.Errorf("unknown water supply must render --, not OK:\n%s", body)
 	}
-	if !strings.Contains(body, "Turnover --") {
+	if !strings.Contains(body, "Turnover 24 h --") {
 		t.Errorf("unknown turnover must render --:\n%s", body)
 	}
 }
@@ -75,7 +75,7 @@ func TestRenderDevicesPoolSnapshotValues(t *testing.T) {
 	ok, achieved, target, runtime := false, 3.2, 5.0, int64(5400)
 	live := stubPoolVerbs(t, &myhome.PoolSnapshotResult{
 		DeviceID: "shellypro1-aabbccddee11", WaterSupplyActive: &ok,
-		TurnoverAchieved: &achieved, TurnoverTarget: &target, RuntimeSec: &runtime, TurnoverTs: 1,
+		Turnover24h: &achieved, TurnoverTarget: &target, RuntimeSec: &runtime, TurnoverTs: 1,
 	})
 	h := newMux(renderCtx(), logr.Discard(), nil, fakeRegistry{devs: []*myhome.Device{switchDevice(t, "shellypro1-aabbccddee11", false)}}, nil, nil, "", nil, nil)
 

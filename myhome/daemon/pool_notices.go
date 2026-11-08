@@ -25,6 +25,7 @@ import (
 const (
 	kvsKeyTurnover      = "script/pool-pump/turnover"
 	kvsKeyRuntimeToday  = "script/pool-pump/runtime-sec"
+	kvsKeyRuntimeTs     = "script/pool-pump/runtime-ts"
 	kvsKeyTurnoverToday = "script/pool-pump/turnover-today"
 	kvsKeyActiveOutput  = "script/pool-pump/active-output"
 )
@@ -59,6 +60,10 @@ type PoolNotices struct {
 	// never read the device (#731). Written only here (start, pool.pump_stop).
 	snapMu sync.Mutex
 	snap   poolTurnoverSnapshot
+
+	// loadTurnoverEvents returns the persisted pool.turnover_today events, oldest
+	// first; nil = read them from the events store. Injectable for tests.
+	loadTurnoverEvents func(ctx context.Context) ([]events.Event, error)
 }
 
 // poolTurnoverSnapshot is one turnover reading with the time it was taken.
@@ -153,11 +158,19 @@ func (p *PoolNotices) recordTurnoverToday(ctx context.Context) {
 		return
 	}
 
-	payload, err := json.Marshal(map[string]any{
+	data := map[string]any{
 		"turnover_achieved": achieved,
 		"turnover_target":   target,
 		"runtime_sec":       runtimeSec,
-	})
+	}
+	// The device's day anchor for the counters above: it changes exactly when
+	// the device resets them, which Rolling24h needs to difference them (#731).
+	if ts, err := readPoolKVSInt(ctx, p.log, p.device, types.ChannelMqtt, kvsKeyRuntimeTs); err == nil {
+		data["runtime_ts"] = ts
+	} else {
+		p.log.Info("runtime-ts not read, notice carries no counter anchor", "error", err.Error())
+	}
+	payload, err := json.Marshal(data)
 	if err != nil {
 		p.log.Error(err, "Failed to marshal turnover notice data")
 		return

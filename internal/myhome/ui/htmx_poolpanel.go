@@ -32,7 +32,7 @@ const poolPanelTemplate = `{{if eq .State "disabled"}}
     {{if not .WaterSupplyActive}}<span class="tag">Water supply: --</span>
     {{else if isActive .WaterSupplyActive}}<span class="tag is-warning">Water supply: pump paused</span>
     {{else}}<span class="tag is-success">Water supply: OK</span>{{end}}
-    <span class="tag">Filtered today: {{with turnoverText .TurnoverAchieved .TurnoverTarget}}{{.}}{{else}}--{{end}}</span>
+    <span class="tag">Filtered 24 h: {{with turnoverText .TurnoverAchieved .TurnoverTarget}}{{.}}{{else}}--{{end}}</span>
     <span class="tag">Pump runtime today: {{with .RuntimeMin}}{{.}} min{{else}}--{{end}}</span>
   </p>
 </div>
@@ -58,7 +58,7 @@ func poolViewFromStatus(res any, err error) poolPanelView {
 		State:             "ok",
 		Name:              st.DeviceID,
 		WaterSupplyActive: st.WaterSupplyActive,
-		TurnoverAchieved:  st.TurnoverAchieved,
+		TurnoverAchieved:  st.Turnover24h, // rolling 24 h
 		TurnoverTarget:    st.TurnoverTarget,
 	}
 	if st.RuntimeSec != nil {

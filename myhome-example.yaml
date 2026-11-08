@@ -161,6 +161,9 @@ weather:
   # Location for weather forecast (decimal degrees)
   latitude: 48.8566
   longitude: 2.3522
+  # Do not publish the retained forecast (myhome/weather/forecast) that device scripts read.
+  # For a read-only side daemon sharing the home broker. Default: false (publisher on).
+  # disable_publisher: true
 
 # Event Log Configuration
 events:

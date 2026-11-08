@@ -23,8 +23,8 @@ make tidy           # tidy all workspace modules
 
 # WARNING: a side daemon shares the real broker with production, and `--instance local` scopes only
 # the RPC topic. With an empty local DB it would auto-set-up every device it hears (config, firmware,
-# KVS and script writes), reconcile them hourly, and publish `myhome/occupancy` and the room
-# temperature ranges that heater.js reads (#700). The script's `SAFE_DAEMON_FLAGS` turn all of that
+# KVS and script writes), reconcile them hourly, and publish `myhome/occupancy`, the room
+# temperature ranges that heater.js reads and the retained weather forecast (#700). The script's `SAFE_DAEMON_FLAGS` turn all of that
 # off (the list lives only there), and it drops `.env` and MYHOME_* variables: `.env` credentials
 # (vacuum, Beem, SFR) would take over the vacuum connection and publish solar availability.
 # Writes you start yourself remain possible and no flag blocks them: UI switch toggles, device setup,

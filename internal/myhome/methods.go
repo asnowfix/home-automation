@@ -97,6 +97,14 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return nil
 		},
 	},
+	DeviceExport: {
+		NewParams: func() any {
+			return "" // name pattern, "*" for all devices
+		},
+		NewResult: func() any {
+			return &[]*Device{}
+		},
+	},
 	TemperatureGet: {
 		NewParams: func() any {
 			return &TemperatureGetParams{}

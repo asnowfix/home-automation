@@ -11,7 +11,7 @@ import (
 
 // DatabaseExport represents the complete database export
 type DatabaseExport struct {
-	Devices          any                                      `json:"devices,omitempty"`
+	Devices          []*myhome.Device                         `json:"devices,omitempty"`
 	TemperatureRooms map[string]*myhome.TemperatureRoomConfig `json:"rooms,omitempty"`
 	WeekdayDefaults  map[int]myhome.DayType                   `json:"weekday_defaults,omitempty"`
 	KindSchedules    []myhome.TemperatureKindSchedule         `json:"kind_schedules,omitempty"`
@@ -63,13 +63,18 @@ Examples:
 		export := DatabaseExport{}
 		deviceCount := 0
 
-		// Get devices matching pattern
-		devices, err := myhome.TheClient.LookupDevices(ctx, pattern)
+		// Full device records (room assignment, info, config) read from the
+		// database by the daemon, not from its in-memory view (#775).
+		out, err := myhome.TheClient.CallE(ctx, myhome.DeviceExport, pattern)
 		if err != nil {
-			return fmt.Errorf("failed to lookup devices: %w", err)
+			return fmt.Errorf("failed to export devices: %w", err)
 		}
-		if devices != nil && len(*devices) > 0 {
-			export.Devices = devices
+		devices, ok := out.(*[]*myhome.Device)
+		if !ok {
+			return fmt.Errorf("unexpected reply %T from %s", out, myhome.DeviceExport)
+		}
+		if len(*devices) > 0 {
+			export.Devices = *devices
 			deviceCount = len(*devices)
 		}
 

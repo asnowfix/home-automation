@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -58,6 +59,29 @@ func TestShellHasFiveRailItemsAndSections(t *testing.T) {
 	}
 	if n := strings.Count(html, `data-section=`); n != 5 {
 		t.Errorf("data-section containers = %d, want 5", n)
+	}
+}
+
+// The kiosk opens on Rooms: Rooms is the first rail item and section, Devices
+// (section id "home", unchanged) the second (#744).
+func TestShellRailOrderRoomsThenDevices(t *testing.T) {
+	html := get(testMux(), "/").Body.String()
+	var labels []string
+	for _, m := range regexp.MustCompile(`class="mh-rail-item"[\s\S]*?<span>([^<]*)</span>`).FindAllStringSubmatch(html, -1) {
+		labels = append(labels, m[1])
+	}
+	if got, want := strings.Join(labels, ","), "Rooms,Devices,Pool,Vacuum,Events"; got != want {
+		t.Errorf("rail = %s, want %s", got, want)
+	}
+	if strings.Index(html, `id="sec-rooms"`) > strings.Index(html, `id="sec-home"`) {
+		t.Error("sec-rooms must precede sec-home")
+	}
+	js, err := os.ReadFile("static/myhome.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(js), "section: 'rooms'"); n != 2 {
+		t.Errorf("default section 'rooms' appears %d times in myhome.js, want 2 (kiosk + app)", n)
 	}
 }
 
@@ -125,14 +149,25 @@ func TestPoolPanelTemplateStates(t *testing.T) {
 		}
 		return b.String()
 	}
-	ok := render(poolPanelView{State: "ok", Name: "Pump", TurnoverAchieved: 3.2, TurnoverTarget: 5, RuntimeMin: 90})
-	for _, s := range []string{"Pump", "Water supply: OK", "3.2 / 5.0", "90 min"} {
+	achieved, target, active := 3.2, 5.0, false
+	ok := render(poolPanelView{State: "ok", Name: "Pump", WaterSupplyActive: &active, TurnoverAchieved: &achieved, TurnoverTarget: &target})
+	for _, s := range []string{"Pump", "Water supply: OK", "3.2/5.0 x/day"} {
 		if !strings.Contains(ok, s) {
 			t.Errorf("ok state lacks %q: %s", s, ok)
 		}
 	}
-	if !strings.Contains(render(poolPanelView{State: "ok", WaterSupplyActive: true}), "pump paused") {
+	paused := true
+	if !strings.Contains(render(poolPanelView{State: "ok", WaterSupplyActive: &paused}), "pump paused") {
 		t.Error("paused state not rendered")
+	}
+	unknown := render(poolPanelView{State: "ok", Name: "Pump"})
+	for _, s := range []string{"Water supply: --", "Filtered 24 h: --"} {
+		if !strings.Contains(unknown, s) {
+			t.Errorf("unknown state lacks %q: %s", s, unknown)
+		}
+	}
+	if strings.Contains(unknown, "OK") {
+		t.Errorf("unknown water supply rendered as OK: %s", unknown)
 	}
 	if !strings.Contains(render(poolPanelView{State: "unavailable"}), "unavailable") {
 		t.Error("unavailable state not rendered")
@@ -168,7 +203,7 @@ func TestPoolViewFromStatus(t *testing.T) {
 	if got := poolViewFromStatus(nil, errors.New("compute turnover: timeout")).State; got != "unavailable" {
 		t.Errorf("real error -> %q, want unavailable", got)
 	}
-	if got := poolViewFromStatus(&myhome.PoolGetStatusResult{DeviceID: "p"}, nil); got.State != "ok" || got.Name != "p" {
+	if got := poolViewFromStatus(&myhome.PoolSnapshotResult{DeviceID: "p"}, nil); got.State != "ok" || got.Name != "p" {
 		t.Errorf("ok result -> %+v", got)
 	}
 }

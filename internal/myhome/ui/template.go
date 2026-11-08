@@ -59,40 +59,39 @@ type DeviceView struct {
 	DoorOpened           *bool                           `json:"door_opened,omitempty"`         // true if door/window is open, false if closed (nil if not a door/window sensor)
 	Switches             map[int]pkgshelly.SwitchSummary `json:"switches,omitempty"`            // Switches on the device (nil if not a switch)
 	IsPoolPump           bool                            `json:"is_pool_pump,omitempty"`        // true if this is the configured pool pump device
-	TurnoverAchieved     *float64                        `json:"turnover_achieved,omitempty"`   // pool volumes filtered today so far (nil unless IsPoolPump)
+	TurnoverAchieved     *float64                        `json:"turnover_achieved,omitempty"`   // pool volumes filtered in the last 24 h (nil = unknown or not IsPoolPump)
 	TurnoverTarget       *float64                        `json:"turnover_target,omitempty"`     // configured daily turnover target, times/day (nil unless IsPoolPump)
 	WaterSupplyActive    *bool                           `json:"water_supply_active,omitempty"` // true = water-supply protection engaged, pump paused (nil unless IsPoolPump)
 	SwitchUnknown        map[int]bool                    `json:"-"`                             // switch ids whose state the daemon has not seen yet: the row shows a disabled button, not "off"
 }
 
 // applyPoolStatus enriches views in place with the configured pool device's
-// turnover rate and water-supply status, fetched once via the pool.getstatus
-// RPC method (myhome/daemon/pool_rpc.go) rather than once per device — there
-// is exactly one configured pool device system-wide, so doing this inside
-// DeviceToView itself would trigger a redundant KVS/MQTT round trip for
-// every other device on each dashboard refresh.
+// turnover and water-supply status from the pool.snapshot RPC method
+// (myhome/daemon/pool_rpc.go), once rather than once per device. pool.snapshot
+// answers from daemon memory only, so rendering never reaches the pool device
+// (#731, AGENTS.md Rule 3). A field the daemon does not know yet stays nil and
+// renders as "--".
 func applyPoolStatus(ctx context.Context, views []DeviceView) {
-	mh, err := myhome.Methods(myhome.PoolGetStatus)
+	mh, err := myhome.Methods(myhome.PoolSnapshot)
 	if err != nil {
 		return // pool RPC not registered (pool tracking disabled)
 	}
 	res, err := mh.ActionE(ctx, nil)
 	if err != nil {
-		return // device unreachable / KVS misconfigured — leave fields blank
+		return
 	}
-	status, ok := res.(*myhome.PoolGetStatusResult)
+	snap, ok := res.(*myhome.PoolSnapshotResult)
 	if !ok {
 		return
 	}
 	for i := range views {
-		if views[i].Id != status.DeviceID {
+		if views[i].Id != snap.DeviceID {
 			continue
 		}
-		achieved, target, active := status.TurnoverAchieved, status.TurnoverTarget, status.WaterSupplyActive
 		views[i].IsPoolPump = true
-		views[i].TurnoverAchieved = &achieved
-		views[i].TurnoverTarget = &target
-		views[i].WaterSupplyActive = &active
+		views[i].TurnoverAchieved = snap.Turnover24h // rolling 24 h, not the device-day counter
+		views[i].TurnoverTarget = snap.TurnoverTarget
+		views[i].WaterSupplyActive = snap.WaterSupplyActive
 	}
 }
 

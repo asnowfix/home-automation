@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 
 	"github.com/asnowfix/home-automation/pkg/devices"
 )
@@ -188,6 +190,16 @@ func ImportDatabase(ctx context.Context, c Client, in *DatabaseImport, devicesOn
 		return n, nil
 	}
 
+	// One temperature sensor per room (#752). Reject the whole file before
+	// writing anything. Open question E3 on #684: to only warn instead, make
+	// this block print the conflicts to progress and carry on.
+	if conflicts := RoomSensorConflicts(in.Devices); len(conflicts) > 0 {
+		for _, c := range conflicts {
+			fmt.Fprintf(progress, "✗ %s\n", c)
+		}
+		return n, fmt.Errorf("import rejected, nothing written: %d room(s) with several temperature sensors", len(conflicts))
+	}
+
 	for i := range in.Devices {
 		device := in.Devices[i]
 		if ctx.Err() != nil {
@@ -255,4 +267,25 @@ func ImportDatabase(ctx context.Context, c Client, in *DatabaseImport, devicesOn
 		}
 	}
 	return finish()
+}
+
+// RoomSensorConflicts returns one line per room holding two or more
+// temperature sensors among devices, sorted by room id. Pure.
+func RoomSensorConflicts(devices []Device) []string {
+	byRoom := map[string][]string{}
+	for i := range devices {
+		d := &devices[i]
+		if d.RoomId != "" && IsTemperatureSensor(d) {
+			byRoom[d.RoomId] = append(byRoom[d.RoomId], d.Id())
+		}
+	}
+	var out []string
+	for room, ids := range byRoom {
+		if len(ids) > 1 {
+			sort.Strings(ids)
+			out = append(out, fmt.Sprintf("configuration error: room %q has %d temperature sensors (%s); a room can have only one", room, len(ids), strings.Join(ids, ", ")))
+		}
+	}
+	sort.Strings(out)
+	return out
 }

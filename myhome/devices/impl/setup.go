@@ -26,24 +26,23 @@ const (
 func classifyDevice(d *myhome.Device) deviceRole {
 	id := strings.ToLower(d.Id())
 
+	// One rule for "temperature sensor", shared with thermometer.list.
+	if myhome.IsTemperatureSensor(d) {
+		return roleTempSensor
+	}
+
 	if shelly.IsBluDevice(id) {
 		if d.Info != nil && d.Info.BTHome != nil {
 			for _, cap := range d.Info.BTHome.Capabilities {
 				switch cap {
 				case "window":
 					return roleDoorSensor
-				case "temperature":
-					return roleTempSensor
 				case "motion":
 					return roleMotionSensor
 				}
 			}
 		}
 		return roleUnknown
-	}
-
-	if strings.HasPrefix(id, "shellyht-") {
-		return roleTempSensor
 	}
 
 	// Non-BLU, non-HT → heater candidate
@@ -101,10 +100,22 @@ func (dm *DeviceManager) SetupRoom(ctx context.Context, roomID string) (*myhome.
 		"door_sensors", len(doorSensors),
 		"motion_sensors", len(motionSensors))
 
+	// A room has at most one temperature sensor (#752): never pick one silently.
+	if len(tempSensors) > 1 {
+		msg := multipleSensorsMessage(roomID, tempSensors)
+		log.Error(nil, "Room has several temperature sensors, refusing to configure it", "count", len(tempSensors))
+		log.Info("Room setup refused", "room", roomID, "reason", msg)
+		result := &myhome.RoomSetupResult{RoomsProcessed: 1}
+		for _, h := range heaters {
+			result.Devices = append(result.Devices, myhome.RoomSetupDeviceResult{DeviceID: h.Id(), Error: msg})
+		}
+		return result, nil
+	}
+
 	// Derive sensor topics
 	var tempTopic string
 	if len(tempSensors) > 0 {
-		tempTopic = sensorMQTTTopic(tempSensors[0]) // first temp sensor
+		tempTopic = sensorMQTTTopic(tempSensors[0])
 	}
 
 	var doorTopics []string

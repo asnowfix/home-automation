@@ -227,9 +227,12 @@ func TestToggleRouteRejectsBadInput(t *testing.T) {
 	}
 }
 
-type fakeRegistry struct{ devs []*myhome.Device }
+type fakeRegistry struct {
+	devs []*myhome.Device
+	err  error // returned by GetAllDevices when set
+}
 
-func (f fakeRegistry) GetAllDevices(context.Context) ([]*myhome.Device, error) { return f.devs, nil }
+func (f fakeRegistry) GetAllDevices(context.Context) ([]*myhome.Device, error) { return f.devs, f.err }
 func (f fakeRegistry) GetDeviceById(_ context.Context, id string) (*myhome.Device, error) {
 	for _, d := range f.devs {
 		if d.Id() == id {

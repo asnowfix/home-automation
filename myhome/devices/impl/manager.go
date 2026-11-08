@@ -2,6 +2,8 @@ package impl
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"net"
 	"reflect"
@@ -252,74 +254,8 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		log.V(1).Info("Setup complete", "device", device.Id())
 		return nil, nil
 	})
-	myhome.RegisterMethodHandler(myhome.DeviceUpdate, func(ctx context.Context, in any) (any, error) {
-		device := in.(*myhome.Device)
-		log := dm.log.WithName("rpc/device.update")
-		log.V(1).Info("New", "id", device.Id(), "name", device.Name())
-
-		var modified bool
-		if modified, err = dm.dr.SetDevice(ctx, device, true); err != nil {
-			log.Error(err, "Failed to update device in DB", "device", device.Id())
-			return nil, err
-		}
-
-		// Broadcast device update via SSE if broadcaster is available (only when a UI is connected)
-		if modified {
-			log.V(1).Info("Broadcasting device update (RPC)", "device", device.Id())
-			dm.sseBroadcaster.BroadcastDeviceUpdate(ui.DeviceToView(ctx, device))
-		}
-
-		return nil, nil
-	})
-	myhome.RegisterMethodHandler(myhome.DeviceSetRoom, func(ctx context.Context, in any) (any, error) {
-		var err error
-
-		params := in.(*myhome.DeviceSetRoomParams)
-		log := dm.log.WithName("rpc/device.setroom")
-		log.V(1).Info("New", "identifier", params.Identifier, "room_id", params.RoomId)
-		// Save room to database
-		if _, err = dm.dr.SetDeviceRoom(ctx, params.Identifier, params.RoomId); err != nil {
-			log.Error(err, "Failed to update device room in DB", "identifier", params.Identifier)
-			return nil, err
-		}
-
-		// Also set room-id in device KVS (for Gen2+ Shelly devices)
-		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
-		if err != nil {
-			log.Error(err, "Failed to get device for KVS update", "identifier", params.Identifier)
-			return nil, nil // DB update succeeded, KVS is best-effort
-		}
-
-		// Skip KVS for Gen1 and BLU devices (they don't support KVS)
-		if shelly.IsGen1Device(device.Id()) || shelly.IsBluDevice(device.Id()) {
-			return nil, nil
-		}
-
-		// Get or create Shelly device implementation
-		sd, ok := device.Impl().(*shelly.Device)
-		if !ok || sd == nil {
-			impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
-			if err != nil {
-				log.Error(err, "Failed to create device for KVS update", "identifier", params.Identifier)
-				return nil, nil // DB update succeeded, KVS is best-effort
-			}
-			sd, ok = impl.(*shelly.Device)
-			if !ok {
-				return nil, nil
-			}
-		}
-
-		// Set room-id in device KVS
-		_, err = kvs.SetKeyValue(ctx, log, types.ChannelDefault, sd, "room-id", params.RoomId)
-		if err != nil {
-			log.Error(err, "Failed to set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
-			// Don't return error - DB update succeeded
-		} else {
-			log.Info("Set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
-		}
-
-		return nil, nil
-	})
+	myhome.RegisterMethodHandler(myhome.DeviceUpdate, dm.handleDeviceUpdate)
+	myhome.RegisterMethodHandler(myhome.DeviceSetRoom, dm.handleDeviceSetRoom)
 	myhome.RegisterMethodHandler(myhome.DeviceListByRoom, func(ctx context.Context, in any) (any, error) {
 		params := in.(*myhome.DeviceListByRoomParams)
 		log := dm.log.WithName("rpc/device.listbyroom")
@@ -929,6 +865,11 @@ func (dm *DeviceManager) HandleThermometerList(ctx context.Context) (*myhome.The
 	return &myhome.ThermometerListResult{Thermometers: classifyThermometers(devices)}, nil
 }
 
+// isGen1HT tells a Gen1 H&T from a BLU thermometer once IsTemperatureSensor said yes.
+func isGen1HT(d *myhome.Device) bool {
+	return (d.Info != nil && d.Info.Application == "shellyht") || strings.HasPrefix(strings.ToLower(d.Id()), "shellyht-")
+}
+
 // classifyThermometers scans devices for Gen1 H&T sensors (by Info.Application
 // or the "shellyht-" id prefix) and BLU sensors advertising a "temperature"
 // BTHome capability, returning one ThermometerInfo per match.
@@ -936,34 +877,27 @@ func classifyThermometers(devices []*myhome.Device) []myhome.ThermometerInfo {
 	thermometers := make([]myhome.ThermometerInfo, 0)
 
 	for _, d := range devices {
-		// Check for Gen1 H&T devices by Info.Application (if populated) and fallback to device ID prefix (e.g., "shellyht-208500")
-		if (d.Info != nil && d.Info.Application == "shellyht") || strings.HasPrefix(d.Id(), "shellyht-") {
+		if !myhome.IsTemperatureSensor(d) {
+			continue
+		}
+		if !isGen1HT(d) {
+			// BLU devices use MAC address in topic (with colons)
 			thermometers = append(thermometers, myhome.ThermometerInfo{
 				ID:        d.Id(),
 				Name:      d.Name(),
-				Type:      "Gen1",
-				MqttTopic: fmt.Sprintf("shellies/%s/sensor/temperature", d.Id()),
+				Type:      "BLU",
+				MqttTopic: fmt.Sprintf("shelly-blu/events/%s", d.MAC),
 				RoomId:    d.RoomId,
 			})
 			continue
 		}
-
-		// Check for BLU devices with temperature capability
-		if d.Info != nil && d.Info.BTHome != nil {
-			for _, cap := range d.Info.BTHome.Capabilities {
-				if cap == "temperature" {
-					// BLU devices use MAC address in topic (with colons)
-					thermometers = append(thermometers, myhome.ThermometerInfo{
-						ID:        d.Id(),
-						Name:      d.Name(),
-						Type:      "BLU",
-						MqttTopic: fmt.Sprintf("shelly-blu/events/%s", d.MAC),
-						RoomId:    d.RoomId,
-					})
-					break
-				}
-			}
-		}
+		thermometers = append(thermometers, myhome.ThermometerInfo{
+			ID:        d.Id(),
+			Name:      d.Name(),
+			Type:      "Gen1",
+			MqttTopic: fmt.Sprintf("shellies/%s/sensor/temperature", d.Id()),
+			RoomId:    d.RoomId,
+		})
 	}
 
 	return thermometers
@@ -1019,4 +953,102 @@ func (dm *DeviceManager) GetShellyDevice(ctx context.Context, device *myhome.Dev
 		}
 	}
 	return sd, nil
+}
+
+func (dm *DeviceManager) handleDeviceUpdate(ctx context.Context, in any) (any, error) {
+	device := in.(*myhome.Device)
+	log := dm.log.WithName("rpc/device.update")
+	log.V(1).Info("New", "id", device.Id(), "name", device.Name())
+
+	// Only a change of room is checked: a re-save of an existing legacy
+	// conflict must not be refused.
+	if prev, perr := dm.dr.GetDeviceById(ctx, device.Id()); perr != nil || prev == nil || prev.RoomId != device.RoomId {
+		if cerr := dm.checkRoomAssignment(ctx, device, device.RoomId); cerr != nil {
+			log.Error(cerr, "Refusing room assignment", "device", device.Id())
+			return nil, cerr
+		}
+	}
+
+	modified, err := dm.dr.SetDevice(ctx, device, true)
+	if err != nil {
+		log.Error(err, "Failed to update device in DB", "device", device.Id())
+		return nil, err
+	}
+
+	// Broadcast device update via SSE if broadcaster is available (only when a UI is connected)
+	if modified {
+		log.V(1).Info("Broadcasting device update (RPC)", "device", device.Id())
+		dm.sseBroadcaster.BroadcastDeviceUpdate(ui.DeviceToView(ctx, device))
+	}
+
+	return nil, nil
+}
+
+func (dm *DeviceManager) handleDeviceSetRoom(ctx context.Context, in any) (any, error) {
+	var err error
+
+	params := in.(*myhome.DeviceSetRoomParams)
+	log := dm.log.WithName("rpc/device.setroom")
+	log.V(1).Info("New", "identifier", params.Identifier, "room_id", params.RoomId)
+	identifier := params.Identifier
+	target, gerr := dm.GetDeviceByAny(ctx, identifier)
+	switch {
+	case gerr == nil && target != nil:
+		if target.RoomId == params.RoomId {
+			// already there: nothing to check
+		} else if err = dm.checkRoomAssignment(ctx, target, params.RoomId); err != nil {
+			log.Error(err, "Refusing room assignment", "identifier", identifier)
+			return nil, err
+		}
+		// The storage UPDATE matches id, MAC, name or host: use the resolved id.
+		identifier = target.Id()
+	case gerr == nil || errors.Is(gerr, sql.ErrNoRows):
+		// Unknown device: nothing to check, the UPDATE below matches no row.
+		log.V(0).Info("Device not found, skipping the one-temperature-sensor-per-room check", "identifier", identifier)
+	default:
+		log.Error(gerr, "Failed to look up device for room assignment", "identifier", identifier)
+		return nil, gerr
+	}
+	// Save room to database
+	if _, err = dm.dr.SetDeviceRoom(ctx, identifier, params.RoomId); err != nil {
+		log.Error(err, "Failed to update device room in DB", "identifier", params.Identifier)
+		return nil, err
+	}
+
+	// Also set room-id in device KVS (for Gen2+ Shelly devices)
+	device, err := dm.GetDeviceByAny(ctx, identifier)
+	if err != nil {
+		log.Error(err, "Failed to get device for KVS update", "identifier", params.Identifier)
+		return nil, nil // DB update succeeded, KVS is best-effort
+	}
+
+	// Skip KVS for Gen1 and BLU devices (they don't support KVS)
+	if shelly.IsGen1Device(device.Id()) || shelly.IsBluDevice(device.Id()) {
+		return nil, nil
+	}
+
+	// Get or create Shelly device implementation
+	sd, ok := device.Impl().(*shelly.Device)
+	if !ok || sd == nil {
+		impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
+		if err != nil {
+			log.Error(err, "Failed to create device for KVS update", "identifier", params.Identifier)
+			return nil, nil // DB update succeeded, KVS is best-effort
+		}
+		sd, ok = impl.(*shelly.Device)
+		if !ok {
+			return nil, nil
+		}
+	}
+
+	// Set room-id in device KVS
+	_, err = kvs.SetKeyValue(ctx, log, types.ChannelDefault, sd, "room-id", params.RoomId)
+	if err != nil {
+		log.Error(err, "Failed to set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
+		// Don't return error - DB update succeeded
+	} else {
+		log.Info("Set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
+	}
+
+	return nil, nil
 }

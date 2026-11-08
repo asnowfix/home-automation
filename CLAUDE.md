@@ -22,7 +22,7 @@ make tidy           # tidy all workspace modules
 # Run the full daemon locally against the real home MQTT broker (needed to test UI/RPC changes
 # against live devices, e.g. via a browser at http://127.0.0.1:6080). Run from the worktree
 # whose code you want to test — each worktree's `go run` builds its own checked-out sources.
-go run ./myhome daemon run --instance local --mqtt-broker tcp://192.168.1.2:1883
+go run ./myhome daemon run --instance local --mqtt-broker tcp://<nas-address>:1883
 
 go test ./internal/myhome/...                    # single package
 go test -v -run TestName ./path/to/package       # specific test
@@ -43,7 +43,7 @@ go run ./myhome ctl shelly script debug <device> true
 go run ./tools/classify-events [events-dir] [testdata-dir]   # classify raw event dumps → pkg/shelly/mqtt/testdata/
 ```
 
-To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call` tools). It is pre-configured in `.mcp.json` with MQTT broker `tcp://192.168.1.2:1883` and approved via `enabledMcpjsonServers` in `.claude/settings.json`. The `.mcp.json` command automatically runs `go generate ./internal/myhome/ui/...` on first use in a fresh worktree (fetches CSS/JS assets required to compile); this needs internet access once per worktree. Restart Claude Code to activate.
+To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call` tools). It is pre-configured in `.mcp.json` with MQTT broker `tcp://<nas-address>:1883` and approved via `enabledMcpjsonServers` in `.claude/settings.json`. The `.mcp.json` command automatically runs `go generate ./internal/myhome/ui/...` on first use in a fresh worktree (fetches CSS/JS assets required to compile); this needs internet access once per worktree. Restart Claude Code to activate.
 
 `make test` is canonical — never bare `go test ./...` (it skips workspace sub-modules). New CI test commands must also invoke `make test`, not go directly to `go test`.
 
@@ -200,14 +200,14 @@ public, and it stays public: GitHub keeps a PR's earlier commits reachable after
 issue's edit history shows earlier versions of its body. So **never publish**:
 
 - Wi-Fi SSIDs, access-point BSSIDs or MAC addresses, and access-point makes and models;
-- hostnames of the NAS or other infrastructure;
+- hostnames or IP addresses of the NAS or other infrastructure;
 - Wi-Fi or any other passwords, even partially;
 - per-device signal readings or exact outage times for security-relevant devices (gate, doors,
   locks), which together describe when and how they can be cut off.
 
 Write generic terms instead ("outdoor AP", "internal AP", "the critical devices", "the evening of
-2026-10-31") and keep the details in the owner's private notes. Facts already published (the NAS IP,
-Shelly device ids and names) need not be removed.
+2026-10-31") and keep the details in the owner's private notes. Facts already published (Shelly device
+ids and names) need not be removed.
 
 **Check before publishing.** Grep a document for these items before committing it, and redact first:
 removing them afterwards does not remove them from GitHub. Worked example, 2026-11-05 (#654, #655): the
@@ -489,3 +489,9 @@ Shelly runs a modified Espruino (ES5, no hoisting, limited ES6). Violations belo
 - **Storage**: Use `Script.storage` for script-internal data, `KVS` for external config, in-memory vars for cache. See AGENTS.md "Data Storage Patterns".
 - **Timer limits**: Use single recurring timer with task queue for sequential async ops to avoid exhausting 5-timer limit. See AGENTS.md "Resource Limit Workarounds".
 - **Async state rebuild guard**: When a multi-step async chain rebuilds shared state (e.g. KVS.List → N×KVS.Get), set a `STATE.reloading` flag and have event handlers that read that state defer themselves via `queueTask` instead of silently dropping work. Clear the flag in every exit path (normal, empty-result, error). See AGENTS.md "Defer Incoming Events During Multi-Step Async State Updates".
+
+## Home network
+
+Home devices (the NAS, the home display) and their SSH MCP servers are described in the owner's private
+notes, `~/.claude/home-network/devices.md` on the owner's machines. This repository is public: never write
+device addresses or hostnames here.

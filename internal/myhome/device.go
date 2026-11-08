@@ -75,7 +75,6 @@ type Device struct {
 	Info           *shelly.DeviceInfo `db:"-" json:"info"`
 	Config         *shelly.Config     `db:"-" json:"config"`
 	Status         *Status            `db:"-" json:"status,omitempty"` // Device status including sensor values (ephemeral, cached in memory)
-	implMu         sync.RWMutex       `db:"-" json:"-"`                // Guards impl: cached devices are shared by watcher, startup pass and render goroutines (#762)
 	impl           any                `db:"-" json:"-"`                // Reference to the inner implementation
 	log            logr.Logger        `db:"-" json:"-"`
 }
@@ -120,19 +119,25 @@ type DeviceImplementation interface {
 	Status() *shelly.Status
 }
 
+// implMu guards the impl field of every Device. It is package-level, not a
+// field, because Device is copied by value in many places (storage, UI, ctl):
+// a lock inside the value would be copied too, possibly while held (#762).
+// Contention is negligible: the critical sections are a pointer read or write.
+var implMu sync.RWMutex
+
 // WithImpl publishes the inner implementation handle. Safe for concurrent use
 // with Impl and other WithImpl calls.
 func (d *Device) WithImpl(i any) *Device {
-	d.implMu.Lock()
+	implMu.Lock()
 	d.impl = i
-	d.implMu.Unlock()
+	implMu.Unlock()
 	return d
 }
 
 // Impl returns the inner implementation handle (nil if none yet).
 func (d *Device) Impl() any {
-	d.implMu.RLock()
-	defer d.implMu.RUnlock()
+	implMu.RLock()
+	defer implMu.RUnlock()
 	return d.impl
 }
 

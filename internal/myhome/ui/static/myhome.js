@@ -230,6 +230,7 @@ var kiosk = {
         sta1Essid: '',
         sta1Passwd: '',
         apPasswd: '',
+        setupError: '',
         saving: false
       },
       heaterForm: {
@@ -595,6 +596,7 @@ var kiosk = {
           sta1Essid: '',
           sta1Passwd: '',
           apPasswd: '',
+          setupError: '',
           saving: false
         };
         
@@ -626,6 +628,7 @@ var kiosk = {
 
       async submitSetup() {
         this.setupForm.saving = true;
+        this.setupForm.setupError = '';
         try {
           const params = { identifier: this.setupForm.deviceId };
           
@@ -637,7 +640,7 @@ var kiosk = {
           if (this.setupForm.apPasswd) params.ap_passwd = this.setupForm.apPasswd;
 
           if (this.setupForm.roomId !== undefined) {
-            await fetch('/rpc', {
+            const roomRes = await fetch('/rpc', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
@@ -645,6 +648,10 @@ var kiosk = {
                 params: { identifier: this.setupForm.deviceId, room_id: this.setupForm.roomId } 
               })
             });
+            if (!roomRes.ok) {
+              this.setupForm.setupError = 'Room assignment refused: ' + await roomRes.text();
+              return;
+            }
           }
 
           const res = await fetch('/rpc', {

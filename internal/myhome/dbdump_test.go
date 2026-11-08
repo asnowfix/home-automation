@@ -148,3 +148,38 @@ func TestOldFormatsStillImport(t *testing.T) {
 		t.Errorf("vacuum failure: %v / %q", err, out.String())
 	}
 }
+
+// One temperature sensor per room (#752): a file with a two-sensor room is
+// rejected before any write; a clean file imports.
+func TestImportRejectsRoomWithSeveralSensors(t *testing.T) {
+	parse := func(devs string) *DatabaseImport {
+		in, err := ParseDatabaseImport([]byte(`{"devices":[` + devs + `]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return in
+	}
+	dev := func(id, room string) string {
+		return `{"manufacturer":"Shelly","id":"` + id + `","name":"` + id + `","room_id":"` + room + `"}`
+	}
+
+	c := &recClient{}
+	var out strings.Builder
+	_, err := ImportDatabase(context.Background(), c,
+		parse(dev("shellyht-a", "salon")+","+dev("shellyht-b", "salon")+","+dev("shellyplus1-x", "salon")), false, &out)
+	if err == nil || len(c.calls) != 0 {
+		t.Fatalf("err = %v, calls = %v (want an error and no write)", err, c.calls)
+	}
+	if !strings.Contains(out.String(), `room "salon" has 2 temperature sensors (shellyht-a, shellyht-b)`) {
+		t.Errorf("progress = %q", out.String())
+	}
+
+	c = &recClient{}
+	if _, err := ImportDatabase(context.Background(), c,
+		parse(dev("shellyht-a", "salon")+","+dev("shellyht-b", "cuisine")), false, &out); err != nil {
+		t.Fatalf("clean file rejected: %v", err)
+	}
+	if len(c.calls) != 2 {
+		t.Errorf("calls = %v", c.calls)
+	}
+}

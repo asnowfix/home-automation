@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/myhome/sfr"
 	"net"
+	"strings"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
@@ -75,6 +76,30 @@ type Device struct {
 	Status         *Status            `db:"-" json:"status,omitempty"` // Device status including sensor values (ephemeral, cached in memory)
 	impl           any                `db:"-" json:"-"`                // Reference to the inner implementation
 	log            logr.Logger        `db:"-" json:"-"`
+}
+
+// IsTemperatureSensor reports whether d is a room thermometer: a Gen1 H&T
+// (Info.Application "shellyht" or an id starting with "shellyht-") or a device
+// whose stored BTHome capabilities include "temperature". It is the single rule
+// behind thermometer.list, room.setup and the one-sensor-per-room check.
+//
+// Known gap (#684 open question E7): stored BLU capabilities may list only
+// "battery", so such a BLU thermometer is not recognised here.
+func IsTemperatureSensor(d *Device) bool {
+	if d == nil {
+		return false
+	}
+	if (d.Info != nil && d.Info.Application == "shellyht") || strings.HasPrefix(strings.ToLower(d.Id()), "shellyht-") {
+		return true
+	}
+	if d.Info != nil && d.Info.BTHome != nil {
+		for _, c := range d.Info.BTHome.Capabilities {
+			if c == "temperature" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Status represents the current runtime status of a device

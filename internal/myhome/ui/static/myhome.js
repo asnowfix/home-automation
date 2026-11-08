@@ -637,7 +637,7 @@ var kiosk = {
           if (this.setupForm.apPasswd) params.ap_passwd = this.setupForm.apPasswd;
 
           if (this.setupForm.roomId !== undefined) {
-            await fetch('/rpc', {
+            const roomRes = await fetch('/rpc', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
@@ -645,6 +645,10 @@ var kiosk = {
                 params: { identifier: this.setupForm.deviceId, room_id: this.setupForm.roomId } 
               })
             });
+            if (!roomRes.ok) {
+              alert('Room assignment refused: ' + await roomRes.text());
+              return;
+            }
           }
 
           const res = await fetch('/rpc', {

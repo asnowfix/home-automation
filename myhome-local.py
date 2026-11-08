@@ -116,6 +116,15 @@ def export_args(broker: str, out: Path) -> list[str]:
     return ["ctl", "--instance", MAIN_INSTANCE, "--mqtt-broker", broker, "db", "export", "--pretty", "--output", str(out)]
 
 
+def probe_args(broker: str) -> list[str]:
+    """Read-only readiness probe of the side daemon: a devices-only export to stdout.
+
+    It exits non-zero while the daemon does not answer (device lookup fails) and zero once it does,
+    which an import cannot tell us: since #738 an import also exits non-zero on a *partial* import.
+    """
+    return ["ctl", "--instance", SIDE_INSTANCE, "--mqtt-broker", broker, "db", "export", "--devices-only"]
+
+
 def import_args(broker: str, src: Path) -> list[str]:
     return ["ctl", "--instance", SIDE_INSTANCE, "--mqtt-broker", broker, "db", "import", str(src)]
 
@@ -191,6 +200,35 @@ def passthrough(root: Path, go: str, broker: str, args: list[str]) -> None:
     os.execvp(cmd[0], cmd)
 
 
+def wait_and_import(daemon, probe: list[str], import_cmd: list[str], cwd: Path, env: dict[str, str],
+                    sleep=time.sleep) -> int | None:
+    """Retry only the readiness probe; run the import exactly once, after the daemon answered.
+
+    Returns None when the side daemon should keep running (import complete, or completed but
+    partial: warnings and the summary line were printed by the import itself), or an exit status
+    when the launcher must stop (daemon died, or never answered).
+    """
+    for attempt in range(1, IMPORT_ATTEMPTS + 1):
+        if daemon.poll() is not None:
+            print("side daemon exited before the import", file=sys.stderr)
+            return daemon.returncode or 1
+        ready = subprocess.run(probe, cwd=cwd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        if ready.returncode == 0:
+            break
+        print(f"      side daemon not answering yet ({attempt}/{IMPORT_ATTEMPTS}), retrying in {IMPORT_RETRY_SECONDS}s")
+        sleep(IMPORT_RETRY_SECONDS)
+    else:
+        print("side daemon never answered; stopping it", file=sys.stderr)
+        return 1
+    done = subprocess.run(import_cmd, cwd=cwd, env=env, check=False)
+    if done.returncode == 0:
+        print("import complete")
+    else:
+        print(f"WARNING: import PARTIAL (exit {done.returncode}); see the warnings above. "
+              "The side daemon keeps running with what was imported.", file=sys.stderr)
+    return None
+
+
 def run_daemon_mode(root: Path, go: str, broker: str) -> int:
     inst = instance_dir(Path(os.path.expanduser("~")), platform.system())
     inst.mkdir(parents=True, exist_ok=True)
@@ -211,19 +249,10 @@ def run_daemon_mode(root: Path, go: str, broker: str) -> int:
     print("[4/5] starting the read-only side daemon (instance local)")
     daemon = subprocess.Popen([str(binary), *daemon_args(broker)], cwd=inst, env=env)
     try:
-        print("[5/5] importing the export into the side daemon (retrying until it answers)")
-        for attempt in range(1, IMPORT_ATTEMPTS + 1):
-            if daemon.poll() is not None:
-                print("side daemon exited before the import", file=sys.stderr)
-                return daemon.returncode or 1
-            done = subprocess.run([str(binary), *import_args(broker, export)], cwd=inst, env=env, check=False)
-            if done.returncode == 0:
-                break
-            print(f"      import attempt {attempt}/{IMPORT_ATTEMPTS} failed, retrying in {IMPORT_RETRY_SECONDS}s")
-            time.sleep(IMPORT_RETRY_SECONDS)
-        else:
-            print("import never succeeded; stopping the side daemon", file=sys.stderr)
-            return 1
+        print("[5/5] waiting for the side daemon to answer, then importing the export")
+        status = wait_and_import(daemon, [str(binary), *probe_args(broker)], [str(binary), *import_args(broker, export)], inst, env)
+        if status is not None:
+            return status
         print("side daemon running (Ctrl-C to stop)")
         return daemon.wait()
     except KeyboardInterrupt:

@@ -4,6 +4,7 @@
 import importlib.util
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 _spec = importlib.util.spec_from_file_location("myhome_local", Path(__file__).resolve().parent / "myhome-local.py")
@@ -115,6 +116,54 @@ class Arguments(unittest.TestCase):
     def test_environment_is_scrubbed(self):
         env = ml.scrubbed_env({"PATH": "/bin", "MYHOME_MQTT_BROKER": "x", "MYHOME_DB": "y", "HOME": "/h", "SECRET": "s"})
         self.assertEqual(env, {"PATH": "/bin", "HOME": "/h"})
+
+
+class FakeDaemon:
+    returncode = None
+
+    def poll(self):
+        return self.returncode
+
+
+def fake_run(probe_codes, import_code):
+    """subprocess.run stand-in: probe commands pop from probe_codes, the import returns import_code."""
+    calls = []
+
+    def run(cmd, **kwargs):
+        kind = "probe" if cmd[0] == "probe" else "import"
+        calls.append(kind)
+        code = probe_codes.pop(0) if kind == "probe" else import_code
+        return mock.Mock(returncode=code)
+
+    return run, calls
+
+
+class WaitAndImport(unittest.TestCase):
+    def go(self, probe_codes, import_code):
+        run, calls = fake_run(probe_codes, import_code)
+        with mock.patch.object(ml.subprocess, "run", run):
+            status = ml.wait_and_import(FakeDaemon(), ["probe"], ["import"], Path("."), {}, sleep=lambda s: None)
+        return status, calls
+
+    def test_retries_probe_until_daemon_answers_then_imports_once(self):
+        status, calls = self.go([1, 1, 0], 0)
+        self.assertIsNone(status)
+        self.assertEqual(calls, ["probe", "probe", "probe", "import"])
+
+    def test_partial_import_is_reported_not_retried_and_daemon_keeps_running(self):
+        status, calls = self.go([0], 1)
+        self.assertIsNone(status)
+        self.assertEqual(calls, ["probe", "import"])
+
+    def test_gives_up_only_when_daemon_never_answers(self):
+        status, calls = self.go([1] * ml.IMPORT_ATTEMPTS, 0)
+        self.assertEqual(status, 1)
+        self.assertNotIn("import", calls)
+
+    def test_probe_is_readonly_devices_export_on_side_instance(self):
+        args = ml.probe_args(BROKER)
+        self.assertEqual(args[:3], ["ctl", "--instance", "local"])
+        self.assertEqual(args[-3:], ["db", "export", "--devices-only"])
 
 
 if __name__ == "__main__":

@@ -40,8 +40,7 @@ func (s *Service) RegisterHandlers() {
 		return s.NameRoom(p.Robot, p.RegionID, p.Name)
 	})
 	myhome.RegisterMethodHandler(myhome.VacuumRoomAssign, func(ctx context.Context, in any) (any, error) {
-		p := in.(*myhome.VacuumRoomAssignParams)
-		return s.AssignRoom(ctx, p.Robot, p.MapID, p.RegionID, p.RoomID)
+		return s.AssignRoom(ctx, in.(*myhome.VacuumRoomAssignParams))
 	})
 	myhome.RegisterMethodHandler(myhome.VacuumRoomsSync, func(ctx context.Context, in any) (any, error) {
 		return s.SyncRooms(ctx, in.(*myhome.VacuumParams).Robot)
@@ -182,14 +181,21 @@ func (s *Service) regions(r *robot) ([]myhome.VacuumRegion, error) {
 	return out, nil
 }
 
-// AssignRoom assigns a region to a daemon room (roomID == "" unassigns) and
-// reports the room it was in. The region is resolved here, not in the CLI: with
-// mapID, exactly that (map, region); without, every region with that id, and if
-// several (ids are unique per map only) the single non-stale one. A stale region
-// may be assigned (the owner may be repairing a mapping); cleaning one stays
-// refused by vacuum.clean.
-func (s *Service) AssignRoom(ctx context.Context, sel, mapID, regionID, roomID string) (*myhome.VacuumRoomAssignResult, error) {
-	r, err := s.pick(sel)
+// AssignRoom assigns a region to a daemon room (RoomID == "" unassigns) and
+// reports the room it was in. The region is resolved here, not in the CLI, from
+// the regions the daemon stores: by RegionName (the human-friendly name, case-
+// and space-insensitive; what the CLI sends) or by RegionID (the robot's or
+// cloud's id). With MapID only that map is searched; without, a name or id that
+// matches on several maps resolves to the single non-stale match, else asks for
+// --map. Two areas of one map with the same name cannot be told apart by --map:
+// that is an error asking to rename one. A stale region may be assigned (the
+// owner may be repairing a mapping); cleaning one stays refused by vacuum.clean.
+func (s *Service) AssignRoom(ctx context.Context, p *myhome.VacuumRoomAssignParams) (*myhome.VacuumRoomAssignResult, error) {
+	name, id, roomID := strings.TrimSpace(p.RegionName), strings.TrimSpace(p.RegionID), p.RoomID
+	if (name == "") == (id == "") {
+		return nil, fmt.Errorf("give exactly one of the area's name or id")
+	}
+	r, err := s.pick(p.Robot)
 	if err != nil {
 		return nil, err
 	}
@@ -197,9 +203,17 @@ func (s *Service) AssignRoom(ctx context.Context, sel, mapID, regionID, roomID s
 	if err != nil {
 		return nil, err
 	}
+	what := fmt.Sprintf("area %q", name)
+	if id != "" {
+		what = fmt.Sprintf("region id %q", id)
+	}
 	var matches, fresh []myhome.VacuumRegion
 	for _, reg := range known {
-		if reg.ID == regionID && (mapID == "" || reg.MapID == mapID) {
+		hit := reg.ID == id
+		if name != "" {
+			hit = strings.EqualFold(strings.TrimSpace(reg.Name), name)
+		}
+		if hit && (p.MapID == "" || reg.MapID == p.MapID) {
 			matches = append(matches, reg)
 			if !reg.Stale {
 				fresh = append(fresh, reg)
@@ -208,16 +222,23 @@ func (s *Service) AssignRoom(ctx context.Context, sel, mapID, regionID, roomID s
 	}
 	var reg myhome.VacuumRegion
 	switch {
-	case len(matches) == 0 && mapID != "":
-		return nil, fmt.Errorf("no region %q on map %q for robot %s", regionID, mapID, r.rec.Name)
+	case len(matches) == 0 && p.MapID != "":
+		return nil, fmt.Errorf("no %s on map %q for robot %s (see `myhome ctl vacuum rooms`)", what, p.MapID, r.rec.Name)
 	case len(matches) == 0:
-		return nil, fmt.Errorf("no region %q for robot %s", regionID, r.rec.Name)
+		return nil, fmt.Errorf("no %s for robot %s (see `myhome ctl vacuum rooms`; an area without a name needs `vacuum rooms name`)", what, r.rec.Name)
 	case len(matches) == 1:
 		reg = matches[0]
 	case len(fresh) == 1:
 		reg = fresh[0]
 	default:
-		return nil, fmt.Errorf("region %s exists on %d robot maps; pass --map <map-id>", regionID, len(matches))
+		maps := map[string]bool{}
+		for _, m := range matches {
+			maps[m.MapID] = true
+		}
+		if len(maps) < len(matches) {
+			return nil, fmt.Errorf("%d areas of one map match %s: rename one so they differ (`vacuum rooms name`, or in the iRobot app then `vacuum rooms sync`)", len(matches), what)
+		}
+		return nil, fmt.Errorf("%s exists on %d robot maps; pass --map <map-id>", what, len(matches))
 	}
 	if roomID != "" {
 		if err := checkRoomExists(ctx, roomID); err != nil {
@@ -228,7 +249,7 @@ func (s *Service) AssignRoom(ctx context.Context, sel, mapID, regionID, roomID s
 	if err != nil {
 		return nil, err
 	}
-	return &myhome.VacuumRoomAssignResult{MapID: reg.MapID, RegionID: reg.ID, RoomID: roomID, Previous: prev}, nil
+	return &myhome.VacuumRoomAssignResult{MapID: reg.MapID, RegionID: reg.ID, RegionName: reg.Name, RoomID: roomID, Previous: prev}, nil
 }
 
 // checkRoomExists asks the rooms service through its RPC verb rather than

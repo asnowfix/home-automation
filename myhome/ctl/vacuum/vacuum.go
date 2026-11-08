@@ -373,38 +373,40 @@ the cloud cannot be renamed here: their names come from the cloud.`,
 var assignMap string
 
 var roomsAssignCmd = &cobra.Command{
-	Use:   "assign <region-id> <room-id> [--map <map-id>]",
-	Short: "Assign a robot region to a daemon room",
-	Long: `Assigns a robot region (see 'vacuum rooms') to a room of the daemon (see
-'myhome ctl room list'), so that the room can be cleaned. A region belongs to at
-most one room: assigning one that is in another room moves it. Several regions
-may belong to the same room.
+	Use:   "assign <area-name> <room-id> [--map <map-id>]",
+	Short: "Assign a robot area, by its name, to a daemon room",
+	Long: `Assigns a robot area, designated by the name 'vacuum rooms' shows for it (for
+example "Cuisine"; case does not matter), to a room of the daemon (see 'myhome
+ctl room list'), so that the room can be cleaned. An area belongs to at most
+one room: assigning one that is in another room moves it. Several areas may
+belong to the same room.
 
-A region id is unique per robot map only: if it exists on several maps,
-pass --map. The daemon resolves the region and checks the room. It can only
-tell that an id is ambiguous from the regions it has stored, so this does not
-need the robot to be connected.`,
+The daemon looks the name up in the areas it stores and checks the room; the
+robot need not be connected. An unknown name is refused (an area with no name
+must first be named with 'vacuum rooms name'). If the same name exists on
+several robot maps, pass --map. Two areas of one map must not share a name.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(args[1]) == "" {
-			return fmt.Errorf("room id is empty: use 'myhome ctl vacuum rooms unassign %s' to take the region out of its room", args[0])
+			return fmt.Errorf("room id is empty: use 'myhome ctl vacuum rooms unassign %s' to take the area out of its room", args[0])
 		}
 		return runAssign(cmd.Context(), os.Stdout, args[0], strings.TrimSpace(args[1]))
 	},
 }
 
 var roomsUnassignCmd = &cobra.Command{
-	Use:   "unassign <region-id> [--map <map-id>]",
-	Short: "Remove a robot region from its daemon room",
+	Use:   "unassign <area-name> [--map <map-id>]",
+	Short: "Remove a robot area, by its name, from its daemon room",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runAssign(cmd.Context(), os.Stdout, args[0], "")
 	},
 }
 
-func runAssign(ctx context.Context, w io.Writer, regionID, roomID string) error {
+// runAssign relays the area's name to the daemon, which resolves it.
+func runAssign(ctx context.Context, w io.Writer, areaName, roomID string) error {
 	out, err := myhome.TheClient.CallE(ctx, myhome.VacuumRoomAssign,
-		&myhome.VacuumRoomAssignParams{Robot: robotFlag, MapID: assignMap, RegionID: regionID, RoomID: roomID})
+		&myhome.VacuumRoomAssignParams{Robot: robotFlag, MapID: assignMap, RegionName: areaName, RoomID: roomID})
 	if err != nil {
 		return err
 	}
@@ -418,17 +420,21 @@ func runAssign(ctx context.Context, w io.Writer, regionID, roomID string) error 
 
 // printAssign says what happened, including the room an area was moved from.
 func printAssign(w io.Writer, res *myhome.VacuumRoomAssignResult) {
+	area := res.RegionName
+	if area == "" {
+		area = res.RegionID
+	}
 	switch {
 	case res.RoomID == "" && res.Previous == "":
-		fmt.Fprintf(w, "region %s was not in a room\n", res.RegionID)
+		fmt.Fprintf(w, "area %s was not in a room\n", area)
 	case res.RoomID == "":
-		fmt.Fprintf(w, "region %s removed from room %s\n", res.RegionID, res.Previous)
+		fmt.Fprintf(w, "area %s removed from room %s\n", area, res.Previous)
 	case res.Previous == res.RoomID:
-		fmt.Fprintf(w, "region %s was already in room %s\n", res.RegionID, res.RoomID)
+		fmt.Fprintf(w, "area %s was already in room %s\n", area, res.RoomID)
 	case res.Previous == "":
-		fmt.Fprintf(w, "region %s is now in room %s\n", res.RegionID, res.RoomID)
+		fmt.Fprintf(w, "area %s is now in room %s\n", area, res.RoomID)
 	default:
-		fmt.Fprintf(w, "region %s moved from %s to %s\n", res.RegionID, res.Previous, res.RoomID)
+		fmt.Fprintf(w, "area %s moved from room %s to room %s\n", area, res.Previous, res.RoomID)
 	}
 }
 

@@ -68,6 +68,85 @@ func assignHarness(t *testing.T) *harness {
 	return h
 }
 
+// assignID assigns by the robot's region id.
+func assignID(h *harness, ctx context.Context, sel, mapID, regionID, roomID string) (*myhome.VacuumRoomAssignResult, error) {
+	return h.svc.AssignRoom(ctx, &myhome.VacuumRoomAssignParams{Robot: sel, MapID: mapID, RegionID: regionID, RoomID: roomID})
+}
+
+// assignName assigns by the area's human-friendly name.
+func assignName(h *harness, ctx context.Context, mapID, name, roomID string) (*myhome.VacuumRoomAssignResult, error) {
+	return h.svc.AssignRoom(ctx, &myhome.VacuumRoomAssignParams{MapID: mapID, RegionName: name, RoomID: roomID})
+}
+
+func TestAssignByName(t *testing.T) {
+	fakeRooms(t, "salon", "cuisine")
+	h := assignHarness(t)
+	ctx := context.Background()
+	if _, err := h.store.nameRegion(blid, "11", "Cuisine", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.nameRegion(blid, "4", "Hall", false); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := assignName(h, ctx, "", "  cuisine ", "cuisine") // case and spaces do not matter
+	if err != nil || res.RegionID != "11" || res.RegionName != "Cuisine" || res.Previous != "" {
+		t.Fatalf("assign by name = %+v, %v", res, err)
+	}
+	if roomOf(t, h, "m1", "11") != "cuisine" || roomOf(t, h, "m1", "4") != "" {
+		t.Error("wrong area assigned")
+	}
+	res, err = assignName(h, ctx, "", "Cuisine", "salon")
+	if err != nil || res.Previous != "cuisine" {
+		t.Fatalf("move by name = %+v, %v", res, err)
+	}
+	if res, err = assignName(h, ctx, "", "Cuisine", ""); err != nil || res.Previous != "salon" {
+		t.Fatalf("unassign by name = %+v, %v", res, err)
+	}
+
+	if _, err := assignName(h, ctx, "", "Garage", "salon"); err == nil || !strings.Contains(err.Error(), `no area "Garage"`) {
+		t.Errorf("unknown name: %v", err)
+	}
+	// A name is not an id: "11" is not the name of anything.
+	if _, err := assignName(h, ctx, "", "11", "salon"); err == nil {
+		t.Error("an id was accepted as a name")
+	}
+	for _, p := range []myhome.VacuumRoomAssignParams{
+		{RoomID: "salon"},
+		{RegionName: "Cuisine", RegionID: "11", RoomID: "salon"},
+	} {
+		if _, err := h.svc.AssignRoom(ctx, &p); err == nil || !strings.Contains(err.Error(), "exactly one") {
+			t.Errorf("params %+v: %v", p, err)
+		}
+	}
+}
+
+// The same name on two maps needs --map; two areas of one map with one name
+// cannot be told apart and must be renamed.
+func TestAssignByNameAmbiguous(t *testing.T) {
+	fakeRooms(t, "salon")
+	h := assignHarness(t)
+	ctx := context.Background()
+	if err := h.store.learnRegion(regionRecord{BLID: blid, MapID: "m2", MapVersion: "v9", RegionID: "11", RegionType: "rid"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.nameRegion(blid, "11", "Cuisine", false); err != nil { // names 11 on both maps
+		t.Fatal(err)
+	}
+	if _, err := assignName(h, ctx, "", "Cuisine", "salon"); err == nil || !strings.Contains(err.Error(), "--map") {
+		t.Fatalf("same name on two maps: %v", err)
+	}
+	if res, err := assignName(h, ctx, "m2", "Cuisine", "salon"); err != nil || res.MapID != "m2" {
+		t.Fatalf("--map m2: %+v, %v", res, err)
+	}
+	if _, err := h.store.nameRegion(blid, "4", "Cuisine", false); err != nil { // second "Cuisine" on m1
+		t.Fatal(err)
+	}
+	if _, err := assignName(h, ctx, "m1", "Cuisine", "salon"); err == nil || !strings.Contains(err.Error(), "rename") {
+		t.Fatalf("same name twice on one map: %v", err)
+	}
+}
+
 func roomOf(t *testing.T, h *harness, mapID, id string) string {
 	t.Helper()
 	res, err := h.svc.Rooms("")
@@ -88,16 +167,16 @@ func TestAssignMoveUnassign(t *testing.T) {
 	h := assignHarness(t)
 	ctx := context.Background()
 
-	res, err := h.svc.AssignRoom(ctx, "", "", "11", "salon")
+	res, err := assignID(h, ctx, "", "", "11", "salon")
 	if err != nil || res.Previous != "" || res.RoomID != "salon" || res.MapID != "m1" {
 		t.Fatalf("assign = %+v, %v", res, err)
 	}
 	// Many areas may share a room.
-	if _, err := h.svc.AssignRoom(ctx, "", "", "4", "salon"); err != nil {
+	if _, err := assignID(h, ctx, "", "", "4", "salon"); err != nil {
 		t.Fatal(err)
 	}
 	// Moving reports the old room, and the area is in exactly one room.
-	res, err = h.svc.AssignRoom(ctx, "", "", "11", "cuisine")
+	res, err = assignID(h, ctx, "", "", "11", "cuisine")
 	if err != nil || res.Previous != "salon" {
 		t.Fatalf("move = %+v, %v", res, err)
 	}
@@ -107,7 +186,7 @@ func TestAssignMoveUnassign(t *testing.T) {
 	if got := roomOf(t, h, "m1", "4"); got != "salon" {
 		t.Errorf("region 4 room = %q (moving 11 must not touch it)", got)
 	}
-	res, err = h.svc.AssignRoom(ctx, "", "", "11", "")
+	res, err = assignID(h, ctx, "", "", "11", "")
 	if err != nil || res.Previous != "cuisine" || res.RoomID != "" {
 		t.Fatalf("unassign = %+v, %v", res, err)
 	}
@@ -121,11 +200,11 @@ func TestAssignRejections(t *testing.T) {
 	h := assignHarness(t)
 	ctx := context.Background()
 
-	if _, err := h.svc.AssignRoom(ctx, "", "", "11", "nowhere"); err == nil || !strings.Contains(err.Error(), `unknown room "nowhere"`) {
+	if _, err := assignID(h, ctx, "", "", "11", "nowhere"); err == nil || !strings.Contains(err.Error(), `unknown room "nowhere"`) {
 		t.Errorf("unknown room: %v", err)
 	}
 	// Another failure of the rooms service is not reported as "unknown room".
-	_, err := h.svc.AssignRoom(ctx, "", "", "11", "broken")
+	_, err := assignID(h, ctx, "", "", "11", "broken")
 	if err == nil || strings.Contains(err.Error(), "unknown room") ||
 		!strings.Contains(err.Error(), `checking room "broken"`) || !strings.Contains(err.Error(), "database is locked") {
 		t.Errorf("other rooms error: %v", err)
@@ -133,22 +212,22 @@ func TestAssignRejections(t *testing.T) {
 	if got := roomOf(t, h, "m1", "11"); got != "" {
 		t.Errorf("a refused assignment wrote %q", got)
 	}
-	if _, err := h.svc.AssignRoom(ctx, "", "", "99", "salon"); err == nil || !strings.Contains(err.Error(), `no region "99"`) {
+	if _, err := assignID(h, ctx, "", "", "99", "salon"); err == nil || !strings.Contains(err.Error(), `no region id "99"`) {
 		t.Errorf("unknown region: %v", err)
 	}
-	if _, err := h.svc.AssignRoom(ctx, "", "m9", "11", "salon"); err == nil || !strings.Contains(err.Error(), `on map "m9"`) {
+	if _, err := assignID(h, ctx, "", "m9", "11", "salon"); err == nil || !strings.Contains(err.Error(), `on map "m9"`) {
 		t.Errorf("unknown map: %v", err)
 	}
-	if _, err := h.svc.AssignRoom(ctx, "nobody", "", "11", "salon"); err == nil {
+	if _, err := assignID(h, ctx, "nobody", "", "11", "salon"); err == nil {
 		t.Error("unknown robot accepted")
 	}
 
 	noRoomsService(t)
-	if _, err := h.svc.AssignRoom(ctx, "", "", "11", "salon"); err == nil || !strings.Contains(err.Error(), "rooms are not enabled") {
+	if _, err := assignID(h, ctx, "", "", "11", "salon"); err == nil || !strings.Contains(err.Error(), "rooms are not enabled") {
 		t.Errorf("no rooms service: %v", err)
 	}
 	// Unassigning needs no rooms service.
-	if _, err := h.svc.AssignRoom(ctx, "", "", "11", ""); err != nil {
+	if _, err := assignID(h, ctx, "", "", "11", ""); err != nil {
 		t.Errorf("unassign without rooms service: %v", err)
 	}
 }
@@ -164,14 +243,14 @@ func TestAssignRegionIdOnTwoMaps(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := h.svc.AssignRoom(ctx, "", "", "11", "salon")
+	_, err := assignID(h, ctx, "", "", "11", "salon")
 	if err == nil || !strings.Contains(err.Error(), "--map") || !strings.Contains(err.Error(), "2 robot maps") {
 		t.Fatalf("ambiguous id: %v", err)
 	}
 	if roomOf(t, h, "m1", "11") != "" || roomOf(t, h, "m2", "11") != "" {
 		t.Error("an ambiguous assignment wrote something")
 	}
-	if _, err := h.svc.AssignRoom(ctx, "", "m2", "11", "etage"); err != nil {
+	if _, err := assignID(h, ctx, "", "m2", "11", "etage"); err != nil {
 		t.Fatal(err)
 	}
 	if roomOf(t, h, "m1", "11") != "" || roomOf(t, h, "m2", "11") != "etage" {
@@ -184,13 +263,13 @@ func TestAssignRegionIdOnTwoMaps(t *testing.T) {
 	if _, err := h.store.syncCloud(blid, both); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.svc.AssignRoom(ctx, "", "", "30", "salon"); err == nil {
+	if _, err := assignID(h, ctx, "", "", "30", "salon"); err == nil {
 		t.Error("two current regions with one id must stay ambiguous")
 	}
 	if _, err := h.store.syncCloud(blid, both[1:]); err != nil {
 		t.Fatal(err)
 	}
-	res, err := h.svc.AssignRoom(ctx, "", "", "30", "salon")
+	res, err := assignID(h, ctx, "", "", "30", "salon")
 	if err != nil || res.MapID != "m4" {
 		t.Fatalf("single fresh candidate: %+v, %v", res, err)
 	}
@@ -209,7 +288,7 @@ func TestAssignStaleRegion(t *testing.T) {
 	if !regionByID(t, h, "7").Stale {
 		t.Fatal("region 7 should be stale")
 	}
-	if _, err := h.svc.AssignRoom(context.Background(), "", "", "7", "salon"); err != nil {
+	if _, err := assignID(h, context.Background(), "", "", "7", "salon"); err != nil {
 		t.Errorf("assigning a stale region: %v", err)
 	}
 }

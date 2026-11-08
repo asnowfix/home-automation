@@ -127,22 +127,27 @@ type VacuumRoomsSyncResult struct {
 
 // VacuumRoomAssignParams assigns a robot region to a daemon room. A region
 // belongs to at most one room: assigning it again moves it. An empty RoomID
-// unassigns. MapID is optional when RegionID exists on one map only (a region
-// id is unique per map, not across maps).
+// unassigns. The region is designated by RegionName (the human-friendly name
+// the daemon stores, case-insensitive; what the CLI sends) or by RegionID (the
+// robot's or cloud's id; exactly one of the two). The daemon resolves it. MapID
+// is optional when the name or id matches on one map only (an id is unique per
+// map, not across maps).
 type VacuumRoomAssignParams struct {
-	Robot    string `json:"robot,omitempty"`
-	MapID    string `json:"map_id,omitempty"`
-	RegionID string `json:"region_id"`
-	RoomID   string `json:"room_id"`
+	Robot      string `json:"robot,omitempty"`
+	MapID      string `json:"map_id,omitempty"`
+	RegionName string `json:"region_name,omitempty"`
+	RegionID   string `json:"region_id,omitempty"`
+	RoomID     string `json:"room_id"`
 }
 
-// VacuumRoomAssignResult reports the region that was resolved and the room it
-// was in before ("" if none).
+// VacuumRoomAssignResult reports the region that was resolved (id and name)
+// and the room it was in before ("" if none).
 type VacuumRoomAssignResult struct {
-	MapID    string `json:"map_id"`
-	RegionID string `json:"region_id"`
-	RoomID   string `json:"room_id"`
-	Previous string `json:"previous"`
+	MapID      string `json:"map_id"`
+	RegionID   string `json:"region_id"`
+	RegionName string `json:"region_name,omitempty"`
+	RoomID     string `json:"room_id"`
+	Previous   string `json:"previous"`
 }
 
 // VacuumRoomNameParams names a learned region.

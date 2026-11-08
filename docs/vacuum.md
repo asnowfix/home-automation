@@ -66,9 +66,9 @@ myhome ctl vacuum pause | resume | stop | dock | find
 myhome ctl vacuum rooms                     # known rooms, with where each came from
 myhome ctl vacuum rooms sync                # fetch the rooms from the iRobot cloud account
 myhome ctl vacuum rooms name 11 kitchen     # name a room the cloud did not provide
-myhome ctl vacuum rooms assign 11 cuisine   # put robot area 11 in the daemon room "cuisine"
-myhome ctl vacuum rooms assign 11 salon --map <map-id>   # --map when id 11 exists on several maps
-myhome ctl vacuum rooms unassign 11         # take the area out of its room
+myhome ctl vacuum rooms assign Cuisine cuisine   # put the area named Cuisine in the daemon room "cuisine"
+myhome ctl vacuum rooms assign Cuisine salon --map <map-id>   # --map when the name exists on several maps
+myhome ctl vacuum rooms unassign Cuisine         # take the area out of its room
 ```
 
 `--robot <name|id>` selects a robot, and can be omitted (the daemon has one configured robot). A command
@@ -176,17 +176,23 @@ which then never equals the robot's reported one.)
 ### Assigning areas to the daemon's rooms
 
 A robot area (region) can be assigned to a room of the daemon (`myhome ctl room list`), so a
-room can later be cleaned by name. `vacuum rooms assign <region-id> <room-id>` stores the room id in
-`vacuum_regions.room_id` (RPC `vacuum.roomassign`); `unassign` clears it; the `ROOM` column of
-`vacuum rooms` shows it (`-` when unassigned).
+room can later be cleaned by name. The CLI designates an area by the **human-friendly name** the
+daemon stores for it (the `NAME` column of `vacuum rooms`, e.g. `Cuisine`; case and surrounding
+spaces do not matter), never by the robot's or cloud's id. `vacuum rooms assign <area-name> <room-id>`
+stores the room id in `vacuum_regions.room_id` (RPC `vacuum.roomassign`); `unassign <area-name>`
+clears it; the `ROOM` column of `vacuum rooms` shows it (`-` when unassigned).
 
+- **The daemon resolves the name**, from the areas it stores, so the CLI holds no business logic and
+  the robot need not be connected. An unknown name is refused (`no area "Garage" for robot ...`); an
+  area that has no name yet must first be named with `vacuum rooms name`. The RPC also accepts
+  `region_id` instead of `region_name` (exactly one), for callers that hold the id.
 - **An area is in at most one room**; several areas may share a room. Assigning an area that is
-  already in another room **moves** it, and the command says so (`region 12 moved from salon to
-  cuisine`).
-- A region id is unique **per robot map**, so if the same id exists on two maps the command asks for
-  `--map <map-id>` (it picks the single non-stale one when there is exactly one). Ambiguity is judged
-  from the regions stored in the database, so it does not need the robot to be connected; without a
-  live connection staleness of learned regions is unknown and counts as not stale.
+  already in another room **moves** it, and the command says so (`area Cuisine moved from room
+  salon to room cuisine`).
+- A name (like an id) is unique **per robot map** only. If it matches on two maps the command asks
+  for `--map <map-id>` (it picks the single non-stale one when there is exactly one). Two areas of
+  **one** map with the same name cannot be told apart: the command refuses and asks to rename one.
+  Staleness of learned areas is unknown without a live connection and then counts as not stale.
 - The daemon checks that the room exists (through `temperature.get`); an unknown room is refused,
   and a daemon without rooms answers "rooms are not enabled on this daemon". Unassigning needs no room.
 - The assignment survives `vacuum rooms sync` (renames, removals: a removed area goes stale and keeps

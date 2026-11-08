@@ -601,6 +601,15 @@ The packaging workflow uses `git describe` to determine the version. For this to
 2. The workflow must check out the tag (not the branch)
 3. Use `ref: ${{ github.event.ref }}` in checkout action
 
+#### Latest-release marker
+
+GitHub's `releases/latest` follows creation time, not version. The NAS `myhome-update.timer` (nightly 00:00) installs whatever it resolves to, so a backport release on an older minor line (e.g. `v0.12.x`) that takes "Latest" makes the NAS downgrade (seen with `v0.12.8` over `v0.13.0`; tracked in #583).
+
+- Publish older-line releases with `--latest=false`.
+- After every release or backport merge, run `gh api repos/asnowfix/home-automation/releases/latest --jq .tag_name` and confirm it is the highest line the NAS runs. Repair with `gh release edit <tag> --latest`.
+- Merging into a `vX.Y.x` branch runs `auto-tag-patch` (`make test`, then tag); `Package and Release` then creates the release as a Draft, and a Draft does not count as Latest.
+- Other sessions may merge backports concurrently (#621): check `gh pr list` and `gh run list` before tagging by hand.
+
 ---
 
 ## Configuration Management
@@ -696,6 +705,16 @@ Examples:
 - `temperatures.port` → `MYHOME_TEMPERATURES_PORT`
 
 ---
+
+## Handling Secrets
+
+The NAS credentials live in `/var/lib/myhome/.env` (mode 0600, root): `MYHOME_VACUUM_BLID`, `MYHOME_VACUUM_HOST`, `MYHOME_VACUUM_PASSWORD`, `MYHOME_IROBOT_EMAIL`, `MYHOME_IROBOT_PASSWORD`.
+
+- Never print, log or paste a password, token or the robot's local password, and never ask the owner to type the iRobot account password into a chat or issue. The owner edits these files themselves.
+- Check an `.env` by key names only: `grep -o -E '^MYHOME_[A-Z_]+=' <file>`. Never show values; compare values without printing them.
+- Tests of credential code use test values and temporary files, never the real ones.
+- Confirm with the owner before deleting a secrets file.
+- Packaging scripts must not wipe a stored secret on a blank answer (fixed in #629).
 
 ## Project Structure
 

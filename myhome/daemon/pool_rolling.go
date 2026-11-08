@@ -129,7 +129,19 @@ func unpairedStop(stops []time.Time, samples []turnoverSample, after, now time.T
 	return false
 }
 
-// rollingFigures sums the volume and runtime of the pump runs that stopped in
+// stopInWindow reports whether any stop falls in (start, now]. With no turnover
+// event in the window, a stop there has no matching read at all, whatever its
+// age: no grace applies (a pending read would still mean the figure is not 0).
+func stopInWindow(stops []time.Time, start, now time.Time) bool {
+	for _, st := range stops {
+		if st.After(start) && !st.After(now) {
+			return true
+		}
+	}
+	return false
+}
+
+// rollingFigures sums the volume of the pump runs that stopped in
 // the 24 h before now. upSince is when the daemon began listening: with no stop
 // in the window, 0 is only a fact if the daemon was up for all of it.
 func rollingFigures(samples []turnoverSample, stops []time.Time, now, upSince time.Time) poolFigures {
@@ -165,7 +177,7 @@ func rollingFigures(samples []turnoverSample, stops []time.Time, now, upSince ti
 	if first < 0 {
 		// No turnover event in the window: 0 is a fact only if the daemon heard
 		// every stop (it was up) and heard none.
-		if upSince.IsZero() || upSince.After(start) || unpairedStop(stops, nil, start, now) {
+		if upSince.IsZero() || upSince.After(start) || stopInWindow(stops, start, now) {
 			return f
 		}
 		zv := 0.0

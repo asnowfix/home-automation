@@ -56,6 +56,7 @@ func TestRollingFigures(t *testing.T) {
 		// A stop (at 10 h) whose read failed must not be absorbed by the next increment.
 		{"failed read in window: unknown", []turnoverSample{smp(30, 1, 1), smp(5, 3, 1)}, stopsAt(30, 10, 5), long, "unknown"},
 		{"failed read before window start: unknown, not over-counted", []turnoverSample{smp(40, 1, 1), smp(5, 3, 1)}, stopsAt(40, 30, 5), long, "unknown"},
+		{"no read, stop 1 min ago, daemon up: unknown (no grace in the zero branch)", nil, []time.Time{rollNow.Add(-time.Minute)}, long, "unknown"},
 		{"all reads failed, stop in window: never 0", nil, stopsAt(8), long, "unknown"},
 		{"stop just now, read pending: not yet unknown", []turnoverSample{smp(30, 1, 1), smp(5, 3, 1)}, append(stopsAt(30, 5), rollNow.Add(-20*time.Second)), long, "2"},
 		// An unanchored event among good ones: unknown while in the window, recovers after.
@@ -135,7 +136,8 @@ func TestRolling24hKnownAnswerRealStore(t *testing.T) {
 	}
 }
 
-// pool.snapshot shows the figures and the target at 00:01 (no calendar-day
+// Guards against the calendar-day drop returning: pool.snapshot shows the
+// figures and the target at 00:01 (no calendar-day
 // check), from events only: no device call.
 func TestPoolSnapshotRollingAcrossMidnight(t *testing.T) {
 	dev := &fakeKVSDevice{id: "pool-1"}

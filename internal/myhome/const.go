@@ -59,6 +59,8 @@ const (
 	VacuumRooms                   Verb = "vacuum.rooms"
 	VacuumRoomName                Verb = "vacuum.roomname"
 	VacuumRoomsSync               Verb = "vacuum.roomsync"
+	VacuumExport                  Verb = "vacuum.export"
+	VacuumImport                  Verb = "vacuum.import"
 )
 
 type Key string

@@ -176,7 +176,7 @@ func UpdateFromMqttEvent(ctx context.Context, d *myhome.Device, event *shellymqt
 				invalidated = kvs.ObserveRevision(log, d.Id(), status.System.KvsRevision)
 			}
 			if sd, ok := d.Impl().(*shellyapi.Device); ok && sd != nil {
-				if invalidated {
+				if c := d.Config; invalidated && c != nil && (c.Switch0 != nil || c.Switch1 != nil || c.Switch2 != nil || c.Switch3 != nil) {
 					// The switch polarity (a KVS key) was dropped with the device's cache;
 					// rendering never reads the device (#732), so re-resolve it, off this goroutine.
 					go reprimePolarity(ctx, log, sd)

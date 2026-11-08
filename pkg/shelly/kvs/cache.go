@@ -61,7 +61,15 @@ func cachePut(deviceId, key string, value GetResponse) {
 func cachePutNotFound(deviceId, key string, definitive bool) {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()
-	cache[cacheKey(deviceId, key)] = cacheEntry{notFound: true, definitive: definitive, expires: time.Now().Add(ttl)}
+	k := cacheKey(deviceId, key)
+	// A failed lookup says nothing about the key: do not let it erase a fact the
+	// device already answered (a value, or a definitive "not found"). That entry
+	// stays until SetKeyValue/DeleteKey/kvs_rev invalidates it; Peek ignores its
+	// expiry, so a stale-but-known polarity keeps rendering.
+	if old, ok := cache[k]; ok && !definitive && (!old.notFound || old.definitive) {
+		return
+	}
+	cache[k] = cacheEntry{notFound: true, definitive: definitive, expires: time.Now().Add(ttl)}
 }
 
 // PeekState is what Peek knows about a key without contacting the device.

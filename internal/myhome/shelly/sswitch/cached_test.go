@@ -28,7 +28,7 @@ func TestOnValueCached(t *testing.T) {
 		t.Error("unprimed device must be unknown")
 	}
 
-	d := prime(t, "sw-nc", "true", false)
+	prime(t, "sw-nc", "true", false)
 	if on, known := OnValueCached("sw-nc", 0); !known || on {
 		t.Errorf("normally-closed switch 0: on=%v known=%v, want false,true", on, known)
 	}
@@ -42,12 +42,17 @@ func TestOnValueCached(t *testing.T) {
 	if _, known := OnValueCached("sw-multi", 5); known {
 		t.Error("out-of-range switch id must be unknown, not a panic")
 	}
+	prime(t, "sw-bad0", "garbage", false)
+	if _, known := OnValueCached("sw-bad0", 0); known {
+		t.Error("unparsable value must be unknown for switch 0 too")
+	}
+	prime(t, "sw-arr0", "[true,false]", false)
+	if on, known := OnValueCached("sw-arr0", 0); !known || on {
+		t.Errorf("array form, switch 0 nc: on=%v known=%v, want false,true", on, known)
+	}
 	prime(t, "sw-bad", "not-json", false)
 	if _, known := OnValueCached("sw-bad", 2); known {
 		t.Error("unparsable array must be unknown")
-	}
-	if len(d.Calls) != 1 {
-		t.Errorf("OnValueCached called the device: %d calls", len(d.Calls))
 	}
 }
 

@@ -165,6 +165,26 @@ func TestPeekNeverCallsDeviceAndIgnoresTTL(t *testing.T) {
 	}
 }
 
+func TestTransientFailureKeepsKnownFact(t *testing.T) {
+	resetKvsCache()
+	id := "device-keep-1"
+	cachePut(id, "found", GetResponse{Value: "true"})
+	cachePutNotFound(id, "absent", true)
+	cachePutNotFound(id, "found", false)
+	cachePutNotFound(id, "absent", false)
+	if v, st := Peek(id, "found"); st != PeekFound || v.Value != "true" {
+		t.Errorf("found value after transient failure: %q, %v; want true, PeekFound", v.Value, st)
+	}
+	if _, st := Peek(id, "absent"); st != PeekAbsent {
+		t.Errorf("definitive absence after transient failure: %v, want PeekAbsent", st)
+	}
+	// a definitive answer still replaces a value
+	cachePutNotFound(id, "found", true)
+	if _, st := Peek(id, "found"); st != PeekAbsent {
+		t.Errorf("definitive answer must replace: %v, want PeekAbsent", st)
+	}
+}
+
 func TestObserveRevisionReportsInvalidation(t *testing.T) {
 	resetKvsCache()
 	id := "device-peek-2"

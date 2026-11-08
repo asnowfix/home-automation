@@ -356,6 +356,34 @@ template adaptation above, and list the commits in the issue.
 
 ## Open questions
 
+**Owner answers (2026-11-08).** All three are settled; the original questions are kept below for the record.
+
+1. **Snapshot.** `pool.getstatus` (and so `ctl pool status`) answers from the in-memory snapshot, with
+   `ts` in the result. The owner accepts that the CLI then shows the snapshot, not a live read. No
+   `--refresh` now. Follow-up PR "E" below.
+2. **Make it atomic now, under a lock.** The device-handle (`Impl`) write must go through a
+   mutex-protected accessor or equivalent, not a lock-free trick, and gets a race-detector test
+   (`-race`, run in the background per CLAUDE.md). It is still never observed: the owner chose to fix it
+   because #735 added a second writer. Follow-up PR "F" below.
+3. **No one-off refresh at start** (stays "not now"). Instead, a row whose live state is not yet known
+   after startup shows a clear **"Starting…"** state, not a misleading on/off and not a bare unknown,
+   until the first retained event or notification for that device arrives. It is implemented where
+   PR D and the Rooms and Devices views (#744) are touched. Follow-up PR "G" below. Open detail for the
+   implementer: when "Starting…" turns into plain unknown for a device that never reports (a quiet or
+   offline device). The design says only "until the first retained event arrives"; propose a rule
+   (e.g. after the first full rediscovery pass) in the PR rather than leave a device "Starting…" forever.
+
+Follow-up PRs from these answers (each into the campaign branch, after PR B #745 lands, since they touch
+the same files):
+- **PR E: `pool.getstatus` from the snapshot.** Add `ts` to the result (a new optional field is allowed
+  by the rules above). The CLI prints the snapshot's age.
+- **PR F: atomic `Impl` write.** Mutex-protected accessor, plus a `-race` test with two concurrent
+  writers and a reader.
+- **PR G: "Starting…" state** for switch rows whose state is unknown since startup, in the device row
+  (`htmx_row.go`) shared by Rooms and Devices, with the end-of-starting rule above.
+
+Original questions:
+
 1. **`ctl pool status`: live or snapshot?** If `pool.getstatus` answers from the snapshot, the CLI and
    the UI agree and the Pro1 is never read on request. The cost is that `ctl` shows values up to one
    pump cycle old, dated by `ts`. The alternative keeps `pool.getstatus` live for `ctl` (an explicit

@@ -30,6 +30,7 @@ import (
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
+	shellycfg "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/go-logr/logr"
 )
@@ -142,6 +143,8 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		modified, err := device.Refresh(ctx)
 		if err != nil {
 			log.Error(err, "Device refresh failed", "device_id", device.Id())
+		} else {
+			primeSwitchPolarity(ctx, log, device)
 		}
 
 		// Always save the device after refresh to persist config and info to database
@@ -383,6 +386,7 @@ func (dm *DeviceManager) Start(ctx context.Context) error {
 
 	go dm.storeDeviceLoop(logr.NewContext(ctx, dm.log.WithName("storeDeviceLoop")), dm.refreshed)
 	go dm.deviceUpdaterLoop(logr.NewContext(ctx, dm.log.WithName("deviceUpdaterLoop")))
+	go dm.primeAllPolarities(logr.NewContext(ctx, dm.log.WithName("primePolarities")))
 	go dm.runDeviceRefreshJob(logr.NewContext(ctx, dm.log.WithName("runDeviceRefreshJob")), options.Flags.RefreshInterval)
 
 	// Loop on MQTT event devices discovery
@@ -602,6 +606,7 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, refreshed chan
 		log.Error(err, "Failed to refresh device", "device", device.DeviceSummary)
 		return
 	}
+	primeSwitchPolarity(ctx, log, device)
 
 	if !modified {
 		log.V(1).Info("Device is up to date", "device", device.DeviceSummary)
@@ -610,6 +615,70 @@ func refreshOneDevice(ctx context.Context, device *myhome.Device, refreshed chan
 
 	log.V(1).Info("Updated: preparing to store", "device", device.DeviceSummary)
 	refreshed <- device
+}
+
+// primeSwitchPolarity resolves (and caches) the switch polarity of a device that
+// has switches. The web UI renders from this cache and never queries the device
+// (#732), so every refresh path calls this, and so does the startup pass.
+func primeSwitchPolarity(ctx context.Context, log logr.Logger, device *myhome.Device) {
+	sd, ok := device.Impl().(*shelly.Device)
+	if !ok || sd == nil {
+		return
+	}
+	primeSwitchPolarityVia(ctx, log, sd, device.Config)
+}
+
+// primeSwitchPolarityVia primes through the given handle without touching any
+// shared device state; the KVS cache is keyed by device id, so any handle for the
+// device fills the entry the UI reads.
+func primeSwitchPolarityVia(ctx context.Context, log logr.Logger, sd *shelly.Device, c *shellycfg.Config) {
+	if c == nil {
+		return
+	}
+	if c.Switch0 == nil && c.Switch1 == nil && c.Switch2 == nil && c.Switch3 == nil {
+		return
+	}
+	mhswitch.PrimeOnValue(ctx, log, sd)
+}
+
+// primeAllPolarities fills the polarity cache for every known device once, in the
+// background, so switch buttons are not "unknown" until the periodic refresh
+// reaches each device (it visits one per interval).
+func (dm *DeviceManager) primeAllPolarities(ctx context.Context) {
+	log, err := logr.FromContext(ctx)
+	if err != nil {
+		panic("BUG: No logger initialized")
+	}
+	devices, err := dm.GetAllDevices(ctx)
+	if err != nil {
+		log.Error(err, "Failed to list devices for the polarity pass")
+		return
+	}
+	for _, d := range devices {
+		if ctx.Err() != nil {
+			return
+		}
+		if shelly.IsGen1Device(d.Id()) || shelly.IsBluDevice(d.Id()) {
+			continue
+		}
+		// Never publish a handle with WithImpl here: the devices are shared with the
+		// MQTT watcher and the UI, and Impl is an unsynchronized field. Use the
+		// existing handle if there is one, else a private one that is dropped.
+		sd, ok := d.Impl().(*shelly.Device)
+		if !ok || sd == nil {
+			impl, err := shelly.NewDeviceFromSummary(ctx, log, d)
+			if err != nil {
+				continue
+			}
+			if sd, ok = impl.(*shelly.Device); !ok {
+				continue
+			}
+		}
+		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		primeSwitchPolarityVia(cctx, log, sd, d.Config)
+		cancel()
+	}
+	log.Info("Switch polarity pass done", "devices", len(devices))
 }
 
 // broadcastStateChange tells open browsers that a device's live state (switch

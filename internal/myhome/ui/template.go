@@ -295,9 +295,15 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 
 				// Active/on color depends on the normally-closed KVS key when present:
 				// the raw Output only means "on" if it matches the device's configured on-value.
+				// Rendering never calls the device (#732): the polarity comes from the
+				// cache the refresh path fills, and an unresolved one shows as unknown.
 				isOn := output
 				if sd != nil {
-					isOn = output == sswitchsvc.OnValue(ctx, log, sd, sw.Id)
+					if onValue, resolved := sswitchsvc.OnValueCached(d.Id(), sw.Id); resolved {
+						isOn = output == onValue
+					} else {
+						known = false
+					}
 				}
 
 				switches[sw.Id] = pkgshelly.SwitchSummary{
@@ -311,21 +317,8 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 			}
 		}
 		log.V(1).Info("Loaded switches from config", "device", d.Id(), "count", len(switches))
-	} else if sd, ok := d.Impl().(*shelly.Device); ok && sd != nil {
-		// Fallback: Fetch switches directly from device if no config
-		log.V(1).Info("No config, fetching switches from device", "device", d.Id())
-		switchSummary, err := pkgshelly.GetSwitchesSummary(ctx, sd)
-		if err != nil {
-			log.V(1).Info("Failed to get switches summary", "device", d.Id(), "error", err)
-		} else {
-			for id, ss := range switchSummary {
-				ss.On = ss.On == sswitchsvc.OnValue(ctx, log, sd, id)
-				switchSummary[id] = ss
-			}
-			switches = switchSummary
-			log.V(1).Info("Fetched switches from device", "device", d.Id(), "count", len(switches))
-		}
 	}
+	// A device without config shows no switches: it is never queried while rendering (#732).
 
 	// Extract sensor values from cached device status
 	var temperature *float64

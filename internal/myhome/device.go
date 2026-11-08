@@ -6,6 +6,7 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome/sfr"
 	"net"
 	"strings"
+	"time"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
@@ -105,6 +106,9 @@ func IsTemperatureSensor(d *Device) bool {
 // Status represents the current runtime status of a device
 type Status struct {
 	Sensors *Sensors `json:"sensors,omitempty"` // Sensor readings (BTHome format)
+	// SensorsUpdatedAt is when any sensor value last arrived (in memory only); absent
+	// until the first value, so a page can show "N h ago" for a stale reading.
+	SensorsUpdatedAt *time.Time `json:"sensors_updated_at,omitempty"`
 }
 
 type Component struct {

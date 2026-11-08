@@ -2,11 +2,13 @@ package devices
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 
@@ -870,4 +872,44 @@ func TestCache_Concurrent_NoRace(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// TestCache_UpdateSensorValue_UpdateTime checks the in-memory update time: absent
+// before any value, set on a successful update, untouched by a rejected one.
+func TestCache_UpdateSensorValue_UpdateTime(t *testing.T) {
+	c := NewCache(testCtx(t), newFakeRegistry())
+	d := fakeDevice("shellyht-001", "ht", "aa:bb:cc:dd:ee:02", "192.168.1.2")
+	if _, err := c.SetDevice(context.Background(), d, false); err != nil {
+		t.Fatalf("SetDevice: %v", err)
+	}
+
+	got, err := c.GetDeviceById(context.Background(), "shellyht-001")
+	if err != nil {
+		t.Fatalf("GetDeviceById: %v", err)
+	}
+	if got.Status != nil && got.Status.SensorsUpdatedAt != nil {
+		t.Fatalf("update time set before any value: %v", got.Status.SensorsUpdatedAt)
+	}
+	if b, _ := json.Marshal(got); strings.Contains(string(b), "sensors_updated_at") {
+		t.Fatalf("sensors_updated_at serialized before any value: %s", b)
+	}
+
+	if err := c.UpdateSensorValue(context.Background(), "shellyht-001", "temperature", "bogus"); err == nil {
+		t.Fatal("expected an error for an invalid value")
+	}
+	if got.Status.SensorsUpdatedAt != nil {
+		t.Fatalf("update time set by a rejected value: %v", got.Status.SensorsUpdatedAt)
+	}
+
+	before := time.Now()
+	if err := c.UpdateSensorValue(context.Background(), "shellyht-001", "temperature", "21.5"); err != nil {
+		t.Fatalf("UpdateSensorValue: %v", err)
+	}
+	at := got.Status.SensorsUpdatedAt
+	if at == nil || at.Before(before) || at.After(time.Now()) {
+		t.Fatalf("update time = %v, want within [%v, now]", at, before)
+	}
+	if b, _ := json.Marshal(got); !strings.Contains(string(b), "sensors_updated_at") {
+		t.Fatalf("sensors_updated_at missing from JSON: %s", b)
+	}
 }

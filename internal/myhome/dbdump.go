@@ -201,11 +201,11 @@ func ImportDatabase(ctx context.Context, c Client, in *DatabaseImport, devicesOn
 	}
 
 	for i := range in.Devices {
-		device := in.Devices[i]
+		device := &in.Devices[i]
 		if ctx.Err() != nil {
 			return n, ctx.Err()
 		}
-		if _, err := c.CallE(ctx, DeviceUpdate, &device); err != nil {
+		if _, err := c.CallE(ctx, DeviceUpdate, device); err != nil {
 			if cerr := fail("Failed to import device %s: %v", device.Id(), err); cerr != nil {
 				return n, cerr
 			}

@@ -124,6 +124,21 @@ var kiosk = {
 
   visible: function(name) { return this.section === name; },
 
+  // Room page (#764): open while a room id is shown. An SSE update for one of
+  // its devices refreshes the page, coalesced to one GET per roomRefreshMs.
+  roomOpen: false,
+  roomTimer: null,
+  roomRefreshMs: 2000,
+  roomTouched: function(deviceId) {
+    var root = this.roomOpen && document.querySelector('#room-view [data-devices]');
+    if (!root || this.roomTimer || (' ' + root.dataset.devices + ' ').indexOf(' ' + deviceId + ' ') < 0) { return; }
+    this.roomTimer = setTimeout(function() {
+      kiosk.roomTimer = null;
+      var r = document.querySelector('#room-view [data-devices]');
+      if (kiosk.roomOpen && r) { htmx.trigger(r, 'refresh'); }
+    }, this.roomRefreshMs);
+  },
+
   fromHash: function() {
     var h = (location.hash || '').replace('#', '');
     return this.sections.indexOf(h) >= 0 ? h : 'rooms';
@@ -205,6 +220,7 @@ var kiosk = {
   function app() {
     return {
       section: 'rooms',
+      openRoom: null,
       online: true,
       staleLabel: '',
       sensors: {},
@@ -262,6 +278,10 @@ var kiosk = {
         document.body.addEventListener('htmx:beforeRequest', (e) => {
           if (kiosk.blocks(e.detail.requestConfig && e.detail.requestConfig.verb)) { e.preventDefault(); }
         });
+        // An unknown room answers 404 with a fragment to show; htmx swaps 2xx only by default.
+        document.body.addEventListener('htmx:beforeSwap', (e) => {
+          if (e.detail.xhr.status === 404 && e.detail.target && e.detail.target.id === 'room-view') { e.detail.shouldSwap = true; }
+        });
         document.body.addEventListener('htmx:afterSwap', (e) => kiosk.fetched(e.detail.target));
         document.body.addEventListener('htmx:responseError', (e) => kiosk.failed(e.detail.target));
         document.body.addEventListener('htmx:sendError', (e) => kiosk.failed(e.detail.target));
@@ -271,6 +291,7 @@ var kiosk = {
       // hash current without growing the history. Tapping the active item is
       // the same "go to top".
       go(name) {
+        this.closeRoom();
         this.modals.room = this.modals.setup = this.modals.heater = this.modals.status = this.modals.device = false;
         this.section = name;
         kiosk.section = name;
@@ -278,6 +299,26 @@ var kiosk = {
         const main = document.getElementById('mh-content');
         if (main) { main.scrollTop = 0; }
         kiosk.showing(name);
+      },
+
+      // Room page: never open on load (a reload shows the room list).
+      showRoom(id) {
+        this.openRoom = id;
+        kiosk.roomOpen = true;
+        const view = document.getElementById('room-view');
+        if (!kiosk.online) {
+          view.textContent = 'Not available while Penates (My Home Daemon) is offline';
+          return;
+        }
+        view.textContent = 'Loading...';
+        htmx.ajax('GET', '/htmx/room/' + encodeURIComponent(id), { target: view, swap: 'innerHTML' });
+      },
+
+      closeRoom() {
+        this.openRoom = null;
+        kiosk.roomOpen = false;
+        const view = document.getElementById('room-view');
+        if (view) { view.textContent = ''; }
       },
 
       // Device sheet: filled from the row's data-* attributes, closed by default.
@@ -356,6 +397,7 @@ var kiosk = {
             const data = JSON.parse(e.data);
             console.log('SSE: sensor-update', data);
             this.updateSensor(data.device_id, data.sensor, data.value);
+            kiosk.roomTouched(data.device_id);
           } catch (err) {
             console.error('SSE: Failed to parse sensor-update:', err);
           }
@@ -368,6 +410,7 @@ var kiosk = {
             console.log('SSE: device-update', deviceView);
             
             kiosk.reloadDevice(deviceView.id);
+            kiosk.roomTouched(deviceView.id);
           } catch (err) {
             console.error('SSE: Failed to parse device-update:', err);
           }

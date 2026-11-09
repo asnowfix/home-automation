@@ -36,7 +36,8 @@ import (
 
 type DeviceManager struct {
 	dr             mhd.DeviceRegistry
-	update         chan *myhome.Device
+	cache          *mhd.Cache // same object as dr, for the export that bypasses it
+	update        chan *myhome.Device
 	refreshed      chan *myhome.Device
 	cancel         context.CancelFunc
 	log            logr.Logger
@@ -66,8 +67,10 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		panic("BUG: No logger initialized")
 	}
 
+	cache := mhd.NewCache(ctx, s)
 	dm := &DeviceManager{
-		dr:             mhd.NewCache(ctx, s),
+		dr:             cache,
+		cache:          cache,
 		log:            log.WithName("DeviceManager"),
 		update:         make(chan *myhome.Device, 64), // TODO configurable buffer size
 		refreshed:      make(chan *myhome.Device, 64), // TODO configurable buffer size
@@ -100,6 +103,13 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 			devices = append(devices, d)
 		}
 		return &devices, nil
+	})
+	myhome.RegisterMethodHandler(myhome.DeviceExport, func(ctx context.Context, in any) (any, error) {
+		ds, err := dm.cache.ExportDevices(ctx, in.(string))
+		if err != nil {
+			return nil, err
+		}
+		return &ds, nil
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceLookup, func(ctx context.Context, in any) (any, error) {
 		name := in.(string)

@@ -181,7 +181,7 @@ func (s *Service) PublishRangesUpdate(ctx context.Context, roomID string) error 
 func (s *Service) GetComfortRanges(ctx context.Context, roomID string, date time.Time) ([]TimeRange, myhome.DayType, error) {
 	room, err := s.storage.GetRoom(roomID)
 	if err != nil {
-		return nil, "", fmt.Errorf("room not found: %s", roomID)
+		return nil, "", fmt.Errorf("%w: %s", myhome.ErrRoomNotFound, roomID)
 	}
 
 	dayType := s.getDayType(ctx, roomID, date)

@@ -291,6 +291,18 @@ func TestComfortTimeViaGetComfortRanges(t *testing.T) {
 	}
 }
 
+// Callers (e.g. the vacuum service) tell "no such room" from other failures
+// with errors.Is on the shared sentinel, whichever path reports it.
+func TestRoomNotFoundWrapsSentinel(t *testing.T) {
+	svc, _ := newTestService(t)
+	if _, _, err := svc.GetComfortRanges(context.Background(), "nowhere", time.Now()); !errors.Is(err, myhome.ErrRoomNotFound) {
+		t.Errorf("GetComfortRanges: %v is not ErrRoomNotFound", err)
+	}
+	if err := svc.storage.DeleteRoom("nowhere"); !errors.Is(err, myhome.ErrRoomNotFound) {
+		t.Errorf("DeleteRoom: %v is not ErrRoomNotFound", err)
+	}
+}
+
 // tod returns a time.Time set to hour:minute on an arbitrary fixed date (UTC).
 func tod(hour, minute int) time.Time {
 	return time.Date(2024, 1, 1, hour, minute, 0, 0, time.UTC)

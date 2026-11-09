@@ -253,7 +253,7 @@ func (s *Storage) DeleteRoom(roomID string) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("room not found: %s", roomID)
+		return fmt.Errorf("%w: %s", myhome.ErrRoomNotFound, roomID)
 	}
 
 	s.log.Info("Room deleted", "room_id", roomID)

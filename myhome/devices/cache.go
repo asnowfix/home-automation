@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/go-logr/logr"
@@ -222,8 +224,57 @@ func (c *Cache) ForgetDevice(ctx context.Context, id string) error {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	// TODO: use cache content
-	return c.db.ForgetDevice(ctx, id)
+	if err := c.db.ForgetDevice(ctx, id); err != nil {
+		return err
+	}
+	c.evict(id)
+	return nil
+}
+
+// evict drops every cached device matching identifier (id, MAC, host or name,
+// as the database's ForgetDevice matches), from the list and from the indexes.
+// The caller holds the lock.
+func (c *Cache) evict(identifier string) {
+	kept := c.devices[:0]
+	for _, d := range c.devices {
+		if d.Id() != identifier && d.MAC != identifier && d.Host_ != identifier && d.Name() != identifier {
+			kept = append(kept, d)
+			continue
+		}
+		delete(c.devicesById, d.Id())
+		delete(c.devicesByMAC, d.MAC)
+		delete(c.devicesByHost, d.Host_)
+		delete(c.devicesByName, d.Name())
+	}
+	for i := len(kept); i < len(c.devices); i++ {
+		c.devices[i] = nil
+	}
+	c.devices = kept
+}
+
+// ExportDevices returns the devices as stored in the database, sorted by
+// manufacturer then id, never from the in-memory view: a backup must not
+// depend on what the cache happens to hold (stale after a forget, or
+// shadowed by another record). pattern is "*" for all devices, otherwise a
+// substring matched like device.match; "*" at either end is ignored.
+func (c *Cache) ExportDevices(ctx context.Context, pattern string) ([]*myhome.Device, error) {
+	var ds []*myhome.Device
+	var err error
+	if pattern == "" || pattern == "*" {
+		ds, err = c.db.GetAllDevices(ctx)
+	} else {
+		ds, err = c.db.GetDevicesMatchingAny(ctx, strings.TrimPrefix(strings.TrimSuffix(pattern, "*"), "*"))
+	}
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(ds, func(i, j int) bool {
+		if ds[i].Manufacturer() != ds[j].Manufacturer() {
+			return ds[i].Manufacturer() < ds[j].Manufacturer()
+		}
+		return ds[i].Id() < ds[j].Id()
+	})
+	return ds, nil
 }
 
 func (c *Cache) RenameDevice(ctx context.Context, oldID, newID string) error {

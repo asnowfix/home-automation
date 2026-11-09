@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/asnowfix/home-automation/pkg/roomba"
 	"github.com/asnowfix/home-automation/pkg/roomba/cloud"
 	"github.com/go-logr/logr"
@@ -48,6 +49,13 @@ type Config struct {
 	// Wake enables the ICMP wake probe after each failed connect attempt
 	// (MYHOME_VACUUM_WAKE, #630). Off by default until measured.
 	Wake bool
+
+	// Bridge publishes the robot's state to the MQTT broker and serves
+	// commands from it (#782, MYHOME_VACUUM_BRIDGE). Off by default: without
+	// it the service does not touch the broker at all. Needs MQTT.
+	Bridge   bool
+	MQTT     mqtt.Client // broker client for the bridge; set by the daemon
+	Instance string      // this daemon's instance name: stamped on availability, compared with command origins
 
 	IRobotEmail    string // iRobot account email (MYHOME_IROBOT_EMAIL), for room sync
 	IRobotPassword string // iRobot account password (MYHOME_IROBOT_PASSWORD), from .env only
@@ -110,6 +118,8 @@ type Service struct {
 	mu     sync.Mutex
 	robots map[string]*robot // by BLID
 
+	bridge *bridge // nil unless Config.Bridge; set once in start
+
 	syncMu sync.Mutex // one room sync at a time
 }
 
@@ -149,7 +159,18 @@ func (s *Service) start() error {
 	s.mu.Lock()
 	s.robots[rec.BLID] = r
 	s.mu.Unlock()
-	go s.supervise(r)
+	if s.cfg.Bridge && s.cfg.MQTT != nil {
+		s.bridge = newBridge(s, r)
+		go func() {
+			if !s.bridge.claim() {
+				return
+			}
+			s.bridge.start()
+			s.supervise(r)
+		}()
+	} else {
+		go s.supervise(r)
+	}
 	s.log.Info("Vacuum service started", "robot", rec.Name, "fixed_host", s.cfg.Host, "cloud_rooms", s.cfg.CloudEnabled())
 	if s.cfg.CloudEnabled() {
 		go s.syncAtStart()
@@ -199,12 +220,14 @@ func (s *Service) supervise(r *robot) {
 		s.mu.Lock()
 		r.rec.Host, r.client, r.connected = host, c, true
 		s.mu.Unlock()
+		s.notifyBridge(true)
 
 		s.watch(r, c)
 
 		s.mu.Lock()
 		r.client, r.connected = nil, false
 		s.mu.Unlock()
+		s.notifyBridge(false)
 		c.Close()
 	}
 }
@@ -222,8 +245,12 @@ func (s *Service) watch(r *robot, c robotClient) {
 		}
 		up := c.Connected()
 		s.mu.Lock()
+		changed := r.connected != up
 		r.connected = up
 		s.mu.Unlock()
+		if changed {
+			s.notifyBridge(false)
+		}
 		switch {
 		case up:
 			downSince = time.Time{}
@@ -292,6 +319,13 @@ func (s *Service) sleep(d time.Duration) {
 	}
 }
 
+// notifyBridge asks the bridge, when enabled, to publish the robot's state.
+func (s *Service) notifyBridge(rooms bool) {
+	if s.bridge != nil {
+		s.bridge.notify(rooms)
+	}
+}
+
 // onStatus runs on the MQTT goroutine for every pushed update.
 func (s *Service) onStatus(r *robot, st roomba.Status) {
 	vs := toStatus(st)
@@ -305,6 +339,7 @@ func (s *Service) onStatus(r *robot, st roomba.Status) {
 		}
 	}
 	s.mu.Unlock()
+	s.notifyBridge(false)
 
 	if prev == nil || prev.Phase != vs.Phase || prev.Error != vs.Error || prev.BinFull != vs.BinFull {
 		s.log.Info("Robot state", "robot", r.rec.Name, "phase", vs.Phase, "cycle", vs.Cycle,

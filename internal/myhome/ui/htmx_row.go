@@ -28,6 +28,8 @@ type deviceRow struct {
 	First     bool // pills are shown on the first row of a device only
 	HasSwitch bool
 	Power     powerView
+	NoToggle  bool   // read-only row (heater, room page): no state button
+	Caption   string // small line under the title
 }
 
 // deviceRows expands a device into its rows. A device with a single switch is
@@ -117,6 +119,7 @@ const deviceRowsTemplate = `
     <span class="mh-avatar" aria-hidden="true">{{if .HasSwitch}}<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.500A6 6 0 0 0 12 3z"/></svg>{{else}}<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="9"/></svg>{{end}}</span>
     <span class="mh-row-text">
       <span class="mh-row-name"{{if .First}} id="device-{{.D.Id}}-name"{{end}}>{{.Title}}</span>
+      {{if .Caption}}<span class="mh-row-caption">{{.Caption}}</span>{{end}}
       {{if .Power.Starting}}<span class="mh-pill is-unknown mh-starting" id="starting-{{.D.Id}}-{{.Power.SwitchID}}">Starting…</span>{{end}}
       {{if .First}}<span class="mh-tags">
         {{if .D.HasTemperatureSensor}}<span class="mh-pill{{if not .D.Temperature}} is-unknown{{end}}" id="sensor-{{.D.Id}}-temperature">{{if .D.Temperature}}{{f1 .D.Temperature}}{{else}}--{{end}}°C</span>{{end}}
@@ -127,7 +130,7 @@ const deviceRowsTemplate = `
       </span>{{end}}
     </span>
   </button>
-  {{if .HasSwitch}}{{template "power" .Power}}{{end}}
+  {{if and .HasSwitch (not .NoToggle)}}{{template "power" .Power}}{{end}}
 </div>
 {{end}}
 

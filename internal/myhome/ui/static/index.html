@@ -74,12 +74,14 @@
   </div>
   <main id="mh-content" class="mh-content" :class="{'is-stale': !online}">
       <section id="sec-rooms" data-section="rooms" x-show="section === 'rooms'" x-cloak>
-        <header class="mh-sec-head">
+        <header class="mh-sec-head" x-show="!openRoom">
           <h2 class="title is-4">Rooms</h2>
           <span class="mh-pill" data-pill hidden></span>
           <button id="add-room-btn" class="button is-primary" @click="showAddRoomModal()">+ Add Room</button>
         </header>
+        <div id="room-view" x-show="openRoom" x-cloak></div>
         <div id="rooms-list"
+             x-show="!openRoom"
              class="columns is-multiline"
              data-refresh
              hx-get="/htmx/rooms"

@@ -632,7 +632,7 @@ const roomsListTemplate = `{{define "rooms-list"}}
       <div class="level mb-2">
         <div class="level-left">
           <div>
-            <strong>{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</strong>
+            <button type="button" class="button is-ghost mh-room-open" data-room-id="{{.ID}}" @click="showRoom($el.dataset.roomId)"><strong>{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}</strong></button>
             {{if .ICalURL}}<span class="ml-1" title="iCal agenda configured">📅</span>{{end}}
             <p class="is-size-7 has-text-grey">{{.ID}}</p>
           </div>

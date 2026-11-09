@@ -131,7 +131,8 @@ type bridge struct {
 	roomsDirty atomic.Bool   // rooms need publishing too
 	guarding   atomic.Bool   // the single-owner guard is listening
 
-	throttle, window time.Duration // stateMinInterval and retainedWindow, read once
+	throttle, window          time.Duration // stateMinInterval and retainedWindow, read once
+	guardWait, recheck, fresh time.Duration // likewise guardWait, guardRecheck, ownerFresh
 
 	runMu        sync.Mutex // commands run one at a time
 	mu           sync.Mutex
@@ -148,6 +149,7 @@ func newBridge(s *Service, r *robot) *bridge {
 		s: s, r: r, mc: s.cfg.MQTT, instance: s.cfg.Instance, owner: owner,
 		dirty: make(chan struct{}, 1), seen: map[string]time.Time{},
 		throttle: stateMinInterval, window: retainedWindow,
+		guardWait: guardWait, recheck: guardRecheck, fresh: ownerFresh,
 	}
 }
 
@@ -214,7 +216,7 @@ func (b *bridge) claim() bool {
 		b.s.log.Info("Vacuum bridge: cannot check for another owner", "error", err.Error())
 		return true // fail open: the bridge is an addition, the robot link must not depend on it
 	}
-	wait := guardWait
+	wait := b.guardWait
 	for {
 		select {
 		case <-arrived:
@@ -225,12 +227,12 @@ func (b *bridge) claim() bool {
 		mu.Lock()
 		a := latest
 		mu.Unlock()
-		if a == nil || !a.Online || a.Owner == b.owner || time.Since(a.TS) >= ownerFresh {
+		if a == nil || !a.Online || a.Owner == b.owner || time.Since(a.TS) >= b.fresh {
 			return true
 		}
 		b.s.log.Error(fmt.Errorf("robot already owned by instance %q (%s)", a.Instance, a.Owner),
-			"Vacuum bridge: another daemon holds this robot; not connecting (the robot accepts a single local client); will re-check", "every", guardRecheck)
-		wait = guardRecheck
+			"Vacuum bridge: another daemon holds this robot; not connecting (the robot accepts a single local client); will re-check", "every", b.recheck)
+		wait = b.recheck
 	}
 }
 

@@ -74,10 +74,10 @@ func (m *recMQTT) count() int {
 
 func fastBridge(t *testing.T) {
 	t.Helper()
-	g, s := guardWait, stateMinInterval
-	r := retainedWindow
+	g, s, r, f, gr := guardWait, stateMinInterval, retainedWindow, ownerFresh, guardRecheck
 	guardWait, stateMinInterval, retainedWindow = 50*time.Millisecond, 10*time.Millisecond, 0
-	t.Cleanup(func() { guardWait, stateMinInterval, retainedWindow = g, s, r })
+	guardRecheck = 50 * time.Millisecond
+	t.Cleanup(func() { guardWait, stateMinInterval, retainedWindow, ownerFresh, guardRecheck = g, s, r, f, gr })
 }
 
 func bridgeHarness(t *testing.T, mc *recMQTT, tweak ...func()) *harness {
@@ -87,7 +87,7 @@ func bridgeHarness(t *testing.T, mc *recMQTT, tweak ...func()) *harness {
 		f()
 	}
 	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50", Name: "Edmond"}},
-		Config{BLID: blid, Password: fakePassword, Bridge: true, MQTT: mc, Instance: "prod"},
+		Config{BLID: blid, Password: fakePassword, Bridge: true, MQTT: mc, Instance: "prod", Owner: "boot-A"},
 		&robotRecord{BLID: blid, Name: "Edmond", Host: "192.0.2.50"})
 	eventually(t, "bridge subscribed to commands", func() bool { return mc.subscribed(BridgeTopic(blid, "cmd")) })
 	eventually(t, "robot connected", func() bool { return connected(h) })
@@ -173,6 +173,10 @@ func TestBridgeServesCommandAndPublishesResult(t *testing.T) {
 		t.Errorf("result retained=%v qos=%d, want not retained QoS 1", p.retained, p.qos)
 	}
 
+	if err := h.store.learnRegion(regionRecord{BLID: blid, MapID: "m1", MapVersion: "v1", RegionID: "1", RegionType: "rid"}); err != nil {
+		t.Fatal(err)
+	}
+	h.last().onChange(roomba.Status{Maps: []roomba.Map{{ID: "m1", Version: "v1"}}})
 	sendCmd(mc, BridgeCommand{ID: "c2", Cmd: "clean_regions", PmapID: "m1", MapVersion: "v1",
 		Regions: []roomba.Region{{ID: "1", Type: "rid"}}, TS: time.Now()})
 	eventually(t, "result c2", func() bool { return len(results(mc)) == 2 })
@@ -261,7 +265,8 @@ func TestBridgeSingleOwnerGuard(t *testing.T) {
 	fastBridge(t)
 	guardWait = 2 * time.Second
 	mc := newRecMQTT()
-	other, _ := json.Marshal(availability{Online: true, TS: time.Now(), Instance: "other"})
+	// Same instance name as ours (the default "myhome" everywhere), other process.
+	other, _ := json.Marshal(availability{Online: true, TS: time.Now(), Instance: "prod", Owner: "boot-B"})
 	stop := make(chan struct{})
 	t.Cleanup(func() { close(stop) })
 	go func() { // the broker delivers its retained message once subscribed
@@ -275,7 +280,7 @@ func TestBridgeSingleOwnerGuard(t *testing.T) {
 		}
 	}()
 	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50"}},
-		Config{BLID: blid, Password: fakePassword, Bridge: true, MQTT: mc, Instance: "prod"},
+		Config{BLID: blid, Password: fakePassword, Bridge: true, MQTT: mc, Instance: "prod", Owner: "boot-A"},
 		&robotRecord{BLID: blid, Host: "192.0.2.50"})
 	time.Sleep(300 * time.Millisecond)
 	if h.last() != nil {
@@ -290,7 +295,7 @@ func TestBridgeGuardIgnoresStaleAndOwnAvailability(t *testing.T) {
 	for name, a := range map[string]availability{
 		"stale other owner": {Online: true, TS: time.Now().Add(-5 * time.Minute), Instance: "other"},
 		"offline":           {Online: false, TS: time.Now(), Instance: "other"},
-		"own restart":       {Online: true, TS: time.Now(), Instance: "prod"},
+		"own restart":       {Online: true, TS: time.Now(), Instance: "prod", Owner: "boot-A"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			fastBridge(t)
@@ -303,7 +308,7 @@ func TestBridgeGuardIgnoresStaleAndOwnAvailability(t *testing.T) {
 				}
 			}()
 			h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50"}},
-				Config{BLID: blid, Password: fakePassword, Bridge: true, MQTT: mc, Instance: "prod"},
+				Config{BLID: blid, Password: fakePassword, Bridge: true, MQTT: mc, Instance: "prod", Owner: "boot-A"},
 				&robotRecord{BLID: blid, Host: "192.0.2.50"})
 			eventually(t, "robot connected", func() bool { return connected(h) })
 		})
@@ -314,7 +319,7 @@ func TestBridgeGuardIgnoresStaleAndOwnAvailability(t *testing.T) {
 func TestBridgeOffByDefault(t *testing.T) {
 	mc := newRecMQTT()
 	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50"}},
-		Config{BLID: blid, Password: fakePassword, MQTT: mc, Instance: "prod"},
+		Config{BLID: blid, Password: fakePassword, MQTT: mc, Instance: "prod", Owner: "boot-A"},
 		&robotRecord{BLID: blid, Host: "192.0.2.50"})
 	eventually(t, "robot connected", func() bool { return connected(h) })
 	h.last().onChange(roomba.Status{Battery: 10})
@@ -335,5 +340,134 @@ func TestAvailabilityWill(t *testing.T) {
 	}
 	if w.Topic != "vacuum/"+blid+"/availability" || !w.Retained || w.QoS != mqtt.AtLeastOnce {
 		t.Fatalf("will = %+v", w)
+	}
+}
+
+// A refused owner re-checks and takes over once the rival's heartbeat is stale.
+func TestBridgeGuardRetriesAfterRivalGoesStale(t *testing.T) {
+	fastBridge(t)
+	ownerFresh = 300 * time.Millisecond
+	mc := newRecMQTT()
+	rival, _ := json.Marshal(availability{Online: true, TS: time.Now(), Instance: "prod", Owner: "boot-B"})
+	go func() {
+		for !mc.subscribed(BridgeTopic(blid, "availability")) {
+			time.Sleep(time.Millisecond)
+		}
+		for i := 0; i < 10; i++ { // a dead owner: only the retained message, delivered at subscribe
+			mc.Feed(BridgeTopic(blid, "availability"), rival)
+			time.Sleep(2 * time.Millisecond)
+		}
+	}()
+	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50"}},
+		Config{BLID: blid, Password: fakePassword, Bridge: true, MQTT: mc, Instance: "prod", Owner: "boot-A"},
+		&robotRecord{BLID: blid, Host: "192.0.2.50"})
+	time.Sleep(100 * time.Millisecond)
+	if h.last() != nil {
+		t.Fatal("connected while the rival was fresh")
+	}
+	eventually(t, "takeover after the rival went stale", func() bool { return connected(h) })
+}
+
+func TestBridgeRefusesCleanOnUnknownRegionOrStaleMap(t *testing.T) {
+	mc := newRecMQTT()
+	h := bridgeHarness(t, mc)
+	if err := h.store.learnRegion(regionRecord{BLID: blid, MapID: "m1", MapVersion: "v1", RegionID: "1", RegionType: "rid"}); err != nil {
+		t.Fatal(err)
+	}
+	h.last().onChange(roomba.Status{Maps: []roomba.Map{{ID: "m1", Version: "v1"}}})
+	cases := map[string]BridgeCommand{
+		"unknown region":  {ID: "u1", Cmd: "clean_regions", PmapID: "m1", MapVersion: "v1", Regions: []roomba.Region{{ID: "9", Type: "rid"}}},
+		"unknown map":     {ID: "u2", Cmd: "clean_regions", PmapID: "nope", MapVersion: "v1", Regions: []roomba.Region{{ID: "1", Type: "rid"}}},
+		"unknown version": {ID: "u3", Cmd: "clean_regions", PmapID: "m1", MapVersion: "vX", Regions: []roomba.Region{{ID: "1", Type: "rid"}}},
+	}
+	n := 0
+	for name, c := range cases {
+		c.TS = time.Now()
+		sendCmd(mc, c)
+		n++
+		eventually(t, name, func() bool { return len(results(mc)) == n })
+		if r := results(mc)[n-1]; r.OK {
+			t.Fatalf("%s: accepted", name)
+		}
+	}
+	// The robot now reports a changed map: the learned region is stale.
+	h.last().onChange(roomba.Status{Maps: []roomba.Map{{ID: "m1", Version: "v2"}}})
+	sendCmd(mc, BridgeCommand{ID: "u4", Cmd: "clean_regions", PmapID: "m1", MapVersion: "v1", Regions: []roomba.Region{{ID: "1", Type: "rid"}}, TS: time.Now()})
+	eventually(t, "stale map", func() bool { return len(results(mc)) == n+1 })
+	if r := results(mc)[n]; r.OK || !strings.Contains(r.Error, "stale") {
+		t.Fatalf("changed map accepted: %+v", r)
+	}
+	if h.last().cleaned != nil {
+		t.Fatal("a refused clean reached the robot")
+	}
+}
+
+func TestBridgeDropsEvac(t *testing.T) {
+	mc := newRecMQTT()
+	h := bridgeHarness(t, mc)
+	sendCmd(mc, BridgeCommand{ID: "e1", Cmd: "evac", TS: time.Now()})
+	eventually(t, "result", func() bool { return len(results(mc)) == 1 })
+	if r := results(mc)[0]; r.OK {
+		t.Fatalf("evac accepted: %+v", r)
+	}
+	if got := commandsRun(h); len(got) != 0 {
+		t.Fatalf("evac reached the robot: %v", got)
+	}
+}
+
+func TestBridgeMalformedCommandGetsFailedResult(t *testing.T) {
+	mc := newRecMQTT()
+	bridgeHarness(t, mc)
+	mc.Feed(BridgeTopic(blid, "cmd"), []byte(`{"id":"bad1","cmd":"stop","ts":"not-a-time"}`))
+	eventually(t, "result", func() bool { return len(results(mc)) == 1 })
+	if r := results(mc)[0]; r.ID != "bad1" || r.OK {
+		t.Fatalf("result = %+v", r)
+	}
+}
+
+func TestBridgeBusyAndExpiredWhileQueued(t *testing.T) {
+	mc := newRecMQTT()
+	h := bridgeHarness(t, mc)
+	b := h.svc.bridge
+	b.runMu.Lock() // a command is "running": the next ones queue behind it
+	sendCmd(mc, BridgeCommand{ID: "q1", Cmd: "find", TS: time.Now().Add(-29 * time.Second)})
+	sendCmd(mc, BridgeCommand{ID: "q2", Cmd: "find", TS: time.Now()})
+	sendCmd(mc, BridgeCommand{ID: "q3", Cmd: "find", TS: time.Now()}) // third: over the bound
+	eventually(t, "busy result", func() bool { return len(results(mc)) == 1 })
+	if r := results(mc)[0]; r.ID != "q3" || !strings.Contains(r.Error, "busy") {
+		t.Fatalf("result = %+v, want busy for q3", r)
+	}
+	time.Sleep(1500 * time.Millisecond) // q1 ages past 30s while queued
+	b.runMu.Unlock()
+	eventually(t, "q1 expired, q2 ran", func() bool { return len(results(mc)) == 3 })
+	for _, r := range results(mc)[1:] {
+		switch r.ID {
+		case "q1":
+			if r.OK || !strings.Contains(r.Error, "expired") {
+				t.Fatalf("q1 = %+v", r)
+			}
+		case "q2":
+			if !r.OK {
+				t.Fatalf("q2 = %+v", r)
+			}
+		}
+	}
+	if got := commandsRun(h); len(got) != 1 {
+		t.Fatalf("commands run = %v, want only q2", got)
+	}
+}
+
+func TestBridgeDedupeMapIsBounded(t *testing.T) {
+	mc := newRecMQTT()
+	h := bridgeHarness(t, mc)
+	b := h.svc.bridge
+	for i := 0; i < dedupeMax+50; i++ {
+		_ = b.onCmd("", []byte(`{"id":"x`+strings.Repeat("a", 1)+string(rune('0'+i%10))+time.Duration(i).String()+`","cmd":"nope","ts":"2000-01-01T00:00:00Z"}`), "")
+	}
+	b.mu.Lock()
+	n := len(b.seen)
+	b.mu.Unlock()
+	if n > dedupeMax {
+		t.Fatalf("dedupe map holds %d ids, cap %d", n, dedupeMax)
 	}
 }

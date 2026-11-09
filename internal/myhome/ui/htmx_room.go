@@ -50,11 +50,16 @@ type roomPageView struct {
 	Vacuum    roomVacuumView
 }
 
-// roomThermometer: the room's thermometer by the daemon's rule, or any device
-// that has already reported a temperature (stored BLU capabilities may list only
-// "battery", #684 E7, so the predicate alone would miss a working BLU H&T).
+// roomThermometer: the room's thermometer by the daemon's rule, or a BLU H&T-like
+// device (BTHome info, and it reports both a temperature with an update time and
+// a humidity) whose stored capabilities list only "battery" (#684 E7). Humidity
+// keeps out a BLU TRV; BTHome keeps out a Gen1 DW2 door sensor.
 func roomThermometer(d *myhome.Device) bool {
-	return myhome.IsTemperatureSensor(d) || (d.Status != nil && d.Status.TemperatureUpdatedAt != nil)
+	if myhome.IsTemperatureSensor(d) {
+		return true
+	}
+	return d.Info != nil && d.Info.BTHome != nil && d.Status != nil && d.Status.TemperatureUpdatedAt != nil &&
+		d.Status.Sensors != nil && d.Status.Sensors.Humidity != nil
 }
 
 // tempAgeText is "" for a fresh reading, otherwise "· 45 min ago" / "· 2 h ago" / "· 3 d ago".
@@ -86,6 +91,7 @@ func roomTemperature(sensors []*myhome.Device, now time.Time) roomTempView {
 	if t := d.Status.TemperatureUpdatedAt; t != nil {
 		v.Age = tempAgeText(now.Sub(*t))
 	} else {
+		// Should not occur in practice: value and time are set together.
 		v.Age = "· age --"
 	}
 	return v
@@ -140,11 +146,18 @@ func (h *HTMXHandler) roomVacuum(roomID string) roomVacuumView {
 		if err != nil {
 			continue
 		}
-		for _, reg := range rooms.(*myhome.VacuumRoomsResult).Regions {
-			if reg.RoomID == roomID && !reg.Stale {
+		rr, ok := rooms.(*myhome.VacuumRoomsResult)
+		if !ok {
+			continue
+		}
+		for _, reg := range rr.Regions {
+			if reg.RoomID == roomID {
 				name := reg.Name
 				if name == "" {
 					name = "region " + reg.ID
+				}
+				if reg.Stale {
+					name += " (robot map changed)"
 				}
 				v.Areas = append(v.Areas, name)
 			}
@@ -187,7 +200,9 @@ func (h *HTMXHandler) roomRoute(w http.ResponseWriter, r *http.Request, part str
 	res, err := mh.ActionE(h.ctx, mh.Signature.NewParams())
 	rooms, ok := res.(*myhome.TemperatureRoomList)
 	if err != nil || !ok {
-		notFound("Room not found")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprint(w, `<p class="has-text-danger" data-room-load-error>Couldn't load the room, try again.</p>`)
 		return
 	}
 	rc, known := (*rooms)[id]
@@ -272,7 +287,7 @@ const roomPageTemplate = `
   <header class="mh-room-head">
     <button type="button" class="button mh-room-back" @click="closeRoom()">&lsaquo; Back</button>
     <h2 class="title is-4">{{.Name}}</h2>
-    <button type="button" class="button mh-room-edit" @click="$dispatch('edit-room', {roomId: '{{.ID}}'})">Edit</button>
+    <button type="button" class="button mh-room-edit" data-room-id="{{.ID}}" @click="$dispatch('edit-room', {roomId: $el.dataset.roomId})">Edit</button>
   </header>
   <div class="mh-room-body">
     <div class="mh-room-side">

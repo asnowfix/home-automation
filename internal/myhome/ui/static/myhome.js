@@ -278,9 +278,13 @@ var kiosk = {
         document.body.addEventListener('htmx:beforeRequest', (e) => {
           if (kiosk.blocks(e.detail.requestConfig && e.detail.requestConfig.verb)) { e.preventDefault(); }
         });
-        // An unknown room answers 404 with a fragment to show; htmx swaps 2xx only by default.
+        // An unknown room (404) or a failed load (500) answers with a fragment to show; htmx swaps 2xx only by default.
         document.body.addEventListener('htmx:beforeSwap', (e) => {
-          if (e.detail.xhr.status === 404 && e.detail.target && e.detail.target.id === 'room-view') { e.detail.shouldSwap = true; }
+          const st = e.detail.xhr.status;
+          if ((st === 404 || st === 500) && e.detail.target && e.detail.target.id === 'room-view') {
+            e.detail.shouldSwap = true;
+            e.detail.isError = false; // else kiosk.failed shows a "couldn't refresh" pill
+          }
         });
         document.body.addEventListener('htmx:afterSwap', (e) => kiosk.fetched(e.detail.target));
         document.body.addEventListener('htmx:responseError', (e) => kiosk.failed(e.detail.target));

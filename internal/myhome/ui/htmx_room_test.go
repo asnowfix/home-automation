@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -62,11 +63,14 @@ func bluSensor(id, room string, caps []string, temp *float64, updated *time.Time
 	d := myhome.NewDevice(logr.Discard(), myhome.SHELLY, id).WithName(id)
 	d.RoomId = room
 	d.Info = &shellyapi.DeviceInfo{BTHome: &shellyapi.BTHomeInfo{Capabilities: caps}}
-	d.Status = &myhome.Status{Sensors: &myhome.Sensors{Temperature: temp}, TemperatureUpdatedAt: updated}
+	d.Status = &myhome.Status{Sensors: &myhome.Sensors{Temperature: temp, Humidity: fp(50)}, TemperatureUpdatedAt: updated}
 	return d
 }
 
 func fp(f float64) *float64 { return &f }
+
+func noHumidity(d *myhome.Device) *myhome.Device { d.Status.Sensors.Humidity = nil; return d }
+func noBTHome(d *myhome.Device) *myhome.Device   { d.Info.BTHome = nil; return d }
 
 func roomBody(t *testing.T, devs []*myhome.Device, path string) (int, string) {
 	t.Helper()
@@ -102,6 +106,12 @@ func TestRoomPageTemperature(t *testing.T) {
 			bluSensor("shellybluht3-01", "sejour", caps, fp(21.4), &fresh),
 			bluSensor("shellyblu-aabbccddeeff", "", caps, fp(3.0), &old)},
 			[]string{`21.4 °C<`}, []string{"Configuration error", "ago", "3.0"}},
+		// BLU TRV (no humidity) and Gen1 DW2 (no BTHome) report a temperature but are not room thermometers.
+		{"BLU H&T with a TRV and a DW2 in the room", []*myhome.Device{
+			bluSensor("shellybluht3-01", "sejour", caps, fp(21.4), &fresh),
+			noHumidity(bluSensor("shellyblutrv-03", "sejour", []string{"battery"}, fp(23), &fresh)),
+			noBTHome(bluSensor("shellydw2-04", "sejour", nil, fp(5), &fresh))},
+			[]string{`21.4 °C<`}, []string{"Configuration error"}},
 		{"two sensors", []*myhome.Device{
 			bluSensor("shellybluht3-01", "sejour", caps, fp(21.4), &fresh),
 			bluSensor("shellyht-02", "sejour", caps, fp(19.0), &fresh)},
@@ -182,6 +192,9 @@ func TestRoomPageHeaterRowsAreReadOnlyAndMakeNoDeviceCall(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", w, body)
 		}
 	}
+	if !strings.Contains(body, `$el.dataset.roomId`) {
+		t.Errorf("Edit button must read the room id from a data attribute:\n%s", body)
+	}
 	if !strings.Contains(body, `data-devices="shellyplus1-aabbccddee61 shellyplus1-aabbccddee62"`) {
 		t.Errorf("missing data-devices for the SSE refresh:\n%s", body)
 	}
@@ -197,6 +210,10 @@ func TestRoomPageUnknownRoomIsNotFoundAndNotProxied(t *testing.T) {
 		if code != http.StatusNotFound || !strings.Contains(body, "data-room-not-found") || !strings.Contains(body, "Room not found") {
 			t.Errorf("%s = %d %q", p, code, body)
 		}
+	}
+	setVerb(t, myhome.TemperatureList, func(context.Context, any) (any, error) { return nil, errors.New("boom") })
+	if code, body := roomBody(t, nil, "/htmx/room/sejour"); code != http.StatusInternalServerError || !strings.Contains(body, "data-room-load-error") || strings.Contains(body, "not found") {
+		t.Errorf("temperature.list failing = %d %q, want a distinct load error", code, body)
 	}
 	registerRooms(t, nil)
 	if code, body := roomBody(t, nil, "/htmx/room/sejour"); code != http.StatusNotFound || !strings.Contains(body, "not enabled") {
@@ -217,8 +234,8 @@ func TestRoomPageVacuumAreas(t *testing.T) {
 		return &myhome.VacuumRoomsResult{Regions: regions}, nil
 	})
 	_, body := roomBody(t, nil, "/htmx/room/sejour")
-	if !strings.Contains(body, "Areas: Salon") || strings.Contains(body, "Old map") || strings.Contains(body, "Cuisine") {
-		t.Errorf("want only the mapped non-stale area:\n%s", body)
+	if !strings.Contains(body, "Salon") || !strings.Contains(body, "Old map (robot map changed)") || strings.Contains(body, "Cuisine") {
+		t.Errorf("want the mapped areas, the stale one labelled, none from another room:\n%s", body)
 	}
 	if !strings.Contains(body, "every 5s [kiosk.visible('rooms') && kiosk.roomOpen") {
 		t.Errorf("vacuum block does not re-poll only while visible:\n%s", body)

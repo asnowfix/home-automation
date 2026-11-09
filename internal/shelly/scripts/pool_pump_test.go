@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"regexp"
 	"strconv"
@@ -380,29 +378,20 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 
 	// handleDailyCheck() runs automatically at the end of init (#476: it must
 	// still run under water-supply protection, see the comment on
-	// handleDailyCheck() itself) and, given a reachable forecast URL, its
-	// Open-Meteo fetch can succeed against the real network in a sandbox with
-	// internet access — silently rewriting the run window mid-test via
-	// updateScheduleMode(), racing the assertions below (observed live
-	// 2026-08-12: it rewrote the window to 15:09-18:51 and stopped a pump
-	// this test had just started). A local server returning a body with no
-	// "hourly" field makes onForecast() bail with "Invalid forecast
-	// structure" and getMaxForecastTemp() stay null, so
-	// decideModeFromForecast() returns before touching the window
-	// (pool-pump.js:2430-2436) — deterministic regardless of what network
-	// access the test environment happens to have.
-	brokenForecast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	t.Cleanup(brokenForecast.Close)
-
+	// handleDailyCheck() itself). #465: the forecast is no longer fetched
+	// on-device at all (it arrives, if it arrives, via a retained MQTT push
+	// from the daemon's fetch-and-transform proxy — see pool-pump.js's "MQTT
+	// FETCH-AND-TRANSFORM PROXY" section) so simply never publishing a
+	// forecast result in this test is deterministic on its own: maxTemp stays
+	// null, decideModeFromForecast() takes the "No forecast data available,
+	// keeping mode" branch, and the window is never touched — no local server
+	// needed any more to keep that race out of this test.
 	now := time.Now()
 	deviceState := &script.DeviceState{
 		KVS: kvs,
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  brokenForecast.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: pro3ComponentStatus(),
 		Schedules:       poolPumpSummerSchedules(now.Add(-1*time.Hour), now.Add(1*time.Hour)),
@@ -1905,7 +1894,14 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 		KVS:             solarKVS(nil),
 		Storage:         solarSummerStorage(),
 		ComponentStatus: pro3ComponentStatus(),
-		Schedules:       poolPumpSchedules(),
+		// A concrete window that has already closed: after solar drops, the
+		// pump must fall back to "off, outside the window". With the default
+		// symbolic (@sunrise/@sunset) schedules the window never resolves
+		// without a forecast, desiredOutput() returns -2 ("no opinion") and
+		// the pump would stay on. These tests used to get a concrete window
+		// only as a side effect of init's on-device forecast HTTP fetch
+		// reaching the real Open-Meteo (#465 removed that fetch).
+		Schedules: poolPumpSummerSchedules(time.Now().Add(-3*time.Hour), time.Now().Add(-1*time.Hour)),
 	}
 
 	ctx, cancel := poolPumpRunContext(t, mc)
@@ -1999,8 +1995,15 @@ func TestPoolPump_SolarStartAndStopSurvivesOwnEcho(t *testing.T) {
 		KVS:             solarKVS(nil),
 		Storage:         solarSummerStorage(),
 		ComponentStatus: pro3ComponentStatus(),
-		Schedules:       poolPumpSchedules(),
-		EventInjector:   injector,
+		// A concrete window that has already closed: after solar drops, the
+		// pump must fall back to "off, outside the window". With the default
+		// symbolic (@sunrise/@sunset) schedules the window never resolves
+		// without a forecast, desiredOutput() returns -2 ("no opinion") and
+		// the pump would stay on. These tests used to get a concrete window
+		// only as a side effect of init's on-device forecast HTTP fetch
+		// reaching the real Open-Meteo (#465 removed that fetch).
+		Schedules:     poolPumpSummerSchedules(time.Now().Add(-3*time.Hour), time.Now().Add(-1*time.Hour)),
+		EventInjector: injector,
 	}
 
 	stop := runPoolPumpPhase(t, buf, deviceState, mc)
@@ -2415,47 +2418,95 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 // is exactly what happened on the production pump on 2026-08-06.
 //
 // These tests drive the real path — init → handleDailyCheck() →
-// performDailyModeCheck() → forecast → decideModeFromForecast() →
-// updateScheduleMode() — against a local forecast server, and assert on the
-// pump state that results.
-
-// poolPumpForecastServer serves an Open-Meteo response shaped the way
-// pool-pump.js's onForecast() parses it: 24 hourly temperatures whose index is
-// the hour of day (so the index of the maximum becomes STATE.peakForecastHour)
-// plus one daily sunrise/sunset pair, which decideModeFromForecast() turns
-// into the window's start floor (sunrise + 1h) and stop ceiling (sunset - 0.5h).
+// performDailyModeCheck() → decideModeFromForecast() → updateScheduleMode()
+// — by publishing a reduced forecast result directly to this device's MQTT
+// fetch-proxy result topic (#465), and assert on the pump state that
+// results.
 //
-// Local on purpose: the forecast fetch is a plain Shelly.call("HTTP.GET"),
-// which the emulator executes for real. Pointing it at a test server keeps
-// these tests deterministic and offline.
-func poolPumpForecastServer(t *testing.T, peakHour int, sunrise, sunset string) *httptest.Server {
+// #465 migrated pool-pump.js off Shelly.call("HTTP.GET", ...) entirely: the
+// daemon's fetch-and-transform proxy (myhome/fetchproxy) now does the fetch
+// and the JSON.parse, and this script only ever receives the few reduced
+// fields — see FORECAST_TRANSFORM in pool-pump.js. These tests simulate that
+// daemon by publishing its output shape directly; they no longer stand up a
+// local Open-Meteo-shaped HTTP server at all.
+
+// poolPumpFakeForecastURL is seeded into Storage["forecast-url"] so
+// ensureForecastUrl() finds a cached URL (containing "daily=", its own
+// sanity check) and skips Shelly.DetectLocation. It is never actually
+// fetched by anything in these tests — the device no longer performs the
+// fetch itself — so it does not need to be reachable.
+const poolPumpFakeForecastURL = "https://api.open-meteo.com/v1/forecast?latitude=0&longitude=0&daily=sunrise,sunset"
+
+// poolPumpForecastTopic is this device's fetch-proxy result topic. The
+// emulator's Shelly.getDeviceInfo() always returns id
+// "shellyplus1-b8d61a85a970" (pkg/shelly/script/run.go), so it is a fixed
+// string for every test in this file.
+const poolPumpForecastTopic = "myhome/fetch/shellyplus1-b8d61a85a970/pool-forecast"
+
+// poolPumpForecastHourFromClock converts an "HH:MM" clock string to the
+// fractional hour FORECAST_TRANSFORM's hourFromIso() would have produced
+// from the equivalent Open-Meteo ISO timestamp.
+func poolPumpForecastHourFromClock(t *testing.T, clock string) float64 {
 	t.Helper()
-
-	temps := make([]float64, 24)
-	for i := range temps {
-		temps[i] = 25
+	parts := strings.Split(clock, ":")
+	if len(parts) != 2 {
+		t.Fatalf("bad clock string %q", clock)
 	}
-	// Above poolPumpWindowKVS's max-temp, so computeRunHours()'s temperature
-	// scale clamps to 1 and run hours land exactly on the configured base hours.
-	temps[peakHour] = 40
+	h, errH := strconv.Atoi(parts[0])
+	m, errM := strconv.Atoi(parts[1])
+	if errH != nil || errM != nil {
+		t.Fatalf("bad clock string %q: %v / %v", clock, errH, errM)
+	}
+	return float64(h) + float64(m)/60
+}
 
+// poolPumpForecastPayload builds the JSON body the daemon's fetch-and-
+// transform proxy publishes, retained, to poolPumpForecastTopic — the same
+// shape FORECAST_TRANSFORM in pool-pump.js produces plus the daemon-added
+// "ts" field (#465 decision 6). maxTempC is fixed above
+// poolPumpWindowKVS's temp-threshold so decideModeFromForecast() always
+// selects 'summer', matching what the old 24-hourly-temperature fixture (25
+// everywhere, 40 at peakHour) produced.
+func poolPumpForecastPayload(t *testing.T, peakHour int, sunrise, sunset string) []byte {
+	t.Helper()
 	body, err := json.Marshal(map[string]interface{}{
-		"hourly": map[string]interface{}{"temperature_2m": temps},
-		"daily": map[string]interface{}{
-			"sunrise": []string{"2026-08-07T" + sunrise},
-			"sunset":  []string{"2026-08-07T" + sunset},
-		},
+		"max_temp_c": 40,
+		"peak_hour":  peakHour,
+		"sunrise_h":  poolPumpForecastHourFromClock(t, sunrise),
+		"sunset_h":   poolPumpForecastHourFromClock(t, sunset),
+		"ts":         time.Now().Unix(),
 	})
 	if err != nil {
-		t.Fatalf("failed to build forecast body: %v", err)
+		t.Fatalf("failed to build forecast payload: %v", err)
 	}
+	return body
+}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+// poolPumpPublishForecastUntil re-publishes payload, retained, to
+// poolPumpForecastTopic every 50ms until stop is closed or ctx is done.
+// Repeated, not once: pkg/shelly/mqtt's MockClient (unlike a real broker)
+// does not buffer a retained publish for a subscriber that has not
+// registered yet (see its doc comment) — it only delivers to channels
+// already subscribed at the moment Publish runs — and pool-pump.js's own
+// MQTT.subscribe for this topic happens a few task-queue ticks into init,
+// not at the instant the script starts. Re-publishing guarantees delivery
+// regardless of exactly when that registration completes, without the test
+// needing to observe it directly.
+func poolPumpPublishForecastUntil(ctx context.Context, mc *mqtt.MockClient, payload []byte, stop <-chan struct{}) {
+	go func() {
+		ticker := time.NewTicker(50 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = mc.Publish(ctx, poolPumpForecastTopic, payload, 0, true, "test")
+			}
+		}
+	}()
 }
 
 // poolPumpWindowKVS is pro1KVS() with the pool geometry rigged so
@@ -2566,12 +2617,14 @@ func poolPumpSummerSchedulesWrapped(start, stop time.Time) []map[string]interfac
 	}
 }
 
-// poolPumpRewriteResult runs the script against the given fixture, waits for
-// the schedule rewrite to land, then reports the active-output the script
-// settled on. wantOutput is what the caller expects; the helper polls for it
-// so a passing test finishes quickly and a failing one still reports the
-// value actually reached.
-func poolPumpRewriteResult(t *testing.T, deviceState *script.DeviceState, wantOutput string) (string, []map[string]interface{}) {
+// poolPumpRewriteResult runs the script against the given fixture, publishes
+// forecastPayload (#465: the daemon's fetch-and-transform proxy result — see
+// poolPumpForecastPayload) to this device's forecast topic, waits for the
+// schedule rewrite it causes to land, then reports the active-output the
+// script settled on. wantOutput is what the caller expects; the helper polls
+// for it so a passing test finishes quickly and a failing one still reports
+// the value actually reached.
+func poolPumpRewriteResult(t *testing.T, deviceState *script.DeviceState, forecastPayload []byte, wantOutput string) (string, []map[string]interface{}) {
 	t.Helper()
 
 	mc := mqtt.NewMockClient()
@@ -2584,6 +2637,10 @@ func poolPumpRewriteResult(t *testing.T, deviceState *script.DeviceState, wantOu
 	go func() {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
+
+	stopPublishing := make(chan struct{})
+	defer close(stopPublishing)
+	poolPumpPublishForecastUntil(ctx, mc, forecastPayload, stopPublishing)
 
 	// The rewrite has to land before the reconciliation it triggers can be
 	// judged, so wait for the morning job's timespec to change first.
@@ -2662,21 +2719,21 @@ func skipIfNowInside(t *testing.T, startMin, stopMin int) {
 func TestPoolPump_ScheduleRewriteIntoPastStartsPump(t *testing.T) {
 	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
 
-	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpWidePeakHour, "00:00", "23:59")
 	now := time.Now()
 
 	deviceState := &script.DeviceState{
 		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: pro1ComponentStatus(), // pump off
 		// Old window: the start is still ahead of us, so nothing was due yet.
 		Schedules: poolPumpSummerSchedules(now.Add(2*time.Hour), now.Add(4*time.Hour)),
 	}
 
-	got, schedules := poolPumpRewriteResult(t, deviceState, "0")
+	got, schedules := poolPumpRewriteResult(t, deviceState, forecast, "0")
 
 	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 0) {
 		t.Fatalf("expected morning start rewritten to 01:00, got %q", ts)
@@ -2693,21 +2750,21 @@ func TestPoolPump_ScheduleRewriteIntoPastStartsPump(t *testing.T) {
 func TestPoolPump_SunriseRewriteStartsPump(t *testing.T) {
 	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
 
-	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpWidePeakHour, "00:00", "23:59")
 	now := time.Now()
 
 	deviceState := &script.DeviceState{
 		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: pro1ComponentStatus(), // pump off, correctly so
 		// Yesterday's window, entirely behind us.
 		Schedules: poolPumpSummerSchedules(now.Add(-5*time.Hour), now.Add(-4*time.Hour)),
 	}
 
-	got, _ := poolPumpRewriteResult(t, deviceState, "0")
+	got, _ := poolPumpRewriteResult(t, deviceState, forecast, "0")
 	if got != "0" {
 		t.Fatalf("sunrise rewrite brought now inside the window: "+
 			"expected the pump to start (active-output=0), got %q", got)
@@ -2720,7 +2777,7 @@ func TestPoolPump_SunriseRewriteStartsPump(t *testing.T) {
 func TestPoolPump_ScheduleRewriteAwayStopsPump(t *testing.T) {
 	skipIfNowInside(t, poolPumpNarrowStartMin, poolPumpNarrowStopMin)
 
-	srv := poolPumpForecastServer(t, poolPumpNarrowPeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpNarrowPeakHour, "00:00", "23:59")
 	now := time.Now()
 
 	cs := pro1ComponentStatus()
@@ -2730,14 +2787,14 @@ func TestPoolPump_ScheduleRewriteAwayStopsPump(t *testing.T) {
 		KVS: poolPumpWindowKVS(poolPumpNarrowRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: cs,
 		// Old window contains "now", which is why the pump is running.
 		Schedules: poolPumpSummerSchedules(now.Add(-1*time.Hour), now.Add(1*time.Hour)),
 	}
 
-	got, schedules := poolPumpRewriteResult(t, deviceState, "-1")
+	got, schedules := poolPumpRewriteResult(t, deviceState, forecast, "-1")
 
 	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 57) {
 		t.Fatalf("expected morning start rewritten to 01:57, got %q", ts)
@@ -2753,14 +2810,14 @@ func TestPoolPump_ScheduleRewriteAwayStopsPump(t *testing.T) {
 func TestPoolPump_ScheduleRewriteOutsideWindowDoesNotStartPump(t *testing.T) {
 	skipIfNowInside(t, poolPumpNarrowStartMin, poolPumpNarrowStopMin)
 
-	srv := poolPumpForecastServer(t, poolPumpNarrowPeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpNarrowPeakHour, "00:00", "23:59")
 	now := time.Now()
 
 	deviceState := &script.DeviceState{
 		KVS: poolPumpWindowKVS(poolPumpNarrowRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: pro1ComponentStatus(), // pump off
 		Schedules:       poolPumpSummerSchedules(now.Add(-5*time.Hour), now.Add(-4*time.Hour)),
@@ -2768,7 +2825,7 @@ func TestPoolPump_ScheduleRewriteOutsideWindowDoesNotStartPump(t *testing.T) {
 
 	// Ask for "0" so the helper spends its full budget looking for a start
 	// that must never come.
-	got, _ := poolPumpRewriteResult(t, deviceState, "0")
+	got, _ := poolPumpRewriteResult(t, deviceState, forecast, "0")
 	if got != "-1" {
 		t.Fatalf("now is outside the rewritten window: "+
 			"expected the pump to stay off (active-output=-1), got %q", got)
@@ -2791,21 +2848,21 @@ func TestPoolPump_ScheduleRewriteOutsideWindowDoesNotStartPump(t *testing.T) {
 func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStartsPump(t *testing.T) {
 	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
 
-	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpWidePeakHour, "00:00", "23:59")
 	now := time.Now()
 
 	deviceState := &script.DeviceState{
 		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: pro1ComponentStatus(), // pump off
 		// Old window: the start is still ahead of us, so nothing was due yet.
 		Schedules: poolPumpSummerSchedulesWrapped(now.Add(2*time.Hour), now.Add(4*time.Hour)),
 	}
 
-	got, schedules := poolPumpRewriteResult(t, deviceState, "0")
+	got, schedules := poolPumpRewriteResult(t, deviceState, forecast, "0")
 
 	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 0) {
 		t.Fatalf("updateScheduleMode() failed to find/rewrite the wrapped morning-start job: "+
@@ -2820,7 +2877,7 @@ func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStartsPump(t *testing.T) 
 func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStopsPump(t *testing.T) {
 	skipIfNowInside(t, poolPumpNarrowStartMin, poolPumpNarrowStopMin)
 
-	srv := poolPumpForecastServer(t, poolPumpNarrowPeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpNarrowPeakHour, "00:00", "23:59")
 	now := time.Now()
 
 	cs := pro1ComponentStatus()
@@ -2830,14 +2887,14 @@ func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStopsPump(t *testing.T) {
 		KVS: poolPumpWindowKVS(poolPumpNarrowRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: cs,
 		// Old window contains "now", which is why the pump is running.
 		Schedules: poolPumpSummerSchedulesWrapped(now.Add(-1*time.Hour), now.Add(1*time.Hour)),
 	}
 
-	got, schedules := poolPumpRewriteResult(t, deviceState, "-1")
+	got, schedules := poolPumpRewriteResult(t, deviceState, forecast, "-1")
 
 	if ts := poolPumpScheduleTimespec(schedules, "handleMorningStart()"); ts != poolPumpTimespec(1, 57) {
 		t.Fatalf("updateScheduleMode() failed to find/rewrite the wrapped morning-start job: "+
@@ -2863,36 +2920,25 @@ func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStopsPump(t *testing.T) {
 // that changes the active-output outcome); these four cover the remaining
 // arms explicitly required by #509's done-criteria.
 
-// poolPumpWinterForecastServer serves an Open-Meteo response whose every
-// hourly temperature sits under poolPumpWindowKVS()'s temp-threshold (20),
+// poolPumpWinterForecastPayload is the proxy result (#465) for a forecast
+// whose max temperature sits under poolPumpWindowKVS()'s temp-threshold (20),
 // so decideModeFromForecast() selects 'winter' and calls
 // updateScheduleMode('winter', null, null) — the no-timings arm that #509's
 // invariant list calls out by name, since a summer-only derivation would not
 // cover it.
-func poolPumpWinterForecastServer(t *testing.T) *httptest.Server {
+func poolPumpWinterForecastPayload(t *testing.T) []byte {
 	t.Helper()
-
-	temps := make([]float64, 24)
-	for i := range temps {
-		temps[i] = 10
-	}
 	body, err := json.Marshal(map[string]interface{}{
-		"hourly": map[string]interface{}{"temperature_2m": temps},
-		"daily": map[string]interface{}{
-			"sunrise": []string{"2026-08-07T06:00"},
-			"sunset":  []string{"2026-08-07T20:00"},
-		},
+		"max_temp_c": 10,
+		"peak_hour":  12,
+		"sunrise_h":  6.0,
+		"sunset_h":   20.0,
+		"ts":         time.Now().Unix(),
 	})
 	if err != nil {
-		t.Fatalf("failed to build winter forecast body: %v", err)
+		t.Fatalf("failed to build winter forecast payload: %v", err)
 	}
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	return body
 }
 
 // TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged is the
@@ -2903,7 +2949,7 @@ func poolPumpWinterForecastServer(t *testing.T) *httptest.Server {
 func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testing.T) {
 	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
 
-	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpWidePeakHour, "00:00", "23:59")
 	now := time.Now()
 
 	// poolPumpWideStartMin/StopMin (01:00 / 23:29) is exactly what this
@@ -2917,7 +2963,7 @@ func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testi
 		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: pro1ComponentStatus(), // pump off at boot
 		Schedules:       poolPumpSummerSchedules(start, stop),
@@ -2933,6 +2979,11 @@ func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testi
 	go func() {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
+
+	// #465: the daemon's proxy result stands in for the old forecast server.
+	stopPublishing := make(chan struct{})
+	defer close(stopPublishing)
+	poolPumpPublishForecastUntil(ctx, mc, forecast, stopPublishing)
 
 	// The window is already correct, so init's own onWindowJobs() call (not
 	// the daily check) should start the pump.
@@ -2972,7 +3023,7 @@ func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testi
 // path must resolve the night window from enable flags alone, which a
 // summer-only derivation would not exercise.
 func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
-	srv := poolPumpWinterForecastServer(t)
+	forecast := poolPumpWinterForecastPayload(t)
 	now := time.Now()
 
 	job := func(id int, code, timespec string, enable bool) map[string]interface{} {
@@ -2996,7 +3047,7 @@ func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
 		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: pro1ComponentStatus(), // pump off
 		Schedules: []map[string]interface{}{
@@ -3018,6 +3069,11 @@ func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
 	go func() {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
+
+	// #465: the daemon's proxy result stands in for the old forecast server.
+	stopPublishing := make(chan struct{})
+	defer close(stopPublishing)
+	poolPumpPublishForecastUntil(ctx, mc, forecast, stopPublishing)
 
 	modeOK := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		v, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
@@ -3052,7 +3108,7 @@ func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
 // already was — NOT get forced to "off" — even though updateScheduleMode()
 // did write a change (the morning job moved) and windowChanged is true.
 func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T) {
-	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpWidePeakHour, "00:00", "23:59")
 	now := time.Now()
 
 	job := func(id int, code, timespec string, enable bool) map[string]interface{} {
@@ -3072,7 +3128,7 @@ func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T
 		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus: cs,
 		// No handleEveningStop() job at all, at init or after the rewrite --
@@ -3096,6 +3152,11 @@ func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T
 	go func() {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
+
+	// #465: the daemon's proxy result stands in for the old forecast server.
+	stopPublishing := make(chan struct{})
+	defer close(stopPublishing)
+	poolPumpPublishForecastUntil(ctx, mc, forecast, stopPublishing)
 
 	initial := poolPumpScheduleTimespec(deviceState.ScheduleJobs(), "handleMorningStart()")
 	rewritten := waitFor(initTimeout, 100*time.Millisecond, func() bool {
@@ -3137,7 +3198,7 @@ func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T
 // place, performDailyModeCheck() would never run and schedule-mode would
 // stay 'winter' forever despite a forecast hot enough for 'summer'.
 func TestPoolPump_DailyCheckRunsDuringWaterSupplyProtection(t *testing.T) {
-	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpWidePeakHour, "00:00", "23:59")
 	now := time.Now()
 
 	cs := pro1ComponentStatus()
@@ -3148,7 +3209,7 @@ func TestPoolPump_DailyCheckRunsDuringWaterSupplyProtection(t *testing.T) {
 		Storage: map[string]interface{}{
 			// No schedule-mode seeded: loadState() defaults to "winter",
 			// matching the live device's post-crash state.
-			"forecast-url": srv.URL + "?daily=sunrise,sunset",
+			"forecast-url": poolPumpFakeForecastURL,
 		},
 		ComponentStatus: cs,
 		Schedules:       poolPumpSummerSchedules(now.Add(2*time.Hour), now.Add(4*time.Hour)),
@@ -3165,10 +3226,14 @@ func TestPoolPump_DailyCheckRunsDuringWaterSupplyProtection(t *testing.T) {
 		done <- script.RunWithDeviceState(ctx, "pool-pump.js", buf, false, deviceState)
 	}()
 
+	stopPublishing := make(chan struct{})
+	poolPumpPublishForecastUntil(ctx, mc, forecast, stopPublishing)
+
 	ok := waitFor(initTimeout, 200*time.Millisecond, func() bool {
 		v, exists := deviceState.KVSValue("script/pool-pump/schedule-mode")
 		return exists && v == "summer"
 	})
+	close(stopPublishing)
 	cancel()
 	<-done
 

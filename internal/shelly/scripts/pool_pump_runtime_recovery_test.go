@@ -1,49 +1,22 @@
 package scripts
 
 import (
+	"context"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/asnowfix/home-automation/pkg/shelly/mqtt"
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 )
 
-// poolPumpBrokenForecastURL returns a local server whose response has no
-// "hourly" field, so onForecast() bails with "Invalid forecast structure" and
-// getMaxForecastTemp() stays null -- the same technique
-// TestPoolPump_WaterSupplyRestoresSpeed uses. Without this, init's own
-// handleDailyCheck() -> performDailyModeCheck() can reach the real
-// api.open-meteo.com in a sandbox with internet access and silently rewrite
-// the run window via updateScheduleMode() before this test ever gets to seed
-// its own STATE facts, racing every assertion below.
-//
-// Also returns `served`, signalled once per request the server actually
-// handles. #524 review round 2: a fixed pre-seed sleep is not sufficient to
-// know init's own automatic daily-check fetch has resolved -- the sleep
-// bounds a GUESS about how long the four initSteps plus the HTTP round trip
-// take, not the round trip itself, and under load the guess can still be too
-// short (observed live 2026-08-19: a seed still landed before the in-flight
-// automatic check's own callback ran, this time surfacing as a REWRITTEN
-// window even though the pre-write probe looked correct a moment earlier,
-// because the callback resolved in the gap between that probe and the
-// eventual read). Waiting on `served` bounds the real bottleneck -- the HTTP
-// round trip -- directly instead of guessing its duration.
-func poolPumpBrokenForecastURL(t *testing.T) (url string, served <-chan struct{}) {
-	t.Helper()
-	ch := make(chan struct{}, 8)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{}`))
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
-	}))
-	t.Cleanup(srv.Close)
-	return srv.URL + "?daily=sunrise,sunset", ch
-}
+// #465: pool-pump.js no longer fetches the forecast itself, so there is no
+// on-device HTTP round trip for these fixtures to guard against. With no
+// proxy result published to the device's forecast topic,
+// STATE.maxForecastTemp stays null and init's own handleDailyCheck() takes
+// the "no forecast data, keeping mode" branch -- the same neutral starting
+// state the old "broken" (hourly-less) forecast server produced -- until a
+// test seeds STATE directly via seedPoolPumpForecastState.
 
 // === #524: runtime-recovery arithmetic ===
 //
@@ -74,22 +47,20 @@ func minutesSinceMidnight(t time.Time) int {
 // computeRunHours() pinned to exactly runHours regardless of the forecast
 // temp seeded later (poolPumpWindowKVS rigs the pool geometry so the
 // temperature scale only matters below CONFIG.maxTemp). Also returns the
-// broken forecast server's `served` channel -- see poolPumpBrokenForecastURL
-// and seedPoolPumpForecastState.
-func poolPumpSummerWindowNow(t *testing.T, runHours float64, offsetStart, offsetStop time.Duration) (*script.DeviceState, <-chan struct{}) {
+// seedPoolPumpForecastState.
+func poolPumpSummerWindowNow(t *testing.T, runHours float64, offsetStart, offsetStop time.Duration) *script.DeviceState {
 	t.Helper()
 	now := time.Now()
-	url, served := poolPumpBrokenForecastURL(t)
 	return &script.DeviceState{
 		KVS: poolPumpWindowKVS(runHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  url,
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus:      pro1ComponentStatus(),
 		Schedules:            poolPumpSummerSchedules(now.Add(offsetStart), now.Add(offsetStop)),
 		ScheduleEvalInjector: make(chan []byte, 4),
-	}, served
+	}
 }
 
 // poolPumpProbeSeq makes every readPoolPumpWindowStop() probe key unique.
@@ -168,11 +139,9 @@ func assertWindowStillMatchesFixture(t *testing.T, d *script.DeviceState, wantSt
 // scale to 1, so the pinned runHours from poolPumpWindowKVS applies exactly).
 //
 // fixtureStopMin is the caller's fixture's own schedule stop (minutes since
-// midnight); forecastServed is poolPumpBrokenForecastURL()'s `served`
-// channel. Both bound this function's wait against real observables (the
-// window having settled from the fixture, and init's own automatic
-// handleDailyCheck() having actually reached the broken forecast server)
-// instead of a guessed sleep duration -- and, after writing, fail loudly
+// midnight). It bounds this function's wait against a real observable (the
+// window having settled from the fixture) instead of a guessed sleep
+// duration -- and, after writing, fail loudly
 // rather than silently if the automatic check still won the race anyway
 // (see assertWindowStillMatchesFixture). onForecast() leaves
 // STATE.maxForecastTemp untouched on its "invalid structure" bail (it only
@@ -183,20 +152,9 @@ func assertWindowStillMatchesFixture(t *testing.T, d *script.DeviceState, wantSt
 // the callback can resolve in the gap between a pre-write probe and this
 // function returning, so only waiting on the request having actually
 // reached the server (not a guess about how long that takes) closes it.
-func seedPoolPumpForecastState(t *testing.T, d *script.DeviceState, forecastServed <-chan struct{}, maxForecastTemp, sunsetHour float64, fixtureStopMin int64) {
+func seedPoolPumpForecastState(t *testing.T, d *script.DeviceState, maxForecastTemp, sunsetHour float64, fixtureStopMin int64) {
 	t.Helper()
 	waitForWindowSeeded(t, d, fixtureStopMin)
-	select {
-	case <-forecastServed:
-	case <-time.After(initTimeout):
-		t.Fatalf("init's automatic daily check never reached the broken forecast server within %v", initTimeout)
-	}
-	// Bounded margin for the script to receive and synchronously process the
-	// (already-sent) HTTP response -- onForecast()'s "invalid structure" bail
-	// and decideModeFromForecast()'s "no forecast data" bail, both plain
-	// synchronous JS once the response is delivered. Not bounding an HTTP
-	// round trip anymore, just local event-loop delivery.
-	time.Sleep(500 * time.Millisecond)
 	code := fmt.Sprintf("STATE.maxForecastTemp = %g; STATE.sunsetHour = %g;", maxForecastTemp, sunsetHour)
 	if err := evalPoolPumpSchedule(d, code); err != nil {
 		t.Fatalf("failed to seed forecast state: %v", err)
@@ -248,13 +206,13 @@ func seedPoolPumpOpenRunInterval(t *testing.T, d *script.DeviceState, openForSec
 // enough to recover the lost time, and the reconciler must then start the
 // pump because "now" is back inside the (extended) window.
 func TestPoolPump_RuntimeRecovery_GapExtendsWindowToConverge(t *testing.T) {
-	d, forecastServed := poolPumpSummerWindowNow(t, 1 /* intended = 3600s */, -2*time.Hour, -1*time.Minute)
+	d := poolPumpSummerWindowNow(t, 1 /* intended = 3600s */, -2*time.Hour, -1*time.Minute)
 	fixtureStopMin := int64(minutesSinceMidnight(time.Now()) - 1) // the schedule's own (now past) stop
 	stop := runPoolPump(t, d)
 	defer stop()
 
 	sunsetHour := float64(minutesSinceMidnight(time.Now())+180) / 60 // far away: not the bound under test
-	seedPoolPumpForecastState(t, d, forecastServed, 40, sunsetHour, fixtureStopMin)
+	seedPoolPumpForecastState(t, d, 40, sunsetHour, fixtureStopMin)
 	seedPoolPumpRuntimeToday(t, d, 1800) // half of the 3600s intent achieved -> 1800s (30min) shortfall
 
 	originalStopMin := fixtureStopMin
@@ -282,13 +240,13 @@ func TestPoolPump_RuntimeRecovery_GapExtendsWindowToConverge(t *testing.T) {
 // the feature only ever recovers a real shortfall, never runs unconditionally
 // past the scheduled edge.
 func TestPoolPump_RuntimeRecovery_NoShortfallDoesNotExtend(t *testing.T) {
-	d, forecastServed := poolPumpSummerWindowNow(t, 1, -2*time.Hour, -1*time.Minute)
+	d := poolPumpSummerWindowNow(t, 1, -2*time.Hour, -1*time.Minute)
 	fixtureStopMin := int64(minutesSinceMidnight(time.Now()) - 1)
 	stop := runPoolPump(t, d)
 	defer stop()
 
 	sunsetHour := float64(minutesSinceMidnight(time.Now())+180) / 60
-	seedPoolPumpForecastState(t, d, forecastServed, 40, sunsetHour, fixtureStopMin)
+	seedPoolPumpForecastState(t, d, 40, sunsetHour, fixtureStopMin)
 	seedPoolPumpRuntimeToday(t, d, 3600) // intent already met: no shortfall
 
 	if err := evalPoolPumpSchedule(d, "handleEveningStop()"); err != nil {
@@ -317,13 +275,13 @@ func TestPoolPump_RuntimeRecovery_SolarCreditShortensExtension(t *testing.T) {
 	const intendedSec = 3600 // 1h
 
 	run := func(t *testing.T, alreadyRanSec float64) int64 {
-		d, forecastServed := poolPumpSummerWindowNow(t, intendedSec/3600, -2*time.Hour, -1*time.Minute)
+		d := poolPumpSummerWindowNow(t, intendedSec/3600, -2*time.Hour, -1*time.Minute)
 		fixtureStopMin := int64(minutesSinceMidnight(time.Now()) - 1)
 		stop := runPoolPump(t, d)
 		defer stop()
 
 		sunsetHour := float64(minutesSinceMidnight(time.Now())+180) / 60
-		seedPoolPumpForecastState(t, d, forecastServed, 40, sunsetHour, fixtureStopMin)
+		seedPoolPumpForecastState(t, d, 40, sunsetHour, fixtureStopMin)
 		seedPoolPumpRuntimeToday(t, d, alreadyRanSec)
 
 		if err := evalPoolPumpSchedule(d, "handleEveningStop()"); err != nil {
@@ -355,14 +313,14 @@ func TestPoolPump_RuntimeRecovery_SolarCreditShortensExtension(t *testing.T) {
 // far larger than the time remaining before sunset -- the "must not chase
 // the target indefinitely" design constraint.
 func TestPoolPump_RuntimeRecovery_BoundedBySunset(t *testing.T) {
-	d, forecastServed := poolPumpSummerWindowNow(t, 10 /* intended = 36000s, deliberately huge */, -2*time.Hour, -1*time.Minute)
+	d := poolPumpSummerWindowNow(t, 10 /* intended = 36000s, deliberately huge */, -2*time.Hour, -1*time.Minute)
 	fixtureStopMin := int64(minutesSinceMidnight(time.Now()) - 1)
 	stop := runPoolPump(t, d)
 	defer stop()
 
 	nowMin := minutesSinceMidnight(time.Now())
 	sunsetHour := float64(nowMin+40) / 60 // stopCeil = sunset - 0.5h = now + 10min
-	seedPoolPumpForecastState(t, d, forecastServed, 40, sunsetHour, fixtureStopMin)
+	seedPoolPumpForecastState(t, d, 40, sunsetHour, fixtureStopMin)
 	seedPoolPumpRuntimeToday(t, d, 0) // the whole 36000s is "owed"
 
 	if err := evalPoolPumpSchedule(d, "handleEveningStop()"); err != nil {
@@ -395,12 +353,11 @@ func TestPoolPump_RuntimeRecovery_HardCeilingStillRefusesRunaway(t *testing.T) {
 	kvs := solarKVS(map[string]string{"solar-max-turnover": "0.001"})
 
 	now := time.Now()
-	forecastURL, forecastServed := poolPumpBrokenForecastURL(t)
 	d := &script.DeviceState{
 		KVS: kvs,
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  forecastURL,
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus:      pro3ComponentStatus(),
 		Schedules:            poolPumpSummerSchedules(now.Add(-2*time.Hour), now.Add(-1*time.Minute)),
@@ -411,7 +368,7 @@ func TestPoolPump_RuntimeRecovery_HardCeilingStillRefusesRunaway(t *testing.T) {
 	defer stop()
 
 	sunsetHour := float64(minutesSinceMidnight(now)+180) / 60
-	seedPoolPumpForecastState(t, d, forecastServed, 40, sunsetHour, fixtureStopMin)
+	seedPoolPumpForecastState(t, d, 40, sunsetHour, fixtureStopMin)
 	// Comfortably past the ~7.7s hard ceiling, but nowhere near the schema-default
 	// computeRunHours() intent (~38700s) -- extendWindowForShortfall() sees a
 	// large shortfall and extends the window regardless of the ceiling; only
@@ -457,13 +414,13 @@ func TestPoolPump_RuntimeRecovery_HardCeilingStillRefusesRunaway(t *testing.T) {
 // (~60min). The two differ by a full 30 minutes, which the +/-5min tolerance
 // below cannot confuse with timing noise.
 func TestPoolPump_RuntimeRecovery_OpenIntervalCountsTowardShortfall(t *testing.T) {
-	d, forecastServed := poolPumpSummerWindowNow(t, 1 /* intended = 3600s */, -2*time.Hour, -1*time.Minute)
+	d := poolPumpSummerWindowNow(t, 1 /* intended = 3600s */, -2*time.Hour, -1*time.Minute)
 	fixtureStopMin := int64(minutesSinceMidnight(time.Now()) - 1)
 	stop := runPoolPump(t, d)
 	defer stop()
 
 	sunsetHour := float64(minutesSinceMidnight(time.Now())+180) / 60 // far away: not the bound under test
-	seedPoolPumpForecastState(t, d, forecastServed, 40, sunsetHour, fixtureStopMin)
+	seedPoolPumpForecastState(t, d, 40, sunsetHour, fixtureStopMin)
 	seedPoolPumpRuntimeToday(t, d, 0)          // no CLOSED interval at all
 	seedPoolPumpOpenRunInterval(t, d, 1800)    // but an OPEN one, running 1800s already
 
@@ -506,7 +463,7 @@ func TestPoolPump_RuntimeRecovery_OpenIntervalCountsTowardShortfall(t *testing.T
 func TestPoolPump_RuntimeRecovery_DailyCheckReseedsLeakedExtension(t *testing.T) {
 	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
 
-	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
+	forecast := poolPumpForecastPayload(t, poolPumpWidePeakHour, "00:00", "23:59")
 	now := time.Now()
 	start := time.Date(now.Year(), now.Month(), now.Day(), 1, 0, 0, 0, now.Location())
 	stop2 := time.Date(now.Year(), now.Month(), now.Day(), 23, 29, 0, 0, now.Location())
@@ -515,14 +472,19 @@ func TestPoolPump_RuntimeRecovery_DailyCheckReseedsLeakedExtension(t *testing.T)
 		KVS: poolPumpWindowKVS(poolPumpWideRunHours),
 		Storage: map[string]interface{}{
 			"schedule-mode": "summer",
-			"forecast-url":  srv.URL + "?daily=sunrise,sunset",
+			"forecast-url":  poolPumpFakeForecastURL,
 		},
 		ComponentStatus:      pro1ComponentStatus(),
 		Schedules:            poolPumpSummerSchedules(start, stop2),
 		ScheduleEvalInjector: make(chan []byte, 4),
 	}
-	stop := runPoolPump(t, d)
+	mc := mqtt.NewMockClient()
+	stop := runPoolPumpWithClient(t, d, mc)
 	defer stop()
+	// #465: the daemon's proxy result stands in for the old forecast server.
+	stopPublishing := make(chan struct{})
+	defer close(stopPublishing)
+	poolPumpPublishForecastUntil(context.Background(), mc, forecast, stopPublishing)
 
 	// The window already contains "now" (poolPumpWideStartMin/StopMin), so
 	// init's own onWindowJobs() call starts the pump without any event.

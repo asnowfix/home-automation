@@ -193,6 +193,9 @@ func (s *Service) regions(r *robot) ([]myhome.VacuumRegion, error) {
 // owner may be repairing a mapping); cleaning one stays refused by vacuum.clean.
 func (s *Service) AssignRoom(ctx context.Context, p *myhome.VacuumRoomAssignParams) (*myhome.VacuumRoomAssignResult, error) {
 	name, id, roomID := strings.TrimSpace(p.RegionName), strings.TrimSpace(p.RegionID), strings.TrimSpace(p.RoomID)
+	if p.RoomID != "" && roomID == "" {
+		return nil, fmt.Errorf("room is blank: use an empty room (unassign) to take the area out of its room")
+	}
 	if (name == "") == (id == "") {
 		return nil, fmt.Errorf("give exactly one of the area's name or id")
 	}
@@ -299,7 +302,10 @@ func resolveRoom(ctx context.Context, ref string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("listing rooms to look up %q: %w", ref, err)
 	}
-	rooms, _ := out.(*myhome.TemperatureRoomList)
+	rooms, ok := out.(*myhome.TemperatureRoomList)
+	if !ok {
+		return "", fmt.Errorf("unexpected temperature.list result %T", out)
+	}
 	var ids []string
 	if rooms != nil {
 		for id, cfg := range *rooms {

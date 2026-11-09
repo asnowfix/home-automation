@@ -3,6 +3,7 @@ package rooms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/mqtt"
@@ -181,7 +182,10 @@ func (s *Service) PublishRangesUpdate(ctx context.Context, roomID string) error 
 func (s *Service) GetComfortRanges(ctx context.Context, roomID string, date time.Time) ([]TimeRange, myhome.DayType, error) {
 	room, err := s.storage.GetRoom(roomID)
 	if err != nil {
-		return nil, "", fmt.Errorf("%w: %s", myhome.ErrRoomNotFound, roomID)
+		if errors.Is(err, myhome.ErrRoomNotFound) {
+			return nil, "", err // GetRoom already says "room not found: <id>"
+		}
+		return nil, "", fmt.Errorf("failed to get room %q: %w", roomID, err)
 	}
 
 	dayType := s.getDayType(ctx, roomID, date)

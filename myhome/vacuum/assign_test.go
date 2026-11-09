@@ -435,11 +435,26 @@ func TestAssignDuplicatesListPairs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Make region 4 stale (the robot reports another version of map m1).
+	// Only region 4 is stale: it was learned at map version v0, the robot reports v1 for m1
+	// (region 11 is at v1). A stale duplicate must not let the fresh one win silently.
+	if err := h.store.learnRegion(regionRecord{BLID: blid, MapID: "m1", MapVersion: "v0", RegionID: "4", RegionType: "rid"}); err != nil {
+		t.Fatal(err)
+	}
 	h.svc.mu.Lock()
-	h.svc.robots[blid].status = &myhome.VacuumStatus{Maps: []myhome.VacuumMap{{ID: "m1", Version: "other"}}}
+	h.svc.robots[blid].status = &myhome.VacuumStatus{Maps: []myhome.VacuumMap{{ID: "m1", Version: "v1"}}}
 	h.svc.mu.Unlock()
-	_, err := assignName(h, ctx, "", "Cuisine", "salon")
+	res, err := h.svc.Rooms("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := map[string]bool{}
+	for _, r := range res.Regions {
+		stale[r.ID] = r.Stale
+	}
+	if stale["11"] || !stale["4"] {
+		t.Fatalf("precondition: want only region 4 stale, got %v", stale)
+	}
+	_, err = assignName(h, ctx, "", "Cuisine", "salon")
 	if err == nil || !strings.Contains(err.Error(), "m1/11") || !strings.Contains(err.Error(), "m1/4") || !strings.Contains(err.Error(), "rename") {
 		t.Fatalf("same-map duplicate: %v", err)
 	}
@@ -459,5 +474,38 @@ func TestAssignDuplicatesListPairs(t *testing.T) {
 	_, err = assignName(h, ctx, "", "Hall", "salon")
 	if err == nil || !strings.Contains(err.Error(), "m1/4") || !strings.Contains(err.Error(), "m2/7") || !strings.Contains(err.Error(), "--map") {
 		t.Fatalf("name on two maps: %v", err)
+	}
+}
+
+// A room of only spaces from a non-CLI caller must not silently unassign.
+func TestAssignBlankRoomRefused(t *testing.T) {
+	fakeRooms(t, "salon")
+	h := assignHarness(t)
+	ctx := context.Background()
+	if _, err := assignID(h, ctx, "", "", "11", "salon"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := assignID(h, ctx, "", "", "11", "   "); err == nil || !strings.Contains(err.Error(), "blank") {
+		t.Fatalf("blank room: %v", err)
+	}
+	if got := roomOf(t, h, "m1", "11"); got != "salon" {
+		t.Errorf("a refused blank room changed the assignment to %q", got)
+	}
+}
+
+// temperature.list answering something else than a room list is an error, not "unknown room".
+func TestResolveRoomBadListResult(t *testing.T) {
+	fakeRooms(t, "salon")
+	prev, _ := myhome.Methods(myhome.TemperatureList)
+	t.Cleanup(func() {
+		if prev != nil {
+			myhome.RegisterMethodHandler(myhome.TemperatureList, prev.ActionE)
+		} else {
+			myhome.UnregisterMethodHandler(myhome.TemperatureList)
+		}
+	})
+	myhome.RegisterMethodHandler(myhome.TemperatureList, func(context.Context, any) (any, error) { return "oops", nil })
+	if _, err := resolveRoom(context.Background(), "Salon"); err == nil || !strings.Contains(err.Error(), "unexpected temperature.list result") {
+		t.Fatalf("bad list result: %v", err)
 	}
 }

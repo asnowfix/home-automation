@@ -75,13 +75,17 @@ func (m *recMQTT) count() int {
 func fastBridge(t *testing.T) {
 	t.Helper()
 	g, s := guardWait, stateMinInterval
-	guardWait, stateMinInterval = 50*time.Millisecond, 10*time.Millisecond
-	t.Cleanup(func() { guardWait, stateMinInterval = g, s })
+	r := retainedWindow
+	guardWait, stateMinInterval, retainedWindow = 50*time.Millisecond, 10*time.Millisecond, 0
+	t.Cleanup(func() { guardWait, stateMinInterval, retainedWindow = g, s, r })
 }
 
-func bridgeHarness(t *testing.T, mc *recMQTT) *harness {
+func bridgeHarness(t *testing.T, mc *recMQTT, tweak ...func()) *harness {
 	t.Helper()
 	fastBridge(t)
+	for _, f := range tweak {
+		f()
+	}
 	h := newHarness(t, fakeFinder{info: roomba.Info{BLID: blid, IP: "192.0.2.50", Name: "Edmond"}},
 		Config{BLID: blid, Password: fakePassword, Bridge: true, MQTT: mc, Instance: "prod"},
 		&robotRecord{BLID: blid, Name: "Edmond", Host: "192.0.2.50"})
@@ -217,10 +221,8 @@ func TestBridgeDedupesByID(t *testing.T) {
 
 func TestBridgeIgnoresRetainedReplay(t *testing.T) {
 	mc := newRecMQTT()
-	fastBridge(t)
-	retainedWindow = time.Minute // the replay arrives "right after subscribing"
-	t.Cleanup(func() { retainedWindow = 2 * time.Second })
-	h := bridgeHarness(t, mc)
+	// The replay arrives "right after subscribing".
+	h := bridgeHarness(t, mc, func() { retainedWindow = time.Minute })
 	// Made before the bridge subscribed, yet younger than the stale limit: only
 	// the retained-replay rule keeps it from starting the robot.
 	sendCmd(mc, BridgeCommand{ID: "replay", Cmd: "start", TS: time.Now().Add(-10 * time.Second)})

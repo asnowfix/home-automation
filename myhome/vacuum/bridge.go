@@ -111,6 +111,8 @@ type bridge struct {
 	roomsDirty atomic.Bool   // rooms need publishing too
 	guarding   atomic.Bool   // the single-owner guard is listening
 
+	throttle, window time.Duration // stateMinInterval and retainedWindow, read once
+
 	runMu        sync.Mutex // commands run one at a time
 	mu           sync.Mutex
 	seen         map[string]time.Time // command id -> first seen
@@ -121,6 +123,7 @@ func newBridge(s *Service, r *robot) *bridge {
 	return &bridge{
 		s: s, r: r, mc: s.cfg.MQTT, instance: s.cfg.Instance,
 		dirty: make(chan struct{}, 1), seen: map[string]time.Time{},
+		throttle: stateMinInterval, window: retainedWindow,
 	}
 }
 
@@ -155,6 +158,7 @@ func (b *bridge) publish(topic string, v any, retained bool) {
 // online availability. It waits up to guardWait for the retained message.
 func (b *bridge) claim() bool {
 	got := make(chan availability, 1)
+	wait := guardWait
 	b.guarding.Store(true)
 	defer b.guarding.Store(false)
 	err := b.mc.SubscribeWithHandler(b.s.ctx, b.topic("availability"), 8, "vacuum-bridge-guard",
@@ -182,7 +186,7 @@ func (b *bridge) claim() bool {
 				"Vacuum bridge: another daemon holds this robot; not connecting (the robot accepts a single local client)")
 			return false
 		}
-	case <-time.After(guardWait):
+	case <-time.After(wait):
 	case <-b.s.ctx.Done():
 		return false
 	}
@@ -253,7 +257,7 @@ func (b *bridge) loop() {
 			b.publishState()
 			select { // throttle; a notify during the wait is published right after
 			case <-b.s.ctx.Done():
-			case <-time.After(stateMinInterval):
+			case <-time.After(b.throttle):
 			}
 		}
 	}
@@ -274,7 +278,7 @@ func (b *bridge) onCmd(_ string, payload []byte, _ string) error {
 	b.mu.Lock()
 	sub := b.subscribedAt
 	b.mu.Unlock()
-	if now.Sub(sub) < retainedWindow && c.TS.Before(sub) {
+	if now.Sub(sub) < b.window && c.TS.Before(sub) {
 		b.s.log.Info("Vacuum bridge: ignoring a command that predates the subscription (retained replay)", "id", c.ID, "origin", c.Origin)
 		return nil
 	}

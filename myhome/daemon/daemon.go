@@ -646,6 +646,10 @@ func (d *daemon) Run() error {
 		if !vacuumCfg.Enabled() {
 			log.Info("Robot vacuum integration disabled (MYHOME_VACUUM_BLID / MYHOME_VACUUM_PASSWORD not set)")
 		}
+		if vacuumCfg.Bridge {
+			// The MQTT bridge (#782) is opt-in: MYHOME_VACUUM_BRIDGE.
+			vacuumCfg.MQTT, vacuumCfg.Instance = mc, myhome.InstanceName
+		}
 		vacuumService, err := vacuum.NewService(d.ctx, log, vacuumStorage, vacuumCfg)
 		if err != nil {
 			log.Error(err, "Failed to start vacuum service")

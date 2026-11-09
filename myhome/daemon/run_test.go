@@ -114,6 +114,14 @@ func TestVacuumConfigFromEnv(t *testing.T) {
 	if vacuumConfig().Wake {
 		t.Fatal("wake probe on without MYHOME_VACUUM_WAKE")
 	}
+	if vacuumConfig().Bridge {
+		t.Fatal("MQTT bridge on without MYHOME_VACUUM_BRIDGE")
+	}
+	t.Setenv("MYHOME_VACUUM_BRIDGE", "true")
+	readVacuumConfig(newViper())
+	if !vacuumConfig().Bridge {
+		t.Fatal("MYHOME_VACUUM_BRIDGE=true not read")
+	}
 	t.Setenv("MYHOME_VACUUM_WAKE", "true")
 	readVacuumConfig(newViper())
 	cfg := vacuumConfig()

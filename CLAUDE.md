@@ -200,7 +200,8 @@ public, and it stays public: GitHub keeps a PR's earlier commits reachable after
 issue's edit history shows earlier versions of its body. So **never publish**:
 
 - Wi-Fi SSIDs, access-point BSSIDs or MAC addresses, and access-point makes and models;
-- hostnames or IP addresses of the NAS or other infrastructure;
+- hostnames, or public IP addresses, of the NAS or other infrastructure (private-range addresses such as
+  `192.168.*` are fine: every IPv4 household has them, and they are not routable);
 - Wi-Fi or any other passwords, even partially;
 - per-device signal readings or exact outage times for security-relevant devices (gate, doors,
   locks), which together describe when and how they can be cut off.
@@ -494,4 +495,4 @@ Shelly runs a modified Espruino (ES5, no hoisting, limited ES6). Violations belo
 
 Home devices (the NAS, the home display) and their SSH MCP servers are described in the owner's private
 notes, `~/.claude/home-network/devices.md` on the owner's machines. This repository is public: never write
-device addresses or hostnames here.
+hostnames here. Private-range addresses (`192.168.*`) are allowed.

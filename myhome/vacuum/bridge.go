@@ -19,8 +19,11 @@ package vacuum
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,19 +35,21 @@ import (
 )
 
 const (
-	cmdMaxAge  = 30 * time.Second // a command older (or newer, clock skew) than this is refused
-	dedupeTTL  = 5 * time.Minute  // command ids remembered, so a QoS 1 redelivery cannot run twice
-	ownerFresh = 90 * time.Second // an availability heartbeat younger than this means a live owner
+	cmdMaxAge = 30 * time.Second // a command older (or newer, clock skew) than this is refused
+	dedupeTTL = 5 * time.Minute  // command ids remembered, so a QoS 1 redelivery cannot run twice
 
-	cmdEvac        = "evac"
 	cmdCleanRegion = "clean_regions"
+	dedupeMax      = 1000 // cap on remembered command ids
+	maxQueued      = 2    // commands running or waiting; more are refused as busy
 )
 
 // Timings of the bridge. Variables so tests can shorten them.
 var (
-	stateMinInterval = time.Second     // state is published at most once per interval; the last value always goes out
-	guardWait        = 3 * time.Second // how long to wait for a retained availability message at start
-	retainedWindow   = 2 * time.Second // a command arriving this soon after subscribing, made before it, is a retained replay
+	stateMinInterval = time.Second      // state is published at most once per interval; the last value always goes out
+	guardWait        = 3 * time.Second  // how long to wait for a retained availability message at start
+	ownerFresh       = 90 * time.Second // an availability heartbeat younger than this means a live owner
+	guardRecheck     = watchInterval    // how often a refused owner re-checks for a stale rival
+	retainedWindow   = 2 * time.Second  // a command arriving this soon after subscribing, made before it, is a retained replay
 )
 
 // BridgeTopic returns the topic of one leaf (state, rooms, availability, cmd, result) of robot id.
@@ -65,14 +70,27 @@ type Will struct {
 // availability heartbeat (every watchInterval) is the only liveness signal and
 // followers notice an owner crash after ownerFresh.
 func AvailabilityWill(id, instance string) Will {
-	p, _ := json.Marshal(availability{Online: false, Instance: instance})
+	p, _ := json.Marshal(availability{Online: false, Instance: instance, Owner: processOwner})
 	return Will{Topic: BridgeTopic(id, "availability"), Payload: p, QoS: mqtt.AtLeastOnce, Retained: true}
+}
+
+// processOwner identifies this process among daemons: the instance name alone
+// does not (it defaults to "myhome" everywhere), so it is the hostname plus a
+// random id drawn at start. A daemon recognises its own availability only by it.
+var processOwner = newOwnerID()
+
+func newOwnerID() string {
+	host, _ := os.Hostname()
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return host + "/" + hex.EncodeToString(b[:])
 }
 
 type availability struct {
 	Online   bool      `json:"online"`
 	TS       time.Time `json:"ts"`
 	Instance string    `json:"instance,omitempty"`
+	Owner    string    `json:"owner,omitempty"` // per-process id, see processOwner
 }
 
 // bridgeState is the payload of vacuum/<id>/state.
@@ -106,7 +124,9 @@ type bridge struct {
 	r        *robot
 	mc       mqtt.Client
 	instance string
+	owner    string // per-process id stamped on availability
 
+	inflight   atomic.Int32  // commands running or waiting
 	dirty      chan struct{} // state needs publishing (capacity 1)
 	roomsDirty atomic.Bool   // rooms need publishing too
 	guarding   atomic.Bool   // the single-owner guard is listening
@@ -120,8 +140,12 @@ type bridge struct {
 }
 
 func newBridge(s *Service, r *robot) *bridge {
+	owner := s.cfg.Owner
+	if owner == "" {
+		owner = processOwner
+	}
 	return &bridge{
-		s: s, r: r, mc: s.cfg.MQTT, instance: s.cfg.Instance,
+		s: s, r: r, mc: s.cfg.MQTT, instance: s.cfg.Instance, owner: owner,
 		dirty: make(chan struct{}, 1), seen: map[string]time.Time{},
 		throttle: stateMinInterval, window: retainedWindow,
 	}
@@ -153,44 +177,61 @@ func (b *bridge) publish(topic string, v any, retained bool) {
 	}
 }
 
-// claim implements the single-owner guard: it reports false, and the caller
-// must not connect to the robot, when another instance published a fresh
-// online availability. It waits up to guardWait for the retained message.
+// claim implements the single-owner guard: it returns true when this daemon
+// may connect to the robot, and false only when the service is stopping. While
+// another process (a different owner id) has a fresh online availability
+// retained, it logs an error and keeps waiting, re-checking every
+// watchInterval: a live owner keeps refreshing its heartbeat so it is never
+// taken over, while a dead one goes stale after ownerFresh (this also covers a
+// restart whose previous boot could not say goodbye). It waits up to guardWait
+// for the retained message at the first check.
 func (b *bridge) claim() bool {
-	got := make(chan availability, 1)
-	wait := guardWait
-	b.guarding.Store(true)
-	defer b.guarding.Store(false)
-	err := b.mc.SubscribeWithHandler(b.s.ctx, b.topic("availability"), 8, "vacuum-bridge-guard",
+	var mu sync.Mutex
+	var latest *availability
+	arrived := make(chan struct{}, 1)
+	ctx, cancel := context.WithCancel(b.s.ctx)
+	defer cancel() // the guard's subscription ends with the guard
+	var done atomic.Bool
+	err := b.mc.SubscribeWithHandler(ctx, b.topic("availability"), 8, "vacuum-bridge-guard",
 		func(_ string, payload []byte, _ string) error {
-			if !b.guarding.Load() {
+			if done.Load() {
 				return nil
 			}
 			var a availability
 			if json.Unmarshal(payload, &a) == nil {
+				mu.Lock()
+				latest = &a
+				mu.Unlock()
 				select {
-				case got <- a:
+				case arrived <- struct{}{}:
 				default:
 				}
 			}
 			return nil
 		})
+	defer done.Store(true)
 	if err != nil {
 		b.s.log.Info("Vacuum bridge: cannot check for another owner", "error", err.Error())
 		return true // fail open: the bridge is an addition, the robot link must not depend on it
 	}
-	select {
-	case a := <-got:
-		if a.Online && a.Instance != b.instance && time.Since(a.TS) < ownerFresh {
-			b.s.log.Error(fmt.Errorf("robot already owned by instance %q", a.Instance),
-				"Vacuum bridge: another daemon holds this robot; not connecting (the robot accepts a single local client)")
+	wait := guardWait
+	for {
+		select {
+		case <-arrived:
+		case <-time.After(wait):
+		case <-b.s.ctx.Done():
 			return false
 		}
-	case <-time.After(wait):
-	case <-b.s.ctx.Done():
-		return false
+		mu.Lock()
+		a := latest
+		mu.Unlock()
+		if a == nil || !a.Online || a.Owner == b.owner || time.Since(a.TS) >= ownerFresh {
+			return true
+		}
+		b.s.log.Error(fmt.Errorf("robot already owned by instance %q (%s)", a.Instance, a.Owner),
+			"Vacuum bridge: another daemon holds this robot; not connecting (the robot accepts a single local client); will re-check", "every", guardRecheck)
+		wait = guardRecheck
 	}
-	return true
 }
 
 // start subscribes to commands and runs the publisher until the service context ends.
@@ -207,7 +248,7 @@ func (b *bridge) start() {
 }
 
 func (b *bridge) publishAvailability(online bool) {
-	b.publish(b.topic("availability"), availability{Online: online, TS: time.Now(), Instance: b.instance}, true)
+	b.publish(b.topic("availability"), availability{Online: online, TS: time.Now(), Instance: b.instance, Owner: b.owner}, true)
 }
 
 func (b *bridge) publishState() {
@@ -244,7 +285,7 @@ func (b *bridge) loop() {
 		select {
 		case <-b.s.ctx.Done():
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			payload, _ := json.Marshal(availability{Online: false, TS: time.Now(), Instance: b.instance})
+			payload, _ := json.Marshal(availability{Online: false, TS: time.Now(), Instance: b.instance, Owner: b.owner})
 			_ = b.mc.Publish(ctx, b.topic("availability"), payload, mqtt.AtLeastOnce, true, "vacuum-bridge")
 			cancel()
 			return
@@ -267,6 +308,12 @@ func (b *bridge) loop() {
 func (b *bridge) onCmd(_ string, payload []byte, _ string) error {
 	var c BridgeCommand
 	if err := json.Unmarshal(payload, &c); err != nil || c.ID == "" {
+		var idOnly struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(payload, &idOnly) == nil && idOnly.ID != "" {
+			b.publish(b.topic("result"), BridgeResult{ID: idOnly.ID, Error: "malformed command"}, false)
+		}
 		b.s.log.Info("Vacuum bridge: ignoring malformed command")
 		return nil
 	}
@@ -291,6 +338,15 @@ func (b *bridge) onCmd(_ string, payload []byte, _ string) error {
 	}
 	_, dup := b.seen[c.ID]
 	if !dup {
+		if len(b.seen) >= dedupeMax { // bounded memory: forget the oldest
+			var oldest string
+			for id, at := range b.seen {
+				if oldest == "" || at.Before(b.seen[oldest]) {
+					oldest = id
+				}
+			}
+			delete(b.seen, oldest)
+		}
 		b.seen[c.ID] = now
 	}
 	b.mu.Unlock()
@@ -304,13 +360,25 @@ func (b *bridge) onCmd(_ string, payload []byte, _ string) error {
 		b.publish(b.topic("result"), BridgeResult{ID: c.ID, Error: "stale command (older than 30s or clock skew)"}, false)
 		return nil
 	}
+	if b.inflight.Add(1) > maxQueued {
+		b.inflight.Add(-1)
+		b.publish(b.topic("result"), BridgeResult{ID: c.ID, Error: "busy: another command is still waiting for the robot"}, false)
+		return nil
+	}
 	go b.exec(c)
 	return nil
 }
 
 func (b *bridge) exec(c BridgeCommand) {
+	defer b.inflight.Add(-1)
 	b.runMu.Lock()
 	defer b.runMu.Unlock()
+	// Freshness was checked on receipt; a command that waited for the one
+	// before it may have aged out since.
+	if age := time.Since(c.TS); age > cmdMaxAge {
+		b.publish(b.topic("result"), BridgeResult{ID: c.ID, Error: "stale command (expired while queued)"}, false)
+		return
+	}
 	log := b.s.log.WithValues("id", c.ID, "cmd", c.Cmd, "origin", c.Origin)
 	if c.Origin != b.instance {
 		log.Info("Vacuum bridge: command from another instance")
@@ -333,15 +401,12 @@ func (b *bridge) dispatch(c BridgeCommand) error {
 	case plainCommands[c.Cmd]:
 		_, err := b.s.Command(ctx, b.r.rec.BLID, c.Cmd)
 		return err
-	case c.Cmd == cmdEvac:
-		cl, err := b.s.client(b.r)
-		if err != nil {
-			return err
-		}
-		return cl.Command(ctx, cmdEvac, nil)
 	case c.Cmd == cmdCleanRegion:
 		if c.PmapID == "" || c.MapVersion == "" || len(c.Regions) == 0 {
 			return fmt.Errorf("clean_regions needs pmap_id, user_pmapv_id and regions")
+		}
+		if err := b.validateClean(c); err != nil {
+			return err
 		}
 		cl, err := b.s.client(b.r)
 		if err != nil {
@@ -350,4 +415,41 @@ func (b *bridge) dispatch(c BridgeCommand) error {
 		return cl.CleanRegions(ctx, roomba.Map{ID: c.PmapID, Version: c.MapVersion}, c.Regions)
 	}
 	return fmt.Errorf("unknown command %q", strings.TrimSpace(c.Cmd))
+}
+
+// validateClean refuses a room clean the robot's own RPC path would refuse: a
+// map the robot does not report, regions not known on that map, regions whose
+// map changed since they were learned (or that the cloud no longer lists), and
+// a map version nobody learned. Retry and abort-watch stay with the caller.
+func (b *bridge) validateClean(c BridgeCommand) error {
+	known, err := b.s.regions(b.r)
+	if err != nil {
+		return err
+	}
+	if _, ok := b.s.robotMapVersion(b.r, c.PmapID); !ok {
+		return fmt.Errorf("the robot does not report map %s: refusing to clean on it", c.PmapID)
+	}
+	versionKnown := false
+	for _, want := range c.Regions {
+		found := false
+		for _, reg := range known {
+			if reg.MapID != c.PmapID || reg.ID != want.ID || reg.Type != want.Type {
+				continue
+			}
+			found = true
+			if reg.Stale {
+				return fmt.Errorf("region %s is stale (its map changed since it was learned, or the cloud no longer lists it)", want.ID)
+			}
+			if reg.MapVersion == c.MapVersion {
+				versionKnown = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("region %s (%s) is not known on map %s", want.ID, want.Type, c.PmapID)
+		}
+	}
+	if !versionKnown {
+		return fmt.Errorf("map version %q is not one known for map %s", c.MapVersion, c.PmapID)
+	}
+	return nil
 }

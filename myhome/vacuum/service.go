@@ -55,6 +55,7 @@ type Config struct {
 	// it the service does not touch the broker at all. Needs MQTT.
 	Bridge   bool
 	MQTT     mqtt.Client // broker client for the bridge; set by the daemon
+	Owner    string      // per-process owner id; empty: generated at start (tests set it)
 	Instance string      // this daemon's instance name: stamped on availability, compared with command origins
 
 	IRobotEmail    string // iRobot account email (MYHOME_IROBOT_EMAIL), for room sync

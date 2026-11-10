@@ -209,6 +209,11 @@ func (d *daemon) Run() error {
 		mqttBrokerAddr = options.Flags.MqttBroker
 	}
 
+	// The vacuum bridge's last-will must be set before the client is created.
+	if err := setVacuumWill(vacuumConfig(), mqttclient.SetWill); err != nil {
+		log.Error(err, "Failed to set the vacuum bridge's MQTT last-will; followers rely on its heartbeat")
+	}
+
 	// Connect to the network's MQTT broker or use the embedded broker
 	err = mqttclient.NewClientE(d.ctx, mqttBrokerAddr, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, false)
 	if err != nil {
@@ -664,6 +669,10 @@ func (d *daemon) Run() error {
 		vacuumCfg := vacuumConfig()
 		if !vacuumCfg.Enabled() {
 			log.Info("Robot vacuum integration disabled (MYHOME_VACUUM_BLID / MYHOME_VACUUM_PASSWORD not set)")
+		}
+		if vacuumCfg.Bridge {
+			// The MQTT bridge (#782) is opt-in: MYHOME_VACUUM_BRIDGE.
+			vacuumCfg.MQTT, vacuumCfg.Instance = mc, myhome.InstanceName
 		}
 		vacuumService, err := vacuum.NewService(d.ctx, log, vacuumStorage, vacuumCfg)
 		if err != nil {

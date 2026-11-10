@@ -148,21 +148,29 @@ authorized.
 
 **CRITICAL**: Every new feature MUST include incremental unit test cases.
 
-#### Sub-agents: do NOT background `make test` — commit first (see issue #432)
+#### Sub-agents: never run `make test` in the foreground, never end the turn waiting (see issue #432)
 
-`make test` is slow here (`internal/shelly/scripts` alone ~183s, full run several minutes), which
-tempts agents into `run_in_background: true`. **Do not do this if you are a sub-agent.** Observed 4
-times out of 8 agent runs: the agent backgrounds the test, ends its turn to wait for the completion
-notification, and never resumes — so its work is left **uncommitted** and its final report,
-measurements and caveats are lost, even though the tests passed.
+CLAUDE.md is authoritative here (sections "The suite now outlives a foreground command" and
+"Running tests in a sub-agent"); read them. In short, two failure modes pull in opposite directions
+and the rules below avoid both:
+
+- The full suite now outlives the harness's 600 s foreground `Bash` cap, so a **foreground**
+  `make test` kills the agent mid-run (work uncommitted, no report).
+- Backgrounding the run and then **ending the turn** to wait for the notification stalls the agent
+  for good: observed 4 times out of 8 agent runs (#432), the work was left uncommitted and the
+  report, measurements and caveats were lost, even though the tests passed.
 
 Rules for sub-agents:
 
 1. **Commit your work BEFORE running the full test suite.** Then a stall costs you the report, never
    the code.
-2. **Run `make test` in the foreground** with a generous timeout. Use `go test ./path/...` on a
+2. **Never run `make test` in the foreground.** Start it with `run_in_background` writing to a file,
+   then poll that file with separate, short `Bash` calls within the same turn (a single long poll
+   loop is itself a foreground command and dies at 600 s). Read results by grepping
+   (`^(--- FAIL|FAIL|ok )`), and report the run's wall-clock duration. Use `go test ./path/...` on a
    single package for fast iteration and save the full `make test` for the end.
-3. Do not end your turn waiting on a background task.
+3. **Never end your turn while the run is in progress**; keep polling until it finishes or your
+   overall time budget is spent, then report what you have.
 
 If you are the **coordinating** agent and a sub-agent reports "waiting for the background test run",
 treat it as finished: review its branch (`git log <branch>`, `git diff <base>..<branch>`), run the
@@ -608,6 +616,15 @@ The packaging workflow uses `git describe` to determine the version. For this to
 2. The workflow must check out the tag (not the branch)
 3. Use `ref: ${{ github.event.ref }}` in checkout action
 
+#### Latest-release marker
+
+GitHub's `releases/latest` follows creation time, not version. The NAS `myhome-update.timer` (nightly 00:00) installs whatever it resolves to, so a backport release on an older minor line (e.g. `v0.12.x`) that takes "Latest" makes the NAS downgrade (seen with `v0.12.8` over `v0.13.0`; tracked in #583).
+
+- Publish older-line releases with `--latest=false`.
+- After every release or backport merge, run `gh api repos/asnowfix/home-automation/releases/latest --jq .tag_name` and confirm it is the highest line the NAS runs. Repair with `gh release edit <tag> --latest`.
+- Merging into a `vX.Y.x` branch runs `auto-tag-patch` (`make test`, then tag); `Package and Release` then creates the release as a Draft, and a Draft does not count as Latest.
+- Other sessions may merge backports concurrently (#621): check `gh pr list` and `gh run list` before tagging by hand.
+
 ---
 
 ## Configuration Management
@@ -703,6 +720,16 @@ Examples:
 - `temperatures.port` → `MYHOME_TEMPERATURES_PORT`
 
 ---
+
+## Handling Secrets
+
+The NAS credentials live in `/var/lib/myhome/.env` (mode 0600, root): `MYHOME_VACUUM_BLID`, `MYHOME_VACUUM_HOST`, `MYHOME_VACUUM_PASSWORD`, `MYHOME_IROBOT_EMAIL`, `MYHOME_IROBOT_PASSWORD`.
+
+- Never print, log or paste a password, token or the robot's local password, and never ask the owner to type the iRobot account password into a chat or issue. The owner edits these files themselves.
+- Check an `.env` by key names only: `grep -o -E '^MYHOME_[A-Z_]+=' <file>`. Never show values; compare values without printing them.
+- Tests of credential code use test values and temporary files, never the real ones.
+- Confirm with the owner before deleting a secrets file.
+- Packaging scripts must not wipe a stored secret on a blank answer (fixed in #629).
 
 ## Project Structure
 

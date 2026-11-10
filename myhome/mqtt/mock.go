@@ -2,6 +2,7 @@ package mqtt
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"sync"
 )
@@ -21,6 +22,7 @@ type RecordingMockClient struct {
 	subChans    map[string][]chan []byte  // topic -> raw-payload subscriber channels
 	subMsgChans map[string][]chan Message // topic -> Message subscriber channels
 	handlers    map[string][]handlerEntry // topic -> SubscribeWithHandler entries
+	will        *Will                     // last-will recorded by SetWill, nil when none
 }
 
 // NewRecordingMockClient returns a fresh RecordingMockClient ready for use.
@@ -71,6 +73,7 @@ func (m *RecordingMockClient) Reset() {
 	m.subChans = make(map[string][]chan []byte)
 	m.subMsgChans = make(map[string][]chan Message)
 	m.handlers = make(map[string][]handlerEntry)
+	m.will = nil
 }
 
 // Feed delivers payload to every subscriber currently listening on topic.
@@ -177,6 +180,31 @@ func (m *RecordingMockClient) Publisher(ctx context.Context, topic string, qlen 
 		}
 	}()
 	return ch, nil
+}
+
+// SetWill records the last-will, mirroring the package-level SetWill (same
+// validation). The mock never connects, so the will is only recorded.
+func (m *RecordingMockClient) SetWill(w Will) error {
+	if w.Topic == "" || w.QoS > 2 {
+		return errors.New("mqtt: invalid will")
+	}
+	w.Payload = append([]byte(nil), w.Payload...)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.will = &w
+	return nil
+}
+
+// Will returns the recorded last-will and whether one was configured.
+func (m *RecordingMockClient) Will() (Will, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.will == nil {
+		return Will{}, false
+	}
+	w := *m.will
+	w.Payload = append([]byte(nil), w.Payload...)
+	return w, true
 }
 
 func (m *RecordingMockClient) Start() error { return nil }

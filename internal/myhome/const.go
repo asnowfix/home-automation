@@ -21,6 +21,7 @@ const (
 	DeviceRefresh                 Verb = "device.refresh"
 	DeviceSetup                   Verb = "device.setup"
 	DeviceUpdate                  Verb = "device.update"
+	DeviceExport                  Verb = "device.export"
 	TemperatureGet                Verb = "temperature.get"
 	TemperatureSet                Verb = "temperature.set"
 	TemperatureList               Verb = "temperature.list"

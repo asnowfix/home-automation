@@ -34,29 +34,15 @@ func decodeLike(v Verb, reply any) (any, error) {
 }
 
 func (c *wireClient) LookupDevices(_ context.Context, _ string) (*[]devices.Device, error) {
-	out, err := decodeLike(DevicesMatch, c.daemon)
-	if err != nil {
-		return nil, err
-	}
-	res := make([]devices.Device, 0)
-	for _, d := range *out.(*[]DeviceSummary) {
-		res = append(res, d)
-	}
-	return &res, nil
+	return nil, errors.New("LookupDevices must not be used by the export (#775)")
 }
 func (c *wireClient) ForgetDevices(context.Context, string) error { return nil }
 func (c *wireClient) CallE(_ context.Context, v Verb, in any) (any, error) {
-	if v == DeviceShow {
-		id := in.(*DeviceShowParams).Identifier
-		if err := c.failing[id]; err != nil {
+	if v == DeviceExport {
+		if err := c.failing["*"]; err != nil {
 			return nil, err
 		}
-		for _, d := range c.daemon {
-			if d.Id() == id {
-				return decodeLike(v, d)
-			}
-		}
-		return nil, fmt.Errorf("device not found: %s", id)
+		return decodeLike(v, c.daemon)
 	}
 	if r, ok := c.results[v]; ok {
 		if err, isErr := r.(error); isErr {
@@ -103,19 +89,12 @@ func TestExportKeepsRoomAssignmentThroughRPCDecoding(t *testing.T) {
 	}
 }
 
-// If device.show fails for one device, it is still exported (summary only) and
-// the lost detail is reported, not silent.
-func TestExportReportsDeviceWithoutFullRecord(t *testing.T) {
-	c := &wireClient{daemon: []*Device{kitchenLamp()}, failing: map[string]error{"shellyplus1-abc": errors.New("timeout")}}
-	exp, err := ExportDatabase(context.Background(), c, "*", true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(exp.Devices) != 1 || exp.Devices[0].Id() != "shellyplus1-abc" || exp.Devices[0].MAC != "aa:bb:cc:dd:ee:01" {
-		t.Errorf("fallback device = %+v", exp.Devices)
-	}
-	if len(exp.Skipped) != 1 || !strings.Contains(exp.Skipped[0].String(), "shellyplus1-abc") || !strings.Contains(exp.Skipped[0].String(), "timeout") {
-		t.Errorf("skipped = %v", exp.Skipped)
+// If device.export fails, the whole export fails: a file silently missing its
+// devices must not be mistaken for a complete one.
+func TestExportFailsWhenDeviceExportFails(t *testing.T) {
+	c := &wireClient{daemon: []*Device{kitchenLamp()}, failing: map[string]error{"*": errors.New("timeout")}}
+	if _, err := ExportDatabase(context.Background(), c, "*", true); err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("err = %v, want the device.export failure", err)
 	}
 }
 

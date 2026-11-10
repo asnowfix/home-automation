@@ -26,6 +26,11 @@ func (c *recClient) LookupDevices(context.Context, string) (*[]devices.Device, e
 func (c *recClient) ForgetDevices(context.Context, string) error { return nil }
 func (c *recClient) CallE(_ context.Context, v Verb, in any) (any, error) {
 	c.calls = append(c.calls, v)
+	if v == DeviceExport {
+		if _, ok := c.results[v]; !ok {
+			return &[]*Device{}, nil
+		}
+	}
 	if c.params == nil {
 		c.params = map[Verb][]any{}
 	}
@@ -66,7 +71,7 @@ func TestExportIncludesVacuumAndSurvivesJSON(t *testing.T) {
 	}
 	// devices-only skips everything else
 	c = &recClient{}
-	if _, err := ExportDatabase(context.Background(), c, "*", true); err != nil || len(c.calls) != 0 {
+	if _, err := ExportDatabase(context.Background(), c, "*", true); err != nil || len(c.calls) != 1 || c.calls[0] != DeviceExport {
 		t.Errorf("devices-only made calls %v (%v)", c.calls, err)
 	}
 	// a daemon without the vacuum service just leaves the section out

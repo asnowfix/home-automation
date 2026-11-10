@@ -6,6 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Hobby project with three goals: learn Go, learn Claude Code, automate the house with [Shelly devices](https://www.shelly.com/). Prefer idiomatic, educational Go patterns. Keep changes small and well-explained. Simplicity over generality. Detailed guidelines (Shelly JS, RPC patterns, config management) are in `AGENTS.md`.
 
+## Home NAS
+
+The NAS `gruissan.local` (`192.168.1.2`) runs the `myhome` daemon, the MQTT broker (`tcp://192.168.1.2:1883`) and the nightly `myhome-update.timer`. Two SSH MCP servers reach it: `nas-ssh-admin` (user `admin`, NAS administration) and `nas-ssh-fix` (user `fix`, NAS user services). Register them on a new machine with the `home-setup` skill.
+
 ## Commands
 
 ```bash
@@ -49,7 +53,7 @@ go run ./myhome ctl shelly script debug <device> true
 go run ./tools/classify-events [events-dir] [testdata-dir]   # classify raw event dumps → pkg/shelly/mqtt/testdata/
 ```
 
-To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call` tools). It is pre-configured in `.mcp.json` with MQTT broker `tcp://192.168.1.2:1883` and approved via `enabledMcpjsonServers` in `.claude/settings.json`. The `.mcp.json` command automatically runs `go generate ./internal/myhome/ui/...` on first use in a fresh worktree (fetches CSS/JS assets required to compile); this needs internet access once per worktree. Restart Claude Code to activate.
+To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call` tools). It is pre-configured in `.mcp.json` with MQTT broker `tcp://<nas-address>:1883` and approved via `enabledMcpjsonServers` in `.claude/settings.json`. The `.mcp.json` command automatically runs `go generate ./internal/myhome/ui/...` on first use in a fresh worktree (fetches CSS/JS assets required to compile); this needs internet access once per worktree. Restart Claude Code to activate.
 
 `python3 -I scripts/myhome-ctl.py [ctl-args...]` (default `mcp`) runs the missing `go generate` steps of a fresh worktree, then `go run ./myhome ctl --instance myhome`, toward the MAIN instance; it is what `.mcp.json` calls (replaces `myhome-local.sh`, kept until verified). `python3 -I scripts/myhome-local-daemon.py` starts a LOCAL read-only daemon (instance `local`, home broker, #700 safe flags, scrubbed environment) in `~/.local/state/myhome/local-side-instance` (platform equivalents): it alone resets that directory's `myhome.db`, runs `db export` from the main daemon, then `db import` into the local one. Tests: `python3 -I -m unittest discover -s scripts -p 'test_*.py'`.
 
@@ -57,9 +61,10 @@ To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call`
 
 ### Test timeout — derived from measurement, never guessed
 
-`TESTFLAGS` in the root `Makefile` carries an explicit `-timeout`. **Whenever a full `make test`
+`TESTTIMEOUT` in the root `Makefile` is the explicit `-timeout`. **Whenever a full `make test`
 succeeds, set the timeout to the slowest package's measured duration plus 10%** (`N + N×0.1`), and
-record the measurement in the comment above `TESTFLAGS` with its date.
+record the measurement in the comment above `TESTFLAGS` with its date. Measure it on **one CPU**
+(see below): `make timeout-check` does that in a short run.
 
 The timeout then tracks what the suite actually costs instead of drifting until it silently fails.
 
@@ -79,6 +84,21 @@ Two things to get right:
   cost; it is wired in today (`Makefile`'s `cover` target). CI calls `make cover` five times across
   workflows against `make test` twice, so the measurement must still be taken under whichever
   configuration is currently slowest, which today is `-race`.
+- **Measure on ONE CPU, with `-parallel` pinned.** A runner may have a single thread, and a value
+  measured on a many-core machine does not bound it. `-timeout` is wall clock per test binary and
+  includes time parked waiting for a `t.Parallel()` slot, and `-parallel` defaults to `GOMAXPROCS`.
+  `internal/shelly/scripts` is wait-bound (emulator timers), not CPU-bound: with the default,
+  `taskset -c 0` ran one test at a time and took 634.934s, while `-parallel=24` on the same CPU took
+  35.3s (CPU time 9.2s; 24 CPUs: 38.8s wall, 12.6s CPU). So `TESTPARALLEL` pins `-parallel`
+  explicitly (like `TESTTIMEOUT`, in its own variable applied to every target), and the timeout is
+  derived from the one-CPU run with that pinned value. `make timeout-check` pins the scripts
+  packages to one CPU with `taskset -c 0` and fails if `TESTTIMEOUT` is below measured + 10%; it is
+  how you re-derive the value when the suite grows, without waiting for a full serial run. Do **not**
+  estimate the one-CPU time by dividing a many-core time by the core count (efficiency was ~65% at
+  24 cores), and do not use CPU time as a proxy for it for a wait-bound package. Prefer a
+  conservative value over the bare +10% (the current 120s is 3.6x the 33.8s measurement): a
+  too-low timeout produces spurious failures on slower CI cores, a too-high one only delays
+  detecting a real hang. (#748)
 - **Only a successful run may set it.** A run that timed out tells you nothing about how long the
   suite needs; raising the timeout from a failed run's duration just guesses again, more slowly.
 
@@ -201,6 +221,30 @@ the status board: post an update whenever a gate opens or closes, a measurement 
 decision changes, using explicit state words (new / pending / implementing / verifying / discarded /
 closed-by-PR / blocked). Do not post when nothing changed.
 
+### This repository is public — keep the house's network details out of it
+
+Everything written here, in issues, in PR descriptions, in review comments and in commit messages is
+public, and it stays public: GitHub keeps a PR's earlier commits reachable after a force-push, and an
+issue's edit history shows earlier versions of its body. So **never publish**:
+
+- Wi-Fi SSIDs, access-point BSSIDs or MAC addresses, and access-point makes and models;
+- public IP addresses or public DNS names of the NAS or other infrastructure. Private-range addresses
+  (`192.168.*`) and `.local` names (FQDNs such as `<host>.local`) are fine: they are the same in every
+  household and are not reachable from outside;
+- Wi-Fi or any other passwords, even partially;
+- per-device signal readings or exact outage times for security-relevant devices (gate, doors,
+  locks), which together describe when and how they can be cut off.
+
+Write generic terms instead ("outdoor AP", "internal AP", "the critical devices", "the evening of
+2026-10-31") and keep the details in the owner's private notes. Facts already published (Shelly device
+ids and names) need not be removed.
+
+**Check before publishing.** Grep a document for these items before committing it, and redact first:
+removing them afterwards does not remove them from GitHub. Worked example, 2026-11-05 (#654, #655): the
+first push of the observability study named the gate devices, the outdoor AP's make and model, exact
+outage times and the NAS's monitoring state; the redaction came one commit later, so the original stays
+reachable in the PR's history.
+
 ### `events.db` is the long-term record — query it before asserting a rate
 
 The daemon persists every device event to a SQLite database, so **how often something actually
@@ -280,10 +324,19 @@ The discipline that made this recoverable:
 
 ### NAS operational facts
 
-- **`myhome.service` restarts every 6 hours by design** — the packaged unit sets
-  `RuntimeMaxSec=21600`. So `NRestarts` climbing is expected, not a crash loop; check
-  `ExecMainStatus`/`Result` before treating it as one. Each restart triggers a rediscovery burst of
-  ~41 `device.online` events, roughly **164/day**, which is a large share of what #499 investigates.
+- **`myhome.service` restarts every 2 days by design** — the packaged unit sets
+  `RuntimeMaxSec=172800` (it was 6 hours / `21600` until #695). So `NRestarts` climbing is expected,
+  not a crash loop; check `ExecMainStatus`/`Result` before treating it as one. Each restart
+  triggers a rediscovery burst of ~41 `device.online` events: roughly **~20/day** at the 2-day
+  cadence (it was ~164/day at 6 h, which inflated what #499 investigates; figures measured before
+  2026-11 must be divided accordingly). The old 6-hour restart was **masking a goroutine leak**
+  (~+4/h of `net/http.(*persistConn)` pairs from unclosed response bodies and a per-request HTTPS
+  transport, #695), so a long-lived daemon is only trustworthy once the 2-day goroutine watch of
+  #695 has passed.
+- **NAS drop-in to remove after #695.** `/etc/systemd/system/myhome.service.d/no-runtime-max.conf`
+  (`RuntimeMaxSec=infinity`, added 2026-11-03 to observe the daemon beyond 6 h) overrides the
+  packaged value. Once the fixed build is installed and the #695 2-day watch is over, delete it and
+  run `systemctl daemon-reload` so the packaged 2-day restart applies again.
 - **The journal is `Storage=volatile`** and the daemon is chatty enough to rotate it away within
   ~15 minutes. **NAS post-mortem evidence does not survive** — use `events.db` (see above), which does.
 - **`sqlite3` is not installed on the NAS.** Query `events.db` with `python3`'s `sqlite3` module
@@ -308,7 +361,30 @@ The discipline that made this recoverable:
   `script/setup/done` is missing (`IsDeviceSetUp`, called from `myhome/devices/impl/manager.go`; the
   marker is defined in `internal/myhome/shelly/setup/setup.go`), not only to devices lacking
   `watchdog.js`; a daemon with an empty DB treats every device as new (#700). A `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst
-  tries to enable it, systemd refuses, everything before that has already succeeded.
+  tries to enable it, systemd refuses, and it **aborts there**. Binary, unit file and the daemon
+  restart have already happened, but the steps *after* the timer handling have **not** run
+  (measured 2026-11-06, v0.13.3): the `myhome ctl shelly script update '*'` push and the
+  `myhome-db-backup.timer` re-enable. Run them by hand as root, as postinst would:
+  `sudo /usr/bin/myhome ctl --wait 180s shelly script update '*'` and
+  `sudo systemctl enable --now myhome-db-backup.timer`. Also remove any local
+  `myhome.service.d/` override (e.g. `no-runtime-max.conf`) and `systemctl daemon-reload`, or the
+  packaged `RuntimeMaxSec` is silently overridden.
+- **A draft release is validated as a whole, through a real package installation.** Install the
+  draft's `.deb` for the host's architecture (`dpkg -i`, `DEBIAN_FRONTEND=noninteractive`, after
+  verifying its checksum) and run the postinst follow-ups above. Do not validate a draft by
+  hand-copying its binary, units or scripts, and do not skip or "preview away" parts of the install:
+  the script marker (`script/<name>` = sha1 of the packaged source) already makes the script push a
+  no-op on every device that is up to date. Installing an *individual* binary, script or config file
+  over SSH or the CLI is fine for development and debugging, but it does not count as having tested
+  the release. Before the push, only check what is device-specific: the production pump relay is OFF
+  and the time is outside its 23:00-00:30 winter window (#661).
+
+### Pushing from a worktree: `cd <worktree> && git push`, never `git -C <dir> push`
+
+Agents push with `cd <worktree> && git push -q -u origin <branch>`. The `git -C <dir> push ...` form is
+**denied** in the permission rules: it slips past every `git push` pattern (allow, ask and deny), so it
+would bypass the push guards that keep agents from pushing to `main` or release branches. `git -C <dir>`
+remains fine for read-only and local commands (`status`, `log`, `diff`, `add`, `commit`, `fetch`).
 
 ### Sub-agents
 
@@ -446,3 +522,9 @@ Shelly runs a modified Espruino (ES5, no hoisting, limited ES6). Violations belo
 - **Storage**: Use `Script.storage` for script-internal data, `KVS` for external config, in-memory vars for cache. See AGENTS.md "Data Storage Patterns".
 - **Timer limits**: Use single recurring timer with task queue for sequential async ops to avoid exhausting 5-timer limit. See AGENTS.md "Resource Limit Workarounds".
 - **Async state rebuild guard**: When a multi-step async chain rebuilds shared state (e.g. KVS.List → N×KVS.Get), set a `STATE.reloading` flag and have event handlers that read that state defer themselves via `queueTask` instead of silently dropping work. Clear the flag in every exit path (normal, empty-result, error). See AGENTS.md "Defer Incoming Events During Multi-Step Async State Updates".
+
+## Home network
+
+Home devices (the NAS, the home display) and their SSH MCP servers are described in the owner's private
+notes, `~/.claude/home-network/devices.md` on the owner's machines. This repository is public: never write
+public addresses or public DNS names here. Private-range addresses (`192.168.*`) and `.local` names are allowed.

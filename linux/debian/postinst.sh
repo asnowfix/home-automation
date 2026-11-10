@@ -338,8 +338,40 @@ if [ "$1" = "configure" ]; then
 
         if [ "$count" -gt 0 ]; then
             echo "Updating Shelly scripts on $count known device(s) (waited ${elapsed}s)..."
-            "$MYHOME_BIN" ctl --wait 180s shelly script update '*' || \
-                echo "Warning: script update did not complete cleanly on all devices; this does not affect package installation. Run 'myhome ctl shelly script update *' manually to retry." >&2
+            if ! "$MYHOME_BIN" ctl --wait 180s shelly script update '*'; then
+                # The registry count settles long before the devices answer
+                # RPCs, so right after a daemon restart a share of devices
+                # time out on this first pass (#793). The push is idempotent
+                # (sha1 KVS markers): pause, then run it one more time and
+                # report that result.
+                RETRY_PAUSE="${MYHOME_POSTINST_RETRY_PAUSE:-40}"
+                echo "Script update incomplete on the first pass (the daemon is probably still rediscovering devices); retrying once in ${RETRY_PAUSE}s..."
+                sleep "$RETRY_PAUSE" || true
+                RETRY_LOG="$(mktemp 2>/dev/null)" || RETRY_LOG=""
+                if [ -n "$RETRY_LOG" ]; then
+                    retry_rc=0
+                    "$MYHOME_BIN" ctl --wait 180s shelly script update '*' >"$RETRY_LOG" 2>&1 || retry_rc=$?
+                    cat "$RETRY_LOG" || true
+                else
+                    retry_rc=0
+                    "$MYHOME_BIN" ctl --wait 180s shelly script update '*' || retry_rc=$?
+                fi
+                if [ "$retry_rc" -eq 0 ]; then
+                    echo "Script update second pass: all devices updated."
+                else
+                    echo "Script update second pass: still incomplete on some devices." >&2
+                    # Best effort: list devices that still time out, from
+                    # lines like "timeout waiting for response from <id> (<name>)".
+                    if [ -n "$RETRY_LOG" ]; then
+                        failed_names="$(sed -n 's/.*timeout waiting for response from [^ ]* (\(.*\)).*/\1/p' "$RETRY_LOG" 2>/dev/null | sort -u | tr '\n' ' ' || true)"
+                        if [ -n "$failed_names" ]; then
+                            echo "Devices that still timed out: $failed_names" >&2
+                        fi
+                    fi
+                    echo "Warning: script update did not complete cleanly on all devices after the second pass; this does not affect package installation. Run 'myhome ctl shelly script update *' manually to retry." >&2
+                fi
+                [ -z "$RETRY_LOG" ] || rm -f "$RETRY_LOG" || true
+            fi
         else
             echo "No known devices found after ${elapsed}s; skipping script update. Run 'myhome ctl shelly script update *' manually once devices are reachable."
         fi

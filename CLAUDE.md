@@ -295,6 +295,12 @@ The discipline that made this recoverable:
   `/var/lib/myhome/.env` when stdin is a tty and `DEBIAN_FRONTEND` is not `noninteractive`. There is
   no dry-run; to preview (a), compare each device's `script/<name>` KVS value with `sha1sum` of the
   packaged `internal/shelly/scripts/<name>`.
+- **The first packaged-script push after a daemon restart is not meaningful (#793).** The daemon is
+  still rediscovering devices, so a third of them time out (`timeout waiting for response from ...`)
+  even though nothing is wrong. postinst therefore pauses (about 40 s) after a failing first pass and
+  runs the push once more, reporting only the second result. When running the push by hand right
+  after `dpkg` returns, do the same: run the push, then re-run it once and read only the second
+  result. The push is idempotent (sha1 markers), so the repeat is safe.
 - Pool provisioning (`Setup`/`AddDevice`/`UpdateDevice`) is reachable **only** from `myhome/ctl/pool/`,
   never from the daemon; the daemon's auto-setup applies solely to devices lacking `watchdog.js` as
   script #1. A `dpkg` exit code of 1 with state `iF` is expected while the timer is masked: postinst

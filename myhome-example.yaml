@@ -238,6 +238,11 @@ vacuum:
   # availability) and serve commands from vacuum/<id>/cmd, so other daemons can
   # follow the robot (#782). Default: false (the broker is not touched)
   # bridge: true
+  # Follower mode (#783): use a robot owned by another daemon through the MQTT
+  # broker, with no robot password here. Value: the robot id (BLID). Needs the
+  # other daemon to run with bridge: true; rejected together with password.
+  # Default: unset (off)
+  # follow: 0123456789ABCDEF0123456789ABCDEF
 
 # iRobot cloud account (optional; see docs/vacuum.md "Rooms"): used only to fetch
 # the robot's room names and ids, once at daemon start and on

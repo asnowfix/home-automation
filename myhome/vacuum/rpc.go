@@ -146,10 +146,21 @@ func (s *Service) Rooms(sel string) (*myhome.VacuumRoomsResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	if r.remote != nil {
+		rooms, _ := r.remote.roomsResult() // ok ignored: no rooms yet lists none, and Clean (via regions) reports the missing data
+		return &rooms, nil
+	}
 	return &myhome.VacuumRoomsResult{Regions: regions, CloudNames: s.cfg.CloudEnabled()}, nil
 }
 
 func (s *Service) regions(r *robot) ([]myhome.VacuumRegion, error) {
+	if r.remote != nil { // follower: the owner's retained rooms topic, no local database
+		rooms, ok := r.remote.roomsResult()
+		if !ok {
+			return nil, fmt.Errorf("no rooms received yet from the robot bridge of %s (is the owning daemon running with MYHOME_VACUUM_BRIDGE?)", r.rec.BLID)
+		}
+		return append([]myhome.VacuumRegion{}, rooms.Regions...), nil
+	}
 	recs, err := s.store.regions(r.rec.BLID)
 	if err != nil {
 		return nil, err
@@ -333,6 +344,9 @@ func (s *Service) NameRoom(sel, regionID, name string) (*myhome.VacuumOKResult, 
 	r, err := s.pick(sel)
 	if err != nil {
 		return nil, err
+	}
+	if r.remote != nil {
+		return nil, errFollower("room names", r.rec.BLID)
 	}
 	cloudOwned := s.cfg.CloudEnabled()
 	n, err := s.store.nameRegion(r.rec.BLID, regionID, strings.TrimSpace(name), cloudOwned)

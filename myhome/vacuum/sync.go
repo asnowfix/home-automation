@@ -36,6 +36,9 @@ func (s *Service) syncAtStart() {
 // which normally differs from the robot's; a room clean always sends the
 // robot's own version (see Clean).
 func (s *Service) SyncRooms(ctx context.Context, sel string) (*myhome.VacuumRoomsSyncResult, error) {
+	if s.cfg.Follow != "" {
+		return nil, errFollower("room sync", s.cfg.Follow)
+	}
 	if !s.cfg.CloudEnabled() {
 		return nil, errCloudDisabled
 	}

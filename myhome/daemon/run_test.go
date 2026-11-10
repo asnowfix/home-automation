@@ -178,3 +178,41 @@ func keys(m map[string]string) []string {
 	}
 	return out
 }
+
+// TestVacuumFollowConfig covers MYHOME_VACUUM_FOLLOW (#783): off by default,
+// read from the environment, and rejected together with a robot password.
+func TestVacuumFollowConfig(t *testing.T) {
+	saved := options.Flags
+	t.Cleanup(func() { options.Flags = saved })
+	newViper := func() *viper.Viper {
+		v := viper.New()
+		v.SetEnvPrefix("MYHOME")
+		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+		v.AutomaticEnv()
+		return v
+	}
+	for _, k := range []string{"MYHOME_VACUUM_FOLLOW", "MYHOME_VACUUM_PASSWORD", "MYHOME_VACUUM_BRIDGE"} {
+		t.Setenv(k, "")
+	}
+	readVacuumConfig(newViper())
+	if cfg := vacuumConfig(); cfg.Follow != "" || cfg.Validate() != nil {
+		t.Fatalf("follower mode on without MYHOME_VACUUM_FOLLOW: %+v", cfg)
+	}
+	t.Setenv("MYHOME_VACUUM_FOLLOW", "0123456789ABCDEF")
+	readVacuumConfig(newViper())
+	cfg := vacuumConfig()
+	if cfg.Follow != "0123456789ABCDEF" || cfg.Validate() != nil {
+		t.Fatalf("MYHOME_VACUUM_FOLLOW not read or wrongly rejected: %+v", cfg)
+	}
+	t.Setenv("MYHOME_VACUUM_PASSWORD", "test-password")
+	readVacuumConfig(newViper())
+	if err := vacuumConfig().Validate(); err == nil {
+		t.Fatal("MYHOME_VACUUM_FOLLOW accepted together with a robot password")
+	}
+	t.Setenv("MYHOME_VACUUM_PASSWORD", "")
+	t.Setenv("MYHOME_VACUUM_BRIDGE", "true")
+	readVacuumConfig(newViper())
+	if err := vacuumConfig().Validate(); err == nil {
+		t.Fatal("MYHOME_VACUUM_FOLLOW accepted together with the bridge")
+	}
+}

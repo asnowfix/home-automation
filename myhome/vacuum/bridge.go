@@ -55,23 +55,13 @@ var (
 // BridgeTopic returns the topic of one leaf (state, rooms, availability, cmd, result) of robot id.
 func BridgeTopic(id, leaf string) string { return "vacuum/" + id + "/" + leaf }
 
-// Will is the MQTT last-will of a bridge: the broker publishes it if the owner
-// dies without saying goodbye.
-type Will struct {
-	Topic    string
-	Payload  []byte
-	QoS      byte
-	Retained bool
-}
-
 // AvailabilityWill returns the last-will settings for the bridge of robot id.
-// This is the single seam to the MQTT client's last-will option (#781): the
-// caller that builds the MQTT client passes these to it. Until then the
-// availability heartbeat (every watchInterval) is the only liveness signal and
-// followers notice an owner crash after ownerFresh.
-func AvailabilityWill(id, instance string) Will {
+// The daemon passes it to mqtt.SetWill before creating the MQTT client, so the
+// broker publishes it if the owner dies. The availability heartbeat (every
+// watchInterval) remains the second line of defence.
+func AvailabilityWill(id, instance string) mqtt.Will {
 	p, _ := json.Marshal(availability{Online: false, Instance: instance, Owner: processOwner})
-	return Will{Topic: BridgeTopic(id, "availability"), Payload: p, QoS: mqtt.AtLeastOnce, Retained: true}
+	return mqtt.Will{Topic: BridgeTopic(id, "availability"), Payload: p, QoS: mqtt.AtLeastOnce, Retained: true}
 }
 
 // processOwner identifies this process among daemons: the instance name alone

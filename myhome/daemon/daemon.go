@@ -208,6 +208,11 @@ func (d *daemon) Run() error {
 		mqttBrokerAddr = options.Flags.MqttBroker
 	}
 
+	// The vacuum bridge's last-will must be set before the client is created.
+	if err := setVacuumWill(vacuumConfig(), mqttclient.SetWill); err != nil {
+		log.Error(err, "Failed to set the vacuum bridge's MQTT last-will; followers rely on its heartbeat")
+	}
+
 	// Connect to the network's MQTT broker or use the embedded broker
 	err = mqttclient.NewClientE(d.ctx, mqttBrokerAddr, myhome.InstanceName, options.Flags.MdnsTimeout, options.Flags.MqttTimeout, options.Flags.MqttGrace, options.Flags.MqttReconnectInterval, false)
 	if err != nil {

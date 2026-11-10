@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/spf13/cobra"
 )
 
 func TestPrintRoomsVersionsAndStale(t *testing.T) {
@@ -122,5 +123,54 @@ func TestRunAssignCallsOnlyTheRPC(t *testing.T) {
 	}
 	if !strings.Contains(b.String(), "moved from room salon to room cuisine") {
 		t.Errorf("output = %q", b.String())
+	}
+}
+
+// The ROOM column is sized from the data: a long room id keeps FROM aligned.
+func TestPrintRoomsAlignsLongRoomID(t *testing.T) {
+	var b strings.Builder
+	printRooms(&b, &myhome.VacuumRoomsResult{Regions: []myhome.VacuumRegion{
+		{MapID: "m1", ID: "11", Type: "rid", Name: "Chambre a coucher", Source: myhome.VacuumSourceRobot, RoomID: "chambre-parents-etage-superieur"},
+		{MapID: "m1", ID: "4", Type: "rid", Name: "Hall", Source: myhome.VacuumSourceRobot},
+	}})
+	col := -1
+	for _, l := range strings.Split(strings.TrimSpace(strings.SplitN(b.String(), "\n\n", 2)[0]), "\n") {
+		i := strings.Index(l, "robot")
+		if strings.HasPrefix(l, "REGION") {
+			i = strings.Index(l, "FROM")
+		}
+		if i < 0 || (col >= 0 && i != col) {
+			t.Fatalf("FROM column misaligned at %d (want %d) in:\n%s", i, col, b.String())
+		}
+		col = i
+	}
+}
+
+// Blank names are refused by the CLI, before any RPC, and without printing usage.
+func TestAssignRefusesBlankArguments(t *testing.T) {
+	fake := myhome.NewFakeClient()
+	old := myhome.TheClient
+	myhome.TheClient = fake
+	t.Cleanup(func() { myhome.TheClient = old })
+	for _, c := range []struct {
+		cmd  *cobra.Command
+		args []string
+		want string
+	}{
+		{roomsAssignCmd, []string{"  ", "salon"}, "area name is empty"},
+		{roomsAssignCmd, []string{"Cuisine", " "}, "room is empty"},
+		{roomsUnassignCmd, []string{""}, "area name is empty"},
+	} {
+		c.cmd.SilenceUsage = false
+		err := c.cmd.RunE(c.cmd, c.args)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s %q: err = %v, want %q", c.cmd.Name(), c.args, err, c.want)
+		}
+		if !c.cmd.SilenceUsage {
+			t.Errorf("%s: usage not silenced", c.cmd.Name())
+		}
+	}
+	if len(fake.Calls) != 0 {
+		t.Errorf("RPC called for blank input: %+v", fake.Calls)
 	}
 }

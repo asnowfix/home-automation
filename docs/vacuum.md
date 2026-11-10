@@ -178,7 +178,7 @@ which then never equals the robot's reported one.)
 A robot area (region) can be assigned to a room of the daemon (`myhome ctl room list`), so a
 room can later be cleaned by name. The CLI designates an area by the **human-friendly name** the
 daemon stores for it (the `NAME` column of `vacuum rooms`, e.g. `Cuisine`; case and surrounding
-spaces do not matter), never by the robot's or cloud's id. `vacuum rooms assign <area-name> <room-id>`
+spaces do not matter), never by the robot's or cloud's id. `vacuum rooms assign <area-name> <room>`
 stores the room id in `vacuum_regions.room_id` (RPC `vacuum.roomassign`); `unassign <area-name>`
 clears it; the `ROOM` column of `vacuum rooms` shows it (`-` when unassigned).
 
@@ -191,10 +191,17 @@ clears it; the `ROOM` column of `vacuum rooms` shows it (`-` when unassigned).
   salon to room cuisine`).
 - A name (like an id) is unique **per robot map** only. If it matches on two maps the command asks
   for `--map <map-id>` (it picks the single non-stale one when there is exactly one). Two areas of
-  **one** map with the same name cannot be told apart: the command refuses and asks to rename one.
+  **one** map with the same name cannot be told apart: the command refuses and asks to rename one;
+  this is checked first, so a stale duplicate on the same map does not resolve silently. Both
+  refusals list the clashing `map/id` pairs.
   Staleness of learned areas is unknown without a live connection and then counts as not stale.
-- The daemon checks that the room exists (through `temperature.get`); an unknown room is refused,
-  and a daemon without rooms answers "rooms are not enabled on this daemon". Unassigning needs no room.
+- The room may be given by its **id or its name** (case and surrounding spaces ignored). The daemon
+  resolves it through the rooms RPC verbs (`temperature.get`, then `temperature.list` for names; no
+  import of `myhome/rooms`) and stores the id. An exact id match wins over a name match; a name shared
+  by several rooms is refused, listing their ids. An unknown room is refused, and a daemon without
+  rooms answers "rooms are not enabled on this daemon". Unassigning needs no room.
+- Unassigned is stored as the empty string, not NULL (the column is `NOT NULL DEFAULT ''`; that is
+  intended, and readers treat `''` as unassigned).
 - The assignment survives `vacuum rooms sync` (renames, removals: a removed area goes stale and keeps
   its room) and is carried by `ctl db export` / `import`. A room deleted afterwards leaves a dangling
   id, which readers must treat as unassigned.

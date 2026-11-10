@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
@@ -191,7 +192,10 @@ func (s *Service) regions(r *robot) ([]myhome.VacuumRegion, error) {
 // that is an error asking to rename one. A stale region may be assigned (the
 // owner may be repairing a mapping); cleaning one stays refused by vacuum.clean.
 func (s *Service) AssignRoom(ctx context.Context, p *myhome.VacuumRoomAssignParams) (*myhome.VacuumRoomAssignResult, error) {
-	name, id, roomID := strings.TrimSpace(p.RegionName), strings.TrimSpace(p.RegionID), p.RoomID
+	name, id, roomID := strings.TrimSpace(p.RegionName), strings.TrimSpace(p.RegionID), strings.TrimSpace(p.RoomID)
+	if p.RoomID != "" && roomID == "" {
+		return nil, fmt.Errorf("room is blank: use an empty room (unassign) to take the area out of its room")
+	}
 	if (name == "") == (id == "") {
 		return nil, fmt.Errorf("give exactly one of the area's name or id")
 	}
@@ -221,6 +225,10 @@ func (s *Service) AssignRoom(ctx context.Context, p *myhome.VacuumRoomAssignPara
 		}
 	}
 	var reg myhome.VacuumRegion
+	if dup := sameMapDuplicates(matches); len(dup) > 0 {
+		// Checked before the stale/fresh pick: a stale duplicate must not resolve silently.
+		return nil, fmt.Errorf("%d areas of one map match %s: %s; rename one so they differ (`vacuum rooms name <region-id> <name>`, or in the iRobot app then `vacuum rooms sync`)", len(dup), what, pairs(dup))
+	}
 	switch {
 	case len(matches) == 0 && p.MapID != "":
 		return nil, fmt.Errorf("no %s on map %q for robot %s (see `myhome ctl vacuum rooms`)", what, p.MapID, r.rec.Name)
@@ -231,17 +239,11 @@ func (s *Service) AssignRoom(ctx context.Context, p *myhome.VacuumRoomAssignPara
 	case len(fresh) == 1:
 		reg = fresh[0]
 	default:
-		maps := map[string]bool{}
-		for _, m := range matches {
-			maps[m.MapID] = true
-		}
-		if len(maps) < len(matches) {
-			return nil, fmt.Errorf("%d areas of one map match %s: rename one so they differ (`vacuum rooms name`, or in the iRobot app then `vacuum rooms sync`)", len(matches), what)
-		}
-		return nil, fmt.Errorf("%s exists on %d robot maps; pass --map <map-id>", what, len(matches))
+		return nil, fmt.Errorf("%s exists on %d robot maps (%s); pass --map <map-id>", what, len(matches), pairs(matches))
 	}
 	if roomID != "" {
-		if err := checkRoomExists(ctx, roomID); err != nil {
+		roomID, err = resolveRoom(ctx, roomID)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -252,20 +254,74 @@ func (s *Service) AssignRoom(ctx context.Context, p *myhome.VacuumRoomAssignPara
 	return &myhome.VacuumRoomAssignResult{MapID: reg.MapID, RegionID: reg.ID, RegionName: reg.Name, RoomID: roomID, Previous: prev}, nil
 }
 
-// checkRoomExists asks the rooms service through its RPC verb rather than
-// importing myhome/rooms (an RPC boundary, as for every cross-service call).
-func checkRoomExists(ctx context.Context, roomID string) error {
-	m, err := myhome.Methods(myhome.TemperatureGet)
-	if err != nil {
-		return fmt.Errorf("rooms are not enabled on this daemon")
+// pairs renders regions as "map/id" pairs for error messages.
+func pairs(regs []myhome.VacuumRegion) string {
+	var parts []string
+	for _, r := range regs {
+		parts = append(parts, r.MapID+"/"+r.ID)
 	}
-	if _, err := m.ActionE(ctx, &myhome.TemperatureGetParams{RoomID: roomID}); err != nil {
-		if errors.Is(err, myhome.ErrRoomNotFound) {
-			return fmt.Errorf("unknown room %q", roomID)
+	return strings.Join(parts, ", ")
+}
+
+// sameMapDuplicates returns the regions of every map that holds more than one match.
+func sameMapDuplicates(matches []myhome.VacuumRegion) []myhome.VacuumRegion {
+	count := map[string]int{}
+	for _, m := range matches {
+		count[m.MapID]++
+	}
+	var dup []myhome.VacuumRegion
+	for _, m := range matches {
+		if count[m.MapID] > 1 {
+			dup = append(dup, m)
 		}
-		return fmt.Errorf("checking room %q: %w", roomID, err)
 	}
-	return nil
+	return dup
+}
+
+// resolveRoom returns the id of the daemon room designated by ref, which is the
+// room's id or its name. It asks the rooms service through its RPC verbs rather
+// than importing myhome/rooms (an RPC boundary, as for every cross-service
+// call; vacuum must not depend on rooms). An exact id match wins over a name
+// match; names are compared case-insensitively and trimmed; a name shared by
+// several rooms is refused with the candidates listed.
+func resolveRoom(ctx context.Context, ref string) (string, error) {
+	get, err := myhome.Methods(myhome.TemperatureGet)
+	if err != nil {
+		return "", fmt.Errorf("rooms are not enabled on this daemon")
+	}
+	if _, err := get.ActionE(ctx, &myhome.TemperatureGetParams{RoomID: ref}); err == nil {
+		return ref, nil
+	} else if !errors.Is(err, myhome.ErrRoomNotFound) {
+		return "", fmt.Errorf("checking room %q: %w", ref, err)
+	}
+	list, err := myhome.Methods(myhome.TemperatureList)
+	if err != nil {
+		return "", fmt.Errorf("unknown room %q", ref)
+	}
+	out, err := list.ActionE(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("listing rooms to look up %q: %w", ref, err)
+	}
+	rooms, ok := out.(*myhome.TemperatureRoomList)
+	if !ok {
+		return "", fmt.Errorf("unexpected temperature.list result %T", out)
+	}
+	var ids []string
+	if rooms != nil {
+		for id, cfg := range *rooms {
+			if cfg != nil && strings.EqualFold(strings.TrimSpace(cfg.Name), ref) {
+				ids = append(ids, id)
+			}
+		}
+	}
+	sort.Strings(ids)
+	switch len(ids) {
+	case 0:
+		return "", fmt.Errorf("unknown room %q (neither a room id nor a room name)", ref)
+	case 1:
+		return ids[0], nil
+	}
+	return "", fmt.Errorf("room name %q matches %d rooms (%s): use the room id", ref, len(ids), strings.Join(ids, ", "))
 }
 
 // NameRoom gives a region a local name. When the iRobot account is configured

@@ -364,3 +364,148 @@ func TestMigrationAddsRoomID(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// fakeRoomNames registers a temperature.list returning the given id -> name
+// rooms (registered on top of fakeRooms, which answers temperature.get).
+func fakeRoomNames(t *testing.T, names map[string]string) {
+	t.Helper()
+	prev, _ := myhome.Methods(myhome.TemperatureList)
+	t.Cleanup(func() {
+		if prev != nil {
+			myhome.RegisterMethodHandler(myhome.TemperatureList, prev.ActionE)
+		} else {
+			myhome.UnregisterMethodHandler(myhome.TemperatureList)
+		}
+	})
+	myhome.RegisterMethodHandler(myhome.TemperatureList, func(context.Context, any) (any, error) {
+		l := myhome.TemperatureRoomList{}
+		for id, n := range names {
+			l[id] = &myhome.TemperatureRoomConfig{RoomID: id, Name: n}
+		}
+		return &l, nil
+	})
+}
+
+// The room argument may be the room's name: case-insensitive, trimmed, and an
+// exact id match wins over a name match. Several rooms with one name are refused.
+func TestAssignRoomByName(t *testing.T) {
+	fakeRooms(t, "salon", "cuisine", "kitchen2")
+	fakeRoomNames(t, map[string]string{
+		"salon": "Salon", "cuisine": "Cuisine", "kitchen2": "cuisine", // "kitchen2" is also named like the id "cuisine"
+		"ch1": "Chambre", "ch2": " chambre ", "sdb": "Salle de bains",
+	})
+	h := assignHarness(t)
+	ctx := context.Background()
+
+	res, err := assignID(h, ctx, "", "", "11", "  SALLE DE BAINS ")
+	if err != nil || res.RoomID != "sdb" {
+		t.Fatalf("by name: %+v, %v", res, err)
+	}
+	if got := roomOf(t, h, "m1", "11"); got != "sdb" {
+		t.Errorf("stored room = %q, want the id", got)
+	}
+	// The id "cuisine" also is the name of kitchen2: the id wins.
+	if res, err = assignID(h, ctx, "", "", "11", "cuisine"); err != nil || res.RoomID != "cuisine" || res.Previous != "sdb" {
+		t.Fatalf("id vs name: %+v, %v", res, err)
+	}
+	// RoomID is trimmed daemon-side too.
+	if res, err = assignID(h, ctx, "", "", "4", "  salon\t"); err != nil || res.RoomID != "salon" {
+		t.Fatalf("untrimmed id: %+v, %v", res, err)
+	}
+	_, err = assignID(h, ctx, "", "", "11", "Chambre")
+	if err == nil || !strings.Contains(err.Error(), "ch1") || !strings.Contains(err.Error(), "ch2") {
+		t.Fatalf("ambiguous name must list ids: %v", err)
+	}
+	if got := roomOf(t, h, "m1", "11"); got != "cuisine" {
+		t.Errorf("a refused assignment changed the room to %q", got)
+	}
+	if _, err = assignID(h, ctx, "", "", "11", "nothing"); err == nil || !strings.Contains(err.Error(), `unknown room "nothing"`) {
+		t.Errorf("unknown: %v", err)
+	}
+}
+
+// A stale duplicate on the same map must not resolve silently, and the errors
+// list the clashing map/id pairs.
+func TestAssignDuplicatesListPairs(t *testing.T) {
+	fakeRooms(t, "salon")
+	h := assignHarness(t)
+	ctx := context.Background()
+	for _, id := range []string{"11", "4"} {
+		if _, err := h.store.nameRegion(blid, id, "Cuisine", false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Only region 4 is stale: it was learned at map version v0, the robot reports v1 for m1
+	// (region 11 is at v1). A stale duplicate must not let the fresh one win silently.
+	if err := h.store.learnRegion(regionRecord{BLID: blid, MapID: "m1", MapVersion: "v0", RegionID: "4", RegionType: "rid"}); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.mu.Lock()
+	h.svc.robots[blid].status = &myhome.VacuumStatus{Maps: []myhome.VacuumMap{{ID: "m1", Version: "v1"}}}
+	h.svc.mu.Unlock()
+	res, err := h.svc.Rooms("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := map[string]bool{}
+	for _, r := range res.Regions {
+		stale[r.ID] = r.Stale
+	}
+	if stale["11"] || !stale["4"] {
+		t.Fatalf("precondition: want only region 4 stale, got %v", stale)
+	}
+	_, err = assignName(h, ctx, "", "Cuisine", "salon")
+	if err == nil || !strings.Contains(err.Error(), "m1/11") || !strings.Contains(err.Error(), "m1/4") || !strings.Contains(err.Error(), "rename") {
+		t.Fatalf("same-map duplicate: %v", err)
+	}
+	// The same name on two maps lists the pairs too.
+	if err := h.store.learnRegion(regionRecord{BLID: blid, MapID: "m2", MapVersion: "v9", RegionID: "7", RegionType: "rid"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.nameRegion(blid, "7", "Hall", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.store.nameRegion(blid, "4", "Hall", false); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.mu.Lock()
+	h.svc.robots[blid].status = nil // no live state: nothing is stale
+	h.svc.mu.Unlock()
+	_, err = assignName(h, ctx, "", "Hall", "salon")
+	if err == nil || !strings.Contains(err.Error(), "m1/4") || !strings.Contains(err.Error(), "m2/7") || !strings.Contains(err.Error(), "--map") {
+		t.Fatalf("name on two maps: %v", err)
+	}
+}
+
+// A room of only spaces from a non-CLI caller must not silently unassign.
+func TestAssignBlankRoomRefused(t *testing.T) {
+	fakeRooms(t, "salon")
+	h := assignHarness(t)
+	ctx := context.Background()
+	if _, err := assignID(h, ctx, "", "", "11", "salon"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := assignID(h, ctx, "", "", "11", "   "); err == nil || !strings.Contains(err.Error(), "blank") {
+		t.Fatalf("blank room: %v", err)
+	}
+	if got := roomOf(t, h, "m1", "11"); got != "salon" {
+		t.Errorf("a refused blank room changed the assignment to %q", got)
+	}
+}
+
+// temperature.list answering something else than a room list is an error, not "unknown room".
+func TestResolveRoomBadListResult(t *testing.T) {
+	fakeRooms(t, "salon")
+	prev, _ := myhome.Methods(myhome.TemperatureList)
+	t.Cleanup(func() {
+		if prev != nil {
+			myhome.RegisterMethodHandler(myhome.TemperatureList, prev.ActionE)
+		} else {
+			myhome.UnregisterMethodHandler(myhome.TemperatureList)
+		}
+	})
+	myhome.RegisterMethodHandler(myhome.TemperatureList, func(context.Context, any) (any, error) { return "oops", nil })
+	if _, err := resolveRoom(context.Background(), "Salon"); err == nil || !strings.Contains(err.Error(), "unexpected temperature.list result") {
+		t.Fatalf("bad list result: %v", err)
+	}
+}

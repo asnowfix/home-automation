@@ -13,6 +13,10 @@ PROM_CONFIG_FILE="$CONFIG_DIR/prometheus-mqtt-exporter.yaml"
 PROM_EXAMPLE_CONFIG="/usr/share/$SERVICE/prometheus-mqtt-exporter.yaml.sample"
 ENV_FILE="$STATE_DIR/.env"
 
+# Test seams (see linux/debian/postinst_test.py). All default to the production
+# behaviour and are unset in a real package install.
+SYSTEMCTL="${MYHOME_POSTINST_SYSTEMCTL:-systemctl}"
+
 # All systemd units to manage
 SERVICES="${SERVICE}.service"
 TIMERS="${SERVICE}-update.timer ${SERVICE}-db-backup.timer"
@@ -267,20 +271,20 @@ fi
 # Check if the script is being run during package installation
 if [ "$1" = "configure" ]; then
     # Reload systemd to recognize the new services
-    systemctl daemon-reload
+    "$SYSTEMCTL" daemon-reload
 
     # Enable and start services
     for svc in $SERVICES; do
         echo "Enabling and starting $svc..."
-        systemctl reenable "$svc"
-        systemctl restart "$svc"
+        "$SYSTEMCTL" reenable "$svc"
+        "$SYSTEMCTL" restart "$svc"
     done
 
     # Enable and start timers
     for timer in $TIMERS; do
         echo "Enabling and starting $timer..."
-        systemctl reenable "$timer"
-        systemctl restart "$timer"
+        "$SYSTEMCTL" reenable "$timer"
+        "$SYSTEMCTL" restart "$timer"
     done
 
     # -------------------------------------------------------------------
@@ -298,12 +302,12 @@ if [ "$1" = "configure" ]; then
     # loaded on a device (see myhome/ctl/shelly/script/update.go), so
     # devices never receive scripts they didn't already have.
     # -------------------------------------------------------------------
-    MYHOME_BIN="/usr/bin/myhome"
+    MYHOME_BIN="${MYHOME_POSTINST_BIN:-/usr/bin/myhome}"
     if [ -x "$MYHOME_BIN" ]; then
         echo "Waiting for $SERVICE to discover its known devices..."
 
-        POLL_INTERVAL=3
-        MAX_WAIT=90
+        POLL_INTERVAL="${MYHOME_POSTINST_POLL_INTERVAL:-3}"
+        MAX_WAIT="${MYHOME_POSTINST_MAX_WAIT:-90}"
         elapsed=0
         prev_count=-1
         stable_polls=0
@@ -334,8 +338,40 @@ if [ "$1" = "configure" ]; then
 
         if [ "$count" -gt 0 ]; then
             echo "Updating Shelly scripts on $count known device(s) (waited ${elapsed}s)..."
-            "$MYHOME_BIN" ctl --wait 180s shelly script update '*' || \
-                echo "Warning: script update did not complete cleanly on all devices; this does not affect package installation. Run 'myhome ctl shelly script update *' manually to retry." >&2
+            if ! "$MYHOME_BIN" ctl --wait 180s shelly script update '*'; then
+                # The registry count settles long before the devices answer
+                # RPCs, so right after a daemon restart a share of devices
+                # time out on this first pass (#793). The push is idempotent
+                # (sha1 KVS markers): pause, then run it one more time and
+                # report that result.
+                RETRY_PAUSE="${MYHOME_POSTINST_RETRY_PAUSE:-40}"
+                echo "Script update incomplete on the first pass (the daemon is probably still rediscovering devices); retrying once in ${RETRY_PAUSE}s..."
+                sleep "$RETRY_PAUSE" || true
+                RETRY_LOG="$(mktemp 2>/dev/null)" || RETRY_LOG=""
+                if [ -n "$RETRY_LOG" ]; then
+                    retry_rc=0
+                    "$MYHOME_BIN" ctl --wait 180s shelly script update '*' >"$RETRY_LOG" 2>&1 || retry_rc=$?
+                    cat "$RETRY_LOG" || true
+                else
+                    retry_rc=0
+                    "$MYHOME_BIN" ctl --wait 180s shelly script update '*' || retry_rc=$?
+                fi
+                if [ "$retry_rc" -eq 0 ]; then
+                    echo "Script update second pass: all devices updated."
+                else
+                    echo "Script update second pass: still incomplete on some devices." >&2
+                    # Best effort: list devices that still time out, from
+                    # lines like "timeout waiting for response from <id> (<name>)".
+                    if [ -n "$RETRY_LOG" ]; then
+                        failed_names="$(sed -n 's/.*timeout waiting for response from [^ ]* (\(.*\)).*/\1/p' "$RETRY_LOG" 2>/dev/null | sort -u | tr '\n' ' ' || true)"
+                        if [ -n "$failed_names" ]; then
+                            echo "Devices that still timed out: $failed_names" >&2
+                        fi
+                    fi
+                    echo "Warning: script update did not complete cleanly on all devices after the second pass; this does not affect package installation. Run 'myhome ctl shelly script update *' manually to retry." >&2
+                fi
+                [ -z "$RETRY_LOG" ] || rm -f "$RETRY_LOG" || true
+            fi
         else
             echo "No known devices found after ${elapsed}s; skipping script update. Run 'myhome ctl shelly script update *' manually once devices are reachable."
         fi
@@ -344,10 +380,10 @@ if [ "$1" = "configure" ]; then
     fi
 
     # Restart prometheus-mqtt-exporter to apply new configuration
-    if systemctl list-unit-files prometheus-mqtt-exporter.service >/dev/null 2>&1; then
-        if systemctl is-active --quiet prometheus-mqtt-exporter; then
+    if "$SYSTEMCTL" list-unit-files prometheus-mqtt-exporter.service >/dev/null 2>&1; then
+        if "$SYSTEMCTL" is-active --quiet prometheus-mqtt-exporter; then
             echo "Restarting prometheus-mqtt-exporter to apply new configuration..."
-            systemctl restart prometheus-mqtt-exporter
+            "$SYSTEMCTL" restart prometheus-mqtt-exporter
         else
             echo "prometheus-mqtt-exporter is installed but not running, skipping restart"
         fi

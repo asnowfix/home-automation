@@ -13,3 +13,5 @@
 - FAILING BEFORE (unmodified push logic, seams only): `python3 -I linux/debian/postinst_test.py` -> Ran 8 tests, FAILED (failures=2): test_first_pass_fails_second_succeeds and test_persistent_failure_warns_and_names_device (AssertionError: 1 != 2, i.e. update ran once, no second pass). test_no_devices_skips_the_push passes (existing behaviour). A first attempt with POLL_INTERVAL=0 looped forever when no devices (elapsed never advances), hence the MAX_WAIT seam.
 - Implemented retry in postinst.sh (RETRY_PAUSE default 40 s, seam MYHOME_POSTINST_RETRY_PAUSE); CLAUDE.md note added after the dpkg/postinst bullet (v0.13.x has no separate manual-follow-up paragraph; the postinst bullet text did not claim a single run, left as is).
 - PASSING AFTER: `python3 -I linux/debian/postinst_test.py` -> Ran 8 tests, OK; `bash -n` ok.
+- Diff re-read against brief: retry once after 40 s pause, every new command guarded (|| / if !), exit status 0, masked-timer path untouched, no Go changes, seams default-off.
+- make test (run in background, includes `-race` and postinst_test.py): exit 0, no FAIL lines, wall clock 801 s (13m21s), measured 2026-11-10.

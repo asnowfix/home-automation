@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/myhome/vacuum"
 	"github.com/go-logr/logr"
 	"github.com/spf13/viper"
 )
@@ -114,6 +116,14 @@ func TestVacuumConfigFromEnv(t *testing.T) {
 	if vacuumConfig().Wake {
 		t.Fatal("wake probe on without MYHOME_VACUUM_WAKE")
 	}
+	if vacuumConfig().Bridge {
+		t.Fatal("MQTT bridge on without MYHOME_VACUUM_BRIDGE")
+	}
+	t.Setenv("MYHOME_VACUUM_BRIDGE", "true")
+	readVacuumConfig(newViper())
+	if !vacuumConfig().Bridge {
+		t.Fatal("MYHOME_VACUUM_BRIDGE=true not read")
+	}
 	t.Setenv("MYHOME_VACUUM_WAKE", "true")
 	readVacuumConfig(newViper())
 	cfg := vacuumConfig()
@@ -169,4 +179,27 @@ func keys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// The vacuum bridge's last-will is set only when the bridge is on and the
+// robot configured; with the bridge off the MQTT client gets no will at all.
+func TestSetVacuumWill(t *testing.T) {
+	var got []mqttclient.Will
+	set := func(w mqttclient.Will) error { got = append(got, w); return nil }
+	robot := vacuum.Config{BLID: "0123456789ABCDEF", Password: "test-password"}
+
+	if err := setVacuumWill(robot, set); err != nil || len(got) != 0 {
+		t.Fatalf("will set with the bridge off: %v (err %v)", got, err)
+	}
+	robot.Bridge = true
+	if err := setVacuumWill(vacuum.Config{Bridge: true}, set); err != nil || len(got) != 0 {
+		t.Fatalf("will set without a robot: %v (err %v)", got, err)
+	}
+	if err := setVacuumWill(robot, set); err != nil || len(got) != 1 {
+		t.Fatalf("will not set with the bridge on: %v (err %v)", got, err)
+	}
+	if got[0].Topic != "vacuum/0123456789ABCDEF/availability" || !got[0].Retained || got[0].QoS != 1 ||
+		!strings.Contains(string(got[0].Payload), `"online":false`) || strings.Contains(string(got[0].Payload), "test-password") {
+		t.Fatalf("will = %+v", got[0])
+	}
 }

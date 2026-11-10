@@ -58,6 +58,11 @@ type Config struct {
 	Owner    string      // per-process owner id; empty: generated at start (tests set it)
 	Instance string      // this daemon's instance name: stamped on availability, compared with command origins
 
+	// Follow, when set, is the id of a robot owned by another daemon (#783,
+	// MYHOME_VACUUM_FOLLOW): this daemon uses it through the broker and needs no
+	// password. Needs MQTT; rejected with a password or Bridge (see Validate).
+	Follow string
+
 	IRobotEmail    string // iRobot account email (MYHOME_IROBOT_EMAIL), for room sync
 	IRobotPassword string // iRobot account password (MYHOME_IROBOT_PASSWORD), from .env only
 }
@@ -65,6 +70,21 @@ type Config struct {
 // CloudEnabled reports whether the iRobot account is configured. Without it
 // room sync is a no-op and room names are local.
 func (c Config) CloudEnabled() bool { return c.IRobotEmail != "" && c.IRobotPassword != "" }
+
+// Validate rejects a configuration that mixes owner and follower mode: a
+// follower never holds the robot password, and does not publish a bridge.
+func (c Config) Validate() error {
+	if c.Follow == "" {
+		return nil
+	}
+	if c.Password != "" {
+		return errors.New("MYHOME_VACUUM_FOLLOW cannot be combined with MYHOME_VACUUM_PASSWORD: a follower uses the robot through the broker and must not hold its password")
+	}
+	if c.Bridge {
+		return errors.New("MYHOME_VACUUM_FOLLOW cannot be combined with MYHOME_VACUUM_BRIDGE: only the daemon that owns the robot publishes it")
+	}
+	return nil
+}
 
 // Enabled reports whether the robot is configured. Without both BLID and
 // password the service holds no connection and vacuum.list is empty.
@@ -94,6 +114,7 @@ type robot struct {
 	client    robotClient // nil while not connected
 	status    *myhome.VacuumStatus
 	connected bool
+	remote    *remoteRobot // set in follower mode (#783): the robot is read and commanded through the broker
 
 	watchers   map[chan myhome.VacuumStatus]struct{} // room cleans watching for an immediate abort
 	interrupts int                                   // stop/pause/resume/dock commands sent; a change cancels a retry
@@ -146,6 +167,12 @@ func NewService(ctx context.Context, log logr.Logger, store *Storage, cfg Config
 }
 
 func (s *Service) start() error {
+	if err := s.cfg.Validate(); err != nil {
+		return err
+	}
+	if s.cfg.Follow != "" {
+		return s.startFollower()
+	}
 	if !s.cfg.Enabled() {
 		if s.cfg.CloudEnabled() {
 			s.log.Info("iRobot account set but no robot configured: room sync needs MYHOME_VACUUM_BLID and MYHOME_VACUUM_PASSWORD")
@@ -417,6 +444,9 @@ func (s *Service) pick(sel string) (*robot, error) {
 func (s *Service) client(r *robot) (robotClient, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if r.remote != nil { // follower: the remote client fails fast itself when the bridge is offline
+		return r.client, nil
+	}
 	if r.client == nil || !r.connected {
 		return nil, fmt.Errorf("robot %s is not connected (last known address %q)", r.rec.Name, r.rec.Host)
 	}

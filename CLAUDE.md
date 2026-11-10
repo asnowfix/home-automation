@@ -49,9 +49,10 @@ To query live devices, use the built-in MCP server (`shelly_list`, `shelly_call`
 
 ### Test timeout — derived from measurement, never guessed
 
-`TESTFLAGS` in the root `Makefile` carries an explicit `-timeout`. **Whenever a full `make test`
+`TESTTIMEOUT` in the root `Makefile` is the explicit `-timeout`. **Whenever a full `make test`
 succeeds, set the timeout to the slowest package's measured duration plus 10%** (`N + N×0.1`), and
-record the measurement in the comment above `TESTFLAGS` with its date.
+record the measurement in the comment above `TESTFLAGS` with its date. Measure it on **one CPU**
+(see below): `make timeout-check` does that in a short run.
 
 The timeout then tracks what the suite actually costs instead of drifting until it silently fails.
 
@@ -71,6 +72,21 @@ Two things to get right:
   cost; it is wired in today (`Makefile`'s `cover` target). CI calls `make cover` five times across
   workflows against `make test` twice, so the measurement must still be taken under whichever
   configuration is currently slowest, which today is `-race`.
+- **Measure on ONE CPU, with `-parallel` pinned.** A runner may have a single thread, and a value
+  measured on a many-core machine does not bound it. `-timeout` is wall clock per test binary and
+  includes time parked waiting for a `t.Parallel()` slot, and `-parallel` defaults to `GOMAXPROCS`.
+  `internal/shelly/scripts` is wait-bound (emulator timers), not CPU-bound: with the default,
+  `taskset -c 0` ran one test at a time and took 634.934s, while `-parallel=24` on the same CPU took
+  35.3s (CPU time 9.2s; 24 CPUs: 38.8s wall, 12.6s CPU). So `TESTPARALLEL` pins `-parallel`
+  explicitly (like `TESTTIMEOUT`, in its own variable applied to every target), and the timeout is
+  derived from the one-CPU run with that pinned value. `make timeout-check` pins the scripts
+  packages to one CPU with `taskset -c 0` and fails if `TESTTIMEOUT` is below measured + 10%; it is
+  how you re-derive the value when the suite grows, without waiting for a full serial run. Do **not**
+  estimate the one-CPU time by dividing a many-core time by the core count (efficiency was ~65% at
+  24 cores), and do not use CPU time as a proxy for it for a wait-bound package. Prefer a
+  conservative value over the bare +10% (the current 120s is 3.6x the 33.8s measurement): a
+  too-low timeout produces spurious failures on slower CI cores, a too-high one only delays
+  detecting a real hang. (#748)
 - **Only a successful run may set it.** A run that timed out tells you nothing about how long the
   suite needs; raising the timeout from a failed run's duration just guesses again, more slowly.
 
@@ -200,8 +216,9 @@ public, and it stays public: GitHub keeps a PR's earlier commits reachable after
 issue's edit history shows earlier versions of its body. So **never publish**:
 
 - Wi-Fi SSIDs, access-point BSSIDs or MAC addresses, and access-point makes and models;
-- hostnames, or public IP addresses, of the NAS or other infrastructure (private-range addresses such as
-  `192.168.*` are fine: every IPv4 household has them, and they are not routable);
+- public IP addresses or public DNS names of the NAS or other infrastructure. Private-range addresses
+  (`192.168.*`) and `.local` names (FQDNs such as `<host>.local`) are fine: they are the same in every
+  household and are not reachable from outside;
 - Wi-Fi or any other passwords, even partially;
 - per-device signal readings or exact outage times for security-relevant devices (gate, doors,
   locks), which together describe when and how they can be cut off.
@@ -495,4 +512,4 @@ Shelly runs a modified Espruino (ES5, no hoisting, limited ES6). Violations belo
 
 Home devices (the NAS, the home display) and their SSH MCP servers are described in the owner's private
 notes, `~/.claude/home-network/devices.md` on the owner's machines. This repository is public: never write
-hostnames here. Private-range addresses (`192.168.*`) are allowed.
+public addresses or public DNS names here. Private-range addresses (`192.168.*`) and `.local` names are allowed.

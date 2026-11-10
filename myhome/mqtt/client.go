@@ -2,6 +2,7 @@ package mqtt
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -104,6 +105,36 @@ type client struct {
 }
 
 const BROKER_DEFAULT_NAME = "mqtt"
+
+// Will is an MQTT last-will: a message the broker publishes on the client's
+// behalf when the connection is lost without a clean DISCONNECT.
+type Will struct {
+	Topic    string
+	Payload  []byte
+	QoS      byte
+	Retained bool
+}
+
+// SetWill configures the last-will of the process-wide MQTT client. It must be
+// called before the client is created (before GetClientE / NewClientE): the
+// connect options are fixed at creation, and an error is returned otherwise.
+// The will is carried in the CONNECT packet, so it is re-registered with the
+// broker on every (re)connect. Without a call, no will is set (default).
+func SetWill(w Will) error {
+	if w.Topic == "" {
+		return errors.New("mqtt: will topic must not be empty")
+	}
+	if w.QoS > 2 {
+		return fmt.Errorf("mqtt: invalid will QoS %d", w.QoS)
+	}
+	mutex.Lock()
+	defer mutex.Unlock()
+	if theClient != nil {
+		return errors.New("mqtt: SetWill must be called before the client is created")
+	}
+	mqttOps.SetBinaryWill(w.Topic, append([]byte(nil), w.Payload...), w.QoS, w.Retained)
+	return nil
+}
 
 var mqttBroker string = BROKER_DEFAULT_NAME
 

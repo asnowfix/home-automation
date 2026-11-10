@@ -229,6 +229,7 @@ func pro1Schedules() []map[string]interface{} {
 }
 
 func TestPoolPump_InitVerifiesSchedules(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -316,6 +317,7 @@ func poolPumpSchedulesWrapped() []map[string]interface{} {
 // to recognize the wrapped jobs, so this fails by timeout if the substring
 // match in verifySchedules() regresses back to the old prefix-equality check.
 func TestPoolPump_InitVerifiesWrappedSchedules(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -363,6 +365,7 @@ func TestPoolPump_InitVerifiesWrappedSchedules(t *testing.T) {
 // device does — from a run window that contains "now" — and asserts the same
 // protect/restore behaviour against it.
 func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -490,6 +493,7 @@ func TestPoolPump_WaterSupplyRestoresSpeed(t *testing.T) {
 // emulator's "http.get" async like Timer.set/MQTT.subscribe already are --
 // see that file's "http.get" method for the full writeup and reproduction.
 func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -583,6 +587,7 @@ func TestPoolPump_ButtonCyclesPro3(t *testing.T) {
 // TestPoolPump_Pro1ToggleAndWaterSupply verifies Pro1 behaviour:
 // init, button toggle on/off, and water supply protection with restore.
 func TestPoolPump_Pro1ToggleAndWaterSupply(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -753,6 +758,7 @@ func assertSwitchOutput(t *testing.T, deviceState *script.DeviceState, want bool
 // observed input (true = protected) — not the first (false = clear), and
 // not some interleaved mix of the two.
 func TestPoolPump_WaterSupplyFlapFalseThenTrue(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -842,6 +848,7 @@ func TestPoolPump_WaterSupplyFlapFalseThenTrue(t *testing.T) {
 // completes) and asserts the pump ends restored, matching the LAST observed
 // input (false = clear) — not the first (true = protected).
 func TestPoolPump_WaterSupplyFlapTrueThenFalse(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -993,6 +1000,7 @@ func parseKVSFloat(t *testing.T, deviceState *script.DeviceState, key string) fl
 // stand-in start/stop trigger; both paths go through the same
 // activateOutput() hook being tested.)
 func TestPoolPump_RuntimeAccounting_TracksElapsedRunAndTurnover(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -1175,6 +1183,7 @@ func localDayNumber(epochSec int64) int64 {
 // proving the round trip is intact end to end, and that a same-day restart
 // carries the count forward instead of resetting it.
 func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -1269,6 +1278,7 @@ func TestPoolPump_RuntimeAccounting_ContinuesAfterReboot(t *testing.T) {
 // Script.storage["runtime"].sec across the reconciliation, not a specific
 // positive amount.
 func TestPoolPump_MissedStopReconciledAtNextBoot(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -1345,6 +1355,7 @@ func TestPoolPump_MissedStopReconciledAtNextBoot(t *testing.T) {
 // forward goja's Date() past a real midnight. Phase 2 must reset the count
 // to 0 rather than carrying yesterday's total into today.
 func TestPoolPump_RuntimeAccounting_PreviousDayRestartResets(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -1404,6 +1415,7 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartResets(t *testing.T) {
 // goja.SetMaxCallStackSize; until that lands, hardware verification is the
 // only thing that can actually catch a reintroduced version of this bug.
 func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -1462,6 +1474,7 @@ func TestPoolPump_RuntimeAccounting_PreviousDayRestartWithLoggingCompletesInit(t
 // stack-depth defect itself (goja does not model call-stack depth, #496) —
 // it only proves the persisted-figure semantics.
 func TestPoolPump_RuntimeAccounting_RolloverPersistsDiscardedFigure(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -1519,6 +1532,7 @@ func TestPoolPump_RuntimeAccounting_RolloverPersistsDiscardedFigure(t *testing.T
 // baseline instead of resetting to 0, exercising the async loadValueAsync/
 // loadRuntimeStateFromKVS path that loadStorageObject() alone cannot reach.
 func TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -1597,6 +1611,7 @@ func TestPoolPump_RuntimeAccounting_CorruptStorageFallsBackToKVS(t *testing.T) {
 // non-null without a real device restart in between (which always goes
 // through this same boot-time reset path).
 func TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -1641,6 +1656,7 @@ func TestPoolPump_RuntimeAccounting_LegacyMigrationDiscardsStaleDate(t *testing.
 // rather than drifting toward whatever moment each checkpoint happened to
 // run at.
 func TestPoolPump_RuntimeAccounting_AnchorDoesNotDriftAcrossCheckpoints(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -1706,6 +1722,7 @@ func TestPoolPump_RuntimeAccounting_AnchorDoesNotDriftAcrossCheckpoints(t *testi
 // the pump for real -- exercising the actual, production stopRuntimeAccounting()
 // -> persistRuntimeState() call chain, not a Go-side Storage overwrite.
 func TestPoolPump_RuntimeAccounting_StopRightAfterMidnightDoesNotCreditWholeRun(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -1811,6 +1828,7 @@ func solarSummerStorage() map[string]interface{} {
 // pump runs only on the night window. Same sequence as
 // TestPoolPump_SolarStartsAndStopsPump, which boots in summer and does start.
 func TestPoolPump_SolarNeverStartsPumpInWinter(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 	mc := mqtt.NewMockClient()
 	deviceState := &script.DeviceState{
@@ -1853,6 +1871,7 @@ func TestPoolPump_SolarNeverStartsPumpInWinter(t *testing.T) {
 // injected via ScheduleEvalInjector (as the day-rollover test does for runtime
 // state); the next solar message stands in for the 30s SOLAR.tickTimer.
 func TestPoolPump_SolarRunStopsWhenModeTurnsWinter(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 	mc := mqtt.NewMockClient()
 	evalCh := make(chan []byte, 4)
@@ -1897,6 +1916,7 @@ func TestPoolPump_SolarRunStopsWhenModeTurnsWinter(t *testing.T) {
 // below-threshold sample stops it again. Zero start/stop delays (solarKVS)
 // mean both transitions should happen essentially immediately.
 func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -1991,6 +2011,7 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 // mislabelled "override" by a relabelling rule that cannot tell an echo of
 // its own actuation from a genuine out-of-band change.
 func TestPoolPump_SolarStartAndStopSurvivesOwnEcho(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 	mc := mqtt.NewMockClient()
 	injector := make(chan []byte, 4)
@@ -2066,6 +2087,7 @@ func TestPoolPump_SolarStartAndStopSurvivesOwnEcho(t *testing.T) {
 // overridden to a tiny value so the ceiling is reachable by a modest
 // pre-seeded runtime-sec without waiting out the default target in real time.
 func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -2133,6 +2155,7 @@ func TestPoolPump_SolarRespectsHardCeiling(t *testing.T) {
 // on release) are not included here -- they need their own hold/release
 // sequencing and are left to #527 itself.
 func TestPoolPump_WaterSupplyOverridesSolar(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -2214,6 +2237,7 @@ func TestPoolPump_WaterSupplyOverridesSolar(t *testing.T) {
 // -- and would therefore mask a regression in the *other* reset path this
 // test targets: solarHardCeilingReached()'s own ensureRuntimeDay() call).
 func TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -2293,6 +2317,7 @@ func TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart(t *testing.
 // as today" — both go through doStart()/activateOutput(), unaffected by
 // checkSolarHysteresis's early-return-on-stale/absent path.
 func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -2354,6 +2379,7 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 // own `ts`, not from receipt time — the failure mode would otherwise start
 // the pump immediately (zero start delay, 600W above the 500W threshold).
 func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
+	t.Parallel()
 	buf := readPoolPumpScript(t)
 
 	mc := mqtt.NewMockClient()
@@ -2660,6 +2686,7 @@ func skipIfNowInside(t *testing.T, startMin, stopMin int) {
 // "now" inside the new window, must start the pump. This is the 2026-08-06
 // production failure: without the fix the pump stays off for the whole day.
 func TestPoolPump_ScheduleRewriteIntoPastStartsPump(t *testing.T) {
+	t.Parallel()
 	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
 
 	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
@@ -2691,6 +2718,7 @@ func TestPoolPump_ScheduleRewriteIntoPastStartsPump(t *testing.T) {
 // elapsed, the daily re-forecast rewrites it to one containing "now", and the
 // pump must start even though no schedule job fires.
 func TestPoolPump_SunriseRewriteStartsPump(t *testing.T) {
+	t.Parallel()
 	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
 
 	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
@@ -2718,6 +2746,7 @@ func TestPoolPump_SunriseRewriteStartsPump(t *testing.T) {
 // that is currently running, rather than leave it running until an
 // evening-stop instant that no longer matches anything.
 func TestPoolPump_ScheduleRewriteAwayStopsPump(t *testing.T) {
+	t.Parallel()
 	skipIfNowInside(t, poolPumpNarrowStartMin, poolPumpNarrowStopMin)
 
 	srv := poolPumpForecastServer(t, poolPumpNarrowPeakHour, "00:00", "23:59")
@@ -2751,6 +2780,7 @@ func TestPoolPump_ScheduleRewriteAwayStopsPump(t *testing.T) {
 // Regression guard: a rewrite that leaves the pump correctly off — "now" is
 // outside both the old and the new window — must not start it.
 func TestPoolPump_ScheduleRewriteOutsideWindowDoesNotStartPump(t *testing.T) {
+	t.Parallel()
 	skipIfNowInside(t, poolPumpNarrowStartMin, poolPumpNarrowStopMin)
 
 	srv := poolPumpForecastServer(t, poolPumpNarrowPeakHour, "00:00", "23:59")
@@ -2789,6 +2819,7 @@ func TestPoolPump_ScheduleRewriteOutsideWindowDoesNotStartPump(t *testing.T) {
 // know") for every job and these tests fail by leaving the pump in the wrong
 // state instead of erroring loudly — exactly the #441 failure shape.
 func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStartsPump(t *testing.T) {
+	t.Parallel()
 	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
 
 	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
@@ -2818,6 +2849,7 @@ func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStartsPump(t *testing.T) 
 }
 
 func TestPoolPump_WrappedScheduleCode_IsWithinRunWindowStopsPump(t *testing.T) {
+	t.Parallel()
 	skipIfNowInside(t, poolPumpNarrowStartMin, poolPumpNarrowStopMin)
 
 	srv := poolPumpForecastServer(t, poolPumpNarrowPeakHour, "00:00", "23:59")
@@ -2901,6 +2933,7 @@ func poolPumpWinterForecastServer(t *testing.T) *httptest.Server {
 // all and the derivation path in updateNext()'s completion must not run
 // either. The pump keeps running off the window resolved at init.
 func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testing.T) {
+	t.Parallel()
 	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
 
 	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
@@ -2972,6 +3005,7 @@ func TestPoolPump_DailyCheckNoOpRewriteLeavesWindowAndScheduleUnchanged(t *testi
 // path must resolve the night window from enable flags alone, which a
 // summer-only derivation would not exercise.
 func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
+	t.Parallel()
 	srv := poolPumpWinterForecastServer(t)
 	now := time.Now()
 
@@ -3052,6 +3086,7 @@ func TestPoolPump_DailyCheckWinterSwitchDerivesNightWindow(t *testing.T) {
 // already was — NOT get forced to "off" — even though updateScheduleMode()
 // did write a change (the morning job moved) and windowChanged is true.
 func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T) {
+	t.Parallel()
 	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
 	now := time.Now()
 
@@ -3137,6 +3172,7 @@ func TestPoolPump_DailyCheckMissingEveningJobLeavesWindowUnresolved(t *testing.T
 // place, performDailyModeCheck() would never run and schedule-mode would
 // stay 'winter' forever despite a forecast hot enough for 'summer'.
 func TestPoolPump_DailyCheckRunsDuringWaterSupplyProtection(t *testing.T) {
+	t.Parallel()
 	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")
 	now := time.Now()
 
@@ -3395,6 +3431,7 @@ func waitPoolPumpInit(t *testing.T, deviceState *script.DeviceState) bool {
 // pool-exhausted fallback in acquireCallSlot removed), this either recurses
 // past MAX_CALL_DEPTH's guard or loses every call past the 6th.
 func TestPoolPump_CallSlotBurstExhaustsPoolButSurvives(t *testing.T) {
+	t.Parallel()
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
 	mc := mqtt.NewMockClient()
@@ -3466,6 +3503,7 @@ func TestPoolPump_CallSlotBurstExhaustsPoolButSurvives(t *testing.T) {
 // must still be healthy enough for pool-pump.js's own, unrelated business
 // logic (a button press cycling the pump speed) to work normally afterwards.
 func TestPoolPump_CallSlotsReleaseAfterBurst(t *testing.T) {
+	t.Parallel()
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
 	mc := mqtt.NewMockClient()
@@ -3531,6 +3569,7 @@ func TestPoolPump_CallSlotsReleaseAfterBurst(t *testing.T) {
 // crash trace shows ("Too much recursion ... in function acquireCallSlot").
 // The deferred completion must still run, just later, off the task queue.
 func TestPoolPump_CallSlotDeepChainDefersInsteadOfRecursing(t *testing.T) {
+	t.Parallel()
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
 	mc := mqtt.NewMockClient()
@@ -3588,6 +3627,7 @@ func TestPoolPump_CallSlotDeepChainDefersInsteadOfRecursing(t *testing.T) {
 // error -105, at CALL_DEPTH 0 so it takes the non-deferred branch, and
 // checks the slot count is identical immediately before and after.
 func TestPoolPump_CallSlotErrorPathReleasesSlot(t *testing.T) {
+	t.Parallel()
 	buf := append(readPoolPumpScript(t), []byte(callSlotTestHarnessJS)...)
 
 	mc := mqtt.NewMockClient()
@@ -3648,6 +3688,7 @@ func TestPoolPump_CallSlotErrorPathReleasesSlot(t *testing.T) {
 // full key ("script/" + SCRIPT_NAME + "/" + suffix) against the limit, so a
 // future long key name fails here instead of silently on the pump.
 func TestPoolPump_KVSKeyLengthsUnderFirmwareLimit(t *testing.T) {
+	t.Parallel()
 	const firmwareKVSKeyLimit = 42 // device error: "length should be less than 42!"
 
 	src := string(readPoolPumpScript(t))
@@ -3733,6 +3774,7 @@ func TestPoolPump_KVSKeyLengthsUnderFirmwareLimit(t *testing.T) {
 // Static, deterministic, and it fails against the exact commit (2d542cc1)
 // that dropped the gate the first time.
 func TestPoolPump_TaskQueueThrottlesOnCallsInFlight(t *testing.T) {
+	t.Parallel()
 	src := string(readPoolPumpScript(t))
 
 	fnRe := regexp.MustCompile(`(?s)function processTaskQueue\(\)\s*\{(.*?)\n\}\n`)

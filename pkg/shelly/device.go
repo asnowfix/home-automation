@@ -259,10 +259,27 @@ func (d *Device) Id() string {
 	return d.Id_
 }
 
-func (d *Device) UpdateId(id string) {
-
+// checkDeviceId reports whether id is a device id this package can represent.
+//
+// Ids are deliberately NOT normalised (e.g. lower-cased): Gen1 devices publish
+// upper-case ids on MQTT (shellies/<ID>/...), and the id is also the database key,
+// so rewriting it here would make it diverge from both. An id that does not match
+// is rejected so that callers can skip the device instead of crashing.
+func checkDeviceId(id string) error {
 	if id == "" || id == "<nil>" || !deviceIdRe.MatchString(id) {
-		panic("invalid device id: " + id)
+		return fmt.Errorf("invalid device id: %q", id)
+	}
+	return nil
+}
+
+// UpdateId sets the device id. An invalid id is logged and ignored (it used to panic,
+// crash-looping the daemon, #800); constructors validate with checkDeviceId first and
+// return the error. The method keeps its error-less signature because it is part of
+// the types.Device interface, which has many implementations.
+func (d *Device) UpdateId(id string) {
+	if err := checkDeviceId(id); err != nil {
+		d.log.Error(err, "Ignoring invalid device id")
+		return
 	}
 	if d.Id_ == id {
 		return
@@ -632,6 +649,9 @@ func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devic
 	if id == "" || id == "<nil>" {
 		return nil, fmt.Errorf("invalid device id: %s", id)
 	}
+	if err := checkDeviceId(id); err != nil {
+		return nil, err
+	}
 	d := &Device{
 		log: log,
 	}
@@ -645,6 +665,9 @@ func NewDeviceFromMqttId(ctx context.Context, log logr.Logger, id string) (devic
 func NewDeviceFromSummary(ctx context.Context, log logr.Logger, summary devices.Device) (devices.Device, error) {
 	if summary.Id() == "" {
 		return nil, fmt.Errorf("device summary has empty ID (name=%q, host=%q)", summary.Name(), summary.Host())
+	}
+	if err := checkDeviceId(summary.Id()); err != nil {
+		return nil, fmt.Errorf("device summary (name=%q, host=%q): %w", summary.Name(), summary.Host(), err)
 	}
 	d := &Device{
 		// info: &shelly.DeviceInfo{
@@ -723,6 +746,9 @@ func (d *Device) initDeviceInfo(ctx context.Context, via types.Channel) error {
 	if d.Id() == "" || d.Mac() == nil {
 		info, err := shelly.GetDeviceInfo(ctx, d, via)
 		if err != nil {
+			return err
+		}
+		if err := checkDeviceId(info.Id); err != nil {
 			return err
 		}
 		d.info = info

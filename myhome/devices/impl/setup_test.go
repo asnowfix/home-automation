@@ -1,10 +1,13 @@
 package impl
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	shellyshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	mhd "github.com/asnowfix/home-automation/myhome/devices"
 	"github.com/go-logr/logr"
 )
 
@@ -35,6 +38,9 @@ func TestClassifyDevice(t *testing.T) {
 		{"shellyblumotion1-aabbccddeeff", []string{"motion", "battery"}, roleMotionSensor},
 		// Gen1 H&T
 		{"shellyht-abc123", nil, roleTempSensor},
+		// Other Gen1 devices have no KVS: not heaters (#800)
+		{"shellyflood-485519EE11F0", nil, roleUnknown},
+		{"shellydw-aabbcc", nil, roleUnknown},
 		// Heaters
 		{"shellyplus1-aabbcc", nil, roleHeater},
 		{"shellyplus2pm-xxyyzz", nil, roleHeater},
@@ -72,5 +78,57 @@ func TestSensorMQTTTopic(t *testing.T) {
 		if got != c.want {
 			t.Errorf("sensorMQTTTopic(%q) = %q, want %q", c.id, got, c.want)
 		}
+	}
+}
+
+// roomRegistry is a DeviceRegistry stub; only the two room-related methods are implemented.
+type roomRegistry struct {
+	mhd.DeviceRegistry
+	devices []*myhome.Device
+}
+
+func (r roomRegistry) GetAllDevices(context.Context) ([]*myhome.Device, error) { return r.devices, nil }
+
+func (r roomRegistry) GetDevicesByRoom(_ context.Context, room string) ([]*myhome.Device, error) {
+	var out []*myhome.Device
+	for _, d := range r.devices {
+		if d.RoomId == room {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
+// Regression for #800: a room holding a device with an invalid id must not panic
+// SetupAllRooms; the bad device is skipped and the heater is still processed.
+func TestSetupAllRooms_BadIdDeviceDoesNotPanic(t *testing.T) {
+	flood := makeDevice("shellyflood-485519EE11F0", nil)      // Gen1: not a heater, never built
+	badHeater := makeDevice("shellyplus1-AABBCCDDEEFF", nil) // heater-classed but invalid id
+	heater := makeDevice("shellyplus1-aabbccddeeff", nil)
+	for _, d := range []*myhome.Device{flood, badHeater, heater} {
+		d.RoomId = "sdb"
+	}
+	dm := &DeviceManager{log: logr.Discard(), dr: roomRegistry{devices: []*myhome.Device{flood, badHeater, heater}}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res := dm.SetupAllRooms(ctx) // must not panic
+
+	if res.RoomsProcessed != 1 {
+		t.Fatalf("RoomsProcessed = %d, want 1", res.RoomsProcessed)
+	}
+	got := map[string]myhome.RoomSetupDeviceResult{}
+	for _, dr := range res.Devices {
+		got[dr.DeviceID] = dr
+	}
+	if _, ok := got[flood.Id()]; ok {
+		t.Errorf("Gen1 flood sensor must not be set up: %+v", got[flood.Id()])
+	}
+	if bad, ok := got[badHeater.Id()]; !ok || bad.Error == "" {
+		t.Errorf("invalid-id device must be reported with an error, got %+v (present=%v)", bad, ok)
+	}
+	// The valid heater was attempted (no host: its KVS writes fail, but it was not skipped).
+	if _, ok := got[heater.Id()]; !ok {
+		t.Errorf("valid heater was not processed; results: %+v", res.Devices)
 	}
 }

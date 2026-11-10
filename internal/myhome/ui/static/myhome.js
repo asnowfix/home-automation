@@ -140,7 +140,7 @@ var kiosk = {
     kiosk.roomTimer = null;
     var r = document.querySelector('#room-view [data-devices]');
     if (!kiosk.roomOpen || !r) { return; }
-    if (document.querySelector('#room-vacuum [data-confirming]')) {
+    if (document.querySelector('#room-vacuum[data-confirming]')) {
       kiosk.roomTimer = setTimeout(kiosk.roomRefresh, kiosk.roomRefreshMs);
       return;
     }

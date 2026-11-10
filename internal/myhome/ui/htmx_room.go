@@ -244,8 +244,8 @@ func (h *HTMXHandler) RoomVacuum(w http.ResponseWriter, r *http.Request) { h.roo
 const roomPageTemplate = `
 {{define "room-vacuum"}}{{if .Show}}<div id="room-vacuum" class="mh-room-block"
      hx-get="/htmx/room/{{.RoomID | urlquery}}/vacuum" hx-swap="outerHTML"
-     hx-trigger="every 5s [kiosk.visible('rooms') && kiosk.roomOpen && kiosk.online && !document.querySelector('#room-vacuum [data-confirming]')]"
-     x-data="{ask: false, t: 0, open() { this.ask = true; clearTimeout(this.t); this.t = setTimeout(() => { this.ask = false }, 20000) }, close() { clearTimeout(this.t); this.ask = false }}"
+     hx-trigger="every 5s [kiosk.visible('rooms') && kiosk.roomOpen && kiosk.online && !document.querySelector('#room-vacuum[data-confirming]')]"
+     x-data="{ask: false, t: 0, open() { this.ask = true; clearTimeout(this.t); this.t = setTimeout(() => { this.ask = false }, 20000) }, hold() { clearTimeout(this.t) }, close() { clearTimeout(this.t); this.ask = false }}"
      :data-confirming="ask ? 'true' : null">
   <h3 class="mh-room-label">Vacuum</h3>
   {{if .Areas}}<p>Areas: {{range $i, $a := .Areas}}{{if $i}}, {{end}}{{$a}}{{end}}</p>
@@ -259,7 +259,7 @@ const roomPageTemplate = `
   <div class="mh-vac-confirm" x-show="ask" x-cloak>
     <p class="mh-vac-ask">Clean {{.RoomName}} now? The robot leaves its dock.</p>
     <button type="button" class="mh-vac-btn" @click="close()">Cancel</button>
-    <button type="button" class="mh-vac-btn is-primary" data-room-clean-confirm hx-disabled-elt="this"
+    <button type="button" class="mh-vac-btn is-primary" data-room-clean-confirm hx-disabled-elt="this" @htmx:before-request="hold()"
             hx-post="/htmx/vacuum/action" hx-vals='{{.Vals}}' hx-target="#room-vacuum" hx-swap="outerHTML"><span class="mh-when-idle">Clean</span><span class="mh-when-busy">Starting&hellip;</span></button>
   </div>
   {{else if .Areas}}

@@ -31,7 +31,7 @@ func (s *Service) RegisterHandlers() {
 	})
 	myhome.RegisterMethodHandler(myhome.VacuumClean, func(ctx context.Context, in any) (any, error) {
 		p := in.(*myhome.VacuumCleanParams)
-		return s.Clean(ctx, p.Robot, p.Rooms)
+		return s.CleanOnMap(ctx, p.Robot, p.Map, p.Rooms)
 	})
 	myhome.RegisterMethodHandler(myhome.VacuumRooms, func(ctx context.Context, in any) (any, error) {
 		return s.Rooms(in.(*myhome.VacuumParams).Robot)

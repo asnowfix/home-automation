@@ -19,6 +19,7 @@ import (
 // roomCleanPlan is what "clean this room" would do right now.
 type roomCleanPlan struct {
 	Robot    myhome.VacuumRobot
+	MapID    string   // the map the ids are on; sent to vacuum.clean so it can refuse a map that changed meanwhile
 	IDs      []string // region ids to send to vacuum.clean; all on one map of one robot
 	Areas    []string // labels of every region mapped to the room, stale ones marked
 	Assigned bool     // at least one region (stale or not) is mapped to the room
@@ -110,17 +111,8 @@ func (h *HTMXHandler) planRoomClean(roomID string) roomCleanPlan {
 		return p
 	}
 	g := groups[0]
-	p.Robot = g.robot
+	p.Robot, p.MapID = g.robot, g.mapID
 	for _, reg := range g.regs {
-		for _, other := range g.all {
-			if other.Stale || (other.MapID == reg.MapID && other.ID == reg.ID) {
-				continue
-			}
-			if sharesIdentifier(reg, other) {
-				p.Reason = fmt.Sprintf("Area id %s is also used on another robot map, so the robot cannot tell them apart", reg.ID)
-				return p
-			}
-		}
 		p.IDs = append(p.IDs, reg.ID)
 	}
 
@@ -131,6 +123,7 @@ func (h *HTMXHandler) planRoomClean(roomID string) roomCleanPlan {
 		if g.robot.Host != "" {
 			p.Reason += " (last seen at " + g.robot.Host + ")"
 		}
+		return p
 	case !ctl.CleanAll:
 		p.Reason = "Robot busy"
 		if st := g.robot.Status; st != nil {
@@ -138,6 +131,18 @@ func (h *HTMXHandler) planRoomClean(roomID string) roomCleanPlan {
 				p.Reason += ": cleaning " + strings.Join(t, ", ")
 			} else {
 				p.Reason += ": " + myhome.VacuumPhaseText(st.Phase)
+			}
+		}
+		return p
+	}
+	for _, reg := range g.regs {
+		for _, other := range g.all {
+			if other.Stale || (other.MapID == reg.MapID && other.ID == reg.ID && other.Type == reg.Type) {
+				continue
+			}
+			if sharesIdentifier(reg, other) {
+				p.Reason = fmt.Sprintf("Area id %s is also used on another robot map, so the robot cannot tell them apart", reg.ID)
+				return p
 			}
 		}
 	}
@@ -221,7 +226,7 @@ func (h *HTMXHandler) startRoomClean(robot, roomID, name string, notice *string)
 	case robot != p.Robot.ID && robot != p.Robot.Name:
 		return fmt.Errorf("this room's areas are on robot %q, not %q", p.Robot.Name, robot)
 	}
-	res, err := callVacuum(h.ctx, myhome.VacuumClean, &myhome.VacuumCleanParams{Robot: p.Robot.ID, Rooms: p.IDs})
+	res, err := callVacuum(h.ctx, myhome.VacuumClean, &myhome.VacuumCleanParams{Robot: p.Robot.ID, Map: p.MapID, Rooms: p.IDs})
 	if err != nil {
 		return err
 	}

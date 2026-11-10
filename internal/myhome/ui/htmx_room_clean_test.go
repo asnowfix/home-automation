@@ -6,10 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/net/html"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 )
@@ -180,7 +183,7 @@ func TestRoomVacuumConfirmMarkup(t *testing.T) {
 	for _, want := range []string{"Clean Séjour now? The robot leaves its dock.", "20000", ":data-confirming",
 		"Starting&hellip;", `hx-disabled-elt="this"`, `hx-target="#room-vacuum"`, `hx-swap="outerHTML"`,
 		"&#34;room_id&#34;:&#34;sejour&#34;", "&#34;command&#34;:&#34;clean-rooms&#34;",
-		"!document.querySelector('#room-vacuum [data-confirming]')"} {
+		"!document.querySelector('#room-vacuum[data-confirming]')"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q:\n%s", want, out)
 		}
@@ -333,5 +336,141 @@ func TestVacuumPanel_ConfirmScopeGolden(t *testing.T) {
 		if strings.Contains(out, banned) {
 			t.Errorf("Vacuum section mentions %q", banned)
 		}
+	}
+}
+
+// guardSelector is the selector the 5 s poll and the device refresh use to see an
+// open confirm. It must match the element Alpine puts data-confirming on.
+const guardSelector = "#room-vacuum[data-confirming]"
+
+// attrNodes returns every element of the document that carries attribute name.
+func attrNodes(n *html.Node, name string, out *[]*html.Node) {
+	if n.Type == html.ElementNode {
+		for _, a := range n.Attr {
+			if a.Key == name {
+				*out = append(*out, n)
+			}
+		}
+	}
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		attrNodes(c, name, out)
+	}
+}
+
+func attrOf(n *html.Node, name string) (string, bool) {
+	for _, a := range n.Attr {
+		if a.Key == name {
+			return a.Val, true
+		}
+	}
+	return "", false
+}
+
+// The guard selector is applied to the rendered block: Alpine's `:data-confirming`
+// binding sits on the element with id room-vacuum itself, so `#room-vacuum[data-confirming]`
+// is what matches once the binding is true. The descendant form never matches.
+func TestRoomVacuumGuardSelectorMatchesTheBoundElement(t *testing.T) {
+	e := newCleanEnv(t, idleRobot("R1"))
+	e.regions["R1"] = []myhome.VacuumRegion{reg("m1", "1", "Salon", "sejour")}
+	out := e.block(t)
+
+	doc, err := html.Parse(strings.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bound []*html.Node
+	attrNodes(doc, ":data-confirming", &bound)
+	if len(bound) != 1 {
+		t.Fatalf("want exactly one element binding data-confirming, got %d:\n%s", len(bound), out)
+	}
+	if id, _ := attrOf(bound[0], "id"); id != "room-vacuum" {
+		t.Fatalf("data-confirming is bound on #%s, the guard looks at #room-vacuum", id)
+	}
+	// the selector, parsed as #id[attr], is satisfied by that very element
+	m := regexp.MustCompile(`^#([\w-]+)\[([\w-]+)\]$`).FindStringSubmatch(guardSelector)
+	if m == nil {
+		t.Fatalf("guard selector %q is not of the form #id[attr]", guardSelector)
+	}
+	if id, _ := attrOf(bound[0], "id"); id != m[1] {
+		t.Errorf("selector id %q does not match the bound element %q", m[1], id)
+	}
+	if _, ok := attrOf(bound[0], ":"+m[2]); !ok {
+		t.Errorf("selector attribute %q is not the one bound", m[2])
+	}
+
+	// the same selector, verbatim, is what the poll trigger and the refresh script use
+	if !strings.Contains(out, "!document.querySelector('"+guardSelector+"')") {
+		t.Errorf("poll trigger does not use %s:\n%s", guardSelector, out)
+	}
+	js, err := os.ReadFile("static/myhome.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), "document.querySelector('"+guardSelector+"')") || strings.Contains(string(js), "#room-vacuum [data-confirming]") {
+		t.Errorf("myhome.js does not use %s", guardSelector)
+	}
+	if strings.Contains(out, "#room-vacuum [data-confirming]") {
+		t.Error("descendant selector left in the markup")
+	}
+}
+
+// The 20 s auto-cancel is stopped when the confirmed request starts, so the guard
+// stays up until the response swaps the block.
+func TestRoomVacuumAutoCancelStopsWhenRequestStarts(t *testing.T) {
+	e := newCleanEnv(t, idleRobot("R1"))
+	e.regions["R1"] = []myhome.VacuumRegion{reg("m1", "1", "Salon", "sejour")}
+	out := e.block(t)
+	if !strings.Contains(out, `@htmx:before-request="hold()"`) || !strings.Contains(out, "hold() { clearTimeout(this.t) }") {
+		t.Errorf("auto-cancel is not cleared when the request starts:\n%s", out)
+	}
+}
+
+// vacuum.clean is told the map the room was resolved on.
+func TestVacuumAction_RoomCleanSendsTheMap(t *testing.T) {
+	e := newCleanEnv(t, idleRobot("R1"))
+	e.regions["R1"] = []myhome.VacuumRegion{reg("m7", "1", "Salon", "sejour")}
+	e.post(t, roomForm())
+	if len(e.cleaned) != 1 || e.cleaned[0].Map != "m7" {
+		t.Fatalf("cleaned %+v, want Map m7", e.cleaned)
+	}
+}
+
+// Offline and busy win over the collision reason; a rid and a zid sharing an id are
+// distinct regions; a stale collider and a name equal to the id behave as documented.
+func TestRoomVacuumReasonOrderAndCollisionEdges(t *testing.T) {
+	offline := idleRobot("R1")
+	offline.Connected = false
+	zone := reg("m1", "1", "Zone", "other")
+	zone.Type = "zid"
+	named := reg("m2", "9", "1", "other") // a region whose NAME is the id of ours
+
+	tests := []struct {
+		name    string
+		robot   myhome.VacuumRobot
+		regions []myhome.VacuumRegion
+		want    string // reason substring; "" = enabled
+	}{
+		{"offline beats collision", offline, []myhome.VacuumRegion{reg("m1", "1", "Salon", "sejour"), reg("m2", "1", "Garage", "garage")}, "Robot offline"},
+		{"rid and zid sharing an id on one map collide", idleRobot("R1"), []myhome.VacuumRegion{reg("m1", "1", "Salon", "sejour"), zone}, "also used on another robot map"},
+		{"name equal to the id collides", idleRobot("R1"), []myhome.VacuumRegion{reg("m1", "1", "Salon", "sejour"), named}, "also used on another robot map"},
+		{"stale collider is allowed", idleRobot("R1"), []myhome.VacuumRegion{reg("m1", "1", "Salon", "sejour"), func() myhome.VacuumRegion {
+			r := named
+			r.Stale = true
+			return r
+		}()}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newCleanEnv(t, tc.robot)
+			e.regions["R1"] = tc.regions
+			out := e.block(t)
+			if tc.want == "" {
+				if !strings.Contains(out, "data-room-clean-confirm") {
+					t.Errorf("want enabled:\n%s", out)
+				}
+			} else if !strings.Contains(out, tc.want) || strings.Contains(out, "data-room-clean-confirm") {
+				t.Errorf("want reason %q:\n%s", tc.want, out)
+			}
+		})
 	}
 }

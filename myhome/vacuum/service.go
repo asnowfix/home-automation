@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/asnowfix/home-automation/pkg/roomba"
 	"github.com/asnowfix/home-automation/pkg/roomba/cloud"
 	"github.com/go-logr/logr"
@@ -49,6 +50,19 @@ type Config struct {
 	// (MYHOME_VACUUM_WAKE, #630). Off by default until measured.
 	Wake bool
 
+	// Bridge publishes the robot's state to the MQTT broker and serves
+	// commands from it (#782, MYHOME_VACUUM_BRIDGE). Off by default: without
+	// it the service does not touch the broker at all. Needs MQTT.
+	Bridge   bool
+	MQTT     mqtt.Client // broker client for the bridge; set by the daemon
+	Owner    string      // per-process owner id; empty: generated at start (tests set it)
+	Instance string      // this daemon's instance name: stamped on availability, compared with command origins
+
+	// Follow, when set, is the id of a robot owned by another daemon (#783,
+	// MYHOME_VACUUM_FOLLOW): this daemon uses it through the broker and needs no
+	// password. Needs MQTT; rejected with a password or Bridge (see Validate).
+	Follow string
+
 	IRobotEmail    string // iRobot account email (MYHOME_IROBOT_EMAIL), for room sync
 	IRobotPassword string // iRobot account password (MYHOME_IROBOT_PASSWORD), from .env only
 }
@@ -56,6 +70,21 @@ type Config struct {
 // CloudEnabled reports whether the iRobot account is configured. Without it
 // room sync is a no-op and room names are local.
 func (c Config) CloudEnabled() bool { return c.IRobotEmail != "" && c.IRobotPassword != "" }
+
+// Validate rejects a configuration that mixes owner and follower mode: a
+// follower never holds the robot password, and does not publish a bridge.
+func (c Config) Validate() error {
+	if c.Follow == "" {
+		return nil
+	}
+	if c.Password != "" {
+		return errors.New("MYHOME_VACUUM_FOLLOW cannot be combined with MYHOME_VACUUM_PASSWORD: a follower uses the robot through the broker and must not hold its password")
+	}
+	if c.Bridge {
+		return errors.New("MYHOME_VACUUM_FOLLOW cannot be combined with MYHOME_VACUUM_BRIDGE: only the daemon that owns the robot publishes it")
+	}
+	return nil
+}
 
 // Enabled reports whether the robot is configured. Without both BLID and
 // password the service holds no connection and vacuum.list is empty.
@@ -85,6 +114,7 @@ type robot struct {
 	client    robotClient // nil while not connected
 	status    *myhome.VacuumStatus
 	connected bool
+	remote    *remoteRobot // set in follower mode (#783): the robot is read and commanded through the broker
 
 	watchers   map[chan myhome.VacuumStatus]struct{} // room cleans watching for an immediate abort
 	interrupts int                                   // stop/pause/resume/dock commands sent; a change cancels a retry
@@ -109,6 +139,8 @@ type Service struct {
 
 	mu     sync.Mutex
 	robots map[string]*robot // by BLID
+
+	bridge *bridge // nil unless Config.Bridge; set once in start
 
 	syncMu sync.Mutex // one room sync at a time
 }
@@ -135,6 +167,12 @@ func NewService(ctx context.Context, log logr.Logger, store *Storage, cfg Config
 }
 
 func (s *Service) start() error {
+	if err := s.cfg.Validate(); err != nil {
+		return err
+	}
+	if s.cfg.Follow != "" {
+		return s.startFollower()
+	}
 	if !s.cfg.Enabled() {
 		if s.cfg.CloudEnabled() {
 			s.log.Info("iRobot account set but no robot configured: room sync needs MYHOME_VACUUM_BLID and MYHOME_VACUUM_PASSWORD")
@@ -149,7 +187,18 @@ func (s *Service) start() error {
 	s.mu.Lock()
 	s.robots[rec.BLID] = r
 	s.mu.Unlock()
-	go s.supervise(r)
+	if s.cfg.Bridge && s.cfg.MQTT != nil {
+		s.bridge = newBridge(s, r)
+		go func() {
+			if !s.bridge.claim() {
+				return
+			}
+			s.bridge.start()
+			s.supervise(r)
+		}()
+	} else {
+		go s.supervise(r)
+	}
 	s.log.Info("Vacuum service started", "robot", rec.Name, "fixed_host", s.cfg.Host, "cloud_rooms", s.cfg.CloudEnabled())
 	if s.cfg.CloudEnabled() {
 		go s.syncAtStart()
@@ -199,12 +248,14 @@ func (s *Service) supervise(r *robot) {
 		s.mu.Lock()
 		r.rec.Host, r.client, r.connected = host, c, true
 		s.mu.Unlock()
+		s.notifyBridge(true)
 
 		s.watch(r, c)
 
 		s.mu.Lock()
 		r.client, r.connected = nil, false
 		s.mu.Unlock()
+		s.notifyBridge(false)
 		c.Close()
 	}
 }
@@ -222,8 +273,12 @@ func (s *Service) watch(r *robot, c robotClient) {
 		}
 		up := c.Connected()
 		s.mu.Lock()
+		changed := r.connected != up
 		r.connected = up
 		s.mu.Unlock()
+		if changed {
+			s.notifyBridge(false)
+		}
 		switch {
 		case up:
 			downSince = time.Time{}
@@ -292,6 +347,13 @@ func (s *Service) sleep(d time.Duration) {
 	}
 }
 
+// notifyBridge asks the bridge, when enabled, to publish the robot's state.
+func (s *Service) notifyBridge(rooms bool) {
+	if s.bridge != nil {
+		s.bridge.notify(rooms)
+	}
+}
+
 // onStatus runs on the MQTT goroutine for every pushed update.
 func (s *Service) onStatus(r *robot, st roomba.Status) {
 	vs := toStatus(st)
@@ -305,6 +367,7 @@ func (s *Service) onStatus(r *robot, st roomba.Status) {
 		}
 	}
 	s.mu.Unlock()
+	s.notifyBridge(false)
 
 	if prev == nil || prev.Phase != vs.Phase || prev.Error != vs.Error || prev.BinFull != vs.BinFull {
 		s.log.Info("Robot state", "robot", r.rec.Name, "phase", vs.Phase, "cycle", vs.Cycle,
@@ -381,6 +444,9 @@ func (s *Service) pick(sel string) (*robot, error) {
 func (s *Service) client(r *robot) (robotClient, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if r.remote != nil { // follower: the remote client fails fast itself when the bridge is offline
+		return r.client, nil
+	}
 	if r.client == nil || !r.connected {
 		return nil, fmt.Errorf("robot %s is not connected (last known address %q)", r.rec.Name, r.rec.Host)
 	}

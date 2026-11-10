@@ -7,8 +7,6 @@ import (
 	"io"
 	"sort"
 	"strings"
-
-	"github.com/asnowfix/home-automation/pkg/devices"
 )
 
 // The unified `myhome ctl db export` / `db import` document. Every section is
@@ -82,18 +80,17 @@ func ParseDatabaseImport(data []byte) (*DatabaseImport, error) {
 // empty one.
 func ExportDatabase(ctx context.Context, c Client, pattern string, devicesOnly bool) (*DatabaseExport, error) {
 	out := &DatabaseExport{}
-	found, err := c.LookupDevices(ctx, pattern)
+	// Full device records (room assignment, info, config) read from the
+	// database by the daemon, not from its in-memory view (#775).
+	res, err := c.CallE(ctx, DeviceExport, pattern)
 	if err != nil {
-		return nil, fmt.Errorf("failed to lookup devices: %w", err)
+		return nil, fmt.Errorf("failed to export devices: %w", err)
 	}
-	if found != nil {
-		for _, d := range *found {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			out.Devices = append(out.Devices, exportDevice(ctx, c, d, out))
-		}
+	devs, ok := res.(*[]*Device)
+	if !ok {
+		return nil, fmt.Errorf("unexpected reply %T from %s", res, DeviceExport)
 	}
+	out.Devices = *devs
 	if devicesOnly {
 		return out, nil
 	}
@@ -128,31 +125,6 @@ func ExportDatabase(ctx context.Context, c Client, pattern string, devicesOnly b
 		out.Vacuum = v
 	}
 	return out, ctx.Err()
-}
-
-// exportDevice fetches the full record of a device found by LookupDevices.
-// The lookup RPCs decode their reply into DeviceSummary, which has no room
-// assignment, info or config; device.show returns the whole Device. If it
-// fails, the summary is exported (so the device is not lost) and the missing
-// detail is recorded in out.Skipped.
-func exportDevice(ctx context.Context, c Client, d devices.Device, out *DatabaseExport) *Device {
-	res, err := c.CallE(ctx, DeviceShow, &DeviceShowParams{Identifier: d.Id()})
-	if err == nil {
-		if full, ok := res.(*Device); ok && full != nil {
-			return full
-		}
-		err = fmt.Errorf("unexpected reply %T", res)
-	}
-	out.Skipped = append(out.Skipped, SkippedSection{"device " + d.Id() + " (room assignment, info, config)", err})
-	fallback := &Device{DeviceSummary: DeviceSummary{
-		DeviceIdentifier: DeviceIdentifier{Manufacturer_: d.Manufacturer(), Id_: d.Id()},
-		Host_:            d.Host(),
-		Name_:            d.Name(),
-	}}
-	if mac := d.Mac(); mac != nil {
-		fallback.MAC = mac.String()
-	}
-	return fallback
 }
 
 // Count returns how many items the export holds, per section.

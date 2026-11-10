@@ -6,7 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/go-logr/logr/funcr"
 )
 
 // hostRedirectTransport rewrites every request's host to targetURL, allowing
@@ -197,5 +201,110 @@ func TestRenewTokenCallsAuthWithCreds(t *testing.T) {
 	}
 	if !checkTokenCalled {
 		t.Error("auth.checkToken must be called when credentials are set")
+	}
+}
+
+// TestCheckTokenDoesNotLogSecrets runs the auth flow against a mock box and
+// asserts no log line carries the credentials, the session token or the hash.
+// It fails on the pre-#620 code, which logged all four.
+func TestCheckTokenDoesNotLogSecrets(t *testing.T) {
+	t.Cleanup(func() { Init("", "") })
+	Init("user@example.com", "s3cret")
+
+	var logged strings.Builder
+	oldLog := log
+	log = funcr.New(func(prefix, args string) {
+		logged.WriteString(prefix)
+		logged.WriteByte(' ')
+		logged.WriteString(args)
+		logged.WriteByte('\n')
+	}, funcr.Options{Verbosity: 10})
+	t.Cleanup(func() { log = oldLog })
+
+	ip := setupMockSFR(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if got := r.Form.Get("method"); got != "auth.checkToken" {
+			t.Errorf("method = %q, want auth.checkToken", got)
+		}
+		// Echo the session token as an attribute, as auth.getToken's reply does.
+		fmt.Fprint(w, `<rsp stat="ok" version="1.0"><auth token="tok-123"></auth></rsp>`)
+	})
+
+	if err := checkToken(ip, "tok-123"); err != nil {
+		t.Fatalf("checkToken: %v", err)
+	}
+
+	uh, err := doHash("user@example.com", []byte("tok-123"))
+	if err != nil {
+		t.Fatalf("doHash(user): %v", err)
+	}
+	ph, err := doHash("s3cret", []byte("tok-123"))
+	if err != nil {
+		t.Fatalf("doHash(password): %v", err)
+	}
+
+	output := logged.String()
+	// Each hash is checked on its own: a line carrying only one of them must
+	// not slip past a check on their concatenation.
+	for _, secret := range []string{"s3cret", "user@example.com", "tok-123", uh, ph} {
+		if strings.Contains(output, secret) {
+			t.Errorf("log output leaks %q:\n%s", secret, output)
+		}
+	}
+	if !strings.Contains(output, "Calling") {
+		t.Fatalf("expected the Calling line at verbosity 10:\n%s", output)
+	}
+}
+
+// TestCheckTokenNetworkErrorDoesNotLogSecrets covers the error path: a
+// transport failure produces a *url.Error that embeds the full request URL,
+// and auth.checkToken carries the session token and hash in its query string.
+func TestCheckTokenNetworkErrorDoesNotLogSecrets(t *testing.T) {
+	t.Cleanup(func() { Init("", "") })
+	Init("user@example.com", "s3cret")
+
+	var logged strings.Builder
+	oldLog := log
+	log = funcr.New(func(prefix, args string) {
+		logged.WriteString(prefix)
+		logged.WriteByte(' ')
+		logged.WriteString(args)
+		logged.WriteByte('\n')
+	}, funcr.Options{Verbosity: 10})
+	t.Cleanup(func() { log = oldLog })
+
+	// A server that is already closed: every request fails with a refused
+	// connection, whose error text includes the request URL.
+	srv := httptest.NewServer(http.NotFoundHandler())
+	srv.Close()
+	old := sfrHTTPClient
+	sfrHTTPClient = &http.Client{
+		Timeout:   time.Second,
+		Transport: &hostRedirectTransport{targetURL: srv.URL},
+	}
+	t.Cleanup(func() { sfrHTTPClient = old })
+
+	uh, err := doHash("user@example.com", []byte("tok-123"))
+	if err != nil {
+		t.Fatalf("doHash(user): %v", err)
+	}
+	ph, err := doHash("s3cret", []byte("tok-123"))
+	if err != nil {
+		t.Fatalf("doHash(password): %v", err)
+	}
+
+	cerr := checkToken(net.ParseIP("192.168.1.1"), "tok-123")
+	if cerr == nil {
+		t.Fatal("expected a network error, got nil")
+	}
+	if !strings.Contains(cerr.Error(), "refused") {
+		t.Errorf("error should still name the cause, got: %v", cerr)
+	}
+
+	output := logged.String() + "\n" + cerr.Error()
+	for _, secret := range []string{"s3cret", "user@example.com", "tok-123", uh, ph} {
+		if strings.Contains(output, secret) {
+			t.Errorf("log/error output leaks %q:\n%s", secret, output)
+		}
 	}
 }

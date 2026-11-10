@@ -21,6 +21,8 @@ func (c serviceClient) ForgetDevices(context.Context, string) error { return nil
 func (c serviceClient) CallE(ctx context.Context, v myhome.Verb, in any) (any, error) {
 	b, _ := json.Marshal(in)
 	switch v {
+	case myhome.DeviceExport:
+		return &[]*myhome.Device{}, nil // no devices in a rooms-only service
 	case myhome.TemperatureList:
 		return c.svc.HandleList(ctx)
 	case myhome.TemperatureSet:

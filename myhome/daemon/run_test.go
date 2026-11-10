@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
+	"github.com/asnowfix/home-automation/myhome/vacuum"
 	"github.com/go-logr/logr"
 	"github.com/spf13/viper"
 )
@@ -114,6 +116,14 @@ func TestVacuumConfigFromEnv(t *testing.T) {
 	if vacuumConfig().Wake {
 		t.Fatal("wake probe on without MYHOME_VACUUM_WAKE")
 	}
+	if vacuumConfig().Bridge {
+		t.Fatal("MQTT bridge on without MYHOME_VACUUM_BRIDGE")
+	}
+	t.Setenv("MYHOME_VACUUM_BRIDGE", "true")
+	readVacuumConfig(newViper())
+	if !vacuumConfig().Bridge {
+		t.Fatal("MYHOME_VACUUM_BRIDGE=true not read")
+	}
 	t.Setenv("MYHOME_VACUUM_WAKE", "true")
 	readVacuumConfig(newViper())
 	cfg := vacuumConfig()
@@ -169,4 +179,97 @@ func keys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// The vacuum bridge's last-will is set only when the bridge is on and the
+// robot configured; with the bridge off the MQTT client gets no will at all.
+func TestSetVacuumWill(t *testing.T) {
+	var got []mqttclient.Will
+	set := func(w mqttclient.Will) error { got = append(got, w); return nil }
+	robot := vacuum.Config{BLID: "0123456789ABCDEF", Password: "test-password"}
+
+	if err := setVacuumWill(robot, set); err != nil || len(got) != 0 {
+		t.Fatalf("will set with the bridge off: %v (err %v)", got, err)
+	}
+	robot.Bridge = true
+	if err := setVacuumWill(vacuum.Config{Bridge: true}, set); err != nil || len(got) != 0 {
+		t.Fatalf("will set without a robot: %v (err %v)", got, err)
+	}
+	if err := setVacuumWill(robot, set); err != nil || len(got) != 1 {
+		t.Fatalf("will not set with the bridge on: %v (err %v)", got, err)
+	}
+	if got[0].Topic != "vacuum/0123456789ABCDEF/availability" || !got[0].Retained || got[0].QoS != 1 ||
+		!strings.Contains(string(got[0].Payload), `"online":false`) || strings.Contains(string(got[0].Payload), "test-password") {
+		t.Fatalf("will = %+v", got[0])
+	}
+}
+
+// TestVacuumFollowConfig covers MYHOME_VACUUM_FOLLOW (#783): off by default,
+// read from the environment, and rejected together with a robot password.
+func TestVacuumFollowConfig(t *testing.T) {
+	saved := options.Flags
+	t.Cleanup(func() { options.Flags = saved })
+	newViper := func() *viper.Viper {
+		v := viper.New()
+		v.SetEnvPrefix("MYHOME")
+		v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+		v.AutomaticEnv()
+		return v
+	}
+	for _, k := range []string{"MYHOME_VACUUM_FOLLOW", "MYHOME_VACUUM_PASSWORD", "MYHOME_VACUUM_BRIDGE"} {
+		t.Setenv(k, "")
+	}
+	readVacuumConfig(newViper())
+	if cfg := vacuumConfig(); cfg.Follow != "" || cfg.Validate() != nil {
+		t.Fatalf("follower mode on without MYHOME_VACUUM_FOLLOW: %+v", cfg)
+	}
+	t.Setenv("MYHOME_VACUUM_FOLLOW", "0123456789ABCDEF")
+	readVacuumConfig(newViper())
+	cfg := vacuumConfig()
+	if cfg.Follow != "0123456789ABCDEF" || cfg.Validate() != nil {
+		t.Fatalf("MYHOME_VACUUM_FOLLOW not read or wrongly rejected: %+v", cfg)
+	}
+	t.Setenv("MYHOME_VACUUM_PASSWORD", "test-password")
+	readVacuumConfig(newViper())
+	if err := vacuumConfig().Validate(); err == nil {
+		t.Fatal("MYHOME_VACUUM_FOLLOW accepted together with a robot password")
+	}
+	t.Setenv("MYHOME_VACUUM_PASSWORD", "")
+	t.Setenv("MYHOME_VACUUM_BRIDGE", "true")
+	readVacuumConfig(newViper())
+	if err := vacuumConfig().Validate(); err == nil {
+		t.Fatal("MYHOME_VACUUM_FOLLOW accepted together with the bridge")
+	}
+}
+
+// An explicit --vacuum-follow wins over MYHOME_VACUUM_FOLLOW; without the flag the env var is used.
+func TestVacuumFollowFlagBeatsEnv(t *testing.T) {
+	saved := options.Flags
+	t.Cleanup(func() {
+		options.Flags = saved
+		f := runCmd.Flags().Lookup("vacuum-follow")
+		_ = f.Value.Set("")
+		f.Changed = false
+	})
+	t.Setenv("MYHOME_VACUUM_FOLLOW", "FROM-ENV")
+	v := viper.New()
+	v.SetEnvPrefix("MYHOME")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	resolve := func() string { // mirrors the order in runCmd.RunE
+		flagValue := options.Flags.VacuumFollow
+		readVacuumConfig(v)
+		applyVacuumFollowFlag(runCmd, flagValue)
+		return options.Flags.VacuumFollow
+	}
+	if got := resolve(); got != "FROM-ENV" {
+		t.Fatalf("without the flag: %q, want the env value", got)
+	}
+	if err := runCmd.ParseFlags([]string{"--vacuum-follow=FROM-FLAG"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolve(); got != "FROM-FLAG" {
+		t.Fatalf("with the flag: %q, want the flag value", got)
+	}
 }

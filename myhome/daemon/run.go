@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/asnowfix/home-automation/myhome/vacuum"
 	"github.com/asnowfix/home-automation/pkg/sfr"
 	"github.com/go-logr/logr"
@@ -85,6 +87,7 @@ func init() {
 	runCmd.PersistentFlags().BoolVar(&disableEventsService, "disable-events-service", false, "Disable the event recording service")
 	runCmd.PersistentFlags().StringVar(&options.Flags.RemoteProxy, "remote-proxy", "", "Forward /devices/... requests to a remote myhome daemon (e.g. http://home-pi:6080) instead of connecting directly")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.SolarStaleAfter, "solar-stale-after", options.SOLAR_STALE_AFTER, "Solar aggregator: exclude a source's reading from the total once it is older than this")
+	runCmd.PersistentFlags().StringVar(&options.Flags.VacuumFollow, "vacuum-follow", "", "Robot vacuum id to use through the MQTT broker, owned by another daemon (#783); rejected together with a robot password. Env: MYHOME_VACUUM_FOLLOW")
 	runCmd.PersistentFlags().StringVar(&options.Flags.PoolDeviceID, "pool-device-id", "", "Pool Shelly device ID")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.PoolEnabled, "enable-pool", false, "Enable pool runtime tracking")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableNoticeService, "enable-notice-service", false, "Enable the notice service (motion rule + daily email digest); requires the events and occupancy services")
@@ -333,7 +336,12 @@ var runCmd = &cobra.Command{
 
 		// Robot vacuum (#626): enabled automatically when both BLID and
 		// password are set. See readVacuumConfig.
+		flagFollow := options.Flags.VacuumFollow // set by cobra from --vacuum-follow
 		readVacuumConfig(v)
+		applyVacuumFollowFlag(cmd, flagFollow)
+		if err := vacuumConfig().Validate(); err != nil {
+			return err
+		}
 
 		// Store Viper instance in global options for daemon to use
 		options.ViperConfig = v
@@ -354,8 +362,17 @@ func readVacuumConfig(v *viper.Viper) {
 	options.Flags.VacuumPassword = v.GetString("vacuum.password")
 	options.Flags.VacuumHost = v.GetString("vacuum.host")
 	options.Flags.VacuumWake = v.GetBool("vacuum.wake")
+	options.Flags.VacuumBridge = v.GetBool("vacuum.bridge")
+	options.Flags.VacuumFollow = v.GetString("vacuum.follow")
 	options.Flags.IRobotEmail = v.GetString("irobot.email")
 	options.Flags.IRobotPassword = v.GetString("irobot.password")
+}
+
+// applyVacuumFollowFlag lets an explicit --vacuum-follow win over MYHOME_VACUUM_FOLLOW.
+func applyVacuumFollowFlag(cmd *cobra.Command, flagValue string) {
+	if cmd.Flags().Changed("vacuum-follow") {
+		options.Flags.VacuumFollow = flagValue
+	}
 }
 
 // vacuumConfig is the vacuum service configuration read by readVacuumConfig.
@@ -365,8 +382,20 @@ func vacuumConfig() vacuum.Config {
 		Password: options.Flags.VacuumPassword,
 		Host:     options.Flags.VacuumHost,
 		Wake:     options.Flags.VacuumWake,
+		Bridge:   options.Flags.VacuumBridge,
+		Follow:   options.Flags.VacuumFollow,
 
 		IRobotEmail:    options.Flags.IRobotEmail,
 		IRobotPassword: options.Flags.IRobotPassword,
 	}
+}
+
+// setVacuumWill registers the vacuum bridge's availability last-will through
+// set (mqtt.SetWill in production) when the bridge is on and the robot is
+// configured; otherwise it does nothing, so the MQTT client has no will.
+func setVacuumWill(cfg vacuum.Config, set func(mqttclient.Will) error) error {
+	if !cfg.Bridge || !cfg.Enabled() {
+		return nil
+	}
+	return set(vacuum.AvailabilityWill(cfg.BLID, myhome.InstanceName))
 }

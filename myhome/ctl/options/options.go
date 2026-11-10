@@ -104,6 +104,8 @@ var Flags struct {
 	VacuumPassword              string        // robot vacuum local password; from .env, never a flag
 	VacuumHost                  string        // robot vacuum fixed address; empty = discovery by BLID; never a flag
 	VacuumWake                  bool          // ICMP wake probe after a failed robot connect attempt (#630); default off
+	VacuumBridge                bool          // publish robot state to MQTT and serve commands from it (#782); default off
+	VacuumFollow                string        // robot id to use through the broker, owned by another daemon (#783); empty = off
 	IRobotEmail                 string        // iRobot cloud account email, for room sync (#628); from .env, never a flag
 	IRobotPassword              string        // iRobot cloud account password (#628); from .env, never a flag
 	EnableNoticeService         bool          // whether to enable the notice service (motion rule + daily email digest)

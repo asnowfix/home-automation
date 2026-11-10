@@ -217,6 +217,7 @@ func (b *bridge) claim() bool {
 		return true // fail open: the bridge is an addition, the robot link must not depend on it
 	}
 	wait := b.guardWait
+	logged := false
 	for {
 		select {
 		case <-arrived:
@@ -230,8 +231,13 @@ func (b *bridge) claim() bool {
 		if a == nil || !a.Online || a.Owner == b.owner || time.Since(a.TS) >= b.fresh {
 			return true
 		}
-		b.s.log.Error(fmt.Errorf("robot already owned by instance %q (%s)", a.Instance, a.Owner),
-			"Vacuum bridge: another daemon holds this robot; not connecting (the robot accepts a single local client); will re-check", "every", b.recheck)
+		const msg = "Vacuum bridge: another daemon holds this robot; not connecting (the robot accepts a single local client); will re-check"
+		if !logged { // an error once, then repeats at info
+			logged = true
+			b.s.log.Error(fmt.Errorf("robot already owned by instance %q (%s)", a.Instance, a.Owner), msg, "every", b.recheck)
+		} else {
+			b.s.log.Info(msg, "instance", a.Instance, "owner", a.Owner, "every", b.recheck)
+		}
 		wait = b.recheck
 	}
 }
@@ -364,6 +370,9 @@ func (b *bridge) onCmd(_ string, payload []byte, _ string) error {
 	}
 	if b.inflight.Add(1) > maxQueued {
 		b.inflight.Add(-1)
+		b.mu.Lock()
+		delete(b.seen, c.ID) // refused, not run: the caller may resend the same id
+		b.mu.Unlock()
 		b.publish(b.topic("result"), BridgeResult{ID: c.ID, Error: "busy: another command is still waiting for the robot"}, false)
 		return nil
 	}

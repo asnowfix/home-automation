@@ -471,3 +471,28 @@ func TestBridgeDedupeMapIsBounded(t *testing.T) {
 		t.Fatalf("dedupe map holds %d ids, cap %d", n, dedupeMax)
 	}
 }
+
+// A command refused as busy was not run, so its id must stay usable.
+func TestBridgeBusyRefusalForgetsID(t *testing.T) {
+	mc := newRecMQTT()
+	h := bridgeHarness(t, mc)
+	b := h.svc.bridge
+	b.runMu.Lock()
+	sendCmd(mc, BridgeCommand{ID: "a", Cmd: "find", TS: time.Now()})
+	sendCmd(mc, BridgeCommand{ID: "b", Cmd: "find", TS: time.Now()})
+	sendCmd(mc, BridgeCommand{ID: "c", Cmd: "find", TS: time.Now()}) // busy
+	eventually(t, "busy result", func() bool { return len(results(mc)) == 1 })
+	b.mu.Lock()
+	_, remembered := b.seen["c"]
+	b.mu.Unlock()
+	if remembered {
+		t.Fatal("busy-refused id still in the dedupe map")
+	}
+	b.runMu.Unlock()
+	eventually(t, "a and b ran", func() bool { return len(results(mc)) == 3 })
+	sendCmd(mc, BridgeCommand{ID: "c", Cmd: "find", TS: time.Now()}) // resend
+	eventually(t, "resent c ran", func() bool { return len(results(mc)) == 4 })
+	if r := results(mc)[3]; r.ID != "c" || !r.OK {
+		t.Fatalf("resent = %+v", r)
+	}
+}

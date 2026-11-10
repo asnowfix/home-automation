@@ -18,10 +18,14 @@ type Method struct {
 	ActionE   MethodHandler
 }
 
+// UnregisteredMethodMsg starts the error a daemon returns for a verb it has no
+// handler for; clients match it to tell "not served" from a failed call.
+const UnregisteredMethodMsg = "unknown or unregistered method"
+
 func Methods(name Verb) (*Method, error) {
 	m, exists := methods[name]
 	if !exists {
-		return nil, fmt.Errorf("unknown or unregistered method %s", name)
+		return nil, fmt.Errorf("%s %s", UnregisteredMethodMsg, name)
 	}
 	return m, nil
 }

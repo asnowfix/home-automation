@@ -83,7 +83,7 @@ func (r *ImportReport) Incomplete() bool {
 // IsMethodUnavailable reports whether err is the daemon saying it has no
 // handler for the verb (an older release, or a service not started).
 func IsMethodUnavailable(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "unknown or unregistered method")
+	return err != nil && strings.Contains(err.Error(), UnregisteredMethodMsg)
 }
 
 // fatal errors stop the import: the user cancelled, or nobody answers (a late
@@ -199,8 +199,11 @@ func importRooms(ctx context.Context, c Client, dump *DatabaseDump, rep *Section
 		if existing != nil {
 			have = (*existing)[id]
 		}
-		if have != nil && have.Name == want.Name && sameKinds(have.Kinds, want.Kinds) &&
-			sameLevels(have.Levels, want.Levels) && (want.ICalURL == "" || have.ICalURL == want.ICalURL) {
+		// A field empty in the dump means "not recorded": neither compared nor written.
+		if have != nil && (want.Name == "" || have.Name == want.Name) &&
+			(len(want.Kinds) == 0 || sameKinds(have.Kinds, want.Kinds)) &&
+			(len(want.Levels) == 0 || sameLevels(have.Levels, want.Levels)) &&
+			(want.ICalURL == "" || have.ICalURL == want.ICalURL) {
 			rep.Unchanged++
 			continue
 		}
@@ -219,7 +222,10 @@ func importRooms(ctx context.Context, c Client, dump *DatabaseDump, rep *Section
 			}
 		}
 		// room.edit writes every field, ical_url included (temperature.set cannot).
-		edit := &RoomEditParams{ID: id, Name: &want.Name, Kinds: want.Kinds, Levels: want.Levels}
+		edit := &RoomEditParams{ID: id, Kinds: want.Kinds, Levels: want.Levels}
+		if want.Name != "" {
+			edit.Name = &want.Name
+		}
 		if want.ICalURL != "" {
 			edit.ICalURL = &want.ICalURL
 		}
@@ -355,20 +361,36 @@ func importDevices(ctx context.Context, c Client, dump *DatabaseDump, opt Import
 		return nil
 	}
 	byId := map[string]*Device{}
-	byMAC := map[string]*Device{}
+	targetMAC := map[string][]*Device{}
 	if l, ok := out.(*[]*Device); ok && l != nil {
 		for _, d := range *l {
 			byId[d.Id()] = d
-			if d.MAC != "" {
-				byMAC[d.MAC] = d
+			if m := normalizeMAC(d.MAC); m != "" {
+				targetMAC[m] = append(targetMAC[m], d)
 			}
+		}
+	}
+	dumpMAC := map[string]int{}
+	for _, d := range dump.Devices {
+		if m := normalizeMAC(d.MAC); m != "" {
+			dumpMAC[m]++
 		}
 	}
 
 	for _, d := range dump.Devices {
 		have := byId[d.Id()]
-		if have == nil && d.MAC != "" {
-			have = byMAC[d.MAC]
+		if have == nil {
+			// Fall back to the MAC, only when it identifies exactly one device on
+			// both sides (duplicate records would flip a room on every run).
+			if m := normalizeMAC(d.MAC); m != "" {
+				if dumpMAC[m] > 1 || len(targetMAC[m]) > 1 {
+					rep.skip(d.Id(), "MAC address shared by several device records: not matched, resolve the duplicates first")
+					continue
+				}
+				if len(targetMAC[m]) == 1 {
+					have = targetMAC[m][0]
+				}
+			}
 		}
 		if have == nil {
 			if !opt.CreateMissing {
@@ -382,12 +404,16 @@ func importDevices(ctx context.Context, c Client, dump *DatabaseDump, opt Import
 				rep.fail(d.Id(), err)
 				continue
 			}
-			rep.Created++
 			if d.RoomId != "" {
-				if err := setRoom(ctx, c, d.Id(), d.RoomId, r); err != nil {
+				ok, err := setRoom(ctx, c, d.Id(), d.RoomId, r)
+				if err != nil {
 					return err
 				}
+				if !ok {
+					continue // counted as failed only: the device exists but is not in its room
+				}
 			}
+			rep.Created++
 			continue
 		}
 		// An empty room in the dump means "none recorded": leave the target alone.
@@ -395,26 +421,32 @@ func importDevices(ctx context.Context, c Client, dump *DatabaseDump, opt Import
 			rep.Unchanged++
 			continue
 		}
-		before := rep.Failed
-		if err := setRoom(ctx, c, have.Id(), d.RoomId, r); err != nil {
+		ok, err := setRoom(ctx, c, have.Id(), d.RoomId, r)
+		if err != nil {
 			return err
 		}
-		if rep.Failed == before {
+		if ok {
 			rep.Updated++
 		}
 	}
 	return nil
 }
 
+// normalizeMAC lower-cases a MAC address and drops its separators.
+func normalizeMAC(mac string) string {
+	return strings.NewReplacer(":", "", "-", "", ".", "").Replace(strings.ToLower(strings.TrimSpace(mac)))
+}
+
 // setRoom assigns the room (database) and re-derives room-id on the device (KVS).
-func setRoom(ctx context.Context, c Client, id, room string, r *ImportReport) error {
+// ok is false when the assignment failed (counted in the report); err is fatal only.
+func setRoom(ctx context.Context, c Client, id, room string, r *ImportReport) (ok bool, err error) {
 	out, err := c.CallE(ctx, DeviceSetRoom, &DeviceSetRoomParams{Identifier: id, RoomId: room})
 	if err != nil {
 		if fatal(ctx, err) {
-			return err
+			return false, err
 		}
 		r.Devices.fail(id+" room "+room, err)
-		return nil
+		return false, nil
 	}
 	res, _ := out.(*DeviceSetRoomResult)
 	switch {
@@ -427,5 +459,5 @@ func setRoom(ctx context.Context, c Client, id, room string, r *ImportReport) er
 	default:
 		r.RoomKVS.Unreachable = append(r.RoomKVS.Unreachable, fmt.Sprintf("%s: %s", id, res.KVSError))
 	}
-	return nil
+	return true, nil
 }

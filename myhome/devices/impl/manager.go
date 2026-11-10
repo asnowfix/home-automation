@@ -1,6 +1,7 @@
 package impl
 
 import (
+	"errors"
 	"context"
 	"fmt"
 	"net"
@@ -49,6 +50,78 @@ type DeviceManager struct {
 	setupInFlight  sync.Map           // Track devices currently being set up (device_id -> bool)
 	eventSvc       *events.Service
 	eventTracker   *events.SensorDailyTracker
+	kvsTimeout     time.Duration                                                     // 0: defaultKVSTimeout
+	kvsWriter      func(context.Context, logr.Logger, *myhome.Device, string) error // nil: writeRoomKVS; test seam
+}
+
+// defaultKVSTimeout caps the room-id KVS write on the device. It must stay well
+// below the RPC client's timeout (14 s by default): otherwise, for an offline
+// device, the caller gives up first and never sees the "unreachable" answer.
+const defaultKVSTimeout = 5 * time.Second
+
+// errNoKVS means the device has no KVS to write (not a Gen2+ Shelly).
+var errNoKVS = errors.New("device has no KVS")
+
+// setRoomKVS re-derives the room-id KVS key on the device and reports the outcome.
+// It always answers within the KVS timeout, whatever the device does.
+func (dm *DeviceManager) setRoomKVS(ctx context.Context, log logr.Logger, identifier, room string) *myhome.DeviceSetRoomResult {
+	unreachable := func(err error) *myhome.DeviceSetRoomResult {
+		return &myhome.DeviceSetRoomResult{KVS: myhome.KVSUnreachable, KVSError: err.Error()}
+	}
+	device, err := dm.GetDeviceByAny(ctx, identifier)
+	if err != nil {
+		log.Error(err, "Failed to get device for KVS update", "identifier", identifier)
+		return unreachable(err)
+	}
+	// Gen1 and BLU devices have no KVS
+	if shelly.IsGen1Device(device.Id()) || shelly.IsBluDevice(device.Id()) {
+		return &myhome.DeviceSetRoomResult{KVS: myhome.KVSNotApplicable}
+	}
+
+	timeout := dm.kvsTimeout
+	if timeout == 0 {
+		timeout = defaultKVSTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	write := dm.kvsWriter
+	if write == nil {
+		write = writeRoomKVS
+	}
+	// Run in a goroutine so that a device layer ignoring ctx cannot hold the reply back.
+	done := make(chan error, 1)
+	go func() { done <- write(ctx, log, device, room) }()
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		err = fmt.Errorf("no answer from the device within %v", timeout)
+	}
+	switch {
+	case err == nil:
+		log.Info("Set room-id in device KVS", "identifier", identifier, "room_id", room)
+		return &myhome.DeviceSetRoomResult{KVS: myhome.KVSSet}
+	case errors.Is(err, errNoKVS):
+		return &myhome.DeviceSetRoomResult{KVS: myhome.KVSNotApplicable}
+	default:
+		log.Error(err, "Failed to set room-id in device KVS", "identifier", identifier, "room_id", room)
+		return unreachable(err)
+	}
+}
+
+func writeRoomKVS(ctx context.Context, log logr.Logger, device *myhome.Device, room string) error {
+	sd, ok := device.Impl().(*shelly.Device)
+	if !ok || sd == nil {
+		impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
+		if err != nil {
+			return err
+		}
+		sd, ok = impl.(*shelly.Device)
+		if !ok {
+			return errNoKVS
+		}
+	}
+	_, err := kvs.SetKeyValue(ctx, log, types.ChannelDefault, sd, "room-id", room)
+	return err
 }
 
 // SSEBroadcaster interface for broadcasting sensor updates to UI
@@ -292,44 +365,7 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 
 		// DB update succeeded: from here on KVS is best-effort, and its outcome is
 		// reported in the result (db import lists the devices it could not reach).
-		unreachable := func(err error) (any, error) {
-			return &myhome.DeviceSetRoomResult{KVS: myhome.KVSUnreachable, KVSError: err.Error()}, nil
-		}
-
-		// Also set room-id in device KVS (for Gen2+ Shelly devices)
-		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
-		if err != nil {
-			log.Error(err, "Failed to get device for KVS update", "identifier", params.Identifier)
-			return unreachable(err)
-		}
-
-		// Skip KVS for Gen1 and BLU devices (they don't support KVS)
-		if shelly.IsGen1Device(device.Id()) || shelly.IsBluDevice(device.Id()) {
-			return &myhome.DeviceSetRoomResult{KVS: myhome.KVSNotApplicable}, nil
-		}
-
-		// Get or create Shelly device implementation
-		sd, ok := device.Impl().(*shelly.Device)
-		if !ok || sd == nil {
-			impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
-			if err != nil {
-				log.Error(err, "Failed to create device for KVS update", "identifier", params.Identifier)
-				return unreachable(err)
-			}
-			sd, ok = impl.(*shelly.Device)
-			if !ok {
-				return &myhome.DeviceSetRoomResult{KVS: myhome.KVSNotApplicable}, nil
-			}
-		}
-
-		// Set room-id in device KVS
-		_, err = kvs.SetKeyValue(ctx, log, types.ChannelDefault, sd, "room-id", params.RoomId)
-		if err != nil {
-			log.Error(err, "Failed to set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
-			return unreachable(err)
-		}
-		log.Info("Set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
-		return &myhome.DeviceSetRoomResult{KVS: myhome.KVSSet}, nil
+		return dm.setRoomKVS(ctx, log, params.Identifier, params.RoomId), nil
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceListByRoom, func(ctx context.Context, in any) (any, error) {
 		params := in.(*myhome.DeviceListByRoomParams)

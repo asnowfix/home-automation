@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the credential prompts of postinst.sh (#629).
+"""Tests for postinst.sh: the credential prompts (#629) and the script push (#793).
 
 Run: python3 -I linux/debian/postinst_test.py   (also run by `make test`)
 
@@ -176,6 +176,78 @@ class PostinstPrompts(unittest.TestCase):
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.assertEqual(r.returncode, 0)
         self.assertSame(parse_env(self.env_path), SEED, SEED.keys())
+
+
+STUB = r"""#!/bin/sh
+# Stub for `myhome`: STUB_DIR holds call counters; STUB_MODE picks the behaviour.
+case "$*" in
+*"list"*)
+    if [ "$STUB_MODE" = "nodevices" ]; then echo '[]'; else echo '[{"id":"a"},{"id":"b"}]'; fi ;;
+*"script update"*)
+    echo x >> "$STUB_DIR/updates"
+    n=$(wc -l < "$STUB_DIR/updates")
+    case "$STUB_MODE" in
+    flaky)
+        if [ "$n" -eq 1 ]; then
+            echo "timeout waiting for response from shellyplus1-aabbcc (flaky-dev)" >&2
+            exit 1
+        fi
+        echo "all devices updated" ;;
+    broken)
+        echo "timeout waiting for response from shellyplus1-ddeeff (dead-dev)" >&2
+        exit 1 ;;
+    esac ;;
+esac
+exit 0
+"""
+
+
+class PostinstPush(unittest.TestCase):
+    """The packaged-script push after a daemon restart (#793). Stubs only: no device, no daemon."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        os.makedirs(os.path.join(self.root, "var/lib/myhome"))
+        self.stub = os.path.join(self.root, "myhome-stub")
+        with open(self.stub, "w") as f:
+            f.write(STUB)
+        os.chmod(self.stub, 0o755)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def run_push(self, mode):
+        env = dict(os.environ, MYHOME_POSTINST_ROOT=self.root, DEBIAN_FRONTEND="noninteractive",
+                   MYHOME_POSTINST_BIN=self.stub, MYHOME_POSTINST_SYSTEMCTL="true",
+                   MYHOME_POSTINST_POLL_INTERVAL="1", MYHOME_POSTINST_MAX_WAIT="1", MYHOME_POSTINST_RETRY_PAUSE="0",
+                   STUB_DIR=self.root, STUB_MODE=mode)
+        r = subprocess.run(["bash", SCRIPT, "configure"], stdin=subprocess.DEVNULL, env=env,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=30)
+        updates = os.path.join(self.root, "updates")
+        calls = len(open(updates).read().split()) if os.path.exists(updates) else 0
+        return r.returncode, r.stdout, calls
+
+    def test_first_pass_fails_second_succeeds(self):
+        rc, out, calls = self.run_push("flaky")
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, 2, out)
+        self.assertIn("second pass", out)
+        self.assertNotIn("Warning: script update", out)
+
+    def test_persistent_failure_warns_and_names_device(self):
+        rc, out, calls = self.run_push("broken")
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, 2, out)
+        self.assertIn("Warning: script update", out)
+        self.assertIn("second pass", out)
+        self.assertIn("dead-dev", out)
+
+    def test_no_devices_skips_the_push(self):
+        rc, out, calls = self.run_push("nodevices")
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, 0)
+        self.assertIn("No known devices", out)
 
 
 if __name__ == "__main__":

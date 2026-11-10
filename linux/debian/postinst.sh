@@ -13,6 +13,10 @@ PROM_CONFIG_FILE="$CONFIG_DIR/prometheus-mqtt-exporter.yaml"
 PROM_EXAMPLE_CONFIG="/usr/share/$SERVICE/prometheus-mqtt-exporter.yaml.sample"
 ENV_FILE="$STATE_DIR/.env"
 
+# Test seams (see linux/debian/postinst_test.py). All default to the production
+# behaviour and are unset in a real package install.
+SYSTEMCTL="${MYHOME_POSTINST_SYSTEMCTL:-systemctl}"
+
 # All systemd units to manage
 SERVICES="${SERVICE}.service"
 TIMERS="${SERVICE}-update.timer ${SERVICE}-db-backup.timer"
@@ -267,20 +271,20 @@ fi
 # Check if the script is being run during package installation
 if [ "$1" = "configure" ]; then
     # Reload systemd to recognize the new services
-    systemctl daemon-reload
+    "$SYSTEMCTL" daemon-reload
 
     # Enable and start services
     for svc in $SERVICES; do
         echo "Enabling and starting $svc..."
-        systemctl reenable "$svc"
-        systemctl restart "$svc"
+        "$SYSTEMCTL" reenable "$svc"
+        "$SYSTEMCTL" restart "$svc"
     done
 
     # Enable and start timers
     for timer in $TIMERS; do
         echo "Enabling and starting $timer..."
-        systemctl reenable "$timer"
-        systemctl restart "$timer"
+        "$SYSTEMCTL" reenable "$timer"
+        "$SYSTEMCTL" restart "$timer"
     done
 
     # -------------------------------------------------------------------
@@ -298,12 +302,12 @@ if [ "$1" = "configure" ]; then
     # loaded on a device (see myhome/ctl/shelly/script/update.go), so
     # devices never receive scripts they didn't already have.
     # -------------------------------------------------------------------
-    MYHOME_BIN="/usr/bin/myhome"
+    MYHOME_BIN="${MYHOME_POSTINST_BIN:-/usr/bin/myhome}"
     if [ -x "$MYHOME_BIN" ]; then
         echo "Waiting for $SERVICE to discover its known devices..."
 
-        POLL_INTERVAL=3
-        MAX_WAIT=90
+        POLL_INTERVAL="${MYHOME_POSTINST_POLL_INTERVAL:-3}"
+        MAX_WAIT="${MYHOME_POSTINST_MAX_WAIT:-90}"
         elapsed=0
         prev_count=-1
         stable_polls=0
@@ -344,10 +348,10 @@ if [ "$1" = "configure" ]; then
     fi
 
     # Restart prometheus-mqtt-exporter to apply new configuration
-    if systemctl list-unit-files prometheus-mqtt-exporter.service >/dev/null 2>&1; then
-        if systemctl is-active --quiet prometheus-mqtt-exporter; then
+    if "$SYSTEMCTL" list-unit-files prometheus-mqtt-exporter.service >/dev/null 2>&1; then
+        if "$SYSTEMCTL" is-active --quiet prometheus-mqtt-exporter; then
             echo "Restarting prometheus-mqtt-exporter to apply new configuration..."
-            systemctl restart prometheus-mqtt-exporter
+            "$SYSTEMCTL" restart prometheus-mqtt-exporter
         else
             echo "prometheus-mqtt-exporter is installed but not running, skipping restart"
         fi

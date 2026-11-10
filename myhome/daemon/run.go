@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/asnowfix/home-automation/myhome/vacuum"
 	"github.com/asnowfix/home-automation/pkg/sfr"
 	"github.com/go-logr/logr"
@@ -354,6 +356,7 @@ func readVacuumConfig(v *viper.Viper) {
 	options.Flags.VacuumPassword = v.GetString("vacuum.password")
 	options.Flags.VacuumHost = v.GetString("vacuum.host")
 	options.Flags.VacuumWake = v.GetBool("vacuum.wake")
+	options.Flags.VacuumBridge = v.GetBool("vacuum.bridge")
 	options.Flags.IRobotEmail = v.GetString("irobot.email")
 	options.Flags.IRobotPassword = v.GetString("irobot.password")
 }
@@ -365,8 +368,19 @@ func vacuumConfig() vacuum.Config {
 		Password: options.Flags.VacuumPassword,
 		Host:     options.Flags.VacuumHost,
 		Wake:     options.Flags.VacuumWake,
+		Bridge:   options.Flags.VacuumBridge,
 
 		IRobotEmail:    options.Flags.IRobotEmail,
 		IRobotPassword: options.Flags.IRobotPassword,
 	}
+}
+
+// setVacuumWill registers the vacuum bridge's availability last-will through
+// set (mqtt.SetWill in production) when the bridge is on and the robot is
+// configured; otherwise it does nothing, so the MQTT client has no will.
+func setVacuumWill(cfg vacuum.Config, set func(mqttclient.Will) error) error {
+	if !cfg.Bridge || !cfg.Enabled() {
+		return nil
+	}
+	return set(vacuum.AvailabilityWill(cfg.BLID, myhome.InstanceName))
 }

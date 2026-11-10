@@ -152,6 +152,7 @@ func assertNoHandlerNameCollisions(t *testing.T, scriptName string, handlerCalls
 // handlers while quotedHandlerNameRe only ever matched four -- fixed here by
 // being explicit about the four this extraction method actually finds.
 func TestScheduleWrap_PoolPumpHandlerNamesDontCollide(t *testing.T) {
+	t.Parallel()
 	handlers := quotedHandlerNames(t, poolPumpScriptPath)
 
 	const wantCount = 4
@@ -169,6 +170,7 @@ func TestScheduleWrap_PoolPumpHandlerNamesDontCollide(t *testing.T) {
 // TestScheduleWrap_GardenHandlerNamesDontCollide is the same guard for
 // garden.js's two schedule.eval jobs (handlePlan, handleWateringStart).
 func TestScheduleWrap_GardenHandlerNamesDontCollide(t *testing.T) {
+	t.Parallel()
 	handlers := registeredHandlerCalls(t, gardenScriptPath)
 	assertNoHandlerNameCollisions(t, "garden.js", handlers)
 }
@@ -182,6 +184,7 @@ func TestScheduleWrap_GardenHandlerNamesDontCollide(t *testing.T) {
 // createSchedules() lost its only caller in #504) -- only garden.js still
 // wraps schedule payloads this way, so only garden.js is checked here.
 func TestScheduleWrap_BoilerplateMatchesSource(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{gardenScriptPath} {
 		buf, err := os.ReadFile(path)
 		if err != nil {

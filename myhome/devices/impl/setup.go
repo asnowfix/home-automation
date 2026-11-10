@@ -45,7 +45,13 @@ func classifyDevice(d *myhome.Device) deviceRole {
 		return roleUnknown
 	}
 
-	// Non-BLU, non-HT → heater candidate
+	// Other Gen1 devices (flood, door/window, ...) have no KVS: nothing to push, and
+	// their ids are not accepted by shelly.NewDeviceFromSummary (#800).
+	if shelly.IsGen1Device(id) {
+		return roleUnknown
+	}
+
+	// Non-BLU, non-Gen1 → heater candidate
 	return roleHeater
 }
 
@@ -132,7 +138,7 @@ func (dm *DeviceManager) SetupRoom(ctx context.Context, roomID string) (*myhome.
 
 		sd, err := dm.GetShellyDevice(ctx, heater)
 		if err != nil {
-			log.Error(err, "Failed to get Shelly device for heater", "device_id", heater.Id())
+			log.Error(err, "Skipping heater: cannot build Shelly device", "device_id", heater.Id(), "room_id", roomID)
 			dr.Error = err.Error()
 			result.Devices = append(result.Devices, dr)
 			continue

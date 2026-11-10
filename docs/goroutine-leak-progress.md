@@ -1,0 +1,12 @@
+# #695 goroutine leak: progress
+
+- Fix: `pkg/shelly/shttp/channel.go` closes bodies (`defer` in callE after dial; explicit close before the >=400 returns in getE/postE). `internal/myhome/proxy/reverse.go` uses one package-level `insecureTransport` (InsecureSkipVerify kept, IdleConnTimeout 90s, MaxIdleConnsPerHost 2). Removed the trivially dead `if tp, ok := ...` block.
+- doWithRetry audit: it closes the body of 5xx/429 responses before retrying and on the final attempt returns the (open) response to the caller, who now closes it on >=400. The ctx.Done and error-return branches hold no open body. No leak found there. Other callers of the shttp response were not exhaustively audited beyond callE/getE/postE.
+- Regression tests: `pkg/shelly/shttp/leak_test.go` (6 subtests GET/POST x success, decode_error, 404: server-side open connections remain after client CloseIdleConnections); `internal/myhome/proxy/transport_test.go` (shared transport serves 8 requests on 1 connection). The proxy `Handle` probes ports 80/443 of the resolved IP, so it cannot be driven end-to-end against httptest; the test exercises the shared transport through a ReverseProxy as Handle builds it.
+- Fail-without-fix (measured):
+  - shttp, with origin/main channel.go: each of 6 subtests `8 connections still open after 8 sequential calls: response bodies are leaking`; with fix: pass, `-race -count=30` ok.
+  - proxy, with a fresh `http.Transport` per request (old behaviour, substituted in the test): `8 connections opened for 8 sequential requests, want 1`; with fix: pass.
+  - Note: a first attempt counting opened connections was wrong: closing a partially read body closes the connection, so it measured nothing useful. Open-after-CloseIdleConnections is the deterministic signal.
+- Systemd: RuntimeMaxSec 21600 -> 172800; CLAUDE.md NAS bullet updated (~164/day -> ~20/day) plus drop-in removal note. Only other repo mentions of 21600/6h were unrelated.
+- Pre-existing: gofmt -l flags channel.go and ops.go (import order) on main; left alone.
+- Full `make test` on fix branch: EXIT=0, 66 `ok` lines, 0 FAIL, wall clock about 14 min (started ~875 s before the poll finished; upper bound). Slowest package internal/shelly/scripts 634.735 s (plain `make test`, 2026-11-05); TESTTIMEOUT stays 674s (634.7 < 674; the rule asks for the -race measurement, not taken). shttp package 10.2 s (pre-existing slow tests, new test ~0.06 s).

@@ -1,27 +1,18 @@
 package db
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"io"
 	"os"
 
 	"github.com/spf13/cobra"
 )
 
-// DatabaseImport represents the complete database import format
-// Supports both unified format and legacy devices-only format
-type DatabaseImport struct {
-	Devices          []myhome.Device                          `json:"devices,omitempty"`
-	TemperatureRooms map[string]*myhome.TemperatureRoomConfig `json:"rooms,omitempty"`
-	WeekdayDefaults  map[int]myhome.DayType                   `json:"weekday_defaults,omitempty"`
-	KindSchedules    []myhome.TemperatureKindSchedule         `json:"kind_schedules,omitempty"`
-}
-
 var importFlags struct {
-	Overwrite   bool
-	DevicesOnly bool
+	Overwrite     bool
+	DevicesOnly   bool
+	CreateMissing bool
 }
 
 var ImportCmd = &cobra.Command{
@@ -31,6 +22,13 @@ var ImportCmd = &cobra.Command{
 
 Supports both the unified export format (devices + temperature tables) and legacy devices-only format.
 The input can be read from a file or from stdin.
+
+Rooms, weekday defaults and kind schedules are overwritten when they differ. Devices are NOT
+recreated unless --create-missing is given (the database keeps no record of forgotten devices,
+so an absent device cannot be told from a forgotten one); a device the target already holds only
+gets its room assignment restored, and the room-id KVS key is then re-written on the physical
+device (a device write; unreachable devices are listed, the database is still updated).
+A section the target daemon does not serve is reported as NOT IMPORTED and the command exits non-zero.
 
 To import to a specific myhome server instance, use the -I flag:
   myhome ctl -I myhome-local db import database.json
@@ -75,122 +73,64 @@ Examples:
 			return fmt.Errorf("no data to import")
 		}
 
-		// Try to parse as unified format first
-		var dbImport DatabaseImport
-		err = json.Unmarshal(data, &dbImport)
+		dump, err := myhome.ParseDatabaseDump(data)
 		if err != nil {
-			// Try legacy devices-only format (array of devices)
-			var devices []myhome.Device
-			err = json.Unmarshal(data, &devices)
-			if err != nil {
-				return fmt.Errorf("failed to parse JSON: %w", err)
-			}
-			dbImport.Devices = devices
+			return err
 		}
 
-		// Track import counts
-		deviceCount := 0
-		roomCount := 0
-		weekdayCount := 0
-		scheduleCount := 0
-
-		// Import devices
-		if len(dbImport.Devices) > 0 {
-			for _, device := range dbImport.Devices {
-				// Check if context was cancelled (e.g., Ctrl-C)
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.DeviceUpdate, &device)
-				if err != nil {
-					// Check if this is a context cancellation error
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-					fmt.Fprintf(os.Stderr, "⚠ Failed to import device %s: %v\n", device.Id(), err)
-					continue
-				}
-				deviceCount++
-				fmt.Fprintf(os.Stderr, "✓ Imported device %s (%s)\n", device.Name(), device.Id())
-			}
+		if importFlags.CreateMissing {
+			fmt.Fprintln(os.Stderr, "! --create-missing: devices absent from the target database will be created")
 		}
+		fmt.Fprintln(os.Stderr, "! Room assignments written to devices also WRITE the room-id KVS key on the physical device")
 
-		// Import temperature tables unless --devices-only is set
-		if !importFlags.DevicesOnly {
-			// Import temperature rooms
-			for roomID, roomConfig := range dbImport.TemperatureRooms {
-				params := &myhome.TemperatureSetParams{
-					RoomID: roomID,
-					Name:   roomConfig.Name,
-					Kinds:  roomConfig.Kinds,
-					Levels: roomConfig.Levels,
-				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSet, params)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "⚠ Failed to import room %s: %v\n", roomID, err)
-					continue
-				}
-				roomCount++
-				fmt.Fprintf(os.Stderr, "✓ Imported room %s (%s)\n", roomConfig.Name, roomID)
-			}
-
-			// Import weekday defaults
-			for weekday, dayType := range dbImport.WeekdayDefaults {
-				params := &myhome.TemperatureSetWeekdayDefaultParams{
-					Weekday: weekday,
-					DayType: dayType,
-				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSetWeekdayDefault, params)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "⚠ Failed to import weekday default %d: %v\n", weekday, err)
-					continue
-				}
-				weekdayCount++
-			}
-			if weekdayCount > 0 {
-				fmt.Fprintf(os.Stderr, "✓ Imported %d weekday defaults\n", weekdayCount)
-			}
-
-			// Import kind schedules
-			for _, schedule := range dbImport.KindSchedules {
-				// Convert TemperatureTimeRange to string format
-				rangeStrs := make([]string, len(schedule.Ranges))
-				for i, r := range schedule.Ranges {
-					rangeStrs[i] = fmt.Sprintf("%02d:%02d-%02d:%02d",
-						r.Start/60, r.Start%60, r.End/60, r.End%60)
-				}
-
-				params := &myhome.TemperatureSetKindScheduleParams{
-					Kind:    schedule.Kind,
-					DayType: schedule.DayType,
-					Ranges:  rangeStrs,
-				}
-				_, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSetKindSchedule, params)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "⚠ Failed to import kind schedule %s/%s: %v\n", schedule.Kind, schedule.DayType, err)
-					continue
-				}
-				scheduleCount++
-			}
-			if scheduleCount > 0 {
-				fmt.Fprintf(os.Stderr, "✓ Imported %d kind schedules\n", scheduleCount)
-			}
+		report, err := myhome.ImportDatabase(ctx, myhome.TheClient, dump, myhome.ImportOptions{
+			DevicesOnly:   importFlags.DevicesOnly,
+			CreateMissing: importFlags.CreateMissing,
+		})
+		printReport(report)
+		if err != nil {
+			return fmt.Errorf("import interrupted: %w", err)
 		}
-
-		// Print summary
-		fmt.Fprintf(os.Stderr, "\n✓ Import complete:\n")
-		fmt.Fprintf(os.Stderr, "  - %d devices\n", deviceCount)
-		if !importFlags.DevicesOnly {
-			fmt.Fprintf(os.Stderr, "  - %d temperature rooms\n", roomCount)
-			fmt.Fprintf(os.Stderr, "  - %d weekday defaults\n", weekdayCount)
-			fmt.Fprintf(os.Stderr, "  - %d kind schedules\n", scheduleCount)
+		if report.Incomplete() {
+			return fmt.Errorf("import incomplete: see the report above")
 		}
-
 		return nil
 	},
 }
 
 func init() {
 	ImportCmd.Flags().BoolVar(&importFlags.Overwrite, "overwrite", true, "Overwrite existing entries (default: true)")
+	ImportCmd.Flags().BoolVar(&importFlags.CreateMissing, "create-missing", false, "Also create devices absent from the target database (default: only restore room assignments of known devices, so forgotten devices are not resurrected)")
 	ImportCmd.Flags().BoolVar(&importFlags.DevicesOnly, "devices-only", false, "Import only devices (skip temperature tables)")
+}
+
+func printSection(name string, s myhome.SectionReport) {
+	switch {
+	case s.NotRequested:
+		return
+	case s.Unavailable != "":
+		fmt.Fprintf(os.Stderr, "  - %s: NOT IMPORTED, %s\n", name, s.Unavailable)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "  - %s: %d created, %d updated, %d unchanged, %d skipped, %d failed\n",
+		name, s.Created, s.Updated, s.Unchanged, s.Skipped, s.Failed)
+	for _, n := range s.Notes {
+		fmt.Fprintf(os.Stderr, "      %s\n", n)
+	}
+}
+
+func printReport(r *myhome.ImportReport) {
+	fmt.Fprintf(os.Stderr, "\nImport report:\n")
+	printSection("devices", r.Devices)
+	printSection("rooms", r.Rooms)
+	printSection("weekday defaults", r.WeekdayDefaults)
+	printSection("kind schedules", r.KindSchedules)
+	k := r.RoomKVS
+	if k.Set+k.NotApplicable+k.Unknown+len(k.Unreachable) > 0 {
+		fmt.Fprintf(os.Stderr, "  - room-id KVS written on devices: %d set, %d n/a (Gen1/BLU), %d unknown (older daemon), %d unreachable\n",
+			k.Set, k.NotApplicable, k.Unknown, len(k.Unreachable))
+		for _, u := range k.Unreachable {
+			fmt.Fprintf(os.Stderr, "      unreachable (database updated, device not): %s\n", u)
+		}
+	}
 }

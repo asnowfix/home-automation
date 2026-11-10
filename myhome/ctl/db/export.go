@@ -9,13 +9,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// DatabaseExport represents the complete database export
-type DatabaseExport struct {
-	Devices          []*myhome.Device                         `json:"devices,omitempty"`
-	TemperatureRooms map[string]*myhome.TemperatureRoomConfig `json:"rooms,omitempty"`
-	WeekdayDefaults  map[int]myhome.DayType                   `json:"weekday_defaults,omitempty"`
-	KindSchedules    []myhome.TemperatureKindSchedule         `json:"kind_schedules,omitempty"`
-}
+// DatabaseExport is the dump file format, shared with import.
+type DatabaseExport = myhome.DatabaseDump
 
 var exportFlags struct {
 	Output      string

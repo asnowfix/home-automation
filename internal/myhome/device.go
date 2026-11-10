@@ -279,6 +279,20 @@ type DeviceSetRoomParams struct {
 	RoomId     string `json:"room_id"`    // Room ID to assign (empty string to clear)
 }
 
+// Outcomes of the room-id KVS write that device.setroom attempts on the device.
+const (
+	KVSSet           = "set"         // room-id written to the device
+	KVSNotApplicable = "n/a"         // Gen1 / BLU devices have no KVS
+	KVSUnreachable   = "unreachable" // database updated, device KVS not written
+)
+
+// DeviceSetRoomResult reports what device.setroom did beyond the database
+// update (which, if it failed, is returned as an RPC error instead).
+type DeviceSetRoomResult struct {
+	KVS      string `json:"kvs,omitempty"`       // one of the KVS* constants
+	KVSError string `json:"kvs_error,omitempty"` // why the KVS write was not done
+}
+
 // DeviceListByRoomParams represents parameters for device.listbyroom RPC
 type DeviceListByRoomParams struct {
 	RoomId string `json:"room_id"` // Room ID to list devices for

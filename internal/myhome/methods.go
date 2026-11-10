@@ -262,7 +262,7 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &DeviceSetRoomParams{}
 		},
 		NewResult: func() any {
-			return nil
+			return &DeviceSetRoomResult{}
 		},
 	},
 	DeviceListByRoom: {

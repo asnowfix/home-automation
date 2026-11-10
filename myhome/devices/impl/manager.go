@@ -290,16 +290,22 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 			return nil, err
 		}
 
+		// DB update succeeded: from here on KVS is best-effort, and its outcome is
+		// reported in the result (db import lists the devices it could not reach).
+		unreachable := func(err error) (any, error) {
+			return &myhome.DeviceSetRoomResult{KVS: myhome.KVSUnreachable, KVSError: err.Error()}, nil
+		}
+
 		// Also set room-id in device KVS (for Gen2+ Shelly devices)
 		device, err := dm.GetDeviceByAny(ctx, params.Identifier)
 		if err != nil {
 			log.Error(err, "Failed to get device for KVS update", "identifier", params.Identifier)
-			return nil, nil // DB update succeeded, KVS is best-effort
+			return unreachable(err)
 		}
 
 		// Skip KVS for Gen1 and BLU devices (they don't support KVS)
 		if shelly.IsGen1Device(device.Id()) || shelly.IsBluDevice(device.Id()) {
-			return nil, nil
+			return &myhome.DeviceSetRoomResult{KVS: myhome.KVSNotApplicable}, nil
 		}
 
 		// Get or create Shelly device implementation
@@ -308,11 +314,11 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 			impl, err := shelly.NewDeviceFromSummary(ctx, log, device)
 			if err != nil {
 				log.Error(err, "Failed to create device for KVS update", "identifier", params.Identifier)
-				return nil, nil // DB update succeeded, KVS is best-effort
+				return unreachable(err)
 			}
 			sd, ok = impl.(*shelly.Device)
 			if !ok {
-				return nil, nil
+				return &myhome.DeviceSetRoomResult{KVS: myhome.KVSNotApplicable}, nil
 			}
 		}
 
@@ -320,12 +326,10 @@ func NewDeviceManager(ctx context.Context, s *storage.DeviceStorage, resolver my
 		_, err = kvs.SetKeyValue(ctx, log, types.ChannelDefault, sd, "room-id", params.RoomId)
 		if err != nil {
 			log.Error(err, "Failed to set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
-			// Don't return error - DB update succeeded
-		} else {
-			log.Info("Set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
+			return unreachable(err)
 		}
-
-		return nil, nil
+		log.Info("Set room-id in device KVS", "identifier", params.Identifier, "room_id", params.RoomId)
+		return &myhome.DeviceSetRoomResult{KVS: myhome.KVSSet}, nil
 	})
 	myhome.RegisterMethodHandler(myhome.DeviceListByRoom, func(ctx context.Context, in any) (any, error) {
 		params := in.(*myhome.DeviceListByRoomParams)

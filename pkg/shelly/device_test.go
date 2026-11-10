@@ -49,6 +49,32 @@ func TestNewDeviceFromSummary_ValidId_Succeeds(t *testing.T) {
 	}
 }
 
+// Regression for #800: ids not matching deviceIdRe (upper-case hex, Gen1 ids) used to
+// panic in UpdateId and crash-loop the daemon at startup.
+func TestNewDeviceFromSummary_InvalidId_ReturnsError(t *testing.T) {
+	for _, id := range []string{"shellyflood-485519EE11F0", "shellyht-208500", "not-a-shelly", "<nil>"} {
+		d, err := NewDeviceFromSummary(context.Background(), logr.Discard(), stubDevice{id: id, name: "x", host: "192.168.1.50"})
+		if err == nil || d != nil {
+			t.Errorf("id %q: expected an error and no device, got device=%v err=%v", id, d, err)
+		}
+	}
+}
+
+func TestNewDeviceFromMqttId_InvalidId_ReturnsError(t *testing.T) {
+	if _, err := NewDeviceFromMqttId(context.Background(), logr.Discard(), "shellyflood-485519EE11F0"); err == nil {
+		t.Fatal("expected error for upper-case id, got nil")
+	}
+}
+
+func TestUpdateId_InvalidId_DoesNotPanicNorChangeId(t *testing.T) {
+	d := &Device{log: logr.Discard()}
+	d.UpdateId("shellyplus1pm-aabbccddeeff")
+	d.UpdateId("shellyflood-485519EE11F0") // must not panic
+	if d.Id() != "shellyplus1pm-aabbccddeeff" {
+		t.Errorf("invalid id replaced the valid one: %q", d.Id())
+	}
+}
+
 func TestForeach_SkipsEmptyIdDevice(t *testing.T) {
 	called := false
 	do := func(ctx context.Context, log logr.Logger, via types.Channel, dev devices.Device, args []string) (any, error) {

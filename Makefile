@@ -264,6 +264,20 @@ logs-local-daemon:
 #                                                                          which accounts for the whole
 #                                                                          delta. Real added cost, so the
 #                                                                          timeout moves with it.)
+#   2026-11-09  internal/shelly/scripts  33.777s, 1 CPU, -race, -parallel=32  ->  120s
+#               (#748: t.Parallel() on every pool-pump and schedule-wrap test, plus an
+#               explicit -parallel=$(TESTPARALLEL). The package is wait-bound, not
+#               CPU-bound: 24 CPUs ran it in 38.8s with only 12.6s of CPU time. Go's
+#               -parallel defaults to GOMAXPROCS, so `taskset -c 0` with the default ran one
+#               test at a time and took 634.934s; the same single CPU with -parallel=24 took
+#               35.3s. Pinning -parallel makes the duration nearly independent of core count.
+#               Measured by `make timeout-check` (pinned to ONE CPU, the worst case): scripts
+#               33.777s, jstarget 29.919s, blu 8.507s, smoke 6.335s. Flake check, same
+#               binary, -parallel=32: 3 runs on 1 CPU (33.2s/33.0s/33.5s) and 3 on 24 CPUs
+#               (29.9s/31.7s/30.2s), no failures and no data races. 33.777 * 1.1 = 37.2s;
+#               120s is deliberately conservative (3.6x) for slower CI cores and contention.
+#               CI (ubuntu-latest, 4 vCPU, -cover, default -parallel=4) measured 158-165s
+#               before this change.)
 #
 # History, same package under -race: 507s (08-23) -> 591s (08-24) -> 627s
 # (08-25) -> 685s (08-26, before the split). It crossed Go's 600s default on
@@ -286,16 +300,25 @@ TESTFLAGS ?= -race
 # five times across workflows against `make test` twice, so a timeout that
 # covers only `test` covers the minority case -- which is exactly how #552
 # survived its first fix.
-TESTTIMEOUT ?= 674s
+TESTTIMEOUT ?= 120s
+
+# TESTPARALLEL pins `go test -parallel` explicitly. Go defaults it to GOMAXPROCS,
+# and internal/shelly/scripts is wait-bound (emulator timers), not CPU-bound:
+# on one CPU the default ran one test at a time and took 634.934s, while
+# `-parallel=24` on the same single CPU took 35.3s (CPU time 9.2s). Leaving the
+# default made the package's duration depend on the runner's core count (#748).
+# Like TESTTIMEOUT it is a separate variable so overriding TESTFLAGS cannot drop
+# it, and it must be applied to EVERY target that runs the suite.
+TESTPARALLEL ?= 32
 
 test: build
 	bash linux/systemd/update_test.sh
 	python3 -I linux/debian/postinst_test.py
-	$(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...
+	$(GO) test $(TESTFLAGS) -parallel=$(TESTPARALLEL) -timeout=$(TESTTIMEOUT) ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
-	    (cd $$dir && $(GO) test $(TESTFLAGS) -timeout=$(TESTTIMEOUT) ./...) || rc=1; \
+	    (cd $$dir && $(GO) test $(TESTFLAGS) -parallel=$(TESTPARALLEL) -timeout=$(TESTTIMEOUT) ./...) || rc=1; \
 	  fi; \
 	done; exit $$rc
 
@@ -306,17 +329,25 @@ test-race:
 
 cover: build
 	@mkdir -p coverage
-	$(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=coverage/root.cov ./...
+	$(GO) test -parallel=$(TESTPARALLEL) -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=coverage/root.cov ./...
 	@rc=0; for dir in $$(awk '/\t\.\//{sub(/\t\.\//, ""); print}' go.work); do \
 	  if find $$dir \( -mindepth 1 -type d -exec test -f "{}/go.mod" \; -prune \) \
 	          -o \( -type f -name "*_test.go" -print -quit \) 2>/dev/null | grep -q .; then \
 	    sdir=$$(echo $$dir | tr '/' '_'); \
-	    (cd $$dir && $(GO) test -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=$(CURDIR)/coverage/$$sdir.cov ./...) || rc=1; \
+	    (cd $$dir && $(GO) test -parallel=$(TESTPARALLEL) -timeout=$(TESTTIMEOUT) -covermode=atomic -coverprofile=$(CURDIR)/coverage/$$sdir.cov ./...) || rc=1; \
 	  fi; \
 	done; \
 	echo "mode: atomic" > coverage.txt; \
 	for f in coverage/*.cov; do grep -v "^mode:" "$$f" >> coverage.txt 2>/dev/null || true; done; \
 	exit $$rc
+
+# timeout-check re-derives the timeout from a SHORT run: it pins the scripts
+# packages to one CPU (the worst case), runs them with -parallel=$(TESTPARALLEL),
+# and fails if TESTTIMEOUT is below the slowest package's duration + 10%.
+# Run it when the suite has grown; raise TESTTIMEOUT (and the dated history
+# above) from a successful run only.
+timeout-check:
+	python3 -I tools/timeout_check.py $(TESTTIMEOUT) $(TESTPARALLEL) $(TESTFLAGS) -- ./internal/shelly/scripts/...
 
 # stress: run timing-sensitive packages with GOMAXPROCS=2 and -count=10 to
 # simulate CI-like goroutine starvation. Catches flaky tests that pass locally

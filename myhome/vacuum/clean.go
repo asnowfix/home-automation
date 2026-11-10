@@ -178,6 +178,11 @@ func (s *Service) retryVersion(r *robot, mapID, first string, known []myhome.Vac
 	if !retryOtherVersion {
 		return "", "retry disabled"
 	}
+	if r.remote != nil {
+		// interrupts counts only this daemon's commands; the owner or another
+		// follower may have stopped the robot since, so a follower never retries.
+		return "", "a follower does not retry (the owner or another follower may have sent a stop or dock meanwhile)"
+	}
 	s.mu.Lock()
 	interrupted := r.interrupts
 	docked := r.status != nil && r.status.Phase == roomba.PhaseCharge

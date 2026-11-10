@@ -21,14 +21,18 @@ import (
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/asnowfix/home-automation/pkg/roomba"
+	"github.com/go-logr/logr"
 )
 
 // Timings of the follower. Variables so tests can shorten them.
 var (
-	followStale   = 90 * time.Second                         // state or availability older than this (three heartbeats) is unknown
-	resultWait    = roomba.DefaultAckTimeout + 5*time.Second // how long a command waits for its result
-	followRefresh = 5 * time.Second                          // how often staleness is re-evaluated without any message
-	followNow     = time.Now                                 // the clock; tests replace it
+	followStale = 90 * time.Second // state or availability older than this (three heartbeats) is unknown
+	// How long a command waits for its result: the owner may still run a queued
+	// command for cmdMaxAge and then wait for the robot's acknowledgement, so
+	// "unconfirmed" must not be declared before the owner has surely finished.
+	resultWait    = cmdMaxAge + roomba.DefaultAckTimeout + 5*time.Second
+	followRefresh = 5 * time.Second // how often staleness is re-evaluated without any message
+	followNow     = time.Now        // the clock; tests replace it
 )
 
 var (
@@ -58,11 +62,13 @@ type remoteRobot struct {
 	state   *bridgeState
 	rooms   *myhome.VacuumRoomsResult
 	waiters map[string]chan BridgeResult
+	late    map[string]bool // ids given up on as unconfirmed, so a late result can be logged
+	log     logr.Logger
 	cancel  context.CancelFunc
 }
 
 func newRemoteRobot(mc mqtt.Client, id, instance string) *remoteRobot {
-	return &remoteRobot{mc: mc, id: id, instance: instance, stale: followStale, wait: resultWait, waiters: map[string]chan BridgeResult{}}
+	return &remoteRobot{mc: mc, id: id, instance: instance, stale: followStale, wait: resultWait, waiters: map[string]chan BridgeResult{}, late: map[string]bool{}, log: logr.Discard()}
 }
 
 func (r *remoteRobot) topic(leaf string) string { return BridgeTopic(r.id, leaf) }
@@ -144,7 +150,12 @@ func (r *remoteRobot) onResultMsg(payload []byte) {
 	}
 	r.mu.Lock()
 	ch := r.waiters[res.ID]
+	wasLate := r.late[res.ID]
+	delete(r.late, res.ID)
 	r.mu.Unlock()
+	if wasLate {
+		r.log.Info("Vacuum follower: late result for a command given up as unconfirmed", "id", res.ID, "ok", res.OK, "error", res.Error)
+	}
 	if ch != nil { // not ours: another follower's result
 		select {
 		case ch <- res:
@@ -249,10 +260,22 @@ func (r *remoteRobot) send(ctx context.Context, c BridgeCommand) error {
 		}
 		return fmt.Errorf("the robot bridge refused or failed the command: %s", res.Error)
 	case <-timer.C:
+		r.giveUp(c.ID)
 		return ErrUnconfirmed
 	case <-ctx.Done():
+		r.giveUp(c.ID)
 		return fmt.Errorf("%w (%v)", ErrUnconfirmed, ctx.Err())
 	}
+}
+
+// giveUp remembers an unconfirmed command id, bounded, to log a result that arrives later.
+func (r *remoteRobot) giveUp(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.late) >= 100 {
+		r.late = map[string]bool{}
+	}
+	r.late[id] = true
 }
 
 // startFollower runs follower mode: no database, no robot connection. The
@@ -263,6 +286,7 @@ func (s *Service) startFollower() error {
 	}
 	id := s.cfg.Follow
 	remote := newRemoteRobot(s.cfg.MQTT, id, s.cfg.Instance)
+	remote.log = s.log
 	// The owner's name is not part of the topic contract: the id stands in for it.
 	r := &robot{rec: robotRecord{BLID: id, Name: id}, client: remote, remote: remote}
 	remote.onState = func(vs myhome.VacuumStatus) { s.followState(r, vs) }

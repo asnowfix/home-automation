@@ -216,3 +216,35 @@ func TestVacuumFollowConfig(t *testing.T) {
 		t.Fatal("MYHOME_VACUUM_FOLLOW accepted together with the bridge")
 	}
 }
+
+// An explicit --vacuum-follow wins over MYHOME_VACUUM_FOLLOW; without the flag the env var is used.
+func TestVacuumFollowFlagBeatsEnv(t *testing.T) {
+	saved := options.Flags
+	t.Cleanup(func() {
+		options.Flags = saved
+		f := runCmd.Flags().Lookup("vacuum-follow")
+		_ = f.Value.Set("")
+		f.Changed = false
+	})
+	t.Setenv("MYHOME_VACUUM_FOLLOW", "FROM-ENV")
+	v := viper.New()
+	v.SetEnvPrefix("MYHOME")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+
+	resolve := func() string { // mirrors the order in runCmd.RunE
+		flagValue := options.Flags.VacuumFollow
+		readVacuumConfig(v)
+		applyVacuumFollowFlag(runCmd, flagValue)
+		return options.Flags.VacuumFollow
+	}
+	if got := resolve(); got != "FROM-ENV" {
+		t.Fatalf("without the flag: %q, want the env value", got)
+	}
+	if err := runCmd.ParseFlags([]string{"--vacuum-follow=FROM-FLAG"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := resolve(); got != "FROM-FLAG" {
+		t.Fatalf("with the flag: %q, want the flag value", got)
+	}
+}

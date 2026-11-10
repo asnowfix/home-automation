@@ -332,9 +332,7 @@ var runCmd = &cobra.Command{
 		// password are set. See readVacuumConfig.
 		flagFollow := options.Flags.VacuumFollow // set by cobra from --vacuum-follow
 		readVacuumConfig(v)
-		if cmd.Flags().Changed("vacuum-follow") {
-			options.Flags.VacuumFollow = flagFollow // the flag wins over MYHOME_VACUUM_FOLLOW
-		}
+		applyVacuumFollowFlag(cmd, flagFollow)
 		if err := vacuumConfig().Validate(); err != nil {
 			return err
 		}
@@ -362,6 +360,13 @@ func readVacuumConfig(v *viper.Viper) {
 	options.Flags.VacuumFollow = v.GetString("vacuum.follow")
 	options.Flags.IRobotEmail = v.GetString("irobot.email")
 	options.Flags.IRobotPassword = v.GetString("irobot.password")
+}
+
+// applyVacuumFollowFlag lets an explicit --vacuum-follow win over MYHOME_VACUUM_FOLLOW.
+func applyVacuumFollowFlag(cmd *cobra.Command, flagValue string) {
+	if cmd.Flags().Changed("vacuum-follow") {
+		options.Flags.VacuumFollow = flagValue
+	}
 }
 
 // vacuumConfig is the vacuum service configuration read by readVacuumConfig.

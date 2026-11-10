@@ -12,6 +12,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/asnowfix/home-automation/pkg/roomba"
 	"github.com/go-logr/logr"
+	"github.com/go-logr/logr/funcr"
 )
 
 // newFollower starts a follower Service with no database and no password.
@@ -251,6 +252,60 @@ func TestFollowerRoomsFromTopicAndClean(t *testing.T) {
 	}
 }
 
+// An aborted follower clean is reported, never retried with another map version.
+func TestFollowerAbortedCleanIsNotRetried(t *testing.T) {
+	old := abortWindow
+	abortWindow = 2 * time.Second
+	t.Cleanup(func() { abortWindow = old })
+	mc := newRecMQTT()
+	s := newFollower(t, mc)
+	feedAvail(mc, true, time.Now())
+	// The robot reports map version v9 while the room is known at v1: a retry would name v9.
+	st := bridgeState{VacuumStatus: myhome.VacuumStatus{Phase: "charge", Cycle: "none", Maps: []myhome.VacuumMap{{ID: "m1", Version: "v9"}}, UpdatedAt: time.Now()}, Connected: true, TS: time.Now()}
+	feedJSON(mc, "state", st)
+	feedRooms(mc, true, kitchen())
+	answer(t, mc, func(c BridgeCommand) BridgeResult { return BridgeResult{ID: c.ID, OK: true} })
+	go func() { // the robot acknowledges, then aborts at once
+		for len(sent(mc)) == 0 {
+			time.Sleep(2 * time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond)
+		st.Error, st.Mission, st.TS = 7, 1, time.Now()
+		feedJSON(mc, "state", st)
+	}()
+	_, err := s.Clean(context.Background(), "", []string{"Kitchen"})
+	if err == nil || !strings.Contains(err.Error(), "aborted") || !strings.Contains(err.Error(), "a follower does not retry") {
+		t.Fatalf("err = %v, want an abort without retry", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if n := len(sent(mc)); n != 1 {
+		t.Fatalf("%d clean commands published, want exactly 1 (no retry on a follower)", n)
+	}
+}
+
+// A result arriving after the follower gave up is logged, not silently dropped.
+func TestFollowerLateResultIsLogged(t *testing.T) {
+	mc := newRecMQTT()
+	s := newFollower(t, mc, func() { resultWait = 50 * time.Millisecond })
+	feedAvail(mc, true, time.Now())
+	if _, err := s.Command(context.Background(), "", "start"); !errors.Is(err, ErrUnconfirmed) {
+		t.Fatalf("err = %v, want unconfirmed", err)
+	}
+	var lines []string
+	s.robots[blid].remote.log = funcr.New(func(prefix, args string) { lines = append(lines, args) }, funcr.Options{})
+	id := sent(mc)[0].ID
+	feedJSON(mc, "result", BridgeResult{ID: id, OK: true})
+	if len(lines) != 1 || !strings.Contains(lines[0], id) || !strings.Contains(lines[0], "late result") {
+		t.Fatalf("log lines = %v, want one late-result line naming %s", lines, id)
+	}
+}
+
+func TestFollowerWaitCoversTheOwnersQueue(t *testing.T) {
+	if want := cmdMaxAge + roomba.DefaultAckTimeout; resultWait < want {
+		t.Fatalf("resultWait = %v, want at least %v (owner may run a queued command that long)", resultWait, want)
+	}
+}
+
 func TestFollowerCleanRefusedWhileStateUnknown(t *testing.T) {
 	mc := newRecMQTT()
 	s := newFollower(t, mc)
@@ -373,6 +428,15 @@ func TestFollowerAgainstOwnerBridge(t *testing.T) {
 	}
 	// Owner-side validation failure: the region is not one the owner knows.
 	eventually(t, "follower has the owner's rooms", func() bool { r, err := follower.Rooms(""); return err == nil && len(r.Regions) == 1 })
+	oldAbort := abortWindow
+	abortWindow = 50 * time.Millisecond
+	t.Cleanup(func() { abortWindow = oldAbort })
+	if _, err := follower.Clean(context.Background(), "", []string{"1"}); err != nil {
+		t.Fatalf("follower.Clean: %v", err)
+	}
+	if c := owner.last(); c.cleanMap.ID != "m1" || len(c.cleaned) != 1 {
+		t.Fatalf("owner robot got map=%+v regions=%v", c.cleanMap, c.cleaned)
+	}
 	err := follower.robots[blid].remote.CleanRegions(context.Background(), roomba.Map{ID: "m1", Version: "v1"}, []roomba.Region{{ID: "99", Type: "rid"}})
 	if err == nil || !strings.Contains(err.Error(), "not known on map m1") {
 		t.Fatalf("err = %v, want the owner's validation failure", err)

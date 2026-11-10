@@ -132,7 +132,7 @@ func (s *Service) Rooms(sel string) (*myhome.VacuumRoomsResult, error) {
 		return nil, err
 	}
 	if r.remote != nil {
-		rooms, _ := r.remote.roomsResult()
+		rooms, _ := r.remote.roomsResult() // ok ignored: no rooms yet lists none, and Clean (via regions) reports the missing data
 		return &rooms, nil
 	}
 	return &myhome.VacuumRoomsResult{Regions: regions, CloudNames: s.cfg.CloudEnabled()}, nil

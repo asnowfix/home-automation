@@ -240,8 +240,8 @@ func TestRoomPageVacuumAreas(t *testing.T) {
 	if !strings.Contains(body, "every 5s [kiosk.visible('rooms') && kiosk.roomOpen") {
 		t.Errorf("vacuum block does not re-poll only while visible:\n%s", body)
 	}
-	if strings.Contains(body, "Clean this room") {
-		t.Errorf("clean button belongs to #765")
+	if !strings.Contains(body, "Clean this room") || !strings.Contains(body, "Robot offline") {
+		t.Errorf("want the disabled clean button with its reason (robot not connected):\n%s", body)
 	}
 
 	regions = nil

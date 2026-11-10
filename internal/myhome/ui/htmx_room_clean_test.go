@@ -260,7 +260,7 @@ func TestVacuumAction_RoomCleanRechecks(t *testing.T) {
 		{"two maps", []myhome.VacuumRobot{idleRobot("R1")}, []myhome.VacuumRegion{reg("m1", "1", "A", "sejour"), reg("m2", "2", "B", "sejour")}, roomForm(), "different robot maps"},
 		{"id also on another map", []myhome.VacuumRobot{idleRobot("R1")}, []myhome.VacuumRegion{reg("m1", "1", "A", "sejour"), reg("m2", "1", "B", "other")}, roomForm(), "also used on another robot map"},
 		{"unassigned", []myhome.VacuumRobot{idleRobot("R1")}, []myhome.VacuumRegion{reg("m1", "1", "A", "other")}, roomForm(), "no robot area is assigned"},
-		{"other robot", []myhome.VacuumRobot{idleRobot("R1")}, []myhome.VacuumRegion{reg("m1", "1", "A", "sejour")}, func() url.Values { f := roomForm(); f.Set("robot", "R9"); return f }(), "not \"R9\""},
+		{"other robot", []myhome.VacuumRobot{idleRobot("R1")}, []myhome.VacuumRegion{reg("m1", "1", "A", "sejour")}, func() url.Values { f := roomForm(); f.Set("robot", "R9"); return f }(), "not &#34;R9&#34;"},
 		{"unknown room", []myhome.VacuumRobot{idleRobot("R1")}, []myhome.VacuumRegion{reg("m1", "1", "A", "sejour")}, func() url.Values { f := roomForm(); f.Set("room_id", "nowhere"); return f }(), "unknown room"},
 	}
 	for _, tc := range tests {
@@ -279,8 +279,6 @@ func TestVacuumAction_RoomCleanRechecks(t *testing.T) {
 
 	t.Run("room_id with another command", func(t *testing.T) {
 		e := newCleanEnv(t, idleRobot("R1"))
-		code, _ := e.post(t, roomForm("x", "y"))
-		_ = code
 		f := roomForm()
 		f.Set("command", "start")
 		if code, _ := e.post(t, f); code != http.StatusBadRequest || len(e.cleaned) != 0 {
@@ -303,10 +301,6 @@ func TestVacuumAction_RoomCleanRechecks(t *testing.T) {
 // nothing in the panel knows about room_id.
 func TestVacuumPanel_ConfirmScopeGolden(t *testing.T) {
 	out := renderVacuumPanel(t, card(true, &myhome.VacuumStatus{Phase: "charge", BinPresent: true}, nil))
-	if n := strings.Count(out, "@click="); n != 4 { // open('start'), open('stop'), and the confirm's Cancel (close())
-		// the template also has the two x-data handlers inline, which are not @click
-		t.Logf("@click count %d", n)
-	}
 	for _, want := range []string{
 		`@click="open('start')">Clean all</button>`,
 		`@click="open('stop')">Stop</button>`,

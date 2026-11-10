@@ -31,6 +31,7 @@ import (
 // turnOffAllSwitchesNext), and those helpers may only be called from the
 // actuator. Everything else must go through applyOutput().
 func TestPoolPump_OnlyOneActuator(t *testing.T) {
+	t.Parallel()
 	src, err := os.ReadFile(poolPumpScriptPath)
 	if err != nil {
 		t.Fatalf("read pool-pump.js: %v", err)
@@ -59,6 +60,7 @@ func TestPoolPump_OnlyOneActuator(t *testing.T) {
 // mem_peak on a Pro1, so the reconciler's hot path must pass named function
 // references to queueTask, never freshly built anonymous functions.
 func TestPoolPump_NoClosureAllocatedPerReconcile(t *testing.T) {
+	t.Parallel()
 	src, err := os.ReadFile(poolPumpScriptPath)
 	if err != nil {
 		t.Fatalf("read pool-pump.js: %v", err)
@@ -152,6 +154,7 @@ func waitActiveOutput(t *testing.T, d *script.DeviceState, want string) bool {
 // left the pump off for the whole day; level-triggered control starts it
 // because the answer to "should I be running?" is asked continuously.
 func TestPoolPump_ReconcilerStartsInsideWindowWithoutAnyEvent(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -1*time.Hour, 1*time.Hour, false)
 	stop := runPoolPump(t, d)
 	defer stop()
@@ -167,6 +170,7 @@ func TestPoolPump_ReconcilerStartsInsideWindowWithoutAnyEvent(t *testing.T) {
 // policy instead of adopting whatever it finds. A pump left running outside
 // its window is stopped.
 func TestPoolPump_ReconcilerStopsOutsideWindowAfterRestart(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, true)
 	stop := runPoolPump(t, d)
 	defer stop()
@@ -183,6 +187,7 @@ func TestPoolPump_ReconcilerStopsOutsideWindowAfterRestart(t *testing.T) {
 // because a schedule read came back incomplete (#441/#436). It must do
 // nothing at all.
 func TestPoolPump_UnknownWindowMeansNoAction(t *testing.T) {
+	t.Parallel()
 	cs := pro1ComponentStatus()
 	cs["switch:0"] = map[string]interface{}{"id": 0, "output": true}
 	d := &script.DeviceState{
@@ -217,6 +222,7 @@ func TestPoolPump_UnknownWindowMeansNoAction(t *testing.T) {
 // run window must hold, or the reconciler would undo it within one 200ms tick
 // — the cost the study flagged and the reason override-ms exists.
 func TestPoolPump_ManualOverrideSurvivesOutsideWindow(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false)
 	injector := make(chan []byte, 4)
 	d.EventInjector = injector
@@ -242,6 +248,7 @@ func TestPoolPump_ManualOverrideSurvivesOutsideWindow(t *testing.T) {
 // TestPoolPump_ScheduleEdgeClearsManualOverride: an override expires at
 // override-ms OR at the next schedule edge, whichever comes first.
 func TestPoolPump_ScheduleEdgeClearsManualOverride(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false)
 	injector := make(chan []byte, 4)
 	d.EventInjector = injector
@@ -280,6 +287,7 @@ func TestPoolPump_ScheduleEdgeClearsManualOverride(t *testing.T) {
 // window at all, so there is nothing left for the fuse to ever act on from
 // button activity alone.
 func TestPoolPump_ButtonChangesDoNotAccumulateInFuseWindow(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false)
 	injector := make(chan []byte, 16)
 	d.EventInjector = injector
@@ -316,6 +324,7 @@ func TestPoolPump_ButtonChangesDoNotAccumulateInFuseWindow(t *testing.T) {
 // exercised here — see TestPoolPump_WaterInterlockRefusesButtonPress) is the
 // only fact allowed to override a manual press.
 func TestPoolPump_ButtonBypassesFuseRefusalAfterTrip(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -1*time.Hour, 1*time.Hour, false) // window contains "now": pump starts on its own
 	d.ScheduleEvalInjector = make(chan []byte, 8)
 	buttonInjector := make(chan []byte, 4)
@@ -380,6 +389,7 @@ func TestPoolPump_ButtonBypassesFuseRefusalAfterTrip(t *testing.T) {
 // anywhere in this test) must still trip the fuse and still be refused,
 // exactly as before.
 func TestPoolPump_ScheduleDrivenChangesStillTripFuse(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -1*time.Hour, 1*time.Hour, false) // window contains "now": pump starts on its own
 	d.ScheduleEvalInjector = make(chan []byte, 8)
 	stop := runPoolPump(t, d)
@@ -437,6 +447,7 @@ func TestPoolPump_ScheduleDrivenChangesStillTripFuse(t *testing.T) {
 // is active must still be ignored outright, not merely "refused by the
 // fuse".
 func TestPoolPump_WaterInterlockRefusesButtonPress(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false)
 	d.ComponentStatus["input:0"] = map[string]interface{}{"id": 0, "state": true} // water supply active from boot
 	injector := make(chan []byte, 4)
@@ -488,6 +499,7 @@ func TestPoolPump_WaterInterlockRefusesButtonPress(t *testing.T) {
 //     they accumulate and the fuse genuinely trips, refusing the final
 //     restore.
 func TestPoolPump_OutOfBandAdoptionAfterButtonLosesFuseImmunity(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false) // outside window: nothing auto-actuates
 	injector := make(chan []byte, 32)
 	d.EventInjector = injector
@@ -576,6 +588,7 @@ func TestPoolPump_OutOfBandAdoptionAfterButtonLosesFuseImmunity(t *testing.T) {
 // RC_BUTTON_DRIVEN, so a button-driven run must credit exactly like any
 // other. This pins that with a real button-driven start+stop cycle.
 func TestPoolPump_ButtonDrivenRunCreditsRuntimeDespiteFuseImmunity(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false) // outside window: only the button drives this
 	injector := make(chan []byte, 4)
 	d.EventInjector = injector
@@ -640,6 +653,7 @@ func TestPoolPump_ButtonDrivenRunCreditsRuntimeDespiteFuseImmunity(t *testing.T)
 // are needed to see the bug. applyOutput() now captures the pre-transition
 // output into RC_WAS at dispatch time, before any event can race it.
 func TestPoolPump_NestedEventDuringActuationProducesOneChain(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -1*time.Hour, 1*time.Hour, false)
 	injector := make(chan []byte, 8)
 	d.EventInjector = injector
@@ -738,6 +752,7 @@ func TestPoolPump_NestedEventDuringActuationProducesOneChain(t *testing.T) {
 // sibling turnOffAllSwitchesNext). Calling applyOutput(1) once, directly,
 // isolates the one behaviour this fix changes.
 func TestPoolPump_BreakBeforeMakeOffStepFailureAbortsTransition(t *testing.T) {
+	t.Parallel()
 	injector := make(chan []byte, 8)
 	d := &script.DeviceState{
 		KVS:                  controllerKVS(),
@@ -857,6 +872,7 @@ func shellySwitchEvent(id int, state bool) []byte {
 // injected switch:N event, exactly modelling a source this script did not
 // initiate.
 func TestPoolPump_OutOfBandTransitionCreditsRuntime(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -5*time.Hour, -4*time.Hour, false)
 	injector := make(chan []byte, 8)
 	d.EventInjector = injector
@@ -928,6 +944,7 @@ func TestPoolPump_OutOfBandTransitionCreditsRuntime(t *testing.T) {
 // unaided when the observation channel is silent, as it always is in this
 // harness.
 func TestPoolPump_ScheduleDrivenRunCreditsExactlyOnce(t *testing.T) {
+	t.Parallel()
 	d := poolPumpWindowNow(t, -1*time.Hour, 1*time.Hour, false)
 	d.ScheduleEvalInjector = make(chan []byte, 4)
 	stop := runPoolPump(t, d)

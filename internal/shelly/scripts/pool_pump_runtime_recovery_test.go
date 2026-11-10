@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -103,7 +104,10 @@ func poolPumpSummerWindowNow(t *testing.T, runHours float64, offsetStart, offset
 // in this round -- confirmed empirically by combining a fire+read into one
 // atomic eval (no separate probe involved) and observing the extension DID
 // happen correctly, immediately. Real bug: the probe helper, not the script.
-var poolPumpProbeSeq int64
+//
+// It is atomic because the tests run in parallel (#748): a plain int64 would be
+// a data race, and a duplicated key would resurrect the stale-read bug above.
+var poolPumpProbeSeq atomic.Int64
 
 // readPoolPumpWindowStop probes F_WIN_STOP (minutes since midnight) by
 // having the script itself write it to a fresh, uniquely-named test-only KVS
@@ -112,8 +116,7 @@ var poolPumpProbeSeq int64
 // probe (see poolPumpProbeSeq).
 func readPoolPumpWindowStop(t *testing.T, d *script.DeviceState) int64 {
 	t.Helper()
-	poolPumpProbeSeq++
-	key := fmt.Sprintf("test/win-stop-%d", poolPumpProbeSeq)
+	key := fmt.Sprintf("test/win-stop-%d", poolPumpProbeSeq.Add(1))
 	if err := evalPoolPumpSchedule(d, fmt.Sprintf("Shelly.call('KVS.Set',{key:%q,value:F_WIN_STOP})", key)); err != nil {
 		t.Fatalf("failed to probe F_WIN_STOP: %v", err)
 	}
@@ -248,6 +251,7 @@ func seedPoolPumpOpenRunInterval(t *testing.T, d *script.DeviceState, openForSec
 // enough to recover the lost time, and the reconciler must then start the
 // pump because "now" is back inside the (extended) window.
 func TestPoolPump_RuntimeRecovery_GapExtendsWindowToConverge(t *testing.T) {
+	t.Parallel()
 	d, forecastServed := poolPumpSummerWindowNow(t, 1 /* intended = 3600s */, -2*time.Hour, -1*time.Minute)
 	fixtureStopMin := int64(minutesSinceMidnight(time.Now()) - 1) // the schedule's own (now past) stop
 	stop := runPoolPump(t, d)
@@ -282,6 +286,7 @@ func TestPoolPump_RuntimeRecovery_GapExtendsWindowToConverge(t *testing.T) {
 // the feature only ever recovers a real shortfall, never runs unconditionally
 // past the scheduled edge.
 func TestPoolPump_RuntimeRecovery_NoShortfallDoesNotExtend(t *testing.T) {
+	t.Parallel()
 	d, forecastServed := poolPumpSummerWindowNow(t, 1, -2*time.Hour, -1*time.Minute)
 	fixtureStopMin := int64(minutesSinceMidnight(time.Now()) - 1)
 	stop := runPoolPump(t, d)
@@ -314,6 +319,7 @@ func TestPoolPump_RuntimeRecovery_NoShortfallDoesNotExtend(t *testing.T) {
 // and one with none, and asserts the solar-credited device needs -- and gets
 // -- a much shorter extension.
 func TestPoolPump_RuntimeRecovery_SolarCreditShortensExtension(t *testing.T) {
+	t.Parallel()
 	const intendedSec = 3600 // 1h
 
 	run := func(t *testing.T, alreadyRanSec float64) int64 {
@@ -333,7 +339,7 @@ func TestPoolPump_RuntimeRecovery_SolarCreditShortensExtension(t *testing.T) {
 		return readPoolPumpWindowStop(t, d)
 	}
 
-	noCreditStop := run(t, 0)               // full 3600s shortfall
+	noCreditStop := run(t, 0)                  // full 3600s shortfall
 	solarCreditStop := run(t, intendedSec-600) // only 600s (10min) shortfall left
 
 	nowMin := int64(minutesSinceMidnight(time.Now()))
@@ -355,6 +361,7 @@ func TestPoolPump_RuntimeRecovery_SolarCreditShortensExtension(t *testing.T) {
 // far larger than the time remaining before sunset -- the "must not chase
 // the target indefinitely" design constraint.
 func TestPoolPump_RuntimeRecovery_BoundedBySunset(t *testing.T) {
+	t.Parallel()
 	d, forecastServed := poolPumpSummerWindowNow(t, 10 /* intended = 36000s, deliberately huge */, -2*time.Hour, -1*time.Minute)
 	fixtureStopMin := int64(minutesSinceMidnight(time.Now()) - 1)
 	stop := runPoolPump(t, d)
@@ -390,6 +397,7 @@ func TestPoolPump_RuntimeRecovery_BoundedBySunset(t *testing.T) {
 // has pushed the window well past "now". Recovery must never bypass the
 // existing hard-ceiling bound.
 func TestPoolPump_RuntimeRecovery_HardCeilingStillRefusesRunaway(t *testing.T) {
+	t.Parallel()
 	// Same tiny ceiling override as TestPoolPump_SolarRespectsHardCeiling
 	// (~7.7s target against the schema-default pool geometry).
 	kvs := solarKVS(map[string]string{"solar-max-turnover": "0.001"})
@@ -457,6 +465,7 @@ func TestPoolPump_RuntimeRecovery_HardCeilingStillRefusesRunaway(t *testing.T) {
 // (~60min). The two differ by a full 30 minutes, which the +/-5min tolerance
 // below cannot confuse with timing noise.
 func TestPoolPump_RuntimeRecovery_OpenIntervalCountsTowardShortfall(t *testing.T) {
+	t.Parallel()
 	d, forecastServed := poolPumpSummerWindowNow(t, 1 /* intended = 3600s */, -2*time.Hour, -1*time.Minute)
 	fixtureStopMin := int64(minutesSinceMidnight(time.Now()) - 1)
 	stop := runPoolPump(t, d)
@@ -464,8 +473,8 @@ func TestPoolPump_RuntimeRecovery_OpenIntervalCountsTowardShortfall(t *testing.T
 
 	sunsetHour := float64(minutesSinceMidnight(time.Now())+180) / 60 // far away: not the bound under test
 	seedPoolPumpForecastState(t, d, forecastServed, 40, sunsetHour, fixtureStopMin)
-	seedPoolPumpRuntimeToday(t, d, 0)          // no CLOSED interval at all
-	seedPoolPumpOpenRunInterval(t, d, 1800)    // but an OPEN one, running 1800s already
+	seedPoolPumpRuntimeToday(t, d, 0)       // no CLOSED interval at all
+	seedPoolPumpOpenRunInterval(t, d, 1800) // but an OPEN one, running 1800s already
 
 	if err := evalPoolPumpSchedule(d, "handleEveningStop()"); err != nil {
 		t.Fatalf("failed to fire handleEveningStop(): %v", err)
@@ -504,6 +513,7 @@ func TestPoolPump_RuntimeRecovery_OpenIntervalCountsTowardShortfall(t *testing.T
 // manual STATE seeding, so there is no race with init's own automatic daily
 // check to guard against here.
 func TestPoolPump_RuntimeRecovery_DailyCheckReseedsLeakedExtension(t *testing.T) {
+	t.Parallel()
 	skipUnlessNowInside(t, poolPumpWideStartMin, poolPumpWideStopMin)
 
 	srv := poolPumpForecastServer(t, poolPumpWidePeakHour, "00:00", "23:59")

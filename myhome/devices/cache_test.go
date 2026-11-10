@@ -798,8 +798,81 @@ func TestCache_GetAllDevices_ReturnsCacheContent(t *testing.T) {
 	}
 }
 
-// TestCache_ForgetDevice_DelegatesToRegistry documents the current TODO
-// behaviour: ForgetDevice always calls the registry.
+// TestCache_ForgetDevice_EvictsFromCache: a forgotten device must leave the
+// in-memory list and every index, not only the database (#771).
+func TestCache_ForgetDevice_EvictsFromCache(t *testing.T) {
+	reg := newFakeRegistry()
+	c := NewCache(testCtx(t), reg)
+	ctx := context.Background()
+
+	keep := fakeDevice("shelly-041", "keeper", "aa:bb:cc:dd:ee:41", "192.168.1.41")
+	gone := fakeDevice("shelly-042", "forgotten", "aa:bb:cc:dd:ee:42", "192.168.1.42")
+	for _, d := range []*myhome.Device{keep, gone} {
+		if _, err := c.SetDevice(ctx, d, false); err != nil {
+			t.Fatalf("SetDevice: %v", err)
+		}
+	}
+
+	// Forget by name, which is not the key of every index.
+	if err := c.ForgetDevice(ctx, "forgotten"); err != nil {
+		t.Fatalf("ForgetDevice: %v", err)
+	}
+	all, _ := c.GetAllDevices(ctx)
+	if len(all) != 1 || all[0].Id() != "shelly-041" {
+		t.Errorf("expected only shelly-041 left in the cache list, got %+v", all)
+	}
+	if _, ok := c.devicesById["shelly-042"]; ok {
+		t.Error("devicesById still holds the forgotten device")
+	}
+	if _, ok := c.devicesByName["forgotten"]; ok {
+		t.Error("devicesByName still holds the forgotten device")
+	}
+	if _, ok := c.devicesByMAC["aa:bb:cc:dd:ee:42"]; ok {
+		t.Error("devicesByMAC still holds the forgotten device")
+	}
+	if _, ok := c.devicesByHost["192.168.1.42"]; ok {
+		t.Error("devicesByHost still holds the forgotten device")
+	}
+	if _, ok := c.devicesById["shelly-041"]; !ok {
+		t.Error("the kept device was evicted")
+	}
+}
+
+// TestCache_ExportDevices_IgnoresCache: the export must reflect the registry
+// (the database), whatever the cache holds: a device only the cache has is
+// absent, devices only the registry has are present with their room, and the
+// order is stable.
+func TestCache_ExportDevices_IgnoresCache(t *testing.T) {
+	reg := newFakeRegistry()
+	c := NewCache(testCtx(t), reg)
+	ctx := context.Background()
+
+	// Stale cache entry, as left by a forget that did not evict.
+	stale := fakeDevice("shelly-060", "stale", "aa:bb:cc:dd:ee:60", "192.168.1.60")
+	c.mutex.Lock()
+	_, _ = c.insert(stale)
+	c.mutex.Unlock()
+
+	// Database truth, absent from the cache.
+	b := fakeDevice("shelly-062", "b-device", "aa:bb:cc:dd:ee:62", "192.168.1.62")
+	b.RoomId = "kitchen"
+	a := fakeDevice("shelly-061", "a-device", "aa:bb:cc:dd:ee:61", "192.168.1.61")
+	reg.devices[b.Id()] = b
+	reg.devices[a.Id()] = a
+
+	got, err := c.ExportDevices(ctx, "*")
+	if err != nil {
+		t.Fatalf("ExportDevices: %v", err)
+	}
+	if len(got) != 2 || got[0].Id() != "shelly-061" || got[1].Id() != "shelly-062" {
+		t.Fatalf("expected [shelly-061 shelly-062] from the registry, got %+v", got)
+	}
+	if got[1].RoomId != "kitchen" {
+		t.Errorf("room_id lost: %q", got[1].RoomId)
+	}
+}
+
+// TestCache_ForgetDevice_DelegatesToRegistry: ForgetDevice calls the registry.
 func TestCache_ForgetDevice_DelegatesToRegistry(t *testing.T) {
 	reg := newFakeRegistry()
 	c := NewCache(testCtx(t), reg)

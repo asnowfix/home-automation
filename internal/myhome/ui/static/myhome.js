@@ -132,11 +132,19 @@ var kiosk = {
   roomTouched: function(deviceId) {
     var root = this.roomOpen && document.querySelector('#room-view [data-devices]');
     if (!root || this.roomTimer || (' ' + root.dataset.devices + ' ').indexOf(' ' + deviceId + ' ') < 0) { return; }
-    this.roomTimer = setTimeout(function() {
-      kiosk.roomTimer = null;
-      var r = document.querySelector('#room-view [data-devices]');
-      if (kiosk.roomOpen && r) { htmx.trigger(r, 'refresh'); }
-    }, this.roomRefreshMs);
+    this.roomTimer = setTimeout(this.roomRefresh, this.roomRefreshMs);
+  },
+  // Not while the room's Clean confirm is open (or its request is in flight): the
+  // swap would drop the confirm. It cancels itself after 20 s, so this waits at most that.
+  roomRefresh: function() {
+    kiosk.roomTimer = null;
+    var r = document.querySelector('#room-view [data-devices]');
+    if (!kiosk.roomOpen || !r) { return; }
+    if (document.querySelector('#room-vacuum [data-confirming]')) {
+      kiosk.roomTimer = setTimeout(kiosk.roomRefresh, kiosk.roomRefreshMs);
+      return;
+    }
+    htmx.trigger(r, 'refresh');
   },
 
   fromHash: function() {

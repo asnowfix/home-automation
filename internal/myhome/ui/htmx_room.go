@@ -14,7 +14,8 @@ import (
 // Read-only room page (#764, #684 PR 3b): GET /htmx/room/{id}. It renders from
 // daemon memory and SQLite only (device cache, temperature.*, occupancy.*,
 // vacuum.*); no device is contacted. There is deliberately no heater toggle and
-// no clean button (#684 addendum §F, #765).
+// heater control (#684 addendum §F); the vacuum block can start a clean of the
+// room's mapped areas (#765), the one action on the page.
 
 // roomNow is the page's clock; tests replace it.
 var roomNow = time.Now
@@ -35,9 +36,14 @@ type roomHeaterView struct {
 }
 
 type roomVacuumView struct {
-	RoomID string
-	Show   bool // a robot is configured
-	Areas  []string
+	RoomID, RoomName string
+	Show             bool // a robot is configured
+	Areas            []string
+	CanClean         bool   // the room's areas resolve to one map and the robot is connected and idle
+	Reason           string // why Clean this room is disabled; "" when CanClean or when no area is assigned
+	Vals             string // hx-vals of the confirmed request (JSON)
+	Notice           string // outcome of the last clean ("Cleaning <room>")
+	Error            string // failure of the last clean
 }
 
 type roomPageView struct {
@@ -129,44 +135,6 @@ func (h *HTMXHandler) roomTarget(roomID string, now time.Time) string {
 	return s
 }
 
-// roomVacuum lists the mapped, non-stale areas of every robot (memory + SQLite).
-func (h *HTMXHandler) roomVacuum(roomID string) roomVacuumView {
-	v := roomVacuumView{RoomID: roomID}
-	res, err := callVacuum(h.ctx, myhome.VacuumList, nil)
-	if err != nil {
-		return v
-	}
-	list, ok := res.(*myhome.VacuumListResult)
-	if !ok || len(list.Robots) == 0 {
-		return v
-	}
-	v.Show = true
-	for _, r := range list.Robots {
-		rooms, err := callVacuum(h.ctx, myhome.VacuumRooms, &myhome.VacuumParams{Robot: r.ID})
-		if err != nil {
-			continue
-		}
-		rr, ok := rooms.(*myhome.VacuumRoomsResult)
-		if !ok {
-			continue
-		}
-		for _, reg := range rr.Regions {
-			if reg.RoomID == roomID {
-				name := reg.Name
-				if name == "" {
-					name = "region " + reg.ID
-				}
-				if reg.Stale {
-					name += " (robot map changed)"
-				}
-				v.Areas = append(v.Areas, name)
-			}
-		}
-	}
-	sort.Strings(v.Areas)
-	return v
-}
-
 // roomDeviceRows is deviceRows with heater rows made read-only: the heater
 // script decides, the page only shows state.
 func roomDeviceRows(d DeviceView) []deviceRow {
@@ -213,7 +181,7 @@ func (h *HTMXHandler) roomRoute(w http.ResponseWriter, r *http.Request, part str
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if part == "vacuum" {
-		if err := roomTmpl.ExecuteTemplate(w, "room-vacuum", h.roomVacuum(id)); err != nil {
+		if err := roomTmpl.ExecuteTemplate(w, "room-vacuum", h.roomVacuum(id, rc.Name, "", "")); err != nil {
 			h.log.Error(err, "failed to render room vacuum block")
 		}
 		return
@@ -240,7 +208,7 @@ func (h *HTMXHandler) roomRoute(w http.ResponseWriter, r *http.Request, part str
 	sort.Slice(views, func(i, j int) bool { return strings.ToLower(views[i].Name) < strings.ToLower(views[j].Name) })
 	applyPoolStatus(h.ctx, views)
 
-	p := roomPageView{ID: id, Name: rc.Name, Devices: views, Temp: roomTemperature(sensors, now), Target: h.roomTarget(id, now), Vacuum: h.roomVacuum(id)}
+	p := roomPageView{ID: id, Name: rc.Name, Devices: views, Temp: roomTemperature(sensors, now), Target: h.roomTarget(id, now), Vacuum: h.roomVacuum(id, rc.Name, "", "")}
 	if p.Name == "" {
 		p.Name = id
 	}
@@ -276,10 +244,28 @@ func (h *HTMXHandler) RoomVacuum(w http.ResponseWriter, r *http.Request) { h.roo
 const roomPageTemplate = `
 {{define "room-vacuum"}}{{if .Show}}<div id="room-vacuum" class="mh-room-block"
      hx-get="/htmx/room/{{.RoomID | urlquery}}/vacuum" hx-swap="outerHTML"
-     hx-trigger="every 5s [kiosk.visible('rooms') && kiosk.roomOpen && kiosk.online]">
+     hx-trigger="every 5s [kiosk.visible('rooms') && kiosk.roomOpen && kiosk.online && !document.querySelector('#room-vacuum [data-confirming]')]"
+     x-data="{ask: false, t: 0, open() { this.ask = true; clearTimeout(this.t); this.t = setTimeout(() => { this.ask = false }, 20000) }, close() { clearTimeout(this.t); this.ask = false }}"
+     :data-confirming="ask ? 'true' : null">
   <h3 class="mh-room-label">Vacuum</h3>
   {{if .Areas}}<p>Areas: {{range $i, $a := .Areas}}{{if $i}}, {{end}}{{$a}}{{end}}</p>
   {{else}}<p class="has-text-grey">No robot area assigned (<code>myhome ctl vacuum rooms assign</code>)</p>{{end}}
+  {{if .Notice}}<p class="mh-vac-note" data-room-clean-notice>{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="mh-vac-note is-bad" data-room-clean-error>{{.Error}}</p>{{end}}
+  {{if .CanClean}}
+  <button type="button" class="mh-vac-btn is-primary mh-room-clean" data-room-clean @click="open()">Clean this room</button>
+  {{/* In-place confirm, the vacuum card's pattern: it cancels itself after 20 s and
+       pauses the block's poll while open. Cancel sends no request. */}}
+  <div class="mh-vac-confirm" x-show="ask" x-cloak>
+    <p class="mh-vac-ask">Clean {{.RoomName}} now? The robot leaves its dock.</p>
+    <button type="button" class="mh-vac-btn" @click="close()">Cancel</button>
+    <button type="button" class="mh-vac-btn is-primary" data-room-clean-confirm hx-disabled-elt="this"
+            hx-post="/htmx/vacuum/action" hx-vals='{{.Vals}}' hx-target="#room-vacuum" hx-swap="outerHTML"><span class="mh-when-idle">Clean</span><span class="mh-when-busy">Starting&hellip;</span></button>
+  </div>
+  {{else if .Areas}}
+  <button type="button" class="mh-vac-btn is-primary mh-room-clean" data-room-clean disabled>Clean this room</button>
+  <p class="mh-vac-note is-warn" data-room-clean-reason>{{.Reason}}</p>
+  {{end}}
 </div>{{else}}<div id="room-vacuum" hidden></div>{{end}}{{end}}
 
 {{define "room-page"}}<div class="mh-room" data-room="{{.ID}}" data-devices="{{.DeviceIDs}}" data-refresh

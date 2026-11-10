@@ -268,6 +268,8 @@ func (h *HTMXHandler) vacuumStillApplies(robot, command string) error {
 }
 
 // VacuumAction runs a command or a room clean and re-renders the panel (POST /htmx/vacuum/action).
+// With room_id (and command=clean-rooms) it cleans that daemon room's mapped areas and
+// returns the room page's vacuum block instead (cleanRoom).
 // A failure (e.g. the robot did not acknowledge) is shown on that robot's card.
 func (h *HTMXHandler) VacuumAction(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -281,6 +283,16 @@ func (h *HTMXHandler) VacuumAction(w http.ResponseWriter, r *http.Request) {
 	robot, command := r.FormValue("robot"), r.FormValue("command")
 	if robot == "" || command == "" {
 		http.Error(w, "robot and command required", http.StatusBadRequest)
+		return
+	}
+	if roomID := r.FormValue("room_id"); roomID != "" {
+		// Clean this room (#765). Every `room` field is ignored: the regions are
+		// resolved on the server from the room's mapping.
+		if command != "clean-rooms" {
+			http.Error(w, "room_id goes with command=clean-rooms", http.StatusBadRequest)
+			return
+		}
+		h.cleanRoom(w, robot, roomID)
 		return
 	}
 	var err error

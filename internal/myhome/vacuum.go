@@ -58,7 +58,11 @@ type VacuumCommandParams struct {
 
 // VacuumCleanParams cleans the given rooms, in order. Rooms are region names or region ids.
 type VacuumCleanParams struct {
-	Robot string   `json:"robot,omitempty"`
+	Robot string `json:"robot,omitempty"`
+	// Map, when set, is the map the caller resolved the rooms on: the clean is
+	// refused if a room resolves to another map (region ids can collide across
+	// maps, and the map may have changed since the caller looked).
+	Map   string   `json:"map,omitempty"`
 	Rooms []string `json:"rooms"`
 }
 

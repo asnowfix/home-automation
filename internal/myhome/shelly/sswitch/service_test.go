@@ -81,3 +81,52 @@ func TestParseOn(t *testing.T) {
 		})
 	}
 }
+
+// Issue #809: the registered handlers must accept both a value and a pointer
+// (in-process callers vs RPC decoding) and reject anything else with an error,
+// never a panic. The provider fails the lookup, so reaching that error proves
+// the parameters were accepted.
+func TestRegisteredHandlers_ParamsValueOrPointer(t *testing.T) {
+	lookupErr := errors.New("no such device")
+	NewService(logr.Discard(), &fakeProvider{deviceErr: lookupErr}).RegisterHandlers()
+	verbs := []myhome.Verb{myhome.SwitchToggle, myhome.SwitchOn, myhome.SwitchOff, myhome.SwitchStatus, myhome.SwitchAll}
+	t.Cleanup(func() {
+		for _, v := range verbs {
+			myhome.UnregisterMethodHandler(v)
+		}
+	})
+
+	for _, v := range verbs {
+		var value, ptr any = myhome.SwitchParams{Identifier: "x"}, &myhome.SwitchParams{Identifier: "x"}
+		if v == myhome.SwitchAll {
+			value, ptr = myhome.SwitchAllParams{Identifier: "x"}, &myhome.SwitchAllParams{Identifier: "x"}
+		}
+		var nilPtr any = (*myhome.SwitchParams)(nil)
+		cases := []struct {
+			name   string
+			in     any
+			accept bool
+		}{
+			{"value", value, true},
+			{"pointer", ptr, true},
+			{"nil pointer", nilPtr, false},
+			{"nil", nil, false},
+			{"wrong type", "x", false},
+		}
+		for _, c := range cases {
+			t.Run(string(v)+"/"+c.name, func(t *testing.T) {
+				m, err := myhome.Methods(v)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = m.ActionE(context.Background(), c.in)
+				if err == nil {
+					t.Fatal("expected an error from the failing provider")
+				}
+				if got := errors.Is(err, lookupErr); got != c.accept {
+					t.Errorf("params accepted = %v, want %v (err: %v)", got, c.accept, err)
+				}
+			})
+		}
+	}
+}

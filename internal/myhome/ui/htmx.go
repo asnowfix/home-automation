@@ -405,7 +405,7 @@ func (h *HTMXHandler) SwitchButton(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	params := myhome.SwitchParams{
+	params := &myhome.SwitchParams{
 		Identifier: deviceID,
 		SwitchId:   sid,
 	}

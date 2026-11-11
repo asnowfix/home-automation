@@ -184,7 +184,7 @@ func TestToggleRouteRendersLogicalState(t *testing.T) {
 	var got myhome.SwitchParams
 	for _, on := range []bool{true, false} {
 		stubSwitchToggle(t, func(_ context.Context, in any) (any, error) {
-			got = in.(myhome.SwitchParams)
+			got = *in.(*myhome.SwitchParams)
 			return &myhome.SwitchResult{DeviceID: "plug-1", SwitchId: 1, On: on}, nil
 		})
 		rec := postToggle(testMux(), url.Values{"device_id": {"plug-1"}, "switch_id": {"1"}, "label": {`Kitchen "main"`}})

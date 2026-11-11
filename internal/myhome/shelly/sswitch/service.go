@@ -35,22 +35,58 @@ func NewService(log logr.Logger, provider DeviceProvider) *Service {
 	}
 }
 
+// paramsOf accepts either a *T (what RPC over MQTT decodes into) or a T (what
+// an in-process caller may hand over) and reports anything else as an error
+// instead of panicking: a bad type from the web UI must not kill the request (#809).
+func paramsOf[T any](in any) (*T, error) {
+	switch p := in.(type) {
+	case *T:
+		if p == nil {
+			return nil, fmt.Errorf("nil %T parameters", p)
+		}
+		return p, nil
+	case T:
+		return &p, nil
+	}
+	return nil, fmt.Errorf("invalid parameters: got %T, want %T or *%T", in, *new(T), *new(T))
+}
+
 // RegisterHandlers registers the switch RPC handlers
 func (s *Service) RegisterHandlers() {
 	myhome.RegisterMethodHandler(myhome.SwitchToggle, func(ctx context.Context, in any) (any, error) {
-		return s.HandleToggle(ctx, in.(*myhome.SwitchParams))
+		p, err := paramsOf[myhome.SwitchParams](in)
+		if err != nil {
+			return nil, err
+		}
+		return s.HandleToggle(ctx, p)
 	})
 	myhome.RegisterMethodHandler(myhome.SwitchOn, func(ctx context.Context, in any) (any, error) {
-		return s.HandleOn(ctx, in.(*myhome.SwitchParams))
+		p, err := paramsOf[myhome.SwitchParams](in)
+		if err != nil {
+			return nil, err
+		}
+		return s.HandleOn(ctx, p)
 	})
 	myhome.RegisterMethodHandler(myhome.SwitchOff, func(ctx context.Context, in any) (any, error) {
-		return s.HandleOff(ctx, in.(*myhome.SwitchParams))
+		p, err := paramsOf[myhome.SwitchParams](in)
+		if err != nil {
+			return nil, err
+		}
+		return s.HandleOff(ctx, p)
 	})
 	myhome.RegisterMethodHandler(myhome.SwitchStatus, func(ctx context.Context, in any) (any, error) {
-		return s.HandleStatus(ctx, in.(*myhome.SwitchParams))
+		p, err := paramsOf[myhome.SwitchParams](in)
+		if err != nil {
+			return nil, err
+		}
+		return s.HandleStatus(ctx, p)
 	})
 	myhome.RegisterMethodHandler(myhome.SwitchAll, func(ctx context.Context, in any) (any, error) {
-		return s.HandleAll(ctx, in.(*myhome.SwitchAllParams))
+		p, err := paramsOf[myhome.SwitchAllParams](in)
+		if err != nil {
+			return nil, err
+		}
+		return s.HandleAll(ctx, p)
 	})
 }
 

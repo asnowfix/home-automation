@@ -1853,9 +1853,18 @@ func solarSummerStorage(t *testing.T) map[string]interface{} {
 // (@sunrise/@sunset, unknown, so desiredOutput() has no opinion) or, once the
 // real forecast flipped the mode, the 23:15-00:15 night window -- inside which
 // the stop never happens (#815, #671).
+//
+// The night pair is moved to the same instants and left enabled, so a test
+// that flips the mode to winter (TestPoolPump_SolarRunStopsWhenModeTurnsWinter)
+// also finds a known winter window that excludes now, instead of the fixed
+// 23:15-00:15 one.
 func solarSummerSchedules() []map[string]interface{} {
 	now := time.Now()
-	return poolPumpSummerSchedules(now.Add(11*time.Hour), now.Add(12*time.Hour))
+	start, stop := now.Add(11*time.Hour), now.Add(12*time.Hour)
+	jobs := poolPumpSummerSchedules(start, stop)
+	jobs[3]["enable"], jobs[3]["timespec"] = true, poolPumpTimespec(start.Hour(), start.Minute())
+	jobs[4]["enable"], jobs[4]["timespec"] = true, poolPumpTimespec(stop.Hour(), stop.Minute())
+	return jobs
 }
 
 // TestPoolPump_SolarNeverStartsPumpInWinter is the #621 regression: in winter

@@ -1814,12 +1814,48 @@ func solarPayload(availableW float64, tsUnixSec int64) []byte {
 	return data
 }
 
+// offlineForecastURL returns a forecast URL served by a local httptest server
+// that answers `{}`. onForecast() rejects that body ("Invalid forecast
+// structure"), so decideModeFromForecast() returns before touching the mode or
+// the schedules. Without it, handleDailyCheck() at the end of init fetches the
+// real api.open-meteo.com (the emulator makes the call for real) and the
+// outcome depends on live weather and on whether the network answers in time
+// (#815, #671): a cold forecast flips the script to winter, a hot one rewrites
+// the window around the real clock, and a slow or failed one leaves the
+// window unknown so a solar release can never stop the pump.
+func offlineForecastURL(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL + "?daily=sunrise,sunset"
+}
+
 // solarSummerStorage boots the script in summer mode. #621: solar only starts
 // the pump in summer; an empty Storage boots in winter (the script's default),
 // where solar must stay silent -- so every test that expects a solar start
-// seeds the mode explicitly.
-func solarSummerStorage() map[string]interface{} {
-	return map[string]interface{}{"schedule-mode": "summer"}
+// seeds the mode explicitly. The forecast is pinned offline (see
+// offlineForecastURL) so the seeded mode is the mode for the whole test.
+func solarSummerStorage(t *testing.T) map[string]interface{} {
+	t.Helper()
+	return map[string]interface{}{
+		"schedule-mode": "summer",
+		"forecast-url":  offlineForecastURL(t),
+	}
+}
+
+// solarSummerSchedules is a summer job set whose run window (now+11h to
+// now+12h) never contains the present moment, wall clock notwithstanding.
+// A solar release must stop the pump, which only holds while the scheduled
+// window says "off"; with poolPumpSchedules() the window was symbolic
+// (@sunrise/@sunset, unknown, so desiredOutput() has no opinion) or, once the
+// real forecast flipped the mode, the 23:15-00:15 night window -- inside which
+// the stop never happens (#815, #671).
+func solarSummerSchedules() []map[string]interface{} {
+	now := time.Now()
+	return poolPumpSummerSchedules(now.Add(11*time.Hour), now.Add(12*time.Hour))
 }
 
 // TestPoolPump_SolarNeverStartsPumpInWinter is the #621 regression: in winter
@@ -1833,7 +1869,7 @@ func TestPoolPump_SolarNeverStartsPumpInWinter(t *testing.T) {
 	mc := mqtt.NewMockClient()
 	deviceState := &script.DeviceState{
 		KVS:             solarKVS(nil),
-		Storage:         make(map[string]interface{}), // no saved mode -> winter
+		Storage:         map[string]interface{}{"forecast-url": offlineForecastURL(t)}, // no saved mode -> winter
 		ComponentStatus: pro3ComponentStatus(),
 		Schedules:       poolPumpSchedules(),
 	}
@@ -1877,9 +1913,9 @@ func TestPoolPump_SolarRunStopsWhenModeTurnsWinter(t *testing.T) {
 	evalCh := make(chan []byte, 4)
 	deviceState := &script.DeviceState{
 		KVS:                  solarKVS(nil),
-		Storage:              solarSummerStorage(),
+		Storage:              solarSummerStorage(t),
 		ComponentStatus:      pro3ComponentStatus(),
-		Schedules:            poolPumpSchedules(),
+		Schedules:            solarSummerSchedules(),
 		ScheduleEvalInjector: evalCh,
 	}
 	stop := runPoolPumpPhase(t, buf, deviceState, mc)
@@ -1923,9 +1959,9 @@ func TestPoolPump_SolarStartsAndStopsPump(t *testing.T) {
 
 	deviceState := &script.DeviceState{
 		KVS:             solarKVS(nil),
-		Storage:         solarSummerStorage(),
+		Storage:         solarSummerStorage(t),
 		ComponentStatus: pro3ComponentStatus(),
-		Schedules:       poolPumpSchedules(),
+		Schedules:       solarSummerSchedules(),
 	}
 
 	ctx, cancel := poolPumpRunContext(t, mc)
@@ -2018,9 +2054,9 @@ func TestPoolPump_SolarStartAndStopSurvivesOwnEcho(t *testing.T) {
 
 	deviceState := &script.DeviceState{
 		KVS:             solarKVS(nil),
-		Storage:         solarSummerStorage(),
+		Storage:         solarSummerStorage(t),
 		ComponentStatus: pro3ComponentStatus(),
-		Schedules:       poolPumpSchedules(),
+		Schedules:       solarSummerSchedules(),
 		EventInjector:   injector,
 	}
 
@@ -2168,9 +2204,9 @@ func TestPoolPump_WaterSupplyOverridesSolar(t *testing.T) {
 
 	deviceState := &script.DeviceState{
 		KVS:             kvs,
-		Storage:         solarSummerStorage(),
+		Storage:         solarSummerStorage(t),
 		ComponentStatus: cs,
-		Schedules:       poolPumpSchedules(),
+		Schedules:       solarSummerSchedules(),
 	}
 
 	ctx, cancel := poolPumpRunContext(t, mc)
@@ -2249,7 +2285,7 @@ func TestPoolPump_SolarHardCeiling_DayRolloverUnblocksWithoutRestart(t *testing.
 	evalCh := make(chan []byte, 4)
 	deviceState := &script.DeviceState{
 		KVS:                  kvs,
-		Storage:              solarSummerStorage(),
+		Storage:              solarSummerStorage(t),
 		ComponentStatus:      pro3ComponentStatus(), // pump off at boot
 		Schedules:            nil,                   // #502: the mezzanine case -- no pool schedules at all
 		ScheduleEvalInjector: evalCh,
@@ -2326,9 +2362,9 @@ func TestPoolPump_SolarStaleFallsBackToSchedule(t *testing.T) {
 
 	deviceState := &script.DeviceState{
 		KVS:             solarKVS(nil),
-		Storage:         solarSummerStorage(),
+		Storage:         solarSummerStorage(t),
 		ComponentStatus: pro3ComponentStatus(),
-		Schedules:       poolPumpSchedules(),
+		Schedules:       solarSummerSchedules(),
 		EventInjector:   injector,
 	}
 
@@ -2390,9 +2426,9 @@ func TestPoolPump_SolarStaleTsFallsBackImmediately(t *testing.T) {
 
 	deviceState := &script.DeviceState{
 		KVS:             kvs,
-		Storage:         solarSummerStorage(),
+		Storage:         solarSummerStorage(t),
 		ComponentStatus: pro3ComponentStatus(),
-		Schedules:       poolPumpSchedules(),
+		Schedules:       solarSummerSchedules(),
 	}
 
 	ctx, cancel := poolPumpRunContext(t, mc)

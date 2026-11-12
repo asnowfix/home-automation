@@ -372,6 +372,31 @@ Agents push with `cd <worktree> && git push -q -u origin <branch>`. The `git -C 
 would bypass the push guards that keep agents from pushing to `main` or release branches. `git -C <dir>`
 remains fine for read-only and local commands (`status`, `log`, `diff`, `add`, `commit`, `fetch`).
 
+### Ask, or proceed and report
+
+Default to **proceeding and reporting**. Stop for a human decision only for the **strict stops**:
+production devices (any write to a Shelly in service, beyond the authorizations in the shelly
+skill), production databases (`myhome.db`, `events.db` on the NAS), package installs or service
+changes on the NAS, deleting data or remote branches, publishing outside the team, spending, and
+merging to `main`. These stay strict; nothing below relaxes them.
+
+Everything else that is **in scope**, **local**, **reversible** and **cheap to undo** is done, not
+asked: restarting or rebuilding a local throwaway daemon or test instance, re-running a build,
+test or read-only query, creating a branch or worktree. Announce it in one line ("restarted the
+local side daemon on :6080 to pick up #810") and carry on.
+
+A step is **in scope** when it is needed to complete what the owner asked for or to keep an
+environment they asked for usable (they asked to test the fix live, so restarting the instance that
+must run the fix is in scope). If unsure: not on the strict-stop list and reversible means proceed.
+
+When you do have to ask:
+1. Put a **recommended default** and **what you will do if there is no answer** in the question
+   (a safe action, or "I will not do it"; never an auto-approval of a strict stop).
+2. **Batch** pending questions into one message.
+3. **Keep working** on everything that does not depend on the answer, and say what is blocked.
+4. Never report "nothing to do" while unblocked follow-up work exists (verification, the next
+   issue, cleanup of your own test instances); list it and start it.
+
 ### Sub-agents
 
 **Every sub-agent must persist its progress outside its own context**, incrementally, as it works —

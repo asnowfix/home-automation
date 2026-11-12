@@ -99,6 +99,13 @@ var kiosk = {
     return { changed: changed, reopen: reopen };
   },
 
+  // The rail's Reload button (#817), to pick up a new build without rebooting the display.
+  // Refused while the daemon is unreachable: the reload would land on Chromium's error
+  // page, with no chrome to recover from it (683 design, section 1). No timer calls this.
+  reload: function() {
+    if (this.online) { location.reload(); }
+  },
+
   // htmx writes are refused while offline; GET refreshes stay.
   blocks: function(verb) {
     return !this.online && !!verb && String(verb).toLowerCase() !== 'get';
@@ -213,7 +220,8 @@ var kiosk = {
 
   refresh: function(name) {
     var sec = this.el(name);
-    if (sec) { sec.querySelectorAll('[data-refresh]').forEach(function(n) { htmx.trigger(n, 'refresh'); }); }
+    // Not under an open Clean confirm (Rooms card, #817): the swap would drop it. It cancels itself after 20 s.
+    if (sec) { sec.querySelectorAll('[data-refresh]').forEach(function(n) { if (!n.querySelector('[data-room-clean-card][data-confirming]')) { htmx.trigger(n, 'refresh'); } }); }
   },
 
   // Live event rows: ev.html is the server-rendered <tr>. When the table is not

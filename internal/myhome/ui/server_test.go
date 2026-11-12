@@ -121,9 +121,10 @@ func TestShellScriptHasNoExternalNavigation(t *testing.T) {
 			t.Errorf("myhome.js contains %q", s)
 		}
 	}
-	// the one permitted reload: a daemon upgrade seen on a ping (offline_test.go)
-	if n := strings.Count(js, "location.reload"); n != 1 {
-		t.Errorf("myhome.js has %d location.reload calls, want exactly 1", n)
+	// the two permitted reloads: a daemon upgrade seen on a ping (offline_test.go),
+	// and the rail's Reload button, kiosk.reload (#817, htmx_room_card_clean_test.go)
+	if n := strings.Count(js, "location.reload"); n != 2 {
+		t.Errorf("myhome.js has %d location.reload calls, want exactly 2", n)
 	}
 }
 

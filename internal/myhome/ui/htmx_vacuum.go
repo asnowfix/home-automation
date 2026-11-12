@@ -292,7 +292,7 @@ func (h *HTMXHandler) VacuumAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "room_id goes with command=clean-rooms", http.StatusBadRequest)
 			return
 		}
-		h.cleanRoom(w, robot, roomID)
+		h.cleanRoom(w, robot, roomID, r.FormValue("view"))
 		return
 	}
 	var err error

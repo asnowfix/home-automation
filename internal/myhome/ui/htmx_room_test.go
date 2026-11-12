@@ -99,8 +99,10 @@ func TestRoomPageTemperature(t *testing.T) {
 			[]string{`21.4 °C<`, "· 2 h ago"}, nil},
 		{"value without update time", []*myhome.Device{bluSensor("shellybluht3-01", "sejour", caps, fp(21.4), nil)},
 			[]string{`21.4 °C<`, "· age --"}, nil},
-		{"BLU only, capabilities list battery only", []*myhome.Device{bluSensor("shellybluht3-01", "sejour", []string{"battery"}, fp(18.2), &fresh)},
-			[]string{`18.2 °C<`}, nil},
+		// The room page uses the daemon's rule alone (#786): the BLU listener now accumulates
+		// capabilities, so a stored battery-only record is not guessed to be a thermometer.
+		{"BLU capabilities list battery only", []*myhome.Device{bluSensor("shellybluht3-01", "sejour", []string{"battery"}, fp(18.2), &fresh)},
+			[]string{`id="room-temp">--<`}, []string{"18.2"}},
 		// #772: the generic twin carries no room and an older reading; it must not count.
 		{"BLU with a generic twin without room", []*myhome.Device{
 			bluSensor("shellybluht3-01", "sejour", caps, fp(21.4), &fresh),

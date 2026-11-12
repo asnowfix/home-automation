@@ -98,7 +98,10 @@ func TestRoomCardCleanIsTheRoomPageControl(t *testing.T) {
 
 	confirm := func(s string) string {
 		i := strings.Index(s, `<div class="mh-vac-confirm"`)
-		j := strings.Index(s[i:], "</button>\n  </div>")
+		if i < 0 {
+			t.Fatalf("no confirm in:\n%s", s)
+		}
+		j := strings.Index(s[i:],"</button>\n  </div>")
 		if i < 0 || j < 0 {
 			t.Fatalf("no confirm in:\n%s", s)
 		}

@@ -56,18 +56,6 @@ type roomPageView struct {
 	Vacuum    roomVacuumView
 }
 
-// roomThermometer: the room's thermometer by the daemon's rule, or a BLU H&T-like
-// device (BTHome info, and it reports both a temperature with an update time and
-// a humidity) whose stored capabilities list only "battery" (#684 E7). Humidity
-// keeps out a BLU TRV; BTHome keeps out a Gen1 DW2 door sensor.
-func roomThermometer(d *myhome.Device) bool {
-	if myhome.IsTemperatureSensor(d) {
-		return true
-	}
-	return d.Info != nil && d.Info.BTHome != nil && d.Status != nil && d.Status.TemperatureUpdatedAt != nil &&
-		d.Status.Sensors != nil && d.Status.Sensors.Humidity != nil
-}
-
 // tempAgeText is "" for a fresh reading, otherwise "· 45 min ago" / "· 2 h ago" / "· 3 d ago".
 func tempAgeText(age time.Duration) string {
 	switch {
@@ -200,7 +188,7 @@ func (h *HTMXHandler) roomRoute(w http.ResponseWriter, r *http.Request, part str
 		if d.RoomId != id {
 			continue
 		}
-		if roomThermometer(d) {
+		if myhome.IsTemperatureSensor(d) {
 			sensors = append(sensors, d)
 		}
 		views = append(views, DeviceToView(h.ctx, d))

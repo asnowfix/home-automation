@@ -3,6 +3,7 @@ package blu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,10 @@ func (f *fakeBLURegistry) SetDevice(_ context.Context, _ *myhome.Device, _ bool)
 
 func (f *fakeBLURegistry) GetDeviceById(_ context.Context, _ string) (*myhome.Device, error) {
 	return f.getByIdDevice, nil
+}
+
+func (f *fakeBLURegistry) GetDeviceByMAC(_ context.Context, _ string) (*myhome.Device, error) {
+	return nil, errors.New("not found")
 }
 
 func (f *fakeBLURegistry) UpdateSensorValue(_ context.Context, deviceID, sensor, value string) error {
@@ -62,7 +67,7 @@ func TestHandleBLUEvent_SensorUpdateWritesCache(t *testing.T) {
 	})
 
 	reg := &fakeBLURegistry{
-		getByIdDevice: &myhome.Device{},
+		getByIdDevice: myhome.NewDevice(logr.Discard(), myhome.SHELLY, "shellybluht3-aabbccddeeff"),
 	}
 	ctx := logr.NewContext(context.Background(), logr.Discard())
 	topic := "shelly-blu/events/aa:bb:cc:dd:ee:ff"
@@ -110,7 +115,7 @@ func TestHandleBLUEvent_NoSensorsNoCache(t *testing.T) {
 		// No sensor fields
 	})
 
-	reg := &fakeBLURegistry{getByIdDevice: &myhome.Device{}}
+	reg := &fakeBLURegistry{getByIdDevice: myhome.NewDevice(logr.Discard(), myhome.SHELLY, "shellybluht3-aabbccddeeff")}
 	ctx := logr.NewContext(context.Background(), logr.Discard())
 	topic := "shelly-blu/events/aa:bb:cc:dd:ee:ff"
 
@@ -149,7 +154,7 @@ func TestHandleBLUEventBridge_WindowEvent(t *testing.T) {
 
 	svc := newTestEventsService(t)
 	before := time.Now().Unix()
-	handleBLUEventBridge(context.Background(), logr.Discard(), payload, svc, nil)
+	handleBLUEventBridge(context.Background(), logr.Discard(), payload, "", svc, nil)
 	after := time.Now().Unix()
 
 	evts, err := svc.Store().Query(context.Background(), events.Query{})
@@ -201,7 +206,7 @@ func TestHandleBLUEventBridge_MotionRecordsIlluminance(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := buildBLUPayload(t, BLUEventData{Address: mac, Motion: &motion, Illuminance: tc.lux, RSSI: -90})
 			svc := newTestEventsService(t)
-			handleBLUEventBridge(context.Background(), logr.Discard(), payload, svc, nil)
+			handleBLUEventBridge(context.Background(), logr.Discard(), payload, "", svc, nil)
 
 			evts, err := svc.Store().Query(context.Background(), events.Query{})
 			if err != nil {

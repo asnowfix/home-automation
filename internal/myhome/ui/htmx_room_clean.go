@@ -152,10 +152,22 @@ func (h *HTMXHandler) planRoomClean(roomID string) roomCleanPlan {
 // roomVacuum builds the room page's vacuum block. notice and errText carry the
 // outcome of a clean just requested from this block.
 func (h *HTMXHandler) roomVacuum(roomID, roomName, notice, errText string) roomVacuumView {
+	return h.roomCleanView(roomID, roomName, notice, errText, false)
+}
+
+// roomCleanView is the one builder behind the Clean control of both the room page
+// (card=false) and the Rooms list card (card=true, #817). They differ only in the
+// button label, where the response of the confirmed POST is swapped, and the
+// `view=card` field telling cleanRoom which of the two to render back.
+func (h *HTMXHandler) roomCleanView(roomID, roomName, notice, errText string, card bool) roomVacuumView {
 	if roomName == "" {
 		roomName = roomID
 	}
-	v := roomVacuumView{RoomID: roomID, RoomName: roomName, Notice: notice, Error: errText}
+	v := roomVacuumView{RoomID: roomID, RoomName: roomName, Notice: notice, Error: errText,
+		Label: "Clean this room", Target: "#room-vacuum"}
+	if card {
+		v.Label, v.Target = "Clean", cardCleanTarget
+	}
 	p := h.planRoomClean(roomID)
 	if !p.Shown {
 		return v
@@ -163,11 +175,53 @@ func (h *HTMXHandler) roomVacuum(roomID, roomName, notice, errText string) roomV
 	v.Show, v.Areas, v.Reason = true, p.Areas, p.Reason
 	v.CanClean = p.Assigned && p.Reason == ""
 	if v.CanClean {
-		vals, _ := json.Marshal(map[string]string{"robot": p.Robot.ID, "command": "clean-rooms", "room_id": roomID})
+		f := map[string]string{"robot": p.Robot.ID, "command": "clean-rooms", "room_id": roomID}
+		if card {
+			f["view"] = cardView
+		}
+		vals, _ := json.Marshal(f)
 		v.Vals = string(vals)
 	}
 	return v
 }
+
+const (
+	cardView        = "card"                           // POST field: render the card's control, not the room page's block
+	cardCleanTarget = "closest [data-room-clean-card]" // not an id: room ids are free text and a page holds many cards
+)
+
+// roomCleanXData is the Alpine state of the confirm, shared by both containers.
+const roomCleanXData = `{ask: false, t: 0, open() { this.ask = true; clearTimeout(this.t); this.t = setTimeout(() => { this.ask = false }, 20000) }, hold() { clearTimeout(this.t) }, close() { clearTimeout(this.t); this.ask = false }}`
+
+// roomCleanTemplate: "room-clean-control" is the button, its in-place confirm and
+// the disabled reason, written once and used by the room page's vacuum block and by
+// the Rooms list card. "room-clean-card" is the card's container, which swaps
+// itself (outerHTML) with the response, so a card is never replaced by a room-page
+// block. Nothing here reads a device.
+var roomCleanTemplate = strings.ReplaceAll(`
+{{define "room-clean-control"}}{{if .CanClean}}
+  <button type="button" class="mh-vac-btn is-primary mh-room-clean" data-room-clean @click="open()">{{.Label}}</button>
+  {{/* In-place confirm, the vacuum card's pattern: it cancels itself after 20 s and
+       pauses the block's poll while open. Cancel sends no request. */}}
+  <div class="mh-vac-confirm" x-show="ask" x-cloak>
+    <p class="mh-vac-ask">Clean {{.RoomName}} now? The robot leaves its dock.</p>
+    <button type="button" class="mh-vac-btn" @click="close()">Cancel</button>
+    <button type="button" class="mh-vac-btn is-primary" data-room-clean-confirm hx-disabled-elt="this" @htmx:before-request="hold()"
+            hx-post="/htmx/vacuum/action" hx-vals='{{.Vals}}' hx-target="{{.Target}}" hx-swap="outerHTML"><span class="mh-when-idle">Clean</span><span class="mh-when-busy">Starting&hellip;</span></button>
+  </div>
+  {{else if .Areas}}
+  <button type="button" class="mh-vac-btn is-primary mh-room-clean" data-room-clean disabled>{{.Label}}</button>
+  <p class="mh-vac-note is-warn" data-room-clean-reason>{{.Reason}}</p>
+{{end}}{{end}}
+
+{{define "room-clean-card"}}{{if or .CanClean .Areas}}<div class="mh-room-clean-card" data-room-clean-card
+     x-data="@XDATA@"
+     :data-confirming="ask ? 'true' : null">
+  {{if .Notice}}<p class="mh-vac-note" data-room-clean-notice>{{.Notice}}</p>{{end}}
+  {{if .Error}}<p class="mh-vac-note is-bad" data-room-clean-error>{{.Error}}</p>{{end}}
+  {{template "room-clean-control" .}}
+</div>{{end}}{{end}}
+`, "@XDATA@", roomCleanXData)
 
 // roomName is the display name of a room, looked up like the room page does.
 func (h *HTMXHandler) roomName(roomID string) (string, error) {
@@ -193,8 +247,8 @@ func (h *HTMXHandler) roomName(roomID string) (string, error) {
 // cleanRoom serves the `room_id` branch of POST /htmx/vacuum/action. The client's
 // `room` fields were never read: the regions are resolved here, now, and the
 // robot's connection and idleness are re-checked (the block may be 5 s old, or a
-// confirm may have sat open). The response is the room's vacuum block.
-func (h *HTMXHandler) cleanRoom(w http.ResponseWriter, robot, roomID string) {
+// confirm may have sat open). The response is the room's vacuum block, or with view=card the Rooms card's control.
+func (h *HTMXHandler) cleanRoom(w http.ResponseWriter, robot, roomID, view string) {
 	var notice string
 	name, err := h.roomName(roomID)
 	if err == nil {
@@ -209,6 +263,12 @@ func (h *HTMXHandler) cleanRoom(w http.ResponseWriter, robot, roomID string) {
 		name = roomID
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if view == cardView {
+		if err := roomsTmpl.ExecuteTemplate(w, "room-clean-card", h.roomCleanView(roomID, name, notice, errText, true)); err != nil {
+			h.log.Error(err, "failed to render room clean card")
+		}
+		return
+	}
 	if err := roomTmpl.ExecuteTemplate(w, "room-vacuum", h.roomVacuum(roomID, name, notice, errText)); err != nil {
 		h.log.Error(err, "failed to render room vacuum block")
 	}

@@ -44,6 +44,8 @@ type roomVacuumView struct {
 	Vals             string // hx-vals of the confirmed request (JSON)
 	Notice           string // outcome of the last clean ("Cleaning <room>")
 	Error            string // failure of the last clean
+	Label            string // the Clean button's text
+	Target           string // hx-target of the confirmed request: where the response goes
 }
 
 type roomPageView struct {
@@ -149,7 +151,7 @@ func roomDeviceRows(d DeviceView) []deviceRow {
 }
 
 var roomTmpl = template.Must(template.New("room").Funcs(rowTemplateFuncs()).Funcs(template.FuncMap{"rows": roomDeviceRows}).
-	Parse(deviceRowsTemplate + roomPageTemplate))
+	Parse(deviceRowsTemplate + roomCleanTemplate + strings.ReplaceAll(roomPageTemplate, "@XDATA@", roomCleanXData)))
 
 func (h *HTMXHandler) roomRoute(w http.ResponseWriter, r *http.Request, part string) {
 	id := r.PathValue("id")
@@ -245,27 +247,14 @@ const roomPageTemplate = `
 {{define "room-vacuum"}}{{if .Show}}<div id="room-vacuum" class="mh-room-block"
      hx-get="/htmx/room/{{.RoomID | urlquery}}/vacuum" hx-swap="outerHTML"
      hx-trigger="every 5s [kiosk.visible('rooms') && kiosk.roomOpen && kiosk.online && !document.querySelector('#room-vacuum[data-confirming]')]"
-     x-data="{ask: false, t: 0, open() { this.ask = true; clearTimeout(this.t); this.t = setTimeout(() => { this.ask = false }, 20000) }, hold() { clearTimeout(this.t) }, close() { clearTimeout(this.t); this.ask = false }}"
+     x-data="@XDATA@"
      :data-confirming="ask ? 'true' : null">
   <h3 class="mh-room-label">Vacuum</h3>
   {{if .Areas}}<p>Areas: {{range $i, $a := .Areas}}{{if $i}}, {{end}}{{$a}}{{end}}</p>
   {{else}}<p class="has-text-grey">No robot area assigned (<code>myhome ctl vacuum rooms assign</code>)</p>{{end}}
   {{if .Notice}}<p class="mh-vac-note" data-room-clean-notice>{{.Notice}}</p>{{end}}
   {{if .Error}}<p class="mh-vac-note is-bad" data-room-clean-error>{{.Error}}</p>{{end}}
-  {{if .CanClean}}
-  <button type="button" class="mh-vac-btn is-primary mh-room-clean" data-room-clean @click="open()">Clean this room</button>
-  {{/* In-place confirm, the vacuum card's pattern: it cancels itself after 20 s and
-       pauses the block's poll while open. Cancel sends no request. */}}
-  <div class="mh-vac-confirm" x-show="ask" x-cloak>
-    <p class="mh-vac-ask">Clean {{.RoomName}} now? The robot leaves its dock.</p>
-    <button type="button" class="mh-vac-btn" @click="close()">Cancel</button>
-    <button type="button" class="mh-vac-btn is-primary" data-room-clean-confirm hx-disabled-elt="this" @htmx:before-request="hold()"
-            hx-post="/htmx/vacuum/action" hx-vals='{{.Vals}}' hx-target="#room-vacuum" hx-swap="outerHTML"><span class="mh-when-idle">Clean</span><span class="mh-when-busy">Starting&hellip;</span></button>
-  </div>
-  {{else if .Areas}}
-  <button type="button" class="mh-vac-btn is-primary mh-room-clean" data-room-clean disabled>Clean this room</button>
-  <p class="mh-vac-note is-warn" data-room-clean-reason>{{.Reason}}</p>
-  {{end}}
+  {{template "room-clean-control" .}}
 </div>{{else}}<div id="room-vacuum" hidden></div>{{end}}{{end}}
 
 {{define "room-page"}}<div class="mh-room" data-room="{{.ID}}" data-devices="{{.DeviceIDs}}" data-refresh

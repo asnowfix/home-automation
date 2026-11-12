@@ -205,6 +205,9 @@ type RoomView struct {
 	AgendaSlots []agendaSlot
 	AgendaNow   bool   // is current time in a busy slot?
 	AgendaNext  string // e.g. "busy at 18:00" or "free until 22:00"
+
+	// the card's Clean shortcut (#817): the room page's control, same plan
+	Clean roomVacuumView
 }
 
 func (h *HTMXHandler) roomAgenda(roomID string) []agendaSlot {
@@ -263,7 +266,7 @@ var roomsTmpl = template.Must(template.New("rooms").Funcs(rowTemplateFuncs()).Fu
 			return "is-light"
 		}
 	},
-}).Parse(deviceRowsTemplate + roomsListTemplate))
+}).Parse(deviceRowsTemplate + roomCleanTemplate + roomsListTemplate))
 
 // RoomsList renders the rooms list HTML fragment
 func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
@@ -354,6 +357,7 @@ func (h *HTMXHandler) RoomsList(w http.ResponseWriter, r *http.Request) {
 			AgendaSlots: slots,
 			AgendaNow:   inBusy,
 			AgendaNext:  nextLabel,
+			Clean:       h.roomCleanView(rc.RoomID, rc.Name, "", "", true),
 		})
 	}
 
@@ -667,6 +671,8 @@ const roomsListTemplate = `{{define "rooms-list"}}
         {{if .AgendaNext}}<span class="has-text-grey ml-1">{{.AgendaNext}}</span>{{end}}
       </p>
       {{end}}
+
+      {{template "room-clean-card" .Clean}}
 
       {{if .Devices}}
       <div class="mt-2 mh-grid">{{template "devices" .Devices}}</div>

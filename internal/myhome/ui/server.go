@@ -178,6 +178,7 @@ func newMux(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db De
 	mux.HandleFunc("/htmx/rooms", htmxHandler.RoomsList)
 	mux.HandleFunc("GET /htmx/room/{id}", htmxHandler.RoomPage)
 	mux.HandleFunc("GET /htmx/room/{id}/vacuum", htmxHandler.RoomVacuum)
+	mux.HandleFunc("GET /htmx/room/{id}/clean-card", htmxHandler.RoomCleanCard)
 	mux.HandleFunc("/htmx/switch/toggle", htmxHandler.SwitchButton)
 	mux.HandleFunc("/htmx/events", htmxHandler.EventsTable)
 	mux.HandleFunc("/htmx/events/more", htmxHandler.EventsMore)

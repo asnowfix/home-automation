@@ -95,7 +95,7 @@ const eventsRowsTemplate = `{{range .Events}}` + eventRowTemplate + `
 // eventsTableTemplate renders the full events table fragment (filter bar + table).
 const eventsTableTemplate = `<form id="events-filter-form"
       hx-get="/htmx/events"
-      hx-trigger="change from:#events-filter-form, keyup delay:400ms from:#events-filter-form input"
+      hx-trigger="change, keyup delay:400ms"
       hx-target="#events-table"
       hx-swap="innerHTML">
   <div class="field is-grouped is-grouped-multiline mb-4">

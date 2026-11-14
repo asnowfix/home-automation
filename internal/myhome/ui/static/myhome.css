@@ -1,122 +1,824 @@
+/*
+ * MyHome design tokens and the dark base (#683).
+ *
+ * Linked after bulma.min.css. Bulma 0.9.4 is compiled Sass with literal
+ * colours and no custom properties, so the tokens are applied by selector
+ * overrides, limited to the components the UI fragments actually use.
+ * New shell markup uses its own mh- classes and does not rely on Bulma.
+ */
+
+/* Inter variable font (SIL OFL 1.1, see Inter-OFL.txt). The version is in the
+   file name because this stylesheet is static and assets are cached immutably. */
+@font-face {
+  font-family: "Inter";
+  src: url("/static/InterVariable-4.1.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
+
+  --mh-bg: #151617;
+  --mh-surface-1: #1b1d21;
+  --mh-surface-2: #242527;
+  --mh-surface-3: #303235;
+  --mh-surface-4: #5b5f66;
+  --mh-card: rgba(52, 55, 58, 0.3);
+
+  --mh-primary: #2491ff;
+  --mh-primary-tint-1: #182f45;
+  --mh-primary-tint-2: #1a3b5d;
+  --mh-secondary: #bbdcf8;
+
+  --mh-text: #eaeaea;
+  --mh-text-muted: #a1a2a2;
+  --mh-danger: #b3261e;
+
+  --mh-radius-pill: 200px;
+  --mh-radius-card: 24px;
+
+  --mh-font: "Inter", system-ui, sans-serif;
+  --mh-font-size: 16px;
+  --mh-font-weight: 400;
+
+  --mh-tap: 48px;
+  --mh-rail-width: 80px;
+}
+
+/* Page */
+html {
+  background: var(--mh-bg);
+  font-size: var(--mh-font-size);
 }
 
 body {
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif;
-  margin: 2rem;
+  background: var(--mh-bg);
+  color: var(--mh-text);
+  font-family: var(--mh-font);
+  font-size: var(--mh-font-size);
+  font-weight: var(--mh-font-weight);
 }
 
-h1 {
-  margin-bottom: 0.5rem;
+/* Bulma components used by the fragments */
+.hero.is-light {
+  background-color: var(--mh-surface-1);
+  color: var(--mh-text);
 }
 
-.subtitle {
-  color: #6b7280;
-  margin-bottom: 1.5rem;
+.title,
+.subtitle,
+.label,
+.hero.is-light .title,
+.hero.is-light .subtitle {
+  color: var(--mh-text);
+  font-family: var(--mh-font);
 }
 
-/* Top toolbar */
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+.subtitle,
+.help {
+  color: var(--mh-text-muted);
 }
 
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 1rem;
+.section {
+  background: var(--mh-bg);
 }
 
-.card {
-  border: 1px solid #e5e7eb33;
-  border-radius: 12px;
-  padding: 1rem;
-  background: #ffffff0d;
-  backdrop-filter: blur(2px);
+a {
+  color: var(--mh-primary);
 }
 
-.name {
-  font-weight: 600;
-  font-size: 1.05rem;
-  margin-bottom: 0.25rem;
+strong,
+code,
+.content strong {
+  color: inherit;
 }
 
-.meta {
-  font-size: 0.9rem;
-  color: #6b7280;
+hr {
+  background-color: var(--mh-surface-3);
+}
+
+.footer {
+  background: var(--mh-bg);
+  color: var(--mh-text-muted);
+}
+
+/* Bulma sets these element selectors, so body alone does not reach them. */
+button,
+input,
+optgroup,
+select,
+textarea {
+  font-family: var(--mh-font);
+}
+
+.card,
+.box {
+  background: var(--mh-card);
+  color: var(--mh-text);
+  border-radius: var(--mh-radius-card);
+  box-shadow: none;
+}
+
+.card-header,
+.card-footer {
+  background: transparent;
+  border-color: var(--mh-surface-3);
+  box-shadow: none;
+}
+
+.card-header-title {
+  color: var(--mh-text);
+}
+
+.label {
+  font-weight: 500;
+}
+
+.input,
+.textarea,
+.select select {
+  background: var(--mh-surface-3);
+  border-color: var(--mh-surface-4);
+  color: var(--mh-text);
+  min-height: var(--mh-tap);
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--mh-text-muted);
+}
+
+.input:focus,
+.textarea:focus,
+.select select:focus {
+  border-color: var(--mh-primary);
+  box-shadow: 0 0 0 0.125em var(--mh-primary-tint-2);
+}
+
+.select:not(.is-multiple) {
+  min-height: var(--mh-tap);
+  height: auto;
+}
+
+.select:not(.is-multiple):not(.is-loading)::after {
+  border-color: var(--mh-text-muted);
+}
+
+.table {
+  background: transparent;
+  color: var(--mh-text);
+}
+
+.table th,
+.table td {
+  border-color: var(--mh-surface-3);
+  color: var(--mh-text);
+}
+
+.table thead th {
+  color: var(--mh-text-muted);
+}
+
+.table.is-hoverable tbody tr:not(.is-selected):hover,
+.table.is-striped tbody tr:not(.is-selected):nth-child(even) {
+  background-color: var(--mh-surface-2);
+}
+
+.tag:not(body) {
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  border-radius: var(--mh-radius-pill);
+}
+
+.tag:not(body).is-info,
+.tag:not(body).is-link,
+.tag:not(body).is-primary {
+  background: var(--mh-primary-tint-2);
+  color: var(--mh-secondary);
 }
 
 .button {
-  display: inline-flex;
+  background: var(--mh-surface-3);
+  border-color: transparent;
+  color: var(--mh-text);
+  border-radius: var(--mh-radius-pill);
+  font-family: var(--mh-font);
+  min-height: var(--mh-tap);
+}
+
+.button:focus {
+  border-color: transparent;
+  color: var(--mh-text);
+}
+
+.button.is-primary,
+.button.is-link,
+.button.is-info,
+.button.is-primary:focus,
+.button.is-link:focus,
+.button.is-info:focus {
+  background: var(--mh-primary);
+  color: var(--mh-bg);
+}
+
+/* Press feedback is :active; :hover only where a real pointer exists, because
+   it sticks after a tap on a touch screen (design, touch rules). */
+.button:active,
+.button.is-light:active {
+  background: var(--mh-surface-4);
+  color: var(--mh-text);
+}
+
+.button.is-primary:active,
+.button.is-link:active,
+.button.is-info:active {
+  background: var(--mh-primary);
+  color: var(--mh-bg);
+  filter: brightness(0.85);
+}
+
+a:active {
+  color: var(--mh-secondary);
+}
+
+@media (hover: hover) {
+  .button:hover {
+    background: var(--mh-surface-4);
+    border-color: transparent;
+    color: var(--mh-text);
+  }
+
+  .button.is-primary:hover,
+  .button.is-link:hover,
+  .button.is-info:hover {
+    background: var(--mh-primary);
+    filter: brightness(1.1);
+    color: var(--mh-bg);
+  }
+
+  .button.is-light:hover {
+    background: var(--mh-surface-4);
+    color: var(--mh-text);
+  }
+
+  a:hover,
+  .checkbox:hover {
+    color: var(--mh-secondary);
+  }
+}
+
+/* Without a pointer, neutralise Bulma's sticky hover colours. */
+@media (hover: none) {
+  a:hover {
+    color: var(--mh-primary);
+  }
+
+  .checkbox:hover {
+    color: inherit;
+  }
+
+  .button.is-light:hover {
+    background: var(--mh-surface-3);
+    color: var(--mh-text);
+  }
+}
+
+.button.is-light {
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+}
+
+.modal-background {
+  background-color: rgba(0, 0, 0, 0.7);
+}
+
+.modal-card-head,
+.modal-card-foot {
+  background: var(--mh-surface-2);
+  border-color: var(--mh-surface-3);
+}
+
+.modal-card-body {
+  background: var(--mh-surface-1);
+  color: var(--mh-text);
+}
+
+.modal-card-title {
+  color: var(--mh-text);
+}
+
+.modal-card {
+  border-radius: var(--mh-radius-card);
+  overflow: hidden;
+}
+
+.notification {
+  background: var(--mh-surface-2);
+  color: var(--mh-text);
+  border-radius: var(--mh-radius-card);
+}
+
+.notification.is-info,
+.notification.is-link {
+  background: var(--mh-primary-tint-1);
+  color: var(--mh-secondary);
+}
+
+/* ---- Shell: rail and content (#683). Sizes come from tokens, so a narrower
+   layout can later override --mh-rail-width and --mh-tap in a media query. ---- */
+
+/* Touch rules: no double-tap zoom, no pull-to-refresh, no tap flash, no
+   long-press selection on controls. Only main.mh-content scrolls. */
+html {
+  touch-action: manipulation;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
+}
+
+body.mh-shell {
+  display: flex;
+  height: 100vh;
+  margin: 0;
+  overflow: hidden;
+}
+
+.mh-rail {
+  flex: 0 0 var(--mh-rail-width);
+  width: var(--mh-rail-width);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 4px;
+  background: var(--mh-surface-1);
+  z-index: 50;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mh-rail-item,
+.button,
+.mh-row {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mh-rail-item {
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  margin-top: 0.6rem;
-  padding: 0.4rem 0.7rem;
-  border-radius: 8px;
-  height: 36px;
-  text-align: center;
-  font-size: 0.95rem;
-  line-height: 1;
-  font-weight: 500;
-  font-family: inherit;
-  text-decoration: none;
-  background: #2563eb; /* default (Open) */
-  color: white;
+  gap: 2px;
+  min-height: calc(var(--mh-tap) + 16px);
+  border: 0;
+  border-radius: var(--mh-radius-pill);
+  background: transparent;
+  color: var(--mh-text-muted);
+  font-family: var(--mh-font);
+  font-size: 14px;
+  cursor: pointer;
 }
 
-/* Shelly-inspired primary action (cyan/teal) */
-.button--shelly {
-  background: #00bcd4;
+.mh-rail-item.is-active {
+  background: var(--mh-primary-tint-2);
+  color: var(--mh-secondary);
 }
 
-.actions {
-  display: grid;
-  gap: 0.5rem;
-  margin-top: 0.6rem;
+.mh-rail-item:disabled {
+  opacity: 0.4;
 }
 
-.actions:not(.single) {
-  grid-template-columns: 1fr 1fr;
+.mh-rail-item:active {
+  background: var(--mh-surface-3);
 }
 
-.actions .slot .button {
-  width: 100%;
+/* Reload sits at the bottom of the rail (#817). */
+.mh-rail-reload { margin-top: auto; }
+
+.mh-stage {
+  flex: 1 1 auto;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
-.actions.single {
-  display: inline-flex;
-  gap: 0.5rem;
+/* Daemon unreachable: a 48 px strip above the content, which stays visible
+   but greyed and inert. The rail stays live so cached sections can be browsed. */
+.mh-offline {
+  flex: 0 0 var(--mh-tap);
+  min-height: var(--mh-tap);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--mh-surface-4);
+  color: var(--mh-text);
 }
 
-.actions.single .slot .button {
-  width: auto;
+.mh-offline-text {
+  font-weight: 500;
 }
 
-.button--refresh {
-  background: #7c3aed;
+.mh-offline-since {
+  margin-left: auto;
+  font-size: 14px;
 }
 
-button.button { border: none; cursor: pointer; appearance: none; }
-
-.button:hover {
-  filter: brightness(1.05);
+.mh-content.is-stale {
+  filter: grayscale(1);
+  opacity: 0.55;
 }
 
-.button:active {
-  transform: translateY(1px);
+.mh-content.is-stale [hx-post],
+.mh-content.is-stale [hx-put],
+.mh-content.is-stale [hx-delete],
+.mh-content.is-stale [data-action],
+.mh-content.is-stale button,
+.mh-content.is-stale .button,
+.mh-content.is-stale input,
+.mh-content.is-stale select {
+  pointer-events: none;
 }
 
-.empty {
-  color: #6b7280;
-  font-style: italic;
+.mh-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
 }
 
-footer {
-  margin-top: 2rem;
-  font-size: 0.85rem;
-  color: #9ca3af;
+.mh-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
 }
+
+.mh-sec-head .title {
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.mh-pill {
+  padding: 4px 12px;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-surface-2);
+  color: var(--mh-secondary);
+  font-size: 14px;
+}
+
+.mh-pill[hidden] {
+  display: none;
+}
+
+/* Home grid: as many columns as fit, no fixed widths in px. A device wrapper
+   disappears from layout so that each of its rows is a grid item. */
+.mh-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  gap: 8px;
+}
+
+.mh-device {
+  display: contents;
+}
+
+.mh-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  min-height: 72px;
+  border-radius: var(--mh-radius-card);
+  background: var(--mh-card);
+}
+
+/* Avatar, name and pills: one tap target that opens the device sheet. */
+.mh-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--mh-tap);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--mh-text);
+  font-family: var(--mh-font);
+  font-size: var(--mh-font-size);
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mh-row-main:active {
+  background: var(--mh-surface-2);
+  border-radius: var(--mh-radius-card);
+}
+
+.mh-row-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mh-row-name {
+  font-weight: 500;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mh-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.mh-avatar {
+  flex: 0 0 var(--mh-tap);
+  width: var(--mh-tap);
+  height: var(--mh-tap);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  font-size: 22px;
+}
+
+.mh-row:has(.mh-power.is-on) .mh-avatar {
+  background: var(--mh-primary-tint-2);
+}
+
+.mh-pill.is-unknown {
+  color: var(--mh-text-muted);
+}
+
+.mh-pill.is-alert {
+  background: var(--mh-primary-tint-2);
+}
+
+.door-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+/* Round state button: off, on (ring), pending (htmx-request), unknown (disabled). */
+.mh-power {
+  flex: 0 0 var(--mh-tap);
+  width: var(--mh-tap);
+  height: var(--mh-tap);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mh-power.is-on {
+  background: var(--mh-primary-tint-1);
+  border-color: var(--mh-primary);
+}
+
+.mh-power:active {
+  background: var(--mh-surface-4);
+}
+
+.mh-power.htmx-request {
+  animation: mh-pulse 1s ease-in-out infinite;
+}
+
+.mh-power.is-unknown {
+  color: var(--mh-text-muted);
+  opacity: 0.5;
+  cursor: default;
+  pointer-events: none;
+}
+
+@keyframes mh-pulse {
+  50% { border-color: var(--mh-primary); opacity: 0.6; }
+}
+
+/* Sheet actions: token-styled buttons instead of Bulma's colour variants. */
+.mh-sheet-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mh-action {
+  min-width: var(--mh-tap);
+  min-height: var(--mh-tap);
+  padding: 0 24px;
+  border: 0;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  font-family: var(--mh-font);
+  font-size: var(--mh-font-size);
+  cursor: pointer;
+}
+
+.mh-action:active {
+  background: var(--mh-surface-4);
+}
+
+.mh-action:disabled,
+.mh-action.is-busy {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Overlays cover the content area only, so the rail stays reachable. The
+   backdrop does not dismiss them; each has its own close button. */
+.modal {
+  left: var(--mh-rail-width);
+}
+
+.delete.mh-close {
+  width: var(--mh-tap);
+  height: var(--mh-tap);
+  max-width: none;
+  max-height: none;
+  background: var(--mh-surface-3);
+}
+
+/* Vacuum section (#685). */
+.mh-vac {
+  padding: 16px;
+  margin-bottom: 16px;
+  border-radius: var(--mh-radius-card);
+  background: var(--mh-card);
+}
+
+.mh-vac-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.mh-vac-name {
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.mh-vac-phase {
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.mh-vac-sub {
+  color: var(--mh-text-muted);
+  font-size: 14px;
+}
+
+.mh-vac-controls,
+.mh-vac-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mh-vac-confirm {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mh-surface-3);
+}
+
+.mh-vac-ask {
+  flex: 1 1 100%;
+}
+
+.mh-vac-btn {
+  min-width: 96px;
+  min-height: 56px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  font-family: var(--mh-font);
+  font-size: 16px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mh-vac-btn.is-primary {
+  background: var(--mh-primary);
+  color: var(--mh-bg);
+}
+
+.mh-vac-btn.is-danger {
+  background: var(--mh-danger);
+  color: var(--mh-text);
+}
+
+/* Status tags and notes: explicit dark-surface colours (text at least 4.5:1),
+   not Bulma's light variants, which wash out on this theme. */
+.mh-vac-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.mh-vac-tag {
+  padding: 4px 14px;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+  font-size: 14px;
+}
+
+.mh-vac-tag.is-ok {
+  background: #12351f;
+  color: #9be7b0;
+}
+
+.mh-vac-tag.is-warn {
+  background: #3d3114;
+  color: #f5d06f;
+}
+
+.mh-vac-tag.is-bad {
+  background: #4a1d1a;
+  color: #ffb4ab;
+}
+
+.mh-vac-note {
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--mh-surface-3);
+  color: var(--mh-text);
+}
+
+.mh-vac-note.is-warn {
+  background: #3d3114;
+  color: #f5d06f;
+}
+
+.mh-vac-note.is-bad {
+  background: #4a1d1a;
+  color: #ffb4ab;
+}
+
+.mh-vac-btn:active {
+  background: var(--mh-surface-4);
+  color: var(--mh-text);
+}
+
+.mh-vac-btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* Bulma's .button sets display, which beats the hidden attribute. */
+[hidden] {
+  display: none !important;
+}
+
+.mh-sheet-error {
+  margin-top: 8px;
+  padding: 8px 16px;
+  border-radius: var(--mh-radius-pill);
+  background: var(--mh-primary-tint-2);
+  color: var(--mh-secondary);
+}
+
+/* Room page (#764): two columns, one below 700 px. Only main.mh-content scrolls. */
+.mh-room-head { display: flex; align-items: center; gap: 12px; min-height: 56px; margin-bottom: 8px; }
+.mh-room-head .title { flex: 1 1 auto; margin: 0; }
+.mh-room-back, .mh-room-edit, .mh-room-open { min-height: var(--mh-tap); min-width: var(--mh-tap); }
+.mh-room-body { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 8px; align-items: start; }
+.mh-room-side { display: flex; flex-direction: column; gap: 8px; }
+.mh-room-block { background: var(--mh-card); border-radius: var(--mh-radius-card); padding: 12px 16px; }
+.mh-room-clean { width: 100%; margin-top: 8px; }
+.mh-room-clean + .mh-vac-note { margin-top: 8px; }
+/* Rooms card Clean (#817): full width of the card, so it never widens it. */
+.mh-room-clean-card { margin-top: 8px; min-width: 0; }
+.mh-room-clean-card .mh-vac-confirm { max-width: 100%; }
+.mh-when-busy { display: none; }
+.htmx-request .mh-when-busy { display: inline; }
+.htmx-request .mh-when-idle { display: none; }
+.mh-room-label { font-size: 0.8rem; text-transform: uppercase; opacity: 0.7; margin-bottom: 4px; }
+.mh-room-temp { font-size: 40px; line-height: 1.2; }
+.mh-row-caption { display: block; font-size: 0.8rem; opacity: 0.7; }
+@media (max-width: 699px) { .mh-room-body { grid-template-columns: minmax(0, 1fr); } }

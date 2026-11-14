@@ -55,39 +55,28 @@ func TestGetDevice_ShellyDeviceError(t *testing.T) {
 	}
 }
 
-func TestParseOnValue(t *testing.T) {
-	tests := []struct {
-		value string
-		want  bool
-	}{
-		{"true", false},   // normally closed -> "on" is false
-		{"false", true},   // not normally closed -> "on" is true
-		{"garbage", true}, // ParseBool fails -> nc defaults false -> on true
-	}
-	for _, tt := range tests {
-		t.Run(tt.value, func(t *testing.T) {
-			if got := parseOnValue(tt.value); got != tt.want {
-				t.Errorf("parseOnValue(%q) = %v, want %v", tt.value, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseOnValueIndexed(t *testing.T) {
+func TestParseOn(t *testing.T) {
 	tests := []struct {
 		name     string
 		value    string
 		switchId int
-		want     bool
+		on, ok   bool
 	}{
-		{"index 0 of array: normally closed", `[true,false]`, 0, false},
-		{"index 1 of array: not normally closed", `[true,false]`, 1, true},
-		{"index 2 of longer array", `[false,false,true]`, 2, false},
+		{"bool true: normally closed", "true", 0, false, true},
+		{"bool false", "false", 0, true, true},
+		{"garbage for switch 0 is unknown", "garbage", 0, false, false},
+		{"array index 0: normally closed", `[true,false]`, 0, false, true},
+		{"array index 1", `[true,false]`, 1, true, true},
+		{"array index 2", `[false,false,true]`, 2, false, true},
+		{"out of range is unknown, not a panic", `[true]`, 3, false, false},
+		{"bool for switch 1 is unknown", "true", 1, false, false},
+		{"garbage for switch 2 is unknown", "garbage", 2, false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := parseOnValueIndexed(tt.value, tt.switchId); got != tt.want {
-				t.Errorf("parseOnValueIndexed(%q, %d) = %v, want %v", tt.value, tt.switchId, got, tt.want)
+			on, ok := parseOn(tt.value, tt.switchId)
+			if on != tt.on || ok != tt.ok {
+				t.Errorf("parseOn(%q, %d) = %v,%v want %v,%v", tt.value, tt.switchId, on, ok, tt.on, tt.ok)
 			}
 		})
 	}

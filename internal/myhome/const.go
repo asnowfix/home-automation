@@ -50,6 +50,7 @@ const (
 	SwitchAll                     Verb = "switch.all"
 	EventList                     Verb = "event.list"
 	PoolGetStatus                 Verb = "pool.getstatus"
+	PoolSnapshot                  Verb = "pool.snapshot"
 	SolarClaimersList             Verb = "solar.claimerslist"
 	FetchList                     Verb = "fetch.list"
 	FetchDelete                   Verb = "fetch.delete"
@@ -60,6 +61,9 @@ const (
 	VacuumRooms                   Verb = "vacuum.rooms"
 	VacuumRoomName                Verb = "vacuum.roomname"
 	VacuumRoomsSync               Verb = "vacuum.roomsync"
+	VacuumRoomAssign              Verb = "vacuum.roomassign"
+	VacuumExport                  Verb = "vacuum.export"
+	VacuumImport                  Verb = "vacuum.import"
 )
 
 type Key string

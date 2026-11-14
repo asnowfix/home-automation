@@ -2,6 +2,8 @@ package vacuum
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -38,6 +40,7 @@ type regionRecord struct {
 	MapName    string `db:"map_name"` // cloud only
 	Kind       string `db:"kind"`     // cloud room type (kitchen, ...)
 	Removed    bool   `db:"removed"`  // cloud only: the last sync no longer listed it
+	RoomID     string `db:"room_id"`  // daemon room (#751); "" = unassigned. Never written by learnRegion/syncCloud
 }
 
 // regionColumns are the columns added to vacuum_regions by #628 (cloud sync).
@@ -47,6 +50,7 @@ var regionColumns = []struct{ name, def string }{
 	{"kind", `TEXT NOT NULL DEFAULT ''`},
 	{"removed", `INTEGER NOT NULL DEFAULT 0`},
 	{"synced_at", `TIMESTAMP`},
+	{"room_id", `TEXT NOT NULL DEFAULT ''`}, // #751: the daemon room this region is assigned to
 }
 
 // NewStorage creates the vacuum tables if needed and migrates older ones.
@@ -159,7 +163,7 @@ func (s *Storage) saveName(blid, name string) error {
 func (s *Storage) regions(blid string) ([]regionRecord, error) {
 	var rs []regionRecord
 	err := s.db.Select(&rs, `
-		SELECT blid, pmap_id, pmap_version, region_id, region_type, name, source, map_name, kind, removed
+		SELECT blid, pmap_id, pmap_version, region_id, region_type, name, source, map_name, kind, removed, room_id
 		FROM vacuum_regions WHERE blid=? ORDER BY name, region_id`, blid)
 	return rs, err
 }
@@ -235,6 +239,29 @@ func (s *Storage) syncCloud(blid string, regions []regionRecord) (syncCounts, er
 		c.stale++
 	}
 	return c, tx.Commit()
+}
+
+// assignRegion sets the room of one region (roomID "" unassigns) and returns
+// the room it was in, read and written in one transaction. It errors when the
+// region does not exist.
+func (s *Storage) assignRegion(blid, mapID, regionID, roomID string) (previous string, err error) {
+	tx, err := s.db.Beginx()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := tx.Get(&previous, `SELECT room_id FROM vacuum_regions WHERE blid=? AND pmap_id=? AND region_id=?`,
+		blid, mapID, regionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("no region %q on map %q", regionID, mapID)
+		}
+		return "", err
+	}
+	if _, err := tx.Exec(`UPDATE vacuum_regions SET room_id=? WHERE blid=? AND pmap_id=? AND region_id=?`,
+		roomID, blid, mapID, regionID); err != nil {
+		return "", err
+	}
+	return previous, tx.Commit()
 }
 
 // nameRegion names every region with this id (normally exactly one). With

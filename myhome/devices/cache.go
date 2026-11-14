@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-logr/logr"
 )
@@ -382,6 +383,11 @@ func (c *Cache) UpdateSensorValue(ctx context.Context, deviceID string, sensor s
 		}
 		fieldPtr := mapping.field.(func(*myhome.Sensors) **float64)(device.Status.Sensors)
 		*fieldPtr = &v
+	}
+
+	if sensor == "temperature" {
+		now := time.Now()
+		device.Status.TemperatureUpdatedAt = &now
 	}
 
 	c.log.V(1).Info("Updated sensor value in cache", "device_id", deviceID, "sensor", sensor, "value", value)

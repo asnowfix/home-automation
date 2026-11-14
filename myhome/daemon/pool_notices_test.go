@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"testing"
 
 	"github.com/asnowfix/home-automation/myhome/events"
@@ -78,8 +79,9 @@ func TestPoolNoticesOnEventIgnoresUnrelatedEvents(t *testing.T) {
 // ComputeTurnover (via readPoolKVSInt/readPoolKVSFloat -> kvs.GetValue) only
 // calls those two.
 type fakeKVSDevice struct {
-	id  string
-	kvs map[string]string
+	id    string
+	kvs   map[string]string
+	calls atomic.Int32 // CallE invocations, to prove a code path never reaches the device
 }
 
 func (f *fakeKVSDevice) String() string                                               { return f.id }
@@ -105,6 +107,7 @@ func (f *fakeKVSDevice) IsModified() bool                                       
 func (f *fakeKVSDevice) ResetModified()                                               {}
 
 func (f *fakeKVSDevice) CallE(ctx context.Context, via types.Channel, method string, params any) (any, error) {
+	f.calls.Add(1)
 	if method != string(kvs.Get) {
 		return nil, fmt.Errorf("fakeKVSDevice: unsupported method %q", method)
 	}

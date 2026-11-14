@@ -27,7 +27,7 @@ func TestClassifyDevice(t *testing.T) {
 		want deviceRole
 	}{
 		// Generic BLU fallback ID
-		{"shellyblu-aabbccddeeff", []string{"window", "temperature", "battery"}, roleDoorSensor},
+		{"shellyblu-aabbccddeeff", []string{"window", "temperature", "battery"}, roleTempSensor}, // one predicate (#752): temperature wins over window
 		{"shellyblu-aabbccddeeff", []string{"temperature", "humidity", "battery"}, roleTempSensor},
 		{"shellyblu-aabbccddeeff", []string{"motion"}, roleMotionSensor},
 		{"shellyblu-aabbccddeeff", []string{"battery"}, roleUnknown},

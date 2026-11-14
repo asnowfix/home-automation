@@ -123,7 +123,8 @@ type Device struct {
 	Host_       net.IP              `json:"host"`
 	info        *shelly.DeviceInfo  `json:"-"`
 	config      *shelly.Config      `json:"-"`
-	status      *shelly.Status      `json:"-"`
+	status      *shelly.Status      `json:"-"` // immutable once published: replaced, never mutated (see status.go)
+	statusMu    sync.RWMutex        `json:"-"` // guards the status pointer
 	mqtt        *DeviceMqttChannels `json:"-"` // MQTT channels (shared via registry, includes mutex for serialization)
 	dialogId    uint32              `json:"-"`
 	dialogs     sync.Map            `json:"-"` // map[uint32]bool
@@ -235,13 +236,14 @@ func (d *Device) Refresh(ctx context.Context, via types.Channel) (bool, error) {
 	}
 	d.UpdateName(d.config.System.Device.Name)
 
-	d.status = &crs.Status
-	if d.status.Wifi != nil {
-		d.UpdateHost(d.status.Wifi.IP)
+	status := &crs.Status
+	d.SetStatus(status)
+	if status.Wifi != nil {
+		d.UpdateHost(status.Wifi.IP)
 	}
 	// Ethernet takes precedence over Wifi, when defined
-	if d.status.Ethernet != nil {
-		d.UpdateHost(d.status.Ethernet.IP)
+	if status.Ethernet != nil {
+		d.UpdateHost(status.Ethernet.IP)
 	}
 
 	d.modified = true
@@ -319,11 +321,11 @@ func (d *Device) ClearHost() {
 }
 
 func (d *Device) Ip() net.IP {
-	if d.status != nil {
-		if d.status.Ethernet != nil {
-			d.Host_ = net.ParseIP(d.status.Ethernet.IP)
-		} else if d.status.Wifi != nil {
-			d.Host_ = net.ParseIP(d.status.Wifi.IP)
+	if status := d.Status(); status != nil {
+		if status.Ethernet != nil {
+			d.Host_ = net.ParseIP(status.Ethernet.IP)
+		} else if status.Wifi != nil {
+			d.Host_ = net.ParseIP(status.Wifi.IP)
 		}
 	}
 	return d.Host_
@@ -376,7 +378,11 @@ func (d *Device) Config() *shelly.Config {
 	return d.config
 }
 
+// Status returns the current status snapshot. The returned value must be
+// treated as read-only: it may be shared with concurrent readers.
 func (d *Device) Status() *shelly.Status {
+	d.statusMu.RLock()
+	defer d.statusMu.RUnlock()
 	return d.status
 }
 

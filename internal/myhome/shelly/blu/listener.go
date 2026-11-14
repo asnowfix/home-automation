@@ -76,6 +76,7 @@ type BTHomeFrame struct {
 type DeviceRegistry interface {
 	SetDevice(ctx context.Context, device *myhome.Device, overwrite bool) (bool, error)
 	GetDeviceById(ctx context.Context, id string) (*myhome.Device, error)
+	GetDeviceByMAC(ctx context.Context, mac string) (*myhome.Device, error)
 	UpdateSensorValue(ctx context.Context, deviceID string, sensor string, value string) error
 	RenameDevice(ctx context.Context, oldID, newID string) error
 }
@@ -88,6 +89,57 @@ type SSEBroadcaster interface {
 // StartBLUListener starts listening to BLU device MQTT events and registers them
 func StartBLUListener(ctx context.Context, mc mqtt.Client, registry DeviceRegistry, sseBroadcaster SSEBroadcaster) error {
 	return StartBLUListenerWithEvents(ctx, mc, registry, sseBroadcaster, nil, nil)
+}
+
+// bluPrefixes are the device-type prefixes deviceIDFromCapabilities can produce,
+// typed ones first, the generic fallback last.
+var bluPrefixes = []string{"shellybludoorwindow2", "shellybluht3", "shellyblumotion1", "shellyblubutton1", "shellyblu"}
+
+func macSuffix(mac string) string { return strings.ToLower(strings.ReplaceAll(mac, ":", "")) }
+
+// isGenericBLUID is true for the "shellyblu-<mac>" fallback id.
+func isGenericBLUID(id string) bool { return strings.HasPrefix(id, "shellyblu-") }
+
+// findExistingBLU resolves the record already stored for a physical BLU device.
+// One BLU device sends several kinds of advertisement (an H&T sends battery-only
+// ones next to temperature+humidity ones), and the id inferred from a single event
+// only reflects that event's fields, so the id cannot be the identity: the MAC is.
+// Typed ids win over the generic one so that a pre-existing "shellyblu-<mac>"
+// twin (#772) never shadows the named, roomed record.
+func findExistingBLU(ctx context.Context, registry DeviceRegistry, mac string) *myhome.Device {
+	suffix := macSuffix(mac)
+	for _, prefix := range bluPrefixes[:len(bluPrefixes)-1] {
+		if d, err := registry.GetDeviceById(ctx, prefix+"-"+suffix); err == nil && d != nil && d.Id() != "" {
+			return d
+		}
+	}
+	if d, err := registry.GetDeviceByMAC(ctx, mac); err == nil && d != nil && d.Id() != "" {
+		return d
+	}
+	if d, err := registry.GetDeviceById(ctx, "shellyblu-"+suffix); err == nil && d != nil && d.Id() != "" {
+		return d
+	}
+	return nil
+}
+
+// mergeCapabilities returns stored followed by the entries of observed it lacks:
+// capabilities accumulate over a device's advertisements instead of being replaced
+// by whichever packet arrived last (#786).
+func mergeCapabilities(stored, observed []string) []string {
+	merged := append([]string{}, stored...)
+	for _, c := range observed {
+		found := false
+		for _, m := range merged {
+			if m == c {
+				found = true
+				break
+			}
+		}
+		if !found {
+			merged = append(merged, c)
+		}
+	}
+	return merged
 }
 
 // deviceIDFromCapabilities infers the Shelly BLU device-type prefix from the
@@ -144,7 +196,7 @@ func StartBLUListenerWithEvents(ctx context.Context, mc mqtt.Client, registry De
 		}
 
 		// Feed event log and sensor tracker from the raw payload (nil-safe)
-		handleBLUEventBridge(ctx, log, payload, eventSvc, tracker)
+		handleBLUEventBridge(ctx, log, payload, deviceID, eventSvc, tracker)
 
 		log.V(1).Info("event processing completed", "device_id", deviceID)
 
@@ -169,7 +221,7 @@ func bluData(fields map[string]any) *string {
 }
 
 // handleBLUEventBridge maps BTHome object IDs to event log entries and tracker observations.
-func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, eventSvc *events.Service, tracker *events.SensorDailyTracker) {
+func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, resolvedID string, eventSvc *events.Service, tracker *events.SensorDailyTracker) {
 	var data BLUEventData
 	if err := json.Unmarshal(payload, &data); err != nil {
 		return
@@ -178,9 +230,12 @@ func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, 
 		return
 	}
 
-	// Use the canonical type-inferred device id so the name lookup in the UI
-	// can match the device registration record (which uses the same id).
-	deviceID := deviceIDFromCapabilities(data.Address, data)
+	// Use the id of the stored record (resolved by MAC) so the name lookup in the
+	// UI matches the device registration record; fall back to the inferred id.
+	deviceID := resolvedID
+	if deviceID == "" {
+		deviceID = deviceIDFromCapabilities(data.Address, data)
+	}
 
 	// Use the device-side BTHome timestamp when available (0x50); fall back
 	// to the daemon's receive time so the event never displays as 1970-01-01.
@@ -293,8 +348,6 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 	}
 
 	deviceID := deviceIDFromCapabilities(eventData.Address, eventData)
-	// Fallback: look up by old generic ID for devices stored before type inference.
-	legacyID := "shellyblu-" + strings.ToLower(strings.ReplaceAll(eventData.Address, ":", ""))
 
 	// Determine sensor capabilities from the event data
 	capabilities := []string{}
@@ -405,9 +458,38 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 		model = strings.ToLower(eventData.BTHome.LocalName)
 	}
 
-	// Build new BTHome info with capabilities
+	// Parse MAC address
+	macAddr, parseErr := net.ParseMAC(eventData.Address)
+	if parseErr != nil {
+		log.Error(parseErr, "Failed to parse MAC address", "device_id", deviceID, "mac", eventData.Address)
+		return deviceID, nil, parseErr
+	}
+
+	// Resolve the stored record by MAC, not by the id this single event implies.
+	existingDevice := findExistingBLU(ctx, registry, macAddr.String())
+	if existingDevice != nil && existingDevice.Id() != deviceID {
+		if isGenericBLUID(existingDevice.Id()) && !isGenericBLUID(deviceID) {
+			// Stored before type inference: upgrade the generic id to the typed one.
+			log.Info("Upgrading BLU device ID", "old_id", existingDevice.Id(), "new_id", deviceID)
+			if renameErr := registry.RenameDevice(ctx, existingDevice.Id(), deviceID); renameErr != nil {
+				log.Error(renameErr, "Failed to rename BLU device", "old_id", existingDevice.Id(), "new_id", deviceID)
+				deviceID = existingDevice.Id()
+			} else {
+				existingDevice.Id_ = deviceID
+			}
+		} else {
+			// Keep the stored (typed) id: this event only carries part of the
+			// device's fields (e.g. a battery-only H&T packet).
+			deviceID = existingDevice.Id()
+		}
+	}
+
+	// Build new BTHome info with capabilities, accumulated over the stored ones.
 	var newBTHome *shelly.BTHomeInfo
 	if len(capabilities) > 0 || eventData.BTHome != nil {
+		if existingDevice != nil && existingDevice.Info != nil && existingDevice.Info.BTHome != nil {
+			capabilities = mergeCapabilities(existingDevice.Info.BTHome.Capabilities, capabilities)
+		}
 		newBTHome = &shelly.BTHomeInfo{
 			Version:      eventData.BTHomeVersion,
 			Encryption:   eventData.Encryption,
@@ -419,27 +501,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 		}
 	}
 
-	// Parse MAC address
-	macAddr, parseErr := net.ParseMAC(eventData.Address)
-	if parseErr != nil {
-		log.Error(parseErr, "Failed to parse MAC address", "device_id", deviceID, "mac", eventData.Address)
-		return deviceID, nil, parseErr
-	}
-
-	// Try to get existing device from DB; fall back to legacy generic ID.
-	existingDevice, err := registry.GetDeviceById(ctx, deviceID)
-	if err != nil && legacyID != deviceID {
-		existingDevice, err = registry.GetDeviceById(ctx, legacyID)
-		if err == nil && existingDevice != nil {
-			log.Info("Upgrading BLU device ID", "old_id", legacyID, "new_id", deviceID)
-			if renameErr := registry.RenameDevice(ctx, legacyID, deviceID); renameErr != nil {
-				log.Error(renameErr, "Failed to rename BLU device", "old_id", legacyID, "new_id", deviceID)
-			} else {
-				existingDevice.Id_ = deviceID
-			}
-		}
-	}
-	if err == nil && existingDevice != nil {
+	if existingDevice != nil {
 		// Device exists - check if anything changed
 		changed := false
 
@@ -458,7 +520,7 @@ func handleBLUEvent(ctx context.Context, log logr.Logger, topic string, payload 
 		}
 
 		// Check if BTHome capabilities changed
-		if !btHomeInfoEqual(existingDevice.Info.BTHome, newBTHome) {
+		if newBTHome != nil && !btHomeInfoEqual(existingDevice.Info.BTHome, newBTHome) {
 			existingDevice.Info.BTHome = newBTHome
 			changed = true
 		}

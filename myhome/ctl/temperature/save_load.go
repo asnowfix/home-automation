@@ -113,11 +113,13 @@ Examples:
 		// Load rooms
 		roomCount := 0
 		for roomID, roomConfig := range config.Rooms {
+			ical := roomConfig.ICalURL
 			params := &myhome.TemperatureSetParams{
-				RoomID: roomID,
-				Name:   roomConfig.Name,
-				Kinds:  roomConfig.Kinds,
-				Levels: roomConfig.Levels,
+				RoomID:  roomID,
+				Name:    roomConfig.Name,
+				Kinds:   roomConfig.Kinds,
+				Levels:  roomConfig.Levels,
+				ICalURL: &ical,
 			}
 			_, err := myhome.TheClient.CallE(ctx, myhome.TemperatureSet, params)
 			if err != nil {

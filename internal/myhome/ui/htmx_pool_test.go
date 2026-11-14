@@ -2,13 +2,12 @@ package ui
 
 import (
 	"bytes"
-	"html/template"
 	"strings"
 	"testing"
 )
 
 func TestCardTemplateFuncs_IsActive(t *testing.T) {
-	fn := cardTemplateFuncs()["isActive"].(func(*bool) bool)
+	fn := rowTemplateFuncs()["isActive"].(func(*bool) bool)
 
 	trueVal, falseVal := true, false
 	if fn(nil) {
@@ -23,7 +22,7 @@ func TestCardTemplateFuncs_IsActive(t *testing.T) {
 }
 
 func TestCardTemplateFuncs_TurnoverText(t *testing.T) {
-	fn := cardTemplateFuncs()["turnoverText"].(func(*float64, *float64) string)
+	fn := rowTemplateFuncs()["turnoverText"].(func(*float64, *float64) string)
 
 	if got := fn(nil, nil); got != "" {
 		t.Errorf("turnoverText(nil, nil) = %q, want empty", got)
@@ -37,71 +36,45 @@ func TestCardTemplateFuncs_TurnoverText(t *testing.T) {
 	}
 }
 
-// TestDeviceCardTemplate_PoolTags verifies the pool water-supply/turnover
-// tags render for a pool-pump device and are absent for an ordinary device,
-// guarding against html/template's non-dereferencing behavior for pointer
-// fields in {{if}}/{{printf}} (see cardTemplateFuncs' doc comment).
-func TestDeviceCardTemplate_PoolTags(t *testing.T) {
-	tmpl := template.Must(template.New("device-card").Funcs(cardTemplateFuncs()).Parse(deviceCardTemplate))
-
-	achieved, target := 3.2, 5.0
-	active := true
-	poolView := DeviceView{
-		Id:                "pool-device",
-		Name:              "Pool Pump",
-		IsPoolPump:        true,
-		WaterSupplyActive: &active,
-		TurnoverAchieved:  &achieved,
-		TurnoverTarget:    &target,
-	}
-
+// renderDevice renders one device through the shared row templates.
+func renderDevice(t *testing.T, v DeviceView) string {
+	t.Helper()
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, poolView); err != nil {
+	if err := deviceRowTmpl.ExecuteTemplate(&buf, "device", v); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	out := buf.String()
-	for _, want := range []string{"Paused", "3.2/5.0 x/day"} {
+	return buf.String()
+}
+
+// TestDeviceRow_PoolTags verifies the pool water-supply/turnover pills render
+// for a pool-pump device and are absent for an ordinary device, guarding
+// against html/template's non-dereferencing behavior for pointer fields in
+// {{if}}/{{printf}} (see rowTemplateFuncs' doc comment).
+func TestDeviceRow_PoolTags(t *testing.T) {
+	achieved, target := 3.2, 5.0
+	active := true
+	out := renderDevice(t, DeviceView{
+		Id: "pool-device", Name: "Pool Pump", IsPoolPump: true,
+		WaterSupplyActive: &active, TurnoverAchieved: &achieved, TurnoverTarget: &target,
+	})
+	for _, want := range []string{"Water supply paused", "3.2/5.0 x/day"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("device card missing %q:\n%s", want, out)
+			t.Errorf("device row missing %q:\n%s", want, out)
 		}
 	}
 	if strings.Contains(out, "0x") {
-		t.Errorf("device card leaked a pointer address (dereference bug):\n%s", out)
+		t.Errorf("device row leaked a pointer address (dereference bug):\n%s", out)
 	}
-
-	buf.Reset()
-	ordinaryView := DeviceView{Id: "other-device", Name: "Other"}
-	if err := tmpl.Execute(&buf, ordinaryView); err != nil {
-		t.Fatalf("execute ordinary device: %v", err)
-	}
-	if out := buf.String(); strings.Contains(out, "water-supply-") || strings.Contains(out, "turnover-") {
-		t.Errorf("non-pool device card unexpectedly rendered pool tags:\n%s", out)
+	if out := renderDevice(t, DeviceView{Id: "other-device", Name: "Other"}); strings.Contains(out, "water-supply-") || strings.Contains(out, "turnover-") {
+		t.Errorf("non-pool device unexpectedly rendered pool pills:\n%s", out)
 	}
 }
 
-// TestDeviceCardTemplate_WebUILink verifies the "open device web interface"
-// button is gated on HasWebUI, not on a cached Host value — Host is no
-// longer persisted (see #252/#336), and the link target (LinkToken) is
-// resolved live when clicked (see internal/myhome/proxy.resolveToIPv4), so
-// the button should still appear even when Host is empty.
-func TestDeviceCardTemplate_WebUILink(t *testing.T) {
-	tmpl := template.Must(template.New("device-card").Funcs(cardTemplateFuncs()).Parse(deviceCardTemplate))
-
-	var buf bytes.Buffer
-	withUI := DeviceView{Id: "shellyplus1-abc", Name: "Switch", LinkToken: "shellyplus1-abc", HasWebUI: true}
-	if err := tmpl.Execute(&buf, withUI); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if out := buf.String(); !strings.Contains(out, `href="/devices/shellyplus1-abc/"`) {
-		t.Errorf("expected web UI link for HasWebUI device, got:\n%s", out)
-	}
-
-	buf.Reset()
-	withoutUI := DeviceView{Id: "shellyblu-abc", Name: "Sensor", LinkToken: "shellyblu-abc", HasWebUI: false}
-	if err := tmpl.Execute(&buf, withoutUI); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if out := buf.String(); strings.Contains(out, "Open device web interface") {
-		t.Errorf("expected no web UI link for a BLU (HasWebUI=false) device, got:\n%s", out)
+// TestDeviceRow_NoWebUILink verifies the row opens no new browser window: the
+// kiosk has no browser chrome to come back from (#683).
+func TestDeviceRow_NoWebUILink(t *testing.T) {
+	out := renderDevice(t, DeviceView{Id: "shellyplus1-abc", Name: "Switch", LinkToken: "shellyplus1-abc", HasWebUI: true})
+	if strings.Contains(out, "/devices/") || strings.Contains(out, "_blank") {
+		t.Errorf("device row links out of the shell:\n%s", out)
 	}
 }

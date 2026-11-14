@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
@@ -440,5 +442,49 @@ func TestGetDevicesByRoom_Empty(t *testing.T) {
 	}
 	if len(in) != 0 {
 		t.Errorf("expected empty slice; got %d devices", len(in))
+	}
+}
+
+// A device's room assignment survives the export/import path: the export is the
+// Device JSON as the daemon returns it, and import hands it back to device.update
+// (SetDevice with overwrite).
+func TestDeviceRoomSurvivesJSONExportImport(t *testing.T) {
+	ctx := context.Background()
+	src := newTestStorage(t)
+	d := makeDevice("Shelly", "shellyplus1-abc", "AA:BB:CC:DD:EE:01", "Lamp", "lamp.local")
+	if _, err := src.SetDevice(ctx, d, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := src.SetDeviceRoom(ctx, "shellyplus1-abc", "kitchen"); err != nil {
+		t.Fatal(err)
+	}
+	all, err := src.GetAllDevices(ctx)
+	if err != nil || len(all) != 1 {
+		t.Fatalf("GetAllDevices = %v, %v", all, err)
+	}
+	file, err := json.Marshal(all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(file), `"room_id":"kitchen"`) {
+		t.Fatalf("room_id missing from exported JSON: %s", file)
+	}
+
+	var imported []myhome.Device
+	if err := json.Unmarshal(file, &imported); err != nil {
+		t.Fatal(err)
+	}
+	dst := newTestStorage(t)
+	for i := range imported {
+		if _, err := dst.SetDevice(ctx, &imported[i], true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := dst.GetDeviceById(ctx, "shellyplus1-abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RoomId != "kitchen" {
+		t.Errorf("room_id after import = %q, want kitchen", got.RoomId)
 	}
 }

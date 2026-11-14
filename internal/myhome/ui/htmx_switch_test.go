@@ -5,9 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
-	"strings"
 	"sync"
 	"testing"
 
@@ -97,13 +95,4 @@ func TestSwitchButton_FailedToggleIs500(t *testing.T) {
 	if *toggles != 0 {
 		t.Errorf("device was toggled %d times despite the lookup failure", *toggles)
 	}
-}
-
-// postToggle posts a switch toggle form to h.
-func postToggle(h http.Handler, form url.Values) *httptest.ResponseRecorder {
-	req := httptest.NewRequest("POST", "/htmx/switch/toggle", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	return rec
 }

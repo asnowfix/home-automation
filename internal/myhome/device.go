@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/myhome/sfr"
 	"net"
+	"strings"
+	"sync"
+	"time"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	shellyapi "github.com/asnowfix/home-automation/pkg/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
@@ -77,9 +80,37 @@ type Device struct {
 	log            logr.Logger        `db:"-" json:"-"`
 }
 
+// IsTemperatureSensor reports whether d is a room thermometer: a Gen1 H&T
+// (Info.Application "shellyht" or an id starting with "shellyht-") or a device
+// whose stored BTHome capabilities include "temperature". It is the single rule
+// behind thermometer.list, room.setup and the one-sensor-per-room check.
+//
+// Known gap (#684 open question E7): stored BLU capabilities may list only
+// "battery", so such a BLU thermometer is not recognised here.
+func IsTemperatureSensor(d *Device) bool {
+	if d == nil {
+		return false
+	}
+	if (d.Info != nil && d.Info.Application == "shellyht") || strings.HasPrefix(strings.ToLower(d.Id()), "shellyht-") {
+		return true
+	}
+	if d.Info != nil && d.Info.BTHome != nil {
+		for _, c := range d.Info.BTHome.Capabilities {
+			if c == "temperature" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // Status represents the current runtime status of a device
 type Status struct {
 	Sensors *Sensors `json:"sensors,omitempty"` // Sensor readings (BTHome format)
+	// TemperatureUpdatedAt is when the "temperature" value last arrived (in memory only);
+	// other sensor keys do not touch it. Absent until the first temperature, so a page
+	// can show "N h ago" for a stale reading.
+	TemperatureUpdatedAt *time.Time `json:"temperature_updated_at,omitempty"`
 }
 
 type Component struct {
@@ -93,12 +124,25 @@ type DeviceImplementation interface {
 	Status() *shelly.Status
 }
 
+// implMu guards the impl field of every Device. It is package-level, not a
+// field, because Device is copied by value in many places (storage, UI, ctl):
+// a lock inside the value would be copied too, possibly while held (#762).
+// Contention is negligible: the critical sections are a pointer read or write.
+var implMu sync.RWMutex
+
+// WithImpl publishes the inner implementation handle. Safe for concurrent use
+// with Impl and other WithImpl calls.
 func (d *Device) WithImpl(i any) *Device {
+	implMu.Lock()
 	d.impl = i
+	implMu.Unlock()
 	return d
 }
 
+// Impl returns the inner implementation handle (nil if none yet).
 func (d *Device) Impl() any {
+	implMu.RLock()
+	defer implMu.RUnlock()
 	return d.impl
 }
 

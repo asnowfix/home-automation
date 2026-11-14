@@ -73,6 +73,6 @@ SigV4-signed calls (service `execute-api`).
 ## 4. Our own RPC verbs (`internal/myhome/const.go`)
 
 `vacuum.list`, `vacuum.status`, `vacuum.command`, `vacuum.clean`, `vacuum.rooms`, `vacuum.roomname`,
-`vacuum.roomsync`. CLI: `myhome ctl vacuum {list,status,start,stop,pause,resume,dock,clean,rooms,rooms name,rooms sync,pair}`.
+`vacuum.roomsync`, `vacuum.roomassign` (assign a robot region to a daemon room, #751). CLI: `myhome ctl vacuum {list,status,start,stop,pause,resume,dock,clean,rooms,rooms name,rooms sync,rooms assign,rooms unassign,pair}`.
 
 *Written 2026-10-29. Read-only requests only were made to the iRobot cloud for this catalog.*

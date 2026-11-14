@@ -3,6 +3,7 @@ package rooms
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/mqtt"
@@ -58,6 +59,17 @@ func NewService(ctx context.Context, log logr.Logger, mqttClient mqtt.Client, st
 
 	s.publishAllRanges(ctx)
 	s.log.Info("Rooms service initialized")
+	return s
+}
+
+// NewDataService creates a rooms service that only reads and writes its own
+// database: it never publishes to MQTT, at startup or on any change. It backs
+// the room and schedule RPCs of a daemon whose temperature service is
+// disabled (a read-only side instance), so that `db import` can fill it
+// without anything reaching a device.
+func NewDataService(log logr.Logger, storage *Storage) *Service {
+	s := &Service{log: log.WithName("rooms.DataService"), storage: storage}
+	s.log.Info("Rooms data service initialized (no MQTT publishing)")
 	return s
 }
 
@@ -120,7 +132,13 @@ func (s *Service) publishAllRanges(ctx context.Context) {
 
 // PublishRangesUpdate publishes temperature ranges for a room to MQTT
 // Topic: myhome/rooms/<room-id>/temperature/ranges
+//
+// A Service built without an MQTT client (NewDataService) publishes nothing:
+// the ranges are retained messages that heaters consume.
 func (s *Service) PublishRangesUpdate(ctx context.Context, roomID string) error {
+	if s.mqttClient == nil {
+		return nil
+	}
 	ranges, dayType, err := s.GetComfortRanges(ctx, roomID, time.Now())
 	if err != nil {
 		return err
@@ -164,7 +182,10 @@ func (s *Service) PublishRangesUpdate(ctx context.Context, roomID string) error 
 func (s *Service) GetComfortRanges(ctx context.Context, roomID string, date time.Time) ([]TimeRange, myhome.DayType, error) {
 	room, err := s.storage.GetRoom(roomID)
 	if err != nil {
-		return nil, "", fmt.Errorf("room not found: %s", roomID)
+		if errors.Is(err, myhome.ErrRoomNotFound) {
+			return nil, "", err // GetRoom already says "room not found: <id>"
+		}
+		return nil, "", fmt.Errorf("failed to get room %q: %w", roomID, err)
 	}
 
 	dayType := s.getDayType(ctx, roomID, date)

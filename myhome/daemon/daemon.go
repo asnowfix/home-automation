@@ -36,6 +36,7 @@ import (
 	shellycloud "github.com/asnowfix/home-automation/pkg/shelly/cloud"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
 	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
+	"github.com/asnowfix/home-automation/pkg/version"
 	shellyshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	shellytypes "github.com/asnowfix/home-automation/pkg/shelly/types"
 	"github.com/go-logr/logr"
@@ -362,6 +363,8 @@ func (d *daemon) Run() error {
 
 		// Create SSE broadcaster for live sensor updates
 		sseBroadcaster := ui.NewSSEBroadcaster(log.WithName("sse"))
+		// Recorded start time: clients compare it across reconnects to detect a restart.
+		sseBroadcaster.SetDaemonInfo(time.Now(), version.GetVersion())
 
 		// Start event service if enabled
 		var eventsSvc *events.Service
@@ -541,7 +544,9 @@ func (d *daemon) Run() error {
 		}
 
 		// Resolve weather coordinates via priority chain, then start forecast publisher.
-		{
+		if options.Flags.DisableWeatherPublisher {
+			log.Info("Weather forecast publisher disabled by option (--disable-weather-publisher / weather.disable_publisher)")
+		} else {
 			lat, lon, source := options.Flags.WeatherLatitude, options.Flags.WeatherLongitude, "config"
 			if lat == 0 && lon == 0 {
 				lat, lon, source = discoverLocation(d.ctx, log, d.dm)
@@ -621,6 +626,20 @@ func (d *daemon) Run() error {
 			}()
 
 			log.Info("Rooms RPC methods registered")
+		} else {
+			// Temperature service disabled (e.g. a read-only side instance
+			// fed by `ctl db import`): still serve the room and schedule RPCs
+			// from the local database so imported data lands and the UI can
+			// read it, but with no MQTT client, no iCal agenda publisher, no
+			// room setup and no initial/daily SetupAllRooms. Nothing is
+			// published and nothing is written toward a device.
+			roomsStorage, err := rooms.NewStorage(log, storage.DB())
+			if err != nil {
+				log.Error(err, "Failed to initialize rooms storage")
+				return err
+			}
+			rooms.NewDataService(log, roomsStorage).RegisterHandlers()
+			log.Info("Rooms data RPC methods registered (temperature service disabled: no publishing)")
 		}
 
 		// Register the fetch-and-transform proxy (#465). Always registered —
@@ -677,7 +696,14 @@ func (d *daemon) Run() error {
 		// the UI and `ctl pool status`). Always registered — the signature
 		// exists regardless of pool tracking; handleGetStatus itself returns
 		// a clear error if poolNotices is nil (pool disabled/unreachable).
-		poolRPCHandler := NewPoolRPCHandler(log, poolNotices)
+		poolRPCHandler := NewPoolRPCHandler(log, poolNotices, options.Flags.PoolEnabled && options.Flags.PoolDeviceID != "")
+		// Set the device id whether or not dm exists, so "enabled, unknown"
+		// stays distinct from "disabled" in pool.snapshot.
+		var poolWater func(context.Context) *bool
+		if d.dm != nil {
+			poolWater = cachedWaterSupply(d.dm, options.Flags.PoolDeviceID)
+		}
+		poolRPCHandler.WithSnapshotSource(options.Flags.PoolDeviceID, poolWater)
 		poolRPCHandler.RegisterHandlers()
 
 		// Register Solar RPC methods (static energy-claimers registry).

@@ -4,8 +4,8 @@
   "description": "MyHome Device Management System",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#F5EFE6",
-  "theme_color": "#F5EFE6",
+  "background_color": "#151617",
+  "theme_color": "#151617",
   "orientation": "any",
   "icons": [
     {

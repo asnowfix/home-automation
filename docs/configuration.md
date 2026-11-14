@@ -603,6 +603,10 @@ Topic: `myhome/electricity/status` (retained, QoS 1)
 
 The daemon fetches hourly temperature forecasts from [Open-Meteo](https://open-meteo.com/) (no API key required) every 6 hours and publishes a 4-slot distilled payload to MQTT. Device scripts subscribe and use the data to decide whether to pre-heat.
 
+| Key | Env var | Flag | Default | Description |
+|-----|---------|------|---------|-------------|
+| `weather.disable_publisher` | `MYHOME_WEATHER_DISABLE_PUBLISHER` | `--disable-weather-publisher` | `false` | Never start the forecast publisher, whatever location resolves. For a read-only side daemon sharing the home broker, so it cannot overwrite the retained `myhome/weather/forecast` (#700). The log says "disabled by option", distinct from "disabled: no location available" |
+
 ## Beem Energy
 
 Integration is enabled automatically when both `beem.email` and `beem.password` are set and non-empty. There is no separate enable flag.

@@ -24,6 +24,7 @@ import (
 const (
 	kvsKeyTurnover      = "script/pool-pump/turnover"
 	kvsKeyRuntimeToday  = "script/pool-pump/runtime-sec"
+	kvsKeyRuntimeTs     = "script/pool-pump/runtime-ts"
 	kvsKeyTurnoverToday = "script/pool-pump/turnover-today"
 	kvsKeyActiveOutput  = "script/pool-pump/active-output"
 )
@@ -53,6 +54,11 @@ type PoolNotices struct {
 	events   *events.Service
 	device   types.Device // types.Device (not concrete *shellyapi.Device) so tests can inject a fake KVS responder
 	deviceID string
+
+	// loadEvents returns this device's persisted events of one type (newest
+	// first, as the store does); nil = read them from the events store.
+	// Injectable for tests.
+	loadEvents func(ctx context.Context, eventType string) ([]events.Event, error)
 }
 
 // NewPoolNotices builds a PoolNotices, or returns nil if any dependency is
@@ -100,8 +106,17 @@ func (p *PoolNotices) OnEvent(ctx context.Context, e events.Event) {
 	if e.Event != "pool.pump_stop" {
 		return
 	}
-	p.recordTurnoverToday(ctx)
+	// Off the listener goroutine and with its own deadline: it makes several
+	// sequential device reads, each otherwise bounded only by the MQTT timeout.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), turnoverReadTimeout)
+		defer cancel()
+		p.recordTurnoverToday(ctx)
+	}()
 }
+
+// turnoverReadTimeout bounds the device reads made for one pool.turnover_today.
+const turnoverReadTimeout = 30 * time.Second
 
 func (p *PoolNotices) recordTurnoverToday(ctx context.Context) {
 	achieved, target, runtimeSec, err := p.ComputeTurnover(ctx)
@@ -110,11 +125,19 @@ func (p *PoolNotices) recordTurnoverToday(ctx context.Context) {
 		return
 	}
 
-	payload, err := json.Marshal(map[string]any{
+	data := map[string]any{
 		"turnover_achieved": achieved,
 		"turnover_target":   target,
 		"runtime_sec":       runtimeSec,
-	})
+	}
+	// The device's day anchor for the counters above: it changes exactly when
+	// the device resets them, which Rolling24h needs to difference them (#731).
+	if ts, err := readPoolKVSInt(ctx, p.log, p.device, types.ChannelMqtt, kvsKeyRuntimeTs); err == nil {
+		data["runtime_ts"] = ts
+	} else {
+		p.log.Info("runtime-ts not read, notice carries no counter anchor", "error", err.Error())
+	}
+	payload, err := json.Marshal(data)
 	if err != nil {
 		p.log.Error(err, "Failed to marshal turnover notice data")
 		return
@@ -157,7 +180,8 @@ func (p *PoolNotices) ComputeTurnover(ctx context.Context) (achieved, target flo
 		return 0, 0, 0, fmt.Errorf("read turnover target: %w", err)
 	}
 
-	return roundTo(achieved, 2), target, runtimeSec, nil
+	achieved = roundTo(achieved, 2)
+	return achieved, target, runtimeSec, nil
 }
 
 // WaterSupplyActive reports whether the pool device's water-supply

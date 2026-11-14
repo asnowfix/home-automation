@@ -79,6 +79,7 @@ var Flags struct {
 	ElectricityCheapIntervals   string  // "HH:MM-HH:MM[,HH:MM-HH:MM]", e.g. "23:15-07:15"
 	WeatherLatitude             float64 // decimal degrees
 	WeatherLongitude            float64 // decimal degrees
+	DisableWeatherPublisher     bool    // the value taken by --disable-weather-publisher (#700)
 	EnableMetricsExporter       bool
 	MetricsExporterPort         int
 	MetricsExporterTopic        string

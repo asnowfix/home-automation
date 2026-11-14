@@ -11,9 +11,11 @@ import (
 func init() {
 	Cmd.AddCommand(installCmd)
 	Cmd.AddCommand(uninstallCmd)
+	Cmd.AddCommand(startCmd)
+	Cmd.AddCommand(stopCmd)
 }
 
-func load(ctx context.Context) (service.Service, service.Logger, error) {
+func load(ctx context.Context, args []string) (service.Service, service.Logger, error) {
 	log, err := logr.FromContext(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -37,6 +39,7 @@ func load(ctx context.Context) (service.Service, service.Logger, error) {
 		Name:        "myhome",
 		DisplayName: "MyHome",
 		Description: "MyHome Daemon, with embedded MQTT broker and persistent device manager",
+		Arguments:   args,
 	}
 
 	daemon := NewDaemon(ctx)
@@ -58,7 +61,10 @@ var installCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Install MyHome as a " + service.Platform() + " service",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s, l, err := load(cmd.Context())
+		// Bake the arguments the SCM will launch the service with: they must
+		// route back through the kardianos dispatcher (see run.go), so the
+		// service is actually recognized as running by the SCM.
+		s, l, err := load(cmd.Context(), []string{"daemon", "run"})
 		if err != nil {
 			return err
 		}
@@ -71,11 +77,37 @@ var uninstallCmd = &cobra.Command{
 	Use:   "uninstall",
 	Short: "Uninstall MyHome as a " + service.Platform() + " service",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		s, l, err := load(cmd.Context())
+		s, l, err := load(cmd.Context(), nil)
 		if err != nil {
 			return err
 		}
 		l.Info("Uninstalling service")
 		return s.Uninstall()
+	},
+}
+
+var startCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start the installed MyHome " + service.Platform() + " service",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s, l, err := load(cmd.Context(), nil)
+		if err != nil {
+			return err
+		}
+		l.Info("Starting service")
+		return s.Start()
+	},
+}
+
+var stopCmd = &cobra.Command{
+	Use:   "stop",
+	Short: "Stop the installed MyHome " + service.Platform() + " service",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		s, l, err := load(cmd.Context(), nil)
+		if err != nil {
+			return err
+		}
+		l.Info("Stopping service")
+		return s.Stop()
 	},
 }

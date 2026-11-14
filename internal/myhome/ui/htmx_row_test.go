@@ -287,3 +287,23 @@ func TestToggleFailureIsReportedOnTheSection(t *testing.T) {
 		t.Errorf("failure pills = %q", got)
 	}
 }
+
+// Rooms-list card Edit/Delete buttons must be at least --mh-tap square (#767).
+func TestRoomCardButtonsTapTargets(t *testing.T) {
+	css := string(staticAsset(t, "/static/myhome.css"))
+	m := regexp.MustCompile(`(?s)\n\.button\.mh-room-btn \{([^}]*)\}`).FindStringSubmatch(css)
+	if m == nil {
+		t.Fatal("no .button.mh-room-btn rule")
+	}
+	for _, prop := range []string{"min-width: var(--mh-tap)", "min-height: var(--mh-tap)"} {
+		if !strings.Contains(m[1], prop) {
+			t.Errorf(".button.mh-room-btn lacks %q", prop)
+		}
+	}
+	for _, title := range []string{`title="Edit"`, `title="Delete"`} {
+		re := regexp.MustCompile(`(?s)<button class="[^"]*\bmh-room-btn\b[^"]*"[^>]*` + regexp.QuoteMeta(title))
+		if !re.MatchString(roomsListTemplate) {
+			t.Errorf("rooms template button %s lacks class mh-room-btn", title)
+		}
+	}
+}

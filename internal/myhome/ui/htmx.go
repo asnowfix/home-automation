@@ -642,10 +642,10 @@ const roomsListTemplate = `{{define "rooms-list"}}
           </div>
         </div>
         <div class="level-right">
-          <button class="button is-small is-ghost mr-1"
+          <button class="button is-small is-ghost mr-1 mh-room-btn"
                   @click="$dispatch('edit-room', {roomId: '{{.ID}}'})"
                   title="Edit">✏️</button>
-          <button class="button is-small is-ghost"
+          <button class="button is-small is-ghost mh-room-btn"
                   @click="$dispatch('delete-room', {roomId: '{{.ID}}', roomName: '{{if .Name}}{{.Name}}{{else}}{{.ID}}{{end}}'})"
                   title="Delete">🗑️</button>
         </div>

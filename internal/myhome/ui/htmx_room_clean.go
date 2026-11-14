@@ -3,6 +3,7 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"net/http"
 	"sort"
 	"strings"
@@ -215,6 +216,8 @@ var roomCleanTemplate = strings.ReplaceAll(`
 {{end}}{{end}}
 
 {{define "room-clean-card"}}{{if or .CanClean .Areas}}<div class="mh-room-clean-card" data-room-clean-card
+     hx-get="/htmx/room/{{.RoomID | urlquery}}/clean-card" hx-swap="outerHTML"
+     hx-trigger="every 5s [kiosk.visible('rooms') && !kiosk.roomOpen && kiosk.online && !this.closest('[data-confirming]')]"
      x-data="@XDATA@"
      :data-confirming="ask ? 'true' : null">
   {{if .Notice}}<p class="mh-vac-note" data-room-clean-notice>{{.Notice}}</p>{{end}}
@@ -242,6 +245,25 @@ func (h *HTMXHandler) roomName(roomID string) (string, error) {
 		return roomID, nil
 	}
 	return rc.Name, nil
+}
+
+// RoomCleanCard renders GET /htmx/room/{id}/clean-card, the Rooms list card's
+// Clean container, which re-polls it every 5 s (#822) so a card follows the robot
+// (offline, busy, ready) without a page reload. Cache and SQLite only, like the
+// room page's vacuum block. A room with no control answers an empty fragment.
+func (h *HTMXHandler) RoomCleanCard(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	name, err := h.roomName(id)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err != nil {
+		// 4xx is not swapped by htmx: the card stays as it is.
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, `<p class="has-text-grey" data-room-not-found>%s</p>`, template.HTMLEscapeString(err.Error()))
+		return
+	}
+	if err := roomsTmpl.ExecuteTemplate(w, "room-clean-card", h.roomCleanView(id, name, "", "", true)); err != nil {
+		h.log.Error(err, "failed to render room clean card")
+	}
 }
 
 // cleanRoom serves the `room_id` branch of POST /htmx/vacuum/action. The client's

@@ -23,7 +23,7 @@ import (
 const (
 	// MaxPayloadBytes is the largest status document accepted. The contract
 	// expects about 1.5 KB; anything bigger is not a status.
-	MaxPayloadBytes = 16 << 10
+	MaxPayloadBytes = 8 << 10
 
 	// SupportedMajor is the only schema major this package understands.
 	SupportedMajor = 2

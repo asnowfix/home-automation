@@ -151,19 +151,27 @@ func (c *driveCard) fill(st *homedrive.Status, v homedrive.View, now time.Time) 
 
 // drivePill maps an instance to the accounts tag classes (design section 2).
 func drivePill(v homedrive.View) (class, text string) {
-	switch {
-	case v.Liveness == homedrive.Offline:
+	if v.Liveness == homedrive.Offline {
 		return "is-danger", "Offline"
-	case v.Unsupported:
+	}
+	if v.Unsupported {
 		return "is-light", "Unsupported schema"
+	}
+	if v.Status == nil {
+		return "is-light", "Unknown"
+	}
+	// Problems outrank Stale, so a failing instance is never greyed out.
+	suffix := ""
+	if v.Liveness == homedrive.Stale {
+		suffix = " (stale)"
+	}
+	switch {
+	case v.StateError:
+		return "is-danger", "Error" + suffix
+	case v.AuthProblem:
+		return "is-danger", "Auth problem" + suffix
 	case v.Liveness == homedrive.Stale:
 		return "is-light", "Stale"
-	case v.Status == nil:
-		return "is-light", "Unknown"
-	case v.StateError:
-		return "is-danger", "Error"
-	case v.AuthProblem:
-		return "is-danger", "Auth problem"
 	case v.Degraded:
 		return "is-warning", v.Status.State
 	}

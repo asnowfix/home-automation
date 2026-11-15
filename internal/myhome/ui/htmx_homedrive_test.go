@@ -85,6 +85,8 @@ func TestHomedrivePanel_States(t *testing.T) {
 		{"offline", driveDoc(t, "running.json"), 16 * time.Minute, "is-danger", "Offline", []string{"Status 16 min ago", "Last error push"}},
 		{"state error", driveDoc(t, "error.json"), 0, "is-danger", "Error", []string{"startup"}},
 		{"auth problem", driveDoc(t, "auth_token_invalid.json"), 0, "is-danger", "Auth problem", []string{"Google auth token_invalid", "has-text-danger", "Dry run"}},
+		{"stale with a state error", driveDoc(t, "error.json"), 2 * time.Minute, "is-danger", "Error (stale)", nil},
+		{"stale with an auth problem", driveDoc(t, "auth_token_invalid.json"), 2 * time.Minute, "is-danger", "Auth problem (stale)", nil},
 		{"unsupported", driveDoc(t, "schema_3_0.json"), 0, "is-light", "Unsupported schema", []string{"Unsupported homedrive status schema", "schema 3.0"}},
 		{"degraded", driveDoc(t, "schema_2_7_extra.json"), 0, "is-warning", "quota_blocked", nil},
 	}

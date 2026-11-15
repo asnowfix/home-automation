@@ -8,6 +8,7 @@ import (
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
+	"github.com/asnowfix/home-automation/myhome/events/metricsdb"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/asnowfix/home-automation/myhome/vacuum"
 	"github.com/asnowfix/home-automation/pkg/sfr"
@@ -15,6 +16,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
+
+func defaultMetricsDBPath() string {
+	return "metrics.db"
+}
 
 func defaultEventsDBPath() string {
 	return "events.db"
@@ -84,6 +89,8 @@ func init() {
 	runCmd.PersistentFlags().StringVarP(&options.Flags.InstanceName, "instance", "I", "myhome", "Server instance name for RPC topics (default: myhome)")
 	runCmd.PersistentFlags().StringVar(&options.Flags.EventsDBPath, "events-db", defaultEventsDBPath(), "Path to the events SQLite database")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.EventsRetention, "events-retention", 90*24*time.Hour, "Retention period for event records (default 90 days)")
+	runCmd.PersistentFlags().StringVar(&options.Flags.MetricsDBPath, "metrics-db", defaultMetricsDBPath(), "Path to the device-health metrics SQLite database")
+	runCmd.PersistentFlags().DurationVar(&options.Flags.MetricsRetention, "metrics-retention", metricsdb.DefaultRetention, "Retention period for metric samples (default 7 days)")
 	runCmd.PersistentFlags().BoolVar(&disableEventsService, "disable-events-service", false, "Disable the event recording service")
 	runCmd.PersistentFlags().StringVar(&options.Flags.RemoteProxy, "remote-proxy", "", "Forward /devices/... requests to a remote myhome daemon (e.g. http://home-pi:6080) instead of connecting directly")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.SolarStaleAfter, "solar-stale-after", options.SOLAR_STALE_AFTER, "Solar aggregator: exclude a source's reading from the total once it is older than this")
@@ -254,6 +261,13 @@ var runCmd = &cobra.Command{
 		}
 		if v.IsSet("events.retention") && !cmd.Flags().Changed("events-retention") {
 			options.Flags.EventsRetention = v.GetDuration("events.retention")
+		}
+		// Metrics store config (metrics_store.* / MYHOME_METRICS_STORE_*)
+		if v.IsSet("metrics_store.db") && !cmd.Flags().Changed("metrics-db") {
+			options.Flags.MetricsDBPath = v.GetString("metrics_store.db")
+		}
+		if v.IsSet("metrics_store.retention") && !cmd.Flags().Changed("metrics-retention") {
+			options.Flags.MetricsRetention = v.GetDuration("metrics_store.retention")
 		}
 		if cmd.Flags().Changed("disable-events-service") && disableEventsService {
 			options.Flags.EnableEventsService = false

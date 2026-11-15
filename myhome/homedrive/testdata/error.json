@@ -1,0 +1,25 @@
+{
+  "schema": "2.0",
+  "ts": "2026-11-15T14:32:00Z",
+  "publish_interval_s": 30,
+  "version": "v0.2.0",
+  "state": "error",
+  "started_at": "2026-11-15T14:31:50Z",
+  "uptime_s": 10,
+  "dry_run": false,
+  "pending_up": 0,
+  "last_push": null,
+  "last_pull": null,
+  "last_activity": null,
+  "last_poll": null,
+  "counts": {
+    "1h":  {"files_up": 0, "files_down": 0, "bytes_up": 0, "bytes_down": 0, "errors": 1, "conflicts": 0, "starts": 4},
+    "24h": {"files_up": 0, "files_down": 0, "bytes_up": 0, "bytes_down": 0, "errors": 9, "conflicts": 0, "starts": 40},
+    "7d":  {"files_up": 0, "files_down": 0, "bytes_up": 0, "bytes_down": 0, "errors": 60, "conflicts": 0, "starts": 280}
+  },
+  "last_error": {"ts": "2026-11-15T14:31:51Z", "op": "startup", "message": "open /var/lib/homedrive/state.db: database is locked"},
+  "auth": {"state": "unknown", "last_refresh_ok": null, "last_refresh_error": null},
+  "bisync": null,
+  "local": null,
+  "quota_used_pct": null
+}

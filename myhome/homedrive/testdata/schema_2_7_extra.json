@@ -1,0 +1,25 @@
+{
+  "schema": "2.7",
+  "ts": "2026-11-15T14:32:00Z",
+  "publish_interval_s": 60,
+  "version": "v0.3.0",
+  "state": "quota_blocked",
+  "started_at": "2026-11-15T09:00:00Z",
+  "dry_run": false,
+  "pending_up": 0,
+  "last_push": null,
+  "last_pull": null,
+  "last_activity": null,
+  "last_poll": "2026-11-15T14:31:30Z",
+  "counts": {
+    "1h":  {"files_up": 1, "files_down": 0, "bytes_up": 10, "bytes_down": 0, "errors": 2, "errors_up": 2, "errors_down": 0, "conflicts": 0, "starts": 1, "retries": 7},
+    "24h": null,
+    "7d":  {"files_up": 1, "files_down": 0, "bytes_up": 10, "bytes_down": 0, "errors": 2, "conflicts": 0, "starts": 1}
+  },
+  "last_error": null,
+  "auth": {"state": "ok", "last_refresh_ok": null, "last_refresh_error": null, "scopes": ["drive"]},
+  "bisync": null,
+  "local": null,
+  "quota_used_pct": null,
+  "future_field": {"anything": [1, 2, 3]}
+}

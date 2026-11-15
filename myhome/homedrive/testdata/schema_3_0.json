@@ -1,0 +1,8 @@
+{
+  "schema": "3.0",
+  "ts": "2026-11-15T14:32:00Z",
+  "publish_interval_s": 30,
+  "state": {"now": "running"},
+  "counts": [1, 2, 3],
+  "last_error": "a string where v2 had an object"
+}

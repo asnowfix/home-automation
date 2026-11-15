@@ -63,7 +63,7 @@ finite, and (`InactiveEnterTimestampMonotonic` - `ActiveEnterTimestampMonotonic`
 `RuntimeMaxUSec` is printed human-formatted (`4s`, `2d`), so the handler parses a systemd timespan.
 
 Not covered by this experiment: SIGSTOP of the real daemon. With `WatchdogSec` systemd sends SIGABRT,
-which a stopped process cannot handle, and escalates to SIGKILL after `TimeoutAbortSec`; the result is
+(corrected under Item 7 below: systemd also sends SIGCONT), and escalates to SIGKILL after `TimeoutAbortSec`; the result is
 still `watchdog`. To be checked live by the owner after merge.
 
 ### 2026-11-15 implementation
@@ -91,7 +91,7 @@ Test written first (start-timeout loop after a scheduled restart): it failed, th
 (alert by default). Item 5: with `smtp.from` empty `notify-failure` now returns an error from `Send`
 (after classification, so a scheduled restart still exits 0). Item 8: gofmt of `daemon.go`.
 
-### Blocker 2: probe tolerance (1750f131 precedes; commit "one failed probe no longer risks the deadline")
+### Blocker 2: probe tolerance (1750f131)
 Read `myhome/mqtt/client.go`: every `MQTT_RECONNECT_INTERVAL` (2 h) the watchdog goroutine
 disconnects, reconnects and re-subscribes each topic sequentially, each wait bounded by
 `MqttTimeout` (14 s default). Probes inside that window fail. Also `Publish` waits on its own
@@ -108,13 +108,13 @@ t0+20 after the last good probe), stop at beat 3; systemd kills `WatchdogSec` af
 about 80 to 85 s after the last good probe. The earlier statement "a stall longer than about 60 s"
 was wrong.
 
-### Item 3: postinst (commit "postinst restarts myhome with --no-block")
+### Item 3: postinst (5c082f13)
 Chose `systemctl restart --no-block` over handling failure explicitly: postinst already polls
 `ctl list` for up to 90 s and tolerates a missing daemon (script update is skipped with a message), so
 it never needed the restart to be synchronous; `--no-block` removes the READY wait and the `set -e`
 abort without new error paths. Timers keep the plain restart. `postinst_test.py` passes.
 
-### Item 4: #842 (commit with `Fixes #842`)
+### Item 4: #842 (4ef04ceb, `Fixes #842`)
 `StartLimitIntervalSec=300`/`StartLimitBurst=5` moved to `[Unit]` (values kept).
 `systemd-analyze verify linux/systemd/myhome.service`: the "Unknown key" warning is gone (only
 "/usr/bin/myhome not executable" remains, expected on a workstation).

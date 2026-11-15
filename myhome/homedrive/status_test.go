@@ -20,9 +20,9 @@ func fixture(t *testing.T, name string) []byte {
 	return b
 }
 
-// TestParse_FixturesMatchContract pins the copied structs to the documents in
-// testdata (built from contract section 5.3): decoding with
-// DisallowUnknownFields fails if the contract has a field the copy lacks.
+// TestParse_FixturesMatchContract strict-decodes the hand-written UI-edge-case
+// fixtures (built from contract section 5.3). The producer's own documents are
+// pinned by TestParse_ProducerDocumentsPinned.
 func TestParse_FixturesMatchContract(t *testing.T) {
 	for _, name := range []string{"running.json", "error.json", "auth_token_invalid.json"} {
 		t.Run(name, func(t *testing.T) {
@@ -45,6 +45,52 @@ func TestParse_FixturesMatchContract(t *testing.T) {
 					t.Errorf("counts[%s] missing", w)
 				}
 			}
+		})
+	}
+}
+
+// The files in testdata/contract are copied VERBATIM from the producer:
+// github.com/asnowfix/home-drive, branch issue-141-status-v2, path
+// homedrive/pkg/homedrive/testdata/status-{running,error,auth-failure}.json,
+// last changed in commit 10f28d8f04becbb5856c6d21cd2843405d049c33 (branch tip
+// 4235c27). Re-copy them when the contract changes; this test then fails if the
+// copied structs lack a field the producer emits.
+func TestParse_ProducerDocumentsPinned(t *testing.T) {
+	tests := []struct {
+		file  string
+		check func(t *testing.T, st *Status)
+	}{
+		{"status-running.json", func(t *testing.T, st *Status) {
+			c := st.Counts[Window7d]
+			if st.State != StateRunning || c.ErrorsUp == nil || *c.ErrorsUp != 3 || c.ErrorsDown == nil || *c.ErrorsDown != 1 {
+				t.Errorf("state=%q 7d=%+v", st.State, c)
+			}
+		}},
+		{"status-error.json", func(t *testing.T, st *Status) {
+			if st.State != StateError || st.LastError == nil {
+				t.Errorf("state=%q last_error=%+v", st.State, st.LastError)
+			}
+		}},
+		{"status-auth-failure.json", func(t *testing.T, st *Status) {
+			if st.Auth == nil || st.Auth.State != "token_invalid" || *st.Counts[Window1h].ErrorsDown != 40 {
+				t.Errorf("auth=%+v", st.Auth)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			b := fixture(t, "contract/"+tt.file)
+			dec := json.NewDecoder(bytes.NewReader(b))
+			dec.DisallowUnknownFields()
+			var strict Status
+			if err := dec.Decode(&strict); err != nil {
+				t.Fatalf("strict decode: %v", err)
+			}
+			st, err := Parse(b)
+			if err != nil || st.Unsupported {
+				t.Fatalf("Parse: %v %+v", err, st)
+			}
+			tt.check(t, st)
 		})
 	}
 }

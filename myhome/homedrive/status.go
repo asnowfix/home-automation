@@ -92,9 +92,9 @@ type Status struct {
 	Unsupported bool `json:"-"`
 }
 
-// Counts is one activity window. ErrorsUp/ErrorsDown are the optional
-// per-direction split the contract may gain (home-drive#141): present or
-// absent, both parse.
+// Counts is one activity window. ErrorsUp/ErrorsDown are the per-direction
+// error split (contract section 5.3); pointers so an older producer that omits
+// them still parses.
 type Counts struct {
 	FilesUp    int64  `json:"files_up"`
 	FilesDown  int64  `json:"files_down"`

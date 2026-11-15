@@ -19,6 +19,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	"github.com/asnowfix/home-automation/myhome/electricity"
 	"github.com/asnowfix/home-automation/myhome/events"
+	"github.com/asnowfix/home-automation/myhome/events/metricsdb"
 	"github.com/asnowfix/home-automation/myhome/fetchproxy"
 	"github.com/asnowfix/home-automation/myhome/ical"
 	"github.com/asnowfix/home-automation/myhome/metrics"
@@ -401,6 +402,17 @@ func (d *daemon) Run() error {
 			}
 		} else {
 			log.Info("Events service disabled")
+		}
+
+		// Metrics store (device-health time series). Advisory: a failure to
+		// open it is logged and the daemon runs without it (a nil store is a
+		// no-op). Nothing writes into it yet; the collector is #706.
+		if metricsStore, err := metricsdb.Open(log.WithName("metrics-store"), options.Flags.MetricsDBPath); err != nil {
+			log.Error(err, "Metrics store disabled: failed to open", "path", options.Flags.MetricsDBPath)
+		} else {
+			defer metricsStore.Close()
+			go metricsStore.Start(d.ctx, options.Flags.MetricsRetention)
+			log.Info("Metrics store started", "db", options.Flags.MetricsDBPath, "retention", options.Flags.MetricsRetention)
 		}
 
 		// Start the notice service (curated "notice"-severity events + daily

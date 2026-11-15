@@ -165,6 +165,16 @@ weather:
   # For a read-only side daemon sharing the home broker. Default: false (publisher on).
   # disable_publisher: true
 
+# Metrics store (device-health time series, separate from the event log)
+metrics_store:
+  # Path to the metrics SQLite database
+  # Default: metrics.db (relative to the working directory)
+  # db: metrics.db
+
+  # Samples older than this duration are deleted (hourly, in batches)
+  # Default: 168h (7 days). Set to 0 to disable purging.
+  # retention: 168h
+
 # Event Log Configuration
 events:
   # Path to the events SQLite database (separate from devices.db)

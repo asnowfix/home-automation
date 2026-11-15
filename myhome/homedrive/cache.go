@@ -108,6 +108,8 @@ type Cache struct {
 	mu        sync.Mutex
 	instances map[Key]*instance
 	invalid   int64 // rejected payloads, all instances
+	badTopics int64 // messages on a topic ParseTopic refused
+	topicLog  time.Time
 	logged    map[Key]time.Time
 	capLogged bool
 }
@@ -157,11 +159,12 @@ func (c *Cache) load() {
 // mqtt.Client.SubscribeWithHandler. It never returns an error for a bad
 // payload (the client would only log it): bad payloads are counted.
 func (c *Cache) HandleMessage(topic string, payload []byte, _ string) error {
+	now := c.now()
 	key, ok := ParseTopic(topic)
 	if !ok {
+		c.badTopic(topic, now)
 		return nil
 	}
-	now := c.now()
 	st, err := Parse(payload)
 
 	c.mu.Lock()
@@ -182,6 +185,12 @@ func (c *Cache) HandleMessage(topic string, payload []byte, _ string) error {
 		}
 		in = &instance{key: key}
 		c.instances[key] = in
+	}
+	if !in.clockSkew && !st.Ts.IsZero() && st.Ts.Before(in.lastTs) {
+		// An older document (a replayed retained message) must not overwrite a
+		// newer one. Under skew lastTs is a receipt time, so no comparison.
+		c.mu.Unlock()
+		return nil
 	}
 	in.status, in.interval, in.problem = st, st.IntervalOrDefault(), ""
 	in.raw = append(in.raw[:0], payload...)
@@ -204,6 +213,29 @@ func (c *Cache) HandleMessage(topic string, payload []byte, _ string) error {
 		c.save(row)
 	}
 	return nil
+}
+
+// badTopic counts a message whose topic is not homedrive/<host>/<user>/status
+// and logs it at most once per logEvery, whatever the topic.
+func (c *Cache) badTopic(topic string, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.badTopics++
+	if !c.topicLog.IsZero() && now.Sub(c.topicLog) < logEvery {
+		return
+	}
+	c.topicLog = now
+	if len(topic) > 64 {
+		topic = topic[:64] + "..."
+	}
+	c.log.Info("ignoring homedrive message on an unexpected topic", "topic", topic)
+}
+
+// BadTopics is the number of messages ignored for their topic since start.
+func (c *Cache) BadTopics() int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.badTopics
 }
 
 // reject records a bad payload. Caller holds c.mu.

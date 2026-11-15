@@ -197,16 +197,69 @@ func TestCache_ClockSkewUsesReceiptTime(t *testing.T) {
 	if got := only(t, c, t0.Add(2*time.Minute)).Liveness; got != Stale {
 		t.Errorf("a silent skewed instance must still go stale, got %v", got)
 	}
+	// skew clears when ts is sane again (older than the receipt time is fine: lastTs was a receipt time)
+	send(t, c, testTopic, fixture(t, "running.json"))
+	if v = only(t, c, t0); v.ClockSkew || v.LastTs.Minute() != 32 {
+		t.Errorf("skew must clear: %+v", v)
+	}
 	// within tolerance (+120 s) is not skew
 	near := strings.Replace(string(fixture(t, "running.json")), "2026-11-15T14:32:00Z", "2026-11-15T14:34:10Z", 1)
 	send(t, c, testTopic, []byte(near))
 	if v = only(t, c, t0); v.ClockSkew || v.LastTs.Minute() != 34 {
 		t.Errorf("120 s ahead must not be skew: %+v", v)
 	}
-	// skew clears when ts is sane again
+}
+
+func TestCache_OlderDocumentDoesNotOverwriteNewer(t *testing.T) {
+	c, _ := newTestCache(t, &testClock{t: t0}, nil)
+	newer := strings.Replace(string(fixture(t, "running.json")), "2026-11-15T14:32:00Z", "2026-11-15T14:32:05Z", 1)
+	send(t, c, testTopic, []byte(newer))
+	send(t, c, testTopic, fixture(t, "error.json")) // ts 14:32:00, older
+	v := only(t, c, t0)
+	if v.LastTs.Second() != 5 || v.StateError || v.Status.State != StateRunning {
+		t.Errorf("an older document replaced a newer one: %+v", v)
+	}
+	send(t, c, testTopic, []byte(strings.Replace(string(fixture(t, "error.json")), "14:32:00Z", "14:32:05Z", 1)))
+	if !only(t, c, t0).StateError {
+		t.Error("a document with the same ts is accepted")
+	}
+}
+
+// A retained message redelivered after the instance went offline (client
+// reconnect, broker restart) must not bring it back.
+func TestCache_RetainedRedeliveryWhileOfflineStaysOffline(t *testing.T) {
+	clk := &testClock{t: t0}
+	c, _ := newTestCache(t, clk, nil)
 	send(t, c, testTopic, fixture(t, "running.json"))
-	if v = only(t, c, t0); v.ClockSkew || v.LastTs.Minute() != 32 {
-		t.Errorf("skew must clear: %+v", v)
+	clk.Add(20 * time.Minute)
+	if got := only(t, c, clk.Now()).Liveness; got != Offline {
+		t.Fatalf("setup: %v", got)
+	}
+	send(t, c, testTopic, fixture(t, "running.json"))
+	if got := only(t, c, clk.Now()).Liveness; got != Offline {
+		t.Errorf("redelivery revived the instance: %v", got)
+	}
+	send(t, c, testTopic, fixture(t, "error.json")) // even an older one
+	if got := only(t, c, clk.Now()).Liveness; got != Offline {
+		t.Errorf("older redelivery revived the instance: %v", got)
+	}
+}
+
+func TestCache_UnexpectedTopicCountedAndLoggedOnce(t *testing.T) {
+	clk := &testClock{t: t0}
+	c, ll := newTestCache(t, clk, nil)
+	send(t, c, "homedrive//u/status", fixture(t, "running.json"))
+	send(t, c, "homedrive/h/"+strings.Repeat("u", 200)+"/status", fixture(t, "running.json"))
+	if c.BadTopics() != 2 || ll.count("unexpected topic") != 1 {
+		t.Errorf("badTopics=%d logs=%d", c.BadTopics(), ll.count("unexpected topic"))
+	}
+	clk.Add(time.Hour + time.Second)
+	send(t, c, "homedrive//u/status", fixture(t, "running.json"))
+	if ll.count("unexpected topic") != 2 {
+		t.Error("must log again after an hour")
+	}
+	if len(c.Snapshot(clk.Now())) != 0 {
+		t.Error("nothing is cached for a bad topic")
 	}
 }
 

@@ -13,6 +13,11 @@ import (
 	"github.com/go-logr/logr"
 )
 
+// watchdogMaxFailures: consecutive failed beats before the heartbeat stops.
+// The MQTT client drops and re-subscribes every MQTT_RECONNECT_INTERVAL (2 h),
+// and during that window the probe cannot succeed.
+const watchdogMaxFailures = 3
+
 // healthChecks are the liveness checks gating the systemd watchdog heartbeat
 // (see sdnotify.Heartbeat). The alert evaluator (#712) registers its own check
 // through RegisterHealthCheck once it exists; nothing else should need to.
@@ -49,7 +54,7 @@ func mqttRoundTripCheck(ctx context.Context, mc mqttclient.Client) (sdnotify.Che
 	return func(ctx context.Context) error {
 		seq++
 		nonce := strconv.FormatInt(time.Now().UnixNano(), 10) + "-" + strconv.FormatInt(seq, 10)
-		if err := mc.Publish(ctx, topic, []byte(nonce), 0, false, "watchdog"); err != nil {
+		if err := mc.Publish(ctx, topic, []byte(nonce), mqttclient.AtLeastOnce, false, "watchdog"); err != nil {
 			return fmt.Errorf("publish: %w", err)
 		}
 		for {
@@ -84,6 +89,6 @@ func startWatchdog(ctx context.Context, log logr.Logger, mc mqttclient.Client) {
 	}
 	if interval := sdnotify.WatchdogInterval(); interval > 0 {
 		log.Info("systemd watchdog enabled", "heartbeat_every", interval)
-		go sdnotify.Heartbeat(ctx, log.WithName("watchdog"), interval, registeredHealthChecks)
+		go sdnotify.Heartbeat(ctx, log.WithName("watchdog"), interval, watchdogMaxFailures, registeredHealthChecks)
 	}
 }

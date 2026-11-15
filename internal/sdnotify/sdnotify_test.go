@@ -56,8 +56,8 @@ func TestNotifySends(t *testing.T) {
 func TestWatchdogInterval(t *testing.T) {
 	t.Setenv("WATCHDOG_USEC", "60000000")
 	t.Setenv("WATCHDOG_PID", "")
-	if d := WatchdogInterval(); d != 30*time.Second {
-		t.Fatalf("got %v, want 30s", d)
+	if d := WatchdogInterval(); d != 10*time.Second {
+		t.Fatalf("got %v, want 10s", d)
 	}
 	t.Setenv("WATCHDOG_PID", "1")
 	if d := WatchdogInterval(); d != 0 {
@@ -70,34 +70,69 @@ func TestWatchdogInterval(t *testing.T) {
 	}
 }
 
-func TestHeartbeatGatedOnChecks(t *testing.T) {
+func TestFailureBudget(t *testing.T) {
+	g := &failureBudget{max: 3}
+	// One failed probe never withholds a pet; the third consecutive one does.
+	for i, tc := range []struct{ ok, pet bool }{
+		{false, true}, {true, true}, {false, true}, {false, true}, {false, false}, {false, false}, {true, true},
+	} {
+		if got := g.pet(tc.ok); got != tc.pet {
+			t.Fatalf("step %d (ok=%v): pet=%v, want %v", i, tc.ok, got, tc.pet)
+		}
+	}
+}
+
+func TestHeartbeatSurvivesOneFailedCheck(t *testing.T) {
 	got, path := listen(t)
 	t.Setenv("NOTIFY_SOCKET", path)
 
-	var failing atomic.Bool
-	failing.Store(true)
+	var calls atomic.Int32
 	check := func(context.Context) error {
-		if failing.Load() {
-			return errors.New("down")
+		if calls.Add(1) == 1 {
+			return errors.New("one failed probe")
 		}
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go Heartbeat(ctx, logr.Discard(), 20*time.Millisecond, func() []Check { return []Check{check} })
+	go Heartbeat(ctx, logr.Discard(), 40*time.Millisecond, 3, func() []Check { return []Check{check} })
 
+	// The very first beat fails its check and must still pet.
 	select {
 	case msg := <-got:
-		t.Fatalf("heartbeat %q sent while check failing", msg)
-	case <-time.After(100 * time.Millisecond):
-	}
-	failing.Store(false)
-	select {
-	case msg := <-got:
-		if msg != "WATCHDOG=1" {
-			t.Fatalf("got %q", msg)
+		if msg != "WATCHDOG=1" || calls.Load() > 1 {
+			t.Fatalf("got %q after %d checks; want a pet from the failing first beat", msg, calls.Load())
 		}
 	case <-time.After(time.Second):
-		t.Fatal("no heartbeat after check recovered")
+		t.Fatal("a single failed probe withheld the heartbeat")
+	}
+}
+
+func TestHeartbeatWithheldAfterBudget(t *testing.T) {
+	got, path := listen(t)
+	t.Setenv("NOTIFY_SOCKET", path)
+	check := func(context.Context) error { return errors.New("down") }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go Heartbeat(ctx, logr.Discard(), 20*time.Millisecond, 3, func() []Check { return []Check{check} })
+
+	time.Sleep(300 * time.Millisecond)
+	if n := len(got); n != 2 {
+		t.Fatalf("pets while permanently failing = %d, want exactly 2 (budget 3)", n)
+	}
+}
+
+func TestHeartbeatAbandonsHungCheck(t *testing.T) {
+	got, path := listen(t)
+	t.Setenv("NOTIFY_SOCKET", path)
+	release := make(chan struct{})
+	defer close(release)
+	check := func(context.Context) error { <-release; return nil } // ignores ctx, like a blocking Publish
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go Heartbeat(ctx, logr.Discard(), 20*time.Millisecond, 1, func() []Check { return []Check{check} })
+	time.Sleep(150 * time.Millisecond)
+	if n := len(got); n != 0 {
+		t.Fatalf("hung check still petted %d times", n)
 	}
 }

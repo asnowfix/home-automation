@@ -3,9 +3,15 @@
 [Unit]
 Description=MyHome as a system service
 After=local-fs.target network.target
+# One email per failure, from an independent process (see myhome-failure@.service).
+OnFailure=myhome-failure@%n.service
 
 [Service]
-Type=simple
+# The daemon sends READY=1 once started and WATCHDOG=1 every WatchdogSec/2 while its
+# MQTT round trip works (#715). A hung daemon stops petting and systemd restarts it.
+Type=notify
+WatchdogSec=60
+TimeoutStartSec=300
 ExecStart=/usr/bin/myhome daemon run --ui-port 80
 Restart=always
 RestartSec=10

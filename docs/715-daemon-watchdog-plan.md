@@ -65,3 +65,19 @@ finite, and (`InactiveEnterTimestampMonotonic` - `ActiveEnterTimestampMonotonic`
 Not covered by this experiment: SIGSTOP of the real daemon. With `WatchdogSec` systemd sends SIGABRT,
 which a stopped process cannot handle, and escalates to SIGKILL after `TimeoutAbortSec`; the result is
 still `watchdog`. To be checked live by the owner after merge.
+
+### 2026-11-15 implementation
+
+Done: `internal/sdnotify` (+ tests, vets for GOOS=windows), `myhome/daemon/watchdog.go` (READY, STOPPING,
+MQTT round-trip check, `RegisterHealthCheck` hook for #712), `myhome/daemon/notify_failure.go`
+(`myhome daemon notify-failure <unit> [--dry-run]`), `linux/systemd/myhome-failure@.service`,
+`myhome.service` (`Type=notify`, `WatchdogSec=60`, `TimeoutStartSec=300`, `OnFailure=`), packaging in
+`Makefile` and `package-release.yml`, `linux/README.md`. No new config option (the SMTP keys already
+exist), so the four-file config rule does not apply. No `go generate` change.
+
+Noticed, not fixed (out of scope): `StartLimitIntervalSec`/`StartLimitBurst` sit in `[Service]` in
+`myhome.service`, where systemd ignores them (`systemd-analyze verify` warns); they belong in `[Unit]`.
+So the unit has no effective restart rate limit, which also means no `start-limit-hit` alert.
+
+Live checks left for the owner after merge (NAS): SIGKILL, SIGSTOP, and a short scheduled restart,
+each expecting exactly one email (none for the scheduled one).

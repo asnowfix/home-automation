@@ -5,6 +5,11 @@ Description=MyHome as a system service
 After=local-fs.target network.target
 # One email per failure, from an independent process (see myhome-failure@.service).
 OnFailure=myhome-failure@%n.service
+# Rate limiting to prevent restart loops. Only honoured in [Unit] (it was in
+# [Service], where systemd ignores it, #842): after 5 starts in 300 s the unit
+# stops restarting, so a crash loop sends at most 5 failure emails per 300 s.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 # The daemon sends READY=1 once started and WATCHDOG=1 every WatchdogSec/2 while its
@@ -25,9 +30,6 @@ RestartKillSignal=SIGTERM
 KillMode=mixed
 TimeoutStopSec=30
 
-# Rate limiting to prevent restart loops
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 # Restart the service every 2 days (172800 seconds). This is a safety net, not
 # a fix: it was 6 hours until #695, where it masked a goroutine leak.

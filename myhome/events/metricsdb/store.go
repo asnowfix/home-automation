@@ -17,9 +17,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -38,7 +40,10 @@ const (
 	maxBuffered = 100000
 )
 
-// Sample is one value of one metric of one device at one instant.
+// Sample is one value of one metric of one device at one instant. Ts is
+// stored with a resolution of one second: samples of the same series within
+// the same second replace each other (the last one written wins). Non-finite
+// values (NaN, +/-Inf) are rejected by Add.
 type Sample struct {
 	DeviceID string
 	Metric   string
@@ -54,7 +59,8 @@ type Point struct {
 
 type seriesKey struct{ device, metric string }
 
-// Store is the metrics database plus its write buffer.
+// Store is the metrics database plus its write buffer. All methods are safe
+// for concurrent use by multiple goroutines.
 type Store struct {
 	db  *sqlx.DB
 	log logr.Logger
@@ -65,6 +71,10 @@ type Store struct {
 
 	flushMu sync.Mutex          // serializes Flush; guards series
 	series  map[seriesKey]int64 // series_id cache
+
+	rejected   atomic.Int64 // non-finite samples refused by Add
+	droppedAll atomic.Int64 // samples lost to the buffer cap since Open
+	purgeStmts atomic.Int64 // DELETE statements issued by Purge (observable by tests)
 }
 
 // Open opens (creating if needed) the database at path. A relative filename
@@ -112,6 +122,22 @@ CREATE TABLE IF NOT EXISTS samples (
 	}, nil
 }
 
+// Rejected returns how many non-finite samples Add has refused since Open.
+func (s *Store) Rejected() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.rejected.Load()
+}
+
+// Dropped returns how many samples were lost to the write-buffer cap since Open.
+func (s *Store) Dropped() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.droppedAll.Load()
+}
+
 // Close flushes buffered samples (best effort) and closes the database.
 func (s *Store) Close() error {
 	if s == nil {
@@ -127,8 +153,16 @@ func (s *Store) Close() error {
 
 // Add buffers a sample; it is written by the next Flush. It never touches the
 // disk, so a collector may call it freely.
+// A NaN or infinite value is refused (and counted, see Rejected): SQLite
+// stores NaN as NULL, which would fail the whole batch on every flush.
 func (s *Store) Add(smp Sample) {
 	if s == nil {
+		return
+	}
+	if math.IsNaN(smp.Value) || math.IsInf(smp.Value, 0) {
+		if s.rejected.Add(1) == 1 { // log the first only; the count is in Rejected()
+			s.log.Error(errors.New("non-finite value"), "Rejected sample", "device", smp.DeviceID, "metric", smp.Metric)
+		}
 		return
 	}
 	s.mu.Lock()
@@ -136,6 +170,7 @@ func (s *Store) Add(smp Sample) {
 	if len(s.buf) >= maxBuffered {
 		s.buf = s.buf[1:]
 		s.dropped++
+		s.droppedAll.Add(1)
 	}
 	s.buf = append(s.buf, smp)
 }
@@ -156,7 +191,7 @@ func (s *Store) Flush(ctx context.Context) error {
 	s.dropped = 0
 	s.mu.Unlock()
 	if dropped > 0 {
-		s.log.Info("Dropped samples: buffer full", "count", dropped)
+		s.log.Error(errors.New("write buffer full"), "Dropped samples: data lost", "count", dropped)
 	}
 	if len(batch) == 0 {
 		return nil
@@ -166,6 +201,8 @@ func (s *Store) Flush(ctx context.Context) error {
 		s.buf = append(batch, s.buf...)
 		if over := len(s.buf) - maxBuffered; over > 0 {
 			s.buf = s.buf[over:]
+			s.dropped += over
+			s.droppedAll.Add(int64(over))
 		}
 		s.mu.Unlock()
 		return err
@@ -232,6 +269,7 @@ func (s *Store) Purge(ctx context.Context, cutoff time.Time) (int64, error) {
 		}
 		upper := min(oldest.Int64+int64(purgeChunk/time.Second), limit)
 		res, err := s.db.ExecContext(ctx, `DELETE FROM samples WHERE ts < ?`, upper)
+		s.purgeStmts.Add(1)
 		if err != nil {
 			return total, err
 		}
@@ -243,6 +281,10 @@ func (s *Store) Purge(ctx context.Context, cutoff time.Time) (int64, error) {
 // Query returns one series over [from, to), oldest first. With step >= 1s the
 // points are averaged into buckets of step (bucket start timestamps);
 // otherwise raw samples are returned. An unknown series yields no points.
+//
+// Buckets are aligned to the Unix epoch, not to from: if from is not a
+// multiple of step, the first bucket starts before from and averages only the
+// samples at or after from. Empty buckets are not returned.
 func (s *Store) Query(ctx context.Context, deviceID, metric string, from, to time.Time, step time.Duration) ([]Point, error) {
 	if s == nil {
 		return nil, nil

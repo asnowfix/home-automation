@@ -2,6 +2,7 @@ package metricsdb
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,6 +47,73 @@ func TestSchemaWithoutRowidNoSecondaryIndex(t *testing.T) {
 	}
 	if idx != 0 {
 		t.Fatalf("samples must have no secondary index, found %d", idx)
+	}
+}
+
+func TestNonFiniteSamplesDoNotPoisonBatch(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	s.Add(Sample{"d", "m", now, math.NaN()})
+	s.Add(Sample{"d", "m", now.Add(time.Second), math.Inf(1)})
+	s.Add(Sample{"d", "m", now.Add(2 * time.Second), math.Inf(-1)})
+	s.Add(Sample{"d", "m", now.Add(3 * time.Second), 42})
+	if err := s.Flush(context.Background()); err != nil {
+		t.Fatalf("flush must not fail on non-finite values: %v", err)
+	}
+	if n := count(t, s, "samples"); n != 1 {
+		t.Fatalf("samples = %d, want 1 (only the finite one)", n)
+	}
+	// Nothing left buffered to fail again on the next flush.
+	if err := s.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.Rejected(); got != 3 {
+		t.Fatalf("Rejected = %d, want 3", got)
+	}
+}
+
+func TestCapDropsAreCounted(t *testing.T) {
+	s := open(t)
+	now := time.Now()
+	for i := 0; i < maxBuffered+10; i++ {
+		s.Add(Sample{"d", "m", now.Add(time.Duration(i) * time.Second), 1})
+	}
+	if got := s.Dropped(); got != 10 {
+		t.Fatalf("Dropped after Add overflow = %d, want 10", got)
+	}
+	// A failed flush puts the batch back; samples added meanwhile overflow the cap.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.Flush(ctx); err == nil {
+		t.Fatal("expected error")
+	}
+	s.Add(Sample{"d", "m", now.Add(time.Hour), 1})
+	if got := s.Dropped(); got != 11 {
+		t.Fatalf("Dropped = %d, want 11", got)
+	}
+}
+
+func TestUnalignedFromBucketsAlignToEpoch(t *testing.T) {
+	s := open(t)
+	base := time.Unix(1_700_000_000-1_700_000_000%3600, 0)
+	for i := 0; i < 120; i++ {
+		s.Add(Sample{"d", "m", base.Add(time.Duration(i) * time.Minute), float64(i)})
+	}
+	if err := s.Flush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// from is 30 minutes into the first hour: the first bucket is the epoch-aligned
+	// hour start (before from) and holds only the samples at or after from.
+	from := base.Add(30 * time.Minute)
+	ds, err := s.Query(context.Background(), "d", "m", from, base.Add(2*time.Hour), time.Hour)
+	if err != nil || len(ds) != 2 {
+		t.Fatalf("len=%d err=%v", len(ds), err)
+	}
+	if ds[0].Ts != base.Unix() || ds[0].Value != 44.5 { // mean of minutes 30..59
+		t.Fatalf("first bucket = %+v, want ts=%d value=44.5", ds[0], base.Unix())
+	}
+	if ds[1].Ts != base.Add(time.Hour).Unix() || ds[1].Value != 89.5 {
+		t.Fatalf("second bucket = %+v", ds[1])
 	}
 }
 
@@ -111,6 +179,9 @@ func TestPurgeBatched(t *testing.T) {
 	left := count(t, s, "samples")
 	if int(n)+left != 30*60 || left < 10*60-1 || left > 10*60+1 {
 		t.Fatalf("deleted %d, left %d", n, left)
+	}
+	if got := s.purgeStmts.Load(); got < 19 || got > 21 {
+		t.Fatalf("purge used %d DELETE statements, want ~20 (one per hour)", got)
 	}
 	// Idempotent.
 	if n, _ := s.Purge(context.Background(), now.Add(-10*time.Hour)); n != 0 {

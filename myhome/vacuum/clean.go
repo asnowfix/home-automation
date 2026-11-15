@@ -42,6 +42,14 @@ var (
 // without ever running) is retried once with the other known version when
 // retryOtherVersion is set; see the policy notes above.
 func (s *Service) Clean(ctx context.Context, sel string, rooms []string) (*myhome.VacuumCleanResult, error) {
+	return s.CleanOnMap(ctx, sel, "", rooms)
+}
+
+// CleanOnMap is Clean with an optional map id (VacuumCleanParams.Map). When set,
+// rooms are looked up on that map only, so a room that has since gone stale
+// there, or an id that now also exists on another map, is refused instead of
+// resolving to a different area.
+func (s *Service) CleanOnMap(ctx context.Context, sel, onMap string, rooms []string) (*myhome.VacuumCleanResult, error) {
 	if len(rooms) == 0 {
 		return nil, errors.New("no room given (use vacuum.command start for a whole-home clean)")
 	}
@@ -52,6 +60,18 @@ func (s *Service) Clean(ctx context.Context, sel string, rooms []string) (*myhom
 	known, err := s.regions(r)
 	if err != nil {
 		return nil, err
+	}
+	if onMap != "" {
+		var onThisMap []myhome.VacuumRegion
+		for _, reg := range known {
+			if reg.MapID == onMap {
+				onThisMap = append(onThisMap, reg)
+			}
+		}
+		if len(onThisMap) == 0 {
+			return nil, fmt.Errorf("map %s is not known for robot %s: refusing to clean rooms on it", onMap, r.rec.Name)
+		}
+		known = onThisMap
 	}
 	var mapID, first string
 	var regions []roomba.Region

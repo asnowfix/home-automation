@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
+	"github.com/asnowfix/home-automation/internal/myhome/ui"
 	"github.com/asnowfix/home-automation/pkg/shelly/shelly"
+	"github.com/go-logr/logr"
 )
 
 func newTestDevice(id, name string) *myhome.Device {
@@ -119,4 +121,23 @@ func TestClassifyDoors(t *testing.T) {
 			t.Errorf("expected no doors (door.list only recognizes BLU window sensors), got %+v", got)
 		}
 	})
+}
+
+type recordingSSE struct{ updates []ui.DeviceView }
+
+func (r *recordingSSE) BroadcastSensorUpdate(string, string, string) {}
+func (r *recordingSSE) BroadcastDeviceUpdate(dv ui.DeviceView)       { r.updates = append(r.updates, dv) }
+
+// TestBroadcastStateChange checks that a live-state change becomes a
+// device-update carrying the device id (all the browser needs to re-fetch the card).
+func TestBroadcastStateChange(t *testing.T) {
+	sse := &recordingSSE{}
+	dm := &DeviceManager{sseBroadcaster: sse}
+	d := myhome.NewDevice(logr.Discard(), myhome.SHELLY, "shellyplus1-08b61fd141e8")
+
+	dm.broadcastStateChange(d)
+
+	if len(sse.updates) != 1 || sse.updates[0].Id != "shellyplus1-08b61fd141e8" {
+		t.Fatalf("updates = %+v", sse.updates)
+	}
 }

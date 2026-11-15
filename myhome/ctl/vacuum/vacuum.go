@@ -5,10 +5,12 @@
 package vacuum
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/asnowfix/home-automation/hlog"
@@ -47,7 +49,9 @@ func init() {
 	} {
 		Cmd.AddCommand(commandCmd(c.name, c.short))
 	}
-	roomsCmd.AddCommand(roomsNameCmd, roomsSyncCmd)
+	roomsCmd.AddCommand(roomsNameCmd, roomsSyncCmd, roomsAssignCmd, roomsUnassignCmd)
+	roomsAssignCmd.Flags().StringVar(&assignMap, "map", "", "robot map id, when the region id exists on several maps")
+	roomsUnassignCmd.Flags().StringVar(&assignMap, "map", "", "robot map id, when the region id exists on several maps")
 	cleanCmd.Flags().StringSliceVar(&cleanRooms, "room", nil, "room name or region id; repeat for several, cleaned in order")
 }
 
@@ -242,6 +246,7 @@ Without the account, rooms are learned whenever a room clean is started,
 including from the iRobot app, and named with 'vacuum rooms name'.`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true // a daemon error is not a usage error
 		out, err := myhome.TheClient.CallE(cmd.Context(), myhome.VacuumRooms, &myhome.VacuumParams{Robot: robotFlag})
 		if err != nil {
 			return err
@@ -267,7 +272,9 @@ func printRooms(w io.Writer, res *myhome.VacuumRoomsResult) {
 		}
 		return
 	}
-	fmt.Fprintf(w, "%-8s %-5s %-22s %-14s %-6s %s\n", "REGION", "TYPE", "NAME", "KIND", "FROM", "MAP")
+	// Columns are sized from the data (a room id such as "chambre-parents" is longer than any fixed width).
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "REGION\tTYPE\tNAME\tKIND\tROOM\tFROM\tMAP")
 	type mapInfo struct{ cloud, robot string }
 	maps := map[string]mapInfo{} // map label -> versions, for maps with cloud rooms
 	var order []string
@@ -278,6 +285,10 @@ func printRooms(w io.Writer, res *myhome.VacuumRoomsResult) {
 		}
 		if kind == "" {
 			kind = "-"
+		}
+		room := r.RoomID
+		if room == "" {
+			room = "-"
 		}
 		label := r.MapID
 		if r.MapName != "" {
@@ -295,8 +306,9 @@ func printRooms(w io.Writer, res *myhome.VacuumRoomsResult) {
 			}
 			maps[label] = mapInfo{r.MapVersion, r.RobotMapVersion}
 		}
-		fmt.Fprintf(w, "%-8s %-5s %-22s %-14s %-6s %s%s\n", r.ID, r.Type, name, kind, r.Source, label, note)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n", r.ID, r.Type, name, kind, room, r.Source, label, note)
 	}
+	tw.Flush()
 	for _, label := range order {
 		v := maps[label]
 		robot := v.robot
@@ -322,6 +334,7 @@ stored are kept. Only plain email+password accounts work (not Google/Apple
 sign-in or two-factor).`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true // a daemon error is not a usage error
 		out, err := myhome.TheClient.CallE(cmd.Context(), myhome.VacuumRoomsSync, &myhome.VacuumParams{Robot: robotFlag})
 		if err != nil {
 			return err
@@ -353,6 +366,7 @@ var roomsNameCmd = &cobra.Command{
 the cloud cannot be renamed here: their names come from the cloud.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true // a daemon error is not a usage error
 		_, err := myhome.TheClient.CallE(cmd.Context(), myhome.VacuumRoomName,
 			&myhome.VacuumRoomNameParams{Robot: robotFlag, RegionID: args[0], Name: args[1]})
 		if err != nil {
@@ -361,6 +375,84 @@ the cloud cannot be renamed here: their names come from the cloud.`,
 		fmt.Printf("region %s is now %q\n", args[0], args[1])
 		return nil
 	},
+}
+
+var assignMap string
+
+var roomsAssignCmd = &cobra.Command{
+	Use:   "assign <area-name> <room> [--map <map-id>]",
+	Short: "Assign a robot area, by its name, to a daemon room",
+	Long: `Assigns a robot area, designated by the name 'vacuum rooms' shows for it (for
+example "Cuisine"; case does not matter), to a room of the daemon, given by its
+id or its name (see 'myhome ctl room list'; the id wins if both match, case and
+surrounding spaces do not matter in a name; a name shared by several rooms is
+refused), so that the room can be cleaned. An area belongs to at most
+one room: assigning one that is in another room moves it. Several areas may
+belong to the same room.
+
+The daemon looks the name up in the areas it stores and checks the room; the
+robot need not be connected. An unknown name is refused (an area with no name
+must first be named with 'vacuum rooms name'). If the same name exists on
+several robot maps, pass --map. Two areas of one map must not share a name.`,
+	Args: cobra.ExactArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true // arguments are valid from here on: a failure is not a usage error
+		if strings.TrimSpace(args[0]) == "" {
+			return fmt.Errorf("area name is empty: see 'myhome ctl vacuum rooms' for the names")
+		}
+		if strings.TrimSpace(args[1]) == "" {
+			return fmt.Errorf("room is empty: use 'myhome ctl vacuum rooms unassign %s' to take the area out of its room", args[0])
+		}
+		return runAssign(cmd.Context(), os.Stdout, args[0], strings.TrimSpace(args[1]))
+	},
+}
+
+var roomsUnassignCmd = &cobra.Command{
+	Use:   "unassign <area-name> [--map <map-id>]",
+	Short: "Remove a robot area, by its name, from its daemon room",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
+		if strings.TrimSpace(args[0]) == "" {
+			return fmt.Errorf("area name is empty: see 'myhome ctl vacuum rooms' for the names")
+		}
+		return runAssign(cmd.Context(), os.Stdout, args[0], "")
+	},
+}
+
+// runAssign relays the area's name to the daemon, which resolves it.
+func runAssign(ctx context.Context, w io.Writer, areaName, roomID string) error {
+	out, err := myhome.TheClient.CallE(ctx, myhome.VacuumRoomAssign,
+		&myhome.VacuumRoomAssignParams{Robot: robotFlag, MapID: assignMap, RegionName: areaName, RoomID: roomID})
+	if err != nil {
+		return err
+	}
+	res, ok := out.(*myhome.VacuumRoomAssignResult)
+	if !ok {
+		return fmt.Errorf("unexpected result %T", out)
+	}
+	printAssign(w, res)
+	return nil
+}
+
+// printAssign says what happened, including the room an area was moved from.
+func printAssign(w io.Writer, res *myhome.VacuumRoomAssignResult) {
+	area := res.RegionName
+	if area == "" {
+		area = res.RegionID
+	}
+	switch {
+	case res.RoomID == "" && res.Previous == "":
+		fmt.Fprintf(w, "area %s was not in a room\n", area)
+	case res.RoomID == "":
+		fmt.Fprintf(w, "area %s removed from room %s\n", area, res.Previous)
+	case res.Previous == res.RoomID:
+		fmt.Fprintf(w, "area %s was already in room %s\n", area, res.RoomID)
+	case res.Previous == "":
+		fmt.Fprintf(w, "area %s is now in room %s\n", area, res.RoomID)
+	default:
+		fmt.Fprintf(w, "area %s moved from room %s to room %s\n", area, res.Previous, res.RoomID)
+	}
 }
 
 var pairCmd = &cobra.Command{

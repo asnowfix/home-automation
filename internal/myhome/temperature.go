@@ -1,6 +1,13 @@
 package myhome
 
+import "errors"
+
 // Temperature RPC types
+
+// ErrRoomNotFound is wrapped by the rooms service when a room id does not
+// exist (temperature.get). It lives here so other services can tell "no such
+// room" from any other failure without importing myhome/rooms.
+var ErrRoomNotFound = errors.New("room not found")
 
 // DayType represents the type of day for temperature scheduling
 type DayType string
@@ -32,6 +39,9 @@ type TemperatureSetParams struct {
 	Name   string             `json:"name"`
 	Kinds  []RoomKind         `json:"kinds"`  // Room kinds (can be multiple)
 	Levels map[string]float64 `json:"levels"` // Temperature levels: "eco", "comfort", "away", etc.
+	// ICalURL is the room's public iCal agenda URL. nil keeps the stored value
+	// (callers that predate the field must not wipe it); a pointer to "" clears it.
+	ICalURL *string `json:"ical_url,omitempty"`
 }
 
 // TemperatureDeleteParams represents parameters for temperature.delete

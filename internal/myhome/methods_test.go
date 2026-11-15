@@ -175,6 +175,7 @@ func TestAllVerbsInSignatures(t *testing.T) {
 		RoomList, RoomCreate, RoomEdit, RoomDelete,
 		DeviceSetRoom, DeviceListByRoom,
 		SwitchToggle, SwitchOn, SwitchOff, SwitchStatus, SwitchAll,
+		VacuumExport, VacuumImport,
 	}
 	for _, v := range allVerbs {
 		if _, ok := signatures[v]; !ok {

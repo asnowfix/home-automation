@@ -253,3 +253,20 @@ func TestErrorHint(t *testing.T) {
 		t.Fatal("hint for an unknown code")
 	}
 }
+
+// The optional map pins the clean to the map the caller resolved the room on.
+func TestCleanOnMapRefusesAnotherMap(t *testing.T) {
+	h, c := cleanHarness(t, robotVer, func(h *harness, c *fakeClient, v string) {
+		c.onChange(running(docked(robotVer)))
+	})
+	if _, err := h.svc.CleanOnMap(context.Background(), "", "other-map", []string{"Cuisine"}); err == nil || !strings.Contains(err.Error(), "other-map") {
+		t.Fatalf("err = %v, want a refusal naming the map", err)
+	}
+	if got := versions(c); len(got) != 0 {
+		t.Fatalf("a command was sent: %v", got)
+	}
+	res, err := h.svc.CleanOnMap(context.Background(), "", "m1", []string{"Cuisine"})
+	if err != nil || !res.OK || res.MapID != "m1" {
+		t.Fatalf("on the right map: %+v, %v", res, err)
+	}
+}

@@ -181,6 +181,32 @@ daemon:
 - Flag: `--events-dir` or `-E`
 - Env: `MYHOME_DAEMON_EVENTS_DIR`
 
+## Metrics Store Configuration
+
+The metrics store (`metrics.db`) keeps device-health values over time, separate from the event log: `events.db` records what happened, `metrics.db` records values. Samples are buffered and written once a minute in one transaction. If the store cannot be opened, the daemon logs the error and runs without it; it never blocks startup or device control.
+
+### Example
+
+```yaml
+metrics_store:
+  db: metrics.db      # path to the metrics SQLite database
+  retention: 168h     # samples older than this are deleted (default 7 days)
+```
+
+### Options
+
+**`db`** (string, default: `metrics.db`)
+- Path to the metrics SQLite database file; a relative name is resolved against the working directory. The parent directory of an absolute path is created if missing
+- Flag: `--metrics-db`
+- Env: `MYHOME_METRICS_STORE_DB`
+
+**`retention`** (duration, default: `168h`)
+- How long samples are kept (7 days by default)
+- Purge runs at startup and then hourly, deleting one hour of data per statement
+- Set to `0` to disable purging
+- Flag: `--metrics-retention`
+- Env: `MYHOME_METRICS_STORE_RETENTION`
+
 ## Events Configuration
 
 The event log service records every meaningful state-change event from all devices to a dedicated SQLite database, with optional auto-purge and live CLI tailing.
@@ -602,6 +628,10 @@ Topic: `myhome/electricity/status` (retained, QoS 1)
 ## Weather Forecast Configuration
 
 The daemon fetches hourly temperature forecasts from [Open-Meteo](https://open-meteo.com/) (no API key required) every 6 hours and publishes a 4-slot distilled payload to MQTT. Device scripts subscribe and use the data to decide whether to pre-heat.
+
+| Key | Env var | Flag | Default | Description |
+|-----|---------|------|---------|-------------|
+| `weather.disable_publisher` | `MYHOME_WEATHER_DISABLE_PUBLISHER` | `--disable-weather-publisher` | `false` | Never start the forecast publisher, whatever location resolves. For a read-only side daemon sharing the home broker, so it cannot overwrite the retained `myhome/weather/forecast` (#700). The log says "disabled by option", distinct from "disabled: no location available" |
 
 ## Beem Energy
 

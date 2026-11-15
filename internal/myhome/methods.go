@@ -38,6 +38,12 @@ func RegisterMethodHandler(name Verb, mh MethodHandler) {
 	}
 }
 
+// UnregisterMethodHandler removes a verb's handler. It exists so tests that
+// register a stub can leave the shared registry as they found it.
+func UnregisterMethodHandler(name Verb) {
+	delete(methods, name)
+}
+
 var methods map[Verb]*Method = make(map[Verb]*Method)
 
 var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
@@ -329,6 +335,14 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &PoolGetStatusResult{}
 		},
 	},
+	PoolSnapshot: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &PoolSnapshotResult{}
+		},
+	},
 	SolarClaimersList: {
 		NewParams: func() any {
 			return nil
@@ -401,12 +415,36 @@ var signatures map[Verb]MethodSignature = map[Verb]MethodSignature{
 			return &VacuumOKResult{}
 		},
 	},
+	VacuumRoomAssign: {
+		NewParams: func() any {
+			return &VacuumRoomAssignParams{}
+		},
+		NewResult: func() any {
+			return &VacuumRoomAssignResult{}
+		},
+	},
 	VacuumRoomsSync: {
 		NewParams: func() any {
 			return &VacuumParams{}
 		},
 		NewResult: func() any {
 			return &VacuumRoomsSyncResult{}
+		},
+	},
+	VacuumExport: {
+		NewParams: func() any {
+			return nil
+		},
+		NewResult: func() any {
+			return &VacuumDump{}
+		},
+	},
+	VacuumImport: {
+		NewParams: func() any {
+			return &VacuumDump{}
+		},
+		NewResult: func() any {
+			return &VacuumImportResult{}
 		},
 	},
 }

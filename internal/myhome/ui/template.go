@@ -2,16 +2,18 @@ package ui
 
 import (
 	"context"
+	"crypto/sha256"
 	"embed"
-	"io"
-	"io/fs"
+	"encoding/hex"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	sswitchsvc "github.com/asnowfix/home-automation/internal/myhome/shelly/sswitch"
-	"net/http"
+	"github.com/asnowfix/home-automation/internal/myhome/ui/static"
 	"github.com/asnowfix/home-automation/pkg/shelly"
 	pkgshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
+	"io"
 	"strings"
+	"sync"
 	"text/template"
 
 	"github.com/asnowfix/home-automation/internal/global"
@@ -19,24 +21,11 @@ import (
 	"github.com/go-logr/logr"
 )
 
-// Embed static assets under this package
+// staticFS holds only the index page template; every other static asset is
+// embedded by the static package and served from static.Assets.
 //
-//go:embed static/*
+//go:embed static/index.html
 var staticFS embed.FS
-
-// StaticFS returns the embedded static filesystem
-func StaticFS() (fs.FS, error) {
-	return fs.Sub(staticFS, "static")
-}
-
-// StaticFileServer returns an http.Handler for serving static files
-func StaticFileServer() (http.Handler, error) {
-	sub, err := StaticFS()
-	if err != nil {
-		return nil, err
-	}
-	return http.FileServer(http.FS(sub)), nil
-}
 
 // DeviceRegistry is the device-lookup capability the UI layer needs to render
 // dashboards. It's defined here (rather than importing devices.DeviceRegistry)
@@ -61,48 +50,49 @@ type DeviceView struct {
 	HasWebUI             bool                            `json:"has_web_ui"` // true if the device exposes an HTTP web UI at all (excludes BLU); reachability itself is resolved live when the link is opened, see internal/myhome/proxy
 	IsRefreshable        bool                            `json:"is_refreshable"`
 	HasHeaterScript      bool                            `json:"has_heater_script"`
-	HasDoorSensor        bool                            `json:"has_door_sensor"`        // true if device has door/window sensing capability
-	HasTemperatureSensor bool                            `json:"has_temperature_sensor"` // true if device has temperature sensing capability
-	HasHumiditySensor    bool                            `json:"has_humidity_sensor"`    // true if device has humidity sensing capability
-	DeviceTypeEmoji      string                          `json:"device_type_emoji"`      // Emoji indicating device type (e.g., 🌡️ for thermometer, 🚶 for motion)
-	Temperature          *float64                        `json:"temperature,omitempty"`  // Current temperature in Celsius (nil if not a thermometer)
-	Humidity             *float64                        `json:"humidity,omitempty"`     // Current humidity in percentage (nil if not a humidity sensor)
-	DoorOpened           *bool                           `json:"door_opened,omitempty"`  // true if door/window is open, false if closed (nil if not a door/window sensor)
-	Switches             map[int]pkgshelly.SwitchSummary `json:"switches,omitempty"`     // Switches on the device (nil if not a switch)
-	IsPoolPump           bool                            `json:"is_pool_pump,omitempty"`           // true if this is the configured pool pump device
-	TurnoverAchieved     *float64                        `json:"turnover_achieved,omitempty"`      // pool volumes filtered today so far (nil unless IsPoolPump)
-	TurnoverTarget       *float64                        `json:"turnover_target,omitempty"`        // configured daily turnover target, times/day (nil unless IsPoolPump)
-	WaterSupplyActive    *bool                           `json:"water_supply_active,omitempty"`    // true = water-supply protection engaged, pump paused (nil unless IsPoolPump)
+	HasDoorSensor        bool                            `json:"has_door_sensor"`               // true if device has door/window sensing capability
+	HasTemperatureSensor bool                            `json:"has_temperature_sensor"`        // true if device has temperature sensing capability
+	HasHumiditySensor    bool                            `json:"has_humidity_sensor"`           // true if device has humidity sensing capability
+	DeviceTypeEmoji      string                          `json:"device_type_emoji"`             // Emoji indicating device type (e.g., 🌡️ for thermometer, 🚶 for motion)
+	Temperature          *float64                        `json:"temperature,omitempty"`         // Current temperature in Celsius (nil if not a thermometer)
+	Humidity             *float64                        `json:"humidity,omitempty"`            // Current humidity in percentage (nil if not a humidity sensor)
+	DoorOpened           *bool                           `json:"door_opened,omitempty"`         // true if door/window is open, false if closed (nil if not a door/window sensor)
+	Switches             map[int]pkgshelly.SwitchSummary `json:"switches,omitempty"`            // Switches on the device (nil if not a switch)
+	IsPoolPump           bool                            `json:"is_pool_pump,omitempty"`        // true if this is the configured pool pump device
+	TurnoverAchieved     *float64                        `json:"turnover_achieved,omitempty"`   // pool volumes filtered in the last 24 h (nil = unknown or not IsPoolPump)
+	TurnoverTarget       *float64                        `json:"turnover_target,omitempty"`     // configured daily turnover target, times/day (nil unless IsPoolPump)
+	WaterSupplyActive    *bool                           `json:"water_supply_active,omitempty"` // true = water-supply protection engaged, pump paused (nil unless IsPoolPump)
+	Starting             bool                            `json:"-"`                             // daemon still in its post-start phase (#763): unknown switches render "Starting…", not a bare unknown
+	SwitchUnknown        map[int]bool                    `json:"-"`                             // switch ids whose state the daemon has not seen yet: the row shows a disabled button, not "off"
 }
 
 // applyPoolStatus enriches views in place with the configured pool device's
-// turnover rate and water-supply status, fetched once via the pool.getstatus
-// RPC method (myhome/daemon/pool_rpc.go) rather than once per device — there
-// is exactly one configured pool device system-wide, so doing this inside
-// DeviceToView itself would trigger a redundant KVS/MQTT round trip for
-// every other device on each dashboard refresh.
+// turnover and water-supply status from the pool.snapshot RPC method
+// (myhome/daemon/pool_rpc.go), once rather than once per device. pool.snapshot
+// answers from daemon memory only, so rendering never reaches the pool device
+// (#731, AGENTS.md Rule 3). A field the daemon does not know yet stays nil and
+// renders as "--".
 func applyPoolStatus(ctx context.Context, views []DeviceView) {
-	mh, err := myhome.Methods(myhome.PoolGetStatus)
+	mh, err := myhome.Methods(myhome.PoolSnapshot)
 	if err != nil {
 		return // pool RPC not registered (pool tracking disabled)
 	}
 	res, err := mh.ActionE(ctx, nil)
 	if err != nil {
-		return // device unreachable / KVS misconfigured — leave fields blank
+		return
 	}
-	status, ok := res.(*myhome.PoolGetStatusResult)
+	snap, ok := res.(*myhome.PoolSnapshotResult)
 	if !ok {
 		return
 	}
 	for i := range views {
-		if views[i].Id != status.DeviceID {
+		if views[i].Id != snap.DeviceID {
 			continue
 		}
-		achieved, target, active := status.TurnoverAchieved, status.TurnoverTarget, status.WaterSupplyActive
 		views[i].IsPoolPump = true
-		views[i].TurnoverAchieved = &achieved
-		views[i].TurnoverTarget = &target
-		views[i].WaterSupplyActive = &active
+		views[i].TurnoverAchieved = snap.Turnover24h // rolling 24 h, not the device-day counter
+		views[i].TurnoverTarget = snap.TurnoverTarget
+		views[i].WaterSupplyActive = snap.WaterSupplyActive
 	}
 }
 
@@ -114,8 +104,31 @@ type IndexData struct {
 // index template and renderer
 var indexTmpl *template.Template
 
-// eventLogTmpl is the full-page event log template
-var eventLogTmpl *template.Template
+// assetHashes caches the content-hash suffix of each embedded asset.
+var assetHashes sync.Map
+
+// assetURL returns an embedded asset's path with a "?v=<hash>" query derived
+// from its bytes. Assets are served immutable for a year, so the URL must change
+// whenever the content does; the build version cannot do that (every hand build
+// reports the same one). Unknown paths are returned unchanged.
+func assetURL(path string) string {
+	if v, ok := assetHashes.Load(path); ok {
+		return path + "?v=" + v.(string)
+	}
+	a, ok := static.Assets[path]
+	if !ok {
+		return path
+	}
+	h := contentHash(a.Content)
+	assetHashes.Store(path, h)
+	return path + "?v=" + h
+}
+
+// contentHash is the first 12 hex digits of the SHA-256 of b.
+func contentHash(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
 
 func init() {
 	indexContent, err := staticFS.ReadFile("static/index.html")
@@ -126,13 +139,9 @@ func init() {
 	// Create template with custom functions
 	tmpl := template.New("index").Funcs(template.FuncMap{
 		"lower": strings.ToLower,
+		"asset": assetURL,
 	})
 	indexTmpl = template.Must(tmpl.Parse(string(indexContent)))
-
-	// Build the event-log page template
-	eventLogTmpl = template.Must(template.New("event-log").Funcs(template.FuncMap{
-		"lower": strings.ToLower,
-	}).Parse(eventLogPageHTML))
 }
 
 // DeviceToView converts a myhome.Device to ui.DeviceView for SSE broadcasting and UI rendering
@@ -239,6 +248,7 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 
 	// Get switch information
 	switches := make(map[int]pkgshelly.SwitchSummary)
+	unknown := make(map[int]bool)
 
 	// First try to get switches from config if available
 	if d.Config != nil {
@@ -255,33 +265,45 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 		for _, sw := range []*sswitch.Config{d.Config.Switch0, d.Config.Switch1, d.Config.Switch2, d.Config.Switch3} {
 			if sw != nil {
 				output := false
+				// A switch with no status yet is unknown, not off.
+				known := false
 				// Get actual switch status if available
 				if status != nil {
 					switch sw.Id {
 					case 0:
 						if status.Switch0 != nil {
 							output = status.Switch0.Output
+							known = true
 						}
 					case 1:
 						if status.Switch1 != nil {
 							output = status.Switch1.Output
+							known = true
 						}
 					case 2:
 						if status.Switch2 != nil {
 							output = status.Switch2.Output
+							known = true
 						}
 					case 3:
 						if status.Switch3 != nil {
 							output = status.Switch3.Output
+							known = true
 						}
 					}
 				}
 
 				// Active/on color depends on the normally-closed KVS key when present:
 				// the raw Output only means "on" if it matches the device's configured on-value.
+				// Rendering never calls the device (#732): the polarity comes from the
+				// cache the refresh path fills, and an unresolved one shows as unknown.
 				isOn := output
 				if sd != nil {
-					isOn = output == sswitchsvc.OnValue(ctx, log, sd, sw.Id)
+					if onValue, resolved := sswitchsvc.OnValueCached(d.Id(), sw.Id); resolved {
+						isOn = output == onValue
+					} else {
+						known = false
+					}
 				}
 
 				switches[sw.Id] = pkgshelly.SwitchSummary{
@@ -289,24 +311,14 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 					Name: sw.Name,
 					On:   isOn,
 				}
+				if !known {
+					unknown[sw.Id] = true
+				}
 			}
 		}
 		log.V(1).Info("Loaded switches from config", "device", d.Id(), "count", len(switches))
-	} else if sd, ok := d.Impl().(*shelly.Device); ok && sd != nil {
-		// Fallback: Fetch switches directly from device if no config
-		log.V(1).Info("No config, fetching switches from device", "device", d.Id())
-		switchSummary, err := pkgshelly.GetSwitchesSummary(ctx, sd)
-		if err != nil {
-			log.V(1).Info("Failed to get switches summary", "device", d.Id(), "error", err)
-		} else {
-			for id, ss := range switchSummary {
-				ss.On = ss.On == sswitchsvc.OnValue(ctx, log, sd, id)
-				switchSummary[id] = ss
-			}
-			switches = switchSummary
-			log.V(1).Info("Fetched switches from device", "device", d.Id(), "count", len(switches))
-		}
 	}
+	// A device without config shows no switches: it is never queried while rendering (#732).
 
 	// Extract sensor values from cached device status
 	var temperature *float64
@@ -354,20 +366,9 @@ func DeviceToView(ctx context.Context, d *myhome.Device) DeviceView {
 		Humidity:             humidity,
 		DoorOpened:           doorOpened,
 		Switches:             switches,
+		SwitchUnknown:        unknown,
+		Starting:             IsStarting() && len(unknown) > 0,
 	}
-}
-
-// RenderEventLog renders the event log page.
-// It reuses the same index layout but injects the events table section.
-// Device data is loaded separately by the client via hx-get="/htmx/devices"
-// (index.html/eventLogPageHTML never reference .Devices), so this does not
-// enumerate devices — that work would be discarded and was the dominant
-// cost of loading this page (see #390).
-func RenderEventLog(ctx context.Context, w io.Writer) error {
-	data := IndexData{
-		Version: ctx.Value(global.VersionKey).(string),
-	}
-	return eventLogTmpl.Execute(w, data)
 }
 
 // RenderIndex renders the index page.

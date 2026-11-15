@@ -9,6 +9,9 @@ on:
     branches:
       - main
       - v[0-9]+.[0-9x]+.x
+      # Long-running campaign integration branches (e.g. campaign/681-kiosk-ui)
+      # get the same build/test gate as main (#681).
+      - campaign/**
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -36,8 +39,8 @@ jobs:
         run: ./scripts/check-coverage.sh "$(cat .coverage-min)"
 
   # Additive visibility only — never blocks merging. Computes the PR
-  # branch's aggregate coverage against its base branch's (main, or a
-  # release branch like v0.11.x for a backport PR) so a reviewer can see at
+  # branch's aggregate coverage against its base branch's (main, a
+  # release branch like v0.11.x for a backport PR, or a campaign/** branch) so a reviewer can see at
   # a glance whether a PR moved the needle, without running `make cover`
   # locally on both branches themselves.
   #

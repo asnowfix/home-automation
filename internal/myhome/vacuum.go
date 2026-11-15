@@ -58,7 +58,11 @@ type VacuumCommandParams struct {
 
 // VacuumCleanParams cleans the given rooms, in order. Rooms are region names or region ids.
 type VacuumCleanParams struct {
-	Robot string   `json:"robot,omitempty"`
+	Robot string `json:"robot,omitempty"`
+	// Map, when set, is the map the caller resolved the rooms on: the clean is
+	// refused if a room resolves to another map (region ids can collide across
+	// maps, and the map may have changed since the caller looked).
+	Map   string   `json:"map,omitempty"`
 	Rooms []string `json:"rooms"`
 }
 
@@ -92,6 +96,11 @@ type VacuumRegion struct {
 	// for a cloud region, the last sync no longer listed it. Stale regions are
 	// not cleaned.
 	Stale bool `json:"stale"`
+	// RoomID is the daemon room (rooms.room_id) this region is assigned to
+	// (vacuum.roomassign, #751); empty when unassigned. It is returned as
+	// stored: an id that no longer names a room (room.delete does not reach
+	// here) must be treated by readers as unassigned.
+	RoomID string `json:"room_id,omitempty"`
 }
 
 // VacuumRoomsResult is the result of vacuum.rooms.
@@ -118,6 +127,31 @@ type VacuumRoomsSyncResult struct {
 	Added   int               `json:"added"`
 	Updated int               `json:"updated"`
 	Stale   int               `json:"stale"` // regions no longer listed by the cloud, now marked stale
+}
+
+// VacuumRoomAssignParams assigns a robot region to a daemon room. A region
+// belongs to at most one room: assigning it again moves it. An empty RoomID
+// unassigns. The region is designated by RegionName (the human-friendly name
+// the daemon stores, case-insensitive; what the CLI sends) or by RegionID (the
+// robot's or cloud's id; exactly one of the two). The daemon resolves it. MapID
+// is optional when the name or id matches on one map only (an id is unique per
+// map, not across maps).
+type VacuumRoomAssignParams struct {
+	Robot      string `json:"robot,omitempty"`
+	MapID      string `json:"map_id,omitempty"`
+	RegionName string `json:"region_name,omitempty"`
+	RegionID   string `json:"region_id,omitempty"`
+	RoomID     string `json:"room_id"`
+}
+
+// VacuumRoomAssignResult reports the region that was resolved (id and name)
+// and the room it was in before ("" if none).
+type VacuumRoomAssignResult struct {
+	MapID      string `json:"map_id"`
+	RegionID   string `json:"region_id"`
+	RegionName string `json:"region_name,omitempty"`
+	RoomID     string `json:"room_id"`
+	Previous   string `json:"previous"`
 }
 
 // VacuumRoomNameParams names a learned region.
@@ -186,4 +220,25 @@ func VacuumPhaseText(phase string) string {
 		return "unknown"
 	}
 	return phase
+}
+
+// VacuumRow is one database row of the vacuum tables, keyed by column name.
+// Rows are exchanged as maps so that an export taken from a build with more
+// columns (for example vacuum_regions.room_id, #684) still imports into a build
+// with fewer, and the other way round: unknown columns are ignored, missing
+// ones take their default.
+type VacuumRow map[string]any
+
+// VacuumDump is the vacuum part of `ctl db export` (vacuum.export) and of
+// `ctl db import` (vacuum.import). It carries the robot's non-secret facts and
+// its learned or cloud-synced regions, never the robot's password.
+type VacuumDump struct {
+	Robots  []VacuumRow `json:"robots,omitempty"`
+	Regions []VacuumRow `json:"regions,omitempty"`
+}
+
+// VacuumImportResult counts the rows vacuum.import stored.
+type VacuumImportResult struct {
+	Robots  int `json:"robots"`
+	Regions int `json:"regions"`
 }

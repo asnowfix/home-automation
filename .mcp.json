@@ -2,8 +2,8 @@
   "mcpServers": {
     "shelly": {
       "type": "stdio",
-      "command": "./myhome-local.sh",
-      "args": ["mcp"]
+      "command": "python3",
+      "args": ["-I", "scripts/myhome-ctl.py", "mcp"]
     }
   }
 }

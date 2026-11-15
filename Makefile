@@ -329,6 +329,7 @@ debpkg-package:
 	@# Systemd units
 	mkdir -p $(DEBPKG_DIR)/lib/systemd/system
 	cp linux/systemd/myhome.service $(DEBPKG_DIR)/lib/systemd/system/
+	cp 'linux/systemd/myhome-failure@.service' $(DEBPKG_DIR)/lib/systemd/system/
 	cp linux/systemd/myhome-update.service $(DEBPKG_DIR)/lib/systemd/system/
 	cp linux/systemd/myhome-update.timer $(DEBPKG_DIR)/lib/systemd/system/
 	cp linux/systemd/myhome-db-backup.service $(DEBPKG_DIR)/lib/systemd/system/

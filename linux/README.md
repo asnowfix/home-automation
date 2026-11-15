@@ -52,6 +52,7 @@ linux/
 │   └── postrm.sh     # Post-removal (disable services)
 ├── systemd/          # Systemd units and helper scripts
 │   ├── myhome.service
+│   ├── myhome-failure@.service
 │   ├── myhome-update.service
 │   ├── myhome-update.timer
 │   ├── myhome-db-backup.service

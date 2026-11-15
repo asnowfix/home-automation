@@ -22,6 +22,7 @@ import (
 	"github.com/asnowfix/home-automation/myhome/fetchproxy"
 	"github.com/asnowfix/home-automation/myhome/ical"
 	"github.com/asnowfix/home-automation/myhome/metrics"
+	"github.com/asnowfix/home-automation/myhome/homedrive"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
 	mqttserver "github.com/asnowfix/home-automation/myhome/mqtt"
 	"github.com/asnowfix/home-automation/myhome/notice"
@@ -681,6 +682,32 @@ func (d *daemon) Run() error {
 		}
 		vacuumService.RegisterHandlers()
 
+		// Drive sync status (#834): the homedrive agent publishes one retained
+		// status document per host/user; the cache keeps the last of each (and
+		// persists them in myhome.db) and feeds the System status sheet. The
+		// subscription is queued until mc.Start(). Read-only: nothing is
+		// published back to homedrive.
+		var driveCache *homedrive.Cache
+		if driveStore, err := homedrive.NewStore(storage.DB()); err != nil {
+			// Not fatal: the panel works from memory, a restart just forgets dead instances.
+			log.Error(err, "Failed to initialize homedrive storage, running without persistence")
+			driveCache = homedrive.NewCache(homedrive.Config{Log: log})
+		} else {
+			driveCache = homedrive.NewCache(homedrive.Config{Log: log, Store: driveStore})
+		}
+		if err := mc.SubscribeWithHandler(d.ctx, homedrive.TopicFilter, 16, "homedrive/status", driveCache.HandleMessage); err != nil {
+			log.Error(err, "Failed to subscribe to homedrive status", "topic", homedrive.TopicFilter)
+		}
+		driveDone := make(chan struct{})
+		go func() { driveCache.Run(d.ctx); close(driveDone) }()
+		defer func() {
+			// Let the shutdown flush finish before the deferred storage.Close().
+			select {
+			case <-driveDone:
+			case <-time.After(2 * time.Second):
+			}
+		}()
+
 		// Register Occupancy RPC methods if enabled
 		if options.Flags.EnableOccupancyService && d.occupancyService != nil {
 			log.Info("Registering occupancy RPC methods")
@@ -749,7 +776,7 @@ func (d *daemon) Run() error {
 		// Pass the live device manager (not raw storage) so the dashboard sees
 		// each device's in-memory Impl/Status rather than a DB snapshot with no
 		// live state attached.
-		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, d.dm, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy, accountsRegistry, storage.DB()); err != nil {
+		if err := ui.Start(d.ctx, log.WithName("server"), options.Flags.UiPort, resolver, d.dm, mc, sseBroadcaster, eventsSvc, options.Flags.RemoteProxy, accountsRegistry, storage.DB(), driveCache); err != nil {
 			log.Error(err, "Failed to start UI server")
 			return err
 		}

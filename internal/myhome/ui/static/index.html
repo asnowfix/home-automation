@@ -140,7 +140,7 @@
         <header class="mh-sec-head">
           <h2 class="title is-4">Events</h2>
           <span class="mh-pill" data-pill hidden></span>
-          <button class="button" @click="modals.status = true">System status</button>
+          <button class="button" @click="modals.status = true; $nextTick(() => htmx.trigger('#homedrive-container', 'refresh'))">System status</button>
         </header>
         <div id="events-table"
              data-refresh
@@ -343,7 +343,7 @@
   </div>
 
   <!-- System status sheet: opened from the Events section, closed by default -->
-  <div class="modal" :class="{'is-active': modals.status}">
+  <div class="modal" id="status-sheet" :class="{'is-active': modals.status}">
     <div class="modal-background"></div>
     <div class="modal-card">
       <header class="modal-card-head">
@@ -360,6 +360,15 @@
              hx-trigger="load, refresh"
              hx-swap="innerHTML">
           <div class="column is-12"><p class="has-text-grey">Loading accounts...</p></div>
+        </div>
+        <h3 class="title is-5 mt-4">Drive sync</h3>
+        <!-- Memory-only fragment; re-polled every 30 s only while this sheet is open and the daemon is up (design homedrive-panel §2). -->
+        <div id="homedrive-container"
+             data-refresh
+             hx-get="/htmx/homedrive"
+             hx-trigger="load, refresh, every 30s [kiosk.online && kiosk.statusOpen()]"
+             hx-swap="innerHTML">
+          <p class="has-text-grey mh-drive-line">Loading Drive sync...</p>
         </div>
       </section>
       <footer class="modal-card-foot">

@@ -31,13 +31,13 @@ import (
 // - an IPv4/IPv6 address
 // - a .local hostname
 // - any known identifier in the myhome database (name, id, mac, host)
-func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db DeviceRegistry, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry, sqlDB *sqlx.DB) error {
+func Start(ctx context.Context, log logr.Logger, listenPort int, resolver mynet.Resolver, db DeviceRegistry, mc mqtt.Client, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry, sqlDB *sqlx.DB, drive HomedriveSource) error {
 	addr := fmt.Sprintf(":%d", listenPort)
 	srv := &http.Server{Addr: addr}
 
 	log.V(1).Info("Starting UI server", "addr", addr, "resolver", resolver, "db", db, "mc", mc, "sseBroadcaster", sseBroadcaster)
 
-	mux := newMux(ctx, log, resolver, db, sseBroadcaster, eventsSvc, upstreamProxy, accountsRegistry, sqlDB)
+	mux := newMuxWithHomedrive(ctx, log, resolver, db, sseBroadcaster, eventsSvc, upstreamProxy, accountsRegistry, sqlDB, drive)
 
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Info("http-incoming", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "proto", r.Proto, "content-length", r.ContentLength)
@@ -122,6 +122,11 @@ func serveStatic(w http.ResponseWriter, r *http.Request) {
 // exercise the routes with httptest. Unknown paths fall through to the device
 // reverse proxy (GET / is the shell, /event-log redirects to its section).
 func newMux(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db DeviceRegistry, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry, sqlDB *sqlx.DB) *http.ServeMux {
+	return newMuxWithHomedrive(ctx, log, resolver, db, sseBroadcaster, eventsSvc, upstreamProxy, accountsRegistry, sqlDB, nil)
+}
+
+// newMuxWithHomedrive is newMux plus the Drive sync panel's data source (nil allowed).
+func newMuxWithHomedrive(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db DeviceRegistry, sseBroadcaster *SSEBroadcaster, eventsSvc *events.Service, upstreamProxy string, accountsRegistry *accounts.Registry, sqlDB *sqlx.DB, drive HomedriveSource) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -170,6 +175,7 @@ func newMux(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db De
 
 	// HTMX endpoints for partial HTML responses
 	htmxHandler := NewHTMXHandler(ctx, log.WithName("HTMXHandler"), db, eventsSvc, accountsRegistry, sqlDB)
+	htmxHandler.SetHomedriveSource(drive)
 	if sseBroadcaster != nil {
 		sseBroadcaster.SetDeviceNameResolver(htmxHandler.DeviceNameResolver())
 	}
@@ -183,6 +189,7 @@ func newMux(ctx context.Context, log logr.Logger, resolver mynet.Resolver, db De
 	mux.HandleFunc("/htmx/events", htmxHandler.EventsTable)
 	mux.HandleFunc("/htmx/events/more", htmxHandler.EventsMore)
 	mux.HandleFunc("/htmx/accounts", htmxHandler.AccountsPanel)
+	mux.HandleFunc("GET /htmx/homedrive", htmxHandler.HomedrivePanel)
 	mux.HandleFunc("/htmx/pool", htmxHandler.PoolPanel)
 	mux.HandleFunc("/htmx/vacuum", htmxHandler.VacuumPanel)
 	mux.HandleFunc("/htmx/vacuum/action", htmxHandler.VacuumAction)

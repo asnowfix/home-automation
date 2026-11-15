@@ -68,10 +68,19 @@ var notifyFailureCmd = &cobra.Command{
 		if notifyFailureDryRun {
 			mailer = printMailer{cmd.OutOrStdout()}
 		} else if cfg.From == "" {
-			fmt.Fprintln(cmd.ErrOrStderr(), "smtp.from is empty: email disabled, nothing sent")
+			// Fails at Send time (after classification, so a scheduled restart
+			// still exits 0): a missing alert path must not look like success.
+			mailer = unconfiguredMailer{}
 		}
 		return handleFailure(ctx, args[0], systemctlShow, mailer, cmd.OutOrStdout())
 	},
+}
+
+// unconfiguredMailer stands in when smtp.from is empty: sending an alert is an error.
+type unconfiguredMailer struct{}
+
+func (unconfiguredMailer) Send(context.Context, string, string) error {
+	return fmt.Errorf("smtp.from is empty: failure email not sent (set MYHOME_SMTP_FROM, or use --dry-run)")
 }
 
 // printMailer is the --dry-run sender: it never touches the network.
@@ -88,7 +97,7 @@ type showFunc func(ctx context.Context, unit string) (map[string]string, error)
 func systemctlShow(ctx context.Context, unit string) (map[string]string, error) {
 	out, err := exec.CommandContext(ctx, "systemctl", "show", unit,
 		"-p", "Result,ExecMainCode,ExecMainStatus,NRestarts,RuntimeMaxUSec,"+
-			"ActiveEnterTimestampMonotonic,InactiveEnterTimestampMonotonic").Output()
+			"InactiveExitTimestampMonotonic,ActiveEnterTimestampMonotonic,InactiveEnterTimestampMonotonic").Output()
 	if err != nil {
 		return nil, fmt.Errorf("systemctl show %s: %w", unit, err)
 	}
@@ -143,7 +152,12 @@ func isScheduledRestart(p map[string]string) bool {
 	}
 	active, err1 := strconv.ParseInt(p["ActiveEnterTimestampMonotonic"], 10, 64)
 	inactive, err2 := strconv.ParseInt(p["InactiveEnterTimestampMonotonic"], 10, 64)
-	if err1 != nil || err2 != nil || active <= 0 {
+	exit, err3 := strconv.ParseInt(p["InactiveExitTimestampMonotonic"], 10, 64)
+	// ActiveEnter only moves when the unit becomes active. If this run never got
+	// there (a start timeout), it still holds the previous run's value, and the
+	// difference would look like a full RuntimeMaxSec: require it to be from
+	// this run, i.e. later than this run's start.
+	if err1 != nil || err2 != nil || err3 != nil || active <= 0 || active <= exit {
 		return false
 	}
 	ran := time.Duration(inactive-active) * time.Microsecond

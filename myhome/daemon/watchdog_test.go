@@ -34,13 +34,22 @@ func TestHandleFailure(t *testing.T) {
 		{"crash", map[string]string{"Result": "signal", "ExecMainStatus": "9", "RuntimeMaxUSec": "2d"}, nil, true},
 		{"hang", map[string]string{"Result": "watchdog", "ExecMainStatus": "6", "RuntimeMaxUSec": "2d"}, nil, true},
 		{"scheduled RuntimeMaxSec", map[string]string{"Result": "timeout", "RuntimeMaxUSec": "2d",
-			"ActiveEnterTimestampMonotonic": "1000", "InactiveEnterTimestampMonotonic": "172800004000"}, nil, false},
+			"InactiveExitTimestampMonotonic": "500", "ActiveEnterTimestampMonotonic": "1000", "InactiveEnterTimestampMonotonic": "172800004000"}, nil, false},
 		{"scheduled, short limit as measured", map[string]string{"Result": "timeout", "RuntimeMaxUSec": "4s",
-			"ActiveEnterTimestampMonotonic": "801148033411", "InactiveEnterTimestampMonotonic": "801152245826"}, nil, false},
+			"InactiveExitTimestampMonotonic": "801148000000", "ActiveEnterTimestampMonotonic": "801148033411", "InactiveEnterTimestampMonotonic": "801152245826"}, nil, false},
 		{"timeout well before the limit (start/stop timeout)", map[string]string{"Result": "timeout", "RuntimeMaxUSec": "2d",
 			"ActiveEnterTimestampMonotonic": "1000", "InactiveEnterTimestampMonotonic": "3000000"}, nil, true},
 		{"timeout with no RuntimeMaxSec", map[string]string{"Result": "timeout", "RuntimeMaxUSec": "infinity",
 			"ActiveEnterTimestampMonotonic": "1000", "InactiveEnterTimestampMonotonic": "999999999999"}, nil, true},
+		// Blocker 1: a start that never reached active leaves ActiveEnter at the
+		// PREVIOUS run's value (2 days ago), so inactive-activeEnter looks like a
+		// full RuntimeMaxSec. Must alert: this run's InactiveExit is later.
+		{"start-timeout loop after a scheduled restart (stale ActiveEnter)", map[string]string{"Result": "timeout", "RuntimeMaxUSec": "2d",
+			"ActiveEnterTimestampMonotonic": "1000", "InactiveExitTimestampMonotonic": "172800010000",
+			"InactiveEnterTimestampMonotonic": "173100010000"}, nil, true},
+		{"exit-code", map[string]string{"Result": "exit-code", "ExecMainStatus": "1", "RuntimeMaxUSec": "2d"}, nil, true},
+		{"start-limit-hit", map[string]string{"Result": "start-limit-hit", "RuntimeMaxUSec": "2d"}, nil, true},
+		{"core-dump", map[string]string{"Result": "core-dump", "ExecMainStatus": "11", "RuntimeMaxUSec": "2d"}, nil, true},
 		{"systemctl unavailable alerts", nil, errors.New("exec: not found"), true},
 	}
 	for _, tt := range tests {
@@ -109,5 +118,11 @@ func TestMQTTRoundTripCheck(t *testing.T) {
 	err = check(ctx)
 	if err == nil || !strings.Contains(err.Error(), "no echo") {
 		t.Fatalf("wedged broker: got %v, want no-echo error", err)
+	}
+}
+
+func TestUnconfiguredMailerIsAnError(t *testing.T) {
+	if err := (unconfiguredMailer{}).Send(context.Background(), "s", "b"); err == nil {
+		t.Fatal("want an error when smtp.from is empty")
 	}
 }

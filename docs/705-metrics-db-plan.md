@@ -7,7 +7,7 @@ Issue: #705 (epic #654, phase 1). Design: `docs/observability/observability-stud
 1. [x] Package `myhome/events/metricsdb` (store, buffer, flush, purge, query) plus tests.
 2. [x] Options in all four places: `options.go`, `run.go`, `docs/configuration.md`, `myhome-example.yaml`.
 3. [x] Daemon wiring: open, degrade to disabled on error, run flush loop and retention.
-4. [ ] Full `make test`.
+4. [x] Full `make test`.
 
 ## Decisions
 
@@ -36,3 +36,4 @@ Issue: #705 (epic #654, phase 1). Design: `docs/observability/observability-stud
 - Wrote store and tests; `go test -race ./metricsdb/` (in `myhome/events`) passes. A first test run
   failed because my test base time was not hour-aligned (3 buckets, not 2): a test bug, not a store bug.
 - Config and wiring done; `go build ./...` passes after `make generate`.
+- Full `make test` (background, polled): 229 s wall clock, 70 packages ok, no FAIL; metricsdb ok in 2.1 s. Not run: Pi measurements (size/CPU/writes after 7 days), which the issue assigns to the Pi.

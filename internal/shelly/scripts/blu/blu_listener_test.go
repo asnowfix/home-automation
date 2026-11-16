@@ -311,6 +311,50 @@ func TestBluListener_IlluminanceWithinBoundsTurnsOn(t *testing.T) {
 	}
 }
 
+// TestBluListener_MotionExtendsAutoOffDespiteIlluminance is the #849 regression:
+// the light itself raises the sensor's lux above illuminance_max, so follow-up
+// motion events fail the bounds check. They must still push the auto-off delay
+// back, so the switch goes off only auto_off seconds after the LAST motion.
+func TestBluListener_MotionExtendsAutoOffDespiteIlluminance(t *testing.T) {
+	buf := readBluListenerScript(t)
+	mac := "aa:11:bb:22:cc:66"
+	// max=20 lux, auto_off=1.5 s
+	state := newBluListenerState(bluFollowKVSWithBounds(mac, "switch:0", 1.5, nil, 20))
+
+	ctx, cancel := context.WithTimeout(
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mqtt.NewMockClient()),
+		15*time.Second,
+	)
+	defer cancel()
+
+	done := runBluListener(ctx, t, buf, state)
+	fail := func(msg string) {
+		cancel()
+		<-done
+		t.Fatal(msg)
+	}
+
+	injectBluEvent(t, state.EventInjector, mac, 0, 1) // dark: turns on, timer = 1.5 s
+	if !waitFor(5*time.Second, 50*time.Millisecond, func() bool { return switchIsOn(state, "switch:0") }) {
+		fail("switch:0 was not turned on")
+	}
+
+	time.Sleep(900 * time.Millisecond)
+	injectBluEvent(t, state.EventInjector, mac, 50, 1) // lit by the light itself: above max, must still extend
+
+	// t ~= 1.9 s: past the original expiry (1.5 s), before the extended one (~2.4 s)
+	time.Sleep(1000 * time.Millisecond)
+	if !switchIsOn(state, "switch:0") {
+		fail("auto-off was not extended by motion above illuminance_max")
+	}
+
+	if !waitFor(5*time.Second, 50*time.Millisecond, func() bool { return !switchIsOn(state, "switch:0") }) {
+		fail("switch:0 was not turned off after the extended delay")
+	}
+	cancel()
+	<-done
+}
+
 // TestBluListener_KVSReloadPicksUpNewFollow verifies that after a KVS change
 // event, a newly configured follow MAC becomes active.
 func TestBluListener_KVSReloadPicksUpNewFollow(t *testing.T) {

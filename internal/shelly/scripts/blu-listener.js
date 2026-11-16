@@ -324,9 +324,15 @@ function handleBluEvent(topic, message) {
 
   log("Motion detected for", mac, "illuminance", data.illuminance, "min", follow.illuminanceMin, "max", follow.illuminanceMax);
 
-  // Enforce illuminance bounds (plain lux numbers; percentages are resolved by the daemon)
+  var idx = follow.switchIndex;
+
+  // Illuminance bounds only decide whether to turn the light ON (plain lux numbers;
+  // percentages are resolved by the daemon). While our own auto-off timer is pending the
+  // light is on because of us, and the sensor then sees the light itself (#849): motion
+  // must keep extending the delay regardless of the bounds.
   var illum = (data && typeof data.illuminance === "number") ? data.illuminance : null;
-  if (follow.illuminanceMin !== null || follow.illuminanceMax !== null) {
+  var lightOnByUs = !!STATE.offTimers[idx];
+  if (!lightOnByUs && (follow.illuminanceMin !== null || follow.illuminanceMax !== null)) {
     if (illum === null) {
       log("Ignoring: no illuminance in event for bounds check", mac);
       return;
@@ -340,9 +346,8 @@ function handleBluEvent(topic, message) {
       return;
     }
   }
-  log("Illuminance ok for", mac, "illuminance", illum);
+  log("Illuminance ok for", mac, "illuminance", illum, "lightOnByUs", lightOnByUs);
 
-  var idx = follow.switchIndex;
   queueTask(function() {
     Shelly.call("Switch.Set", { id: idx, on: true }, onSwitchSetOnResponse.bind(null, idx, follow, mac));
   });

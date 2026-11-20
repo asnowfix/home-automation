@@ -154,7 +154,7 @@ func TestHandleBLUEventBridge_WindowEvent(t *testing.T) {
 
 	svc := newTestEventsService(t)
 	before := time.Now().Unix()
-	handleBLUEventBridge(context.Background(), logr.Discard(), payload, "", svc, nil)
+	handleBLUEventBridge(context.Background(), logr.Discard(), payload, "", svc, nil, nil)
 	after := time.Now().Unix()
 
 	evts, err := svc.Store().Query(context.Background(), events.Query{})
@@ -206,7 +206,7 @@ func TestHandleBLUEventBridge_MotionRecordsIlluminance(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			payload := buildBLUPayload(t, BLUEventData{Address: mac, Motion: &motion, Illuminance: tc.lux, RSSI: -90})
 			svc := newTestEventsService(t)
-			handleBLUEventBridge(context.Background(), logr.Discard(), payload, "", svc, nil)
+			handleBLUEventBridge(context.Background(), logr.Discard(), payload, "", svc, nil, nil)
 
 			evts, err := svc.Store().Query(context.Background(), events.Query{})
 			if err != nil {

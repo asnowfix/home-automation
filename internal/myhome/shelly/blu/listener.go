@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"time"
 
 	"github.com/asnowfix/home-automation/internal/myhome"
 	"github.com/asnowfix/home-automation/myhome/events"
@@ -169,6 +168,7 @@ func deviceIDFromCapabilities(mac string, data BLUEventData) string {
 func StartBLUListenerWithEvents(ctx context.Context, mc mqtt.Client, registry DeviceRegistry, sseBroadcaster SSEBroadcaster, eventSvc *events.Service, tracker *events.SensorDailyTracker) error {
 	log := logr.FromContextOrDiscard(ctx).WithName("BLUListener")
 
+	dedup := newRelayDeduper(DefaultDedupWindow, nil)
 	log.Info("Starting BLU listener", "mqtt_client", fmt.Sprintf("%T", mc), "registry", fmt.Sprintf("%T", registry))
 
 	// Subscribe to BLU events topic
@@ -196,7 +196,7 @@ func StartBLUListenerWithEvents(ctx context.Context, mc mqtt.Client, registry De
 		}
 
 		// Feed event log and sensor tracker from the raw payload (nil-safe)
-		handleBLUEventBridge(ctx, log, payload, deviceID, eventSvc, tracker)
+		handleBLUEventBridge(ctx, log, payload, deviceID, eventSvc, tracker, dedup)
 
 		log.V(1).Info("event processing completed", "device_id", deviceID)
 
@@ -221,7 +221,9 @@ func bluData(fields map[string]any) *string {
 }
 
 // handleBLUEventBridge maps BTHome object IDs to event log entries and tracker observations.
-func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, resolvedID string, eventSvc *events.Service, tracker *events.SensorDailyTracker) {
+// Copies of one advertisement forwarded by several relays are merged into one
+// row by dedup (nil disables merging); see relayDeduper.
+func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, resolvedID string, eventSvc *events.Service, tracker *events.SensorDailyTracker, dedup *relayDeduper) {
 	var data BLUEventData
 	if err := json.Unmarshal(payload, &data); err != nil {
 		return
@@ -239,9 +241,24 @@ func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, 
 
 	// Use the device-side BTHome timestamp when available (0x50); fall back
 	// to the daemon's receive time so the event never displays as 1970-01-01.
-	ts := float64(time.Now().Unix())
+	ts := float64(dedup.clock().Unix())
 	if data.Timestamp != nil {
 		ts = float64(*data.Timestamp)
+	}
+
+	// Relay identity and packet id are read separately from BLUEventData: pid
+	// must be distinguishable from absent, and relay is absent on old publishers.
+	var meta struct {
+		PID   *int   `json:"pid"`
+		Relay string `json:"relay"`
+	}
+	_ = json.Unmarshal(payload, &meta)
+	rec := func(event, component, severity string, fields map[string]any) {
+		dedup.record(ctx, log, eventSvc,
+			dedupKey{address: data.Address, pid: pidOrZero(meta.PID), event: event},
+			meta.PID,
+			events.Event{Ts: ts, DeviceID: deviceID, Component: component, Event: event, Severity: severity},
+			fields, meta.Relay, data.RSSI)
 	}
 
 	// Motion (0x21)
@@ -256,16 +273,7 @@ func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, 
 		if data.Illuminance != nil {
 			motionData["illuminance"] = *data.Illuminance
 		}
-		if err := eventSvc.Record(ctx, events.Event{
-			Ts:        ts,
-			DeviceID:  deviceID,
-			Component: "motion:0",
-			Event:     eventName,
-			Severity:  "info",
-			Data:      bluData(motionData),
-		}); err != nil {
-			log.Error(err, "Failed to record motion event", "device_id", deviceID)
-		}
+		rec(eventName, "motion:0", "info", motionData)
 	}
 
 	// Window (0x2D)
@@ -274,44 +282,17 @@ func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, 
 		if *data.Window == 1 {
 			eventName = "window.opened"
 		}
-		if err := eventSvc.Record(ctx, events.Event{
-			Ts:        ts,
-			DeviceID:  deviceID,
-			Component: "window:0",
-			Event:     eventName,
-			Severity:  "info",
-			Data:      bluData(map[string]any{"window": *data.Window, "address": data.Address, "rssi": data.RSSI}),
-		}); err != nil {
-			log.Error(err, "Failed to record window event", "device_id", deviceID)
-		}
+		rec(eventName, "window:0", "info", map[string]any{"window": *data.Window, "address": data.Address, "rssi": data.RSSI})
 	}
 
 	// Button (0x3A)
 	if data.Button != nil && eventSvc != nil {
-		if err := eventSvc.Record(ctx, events.Event{
-			Ts:        ts,
-			DeviceID:  deviceID,
-			Component: "button:0",
-			Event:     "button.push",
-			Severity:  "info",
-			Data:      bluData(map[string]any{"button": *data.Button, "address": data.Address, "rssi": data.RSSI}),
-		}); err != nil {
-			log.Error(err, "Failed to record button event", "device_id", deviceID)
-		}
+		rec("button.push", "button:0", "info", map[string]any{"button": *data.Button, "address": data.Address, "rssi": data.RSSI})
 	}
 
 	// Battery low
 	if data.Battery != nil && *data.Battery < 20 && eventSvc != nil {
-		if err := eventSvc.Record(ctx, events.Event{
-			Ts:        ts,
-			DeviceID:  deviceID,
-			Component: "battery",
-			Event:     "battery.low",
-			Severity:  "warn",
-			Data:      bluData(map[string]any{"battery": *data.Battery, "address": data.Address, "rssi": data.RSSI}),
-		}); err != nil {
-			log.Error(err, "Failed to record battery.low event", "device_id", deviceID)
-		}
+		rec("battery.low", "battery", "warn", map[string]any{"battery": *data.Battery, "address": data.Address, "rssi": data.RSSI})
 	}
 
 	// Temperature (0x02) → tracker only
@@ -327,6 +308,13 @@ func handleBLUEventBridge(ctx context.Context, log logr.Logger, payload []byte, 
 			log.Error(err, "Failed to observe BLU humidity", "device_id", deviceID)
 		}
 	}
+}
+
+func pidOrZero(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // handleBLUEvent returns (deviceID, sensors, error).

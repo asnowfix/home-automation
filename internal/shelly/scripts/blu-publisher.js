@@ -89,7 +89,11 @@ var STATE = {
   // KVS keys are set externally via "myhome ctl blu publish" command
   // Each followed MAC has its own KVS key: publish/shelly-blu/<mac>
   // Empty map = publish ALL BLU events (no filtering)
-  follows: {}
+  follows: {},
+  // This publisher's own device id, read once at start by readRelayId() and
+  // added to every published payload as "relay" so the daemon can tell which
+  // relays heard one advertisement (#850). Empty = unknown, key omitted.
+  relay: ""
 };
 
 // Polyfill for print function
@@ -120,6 +124,22 @@ function log() {
     if (i + 1 < arguments.length) s += " ";
   }
   print(SCRIPT_PREFIX, s);
+}
+
+/**
+ * Reads this device's id once; never throws (called from init).
+ */
+function readRelayId() {
+  try {
+    var info = Shelly.getDeviceInfo();
+    if (info && "id" in info) {
+      STATE.relay = String(info.id);
+    }
+  } catch (e) {
+    log("Error reading device id:", e);
+    // Ensure 'e' is referenced so the minifier doesn't drop it and produce `catch {}`
+    if (e && false) {}
+  }
 }
 
 function getFollows() {
@@ -601,6 +621,10 @@ function emitData(data) {
       }
     }
     
+    if (STATE.relay) {
+      publishData.relay = STATE.relay;
+    }
+
     try {
       var payload = JSON.stringify(publishData);
       log("Publishing event via MQTT on topic: ", topic, "payload: ", payload);
@@ -746,6 +770,7 @@ function subscribeKvsEvents() {
 // Init, only if the Shelly object is available
 if (typeof Shelly !== "undefined") {
   log("Script starting...");
+  readRelayId();
   loadFollowsFromKVS();
   initBLEScanner();
   subscribeKvsEvents();

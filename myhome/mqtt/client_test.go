@@ -31,7 +31,6 @@ func (t *fakePahoToken) Error() error                      { return nil }
 type fakePahoClient struct {
 	mu             sync.Mutex
 	failSubscribes int // next N Subscribe calls fail with a token error
-	publishToken   pahomqtt.Token // Publish returns this instead of a completed token (nil: completed)
 	subscribed     []string
 	unsubscribed []string
 	handlers     map[string]pahomqtt.MessageHandler
@@ -41,14 +40,7 @@ func (f *fakePahoClient) IsConnected() bool                                     
 func (f *fakePahoClient) IsConnectionOpen() bool                                             { return true }
 func (f *fakePahoClient) Connect() pahomqtt.Token                                            { return &fakePahoToken{} }
 func (f *fakePahoClient) Disconnect(uint)                                                    {}
-func (f *fakePahoClient) Publish(string, byte, bool, interface{}) pahomqtt.Token {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.publishToken != nil {
-		return f.publishToken
-	}
-	return &fakePahoToken{}
-}
+func (f *fakePahoClient) Publish(string, byte, bool, interface{}) pahomqtt.Token             { return &fakePahoToken{} }
 func (f *fakePahoClient) Subscribe(topic string, _ byte, h pahomqtt.MessageHandler) pahomqtt.Token {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -369,7 +369,31 @@ The discipline that made this recoverable:
   `sudo systemctl enable --now myhome-db-backup.timer`. Also remove any local
   `myhome.service.d/` override (e.g. `no-runtime-max.conf`) and `systemctl daemon-reload`, or the
   packaged `RuntimeMaxSec` is silently overridden.
-- **A draft release is validated as a whole, through a real package installation.** Install the
+- **Test locally with a side instance before upgrading the NAS (default procedure since 2026-11-21).**
+  The NAS runs the house, so it is the last place to find out a release misbehaves. Before any
+  `dpkg -i` on it, have a **side agent** run the release as a **local side instance connected to
+  the home broker**, using the existing launcher and not a hand-made command line:
+  `python3 -I scripts/myhome-local-daemon.py`, run from a worktree checked out at the tag under
+  test (it builds that checkout). The launcher first mirrors the devices known by the main
+  instance (`ctl --instance myhome db export` from the main daemon over MQTT, read-only, then
+  `ctl --instance local db import` into the side instance's own database), then runs the daemon as
+  instance `local` with the #700 read-only flags (no auto-setup, no reconcile, no mDNS publishing,
+  no weather publisher...), so it does not write to devices. Never start a side daemon with a
+  hand-built command line: a default `daemon run` on the real broker runs every service, including
+  ones that act on devices and publish retained topics.
+  Measure what the change touches (e.g. how long the side daemon takes to answer `ctl` RPC, which
+  the launcher shows as its "not answering yet (n/20)" probe lines) and compare with the version
+  currently on the NAS. Do not try a loopback-only network namespace instead: the daemon's own MQTT
+  client resolves its broker through the mDNS resolver (`internal/myhome/net/resolver.go`), which
+  needs a default gateway and a multicast-capable interface, so startup fails (measured 2026-11-21;
+  `unshare -rn` is also refused on the maintainer's workstation).
+  Exceptions, where the real broker or proxy is the thing under test: changes to MQTT or proxy
+  behaviour. State the exception and its rollback (the previous release's `.deb`, checksum-verified)
+  before installing. Measured motivation, 2026-11-21: v0.14.1 installed on the NAS and its daemon
+  never answered `ctl` RPC for 15 minutes (v0.14.0 answered in ~80 s), which took a rollback to
+  find out.
+- **A draft release is validated as a whole, through a real package installation** — once the local
+  test above is green. Install the
   draft's `.deb` for the host's architecture (`dpkg -i`, `DEBIAN_FRONTEND=noninteractive`, after
   verifying its checksum) and run the postinst follow-ups above. Do not validate a draft by
   hand-copying its binary, units or scripts, and do not skip or "preview away" parts of the install:

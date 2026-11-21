@@ -61,6 +61,8 @@ type harness struct {
 	prod  *Producer
 	base  string
 	topic string
+	// prodGrace boots the core with the production startup grace instead of none.
+	prodGrace bool
 }
 
 func newHarness(t *testing.T, base string, start time.Time) *harness {
@@ -91,7 +93,11 @@ func (h *harness) boot() {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	ev, err := alert.NewEvaluator(context.Background(), logr.Discard(), h.pub, as, alert.WithClock(h.clk.Now), alert.WithGrace(0))
+	opts := []alert.Option{alert.WithClock(h.clk.Now)}
+	if !h.prodGrace {
+		opts = append(opts, alert.WithGrace(0))
+	}
+	ev, err := alert.NewEvaluator(context.Background(), logr.Discard(), h.pub, as, opts...)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -182,7 +188,6 @@ func TestRules_FireAndResolve(t *testing.T) {
 		{"R3 client_misconfigured", RuleAuthBroken, alert.Critical, 0, func(m map[string]any, _ time.Time) { set(m, "auth.state", "client_misconfigured") }},
 		{"R3b refresh_failing", RuleAuthRefresh, alert.Critical, 10 * time.Minute, func(m map[string]any, _ time.Time) { set(m, "auth.state", "refresh_failing") }},
 		{"R3c unknown 1h", RuleAuthUnknown, alert.Warning, time.Hour, func(m map[string]any, _ time.Time) { set(m, "auth.state", "unknown") }},
-		{"R3c absent auth", RuleAuthUnknown, alert.Warning, time.Hour, func(m map[string]any, _ time.Time) { delete(m, "auth") }},
 		{"R4 push errors", RuleSyncFailing, alert.Critical, 5 * time.Minute, failing},
 		{"R4 push errors masked by pulls", RuleSyncFailing, alert.Critical, 5 * time.Minute, func(m map[string]any, now time.Time) {
 			failing(m, now)
@@ -202,6 +207,14 @@ func TestRules_FireAndResolve(t *testing.T) {
 			set(m, "last_poll", ts(now.Add(-time.Minute)))
 		}},
 		{"R4 poll stuck", RuleSyncFailing, alert.Critical, 5 * time.Minute, func(m map[string]any, now time.Time) { set(m, "last_poll", ts(now.Add(-20*time.Minute))) }},
+		{"R6 local_root guard", RuleRootBlocked, alert.Critical, 5 * time.Minute, func(m map[string]any, now time.Time) {
+			set(m, "state", "root_blocked")
+			set(m, "guards.local_root", map[string]any{"reason": "marker_missing", "since": ts(now)})
+		}},
+		{"R6 root_blocked state alone", RuleRootBlocked, alert.Critical, 5 * time.Minute, func(m map[string]any, _ time.Time) { set(m, "state", "root_blocked") }},
+		{"R7 bisync deletes guard", RuleDeletesBlocked, alert.Critical, 0, func(m map[string]any, now time.Time) {
+			set(m, "guards.bisync_deletes", map[string]any{"reason": "threshold", "planned": 412, "threshold": 100, "since": ts(now)})
+		}},
 		{"R5 bisync error", RuleBisync, alert.Warning, 0, func(m map[string]any, _ time.Time) {
 			set(m, "bisync.result", "error")
 			set(m, "bisync.error", "boom: /home/u/Drive/a.txt")
@@ -235,7 +248,7 @@ func TestRules_FireAndResolve(t *testing.T) {
 					doc = d
 				}
 			}
-			if doc.Severity != tt.sev || doc.Source != AlertSource || doc.Key != "testhost-testuser" || doc.Labels["subject"] != "homedrive:testhost/testuser" {
+			if doc.Severity != tt.sev || doc.Source != AlertSource || doc.Key != alertKey(Key{"testhost", "testuser"}) || doc.Labels["subject"] != "homedrive:testhost/testuser" {
 				t.Errorf("document = %+v", doc)
 			}
 			if !strings.Contains(doc.Summary, "testuser@testhost") {
@@ -253,8 +266,14 @@ func TestRules_FireAndResolve(t *testing.T) {
 			if h.pub.count(tt.rule, alert.Resolved) != 1 {
 				t.Fatalf("%s resolved = %d, want 1; docs %+v", tt.rule, h.pub.count(tt.rule, alert.Resolved), h.pub.docs)
 			}
-			if r := h.pub.docs[len(h.pub.docs)-1]; r.Since != doc.Since || r.Ended < r.Since {
+			r := h.pub.docs[len(h.pub.docs)-1]
+			if r.Since != doc.Since || r.Ended < r.Since {
 				t.Errorf("resolve %+v does not close episode since=%d", r, doc.Since)
+			}
+			for _, ar := range alertRules() {
+				if ar.Name == tt.rule && r.Detail != ar.cleared {
+					t.Errorf("resolved detail = %q, want %q", r.Detail, ar.cleared)
+				}
 			}
 		})
 	}
@@ -271,7 +290,10 @@ func TestRules_DoNotFire(t *testing.T) {
 			set(m, "counts.1h.errors_up", 7)
 			set(m, "last_error.ts", ts(now.Add(-time.Minute)))
 			set(m, "last_push", ts(now))
+			set(m, "last_activity", ts(now))
 		}},
+		{"absent auth (not reported yet, #142)", func(m map[string]any, _ time.Time) { delete(m, "auth") }},
+		{"null auth", func(m map[string]any, _ time.Time) { set(m, "auth", nil) }},
 		{"4 errors", func(m map[string]any, now time.Time) {
 			set(m, "counts.1h.errors", 4)
 			set(m, "counts.1h.errors_up", 4)
@@ -367,9 +389,13 @@ func TestRules_ContentFreezesWhileOffline(t *testing.T) {
 
 func TestRules_UnsupportedSchemaOnlyLiveness(t *testing.T) {
 	h := newHarness(t, "schema_3_0.json", runningStart)
-	h.run(90*time.Minute, true, nil)
+	h.run(50*time.Minute, true, nil)
 	if len(h.pub.docs) != 0 {
 		t.Fatalf("alert from an unsupported schema's contents: %+v", h.pub.docs)
+	}
+	h.run(30*time.Minute, true, nil) // past 1 h: one warning says the alerts are paused, nothing else
+	if got := h.pub.firedRules(); strings.Join(got, ",") != RuleSchema {
+		t.Fatalf("fired %v, want only %s", got, RuleSchema)
 	}
 }
 
@@ -383,7 +409,7 @@ func TestRestart_KeepsForClockNoDuplicateAndResolves(t *testing.T) {
 		t.Fatalf("fired early: %+v", h.pub.docs)
 	}
 	h.shutdown()
-	h.clk.Add(time.Minute) // the 2-day restart is quick
+	h.clk.Add(time.Minute) // the restart takes a minute
 	h.boot()
 	h.run(2*time.Minute, true, refresh) // 9 min of the condition so far: not yet
 	if len(h.pub.docs) != 0 {
@@ -421,6 +447,8 @@ func TestRules_ContractFixtures(t *testing.T) {
 		{"contract/status-error.json", time.Date(2026, 11, 15, 12, 40, 10, 0, time.UTC), []string{RuleRestartLoop}},
 		{"contract/status-auth-failure.json", time.Date(2026, 11, 15, 12, 45, 10, 0, time.UTC), []string{RuleAuthBroken, RuleSyncFailing}},
 		{"contract/status-running.json", runningStart, nil},
+		{"contract/status-root-blocked.json", time.Date(2026, 11, 15, 12, 33, 23, 0, time.UTC), []string{RuleRootBlocked}},
+		{"contract/status-delete-blocked.json", time.Date(2026, 11, 15, 12, 33, 23, 0, time.UTC), []string{RuleDeletesBlocked}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -448,20 +476,28 @@ func TestRules_RestartLoopDetailNamesOpOnly(t *testing.T) {
 
 // A host named like an IP or a MAC must not wedge the alert: the summary falls back to a generic name.
 func TestRules_HostileInstanceNameFallsBack(t *testing.T) {
-	for _, host := range []string{"203.0.113.20", "aa-bb-cc-dd-ee-ff", "Host_Mixed.Case"} {
-		t.Run(host, func(t *testing.T) {
+	tests := []struct {
+		host     string
+		fallback bool
+	}{
+		{"203.0.113.20", true},
+		{"aa-bb-cc-dd-ee-ff", true},
+		{"Host_Mixed.Case", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
 			h := newHarness(t, running, runningStart)
-			h.topic = "homedrive/" + host + "/fix/status"
+			h.topic = "homedrive/" + tt.host + "/fix/status"
 			h.run(time.Minute, true, func(m map[string]any, _ time.Time) { set(m, "auth.state", "token_invalid") })
 			if h.pub.count(RuleAuthBroken, alert.Firing) != 1 {
 				t.Fatalf("docs %+v", h.pub.docs)
 			}
 			d := h.pub.docs[0]
-			if d.Key != alertKey(Key{host, "fix"}) || d.Key != strings.ToLower(d.Key) {
+			if d.Key != alertKey(Key{tt.host, "fix"}) || d.Key != strings.ToLower(d.Key) {
 				t.Errorf("key = %q", d.Key)
 			}
-			if strings.Contains(host, "1") && !strings.Contains(d.Summary, "on an instance") {
-				t.Errorf("summary %q should not carry the host", d.Summary)
+			if fb := strings.Contains(d.Summary, "on an instance"); fb != tt.fallback {
+				t.Errorf("summary %q: fallback = %v, want %v", d.Summary, fb, tt.fallback)
 			}
 		})
 	}
@@ -475,8 +511,10 @@ func TestAlertRules_NamesAndPolicy(t *testing.T) {
 		RuleOffline: {alert.Critical, 0}, RuleRestartLoop: {alert.Critical, 0}, RuleAuthBroken: {alert.Critical, 0},
 		RuleAuthRefresh: {alert.Critical, 10 * time.Minute}, RuleAuthUnknown: {alert.Warning, time.Hour},
 		RuleSyncFailing: {alert.Critical, 5 * time.Minute}, RuleBisync: {alert.Warning, 0},
+		RuleRootBlocked: {alert.Critical, 5 * time.Minute}, RuleDeletesBlocked: {alert.Critical, 0},
+		RuleSchema: {alert.Warning, time.Hour},
 	}
-	rules := AlertRules()
+	rules := alertRules()
 	if len(rules) != len(want) {
 		t.Fatalf("%d rules, want %d", len(rules), len(want))
 	}

@@ -75,28 +75,29 @@ func TestHomedrivePanel_States(t *testing.T) {
 		return []byte(strings.Replace(running, `"state": "running"`, `"state": "`+s+`"`, 1))
 	}
 	tests := []struct {
-		name  string
-		doc   []byte
-		after time.Duration // clock advance since the cache started
-		class string
-		text  string
-		want  []string
+		name    string
+		doc     []byte
+		after   time.Duration // clock advance since the cache started
+		class   string
+		text    string
+		want    []string
+		notWant []string
 	}{
-		{"online", driveDoc(t, "running.json"), 0, "is-success", "Online", []string{"testuser@testhost", "Status 10 s ago (14:32)", "Version v0.2.0", "up 3 d 2 h", "State running", "Google auth ok (refreshed 13:40)"}},
-		{"starting", withState("starting"), 0, "is-light", "Starting", nil},
-		{"paused", withState("paused"), 0, "is-light", "Paused", nil},
-		{"stale", driveDoc(t, "running.json"), 2 * time.Minute, "is-light", "Stale", []string{"Status 2 min ago"}},
-		{"offline", driveDoc(t, "running.json"), 16 * time.Minute, "is-danger", "Offline", []string{"Status 16 min ago", "Last error push"}},
-		{"state error", driveDoc(t, "error.json"), 0, "is-danger", "Error", []string{"startup"}},
-		{"auth problem", driveDoc(t, "auth_token_invalid.json"), 0, "is-danger", "Auth problem", []string{"Google auth token_invalid", "has-text-danger", "Dry run"}},
-		{"stale with a state error", driveDoc(t, "error.json"), 2 * time.Minute, "is-danger", "Error (stale)", nil},
-		{"stale with an auth problem", driveDoc(t, "auth_token_invalid.json"), 2 * time.Minute, "is-danger", "Auth problem (stale)", nil},
-		{"root blocked", driveDoc(t, "contract/status-root-blocked.json"), contractAfter, "is-danger", "Sync blocked", []string{"State root_blocked", "Sync paused: local folder is not the synced tree (marker missing)"}},
-		{"root blocked and stale", driveDoc(t, "contract/status-root-blocked.json"), contractAfter + 2*time.Minute, "is-danger", "Sync blocked (stale)", nil},
-		{"deletes held", driveDoc(t, "contract/status-delete-blocked.json"), contractAfter, "is-warning", "Deletes held", []string{"Bisync deletes held: 412 planned, limit 100"}},
-		{"contract running has no guard line", driveDoc(t, "contract/status-running.json"), contractAfter, "is-success", "Online", nil},
-		{"unsupported", driveDoc(t, "schema_3_0.json"), 0, "is-light", "Unsupported schema", []string{"Unsupported homedrive status schema", "schema 3.0"}},
-		{"degraded", driveDoc(t, "schema_2_7_extra.json"), 0, "is-warning", "quota_blocked", nil},
+		{"online", driveDoc(t, "running.json"), 0, "is-success", "Online", []string{"testuser@testhost", "Status 10 s ago (14:32)", "Version v0.2.0", "up 3 d 2 h", "State running", "Google auth ok (refreshed 13:40)"}, nil},
+		{"starting", withState("starting"), 0, "is-light", "Starting", nil, nil},
+		{"paused", withState("paused"), 0, "is-light", "Paused", nil, nil},
+		{"stale", driveDoc(t, "running.json"), 2 * time.Minute, "is-light", "Stale", []string{"Status 2 min ago"}, nil},
+		{"offline", driveDoc(t, "running.json"), 16 * time.Minute, "is-danger", "Offline", []string{"Status 16 min ago", "Last error push"}, nil},
+		{"state error", driveDoc(t, "error.json"), 0, "is-danger", "Error", []string{"startup"}, nil},
+		{"auth problem", driveDoc(t, "auth_token_invalid.json"), 0, "is-danger", "Auth problem", []string{"Google auth token_invalid", "has-text-danger", "Dry run"}, nil},
+		{"stale with a state error", driveDoc(t, "error.json"), 2 * time.Minute, "is-danger", "Error (stale)", nil, nil},
+		{"stale with an auth problem", driveDoc(t, "auth_token_invalid.json"), 2 * time.Minute, "is-danger", "Auth problem (stale)", nil, nil},
+		{"root blocked", driveDoc(t, "contract/status-root-blocked.json"), contractAfter, "is-danger", "Sync blocked", []string{"State root_blocked", `has-text-danger">Sync paused: local folder is not the synced tree (marker missing)`}, nil},
+		{"root blocked and stale", driveDoc(t, "contract/status-root-blocked.json"), contractAfter + 2*time.Minute, "is-danger", "Sync blocked (stale)", nil, nil},
+		{"deletes held", driveDoc(t, "contract/status-delete-blocked.json"), contractAfter, "is-warning", "Deletes held", []string{`has-text-warning-dark">Bisync deletes held: 412 planned, limit 100`}, []string{"Sync paused", "has-text-danger"}},
+		{"contract running has no guard line", driveDoc(t, "contract/status-running.json"), contractAfter, "is-success", "Online", nil, []string{"Sync paused", "Bisync deletes held", "has-text-danger", "has-text-warning"}},
+		{"unsupported", driveDoc(t, "schema_3_0.json"), 0, "is-light", "Unsupported schema", []string{"Unsupported homedrive status schema", "schema 3.0"}, nil},
+		{"degraded", driveDoc(t, "schema_2_7_extra.json"), 0, "is-warning", "quota_blocked", nil, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,6 +109,11 @@ func TestHomedrivePanel_States(t *testing.T) {
 			for _, w := range tt.want {
 				if !strings.Contains(html, w) {
 					t.Errorf("missing %q", w)
+				}
+			}
+			for _, w := range tt.notWant {
+				if strings.Contains(html, w) {
+					t.Errorf("unexpected %q", w)
 				}
 			}
 			if strings.Contains(html, "title=") {
@@ -153,7 +159,10 @@ func TestGuardLines(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := guardLines(tt.g)
+			var got []string
+			for _, l := range guardLines(tt.g) {
+				got = append(got, l.Text)
+			}
 			if strings.Join(got, "|") != strings.Join(tt.want, "|") {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}

@@ -52,7 +52,7 @@ func TestParse_FixturesMatchContract(t *testing.T) {
 // The files in testdata/contract are copied VERBATIM from the producer:
 // github.com/asnowfix/home-drive, branch issue-141-status-v2, path
 // homedrive/pkg/homedrive/testdata/status-{running,error,auth-failure,
-// root-blocked,delete-blocked}.json (schema 2.1, PR #144 head 23b6dcf or newer). Re-copy them when the contract changes; this test then fails if the
+// root-blocked,delete-blocked}.json (schema 2.1, PR #144 commit 42f88c2). Re-copy them when the contract changes; this test then fails if the
 // copied structs lack a field the producer emits.
 func TestParse_ProducerDocumentsPinned(t *testing.T) {
 	tests := []struct {

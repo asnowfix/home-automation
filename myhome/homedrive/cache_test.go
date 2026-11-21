@@ -579,12 +579,12 @@ func TestCache_ConcurrentAccess(t *testing.T) {
 // survive a restart through the persisted raw document.
 func TestCache_GuardOverlays(t *testing.T) {
 	tests := []struct {
-		file                          string
-		rootBlocked, deletesHeld, deg bool
+		file                     string
+		rootBlocked, deletesHeld bool
 	}{
-		{"contract/status-running.json", false, false, false},
-		{"contract/status-root-blocked.json", true, false, false},
-		{"contract/status-delete-blocked.json", false, true, false},
+		{"contract/status-running.json", false, false},
+		{"contract/status-root-blocked.json", true, false},
+		{"contract/status-delete-blocked.json", false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -598,7 +598,7 @@ func TestCache_GuardOverlays(t *testing.T) {
 			send(t, c, testTopic, fixture(t, tt.file))
 			check := func(v View) {
 				t.Helper()
-				if v.RootBlocked != tt.rootBlocked || v.DeletesHeld != tt.deletesHeld || v.Degraded != tt.deg || v.StateError {
+				if v.RootBlocked != tt.rootBlocked || v.DeletesHeld != tt.deletesHeld || v.Degraded || v.StateError {
 					t.Errorf("overlays = %+v", v)
 				}
 				if v.Status == nil || v.Status.Guards == nil {
@@ -618,23 +618,30 @@ func TestParse_FutureGuardValues(t *testing.T) {
 	base := string(fixture(t, "contract/status-running.json"))
 	tests := []struct {
 		name, from, to string
+		from2, to2     string // optional second replacement
 		degraded       bool
+		deletesHeld    bool
 	}{
-		{"unknown state", `"state": "running"`, `"state": "quota_blocked"`, true},
-		{"unknown root reason", `"local_root": null`, `"local_root": {"reason": "read_only", "since": "2026-11-15T12:30:04Z"}`, false},
-		{"unknown guard key", `"guards": {`, `"guards": {"quota": {"reason": "x"},`, false},
-		{"unknown deletes reason", `"bisync_deletes": null`, `"bisync_deletes": {"reason": "new", "planned": 1, "threshold": 2, "since": "2026-11-15T12:30:04Z"}`, false},
+		{"unknown state", `"state": "running"`, `"state": "quota_blocked"`, "", "", true, false},
+		{"unknown root reason", `"local_root": null`, `"local_root": {"reason": "read_only", "since": "2026-11-15T12:30:04Z"}`, "", "", false, false},
+		{"unknown guard key", `"guards": {`, `"guards": {"quota": {"reason": "x"},`, "", "", false, false},
+		{"unknown deletes reason", `"bisync_deletes": null`, `"bisync_deletes": {"reason": "new", "planned": 1, "threshold": 2, "since": "2026-11-15T12:30:04Z"}`, "", "", false, true},
+		{"unknown state with deletes guard", `"state": "running"`, `"state": "quota_blocked"`,
+			`"bisync_deletes": null`, `"bisync_deletes": {"reason": "threshold", "planned": 9, "threshold": 5, "since": "2026-11-15T12:30:04Z"}`, true, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			doc := strings.Replace(base, tt.from, tt.to, 1)
+			if tt.from2 != "" {
+				doc = strings.Replace(doc, tt.from2, tt.to2, 1)
+			}
 			if doc == base {
 				t.Fatal("fixture no longer contains the replaced text")
 			}
 			c, _ := newTestCache(t, &testClock{t: time.Date(2026, 11, 15, 12, 33, 23, 0, time.UTC)}, nil)
 			send(t, c, testTopic, []byte(doc))
 			v := only(t, c, time.Date(2026, 11, 15, 12, 33, 23, 0, time.UTC))
-			if v.Status == nil || v.Unsupported || v.Degraded != tt.degraded {
+			if v.Status == nil || v.Unsupported || v.Degraded != tt.degraded || v.DeletesHeld != tt.deletesHeld {
 				t.Errorf("view = %+v", v)
 			}
 		})

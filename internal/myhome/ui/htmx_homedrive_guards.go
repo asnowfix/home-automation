@@ -6,19 +6,26 @@ import (
 	"github.com/asnowfix/home-automation/myhome/homedrive"
 )
 
+// driveGuard is one guard line. Warn picks the warning colour (deletes held,
+// like its pill) instead of danger (root blocked).
+type driveGuard struct {
+	Text string
+	Warn bool
+}
+
 // guardLines turns the schema 2.1 guards into short human lines for the panel.
 // Codes and counts only (the contract carries no path); an unknown reason from
 // a newer producer gets a generic line rather than the raw code.
-func guardLines(g *homedrive.Guards) []string {
+func guardLines(g *homedrive.Guards) []driveGuard {
 	if g == nil {
 		return nil
 	}
-	var lines []string
+	var lines []driveGuard
 	if r := g.LocalRoot; r != nil {
-		lines = append(lines, "Sync paused: "+rootReasonText(r.Reason))
+		lines = append(lines, driveGuard{Text: "Sync paused: " + rootReasonText(r.Reason)})
 	}
 	if d := g.BisyncDeletes; d != nil {
-		lines = append(lines, "Bisync deletes held: "+deletesReasonText(d))
+		lines = append(lines, driveGuard{Text: "Bisync deletes held: " + deletesReasonText(d), Warn: true})
 	}
 	return lines
 }

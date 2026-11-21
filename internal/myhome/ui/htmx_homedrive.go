@@ -59,7 +59,7 @@ type driveCard struct {
 	Bisync      string
 	Local       string
 	Quota       string
-	Guards      []string // schema 2.1 guard lines, shown in the warning colour
+	Guards      []driveGuard // schema 2.1 guard lines, shown in the warning colour
 }
 
 // HomedrivePanel renders the Drive sync block of the System status sheet.
@@ -381,7 +381,7 @@ const homedrivePanelTemplate = `
   {{else}}
     <p class="mh-drive-line">Version {{.Version}} · {{.Uptime}} · State {{.State}}</p>
     <p class="mh-drive-line{{if .AuthProblem}} has-text-danger{{end}}">Google auth {{.Auth}}</p>
-    {{range .Guards}}<p class="mh-drive-line has-text-danger">{{.}}</p>
+    {{range .Guards}}<p class="mh-drive-line {{if .Warn}}has-text-warning-dark{{else}}has-text-danger{{end}}">{{.Text}}</p>
     {{end}}
     <table class="mh-drive-table">
       <thead><tr><th scope="col"></th><th scope="col">1 h</th><th scope="col">24 h</th><th scope="col">7 d</th></tr></thead>

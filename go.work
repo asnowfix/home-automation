@@ -37,6 +37,7 @@ use (
 	./myhome/devices/impl
 	./myhome/events
 	./myhome/fetchproxy
+	./myhome/homedrive
 	./myhome/mqtt
 	./myhome/notice
 	./myhome/notify

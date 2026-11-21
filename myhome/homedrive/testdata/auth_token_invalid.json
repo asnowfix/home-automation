@@ -1,0 +1,25 @@
+{
+  "schema": "2.0",
+  "ts": "2026-11-15T14:32:00Z",
+  "publish_interval_s": 30,
+  "version": "v0.2.0",
+  "state": "running",
+  "started_at": "2026-11-15T09:00:00Z",
+  "uptime_s": 19920,
+  "dry_run": true,
+  "pending_up": 12,
+  "last_push": "2026-11-15T09:10:00Z",
+  "last_pull": "2026-11-15T09:10:00Z",
+  "last_activity": "2026-11-15T09:10:00Z",
+  "last_poll": "2026-11-15T09:12:00Z",
+  "counts": {
+    "1h":  {"files_up": 0, "files_down": 0, "bytes_up": 0, "bytes_down": 0, "errors": 6, "conflicts": 0, "starts": 0},
+    "24h": {"files_up": 5, "files_down": 0, "bytes_up": 1000, "bytes_down": 0, "errors": 6, "conflicts": 0, "starts": 1},
+    "7d":  {"files_up": 5, "files_down": 0, "bytes_up": 1000, "bytes_down": 0, "errors": 6, "conflicts": 0, "starts": 1}
+  },
+  "last_error": {"ts": "2026-11-15T14:30:00Z", "op": "pull", "message": "oauth2: token expired and refresh token is not set"},
+  "auth": {"state": "token_invalid", "last_refresh_ok": "2026-11-15T09:12:00Z", "last_refresh_error": {"ts": "2026-11-15T09:42:00Z", "message": "invalid_grant"}},
+  "bisync": {"at": "2026-11-15T13:00:00Z", "result": "error", "duration_ms": 900, "files_changed": 0, "error": "auth"},
+  "local": {"files": 10, "bytes": 5000, "scanned_at": "2026-11-15T13:00:00Z"},
+  "quota_used_pct": 1
+}

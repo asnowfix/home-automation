@@ -131,6 +131,12 @@ var kiosk = {
 
   visible: function(name) { return this.section === name; },
 
+  // The System status sheet is open (DOM check, like the vacuum filter's predicate): gates the Drive sync poll.
+  statusOpen: function() {
+    var m = document.getElementById('status-sheet');
+    return !!m && m.classList.contains('is-active');
+  },
+
   // Room page (#764): open while a room id is shown. An SSE update for one of
   // its devices refreshes the page, coalesced to one GET per roomRefreshMs.
   roomOpen: false,

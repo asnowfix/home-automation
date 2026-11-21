@@ -1,0 +1,25 @@
+{
+  "schema": "2.0",
+  "ts": "2026-11-15T14:32:00Z",
+  "publish_interval_s": 30,
+  "version": "v0.2.0",
+  "state": "running",
+  "started_at": "2026-11-12T10:32:00Z",
+  "uptime_s": 266400,
+  "dry_run": false,
+  "pending_up": 0,
+  "last_push": "2026-11-15T14:20:00Z",
+  "last_pull": "2026-11-15T14:05:00Z",
+  "last_activity": "2026-11-15T14:20:00Z",
+  "last_poll": "2026-11-15T14:32:00Z",
+  "counts": {
+    "1h":  {"files_up": 3,   "files_down": 0,  "bytes_up": 1200000,    "bytes_down": 0,         "errors": 0, "conflicts": 0, "starts": 1},
+    "24h": {"files_up": 140, "files_down": 12, "bytes_up": 2100000000, "bytes_down": 30000000,  "errors": 2, "conflicts": 0, "starts": 1},
+    "7d":  {"files_up": 900, "files_down": 80, "bytes_up": 9400000000, "bytes_down": 410000000, "errors": 5, "conflicts": 1, "starts": 2}
+  },
+  "last_error": {"ts": "2026-11-15T13:58:00Z", "op": "push", "message": "googleapi: Error 403: rateLimitExceeded for /data/photos/2026/img_0001.jpg"},
+  "auth": {"state": "ok", "last_refresh_ok": "2026-11-15T13:40:00Z", "last_refresh_error": null},
+  "bisync": {"at": "2026-11-15T13:00:00Z", "result": "ok", "duration_ms": 42000, "files_changed": 3, "error": ""},
+  "local": {"files": 12345, "bytes": 81000000000, "scanned_at": "2026-11-15T13:00:00Z"},
+  "quota_used_pct": 63.2
+}

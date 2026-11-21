@@ -1,0 +1,79 @@
+{
+  "schema": "2.1",
+  "ts": "2026-11-15T12:45:00Z",
+  "publish_interval_s": 30,
+  "version": "v0.1.3",
+  "state": "running",
+  "started_at": "2026-11-15T08:00:02Z",
+  "uptime_s": 16391,
+  "dry_run": false,
+  "pending_up": 0,
+  "last_push": "2026-11-15T12:20:41Z",
+  "last_pull": "2026-11-15T11:58:09Z",
+  "last_activity": "2026-11-15T12:20:41Z",
+  "last_poll": "2026-11-15T12:10:03Z",
+  "counts": {
+    "1h": {
+      "files_up": 0,
+      "files_down": 0,
+      "bytes_up": 0,
+      "bytes_down": 0,
+      "errors": 40,
+      "errors_up": 0,
+      "errors_down": 40,
+      "conflicts": 0,
+      "starts": 1
+    },
+    "24h": {
+      "files_up": 41,
+      "files_down": 6,
+      "bytes_up": 73400320,
+      "bytes_down": 125829120,
+      "errors": 0,
+      "errors_up": 0,
+      "errors_down": 0,
+      "conflicts": 1,
+      "starts": 1
+    },
+    "7d": {
+      "files_up": 290,
+      "files_down": 52,
+      "bytes_up": 512000000,
+      "bytes_down": 900000000,
+      "errors": 4,
+      "errors_up": 3,
+      "errors_down": 1,
+      "conflicts": 2,
+      "starts": 3
+    }
+  },
+  "last_error": {
+    "ts": "2026-11-15T12:44:33Z",
+    "op": "poll",
+    "message": "oauth2: cannot fetch token: invalid_grant"
+  },
+  "bisync": {
+    "at": "2026-11-15T12:00:07Z",
+    "result": "ok",
+    "duration_ms": 8123,
+    "files_changed": 0
+  },
+  "local": {
+    "files": 18342,
+    "bytes": 52428800000,
+    "scanned_at": "2026-11-15T12:00:05Z"
+  },
+  "quota_used_pct": 61.4,
+  "guards": {
+    "local_root": null,
+    "bisync_deletes": null
+  },
+  "auth": {
+    "state": "token_invalid",
+    "last_refresh_ok": "2026-11-15T11:10:02Z",
+    "last_refresh_error": {
+      "ts": "2026-11-15T12:10:04Z",
+      "message": "oauth2: cannot fetch token: 400 Bad Request: invalid_grant"
+    }
+  }
+}

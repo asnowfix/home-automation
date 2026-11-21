@@ -26,7 +26,9 @@ type HTMXHandler struct {
 	db               DeviceRegistry
 	eventsSvc        *events.Service
 	accountsRegistry *accounts.Registry
-	sqlDB            *sqlx.DB // room agenda cache (room_agenda_cache); may be nil
+	sqlDB            *sqlx.DB         // room agenda cache (room_agenda_cache); may be nil
+	homedrive        HomedriveSource  // Drive sync panel source; may be nil
+	now              func() time.Time // clock for the panel; nil means time.Now
 }
 
 // NewHTMXHandler creates a new HTMX handler

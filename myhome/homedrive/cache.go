@@ -114,6 +114,7 @@ type Cache struct {
 	topicLog  time.Time
 	logged    map[Key]time.Time
 	capLogged bool
+	pinned    func(Key) bool // instances Prune must keep (open alerts); nil: none
 }
 
 // NewCache builds a Cache and loads the persisted instances, so a dead agent is
@@ -283,6 +284,14 @@ func (in *instance) row() Row {
 	return Row{Host: in.key.Host, User: in.key.User, LastTs: in.lastTs.Unix(), LastStatus: string(in.raw)}
 }
 
+// SetPinned registers a predicate for instances Prune must keep, because an alert is open for them:
+// forgetting an instance that is still offline would silently resolve its alerts.
+func (c *Cache) SetPinned(f func(Key) bool) {
+	c.mu.Lock()
+	c.pinned = f
+	c.mu.Unlock()
+}
+
 // Snapshot returns every known instance classified at now, sorted by host then
 // user. Empty means "never seen". It reads memory only.
 func (c *Cache) Snapshot(now time.Time) []View {
@@ -368,7 +377,7 @@ func (c *Cache) Prune(now time.Time) {
 	var gone []Key
 	c.mu.Lock()
 	for k, in := range c.instances {
-		if !in.lastTs.IsZero() && now.Sub(in.lastTs) > ForgetAfter {
+		if !in.lastTs.IsZero() && now.Sub(in.lastTs) > ForgetAfter && (c.pinned == nil || !c.pinned(k)) {
 			delete(c.instances, k)
 			gone = append(gone, k)
 		}

@@ -3,6 +3,11 @@
 Status: draft for owner review. A UI follow-up on the kiosk campaign branch `campaign/681-kiosk-ui`
 (#681), and the first slice of the alerting work in the observability epic #654.
 
+**Revision 2026-11-21.** Alerting is now a producer only (#835 as re-scoped by the contract #843).
+Sections 3 to 5 are revised accordingly; the goals, "Fit", the alternatives, the consequences and
+the PR plan further down still describe the earlier option A (own `Notifier`, Mailer move, reminders)
+and are superseded where they conflict: that delivery work is #714, #713 and #717.
+
 Evidence labels:
 - **(verified)**: read in code on branch `docs/homedrive-panel-design`, cut from
   `campaign/681-kiosk-ui`.
@@ -244,129 +249,145 @@ forever.
 
 ### 3. Alert rules (`myhome/homedrive/rules.go`, contract §7.4–§7.6)
 
-**When rules run.** On every evaluator tick (30 s), per instance. All rules are subject to the
-startup grace (§4).
-- **The content rules (R2–R5) freeze while the instance is offline or its schema is unsupported.**
-  They neither fire nor resolve from a document that may be hours old. R1 owns that case.
+**Revised 2026-11-21 (producer-only scope).** Per the owner-approved contract #843, homedrive is a
+**producer**: it evaluates the rules below, hands each reading to the shared core (§4), and the core
+publishes alert documents. Delivery (banner, email, WhatsApp) belongs to #713, #714 and #717 and is
+not part of this design.
 
-**What notifications contain.** Names, times and counts only, **never `last_error.message`**. The
-contract says it may contain a file path; a test asserts it is never included.
+**When rules run.** On every producer tick (`EvalEvery`, 30 s), per instance. All rules are subject
+to the core's startup grace (§4).
+- **The content rules (R2–R5) freeze while the instance is not online** (offline, stale, a schema
+  major we do not understand, or an unparsable persisted row). They neither fire nor resolve from a
+  document that may be hours old. R1 owns that case.
 
-| Rule | Trigger | `for` | Resolve (held 5 min) | Severity |
+**What alert documents contain.** Names, times and counts only, **never `last_error.message`**, a
+file name or a path (a test asserts it). `summary` is `homedrive <what>: <user>@<host>` (at most 100
+chars); `detail` is a fixed template (at most 400). Times are UTC. A `<user>@<host>` that would fail
+`Validate` (named like an IP or a MAC, say) falls back to `homedrive <what> on an instance`.
+`labels.subject` is `homedrive:<host>/<user>` and stays local. The alert key is a readable
+`[a-z0-9._-]` prefix of `<host>-<user>` (40 chars at most) plus 12 hex digits of a hash of the exact
+`(host, user)`, so two instances never share a fingerprint (`a-b`/`c` vs `a`/`b-c`, `Pi` vs `pi`).
+
+| Rule (alert `rule`) | Trigger | `for` | Resolve (held 5 min by the core) | Severity |
 |---|---|---|---|---|
-| R1 offline | classification = offline (§1) | 0 (the 15 min is the threshold) | a status with a fresh `ts` | critical |
-| R2 restart loop | `counts["1h"].starts >= 3` **or** `state == "error"` | 0 | `starts < 3` and `state != "error"` | critical |
-| R3 auth broken | `auth.state` ∈ {`client_missing`, `client_misconfigured`, `token_invalid`} | 0 | `auth.state == ok` | critical |
-| R3b auth refresh failing | `auth.state == refresh_failing` | 10 min | `auth.state == ok` | critical |
-| R3c auth unknown | `auth.state == unknown` and `state == running` | 60 min | `auth.state != unknown` | warning |
-| R4 sync failing | (`counts["1h"].errors >= 5` and `last_error.ts > last_activity`) **or** (`state == running` and `now − last_poll > 15 min`) | 5 min | condition false | critical |
-| R5 bisync safety net | `bisync.result == "error"`, or `bisync.at` (or `started_at` if `bisync` is null) older than 3 h | 0 | result ok and age < 3 h | warning |
+| R1 offline (`homedrive.offline`) | the last document is older than 15 min (§1). Judged from the document's age even right after a myhome restart; "counted from consumer start" applies only to an instance that has sent nothing yet | 0 (the 15 min is the threshold) | a fresh status | critical |
+| R2 restart loop (`homedrive.restart-loop`) | `counts["1h"].starts >= 3` **or** `state == "error"` | 0 | `starts < 3` and `state != "error"` | critical |
+| R3 auth broken (`homedrive.auth-broken`) | `auth.state` outside {`ok`, `unknown`, `refresh_failing`} (contract §7.5: anything not ok or unknown) | 0 | `auth.state == ok` | critical |
+| R3b auth refresh failing (`homedrive.auth-refresh`) | `auth.state == refresh_failing` | 10 min | `auth.state == ok` | critical |
+| R3c auth unknown (`homedrive.auth-unknown`) | an explicit `auth.state == unknown` while `state` is `running` or `starting` (an absent or null `auth` never fires, see below) | 60 min | `auth.state != unknown` | warning |
+| R4 sync failing (`homedrive.sync-failing`) | failing with no success since (below) **or** (`state == running` and `now − last_poll > 15 min`; `started_at` when no poll yet) | 5 min | condition false | critical |
+| R5 bisync safety net (`homedrive.bisync`) | `bisync.result == "error"`, or `bisync.at` (or `started_at` if `bisync` is null) older than 3 h; not while `state` is `paused` or `root_blocked` | 0 | result ok and age < 3 h | warning |
+| R6 local root blocked (`homedrive.root-blocked`) | schema 2.1 `guards.local_root != null` or `state == "root_blocked"` | 5 min | guard clears | critical |
+| R7 bisync deletes blocked (`homedrive.deletes-blocked`) | schema 2.1 `guards.bisync_deletes != null` | 0 | guard clears (released with `ctl allow-deletes`, or nothing left to veto) | critical |
+| R8 schema unsupported (`homedrive.schema`) | the instance is online on a schema major myhome does not understand | 60 min | a supported schema | warning |
 
+- **R1 and a restart of homedrive.** A normal restart or deploy of homedrive (seconds to a couple of
+  minutes of silence) never reaches the 15 min threshold, so it never alerts. The core's `for` is not
+  used for R1, because the classification already is the 15 min hold-off; adding a `for` would make
+  it 30 min.
 - **R2 is the incident's rule.** `counts` is persisted by homedrive, so it does not depend on
-  myhome having seen each attempt (contract §7.4). For that reason the contract's third signal,
-  "`started_at` changed 3 times in 30 min as seen by the consumer", is not implemented: it needs
-  in-memory history that myhome's own restarts erase, and it adds nothing to `counts`. The 1 h
-  window means R2 resolves up to 1 h after the loop stops. That is accepted, and the panel shows
-  "running" meanwhile.
-- **"Repeated" (R4)** means at least 5 final failures in the last hour, after retries (contract
-  §5.1: an `Outcome.Err` is a final failure), with no success of any kind since the latest one.
-  Or: the pull loop has made no successful Changes poll for 15 min. R4 uses the contract's `for`,
-  plus 5 min to absorb one bad poll cycle.
-  - Known weakness: `last_activity` covers both directions, so steady push failures interleaved
-    with pull successes keep resetting the condition (request 2 in §9).
+  myhome having seen each attempt (contract §7.4). The contract's third signal, "`started_at`
+  changed 3 times in 30 min as seen by the consumer", is not implemented: it needs in-memory history
+  that myhome's own restarts erase, and it adds nothing to `counts` (this omission is deliberate). The 1 h window means R2 resolves
+  up to 1 h after the loop stops. Three deploys within an hour also trip it; that is accepted.
+- **R4 "failing with no success since" (contract §7.6)** has three parts, any of which fires it:
+  - the contract's total rule, kept as the floor: `counts["1h"].errors >= 5` and `last_error.ts` after
+    `last_activity`. It covers errors with no direction (a failed bisync pass, a conflict) and a 3 + 3
+    split;
+  - push: `errors_up >= 5`, `last_error.op` is a push op, and `last_error.ts` after `last_push`;
+  - pull: `errors_down >= 5` and `last_error.ts` after the success clock of the op: `last_poll` for
+    `poll`, `last_pull` for the download and delete ops. So steady push failures are not masked by pull
+    successes, and steady download failures are not masked by successful Changes polls.
+
+  `last_error` is a single value, so a direction is only judged when it is the direction of the last
+  failure; this is approximate by construction. The detail names the direction that matched. The
+  5 min `for` absorbs one bad poll cycle.
 - **R3b uses a 10 min `for`, where the contract says "immediately".** `refresh_failing` comes from
   an `oauth2.RetrieveError`, which may be a transient Google 5xx (inferred; request 3 in §9). The
   definitive states (R3) stay immediate.
+- **R3c and an absent `auth`.** status-v2 §12 says an absent `auth` is to be treated as `unknown`, but
+  until home-drive#142 ships the NAS publishes `auth: null` on every document, and reading that as
+  `unknown` would raise a warning an hour after every deployment. So R3c fires only on an explicit
+  `unknown`; an absent or null `auth` means "not reported yet" and raises nothing. `starting` counts
+  as up so a homedrive restart does not reset the 1 h clock.
+- **R8 and an unsupported major.** §7.8 asks for no alert from contents myhome cannot read, so open
+  content alerts of such an instance stay frozen. They would otherwise hang silently, so R8 raises one
+  warning (after 1 h on the unknown major) saying that the instance's alerts are paused. It resolves
+  when the schema is supported again, and the frozen alerts then resolve or continue normally.
+- **Warning severity** (R3c, R5, R8) reaches the **banner only**, the #843 default; email for warnings
+  would be a #843 question.
 - **Quota** has no rule. The quota manager is not wired (contract §1), and exhaustion would show up
   as R4 anyway.
+- **Known limits.**
+  - **An instance myhome has never seen cannot be reported offline.** R1 judges the age of a document
+    it has; with none (homedrive never published since myhome first ran, or its row is gone) there
+    is nothing to judge. Detecting it needs a configured list of expected instances, which is new
+    scope. The persisted cache covers the restart case once an instance has been seen.
+  - **An instance with an open alert is never pruned.** The cache forgets an instance unseen for
+    30 days, which would make the core resolve its alerts silently, so `Prune` keeps any instance with
+    a firing or resolving alert. The consequence: a decommissioned homedrive stays offline-alerting
+    until its row is deleted from `myhome.db` (`homedrive_instances`) and myhome is restarted, or
+    the alert is otherwise cleared (a future ack, #843 non-goal).
+  - **A daemon restart during an outage keeps the alert.** R1 reads the last document's age, not the
+    process start, so the restart neither resolves nor re-fires it.
 
-**Message texts** (subject / first line):
-- R1: `[myhome] homedrive offline: <user>@<host>` / `No status since 14:32 (16 min). See System status on the kiosk.`. Resolved: `homedrive <user>@<host> reporting again after 2 h 10 min.`
-- R2: `[myhome] homedrive restart loop: <user>@<host>` / `4 starts in the last hour; state error; last failing step: startup.` (the `op` only).
-- R3/R3b: `[myhome] homedrive needs Google sign-in: <user>@<host>` / `Auth state token_invalid since 09:12. Re-authorise homedrive on the NAS.`
-- R4: `[myhome] homedrive sync failing: <user>@<host>` / `7 failures in the last hour, none succeeded since 13:12. Last failing step: push.`
-- R5: `[myhome] homedrive bisync not healthy: <user>@<host>` / `Last bisync 09:00: error.`
+- **Guard rules R6 and R7 (schema 2.1, home-drive#144).** Both mean sync is deliberately not making
+  progress and needs a human, and nothing else will say so, so both are critical. R6 has a 5 min
+  `for` because a mount that is not ready yet at boot looks like `missing` and clears on its own.
+  R7 has none: a held-back mass deletion is the data-loss hazard the guard exists for, and it does
+  not clear until released. The texts carry the reason code and the counts only. Against a 2.0
+  producer, `guards` is absent and neither rule fires.
 
-### 4. Evaluator: `myhome/alert` (new workspace module; the first slice of #712)
+**Message texts** (summary / first line of detail):
+- R1: `homedrive offline: <user>@<host>` / `No status since 14:32 UTC (16 min).` Resolved: `homedrive is reporting again.`
+- R2: `homedrive restart loop: <user>@<host>` / `4 starts in the last hour; state error. Last failing step: startup.` (the `op` only, and only if it looks like an op name).
+- R3: `homedrive needs Google sign-in: <user>@<host>` / `Auth state token_invalid. Re-authorise homedrive on its host.`
+- R3b: `homedrive cannot refresh its Google token: <user>@<host>` / `Auth state refresh_failing. Check the network and the Google account.`
+- R3c: `homedrive Google sign-in unverified: <user>@<host>` / `Auth state still unknown while running.`
+- R4: `homedrive sync failing: <user>@<host>` / `7 failures in the last hour, none succeeded since. Last failing step: push.`
+- R5: `homedrive bisync not healthy: <user>@<host>` / `Last bisync at 09:00 UTC failed.`
+- R6: `homedrive local root blocked: <user>@<host>` / `Sync is paused: the local root is not the synced tree (marker_missing).`
+- R7: `homedrive bisync deletes blocked: <user>@<host>` / `Bisync held back 412 deletions (limit 100, threshold). Review them, then release with allow-deletes.`
 
-**Interfaces.**
-- `Rule { Name() string; Evaluate(now) []Signal }`, with `Signal{Key, Active, Frozen, Severity, Summary, Detail}`.
-- `Notifier { Notify(ctx, Notification) error }`, with `Notification{Rule, Key, Severity, Kind (firing|resolved|reminder|forgotten), Summary, Detail, Since}`.
-- `MailNotifier` adapts a `notify.Mailer`: subject = `Summary`, body = `Detail`.
-- `Multi` fans out to several notifiers. #717 adds a WhatsApp notifier that sends `Summary` only,
-  because CallMeBot puts the text in a query string (study §6).
+### 4. The shared alert core: `myhome/alert` (#845, PR #846)
 
-**State machine, per (rule, key).** inactive → pending (`for` running) → firing → resolving (hold)
-→ inactive. These are the study's §6 states. "Resolved" is emitted as a notification on the way
-back. While `Frozen`, the state does not move.
+The state machine is **not** written here. It is the shared core of #845, which this producer
+configures and feeds; this section records only how homedrive uses it.
 
-**De-duplication.**
-- One firing notification per episode.
-- A reminder every 24 h while firing (Open question 3).
-- One resolved notification, **only if the firing notification was delivered**. A firing that was
-  never delivered and then resolved sends nothing.
-
-**Flapping.** `for` absorbs short blips. The 5-min resolve hold stops fire, resolve, fire
-sequences: a condition that comes back during the hold continues the same episode.
-
-**Persistence.** Table `alert_state` in `myhome.db`:
-
-```
-alert_state(rule, key, state, pending_since, firing_since, inactive_since,
-            last_notified, delivered, next_attempt, PRIMARY KEY(rule, key))
-```
-
-- It is written only on transitions and on send attempts.
-- At startup, open pending and firing episodes are restored with their timestamps, as Prometheus
-  restores `for` state. A restart neither re-sends a firing notification nor resets a `for` clock.
-
-**Startup grace: 10 min** (the study's estimate).
-- The evaluator runs and transitions during the grace, but **new** firing notifications are held
-  until it ends, and dropped if their condition clears first.
-- Restored episodes keep their reminder schedule.
-- Resolved notifications go out at once.
-- In practice this matters for R2–R5. R1 cannot fire before 15 min after start anyway.
-
-**Delivery failure.**
-- The episode keeps `delivered=false` and gets a persisted `next_attempt`. Backoff starts at 1 min,
-  doubles, and is capped at 30 min.
-- Sends run on the evaluator goroutine, with the Mailer's 10 s timeout (`mailer.go:51-53`), never
-  in the MQTT handler.
-- #714 later replaces this with a real queue behind the same `Notifier`.
-
-**Kiosk trace.** When `events.Service` runs, each firing or resolved transition is also recorded:
-- `component=alert`;
-- `event=alert.firing` or `alert.resolved`;
-- severity `warn` or `info`;
-- `device_id=homedrive:<host>/<user>`.
-
-It then shows live in the Events section, survives the volatile journal, and gives #713 its data.
-The panel's "Alert" line reads the evaluator's `Snapshot()`.
+- **Interfaces used.** `alert.Rule{Name, Source, Severity, For, Hold}` per rule;
+  `alert.Observation{Key, Active, Frozen, Summary, Detail, Labels}` per instance and tick;
+  `Evaluator.Eval(ctx, rule, observations)`; `alert.NewMQTTPublisher`. homedrive's `Producer`
+  builds one observation per known instance and rule, with `Frozen` set for a content rule while
+  the instance is not online (§3).
+- **What the core owns:** the states (inactive, pending, firing, resolving), `for`, the 5 min resolve
+  hold, the 10 min startup grace, `alert_state` in `myhome.db` (so a `for` clock survives the 2-day
+  restart and a restart neither re-fires an open alert nor loses its resolve), publish-then-persist,
+  and `Validate` on every document. See #843 for the contract.
+- **What the producer owns:** the conditions, the texts, and its own inputs: the homedrive cache
+  already persists every instance in `myhome.db` (§1), as #843 asks of a producer.
+- **No channel in this producer.** It publishes on `<instance>/alert/<rule>/<key>` (QoS 1, not
+  retained) and knows nothing about email, the banner or WhatsApp. **Reminders, send retries with
+  backoff, resolve-only-if-delivered, the `events.db` trace and the banner's open set are delivery's
+  (#714, #713)**, which subscribes to those topics. The panel's "Alert" line can read
+  `Evaluator.Snapshot()`.
+- **Without delivery**, the documents go to a broker topic nobody subscribes to: nothing is sent.
+  That is the state until #714 lands.
 
 ### 5. Daemon wiring (`myhome/daemon/daemon.go`)
 
-- **Build the Mailer outside the notice branch.** Build `reportingMailer{notify.New(...)}` once,
-  before the notice block (`daemon.go:421-432` moves up). Pass the same value to
-  `notice.NewService` and to `alert.NewMailNotifier`.
-  - `notify.New` returns the no-op Mailer when `smtp.from` is empty (`mailer.go:46-50`), so this is
-    safe with no configuration.
-  - `accountsRegistry.SetEnabled("smtp", …)` moves too, so SMTP status shows in Accounts with the
-    notice service off.
-- Create the homedrive cache and subscribe before `mc.Start()`. Start the evaluator after storage
-  is open, with the homedrive rules registered.
+- The homedrive cache and its subscription are created before `mc.Start()` (§1).
+- The alert store, evaluator and producer are built before the cache's `Run` starts (the cache's
+  prune must know which instances have an open alert). The producer **runs** only after `mc.Start()`
+  (the contract's wiring rule: delivery subscribes first, producers start after), and the daemon waits
+  for it at shutdown like for the cache, so a tick never persists into a closed storage.
+- A failure to open the alert state disables homedrive alerts without stopping the daemon, and is
+  reported in Accounts as `homedrive-alerts` (like `mqtt`, `beem` and `sfr`), not only logged.
 - `ui.Start` gains one parameter, the homedrive source (nil allowed), which it passes to
-  `NewHTMXHandler`.
-- **Configuration the alert path needs: only the existing SMTP keys.**
-  - Secrets: `MYHOME_SMTP_FROM`, `MYHOME_SMTP_TO`, `MYHOME_SMTP_USERNAME` and
-    `MYHOME_SMTP_PASSWORD`, in the daemon `.env` (`EnvironmentFile`, `myhome.service:32`).
-    Non-secret keys may also go under `smtp.*` in `myhome.yaml`.
-  - Host and port default to Gmail STARTTLS (`run.go:96-97`).
-  - Live, `myhome.yaml` has no `smtp` or `notice` keys (observed), and it is unknown whether the
-    `.env` has them.
-  - With `smtp.from` unset, alerts are still recorded and shown. The no-op Mailer logs "email
-    disabled".
-  - **No new config options.** Thresholds are constants, as in 682 §5, so the 4-file rule is not
-    triggered.
+  `NewHTMXHandler` (§2).
+- **Moved to #714 (delivery):** moving `notify.Mailer` out of the notice branch, the SMTP
+  configuration the email channel needs, and the Accounts entry. This producer needs no SMTP key.
+- **No new config options.** Thresholds are constants, as in 682 §5, so the 4-file rule is not
+  triggered.
 
 ## Alternatives considered (scope: the key decision)
 

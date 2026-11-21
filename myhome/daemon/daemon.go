@@ -15,10 +15,12 @@ import (
 	myhomesfr "github.com/asnowfix/home-automation/internal/myhome/sfr"
 	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
+	"github.com/asnowfix/home-automation/myhome/alert"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	"github.com/asnowfix/home-automation/myhome/electricity"
 	"github.com/asnowfix/home-automation/myhome/events"
+	"github.com/asnowfix/home-automation/myhome/events/metricsdb"
 	"github.com/asnowfix/home-automation/myhome/fetchproxy"
 	"github.com/asnowfix/home-automation/myhome/homedrive"
 	"github.com/asnowfix/home-automation/myhome/ical"
@@ -404,6 +406,17 @@ func (d *daemon) Run() error {
 			log.Info("Events service disabled")
 		}
 
+		// Metrics store (device-health time series). Advisory: a failure to
+		// open it is logged and the daemon runs without it (a nil store is a
+		// no-op). Nothing writes into it yet; the collector is #706.
+		if metricsStore, err := metricsdb.Open(log.WithName("metrics-store"), options.Flags.MetricsDBPath); err != nil {
+			log.Error(err, "Metrics store disabled: failed to open", "path", options.Flags.MetricsDBPath)
+		} else {
+			defer metricsStore.Close()
+			go metricsStore.Start(d.ctx, options.Flags.MetricsRetention)
+			log.Info("Metrics store started", "db", options.Flags.MetricsDBPath, "retention", options.Flags.MetricsRetention)
+		}
+
 		// Start the notice service (curated "notice"-severity events + daily
 		// email digest) if enabled. Requires both the events service (to
 		// record derived motion notices and query the digest) and the
@@ -698,12 +711,35 @@ func (d *daemon) Run() error {
 		if err := mc.SubscribeWithHandler(d.ctx, homedrive.TopicFilter, 16, "homedrive/status", driveCache.HandleMessage); err != nil {
 			log.Error(err, "Failed to subscribe to homedrive status", "topic", homedrive.TopicFilter)
 		}
+		// Drive sync alerts (#835): the homedrive rules (R1 to R8) run on the shared alert core
+		// (#845) and publish alert documents on <instance>/alert/<rule>/<key> (#843, QoS 1, not
+		// retained). Channel-independent: delivery (#714) subscribes; this only produces. Built here,
+		// before the cache's prune, which must know which instances have an open alert; started only
+		// after mc.Start(). Not fatal if the state is unusable, but reported in Accounts.
+		var driveProducer *homedrive.Producer
+		accountsRegistry.SetEnabled("homedrive-alerts", true)
+		if alertStore, err := alert.NewStore(storage.DB()); err != nil {
+			log.Error(err, "Failed to initialize alert state, homedrive alerts disabled")
+			accountsRegistry.Report("homedrive-alerts", fmt.Errorf("alerts disabled: %w", err))
+		} else if alertEval, err := alert.NewEvaluator(d.ctx, log.WithName("alert"), alert.NewMQTTPublisher(mc, myhome.InstanceName), alertStore); err != nil {
+			log.Error(err, "Failed to start the alert evaluator, homedrive alerts disabled")
+			accountsRegistry.Report("homedrive-alerts", fmt.Errorf("alerts disabled: %w", err))
+		} else {
+			driveProducer = homedrive.NewProducer(log, driveCache, alertEval, nil)
+			accountsRegistry.Report("homedrive-alerts", nil)
+		}
+		alertDone := make(chan struct{})
 		driveDone := make(chan struct{})
 		go func() { driveCache.Run(d.ctx); close(driveDone) }()
 		defer func() {
 			// Let the shutdown flush finish before the deferred storage.Close().
 			select {
 			case <-driveDone:
+			case <-time.After(2 * time.Second):
+			}
+			// Same for the alert producer: a tick must not persist into a closed storage.
+			select {
+			case <-alertDone:
 			case <-time.After(2 * time.Second):
 			}
 		}()
@@ -756,6 +792,13 @@ func (d *daemon) Run() error {
 		log.Info("MQTT client connected - subscriptions active")
 		accountsRegistry.SetEnabled("mqtt", true)
 		accountsRegistry.Report("mqtt", nil)
+
+		// Start the homedrive alert producer now that the broker is up (the contract's wiring rule).
+		if driveProducer != nil {
+			go func() { driveProducer.Run(d.ctx); close(alertDone) }()
+		} else {
+			close(alertDone)
+		}
 
 		// Subscribe to $SYS topics for monitoring (after connection to avoid early connection)
 		// Use large buffer (256) because broker publishes 15-20+ $SYS topics in rapid bursts every 30s

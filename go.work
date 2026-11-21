@@ -15,6 +15,7 @@ use (
 	./internal/myzone
 	./internal/shelly/scripts
 	./internal/tools
+	./myhome/alert
 	./myhome/ctl
 	./myhome/ctl/blu
 	./myhome/ctl/blu/follow

@@ -90,6 +90,8 @@ var Flags struct {
 	InstanceName                string        // the value taken by --instance / -I
 	EventsDBPath                string        // path to events SQLite database
 	EventsRetention             time.Duration // retention period for event records
+	MetricsDBPath               string        // path to metrics (device-health time series) SQLite database
+	MetricsRetention            time.Duration // retention period for metric samples
 	EnableEventsService         bool          // whether to enable the event recording service
 	RemoteProxy                 string        // the value taken by --remote-proxy; delegates /devices/... to a remote myhome daemon
 	PoolDeviceID                string        // Shelly device ID for the pool pump

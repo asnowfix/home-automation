@@ -659,14 +659,23 @@ func (c *client) Publish(ctx context.Context, topic string, msg []byte, qos byte
 	}
 
 	token := c.mqtt.Publish(topic, byte(qos), retained, msg)
-	if token.WaitTimeout(c.timeout) {
-		c.log.Info("Published", "to topic", topic, "payload", string(msg))
-		return nil
-	} else {
-		c.log.Error(token.Error(), "Failed to publish", "to topic", topic, "payload", string(msg))
-		return token.Error()
+	if !token.WaitTimeout(c.timeout) {
+		// The token has not completed, so token.Error() is nil: report the timeout explicitly, or a
+		// caller would take an undelivered message for a delivered one.
+		err := fmt.Errorf("%w: topic %s after %s", ErrPublishTimeout, topic, c.timeout)
+		c.log.Error(err, "Failed to publish", "to topic", topic, "payload", string(msg))
+		return err
 	}
+	if err := token.Error(); err != nil { // completed, but the broker or the link refused it
+		c.log.Error(err, "Failed to publish", "to topic", topic, "payload", string(msg))
+		return err
+	}
+	c.log.Info("Published", "to topic", topic, "payload", string(msg))
+	return nil
 }
+
+// ErrPublishTimeout is returned (wrapped) by Publish when the broker did not acknowledge in time.
+var ErrPublishTimeout = errors.New("mqtt: publish not acknowledged")
 
 func (c *client) Subscribe(ctx context.Context, topic string, qlen uint, subscriberName string) (<-chan []byte, error) {
 	c.log.Info("Subscribe", "topic", topic, "qlen", qlen, "subscriber", subscriberName)

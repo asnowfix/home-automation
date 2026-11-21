@@ -18,6 +18,10 @@ import (
 // The documents are the myhome/homedrive fixtures, built from the contract.
 const driveFixtureDir = "../../../myhome/homedrive/testdata"
 
+// contractAfter moves the clock back so the contract fixtures (ts 12:33:13) are
+// 10 s old, like the hand-written ones are at driveT0.
+const contractAfter = -(time.Hour + 58*time.Minute + 47*time.Second)
+
 var driveT0 = time.Date(2026, 11, 15, 14, 32, 10, 0, time.UTC) // 10 s after the fixtures' ts
 
 func driveDoc(t *testing.T, name string) []byte {
@@ -87,6 +91,10 @@ func TestHomedrivePanel_States(t *testing.T) {
 		{"auth problem", driveDoc(t, "auth_token_invalid.json"), 0, "is-danger", "Auth problem", []string{"Google auth token_invalid", "has-text-danger", "Dry run"}},
 		{"stale with a state error", driveDoc(t, "error.json"), 2 * time.Minute, "is-danger", "Error (stale)", nil},
 		{"stale with an auth problem", driveDoc(t, "auth_token_invalid.json"), 2 * time.Minute, "is-danger", "Auth problem (stale)", nil},
+		{"root blocked", driveDoc(t, "contract/status-root-blocked.json"), contractAfter, "is-danger", "Sync blocked", []string{"State root_blocked", "Sync paused: local folder is not the synced tree (marker missing)"}},
+		{"root blocked and stale", driveDoc(t, "contract/status-root-blocked.json"), contractAfter + 2*time.Minute, "is-danger", "Sync blocked (stale)", nil},
+		{"deletes held", driveDoc(t, "contract/status-delete-blocked.json"), contractAfter, "is-warning", "Deletes held", []string{"Bisync deletes held: 412 planned, limit 100"}},
+		{"contract running has no guard line", driveDoc(t, "contract/status-running.json"), contractAfter, "is-success", "Online", nil},
 		{"unsupported", driveDoc(t, "schema_3_0.json"), 0, "is-light", "Unsupported schema", []string{"Unsupported homedrive status schema", "schema 3.0"}},
 		{"degraded", driveDoc(t, "schema_2_7_extra.json"), 0, "is-warning", "quota_blocked", nil},
 	}
@@ -110,6 +118,44 @@ func TestHomedrivePanel_States(t *testing.T) {
 			}
 			if src.calls != 1 {
 				t.Errorf("Snapshot called %d times, want 1", src.calls)
+			}
+		})
+	}
+}
+
+func TestGuardLines(t *testing.T) {
+	root := func(r string) *homedrive.Guards {
+		return &homedrive.Guards{LocalRoot: &homedrive.RootGuard{Reason: r}}
+	}
+	del := func(r string, planned, thr int64) *homedrive.Guards {
+		return &homedrive.Guards{BisyncDeletes: &homedrive.DeletesGuard{Reason: r, Planned: planned, Threshold: thr}}
+	}
+	tests := []struct {
+		name string
+		g    *homedrive.Guards
+		want []string
+	}{
+		{"nil guards (schema 2.0)", nil, nil},
+		{"none set", &homedrive.Guards{}, nil},
+		{"root missing", root("missing"), []string{"Sync paused: local folder missing"}},
+		{"root marker missing", root("marker_missing"), []string{"Sync paused: local folder is not the synced tree (marker missing)"}},
+		{"root identity mismatch", root("identity_mismatch"), []string{"Sync paused: local folder is not the one that was synced"}},
+		{"root unreadable", root("unreadable"), []string{"Sync paused: local folder unreadable"}},
+		{"root unknown reason", root("<b>new</b>"), []string{"Sync paused: local folder blocked"}},
+		{"deletes threshold", del("threshold", 312, 50), []string{"Bisync deletes held: 312 planned, limit 50"}},
+		{"deletes empty local", del("empty_local", 18342, 0), []string{"Bisync deletes held: local side is empty, 18\u00a0342 planned"}},
+		{"deletes empty remote", del("empty_remote", 7, 0), []string{"Bisync deletes held: Drive side is empty, 7 planned"}},
+		{"deletes unknown reason", del("whatever", 7, 0), []string{"Bisync deletes held: 7 planned"}},
+		{"both", &homedrive.Guards{
+			LocalRoot:     &homedrive.RootGuard{Reason: "missing"},
+			BisyncDeletes: &homedrive.DeletesGuard{Reason: "threshold", Planned: 2, Threshold: 1},
+		}, []string{"Sync paused: local folder missing", "Bisync deletes held: 2 planned, limit 1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := guardLines(tt.g)
+			if strings.Join(got, "|") != strings.Join(tt.want, "|") {
+				t.Errorf("got %q, want %q", got, tt.want)
 			}
 		})
 	}

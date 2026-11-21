@@ -59,6 +59,7 @@ type driveCard struct {
 	Bisync      string
 	Local       string
 	Quota       string
+	Guards      []string // schema 2.1 guard lines, shown in the warning colour
 }
 
 // HomedrivePanel renders the Drive sync block of the System status sheet.
@@ -132,6 +133,7 @@ func (c *driveCard) fill(st *homedrive.Status, v homedrive.View, now time.Time) 
 		}
 	}
 	c.Auth = authText(st.Auth, now)
+	c.Guards = guardLines(st.Guards)
 	c.Lines = windowLines(st.Counts)
 	if st.PendingUp != nil {
 		c.Pending = strconv.FormatInt(*st.PendingUp, 10)
@@ -168,8 +170,12 @@ func drivePill(v homedrive.View) (class, text string) {
 	switch {
 	case v.StateError:
 		return "is-danger", "Error" + suffix
+	case v.RootBlocked:
+		return "is-danger", "Sync blocked" + suffix
 	case v.AuthProblem:
 		return "is-danger", "Auth problem" + suffix
+	case v.DeletesHeld:
+		return "is-warning", "Deletes held" + suffix
 	case v.Liveness == homedrive.Stale:
 		return "is-light", "Stale"
 	case v.Degraded:
@@ -375,6 +381,8 @@ const homedrivePanelTemplate = `
   {{else}}
     <p class="mh-drive-line">Version {{.Version}} · {{.Uptime}} · State {{.State}}</p>
     <p class="mh-drive-line{{if .AuthProblem}} has-text-danger{{end}}">Google auth {{.Auth}}</p>
+    {{range .Guards}}<p class="mh-drive-line has-text-danger">{{.}}</p>
+    {{end}}
     <table class="mh-drive-table">
       <thead><tr><th scope="col"></th><th scope="col">1 h</th><th scope="col">24 h</th><th scope="col">7 d</th></tr></thead>
       <tbody>

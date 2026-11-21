@@ -61,6 +61,7 @@ func init() {
 	runCmd.PersistentFlags().IntVarP(&options.Flags.MqttWatchdogMaxFailures, "mqtt-watchdog-max-failures", "F", options.MQTT_WATCHDOG_MAX_FAILURES, "MQTT watchdog max consecutive failures before restart")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.MqttReconnectInterval, "mqtt-reconnect-interval", options.MQTT_RECONNECT_INTERVAL, "Interval for periodic MQTT reconnection to refresh retained messages (0 to disable)")
 	runCmd.PersistentFlags().DurationVar(&options.Flags.MqttBrokerClientLogInterval, "mqtt-broker-client-log-interval", options.MQTT_BROKER_CLIENT_LOG_INTERVAL, "Interval for logging MQTT broker connected clients (0 to disable)")
+	runCmd.PersistentFlags().IntVar(&options.Flags.MqttBrokerClientWritesPending, "mqtt-broker-client-writes-pending", options.MQTT_BROKER_CLIENT_WRITES_PENDING, "Embedded MQTT broker: max pending outbound messages per client before drops (0 = Mochi default, 8192)")
 	runCmd.PersistentFlags().StringVarP(&options.Flags.EventsDir, "events-dir", "E", "", "Directory to write received MQTT events as JSON files")
 	runCmd.PersistentFlags().IntVarP(&options.Flags.UiPort, "ui-port", "p", options.HTTP_DEFAULT_PORT, "UI listen port (default "+strconv.Itoa(options.HTTP_DEFAULT_PORT)+")")
 	runCmd.PersistentFlags().BoolVar(&options.Flags.EnableGen1Proxy, "enable-gen1-proxy", false, "Enable the Gen1 HTTP->MQTT proxy (requires embedded broker)")
@@ -165,6 +166,12 @@ var runCmd = &cobra.Command{
 		}
 		if v.IsSet("daemon.mqtt_broker_client_log_interval") && !cmd.Flags().Changed("mqtt-broker-client-log-interval") {
 			options.Flags.MqttBrokerClientLogInterval = v.GetDuration("daemon.mqtt_broker_client_log_interval")
+		}
+		if v.IsSet("daemon.mqtt_broker_client_writes_pending") && !cmd.Flags().Changed("mqtt-broker-client-writes-pending") {
+			options.Flags.MqttBrokerClientWritesPending = v.GetInt("daemon.mqtt_broker_client_writes_pending")
+		}
+		if options.Flags.MqttBrokerClientWritesPending < 0 {
+			return fmt.Errorf("invalid mqtt-broker-client-writes-pending %d: must be >= 0 (0 = Mochi default)", options.Flags.MqttBrokerClientWritesPending)
 		}
 		if v.IsSet("daemon.reconcile_interval") && !cmd.Flags().Changed("reconcile-interval") {
 			options.Flags.ReconcileInterval = v.GetDuration("daemon.reconcile_interval")

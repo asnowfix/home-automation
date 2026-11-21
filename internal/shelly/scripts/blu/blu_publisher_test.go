@@ -131,6 +131,64 @@ func TestBluPublisher_PayloadCarriesRelayID(t *testing.T) {
 	<-done
 }
 
+// TestBluPublisher_PublishesRepeatedPacketIDs (#849): a repeated BTHome packet id is
+// still published. The publisher used to drop a packet whose pid equalled the previous
+// one, which saves no battery (the sensor already transmitted) and hid repeated motion
+// advertisements from blu-listener.js, the only component that decides how long a light stays on.
+func TestBluPublisher_PublishesRepeatedPacketIDs(t *testing.T) {
+	const mac = "aa:bb:cc:00:11:33"
+	buf, err := fs.ReadFile(scripts.GetFS(), bluPublisherScriptPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", bluPublisherScriptPath, err)
+	}
+	state := &script.DeviceState{
+		KVS:                  map[string]interface{}{},
+		Storage:              make(map[string]interface{}),
+		ComponentConfig:      map[string]interface{}{"ble": map[string]interface{}{"enable": true}},
+		ScheduleEvalInjector: make(chan []byte, 4),
+	}
+	mc := mqtt.NewMockClient()
+	ctx, cancel := context.WithTimeout(
+		mqtt.NewContextWithClient(logr.NewContext(context.Background(), testr.New(t)), mc),
+		10*time.Second,
+	)
+	defer cancel()
+	published, err := mc.Subscribe(ctx, "shelly-blu/events/"+mac, 8, "test")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- script.RunWithDeviceState(ctx, bluPublisherScriptPath, buf, false, state)
+	}()
+	waitFor(2*time.Second, 50*time.Millisecond, func() bool { return state.BLEScannerStarts() > 0 })
+
+	// One BTHome v2 frame: device info 0x40, packet id 0x00 = 5, motion 0x21 = 1. Fed twice, same pid.
+	// The emulator lacks two device built-ins the decode path uses: String.prototype.at returns a
+	// character (the device's returns the byte value BTHomeDecoder expects) and btoa is undefined
+	// (sanitizeBTHomeFrame); polyfill both for this test only. The payload content is not asserted.
+	scan := `(function(){try{String.prototype.at=function(i){return this.charCodeAt(i)};btoa=function(s){return "b64"};BLEScanCallback(BLE.Scanner.SCAN_RESULT,{addr:"` + mac +
+		`",rssi:-70,service_data:{fcd2:"\x40\x00\x05\x21\x01"}});return "ok"}catch(e){return "ERR:"+e}})()`
+	for i := 0; i < 2; i++ {
+		req, _ := json.Marshal(map[string]string{"code": scan})
+		state.ScheduleEvalInjector <- req
+	}
+
+	for i := 0; i < 2; i++ {
+		select {
+		case msg := <-published:
+			var got map[string]interface{}
+			if err := json.Unmarshal(msg, &got); err != nil || got["pid"] != float64(5) {
+				t.Fatalf("message %d: pid/JSON wrong: %s (%v)", i+1, msg, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d of 2 messages published: a repeated packet id must still be published", i)
+		}
+	}
+	cancel()
+	<-done
+}
+
 // TestBluPublisher_DoesNotStartScannerWhenBLEExplicitlyDisabled covers
 // firmware < 2.0.0 with Bluetooth switched off: an explicit enable:false must
 // still keep the scanner off.

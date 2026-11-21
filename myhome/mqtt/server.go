@@ -7,6 +7,7 @@ import (
 	mynet "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -19,12 +20,12 @@ import (
 	"github.com/mochi-mqtt/server/v2/listeners"
 )
 
-func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string, clientLogInterval time.Duration, noMdns bool, v *viper.Viper) error {
+func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, program string, info []string, clientLogInterval time.Duration, noMdns bool, v *viper.Viper, clientWritesPending int) error {
 	log = log.WithName("MqttBroker")
 	log.Info("Starting MyHome", "program", program, "info", info, "clientLogInterval", clientLogInterval, "noMdns", noMdns)
 
 	// Load broker configuration from Viper (or use defaults)
-	opts := loadBrokerConfig(ctx, log, v)
+	opts := loadBrokerConfig(ctx, log, v, clientWritesPending)
 
 	// Logger specifies a custom configured implementation of log/slog to override
 	// the servers default logger configuration. If you wish to change the log level,
@@ -59,6 +60,12 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 		return err
 	}
 	log.Info("Debug hook added")
+
+	// Make dropped messages (client outbound queue full) visible
+	if err := mqttServer.AddHook(newDropLogger(log.WithName("drops"), dropLogInterval, time.Now), nil); err != nil {
+		log.Error(err, "error adding MQTT dropped-message hook")
+		return err
+	}
 
 	// Allow all connections.
 	log.Info("Adding auth hook")
@@ -141,7 +148,8 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 					for id := range clients {
 						clientIds = append(clientIds, id)
 					}
-					log.Info("MQTT broker connected clients", "count", len(clients), "client_ids", clientIds)
+					log.Info("MQTT broker connected clients", "count", len(clients), "client_ids", clientIds,
+						"messages_dropped", atomic.LoadInt64(&mqttServer.Info.MessagesDropped))
 				}
 			}
 		}(log.WithName("monitor"))

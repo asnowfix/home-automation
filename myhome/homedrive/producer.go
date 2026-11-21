@@ -19,7 +19,7 @@ type Producer struct {
 	log   logr.Logger
 	cache *Cache
 	ev    *alert.Evaluator
-	rules []AlertRule
+	rules []alertRule
 	now   func() time.Time
 }
 
@@ -28,7 +28,21 @@ func NewProducer(log logr.Logger, cache *Cache, ev *alert.Evaluator, now func() 
 	if now == nil {
 		now = time.Now
 	}
-	return &Producer{log: log.WithName("homedrive-alert"), cache: cache, ev: ev, rules: AlertRules(), now: now}
+	p := &Producer{log: log.WithName("homedrive-alert"), cache: cache, ev: ev, rules: alertRules(), now: now}
+	cache.SetPinned(p.hasOpenAlert)
+	return p
+}
+
+// hasOpenAlert reports whether an alert is firing or resolving for the instance, in which case the
+// cache must not forget it (the core would resolve the alert of an instance it no longer observes).
+func (p *Producer) hasOpenAlert(k Key) bool {
+	key := alertKey(k)
+	for _, a := range p.ev.Snapshot() {
+		if a.Source == AlertSource && a.Key == key {
+			return true
+		}
+	}
+	return false
 }
 
 // Evaluate runs every rule once over the current snapshot.
@@ -47,22 +61,22 @@ func (p *Producer) Evaluate(ctx context.Context) {
 	}
 }
 
-func observe(r AlertRule, v View, now time.Time) alert.Observation {
+func observe(r alertRule, v View, now time.Time) alert.Observation {
 	key := Key{v.Host, v.User}
 	o := alert.Observation{
 		Key:    alertKey(key),
 		Labels: map[string]string{"subject": truncate("homedrive:"+v.Host+"/"+v.User, alert.MaxLabelLength)},
 	}
-	if r.Content && !trusted(v) {
+	if r.freeze != nil && r.freeze(v) {
 		o.Frozen = true
 		return o
 	}
-	rd := r.Eval(v, now)
-	o.Active = rd.Active
-	o.Summary = summaryFor(rd.Noun, key)
-	o.Detail = rd.Detail
-	if !rd.Active {
-		o.Detail = r.Cleared
+	rd := r.eval(v, now)
+	o.Active = rd.active
+	o.Summary = summaryFor(rd.noun, key)
+	o.Detail = rd.detail
+	if !rd.active {
+		o.Detail = r.cleared
 	}
 	return o
 }

@@ -264,20 +264,22 @@ to the core's startup grace (§4).
 file name or a path (a test asserts it). `summary` is `homedrive <what>: <user>@<host>` (at most 100
 chars); `detail` is a fixed template (at most 400). Times are UTC. A `<user>@<host>` that would fail
 `Validate` (named like an IP or a MAC, say) falls back to `homedrive <what> on an instance`.
-`labels.subject` is `homedrive:<host>/<user>` and stays local. The alert key is
-`lower(<host>-<user>)` with every character outside `[a-z0-9._-]` replaced by `-`.
+`labels.subject` is `homedrive:<host>/<user>` and stays local. The alert key is a readable
+`[a-z0-9._-]` prefix of `<host>-<user>` (40 chars at most) plus 12 hex digits of a hash of the exact
+`(host, user)`, so two instances never share a fingerprint (`a-b`/`c` vs `a`/`b-c`, `Pi` vs `pi`).
 
 | Rule (alert `rule`) | Trigger | `for` | Resolve (held 5 min by the core) | Severity |
 |---|---|---|---|---|
-| R1 offline (`homedrive.offline`) | liveness classification = offline (§1: no document younger than 15 min for 15 min, counted from consumer start if none arrived) | 0 (the 15 min is the threshold) | a fresh status | critical |
+| R1 offline (`homedrive.offline`) | the last document is older than 15 min (§1). Judged from the document's age even right after a myhome restart; "counted from consumer start" applies only to an instance that has sent nothing yet | 0 (the 15 min is the threshold) | a fresh status | critical |
 | R2 restart loop (`homedrive.restart-loop`) | `counts["1h"].starts >= 3` **or** `state == "error"` | 0 | `starts < 3` and `state != "error"` | critical |
 | R3 auth broken (`homedrive.auth-broken`) | `auth.state` outside {`ok`, `unknown`, `refresh_failing`} (contract §7.5: anything not ok or unknown) | 0 | `auth.state == ok` | critical |
 | R3b auth refresh failing (`homedrive.auth-refresh`) | `auth.state == refresh_failing` | 10 min | `auth.state == ok` | critical |
-| R3c auth unknown (`homedrive.auth-unknown`) | `auth.state == unknown` (or `auth` absent) and `state == running` | 60 min | `auth.state != unknown` | warning |
+| R3c auth unknown (`homedrive.auth-unknown`) | an explicit `auth.state == unknown` while `state` is `running` or `starting` (an absent or null `auth` never fires, see below) | 60 min | `auth.state != unknown` | warning |
 | R4 sync failing (`homedrive.sync-failing`) | failing with no success since (below) **or** (`state == running` and `now − last_poll > 15 min`; `started_at` when no poll yet) | 5 min | condition false | critical |
 | R5 bisync safety net (`homedrive.bisync`) | `bisync.result == "error"`, or `bisync.at` (or `started_at` if `bisync` is null) older than 3 h; not while `state` is `paused` or `root_blocked` | 0 | result ok and age < 3 h | warning |
 | R6 local root blocked (`homedrive.root-blocked`) | schema 2.1 `guards.local_root != null` or `state == "root_blocked"` | 5 min | guard clears | critical |
 | R7 bisync deletes blocked (`homedrive.deletes-blocked`) | schema 2.1 `guards.bisync_deletes != null` | 0 | guard clears (released with `ctl allow-deletes`, or nothing left to veto) | critical |
+| R8 schema unsupported (`homedrive.schema`) | the instance is online on a schema major myhome does not understand | 60 min | a supported schema | warning |
 
 - **R1 and a restart of homedrive.** A normal restart or deploy of homedrive (seconds to a couple of
   minutes of silence) never reaches the 15 min threshold, so it never alerts. The core's `for` is not
@@ -286,23 +288,49 @@ chars); `detail` is a fixed template (at most 400). Times are UTC. A `<user>@<ho
 - **R2 is the incident's rule.** `counts` is persisted by homedrive, so it does not depend on
   myhome having seen each attempt (contract §7.4). The contract's third signal, "`started_at`
   changed 3 times in 30 min as seen by the consumer", is not implemented: it needs in-memory history
-  that myhome's own restarts erase, and it adds nothing to `counts`. The 1 h window means R2 resolves
+  that myhome's own restarts erase, and it adds nothing to `counts` (this omission is deliberate). The 1 h window means R2 resolves
   up to 1 h after the loop stops. Three deploys within an hour also trip it; that is accepted.
-- **R4 "failing with no success since" (contract §7.6)** uses `errors_up` and `errors_down` when the
-  document has both, so steady push failures are not masked by pull successes:
-  - push: `counts["1h"].errors_up >= 5` and `last_error.ts` after `last_push`;
-  - pull: `counts["1h"].errors_down >= 5` and `last_error.ts` after `max(last_pull, last_poll)`;
-  - without the split: `counts["1h"].errors >= 5` and `last_error.ts` after `last_activity`.
+- **R4 "failing with no success since" (contract §7.6)** has three parts, any of which fires it:
+  - the contract's total rule, kept as the floor: `counts["1h"].errors >= 5` and `last_error.ts` after
+    `last_activity`. It covers errors with no direction (a failed bisync pass, a conflict) and a 3 + 3
+    split;
+  - push: `errors_up >= 5`, `last_error.op` is a push op, and `last_error.ts` after `last_push`;
+  - pull: `errors_down >= 5` and `last_error.ts` after the success clock of the op: `last_poll` for
+    `poll`, `last_pull` for the download and delete ops. So steady push failures are not masked by pull
+    successes, and steady download failures are not masked by successful Changes polls.
 
-  `last_error` is a single value, so a direction is judged by whether anything succeeded after the
-  latest failure; this is approximate by construction. The 5 min `for` absorbs one bad poll cycle.
+  `last_error` is a single value, so a direction is only judged when it is the direction of the last
+  failure; this is approximate by construction. The detail names the direction that matched. The
+  5 min `for` absorbs one bad poll cycle.
 - **R3b uses a 10 min `for`, where the contract says "immediately".** `refresh_failing` comes from
   an `oauth2.RetrieveError`, which may be a transient Google 5xx (inferred; request 3 in §9). The
   definitive states (R3) stay immediate.
-- **Warning severity** (R3c, R5) reaches the **banner only**, the #843 default; email for warnings
+- **R3c and an absent `auth`.** status-v2 §12 says an absent `auth` is to be treated as `unknown`, but
+  until home-drive#142 ships the NAS publishes `auth: null` on every document, and reading that as
+  `unknown` would raise a warning an hour after every deployment. So R3c fires only on an explicit
+  `unknown`; an absent or null `auth` means "not reported yet" and raises nothing. `starting` counts
+  as up so a homedrive restart does not reset the 1 h clock.
+- **R8 and an unsupported major.** §7.8 asks for no alert from contents myhome cannot read, so open
+  content alerts of such an instance stay frozen. They would otherwise hang silently, so R8 raises one
+  warning (after 1 h on the unknown major) saying that the instance's alerts are paused. It resolves
+  when the schema is supported again, and the frozen alerts then resolve or continue normally.
+- **Warning severity** (R3c, R5, R8) reaches the **banner only**, the #843 default; email for warnings
   would be a #843 question.
 - **Quota** has no rule. The quota manager is not wired (contract §1), and exhaustion would show up
   as R4 anyway.
+- **Known limits.**
+  - **An instance myhome has never seen cannot be reported offline.** R1 judges the age of a document
+    it has; with none (homedrive never published since myhome first ran, or its row is gone) there
+    is nothing to judge. Detecting it needs a configured list of expected instances, which is new
+    scope. The persisted cache covers the restart case once an instance has been seen.
+  - **An instance with an open alert is never pruned.** The cache forgets an instance unseen for
+    30 days, which would make the core resolve its alerts silently, so `Prune` keeps any instance with
+    a firing or resolving alert. The consequence: a decommissioned homedrive stays offline-alerting
+    until its row is deleted from `myhome.db` (`homedrive_instances`) and myhome is restarted, or
+    the alert is otherwise cleared (a future ack, #843 non-goal).
+  - **A daemon restart during an outage keeps the alert.** R1 reads the last document's age, not the
+    process start, so the restart neither resolves nor re-fires it.
+
 - **Guard rules R6 and R7 (schema 2.1, home-drive#144).** Both mean sync is deliberately not making
   progress and needs a human, and nothing else will say so, so both are critical. R6 has a 5 min
   `for` because a mount that is not ready yet at boot looks like `missing` and clears on its own.
@@ -348,11 +376,12 @@ configures and feeds; this section records only how homedrive uses it.
 ### 5. Daemon wiring (`myhome/daemon/daemon.go`)
 
 - The homedrive cache and its subscription are created before `mc.Start()` (§1).
-- After `mc.Start()` (the contract's wiring rule: delivery subscribes first, producers start
-  after), the daemon opens `alert.NewStore(storage.DB())`, builds
-  `alert.NewEvaluator(..., alert.NewMQTTPublisher(mc, myhome.InstanceName), store)` and runs
-  `homedrive.NewProducer(log, driveCache, evaluator, nil).Run(ctx)`. A failure to open the alert
-  state is logged and disables homedrive alerts without stopping the daemon.
+- The alert store, evaluator and producer are built before the cache's `Run` starts (the cache's
+  prune must know which instances have an open alert). The producer **runs** only after `mc.Start()`
+  (the contract's wiring rule: delivery subscribes first, producers start after), and the daemon waits
+  for it at shutdown like for the cache, so a tick never persists into a closed storage.
+- A failure to open the alert state disables homedrive alerts without stopping the daemon, and is
+  reported in Accounts as `homedrive-alerts` (like `mqtt`, `beem` and `sfr`), not only logged.
 - `ui.Start` gains one parameter, the homedrive source (nil allowed), which it passes to
   `NewHTMXHandler` (§2).
 - **Moved to #714 (delivery):** moving `notify.Mailer` out of the notice branch, the SMTP

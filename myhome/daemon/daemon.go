@@ -711,12 +711,35 @@ func (d *daemon) Run() error {
 		if err := mc.SubscribeWithHandler(d.ctx, homedrive.TopicFilter, 16, "homedrive/status", driveCache.HandleMessage); err != nil {
 			log.Error(err, "Failed to subscribe to homedrive status", "topic", homedrive.TopicFilter)
 		}
+		// Drive sync alerts (#835): the homedrive rules (R1 to R8) run on the shared alert core
+		// (#845) and publish alert documents on <instance>/alert/<rule>/<key> (#843, QoS 1, not
+		// retained). Channel-independent: delivery (#714) subscribes; this only produces. Built here,
+		// before the cache's prune, which must know which instances have an open alert; started only
+		// after mc.Start(). Not fatal if the state is unusable, but reported in Accounts.
+		var driveProducer *homedrive.Producer
+		accountsRegistry.SetEnabled("homedrive-alerts", true)
+		if alertStore, err := alert.NewStore(storage.DB()); err != nil {
+			log.Error(err, "Failed to initialize alert state, homedrive alerts disabled")
+			accountsRegistry.Report("homedrive-alerts", fmt.Errorf("alerts disabled: %w", err))
+		} else if alertEval, err := alert.NewEvaluator(d.ctx, log.WithName("alert"), alert.NewMQTTPublisher(mc, myhome.InstanceName), alertStore); err != nil {
+			log.Error(err, "Failed to start the alert evaluator, homedrive alerts disabled")
+			accountsRegistry.Report("homedrive-alerts", fmt.Errorf("alerts disabled: %w", err))
+		} else {
+			driveProducer = homedrive.NewProducer(log, driveCache, alertEval, nil)
+			accountsRegistry.Report("homedrive-alerts", nil)
+		}
+		alertDone := make(chan struct{})
 		driveDone := make(chan struct{})
 		go func() { driveCache.Run(d.ctx); close(driveDone) }()
 		defer func() {
 			// Let the shutdown flush finish before the deferred storage.Close().
 			select {
 			case <-driveDone:
+			case <-time.After(2 * time.Second):
+			}
+			// Same for the alert producer: a tick must not persist into a closed storage.
+			select {
+			case <-alertDone:
 			case <-time.After(2 * time.Second):
 			}
 		}()
@@ -770,16 +793,11 @@ func (d *daemon) Run() error {
 		accountsRegistry.SetEnabled("mqtt", true)
 		accountsRegistry.Report("mqtt", nil)
 
-		// Drive sync alerts (#835): the homedrive rules (R1 to R5) run on the shared alert core
-		// (#845) and publish alert documents on <instance>/alert/<rule>/<key> (#843, QoS 1, not
-		// retained). Channel-independent: delivery (#714) subscribes; this only produces. Started
-		// after mc.Start() per the contract's wiring rule. Not fatal if the state table is unusable.
-		if alertStore, err := alert.NewStore(storage.DB()); err != nil {
-			log.Error(err, "Failed to initialize alert state, homedrive alerts disabled")
-		} else if alertEval, err := alert.NewEvaluator(d.ctx, log.WithName("alert"), alert.NewMQTTPublisher(mc, myhome.InstanceName), alertStore); err != nil {
-			log.Error(err, "Failed to start the alert evaluator, homedrive alerts disabled")
+		// Start the homedrive alert producer now that the broker is up (the contract's wiring rule).
+		if driveProducer != nil {
+			go func() { driveProducer.Run(d.ctx); close(alertDone) }()
 		} else {
-			go homedrive.NewProducer(log, driveCache, alertEval, nil).Run(d.ctx)
+			close(alertDone)
 		}
 
 		// Subscribe to $SYS topics for monitoring (after connection to avoid early connection)

@@ -372,9 +372,15 @@ The discipline that made this recoverable:
 - **Test locally, in isolation, before upgrading the NAS (default procedure since 2026-11-21).**
   The NAS runs the house, so it is the last place to find out a release misbehaves. Before any
   `dpkg -i` on it, have a **side agent** (a verifier sub-agent in its own worktree) build the tag
-  with `make build` and run the daemon **locally, inside a loopback-only network namespace**
-  (`unshare -rn`, `ip link set lo up`) with a scratch working directory, so it can reach neither
-  the real devices (mDNS discovery and auto-setup would otherwise touch them) nor the NAS broker.
+  with `make build` and run the daemon **locally, in a network namespace cut off from the house
+  LAN** and with a scratch working directory, so it can reach neither the real devices (mDNS
+  discovery and auto-setup would otherwise touch them) nor the NAS broker. Measured limits
+  (2026-11-21): `unshare -rn` is refused on the maintainer's workstation (`uid_map` write not
+  permitted), and a **loopback-only** namespace is not enough: with no `-B`, the daemon's own MQTT
+  client resolves its broker through the mDNS resolver (`internal/myhome/net/resolver.go`), which
+  needs a default gateway and a multicast-capable interface, so startup fails after ~45 s. Give the
+  namespace a dummy multicast interface and a default route (needs root: `ip netns add`,
+  `ip link add ... type dummy`).
   Measure what the change touches (e.g. time until `myhome ctl list` is answered after a start and
   after a restart over an existing database) and compare with the version currently on the NAS.
   Exceptions, where the real broker or proxy is the thing under test: changes to MQTT or proxy

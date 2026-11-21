@@ -121,6 +121,10 @@ daemon:
   # MQTT broker client log interval (0 to disable)
   # mqtt_broker_client_log_interval: 2m
 
+  # Embedded broker: max pending outbound messages per client before drops (0 = Mochi default, 8192).
+  # Overrides mqtt.broker.capabilities.maximumclientwritespending when > 0
+  # mqtt_broker_client_writes_pending: 0
+
   # Interval for re-applying canonical MQTT broker/NTP/Matter config to known
   # devices over HTTP, as a self-healing safety net against config drift (0 to disable)
   # reconcile_interval: 1h

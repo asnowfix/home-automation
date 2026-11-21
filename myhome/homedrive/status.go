@@ -55,8 +55,9 @@ const (
 	StateRunning  = "running"
 	StatePaused   = "paused"
 	StateError    = "error"
-	// StateRootBlocked (schema 2.1): local_root is missing or not the synced tree, so pull, push
-	// and bisync are paused; see Guards.LocalRoot.
+
+	// StateRootBlocked (schema 2.1): local_root is missing or not the synced
+	// tree, so pull, push and bisync are paused (see Guards.LocalRoot).
 	StateRootBlocked = "root_blocked"
 )
 
@@ -96,6 +97,41 @@ type Status struct {
 	Unsupported bool `json:"-"`
 }
 
+// Guards reports the safety guards that deliberately stop sync (schema 2.1).
+// Each is nil when not blocking. They carry codes and counts only, never a path.
+type Guards struct {
+	LocalRoot     *RootGuard    `json:"local_root"`
+	BisyncDeletes *DeletesGuard `json:"bisync_deletes"`
+}
+
+// RootGuard is the local_root guard. Reason is one of the RootReason* values,
+// or a future one (consumers must not fail on it).
+type RootGuard struct {
+	Reason string `json:"reason"`
+	Since  Time   `json:"since"`
+}
+
+// DeletesGuard is the bisync mass-deletion guard: Planned deletions were held
+// back because the limit was Threshold (0 for an empty side).
+type DeletesGuard struct {
+	Reason    string `json:"reason"`
+	Planned   int64  `json:"planned"`
+	Threshold int64  `json:"threshold"`
+	Since     Time   `json:"since"`
+}
+
+// Known guard reasons.
+const (
+	RootReasonMissing          = "missing"
+	RootReasonMarkerMissing    = "marker_missing"
+	RootReasonIdentityMismatch = "identity_mismatch"
+	RootReasonUnreadable       = "unreadable"
+
+	DeletesReasonThreshold   = "threshold"
+	DeletesReasonEmptyLocal  = "empty_local"
+	DeletesReasonEmptyRemote = "empty_remote"
+)
+
 // Counts is one activity window. ErrorsUp/ErrorsDown are the per-direction
 // error split (contract section 5.3); pointers so an older producer that omits
 // them still parses.
@@ -117,28 +153,6 @@ type LastError struct {
 	Ts      Time   `json:"ts"`
 	Op      string `json:"op"`
 	Message string `json:"message"`
-}
-
-// Guards (schema 2.1) are the producer's deliberate stops; each is nil when its guard is not
-// blocking. They carry codes and counts only, never a path or a message.
-type Guards struct {
-	LocalRoot     *RootGuard   `json:"local_root"`
-	BisyncDeletes *DeleteGuard `json:"bisync_deletes"`
-}
-
-// RootGuard: Reason is missing, marker_missing, identity_mismatch or unreadable.
-type RootGuard struct {
-	Reason string `json:"reason"`
-	Since  Time   `json:"since"`
-}
-
-// DeleteGuard: bisync held back Planned deletions because the limit was Threshold (0 for an empty
-// side). Reason is threshold, empty_local or empty_remote.
-type DeleteGuard struct {
-	Reason    string `json:"reason"`
-	Planned   int64  `json:"planned"`
-	Threshold int64  `json:"threshold"`
-	Since     Time   `json:"since"`
 }
 
 // Auth is the Google authorisation state.

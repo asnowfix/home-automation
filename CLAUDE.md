@@ -397,6 +397,14 @@ The discipline that made this recoverable:
   before installing. Measured motivation, 2026-11-21: v0.14.1 installed on the NAS and its daemon
   never answered `ctl` RPC for 15 minutes (v0.14.0 answered in ~80 s), which took a rollback to
   find out.
+- **Small operational gotchas (2026-11-21).** A device can take a **new DHCP address after a
+  reboot** (the pump went `.64` -> `.61`): address devices by their `.local` name, and when one
+  "disappears" re-resolve the name before concluding it is off the network. #861-style PRs are
+  merged with **merge commits** here: to backport, cherry-pick the PR's feature commit, not the merge
+  (`git cherry-pick -x <commit>`; a merge commit fails without `-m`). Over `ssh`, `pkill -f <pattern>`
+  matches the ssh command line itself and kills the session: put watchers in a script file and match
+  on its name. Never `select *` from `vacuum_robots`/`vacuum_regions` (robot id and credentials):
+  name the columns.
 - **A draft release is validated as a whole, through a real package installation** — once the local
   test above is green. Install the
   draft's `.deb` for the host's architecture (`dpkg -i`, `DEBIAN_FRONTEND=noninteractive`, after

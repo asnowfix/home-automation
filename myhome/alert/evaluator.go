@@ -14,6 +14,10 @@ import (
 const (
 	DefaultHold  = 5 * time.Minute  // resolve hold: a cleared condition must stay clear this long
 	DefaultGrace = 10 * time.Minute // after process start, new firings are held
+
+	// publishBackoff is how long publishing is skipped after a failed publish: a down broker then
+	// costs one publish timeout, not one per key and rule, and the next Eval retries.
+	publishBackoff = 15 * time.Second
 )
 
 // Supersedes reports whether a firing document opens a newer episode of the same fingerprint than
@@ -51,9 +55,16 @@ type Evaluator struct {
 	now   func() time.Time
 	grace time.Duration
 
-	mu    sync.Mutex
-	start time.Time // grace is relative to process start
-	rows  map[string]*row
+	mu           sync.Mutex // the state machine; held across publishes
+	start        time.Time  // grace is relative to process start
+	rows         map[string]*row
+	noPublishTil time.Time // no publish before this instant (after a failure)
+
+	// viewMu guards view, a copy of the open rows for Snapshot. It is never held across a publish,
+	// so Snapshot (hence the homedrive cache's Prune, which runs under the cache lock) cannot stall
+	// behind a slow broker.
+	viewMu sync.Mutex
+	view   map[string]row
 }
 
 // Option configures an Evaluator.
@@ -67,7 +78,7 @@ func WithGrace(d time.Duration) Option { return func(e *Evaluator) { e.grace = d
 
 // NewEvaluator restores the persisted state. Create it after delivery has subscribed and Eval only after mc.Start().
 func NewEvaluator(ctx context.Context, log logr.Logger, pub Publisher, store *Store, opts ...Option) (*Evaluator, error) {
-	e := &Evaluator{log: log, pub: pub, store: store, now: time.Now, grace: DefaultGrace, rows: map[string]*row{}}
+	e := &Evaluator{log: log, pub: pub, store: store, now: time.Now, grace: DefaultGrace, rows: map[string]*row{}, view: map[string]row{}}
 	for _, o := range opts {
 		o(e)
 	}
@@ -78,6 +89,7 @@ func NewEvaluator(ctx context.Context, log logr.Logger, pub Publisher, store *St
 	}
 	for i := range rows {
 		e.rows[rows[i].Fingerprint] = &rows[i]
+		e.syncView(&rows[i])
 	}
 	return e, nil
 }
@@ -93,7 +105,8 @@ func contractErr(err error) error { return fmt.Errorf("%w: %w", ErrContract, err
 // Error contract: only contract violations are returned (ErrContract: bad rule, key or texts); the
 // caller fixes its producer. Invalid texts never block a transition: the last valid texts are kept.
 // Transient publish and persist failures are logged once and not returned; the state stays put and
-// the next Eval retries, so the caller never needs to retry. Not calling Eval freezes the whole rule.
+// a later Eval retries (after publishBackoff for a failed publish, so a down broker costs one
+// timeout, not one per key), so the caller never needs to retry. Not calling Eval freezes the whole rule.
 func (e *Evaluator) Eval(ctx context.Context, rule Rule, obs []Observation) error {
 	if err := rule.validate(); err != nil {
 		return contractErr(err)
@@ -104,6 +117,9 @@ func (e *Evaluator) Eval(ctx context.Context, rule Rule, obs []Observation) erro
 	seen := map[string]bool{}
 	var errs []error
 	for _, o := range obs {
+		if ctx.Err() != nil { // shutting down: leave the rest to the next process
+			break
+		}
 		seen[o.Key] = true
 		if !nameRE.MatchString(o.Key) {
 			errs = append(errs, contractErr(fmt.Errorf("key %q must match %s", o.Key, nameRE)))
@@ -123,6 +139,9 @@ func (e *Evaluator) Eval(ctx context.Context, rule Rule, obs []Observation) erro
 	}
 	if now.Sub(e.start) >= e.grace {
 		for _, r := range e.rows {
+			if ctx.Err() != nil {
+				break
+			}
 			if r.Rule == rule.Name && !seen[r.Key] {
 				e.step(ctx, rule, Observation{Key: r.Key}, now)
 			}
@@ -176,6 +195,7 @@ func (e *Evaluator) step(ctx context.Context, rule Rule, o Observation, now time
 		r = e.open(ctx, rule, o, now)
 	} else {
 		updateTexts(r, o)
+		e.syncView(r)
 	}
 
 	// The hold is over: close the episode. A condition that is active again starts a NEW one; it never
@@ -233,6 +253,7 @@ func updateTexts(r *row, o Observation) {
 
 // persist and forget run to completion even if ctx is cancelled by a shutdown right after a publish.
 func (e *Evaluator) persist(ctx context.Context, r *row) {
+	e.syncView(r)
 	if err := e.store.save(context.WithoutCancel(ctx), r); err != nil {
 		e.log.Error(err, "persisting alert_state failed; in-memory state continues", "fingerprint", r.Fingerprint)
 	}
@@ -240,17 +261,31 @@ func (e *Evaluator) persist(ctx context.Context, r *row) {
 
 func (e *Evaluator) forget(ctx context.Context, fp string) {
 	delete(e.rows, fp)
+	e.viewMu.Lock()
+	delete(e.view, fp)
+	e.viewMu.Unlock()
 	if err := e.store.delete(context.WithoutCancel(ctx), fp); err != nil {
 		e.log.Error(err, "deleting alert_state failed", "fingerprint", fp)
 	}
 }
 
 func (e *Evaluator) publish(ctx context.Context, r *row, st State, now time.Time) bool {
+	if now.Before(e.noPublishTil) {
+		return false // the broker just failed: retry on a later Eval, without another timeout
+	}
 	if err := e.pub.Publish(ctx, e.document(r, st, now)); err != nil {
+		e.noPublishTil = now.Add(publishBackoff)
 		e.log.Error(err, "publishing alert failed; retried on the next evaluation", "fingerprint", r.Fingerprint, "state", st)
 		return false
 	}
 	return true
+}
+
+// syncView refreshes the Snapshot copy of r. The caller holds e.mu (or is the constructor).
+func (e *Evaluator) syncView(r *row) {
+	e.viewMu.Lock()
+	e.view[r.Fingerprint] = *r
+	e.viewMu.Unlock()
 }
 
 func (e *Evaluator) document(r *row, st State, now time.Time) *Alert {
@@ -265,13 +300,14 @@ func (e *Evaluator) document(r *row, st State, now time.Time) *Alert {
 
 // Snapshot returns the open (firing or resolving) alerts, sorted by fingerprint, for a producer's own panel.
 func (e *Evaluator) Snapshot() []Alert {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.viewMu.Lock()
+	defer e.viewMu.Unlock()
 	var out []Alert
 	now := e.now()
-	for _, r := range e.rows {
+	for fp := range e.view {
+		r := e.view[fp]
 		if r.State != "pending" {
-			out = append(out, *e.document(r, Firing, now))
+			out = append(out, *e.document(&r, Firing, now))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Fingerprint < out[j].Fingerprint })

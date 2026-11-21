@@ -213,6 +213,7 @@ func TestPublishFailureRetriesNaturally(t *testing.T) {
 		t.Fatal("not firing until published")
 	}
 	pub.err = nil
+	c.Advance(publishBackoff)
 	eval(t, e, on("k"))
 	if len(pub.docs) != 1 {
 		t.Fatal("next evaluation must publish")

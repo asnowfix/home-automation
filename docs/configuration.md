@@ -47,6 +47,7 @@ daemon:
   mqtt_watchdog_max_failures: 3
   mqtt_reconnect_interval: 2h
   mqtt_broker_client_log_interval: 2m
+  mqtt_broker_client_writes_pending: 0  # 0 = Mochi default (8192)
   reconcile_interval: 1h
   
   # MyHome Ports
@@ -119,6 +120,13 @@ daemon:
 - Set to `0` to disable
 - Flag: `--mqtt-broker-client-log-interval`
 - Env: `MYHOME_DAEMON_MQTT_BROKER_CLIENT_LOG_INTERVAL`
+
+**`mqtt_broker_client_writes_pending`** (int, default: `0`)
+- Embedded broker only: how many outbound messages may be queued per connected client before the broker drops further ones (a dropped QoS 1 message is not retried). `0` means Mochi's default (8192; about 64 KB of queue per client). Negative values are rejected at startup.
+- A drop is logged at error level (the only level always shown), at most once per client per minute with a count, and the periodic client log (`mqtt_broker_client_log_interval`) shows the broker's `messages_dropped` total.
+- Precedence: a value greater than 0 here (flag, env or `daemon.*` key; flag wins over env/config) overrides `capabilities.maximumclientwritespending` of the advanced `mqtt.broker` block (viper matches Go field names case-insensitively, so the YAML snake_case spelling does not work there). With `0`, the `mqtt.broker` block value is used if set, otherwise Mochi's default. A non-positive value in the `mqtt.broker` block is replaced by Mochi's default.
+- Flag: `--mqtt-broker-client-writes-pending`
+- Env: `MYHOME_DAEMON_MQTT_BROKER_CLIENT_WRITES_PENDING`
 
 **`reconcile_interval`** (duration, default: `1h`)
 - Interval for re-applying the canonical MQTT broker address, NTP server, and Matter-disabled setting to every known Gen2+ device, over HTTP. Self-healing safety net against config drift (e.g. a device ending up with the wrong MQTT broker). Never touches device name, WiFi, or scripts.

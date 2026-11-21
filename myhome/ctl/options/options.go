@@ -40,6 +40,9 @@ const MQTT_WATCHDOG_MAX_FAILURES int = 3
 
 const MQTT_BROKER_CLIENT_LOG_INTERVAL time.Duration = 2 * time.Minute
 
+// MQTT_BROKER_CLIENT_WRITES_PENDING: 0 means Mochi's own default (8192), not a literal cap.
+const MQTT_BROKER_CLIENT_WRITES_PENDING int = 0
+
 const MQTT_RECONNECT_INTERVAL time.Duration = 2 * time.Hour
 
 const SHELLY_DEFAULT_RATE_LIMIT time.Duration = 200 * time.Millisecond
@@ -68,6 +71,7 @@ var Flags struct {
 	MqttWatchdogMaxFailures     int           // the value taken by --mqtt-watchdog-max-failures
 	MqttReconnectInterval       time.Duration // the value taken by --mqtt-reconnect-interval
 	MqttBrokerClientLogInterval time.Duration // the value taken by --mqtt-broker-client-log-interval
+	MqttBrokerClientWritesPending int // the value taken by --mqtt-broker-client-writes-pending (0 = Mochi default)
 	Via                         string
 	SwitchId                    uint32
 	EventsDir                   string

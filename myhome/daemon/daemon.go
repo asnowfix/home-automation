@@ -15,6 +15,7 @@ import (
 	myhomesfr "github.com/asnowfix/home-automation/internal/myhome/sfr"
 	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
+	"github.com/asnowfix/home-automation/myhome/alert"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	"github.com/asnowfix/home-automation/myhome/electricity"
@@ -741,6 +742,18 @@ func (d *daemon) Run() error {
 		log.Info("MQTT client connected - subscriptions active")
 		accountsRegistry.SetEnabled("mqtt", true)
 		accountsRegistry.Report("mqtt", nil)
+
+		// Drive sync alerts (#835): the homedrive rules (R1 to R5) run on the shared alert core
+		// (#845) and publish alert documents on <instance>/alert/<rule>/<key> (#843, QoS 1, not
+		// retained). Channel-independent: delivery (#714) subscribes; this only produces. Started
+		// after mc.Start() per the contract's wiring rule. Not fatal if the state table is unusable.
+		if alertStore, err := alert.NewStore(storage.DB()); err != nil {
+			log.Error(err, "Failed to initialize alert state, homedrive alerts disabled")
+		} else if alertEval, err := alert.NewEvaluator(d.ctx, log.WithName("alert"), alert.NewMQTTPublisher(mc, myhome.InstanceName), alertStore); err != nil {
+			log.Error(err, "Failed to start the alert evaluator, homedrive alerts disabled")
+		} else {
+			go homedrive.NewProducer(log, driveCache, alertEval, nil).Run(d.ctx)
+		}
 
 		// Subscribe to $SYS topics for monitoring (after connection to avoid early connection)
 		// Use large buffer (256) because broker publishes 15-20+ $SYS topics in rapid bursts every 30s

@@ -574,3 +574,69 @@ func TestCache_ConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// Schema 2.1 guards: the contract fixtures set the overlays, and the guards
+// survive a restart through the persisted raw document.
+func TestCache_GuardOverlays(t *testing.T) {
+	tests := []struct {
+		file                          string
+		rootBlocked, deletesHeld, deg bool
+	}{
+		{"contract/status-running.json", false, false, false},
+		{"contract/status-root-blocked.json", true, false, false},
+		{"contract/status-delete-blocked.json", false, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.file, func(t *testing.T) {
+			store, err := NewStore(memDB(t))
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Date(2026, 11, 15, 12, 33, 23, 0, time.UTC) // 10 s after the fixtures' ts
+			clk := &testClock{t: now}
+			c, _ := newTestCache(t, clk, store)
+			send(t, c, testTopic, fixture(t, tt.file))
+			check := func(v View) {
+				t.Helper()
+				if v.RootBlocked != tt.rootBlocked || v.DeletesHeld != tt.deletesHeld || v.Degraded != tt.deg || v.StateError {
+					t.Errorf("overlays = %+v", v)
+				}
+				if v.Status == nil || v.Status.Guards == nil {
+					t.Errorf("guards lost: %+v", v.Status)
+				}
+			}
+			check(only(t, c, now))
+			c2, _ := newTestCache(t, &testClock{t: now}, store)
+			check(only(t, c2, now))
+		})
+	}
+}
+
+// Future values (a state or guard reason a newer 2.x producer may add) must not
+// break the parse; an unknown state is degraded, as before.
+func TestParse_FutureGuardValues(t *testing.T) {
+	base := string(fixture(t, "contract/status-running.json"))
+	tests := []struct {
+		name, from, to string
+		degraded       bool
+	}{
+		{"unknown state", `"state": "running"`, `"state": "quota_blocked"`, true},
+		{"unknown root reason", `"local_root": null`, `"local_root": {"reason": "read_only", "since": "2026-11-15T12:30:04Z"}`, false},
+		{"unknown guard key", `"guards": {`, `"guards": {"quota": {"reason": "x"},`, false},
+		{"unknown deletes reason", `"bisync_deletes": null`, `"bisync_deletes": {"reason": "new", "planned": 1, "threshold": 2, "since": "2026-11-15T12:30:04Z"}`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := strings.Replace(base, tt.from, tt.to, 1)
+			if doc == base {
+				t.Fatal("fixture no longer contains the replaced text")
+			}
+			c, _ := newTestCache(t, &testClock{t: time.Date(2026, 11, 15, 12, 33, 23, 0, time.UTC)}, nil)
+			send(t, c, testTopic, []byte(doc))
+			v := only(t, c, time.Date(2026, 11, 15, 12, 33, 23, 0, time.UTC))
+			if v.Status == nil || v.Unsupported || v.Degraded != tt.degraded {
+				t.Errorf("view = %+v", v)
+			}
+		})
+	}
+}

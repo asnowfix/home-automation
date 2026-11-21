@@ -75,6 +75,8 @@ type View struct {
 	ClockSkew   bool   // ts was in the future; receipt time used for liveness
 	Degraded    bool   // state is not one of the known values
 	StateError  bool   // state == "error"
+	RootBlocked bool   // state == "root_blocked" or guards.local_root set
+	DeletesHeld bool   // guards.bisync_deletes set
 	AuthProblem bool   // auth.state not in {ok, unknown}
 	Problem     string // the last payload was rejected (see Problem*)
 }
@@ -316,6 +318,9 @@ func (c *Cache) view(in *instance, now time.Time) View {
 		v.Unsupported = st.Unsupported
 		if !st.Unsupported {
 			v.StateError = st.State == StateError
+			g := st.Guards
+			v.RootBlocked = st.State == StateRootBlocked || (g != nil && g.LocalRoot != nil)
+			v.DeletesHeld = g != nil && g.BisyncDeletes != nil
 			v.Degraded = !knownState(st.State)
 			v.AuthProblem = st.Auth != nil && !authFine(st.Auth.State)
 		}
@@ -350,7 +355,7 @@ func Classify(lastTs time.Time, interval time.Duration, processStart, now time.T
 
 func knownState(s string) bool {
 	switch s {
-	case StateStarting, StateRunning, StatePaused, StateError:
+	case StateStarting, StateRunning, StatePaused, StateError, StateRootBlocked:
 		return true
 	}
 	return false

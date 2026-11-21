@@ -51,9 +51,8 @@ func TestParse_FixturesMatchContract(t *testing.T) {
 
 // The files in testdata/contract are copied VERBATIM from the producer:
 // github.com/asnowfix/home-drive, branch issue-141-status-v2, path
-// homedrive/pkg/homedrive/testdata/status-{running,error,auth-failure}.json,
-// last changed in commit 10f28d8f04becbb5856c6d21cd2843405d049c33 (branch tip
-// 4235c27). Re-copy them when the contract changes; this test then fails if the
+// homedrive/pkg/homedrive/testdata/status-{running,error,auth-failure,
+// root-blocked,delete-blocked}.json (schema 2.1, PR #144 head 23b6dcf or newer). Re-copy them when the contract changes; this test then fails if the
 // copied structs lack a field the producer emits.
 func TestParse_ProducerDocumentsPinned(t *testing.T) {
 	tests := []struct {
@@ -76,6 +75,22 @@ func TestParse_ProducerDocumentsPinned(t *testing.T) {
 				t.Errorf("auth=%+v", st.Auth)
 			}
 		}},
+		{"status-root-blocked.json", func(t *testing.T, st *Status) {
+			g := st.Guards
+			if st.State != StateRootBlocked || g == nil || g.BisyncDeletes != nil || g.LocalRoot == nil ||
+				g.LocalRoot.Reason != RootReasonMarkerMissing || g.LocalRoot.Since.IsZero() {
+				t.Errorf("state=%q guards=%+v", st.State, g)
+			}
+		}},
+		{"status-delete-blocked.json", func(t *testing.T, st *Status) {
+			g := st.Guards
+			if st.State != StateRunning || g == nil || g.LocalRoot != nil || g.BisyncDeletes == nil {
+				t.Fatalf("state=%q guards=%+v", st.State, g)
+			}
+			if d := g.BisyncDeletes; d.Reason != DeletesReasonThreshold || d.Planned != 412 || d.Threshold != 100 || d.Since.IsZero() {
+				t.Errorf("bisync_deletes = %+v", d)
+			}
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -89,6 +104,9 @@ func TestParse_ProducerDocumentsPinned(t *testing.T) {
 			st, err := Parse(b)
 			if err != nil || st.Unsupported {
 				t.Fatalf("Parse: %v %+v", err, st)
+			}
+			if st.Schema != "2.1" || st.Guards == nil {
+				t.Errorf("schema=%q guards=%v, want 2.1 with guards always present", st.Schema, st.Guards)
 			}
 			tt.check(t, st)
 		})

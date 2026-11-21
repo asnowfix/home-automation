@@ -649,9 +649,6 @@ function emitData(data) {
   }
 }
 
-//saving the id of the last packet, this is used to filter the duplicated packets
-let lastPacketId = 0x100;
-
 // Callback for the BLE scanner object
 function BLEScanCallback(event, result) {
   //exit if not a result of a scan
@@ -681,12 +678,10 @@ function BLEScanCallback(event, result) {
     return;
   }
 
-  //exit if the event is duplicated
-  if (lastPacketId === unpackedData.pid) {
-    return;
-  }
-
-  lastPacketId = unpackedData.pid;
+  // Every advertisement is published, repeated packet ids included (#849): the sensor has
+  // already spent the battery to send it, so dropping it here saves nothing, and
+  // the consumers decide what a repeat means (blu-listener.js extends its auto-off delay
+  // on each motion event; the daemon merges copies by address and pid, #850).
 
   unpackedData.rssi = result.rssi;
   unpackedData.address = result.addr;

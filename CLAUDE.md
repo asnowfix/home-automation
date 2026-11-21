@@ -369,7 +369,21 @@ The discipline that made this recoverable:
   `sudo systemctl enable --now myhome-db-backup.timer`. Also remove any local
   `myhome.service.d/` override (e.g. `no-runtime-max.conf`) and `systemctl daemon-reload`, or the
   packaged `RuntimeMaxSec` is silently overridden.
-- **A draft release is validated as a whole, through a real package installation.** Install the
+- **Test locally, in isolation, before upgrading the NAS (default procedure since 2026-11-21).**
+  The NAS runs the house, so it is the last place to find out a release misbehaves. Before any
+  `dpkg -i` on it, have a **side agent** (a verifier sub-agent in its own worktree) build the tag
+  with `make build` and run the daemon **locally, inside a loopback-only network namespace**
+  (`unshare -rn`, `ip link set lo up`) with a scratch working directory, so it can reach neither
+  the real devices (mDNS discovery and auto-setup would otherwise touch them) nor the NAS broker.
+  Measure what the change touches (e.g. time until `myhome ctl list` is answered after a start and
+  after a restart over an existing database) and compare with the version currently on the NAS.
+  Exceptions, where the real broker or proxy is the thing under test: changes to MQTT or proxy
+  behaviour. State the exception and its rollback (the previous release's `.deb`, checksum-verified)
+  before installing. Measured motivation, 2026-11-21: v0.14.1 installed on the NAS and its daemon
+  never answered `ctl` RPC for 15 minutes (v0.14.0 answered in ~80 s), which took a rollback to
+  find out.
+- **A draft release is validated as a whole, through a real package installation** — once the local
+  test above is green. Install the
   draft's `.deb` for the host's architecture (`dpkg -i`, `DEBIAN_FRONTEND=noninteractive`, after
   verifying its checksum) and run the postinst follow-ups above. Do not validate a draft by
   hand-copying its binary, units or scripts, and do not skip or "preview away" parts of the install:

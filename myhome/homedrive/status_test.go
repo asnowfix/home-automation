@@ -51,8 +51,8 @@ func TestParse_FixturesMatchContract(t *testing.T) {
 
 // The files in testdata/contract are copied VERBATIM from the producer:
 // github.com/asnowfix/home-drive, branch issue-141-status-v2, path
-// homedrive/pkg/homedrive/testdata/status-{running,error,auth-failure}.json,
-// last changed in commit 10f28d8f04becbb5856c6d21cd2843405d049c33 (branch tip
+// homedrive/pkg/homedrive/testdata/status-{running,error,auth-failure,root-blocked,delete-blocked}.json,
+// schema 2.1 (guards), branch tip e534dfa as of 2026-11-21 (earlier: commit 10f28d8f04, tip
 // 4235c27). Re-copy them when the contract changes; this test then fails if the
 // copied structs lack a field the producer emits.
 func TestParse_ProducerDocumentsPinned(t *testing.T) {
@@ -69,6 +69,17 @@ func TestParse_ProducerDocumentsPinned(t *testing.T) {
 		{"status-error.json", func(t *testing.T, st *Status) {
 			if st.State != StateError || st.LastError == nil {
 				t.Errorf("state=%q last_error=%+v", st.State, st.LastError)
+			}
+		}},
+		{"status-root-blocked.json", func(t *testing.T, st *Status) {
+			if st.State != StateRootBlocked || st.Guards == nil || st.Guards.LocalRoot == nil || st.Guards.LocalRoot.Reason != "marker_missing" || st.Guards.BisyncDeletes != nil {
+				t.Errorf("state=%q guards=%+v", st.State, st.Guards)
+			}
+		}},
+		{"status-delete-blocked.json", func(t *testing.T, st *Status) {
+			g := st.Guards
+			if g == nil || g.BisyncDeletes == nil || g.BisyncDeletes.Planned != 412 || g.BisyncDeletes.Threshold != 100 || g.LocalRoot != nil {
+				t.Errorf("guards=%+v", g)
 			}
 		}},
 		{"status-auth-failure.json", func(t *testing.T, st *Status) {

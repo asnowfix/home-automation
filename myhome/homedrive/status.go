@@ -55,6 +55,9 @@ const (
 	StateRunning  = "running"
 	StatePaused   = "paused"
 	StateError    = "error"
+	// StateRootBlocked (schema 2.1): local_root is missing or not the synced tree, so pull, push
+	// and bisync are paused; see Guards.LocalRoot.
+	StateRootBlocked = "root_blocked"
 )
 
 // Known values of Auth.State that are not a problem.
@@ -86,6 +89,7 @@ type Status struct {
 	Bisync          *Bisync            `json:"bisync"`
 	Local           *Local             `json:"local"`
 	QuotaUsedPct    *float64           `json:"quota_used_pct"`
+	Guards          *Guards            `json:"guards"` // schema 2.1; nil from a 2.0 producer
 
 	// Unsupported is set by Parse (not by the wire) when the schema major is
 	// not SupportedMajor. Only Schema, Ts and PublishInterval are then filled.
@@ -113,6 +117,28 @@ type LastError struct {
 	Ts      Time   `json:"ts"`
 	Op      string `json:"op"`
 	Message string `json:"message"`
+}
+
+// Guards (schema 2.1) are the producer's deliberate stops; each is nil when its guard is not
+// blocking. They carry codes and counts only, never a path or a message.
+type Guards struct {
+	LocalRoot     *RootGuard   `json:"local_root"`
+	BisyncDeletes *DeleteGuard `json:"bisync_deletes"`
+}
+
+// RootGuard: Reason is missing, marker_missing, identity_mismatch or unreadable.
+type RootGuard struct {
+	Reason string `json:"reason"`
+	Since  Time   `json:"since"`
+}
+
+// DeleteGuard: bisync held back Planned deletions because the limit was Threshold (0 for an empty
+// side). Reason is threshold, empty_local or empty_remote.
+type DeleteGuard struct {
+	Reason    string `json:"reason"`
+	Planned   int64  `json:"planned"`
+	Threshold int64  `json:"threshold"`
+	Since     Time   `json:"since"`
 }
 
 // Auth is the Google authorisation state.

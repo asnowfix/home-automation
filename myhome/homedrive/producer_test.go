@@ -202,6 +202,14 @@ func TestRules_FireAndResolve(t *testing.T) {
 			set(m, "last_poll", ts(now.Add(-time.Minute)))
 		}},
 		{"R4 poll stuck", RuleSyncFailing, alert.Critical, 5 * time.Minute, func(m map[string]any, now time.Time) { set(m, "last_poll", ts(now.Add(-20*time.Minute))) }},
+		{"R6 local_root guard", RuleRootBlocked, alert.Critical, 5 * time.Minute, func(m map[string]any, now time.Time) {
+			set(m, "state", "root_blocked")
+			set(m, "guards.local_root", map[string]any{"reason": "marker_missing", "since": ts(now)})
+		}},
+		{"R6 root_blocked state alone", RuleRootBlocked, alert.Critical, 5 * time.Minute, func(m map[string]any, _ time.Time) { set(m, "state", "root_blocked") }},
+		{"R7 bisync deletes guard", RuleDeletesBlocked, alert.Critical, 0, func(m map[string]any, now time.Time) {
+			set(m, "guards.bisync_deletes", map[string]any{"reason": "threshold", "planned": 412, "threshold": 100, "since": ts(now)})
+		}},
 		{"R5 bisync error", RuleBisync, alert.Warning, 0, func(m map[string]any, _ time.Time) {
 			set(m, "bisync.result", "error")
 			set(m, "bisync.error", "boom: /home/u/Drive/a.txt")
@@ -421,6 +429,8 @@ func TestRules_ContractFixtures(t *testing.T) {
 		{"contract/status-error.json", time.Date(2026, 11, 15, 12, 40, 10, 0, time.UTC), []string{RuleRestartLoop}},
 		{"contract/status-auth-failure.json", time.Date(2026, 11, 15, 12, 45, 10, 0, time.UTC), []string{RuleAuthBroken, RuleSyncFailing}},
 		{"contract/status-running.json", runningStart, nil},
+		{"contract/status-root-blocked.json", time.Date(2026, 11, 15, 12, 33, 23, 0, time.UTC), []string{RuleRootBlocked}},
+		{"contract/status-delete-blocked.json", time.Date(2026, 11, 15, 12, 33, 23, 0, time.UTC), []string{RuleDeletesBlocked}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.file, func(t *testing.T) {
@@ -475,6 +485,7 @@ func TestAlertRules_NamesAndPolicy(t *testing.T) {
 		RuleOffline: {alert.Critical, 0}, RuleRestartLoop: {alert.Critical, 0}, RuleAuthBroken: {alert.Critical, 0},
 		RuleAuthRefresh: {alert.Critical, 10 * time.Minute}, RuleAuthUnknown: {alert.Warning, time.Hour},
 		RuleSyncFailing: {alert.Critical, 5 * time.Minute}, RuleBisync: {alert.Warning, 0},
+		RuleRootBlocked: {alert.Critical, 5 * time.Minute}, RuleDeletesBlocked: {alert.Critical, 0},
 	}
 	rules := AlertRules()
 	if len(rules) != len(want) {

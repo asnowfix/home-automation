@@ -350,7 +350,7 @@ func Classify(lastTs time.Time, interval time.Duration, processStart, now time.T
 
 func knownState(s string) bool {
 	switch s {
-	case StateStarting, StateRunning, StatePaused, StateError:
+	case StateStarting, StateRunning, StatePaused, StateError, StateRootBlocked:
 		return true
 	}
 	return false

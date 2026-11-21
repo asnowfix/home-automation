@@ -22,6 +22,9 @@ const (
 	RuleAuthUnknown = "homedrive.auth-unknown" // R3c
 	RuleSyncFailing = "homedrive.sync-failing" // R4
 	RuleBisync      = "homedrive.bisync"       // R5
+
+	RuleRootBlocked    = "homedrive.root-blocked"    // R6, schema 2.1 guards.local_root
+	RuleDeletesBlocked = "homedrive.deletes-blocked" // R7, schema 2.1 guards.bisync_deletes
 )
 
 // Thresholds of the rules (design section 3; contract section 7). Constants, not configuration.
@@ -53,10 +56,8 @@ type Reading struct {
 
 // AlertRules is the homedrive rule set (design section 3, R1 to R5).
 //
-// TODO(home-drive#144): the producer is gaining guard fields for "local_root blocked" and "bisync
-// deletes blocked". They are not in status-v2.md on issue-141-status-v2 as of 2026-11-21, so no
-// rule exists for them: add one AlertRule each here (and Status fields) once the field names are
-// published. Do not guess them.
+// R6 and R7 are the schema 2.1 guards (status-v2 section 5.3, home-drive#144): sync is deliberately
+// not making progress and needs a human.
 func AlertRules() []AlertRule {
 	return []AlertRule{
 		{Rule: alert.Rule{Name: RuleOffline, Source: AlertSource, Severity: alert.Critical}, Eval: evalOffline,
@@ -75,6 +76,11 @@ func AlertRules() []AlertRule {
 			Eval: evalSyncFailing, Cleared: "Sync is working again."},
 		{Rule: alert.Rule{Name: RuleBisync, Source: AlertSource, Severity: alert.Warning}, Content: true,
 			Eval: evalBisync, Cleared: "The bisync safety net is healthy again."},
+		// 5 min absorbs a mount that is not ready yet at boot; the guard clears on its own.
+		{Rule: alert.Rule{Name: RuleRootBlocked, Source: AlertSource, Severity: alert.Critical, For: 5 * time.Minute}, Content: true,
+			Eval: evalRootBlocked, Cleared: "The local root is available again."},
+		{Rule: alert.Rule{Name: RuleDeletesBlocked, Source: AlertSource, Severity: alert.Critical}, Content: true,
+			Eval: evalDeletesBlocked, Cleared: "Bisync deletions are no longer held back."},
 	}
 }
 
@@ -145,7 +151,7 @@ func evalSyncFailing(v View, now time.Time) Reading {
 func evalBisync(v View, now time.Time) Reading {
 	st := v.Status
 	r := Reading{Noun: "bisync not healthy"}
-	if st.State == StatePaused { // bisync is expected to be idle while paused
+	if st.State == StatePaused || st.State == StateRootBlocked { // bisync is expected to be idle
 		return r
 	}
 	switch {
@@ -164,6 +170,42 @@ func evalBisync(v View, now time.Time) Reading {
 			r.Detail = fmt.Sprintf("No bisync completed since %s (%d h).", clock(ref), int(now.Sub(ref).Hours()))
 		}
 	}
+	return r
+}
+
+var (
+	rootReasons   = map[string]bool{"missing": true, "marker_missing": true, "identity_mismatch": true, "unreadable": true}
+	deleteReasons = map[string]bool{"threshold": true, "empty_local": true, "empty_remote": true}
+)
+
+func evalRootBlocked(v View, _ time.Time) Reading {
+	st := v.Status
+	g := (*RootGuard)(nil)
+	if st.Guards != nil {
+		g = st.Guards.LocalRoot
+	}
+	r := Reading{Noun: "local root blocked", Active: g != nil || st.State == StateRootBlocked}
+	reason := "unrecognised"
+	if g != nil && rootReasons[g.Reason] {
+		reason = g.Reason
+	}
+	r.Detail = fmt.Sprintf("Sync is paused: the local root is not the synced tree (%s).", reason)
+	return r
+}
+
+func evalDeletesBlocked(v View, _ time.Time) Reading {
+	st := v.Status
+	r := Reading{Noun: "bisync deletes blocked"}
+	if st.Guards == nil || st.Guards.BisyncDeletes == nil {
+		return r
+	}
+	g := st.Guards.BisyncDeletes
+	reason := "unrecognised"
+	if deleteReasons[g.Reason] {
+		reason = g.Reason
+	}
+	r.Active = true
+	r.Detail = fmt.Sprintf("Bisync held back %d deletions (limit %d, %s). Review them, then release with allow-deletes.", g.Planned, g.Threshold, reason)
 	return r
 }
 

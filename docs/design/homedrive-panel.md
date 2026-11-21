@@ -275,7 +275,9 @@ chars); `detail` is a fixed template (at most 400). Times are UTC. A `<user>@<ho
 | R3b auth refresh failing (`homedrive.auth-refresh`) | `auth.state == refresh_failing` | 10 min | `auth.state == ok` | critical |
 | R3c auth unknown (`homedrive.auth-unknown`) | `auth.state == unknown` (or `auth` absent) and `state == running` | 60 min | `auth.state != unknown` | warning |
 | R4 sync failing (`homedrive.sync-failing`) | failing with no success since (below) **or** (`state == running` and `now − last_poll > 15 min`; `started_at` when no poll yet) | 5 min | condition false | critical |
-| R5 bisync safety net (`homedrive.bisync`) | `bisync.result == "error"`, or `bisync.at` (or `started_at` if `bisync` is null) older than 3 h; not while `state == paused` | 0 | result ok and age < 3 h | warning |
+| R5 bisync safety net (`homedrive.bisync`) | `bisync.result == "error"`, or `bisync.at` (or `started_at` if `bisync` is null) older than 3 h; not while `state` is `paused` or `root_blocked` | 0 | result ok and age < 3 h | warning |
+| R6 local root blocked (`homedrive.root-blocked`) | schema 2.1 `guards.local_root != null` or `state == "root_blocked"` | 5 min | guard clears | critical |
+| R7 bisync deletes blocked (`homedrive.deletes-blocked`) | schema 2.1 `guards.bisync_deletes != null` | 0 | guard clears (released with `ctl allow-deletes`, or nothing left to veto) | critical |
 
 - **R1 and a restart of homedrive.** A normal restart or deploy of homedrive (seconds to a couple of
   minutes of silence) never reaches the 15 min threshold, so it never alerts. The core's `for` is not
@@ -301,10 +303,12 @@ chars); `detail` is a fixed template (at most 400). Times are UTC. A `<user>@<ho
   would be a #843 question.
 - **Quota** has no rule. The quota manager is not wired (contract §1), and exhaustion would show up
   as R4 anyway.
-- **Guard rules, pending the producer.** homedrive is gaining "local_root blocked" and "bisync
-  deletes blocked" guard states (home-drive#144). Until `status-v2.md` publishes their field names
-  there is no rule for them; `rules.go` carries a `TODO` hook. Each becomes one more `AlertRule`
-  (proposed severity: critical, since sync is stopped on purpose and nothing else will say so).
+- **Guard rules R6 and R7 (schema 2.1, home-drive#144).** Both mean sync is deliberately not making
+  progress and needs a human, and nothing else will say so, so both are critical. R6 has a 5 min
+  `for` because a mount that is not ready yet at boot looks like `missing` and clears on its own.
+  R7 has none: a held-back mass deletion is the data-loss hazard the guard exists for, and it does
+  not clear until released. The texts carry the reason code and the counts only. Against a 2.0
+  producer, `guards` is absent and neither rule fires.
 
 **Message texts** (summary / first line of detail):
 - R1: `homedrive offline: <user>@<host>` / `No status since 14:32 UTC (16 min).` Resolved: `homedrive is reporting again.`
@@ -314,6 +318,8 @@ chars); `detail` is a fixed template (at most 400). Times are UTC. A `<user>@<ho
 - R3c: `homedrive Google sign-in unverified: <user>@<host>` / `Auth state still unknown while running.`
 - R4: `homedrive sync failing: <user>@<host>` / `7 failures in the last hour, none succeeded since. Last failing step: push.`
 - R5: `homedrive bisync not healthy: <user>@<host>` / `Last bisync at 09:00 UTC failed.`
+- R6: `homedrive local root blocked: <user>@<host>` / `Sync is paused: the local root is not the synced tree (marker_missing).`
+- R7: `homedrive bisync deletes blocked: <user>@<host>` / `Bisync held back 412 deletions (limit 100, threshold). Review them, then release with allow-deletes.`
 
 ### 4. The shared alert core: `myhome/alert` (#845, PR #846)
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/asnowfix/home-automation/pkg/shelly/kvs"
 	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
+	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
 	"github.com/go-logr/logr/testr"
@@ -287,13 +288,37 @@ type fakeUploadDevice struct {
 	// failure (timeout, connection reset) as opposed to the device answering
 	// "key not found".
 	kvGetErr error
+
+	// code holds each script's code as PutCode left it (#863: the pump guard
+	// saves and restores it). putCodeErr, if set, is consulted on every
+	// PutCode call (1-based) to simulate a chunk transfer that breaks.
+	code       map[uint32]string
+	putCodeErr func(call int) error
+	putCalls   int
+
+	// status, if set, is returned by Script.GetStatus for a script id, after
+	// the given number of Script.Start calls (see statusAfterStart).
+	// Default: running, no errors.
+	statusAfterStart func(id uint32, starts int) pkgscript.Status
+
+	// relays are the switch outputs; Switch.GetStatus for an id beyond them
+	// answers "not found", like a device without that component. nil means
+	// one switch, off.
+	relays []bool
+
+	// kvSetErr, if set, is returned by every KVS.Set.
+	kvSetErr error
 }
 
 var _ types.Device = (*fakeUploadDevice)(nil)
 
 func newFakeUploadDevice(id string) *fakeUploadDevice {
-	return &fakeUploadDevice{id: id, scripts: map[uint32]string{}, kv: map[string]string{}, calls: map[string]int{}}
+	return &fakeUploadDevice{id: id, scripts: map[uint32]string{}, kv: map[string]string{}, calls: map[string]int{}, code: map[uint32]string{}}
 }
+
+// getCodeChunk is how many bytes the fake's Script.GetCode returns per call,
+// small enough that tests exercise the multi-chunk path.
+const getCodeChunk = 7
 
 func (f *fakeUploadDevice) CallE(_ context.Context, _ types.Channel, method string, params any) (any, error) {
 	f.calls[method]++
@@ -315,7 +340,56 @@ func (f *fakeUploadDevice) CallE(_ context.Context, _ types.Channel, method stri
 		return &pkgscript.Status{}, nil
 
 	case "Script.PutCode":
+		f.putCalls++
+		if f.putCodeErr != nil {
+			if err := f.putCodeErr(f.putCalls); err != nil {
+				return nil, err
+			}
+		}
+		req := params.(*pkgscript.PutCodeRequest)
+		if req.Append {
+			f.code[req.Id] += req.Code
+		} else {
+			f.code[req.Id] = req.Code
+		}
 		return &pkgscript.PutCodeResponse{}, nil
+
+	case "Script.GetCode":
+		req := params.(*pkgscript.GetCodeRequest)
+		c := f.code[req.Id]
+		if int(req.Offset) > len(c) {
+			return nil, &types.RpcError{Code: -103, Message: "offset out of range"}
+		}
+		end := int(req.Offset) + getCodeChunk
+		if end > len(c) {
+			end = len(c)
+		}
+		return &pkgscript.GetCodeResponse{Data: c[req.Offset:end], Left: uint32(len(c) - end)}, nil
+
+	case "Script.GetStatus":
+		req := params.(*pkgscript.StatusStartStopDeleteRequest)
+		if f.statusAfterStart != nil {
+			st := f.statusAfterStart(req.Id, f.startCalls)
+			st.Id = req.Id
+			return &st, nil
+		}
+		return &pkgscript.Status{Id: req.Id, Running: true}, nil
+
+	case "Switch.GetStatus":
+		req := params.(*sswitch.ToggleStatusConfigRequest)
+		relays := f.relays
+		if relays == nil {
+			relays = []bool{false}
+		}
+		if req.Id >= len(relays) {
+			return nil, &types.RpcError{Code: -105, Message: fmt.Sprintf("Argument 'id', value %d not found!", req.Id)}
+		}
+		return &sswitch.Status{Id: req.Id, Output: relays[req.Id]}, nil
+
+	case "KVS.Delete":
+		req := params.(map[string]any)
+		delete(f.kv, req["key"].(string))
+		return &kvs.Status{}, nil
 
 	case "Script.SetConfig":
 		return &pkgscript.Status{}, nil
@@ -344,6 +418,9 @@ func (f *fakeUploadDevice) CallE(_ context.Context, _ types.Channel, method stri
 		return &kvs.GetResponse{Value: v}, nil
 
 	case "KVS.Set":
+		if f.kvSetErr != nil {
+			return nil, f.kvSetErr
+		}
 		req := params.(*kvs.KeyValue)
 		f.kv[req.Key] = req.Value
 		return &kvs.Status{}, nil

@@ -899,6 +899,7 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 	type failedDevice struct {
 		name string
 		id   string
+		err  error
 	}
 	var failedDevices []failedDevice
 	for result := range results {
@@ -906,7 +907,7 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 			deviceId := result.Device.Id()
 			deviceName := result.Device.Name()
 			errs = append(errs, fmt.Errorf("device %s: %w", deviceId, result.Error))
-			failedDevices = append(failedDevices, failedDevice{name: deviceName, id: deviceId})
+			failedDevices = append(failedDevices, failedDevice{name: deviceName, id: deviceId, err: result.Error})
 		}
 		out = append(out, result.Result)
 	}
@@ -922,7 +923,10 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 		}
 		fmt.Printf("✗ %d device(s) failed:\n", len(errs))
 		for _, dev := range failedDevices {
-			fmt.Printf("  - %s (%s)\n", dev.name, dev.id)
+			// The reason is part of the summary: without it a fleet run
+			// (`script update '*'`) reports only names, and the cause of its
+			// failures is lost (#863).
+			fmt.Printf("  - %s (%s): %v\n", dev.name, dev.id, dev.err)
 		}
 
 		// Log details

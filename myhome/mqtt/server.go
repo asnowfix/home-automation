@@ -210,6 +210,15 @@ func removeClosedClients(log logr.Logger, registry *mochiServer.Clients, snapsho
 		if !client.Closed() {
 			continue
 		}
+		// The snapshot may be stale: if the client reconnected since, the registry holds its live
+		// successor under the same id, and deleting by id would make that connection deaf to every
+		// live publish while its socket and keepalive stay up (#858). Only delete the entry that is
+		// still the closed client. Mochi offers no compare-and-delete, so a reconnect landing
+		// between this Get and the Delete below is still possible, but that window no longer spans
+		// the log write or the rest of the loop.
+		if current, ok := registry.Get(id); !ok || current != client {
+			continue
+		}
 		log.Info("Removing closed client from registry",
 			"client_id", id,
 			"stop_time", time.Unix(client.StopTime(), 0))

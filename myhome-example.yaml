@@ -4,6 +4,8 @@
 mqtt:
   # MQTT Broker Configuration
   # This section configures the embedded Mochi MQTT broker
+  # Keys use snake_case (matched to Mochi Options field names, ignoring case and underscores);
+  # an unknown key is ignored and logged as a WARNING at startup.
   broker:
     # System Configuration
     # Size of the client network write buffer in bytes
@@ -122,7 +124,7 @@ daemon:
   # mqtt_broker_client_log_interval: 2m
 
   # Embedded broker: max pending outbound messages per client before drops (0 = Mochi default, 8192).
-  # Overrides mqtt.broker.capabilities.maximumclientwritespending when > 0
+  # Overrides mqtt.broker.capabilities.maximum_client_writes_pending when > 0
   # mqtt_broker_client_writes_pending: 0
 
   # Interval for re-applying canonical MQTT broker/NTP/Matter config to known

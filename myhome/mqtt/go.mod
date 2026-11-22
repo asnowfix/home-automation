@@ -10,6 +10,7 @@ require (
 	github.com/asnowfix/home-automation/myhome/ctl/options v0.0.0-20260713141241-6bc3b69c6509
 	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/go-logr/logr v1.4.3
+	github.com/go-viper/mapstructure/v2 v2.4.0
 	github.com/grandcat/zeroconf v1.0.0
 	github.com/mochi-mqtt/server/v2 v2.6.6
 	github.com/spf13/viper v1.21.0
@@ -20,7 +21,6 @@ require (
 	github.com/asnowfix/home-automation/pkg/version v0.0.0-20260713141241-6bc3b69c6509 // indirect
 	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
-	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackpal/gateway v1.1.1 // indirect
 	github.com/miekg/dns v1.1.65 // indirect

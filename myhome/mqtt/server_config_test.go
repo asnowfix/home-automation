@@ -164,3 +164,56 @@ func waitFor(t *testing.T, cond func() bool) {
 		runtimeGosched()
 	}
 }
+
+func TestLoadBrokerConfig_SnakeCaseAndUnknownKeys(t *testing.T) {
+	var lines []string
+	log := funcr.New(func(prefix, args string) { lines = append(lines, args) }, funcr.Options{})
+
+	set := func(m map[string]any) *viper.Viper {
+		v := viper.New()
+		v.Set("mqtt.broker", m)
+		return v
+	}
+
+	t.Run("snake_case honoured, no warning", func(t *testing.T) {
+		lines = nil
+		got := loadBrokerConfig(context.Background(), log, set(map[string]any{
+			"sys_topic_resend_interval": 42,
+			"capabilities":              map[string]any{"maximum_client_writes_pending": 123, "receive_maximum": 7},
+		}), 0)
+		if got.Capabilities.MaximumClientWritesPending != 123 || got.Capabilities.ReceiveMaximum != 7 || got.SysTopicResendInterval != 42 {
+			t.Fatalf("snake_case keys not applied: %+v %+v", got, got.Capabilities)
+		}
+		for _, l := range lines {
+			if strings.Contains(l, "WARNING") {
+				t.Fatalf("unexpected warning: %s", l)
+			}
+		}
+	})
+
+	t.Run("legacy lowercase still works", func(t *testing.T) {
+		got := loadBrokerConfig(context.Background(), logr.Discard(), set(map[string]any{
+			"capabilities": map[string]any{"maximumclientwritespending": 55},
+		}), 0)
+		if got.Capabilities.MaximumClientWritesPending != 55 {
+			t.Fatalf("got %d, want 55", got.Capabilities.MaximumClientWritesPending)
+		}
+	})
+
+	t.Run("unknown keys warn, known ones still applied", func(t *testing.T) {
+		lines = nil
+		got := loadBrokerConfig(context.Background(), log, set(map[string]any{
+			"bogus_top":    1,
+			"capabilities": map[string]any{"maximum_client_writes_pnding": 9, "receive_maximum": 7},
+		}), 0)
+		if got.Capabilities.ReceiveMaximum != 7 {
+			t.Fatalf("known key not applied alongside unknown ones")
+		}
+		joined := strings.Join(lines, "\n")
+		for _, want := range []string{"mqtt.broker.bogus_top", "mqtt.broker.Capabilities.maximum_client_writes_pnding"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("missing warning for %q in:\n%s", want, joined)
+			}
+		}
+	})
+}

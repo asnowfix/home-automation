@@ -172,23 +172,7 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 				log.Info("Stopping MQTT broker stale client cleanup")
 				return
 			case <-ticker.C:
-				clients := mqttServer.Clients.GetAll()
-				staleCount := 0
-
-				for id, client := range clients {
-					// Check if client connection is already closed/dead
-					// Closed() returns true if the client has been stopped
-					if client.Closed() {
-						log.Info("Removing closed client from registry",
-							"client_id", id,
-							"stop_time", time.Unix(client.StopTime(), 0))
-
-						// Delete the client from the registry
-						// The client is already stopped, we just need to clean up the registry
-						mqttServer.Clients.Delete(id)
-						staleCount++
-					}
-				}
+				staleCount := removeClosedClients(log, mqttServer.Clients, mqttServer.Clients.GetAll())
 
 				if staleCount > 0 {
 					// Get fresh count after deletions (clients variable is a snapshot from before deletions)
@@ -209,4 +193,30 @@ func Broker(ctx context.Context, log logr.Logger, resolver mynet.Resolver, progr
 	}(log.WithName("cleanup"))
 
 	return nil
+}
+
+// removeClosedClients deletes from the broker's client registry every client of snapshot that is
+// closed, and returns how many it deleted. snapshot is a copy of the registry taken earlier
+// (Clients.GetAll()), so it is passed in explicitly: that is what lets a test reproduce a client
+// reconnecting between the snapshot and the deletion (#858).
+//
+// Deleting a registry entry does not touch Mochi's topic index: subscriptions stay indexed by
+// client id, so a later connection with the same id keeps receiving them (Mochi resolves the id
+// through the registry at delivery time).
+func removeClosedClients(log logr.Logger, registry *mochiServer.Clients, snapshot map[string]*mochiServer.Client) int {
+	removed := 0
+	for id, client := range snapshot {
+		// Closed() returns true if the client has been stopped
+		if !client.Closed() {
+			continue
+		}
+		log.Info("Removing closed client from registry",
+			"client_id", id,
+			"stop_time", time.Unix(client.StopTime(), 0))
+
+		// The client is already stopped, we just need to clean up the registry
+		registry.Delete(id)
+		removed++
+	}
+	return removed
 }

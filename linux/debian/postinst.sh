@@ -297,7 +297,28 @@ if [ "$1" = "configure" ]; then
     # `myhome ctl shelly script update '*'` only touches scripts already
     # loaded on a device (see myhome/ctl/shelly/script/update.go), so
     # devices never receive scripts they didn't already have.
+    #
+    # It is NOT a no-op on every device (#863): a script whose version
+    # marker (KVS script/<name>.js) is missing or differs is uploaded and
+    # restarted. pool-pump.js is never uploaded from here: it needs an
+    # explicit `--include-pump`, run by hand. A --dry-run runs first so the
+    # log shows what the real run is about to touch, and both runs are
+    # appended to $SCRIPT_UPDATE_LOG, one line per device and script.
     # -------------------------------------------------------------------
+    SCRIPT_UPDATE_LOG="/var/lib/myhome/script-update.log"
+    run_script_update() {
+        # Prints to the console and appends to the log; returns myhome's exit
+        # status (a plain pipe into tee would return tee's).
+        rc_file=$(mktemp)
+        {
+            echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) myhome ctl shelly script update $*"
+            "$MYHOME_BIN" ctl --wait 180s shelly script update "$@" 2>&1
+            echo $? >"$rc_file"
+        } | tee -a "$SCRIPT_UPDATE_LOG"
+        rc=$(cat "$rc_file" 2>/dev/null || echo 1)
+        rm -f "$rc_file"
+        return "$rc"
+    }
     MYHOME_BIN="/usr/bin/myhome"
     if [ -x "$MYHOME_BIN" ]; then
         echo "Waiting for $SERVICE to discover its known devices..."
@@ -333,9 +354,12 @@ if [ "$1" = "configure" ]; then
         done
 
         if [ "$count" -gt 0 ]; then
-            echo "Updating Shelly scripts on $count known device(s) (waited ${elapsed}s)..."
-            "$MYHOME_BIN" ctl --wait 180s shelly script update '*' || \
-                echo "Warning: script update did not complete cleanly on all devices; this does not affect package installation. Run 'myhome ctl shelly script update *' manually to retry." >&2
+            echo "Planning Shelly script updates on $count known device(s) (waited ${elapsed}s)..."
+            run_script_update --dry-run '*' || \
+                echo "Warning: the script update dry run did not complete cleanly on all devices (see $SCRIPT_UPDATE_LOG)." >&2
+            echo "Updating Shelly scripts on $count known device(s)..."
+            run_script_update '*' || \
+                echo "Warning: script update did not complete cleanly on all devices; this does not affect package installation. Reasons are in $SCRIPT_UPDATE_LOG. Run 'myhome ctl shelly script update --dry-run *' to see what is left." >&2
         else
             echo "No known devices found after ${elapsed}s; skipping script update. Run 'myhome ctl shelly script update *' manually once devices are reachable."
         fi

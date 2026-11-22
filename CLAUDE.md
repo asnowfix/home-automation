@@ -349,13 +349,18 @@ The discipline that made this recoverable:
 - **`dpkg -i` runs the package's postinst, and that is not just a binary swap.** `update.sh` itself
   only fetches the `.deb` and runs `dpkg -i`, but the postinst then (a) runs
   `myhome ctl shelly script update '*'`, pushing the packaged scripts to **every known device that
-  already has the script loaded** whose KVS version marker (`script/<name>` = sha1 of the packaged
-  source) differs — that includes the production pool pump if it carries a hand-deployed build;
+  already has the script loaded** whose KVS version marker (`script/<name>`, where `<name>`
+  includes `.js`, e.g. `script/pool-pump.js`, = sha1 of the packaged unminified source) is missing
+  or differs. Since #863 it **never uploads `pool-pump.js`** (that needs `--include-pump`, by hand),
+  runs a `--dry-run` first, and appends both runs to `/var/lib/myhome/script-update.log`, one line
+  per device and script (`up-to-date`, `updated (old -> new)`, `refused`, `not-packaged`,
+  `failed: <reason>`);
   (b) `systemctl reenable`s **both** timers, so a merely *disabled* update timer comes back (a
   *masked* one makes postinst fail, see below); (c) prompts for credentials and rewrites
-  `/var/lib/myhome/.env` when stdin is a tty and `DEBIAN_FRONTEND` is not `noninteractive`. There is
-  no dry-run; to preview (a), compare each device's `script/<name>` KVS value with `sha1sum` of the
-  packaged `internal/shelly/scripts/<name>`.
+  `/var/lib/myhome/.env` when stdin is a tty and `DEBIAN_FRONTEND` is not `noninteractive`. To
+  preview (a), run `myhome ctl shelly script update --dry-run '*'` (reads `Script.List` and the
+  markers only; on a binary older than #863, compare each device's `script/<name>.js` KVS value with
+  `sha1sum` of the packaged `internal/shelly/scripts/<name>.js`).
 - Pool provisioning (`Setup`/`AddDevice`/`UpdateDevice`) is reachable **only** from `myhome/ctl/pool/`,
   never from the daemon; the daemon's auto-setup applies to any Gen2 device whose KVS marker
   `script/setup/done` is missing (`IsDeviceSetUp`, called from `myhome/devices/impl/manager.go`; the
@@ -372,9 +377,19 @@ The discipline that made this recoverable:
 - **A draft release is validated as a whole, through a real package installation.** Install the
   draft's `.deb` for the host's architecture (`dpkg -i`, `DEBIAN_FRONTEND=noninteractive`, after
   verifying its checksum) and run the postinst follow-ups above. Do not validate a draft by
-  hand-copying its binary, units or scripts, and do not skip or "preview away" parts of the install:
-  the script marker (`script/<name>` = sha1 of the packaged source) already makes the script push a
-  no-op on every device that is up to date. Installing an *individual* binary, script or config file
+  hand-copying its binary, units or scripts. **Correction, measured 2026-11-21 (#863): the script
+  push is NOT a no-op on devices that are up to date.** A second `script update '*'` minutes after
+  the first re-uploaded `watchdog.js` on ~31 devices and `pool-pump.js` on the production pump, whose
+  script then stopped with `out_of_memory` until the device was rebooted (heap peak at the Pro1
+  ceiling, #864). Causes found in the code (#863, desk analysis, not yet reproduced on hardware): a
+  confirmation-gap upload never wrote the marker; a failed marker write was only logged; and the
+  postinst's single `--wait 180s` deadline across every device (all run in parallel) could cut an
+  upload after `Script.Stop` or before its marker write. Since #863 that section is detached from the
+  deadline and a missed marker is reported as `failed`. So: **do not run `script update '*'` after an install** unless the release changes
+  device scripts (`git diff <old> <new> -- internal/shelly/scripts` is empty for a broker or daemon
+  change: then skip the push entirely), never run it blind, and before any push capture the pump's
+  before-state (`Script.GetCode`, `KVS` list, status) and check its relay is OFF outside its run
+  window. Installing an *individual* binary, script or config file
   over SSH or the CLI is fine for development and debugging, but it does not count as having tested
   the release. Before the push, only check what is device-specific: the production pump relay is OFF
   and the time is outside its 23:00-00:30 winter window (#661).

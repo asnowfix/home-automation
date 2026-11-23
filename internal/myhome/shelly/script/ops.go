@@ -175,10 +175,51 @@ func UploadWithVersion(ctx context.Context, log logr.Logger, via types.Channel, 
 // confirmation step (enabling/starting the script) did not respond. See
 // issue #428.
 func UploadWithVersionDetailed(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, name string, code []byte, minify bool, force bool) (uint32, UploadStatus, error) {
-	// Calculate version hash
-	h := sha1.New()
-	h.Write(code)
-	version := hex.EncodeToString(h.Sum(nil))
+	plan := PlanUpload(ctx, log, via, device, name, code, force, nil)
+	out, err := ExecuteUpload(ctx, log, via, device, name, code, minify, plan)
+	return out.Id, out.Status, err
+}
+
+// UploadPlan is the decision whether a script's code must be sent to a device,
+// taken without changing anything on the device: it reads the script/<name>
+// version marker and, unless the caller already knows, whether the script is
+// loaded. `script update --dry-run` prints it; ExecuteUpload carries it out
+// (#863).
+type UploadPlan struct {
+	Upload     bool   // true when the code must be (re)sent
+	Reason     string // why, for logs and the per-device report
+	Key        string // the KVS key of the version marker, "script/<name>"
+	OldVersion string // the marker on the device; "" unless the read succeeded
+	NewVersion string // sha1 of the code that would be uploaded
+	marker     versionMarkerState
+}
+
+// OldVersionLabel is OldVersion for display: "none" when the device answered
+// that it has no marker, "unknown" when reading it failed.
+func (p UploadPlan) OldVersionLabel() string {
+	switch p.marker {
+	case markerRead:
+		return p.OldVersion
+	case markerMissing:
+		return "none"
+	default:
+		return "unknown"
+	}
+}
+
+// ScriptVersion is the version marker value for code: its sha1, hex-encoded.
+// It is computed on the source as given, before any minification, so the
+// marker does not depend on the --no-minify flag.
+func ScriptVersion(code []byte) string {
+	h := sha1.Sum(code)
+	return hex.EncodeToString(h[:])
+}
+
+// PlanUpload decides, read-only, whether name must be uploaded. present is
+// whether the script is loaded on the device; pass nil to have PlanUpload look
+// it up (Script.List).
+func PlanUpload(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, name string, code []byte, force bool, present *bool) UploadPlan {
+	version := ScriptVersion(code)
 
 	// Use basename to get just the filename without any directory path
 	basename := filepath.Base(name)
@@ -196,18 +237,65 @@ func UploadWithVersionDetailed(ctx context.Context, log logr.Logger, via types.C
 	// the upload and starts a script that is absent or empty, while reporting
 	// success — see #449. So confirm the script is really on the device before
 	// letting a matching version suppress the upload.
-	present := scriptIsLoaded(ctx, log, via, device, basename)
+	var isPresent bool
+	if present != nil {
+		isPresent = *present
+	} else {
+		isPresent = scriptIsLoaded(ctx, log, via, device, basename)
+	}
 
 	// Upload if forced, the version changed, or the device does not actually
 	// have the script.
-	var id uint32
-	var err error
-	upload, reason := shouldUpload(force, version, marker, kvsVersion, present)
-	if upload {
-		log.Info(reason, "name", name, "version", version, "key", kvsKey, "device", device.Name())
+	upload, reason := shouldUpload(force, version, marker, kvsVersion, isPresent)
+	return UploadPlan{
+		Upload:     upload,
+		Reason:     reason,
+		Key:        kvsKey,
+		OldVersion: kvsVersion,
+		NewVersion: version,
+		marker:     marker,
+	}
+}
+
+// UploadOutcome is what ExecuteUpload did.
+type UploadOutcome struct {
+	Id       uint32       // id of the uploaded script; 0 when nothing was uploaded
+	Status   UploadStatus // see UploadStatus
+	Uploaded bool         // true when code was sent to the device
+	// MarkerErr is set when the code was delivered but recording its version
+	// marker failed. The next push then uploads the same code again, so it is
+	// reported rather than only logged (#863).
+	MarkerErr error
+}
+
+// uploadCriticalTimeout bounds the part of an upload that must not be cut
+// short once it has started: Script.Stop, every PutCode chunk, SetConfig and
+// the marker write. That section runs on a context detached from the caller's
+// deadline (context.WithoutCancel), because the caller's deadline is usually a
+// fleet-wide one (`ctl --wait 180s shelly script update '*'` in the postinst
+// covers every device at once). Expiring it between Script.Stop and the last
+// chunk leaves a stopped script with partial code on the device; expiring it
+// between the last chunk and KVS.Set leaves a stale marker, so the next push
+// uploads the same code again (#863).
+//
+// A package var, not a const, so tests can shrink it; production code never
+// changes it.
+var uploadCriticalTimeout = 3 * time.Minute
+
+// ExecuteUpload carries out plan: when plan.Upload is set it uploads code and
+// records its version marker, then (in every case, as before #863) starts the
+// script with a bounded retry. A non-nil error means the code transfer itself
+// did not complete (StatusFailed).
+func ExecuteUpload(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, name string, code []byte, minify bool, plan UploadPlan) (UploadOutcome, error) {
+	var out UploadOutcome
+	if plan.Upload {
+		log.Info(plan.Reason, "name", name, "version", plan.NewVersion, "key", plan.Key, "device", device.Name())
+
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), uploadCriticalTimeout)
+		defer cancel()
 
 		// Upload the script using the generic pkg/shelly/script package
-		id, err = script.Upload(ctx, via, device, name, code, minify)
+		id, err := script.Upload(cctx, via, device, name, code, minify)
 		if err != nil {
 			// A *script.PostUploadConfigError means every PutCode chunk
 			// was acknowledged (the code is on the device) but the
@@ -215,26 +303,30 @@ func UploadWithVersionDetailed(ctx context.Context, log logr.Logger, via types.C
 			// gap, not an upload failure. Anything else means the chunk
 			// transfer itself did not complete: genuinely failed.
 			var confErr *script.PostUploadConfigError
-			if errors.As(err, &confErr) {
-				id = confErr.Id
-				log.Info("Script code confirmed on device, but enabling it did not confirm; will still try to start it", "name", name, "device", device.Name(), "error", confErr.Error())
-			} else {
+			if !errors.As(err, &confErr) {
 				status, message := classifyUpload(err, nil)
 				log.Error(err, message, "name", name, "device", device.Name())
-				return 0, status, err
+				out.Status = status
+				return out, err
 			}
+			id = confErr.Id
+			log.Info("Script code confirmed on device, but enabling it did not confirm; will still try to start it", "name", name, "device", device.Name(), "error", confErr.Error())
+		}
+		out.Id = id
+		out.Uploaded = true
+
+		// Record the version marker. The code is on the device in both the
+		// confirmed and the confirmation-gap case, so the marker is written in
+		// both: skipping it on the gap path (as before #863) made the next push
+		// upload the same code again.
+		if _, err := kvs.SetKeyValue(cctx, log, via, device, plan.Key, plan.NewVersion); err != nil {
+			log.Error(err, "Unable to set KVS entry for script version", "key", plan.Key, "version", plan.NewVersion, "device", device.Name())
+			out.MarkerErr = err
 		} else {
-			// Create/update KVS entry with script version
-			_, err = kvs.SetKeyValue(ctx, log, via, device, kvsKey, version)
-			if err != nil {
-				log.Error(err, "Unable to set KVS entry for script version", "key", kvsKey, "version", version, "device", device.Name())
-				// Don't fail the upload if KVS fails, just log the error
-			} else {
-				log.Info("Set KVS entry for script version", "key", kvsKey, "version", version, "device", device.Name())
-			}
+			log.Info("Set KVS entry for script version", "key", plan.Key, "version", plan.NewVersion, "device", device.Name())
 		}
 	} else {
-		log.Info(reason, "name", name, "version", version)
+		log.Info(plan.Reason, "name", name, "version", plan.NewVersion)
 	}
 
 	// Now start the script, with a bounded retry: the device is often still
@@ -243,8 +335,8 @@ func UploadWithVersionDetailed(ctx context.Context, log logr.Logger, via types.C
 	confirmErr := startWithRetry(ctx, log, via, device, name)
 	status, message := classifyUpload(nil, confirmErr)
 	log.Info(message, "name", name, "device", device.Name())
-
-	return id, status, nil
+	out.Status = status
+	return out, nil
 }
 
 // versionMarkerState is what reading the device's script/<name> KVS entry

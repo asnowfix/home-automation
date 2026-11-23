@@ -245,6 +245,59 @@ function loadConfig(callback) {
   
   var keyIndex = 0;
   
+  // KVS.Get completion for one config key; `key` is the CONFIG name, passed as
+  // Shelly.call's userdata. Defined before loadNextKey (no hoisting); it only
+  // reaches loadNextKey when called, after both exist. Body wrapped in place.
+  function onConfigKeyLoaded(result, err, errMsg, key) {
+    try {
+      var schema = CONFIG_SCHEMA[key];
+      var kvsKey = CONFIG_KEY_PREFIX + schema.key;
+      if (err) {
+        log("WARNING: KVS.Get failed for", kvsKey, ":", err, "- using default");
+        CONFIG[key] = schema.default;
+        if (schema.required && CONFIG[key] === null) {
+          missingRequired.push(key + " (" + kvsKey + ") - KVS error: " + err);
+        }
+        queueTask(loadNextKey);
+        return;
+      }
+
+      if (result && ("value" in result) && result.value !== null && result.value !== "") {
+        var value = result.value;
+
+        // Parse value based on type
+        if (schema.type === "boolean") {
+          CONFIG[key] = value === "true" || value === true;
+        } else if (schema.type === "number") {
+          var num = Number(value);
+          if (!isNaN(num)) {
+            CONFIG[key] = num;
+          } else {
+            log("WARNING: Invalid number for", key, ":", value);
+            CONFIG[key] = schema.default;
+          }
+        } else {
+          CONFIG[key] = value;
+        }
+      } else {
+        // Use default
+        CONFIG[key] = schema.default;
+
+        // Check if required
+        if (schema.required && CONFIG[key] === null) {
+          missingRequired.push(key + " (" + kvsKey + ")");
+        }
+      }
+
+      // Queue next key
+      queueTask(loadNextKey);
+    } catch (e) {
+      // Unreachable in practice; keep the chain moving rather than stall init.
+      log("config key error:", e);
+      queueTask(loadNextKey);
+    }
+  }
+
   // Process one key at a time using task queue
   function loadNextKey() {
     if (keyIndex >= configKeys.length) {
@@ -309,54 +362,14 @@ function loadConfig(callback) {
     }
     
     var key = configKeys[keyIndex];
-    var schema = CONFIG_SCHEMA[key];
-    var kvsKey = CONFIG_KEY_PREFIX + schema.key;
     keyIndex++;
-    
-    // Load from KVS asynchronously
-    Shelly.call("KVS.Get", {key: kvsKey}, function(result, err) {
-      if (err) {
-        log("WARNING: KVS.Get failed for", kvsKey, ":", err, "- using default");
-        CONFIG[key] = schema.default;
-        if (schema.required && CONFIG[key] === null) {
-          missingRequired.push(key + " (" + kvsKey + ") - KVS error: " + err);
-        }
-        queueTask(loadNextKey);
-        return;
-      }
 
-      if (result && ("value" in result) && result.value !== null && result.value !== "") {
-        var value = result.value;
-        
-        // Parse value based on type
-        if (schema.type === "boolean") {
-          CONFIG[key] = value === "true" || value === true;
-        } else if (schema.type === "number") {
-          var num = Number(value);
-          if (!isNaN(num)) {
-            CONFIG[key] = num;
-          } else {
-            log("WARNING: Invalid number for", key, ":", value);
-            CONFIG[key] = schema.default;
-          }
-        } else {
-          CONFIG[key] = value;
-        }
-      } else {
-        // Use default
-        CONFIG[key] = schema.default;
-        
-        // Check if required
-        if (schema.required && CONFIG[key] === null) {
-          missingRequired.push(key + " (" + kvsKey + ")");
-        }
-      }
-      
-      // Queue next key
-      queueTask(loadNextKey);
-    });
+    // Load from KVS asynchronously. One shared named callback; the config key
+    // travels in Shelly.call's userdata (#864: this used to be a fresh closure
+    // per key, 22 of them over init, each pinning key/schema/kvsKey).
+    Shelly.call("KVS.Get", {key: CONFIG_KEY_PREFIX + CONFIG_SCHEMA[key].key}, onConfigKeyLoaded, key);
   }
-  
+
   loadNextKey();
 }
 

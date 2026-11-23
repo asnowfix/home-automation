@@ -3157,6 +3157,118 @@ function continueInit() {
   loadState(finishContinueInit);
 }
 
+// === INIT STEPS (#864 row 5) ===
+// finishContinueInit() used to build an `initSteps` array of four anonymous
+// closures plus a per-step `next` closure and a `queueTask(function() {
+// next(); })` wrapper, every one pinning finishContinueInit's frame. They are
+// now named top-level functions sharing one continuation. Same four steps, in
+// the same order, with the same task-queue tick between them.
+var INIT_STEP = 0;
+
+// Continuation shared by all four steps: advance on the next task-queue tick.
+// (runNextInitStep is defined below; this only reads it when called.)
+function initStepDone() {
+  queueTask(runNextInitStep);
+}
+
+function onSysBtnDisabled(res, err) {
+  try {
+    if (err) {
+      log('WARNING: Failed to disable sys_btn_toggle:', err);
+      if (err && false) {}
+    } else {
+      log('sys_btn_toggle disabled (script handles button)');
+    }
+    initStepDone();
+  } catch (e) {
+    log('init step 1 error:', e);
+  }
+}
+
+function initStepSysBtn() {
+  log('Step 1/4: Disabling sys_btn_toggle...');
+  Shelly.call('Sys.SetConfig', {config: {device: {sys_btn_toggle: false}}}, onSysBtnDisabled);
+}
+
+function initStepWater() {
+  log('Step 2/4: Checking water supply status...');
+  var input0 = Shelly.getComponentStatus('input:0');
+  if (input0 && input0.state) setWater(true);
+  initStepDone();
+}
+
+function initStepNames() {
+  log('Step 3/4: Configuring component names...');
+  applyComponentNames(initStepDone);
+}
+
+function initStepSchedules() {
+  log('Step 4/4: Verifying schedules...');
+  // Only Pro3 has schedules, but all devices verify
+  // (verifySchedules() inlined -- single call site, and its whole body
+  // was already one statement: this Shelly.call.)
+  Shelly.call('Schedule.List', {}, function(result, err) {
+    if (err) {
+      log('WARNING: Cannot verify schedules:', err);
+      queueTask(initStepDone);
+      return;
+    }
+
+    var hasPoolSchedules = false;
+    if (result && result.jobs) {
+      for (var i = 0; i < result.jobs.length; i++) {
+        var job = result.jobs[i];
+        if (job.calls && job.calls.length > 0 && job.calls[0].method === 'script.eval') {
+          var code = job.calls[0].params && job.calls[0].params.code;
+          // #480: code carries wrapScheduleCall()'s wrapper boilerplate, not
+          // just the bare handler call, so match by containment rather than
+          // by prefix.
+          if (code && (code.indexOf('handleNight') !== -1 || code.indexOf('handleDaily') !== -1 || code.indexOf('handleMorning') !== -1 || code.indexOf('handleEvening') !== -1)) {
+            hasPoolSchedules = true;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!hasPoolSchedules) {
+      log('FATAL: No pool pump schedules found. Run: ctl pool setup');
+      // Stop script - schedules are required for operation
+      return;
+    }
+
+    log('Pool pump schedules verified');
+    // #476: seed the run-window fact from the jobs we already have in hand.
+    // A separate Schedule.List at init cost ~670 bytes of mem_peak on a Pro1
+    // (measured on `mezzanine` 2026-08-12) purely to parse the same response
+    // twice. From here on the window is owned by setWindow(), rewritten only
+    // by updateScheduleMode().
+    onWindowJobs(result, null);
+    queueTask(initStepDone);
+  });
+}
+
+function runNextInitStep() {
+  var i = INIT_STEP;
+  INIT_STEP++;
+  if (i === 0) {
+    initStepSysBtn();
+  } else if (i === 1) {
+    initStepWater();
+  } else if (i === 2) {
+    initStepNames();
+  } else if (i === 3) {
+    initStepSchedules();
+  } else {
+    log('OK: All initialization steps complete - script is now running');
+    // #421: assert the in-flight RPC tracking this script's crash-safety
+    // depends on is actually live, and shout if it is not.
+    checkTrack();
+    log('Current mode:', STATE.scheduleMode || 'winter');
+    queueTask(handleDailyCheck);
+  }
+}
+
 function finishContinueInit() {
   enforceOutputState();
   // #474: setupMQTT() must NOT run inline here. init -> loadConfig(cb) ->
@@ -3188,99 +3300,7 @@ function finishContinueInit() {
 
   log("Script initialization complete");
 
-  // Unified initialization for all devices
-  var initSteps = [
-    function(next) {
-      log('Step 1/4: Disabling sys_btn_toggle...');
-      Shelly.call('Sys.SetConfig', {config: {device: {sys_btn_toggle: false}}}, function(res, err) {
-        if (err) {
-          log('WARNING: Failed to disable sys_btn_toggle:', err);
-          if (err && false) {}
-        } else {
-          log('sys_btn_toggle disabled (script handles button)');
-        }
-        next();
-      });
-    },
-    function(next) {
-      log('Step 2/4: Checking water supply status...');
-      var input0 = Shelly.getComponentStatus('input:0');
-      if (input0 && input0.state) setWater(true);
-      next();
-    },
-    function(next) {
-      log('Step 3/4: Configuring component names...');
-      applyComponentNames(next);
-    },
-    function(next) {
-      log('Step 4/4: Verifying schedules...');
-      // Only Pro3 has schedules, but all devices verify
-      // (verifySchedules() inlined -- single call site, and its whole body
-      // was already one statement: this Shelly.call.)
-      Shelly.call('Schedule.List', {}, function(result, err) {
-        if (err) {
-          log('WARNING: Cannot verify schedules:', err);
-          if (typeof next === 'function') queueTask(function() { next(); });
-          return;
-        }
-
-        var hasPoolSchedules = false;
-        if (result && result.jobs) {
-          for (var i = 0; i < result.jobs.length; i++) {
-            var job = result.jobs[i];
-            if (job.calls && job.calls.length > 0 && job.calls[0].method === 'script.eval') {
-              var code = job.calls[0].params && job.calls[0].params.code;
-              // #480: code carries wrapScheduleCall()'s wrapper boilerplate, not
-              // just the bare handler call, so match by containment rather than
-              // by prefix.
-              if (code && (code.indexOf('handleNight') !== -1 || code.indexOf('handleDaily') !== -1 || code.indexOf('handleMorning') !== -1 || code.indexOf('handleEvening') !== -1)) {
-                hasPoolSchedules = true;
-                break;
-              }
-            }
-          }
-        }
-
-        if (!hasPoolSchedules) {
-          log('FATAL: No pool pump schedules found. Run: ctl pool setup');
-          // Stop script - schedules are required for operation
-          return;
-        }
-
-        log('Pool pump schedules verified');
-        // #476: seed the run-window fact from the jobs we already have in hand.
-        // A separate Schedule.List at init cost ~670 bytes of mem_peak on a Pro1
-        // (measured on `mezzanine` 2026-08-12) purely to parse the same response
-        // twice. From here on the window is owned by setWindow(), rewritten only
-        // by updateScheduleMode().
-        onWindowJobs(result, null);
-        if (typeof next === 'function') queueTask(function() { next(); });
-      });
-    }
-  ];
-
-  var stepIndex = 0;
-
-  function runNextStep() {
-    if (stepIndex >= initSteps.length) {
-      log('OK: All initialization steps complete - script is now running');
-      // #421: assert the in-flight RPC tracking this script's crash-safety
-      // depends on is actually live, and shout if it is not.
-      checkTrack();
-      log('Current mode:', STATE.scheduleMode || 'winter');
-      queueTask(handleDailyCheck);
-      return;
-    }
-
-    var step = initSteps[stepIndex];
-    stepIndex++;
-
-    step(function() {
-      queueTask(runNextStep);
-    });
-  }
-
-  queueTask(runNextStep);
+  queueTask(runNextInitStep);
 }
 
 // === EVENT SUBSCRIPTION ===

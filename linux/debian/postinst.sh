@@ -273,7 +273,11 @@ if [ "$1" = "configure" ]; then
     for svc in $SERVICES; do
         echo "Enabling and starting $svc..."
         systemctl reenable "$svc"
-        systemctl restart "$svc"
+        # --no-block: myhome.service is Type=notify, so a plain restart waits for
+        # READY (up to TimeoutStartSec=300) and, under `set -e`, a failed or slow
+        # start would abort postinst half-configured. The device-discovery poll
+        # below already waits for the daemon to be reachable.
+        systemctl restart --no-block "$svc"
     done
 
     # Enable and start timers

@@ -1,0 +1,17 @@
+# Independent failure alert for myhome.service (#715). Started by systemd through
+# OnFailure=myhome-failure@%n.service, as its own process, so it works while the
+# daemon is down or hung. It emails with the daemon's SMTP settings and stays
+# silent for a scheduled RuntimeMaxSec restart (which systemd also counts as a
+# failure). Preview without sending:
+#   myhome daemon notify-failure myhome.service --dry-run
+
+[Unit]
+Description=Failure alert for %i
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/myhome daemon notify-failure %i
+WorkingDirectory=/var/lib/myhome
+Environment=HOME=/var/lib/myhome
+EnvironmentFile=-/var/lib/myhome/.env
+TimeoutStartSec=60

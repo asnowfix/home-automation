@@ -15,6 +15,7 @@ import (
 	myhomesfr "github.com/asnowfix/home-automation/internal/myhome/sfr"
 	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
+	"github.com/asnowfix/home-automation/internal/sdnotify"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	"github.com/asnowfix/home-automation/myhome/electricity"
@@ -37,9 +38,9 @@ import (
 	shellycloud "github.com/asnowfix/home-automation/pkg/shelly/cloud"
 	"github.com/asnowfix/home-automation/pkg/shelly/gen1"
 	shellymqtt "github.com/asnowfix/home-automation/pkg/shelly/mqtt"
-	"github.com/asnowfix/home-automation/pkg/version"
 	shellyshelly "github.com/asnowfix/home-automation/pkg/shelly/shelly"
 	shellytypes "github.com/asnowfix/home-automation/pkg/shelly/types"
+	"github.com/asnowfix/home-automation/pkg/version"
 	"github.com/go-logr/logr"
 	"github.com/kardianos/service"
 )
@@ -804,6 +805,10 @@ func (d *daemon) Run() error {
 		log.Info("MQTT connection status monitoring disabled")
 	}
 
+	// Start-up is complete: tell systemd (Type=notify) and start the watchdog
+	// heartbeat (#715). No-op outside systemd.
+	startWatchdog(d.ctx, log, mc)
+
 	// Create a channel to handle OS signals
 	done := make(chan struct{})
 	go func() {
@@ -813,6 +818,7 @@ func (d *daemon) Run() error {
 
 	// Wait for context cancellation
 	<-done
+	_ = sdnotify.Stopping()
 	log.Info("Shutting down")
 	return nil
 }

@@ -102,6 +102,7 @@ jobs:
           # systemd units
           mkdir -p .debpkg/lib/systemd/system/
           cp linux/systemd/myhome.service .debpkg/lib/systemd/system/
+          cp 'linux/systemd/myhome-failure@.service' .debpkg/lib/systemd/system/
           cp linux/systemd/myhome-update.service .debpkg/lib/systemd/system/
           cp linux/systemd/myhome-update.timer .debpkg/lib/systemd/system/
           cp linux/systemd/myhome-db-backup.service .debpkg/lib/systemd/system/

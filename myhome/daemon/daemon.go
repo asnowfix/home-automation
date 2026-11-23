@@ -15,12 +15,14 @@ import (
 	myhomesfr "github.com/asnowfix/home-automation/internal/myhome/sfr"
 	shellygen2l "github.com/asnowfix/home-automation/internal/myhome/shelly/gen2"
 	"github.com/asnowfix/home-automation/internal/myhome/ui"
+	"github.com/asnowfix/home-automation/myhome/alert"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/myhome/devices/impl"
 	"github.com/asnowfix/home-automation/myhome/electricity"
 	"github.com/asnowfix/home-automation/myhome/events"
 	"github.com/asnowfix/home-automation/myhome/events/metricsdb"
 	"github.com/asnowfix/home-automation/myhome/fetchproxy"
+	"github.com/asnowfix/home-automation/myhome/homedrive"
 	"github.com/asnowfix/home-automation/myhome/ical"
 	"github.com/asnowfix/home-automation/myhome/metrics"
 	mqttclient "github.com/asnowfix/home-automation/myhome/mqtt"
@@ -693,6 +695,55 @@ func (d *daemon) Run() error {
 		}
 		vacuumService.RegisterHandlers()
 
+		// Drive sync status (#834): the homedrive agent publishes one retained
+		// status document per host/user; the cache keeps the last of each (and
+		// persists them in myhome.db) and feeds the System status sheet. The
+		// subscription is queued until mc.Start(). Read-only: nothing is
+		// published back to homedrive.
+		var driveCache *homedrive.Cache
+		if driveStore, err := homedrive.NewStore(storage.DB()); err != nil {
+			// Not fatal: the panel works from memory, a restart just forgets dead instances.
+			log.Error(err, "Failed to initialize homedrive storage, running without persistence")
+			driveCache = homedrive.NewCache(homedrive.Config{Log: log})
+		} else {
+			driveCache = homedrive.NewCache(homedrive.Config{Log: log, Store: driveStore})
+		}
+		if err := mc.SubscribeWithHandler(d.ctx, homedrive.TopicFilter, 16, "homedrive/status", driveCache.HandleMessage); err != nil {
+			log.Error(err, "Failed to subscribe to homedrive status", "topic", homedrive.TopicFilter)
+		}
+		// Drive sync alerts (#835): the homedrive rules (R1 to R8) run on the shared alert core
+		// (#845) and publish alert documents on <instance>/alert/<rule>/<key> (#843, QoS 1, not
+		// retained). Channel-independent: delivery (#714) subscribes; this only produces. Built here,
+		// before the cache's prune, which must know which instances have an open alert; started only
+		// after mc.Start(). Not fatal if the state is unusable, but reported in Accounts.
+		var driveProducer *homedrive.Producer
+		accountsRegistry.SetEnabled("homedrive-alerts", true)
+		if alertStore, err := alert.NewStore(storage.DB()); err != nil {
+			log.Error(err, "Failed to initialize alert state, homedrive alerts disabled")
+			accountsRegistry.Report("homedrive-alerts", fmt.Errorf("alerts disabled: %w", err))
+		} else if alertEval, err := alert.NewEvaluator(d.ctx, log.WithName("alert"), alert.NewMQTTPublisher(mc, myhome.InstanceName), alertStore); err != nil {
+			log.Error(err, "Failed to start the alert evaluator, homedrive alerts disabled")
+			accountsRegistry.Report("homedrive-alerts", fmt.Errorf("alerts disabled: %w", err))
+		} else {
+			driveProducer = homedrive.NewProducer(log, driveCache, alertEval, nil)
+			accountsRegistry.Report("homedrive-alerts", nil)
+		}
+		alertDone := make(chan struct{})
+		driveDone := make(chan struct{})
+		go func() { driveCache.Run(d.ctx); close(driveDone) }()
+		defer func() {
+			// Let the shutdown flush finish before the deferred storage.Close().
+			select {
+			case <-driveDone:
+			case <-time.After(2 * time.Second):
+			}
+			// Same for the alert producer: a tick must not persist into a closed storage.
+			select {
+			case <-alertDone:
+			case <-time.After(2 * time.Second):
+			}
+		}()
+
 		// Register Occupancy RPC methods if enabled
 		if options.Flags.EnableOccupancyService && d.occupancyService != nil {
 			log.Info("Registering occupancy RPC methods")
@@ -741,6 +792,13 @@ func (d *daemon) Run() error {
 		log.Info("MQTT client connected - subscriptions active")
 		accountsRegistry.SetEnabled("mqtt", true)
 		accountsRegistry.Report("mqtt", nil)
+
+		// Start the homedrive alert producer now that the broker is up (the contract's wiring rule).
+		if driveProducer != nil {
+			go func() { driveProducer.Run(d.ctx); close(alertDone) }()
+		} else {
+			close(alertDone)
+		}
 
 		// Subscribe to $SYS topics for monitoring (after connection to avoid early connection)
 		// Use large buffer (256) because broker publishes 15-20+ $SYS topics in rapid bursts every 30s

@@ -174,6 +174,7 @@ func TestFailedResolvePublishKeepsResolving(t *testing.T) {
 		t.Fatal("a failed resolve must stay open")
 	}
 	pub.err = nil
+	c.Advance(publishBackoff)
 	eval(t, e, off("k"))
 	if got := pub.states(); len(got) != 2 || got[1] != Resolved {
 		t.Fatalf("the next evaluation must publish the resolve, got %v", got)

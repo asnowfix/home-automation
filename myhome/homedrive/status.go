@@ -67,6 +67,30 @@ const (
 	AuthUnknown = "unknown"
 )
 
+// Auth.State values that are a problem (contract section 5.3).
+const (
+	AuthClientMissing       = "client_missing"
+	AuthClientMisconfigured = "client_misconfigured"
+	AuthTokenInvalid        = "token_invalid"
+	AuthRefreshFailing      = "refresh_failing"
+)
+
+// LastError.Op values (contract section 5.3, Outcome.Op, plus startup). The alert rules use them to
+// tell which direction a failure belongs to.
+const (
+	OpPush       = "push"
+	OpPushDelete = "push_delete"
+	OpDirRename  = "dir_rename"
+	OpPull       = "pull"
+	OpPullDelete = "pull_delete"
+	OpConflict   = "conflict"
+	OpBisyncPush = "bisync_push"
+	OpBisyncPull = "bisync_pull"
+	OpPoll       = "poll"
+	OpBisync     = "bisync"
+	OpStartup    = "startup"
+)
+
 // Status is homedrive's status document, schema 2.x (contract section 5.3).
 // Absent values are JSON null in the contract, so they are pointers (or nil
 // maps) here and render as "--". Unknown fields are ignored.
@@ -116,7 +140,7 @@ type RootGuard struct {
 type DeletesGuard struct {
 	Reason    string `json:"reason"`
 	Planned   int64  `json:"planned"`
-	Threshold int64  `json:"threshold"`
+	Threshold int64  `json:"threshold"` // 0 for an empty side: Reason is authoritative
 	Since     Time   `json:"since"`
 }
 

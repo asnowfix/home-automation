@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -312,7 +314,13 @@ type fakeUploadDevice struct {
 
 var _ types.Device = (*fakeUploadDevice)(nil)
 
+// fakeSeq makes every fake's Id unique: pkg/shelly/kvs keeps a process-wide
+// cache keyed by device Id, so a reused Id (-count=N, or two tests sharing an
+// Id) would replay a previous run's KVS markers into a fresh fake.
+var fakeSeq atomic.Uint64
+
 func newFakeUploadDevice(id string) *fakeUploadDevice {
+	id = fmt.Sprintf("%s#%d", id, fakeSeq.Add(1))
 	return &fakeUploadDevice{id: id, scripts: map[uint32]string{}, kv: map[string]string{}, calls: map[string]int{}, code: map[uint32]string{}}
 }
 
@@ -324,9 +332,17 @@ func (f *fakeUploadDevice) CallE(_ context.Context, _ types.Channel, method stri
 	f.calls[method]++
 	switch method {
 	case "Script.List":
-		list := make([]pkgscript.Status, 0, len(f.scripts))
-		for id, name := range f.scripts {
-			list = append(list, pkgscript.Status{Id: id, Name: name})
+		// Ordered by id, like a device: tests that count Script.Start calls
+		// across scripts (statusAfterStart) depend on a stable order, and Go
+		// map iteration is randomized.
+		ids := make([]uint32, 0, len(f.scripts))
+		for id := range f.scripts {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+		list := make([]pkgscript.Status, 0, len(ids))
+		for _, id := range ids {
+			list = append(list, pkgscript.Status{Id: id, Name: f.scripts[id]})
 		}
 		return &pkgscript.ListResponse{Scripts: list}, nil
 

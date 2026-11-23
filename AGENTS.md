@@ -518,6 +518,12 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 - `--no-minify`: Do not minify script before upload (recommended for Shelly)
 - `--force`: Force re-upload even if version hash matches
 - `--verbose`: Enable verbose logging
+- `--dry-run` (on `script update`, #863): report what would be uploaded, reading only `Script.List`
+  and the `script/<name>.js` markers; nothing is stopped, written or started.
+- `--include-pump` (on `script update`, #863): `pool-pump.js` is guarded and never uploaded (not even
+  started) by `script update` without it. With it, every relay must be off, the replaced code is
+  saved to `--backup-dir` (default `.`) and put back if the upload fails or the new script is not
+  running cleanly after its start (e.g. `out_of_memory`).
 - `--local-scripts-dir <dir>` (on `script upload` / `script update`, issue #457): load `<dir>/<name>`
   instead of the embedded copy when a same-named file exists there, so a one-line edit can be
   uploaded without a full `go build`. Flat directory only — no subdirectories, no path traversal.

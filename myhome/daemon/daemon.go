@@ -691,6 +691,9 @@ func (d *daemon) Run() error {
 			log.Error(err, "Failed to start vacuum service")
 			return err
 		}
+		if eventsSvc != nil {
+			vacuumService.SetEventRecorder(vacuumEventRecorder{events: eventsSvc})
+		}
 		vacuumService.RegisterHandlers()
 
 		// Register Occupancy RPC methods if enabled

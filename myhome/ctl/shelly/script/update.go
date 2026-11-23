@@ -3,15 +3,16 @@ package script
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"strings"
+
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
 	mhscript "github.com/asnowfix/home-automation/internal/myhome/shelly/script"
 	"github.com/asnowfix/home-automation/myhome/ctl/options"
 	"github.com/asnowfix/home-automation/pkg/devices"
 	"github.com/asnowfix/home-automation/pkg/shelly"
-	pkgscript "github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
-	"reflect"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -26,25 +27,47 @@ func init() {
 	updateCtl.Flags().BoolVar(&updateNoMinify, "no-minify", false, "Do not minify scripts before upload")
 	// Flag to force re-upload even if version hash matches
 	updateCtl.Flags().BoolVar(&updateForce, "force", false, "Force re-upload even if version hash matches")
+	updateCtl.Flags().BoolVar(&updateDryRun, "dry-run", false, "Only report what would be uploaded: reads the script list and version markers, changes nothing")
+	updateCtl.Flags().BoolVar(&updateIncludePump, "include-pump", false, "Allow uploading pool-pump.js (refused by default); even then every relay must be off, and the replaced code is saved and restored on failure")
+	updateCtl.Flags().StringVar(&updateBackupDir, "backup-dir", ".", "Directory where the code replaced on a guarded script (pool-pump.js) is saved")
 }
 
 var updateCtl = &cobra.Command{
 	Use:   "update DEVICE [SCRIPT]",
 	Short: "Update all scripts (or a specific script) loaded on the given Shelly device(s) by re-uploading available versions",
-	Args:  cobra.RangeArgs(1, 2),
+	Long: `Update the scripts loaded on the given Shelly device(s) to the versions this binary carries.
+
+A script is uploaded only when its version marker (KVS key script/<name>, the
+sha1 of the packaged source) differs from the packaged version, or is missing,
+or the script is not loaded. Every device and script gets one line:
+up-to-date, updated (old -> new), would-update (--dry-run), refused, not-packaged
+or failed, with the reason.
+
+pool-pump.js is guarded: it is never uploaded unless --include-pump is given,
+and then only while every relay of the device is off. Its current code is saved
+to --backup-dir first and put back if the upload or the restart fails.`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		device := args[0]
 		scriptArgs := []string{}
 		if len(args) > 1 {
 			scriptArgs = []string{args[1]}
 		}
+		if updateDryRun {
+			fmt.Println("Dry run: nothing will be uploaded, stopped or started.")
+		}
 		_, err := myhome.Foreach(cmd.Context(), log, device, options.Via, doUpdate, scriptArgs)
 		return err
 	},
 }
 
-var updateNoMinify bool
-var updateForce bool
+var (
+	updateNoMinify    bool
+	updateForce       bool
+	updateDryRun      bool
+	updateIncludePump bool
+	updateBackupDir   string
+)
 
 func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
 	sd, ok := device.(*shelly.Device)
@@ -52,131 +75,87 @@ func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device de
 		return nil, fmt.Errorf("device is not a Shelly: %s %v", reflect.TypeOf(device), device)
 	}
 
-	// Check if a specific script name was provided
-	var targetScript string
+	opts := mhscript.UpdateOptions{
+		// Resolve each script: a same-named file in --local-scripts-dir shadows
+		// the embedded copy (unless --no-local-scripts is set). This is also
+		// the fleet-upload path the .deb postinst runs unattended
+		// (`script update '*'`), so the default here MUST stay disabled — see
+		// issue #457.
+		LocalDir:       localScriptsDirEffective(),
+		Minify:         !updateNoMinify,
+		Force:          updateForce,
+		DryRun:         updateDryRun,
+		IncludeGuarded: updateIncludePump,
+		BackupDir:      updateBackupDir,
+	}
 	if len(args) > 0 {
-		targetScript = args[0]
+		opts.Target = args[0]
 	}
 
-	// Get list of scripts currently loaded on the device
-	loaded, err := pkgscript.ListLoaded(ctx, via, sd)
+	report, err := mhscript.UpdateDeviceScripts(ctx, log, via, sd, opts)
 	if err != nil {
-		log.Error(err, "Unable to list loaded scripts on device")
-		return nil, err
+		// Printed by Foreach's summary, with the reason (#863).
+		return report, err
 	}
 
-	if targetScript != "" {
-		fmt.Printf("Updating %s on %s\n", targetScript, sd.Name())
-	} else {
-		fmt.Printf("Updating scripts on %s (%d scripts loaded)\n", sd.Name(), len(loaded))
+	// Devices run in parallel: print each device's block in one write so the
+	// lines of two devices never interleave.
+	fmt.Print(formatReport(report, opts.Target))
+
+	if failed := report.Failed(); len(failed) > 0 {
+		names := make([]string, 0, len(failed))
+		for _, f := range failed {
+			names = append(names, fmt.Sprintf("%s: %s", f.Script, f.Reason))
+		}
+		return report, fmt.Errorf("%d script(s) failed: %s", len(failed), strings.Join(names, "; "))
 	}
+	return report, nil
+}
 
-	updateResults := make([]UpdateResult, 0)
-
-	// For each loaded script on the device, try to update it
-	for _, loadedScript := range loaded {
-		scriptName := loadedScript.Name
-
-		// If a specific script was requested, skip others
-		if targetScript != "" && scriptName != targetScript {
-			continue
-		}
-
-		fmt.Printf("  . Checking %s...\n", scriptName)
-
-		// Resolve the script: a same-named file in --local-scripts-dir shadows
-		// the embedded copy (unless --no-local-scripts is set), falling back
-		// silently to embedded when absent. This is also the fleet-upload path
-		// the .deb postinst runs unattended (`script update '*'`), so the
-		// default here MUST stay disabled — see issue #457.
-		buf, source, err := mhscript.LoadScript(log, localScriptsDirEffective(), scriptName)
-		if err != nil {
-			fmt.Printf("  ✗ Failed to read script %s: %v\n", scriptName, err)
-			updateResults = append(updateResults, UpdateResult{
-				ScriptName: scriptName,
-				ScriptId:   loadedScript.Id,
-				Status:     "error",
-				Message:    fmt.Sprintf("Read failed: %v", err),
-			})
-			continue
-		}
-		fmt.Printf("    . Source: %s\n", source)
-
-		id, status, err := mhscript.UploadWithVersionDetailed(ctx, log, via, sd, scriptName, buf, !updateNoMinify, updateForce)
-		if err != nil {
-			// The code transfer itself did not complete: a genuine
-			// failure. See issue #428.
-			fmt.Printf("  ✗ Failed to update %s: %v\n", scriptName, err)
-			updateResults = append(updateResults, UpdateResult{
-				ScriptName: scriptName,
-				ScriptId:   loadedScript.Id,
-				Status:     "error",
-				Message:    fmt.Sprintf("Update failed: %v", err),
-			})
-			continue
-		}
-
-		if status == mhscript.StatusIndeterminate {
-			// Code confirmed on the device; a follow-up confirmation step
-			// (enable/start) did not respond even after retrying. Not a
-			// failure — re-uploading would be wasted work — so this does
-			// not count against the device's overall result.
-			fmt.Printf("  ⚠ %s uploaded (id: %d) but could not confirm it started/enabled — re-run `script status` rather than re-uploading\n", scriptName, id)
-			updateResults = append(updateResults, UpdateResult{
-				ScriptName: scriptName,
-				ScriptId:   loadedScript.Id,
-				NewId:      id,
-				Status:     "indeterminate",
-				Message:    "Code uploaded and confirmed; could not confirm start/enable",
-			})
-			continue
-		}
-
-		if id == 0 {
-			fmt.Printf("  → %s is up-to-date\n", scriptName)
-			updateResults = append(updateResults, UpdateResult{
-				ScriptName: scriptName,
-				ScriptId:   loadedScript.Id,
-				Status:     "skipped",
-				Message:    "Already up-to-date",
-			})
+// formatReport renders one device's report: one line per script, each
+// prefixed with the device name so the output stays greppable once collected
+// in a log file (the postinst case).
+func formatReport(r *mhscript.DeviceScriptsReport, target string) string {
+	var b strings.Builder
+	if len(r.Scripts) == 0 {
+		if target != "" {
+			fmt.Fprintf(&b, "%s: %s is not loaded (skipped)\n", r.Device, target)
 		} else {
-			fmt.Printf("  ✓ Successfully updated %s (id: %d)\n", scriptName, id)
-			updateResults = append(updateResults, UpdateResult{
-				ScriptName: scriptName,
-				ScriptId:   loadedScript.Id,
-				NewId:      id,
-				Status:     "updated",
-				Message:    "Script updated successfully",
-			})
+			fmt.Fprintf(&b, "%s: no scripts loaded\n", r.Device)
 		}
+		return b.String()
 	}
-
-	// If a specific script was requested but not found, skip this device silently
-	if targetScript != "" && len(updateResults) == 0 {
-		fmt.Printf("  → Script %s is not loaded on %s (skipping)\n", targetScript, sd.Name())
-		return nil, nil // Return nil error to indicate success (device skipped, not failed)
+	for _, s := range r.Scripts {
+		fmt.Fprintf(&b, "%s: %s %s", r.Device, s.Script, s.Outcome)
+		switch s.Outcome {
+		case mhscript.OutcomeUpToDate:
+			fmt.Fprintf(&b, " (%s)", short(s.NewVersion))
+		case mhscript.OutcomeUpdated, mhscript.OutcomeWouldUpdate, mhscript.OutcomeIndeterminate:
+			fmt.Fprintf(&b, " (%s -> %s)", short(s.OldVersion), short(s.NewVersion))
+		}
+		if s.Outcome != mhscript.OutcomeUpToDate || strings.Contains(s.Reason, "did not confirm") {
+			if s.Reason != "" {
+				fmt.Fprintf(&b, ": %s", s.Reason)
+			}
+		}
+		if s.Source == "local" {
+			b.WriteString(" [local source]")
+		}
+		if s.Backup != "" {
+			fmt.Fprintf(&b, " [previous code saved to %s]", s.Backup)
+		}
+		b.WriteString("\n")
 	}
-
-	fmt.Printf("\nUpdate complete for %s (%d scripts processed)\n", sd.Name(), len(updateResults))
-
-	return UpdateResults{
-		Device:  sd.Name(),
-		Results: updateResults,
-	}, nil
+	return b.String()
 }
 
-// UpdateResult represents the result of updating a single script
-type UpdateResult struct {
-	ScriptName string `json:"script_name"`
-	ScriptId   uint32 `json:"script_id"`
-	NewId      uint32 `json:"new_id,omitempty"`
-	Status     string `json:"status"` // "updated", "skipped", "error"
-	Message    string `json:"message"`
-}
-
-// UpdateResults represents the results of updating all scripts on a device
-type UpdateResults struct {
-	Device  string         `json:"device"`
-	Results []UpdateResult `json:"results"`
+// short abbreviates a sha1 for display; "none" and "unknown" pass through.
+func short(v string) string {
+	if len(v) == 40 {
+		return v[:7]
+	}
+	if v == "" {
+		return "?"
+	}
+	return v
 }

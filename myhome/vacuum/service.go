@@ -119,6 +119,8 @@ type Service struct {
 	mu     sync.Mutex
 	robots map[string]*robot // by BLID
 
+	recorder EventRecorder // optional; guarded by mu
+
 	bridge *bridge // nil unless Config.Bridge; set once in start
 
 	syncMu sync.Mutex // one room sync at a time

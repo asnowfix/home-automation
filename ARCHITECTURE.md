@@ -115,7 +115,7 @@ pkg/shelly
 ### F4. `pkg/devices` Coupled to pkg/shelly
 
 **Severity: Medium** — The `Device` interface in `pkg/devices` is used by `pkg/shelly` as its device abstraction. If `pkg/shelly` is extracted, `pkg/devices` must either:
-- Be extracted too (into `go-shellies` or its own repo), or
+- Be extracted too (into its own repo; the `go-shellies` extraction was abandoned, see #596), or
 - Be replaced with an interface defined within `pkg/shelly/types`
 
 The current `pkg/devices.Device` interface is generic (Manufacturer, Id, Name, Host, Ip, Mac) and could remain as a shared interface, but the coupling adds extraction complexity.

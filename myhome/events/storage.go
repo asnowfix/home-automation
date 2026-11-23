@@ -141,16 +141,42 @@ CREATE TABLE IF NOT EXISTS sensor_daily_stats (
 }
 
 func (s *Storage) Record(ctx context.Context, e Event) error {
+	_, err := s.RecordID(ctx, e)
+	return err
+}
+
+// RecordID is Record that also returns the id of the inserted row, or 0 when
+// the insert was ignored because an event with the same
+// (device_id, component, event, ts) already exists.
+func (s *Storage) RecordID(ctx context.Context, e Event) (int64, error) {
 	if e.ReceivedAt == 0 {
 		e.ReceivedAt = float64(time.Now().Unix())
 	}
-	_, err := s.db.ExecContext(ctx,
+	res, err := s.db.ExecContext(ctx,
 		`INSERT OR IGNORE INTO events (ts, received_at, device_id, component, event, severity, data)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		e.Ts, e.ReceivedAt, e.DeviceID, e.Component, e.Event, e.Severity, e.Data,
 	)
 	if err != nil {
 		s.log.Error(err, "Failed to record event", "device_id", e.DeviceID, "event", e.Event)
+		return 0, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return 0, nil
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, nil
+	}
+	return id, nil
+}
+
+// UpdateData replaces the data column of an existing event row. It is used to
+// merge late-arriving duplicate copies of one physical event into its row.
+func (s *Storage) UpdateData(ctx context.Context, id int64, data string) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE events SET data = ? WHERE id = ?`, data, id)
+	if err != nil {
+		s.log.Error(err, "Failed to update event data", "id", id)
 	}
 	return err
 }

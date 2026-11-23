@@ -121,10 +121,15 @@ daemon:
 - Flag: `--mqtt-broker-client-log-interval`
 - Env: `MYHOME_DAEMON_MQTT_BROKER_CLIENT_LOG_INTERVAL`
 
+**`mqtt.broker`** (advanced block, embedded broker only)
+- Maps onto Mochi's `Options` struct. Keys are matched to Go field names ignoring case and underscores, so the usual snake_case spelling works (`capabilities.maximum_client_writes_pending`, `sys_topic_resend_interval`, `inline_client`); the older all-lowercase spelling (`maximumclientwritespending`) keeps working.
+- A key that matches no field (typo, wrong nesting) is ignored but logged as a `WARNING: ignoring unknown key in mqtt.broker config` line naming the key. Nested keys are reported under the Go name of their parent, e.g. `mqtt.broker.Capabilities.maximum_client_writes_pnding`.
+- Example: `mqtt: { broker: { capabilities: { maximum_client_writes_pending: 8192 } } }`
+
 **`mqtt_broker_client_writes_pending`** (int, default: `0`)
 - Embedded broker only: how many outbound messages may be queued per connected client before the broker drops further ones (a dropped QoS 1 message is not retried). `0` means Mochi's default (8192; about 64 KB of queue per client). Negative values are rejected at startup.
 - A drop is logged at error level (the only level always shown), at most once per client per minute with a count, and the periodic client log (`mqtt_broker_client_log_interval`) shows the broker's `messages_dropped` total.
-- Precedence: a value greater than 0 here (flag, env or `daemon.*` key; flag wins over env/config) overrides `capabilities.maximumclientwritespending` of the advanced `mqtt.broker` block (viper matches Go field names case-insensitively, so the YAML snake_case spelling does not work there). With `0`, the `mqtt.broker` block value is used if set, otherwise Mochi's default. A non-positive value in the `mqtt.broker` block is replaced by Mochi's default.
+- Precedence: a value greater than 0 here (flag, env or `daemon.*` key; flag wins over env/config) overrides `capabilities.maximum_client_writes_pending` of the advanced `mqtt.broker` block (see below for how its keys are matched). With `0`, the `mqtt.broker` block value is used if set, otherwise Mochi's default. A non-positive value in the `mqtt.broker` block is replaced by Mochi's default.
 - Flag: `--mqtt-broker-client-writes-pending`
 - Env: `MYHOME_DAEMON_MQTT_BROKER_CLIENT_WRITES_PENDING`
 

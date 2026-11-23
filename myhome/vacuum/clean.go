@@ -2,6 +2,7 @@ package vacuum
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -110,7 +111,7 @@ func (s *Service) CleanOnMap(ctx context.Context, sel, onMap string, rooms []str
 	s.mu.Unlock()
 
 	res := &myhome.VacuumCleanResult{MapID: mapID}
-	att, err := s.cleanAttempt(ctx, r, c, mapID, first, regions)
+	att, err := s.cleanAttempt(ctx, r, c, mapID, first, rooms, regions, 1)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +126,7 @@ func (s *Service) CleanOnMap(ctx context.Context, sel, onMap string, rooms []str
 		s.log.Info("Room clean aborted at once; not retrying", "robot", r.rec.Name, "map", mapID, "version", first, "error", att.Error, "reason", why)
 		return nil, cleanFailure(res, why)
 	}
-	att2, err := s.cleanAttempt(ctx, r, c, mapID, second, regions)
+	att2, err := s.cleanAttempt(ctx, r, c, mapID, second, rooms, regions, 2)
 	if err != nil {
 		return nil, fmt.Errorf("%w (after a first attempt with map version %s aborted with error %d)", err, first, att.Error)
 	}
@@ -138,7 +139,7 @@ func (s *Service) CleanOnMap(ctx context.Context, sel, onMap string, rooms []str
 }
 
 // cleanAttempt sends one room clean and watches it for an immediate abort.
-func (s *Service) cleanAttempt(ctx context.Context, r *robot, c robotClient, mapID, version string, regions []roomba.Region) (myhome.VacuumCleanAttempt, error) {
+func (s *Service) cleanAttempt(ctx context.Context, r *robot, c robotClient, mapID, version string, rooms []string, regions []roomba.Region, attempt int) (myhome.VacuumCleanAttempt, error) {
 	att := myhome.VacuumCleanAttempt{MapVersion: version}
 	ch := make(chan myhome.VacuumStatus, 64)
 	s.mu.Lock()
@@ -159,7 +160,7 @@ func (s *Service) cleanAttempt(ctx context.Context, r *robot, c robotClient, map
 		s.mu.Unlock()
 	}()
 
-	s.log.Info("Room clean: sending", "robot", r.rec.Name, "map", mapID, "version", version, "regions", len(regions))
+	s.recordCleanRequest(ctx, r, mapID, version, rooms, regions, attempt)
 	if err := c.CleanRegions(ctx, roomba.Map{ID: mapID, Version: version}, regions); err != nil {
 		return att, err
 	}
@@ -256,4 +257,57 @@ func cleanFailure(res *myhome.VacuumCleanResult, why string) error {
 		}
 	}
 	return errors.New(b.String())
+}
+
+// CleanRequestEvent is the event name recorded just before a room clean is
+// sent to the robot (#860), so a one-off wrong-room clean can be diagnosed
+// after the fact from events.db.
+const CleanRequestEvent = "vacuum.clean_requested"
+
+// EventRecorder persists a vacuum event. The daemon adapts its events service
+// to it; the vacuum module does not import the events module. Optional: a nil
+// recorder only skips the persistence, the Info log is always written.
+type EventRecorder interface {
+	RecordEvent(ctx context.Context, deviceID, component, event, severity, data string) error
+}
+
+// SetEventRecorder installs the recorder; call it before serving requests.
+func (s *Service) SetEventRecorder(rec EventRecorder) {
+	s.mu.Lock()
+	s.recorder = rec
+	s.mu.Unlock()
+}
+
+// recordCleanRequest logs, at Info, and records the exact request about to be
+// sent: the rooms asked for, the region ids and types they resolved to, and
+// the map id and version named. It names the robot by its display name, never
+// its BLID.
+func (s *Service) recordCleanRequest(ctx context.Context, r *robot, mapID, version string, rooms []string, regions []roomba.Region, attempt int) {
+	type reg struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	}
+	rs := make([]reg, len(regions))
+	for i, g := range regions {
+		rs[i] = reg{ID: g.ID, Type: g.Type}
+	}
+	s.log.Info("Room clean: sending", "robot", r.rec.Name, "attempt", attempt, "rooms", rooms,
+		"regions", rs, "map", mapID, "version", version)
+
+	s.mu.Lock()
+	rec := s.recorder
+	s.mu.Unlock()
+	if rec == nil {
+		return
+	}
+	payload, err := json.Marshal(map[string]any{
+		"rooms": rooms, "regions": rs, "map_id": mapID, "map_version": version, "attempt": attempt,
+	})
+	if err != nil {
+		s.log.Error(err, "Failed to marshal clean request")
+		return
+	}
+	if err := rec.RecordEvent(ctx, r.rec.Name, "vacuum", CleanRequestEvent, "info", string(payload)); err != nil {
+		s.log.Error(err, "Failed to record clean request event")
+	}
 }

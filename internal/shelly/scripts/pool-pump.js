@@ -3202,36 +3202,38 @@ function initStepNames() {
   applyComponentNames(initStepDone);
 }
 
-function initStepSchedules() {
-  log('Step 4/4: Verifying schedules...');
-  // Only Pro3 has schedules, but all devices verify
-  // (verifySchedules() inlined -- single call site, and its whole body
-  // was already one statement: this Shelly.call.)
-  Shelly.call('Schedule.List', {}, function(result, err) {
+// True when any job's code names one of the pool handlers. Its own function so
+// the loop's locals (i, job, code) are gone before onWindowJobs() runs.
+function hasPoolScheduleJob(jobs) {
+  for (var i = 0; i < jobs.length; i++) {
+    var job = jobs[i];
+    if (job.calls && job.calls.length > 0 && job.calls[0].method === 'script.eval') {
+      var code = job.calls[0].params && job.calls[0].params.code;
+      // #480: code carries wrapScheduleCall()'s wrapper boilerplate, not
+      // just the bare handler call, so match by containment rather than
+      // by prefix.
+      if (code && (code.indexOf('handleNight') !== -1 || code.indexOf('handleDaily') !== -1 || code.indexOf('handleMorning') !== -1 || code.indexOf('handleEvening') !== -1)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Step 4 completion (#864 row 6). A named function, not a closure: the
+// Schedule.List response (`result`) is referenced only by this frame and the
+// call slot's caller, and nothing created here outlives the call -- in
+// particular no closure is queued from inside it, which is what used to keep
+// the whole response alive across the task-queue tick. Body wrapped in place.
+function onInitScheduleList(result, err) {
+  try {
     if (err) {
       log('WARNING: Cannot verify schedules:', err);
       queueTask(initStepDone);
       return;
     }
 
-    var hasPoolSchedules = false;
-    if (result && result.jobs) {
-      for (var i = 0; i < result.jobs.length; i++) {
-        var job = result.jobs[i];
-        if (job.calls && job.calls.length > 0 && job.calls[0].method === 'script.eval') {
-          var code = job.calls[0].params && job.calls[0].params.code;
-          // #480: code carries wrapScheduleCall()'s wrapper boilerplate, not
-          // just the bare handler call, so match by containment rather than
-          // by prefix.
-          if (code && (code.indexOf('handleNight') !== -1 || code.indexOf('handleDaily') !== -1 || code.indexOf('handleMorning') !== -1 || code.indexOf('handleEvening') !== -1)) {
-            hasPoolSchedules = true;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!hasPoolSchedules) {
+    if (!(result && result.jobs && hasPoolScheduleJob(result.jobs))) {
       log('FATAL: No pool pump schedules found. Run: ctl pool setup');
       // Stop script - schedules are required for operation
       return;
@@ -3245,7 +3247,17 @@ function initStepSchedules() {
     // by updateScheduleMode().
     onWindowJobs(result, null);
     queueTask(initStepDone);
-  });
+  } catch (e) {
+    log('init step 4 error:', e);
+  }
+}
+
+function initStepSchedules() {
+  log('Step 4/4: Verifying schedules...');
+  // Only Pro3 has schedules, but all devices verify
+  // (verifySchedules() inlined -- single call site, and its whole body
+  // was already one statement: this Shelly.call.)
+  Shelly.call('Schedule.List', {}, onInitScheduleList);
 }
 
 function runNextInitStep() {

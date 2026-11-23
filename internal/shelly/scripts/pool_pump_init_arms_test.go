@@ -184,3 +184,38 @@ func TestPoolPump_InitStepsNoSchedulesStopsBeforeWindow(t *testing.T) {
 		t.Errorf("run window = %v-%v, want unset -1--1", d.Ws, d.We)
 	}
 }
+
+// TestPoolPump_InitStepsUnrelatedSchedulesAreNotPoolSchedules pins step 4's
+// job matching: jobs that are not script.eval calls naming a pool handler
+// (another method, or foreign script code) do not count as pool schedules, so
+// init stops before seeding the window, exactly like the no-schedule case.
+func TestPoolPump_InitStepsUnrelatedSchedulesAreNotPoolSchedules(t *testing.T) {
+	t.Parallel()
+
+	job := func(id int, method, code string) map[string]interface{} {
+		return map[string]interface{}{
+			"id": id, "enable": true,
+			"timespec": "0 15 23 * * SUN,MON,TUE,WED,THU,FRI,SAT",
+			"calls": []interface{}{map[string]interface{}{
+				"method": method,
+				"params": map[string]interface{}{"id": 1, "code": code},
+			}},
+		}
+	}
+	ds := &script.DeviceState{
+		KVS:             controllerKVS(),
+		Storage:         make(map[string]interface{}),
+		ComponentStatus: pro3ComponentStatus(),
+		Schedules: []map[string]interface{}{
+			job(1, "Switch.Set", "handleNightStart()"), // right code, wrong method
+			job(2, "script.eval", "somethingElse()"),   // right method, foreign code
+		},
+	}
+	d, ok := runInitAndDump(t, ds, 6*time.Second, func(d initDump) bool { return d.Ws >= 0 })
+	if ok {
+		t.Fatalf("run window seeded from non-pool jobs: %+v", d)
+	}
+	if d.Cfg == nil || d.Init || d.Ws != -1 {
+		t.Errorf("unexpected post-init state: %+v", d)
+	}
+}

@@ -558,9 +558,8 @@ crash `error_msg`.
 - **Preconditions**: `solar-enabled = true` on `filtration-hiver`; a clear-enough day for solar
   output to exceed the (lowered, for this run) 200 W start / 150 W stop thresholds after the
   scheduled window closes; continuous 5-minute manual monitoring for the full day (no automated
-  monitor tool was trusted for this — `tools/monitor-solar.sh`, #546, is separately documented as
-  having produced zero bytes of output for 1h44m during a later session, see the ReferenceError test
-  case below).
+  monitor tool was trusted for this: the monitor script was retired in #586 after it produced no
+  output for 1h44m during a later session; see the ReferenceError test case below).
 
 - **Steps**: set `solar-enabled = true`, restart the script, let the daily schedule run normally,
   observe `Script.GetStatus`/relay state/solar feed manually through and past the scheduled stop

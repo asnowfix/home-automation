@@ -10,6 +10,7 @@ import (
 	"github.com/asnowfix/home-automation/pkg/shelly/script"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -188,10 +189,11 @@ func UploadWithVersionDetailed(ctx context.Context, log logr.Logger, via types.C
 type UploadPlan struct {
 	Upload     bool   // true when the code must be (re)sent
 	Reason     string // why, for logs and the per-device report
-	Key        string // the KVS key of the version marker, "script/<name>"
+	Key        string // the KVS key the marker is written to: "script/<name>" without the .js suffix (#895)
 	OldVersion string // the marker on the device; "" unless the read succeeded
 	NewVersion string // sha1 of the code that would be uploaded
 	marker     versionMarkerState
+	resolved   MarkerResolution // how the marker was found, for the legacy-key migration (#895)
 }
 
 // OldVersionLabel is OldVersion for display: "none" when the device answered
@@ -223,12 +225,13 @@ func PlanUpload(ctx context.Context, log logr.Logger, via types.Channel, device 
 
 	// Use basename to get just the filename without any directory path
 	basename := filepath.Base(name)
-	kvsKey := fmt.Sprintf("script/%s", basename)
 
-	// Read the script version from the KVS. Don't fail the call if the read
-	// fails, but do keep a failed read apart from a missing marker: see
-	// versionMarkerState.
-	marker, kvsVersion := readVersionMarker(ctx, log, via, device, kvsKey)
+	// Read the script version marker (new dotless key first, then the legacy
+	// dotted one, #895). Read-only: copying a legacy marker to the new key is
+	// ExecuteUpload's job, so a dry-run never writes. A failed read is kept
+	// apart from a missing marker: see versionMarkerState.
+	res := ResolveVersionMarker(ctx, log, via, device, basename)
+	marker, kvsVersion, kvsKey := res.State, res.Version, res.Key
 
 	// The version marker records what was last uploaded, but it can outlive the
 	// script itself: deleting a script from the device's web UI, with a raw
@@ -254,6 +257,7 @@ func PlanUpload(ctx context.Context, log logr.Logger, via types.Channel, device 
 		OldVersion: kvsVersion,
 		NewVersion: version,
 		marker:     marker,
+		resolved:   res,
 	}
 }
 
@@ -327,6 +331,10 @@ func ExecuteUpload(ctx context.Context, log logr.Logger, via types.Channel, devi
 		}
 	} else {
 		log.Info(plan.Reason, "name", name, "version", plan.NewVersion)
+		// Up to date, but the marker may still sit under the legacy key: copy it
+		// to the new key (#895). A failure is logged inside and never fatal: the
+		// legacy value stays authoritative.
+		MigrateLegacyMarker(ctx, log, via, device, plan.resolved)
 	}
 
 	// Now start the script, with a bounded retry: the device is often still
@@ -361,18 +369,109 @@ const (
 // kvs.GetValue reports ErrNotFound only when the device itself replied that
 // the key does not exist; every other error leaves the marker unknown.
 func readVersionMarker(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, kvsKey string) (versionMarkerState, string) {
+	state, version, _ := readMarker(ctx, log, via, device, kvsKey)
+	return state, version
+}
+
+// readMarker is readVersionMarker that also returns the read error, so a caller
+// can tell a firmware rejection of a dotted key from a transport failure.
+func readMarker(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, kvsKey string) (versionMarkerState, string, error) {
 	res, err := kvs.GetValue(ctx, log, via, device, kvsKey)
 	switch {
 	case err == nil && res != nil:
 		log.Info("Got KVS entry for script version", "key", kvsKey, "version", res.Value)
-		return markerRead, res.Value
+		return markerRead, res.Value, nil
 	case errors.Is(err, kvs.ErrNotFound):
 		log.Info("No KVS entry for script version on device", "key", kvsKey, "device", device.Name())
-		return markerMissing, ""
+		return markerMissing, "", nil
 	default:
 		log.Info("Unable to read KVS entry for script version, treating the version as unknown", "key", kvsKey, "device", device.Name(), "error", fmt.Sprint(err))
-		return markerUnknown, ""
+		return markerUnknown, "", err
 	}
+}
+
+// MarkerKeys returns the KVS key a script's version marker is stored under and
+// the legacy key it used to be stored under. name is the script file name,
+// normally with its ".js" suffix ("blu-publisher.js").
+//
+// The legacy key "script/<name>.js" contains a dot, which Gen3 firmware rejects
+// ("keys with dots are not supported!", #895); the new key drops the suffix:
+// "script/<name>". A name without the suffix has no distinct legacy key: both
+// results are equal and callers must not treat that as a fallback.
+func MarkerKeys(name string) (key, legacy string) {
+	base := filepath.Base(name)
+	return "script/" + strings.TrimSuffix(base, ".js"), "script/" + base
+}
+
+// MarkerResolution is what ResolveVersionMarker established.
+type MarkerResolution struct {
+	State      versionMarkerState // see versionMarkerState; Version is valid for markerRead only
+	Version    string
+	Key        string // the dotless key: where the marker is written
+	LegacyKey  string // the legacy dotted key ("" when it equals Key)
+	FromLegacy bool   // the value was read from LegacyKey because Key is missing
+	Name       string // script file name, for MigrateLegacyMarker
+}
+
+// ResolveVersionMarker is the one place that knows where a script's version
+// marker lives (#895; #897 reuses it). It is read-only: it reads the dotless
+// key first and, when the device answers that it does not exist, the legacy
+// dotted key. It keeps markerUnknown (a read failed) apart from markerMissing
+// (the device answered "no such key", #663): an unreadable new key is never
+// papered over by the legacy one.
+func ResolveVersionMarker(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, name string) MarkerResolution {
+	key, legacy := MarkerKeys(name)
+	res := MarkerResolution{Key: key, Name: filepath.Base(name)}
+	if legacy != key {
+		res.LegacyKey = legacy
+	}
+	res.State, res.Version, _ = readMarker(ctx, log, via, device, key)
+	if res.State != markerMissing || res.LegacyKey == "" {
+		return res
+	}
+	lstate, lversion, lerr := readMarker(ctx, log, via, device, res.LegacyKey)
+	if lstate == markerUnknown && isDotKeyRejection(lerr) {
+		// Firmware that rejects dotted keys cannot hold a legacy marker.
+		lstate = markerMissing
+	}
+	res.State = lstate
+	if lstate == markerRead {
+		res.Version, res.FromLegacy = lversion, true
+	}
+	return res
+}
+
+// isDotKeyRejection reports whether err is the firmware refusing a dotted KVS
+// key, which is a fact about the key (it cannot exist), not an unreadable marker.
+func isDotKeyRejection(err error) bool {
+	var rpcErr *types.RpcError
+	return errors.As(err, &rpcErr) && strings.Contains(strings.ToLower(rpcErr.Message), "dots")
+}
+
+// MigrateLegacyMarker copies a marker that was found under the legacy key to
+// the dotless key and verifies it by reading it back. The legacy key is NOT
+// deleted in this release (a rollback to a binary that only reads it would
+// re-push every script); a later release removes it. It never fails the
+// caller: when the new key is rejected or does not read back, the legacy value
+// stays authoritative and the marker counts as present (#895).
+//
+// It does nothing for pool-pump.js: no marker is written to the in-service pump
+// as a side effect of a read.
+func MigrateLegacyMarker(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, res MarkerResolution) bool {
+	if !res.FromLegacy || res.State != markerRead || res.Name == "pool-pump.js" {
+		return false
+	}
+	if _, err := kvs.SetKeyValue(ctx, log, via, device, res.Key, res.Version); err != nil {
+		log.Info("Unable to copy the legacy script version marker to the new key, keeping the legacy one", "key", res.Key, "legacy", res.LegacyKey, "device", device.Name(), "error", err.Error())
+		return false
+	}
+	got, err := kvs.GetValue(ctx, log, via, device, res.Key)
+	if err != nil || got == nil || got.Value != res.Version {
+		log.Info("Copied script version marker does not read back, keeping the legacy one", "key", res.Key, "legacy", res.LegacyKey, "device", device.Name(), "error", fmt.Sprint(err))
+		return false
+	}
+	log.Info("Copied the legacy script version marker to the new key", "key", res.Key, "legacy", res.LegacyKey, "device", device.Name())
+	return true
 }
 
 // shouldUpload decides whether the script's code must be sent to the device,
@@ -440,15 +539,17 @@ func DeleteWithVersion(ctx context.Context, log logr.Logger, via types.Channel, 
 		return nil, err
 	}
 
-	// Remove the version entry from KVS
+	// Remove the version entry from KVS: both the dotless key and the legacy
+	// dotted one (#895), so no stale marker outlives the script.
 	basename := filepath.Base(name)
-	kvsKey := fmt.Sprintf("script/%s", basename)
-	_, err = kvs.DeleteKey(ctx, log, via, device, kvsKey)
-	if err != nil {
-		log.Error(err, "Unable to delete KVS entry for script version", "key", kvsKey, "device", device.Name())
-		// Don't fail the delete if KVS fails, just log the error
-	} else {
-		log.Info("Deleted KVS entry for script version", "key", kvsKey, "device", device.Name())
+	key, legacy := MarkerKeys(basename)
+	for _, kvsKey := range []string{key, legacy} {
+		if _, err := kvs.DeleteKey(ctx, log, via, device, kvsKey); err != nil {
+			log.Error(err, "Unable to delete KVS entry for script version", "key", kvsKey, "device", device.Name())
+			// Don't fail the delete if KVS fails, just log the error
+		} else {
+			log.Info("Deleted KVS entry for script version", "key", kvsKey, "device", device.Name())
+		}
 	}
 
 	return out, nil

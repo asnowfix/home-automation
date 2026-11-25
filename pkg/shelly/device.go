@@ -3,7 +3,12 @@ package shelly
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"os"
+	"sort"
+	"time"
 	_ "github.com/asnowfix/home-automation/internal/myhome/net"
 	"net"
 	"github.com/asnowfix/home-automation/pkg/devices"
@@ -816,10 +821,109 @@ type DeviceResult struct {
 	Device devices.Device
 	Result any
 	Error  error
+	// Unreachable is set (and Error is nil) when the device is registered but
+	// did not answer the short reachability probe (see ForeachOptions).
+	Unreachable error
 }
 
+// ErrNoReachableDevice is returned by Foreach when every device it was asked
+// to process was unreachable, so that nothing at all was done. A single
+// explicitly named device that is down must not look like a success.
+var ErrNoReachableDevice = errors.New("no reachable device")
+
+// ForeachOptions tunes ForeachWith. The zero value reproduces Foreach exactly.
+type ForeachOptions struct {
+	// ProbeTimeout, when > 0, makes ForeachWith probe each device with one
+	// cheap RPC (Shelly.GetDeviceInfo) bounded by this duration, before
+	// running the operation. A device whose probe times out is reported as
+	// "unreachable" (skipped, listed apart from failures, no effect on the
+	// exit code) instead of burning the full MQTT/HTTP timeout on every call
+	// the operation would make. Any other probe outcome (an answer, even an
+	// RPC error; or a non-timeout error) lets the device proceed: a device
+	// that merely flapped but answers now is NOT skipped.
+	//
+	// "Unreachable" is decided by the probe alone, never by a registry flag:
+	// the registry summary carries no online state, devices.Host.Online() is a
+	// hardcoded true for mDNS-found devices, and a stored "offline" can be
+	// stale right after a flap. Only an unanswered probe, now, counts.
+	ProbeTimeout time.Duration
+
+	// Probe replaces the default probe (test seam). It is called before the
+	// device is initialised and must return an error satisfying IsUnreachable
+	// to mark the device unreachable.
+	Probe func(ctx context.Context, log logr.Logger, via types.Channel, summary devices.Device) error
+}
+
+// IsUnreachable reports whether err is the kind of failure that means "the
+// device did not answer in time" (probe deadline, MQTT/HTTP timeout), as
+// opposed to a device that answered with an error or a local failure.
+func IsUnreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, os.ErrDeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	return strings.Contains(err.Error(), "timeout waiting for response")
+}
+
+// probeDevice sends one Shelly.GetDeviceInfo bounded by timeout. It returns nil
+// when the device answered (even with an RPC error), an IsUnreachable error
+// when it did not, and any other error for local failures.
+func probeDevice(ctx context.Context, log logr.Logger, via types.Channel, summary devices.Device, timeout time.Duration) error {
+	device, err := NewDeviceFromSummary(ctx, log, summary)
+	if err != nil {
+		return err
+	}
+	sd, ok := device.(*Device)
+	if !ok {
+		return fmt.Errorf("invalid device type %T", device)
+	}
+	// init may itself call the device (a summary without MAC), so it is bound
+	// by the probe deadline too.
+	pctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if err := sd.init(pctx); err != nil {
+		if IsUnreachable(err) && ctx.Err() == nil {
+			return err
+		}
+		return nil // local init failure: not conclusive, the real run reports it
+	}
+	_, err = shelly.GetDeviceInfo(pctx, sd, via)
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return err // the caller cancelled: not the device's fault
+	}
+	var rpcErr *types.RpcError
+	if errors.As(err, &rpcErr) {
+		return nil // it answered
+	}
+	return err
+}
+
+// Foreach runs do on every device, in parallel, with no reachability probe.
 func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, via types.Channel, do Do, args []string) (any, error) {
+	return ForeachWith(ctx, log, deviceList, via, do, args, ForeachOptions{})
+}
+
+// ForeachWith is Foreach with options. It returns an error only for real
+// failures on reachable devices (or when no device at all was reachable);
+// unreachable devices are listed in the summary but do not fail the run.
+func ForeachWith(ctx context.Context, log logr.Logger, deviceList []devices.Device, via types.Channel, do Do, args []string, opts ForeachOptions) (any, error) {
 	log.Info("Running", "func_type", reflect.TypeOf(do), "args", args, "nb_devices", len(deviceList))
+
+	probe := opts.Probe
+	if probe == nil && opts.ProbeTimeout > 0 {
+		probe = func(ctx context.Context, log logr.Logger, via types.Channel, summary devices.Device) error {
+			return probeDevice(ctx, log, via, summary, opts.ProbeTimeout)
+		}
+	}
 
 	// Create channels for results
 	results := make(chan DeviceResult, len(deviceList))
@@ -850,6 +954,17 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 				log.V(1).Info("Skipping BLU device (no command/script support)", "device_id", devSummary.Id())
 				results <- DeviceResult{Device: devSummary, Error: nil}
 				return
+			}
+
+			// Known but silent devices: skip quickly, do not fail.
+			if probe != nil {
+				if perr := probe(ctx, log, via, devSummary); perr != nil && IsUnreachable(perr) && ctx.Err() == nil {
+					log.Info("Skipping unreachable device", "id", devSummary.Id(), "name", devSummary.Name(), "reason", perr.Error())
+					results <- DeviceResult{Device: devSummary, Unreachable: perr}
+					return
+				}
+				// Any other probe error is not conclusive: let the real
+				// operation run and report its own failure.
 			}
 
 			// Create device from summary
@@ -895,51 +1010,65 @@ func Foreach(ctx context.Context, log logr.Logger, deviceList []devices.Device, 
 
 	// Collect results
 	out := make([]any, 0, len(deviceList))
-	var errs []error
-	type failedDevice struct {
-		name string
-		id   string
-		err  error
-	}
-	var failedDevices []failedDevice
+	var failed, unreachable []DeviceResult
 	for result := range results {
-		if result.Error != nil {
-			deviceId := result.Device.Id()
-			deviceName := result.Device.Name()
-			errs = append(errs, fmt.Errorf("device %s: %w", deviceId, result.Error))
-			failedDevices = append(failedDevices, failedDevice{name: deviceName, id: deviceId, err: result.Error})
+		switch {
+		case result.Unreachable != nil:
+			unreachable = append(unreachable, result)
+			continue // no result to report for a device that was not run
+		case result.Error != nil:
+			failed = append(failed, result)
 		}
 		out = append(out, result.Result)
 	}
+	// Goroutines finish in any order: sort so the summary is deterministic.
+	byId := func(r []DeviceResult) {
+		sort.Slice(r, func(a, b int) bool { return r[a].Device.Id() < r[b].Device.Id() })
+	}
+	byId(failed)
+	byId(unreachable)
 
-	// If any devices failed, report them
-	if len(errs) > 0 {
-		successCount := len(deviceList) - len(errs)
+	succeeded := len(deviceList) - len(failed) - len(unreachable)
+	writeForeachSummary(os.Stdout, succeeded, failed, unreachable)
+	if len(failed) > 0 || len(unreachable) > 0 {
+		log.Info("Operation completed with exceptions", "succeeded", succeeded, "failed", len(failed), "unreachable", len(unreachable), "total", len(deviceList))
+	}
 
-		// Print summary to stdout
-		fmt.Printf("\n")
-		if successCount > 0 {
-			fmt.Printf("✓ %d device(s) succeeded\n", successCount)
+	if len(failed) > 0 {
+		if len(failed) == len(deviceList) {
+			return out, fmt.Errorf("all %d device(s) failed", len(deviceList))
 		}
-		fmt.Printf("✗ %d device(s) failed:\n", len(errs))
-		for _, dev := range failedDevices {
+		return out, fmt.Errorf("%d of %d device(s) failed", len(failed), len(deviceList))
+	}
+	if len(unreachable) > 0 && len(unreachable) == len(deviceList) {
+		return out, fmt.Errorf("%w: all %d device(s) unreachable", ErrNoReachableDevice, len(deviceList))
+	}
+	return out, nil
+}
+
+// writeForeachSummary prints the end-of-run summary: succeeded count, then
+// failures (with reasons, #863), then unreachable devices, listed apart.
+func writeForeachSummary(w io.Writer, succeeded int, failed, unreachable []DeviceResult) {
+	if len(failed) == 0 && len(unreachable) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\n")
+	if succeeded > 0 {
+		fmt.Fprintf(w, "✓ %d device(s) succeeded\n", succeeded)
+	}
+	if len(failed) > 0 {
+		fmt.Fprintf(w, "✗ %d device(s) failed:\n", len(failed))
+		for _, r := range failed {
 			// The reason is part of the summary: without it a fleet run
 			// (`script update '*'`) reports only names, and the cause of its
 			// failures is lost (#863).
-			fmt.Printf("  - %s (%s): %v\n", dev.name, dev.id, dev.err)
+			fmt.Fprintf(w, "  - %s (%s): %v\n", r.Device.Name(), r.Device.Id(), r.Error)
 		}
-
-		// Log details
-		log.Info("Operation completed with errors", "succeeded", successCount, "failed", len(errs), "total", len(deviceList))
-
-		// If all devices failed, return error
-		if len(errs) == len(deviceList) {
-			return out, fmt.Errorf("all %d device(s) failed", len(deviceList))
-		}
-
-		// If some devices failed, return aggregated error
-		return out, fmt.Errorf("%d of %d device(s) failed", len(errs), len(deviceList))
 	}
-
-	return out, nil
+	if len(unreachable) > 0 {
+		fmt.Fprintf(w, "⚠ %d device(s) unreachable (skipped, not counted as failures):\n", len(unreachable))
+		for _, r := range unreachable {
+			fmt.Fprintf(w, "  - %s (%s)\n", r.Device.Name(), r.Device.Id())
+		}
+	}
 }

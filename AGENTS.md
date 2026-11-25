@@ -520,6 +520,18 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 - `--verbose`: Enable verbose logging
 - `--dry-run` (on `script update`, #863): report what would be uploaded, reading only `Script.List`
   and the `script/<name>` markers (dotless since #895; the legacy `script/<name>.js` is read as a fallback); nothing is stopped, written or started.
+  For a loaded script with **no** marker it also reads the installed code (`Script.GetCode`) and
+  reports `would-mark` or `would-update`.
+- **Missing-marker catch-up** (on `script update` and `script upload`, #897): a loaded script with
+  no marker (the device answered "not found" on both keys, not an unreadable marker) is not
+  re-uploaded blindly. Its installed code is read once and compared byte for byte with the packaged
+  source, as is or as the uploader minifies it (`pkg/shelly/script.PrepareCode`). Identical: only
+  the marker `script/<name>` is written (sha1 of the packaged source) and read back, outcome
+  `marker-restored`; no stop, no upload. Different: normal upload. Code unreadable: nothing is
+  uploaded or written, outcome `skipped` (not a failure; the next run retries). Empty installed code
+  never matches (#449). `--force` skips the comparison and uploads; `pool-pump.js` is never read
+  (it keeps the `--include-pump` guard and gets no marker without an upload). A script that has a
+  marker costs one `KVS.Get`, as before: only a missing marker triggers the download.
 - `--include-pump` (on `script update`, #863): `pool-pump.js` is guarded and never uploaded (not even
   started) by `script update` without it. With it, every relay must be off, the replaced code is
   saved to `--backup-dir` (default `.`) and put back if the upload fails or the new script is not

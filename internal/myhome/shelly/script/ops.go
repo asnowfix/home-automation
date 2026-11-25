@@ -192,8 +192,46 @@ type UploadPlan struct {
 	Key        string // the KVS key the marker is written to: "script/<name>" without the .js suffix (#895)
 	OldVersion string // the marker on the device; "" unless the read succeeded
 	NewVersion string // sha1 of the code that would be uploaded
-	marker     versionMarkerState
-	resolved   MarkerResolution // how the marker was found, for the legacy-key migration (#895)
+	// CatchUp is the result of the one-time marker catch-up (#897): set only
+	// when the marker is missing and the script is on the device, in which
+	// case the installed code was read and compared with the packaged source.
+	CatchUp  CatchUp
+	marker   versionMarkerState
+	resolved MarkerResolution // how the marker was found, for the legacy-key migration (#895)
+}
+
+// CatchUp is what the one-time version-marker catch-up (#897) found for a
+// script that is on the device but has no version marker. Scripts pushed
+// before markers existed, or before they were readable on Gen3 (#895), are in
+// that state; uploading them on the marker alone would stop and restart every
+// one of them although their code is already the packaged one.
+type CatchUp int
+
+const (
+	// CatchUpNone: no catch-up was needed (a marker exists or was unreadable,
+	// the script is absent, --force, or a guarded script).
+	CatchUpNone CatchUp = iota
+	// CatchUpIdentical: the installed code is the packaged source, as is or
+	// in the uploader's minified form. The marker is recorded without upload.
+	CatchUpIdentical
+	// CatchUpDiffers: the installed code differs; the script is uploaded.
+	CatchUpDiffers
+	// CatchUpUnreadable: the installed code could not be read. Nothing is
+	// uploaded, so a running script is not restarted on an unknown.
+	CatchUpUnreadable
+)
+
+func (c CatchUp) String() string {
+	switch c {
+	case CatchUpIdentical:
+		return "identical"
+	case CatchUpDiffers:
+		return "differs"
+	case CatchUpUnreadable:
+		return "unreadable"
+	default:
+		return "none"
+	}
 }
 
 // OldVersionLabel is OldVersion for display: "none" when the device answered
@@ -247,18 +285,85 @@ func PlanUpload(ctx context.Context, log logr.Logger, via types.Channel, device 
 		isPresent = scriptIsLoaded(ctx, log, via, device, basename)
 	}
 
+	// One-time catch-up (#897): a script that is on the device without a
+	// marker is compared with the packaged source before anything is decided.
+	// Only this state pays for a code download; a marked script costs one
+	// KVS.Get, as before. Guarded scripts (the pump) are never read here.
+	catchUp := CatchUpNone
+	if marker == markerMissing && isPresent && !force && !IsGuarded(basename) {
+		catchUp = compareInstalled(ctx, log, via, device, basename, code)
+	}
+
 	// Upload if forced, the version changed, or the device does not actually
 	// have the script.
-	upload, reason := shouldUpload(force, version, marker, kvsVersion, isPresent)
+	upload, reason := shouldUpload(force, version, marker, kvsVersion, isPresent, catchUp)
 	return UploadPlan{
 		Upload:     upload,
 		Reason:     reason,
 		Key:        kvsKey,
 		OldVersion: kvsVersion,
 		NewVersion: version,
+		CatchUp:    catchUp,
 		marker:     marker,
 		resolved:   res,
 	}
+}
+
+// compareInstalled reads the code of the loaded script basename
+// (Script.List for its id, then Script.GetCode) and compares it with what the
+// uploader would have sent for code. Read-only.
+func compareInstalled(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, basename string, code []byte) CatchUp {
+	loaded, err := script.ListLoaded(ctx, via, device)
+	if err != nil {
+		log.Info("Unable to list loaded scripts to read the installed code", "name", basename, "device", device.Name(), "error", err.Error())
+		return CatchUpUnreadable
+	}
+	var id uint32
+	found := false
+	for _, l := range loaded {
+		if l.Name == basename {
+			id, found = l.Id, true
+			break
+		}
+	}
+	if !found {
+		// Not on the device after all: nothing runs that an upload could
+		// disturb, so no comparison and the pre-#897 decision applies.
+		log.Info("Script not listed, no installed code to compare", "name", basename, "device", device.Name())
+		return CatchUpNone
+	}
+	installed, err := downloadCode(ctx, via, device, id)
+	if err != nil {
+		log.Info("Unable to read the installed code", "name", basename, "id", id, "device", device.Name(), "error", err.Error())
+		return CatchUpUnreadable
+	}
+	if matchesPackaged(installed, code) {
+		log.Info("Installed code is the packaged code, only its version marker is missing", "name", basename, "device", device.Name())
+		return CatchUpIdentical
+	}
+	log.Info("Installed code differs from the packaged code", "name", basename, "device", device.Name(), "installed", len(installed), "packaged", len(code))
+	return CatchUpDiffers
+}
+
+// matchesPackaged reports whether installed is, byte for byte, what the
+// uploader sends for src: the source as is (--no-minify) or its prepared
+// minified form (script.PrepareCode, the transformation doUpload applies).
+// A minifier that cannot process src leaves only the first comparison. If the
+// minifier's output changed since the script was uploaded, an identical source
+// shows as different and is re-uploaded: the safe direction (#897).
+//
+// Empty installed code never matches: a script recreated empty does nothing
+// and must be uploaded (#449), even when the packaged source minifies to
+// nothing (a comment-only file).
+func matchesPackaged(installed string, src []byte) bool {
+	if installed == "" {
+		return false
+	}
+	if installed == string(src) {
+		return true
+	}
+	min, err := script.PrepareCode(src, true)
+	return err == nil && installed == string(min)
 }
 
 // UploadOutcome is what ExecuteUpload did.
@@ -266,6 +371,9 @@ type UploadOutcome struct {
 	Id       uint32       // id of the uploaded script; 0 when nothing was uploaded
 	Status   UploadStatus // see UploadStatus
 	Uploaded bool         // true when code was sent to the device
+	// MarkerRestored is set when no code was sent but the missing version
+	// marker of an identical script was recorded and read back (#897).
+	MarkerRestored bool
 	// MarkerErr is set when the code was delivered but recording its version
 	// marker failed. The next push then uploads the same code again, so it is
 	// reported rather than only logged (#863).
@@ -329,6 +437,17 @@ func ExecuteUpload(ctx context.Context, log logr.Logger, via types.Channel, devi
 		} else {
 			log.Info("Set KVS entry for script version", "key", plan.Key, "version", plan.NewVersion, "device", device.Name())
 		}
+	} else if plan.CatchUp == CatchUpIdentical {
+		// The installed code is the packaged one: record its marker instead of
+		// uploading (#897), and read it back so a write the device dropped is
+		// reported rather than rediscovered on the next push.
+		log.Info(plan.Reason, "name", name, "version", plan.NewVersion, "key", plan.Key, "device", device.Name())
+		if err := writeMarker(ctx, log, via, device, plan.Key, plan.NewVersion); err != nil {
+			log.Error(err, "Unable to record the missing script version marker", "key", plan.Key, "device", device.Name())
+			out.MarkerErr = err
+		} else {
+			out.MarkerRestored = true
+		}
 	} else {
 		log.Info(plan.Reason, "name", name, "version", plan.NewVersion)
 		// Up to date, but the marker may still sit under the legacy key: copy it
@@ -345,6 +464,22 @@ func ExecuteUpload(ctx context.Context, log logr.Logger, via types.Channel, devi
 	log.Info(message, "name", name, "device", device.Name())
 	out.Status = status
 	return out, nil
+}
+
+// writeMarker writes version to key and reads it back.
+func writeMarker(ctx context.Context, log logr.Logger, via types.Channel, device types.Device, key, version string) error {
+	if _, err := kvs.SetKeyValue(ctx, log, via, device, key, version); err != nil {
+		return err
+	}
+	got, err := kvs.GetValue(ctx, log, via, device, key)
+	if err != nil {
+		return fmt.Errorf("marker %s does not read back: %w", key, err)
+	}
+	if got == nil || got.Value != version {
+		return fmt.Errorf("marker %s does not read back as written", key)
+	}
+	log.Info("Recorded the missing script version marker", "key", key, "version", version, "device", device.Name())
+	return nil
 }
 
 // versionMarkerState is what reading the device's script/<name> KVS entry
@@ -494,8 +629,15 @@ func MigrateLegacyMarker(ctx context.Context, log logr.Logger, via types.Channel
 //
 // kvsVersion is only consulted when marker == markerRead (it is "" otherwise).
 //
+// catchUp is the result of comparing the installed code with the packaged one
+// when the marker is missing and the script is present (#897): identical code
+// is not uploaded (its marker is recorded instead), and code that could not be
+// read is not uploaded either, for the same reason as an unknown marker.
+// CatchUpNone (a guarded script, or no comparison made) keeps the behaviour
+// from before #897: a missing marker uploads.
+//
 // Kept as a pure function so this decision is testable without a device.
-func shouldUpload(force bool, wantVersion string, marker versionMarkerState, kvsVersion string, present bool) (bool, string) {
+func shouldUpload(force bool, wantVersion string, marker versionMarkerState, kvsVersion string, present bool, catchUp CatchUp) (bool, string) {
 	switch {
 	case force:
 		return true, "Force flag set, uploading script"
@@ -503,6 +645,12 @@ func shouldUpload(force bool, wantVersion string, marker versionMarkerState, kvs
 		return true, "Script version marker unreadable and the script is not on the device, uploading"
 	case marker == markerUnknown:
 		return false, "Script version marker unreadable, skipping upload so a running script is not restarted (use --force to override)"
+	case marker == markerMissing && present && catchUp == CatchUpIdentical:
+		return false, "No version marker, but the installed code is the packaged code: recording the marker without uploading"
+	case marker == markerMissing && present && catchUp == CatchUpUnreadable:
+		return false, "No version marker and the installed code could not be read, skipping upload so a running script is not restarted (use --force to override)"
+	case marker == markerMissing && present && catchUp == CatchUpDiffers:
+		return true, "No version marker and the installed code differs from the packaged code, uploading"
 	case wantVersion != kvsVersion:
 		return true, "Script version is different, uploading new one"
 	case !present:

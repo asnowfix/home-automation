@@ -350,18 +350,20 @@ The discipline that made this recoverable:
   only fetches the `.deb` and runs `dpkg -i`, but the postinst then (a) runs
   `myhome ctl shelly script update '*'`, pushing the packaged scripts to **every known device that
   already has the script loaded** whose KVS version marker (`script/<name>`, **without** the `.js`
-  suffix, e.g. `script/blu-publisher`, = sha1 of the packaged unminified source) is missing
-  or differs. Before #895 the key was `script/<name>.js`, which Gen3 firmware rejects (dots); the
+  suffix, e.g. `script/blu-publisher`, = sha1 of the packaged unminified source) differs, or is
+  missing **and** the installed code differs from the packaged one (since #897 a missing marker
+  triggers a one-time `Script.GetCode` comparison: identical code only gets its marker written,
+  `marker-restored`; unreadable code is left alone, `skipped`). Before #895 the key was `script/<name>.js`, which Gen3 firmware rejects (dots); the
   legacy key is still read as a fallback and its value copied to the new key (never for
   `pool-pump.js`), but not deleted until a later release. Since #863 it **never uploads `pool-pump.js`** (that needs `--include-pump`, by hand),
   runs a `--dry-run` first, and appends both runs to `/var/lib/myhome/script-update.log`, one line
-  per device and script (`up-to-date`, `updated (old -> new)`, `refused`, `not-packaged`,
-  `failed: <reason>`);
+  per device and script (`up-to-date`, `updated (old -> new)`, `marker-restored`, `refused`,
+  `not-packaged`, `skipped`, `failed: <reason>`);
   (b) `systemctl reenable`s **both** timers, so a merely *disabled* update timer comes back (a
   *masked* one makes postinst fail, see below); (c) prompts for credentials and rewrites
   `/var/lib/myhome/.env` when stdin is a tty and `DEBIAN_FRONTEND` is not `noninteractive`. To
-  preview (a), run `myhome ctl shelly script update --dry-run '*'` (reads `Script.List` and the
-  markers only; on a binary older than #863, compare each device's `script/<name>.js` (or, since #895, `script/<name>`) KVS value with
+  preview (a), run `myhome ctl shelly script update --dry-run '*'` (reads `Script.List`, the
+  markers and, for a script without a marker, its code; writes nothing; on a binary older than #863, compare each device's `script/<name>.js` (or, since #895, `script/<name>`) KVS value with
   `sha1sum` of the packaged `internal/shelly/scripts/<name>.js`).
 - Pool provisioning (`Setup`/`AddDevice`/`UpdateDevice`) is reachable **only** from `myhome/ctl/pool/`,
   never from the daemon; the daemon's auto-setup applies to any Gen2 device whose KVS marker

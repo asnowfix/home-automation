@@ -47,6 +47,16 @@ const (
 	OutcomeNotPackaged Outcome = "not-packaged"
 	// OutcomeFailed: the update was attempted and did not complete.
 	OutcomeFailed Outcome = "failed"
+	// OutcomeMarkerRestored: the script had no version marker but its
+	// installed code is the packaged one; the marker was recorded and read
+	// back, no code was sent (#897).
+	OutcomeMarkerRestored Outcome = "marker-restored"
+	// OutcomeWouldMark: dry run of OutcomeMarkerRestored.
+	OutcomeWouldMark Outcome = "would-mark"
+	// OutcomeSkipped: the script has no version marker and its installed code
+	// could not be read, so nothing was uploaded or written (#897). Not a
+	// failure; the next run tries again.
+	OutcomeSkipped Outcome = "skipped"
 )
 
 // ScriptUpdate reports the outcome for one script on one device.
@@ -90,8 +100,9 @@ type UpdateOptions struct {
 	LocalDir string
 	Minify   bool
 	Force    bool
-	// DryRun reads the script list and version markers only: no Script.Stop,
-	// PutCode, KVS.Set or Script.Start.
+	// DryRun reads the script list and version markers only (plus, for a
+	// loaded script without a marker, its code with Script.GetCode, #897):
+	// no Script.Stop, PutCode, KVS.Set or Script.Start.
 	DryRun bool
 	// IncludeGuarded allows uploading a guarded script (pool-pump.js). Even
 	// then every relay must be off and the code being replaced is saved first.
@@ -165,6 +176,35 @@ func updateOne(ctx context.Context, log logr.Logger, via types.Channel, device t
 	su.Reason = plan.Reason
 
 	guarded := IsGuarded(l.Name)
+	switch {
+	case plan.Upload:
+	case plan.CatchUp == CatchUpUnreadable:
+		// Missing marker and unreadable code (#897): leave the script alone,
+		// not even started.
+		su.Outcome = OutcomeSkipped
+		return su
+	case plan.CatchUp == CatchUpIdentical && opts.DryRun:
+		su.Outcome = OutcomeWouldMark
+		return su
+	case plan.CatchUp == CatchUpIdentical:
+		// Records the marker (with read-back) and starts the script, a no-op
+		// on a running one, exactly like an up-to-date script.
+		out, err := ExecuteUpload(ctx, log, via, device, l.Name, code, opts.Minify, plan)
+		switch {
+		case err != nil:
+			su.Outcome = OutcomeFailed
+			su.Reason = fmt.Sprintf("recording the marker did not complete: %v", err)
+		case out.MarkerErr != nil:
+			su.Outcome = OutcomeFailed
+			su.Reason = fmt.Sprintf("the installed code is the packaged code, but its version marker %s was not recorded: %v", plan.Key, out.MarkerErr)
+		default:
+			su.Outcome = OutcomeMarkerRestored
+			if out.Status == StatusIndeterminate {
+				su.Reason = plan.Reason + "; starting it did not confirm"
+			}
+		}
+		return su
+	}
 	if !plan.Upload {
 		// A guarded script is left entirely alone by default, not even
 		// started: a Script.Start on a stopped pump script is a change to

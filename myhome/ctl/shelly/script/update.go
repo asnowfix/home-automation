@@ -27,7 +27,7 @@ func init() {
 	updateCtl.Flags().BoolVar(&updateNoMinify, "no-minify", false, "Do not minify scripts before upload")
 	// Flag to force re-upload even if version hash matches
 	updateCtl.Flags().BoolVar(&updateForce, "force", false, "Force re-upload even if version hash matches")
-	updateCtl.Flags().BoolVar(&updateDryRun, "dry-run", false, "Only report what would be uploaded: reads the script list and version markers, changes nothing")
+	updateCtl.Flags().BoolVar(&updateDryRun, "dry-run", false, "Only report what would be uploaded: reads the script list, the version markers and, for a script without a marker, its code; changes nothing")
 	updateCtl.Flags().BoolVar(&updateIncludePump, "include-pump", false, "Allow uploading pool-pump.js (refused by default); even then every relay must be off, and the replaced code is saved and restored on failure")
 	updateCtl.Flags().StringVar(&updateBackupDir, "backup-dir", ".", "Directory where the code replaced on a guarded script (pool-pump.js) is saved")
 }
@@ -38,10 +38,14 @@ var updateCtl = &cobra.Command{
 	Long: `Update the scripts loaded on the given Shelly device(s) to the versions this binary carries.
 
 A script is uploaded only when its version marker (KVS key script/<name>, the
-sha1 of the packaged source) differs from the packaged version, or is missing,
-or the script is not loaded. Every device and script gets one line:
-up-to-date, updated (old -> new), would-update (--dry-run), refused, not-packaged
-or failed, with the reason.
+sha1 of the packaged source) differs from the packaged version, or the script
+is not loaded. When a loaded script has no marker, its installed code is read
+once (Script.GetCode) and compared with the packaged source (as is, or
+minified): if identical, only the marker is recorded (marker-restored); if
+different, it is uploaded; if the code cannot be read, it is left alone
+(skipped). Every device and script gets one line: up-to-date, updated
+(old -> new), marker-restored, would-update / would-mark (--dry-run), refused,
+not-packaged, skipped or failed, with the reason.
 
 pool-pump.js is guarded: it is never uploaded unless --include-pump is given,
 and then only while every relay of the device is off. Its current code is saved
@@ -130,7 +134,8 @@ func formatReport(r *mhscript.DeviceScriptsReport, target string) string {
 		switch s.Outcome {
 		case mhscript.OutcomeUpToDate:
 			fmt.Fprintf(&b, " (%s)", short(s.NewVersion))
-		case mhscript.OutcomeUpdated, mhscript.OutcomeWouldUpdate, mhscript.OutcomeIndeterminate:
+		case mhscript.OutcomeUpdated, mhscript.OutcomeWouldUpdate, mhscript.OutcomeIndeterminate,
+			mhscript.OutcomeMarkerRestored, mhscript.OutcomeWouldMark:
 			fmt.Fprintf(&b, " (%s -> %s)", short(s.OldVersion), short(s.NewVersion))
 		}
 		if s.Outcome != mhscript.OutcomeUpToDate || strings.Contains(s.Reason, "did not confirm") {

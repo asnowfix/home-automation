@@ -519,7 +519,7 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 - `--force`: Force re-upload even if version hash matches
 - `--verbose`: Enable verbose logging
 - `--dry-run` (on `script update`, #863): report what would be uploaded, reading only `Script.List`
-  and the `script/<name>.js` markers; nothing is stopped, written or started.
+  and the `script/<name>` markers (dotless since #895; the legacy `script/<name>.js` is read as a fallback); nothing is stopped, written or started.
 - `--include-pump` (on `script update`, #863): `pool-pump.js` is guarded and never uploaded (not even
   started) by `script update` without it. With it, every relay must be off, the replaced code is
   saved to `--backup-dir` (default `.`) and put back if the upload fails or the new script is not

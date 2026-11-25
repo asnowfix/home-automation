@@ -34,8 +34,43 @@ func TestShouldUpload(t *testing.T) {
 		marker     versionMarkerState
 		kvsVersion string
 		present    bool
+		catchUp    CatchUp
 		wantUpload bool
 	}{
+		// #897: one-time catch-up for a present script without a marker.
+		{
+			name:       "marker missing, installed code identical: no upload (marker recorded)",
+			want:       version,
+			marker:     markerMissing,
+			present:    true,
+			catchUp:    CatchUpIdentical,
+			wantUpload: false,
+		},
+		{
+			name:       "marker missing, installed code differs: upload",
+			want:       version,
+			marker:     markerMissing,
+			present:    true,
+			catchUp:    CatchUpDiffers,
+			wantUpload: true,
+		},
+		{
+			name:       "marker missing, installed code unreadable: no upload",
+			want:       version,
+			marker:     markerMissing,
+			present:    true,
+			catchUp:    CatchUpUnreadable,
+			wantUpload: false,
+		},
+		{
+			name:       "force wins over an identical catch-up",
+			force:      true,
+			want:       version,
+			marker:     markerMissing,
+			present:    true,
+			catchUp:    CatchUpIdentical,
+			wantUpload: true,
+		},
 		{
 			name:       "version differs, script present",
 			want:       version,
@@ -79,9 +114,9 @@ func TestShouldUpload(t *testing.T) {
 			wantUpload: true,
 		},
 		{
-			// The device answered "no such key": a genuinely missing marker still
-			// uploads (first install, or a marker that was deleted).
-			name:       "marker missing, script present: upload",
+			// The device answered "no such key" and no code comparison was made
+			// (a guarded script): a missing marker still uploads.
+			name:       "marker missing, script present, no catch-up: upload",
 			want:       version,
 			marker:     markerMissing,
 			present:    true,
@@ -119,7 +154,7 @@ func TestShouldUpload(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got, reason := shouldUpload(tc.force, tc.want, tc.marker, tc.kvsVersion, tc.present)
+			got, reason := shouldUpload(tc.force, tc.want, tc.marker, tc.kvsVersion, tc.present, tc.catchUp)
 			if got != tc.wantUpload {
 				t.Errorf("shouldUpload(force=%v, want=%q, marker=%v, kvs=%q, present=%v) = %v (%q), want %v",
 					tc.force, tc.want, tc.marker, tc.kvsVersion, tc.present, got, reason, tc.wantUpload)

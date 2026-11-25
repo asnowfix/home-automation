@@ -349,9 +349,11 @@ The discipline that made this recoverable:
 - **`dpkg -i` runs the package's postinst, and that is not just a binary swap.** `update.sh` itself
   only fetches the `.deb` and runs `dpkg -i`, but the postinst then (a) runs
   `myhome ctl shelly script update '*'`, pushing the packaged scripts to **every known device that
-  already has the script loaded** whose KVS version marker (`script/<name>`, where `<name>`
-  includes `.js`, e.g. `script/pool-pump.js`, = sha1 of the packaged unminified source) is missing
-  or differs. Since #863 it **never uploads `pool-pump.js`** (that needs `--include-pump`, by hand),
+  already has the script loaded** whose KVS version marker (`script/<name>`, **without** the `.js`
+  suffix, e.g. `script/blu-publisher`, = sha1 of the packaged unminified source) is missing
+  or differs. Before #895 the key was `script/<name>.js`, which Gen3 firmware rejects (dots); the
+  legacy key is still read as a fallback and its value copied to the new key (never for
+  `pool-pump.js`), but not deleted until a later release. Since #863 it **never uploads `pool-pump.js`** (that needs `--include-pump`, by hand),
   runs a `--dry-run` first, and appends both runs to `/var/lib/myhome/script-update.log`, one line
   per device and script (`up-to-date`, `updated (old -> new)`, `refused`, `not-packaged`,
   `failed: <reason>`);
@@ -359,7 +361,7 @@ The discipline that made this recoverable:
   *masked* one makes postinst fail, see below); (c) prompts for credentials and rewrites
   `/var/lib/myhome/.env` when stdin is a tty and `DEBIAN_FRONTEND` is not `noninteractive`. To
   preview (a), run `myhome ctl shelly script update --dry-run '*'` (reads `Script.List` and the
-  markers only; on a binary older than #863, compare each device's `script/<name>.js` KVS value with
+  markers only; on a binary older than #863, compare each device's `script/<name>.js` (or, since #895, `script/<name>`) KVS value with
   `sha1sum` of the packaged `internal/shelly/scripts/<name>.js`).
 - Pool provisioning (`Setup`/`AddDevice`/`UpdateDevice`) is reachable **only** from `myhome/ctl/pool/`,
   never from the daemon; the daemon's auto-setup applies to any Gen2 device whose KVS marker

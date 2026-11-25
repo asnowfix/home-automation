@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/asnowfix/home-automation/pkg/shelly/sswitch"
 	"github.com/asnowfix/home-automation/pkg/shelly/types"
 
+	"github.com/go-logr/logr"
 	"github.com/go-logr/logr/testr"
 )
 
@@ -310,6 +312,18 @@ type fakeUploadDevice struct {
 
 	// kvSetErr, if set, is returned by every KVS.Set.
 	kvSetErr error
+
+	// rejectDots makes KVS.Get/Set/Delete refuse any key containing a dot, as
+	// Gen3 firmware does (#895).
+	rejectDots bool
+	// kvSetReject makes KVS.Set refuse these exact keys (the device
+	// answers with an RPC error), whatever they contain.
+	kvSetReject map[string]bool
+}
+
+// errDotKey is the firmware's answer to a dotted KVS key (#895).
+func errDotKey() error {
+	return &types.RpcError{Code: -103, Message: "Invalid argument 'key': keys with dots are not supported!"}
 }
 
 var _ types.Device = (*fakeUploadDevice)(nil)
@@ -404,8 +418,14 @@ func (f *fakeUploadDevice) CallE(_ context.Context, _ types.Channel, method stri
 
 	case "KVS.Delete":
 		req := params.(map[string]any)
+		if f.rejectDots && strings.Contains(req["key"].(string), ".") {
+			return nil, errDotKey()
+		}
 		delete(f.kv, req["key"].(string))
 		return &kvs.Status{}, nil
+
+	case "Script.Delete":
+		return &pkgscript.Status{}, nil
 
 	case "Script.SetConfig":
 		return &pkgscript.Status{}, nil
@@ -424,6 +444,9 @@ func (f *fakeUploadDevice) CallE(_ context.Context, _ types.Channel, method stri
 		if f.kvGetErr != nil {
 			return nil, f.kvGetErr
 		}
+		if f.rejectDots && strings.Contains(req.Key, ".") {
+			return nil, errDotKey()
+		}
 		v, ok := f.kv[req.Key]
 		if !ok {
 			// The device answered: a typed RPC error whose message says "not found",
@@ -438,6 +461,12 @@ func (f *fakeUploadDevice) CallE(_ context.Context, _ types.Channel, method stri
 			return nil, f.kvSetErr
 		}
 		req := params.(*kvs.KeyValue)
+		if f.rejectDots && strings.Contains(req.Key, ".") {
+			return nil, errDotKey()
+		}
+		if f.kvSetReject[req.Key] {
+			return nil, &types.RpcError{Code: -103, Message: "Invalid argument 'key'"}
+		}
 		f.kv[req.Key] = req.Value
 		return &kvs.Status{}, nil
 
@@ -697,7 +726,7 @@ func TestUploadWithVersionDetailed_UnreadableMarkerVariants(t *testing.T) {
 func TestUploadWithVersionDetailed_MissingMarkerStillUploads(t *testing.T) {
 	log := testr.New(t)
 	dev := newFakeUploadDevice("device-663-missing-marker")
-	dev.scripts[1] = "pool-pump.js" // present, but no kv["script/pool-pump.js"]
+	dev.scripts[1] = "pool-pump.js" // present, but no kv["script/pool-pump"]
 
 	code := []byte("// v1\n")
 	if _, _, err := UploadWithVersionDetailed(context.Background(), log, types.ChannelDefault, dev, "pool-pump.js", code, false, false); err != nil {
@@ -707,7 +736,7 @@ func TestUploadWithVersionDetailed_MissingMarkerStillUploads(t *testing.T) {
 	if dev.calls["Script.Stop"] == 0 || dev.calls["Script.PutCode"] == 0 {
 		t.Errorf("a missing marker must still upload: Script.Stop=%d Script.PutCode=%d", dev.calls["Script.Stop"], dev.calls["Script.PutCode"])
 	}
-	if got, want := dev.kv["script/pool-pump.js"], sha1Hex(code); got != want {
+	if got, want := dev.kv["script/pool-pump"], sha1Hex(code); got != want {
 		t.Errorf("marker after upload = %q, want %q", got, want)
 	}
 }
@@ -719,7 +748,7 @@ func TestUploadWithVersionDetailed_DifferentMarkerStillUploads(t *testing.T) {
 	log := testr.New(t)
 	dev := newFakeUploadDevice("device-663-different-marker")
 	dev.scripts[1] = "pool-pump.js"
-	dev.kv["script/pool-pump.js"] = "0000000000000000000000000000000000000000"
+	dev.kv["script/pool-pump"] = "0000000000000000000000000000000000000000"
 
 	code := []byte("// v2\n")
 	_, _, err := UploadWithVersionDetailed(context.Background(), log, types.ChannelDefault, dev, "pool-pump.js", code, false, false)
@@ -730,7 +759,170 @@ func TestUploadWithVersionDetailed_DifferentMarkerStillUploads(t *testing.T) {
 	if dev.calls["Script.Stop"] == 0 || dev.calls["Script.PutCode"] == 0 {
 		t.Errorf("a different version marker must still upload: Script.Stop=%d Script.PutCode=%d", dev.calls["Script.Stop"], dev.calls["Script.PutCode"])
 	}
-	if got, want := dev.kv["script/pool-pump.js"], sha1Hex(code); got != want {
+	if got, want := dev.kv["script/pool-pump"], sha1Hex(code); got != want {
 		t.Errorf("marker after upload = %q, want %q", got, want)
+	}
+}
+
+// --- #895: dotless version marker key -------------------------------------
+
+func kvKeys(f *fakeUploadDevice) []string {
+	keys := make([]string, 0, len(f.kv))
+	for k := range f.kv { // map order is random: sort before comparing
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func TestMarkerKeys(t *testing.T) {
+	for _, tc := range []struct{ in, key, legacy string }{
+		{"blu-publisher.js", "script/blu-publisher", "script/blu-publisher.js"},
+		{"./dir/pool-pump.js", "script/pool-pump", "script/pool-pump.js"},
+		{"noext", "script/noext", "script/noext"},
+	} {
+		key, legacy := MarkerKeys(tc.in)
+		if key != tc.key || legacy != tc.legacy {
+			t.Errorf("MarkerKeys(%q) = %q, %q; want %q, %q", tc.in, key, legacy, tc.key, tc.legacy)
+		}
+	}
+}
+
+// A Gen3 device (rejects dotted keys): first upload records the dotless marker,
+// the second run is up to date and does not upload again.
+func TestMarker895_Gen3RecordsAndRecognises(t *testing.T) {
+	log := testr.New(t)
+	code := []byte("// v1\n")
+	dev := newFakeUploadDevice("device-895-gen3")
+	dev.rejectDots = true
+
+	out, err := ExecuteUploadFor(t, log, dev, "blu-publisher.js", code)
+	if err != nil || out.MarkerErr != nil || !out.Uploaded {
+		t.Fatalf("first upload: out=%+v err=%v", out, err)
+	}
+	if got := kvKeys(dev); len(got) != 1 || got[0] != "script/blu-publisher" || dev.kv[got[0]] != sha1Hex(code) {
+		t.Fatalf("kv after first upload = %v", dev.kv)
+	}
+	stops := dev.calls["Script.Stop"]
+	out, err = ExecuteUploadFor(t, log, dev, "blu-publisher.js", code)
+	if err != nil || out.Uploaded || dev.calls["Script.Stop"] != stops {
+		t.Errorf("second run must be up to date: out=%+v err=%v", out, err)
+	}
+}
+
+// ExecuteUploadFor plans and executes an update the way `script update` does.
+func ExecuteUploadFor(t *testing.T, log logr.Logger, dev *fakeUploadDevice, name string, code []byte) (UploadOutcome, error) {
+	t.Helper()
+	present := true
+	for _, n := range dev.scripts {
+		if n == name {
+			present = true
+		}
+	}
+	plan := PlanUpload(context.Background(), log, types.ChannelDefault, dev, name, code, false, &present)
+	return ExecuteUpload(context.Background(), log, types.ChannelDefault, dev, name, code, false, plan)
+}
+
+// A legacy marker is recognised (no re-upload), copied to the new key, and the
+// legacy key is kept.
+func TestMarker895_LegacyCopiedNotDeleted(t *testing.T) {
+	log := testr.New(t)
+	code := []byte("// v1\n")
+	dev := newFakeUploadDevice("device-895-legacy")
+	dev.scripts[1] = "blu-publisher.js"
+	dev.kv["script/blu-publisher.js"] = sha1Hex(code)
+
+	present := true
+	plan := PlanUpload(context.Background(), log, types.ChannelDefault, dev, "blu-publisher.js", code, false, &present)
+	if plan.Upload || plan.OldVersionLabel() != sha1Hex(code) {
+		t.Fatalf("plan = %+v, want no upload with the legacy version", plan)
+	}
+	if dev.calls["KVS.Set"] != 0 {
+		t.Fatal("planning (dry-run) must not write")
+	}
+	if _, err := ExecuteUpload(context.Background(), log, types.ChannelDefault, dev, "blu-publisher.js", code, false, plan); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"script/blu-publisher", "script/blu-publisher.js"}
+	if got := kvKeys(dev); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("keys = %v, want %v", got, want)
+	}
+	if dev.kv["script/blu-publisher"] != sha1Hex(code) || dev.calls["Script.PutCode"] != 0 {
+		t.Errorf("copy wrong or script re-uploaded: kv=%v", dev.kv)
+	}
+}
+
+// The dotless key wins over a stale legacy one.
+func TestMarker895_NewKeyFirst(t *testing.T) {
+	dev := newFakeUploadDevice("device-895-newfirst")
+	dev.kv["script/x"] = "new"
+	dev.kv["script/x.js"] = "old"
+	res := ResolveVersionMarker(context.Background(), testr.New(t), types.ChannelDefault, dev, "x.js")
+	if res.State != markerRead || res.Version != "new" || res.FromLegacy {
+		t.Errorf("res = %+v", res)
+	}
+}
+
+// New-key write rejected: the legacy value is kept and counts as present, so
+// nothing is re-uploaded (and the marker is not "missing").
+func TestMarker895_NewKeyWriteRejectedKeepsLegacy(t *testing.T) {
+	log := testr.New(t)
+	code := []byte("// v1\n")
+	dev := newFakeUploadDevice("device-895-rejected")
+	dev.scripts[1] = "x.js"
+	dev.kv["script/x.js"] = sha1Hex(code)
+	dev.kvSetReject = map[string]bool{"script/x": true}
+
+	out, err := ExecuteUploadFor(t, log, dev, "x.js", code)
+	if err != nil || out.Uploaded || dev.calls["Script.PutCode"] != 0 {
+		t.Fatalf("out=%+v err=%v", out, err)
+	}
+	if _, ok := dev.kv["script/x"]; ok || dev.kv["script/x.js"] != sha1Hex(code) {
+		t.Errorf("kv = %v", dev.kv)
+	}
+}
+
+// Missing and unknown stay distinct: a Gen3 with neither key is missing (the
+// dotted legacy read is a rejection, not an unreadable marker); a transport
+// error on the new key stays unknown.
+func TestMarker895_MissingVersusUnknown(t *testing.T) {
+	log := testr.New(t)
+	gen3 := newFakeUploadDevice("device-895-missing")
+	gen3.rejectDots = true
+	if res := ResolveVersionMarker(context.Background(), log, types.ChannelDefault, gen3, "x.js"); res.State != markerMissing {
+		t.Errorf("gen3 with no marker: state = %v, want markerMissing", res.State)
+	}
+	broken := newFakeUploadDevice("device-895-unknown")
+	broken.kvGetErr = errors.New("timeout waiting for response")
+	if res := ResolveVersionMarker(context.Background(), log, types.ChannelDefault, broken, "x.js"); res.State != markerUnknown {
+		t.Errorf("transport error: state = %v, want markerUnknown", res.State)
+	}
+}
+
+// The legacy copy never writes to the pump's markers.
+func TestMarker895_PoolPumpNeverMigrated(t *testing.T) {
+	log := testr.New(t)
+	code := []byte("// v1\n")
+	dev := newFakeUploadDevice("device-895-pump")
+	dev.scripts[1] = "pool-pump.js"
+	dev.kv["script/pool-pump.js"] = sha1Hex(code)
+
+	out, err := ExecuteUploadFor(t, log, dev, "pool-pump.js", code)
+	if err != nil || out.Uploaded || dev.calls["KVS.Set"] != 0 {
+		t.Fatalf("out=%+v err=%v KVS.Set=%d", out, err, dev.calls["KVS.Set"])
+	}
+}
+
+func TestMarker895_DeleteRemovesBothKeys(t *testing.T) {
+	dev := newFakeUploadDevice("device-895-delete")
+	dev.scripts[1] = "x.js"
+	dev.kv["script/x"] = "a"
+	dev.kv["script/x.js"] = "a"
+	dev.kv["script/other"] = "keep"
+	if _, err := DeleteWithVersion(context.Background(), testr.New(t), types.ChannelDefault, dev, "x.js"); err != nil {
+		t.Fatal(err)
+	}
+	if got := kvKeys(dev); strings.Join(got, ",") != "script/other" {
+		t.Errorf("keys = %v", got)
 	}
 }

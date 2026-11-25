@@ -92,6 +92,16 @@ func (m *DeviceMqttChannels) Init(ctx context.Context, deviceId string) (*Device
 	}
 	replyTo := fmt.Sprintf("%s_%s", mc.Id(), deviceId)
 
+	// The registry entry outlives this caller: every later Device for the same
+	// id reuses it. The MQTT client ties a subscription and a publisher to the
+	// ctx they are created with (the subscriber queue is closed and the publisher
+	// stops when it ends), so they must not inherit this caller's cancellation or
+	// deadline. Otherwise a short-lived first caller, such as the reachability
+	// probe's timeout ctx, leaves a closed reply channel in the registry, and every
+	// later call on that device reads an empty payload (#905). WithoutCancel keeps
+	// ctx's values, including the MQTT client.
+	ctx = context.WithoutCancel(ctx)
+
 	// Use larger buffer (64) to handle concurrent refresh operations without dropping responses
 	// With maxConcurrentRefreshes and multiple devices, responses can arrive in bursts
 	from, err := mc.Subscribe(ctx, fmt.Sprintf("%s/rpc", replyTo), 64 /*qlen*/, "shelly/device/"+deviceId)

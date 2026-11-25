@@ -520,6 +520,13 @@ func doUpload(ctx context.Context, log logr.Logger, via types.Channel, device de
 - `--verbose`: Enable verbose logging
 - `--dry-run` (on `script update`, #863): report what would be uploaded, reading only `Script.List`
   and the `script/<name>` markers (dotless since #895; the legacy `script/<name>.js` is read as a fallback); nothing is stopped, written or started.
+- `script backfill-markers DEVICE [SCRIPT]` (#897, `--dry-run` supported): an explicit operator
+  command, not run by the postinst. For scripts that are already on a device with exactly the
+  packaged code (as is, or minified as the uploader would have sent it) but have no version marker,
+  it writes the marker `script/<name>` (value: sha1 of the packaged source) without uploading,
+  stopping or starting anything, so `script update` stops re-pushing them. Scripts whose code
+  differs are reported `differs` and left to `script update`; `pool-pump.js` is never read.
+  Reading code over MQTT is slow on a Pro1: use a generous `--wait`.
 - `--include-pump` (on `script update`, #863): `pool-pump.js` is guarded and never uploaded (not even
   started) by `script update` without it. With it, every relay must be off, the replaced code is
   saved to `--backup-dir` (default `.`) and put back if the upload fails or the new script is not

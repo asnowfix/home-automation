@@ -75,7 +75,7 @@ func TestUpdateDeviceScripts_SecondRunIsUpToDate(t *testing.T) {
 	dev.scripts[1] = "watchdog.js"
 	dev.scripts[2] = "status-listener.js"
 	dev.nextID = 2
-	dev.kv["script/watchdog.js"] = ScriptVersion([]byte("// watchdog v1\n")) // an older version
+	dev.kv["script/watchdog"] = ScriptVersion([]byte("// watchdog v1\n")) // an older version
 	// status-listener.js has no marker at all (first push on this device)
 	opts := UpdateOptions{LocalDir: dir}
 
@@ -118,7 +118,7 @@ func TestUpdateDeviceScripts_ConfirmationGapStillRecordsMarker(t *testing.T) {
 	if got := first["watchdog.js"].Outcome; got == OutcomeFailed {
 		t.Fatalf("a confirmation gap is not a failure: %s", first["watchdog.js"].Reason)
 	}
-	if got, want := inner.kv["script/watchdog.js"], ScriptVersion([]byte("// watchdog v2\n")); got != want {
+	if got, want := inner.kv["script/watchdog"], ScriptVersion([]byte("// watchdog v2\n")); got != want {
 		t.Fatalf("marker after a confirmation-gap upload = %q, want %q", got, want)
 	}
 
@@ -167,7 +167,7 @@ func TestUpdateDeviceScripts_DryRunChangesNothing(t *testing.T) {
 	dev.scripts[3] = "heater.js"
 	dev.scripts[4] = "myhome-link.js" // not carried by the binary
 	dev.nextID = 4
-	dev.kv["script/heater.js"] = ScriptVersion([]byte("// heater v1\n"))
+	dev.kv["script/heater"] = ScriptVersion([]byte("// heater v1\n"))
 
 	got := mustUpdate(t, dev, UpdateOptions{LocalDir: dir, DryRun: true})
 
@@ -234,8 +234,8 @@ func newPump(t *testing.T, id string) (*fakeUploadDevice, string) {
 	dev.scripts[2] = "watchdog.js"
 	dev.nextID = 2
 	dev.code[1] = pumpOld
-	dev.kv["script/pool-pump.js"] = ScriptVersion([]byte(pumpOld))
-	dev.kv["script/watchdog.js"] = ScriptVersion([]byte("// w\n"))
+	dev.kv["script/pool-pump"] = ScriptVersion([]byte(pumpOld))
+	dev.kv["script/watchdog"] = ScriptVersion([]byte("// w\n"))
 	return dev, localScripts(t, map[string]string{"pool-pump.js": pumpNew, "watchdog.js": "// w\n"})
 }
 
@@ -277,7 +277,7 @@ func TestUpdateDeviceScripts_UpToDatePumpIsNotStarted(t *testing.T) {
 	dev.scripts[1] = "pool-pump.js"
 	dev.nextID = 1
 	dev.code[1] = pumpNew
-	dev.kv["script/pool-pump.js"] = ScriptVersion([]byte(pumpNew))
+	dev.kv["script/pool-pump"] = ScriptVersion([]byte(pumpNew))
 	dir := localScripts(t, map[string]string{"pool-pump.js": pumpNew})
 
 	s := mustUpdate(t, dev, UpdateOptions{LocalDir: dir})["pool-pump.js"]
@@ -357,7 +357,7 @@ func TestUpdateDeviceScripts_PumpRolledBackOnOutOfMemory(t *testing.T) {
 	if dev.code[1] != pumpOld {
 		t.Errorf("device code = %q, want the previous code back", dev.code[1])
 	}
-	if _, ok := dev.kv["script/pool-pump.js"]; ok {
+	if _, ok := dev.kv["script/pool-pump"]; ok {
 		t.Errorf("marker still present after a rollback; it would claim the new version is installed")
 	}
 }
@@ -416,7 +416,7 @@ func TestExecuteUpload_CriticalSectionOutlivesCallerDeadline(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // the caller's deadline has already expired
-	plan := UploadPlan{Upload: true, Reason: "test", Key: "script/watchdog.js", NewVersion: ScriptVersion(code), marker: markerRead}
+	plan := UploadPlan{Upload: true, Reason: "test", Key: "script/watchdog", NewVersion: ScriptVersion(code), marker: markerRead}
 
 	out, err := ExecuteUpload(ctx, testr.New(t), types.ChannelDefault, dev, "watchdog.js", code, false, plan)
 	if err != nil {
@@ -425,7 +425,7 @@ func TestExecuteUpload_CriticalSectionOutlivesCallerDeadline(t *testing.T) {
 	if inner.code[1] != string(code) {
 		t.Errorf("device has %d bytes of code, want all %d", len(inner.code[1]), len(code))
 	}
-	if inner.kv["script/watchdog.js"] != ScriptVersion(code) {
+	if inner.kv["script/watchdog"] != ScriptVersion(code) {
 		t.Errorf("marker not recorded")
 	}
 	// The start is outside the critical section and does honour the deadline.

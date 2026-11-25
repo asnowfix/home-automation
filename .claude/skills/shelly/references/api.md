@@ -140,9 +140,13 @@ go run ./myhome ctl shelly script debug  <device> true|false   # UDP debug — s
 go run ./myhome ctl shelly script probe  <device> <script>     # settled mem_peak measurement
 ```
 
-Embedded scripts live in `internal/shelly/scripts/`. KVS version hashes are stored under
-`script/<name>/version` and checked before upload to avoid unnecessary re-uploads — note the
-version-marker trap in #449 when force-uploading for a measurement.
+Embedded scripts live in `internal/shelly/scripts/`. KVS version hashes (sha1 of the source) are stored under
+`script/<name>` (no `.js`, #895; legacy `script/<name>.js` is read as a fallback because Gen3
+firmware rejects dotted keys) and checked before upload to avoid unnecessary re-uploads — note the
+version-marker trap in #449 when force-uploading for a measurement. A loaded script with **no**
+marker is not re-uploaded blindly (#897): its installed code is read once (`Script.GetCode`) and,
+if it equals the packaged source (raw or minified), only the marker is written (`marker-restored`);
+unreadable code is left alone (`skipped`). `pool-pump.js` is excluded from that read.
 
 ### `--no-minify` does not always work — the device has a source-length limit
 

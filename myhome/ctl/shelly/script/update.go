@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/asnowfix/home-automation/hlog"
 	"github.com/asnowfix/home-automation/internal/myhome"
@@ -27,8 +28,9 @@ func init() {
 	updateCtl.Flags().BoolVar(&updateNoMinify, "no-minify", false, "Do not minify scripts before upload")
 	// Flag to force re-upload even if version hash matches
 	updateCtl.Flags().BoolVar(&updateForce, "force", false, "Force re-upload even if version hash matches")
-	updateCtl.Flags().BoolVar(&updateDryRun, "dry-run", false, "Only report what would be uploaded: reads the script list and version markers, changes nothing")
+	updateCtl.Flags().BoolVar(&updateDryRun, "dry-run", false, "Only report what would be uploaded: reads the script list, the version markers and, for a script without a marker, its code; changes nothing")
 	updateCtl.Flags().BoolVar(&updateIncludePump, "include-pump", false, "Allow uploading pool-pump.js (refused by default); even then every relay must be off, and the replaced code is saved and restored on failure")
+	updateCtl.Flags().DurationVar(&updateProbeTimeout, "probe-timeout", 5*time.Second, "Reachability probe per device before updating it: a device that does not answer within it is listed as unreachable and skipped, without failing the run (0 disables the probe)")
 	updateCtl.Flags().StringVar(&updateBackupDir, "backup-dir", ".", "Directory where the code replaced on a guarded script (pool-pump.js) is saved")
 }
 
@@ -38,10 +40,23 @@ var updateCtl = &cobra.Command{
 	Long: `Update the scripts loaded on the given Shelly device(s) to the versions this binary carries.
 
 A script is uploaded only when its version marker (KVS key script/<name>, the
-sha1 of the packaged source) differs from the packaged version, or is missing,
-or the script is not loaded. Every device and script gets one line:
-up-to-date, updated (old -> new), would-update (--dry-run), refused, not-packaged
-or failed, with the reason.
+sha1 of the packaged source) differs from the packaged version, or the script
+is not loaded. When a loaded script has no marker, its installed code is read
+once (Script.GetCode) and compared with the packaged source (as is, or
+minified): if identical, only the marker is recorded (marker-restored); if
+different, it is uploaded; if the code cannot be read, it is left alone
+(skipped). Every device and script gets one line: up-to-date, updated
+(old -> new), marker-restored, would-update / would-mark (--dry-run), refused,
+not-packaged, skipped or failed, with the reason.
+
+Before updating a device, one cheap probe (--probe-timeout, default 5s) checks
+that it answers. A registered device that does not answer is listed as
+"unreachable" in the summary and skipped at once, instead of waiting the full
+MQTT timeout on every call; it does not make the exit code non-zero. The exit
+code is non-zero only for real failures on devices that answered (or when no
+device at all was reachable). A device that merely flapped but answers the
+probe is updated normally: only an unanswered probe, now, makes a device
+unreachable, never the registry's stored online state.
 
 pool-pump.js is guarded: it is never uploaded unless --include-pump is given,
 and then only while every relay of the device is off. Its current code is saved
@@ -56,17 +71,19 @@ to --backup-dir first and put back if the upload or the restart fails.`,
 		if updateDryRun {
 			fmt.Println("Dry run: nothing will be uploaded, stopped or started.")
 		}
-		_, err := myhome.Foreach(cmd.Context(), log, device, options.Via, doUpdate, scriptArgs)
+		_, err := myhome.ForeachWith(cmd.Context(), log, device, options.Via, doUpdate, scriptArgs,
+			shelly.ForeachOptions{ProbeTimeout: updateProbeTimeout})
 		return err
 	},
 }
 
 var (
-	updateNoMinify    bool
-	updateForce       bool
-	updateDryRun      bool
-	updateIncludePump bool
-	updateBackupDir   string
+	updateNoMinify     bool
+	updateForce        bool
+	updateDryRun       bool
+	updateIncludePump  bool
+	updateBackupDir    string
+	updateProbeTimeout time.Duration
 )
 
 func doUpdate(ctx context.Context, log logr.Logger, via types.Channel, device devices.Device, args []string) (any, error) {
@@ -130,7 +147,8 @@ func formatReport(r *mhscript.DeviceScriptsReport, target string) string {
 		switch s.Outcome {
 		case mhscript.OutcomeUpToDate:
 			fmt.Fprintf(&b, " (%s)", short(s.NewVersion))
-		case mhscript.OutcomeUpdated, mhscript.OutcomeWouldUpdate, mhscript.OutcomeIndeterminate:
+		case mhscript.OutcomeUpdated, mhscript.OutcomeWouldUpdate, mhscript.OutcomeIndeterminate,
+			mhscript.OutcomeMarkerRestored, mhscript.OutcomeWouldMark:
 			fmt.Fprintf(&b, " (%s -> %s)", short(s.OldVersion), short(s.NewVersion))
 		}
 		if s.Outcome != mhscript.OutcomeUpToDate || strings.Contains(s.Reason, "did not confirm") {

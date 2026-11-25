@@ -373,23 +373,31 @@ func Upload(ctx context.Context, via types.Channel, device types.Device, name st
 	return id, nil
 }
 
+// PrepareCode returns the exact bytes doUpload sends to the device for src:
+// src as is when minify is false, otherwise minified with template literals
+// downgraded. It is the single definition of that transformation, so callers
+// that must predict what is installed (the version-marker backfill, #897)
+// cannot drift from the uploader.
+func PrepareCode(src []byte, minify bool) ([]byte, error) {
+	if !minify {
+		return src, nil
+	}
+	origLen := len(src)
+	minified, err := minifyJS(src)
+	if err != nil {
+		return nil, err
+	}
+	out := downgradeTemplates(minified)
+	log.Info("Prepared script", "from", origLen, "minified", len(minified), "to", len(out))
+	return out, nil
+}
+
 func doUpload(ctx context.Context, via types.Channel, device types.Device, name string, buf []byte, minify bool) (uint32, error) {
 	// Minify before splitting and uploading (only if requested)
-	if minify {
-		origLen := len(buf)
-		if minified, err := minifyJS(buf); err != nil {
-			log.Error(err, "Minify failed", "name", name)
-			return 0, err
-		} else {
-			buf = minified
-			log.Info("Minified script", "name", name, "from", origLen, "to", len(buf))
-			// Downgrade ES6 template literals without interpolations to plain strings
-			before := len(buf)
-			buf = downgradeTemplates(buf)
-			if len(buf) != before {
-				log.Info("Downgraded template literals in minified script", "name", name)
-			}
-		}
+	buf, err := PrepareCode(buf, minify)
+	if err != nil {
+		log.Error(err, "Minify failed", "name", name)
+		return 0, err
 	}
 
 	// Reject before any RPC is attempted: the device will refuse a script
